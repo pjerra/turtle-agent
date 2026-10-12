@@ -4,7 +4,7 @@ GOFMT := $(GOROOT_LOCAL)/bin/gofmt
 CORE ?= $(HOME)/tortoise-wow
 export GOTOOLCHAIN := local
 
-.PHONY: fuzz-moves test fmt fmt-check vet nocgo build opcodes spellnames tbm-contract
+.PHONY: test fuzz fmt fmt-check vet nocgo build opcodes spellnames tbm-contract
 
 test: fmt-check vet nocgo
 	$(GO) test -race -count=1 ./...
@@ -18,10 +18,18 @@ fmt-check:
 vet:
 	$(GO) vet ./...
 
-# Fuzz the SMSG_MONSTER_MOVE parser (FUZZTIME=30s to bound it). `make test` only runs the seed corpus.
-FUZZTIME ?= 30s
-fuzz-moves:
-	$(GO) test -run xxx -fuzz FuzzParseMonsterMove -fuzztime $(FUZZTIME) ./internal/objects
+# Fuzz every Fuzz* target of the SMSG parsers, FUZZTIME each (go test -fuzz takes one target at a time).
+# `make test` runs only their seeds. A crash is saved under <package>/testdata/fuzz/<target>/: commit it
+# with the fix as a regression seed.
+FUZZTIME ?= 5s
+FUZZPKGS := ./internal/game ./internal/objects
+fuzz:
+	@set -e; for pkg in $(FUZZPKGS); do \
+		for t in $$($(GO) test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
+			echo "== $$pkg $$t"; \
+			$(GO) test -run '^$$' -fuzz "^$$t$$" -fuzztime $(FUZZTIME) $$pkg; \
+		done; \
+	done
 
 # A build without cgo still works, without path_to and walk_path (navmesh.ErrNoEngine).
 nocgo:

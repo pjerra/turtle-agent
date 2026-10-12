@@ -27,7 +27,7 @@ engine), and a server whose realmd and world ports you can reach. `CGO_ENABLED=0
 ```sh
 make build                      # bin/turtle-agent
 make test                       # gofmt check, go vet, a no-cgo build, go test -race
-make fuzz-moves               # go test -fuzz on the monster-move parser (ctrl-C to stop; `make test` runs only its seeds)
+make fuzz FUZZTIME=30s         # go test -fuzz on every SMSG parser, 30 s each (default 5 s); `make test` runs only their seeds
 make tbm-contract               # TBM addon protocol check (needs lua5.1; see TBM contract test)
 ```
 
@@ -635,6 +635,13 @@ you set).
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
 | `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`) |
+
+Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
+within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures
+(`internal/game/realpackets_test.go`: gossip, vendor list, raid icons, root and knock back orders, new world; the runs
+never opened a trainer, a quest panel or a loot window, so those parsers still run only on `gametest` packets) and the
+`gametest` builders. `make fuzz` runs them all; an input a fuzzer finds is saved under `<package>/testdata/fuzz/` and
+stays as a regression seed that `make test` runs.
 
 Design and implementation plan: `docs/superpowers/`.
 
