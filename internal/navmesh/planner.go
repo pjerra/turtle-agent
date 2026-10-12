@@ -43,6 +43,11 @@ const GroundStep = 4
 // smallMap is the tile count up to which a map loads whole (a dungeon).
 const smallMap = 16
 
+// MaxTiles bounds the tiles a map keeps loaded (a tile is 0.5-3 MB); past it the least
+// recently used ones are unloaded, and a box of tiles that would not fit is cut to the
+// tiles nearest the straight line from start to goal.
+const MaxTiles = 64
+
 // ErrNoEngine says the binary was built without cgo, so it has no Detour.
 var ErrNoEngine = errors.New("navmesh: this turtle-agent was built without cgo, so it has no Detour engine; " +
 	"rebuild with CGO_ENABLED=1 and a C++ compiler")
@@ -73,14 +78,23 @@ type Planner struct {
 	dir  string
 	mu   sync.Mutex
 	maps map[uint32]*mapMesh
+	max  int // MaxTiles; tests lower it
 }
 
 type mapMesh struct {
 	eng   *engine
-	tiles map[string]bool
+	tiles map[string]*loaded
+	tick  uint64
 }
 
-func NewPlanner(dir string) *Planner { return &Planner{dir: dir, maps: map[uint32]*mapMesh{}} }
+type loaded struct {
+	ref  uint64 // Detour tile ref
+	used uint64 // mapMesh.tick when a plan last wanted it
+}
+
+func NewPlanner(dir string) *Planner {
+	return &Planner{dir: dir, maps: map[uint32]*mapMesh{}, max: MaxTiles}
+}
 
 // Close frees the Detour meshes.
 func (p *Planner) Close() {
@@ -127,7 +141,7 @@ func (p *Planner) Plan(mapID uint32, from, to Vec3) (Path, error) {
 	}
 	var path Path
 	for _, margin := range []int{1, 3} {
-		if err := p.load(m, wantTiles(names, mapID, []Vec3{from, to}, margin)); err != nil {
+		if err := p.load(m, wantTiles(names, mapID, from, to, margin, p.max)); err != nil {
 			return Path{}, err
 		}
 		path = plan(m.eng, from, to)
@@ -152,7 +166,7 @@ func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	m := &mapMesh{eng: eng, tiles: map[string]bool{}}
+	m := &mapMesh{eng: eng, tiles: map[string]*loaded{}}
 	p.maps[mapID] = m
 	return m, nil
 }
@@ -177,30 +191,57 @@ func (p *Planner) list(mapID uint32) ([]string, error) {
 	return out, nil
 }
 
-func (p *Planner) load(m *mapMesh, names []string) error {
-	for _, n := range names {
-		if m.tiles[n] {
+// load makes the wanted tiles the loaded ones, unloading the least recently wanted others
+// first when they would not all fit.
+func (p *Planner) load(m *mapMesh, want []string) error {
+	m.tick++
+	missing := 0
+	for _, n := range want {
+		if t := m.tiles[n]; t != nil {
+			t.used = m.tick
+		} else {
+			missing++
+		}
+	}
+	for len(m.tiles)+missing > p.max {
+		var old string
+		for n, t := range m.tiles {
+			if t.used != m.tick && (old == "" || t.used < m.tiles[old].used) {
+				old = n
+			}
+		}
+		if old == "" {
+			break
+		}
+		if err := m.eng.removeTile(m.tiles[old].ref); err != nil {
+			return fmt.Errorf("navmesh: %s: %w", old, err)
+		}
+		delete(m.tiles, old)
+	}
+	for _, n := range want {
+		if m.tiles[n] != nil {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(p.dir, n))
 		if err != nil {
 			return fmt.Errorf("navmesh: %w", err)
 		}
-		if err := m.eng.addTile(data); err != nil {
+		ref, err := m.eng.addTile(data)
+		if err != nil {
 			return fmt.Errorf("navmesh: %s: %w", n, err)
 		}
-		m.tiles[n] = true
+		m.tiles[n] = &loaded{ref: ref, used: m.tick}
 	}
 	return nil
 }
 
 func plan(eng *engine, from, to Vec3) Path {
-	rc, pts := eng.findPath(from, to)
+	rc, pts, goal := eng.findPath(from, to)
 	path := Path{Engine: engineName, Points: pts}
 	switch rc {
 	case 0:
 		path.Status = Complete
-	case 1:
+	case 1, 2:
 		path.Status = Partial
 	case -1:
 		return Path{Status: NoPath, Engine: engineName, Points: []Vec3{}, Reason: fmt.Sprintf(
@@ -215,10 +256,14 @@ func plan(eng *engine, from, to Vec3) Path {
 		path.Length += dist3D(pts[i-1], pts[i])
 		path.Ground = append(path.Ground, ground(eng, pts[i-1], pts[i]))
 	}
-	if path.Status == Partial {
-		end := pts[len(pts)-1]
-		path.Reason = fmt.Sprintf("no navmesh route to the goal: the nearest reachable point %s is %.1f yd from it",
-			fmtVec(end), dist3D(end, to))
+	end := pts[len(pts)-1]
+	switch rc {
+	case 1:
+		path.Reason = fmt.Sprintf("no navmesh route to the goal: the nearest reachable point %s is %.1f yd from the "+
+			"goal's floor point %s", fmtVec(end), dist3D(end, goal), fmtVec(goal))
+	case 2:
+		path.Reason = fmt.Sprintf("the goal %s is %.1f yd from the navmesh; the path ends on the floor nearest it, %s",
+			fmtVec(to), dist3D(to, goal), fmtVec(end))
 	}
 	return path
 }
@@ -250,56 +295,52 @@ func ground(eng *engine, a, b Vec3) []Vec3 {
 	return out
 }
 
-// GroundZ is the height at (x, y) of a walk from a to b over the ground samples g: (x, y)
-// is projected onto the segment, clamped to its ends, and the height interpolated along
-// a, g..., b.
-func GroundZ(a, b Vec3, g []Vec3, x, y float32) float32 {
-	l := dist2D(a, b)
-	if l < 1e-4 {
-		return b[2]
+// wantTiles is the tiles to load for a path from one point to another: a small map whole,
+// else the box of tiles round the two, margin tiles wider on each side, cut to the limit
+// tiles nearest the straight line between them.
+func wantTiles(names []string, mapID uint32, from, to Vec3, margin, limit int) []string {
+	type cand struct {
+		name string
+		d    float64
 	}
-	t := ((x-a[0])*(b[0]-a[0]) + (y-a[1])*(b[1]-a[1])) / (l * l)
-	d := min(max(t, 0), 1) * l
-	prev, prevD := a, float32(0)
-	for i := 0; i <= len(g); i++ {
-		q := b
-		if i < len(g) {
-			q = g[i]
-		}
-		qd := dist2D(a, q)
-		if d <= qd {
-			if qd-prevD < 1e-4 {
-				return q[2]
-			}
-			return prev[2] + (q[2]-prev[2])*(d-prevD)/(qd-prevD)
-		}
-		prev, prevD = q, qd
-	}
-	return b[2]
-}
-
-// wantTiles is the tiles to load for a path between the points: a small map whole, else
-// the box of tiles round the points, margin tiles wider on each side.
-func wantTiles(names []string, mapID uint32, pts []Vec3, margin int) []string {
-	if len(names) <= smallMap {
-		return names
-	}
-	r0, c0, r1, c1 := math.MaxInt, math.MaxInt, math.MinInt, math.MinInt
-	for _, q := range pts {
-		r, c := tileRC(q[0], q[1])
-		r0, r1, c0, c1 = min(r0, r), max(r1, r), min(c0, c), max(c1, c)
-	}
-	var out []string
+	r0, c0 := tileRC(from[0], from[1])
+	r1, c1 := tileRC(to[0], to[1])
+	var cs []cand
 	for _, n := range names {
 		var m, r, c int
 		if _, err := fmt.Sscanf(n, "%03d%02d%02d.mmtile", &m, &r, &c); err != nil || uint32(m) != mapID {
 			continue
 		}
-		if r >= r0-margin && r <= r1+margin && c >= c0-margin && c <= c1+margin {
-			out = append(out, n)
+		if len(names) > smallMap && (r < min(r0, r1)-margin || r > max(r0, r1)+margin || c < min(c0, c1)-margin ||
+			c > max(c0, c1)+margin) {
+			continue
 		}
+		cs = append(cs, cand{n, segDist(float64(r), float64(c), float64(r0), float64(c0), float64(r1), float64(c1))})
+	}
+	slices.SortStableFunc(cs, func(a, b cand) int {
+		if a.d != b.d {
+			if a.d < b.d {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	out := make([]string, 0, min(len(cs), limit))
+	for _, c := range cs[:min(len(cs), limit)] {
+		out = append(out, c.name)
 	}
 	return out
+}
+
+// segDist is the distance from (x, y) to the segment (ax, ay)-(bx, by).
+func segDist(x, y, ax, ay, bx, by float64) float64 {
+	dx, dy := bx-ax, by-ay
+	t := 0.0
+	if l := dx*dx + dy*dy; l > 0 {
+		t = min(max(((x-ax)*dx+(y-ay)*dy)/l, 0), 1)
+	}
+	return math.Hypot(x-ax-t*dx, y-ay-t*dy)
 }
 
 // tileRC is the (gy, gx) of the grid holding a position: the core names a tile
@@ -313,6 +354,16 @@ func tileRC(x, y float32) (int, int) {
 func tileFile(mapID uint32, x, y float32) string {
 	r, c := tileRC(x, y)
 	return fmt.Sprintf("%03d%02d%02d.mmtile", mapID, r, c)
+}
+
+var tileErrors = map[int]string{-1: "not an mmtile (bad header)", -2: "not mmap version 6 / Detour version 7",
+	-3: "truncated (the header claims more data than the file holds)", -4: "Detour refused the tile"}
+
+func tileError(rc int) error {
+	if msg, ok := tileErrors[rc]; ok {
+		return errors.New(msg)
+	}
+	return fmt.Errorf("unknown tile error %d", rc)
 }
 
 func dist2D(a, b Vec3) float32 {

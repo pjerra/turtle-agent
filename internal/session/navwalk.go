@@ -20,9 +20,13 @@ var ErrNoNavmesh = errors.New(`path_to and walk_path need the server's mmaps: se
 var errStillBlocked = errors.New("still rooted or moved by the server")
 
 const (
-	maxReplans = 8                // server moves a walk_path plans round before it gives up
-	rootWait   = 15 * time.Second // how long walk_path waits for a root to end
+	maxReplans = 8  // times walk_path plans again after a server move; the next one ends it
+	maxHops    = 32 // times it plans on from the end of a partial path it made progress on
+	minHop     = 10 // yards a partial path must have gained to plan on from its end
 )
+
+// rootWait is how long walk_path waits for a root to end (a var for the tests).
+var rootWait = 15 * time.Second
 
 // PathInfo is a planned path from the player's position.
 type PathInfo struct {
@@ -112,6 +116,7 @@ func (s *Session) WalkPath(ctx context.Context, x, y, z float32) (WalkReport, er
 		return rep
 	}
 	startMap, _ := s.where()
+	hops := 0
 	for {
 		if err := s.waitFree(ctx); errors.Is(err, errStillBlocked) {
 			return end("partial", err.Error()), nil
@@ -136,15 +141,16 @@ func (s *Session) WalkPath(ctx context.Context, x, y, z float32) (WalkReport, er
 			}
 			return end("partial", path.Reason), nil
 		}
+		_, planned := s.where()
 		interrupted := false
 		for i := 1; i < len(path.Points) && !interrupted; i++ {
-			a, b := path.Points[i-1], path.Points[i]
+			b := path.Points[i]
 			var g []navmesh.Vec3
 			if i-1 < len(path.Ground) {
 				g = path.Ground[i-1]
 			}
 			_, before := s.where()
-			err := s.walkStraight(ctx, b, math.Inf(1), func(x, y float32) float32 { return navmesh.GroundZ(a, b, g, x, y) })
+			err := s.walkStraight(ctx, b, math.Inf(1), g)
 			_, after := s.where()
 			rep.Walked += dist3(before, after)
 			st := TraceStep{Kind: "walk", From: &before, To: &b}
@@ -169,11 +175,18 @@ func (s *Session) WalkPath(ctx context.Context, x, y, z float32) (WalkReport, er
 			if path.Status == navmesh.Complete {
 				return end("arrived", ""), nil
 			}
-			return end("partial", path.Reason), nil
+			// A partial path that got somewhere may end at the edge of the tiles loaded for
+			// it: plan on from its end. One that got nowhere is as close as the mesh goes.
+			if _, here := s.where(); dist3(planned, here) < minHop || hops >= maxHops {
+				return end("partial", path.Reason), nil
+			}
+			hops++
+			continue
 		}
-		if rep.Replans++; rep.Replans > maxReplans {
-			return end("partial", fmt.Sprintf("the server moved the player %d times; gave up", rep.Replans)), nil
+		if rep.Replans == maxReplans {
+			return end("partial", fmt.Sprintf("the server moved the player %d times; gave up", maxReplans+1)), nil
 		}
+		rep.Replans++
 	}
 }
 

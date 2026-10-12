@@ -13,6 +13,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
 // fakePlanner answers each Plan with the next scripted reply and records what it was asked.
@@ -232,4 +233,162 @@ func TestPathToAndNoPlanner(t *testing.T) {
 		t.Fatalf("walk_path: %v", err)
 	}
 	h2.logout()
+}
+
+// collectMoves gathers the player's movement packets (start, heartbeats, stop) until the
+// walk ends.
+func collectMoves(t *testing.T, h *harness, mark int, stop worldconn.Packet) []game.MoveInfo {
+	t.Helper()
+	var out []game.MoveInfo
+	for _, p := range h.srv.Skipped()[mark:] {
+		switch p.Op {
+		case opcode.MSGMoveStartForward, opcode.MSGMoveHeartbeat:
+			out = append(out, moveInfo(p.Body))
+		}
+	}
+	return append(out, moveInfo(stop.Body))
+}
+
+// A leg that runs 8 yd level, then climbs a 50° slope (9.53 yd up over 8 yd): every beat
+// keeps its height change within the run speed times its client-time gap, the most the
+// anticheat allows (plus its 0.5 yd margin, which the walk does not need).
+func TestWalkPathClimbsA50DegreeSlopeWithinTheZSpeed(t *testing.T) {
+	rise := float32(8 * math.Tan(50*math.Pi/180))
+	slope := func(from, to navmesh.Vec3) navmesh.Path {
+		p := straight(from, to)
+		p.Ground = [][]navmesh.Vec3{{{from[0] + 4, from[1], from[2]}, {from[0] + 8, from[1], from[2]},
+			{from[0] + 12, from[1], from[2] + rise/2}}}
+		return p
+	}
+	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{slope}}
+	h := start(t, Options{Planner: f})
+	h.enterWorld() // 7 yd/s
+	mark := len(h.srv.Skipped())
+	done := make(chan WalkReport, 1)
+	go func() { r, _ := h.s.WalkPath(context.Background(), me.X+16, me.Y, me.Z+rise); done <- r }()
+	stop, err := h.srv.Expect(opcode.MSGMoveStop, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := <-done; r.Result != "arrived" {
+		t.Fatalf("%+v", r)
+	}
+	moves := collectMoves(t, h, mark, stop)
+	if len(moves) < 5 {
+		t.Fatalf("%d packets", len(moves))
+	}
+	for i := 1; i < len(moves); i++ {
+		a, b := moves[i-1], moves[i]
+		dt := float64(b.Time-a.Time) / 1000
+		dz := math.Abs(float64(b.Z - a.Z))
+		if dz > 7*dt+0.05 || dz > 7*dt+0.5 {
+			t.Fatalf("beat %d: z %+.2f in %.3f s, over 7 yd/s (%+v -> %+v)", i, b.Z-a.Z, dt, a, b)
+		}
+	}
+	if last := moves[len(moves)-1]; last.Z != me.Z+rise || last.X != me.X+16 {
+		t.Fatalf("stopped at %+v", last)
+	}
+	h.logout()
+}
+
+// A ground sample that snapped to a floor 6 yd up between two beats cannot lift a packet
+// more than speed*dt above the last one sent.
+func TestClampZHoldsTheZSpeed(t *testing.T) {
+	w := newWalk([][3]float32{{0, 0, 0}, {10, 0, 0}}, 7, time.Now(), nil)
+	w.sentZ, w.sentT = 0, 1000
+	if z := w.clampZ(6, 1500); z != 3.5 {
+		t.Fatalf("z %v, want 3.5", z)
+	}
+	if z := w.clampZ(-6, 2000); z != 0 {
+		t.Fatalf("z %v, want 0", z)
+	}
+	if z := w.clampZ(1, 2500); z != 1 {
+		t.Fatalf("z %v, want 1", z)
+	}
+}
+
+// The ninth server move ends the walk: walk_path plans again up to maxReplans times.
+func TestWalkPathGivesUpAfterMaxReplans(t *testing.T) {
+	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{straight}}
+	h := start(t, Options{Planner: f})
+	h.enterWorld()
+	done := make(chan WalkReport, 1)
+	go func() { r, _ := h.s.WalkPath(context.Background(), me.X+30, me.Y, me.Z); done <- r }()
+	for range maxReplans + 1 {
+		h.expect(opcode.MSGMoveStartForward)
+		push := packet.NewWriter().PackedGUID(me.GUID).F32(me.X).F32(me.Y).F32(me.Z).U32(1).U8(0).U32(0x100).U32(10).U32(1).
+			F32(me.X).F32(me.Y).F32(me.Z).Bytes()
+		h.send(opcode.SMSGMonsterMove, push)
+	}
+	r := <-done
+	if r.Result != "partial" || r.Replans != maxReplans || !strings.Contains(r.Reason, "9 times") || len(f.froms()) != maxReplans+1 {
+		t.Fatalf("%+v (%d plans)", r, len(f.froms()))
+	}
+	h.logout()
+}
+
+// A root stops the leg; walk_path waits for the unroot, plans again and arrives.
+func TestWalkPathWaitsOutARoot(t *testing.T) {
+	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{straight}}
+	h := start(t, Options{Planner: f})
+	h.enterWorld()
+	done := make(chan WalkReport, 1)
+	go func() { r, _ := h.s.WalkPath(context.Background(), me.X+5, me.Y, me.Z); done <- r }()
+	h.expect(opcode.MSGMoveStartForward)
+	h.send(opcode.SMSGForceMoveRoot, packet.NewWriter().PackedGUID(me.GUID).U32(5).Bytes())
+	h.expect(opcode.MSGMoveStop)
+	h.expect(opcode.CMSGForceMoveRootAck)
+	time.Sleep(300 * time.Millisecond)
+	if _, err := h.srv.Expect(opcode.MSGMoveStartForward, 10*time.Millisecond); err == nil {
+		t.Fatal("walked on while rooted")
+	}
+	h.send(opcode.SMSGForceMoveUnroot, packet.NewWriter().PackedGUID(me.GUID).U32(6).Bytes())
+	h.expect(opcode.MSGMoveStartForward)
+	h.expect(opcode.MSGMoveStop)
+	r := <-done
+	if r.Result != "arrived" || r.Replans != 1 || kinds(r) != "plan,walk,interrupted,plan,walk" ||
+		r.Trace[2].Text != "rooted by the server; walk stopped" || r.Trace[3].TMS < 300 {
+		t.Fatalf("%+v", r)
+	}
+	h.logout()
+}
+
+// A root that outlasts rootWait ends the walk as partial.
+func TestWalkPathRootOutlastsTheWait(t *testing.T) {
+	old := rootWait
+	rootWait = 300 * time.Millisecond
+	t.Cleanup(func() { rootWait = old })
+	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{straight}}
+	h := start(t, Options{Planner: f})
+	h.enterWorld()
+	done := make(chan WalkReport, 1)
+	go func() { r, _ := h.s.WalkPath(context.Background(), me.X+5, me.Y, me.Z); done <- r }()
+	h.expect(opcode.MSGMoveStartForward)
+	h.send(opcode.SMSGForceMoveRoot, packet.NewWriter().PackedGUID(me.GUID).U32(5).Bytes())
+	select {
+	case r := <-done:
+		if r.Result != "partial" || !strings.Contains(r.Reason, "still rooted") {
+			t.Fatalf("%+v", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("walk_path still waiting")
+	}
+	h.logout()
+}
+
+// A partial path that gained ground is planned on from its end (the tiles round the new
+// start may reach further); one that gained nothing ends the walk.
+func TestWalkPathPlansOnFromAPartialEnd(t *testing.T) {
+	part := func(from, to navmesh.Vec3) navmesh.Path {
+		end := navmesh.Vec3{from[0] + 12, from[1], from[2]}
+		return navmesh.Path{Status: navmesh.Partial, Reason: "edge of the loaded tiles", Points: []navmesh.Vec3{from, end},
+			Ground: make([][]navmesh.Vec3, 1)}
+	}
+	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{part, straight}}
+	h := walkHarness(t, f)
+	r, err := h.s.WalkPath(context.Background(), me.X+20, me.Y, me.Z)
+	if err != nil || r.Result != "arrived" || r.Replans != 0 || kinds(r) != "plan,walk,plan,walk" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	h.logout()
 }

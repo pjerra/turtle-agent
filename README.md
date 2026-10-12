@@ -146,11 +146,16 @@ bin/turtle-agent fleet --config fleet.json --settings other.json --stagger 3s --
 PathFinder uses (the core's `data/mmaps`), then walks the corners one straight walk at a time, with the same
 movement packets as `walk_to`: a client time that only runs forward, the run speed the server has set, no walking
 while rooted. Between corners the heartbeats carry the height of the ground (the mesh is sampled every 4 yd), so a
-straight leg over a hill does not cut through it.
+straight leg over a hill does not cut through it. The path starts and ends on the floor under the points asked for,
+not at their height. Each leg moves along its 3D length at the run speed, so no beat changes height by more than the
+speed allows (the anticheat's z check), even up the steepest walkable slope; a packet's height is also held within
+that of the one before, should a ground sample land on another floor.
 
 When the server moves the player mid-walk (fear, a scripted move, a teleport on the same map) or roots it,
 `walk_path` waits until the server lets go (up to 15 s for a root), plans again from where the player now is and walks
-on. It gives up after 8 such interruptions. A teleport to another map ends the walk. The report says how it ended:
+on. It plans again up to 8 times; the 9th interruption ends the walk. A teleport to another map ends it too. A partial
+path that gained at least 10 yd is planned on from its end, as the tiles round it may reach further. The report
+says how it ended:
 
 | `result` | Meaning |
 | --- | --- |
@@ -158,19 +163,25 @@ on. It gives up after 8 such interruptions. A teleport to another map ends the w
 | `partial` | stopped short: the mesh has no route all the way (it walks to the reachable point nearest the goal), the server kept moving the player, or took it to another map; `reason` says which |
 | `no_path` | nothing walked: the start or the goal is not on the mesh (no walkable polygon within 5 yd), or the map has no route |
 
+A goal more than 7 yd from the mesh (in the air, say) gives `partial`, as in the server's PathFinder, with the path
+ending on the floor nearest it.
+
 `trace` lists each `plan` (status, points, length), each `walk` (one segment, `from`, `to`, and the error that ended
 it early) and each `interrupted`, with `t_ms` since the call began.
 
 **Tiles.** Copy the server's `data/mmaps/NNN.mmap` and the map's `NNNyyxx.mmtile` files into `mmaps_dir`; the
 wow-play-harness tile cache folder (one subfolder per server) works as it is. Tiles load on demand: a map with up to 16
 tiles (a dungeon) loads whole, a bigger one the tiles round the start and the goal, one tile wider, and three wider
-when that gives no complete path. Tiles copied in later are picked up on the next call.
+when that gives no complete path. At most 64 tiles stay loaded per map: a box that would hold more keeps the tiles
+nearest the straight line from start to goal, and the least recently used tiles are unloaded first. Tiles copied in
+later are picked up on the next call.
 
 **Engine.** The planner is the core's own Detour (recastnavigation, as vendored by
 [tortoise-wow](https://github.com/tortoise-wow/tortoise-wow) with its 64-bit poly refs), compiled in through cgo, and
 it makes the PathFinder's calls: `findNearestPoly` with its extents (5 yd round, 10 yd of height, never a floor more
 than 3 yd above the point), `findPath` with a player's filter (ground and water; lava, slime and too-steep slopes left
-out) and `findStraightPath`. So the corners are the ones the server computes. Two alternatives were turned down:
+out) and `findStraightPath`. So the corners are the ones the server computes; only the two ends differ, put on the
+floor where the server keeps the points it was given. Two alternatives were turned down:
 a pure-Go Detour such as [arl/go-detour](https://github.com/arl/go-detour) (zlib) has 32-bit poly refs and 12-byte
 links, so it cannot read these tiles without a fork, and its port of Detour is older than the core's; and a port of
 the harness's Python fallback (polygon graph, A*, funnel) would give similar, not the same, paths. The cost is cgo:

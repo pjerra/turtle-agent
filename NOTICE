@@ -61,6 +61,7 @@ zlib licence, whose full text is internal/navmesh/detour/License.txt:
   3. This notice may not be removed or altered from any source distribution.
 
 turtle-agent file | Detour source | how
-internal/navmesh/detour/Include/*.h (DetourAlloc, Assert, Common, Math, NavMesh, NavMeshQuery, Node, Status) | Detour/Include | copied unchanged
-internal/navmesh/detour/Source/*.cpp (DetourAlloc, Assert, Common, NavMesh, NavMeshQuery, Node) | Detour/Source | copied unchanged (DetourNavMeshBuilder left out: tiles are read, never built)
+internal/navmesh/detour/Include/*.h (DetourAlloc, Assert, Common, Math, NavMesh, NavMeshQuery, Node, Status) | Detour/Include | copied unchanged from the core
+internal/navmesh/detour/Source/*.cpp (DetourAlloc, Assert, Common, NavMesh, NavMeshQuery, Node) | Detour/Source | copied unchanged from the core (DetourNavMeshBuilder left out: tiles are read, never built)
+internal/navmesh/detour/recastnavigation.diff | dep/recastnavigation/recastnavigation.diff | copied unchanged: the core's alterations of recastnavigation, in DetourNavMesh.h and DetourNavMeshQuery.cpp (zlib clause 2)
 internal/navmesh/detour_*.cpp | - | new: one-line wrappers that compile each Detour source in the cgo package

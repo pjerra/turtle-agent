@@ -51,6 +51,24 @@ dtPolyRef findWalkPoly(Nav* n, const float* p, const dtQueryFilter& f, float* cl
     *dist = dtVdist(closest, p);
     return ref;
 }
+// The bytes dtNavMesh::addTile reads for a tile with this header (DetourNavMesh.cpp
+// addTile's layout), so a header that claims more than the file holds is refused before
+// Detour reads past the end.
+uint64_t tileDataSize(const unsigned char* data) {
+    auto a4 = [](uint64_t x) { return (x + 3) & ~(uint64_t)3; };
+    dtMeshHeader h;
+    std::memcpy(&h, data, sizeof(h));
+    if (h.polyCount < 0 || h.vertCount < 0 || h.maxLinkCount < 0 || h.detailMeshCount < 0 ||
+        h.detailVertCount < 0 || h.detailTriCount < 0 || h.bvNodeCount < 0 || h.offMeshConCount < 0)
+        return UINT64_MAX;
+    return (uint64_t)a4(sizeof(dtMeshHeader)) + a4(sizeof(float) * 3 * (uint64_t)h.vertCount) +
+           a4(sizeof(dtPoly) * (uint64_t)h.polyCount) + a4(sizeof(dtLink) * (uint64_t)h.maxLinkCount) +
+           a4(sizeof(dtPolyDetail) * (uint64_t)h.detailMeshCount) +
+           a4(sizeof(float) * 3 * (uint64_t)h.detailVertCount) +
+           a4(sizeof(unsigned char) * 4 * (uint64_t)h.detailTriCount) +
+           a4(sizeof(dtBVNode) * (uint64_t)h.bvNodeCount) +
+           a4(sizeof(dtOffMeshConnection) * (uint64_t)h.offMeshConCount);
+}
 }  // namespace
 
 extern "C" int nd_version(void) { return 100 * DT_NAVMESH_VERSION + (int)sizeof(dtPolyRef); }
@@ -82,7 +100,7 @@ extern "C" void nd_destroy(void* h) {
     delete n;
 }
 
-extern "C" int nd_add_tile(void* h, const unsigned char* file, int size) {
+extern "C" int nd_add_tile(void* h, const unsigned char* file, int size, unsigned long long* tile) {
     Nav* n = (Nav*)h;
     if (!n || size < (int)sizeof(MmapTileHeader))
         return -1;
@@ -94,6 +112,8 @@ extern "C" int nd_add_tile(void* h, const unsigned char* file, int size) {
         return -2;
     if (hd.size > (uint32_t)size - sizeof(hd))
         return -3;
+    if (hd.size < sizeof(dtMeshHeader) || tileDataSize(file + sizeof(hd)) > hd.size)
+        return -3;
     unsigned char* data = (unsigned char*)dtAlloc(hd.size, DT_ALLOC_PERM);
     if (!data)
         return -4;
@@ -103,7 +123,13 @@ extern "C" int nd_add_tile(void* h, const unsigned char* file, int size) {
         dtFree(data);
         return -4;
     }
+    *tile = ref;
     return 0;
+}
+
+extern "C" int nd_remove_tile(void* h, unsigned long long tile) {
+    Nav* n = (Nav*)h;
+    return dtStatusFailed(n->mesh->removeTile((dtTileRef)tile, nullptr, nullptr)) ? -1 : 0;
 }
 
 extern "C" int nd_nearest(void* h, const float* p, const float* ext, unsigned short include,
@@ -120,7 +146,7 @@ extern "C" int nd_nearest(void* h, const float* p, const float* ext, unsigned sh
 }
 
 extern "C" int nd_find_path(void* h, const float* start, const float* end, unsigned short include,
-                            unsigned short exclude, float* out, int max_points, int* count) {
+                            unsigned short exclude, float* out, int max_points, int* count, float* goal) {
     Nav* n = (Nav*)h;
     *count = 0;
     dtQueryFilter f = makeFilter(include, exclude);
@@ -133,24 +159,22 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
     dtPolyRef eref = findWalkPoly(n, e, f, ec, &edist);
     if (!eref)
         return -2;
-    int result = 0;
-    // BuildPolyPath: a goal over 7 yd from its polygon is clamped to the polygon's edge and
-    // the path is incomplete.
-    if (edist > 7.0f) {
-        float c[3];
-        if (dtStatusSucceed(n->query->closestPointOnPolyBoundary(eref, e, c)))
-            dtVcopy(e, c);
-        result = 1;
-    }
+    toWow(ec, goal);
+    // The path runs between the points on the floor (findNearestPoly's closest points on
+    // the detail surface), not the asked ones: findStraightPath keeps an end inside its
+    // polygon as it is, height and all, and a walk to a point yards above or below the
+    // floor trips the anticheat's z speed check. BuildPolyPath's rule stays: a goal over
+    // 7 yd from the mesh makes the path incomplete.
+    int result = edist > 7.0f ? 2 : 0;
     dtPolyRef polys[MAX_POLYS];
     int np = 0;
-    dtStatus st = n->query->findPath(sref, eref, s, e, &f, polys, &np, MAX_POLYS);
+    dtStatus st = n->query->findPath(sref, eref, sc, ec, &f, polys, &np, MAX_POLYS);
     if (dtStatusFailed(st) || np == 0)
         return -3;
     if (polys[np - 1] != eref || dtStatusDetail(st, DT_PARTIAL_RESULT))
         result = 1;
     int npts = 0;
-    if (dtStatusFailed(n->query->findStraightPath(s, e, polys, np, out, nullptr, nullptr, &npts, max_points)) ||
+    if (dtStatusFailed(n->query->findStraightPath(sc, ec, polys, np, out, nullptr, nullptr, &npts, max_points)) ||
         npts < 1)
         return -3;
     for (int i = 0; i < npts; ++i) {

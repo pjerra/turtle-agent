@@ -157,22 +157,6 @@ func TestGroundFollowsTheSurfaceBetweenCorners(t *testing.T) {
 	if top < 18 {
 		t.Fatalf("highest ground point %.1f, the hill is 20", top)
 	}
-	if z := GroundZ(Vec3{12, 12, h(12)}, path.Points[1], g, 50, 12); math.Abs(float64(z-19)) > 0.01 {
-		t.Fatalf("GroundZ at the top = %.2f", z)
-	}
-}
-
-func TestGroundZInterpolatesAndClamps(t *testing.T) {
-	a, b := Vec3{0, 0, 0}, Vec3{12, 0, 0}
-	g := []Vec3{{4, 0, 4}, {8, 0, 4}}
-	for _, c := range []struct{ x, want float32 }{{0, 0}, {2, 2}, {6, 4}, {10, 2}, {12, 0}, {-3, 0}, {20, 0}} {
-		if z := GroundZ(a, b, g, c.x, 0); math.Abs(float64(z-c.want)) > 1e-4 {
-			t.Errorf("x %.0f: z %.3f, want %.3f", c.x, z, c.want)
-		}
-	}
-	if z := GroundZ(a, Vec3{12, 0, 6}, nil, 6, 0); z != 3 {
-		t.Errorf("no ground: z %.3f, want the straight line's 3", z)
-	}
 }
 
 func TestMissingMapAndBadTilesAreErrors(t *testing.T) {
@@ -220,12 +204,23 @@ func TestWantTilesPicksTheBoxRoundThePointsOnBigMaps(t *testing.T) {
 			names = append(names, tileFile(0, float32(32-r)*navfixture.Tile-1, float32(32-c)*navfixture.Tile-1))
 		}
 	}
-	got := wantTiles(names, 0, []Vec3{{-8913, 554, 94}, {-8900, 560, 94}}, 1)
-	if len(got) != 9 || !contains(got, tileFile(0, -8913, 554)) {
+	got := wantTiles(names, 0, Vec3{-8913, 554, 94}, Vec3{-8900, 560, 94}, 1, MaxTiles)
+	if len(got) != 9 || got[0] != tileFile(0, -8913, 554) {
+		t.Fatalf("%d tiles %v", len(got), got)
+	}
+	// A long line across the map: the box would be 20 x 20, cut to the tiles nearest it.
+	at := func(r, c int) Vec3 {
+		return Vec3{float32(32-r)*navfixture.Tile - 1, float32(32-c)*navfixture.Tile - 1, 0}
+	}
+	from, to := at(41, 21), at(58, 38)
+	got = wantTiles(names, 0, from, to, 3, 30)
+	mid := at(49, 29)
+	if len(got) != 30 || got[0] != tileFile(0, from[0], from[1]) || !contains(got, tileFile(0, to[0], to[1])) ||
+		!contains(got, tileFile(0, mid[0], mid[1])) || contains(got, tileFile(0, at(41, 38)[0], at(41, 38)[1])) {
 		t.Fatalf("%d tiles %v", len(got), got)
 	}
 	small := []string{"0703131.mmtile", "0703231.mmtile", "0703232.mmtile"}
-	if got := wantTiles(small, 70, []Vec3{{0, 0, 0}}, 1); len(got) != 3 {
+	if got := wantTiles(small, 70, Vec3{}, Vec3{}, 1, MaxTiles); len(got) != 3 {
 		t.Fatalf("a small map loads whole: %v", got)
 	}
 }
@@ -237,6 +232,73 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// The path runs between the floor points under the asked ones (findNearestPoly's closest
+// points), never at the asked height: a walk there would climb or drop yards in a beat.
+func TestPathEndsOnTheFloor(t *testing.T) {
+	p := planner(t, navfixture.LCorridor(0))
+	for _, c := range []struct {
+		name     string
+		from, to Vec3
+		status   Status
+		reason   string
+	}{
+		{"goal 5 yd up", Vec3{12, 12, 0}, Vec3{48, 48, 5}, Complete, ""},
+		{"goal 8 yd up", Vec3{12, 12, 0}, Vec3{48, 48, 8}, Partial, "8.0 yd from the navmesh"},
+		{"goal 2 yd down", Vec3{12, 12, 0}, Vec3{48, 48, -2}, Complete, ""},
+		{"start 4 yd up", Vec3{12, 12, 4}, Vec3{48, 48, 0}, Complete, ""},
+	} {
+		path, err := p.Plan(fixtureMap, c.from, c.to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, last := path.Points[0], path.Points[len(path.Points)-1]
+		if path.Status != c.status || !strings.Contains(path.Reason, c.reason) || (c.reason == "") != (path.Reason == "") {
+			t.Errorf("%s: %s %q", c.name, path.Status, path.Reason)
+		}
+		if first != (Vec3{12, 12, 0}) || last != (Vec3{48, 48, 0}) {
+			t.Errorf("%s: path from %v to %v, not on the floor", c.name, first, last)
+		}
+	}
+}
+
+// Past the tile limit the least recently used tile is unloaded, and comes back when needed.
+func TestTilesEvictLeastRecentlyUsed(t *testing.T) {
+	dir := navfixture.WriteDir(t, fixtureMap, navfixture.LCorridor(0))
+	// A second tile holding a 4-yd cell at x -590..-586, y 10..14 (Detour tile x 0, y -2).
+	far := navfixture.BuildTile([]navfixture.Poly{navfixture.Square(-590, 10, -586, 14, 0)}, nil, 0, -2)
+	if err := os.WriteFile(filepath.Join(dir, tileFile(fixtureMap, -588, 12)), far, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewPlanner(dir)
+	defer p.Close()
+	p.max = 1
+	for i, c := range []struct {
+		from, to Vec3
+		tile     string
+	}{
+		{Vec3{12, 12, 0}, Vec3{48, 48, 0}, "0013131.mmtile"},
+		{Vec3{-589, 12, 0}, Vec3{-587, 13, 0}, tileFile(fixtureMap, -588, 12)},
+		{Vec3{12, 12, 0}, Vec3{48, 48, 0}, "0013131.mmtile"},
+	} {
+		path, err := p.Plan(fixtureMap, c.from, c.to)
+		if err != nil || path.Status != Complete {
+			t.Fatalf("plan %d: %+v %v", i, path, err)
+		}
+		if got := p.Tiles(fixtureMap); len(got) != 1 || got[0] != c.tile {
+			t.Fatalf("plan %d: tiles %v, want %s", i, got, c.tile)
+		}
+	}
+}
+
+func TestTileErrorNamesUnknownCodes(t *testing.T) {
+	if err := tileError(-3); !strings.Contains(err.Error(), "truncated") {
+		t.Fatal(err)
+	}
+	if err := tileError(-9); err.Error() != "unknown tile error -9" {
+		t.Fatal(err)
+	}
 }
 
 // TestRealTiles runs on real server tiles when TURTLE_AGENT_MMAPS points at a folder

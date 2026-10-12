@@ -10,8 +10,9 @@ type engine struct{}
 
 func newEngine([]byte) (*engine, error)         { return nil, ErrNoEngine }
 func (*engine) close()                          {}
-func (*engine) addTile([]byte) error            { return ErrNoEngine }
+func (*engine) addTile([]byte) (uint64, error)  { return 0, ErrNoEngine }
+func (*engine) removeTile(uint64) error         { return ErrNoEngine }
 func (*engine) nearest(Vec3, Vec3) (Vec3, bool) { return Vec3{}, false }
-func (*engine) findPath(Vec3, Vec3) (int, []Vec3) {
-	return -3, nil
+func (*engine) findPath(Vec3, Vec3) (int, []Vec3, Vec3) {
+	return -3, nil, Vec3{}
 }

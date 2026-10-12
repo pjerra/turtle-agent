@@ -30,33 +30,72 @@ var (
 	errCancelled   = errors.New("walk cancelled")
 )
 
+// walkState is a running walk along a polyline: the start, then for a navmesh leg the
+// ground samples, then the end. Progress runs along the 3D length at the run speed, so
+// no beat moves further than speed*dt, height included: the anticheat allows no more z
+// change than that per beat (Movement.cpp:574-595, OVERSPEED_Z), even up a 50° slope.
 type walkState struct {
-	from, to [3]float32
+	pts      [][3]float32 // at least two points; the last is to
+	cum      []float64    // 3D length from pts[0] to pts[i]
+	to       [3]float32
 	o        float32
-	start    time.Time
-	dur      time.Duration
+	start    time.Time // when base yards had been walked
+	base     float64
+	speed    float32
 	nextBeat time.Time
 	done     chan error
-	// ground, when set, is the surface height at (x, y) along the segment (a navmesh
-	// path's ground samples); without it the height runs straight from start to end.
-	ground func(x, y float32) float32
+	sentZ    float32 // height and client time of the last movement packet sent for this walk
+	sentT    uint32
 }
 
-// at is the walk's position at now, clamped to the segment.
+func newWalk(pts [][3]float32, speed float32, now time.Time, done chan error) *walkState {
+	w := &walkState{pts: pts, cum: make([]float64, len(pts)), to: pts[len(pts)-1], start: now, speed: speed,
+		nextBeat: now.Add(500 * time.Millisecond), done: done}
+	for i := 1; i < len(pts); i++ {
+		w.cum[i] = w.cum[i-1] + dist3f(pts[i-1], pts[i])
+	}
+	w.o = game.Facing(pts[0][0], pts[0][1], w.to[0], w.to[1])
+	return w
+}
+
+func dist3f(a, b [3]float32) float64 {
+	dx, dy, dz := float64(b[0]-a[0]), float64(b[1]-a[1]), float64(b[2]-a[2])
+	return math.Sqrt(dx*dx + dy*dy + dz*dz)
+}
+
+// walked is the 3D distance covered at now, at most the whole polyline.
+func (w *walkState) walked(now time.Time) float64 {
+	return min(w.base+float64(w.speed)*now.Sub(w.start).Seconds(), w.cum[len(w.cum)-1])
+}
+
+func (w *walkState) arrived(now time.Time) bool {
+	return w.walked(now) >= w.cum[len(w.cum)-1]-1e-6
+}
+
+// at is the walk's position at now, clamped to the polyline.
 func (w *walkState) at(now time.Time) [3]float32 {
-	frac := float32(1)
-	if w.dur > 0 {
-		frac = float32(now.Sub(w.start)) / float32(w.dur)
+	d := w.walked(now)
+	for i := 1; i < len(w.pts); i++ {
+		if d <= w.cum[i] || i == len(w.pts)-1 {
+			seg := w.cum[i] - w.cum[i-1]
+			f := float32(1)
+			if seg > 1e-9 {
+				f = float32(min(max((d-w.cum[i-1])/seg, 0), 1))
+			}
+			a, b := w.pts[i-1], w.pts[i]
+			return [3]float32{a[0] + (b[0]-a[0])*f, a[1] + (b[1]-a[1])*f, a[2] + (b[2]-a[2])*f}
+		}
 	}
-	frac = min(max(frac, 0), 1)
-	var p [3]float32
-	for i := range p {
-		p[i] = w.from[i] + (w.to[i]-w.from[i])*frac
-	}
-	if w.ground != nil && frac < 1 {
-		p[2] = w.ground(p[0], p[1])
-	}
-	return p
+	return w.to
+}
+
+// clampZ holds a movement packet's height within speed*dt of the last one sent: a
+// backstop under the polyline timing, for a ground sample that snapped to another floor.
+func (w *walkState) clampZ(z float32, ctime uint32) float32 {
+	lim := w.speed * float32(ctime-w.sentT) / 1000
+	z = min(max(z, w.sentZ-lim), w.sentZ+lim)
+	w.sentZ, w.sentT = z, ctime
+	return z
 }
 
 // speedAcks maps each forced speed change to its ack (Opcodes_1_12_1.h:229-238, :733-738).
@@ -126,12 +165,13 @@ func (s *Session) currentFlags() uint32 {
 	return f
 }
 
-// syncWalk moves s.pos to where the running walk is at now.
+// syncWalk moves s.pos to where the running walk is at now; a movement packet follows.
 func (s *Session) syncWalk(now time.Time) {
 	if s.walk == nil {
 		return
 	}
 	p := s.walk.at(now)
+	p[2] = s.walk.clampZ(p[2], s.clock())
 	s.mu.Lock()
 	s.pos[0], s.pos[1], s.pos[2] = p[0], p[1], p[2]
 	s.mu.Unlock()
@@ -251,9 +291,10 @@ func (s *Session) WalkTo(ctx context.Context, x, y, z float32) error {
 }
 
 // walkStraight is one straight walk to `to`, refused when it is over limit yards; walk_to
-// and each segment of walk_path go through it. It returns on arrival, or with the reason
-// the walk ended early.
-func (s *Session) walkStraight(ctx context.Context, to [3]float32, limit float64, ground func(x, y float32) float32) error {
+// and each segment of walk_path go through it. via are the ground points on the way (a
+// navmesh leg's samples), walked through in order. It returns on arrival, or with the
+// reason the walk ended early.
+func (s *Session) walkStraight(ctx context.Context, to [3]float32, limit float64, via [][3]float32) error {
 	x, y, z := to[0], to[1], to[2]
 	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
@@ -274,7 +315,7 @@ func (s *Session) walkStraight(ctx context.Context, to [3]float32, limit float64
 		dx, dy, dz := float64(x-from[0]), float64(y-from[1]), float64(z-from[2])
 		dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
 		if dist > limit {
-			return nil, fmt.Errorf("walk_to is for short moves: %.1f yards is over %d, use walk_path or teleport", dist, maxWalk)
+			return nil, fmt.Errorf("walk_to is for short moves: %.1f yards is over %g, use walk_path or teleport", dist, limit)
 		}
 		done := make(chan error, 1)
 		if dist < 0.1 {
@@ -282,13 +323,13 @@ func (s *Session) walkStraight(ctx context.Context, to [3]float32, limit float64
 			return done, nil
 		}
 		now := time.Now()
-		w := &walkState{from: from, to: [3]float32{x, y, z}, o: game.Facing(from[0], from[1], x, y), start: now,
-			dur: time.Duration(dist / float64(s.runSpeed) * float64(time.Second)), nextBeat: now.Add(500 * time.Millisecond), done: done,
-			ground: ground}
+		pts := append(append([][3]float32{from}, via...), [3]float32{x, y, z})
+		w := newWalk(pts, s.runSpeed, now, done)
 		s.mu.Lock()
 		s.pos[3] = w.o
 		mi := s.moveInfo(game.MoveForward)
 		s.mu.Unlock()
+		w.sentZ, w.sentT = mi.Z, mi.Time
 		if err := s.conn.WritePacket(opcode.MSGMoveStartForward, game.BuildMovement(mi)); err != nil {
 			return nil, err
 		}
@@ -324,10 +365,11 @@ func (s *Session) tickWalk() error {
 		return nil
 	}
 	now := time.Now()
-	if !now.Before(w.start.Add(w.dur)) {
+	if w.arrived(now) {
 		s.walk = nil
+		z := w.clampZ(w.to[2], s.clock())
 		s.mu.Lock()
-		s.pos = [4]float32{w.to[0], w.to[1], w.to[2], w.o}
+		s.pos = [4]float32{w.to[0], w.to[1], z, w.o}
 		mi := s.moveInfo(s.currentFlags())
 		s.mu.Unlock()
 		err := s.conn.WritePacket(opcode.MSGMoveStop, game.BuildMovement(mi))
@@ -518,9 +560,7 @@ func (s *Session) setRunSpeed(speed float32, now time.Time) {
 	}
 	s.runSpeed = speed
 	if w := s.walk; w != nil {
-		w.from = w.at(now)
-		dx, dy, dz := float64(w.to[0]-w.from[0]), float64(w.to[1]-w.from[1]), float64(w.to[2]-w.from[2])
-		w.start, w.dur = now, time.Duration(math.Sqrt(dx*dx+dy*dy+dz*dz)/float64(speed)*float64(time.Second))
+		w.base, w.start, w.speed = w.walked(now), now, speed
 	}
 }
 

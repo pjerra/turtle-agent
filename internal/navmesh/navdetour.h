@@ -14,20 +14,25 @@ int nd_version(void);
 void* nd_create(const unsigned char* params, int size);
 void nd_destroy(void* h);
 
-// A whole .mmtile file. 0 added; -1 bad header, -2 mmap/Detour version, -3 truncated,
-// -4 Detour refused the tile.
-int nd_add_tile(void* h, const unsigned char* file, int size);
+// A whole .mmtile file. 0 added (*tile = its ref); -1 bad header, -2 mmap/Detour version,
+// -3 truncated, -4 Detour refused the tile.
+int nd_add_tile(void* h, const unsigned char* file, int size, unsigned long long* tile);
+
+// Unloads a tile nd_add_tile added. 0 done, -1 Detour refused.
+int nd_remove_tile(void* h, unsigned long long tile);
 
 // The nearest walkable point to p within the half extents ext (WoW x/y, then height).
 // 0 found (out set), -1 none.
 int nd_nearest(void* h, const float* p, const float* ext, unsigned short include, unsigned short exclude,
                float* out);
 
-// findPath + findStraightPath from start to end, as the server's PathFinder. 0 complete,
-// 1 partial (out ends at the reachable point nearest the goal), -1 start off the mesh,
-// -2 goal off the mesh, -3 Detour failure. *count = points written (3 floats each).
+// findPath + findStraightPath between the floor points under start and end, as the
+// server's PathFinder. 0 complete, 1 partial (out ends at the reachable point nearest the
+// goal), 2 partial because the goal is over 7 yd from the mesh, -1 start off the mesh,
+// -2 goal off the mesh, -3 Detour failure. *count = points written (3 floats each); goal
+// = the floor point found for end (set from 0 up).
 int nd_find_path(void* h, const float* start, const float* end, unsigned short include, unsigned short exclude,
-                 float* out, int max_points, int* count);
+                 float* out, int max_points, int* count, float* goal);
 
 #ifdef __cplusplus
 }
