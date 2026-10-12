@@ -1,0 +1,17 @@
+//go:build !cgo
+
+package navmesh
+
+const engineName = "none"
+
+// engine is the stand-in of a build without cgo: no map loads, so every plan fails with
+// ErrNoEngine.
+type engine struct{}
+
+func newEngine([]byte) (*engine, error)         { return nil, ErrNoEngine }
+func (*engine) close()                          {}
+func (*engine) addTile([]byte) error            { return ErrNoEngine }
+func (*engine) nearest(Vec3, Vec3) (Vec3, bool) { return Vec3{}, false }
+func (*engine) findPath(Vec3, Vec3) (int, []Vec3) {
+	return -3, nil
+}

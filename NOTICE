@@ -35,3 +35,32 @@ internal/auth/srp.go | pkg/auth/srp.go | ported (group and SRP6 arithmetic kept;
 internal/worldconn/conn.go | pkg/worldconn/protocol.go, pkg/worldconn/conn.go | ported (ReadFull framing, serialized writes, Dial-then-authenticate kept; 4-byte server header, XOR cipher, 1.12 auth session and response rewritten)
 internal/session/session.go | pkg/world/engine.go | ported (single-owner select loop, ping cadence, logout wait kept; 1.12 login sequence, readiness on SMSG_LOGIN_VERIFY_WORLD and all handlers new)
 internal/rpc/server.go | pkg/worldrpc/server.go, pkg/worldrpc/router.go | ported (loopback Listen, local-request checks, JSON-RPC 2.0 envelope kept; method registry and typed params new)
+
+turtle-agent also contains Detour, from recastnavigation by Mikko Mononen, as the
+Tortoise WoW core vendors it (https://github.com/tortoise-wow/tortoise-wow,
+dep/recastnavigation at 818b3861f87178a09a3d35aea1321cd39f3a0f12, with the core's
+TrinityCore patch: DT_POLYREF64 and 12/21/31 salt/tile/poly bits), used under the
+zlib licence, whose full text is internal/navmesh/detour/License.txt:
+
+  Copyright (c) 2009 Mikko Mononen memon@inside.org
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+  claim that you wrote the original software. If you use this software
+  in a product, an acknowledgment in the product documentation would be
+  appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+  misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+turtle-agent file | Detour source | how
+internal/navmesh/detour/Include/*.h (DetourAlloc, Assert, Common, Math, NavMesh, NavMeshQuery, Node, Status) | Detour/Include | copied unchanged
+internal/navmesh/detour/Source/*.cpp (DetourAlloc, Assert, Common, NavMesh, NavMeshQuery, Node) | Detour/Source | copied unchanged (DetourNavMeshBuilder left out: tiles are read, never built)
+internal/navmesh/detour_*.cpp | - | new: one-line wrappers that compile each Detour source in the cgo package

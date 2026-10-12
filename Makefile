@@ -4,9 +4,9 @@ GOFMT := $(GOROOT_LOCAL)/bin/gofmt
 CORE ?= $(HOME)/tortoise-wow
 export GOTOOLCHAIN := local
 
-.PHONY: test fmt fmt-check vet build opcodes
+.PHONY: test fmt fmt-check vet nocgo build opcodes
 
-test: fmt-check vet
+test: fmt-check vet nocgo
 	$(GO) test -race -count=1 ./...
 
 fmt:
@@ -17,6 +17,10 @@ fmt-check:
 
 vet:
 	$(GO) vet ./...
+
+# A build without cgo still works, without path_to and walk_path (navmesh.ErrNoEngine).
+nocgo:
+	CGO_ENABLED=0 $(GO) build ./...
 
 build:
 	$(GO) build -o bin/turtle-agent ./cmd/turtle-agent

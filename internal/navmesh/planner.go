@@ -1,0 +1,327 @@
+// Package navmesh plans walking paths on the server's own navmesh: the mmaps the core's
+// PathFinder uses (MaNGOS mmap version 6 tiles holding Detour version 7 data with 64-bit
+// poly refs), run through the core's own Detour sources, vendored in detour/ (zlib).
+//
+// Tiles are read on demand from a local folder holding copies of the server's data/mmaps
+// files: NNN.mmap (the map's dtNavMeshParams) and NNNyyxx.mmtile.
+package navmesh
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+)
+
+// Vec3 is a WoW position (x, y, z).
+type Vec3 = [3]float32
+
+// MoveMapSharedDefines.h NavTerrain.
+const (
+	NavGround = 0x01
+	NavMagma  = 0x02
+	NavSlime  = 0x04
+	NavWater  = 0x08
+	NavSteep  = 0x10 // slopes above the player's climb angle
+)
+
+// IncludeFlags and ExcludeFlags are the polygon filter of a player on foot: ground and water
+// as the server's PathFinder::createFilter gives a player, and never lava, slime or slopes
+// too steep to climb.
+const (
+	IncludeFlags = NavGround | NavWater
+	ExcludeFlags = NavMagma | NavSlime | NavSteep
+)
+
+// GroundStep is the spacing of Path.Ground samples, in yards.
+const GroundStep = 4
+
+// smallMap is the tile count up to which a map loads whole (a dungeon).
+const smallMap = 16
+
+// ErrNoEngine says the binary was built without cgo, so it has no Detour.
+var ErrNoEngine = errors.New("navmesh: this turtle-agent was built without cgo, so it has no Detour engine; " +
+	"rebuild with CGO_ENABLED=1 and a C++ compiler")
+
+type Status string
+
+const (
+	Complete Status = "complete"
+	Partial  Status = "partial" // the path ends at the reachable point nearest the goal
+	NoPath   Status = "no_path"
+)
+
+// Path is a planned route. Points are Detour's straight-path corners, the first the start
+// and the last the goal (or, when partial, the nearest point to it the mesh reaches).
+// Ground[i] holds surface points every GroundStep yards strictly between Points[i] and
+// Points[i+1], so a walk keeps to the ground between corners.
+type Path struct {
+	Status Status   `json:"status"`
+	Reason string   `json:"reason,omitempty"`
+	Points []Vec3   `json:"points"`
+	Length float32  `json:"length"`
+	Engine string   `json:"engine"`
+	Ground [][]Vec3 `json:"-"`
+}
+
+// Planner plans paths on the tiles under one folder. It is safe for concurrent use.
+type Planner struct {
+	dir  string
+	mu   sync.Mutex
+	maps map[uint32]*mapMesh
+}
+
+type mapMesh struct {
+	eng   *engine
+	tiles map[string]bool
+}
+
+func NewPlanner(dir string) *Planner { return &Planner{dir: dir, maps: map[uint32]*mapMesh{}} }
+
+// Close frees the Detour meshes.
+func (p *Planner) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for id, m := range p.maps {
+		m.eng.close()
+		delete(p.maps, id)
+	}
+}
+
+// Tiles lists the tile files loaded for a map.
+func (p *Planner) Tiles(mapID uint32) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m := p.maps[mapID]
+	if m == nil {
+		return nil
+	}
+	var out []string
+	for n := range m.tiles {
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Plan finds a path from one point to another on a map. The error is for what a retry
+// will not fix (no folder, no map, a broken tile, no engine); an unreachable goal is a
+// Path with Status NoPath or Partial and a Reason.
+func (p *Planner) Plan(mapID uint32, from, to Vec3) (Path, error) {
+	if p.dir == "" {
+		return Path{}, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m, err := p.mesh(mapID)
+	if err != nil {
+		return Path{}, err
+	}
+	names, err := p.list(mapID)
+	if err != nil {
+		return Path{}, err
+	}
+	var path Path
+	for _, margin := range []int{1, 3} {
+		if err := p.load(m, wantTiles(names, mapID, []Vec3{from, to}, margin)); err != nil {
+			return Path{}, err
+		}
+		path = plan(m.eng, from, to)
+		if path.Status == Complete || len(names) <= smallMap {
+			break
+		}
+	}
+	return path, nil
+}
+
+func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
+	if m := p.maps[mapID]; m != nil {
+		return m, nil
+	}
+	name := fmt.Sprintf("%03d.mmap", mapID)
+	params, err := os.ReadFile(filepath.Join(p.dir, name))
+	if err != nil {
+		return nil, fmt.Errorf("navmesh: map %d: %w (copy the server's data/mmaps/%s and %03d*.mmtile into mmaps_dir)",
+			mapID, err, name, mapID)
+	}
+	eng, err := newEngine(params)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	m := &mapMesh{eng: eng, tiles: map[string]bool{}}
+	p.maps[mapID] = m
+	return m, nil
+}
+
+// list is the map's tile files in the folder, read each time so tiles copied in later count.
+func (p *Planner) list(mapID uint32) ([]string, error) {
+	ents, err := os.ReadDir(p.dir)
+	if err != nil {
+		return nil, fmt.Errorf("navmesh: %w", err)
+	}
+	prefix := fmt.Sprintf("%03d", mapID)
+	var out []string
+	for _, e := range ents {
+		n := e.Name()
+		if len(n) == len("0000000.mmtile") && strings.HasPrefix(n, prefix) && strings.HasSuffix(n, ".mmtile") {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("navmesh: no %s*.mmtile files in %s", prefix, p.dir)
+	}
+	return out, nil
+}
+
+func (p *Planner) load(m *mapMesh, names []string) error {
+	for _, n := range names {
+		if m.tiles[n] {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(p.dir, n))
+		if err != nil {
+			return fmt.Errorf("navmesh: %w", err)
+		}
+		if err := m.eng.addTile(data); err != nil {
+			return fmt.Errorf("navmesh: %s: %w", n, err)
+		}
+		m.tiles[n] = true
+	}
+	return nil
+}
+
+func plan(eng *engine, from, to Vec3) Path {
+	rc, pts := eng.findPath(from, to)
+	path := Path{Engine: engineName, Points: pts}
+	switch rc {
+	case 0:
+		path.Status = Complete
+	case 1:
+		path.Status = Partial
+	case -1:
+		return Path{Status: NoPath, Engine: engineName, Points: []Vec3{}, Reason: fmt.Sprintf(
+			"start %s is not on the navmesh (no walkable polygon within 5 yd, or tiles missing)", fmtVec(from))}
+	case -2:
+		return Path{Status: NoPath, Engine: engineName, Points: []Vec3{}, Reason: fmt.Sprintf(
+			"goal %s is not on the navmesh (no walkable polygon within 5 yd, or tiles missing)", fmtVec(to))}
+	default:
+		return Path{Status: NoPath, Engine: engineName, Points: []Vec3{}, Reason: "Detour found no path"}
+	}
+	for i := 1; i < len(pts); i++ {
+		path.Length += dist3D(pts[i-1], pts[i])
+		path.Ground = append(path.Ground, ground(eng, pts[i-1], pts[i]))
+	}
+	if path.Status == Partial {
+		end := pts[len(pts)-1]
+		path.Reason = fmt.Sprintf("no navmesh route to the goal: the nearest reachable point %s is %.1f yd from it",
+			fmtVec(end), dist3D(end, to))
+	}
+	return path
+}
+
+// ground samples the mesh surface every GroundStep yards between two corners. Each sample
+// looks for the floor near the last one's height, so a hill is followed up and over and a
+// bridge does not drop to the floor under it; a miss keeps the straight line's height.
+func ground(eng *engine, a, b Vec3) []Vec3 {
+	n := int(dist2D(a, b) / GroundStep)
+	if n < 1 {
+		return nil
+	}
+	out := make([]Vec3, 0, n)
+	prev := a[2]
+	for k := 1; k <= n; k++ {
+		f := float32(k) * GroundStep / dist2D(a, b)
+		if f >= 1 {
+			break
+		}
+		q := Vec3{a[0] + (b[0]-a[0])*f, a[1] + (b[1]-a[1])*f, prev + (b[2]-a[2])/float32(n+1)}
+		if c, ok := eng.nearest(q, Vec3{0.25, 0.25, 6}); ok && dist2D(c, q) < 0.05 {
+			q[2] = c[2]
+		} else {
+			q[2] = a[2] + (b[2]-a[2])*f
+		}
+		prev = q[2]
+		out = append(out, q)
+	}
+	return out
+}
+
+// GroundZ is the height at (x, y) of a walk from a to b over the ground samples g: (x, y)
+// is projected onto the segment, clamped to its ends, and the height interpolated along
+// a, g..., b.
+func GroundZ(a, b Vec3, g []Vec3, x, y float32) float32 {
+	l := dist2D(a, b)
+	if l < 1e-4 {
+		return b[2]
+	}
+	t := ((x-a[0])*(b[0]-a[0]) + (y-a[1])*(b[1]-a[1])) / (l * l)
+	d := min(max(t, 0), 1) * l
+	prev, prevD := a, float32(0)
+	for i := 0; i <= len(g); i++ {
+		q := b
+		if i < len(g) {
+			q = g[i]
+		}
+		qd := dist2D(a, q)
+		if d <= qd {
+			if qd-prevD < 1e-4 {
+				return q[2]
+			}
+			return prev[2] + (q[2]-prev[2])*(d-prevD)/(qd-prevD)
+		}
+		prev, prevD = q, qd
+	}
+	return b[2]
+}
+
+// wantTiles is the tiles to load for a path between the points: a small map whole, else
+// the box of tiles round the points, margin tiles wider on each side.
+func wantTiles(names []string, mapID uint32, pts []Vec3, margin int) []string {
+	if len(names) <= smallMap {
+		return names
+	}
+	r0, c0, r1, c1 := math.MaxInt, math.MaxInt, math.MinInt, math.MinInt
+	for _, q := range pts {
+		r, c := tileRC(q[0], q[1])
+		r0, r1, c0, c1 = min(r0, r), max(r1, r), min(c0, c), max(c1, c)
+	}
+	var out []string
+	for _, n := range names {
+		var m, r, c int
+		if _, err := fmt.Sscanf(n, "%03d%02d%02d.mmtile", &m, &r, &c); err != nil || uint32(m) != mapID {
+			continue
+		}
+		if r >= r0-margin && r <= r1+margin && c >= c0-margin && c <= c1+margin {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// tileRC is the (gy, gx) of the grid holding a position: the core names a tile
+// %03i%02i%02i.mmtile from (map, gy, gx) with gx from y and gy from x ("it's reversed",
+// GridMap.cpp, MoveMap.cpp).
+func tileRC(x, y float32) (int, int) {
+	const tile = 533.3333333
+	return int(32 - x/tile), int(32 - y/tile)
+}
+
+func tileFile(mapID uint32, x, y float32) string {
+	r, c := tileRC(x, y)
+	return fmt.Sprintf("%03d%02d%02d.mmtile", mapID, r, c)
+}
+
+func dist2D(a, b Vec3) float32 {
+	return float32(math.Hypot(float64(a[0]-b[0]), float64(a[1]-b[1])))
+}
+
+func dist3D(a, b Vec3) float32 {
+	dx, dy, dz := float64(a[0]-b[0]), float64(a[1]-b[1]), float64(a[2]-b[2])
+	return float32(math.Sqrt(dx*dx + dy*dy + dz*dz))
+}
+
+func fmtVec(v Vec3) string { return fmt.Sprintf("(%.1f, %.1f, %.1f)", v[0], v[1], v[2]) }
