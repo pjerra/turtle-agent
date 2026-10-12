@@ -89,3 +89,24 @@ func TestOnlyAccount(t *testing.T) {
 		t.Fatalf("two accounts: %v", err)
 	}
 }
+
+func TestMmapsDir(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(writeSettings(t, 0o600, fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"mmaps_dir":%q}`, dir)))
+	if err != nil || s.MmapsDir != dir {
+		t.Fatalf("%q %v", s.MmapsDir, err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "mmaps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"mmaps_dir":"~/mmaps"}`))
+	if err != nil || s.MmapsDir != filepath.Join(home, "mmaps") {
+		t.Fatalf("~/: %q %v", s.MmapsDir, err)
+	}
+	_, err = Load(writeSettings(t, 0o600, fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"mmaps_dir":%q}`, filepath.Join(dir, "none"))))
+	if err == nil || !strings.Contains(err.Error(), "mmaps_dir") {
+		t.Fatalf("missing folder: %v", err)
+	}
+}

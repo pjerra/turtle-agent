@@ -15,6 +15,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/capture"
 	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/worldconn"
@@ -179,8 +180,15 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	log := events.New(100000)
 	// The server can echo the account name back (a .pinfo reply): events and the stderr
 	// log never carry it, nor the password (ruling P10, review I3).
-	s := session.New(conn, session.Options{Character: character, Log: log, Logger: stderr,
-		Redact: []string{ticket.Account, account}, RedactAnywhere: []string{password}})
+	opts := session.Options{Character: character, Log: log, Logger: stderr,
+		Redact: []string{ticket.Account, account}, RedactAnywhere: []string{password}}
+	if st.MmapsDir != "" {
+		planner := navmesh.NewPlanner(st.MmapsDir)
+		defer planner.Close()
+		opts.Planner = planner
+		fmt.Fprintf(stderr, "navmesh: tiles from %s\n", st.MmapsDir)
+	}
+	s := session.New(conn, opts)
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(context.Background()) }()
 	select {

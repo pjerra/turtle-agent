@@ -37,6 +37,12 @@ type agentRig struct {
 // newRig logs a session into a scripted world server and serves its methods over HTTP.
 func newRig(t *testing.T) *agentRig {
 	t.Helper()
+	return newRigAt(t, session.Options{}, [3]float32{1, 2, 3})
+}
+
+// newRigAt is newRig with session options and the position the character enters map 0 at.
+func newRigAt(t *testing.T, opts session.Options, pos [3]float32) *agentRig {
+	t.Helper()
 	key := bytes.Repeat([]byte{7}, 40)
 	cli, srvConn := net.Pipe()
 	t.Cleanup(func() { cli.Close(); srvConn.Close() })
@@ -47,7 +53,8 @@ func newRig(t *testing.T) *agentRig {
 		t.Fatal(err)
 	}
 	r := &agentRig{t: t, srv: <-ch, run: make(chan error, 1)}
-	r.s = session.New(conn, session.Options{Character: "Harnessb"})
+	opts.Character = "Harnessb"
+	r.s = session.New(conn, opts)
 	go func() { r.run <- r.s.Run(context.Background()) }()
 	srv := rpc.NewServer()
 	registerMethods(srv, r.s)
@@ -57,7 +64,7 @@ func newRig(t *testing.T) *agentRig {
 	enum := packet.NewWriter().U8(1).GUID(0x2A).CString("Harnessb").Append(make([]byte, session.CharEnumTailLen)).Bytes()
 	r.srv.Send(opcode.SMSGCharEnum, enum)
 	r.expect(opcode.CMSGPlayerLogin)
-	r.srv.Send(opcode.SMSGLoginVerifyWorld, packet.NewWriter().U32(0).F32(1).F32(2).F32(3).F32(0).Bytes())
+	r.srv.Send(opcode.SMSGLoginVerifyWorld, packet.NewWriter().U32(0).F32(pos[0]).F32(pos[1]).F32(pos[2]).F32(0).Bytes())
 	// Ready never closes when login fails, so Done ends the wait too.
 	select {
 	case <-r.s.Ready():
@@ -452,5 +459,15 @@ func TestActionMethodShapes(t *testing.T) {
 	r.srv.Send(opcode.SMSGNewWorld, packet.NewWriter().U32(0).F32(1).F32(2).F32(3).F32(0).Bytes())
 	if out := <-tp; out["error"] != nil {
 		t.Fatalf("teleport %v", out["error"])
+	}
+}
+
+func TestPathMethodsWithoutMmapsDir(t *testing.T) {
+	r := newRig(t)
+	for _, m := range []string{"path_to", "walk_path"} {
+		out := r.call(m, `{"x":1,"y":2,"z":3}`)
+		if errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "mmaps_dir") {
+			t.Fatalf("%s: %v", m, out)
+		}
 	}
 }

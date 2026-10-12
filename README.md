@@ -4,22 +4,24 @@
 
 A headless World of Warcraft client for **vanilla 1.12 / Turtle WoW 1.18.1** servers (login build 7272, world build 5875).
 One process logs one character in, with no game window, and exposes it over a local JSON-RPC API. Use it to drive a
-test character from scripts or AI agents: chat and GM commands, party, units around you, target, attack, cast, short
-walks and GM teleports, and an ordered event log of chat and combat.
+test character from scripts or AI agents: chat and GM commands, party, units around you, target, attack, cast, walks
+on the server's own navmesh and GM teleports, and an ordered event log of chat and combat.
 
 It was built to test server-side bots ([TortoiseBots](https://github.com/Sagiroth/TortoiseBots)) on a private test
 server: log in, hire or invite bots, start a fight, then read back the combat log and what each bot did.
 
-> Use it only on servers you run or are allowed to test on. It has no Warden emulation and does no rendering,
-> pathfinding or inventory management.
+> Use it only on servers you run or are allowed to test on. It has no Warden emulation and does no rendering or
+> inventory management.
 
 ## Quick start
 
-Requirements: Go 1.27.1 or newer (see `go.mod`), and a server whose realmd and world ports you can reach.
+Requirements: Go 1.27.1 or newer (see `go.mod`), a C++17 compiler for cgo (g++ or clang; it builds the navmesh
+engine), and a server whose realmd and world ports you can reach. `CGO_ENABLED=0` still builds; `path_to` and
+`walk_path` then answer that the binary has no navmesh engine.
 
 ```sh
 make build                      # bin/turtle-agent
-make test                       # gofmt check, go vet, go test -race
+make test                       # gofmt check, go vet, a no-cgo build, go test -race
 ```
 
 Create the settings file (default `~/.config/turtle-agent/settings.json`, mode **0600**; the agent refuses a file other
@@ -31,12 +33,14 @@ users can read):
   "accounts": { "MYACCOUNT": "my-password" },
   "rpc": "127.0.0.1:8765",
   "spot": { "map": 1, "x": -1287.0, "y": -2379.6, "z": 91.7 },
-  "test_spell": 52524
+  "test_spell": 52524,
+  "mmaps_dir": "~/turtle-agent-mmaps"
 }
 ```
 
 Only `realmd` and `accounts` are required. `rpc` must be a loopback address. `realm` and `world_addr` override what the
-realm list returns; `bots`, `spot` and `test_spell` are optional hints for scripts.
+realm list returns; `bots`, `spot` and `test_spell` are optional hints for scripts. `mmaps_dir` is a folder holding
+copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)).
 
 Log a character in and keep it online with the RPC server running:
 
@@ -93,7 +97,9 @@ browser (`Origin` header) and other `Host` names are refused.
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `face` | `guid` | |
-| `walk_to` | `x`, `y`, `z` (short, straight-line walks: Z is interpolated and terrain is ignored, so keep walks short and on flat ground; after a `teleport` to a Z above the ground the character does not fall) | |
+| `walk_to` | `x`, `y`, `z` (short, straight-line walks: Z is interpolated and terrain is ignored, so keep walks short and on flat ground, or use `walk_path`; after a `teleport` to a Z above the ground the character does not fall) | |
+| `path_to` | `x`, `y`, `z` | a navmesh path from where you stand, without moving: `map`, `from`, `to`, `status` (complete, partial, no_path), `reason`, `points`, `length`, `engine` |
+| `walk_path` | `x`, `y`, `z` | walks the navmesh path: `result` (arrived, partial, no_path), `reason`, `goal`, `position`, `dist_left`, `walked`, `replans`, `seconds`, `trace` |
 | `teleport` | `x`, `y`, `z`, `map` (a GM `.go xyz`; needs a GM account) | |
 | `logout` | | |
 
@@ -134,6 +140,46 @@ bin/turtle-agent fleet --config fleet.json --settings other.json --stagger 3s --
 - A child that exits non-zero, or a fleet that is not fully in world after `--wait` (default 2 m), stops the others and
   makes `fleet` exit 9. It exits 0 only when every child exited 0.
 
+## Navmesh walking
+
+`walk_to` walks in a straight line and knows nothing of walls. `walk_path` plans on the navmesh the server's own
+PathFinder uses (the core's `data/mmaps`), then walks the corners one straight walk at a time, with the same
+movement packets as `walk_to`: a client time that only runs forward, the run speed the server has set, no walking
+while rooted. Between corners the heartbeats carry the height of the ground (the mesh is sampled every 4 yd), so a
+straight leg over a hill does not cut through it.
+
+When the server moves the player mid-walk (fear, a scripted move, a teleport on the same map) or roots it,
+`walk_path` waits until the server lets go (up to 15 s for a root), plans again from where the player now is and walks
+on. It gives up after 8 such interruptions. A teleport to another map ends the walk. The report says how it ended:
+
+| `result` | Meaning |
+| --- | --- |
+| `arrived` | the goal was reached |
+| `partial` | stopped short: the mesh has no route all the way (it walks to the reachable point nearest the goal), the server kept moving the player, or took it to another map; `reason` says which |
+| `no_path` | nothing walked: the start or the goal is not on the mesh (no walkable polygon within 5 yd), or the map has no route |
+
+`trace` lists each `plan` (status, points, length), each `walk` (one segment, `from`, `to`, and the error that ended
+it early) and each `interrupted`, with `t_ms` since the call began.
+
+**Tiles.** Copy the server's `data/mmaps/NNN.mmap` and the map's `NNNyyxx.mmtile` files into `mmaps_dir`; the
+wow-play-harness tile cache folder (one subfolder per server) works as it is. Tiles load on demand: a map with up to 16
+tiles (a dungeon) loads whole, a bigger one the tiles round the start and the goal, one tile wider, and three wider
+when that gives no complete path. Tiles copied in later are picked up on the next call.
+
+**Engine.** The planner is the core's own Detour (recastnavigation, as vendored by
+[tortoise-wow](https://github.com/tortoise-wow/tortoise-wow) with its 64-bit poly refs), compiled in through cgo, and
+it makes the PathFinder's calls: `findNearestPoly` with its extents (5 yd round, 10 yd of height, never a floor more
+than 3 yd above the point), `findPath` with a player's filter (ground and water; lava, slime and too-steep slopes left
+out) and `findStraightPath`. So the corners are the ones the server computes. Two alternatives were turned down:
+a pure-Go Detour such as [arl/go-detour](https://github.com/arl/go-detour) (zlib) has 32-bit poly refs and 12-byte
+links, so it cannot read these tiles without a fork, and its port of Detour is older than the core's; and a port of
+the harness's Python fallback (polygon graph, A*, funnel) would give similar, not the same, paths. The cost is cgo:
+a C++ compiler at build time, and cross-compiling needs a cross C++ toolchain.
+
+Limits: the mesh has no game objects, so a path can run through a closed door (what the server does with a
+headless walk through one is not tested yet); every leg uses the run speed, in water too; the corners are the
+server's straight path, not its smoothed one (which follows the same polygon corridor in 2-8 yd steps).
+
 ## Python
 
 The companion test harness (wow-play-harness, not public yet) has a `HeadlessClient` that wraps this API
@@ -149,6 +195,7 @@ with the same calls as its real-client backend (`chat`, `gm`, `state`, `tail_cha
 | `internal/session` | single-owner session loop: login, ping, chat, names, party, world, actions, combat, logout |
 | `internal/game` | packet codecs for chat, queries, groups, actions and the combat log |
 | `internal/objects` | update-object parser and the object store |
+| `internal/navmesh` | tile loading and path planning over the core's Detour (cgo); `navfixture` builds synthetic tiles |
 | `internal/events` | ordered event log with cursors |
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
@@ -158,5 +205,6 @@ Design and implementation plan: `docs/superpowers/`.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Parts are ported from [agent-wow](https://github.com/agent-wow/agent-wow) (MIT); see
+MIT, see [LICENSE](LICENSE). Parts are ported from [agent-wow](https://github.com/agent-wow/agent-wow) (MIT), and
+`internal/navmesh/detour` is Detour from recastnavigation (zlib, `internal/navmesh/detour/License.txt`); see
 [NOTICE](NOTICE). World of Warcraft is a trademark of Blizzard Entertainment; this project is not affiliated with it.

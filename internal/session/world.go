@@ -140,7 +140,7 @@ func (s *Session) onMonsterMove(body []byte) error {
 // serverMoved puts the player where the server moved it, ending a running walk without a
 // stop packet: the server owns the movement now.
 func (s *Session) serverMoved(p [3]float32) {
-	s.stopWalk(errors.New("moved by the server"), false)
+	s.stopWalk(errServerMoved, false)
 	s.mu.Lock()
 	s.pos[0], s.pos[1], s.pos[2] = p[0], p[1], p[2]
 	s.mu.Unlock()

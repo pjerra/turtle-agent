@@ -79,6 +79,8 @@ type Options struct {
 	// holding one is never hex-dumped.
 	Redact         []string
 	RedactAnywhere []string
+	// Planner plans path_to and walk_path on the navmesh; nil: both answer ErrNoNavmesh.
+	Planner Planner
 }
 
 // maxLoginRetries bounds the retries after SMSG_CHARACTER_LOGIN_FAILED code 1. With the

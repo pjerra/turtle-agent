@@ -19,6 +19,17 @@ const (
 	defaultRunSpeed = 7.0 // yards per second until the server sets another
 )
 
+// Why a walk ended early. A server move, a same-map teleport and a root interrupt a
+// walk_path, which waits and plans again; the others end it.
+var (
+	errServerMoved = errors.New("moved by the server")
+	errTeleported  = errors.New("teleported by the server")
+	errNewMap      = errors.New("teleported to another map")
+	errRooted      = errors.New("rooted by the server; walk stopped")
+	errRootedNow   = errors.New("rooted; walk_to waits until the server releases the root")
+	errCancelled   = errors.New("walk cancelled")
+)
+
 type walkState struct {
 	from, to [3]float32
 	o        float32
@@ -26,6 +37,9 @@ type walkState struct {
 	dur      time.Duration
 	nextBeat time.Time
 	done     chan error
+	// ground, when set, is the surface height at (x, y) along the segment (a navmesh
+	// path's ground samples); without it the height runs straight from start to end.
+	ground func(x, y float32) float32
 }
 
 // at is the walk's position at now, clamped to the segment.
@@ -38,6 +52,9 @@ func (w *walkState) at(now time.Time) [3]float32 {
 	var p [3]float32
 	for i := range p {
 		p[i] = w.from[i] + (w.to[i]-w.from[i])*frac
+	}
+	if w.ground != nil && frac < 1 {
+		p[2] = w.ground(p[0], p[1])
 	}
 	return p
 }
@@ -230,6 +247,14 @@ func (s *Session) Face(ctx context.Context, g packet.GUID) error {
 
 // WalkTo walks in a straight line to a point at most maxWalk yards away and returns on arrival.
 func (s *Session) WalkTo(ctx context.Context, x, y, z float32) error {
+	return s.walkStraight(ctx, [3]float32{x, y, z}, maxWalk, nil)
+}
+
+// walkStraight is one straight walk to `to`, refused when it is over limit yards; walk_to
+// and each segment of walk_path go through it. It returns on arrival, or with the reason
+// the walk ended early.
+func (s *Session) walkStraight(ctx context.Context, to [3]float32, limit float64, ground func(x, y float32) float32) error {
+	x, y, z := to[0], to[1], to[2]
 	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
 			return nil, err
@@ -238,18 +263,18 @@ func (s *Session) WalkTo(ctx context.Context, x, y, z float32) error {
 			return nil, errors.New("already walking")
 		}
 		if s.rooted {
-			return nil, errors.New("rooted; walk_to waits until the server releases the root")
+			return nil, errRootedNow
 		}
 		if left := time.Until(s.splineUntil); left > 0 {
-			return nil, fmt.Errorf("moved by the server (fear, charm or a scripted move); walk_to waits %.1f s until it ends", left.Seconds())
+			return nil, fmt.Errorf("%w (fear, charm or a scripted move); walk_to waits %.1f s until it ends", errServerMoved, left.Seconds())
 		}
 		s.mu.Lock()
 		from := [3]float32{s.pos[0], s.pos[1], s.pos[2]}
 		s.mu.Unlock()
 		dx, dy, dz := float64(x-from[0]), float64(y-from[1]), float64(z-from[2])
 		dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
-		if dist > maxWalk {
-			return nil, fmt.Errorf("walk_to is for short moves: %.1f yards is over %d, use teleport", dist, maxWalk)
+		if dist > limit {
+			return nil, fmt.Errorf("walk_to is for short moves: %.1f yards is over %d, use walk_path or teleport", dist, maxWalk)
 		}
 		done := make(chan error, 1)
 		if dist < 0.1 {
@@ -258,7 +283,8 @@ func (s *Session) WalkTo(ctx context.Context, x, y, z float32) error {
 		}
 		now := time.Now()
 		w := &walkState{from: from, to: [3]float32{x, y, z}, o: game.Facing(from[0], from[1], x, y), start: now,
-			dur: time.Duration(dist / float64(s.runSpeed) * float64(time.Second)), nextBeat: now.Add(500 * time.Millisecond), done: done}
+			dur: time.Duration(dist / float64(s.runSpeed) * float64(time.Second)), nextBeat: now.Add(500 * time.Millisecond), done: done,
+			ground: ground}
 		s.mu.Lock()
 		s.pos[3] = w.o
 		mi := s.moveInfo(game.MoveForward)
@@ -279,7 +305,7 @@ func (s *Session) WalkTo(ctx context.Context, x, y, z float32) error {
 	case <-ctx.Done():
 		_, _ = s.do(context.Background(), func() (any, error) {
 			if s.walk != nil && s.walk.done == done { // not a walk started after this one ended
-				s.stopWalk(errors.New("walk cancelled"), true)
+				s.stopWalk(errCancelled, true)
 			}
 			return nil, nil
 		})
@@ -412,7 +438,7 @@ func (s *Session) onTeleportAck(body []byte) error {
 	if a.GUID != self {
 		return nil
 	}
-	s.stopWalk(errors.New("teleported by the server"), false)
+	s.stopWalk(errTeleported, false)
 	s.mu.Lock()
 	s.pos = [4]float32{a.Move.X, a.Move.Y, a.Move.Z, a.Move.O}
 	s.mu.Unlock()
@@ -441,7 +467,7 @@ func (s *Session) onNewWorld(body []byte) error {
 	if err != nil {
 		return err
 	}
-	s.stopWalk(errors.New("teleported to another map"), false)
+	s.stopWalk(errNewMap, false)
 	s.mu.Lock()
 	s.mapID, s.pos = nw.Map, [4]float32{nw.X, nw.Y, nw.Z, nw.O}
 	s.target = 0
@@ -524,7 +550,7 @@ func (s *Session) rootHandler(ack uint16, apply bool) handler {
 		}
 		s.rooted = apply
 		if apply {
-			s.stopWalk(errors.New("rooted by the server; walk stopped"), true)
+			s.stopWalk(errRooted, true)
 		}
 		s.mu.Lock()
 		mi := s.moveInfo(s.currentFlags())

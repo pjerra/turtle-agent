@@ -32,6 +32,9 @@ type Settings struct {
 	Bots      []string          `json:"bots,omitempty"`
 	TestSpell uint32            `json:"test_spell,omitempty"`
 	Spot      *Spot             `json:"spot,omitempty"`
+	// MmapsDir holds copies of the server's data/mmaps files (NNN.mmap, NNNyyxx.mmtile)
+	// for path_to and walk_path. A leading ~/ is the home folder.
+	MmapsDir string `json:"mmaps_dir,omitempty"`
 }
 
 const DefaultRPC = "127.0.0.1:8765"
@@ -69,6 +72,11 @@ func Load(path string) (Settings, error) {
 	if s.RPC == "" {
 		s.RPC = DefaultRPC
 	}
+	if rest, ok := strings.CutPrefix(s.MmapsDir, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			s.MmapsDir = filepath.Join(home, rest)
+		}
+	}
 	if err := s.validate(); err != nil {
 		return Settings{}, fmt.Errorf("settings %s: %w", path, err)
 	}
@@ -86,6 +94,11 @@ func (s Settings) validate() error {
 	}
 	if _, _, err := netutil.CheckLoopbackAddr(s.RPC); err != nil {
 		return fmt.Errorf(`"rpc" %w`, err)
+	}
+	if s.MmapsDir != "" {
+		if info, err := os.Stat(s.MmapsDir); err != nil || !info.IsDir() {
+			return fmt.Errorf(`"mmaps_dir" %s is not a folder (copy the server's data/mmaps files there)`, s.MmapsDir)
+		}
 	}
 	if len(s.Accounts) == 0 {
 		return errors.New(`"accounts" must map at least one account name to its password`)
