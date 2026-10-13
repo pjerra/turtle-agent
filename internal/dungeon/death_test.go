@@ -409,21 +409,23 @@ func TestNonGMDeadMemberRecoversWithRecoverWipe(t *testing.T) {
 	}
 }
 
-func TestProbeSettlesTheModeFromTheServersAnswer(t *testing.T) {
+func TestProbeSettlesTheModeFromTheAccountLevel(t *testing.T) {
 	cases := []struct {
-		name        string
-		gm, known   bool
-		wantGM      bool
-		wantNote    string
-		teleportErr bool
+		name     string
+		level    int
+		known    bool
+		wantGM   bool
+		wantNote string
+		visible  bool // the driver sends .gm visible on itself afterwards
 	}{
-		{"a GM", true, true, true, "leader made visible", false},
-		{"a player", false, true, false, "not a GM", false},
-		{"no answer", false, false, true, "taken for a GM", false},
+		{"a GM", 3, true, true, "account level is 3", true},
+		{"a moderator", 2, true, true, "account level is 2", true},
+		{"a player", 0, true, false, "account level is 0 (a player)", false},
+		{"no answer", 0, false, true, "did not answer .account", true},
 	}
 	for _, c := range cases {
 		g, p := runFixture(t)
-		g.dead.probeGM, g.dead.probeKnown = c.gm, c.known
+		g.dead.probeLevel, g.dead.probeKnown = c.level, c.known
 		d := NewDriver(p, g, Config{GM: GMProbe}, g.clock())
 		if err := d.Run(context.Background(), 0); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -432,17 +434,32 @@ func TestProbeSettlesTheModeFromTheServersAnswer(t *testing.T) {
 		if rep.LeaderGM != c.wantGM || g.dead.probes != 1 || !strings.Contains(strings.Join(rep.Notes, "|"), c.wantNote) {
 			t.Fatalf("%s: %+v", c.name, rep)
 		}
-		if len(g.gms) != 0 { // the probe is the one .gm visible on; the driver sends none of its own
+		if c.known && (rep.AccountLevel == nil || *rep.AccountLevel != c.level) || !c.known && rep.AccountLevel != nil {
+			t.Fatalf("%s: level %v", c.name, rep.AccountLevel)
+		}
+		if got := len(g.gms) == 1 && g.gms[0] == ".gm visible on"; got != c.visible || (!c.visible && len(g.gms) != 0) {
 			t.Fatalf("%s: gms %q", c.name, g.gms)
 		}
 	}
 	// A player found by the probe and a teleport asked for: refused before anything else.
 	g, p := runFixture(t)
 	g.mapID = 1
-	g.dead.probeGM, g.dead.probeKnown = false, true
+	g.dead.probeKnown = true
 	err := NewDriver(p, g, Config{GM: GMProbe, Teleport: true}, g.clock()).Run(context.Background(), 0)
-	if err == nil || !strings.Contains(err.Error(), "needs a GM account") || len(g.teleports) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "needs a GM account") || len(g.teleports) != 0 || len(g.gms) != 0 {
 		t.Fatalf("%v", err)
+	}
+	// .aura needs developer level: a moderator's buffs are refused, a developer's are not.
+	for level, wantErr := range map[int]bool{2: true, 3: false} {
+		g, p := runFixture(t)
+		g.dead.probeLevel, g.dead.probeKnown = level, true
+		err := NewDriver(p, g, Config{GM: GMProbe, Buffs: []Buff{{22888, "Rallying Cry of the Dragonslayer"}}}, g.clock()).Run(context.Background(), 0)
+		if wantErr && (err == nil || !strings.Contains(err.Error(), "buffs need developer level")) {
+			t.Fatalf("level %d: %v", level, err)
+		}
+		if !wantErr && err != nil {
+			t.Fatalf("level %d: %v", level, err)
+		}
 	}
 }
 
@@ -476,5 +493,43 @@ func TestResurrectionSicknessIsNotedOrWaitedOut(t *testing.T) {
 		if wait && !strings.Contains(notes, "resurrection sickness waited out") {
 			t.Fatalf("notes %s", notes)
 		}
+	}
+}
+
+// The leader's brain is off while the leader is dead or a ghost (a ghost has 1 health, so the brain cannot tell by itself in
+// every build), and comes back at the rest gate after.
+func TestTheBrainIsStoppedForTheCorpseRun(t *testing.T) {
+	g, p := runFixture(t)
+	var once bool
+	killLeaderInFight(g, &once, true)
+	g.dead.graveyard, g.dead.graveMap = Point{50, 0, 0}, 70
+	g.dead.corpse = Corpse{Found: true, Map: 70, CorpseMap: 70, Pos: Point{20, 5, 0}}
+	br := &fakeBrain{}
+	ranDead := false
+	var seenDead time.Time
+	prev := g.onTick
+	g.onTick = func(g *fakeGame) {
+		prev(g)
+		if !g.self.Dead() {
+			seenDead = time.Time{}
+			return
+		}
+		if seenDead.IsZero() {
+			seenDead = g.now // the tick the leader dies in: the driver has not looked yet
+			return
+		}
+		if br.running {
+			ranDead = true
+		}
+	}
+	d := NewDriver(p, g, Config{Brain: br, BrainName: "frost_mage"}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if ranDead {
+		t.Fatalf("the brain ran while the leader was dead or a ghost: %v", br.log)
+	}
+	if got := strings.Join(br.log, ","); !strings.Contains(got, "stop,rest=true") && !strings.Contains(got, "start,rest=true") {
+		t.Fatalf("%s", got)
 	}
 }

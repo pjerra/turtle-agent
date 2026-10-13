@@ -551,11 +551,14 @@ the party is summoned, and the run is flagged `teleport_to_leg_start` in `gm_sho
 shortcuts. A **player account works too** (issue #80 step 3a): `"gm": false` makes the driver send **no GM command at all**: no
 `.gm visible on`, no `.go` teleport, no `.revive` of a member, no `.aura`. `teleport` and `buffs` are then refused with a clear error
 (at the RPC, before anything is sent), the setup (standing at the entrance, the companions' levels) is done by hand and may be
-listed in `setup`. `"gm": true` is the old behaviour with no probe. With `gm` left out the run **probes** once: it sends `.gm visible on`
-and reads what the server does with it. A GM account runs it and answers with a notification; an account below GM level has the line
-said aloud in "say" (Chat.cpp:1773-1774), which shows up as the player's own chat echo within 2 s. An echo means a player, a notification
-means a GM, silence is taken for a GM (noted). A probe on a player account therefore costs one line said aloud; pass `gm: false` to
-avoid even that. The report has `leader_gm`, and `dungeon_run` answers `leader_gm` `true`, `false` or `probe`.
+listed in `setup`. `"gm": true` is the old behaviour with no probe. With `gm` left out the run **probes** once: it sends `.account`
+(a command any account may run, Chat.cpp:77) and reads the reply "Your account level is: N" (0 player, 1 observer, 2 moderator, 3 developer
+...). N above 0 is a GM: the run then sends `.gm visible on` and goes on as before; 0 is a player. Only that reply counts: any other system
+line in the 2 s window (a combat message, "This command is not available to you.") is ignored. With the server option `PlayerCommands = 0`
+a player's `.account` is said aloud instead, which is read as level 0. No answer at all is taken for a GM and noted. A probe on a
+player account costs one `.account` line and no `say`; pass `gm: false` to send nothing. `.aura` needs level 3 (developer, Chat.cpp:874): a
+probed level below it refuses `buffs` before anything is applied. The report has `leader_gm` and `account_level` (when read), and
+`dungeon_run` answers `leader_gm` `true`, `false` or `probe`.
 
 What the driver does for each action of the plan (the stepper decides which):
 
@@ -643,7 +646,9 @@ What the driver does for each action of the plan (the stepper decides which):
 - **wipe**: every online member dead (the leader too, or not) ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1),
   unless `recover_wipe` is set: then the members are told `.bot action release`, the leader does its corpse run, the members are told
   `.bot action corpse run` (again every 30 s while any is dead), and when all live the run gathers, rests and goes on from the current
-  step. At most 2 recoveries a run and 12 min each; the next wipe ends the run. Every wipe counts in `wipes`, recovered or not.
+  step. At most 2 recoveries a run and 12 min each; the next wipe ends the run. `.bot action release` and `.bot action corpse run` only reach
+  companions the leader owns or hired (TortoiseBots' `CanControlBot`); bots that are only in the group but not its own ignore them,
+  and the recovery then ends with "members are still dead" after 12 min. Every wipe counts in `wipes`, recovered or not.
 
 Events (`events` kinds `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`, and `dungeon_leader` for the leader's death): `dungeon_leg` at the start and end of
 each leg (`data.phase`, `result`, `seconds`, `deaths`, `pulls`, `rest_seconds`); `dungeon_step` when an action finishes (`data.action`

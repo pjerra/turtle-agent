@@ -54,6 +54,9 @@ const maxAccepts = 3
 // the ghost stops a few yards short of that so that a position error does not make the packet ignored.
 const reclaimReach = 34
 
+// DeveloperLevel is SEC_DEVELOPER (Common.h:189): the level ".aura" needs (Chat.cpp:874).
+const DeveloperLevel = 3
+
 // GMMode says how the Driver learns whether the leader's account is a GM.
 type GMMode int
 
@@ -62,8 +65,9 @@ const (
 	GMAssumed GMMode = iota
 	// GMNone takes the account for a player's: the driver sends no GM command at all.
 	GMNone
-	// GMProbe sends ".gm visible on" once and reads the server's answer (Game.ProbeGM): a GM account runs it and answers with
-	// a notification, a player account has it said aloud in "say" (Chat.cpp:1773-1774). No clear answer counts as GM.
+	// GMProbe sends ".account" once and reads the account level from the reply "Your account level is: N" (Game.ProbeAccount):
+	// above 0 is a GM. With PlayerCommands = 0 a player has the line said aloud, which counts as level 0. No clear answer
+	// counts as GM.
 	GMProbe
 )
 
@@ -160,6 +164,7 @@ func (d *Driver) bringBack(ctx context.Context, orders func(context.Context) err
 		d.leaderEvent("died", map[string]any{"healer_alive": d.healerAlive()})
 		d.rep.note(fmt.Sprintf("leg %d: the leader died", leg))
 	}
+	d.brainOff() // a dead or ghost leader casts nothing; the next gate starts the brain again
 	how, err := d.leaderBack(ctx, orders == nil, orders)
 	d.recovering = prev
 	secs := d.clk.Now().Sub(began).Seconds()
@@ -417,6 +422,9 @@ func (d *Driver) corpseRun(ctx context.Context, orders func(context.Context) err
 
 // ghostWalk walks the ghost along the navmesh toward p, stopping the walk when a resurrection is offered or the leader
 // lives again. A walk that could not arrive is not an error: the corpse run looks again after a pause.
+//
+// TODO(#88 move lock): when the driver holds the brain's move lock during walks (as doWalk will), this walk must hold it too, or the
+// brain's own steps could fight it; today the brain is stopped for the whole recovery (bringBack).
 func (d *Driver) ghostWalk(ctx context.Context, p Point) error {
 	wctx, cancel := context.WithCancel(ctx)
 	stop := d.watchUntil(wctx, cancel, func() bool {

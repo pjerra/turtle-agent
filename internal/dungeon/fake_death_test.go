@@ -26,7 +26,8 @@ type fakeDeath struct {
 
 	releases, accepts, reclaims, triggers, queries int
 	triggerIDs                                     []uint32
-	probeGM, probeKnown                            bool
+	probeLevel                                     int
+	probeKnown                                     bool
 	probeErr                                       error
 	probes                                         int
 	acceptErr                                      error
@@ -112,9 +113,9 @@ func (g *fakeGame) AreaTrigger(ctx context.Context, id uint32) error {
 	return nil
 }
 
-func (g *fakeGame) ProbeGM(ctx context.Context) (bool, bool, error) {
+func (g *fakeGame) ProbeAccount(ctx context.Context) (int, bool, error) {
 	g.dead.probes++
-	return g.dead.probeGM, g.dead.probeKnown, g.dead.probeErr
+	return g.dead.probeLevel, g.dead.probeKnown, g.dead.probeErr
 }
 
 func auraNamed(name string, remainingMS *int64) []objects.Aura {

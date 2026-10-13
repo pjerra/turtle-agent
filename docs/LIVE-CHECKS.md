@@ -264,8 +264,10 @@ hired party of a tank, a healer and two damage dealers; set up by hand (stand at
 
 1. `dungeon_run {"name":"uldaman","gm":false,"brain":"frost_mage","setup":["by hand: entrance"]}`. Expect `leader_gm` `false` in the
    answer and in the report, and **no `say` line starting with `.`** in the chat log; `teleport` and `buffs` are refused with `gm: false`.
-2. The probe: the same without `gm`, once on the player account and once on a GM account. Player: `report.leader_gm` false, a note
-   "the leader's account is not a GM", and exactly one `.gm visible on` said aloud. GM: `leader_gm` true. Report anything else.
+2. The probe: the same without `gm`, once on the player account and once on a GM account. Player: `report.leader_gm` false,
+   `account_level` 0, a note "account level is 0 (a player)", the `.account` line answered by "Your account level is: 0" and no `say`.
+   GM: `leader_gm` true, `account_level` N, then `.gm visible on`. Note the exact reply text and event kind of `.account` (the
+   probe matches `Your account level is: N` in a system event) and report anything else.
 3. Resurrection: let the leader die in a fight with the healer alive (pull two packs at once, or `levelup -10` before). Expect
    `dungeon_leader` `died`, then `resurrect_request` (the healer casts Resurrection) and `resurrect_accepted`, `back`; `status` `dead`
    false; `resurrections` 1 in the report. Note how long the healer takes (the driver waits 60 s) and whether it resurrects in combat.

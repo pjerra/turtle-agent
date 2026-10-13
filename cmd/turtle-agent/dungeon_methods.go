@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -389,22 +390,25 @@ func (g *sessionGame) AreaTrigger(ctx context.Context, id uint32) error {
 	return g.cur().AreaTrigger(ctx, id)
 }
 
-// gmProbeWindow is how long ProbeGM listens for the server's answer to ".gm visible on".
-const gmProbeWindow = 2 * time.Second
+// accountProbeWindow is how long ProbeAccount listens for the server's answer to ".account".
+const accountProbeWindow = 2 * time.Second
 
-// ProbeGM sends ".gm visible on" and tells from the events that follow whether the server ran it. A GM account runs the
-// command and answers with a notification (a system event) and nothing else of the line. A player account has the line said
-// aloud: the server echoes it as a "say" chat event from the player (Chat.cpp:1773-1774: without PlayerCommands the line is
-// ordinary chat).
-func (g *sessionGame) ProbeGM(ctx context.Context) (gm, known bool, err error) {
+// accountLevelReply is LANG_ACCOUNT_LEVEL, "Your account level is: %u" (mangos_string 11), the answer of ".account"
+// (HandleAccountCommand, Commands.cpp:6283-6291; SEC_PLAYER, Chat.cpp:77, so any account may ask).
+var accountLevelReply = regexp.MustCompile(`^\s*Your account level is: (\d+)\s*$`)
+
+// ProbeAccount sends ".account" and reads the account's security level from the reply. With PlayerCommands = 0 (not the
+// shipped default) the server says the line aloud instead (Chat.cpp:1773-1774), which is read as level 0: the account may
+// not run commands. Any other system line in the window is no answer.
+func (g *sessionGame) ProbeAccount(ctx context.Context) (level int, known bool, err error) {
 	s := g.cur()
-	const cmd = ".gm visible on"
+	const cmd = ".account"
 	since := s.Log().Last()
 	self := s.Status().GUID
 	if err := s.GM(ctx, cmd); err != nil {
-		return false, false, err
+		return 0, false, err
 	}
-	wctx, cancel := context.WithTimeout(ctx, gmProbeWindow)
+	wctx, cancel := context.WithTimeout(ctx, accountProbeWindow)
 	defer cancel()
 	var seen []events.Event
 	for wctx.Err() == nil {
@@ -412,33 +416,33 @@ func (g *sessionGame) ProbeGM(ctx context.Context) (gm, known bool, err error) {
 		page := s.Log().Read(events.Query{Since: since, Kinds: []string{events.KindChat, events.KindSystem}})
 		since = page.Next
 		seen = append(seen, page.Events...)
-		if gm, known := classifyGMProbe(seen, self, cmd); known && !gm {
-			return false, true, nil // an echo is final
+		if level, known := classifyAccountProbe(seen, self, cmd); known {
+			return level, true, nil
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return false, false, err
-	}
-	gm, known = classifyGMProbe(seen, self, cmd)
-	return gm, known, nil
+	return 0, false, ctx.Err()
 }
 
-// classifyGMProbe reads the events after the line cmd was sent. The player's own line coming back as "say" means the
-// server did not run it: not a GM (known, false). Else any system event (the notification a GM gets) means it ran: a GM
-// (known, true). Neither: unknown.
-func classifyGMProbe(evs []events.Event, self packet.GUID, cmd string) (gm, known bool) {
-	system := false
+// classifyAccountProbe reads the events after the line cmd was sent: the reply "Your account level is: N" gives N; the
+// player's own line coming back in "say" means the server did not run it, level 0. Anything else, system lines
+// included, is ignored. known is false when neither came.
+func classifyAccountProbe(evs []events.Event, self packet.GUID, cmd string) (level int, known bool) {
 	for _, e := range evs {
 		switch e.Kind {
+		case events.KindSystem:
+			if m := accountLevelReply.FindStringSubmatch(e.Text); m != nil {
+				n, err := strconv.Atoi(m[1])
+				if err == nil {
+					return n, true
+				}
+			}
 		case events.KindChat:
 			if e.SourceGUID == self && strings.TrimSpace(e.Text) == cmd {
-				return false, true
+				return 0, true
 			}
-		case events.KindSystem:
-			system = true
 		}
 	}
-	return system, system
+	return 0, false
 }
 
 func (g *sessionGame) Party() []dungeon.Member {

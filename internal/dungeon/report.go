@@ -20,6 +20,8 @@ type Report struct {
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`
+	// AccountLevel is the leader's security level (0 player, 3 developer) when the probe read it from ".account"; absent otherwise.
+	AccountLevel *int `json:"account_level,omitempty"`
 	// The leader's own deaths (README "Death and the corpse run"): how often it died, came back by an accepted
 	// resurrection or by a corpse run, and for how long it was dead in all.
 	LeaderDeaths  int        `json:"leader_deaths"`

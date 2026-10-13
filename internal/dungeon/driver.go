@@ -38,9 +38,10 @@ type Game interface {
 	// so that nothing else can change the selection between the two.
 	GMOn(ctx context.Context, guid packet.GUID, text string) error
 	Teleport(ctx context.Context, to Point, mapID uint32) error
-	// ProbeGM sends ".gm visible on" and reports whether the server ran it as a GM command (gm), and whether it could tell
-	// (known). A GM answers with a notification; a player account has the command said aloud in "say".
-	ProbeGM(ctx context.Context) (gm, known bool, err error)
+	// ProbeAccount sends ".account" (SEC_PLAYER, Chat.cpp:77) and reads the account's security level from the server's reply
+	// "Your account level is: N" (0 player, 1 observer, 2 moderator, 3 developer ...). With PlayerCommands = 0 the line is
+	// said aloud instead, which counts as level 0. known is false when no such answer came: an unrelated system line is no answer.
+	ProbeAccount(ctx context.Context) (level int, known bool, err error)
 
 	// The leader's death (README "Death and the corpse run"): the state, the answer to a resurrection offer, the release of
 	// the spirit, the corpse's position, the reclaim of the corpse, and the portal's area trigger a ghost sends to enter a
@@ -291,6 +292,7 @@ type Driver struct {
 	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
 
 	gm             bool // the leader's account is taken for a GM (decided in begin)
+	level          int  // its account level when the probe read it (0 otherwise)
 	recovering     bool // the leader's recovery is going on: its waits do not start another
 	inWipe         bool // a wipe is being recovered from: the waits do not report it again
 	deathCounted   bool // the leader's current death is in the report
@@ -476,20 +478,28 @@ func (d *Driver) setupGM(ctx context.Context) error {
 	case GMNone:
 		d.gm = false
 	case GMProbe:
-		gm, known, err := d.g.ProbeGM(ctx)
+		level, known, err := d.g.ProbeAccount(ctx)
 		switch {
 		case err != nil:
 			d.gm = true
-			d.rep.note("could not tell whether the leader is a GM (" + err.Error() + "); taken for one")
+			d.rep.note("could not tell the leader's account level (" + err.Error() + "); taken for a GM")
 		case !known:
 			d.gm = true
-			d.rep.note("the server gave no sign whether .gm visible on ran; the leader is taken for a GM (pass gm: false for a player account)")
+			d.rep.note("the server did not answer .account; the leader is taken for a GM (pass gm: false for a player account)")
 		default:
-			d.gm = gm
-			if gm {
-				d.rep.note("leader made visible with .gm visible on")
+			d.gm = level > 0
+			d.level = level
+			d.rep.update(func(r *Report) { l := level; r.AccountLevel = &l })
+			if d.gm {
+				d.rep.note(fmt.Sprintf("the leader's account level is %d", level))
 			} else {
-				d.rep.note("the leader's account is not a GM (the server said .gm visible on aloud): the run sends no GM command")
+				d.rep.note("the leader's account level is 0 (a player): the run sends no GM command")
+			}
+		}
+		if d.gm {
+			d.rep.note("leader made visible with .gm visible on")
+			if err := d.g.GM(ctx, ".gm visible on"); err != nil {
+				d.rep.note("could not send .gm visible on: " + err.Error())
 			}
 		}
 	default:
@@ -500,6 +510,9 @@ func (d *Driver) setupGM(ctx context.Context) error {
 		}
 	}
 	d.rep.update(func(r *Report) { r.LeaderGM = d.gm })
+	if d.gm && d.level > 0 && d.level < DeveloperLevel && len(d.cfg.Buffs) > 0 {
+		return fmt.Errorf("buffs need developer level (.aura is SEC_DEVELOPER, %d); the leader's account level is %d: run without buffs", DeveloperLevel, d.level)
+	}
 	if !d.gm {
 		d.cfg.Shortcuts = false
 		switch {

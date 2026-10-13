@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/objects"
 )
 
 // A test strategy: actions that only record that they ran.
@@ -413,5 +414,19 @@ func TestAFailedActionThatIsNoCastIsHeldToo(t *testing.T) {
 	fails = false
 	if d := r.tick(time.Second); d == nil || d.Result != ResultOK || n != 2 {
 		t.Fatalf("%+v %d", d, n)
+	}
+}
+
+// A ghost has 1 health, not 0: the brain still does nothing, no cast and no potion during the corpse run.
+func TestAGhostDoesNothing(t *testing.T) {
+	g, l := newFake(), &log{}
+	r := engine(t, g, &Strategy{Name: "s", Actions: []*Action{l.act("a", nil, nil)}, Rules: []Rule{{Trigger: always(""), Do: []Next{{"a", RelNormal}}}}})
+	g.setSelf(func(u *objects.Unit) { u.Health = 1; u.Ghost = true })
+	if d := r.tick(time.Second); d != nil || r.idle() != "dead" || len(l.ran) != 0 {
+		t.Fatalf("%+v %q %v", d, r.idle(), l.ran)
+	}
+	g.setSelf(func(u *objects.Unit) { u.Health = 400; u.Ghost = false })
+	if d := r.tick(time.Second); d == nil {
+		t.Fatal("alive again: it acts")
 	}
 }

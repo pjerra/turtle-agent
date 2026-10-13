@@ -135,26 +135,31 @@ func TestDungeonRunNonGM(t *testing.T) {
 	}
 }
 
-// The probe tells a GM from a player by what the server does with ".gm visible on".
-func TestClassifyGMProbe(t *testing.T) {
+// The probe reads the level from the reply to .account, whatever else the server says meanwhile.
+func TestClassifyAccountProbe(t *testing.T) {
 	const me packet.GUID = 0x2A
-	echo := events.Event{Kind: events.KindChat, SourceGUID: me, Text: ".gm visible on", Data: map[string]any{"type": "say"}}
-	notif := events.Event{Kind: events.KindSystem, Text: "GM visibility on"}
-	other := events.Event{Kind: events.KindChat, SourceGUID: 0x99, Text: "hello"}
+	sys := func(text string) events.Event { return events.Event{Kind: events.KindSystem, Text: text} }
+	echo := events.Event{Kind: events.KindChat, SourceGUID: me, Text: ".account", Data: map[string]any{"type": "say"}}
+	other := events.Event{Kind: events.KindChat, SourceGUID: 0x99, Text: ".account"}
 	for _, c := range []struct {
-		name      string
-		evs       []events.Event
-		gm, known bool
+		name  string
+		evs   []events.Event
+		level int
+		known bool
 	}{
-		{"nothing", nil, false, false},
-		{"a notification", []events.Event{notif}, true, true},
-		{"the line said aloud", []events.Event{echo}, false, true},
-		{"the echo wins over a system line", []events.Event{notif, echo}, false, true},
-		{"somebody else's chat", []events.Event{other}, false, false},
+		{"nothing", nil, 0, false},
+		{"a developer", []events.Event{sys("Your account level is: 3")}, 3, true},
+		{"a player (PlayerCommands 1)", []events.Event{sys("Your account level is: 0")}, 0, true},
+		{"an administrator after noise", []events.Event{sys("You are in combat."), sys("Your account level is: 4")}, 4, true},
+		{"the line said aloud (PlayerCommands 0)", []events.Event{echo}, 0, true},
+		{"an unrelated system line is no answer", []events.Event{sys("This command is not available to you.")}, 0, false},
+		{"a notification is no answer", []events.Event{sys("GM visibility on")}, 0, false},
+		{"somebody else's chat", []events.Event{other}, 0, false},
+		{"a sentence that only contains the words", []events.Event{sys("Your account level is: 3 and more")}, 0, false},
 	} {
-		gm, known := classifyGMProbe(c.evs, me, ".gm visible on")
-		if gm != c.gm || known != c.known {
-			t.Errorf("%s: %v %v", c.name, gm, known)
+		level, known := classifyAccountProbe(c.evs, me, ".account")
+		if level != c.level || known != c.known {
+			t.Errorf("%s: %d %v", c.name, level, known)
 		}
 	}
 }
