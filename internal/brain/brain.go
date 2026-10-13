@@ -143,6 +143,8 @@ type memory struct {
 	mel         melMem  // auto attack and stance changes (melee.go)
 	heal        healMem // health history, shields, dispels and the last friendly cast (heal.go)
 	sham        shamMem // the shaman's totems and weapon imbue (shaman.go)
+	dru         druMem  // the druid's refused Mark of the Wild casts (druid.go)
+	rez         rezMem  // resurrections sent and the moment one could be cast last (rez.go)
 
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
@@ -589,7 +591,7 @@ func castable(c *Ctx, a *Action, m *memory) (bool, string) {
 	if !ok {
 		return false, "target_not_in_view"
 	}
-	if u.Dead {
+	if u.Dead && !a.Dead {
 		return false, "target_dead"
 	}
 	if a.Harmful && !u.Hostile {

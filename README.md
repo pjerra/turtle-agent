@@ -640,7 +640,8 @@ What the driver does for each action of the plan (the stepper decides which):
   TortoiseBots, not to work around). After 150 s the run goes on with a note if everyone has 50% health, else it fails. A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
   naming `recover_wipe`; with `recover_wipe` the member gets a minute for a healer's resurrection, then `.bot action release` and
-  `.bot action corpse run`, and the gate waits for it up to 12 min); after a revive the party
+  `.bot action corpse run`, and the gate waits for it up to 12 min). **Before any of that, a leader whose brain can resurrect gets up to 120 s**
+  (`Config.BrainRezWait`) to do so: see [The holy paladin and resurrecting the party](#the-holy-paladin-and-resurrecting-the-party); after a revive the party
   list is polled for up to 5 s for the dead flag to clear before the member is judged, and a second revive goes out only after that
   (two revives at most, then the run fails).
 - **buffs** (optional, `dungeon_run`'s `buffs`): a **GM boost**, off unless asked for. `buffs` is a spell id, a preset name or a list of
@@ -993,7 +994,7 @@ for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by han
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: the other classes (warlock and pets, holy paladin; rogue, hunter and retribution paladin are in "Roles and classes", the priest and the healer role in "The healer and the priest", the druid and the shaman in "The druid and the shaman"). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+idles (`dead`). The other classes: the holy paladin and resurrecting the party are in "The holy paladin and resurrecting the party", the warlock and the pets in their own section; rogue, hunter and retribution paladin are in "Roles and classes", the priest and the healer role in "The healer and the priest", the druid and the shaman in "The druid and the shaman"). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
 `docs/LIVE-CHECKS.md`.
 
 ### Roles and classes (step 3c)
@@ -1001,7 +1002,7 @@ idles (`dead`). Not in this step: the other classes (warlock and pets, holy pala
 **Roles.** A role is a set of strategies that share a discipline; a strategy names its role, and `brain_start.role` (`Params.Role`) is
 checked against the active strategies: left empty it takes the role they play (`dps` when none names one), a role that does not fit
 them is refused (`role "tank" does not match the strategies [...], which play dps`), more than one role among the strategies is
-refused. `healer` needs the `role_healer` strategy (presets `holy_priest`, `resto_druid`, `resto_shaman`); `tank` needs `role_tank` (`tank_warrior`, `bear_tank_druid`).
+refused. `healer` needs the `role_healer` strategy (presets `holy_priest`, `holy_paladin`, `resto_druid`, `resto_shaman`); `tank` needs `role_tank` (`tank_warrior`, `bear_tank_druid`).
 - `role_dps` (the name of `combat_dps`): wait out the opening delay, veto area abilities while a mob is loose, fight the tank's mob.
 - `role_tank`: the player holds the mobs. The fight's mob is **a loose add first** (a mob in combat within 30 yd that attacks a party
   member), then the nearest mob that attacks the player, then the player's selected target in combat. There is no opening delay. A loose add is answered with the
@@ -1157,12 +1158,12 @@ aura is up and nothing is going on, no cast is sent (buffs, top-up heals, dispel
 | | Power Word: Shield on the priest (24) | a mob on the priest, under 80% health, not in Shadowform |
 | `class_interrupt` | Silence (40) | a talent; the class row's interrupt, for `shadow_priest` only |
 
-Presets: `holy_priest` = `role_healer` + `priest_holy` + `priest_defense` + `priest_buffs` + `healer_position` + `avoid_ground` +
+Presets: `holy_priest` = `role_healer` + `priest_holy` + `priest_defense` + `priest_buffs` + `rez` + `healer_position` + `avoid_ground` +
 `combat_consumables` + `wand` + `rest_eat` + `rest_drink`; `shadow_priest` = `combat_dps` + `priest_shadow` + `priest_defense` +
 `priest_buffs` + `ranged_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `wand` + `rest_eat` + `rest_drink`. The shadow priest stands
 14 to 19 yd from the mob (the class row's `Band`; the mage's is 20 to 28) because Mind Flay reaches 20 yd. `dungeon_run`'s `brain` option takes either.
 The dungeon driver's own orders are unchanged: a priest leader in a TortoiseBots party that has its own healer bot has two healers; the triage
-counts the other's heals in flight, so they do not heal the same member twice. Not in this step: Prayer of Healing, resurrecting a dead member,
+counts the other's heals in flight, so they do not heal the same member twice. Resurrecting a dead member came with step 4e (`rez`). Not in this step: Prayer of Healing,
 Divine Spirit and Shadow Protection, and every other class (step 4b).
 
 ### Rogue, hunter and retribution paladin (step 4b)
@@ -1370,7 +1371,7 @@ The abilities name their forms (`druidAbilityForms`, pinned by `TestFormGatesFol
 
 Combo points are the player's own (`combo_points`/`combo_target`), counted only when they are on the fight's mob. **Never used:** Prowl, Pounce and Ravage (no stealth play), Hibernate (a sleeping mob that wakes pulls the pack), Moonkin Form, Tree Form, Travel Form and Aquatic Form, Rebirth, Tranquility, Gift of the Wild, Mangle, Bash and Challenging Roar.
 
-Presets: `resto_druid` = `role_healer` + `druid_caster` + `druid_buffs` + `druid_innervate` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `balance_druid` = `combat_dps` + `druid_caster` + `druid_balance` + `druid_buffs` + `druid_innervate` +
+Presets: `resto_druid` = `role_healer` + `druid_caster` + `druid_buffs` + `druid_innervate` + `rez` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `balance_druid` = `combat_dps` + `druid_caster` + `druid_balance` + `druid_buffs` + `druid_innervate` +
 `ranged_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `feral_cat_druid` = `combat_dps` + `druid_form_cat` + `druid_cat` + `druid_buffs_feral` + `melee_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`;
 `bear_tank_druid` = `role_tank` + `druid_form_bear` + `druid_bear` + `druid_buffs_feral` + `melee_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`. The balance druid keeps the mage's 20 to 28 yd band (Wrath and Starfire reach 30).
 
@@ -1379,7 +1380,7 @@ Presets: `resto_druid` = `role_healer` + `druid_caster` + `druid_buffs` + `druid
 | Strategy | Ability (relevance) | When |
 | :--- | :--- | :--- |
 | `shaman_shield` | Water Shield (13) for a healer that has it, else Lightning Shield (13); 8 in combat | out of combat at a rest gate with 25% mana, or in a fight with 50% when the aura (charges used up) is gone |
-| `shaman_imbue` | Windfury Weapon, else Flametongue Weapon, else Rockbiter Weapon (12) | out of combat at a rest gate, 30% mana: **a cast at the weapon in the main hand** (`CMSG_CAST_SPELL` with `TARGET_FLAG_ITEM` and the weapon's guid: `Session.CastOnMainHand`, the optional `brain.WeaponImbuer`). The agent cannot read the enchantment off the weapon, so it remembers the imbue and renews it 5 minutes before its hour (the spell's base points are 3599) is up, once at the start of a run. A refusal (`item_gone`: no weapon) is tried again after a minute. The off hand is left alone |
+| `shaman_imbue` | Windfury Weapon, else Flametongue Weapon, else Rockbiter Weapon (12) | out of combat at a rest gate, 30% mana: **a cast at the weapon in the main hand** (`CMSG_CAST_SPELL` with `TARGET_FLAG_ITEM` and the weapon's guid: `Session.CastOnMainHand`, the optional `brain.WeaponImbuer`). The imbue is remembered and renewed 5 minutes before its hour (the spell's base points are 3599) is up, once at the start of a run; since step 4e the weapon is also read (below), so a weapon swap or a lost imbue is seen. A refusal (`item_gone`: no weapon) is tried again after a minute. The off hand is left alone |
 | `shaman_elemental` | Flame Shock (15) | the mob lacks it, is above 40% health, 30% mana or more; instant, also on the move |
 | | Chain Lightning (13) | 2 or more mobs within 12 yd of the fight's mob, not on the move, and `combat_dps`'s area veto allows it (no mob near the shaman that is not on the tank or the shaman) |
 | | Lightning Bolt (10) | the filler, not on the move |
@@ -1395,9 +1396,57 @@ a fight is on (the player in combat or a mob to fight), the tank in view is with
 within 8 yd of the drop; one whose name is not known yet counts as ours, so a slow name query cannot make the shaman drop the same totem again and again), never twice into one slot within 10 s, one per tick, in the order fire, air, water, earth. The preset decides the totems (the first of each list the spellbook has):
 `resto_shaman` Mana Spring Totem (else Healing Stream Totem) and Stoneskin Totem, at relevance 7, under every heal; `elemental_shaman` Searing Totem and Mana Spring Totem, at 11; `enhancement_shaman` Searing Totem, Windfury Totem (else Grace of Air Totem) and Strength of Earth Totem, at 11. **Ghost Wolf is never cast.**
 
-Presets: `resto_shaman` = `role_healer` + `shaman_shield` + `shaman_totems_resto` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `elemental_shaman` = `combat_dps` + `shaman_elemental` + `shaman_shield` + `shaman_totems_elemental` +
+Presets: `resto_shaman` = `role_healer` + `shaman_shield` + `shaman_totems_resto` + `rez` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `elemental_shaman` = `combat_dps` + `shaman_elemental` + `shaman_shield` + `shaman_totems_elemental` +
 `ranged_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat` + `rest_drink` (the elemental shaman stands 14 to 19 yd from the mob, the class row's `Band`, because the shocks reach 20 yd); `enhancement_shaman` = `combat_dps` + `shaman_enhancement` + `shaman_shield` + `shaman_imbue` + `shaman_totems_enhancement` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat` + `rest_drink`.
-`dungeon_run`'s `brain` option takes any of them. Not in this step: Gift of the Wild, Prayer-style group heals, Earth Shield, Water Breathing, Reincarnation, off-hand imbues, Moonkin Form, resurrecting a dead member (Rebirth, Ancestral Spirit), and the warlock, the pets and the holy paladin (step 4d).
+`dungeon_run`'s `brain` option takes any of them. Not in this step: Gift of the Wild, Prayer-style group heals, Earth Shield, Water Breathing, Reincarnation, off-hand imbues, Moonkin Form. Resurrecting a dead member (Rebirth, Ancestral Spirit) and the holy paladin came with step 4e, together with the three follow-ups of this step's review (see there).
+
+### The holy paladin and resurrecting the party (step 4e)
+
+The last healer class, and the resurrection every healer class shares. Spell names, levels, costs, ranges, cast times, reagents and form masks are checked against the
+core's spell data (tortoise-wow 5d79486) in `TestHolyPaladinSpellData` and `TestRezSpellData`; the rotation is ideas from mod-playerbots' paladin behaviour (GPL-2.0+, ideas and
+numbers only, no code).
+
+**`holy_paladin`** (`internal/brain/paladin_holy.go`) = `role_healer` + `paladin_holy` + `rez` + `healer_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat` + `rest_drink`.
+The kit (`paladinHeals`): **Holy Light** (9 ranks, level 1 to 60, 2.5 s) is the big heal and **Flash of Light** (7 ranks, level 20 to 60, 1.5 s) the quick and dear one, which the
+healer role keeps for a member who is low (under 25%, the tank 35%); **Cleanse** (level 42: magic, poison and disease) else **Purify** (level 8: poison and disease) dispel. In this
+data Flash of Light heals through a script effect (effect 77, the core's `spell_paladin_flash_of_light`), not a heal effect, so `heal.go` counts it as a heal by name (`scriptHeal`).
+
+| Strategy | Ability (relevance) | When |
+| :--- | :--- | :--- |
+| `paladin_holy` | Blessing of Wisdom / Might / Kings / Salvation on the paladin and every member (12) | out of combat at a rest gate, 30% mana, the member within 28 yd and in sight. **By role**: the tank gets Kings, else Might (**never Salvation**); healers and mana casters (priest, paladin, shaman, druid, mage, warlock) Wisdom, else Kings, else Salvation; warrior, rogue and hunter Might, else Kings, else Salvation |
+| | | **A member that carries any blessing (or Greater Blessing) is left alone**: the caster is not visible, a companion paladin's blessing counts as the blessing and is never cast over. The paladin's own is renewed when the server says under a minute is left (aura rows carry no caster, so a companion's recast of the same blessing is not told apart). A blessing is not sent twice to one member within 6 s |
+| | Concentration Aura, else Devotion Aura (13) | in a fight or at a rest gate, when **no paladin aura** at all (Concentration, Devotion, Retribution, Sanctity, a resistance aura) is on the paladin: a companion paladin's aura stays |
+| | Lay on Hands (45) | in a fight, on the member or the paladin with the least health under 15%, in heal reach (38.5 yd) and sight |
+| | Hand of Protection (44) | in a fight, on a member who is **not the tank and not the paladin**, under 40% health, with a mob hitting it in melee and either two on it or a quarter of its health lost within 3 s; not on one with Forbearance. (The data's name for the Blessing of Protection is Hand of Protection) |
+| | Divine Shield (43) | the paladin under 15% health in a fight with a mob on it or a quarter of its health lost within 3 s, no Forbearance. **In this data Divine Shield cuts the damage the paladin does (-61%) and does not pacify or silence**, so the heals go on; the check is `TestHolyPaladinSpellData` |
+| | Divine Favor (42) | when the heal of the tick is an emergency and the spellbook has a castable Divine Favor; while its aura is up the big heal is chosen instead of the quick one (`HealKit.NoFast`). **The five Divine Favor ranks of this data (51312 to 51316) are talent passives and are never cast**, so today this is dormant |
+| `class_interrupt` | Hammer of Justice (40) | a heal, crowd-control or damage cast aimed at the party within 10 yd: a stun breaks the cast. The class row's interrupt |
+| `paladin_judge` | Seal of Wisdom (below 80% mana, else Seal of Light) (7), Judgement (8) | **off by default, not in the preset** (`brain_start {"strategies":["holy_paladin","paladin_judge"]}`): 60% mana or more, nobody needing a heal, the fight's mob held by the tank and within 9 yd (Judgement reaches 10 yd, the healer's band is 20 to 30 yd from the tank, so it fires for a mob that stands near the paladin) |
+
+**`rez`**, the shared resurrection (`internal/brain/rez.go`), in the `holy_priest`, `holy_paladin`, `resto_shaman` and `resto_druid` presets. Priest **Resurrection** (level 10, 75% of the base mana), paladin
+**Redemption** (12, 80%), shaman **Ancestral Spirit** (12, 90%): 10 s casts, 30 yd, **out of combat only** (the spells are barred in a fight) and, in the brain, only at a rest gate (or a brain
+started by hand) with no one in the party in combat (relevance 14). Druid **Rebirth** (level 20, 85%, 2 s, a 30 minute cooldown, a reagent: Maple Seed 17034 to Ironwood Seed 17038) is the other way round: **only in a fight, only
+on a key member** (the tank, a healer class), only when the spellbook has it and the bags hold the reagent, never out of combat (relevance 26, under an emergency heal). The brain bars the spells in the forms the data
+bars them in (Resurrection in Shadowform, Rebirth in Moonkin Form: `stancesNot`).
+- **Who**: a party member in view that is dead with its body where it fell (`Dead`; a released spirit is not in view of the living, and the module's own resurrection chooses corpses the same way), within 28 yd and in sight; healers
+  first, then the tank (the one seen last, the named one, else a warrior when no tank is in view), then the others, the nearest first. A body in view 28 to 40 yd away, or behind a wall, makes the healer walk into reach (`rez_approach`, a band spot, relevance 13; at a rest gate only, and
+  not while the driver holds the move lock). **One at a time**: the 10 s cast is the brain's only cast (no second cast starts before it ends), and a member it sent a resurrection to is not offered another for 14 s unless the server refused the cast. A member who stays dead and keeps declining gets **three offers and is then left alone for 5 minutes**.
+- **Pending from another healer**: a member for whom anyone in view is casting a resurrection (the cast's target as `SMSG_SPELL_START` names it, read off the caster's unit) is skipped.
+- **Mana**: a resurrection costs most of the pool, so while a member waits and the spell is not affordable the healer **drinks to the top** (`rest_drink`'s threshold becomes 100% instead of 80%).
+- **What a TortoiseBots bot does with the offer** (checked in the module, not live): a dead companion gets `SMSG_RESURRECT_REQUEST` and the dead strategy's `resurrect request` trigger runs `accept resurrect` (`CMSG_RESURRECT_RESPONSE`, accept) at once, with no
+  delay or condition but being dead (`AcceptResurrectAction`, relevance +3 over the dead strategy). A bot that holds the Dungeon activity lease **does not release its spirit** while a living priest, paladin, shaman or druid of the group is on its map, or the crew is in combat (`AutoReleaseSpiritAction`), so
+  a healer leader finds the bodies where they fell. A bot that did release (a wipe, or no living resurrector then) is a ghost and out of this brain's reach: that is the driver's corpse run.
+- **The dungeon driver** (`internal/dungeon/rez.go`): at a rest gate, when a member is dead and the leader's brain `CanRez()` (its class has a resurrection in the book and it saw a dead member in view a moment ago, **including one whose resurrection is on its way**: the brain's own cast in its 14 s hold, or another healer's in flight), the gate **waits for the brain's resurrection** up to
+  `Config.BrainRezWait` (120 s, from the first dead member) instead of a GM revive, the corpse runs of `recover_wipe`, or the "dead and GM shortcuts are off" failure; the rest timeout does not run meanwhile. A brain started at this very gate has not looked yet, so the first "cannot" is given one poll to change. Members the brain brought back get their buffs back as a revived member does. When the wait is over the old answers apply. A leader that is not a healer (or a
+  druid, who cannot resurrect at a gate) is unchanged. Only the optional `dungeon.RezBrain` half is read, so other brains are unaffected.
+
+**Follow-ups of the review of #102.**
+- A **totem is recorded when its spell goes off** (the spell state's last cast, `SMSG_SPELL_GO`), not when the cast is sent: a refused or lost cast leaves no record, so the slot is filled again after the refusal's hold instead of the 10 s totem gap. A cast that neither went off nor failed within 4 s is given up.
+- The **weapon imbue reads the weapon** (the optional `brain.MainHandReader`; `objects.Item.TempEnchant`, the id word of `ITEM_FIELD_ENCHANTMENT` slot 1, `Session.MainHandItem`): it imbues again when the main-hand item is another one than the imbued one, or when the temporary enchantment reads 0
+  (10 s after a cast at the earliest: the item's update takes a moment) once it has been seen set. If the field never shows (the server does not send it to the client), the brain falls back to the 5-minutes-before-the-hour timer and still notices a weapon swap.
+- **Mark of the Wild on a member it keeps failing on** (out of reach through a wall, a refusal) is dropped after two refusals in a row for 60 s, so a feral druid no longer shifts out of its form at every gate for a buff that does not land. The count goes when the member carries the buff.
+
+Not in this step: Blessing of Light, Sanctuary, Freedom and Sacrifice, Holy Shock, Righteous Fury, auras beyond Concentration and Devotion, Greater Blessings, Divine Intervention, a corpse-object target for a released spirit.
 
 ## Vendors, trainers and quests
 

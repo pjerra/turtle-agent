@@ -75,6 +75,8 @@ type Action struct {
 	// aura after a drink); casts settle for Config.Settle instead.
 	Settle   time.Duration
 	Pre, Alt []string
+	// Dead lets the action's target be a dead unit (a resurrection); every other cast refuses one.
+	Dead bool
 	// Resolve finds the spell when it depends on the player (its class's interrupt, the stance it wants); it replaces Spell. false:
 	// there is none to cast now.
 	Resolve func(*Ctx) (uint32, bool)

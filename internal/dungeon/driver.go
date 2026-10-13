@@ -186,6 +186,7 @@ type Config struct {
 	BuffMaxDist    float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
+	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
 	ResWait            time.Duration // after the leader died, how long a living healer is given to resurrect it before the spirit is released
 	ResAcceptWait      time.Duration // after accepting a resurrection, how long to wait for the leader to live
 	ReleaseWait        time.Duration // after the release, how long to wait for the ghost
@@ -207,7 +208,7 @@ func DefaultConfig() Config {
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
-		ResWait: 60 * time.Second, ResAcceptWait: 10 * time.Second, ReleaseWait: 15 * time.Second, CorpseRunTimeout: 10 * time.Minute,
+		BrainRezWait: 120 * time.Second, ResWait: 60 * time.Second, ResAcceptWait: 10 * time.Second, ReleaseWait: 15 * time.Second, CorpseRunTimeout: 10 * time.Minute,
 		MaxLeaderDeaths: 5, MaxWipeRecoveries: 2, WipeRecoverTimeout: 12 * time.Minute, SicknessMax: 11 * time.Minute,
 	}
 }
@@ -263,6 +264,7 @@ func (c Config) withDefaults() Config {
 	fill(&c.BuffGap, d.BuffGap)
 	fill(&c.BuffViewWait, d.BuffViewWait)
 	fillF(&c.BuffMaxDist, d.BuffMaxDist)
+	fill(&c.BrainRezWait, d.BrainRezWait)
 	fill(&c.ResWait, d.ResWait)
 	fill(&c.ResAcceptWait, d.ResAcceptWait)
 	fill(&c.ReleaseWait, d.ReleaseWait)
@@ -1072,6 +1074,7 @@ func (d *Driver) restGate(ctx context.Context) error {
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
 	rebuff := map[packet.GUID]bool{} // revived members still to get their buffs back
+	var rez rezWatch                 // the wait for the leader's brain to resurrect the dead members
 	mana := map[packet.GUID]manaWatch{}
 	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
 	// its combat flag), the gate as a whole is bounded.
@@ -1105,6 +1108,18 @@ func (d *Driver) restGate(ctx context.Context) error {
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
 		st := d.restState(mana)
+		if len(st.dead) == 0 {
+			rez = rezWatch{}
+		} else if d.brainRezWaiting(&rez) {
+			for _, m := range st.dead {
+				rebuff[m.GUID] = true
+			}
+			calm = d.clk.Now()
+			if err := d.sleep(ctx, d.cfg.RestPoll); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(st.dead) > 0 && !d.cfg.Shortcuts && d.cfg.RecoverWipe {
 			if err := d.recoverDeadMembers(ctx); err != nil {
 				// The leader died while the members' recovery went on and nobody is left alive: that is a wipe, which RecoverWipe (on

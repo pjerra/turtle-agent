@@ -73,7 +73,7 @@ var classTable = map[uint8]ClassInfo{
 		{Spell: "Pummel", Stances: []string{stanceBattle, stanceBerserker}},      // spell 6552; the Turtle rank 13491 is Battle only (SpellStances)
 		{Spell: "Shield Bash", Stances: []string{stanceBattle, stanceDefensive}}, // needs a shield; the server's refusal backs it off
 	}},
-	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning", Interrupts: []InterruptSpell{{Spell: "Hammer of Justice"}}},
+	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning", Heals: &paladinHeals, Interrupts: []InterruptSpell{{Spell: "Hammer of Justice"}}},
 	ClassHunter:  {ID: ClassHunter, Name: "hunter", Power: powerMana, Drinks: true, ManaPotions: true, Band: [2]float64{10, 30}}, // the dead zone is 8 yd, the shots reach 35
 	ClassRogue:   {ID: ClassRogue, Name: "rogue", Power: powerEnergy, Interrupts: []InterruptSpell{{Spell: "Kick"}}},
 	ClassPriest: {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &priestHeals, Band: [2]float64{14, 19},

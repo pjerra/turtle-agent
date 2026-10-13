@@ -60,7 +60,7 @@ func resolveRole(want string, strats []*Strategy, names []string) (string, error
 	case len(active) == 0 && want == RoleTank:
 		return "", fmt.Errorf("role %q needs the role_tank strategy (presets tank_warrior, bear_tank_druid): %v do not play it", want, names)
 	case len(active) == 0 && want == RoleHealer:
-		return "", fmt.Errorf("role %q needs the role_healer strategy (presets holy_priest, resto_druid, resto_shaman): %v do not play it", want, names)
+		return "", fmt.Errorf("role %q needs the role_healer strategy (presets holy_priest, holy_paladin, resto_druid, resto_shaman): %v do not play it", want, names)
 	}
 	return want, nil
 }

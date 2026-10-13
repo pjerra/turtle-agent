@@ -5,10 +5,12 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/spells"
 )
 
 // The druid, the fifth class of the brain (issue #80 step 4c): a healer (resto_druid), a caster (balance_druid), a cat (feral_cat_druid)
@@ -170,7 +172,7 @@ func init() {
 	strategyBuilders["druid_form_bear"] = func() *Strategy { return druidHome("druid_form_bear", bearForms) }
 	strategyBuilders["druid_cat"] = druidCat
 	strategyBuilders["druid_bear"] = druidBear
-	presets["resto_druid"] = []string{"role_healer", "druid_caster", "druid_buffs", "druid_innervate", "healer_position", "avoid_ground",
+	presets["resto_druid"] = []string{"role_healer", "druid_caster", "druid_buffs", "druid_innervate", "rez", "healer_position", "avoid_ground",
 		"combat_consumables", "rest_eat", "rest_drink"}
 	presets["balance_druid"] = []string{"combat_dps", "druid_caster", "druid_balance", "druid_buffs", "druid_innervate", "ranged_position",
 		"avoid_ground", "combat_consumables", "rest_eat", "rest_drink"}
@@ -244,17 +246,82 @@ func leaveFormAction(allowed func(*Ctx) bool) *Action {
 // motwAuras are the auras of Mark of the Wild and its group version.
 var motwAuras = []string{"Mark of the Wild", "Gift of the Wild"}
 
+// A member that Mark of the Wild keeps failing on (out of reach through a wall, a different faction, a full aura bar) must not keep a
+// feral druid shifting out of its form at every rest gate: after motwMaxFails refusals in a row the member is left alone for motwSkip.
+const (
+	motwMaxFails = 2
+	motwSkip     = 60 * time.Second
+)
+
+// druMem remembers the refused Mark of the Wild casts.
+type druMem struct {
+	mu       sync.Mutex
+	fails    map[packet.GUID]motwFail
+	failSeen uint64
+	failInit bool
+}
+
+type motwFail struct {
+	n         int
+	skipUntil time.Time
+}
+
+// motwSkipped says the member is left alone for now.
+func (d *druMem) motwSkipped(g packet.GUID, now time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return now.Before(d.fails[g].skipUntil)
+}
+
+// noteMotwFailure counts a refusal of Mark of the Wild against the member the cast aimed at (the spell state names the spell, the brain
+// remembers the target), and forgets the count of a member that carries the buff.
+func noteMotwFailure(c *Ctx) {
+	cs := c.Spells.CastState()
+	d := &c.mem.dru
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for g, f := range d.fails {
+		if u, ok := c.Unit(g); ok && HasAura(u, motwAuras...) {
+			delete(d.fails, g)
+		} else if f.n == 0 && !c.Now.Before(f.skipUntil) {
+			delete(d.fails, g)
+		}
+	}
+	first := !d.failInit
+	d.failInit = true
+	fresh := cs.Failures != d.failSeen
+	d.failSeen = cs.Failures
+	if first || !fresh || cs.LastFailure == nil || spells.Name(cs.LastFailure.SpellID) != "Mark of the Wild" {
+		return
+	}
+	c.mem.mu.Lock()
+	g := c.mem.lastCastTarget
+	c.mem.mu.Unlock()
+	if g == 0 {
+		return
+	}
+	if d.fails == nil {
+		d.fails = map[packet.GUID]motwFail{}
+	}
+	f := d.fails[g]
+	f.n++
+	if f.n >= motwMaxFails {
+		f = motwFail{skipUntil: c.Now.Add(motwSkip)}
+	}
+	d.fails[g] = f
+}
+
 // motwTarget is the first of the player and the members in view that lacks Mark of the Wild (the player's own also when it has under
-// a minute left, if the server says how long).
+// a minute left, if the server says how long), leaving out a member the spell keeps failing on.
 func motwTarget(c *Ctx) packet.GUID {
 	for _, u := range healMembers(c) {
 		if u.GUID == c.Self.GUID {
-			if auraMissing(u, motwAuras...) {
+			if auraMissing(u, motwAuras...) && !c.mem.dru.motwSkipped(u.GUID, c.Now) {
 				return u.GUID
 			}
 			continue
 		}
-		if float64(u.Distance) <= buffReach && !HasAura(u, motwAuras...) && sightOK(c, u) {
+		if float64(u.Distance) <= buffReach && !HasAura(u, motwAuras...) && sightOK(c, u) && !c.mem.dru.motwSkipped(u.GUID, c.Now) {
 			return u.GUID
 		}
 	}
@@ -291,7 +358,7 @@ func druidBuffs(name string, thorns bool) *Strategy {
 		rules = append(rules, Rule{Trigger: Trigger{Name: "thorns_missing", Active: func(c *Ctx) bool { return ok(c) && thornsTarget(c) != 0 }},
 			Do: []Next{{"thorns", RelNormal + 2}}})
 	}
-	return &Strategy{Name: name, Actions: acts, Rules: rules}
+	return &Strategy{Name: name, Actions: acts, Rules: rules, Before: noteMotwFailure}
 }
 
 // ---- druid_innervate ----

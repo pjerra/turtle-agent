@@ -99,6 +99,31 @@ func TestItemAtBackpackAndBags(t *testing.T) {
 	}
 }
 
+// An imbued weapon shows its temporary enchantment (ITEM_FIELD_ENCHANTMENT slot 1, the id word) on the item row.
+func TestItemAtReadsTheTemporaryEnchantment(t *testing.T) {
+	const (
+		me            = packet.GUID(0x2A)
+		sword, dagger = packet.GUID(0x4000000000000003), packet.GUID(0x4000000000000007)
+	)
+	s := NewStore()
+	imbued := itemCreate(sword, TypeItem, 2589, 1)
+	imbued.Values[ItemTempEnchantID] = 3345 // Windfury Weapon
+	imbued.Values[ItemTempEnchantID+1] = 3600000
+	s.Apply([]Block{imbued, itemCreate(dagger, TypeItem, 2092, 1),
+		createBlock(me, TypePlayer, 0, 0, invSlot(invSlot(map[uint16]uint32{}, 15, sword), 16, dagger))})
+	if it, ok := s.ItemAt(me, BackpackBag, 15); !ok || it.TempEnchant != 3345 || it.Entry != 2589 {
+		t.Fatalf("%+v %v", it, ok)
+	}
+	if it, ok := s.ItemAt(me, BackpackBag, 16); !ok || it.TempEnchant != 0 {
+		t.Fatalf("%+v %v", it, ok)
+	}
+	// The imbue running out is a values update for the item.
+	s.Apply([]Block{{Type: BlockValues, GUID: sword, Values: map[uint16]uint32{ItemTempEnchantID: 0}}})
+	if it, _ := s.ItemAt(me, BackpackBag, 15); it.TempEnchant != 0 {
+		t.Fatalf("%+v", it)
+	}
+}
+
 // The m1 login capture: Tagentone carries one item in the backpack, entry 80817 in slot 23,
 // next to three equipped items and four bags.
 func TestCapturedBackpack(t *testing.T) {
