@@ -313,14 +313,14 @@ func TestBeginTruncatedField(t *testing.T) {
 		b    string
 		want bool
 		ok   bool
-	}{{"0x2A,0,0,0,1", true, true}, {"0x2A,0,0,0,0", false, true}, {"0x2A,0,0,0", false, true}, {"0x2A,0,0,0,2", false, false}, {"0x2A,0,0,0,1,9", false, false}} {
+	}{{"0x2A,0,0,0,1", true, true}, {"0x2A,0,0,0,0", false, true}, {"0x2A,0,0,0", false, true}, {"0x2A,0,0,0,2", false, true}, {"0x2A,0,0,0,1,9,x", true, true}, {"0x2A,0,0", false, false}} {
 		seq := i + 1
 		fr := feedAll(a, []string{fmt.Sprintf("TBM:VIEW|v1|%d|B|%s", seq, tc.b), fmt.Sprintf("TBM:VIEW|v1|%d|E|2", seq)})
 		if tc.ok != (len(fr) == 1) || (tc.ok && fr[0].Truncated != tc.want) {
 			t.Errorf("%s: %+v", tc.b, fr)
 		}
 	}
-	if a.Stats().Truncated != 1 {
+	if a.Stats().Truncated != 2 {
 		t.Fatalf("%+v", a.Stats())
 	}
 }

@@ -72,6 +72,11 @@ type fakeRemote struct {
 	healRate    float64
 	onTick      func(g *fakeRemote)
 	revived     []string
+	mobsKilled  int
+	hide        int  // the next n frames list no hostile (the bots lost sight of everything for a moment)
+	truncating  bool // frames are marked truncated and list no hostile
+	panicOn     string
+	vanish      bool // after a pullback the mob leaves the world without a fight
 }
 
 func newFakeRemote(t *testing.T) *fakeRemote {
@@ -140,6 +145,8 @@ func (g *fakeRemote) advance(d time.Duration) {
 		}
 		if m.hp > 0 {
 			live = append(live, m)
+		} else {
+			g.mobsKilled++
 		}
 	}
 	g.mobs = live
@@ -201,6 +208,14 @@ func (g *fakeRemote) publish() {
 			f.Threats = append(f.Threats, tbm.ThreatRec{Hostile: m.guid, Top: []tbm.ThreatEntry{{GUID: m.target, Pct: 100}, {GUID: gHealer, Pct: 30}}})
 		}
 	}
+	if g.hide > 0 {
+		g.hide--
+		f.Hostiles, f.Threats = []tbm.HostileRec{}, []tbm.ThreatRec{}
+	}
+	if g.truncating {
+		f.Truncated = true
+		f.Hostiles, f.Threats = []tbm.HostileRec{}, []tbm.ThreatRec{}
+	}
 	g.frame, g.have = f, true
 	g.stats.Frames++
 	g.stats.LastSeq = g.n
@@ -218,6 +233,10 @@ func errReply(intent, code string) tbm.Reply {
 
 func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	g.orders = append(g.orders, command)
+	if g.panicOn != "" && strings.HasPrefix(command, g.panicOn) {
+		g.panicOn = ""
+		panic("boom")
+	}
 	f := strings.Fields(command)
 	intent := f[0] + " " + f[1]
 	if codes := g.cmdErr[f[1]]; f[0] == "cmd" && len(codes) > 0 {
@@ -265,6 +284,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			return errReply(intent, "invalid-target"), nil
 		}
 		m.pulled, m.pullAt = true, g.now
+		if g.vanish {
+			g.mobs = nil
+		}
 		return ack(intent), nil
 	case "cmd attack":
 		m := g.mobByArg(f[2])
@@ -852,5 +874,103 @@ func TestRemoteRefusesWithoutLead(t *testing.T) {
 	_, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), RemoteOptions{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "lead_bot") || g.unbinds != 0 || len(g.orders) != 0 {
 		t.Fatalf("%v %v", err, g.orders)
+	}
+}
+
+func pullPlan() *Plan {
+	return remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
+}
+
+// A pulled mob that is missing from the first frame after the pull (the bots lost sight of it for a moment, or it rotated out of
+// the 24-hostile cap) is not dead: the fight goes on and the mob is killed.
+func TestRemoteFightSurvivesAMobMissingFromAFrame(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	pulled := false
+	g.onTick = func(g *fakeRemote) {
+		if !pulled && len(g.ordersOf("cmd pullback")) == 1 {
+			pulled, g.hide = true, 1
+		}
+	}
+	rep, err := runRemote(t, g, pullPlan(), opts(), nil)
+	if err != nil || len(g.mobs) != 0 || !pulled {
+		t.Fatalf("%v mobs %d notes %v", err, len(g.mobs), rep.Notes)
+	}
+	if rep.Remote.Orders["pullback"] != 1 || rep.Legs[0].Pulls != 1 || rep.Legs[0].PullRetries != 0 {
+		t.Fatalf("%+v %+v", rep.Remote, rep.Legs[0])
+	}
+}
+
+// A mob absent from two frames in a row is gone; one absent only from truncated frames never is, however many come.
+func TestRemoteFightIgnoresTruncatedFrames(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.killRate = 5 // a long fight
+	var cutFrom time.Time
+	g.onTick = func(g *fakeRemote) {
+		m := g.mobs
+		switch {
+		case len(m) == 1 && m[0].engaged && cutFrom.IsZero():
+			cutFrom, g.truncating = g.now, true
+		case !cutFrom.IsZero() && g.now.Sub(cutFrom) > 8*time.Second:
+			g.truncating = false
+		}
+	}
+	rep, err := runRemote(t, g, pullPlan(), opts(), nil)
+	if err != nil || cutFrom.IsZero() {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	// The run went on after the cut only because the mob came back: it was killed, not taken for dead.
+	if len(g.mobs) != 0 || g.mobsKilled == 0 {
+		t.Fatalf("mobs %d killed %d: the fight ended early", len(g.mobs), g.mobsKilled)
+	}
+}
+
+// Absent from two plain frames after fighting: dead.
+func TestRemoteFightCountsAMobGoneForTwoFramesAsKilled(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.killRate = 0
+	g.onTick = func(g *fakeRemote) {
+		for _, m := range g.mobs {
+			if m.engaged && g.now.After(m.pullAt.Add(6*time.Second)) {
+				g.mobs = nil // gone from the world, never at 0 %
+				return
+			}
+		}
+	}
+	rep, err := runRemote(t, g, pullPlan(), opts(), nil)
+	if err != nil || rep.Legs[0].Pulls != 1 || rep.Legs[0].PullRetries != 0 {
+		t.Fatalf("%v %+v", err, rep.Legs)
+	}
+}
+
+// A mob that leaves the feed after the pull and was never seen fighting is no kill: the pull drew no fight.
+func TestRemoteFightMobNeverSeenFightingIsNoEngage(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.vanish = true
+	rep, err := runRemote(t, g, pullPlan(), opts(), nil)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	found := false
+	for _, n := range rep.Notes {
+		found = found || strings.Contains(n, "drew no fight")
+	}
+	if !found {
+		t.Fatalf("a mob that never fought was counted as won: notes %v", rep.Notes)
+	}
+}
+
+func TestRemoteRunRecoversAPanic(t *testing.T) {
+	g := newFakeRemote(t)
+	g.panicOn = "cmd move"
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{50, 0, 0}}), opts(), nil)
+	if err == nil || !strings.Contains(err.Error(), "internal error: boom") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if g.unbinds != 1 || !rep.Remote.Unbound {
+		t.Fatalf("unbinds %d %+v", g.unbinds, rep.Remote)
 	}
 }

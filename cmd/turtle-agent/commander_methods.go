@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -26,27 +26,52 @@ type sessionLink struct{ cur func() *session.Session }
 func (l sessionLink) Say(ctx context.Context, text string) error { return l.cur().GM(ctx, text) }
 func (l sessionLink) Log() *events.Log                           { return l.cur().Log() }
 
-// commanderService holds the one commander of the agent: the command sender and the feed that follows the event log.
+// commanderService holds the one commander of the agent: the command sender and the feed. The feed is wired into the event log
+// (events.Log.SetIntercept): every TBM:VIEW line goes to the feed and, unless the debug sampling says otherwise, not into the log;
+// the unbind ACKs the module sends when it ends a binding are shown to the feed and stay in the log.
 type commanderService struct {
 	cur     func() *session.Session
 	cmdr    *tbm.Commander
 	feed    *tbm.ViewFeed
 	planner *navmesh.Planner
+
+	viewLogEvery atomic.Int64 // 0: no VIEW line is logged; n: every nth frame's lines are (debug)
+	viewLines    atomic.Uint64
+	viewFrames   atomic.Uint64
 }
 
-// newCommanderService starts the feed on the session's event log (the log outlives reconnects) until ctx ends.
-func newCommanderService(ctx context.Context, cur func() *session.Session, planner *navmesh.Planner, wg *sync.WaitGroup) *commanderService {
+// newCommanderService wires the feed into the session's event log (the log outlives reconnects).
+func newCommanderService(cur func() *session.Session, planner *navmesh.Planner) *commanderService {
 	log := cur().Log()
 	emit := func(kind, text string, data map[string]any) {
 		log.Append(events.Event{Kind: kind, Text: text, Data: data})
 	}
 	c := &commanderService{cur: cur, cmdr: tbm.NewCommander(sessionLink{cur}), feed: tbm.NewViewFeed(log, emit, tbm.DefaultEventEvery), planner: planner}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.feed.Run(ctx)
-	}()
+	log.SetIntercept(c.intercept)
 	return c
+}
+
+// intercept shows the feed each system and addon event; it consumes the TBM:VIEW lines.
+func (c *commanderService) intercept(e events.Event) bool {
+	if e.Kind != events.KindSystem && e.Kind != events.KindAddon {
+		return false
+	}
+	line, ok := tbm.LineOf(e)
+	if !ok || !strings.HasPrefix(line, "TBM:") {
+		return false
+	}
+	if !strings.HasPrefix(line, tbm.ViewPrefix) {
+		c.feed.ProcessLine(line) // the unbind ACK that ends a binding; the event stays in the log
+		return false
+	}
+	c.feed.ProcessLine(line)
+	c.viewLines.Add(1)
+	if vl, err := tbm.ParseViewLine(line); err == nil && vl.Part == 'B' {
+		c.viewFrames.Add(1)
+	}
+	every := c.viewLogEvery.Load()
+	// Debug sampling by frame: the lines of every nth frame are logged.
+	return every <= 0 || (c.viewFrames.Load()-1)%uint64(every) != 0
 }
 
 type commanderParams struct {
@@ -106,6 +131,9 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 type botViewParams struct {
 	AfterN uint64 `json:"after_n,omitempty"` // wait for a frame newer than this counter (the n of the last result)
 	WaitMS int    `json:"wait_ms,omitempty"` // how long to wait for it; 0: return what there is
+	// LogEvery is a debug switch: with n above 0, every nth frame's TBM:VIEW lines are also written to the event log (by default none
+	// are, so a long run does not push other events out); 0 turns it off again. Omitted: unchanged.
+	LogEvery *int `json:"log_every,omitempty"`
 }
 
 type botViewResult struct {
@@ -115,9 +143,17 @@ type botViewResult struct {
 	Frame       *tbm.ViewFrame   `json:"frame,omitempty"`
 	Stats       tbm.ViewStats    `json:"stats"`
 	BindingEnds []tbm.BindingEnd `json:"binding_ends"`
+	LogEvery    int64            `json:"log_every"`
+	ViewLines   uint64           `json:"view_lines"` // TBM:VIEW lines read, logged or not
 }
 
 func (c *commanderService) view(ctx context.Context, p botViewParams) (botViewResult, error) {
+	if p.LogEvery != nil {
+		if *p.LogEvery < 0 || *p.LogEvery > 10000 {
+			return botViewResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "log_every must be 0 to 10000"}
+		}
+		c.viewLogEvery.Store(int64(*p.LogEvery))
+	}
 	if p.WaitMS > 0 {
 		wctx, cancel := context.WithTimeout(ctx, waitBound(p.WaitMS, 0))
 		_, _, err := c.feed.WaitNew(wctx, p.AfterN)
@@ -126,7 +162,7 @@ func (c *commanderService) view(ctx context.Context, p botViewParams) (botViewRe
 			return botViewResult{}, rpcErr(ctx.Err())
 		}
 	}
-	res := botViewResult{Stats: c.feed.Stats(), BindingEnds: c.feed.Ends()}
+	res := botViewResult{Stats: c.feed.Stats(), BindingEnds: c.feed.Ends(), LogEvery: c.viewLogEvery.Load(), ViewLines: c.viewLines.Load()}
 	if fr, n, ok := c.feed.Latest(); ok {
 		res.Have, res.N, res.Frame = true, n, &fr
 		res.AgeMS = time.Since(fr.At).Milliseconds()
@@ -134,18 +170,16 @@ func (c *commanderService) view(ctx context.Context, p botViewParams) (botViewRe
 	return res, nil
 }
 
-// registerCommanderMethods wires commander and bot_view. The returned func stops the feed.
+// registerCommanderMethods wires commander and bot_view. The returned func removes the log's intercept.
 func registerCommanderMethods(srv *rpc.Server, cur func() *session.Session, planner *navmesh.Planner) (*commanderService, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	c := newCommanderService(ctx, cur, planner, &wg)
+	c := newCommanderService(cur, planner)
 	srv.Register("commander", rpc.Typed(func(ctx context.Context, p commanderParams) (commanderResult, error) {
 		return c.do(ctx, p)
 	}))
 	srv.Register("bot_view", rpc.Typed(func(ctx context.Context, p botViewParams) (botViewResult, error) {
 		return c.view(ctx, p)
 	}))
-	return c, func() { cancel(); wg.Wait() }
+	return c, func() { cur().Log().SetIntercept(nil) }
 }
 
 // remoteGame is the dungeon.RemoteGame over the commander service and the session.

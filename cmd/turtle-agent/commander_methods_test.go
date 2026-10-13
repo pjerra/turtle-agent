@@ -224,3 +224,66 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 		t.Fatalf("%v", st)
 	}
 }
+
+// TBM:VIEW lines go to the feed and not into the event log, so a long run does not push other events out; the ACKs stay.
+func TestViewLinesStayOutOfTheEventLog(t *testing.T) {
+	r := newRig(t)
+	for seq := 1; seq <= 5; seq++ {
+		r.system(viewFrame(seq, true)...)
+	}
+	r.system("TBM:ACTION_ACK|commander view|party|1|on", "plain system line")
+	var res map[string]any
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		res = resultOf(t, r.call("bot_view", `{}`))
+		if res["view_lines"].(float64) >= 25 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if res["view_lines"].(float64) != 25 || res["stats"].(map[string]any)["frames"].(float64) != 5 {
+		t.Fatalf("%v", res)
+	}
+	// The ACK and the plain line are in the log (poll until they arrive), no VIEW line is.
+	var evs []any
+	for time.Now().Before(deadline.Add(2 * time.Second)) {
+		evs = resultOf(t, r.call("events", `{"since":0,"kinds":["system"]}`))["events"].([]any)
+		if len(evs) >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(evs) != 2 {
+		t.Fatalf("%d system events: %v", len(evs), evs)
+	}
+	for _, e := range evs {
+		if strings.Contains(e.(map[string]any)["text"].(string), "TBM:VIEW") {
+			t.Fatalf("a VIEW line is in the log: %v", e)
+		}
+	}
+	// Debug sampling: every 2nd frame is logged (frames 1, 3, 5 of the next five: lines of frames counted from now on).
+	resultOf(t, r.call("bot_view", `{"log_every":2}`))
+	for seq := 6; seq <= 9; seq++ {
+		r.system(viewFrame(seq, false)...)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	n := 0
+	for time.Now().Before(deadline) {
+		n = 0
+		for _, e := range resultOf(t, r.call("events", `{"since":0,"kinds":["system"]}`))["events"].([]any) {
+			if strings.Contains(e.(map[string]any)["text"].(string), "TBM:VIEW") {
+				n++
+			}
+		}
+		if n >= 6 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n != 6 { // two of the four frames, three lines each
+		t.Fatalf("%d VIEW lines logged with log_every 2", n)
+	}
+	if out := r.call("bot_view", `{"log_every":-1}`); errCode(out) != rpc.CodeInvalidParams {
+		t.Fatalf("%v", out)
+	}
+}

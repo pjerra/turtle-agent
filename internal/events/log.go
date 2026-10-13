@@ -203,6 +203,8 @@ type Log struct {
 	buf     []Event
 	last    uint64
 	changed chan struct{}
+	// intercept sees every event before it is stored and may consume it (SetIntercept).
+	intercept func(Event) bool
 }
 
 func New(capacity int) *Log {
@@ -212,8 +214,28 @@ func New(capacity int) *Log {
 	return &Log{limit: capacity, changed: make(chan struct{})}
 }
 
-// Append stores e with the next sequence number, stamps Time if unset and wakes waiters.
+// SetIntercept installs fn, which Append calls with every event before storing it. When fn returns true the event is consumed: it is
+// not stored, gets no sequence number and wakes nobody. The remote commander's feed uses it to take the TBM:VIEW lines (about five a
+// second while bound) out of the log, so they do not push chat, dungeon and brain events out of the ring. fn runs on the appender's
+// goroutine, outside the log's lock, and may itself call Append for other events. nil removes it.
+func (l *Log) SetIntercept(fn func(Event) bool) {
+	l.mu.Lock()
+	l.intercept = fn
+	l.mu.Unlock()
+}
+
+// Append stores e with the next sequence number, stamps Time if unset and wakes waiters. A consumed event (SetIntercept) is returned
+// with Seq 0.
 func (l *Log) Append(e Event) Event {
+	l.mu.Lock()
+	fn := l.intercept
+	l.mu.Unlock()
+	if fn != nil {
+		Stamp(&e)
+		if fn(e) {
+			return e
+		}
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.last++

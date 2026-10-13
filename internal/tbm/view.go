@@ -421,8 +421,8 @@ type beginRec struct {
 
 func parseBegin(s string) (beginRec, error) {
 	f := strings.Split(s, ",")
-	if len(f) < 4 || len(f) > 5 {
-		return beginRec{}, fmt.Errorf("%w: B line has %d fields, needs 4 or 5", ErrViewFormat, len(f))
+	if len(f) < 4 {
+		return beginRec{}, fmt.Errorf("%w: B line has %d fields, needs at least 4", ErrViewFormat, len(f))
 	}
 	lead, err := ParseGUIDField(f[0])
 	if err != nil {
@@ -437,14 +437,9 @@ func parseBegin(s string) (beginRec, error) {
 		n[i] = v
 	}
 	b := beginRec{lead: lead, party: n[0], hostiles: n[1], threatCnt: n[2]}
-	if len(f) == 5 {
-		switch f[4] {
-		case "0":
-		case "1":
-			b.truncated = true
-		default:
-			return beginRec{}, fmt.Errorf("%w: B truncated flag %q", ErrViewFormat, f[4])
-		}
+	// The fifth field is truncated (0 or 1, TortoiseBots #901); fields after it are a later v1 addition and are ignored.
+	if len(f) >= 5 {
+		b.truncated = f[4] == "1"
 	}
 	return b, nil
 }

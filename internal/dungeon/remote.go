@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -29,7 +31,7 @@ type Runner interface {
 }
 
 // RemoteGame is what the RemoteDriver does to the game: send commander commands, read the feed. The agent implements it over
-// the session (cmd/turtle-agent/remote_game.go); the tests use a fake with a fake clock. A RemoteGame may also implement
+// the session (cmd/turtle-agent/commander_methods.go); the tests use a fake with a fake clock. A RemoteGame may also implement
 // PathPlanner.
 type RemoteGame interface {
 	// Command sends ".bot <command>" ("commander bind Tanky", "cmd move 1 2 3") and returns its ACK or ERR reply (Kind
@@ -209,6 +211,7 @@ type RemoteDriver struct {
 	unbinding   bool
 	endsAtBind  int
 	stats0      tbm.ViewStats
+	statsMu     sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
 	prevDead    map[packet.GUID]bool
 	deadSeen    bool
 	revived     map[packet.GUID]int
@@ -260,6 +263,8 @@ func (d *RemoteDriver) Status() (Report, bool) {
 // fillFeed copies the feed's counters since the bind into the remote report.
 func (d *RemoteDriver) fillFeed(r *RemoteReport) {
 	s := d.g.ViewStats()
+	d.statsMu.Lock()
+	defer d.statsMu.Unlock()
 	r.FramesReceived, r.FramesMissed, r.FramesInvalid, r.FramesStale = s.Frames-d.stats0.Frames, s.Missed-d.stats0.Missed, s.Invalid-d.stats0.Invalid, s.Stale-d.stats0.Stale
 	r.FramesTruncated = s.Truncated - d.stats0.Truncated
 	r.LastSeq = s.LastSeq
@@ -280,9 +285,21 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	d.rep.start(fromLeg)
-	err := d.run(ctx, fromLeg)
+	err := d.runRecovering(ctx, fromLeg)
 	d.finish(err)
 	return err
+}
+
+// runRecovering is run with a panic turned into a failed run: the deferred unbind has run by the time the panic gets here, and the
+// report says what happened instead of the process going down with the binding half undone.
+func (d *RemoteDriver) runRecovering(ctx context.Context, fromLeg int) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: %v", r)
+			d.rep.note(fmt.Sprintf("the remote run panicked: %v\n%s", r, debug.Stack()))
+		}
+	}()
+	return d.run(ctx, fromLeg)
 }
 
 func (d *RemoteDriver) finish(err error) {
@@ -480,7 +497,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	}
 	d.countObjectSteps(fromLeg)
 	d.g.ResetView()
-	d.stats0 = d.g.ViewStats()
+	d.setStats0(d.g.ViewStats())
 	d.endsAtBind = len(d.g.BindingEnds())
 	args := append([]string{"commander", "bind", d.opt.Lead}, d.opt.Bots...)
 	r, err := d.g.Command(ctx, strings.Join(args, " "))
@@ -624,6 +641,12 @@ func (d *RemoteDriver) unbind() {
 	})
 	d.rep.note("commander unbind: " + via)
 	d.bound = false
+}
+
+func (d *RemoteDriver) setStats0(s tbm.ViewStats) {
+	d.statsMu.Lock()
+	d.stats0 = s
+	d.statsMu.Unlock()
 }
 
 // look reads the feed. It never waits.

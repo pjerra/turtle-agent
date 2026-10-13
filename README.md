@@ -893,12 +893,14 @@ target, spell, dead, state, last action), `H` (hostiles the bots fight or see: g
 dropped when a newer one completes, a late frame behind the newest is dropped as stale, a `seq` that goes back by more than 3 is a new binding,
 a line of another version (`v2`) is counted and skipped, a malformed line is counted and skipped. The counters (`lines`, `frames`, `missed`,
 `stale`, `invalid`, `incomplete`, `orphans`, `unsupported`, `malformed`, `truncated`, `restarts`) are in `bot_view.stats` and the run report.
-A `truncated` frame (the module dropped records to fit) is flagged in the frame and counted. The feed follows the event log, so it needs no
+A `truncated` frame (the module dropped records to fit; the optional fifth field of the B line, any further fields are ignored) is flagged in the frame and counted; the driver never counts a mob gone from one. The feed follows the event log, so it needs no
 registration: it reads every `TBM:VIEW` system line (or addon line) as it arrives. `bot_view` returns the newest frame (with `after_n` and
 `wait_ms` it waits for a newer one). The events log gets a throttled `bot_view_frame` (the first frame, then every 5 s, or sooner when a bot
 dies or the party enters or leaves combat, never faster than once a second): `data.seq`, `lead`, `party[]` (name, hp_pct, power_pct, dead,
-state), `hostiles[]` (guid, entry, hp_pct, flags, threat_holder), `engaged`, `in_combat`. The `VIEW` lines stay in the event log too (about 5-8
-a second while bound); the log keeps 100000 events.
+state), `hostiles[]` (guid, entry, hp_pct, flags, threat_holder), `engaged`, `in_combat`. The `TBM:VIEW` lines go to the feed only and are **not** written to the event log (about five lines a second while bound would push chat,
+dungeon and brain events out of its ring): the log's intercept (`events.Log.SetIntercept`) hands them to the assembler. The unbind ACKs the
+module sends stay in the log. For debugging, `bot_view {"log_every": n}` also logs the lines of every nth frame (0 turns it off); `bot_view`
+reports `view_lines`, the lines read.
 
 **Orders.** `commander {"op":"bind","lead_bot":"Tanky","bots":["Healy"]}` (also `unbind`, `status`, `view` with `on`) and `commander {"op":"cmd",
 "verb":"pullback","args":["0xF130000C5E0012AB"]}` send `.bot commander ...` / `.bot cmd ...` as say chat and wait for the `TBM:ACTION_ACK` or
@@ -913,7 +915,7 @@ as a group run, but everything comes from the feed and goes out as an order:
 | --- | --- |
 | walk | `.bot cmd move x y z` on the lead bot, in legs of at most 120 yd (the server takes 150; legs follow the navmesh path when the agent has one, else the straight line), then a wait for the lead bot's position in the feed to come within 5 yd. A lead bot that gained no ground in 10 s gets the move again; a refused move (`too-far`, `off-mesh`, `unreachable`) is retried with a shorter leg; `lead-unavailable` is waited out for up to 30 s |
 | pull group / boss | the nearest hostile of the group's entries **as the bots see it** (not the agent's view), `.bot cmd pullback <guid>`; out of range, the lead bot is moved up to 38 yd first; `too-far` moves it closer and retries; `unreachable`/`evading` skips the mob; `no-tank` falls back to `.bot cmd attack` |
-| fight | the feed's hostiles, targets, health and threat; `.bot cmd attack <guid>` at the nearest engaged mob every 10 s; the fight is won when its mobs are gone from the feed, `evaded` when they walk home |
+| fight | the feed's hostiles, targets, health and threat; `.bot cmd attack <guid>` at the nearest engaged mob every 10 s. A mob is dead when its health reads 0, or when it was seen fighting (engaged or hurt) and is then absent from **two frames in a row**; an absence in a `truncated` frame counts for nothing. A pull whose mobs all leave the feed without ever being seen fighting is `drew no fight`, not a win. `evaded` when they walk home |
 | cc | `cc` option: `[{"entry":4863,"mark":"moon","bot":"Magey"}]` sends `.bot cmd cc <mark> <guid> [bot]` for mobs of that entry around the pull target, before the pull; such a mob is not picked as the pull target while another is there |
 | rest gate | party health and mana, and everybody near the lead bot, from the feed; `.bot cmd rest` (again every 45 s); a dead bot gets `.bot cmd revive <name>` (owner or GM; refused: the run fails) |
 | wipe / death | from the feed: every bot dead is a wipe; with `recover_wipe` a revive order for each and the step is tried again |
@@ -926,7 +928,8 @@ anyway (`threat_overrides`); `threat_holds` counts the mobs that were on the tan
 top threat. Naming the `tank` is the reliable way.
 
 **Always unbound.** The unbind (`commander unbind`) is deferred inside the run: done, failed, stopped (`dungeon_stop`) or a panic, it goes out with
-its own context before the report says the run ended. A bind the module refused is no binding (nothing to unbind); one that got no answer is
+its own context before the report says the run ended. A panic in a remote run is recovered and reported as a failed run (`internal error: ...`,
+with the stack in the notes); group mode has no such guard. A bind the module refused is no binding (nothing to unbind); one that got no answer is
 unbound anyway. The module can end the binding itself (the lead bot logged out or left, the party disbanded, a player joined, the switch turned
 off): its `commander unbind` ACK or a `not-bound`/`disabled` answer fails the run with `the commander binding ended: <reason>`.
 
@@ -942,7 +945,7 @@ in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_agg
 `remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
 
 **Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not),
-no loot or dead flag for hostiles (a hostile that leaves the feed after fighting is counted dead), and the bots see only what they see: a pack
+no loot or dead flag for hostiles (a hostile seen fighting that leaves the feed for two frames is counted dead), and the bots see only what they see: a pack
 nobody has in sight is not pulled until the lead bot has walked up to its positions. A feed that goes quiet for 6 s makes the fight loops wait
 (`feed_stalls`); one quiet for 45 s fails the run.
 

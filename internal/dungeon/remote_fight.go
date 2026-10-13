@@ -371,7 +371,16 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	lastCombat := began
 	var lastAssist time.Time
 	killed := map[packet.GUID]bool{}
-	seen := map[packet.GUID]bool{} // tracked mobs the feed has shown at least once, to tell "gone" from "never seen"
+	// A mob is counted gone only when it is absent from two frames in a row, and never from a frame the module cut short (Truncated:
+	// records were dropped to fit, so its absence says nothing). A mob counts as killed only when the feed showed it fighting (or
+	// hurt) before it went; a mob that vanishes without that is no kill, and a pull that ends with no kill and no fight drew none.
+	fought := map[packet.GUID]bool{}
+	absent := map[packet.GUID]int{}
+	for g := range tracked {
+		fought[g] = false
+	}
+	lastN := d.n
+	sawEvade := false
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
 			return fightResult{}, err
@@ -387,23 +396,37 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				tracked[h.GUID] = true
 			}
 		}
+		newFrame := d.n != lastN
+		lastN = d.n
 		alive, fighting := 0, false
 		var fightingMobs []tbm.HostileRec
 		for g := range tracked {
 			h, ok := d.fr.Hostile(g)
-			if !ok { // out of the bots' sight: dead if it was in the fight, else gone
-				if seen[g] && engaged {
-					killed[g] = true
+			if !ok {
+				if newFrame && !d.fr.Truncated {
+					absent[g]++
 				}
+				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
+					if fought[g] {
+						killed[g] = true
+					}
+					delete(tracked, g)
+				} else {
+					alive++ // not known to be gone
+				}
+				continue
+			}
+			absent[g] = 0
+			if h.HPPct <= 0 {
+				killed[g] = true
 				delete(tracked, g)
 				continue
 			}
-			seen[g] = true
-			if h.HPPct <= 0 {
-				killed[g] = true
-				continue
+			if d.engagedWith(h) || h.HPPct < 100 {
+				fought[g] = true
 			}
 			if h.Evading() && !d.engagedWith(h) {
+				sawEvade = true
 				continue // walking home: not part of the fight any more
 			}
 			if sp.sneak && h.Stealthed() && !d.engagedWith(h) && h.HPPct >= 100 {
@@ -420,10 +443,13 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			d.watchThreat(fightingMobs)
 		}
 		switch {
-		case alive == 0 && (engaged || len(killed) > 0 || !d.hostileSeen(t.GUID)):
+		case alive == 0 && len(killed) > 0:
 			return fightResult{out: won, kills: len(killed)}, d.afterFight(ctx)
+		case alive == 0 && sawEvade:
+			return fightResult{out: evaded}, nil
 		case alive == 0:
-			return fightResult{out: evaded, kills: len(killed)}, nil
+			// Everything tracked went without the feed ever showing it fight: nothing was killed.
+			return fightResult{out: noEngage}, nil
 		case !engaged && now.Sub(began) > d.cfg.EngageTimeout:
 			return fightResult{out: noEngage, kills: len(killed)}, nil
 		case engaged && now.Sub(lastCombat) > d.cfg.EvadeGrace:
@@ -437,11 +463,6 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			}
 		}
 	}
-}
-
-func (d *RemoteDriver) hostileSeen(g packet.GUID) bool {
-	_, ok := d.fr.Hostile(g)
-	return ok
 }
 
 // assistEvery sends the party at the nearest of mobs, the first time at once (when the threat allows) and then every AssistEvery.

@@ -240,3 +240,34 @@ func TestMonoMSNeverGoesBack(t *testing.T) {
 		prev = e.MonoMS
 	}
 }
+
+func TestLogIntercept(t *testing.T) {
+	l := New(100)
+	var seen []string
+	l.SetIntercept(func(e Event) bool {
+		seen = append(seen, e.Text)
+		if e.Text == "eat me" {
+			l.Append(Event{Kind: KindSystem, Text: "from inside"}) // an interceptor may append other events
+			return true
+		}
+		return false
+	})
+	l.Append(Event{Kind: KindSystem, Text: "keep"})
+	got := l.Append(Event{Kind: KindSystem, Text: "eat me"})
+	l.Append(Event{Kind: KindSystem, Text: "keep too"})
+	if got.Seq != 0 || got.MonoMS == 0 && got.Time.IsZero() {
+		t.Fatalf("consumed event: %+v", got)
+	}
+	p := l.Read(Query{})
+	var texts []string
+	for _, e := range p.Events {
+		texts = append(texts, e.Text)
+	}
+	if len(texts) != 3 || texts[0] != "keep" || texts[1] != "from inside" || texts[2] != "keep too" || l.Last() != 3 {
+		t.Fatalf("%v last %d", texts, l.Last())
+	}
+	l.SetIntercept(nil)
+	if e := l.Append(Event{Kind: KindSystem, Text: "eat me"}); e.Seq != 4 {
+		t.Fatalf("%+v", e)
+	}
+}

@@ -615,4 +615,5 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
 6. **Open questions the fixtures cannot answer.** How close `move` stops (arrival radius 5 yd assumed), how long a 120 yd leg takes in a dungeon (the
    leg timeout is 30 s + 1 s per 3 yd), whether the tank-like inference picks the real tank (name it with `tank` otherwise), whether `pullback` at a
    mob that is not yet in the lead bot's range answers `too-far`, and whether a hostile that dies is dropped from `H` at once (the fight counts a
-   mob gone from the feed as dead).
+   mob that was seen fighting and is absent for two frames as dead), and in a dense room (more than 24 hostiles) whether the fight is ever
+   called early: check `frames_truncated` and that no pull ends `won` with 0 kills.
