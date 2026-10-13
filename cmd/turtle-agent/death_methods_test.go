@@ -112,6 +112,10 @@ func TestDungeonRunNonGM(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{"name":"rig","gm":false,"teleport":true}`, "teleport needs a GM account"},
 		{`{"name":"rig","gm":false,"buffs":"world"}`, "buffs need a GM account"},
+		{`{"name":"rig","gm_level":2}`, "gm_level goes with gm true"},
+		{`{"name":"rig","gm":false,"gm_level":3}`, "gm_level goes with gm true"},
+		{`{"name":"rig","gm":true,"gm_level":0}`, "gm_level must be 1"},
+		{`{"name":"rig","gm":true,"gm_level":7}`, "gm_level must be 1"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)

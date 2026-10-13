@@ -246,7 +246,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server, see [Dungeon runs](#dungeon-runs)), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -551,13 +551,26 @@ the party is summoned, and the run is flagged `teleport_to_leg_start` in `gm_sho
 shortcuts. A **player account works too** (issue #80 step 3a): `"gm": false` makes the driver send **no GM command at all**: no
 `.gm visible on`, no `.go` teleport, no `.revive` of a member, no `.aura`. `teleport` and `buffs` are then refused with a clear error
 (at the RPC, before anything is sent), the setup (standing at the entrance, the companions' levels) is done by hand and may be
-listed in `setup`. `"gm": true` is the old behaviour with no probe. With `gm` left out the run **probes** once: it sends `.account`
+listed in `setup`. `"gm": true` takes the leader for a GM with no probe, of level `gm_level` (1 to 6, only with `gm: true`;
+developer, 3, when omitted). With `gm` left out the run **probes** once: it sends `.account`
 (a command any account may run, Chat.cpp:77) and reads the reply "Your account level is: N" (0 player, 1 observer, 2 moderator, 3 developer
-...). N above 0 is a GM: the run then sends `.gm visible on` and goes on as before; 0 is a player. Only that reply counts: any other system
-line in the 2 s window (a combat message, "This command is not available to you.") is ignored. With the server option `PlayerCommands = 0`
-a player's `.account` is said aloud instead, which is read as level 0. No answer at all is taken for a GM and noted. A probe on a
-player account costs one `.account` line and no `say`; pass `gm: false` to send nothing. `.aura` needs level 3 (developer, Chat.cpp:874): a
-probed level below it refuses `buffs` before anything is applied. The report has `leader_gm` and `account_level` (when read), and
+...). Only that reply counts: any other system line in the 2 s window (a combat message, "This command is not available to you.") is
+ignored. With the server option `PlayerCommands = 0` a player's `.account` is said aloud instead, which is read as level 0. **No answer
+(or a probe error) is taken for a player**: the server answers every account one way or the other, so silence means the probe broke
+(lag, the event log), not a GM; the run sends no GM command, and the note and any refusal say to pass `gm: true` (and `gm_level`) to
+override. A probe on a player account costs one `.account` line and no `say`; pass `gm: false` to send nothing.
+The level then gates **each GM command on its own**, by the level the core's command table gives it:
+
+| Capability (`gm_caps`) | Command | Level |
+|---|---|---|
+| `teleport` | `.go xyz` (Chat.cpp:234) | 1 observer |
+| `visible` | `.gm visible on` (Chat.cpp:218) | 2 moderator |
+| `revive` | `.revive` of a dead member at a rest gate (Chat.cpp:887) | 3 developer |
+| `buffs` | `.aura` (Chat.cpp:874) | 3 developer |
+
+Below a capability's level it is off from the start: `teleport` and `buffs` are refused before anything is sent, `.gm visible on` is
+not sent (noted), and a dead member is not revived by GM: with `recover_wipe` it runs back to its corpse, without it the run ends
+naming `recover_wipe`. The report has `leader_gm` (level above 0), `gm_caps` and `account_level` (when probed), and
 `dungeon_run` answers `leader_gm` `true`, `false` or `probe`.
 
 What the driver does for each action of the plan (the stepper decides which):
@@ -656,7 +669,7 @@ walk, use_object, pull, kill_boss, or wait when a wait step begins; `ok`, `secon
 without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeon_done` with the totals.
 
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
-progress), `error`, `wipes`, `leader_gm`, `leader_deaths`, `resurrections` (accepted), `corpse_runs`, `seconds_dead` (per leg too), `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
+progress), `error`, `wipes`, `leader_gm`, `gm_caps` (`visible`, `teleport`, `revive`, `buffs`), `account_level`, `leader_deaths`, `resurrections` (accepted), `corpse_runs`, `seconds_dead` (per leg too), `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
 `pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`, `leader_deaths`, `resurrections`, `corpse_runs`, `seconds_dead`), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
 playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `leg`, `detail` and `at`, `buffs[]` (the spells asked for, `id` and `name`), and
 `setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",

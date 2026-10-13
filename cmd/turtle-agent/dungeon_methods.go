@@ -86,10 +86,13 @@ type dungeonRunParams struct {
 	// brain starts at a leg's first rest gate and stops at the leg's end. Off by default.
 	Brain string `json:"brain,omitempty"`
 	// GM says whether the leader's account is a GM. false: a player's account, the run sends no GM command (no
-	// ".gm visible on", no teleport, no revive, no ".aura"; teleport and buffs are refused). true: a GM, as before.
-	// Omitted: the run sends ".gm visible on" once and reads the server's answer; a player account has it said aloud
-	// in "say", which is how it is told. No clear answer counts as a GM.
+	// ".gm visible on", no teleport, no revive, no ".aura"; teleport and buffs are refused). true: a GM of level GMLevel
+	// (developer when omitted), no probe. Omitted: the run sends ".account" once and reads the level from the reply; no
+	// clear answer counts as a player (pass gm true to override). The level gates each GM command (dungeon.capsFor).
 	GM *bool `json:"gm,omitempty"`
+	// GMLevel is the account level a gm true leader has (1 observer: teleport; 2 moderator: also .gm visible on;
+	// 3 developer and above: also revive and buffs). Only with gm true.
+	GMLevel *int `json:"gm_level,omitempty"`
 	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
 	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
 	RecoverWipe bool `json:"recover_wipe,omitempty"`
@@ -187,6 +190,14 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 		}
 	}
+	if p.GMLevel != nil {
+		switch {
+		case p.GM == nil || !*p.GM:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level goes with gm true (it states the GM account's level instead of probing it)"}
+		case *p.GMLevel < 1 || *p.GMLevel > 6:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level must be 1 (observer) to 6 (console)"}
+		}
+	}
 	if p.GM != nil && !*p.GM {
 		switch {
 		case p.Teleport:
@@ -242,6 +253,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		cfg.GM = dungeon.GMProbe
 	case *p.GM:
 		cfg.GM, leaderGM = dungeon.GMAssumed, "true"
+		if p.GMLevel != nil {
+			cfg.GMLevel = *p.GMLevel
+		}
 	default:
 		cfg.GM, leaderGM = dungeon.GMNone, "false"
 	}

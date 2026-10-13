@@ -128,6 +128,8 @@ type Config struct {
 	// GM says how the Driver learns whether the leader's account is a GM. Without one the driver sends no GM command: no
 	// ".gm visible on", no teleport, no revive, no ".aura" (a Teleport or Buffs option then fails the run at once).
 	GM GMMode
+	// GMLevel is the account level a GMAssumed leader is taken to have (0: developer). It gates each GM command (gmCapLevels).
+	GMLevel int
 	// RecoverWipe lets the whole party, dead, do a corpse run and the run go on from the current step, instead of ending
 	// with "wipe". Dead members at a rest gate with no GM revive are recovered the same way. Off by default.
 	RecoverWipe bool
@@ -291,12 +293,13 @@ type Driver struct {
 	skipped    map[packet.GUID]string
 	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
 
-	gm             bool // the leader's account is taken for a GM (decided in begin)
-	level          int  // its account level when the probe read it (0 otherwise)
-	recovering     bool // the leader's recovery is going on: its waits do not start another
-	inWipe         bool // a wipe is being recovered from: the waits do not report it again
-	deathCounted   bool // the leader's current death is in the report
-	recoveries     int  // how often the leader came back; a walk does not count the interruption as a failed try
+	gm             bool   // the leader's account is taken for a GM, level above 0 (decided in begin)
+	level          int    // its account level: probed, asserted (gm_level, else developer) or 0
+	caps           GMCaps // the GM commands that level may send (gmCapLevels)
+	recovering     bool   // the leader's recovery is going on: its waits do not start another
+	inWipe         bool   // a wipe is being recovered from: the waits do not report it again
+	deathCounted   bool   // the leader's current death is in the report
+	recoveries     int    // how often the leader came back; a walk does not count the interruption as a failed try
 	leaderDeaths   int
 	wipeRecoveries int
 }
@@ -471,58 +474,82 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 	return d.startBuffs(ctx, fromLeg)
 }
 
-// setupGM settles whether the run may use GM commands and, if so, makes the leader visible. The mode comes from the option
-// (Config.GM); without a GM the run refuses the options that need one before it sends anything.
+// setupGM settles the leader's account level and from it the GM capabilities of the run (gmCapLevels), then makes the
+// leader visible when it may. The level comes from the option (Config.GM): none (0), the probe, or asserted (Config.GMLevel,
+// developer when not given). A probe with no clear answer counts as a player: the server answers ".account" to any account
+// (SEC_PLAYER, PlayerCommands = 1) or says it aloud (PlayerCommands = 0), so silence means the probe broke, not that the
+// leader is a GM. An option that needs a capability the level lacks fails the run before anything is sent.
 func (d *Driver) setupGM(ctx context.Context) error {
+	unknown := ""
 	switch d.cfg.GM {
 	case GMNone:
-		d.gm = false
+		d.level = 0
 	case GMProbe:
 		level, known, err := d.g.ProbeAccount(ctx)
 		switch {
 		case err != nil:
-			d.gm = true
-			d.rep.note("could not tell the leader's account level (" + err.Error() + "); taken for a GM")
+			unknown = "could not tell the leader's account level (" + err.Error() + ")"
 		case !known:
-			d.gm = true
-			d.rep.note("the server did not answer .account; the leader is taken for a GM (pass gm: false for a player account)")
+			unknown = "the server did not answer .account"
 		default:
-			d.gm = level > 0
-			d.level = level
+			d.level = max(level, 0)
 			d.rep.update(func(r *Report) { l := level; r.AccountLevel = &l })
-			if d.gm {
+			if level > 0 {
 				d.rep.note(fmt.Sprintf("the leader's account level is %d", level))
 			} else {
 				d.rep.note("the leader's account level is 0 (a player): the run sends no GM command")
 			}
 		}
-		if d.gm {
-			d.rep.note("leader made visible with .gm visible on")
-			if err := d.g.GM(ctx, ".gm visible on"); err != nil {
-				d.rep.note("could not send .gm visible on: " + err.Error())
-			}
+		if unknown != "" {
+			d.level = 0
+			unknown += "; the leader is taken for a player and the run sends no GM command (pass gm: true, and gm_level, to override)"
+			d.rep.note(unknown)
 		}
 	default:
-		d.gm = true
+		d.level = d.cfg.GMLevel
+		if d.level <= 0 {
+			d.level = DeveloperLevel
+		}
+		if d.cfg.GMLevel > 0 {
+			d.rep.note(fmt.Sprintf("the leader is taken for a GM of account level %d (gm_level)", d.level))
+		}
+	}
+	d.gm = d.level > 0
+	d.caps = capsFor(d.level)
+	d.rep.update(func(r *Report) { r.LeaderGM, r.GMCaps = d.gm, d.caps })
+	if d.caps.Visible {
 		d.rep.note("leader made visible with .gm visible on")
 		if err := d.g.GM(ctx, ".gm visible on"); err != nil {
 			d.rep.note("could not send .gm visible on: " + err.Error())
 		}
+	} else if d.gm {
+		d.rep.note(fmt.Sprintf(".gm visible on needs account level %d; the leader's is %d: not sent", ModeratorLevel, d.level))
 	}
-	d.rep.update(func(r *Report) { r.LeaderGM = d.gm })
-	if d.gm && d.level > 0 && d.level < DeveloperLevel && len(d.cfg.Buffs) > 0 {
-		return fmt.Errorf("buffs need developer level (.aura is SEC_DEVELOPER, %d); the leader's account level is %d: run without buffs", DeveloperLevel, d.level)
-	}
-	if !d.gm {
+	if !d.caps.Revive && d.cfg.Shortcuts {
 		d.cfg.Shortcuts = false
-		switch {
-		case d.cfg.Teleport:
-			return errors.New("teleport needs a GM account (.go xyz); the leader is a player: stand at the entrance and run without teleport")
-		case len(d.cfg.Buffs) > 0:
-			return errors.New("buffs need a GM account (.aura, developer level); the leader is a player: run without buffs")
+		if d.gm {
+			d.rep.note(fmt.Sprintf("GM revives need account level %d (.revive); the leader's is %d: dead members are not revived by GM (recover_wipe runs them back to their corpses)", DeveloperLevel, d.level))
 		}
 	}
+	if d.cfg.Teleport && !d.caps.Teleport {
+		return d.capError("teleport needs", ".go xyz", ObserverLevel, "stand at the entrance and run without teleport", unknown)
+	}
+	if len(d.cfg.Buffs) > 0 && !d.caps.Buffs {
+		return d.capError("buffs need", ".aura", DeveloperLevel, "run without buffs", unknown)
+	}
 	return nil
+}
+
+// capError is the error of an option (what: "teleport needs") whose GM command (cmd) needs account level need, above the leader's.
+func (d *Driver) capError(what, cmd string, need int, instead, unknown string) error {
+	if d.level == 0 {
+		msg := fmt.Sprintf("%s a GM account (%s, level %d); the leader is a player: %s", what, cmd, need, instead)
+		if unknown != "" {
+			msg += " (the account level is unknown: pass gm: true, and gm_level, if the leader is a GM)"
+		}
+		return errors.New(msg)
+	}
+	return fmt.Errorf("%s account level %d (%s); the leader's account level is %d: %s", what, need, cmd, d.level, instead)
 }
 
 // startPoint is where a run from leg i begins: the entrance, or where the leg before ended.

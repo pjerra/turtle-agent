@@ -410,56 +410,122 @@ func TestNonGMDeadMemberRecoversWithRecoverWipe(t *testing.T) {
 }
 
 func TestProbeSettlesTheModeFromTheAccountLevel(t *testing.T) {
+	all := GMCaps{Visible: true, Teleport: true, Revive: true, Buffs: true}
 	cases := []struct {
 		name     string
 		level    int
 		known    bool
+		err      error
 		wantGM   bool
+		wantCaps GMCaps
 		wantNote string
-		visible  bool // the driver sends .gm visible on itself afterwards
 	}{
-		{"a GM", 3, true, true, "account level is 3", true},
-		{"a moderator", 2, true, true, "account level is 2", true},
-		{"a player", 0, true, false, "account level is 0 (a player)", false},
-		{"no answer", 0, false, true, "did not answer .account", true},
+		{"a developer", 3, true, nil, true, all, "account level is 3"},
+		{"an administrator", 4, true, nil, true, all, "account level is 4"},
+		{"a moderator", 2, true, nil, true, GMCaps{Visible: true, Teleport: true}, "account level is 2"},
+		{"an observer", 1, true, nil, true, GMCaps{Teleport: true}, "needs account level 2; the leader's is 1: not sent"},
+		{"a player", 0, true, nil, false, GMCaps{}, "account level is 0 (a player)"},
+		// No answer (or a broken probe) is a player's run, never a GM's: the note says how to override.
+		{"no answer", 0, false, nil, false, GMCaps{}, "did not answer .account; the leader is taken for a player and the run sends no GM command (pass gm: true"},
+		{"probe error", 0, false, errors.New("not in world"), false, GMCaps{}, "could not tell the leader's account level (not in world); the leader is taken for a player"},
 	}
 	for _, c := range cases {
 		g, p := runFixture(t)
-		g.dead.probeLevel, g.dead.probeKnown = c.level, c.known
-		d := NewDriver(p, g, Config{GM: GMProbe}, g.clock())
+		g.dead.probeLevel, g.dead.probeKnown, g.dead.probeErr = c.level, c.known, c.err
+		d := NewDriver(p, g, Config{GM: GMProbe, Shortcuts: true}, g.clock())
 		if err := d.Run(context.Background(), 0); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		rep := d.Report()
-		if rep.LeaderGM != c.wantGM || g.dead.probes != 1 || !strings.Contains(strings.Join(rep.Notes, "|"), c.wantNote) {
+		if rep.LeaderGM != c.wantGM || rep.GMCaps != c.wantCaps || g.dead.probes != 1 || !strings.Contains(strings.Join(rep.Notes, "|"), c.wantNote) {
 			t.Fatalf("%s: %+v", c.name, rep)
 		}
 		if c.known && (rep.AccountLevel == nil || *rep.AccountLevel != c.level) || !c.known && rep.AccountLevel != nil {
 			t.Fatalf("%s: level %v", c.name, rep.AccountLevel)
 		}
-		if got := len(g.gms) == 1 && g.gms[0] == ".gm visible on"; got != c.visible || (!c.visible && len(g.gms) != 0) {
+		if got := len(g.gms) == 1 && g.gms[0] == ".gm visible on"; got != c.wantCaps.Visible || (!c.wantCaps.Visible && len(g.gms) != 0) {
 			t.Fatalf("%s: gms %q", c.name, g.gms)
 		}
 	}
-	// A player found by the probe and a teleport asked for: refused before anything else.
-	g, p := runFixture(t)
-	g.mapID = 1
-	g.dead.probeKnown = true
-	err := NewDriver(p, g, Config{GM: GMProbe, Teleport: true}, g.clock()).Run(context.Background(), 0)
-	if err == nil || !strings.Contains(err.Error(), "needs a GM account") || len(g.teleports) != 0 || len(g.gms) != 0 {
-		t.Fatalf("%v", err)
+
+	// Teleport (.go xyz) needs level 1: refused for a player, with the override named when the level is unknown; an
+	// observer teleports.
+	for _, c := range []struct {
+		name         string
+		level        int
+		known        bool
+		wantErr      string
+		wantOverride bool
+	}{
+		{"player", 0, true, "teleport needs a GM account (.go xyz, level 1)", false},
+		{"unknown", 0, false, "teleport needs a GM account (.go xyz, level 1)", true},
+		{"observer", 1, true, "", false},
+	} {
+		g, p := runFixture(t)
+		g.mapID = 1
+		g.dead.probeLevel, g.dead.probeKnown = c.level, c.known
+		err := NewDriver(p, g, Config{GM: GMProbe, Teleport: true}, g.clock()).Run(context.Background(), 1)
+		if c.wantErr == "" {
+			if err != nil || len(g.teleports) != 1 {
+				t.Fatalf("%s: %v %v", c.name, err, g.teleports)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) || strings.Contains(err.Error(), "pass gm: true") != c.wantOverride || len(g.teleports) != 0 || len(g.gms) != 0 {
+			t.Fatalf("%s: %v", c.name, err)
+		}
 	}
-	// .aura needs developer level: a moderator's buffs are refused, a developer's are not.
-	for level, wantErr := range map[int]bool{2: true, 3: false} {
+
+	// .aura needs developer level: buffs are refused below it, before anything is sent but .gm visible on.
+	for level, wantErr := range map[int]string{0: "buffs need a GM account (.aura, level 3)", 1: "buffs need account level 3 (.aura); the leader's account level is 1",
+		2: "buffs need account level 3 (.aura); the leader's account level is 2", 3: ""} {
 		g, p := runFixture(t)
 		g.dead.probeLevel, g.dead.probeKnown = level, true
 		err := NewDriver(p, g, Config{GM: GMProbe, Buffs: []Buff{{22888, "Rallying Cry of the Dragonslayer"}}}, g.clock()).Run(context.Background(), 0)
-		if wantErr && (err == nil || !strings.Contains(err.Error(), "buffs need developer level")) {
+		if wantErr != "" && (err == nil || !strings.Contains(err.Error(), wantErr) || gmsWith(g, ".aura") != 0) {
 			t.Fatalf("level %d: %v", level, err)
 		}
-		if !wantErr && err != nil {
+		if wantErr == "" && err != nil {
 			t.Fatalf("level %d: %v", level, err)
 		}
+	}
+}
+
+// .revive needs developer level: a moderator (probed or asserted) does not revive by GM; its dead members go the
+// non-GM way (recover_wipe), and without recover_wipe the run says so instead of sending .revive.
+func TestReviveNeedsDeveloperLevel(t *testing.T) {
+	for _, cfg := range []Config{{GM: GMProbe, Shortcuts: true}, {GM: GMAssumed, GMLevel: 2, Shortcuts: true}} {
+		g, p := runFixture(t)
+		g.dead.probeLevel, g.dead.probeKnown = 2, true
+		g.party[1].Dead = true
+		g.afterGate = nil
+		d := NewDriver(p, g, cfg, g.clock())
+		err := d.Run(context.Background(), 0)
+		if err == nil || !strings.Contains(err.Error(), "Heal is dead and GM shortcuts are off") || gmsWith(g, ".revive") != 0 ||
+			!strings.Contains(strings.Join(d.Report().Notes, "|"), "GM revives need account level 3") || d.Report().GMCaps.Revive {
+			t.Fatalf("%+v: %v %q", cfg, err, g.gms)
+		}
+
+		g, p = runFixture(t)
+		g.dead.probeLevel, g.dead.probeKnown = 2, true
+		g.party[1].Dead = true
+		g.onChat = func(g *fakeGame, text string) {
+			if text == ".bot action corpse run" {
+				g.revAt = map[string]time.Time{"Heal": g.now.Add(20 * time.Second)}
+			}
+		}
+		cfg.RecoverWipe = true
+		d = NewDriver(p, g, cfg, g.clock())
+		if err := d.Run(context.Background(), 0); err != nil || gmsWith(g, ".revive") != 0 || g.count(".bot action corpse run") < 1 {
+			t.Fatalf("%+v: %v gms %q", cfg, err, g.gms)
+		}
+	}
+	// An asserted GM with no gm_level is a developer: it revives.
+	g, p := runFixture(t)
+	g.party[1].Dead = true
+	d := NewDriver(p, g, Config{Shortcuts: true}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil || gmsWith(g, ".revive Heal") != 1 || d.Report().GMCaps != (GMCaps{Visible: true, Teleport: true, Revive: true, Buffs: true}) {
+		t.Fatalf("%v %q %+v", err, g.gms, d.Report().GMCaps)
 	}
 }
 
@@ -532,4 +598,15 @@ func TestTheBrainIsStoppedForTheCorpseRun(t *testing.T) {
 	if got := strings.Join(br.log, ","); !strings.Contains(got, "stop,rest=true") && !strings.Contains(got, "start,rest=true") {
 		t.Fatalf("%s", got)
 	}
+}
+
+// gmsWith counts the GM commands sent that start with prefix.
+func gmsWith(g *fakeGame, prefix string) int {
+	n := 0
+	for _, c := range g.gms {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
 }

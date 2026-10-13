@@ -22,6 +22,8 @@ type Report struct {
 	LeaderGM bool `json:"leader_gm"`
 	// AccountLevel is the leader's security level (0 player, 3 developer) when the probe read it from ".account"; absent otherwise.
 	AccountLevel *int `json:"account_level,omitempty"`
+	// GMCaps are the GM commands the leader's account level let the run use (visible, teleport, revive, buffs).
+	GMCaps GMCaps `json:"gm_caps"`
 	// The leader's own deaths (README "Death and the corpse run"): how often it died, came back by an accepted
 	// resurrection or by a corpse run, and for how long it was dead in all.
 	LeaderDeaths  int        `json:"leader_deaths"`
@@ -145,5 +147,5 @@ func (p *reporter) summary() map[string]any {
 	r := p.snapshot()
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
-		"leader_gm": r.LeaderGM, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}
+		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}
 }

@@ -54,20 +54,45 @@ const maxAccepts = 3
 // the ghost stops a few yards short of that so that a position error does not make the packet ignored.
 const reclaimReach = 34
 
-// DeveloperLevel is SEC_DEVELOPER (Common.h:189): the level ".aura" needs (Chat.cpp:874).
-const DeveloperLevel = 3
+// Account security levels (Common.h AccountTypes) the GM commands of the driver need.
+const (
+	ObserverLevel  = 1 // SEC_OBSERVER: ".go xyz" (Chat.cpp:234)
+	ModeratorLevel = 2 // SEC_MODERATOR: ".gm visible" (Chat.cpp:218)
+	DeveloperLevel = 3 // SEC_DEVELOPER: ".revive" (Chat.cpp:887), ".aura" (Chat.cpp:874)
+)
+
+// GMCaps are the GM capabilities of a run, each on when the leader's account level reaches the one gmCapLevels gives it.
+// The report has them as gm_caps.
+type GMCaps struct {
+	Visible  bool `json:"visible"`  // ".gm visible on" as the run starts
+	Teleport bool `json:"teleport"` // ".go xyz" to the start (the teleport option)
+	Revive   bool `json:"revive"`   // ".revive <name>" of a dead member at a rest gate
+	Buffs    bool `json:"buffs"`    // ".aura <id>" on the companions (the buffs option)
+}
+
+// gmCapLevels is the account level each GM capability needs: the level of its command in the core's command table.
+var gmCapLevels = struct{ Visible, Teleport, Revive, Buffs int }{
+	Visible: ModeratorLevel, Teleport: ObserverLevel, Revive: DeveloperLevel, Buffs: DeveloperLevel,
+}
+
+// capsFor is the GM capabilities of an account of level.
+func capsFor(level int) GMCaps {
+	l := gmCapLevels
+	return GMCaps{Visible: level >= l.Visible, Teleport: level >= l.Teleport, Revive: level >= l.Revive, Buffs: level >= l.Buffs}
+}
 
 // GMMode says how the Driver learns whether the leader's account is a GM.
 type GMMode int
 
 const (
-	// GMAssumed (the zero value) takes the account for a GM and sends the GM commands, as the first driver did.
+	// GMAssumed (the zero value) takes the account for a GM of level Config.GMLevel (developer when 0) and sends the GM
+	// commands that level may (gmCapLevels).
 	GMAssumed GMMode = iota
 	// GMNone takes the account for a player's: the driver sends no GM command at all.
 	GMNone
 	// GMProbe sends ".account" once and reads the account level from the reply "Your account level is: N" (Game.ProbeAccount):
-	// above 0 is a GM. With PlayerCommands = 0 a player has the line said aloud, which counts as level 0. No clear answer
-	// counts as GM.
+	// above 0 is a GM, and the level gates each GM command. With PlayerCommands = 0 a player has the line said aloud,
+	// which counts as level 0. No clear answer (or an error) counts as a player: the probe broke, the run sends no GM command.
 	GMProbe
 )
 
