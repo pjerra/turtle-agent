@@ -254,27 +254,7 @@ func warriorMelee() *Strategy {
 			return 1
 		}}},
 		Actions: []*Action{
-			{Name: "auto_attack", Harmful: true, Threat: ThreatSingle, Target: fightTarget, Pre: []string{"face_target"},
-				Possible: func(c *Ctx) bool { return mobInReach(c) },
-				Useful:   func(c *Ctx) bool { return !swingingAt(c, fightMob(c)) },
-				Do: func(ctx context.Context, c *Ctx) error {
-					m := fightMob(c)
-					if m == nil {
-						return nil
-					}
-					if c.G.Selected() != m.GUID {
-						if err := c.G.Target(ctx, m.GUID); err != nil {
-							return err
-						}
-					}
-					if err := c.G.Attack(ctx); err != nil {
-						return err
-					}
-					c.mem.mel.mu.Lock()
-					c.mem.mel.swingTarget, c.mem.mel.swingAt = m.GUID, c.Now
-					c.mem.mel.mu.Unlock()
-					return nil
-				}},
+			swingAction("auto_attack", fightMob),
 			meleeAction("execute", "Execute", ThreatSingle, warriorStances["Execute"], func(c *Ctx) bool {
 				return mobHealthPct(fightMob(c)) < executePct
 			}),

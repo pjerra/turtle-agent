@@ -80,6 +80,7 @@ type fakeGame struct {
 	targets []packet.GUID
 	attacks int
 	stops   int
+	cancels int
 	stands  int
 	evs     []events.Event
 }
@@ -180,6 +181,14 @@ func (f *fakeGame) StopAttack(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stops++
+	return nil
+}
+
+// CancelAutoRepeat switches the auto-repeat spell off.
+func (f *fakeGame) CancelAutoRepeat(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancels++
 	return nil
 }
 

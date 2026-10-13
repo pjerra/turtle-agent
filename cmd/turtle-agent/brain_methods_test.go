@@ -37,7 +37,7 @@ func TestBrainStartRefusals(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{}`, "name at least one"},
 		{`{"strategies":[]}`, "name at least one"},
-		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, holy_priest, shadow_priest, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, `},
+		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: arms_warrior, `},
 		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer" does not match the strategies`},
 		{`{"strategies":["mage_rest"],"role":"healer"}`, `role "healer" needs the role_healer strategy`},
 		{`{"strategies":["arms_warrior"],"role":"tank"}`, `role "tank" does not match the strategies`},

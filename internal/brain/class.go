@@ -39,8 +39,8 @@ type ClassInfo struct {
 	ID    uint8
 	Name  string
 	Power uint8 // the primary power: mana, rage or energy
-	// Interrupts are the spells the class interrupts with, best first. Rogue and shaman are listed for step 4b; no preset
-	// uses them yet.
+	// Interrupts are the spells the class interrupts with, best first. Kick (rogue) and Hammer of Justice (paladin, a stun) are used by
+	// the step-4b presets; Earth Shock (shaman) has no preset yet.
 	Interrupts []InterruptSpell
 	// Drinks and ConjuredDrinks: the class drinks at rest (mana users), and conjures its own water (mages).
 	Drinks, ConjuredDrinks bool
@@ -73,8 +73,8 @@ var classTable = map[uint8]ClassInfo{
 		{Spell: "Pummel", Stances: []string{stanceBattle, stanceBerserker}},      // spell 6552; the Turtle rank 13491 is Battle only (SpellStances)
 		{Spell: "Shield Bash", Stances: []string{stanceBattle, stanceDefensive}}, // needs a shield; the server's refusal backs it off
 	}},
-	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning"},
-	ClassHunter:  {ID: ClassHunter, Name: "hunter", Power: powerMana, Drinks: true, ManaPotions: true},
+	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning", Interrupts: []InterruptSpell{{Spell: "Hammer of Justice"}}},
+	ClassHunter:  {ID: ClassHunter, Name: "hunter", Power: powerMana, Drinks: true, ManaPotions: true, Band: [2]float64{10, 30}}, // the dead zone is 8 yd, the shots reach 35
 	ClassRogue:   {ID: ClassRogue, Name: "rogue", Power: powerEnergy, Interrupts: []InterruptSpell{{Spell: "Kick"}}},
 	ClassPriest: {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &priestHeals, Band: [2]float64{14, 19},
 		Interrupts: []InterruptSpell{{Spell: "Silence"}}}, // a talent (spell 15487): the spellbook has it or it is skipped

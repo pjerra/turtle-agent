@@ -447,7 +447,7 @@ func TestEveryPresetAndStrategyBuilds(t *testing.T) {
 		_, err := New(g, DefaultConfig(), Params{Strategies: []string{n}})
 		standalone := map[string]bool{"combat_dps": true, "role_dps": true, "role_tank": true, "mage_rest": true, "avoid_ground": true, "ranged_position": true, "combat_consumables": true,
 			"mage_interrupt": true, "class_interrupt": true, "melee_position": true, "rest_eat": true,
-			"role_healer": true, "healer_position": true, "rest_drink": true, "priest_holy": true, "priest_defense": true, "priest_buffs": true}
+			"role_healer": true, "healer_position": true, "rest_drink": true, "hunter_position": true, "priest_holy": true, "priest_defense": true, "priest_buffs": true}
 		if !standalone[n] && err == nil {
 			t.Errorf("%s alone must be refused: it uses an action another strategy defines", n)
 		}
@@ -467,7 +467,7 @@ func TestBadParams(t *testing.T) {
 		want string
 	}{
 		{Params{}, "name at least one"},
-		{Params{Strategies: []string{"frost_mage", "warlock_fire"}}, `strategy "warlock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, holy_priest, shadow_priest, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, healer_position, `},
+		{Params{Strategies: []string{"frost_mage", "warlock_fire"}}, `strategy "warlock_fire" is unknown (presets: arms_warrior, `},
 		{Params{Strategies: []string{"frost_mage"}, Role: "tank"}, `role "tank"`},
 		{Params{Strategies: []string{"mage_frost"}}, "face_target"},
 	} {

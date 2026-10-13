@@ -951,7 +951,7 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 3 s; a server that says no wand is equipped backs it off for 30 s.
 
 **Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
-- presets: `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`; the warrior presets are in "Roles and classes" and the priest presets in "The healer and the priest" below;
+- presets: `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`; the warrior, rogue, hunter and paladin presets are in "Roles and classes" and the priest presets in "The healer and the priest" below;
 - `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
   leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
@@ -978,7 +978,7 @@ for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by han
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: the other classes (step 4b of #80; the priest and the healer role are in "The healer and the priest" below). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+idles (`dead`). Not in this step: the other classes (shaman, warlock, druid; rogue, hunter and retribution paladin are in "Roles and classes", the priest and the healer role in "The healer and the priest"). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
 `docs/LIVE-CHECKS.md`.
 
 ### Roles and classes (step 3c)
@@ -1003,8 +1003,8 @@ spells it interrupts with (and the stances those work in), whether it drinks and
 `class_interrupt` is Counterspell for a mage, Pummel (Battle or Berserker Stance) then Shield Bash (Battle or Defensive Stance) for a warrior; `mage_rest` and
 `combat_consumables` take their drink and mana-potion tables from the leader's class (the mage's conjured waters are the mage's row;
 a warrior drinks nothing, a priest only vendor drinks). `mage_interrupt` is the same strategy under the mage's name, and `frost_mage`
-is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick) and shaman (Earth Shock)
-rows are there for step 4b; no preset uses them (the priest's Silence is used by `shadow_priest`). The brain **does not change stance for an interrupt**: a stance change costs a warrior
+is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick), paladin (Hammer of Justice) and shaman (Earth Shock)
+rows are used by `combat_rogue`, `ret_paladin` and (Kick, Hammer of Justice) step 4b; the shaman has no preset yet (the priest's Silence is used by `shadow_priest`). The brain **does not change stance for an interrupt**: a stance change costs a warrior
 its rage (without Tactical Mastery) and Pummel costs rage. It uses the highest rank the stance allows: the core's data lets Pummel 6552 work in
 Battle and Berserker Stance and the Turtle rank 13491 in Battle Stance only (`SpellStances`), Shield Bash in Battle and Defensive Stance; a
 tank in Defensive Stance has Shield Bash only (it needs a shield: the server's refusal backs it off).
@@ -1149,6 +1149,88 @@ Presets: `holy_priest` = `role_healer` + `priest_holy` + `priest_defense` + `pri
 The dungeon driver's own orders are unchanged: a priest leader in a TortoiseBots party that has its own healer bot has two healers; the triage
 counts the other's heals in flight, so they do not heal the same member twice. Not in this step: Prayer of Healing, resurrecting a dead member,
 Divine Spirit and Shadow Protection, and every other class (step 4b).
+
+### Rogue, hunter and retribution paladin (step 4b)
+
+Three more damage dealers as presets, each a role-`dps` strategy (`combat_dps` discipline: the opening delay, the area veto) plus the shared
+parts above. The rotations are ideas from mod-playerbots' rotation tables (GPL-2.0+; ideas and numbers only, no code); every spell is checked
+against the core's spell data in `TestRogueSpellData`, `TestHunterSpellData` and `TestPaladinSpellData` (id, name, level, cost, range, power,
+flags, cooldown categories, and the aura names the brain looks for). None of these abilities has a stance or form in the core's `spell_template`
+(`stances` and `stancesNot` are 0 for every rank, tortoise-wow 5d79486; the data tests pin that the brain gives them no gate and the class table
+gives Kick and Hammer of Justice none), so there is no stance table here as there is for the warrior. Energy is in whole points, mana in
+points; relevance is the band the rule asks for.
+
+**Rogue** (`combat_rogue` = `combat_dps` + `rogue_combat` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat`).
+It stands behind the mob like the warrior.
+
+| Ability (relevance) | When |
+| :--- | :--- |
+| Auto attack (19) | a mob within 8 yd, not swinging at it yet |
+| Slice and Dice (18) | 2 or more combo points on the mob, the mob above 40% health, and the buff missing or with under 1.5 s left (when the server says how long) |
+| Eviscerate (17) | 5 combo points, or 4 when the mob is at 35% or less. The points count only when they are on the fight's mob (`combo_target`) |
+| Sinister Strike (15) | the builder, below 5 points (it does not overshoot) |
+| Kick (40, `class_interrupt`) | a heal, crowd-control or damage cast within 5 yd |
+| Feint (20) | a mob within 8 yd has the rogue while a tank is in view; its own 10 s cooldown spaces it |
+| Evasion (43) | a mob on the rogue within 8 yd and health below 50% |
+| Vanish (44) | a mob on the rogue and health below 25%. A threat wipe that leaves the rogue stealthed until its next swing or Sinister Strike: the last resort of the ladder, there is no opener after it |
+| Sprint (42) and the run to the tank (33) | a mob on the rogue, health below 30%, the tank in view more than 8 yd away: `flee_to_tank` walks to a point 4 yd from the tank |
+
+Not in this step: Stealth openers (they need a walk up to a sleeping mob; a tank or the dungeon driver pulls), Backstab (it needs a dagger, which
+the agent cannot tell from the equipment) and poisons (applying one needs a target item; `Game.UseItem` takes none).
+
+**Hunter** (`marksman_hunter` = `combat_dps` + `hunter_marksman` + `hunter_position` + `avoid_ground` + `combat_consumables` + `rest_drink` + `rest_eat`).
+Ranged, 8 to 35 yd; the first 8 yd are the dead zone. Auto Shot is spell 75 started like the mage's wand: one `cast` at the mob, and the server ignores a
+second start while it runs but restarts the
+ranged timer at 500 ms, so the brain does not repeat it: it takes Auto Shot as running while it sees a shot (the spell state's last cast, within 6 s)
+and sends it again after a walk, a refusal, a feint, a new mob, or when no shot was seen for 6 s.
+
+| Ability (relevance) | When |
+| :--- | :--- |
+| Auto Shot (19) | a mob in range, and Auto Shot not running (see above) |
+| Hunter's Mark (18) | the mob has none and is above 50% health |
+| Multi-Shot (17) | 2 or more mobs in combat within 10 yd of the target, 20% mana or more; the damage dealer's area veto and a veto of its own (a mob near the target that is not on the tank or the hunter) hold it back |
+| Serpent Sting (16) | the mob has none, is above 40% health, 20% mana or more |
+| Arcane Shot (15) | on cooldown, 20% mana or more |
+| Concussive Shot (32) | a mob on the hunter, moving, 9 to 30 yd off, not slowed yet |
+| Feign Death (41) | a mob on the hunter within 15 yd while a tank is in view. The auto-repeat spell is switched off first (`CMSG_CANCEL_AUTO_REPEAT_SPELL`, the optional `AutoRepeatCanceller` half of the game; the server keeps Auto Shot through the feint and the next shot would end it). The shots and the swing wait 6 s, then Auto Shot is sent anew |
+| Swing (19), Raptor Strike (16) | a mob on the hunter within 6 yd (no tank, or Feign Death not ready); Raptor Strike is held 1.5 s like Heroic Strike |
+| Aspect of the Hawk (12) | no aspect up (a Cheetah or Pack in combat is replaced); Cheetah and Pack are never cast and left alone out of combat |
+| Aspect of the Viper (20) | in combat below 20% mana, back to the Hawk from 60%. Turtle has it from level 56 (`45651`); without it the hunter drinks out of combat (`rest_drink`) |
+
+`hunter_position` (relevance 30) keeps the hunter between 9 and 32 yd (2D) from the fight's mob with sight of it and out of its front within 14 yd;
+the standing spots are searched 12 to 29 yd from the mob like the mage's band. A mob on the hunter is the aggro response's business (Concussive
+Shot, Feign Death, `run_to_tank`, the melee kit). A server refusal for ammo (`no_ammo`, `need_ammo`) holds the spell back for 30 s
+(`brain_status.holds`, the decision log says `held:no_ammo`); the ammo in the quiver is not in the backpack list, so there is no count to warn on.
+
+**Pets are not driven.** What the agent is missing: the pet's guid (`Store.Owners` finds a unit's summoner, but the brain's `Game` and the unit rows
+do not carry it), the pet's health and happiness, and a call that sends `CMSG_PET_ACTION` (the opcode is there, nothing sends it): so no
+`pet attack` on the tank's mob, and Call Pet, Revive Pet, Mend Pet and Feed Pet are not cast (the brain cannot tell whether a pet is out or
+hurt). A hunter plays without its pet until those exist.
+
+**Retribution paladin** (`ret_paladin` = `combat_dps` + `paladin_retribution` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_drink` + `rest_eat`).
+It stands behind the mob.
+
+| Ability (relevance) | When |
+| :--- | :--- |
+| Seal (18) | none up and the fight's mob within 15 yd (also during the opening delay: it is a buff). Seal of Command, else Righteousness; Seal of the Crusader instead when the mob has no Judgement of the Crusader and is above 60% health and the paladin has 50% mana or more; Seal of Wisdom instead below 30% mana unless the mob has Judgement of Wisdom. A seal that is up is never swapped |
+| Auto attack (19) | a mob within 8 yd |
+| Judgement (17) | a seal is up, the mob within reach; its own 10 s cooldown. It spends the seal, so the seal is cast again |
+| Crusader Strike (16) | on cooldown |
+| Consecration (14) | 2 or more mobs within 8 yd, 40% mana or more, and the area veto allows it |
+| Hammer of Justice (40 as `class_interrupt`, 42 as an emergency) | a cast to stop within 10 yd; or a mob on the paladin in melee, health below 45%, the mob not stunned already |
+| Divine Protection (44) | a mob on the paladin and health below 35%. It pacifies the paladin: attacks wait while the aura lasts |
+| Lay on Hands (50) | in combat below 20% health |
+| Mana floor | below 30% mana only a Seal of Wisdom is judged (its judgement gives mana back); below 15% no seal but Wisdom is cast and Crusader Strike waits. The swing and the free abilities go on; `rest_drink` and the mana potion are the way back |
+| Aura (13) | Retribution Aura, else Devotion Aura, when the aura is not up. A companion paladin's Devotion does not count for the Retribution (they stack); out of combat only at a rest gate |
+| Blessing (12) | out of combat at a rest gate, on the paladin itself: Blessing of Might, else Kings, when neither is up, or the one it carries when under a minute is left. The buff's caster is not visible, so a blessing from a companion paladin counts as ours and is not cast over |
+
+The companion paladins judge too: the brain never judges over their debuffs on purpose (the Crusader and Wisdom seals above are the only ones
+that leave a debuff, and both look at the mob first). Drinking is `rest_drink` (any mana class: the vendor drinks of the class table, below 65%
+mana, out of combat at a rest gate). Not in this step: Exorcism and Holy Wrath (undead and demons only, and a 1.12 client sees no creature
+type), blessings for the party, Redemption, Righteous Fury and Hand of Reckoning.
+
+Examples: `brain_start {"strategies":["combat_rogue"],"tank":"<name>"}`, `brain_start {"strategies":["marksman_hunter"]}`,
+`dungeon_run {"name":"uldaman","brain":"ret_paladin"}`.
 
 ## Vendors, trainers and quests
 

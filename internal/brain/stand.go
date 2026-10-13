@@ -22,6 +22,13 @@ type Stander interface {
 	Stand(ctx context.Context) error
 }
 
+// AutoRepeatCanceller is the optional half of the Game that can switch the player's auto-repeat spell (Auto Shot) off, as a real client
+// does when the player toggles it. The hunter's Feign Death needs it: the server keeps the auto-repeat spell through the feint, and the
+// next shot would end it.
+type AutoRepeatCanceller interface {
+	CancelAutoRepeat(ctx context.Context) error
+}
+
 const (
 	standWorthRel = RelHigh + 8 // the relevance from which a meal is broken outside a fight
 	standHold     = 1500 * time.Millisecond

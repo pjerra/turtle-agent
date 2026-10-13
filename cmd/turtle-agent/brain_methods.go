@@ -185,6 +185,10 @@ func (g *sessionBrainGame) Attack(ctx context.Context) error { return g.cur().At
 
 func (g *sessionBrainGame) Stand(ctx context.Context) error { return g.cur().Stand(ctx) }
 
+func (g *sessionBrainGame) CancelAutoRepeat(ctx context.Context) error {
+	return g.cur().CancelAutoRepeat(ctx)
+}
+
 func (g *sessionBrainGame) StopAttack(ctx context.Context) error { return g.cur().StopAttack(ctx) }
 
 func (g *sessionBrainGame) UseItem(ctx context.Context, entry uint32) error {
