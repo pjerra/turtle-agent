@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,8 +10,9 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
-// The create body is CMSG_CHAR_CREATE (CharacterHandler.cpp:179-185): name,
-// race, class, gender, six default look bytes, Turtle's u32 challengeMask 0.
+// The create body is CMSG_CHAR_CREATE (WorldSession::HandleCharCreateOpcode in
+// CharacterHandler.cpp): name, race, class, gender, six default look bytes,
+// Turtle's u32 challengeMask 0.
 func TestCreateBodyLayout(t *testing.T) {
 	c := CreateSpec{Race: 1, Class: 2, Gender: 1}
 	got := c.createBody("Hirequest")
@@ -43,9 +45,43 @@ func TestParseCreateSpec(t *testing.T) {
 	if err != nil || c != (CreateSpec{Race: 4, Class: 7, Gender: 1}) {
 		t.Fatalf("%+v %v", c, err)
 	}
-	for _, bad := range []string{"", "1", "1,2,3,4", "human,warrior", "1,x", "300,2"} {
-		if _, err := ParseCreateSpec(bad); err == nil {
-			t.Errorf("%q parsed without an error", bad)
+	c, err = ParseCreateSpec("10,11,1") // Turtle's High Elf, Druid
+	if err != nil || c != (CreateSpec{Race: 10, Class: 11, Gender: 1}) {
+		t.Fatalf("%+v %v", c, err)
+	}
+	for _, bad := range []struct{ spec, want string }{
+		{"", "want race,class[,gender]"},
+		{"1", "want race,class[,gender]"},
+		{"1,2,3,4", "want race,class[,gender]"},
+		{"human,warrior", "is not a number"},
+		{"1,x", "is not a number"},
+		{"0,1", "race 0 is not a playable race"},
+		{"11,1", "race 11 is not a playable race"},
+		{"300,2", "race 300 is not a playable race"},
+		{"1,6", "class 6 is not a playable class"},
+		{"1,10", "class 10 is not a playable class"},
+		{"1,2,2", "gender 2 is not 0 (male) or 1 (female)"},
+		{"1,2,256", "gender 256 is not 0 (male) or 1 (female)"},
+	} {
+		if _, err := ParseCreateSpec(bad.spec); err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("%q: err = %v, want it to mention %q", bad.spec, err, bad.want)
+		}
+	}
+}
+
+// Every number is accepted or refused as the core's playable sets say: races
+// 1-10, classes 1-5, 7-9 and 11, genders 0 and 1.
+func TestParseCreateSpecRangesMatchCore(t *testing.T) {
+	classes := map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true, 7: true, 8: true, 9: true, 11: true}
+	for n := 0; n <= 255; n++ {
+		if _, err := ParseCreateSpec(fmt.Sprintf("%d,1", n)); (err == nil) != (n >= 1 && n <= 10) {
+			t.Errorf("race %d: err = %v", n, err)
+		}
+		if _, err := ParseCreateSpec(fmt.Sprintf("1,%d", n)); (err == nil) != classes[n] {
+			t.Errorf("class %d: err = %v", n, err)
+		}
+		if _, err := ParseCreateSpec(fmt.Sprintf("1,1,%d", n)); (err == nil) != (n <= 1) {
+			t.Errorf("gender %d: err = %v", n, err)
 		}
 	}
 }

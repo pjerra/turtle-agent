@@ -10,7 +10,7 @@ import (
 func TestLoginBadCreateNeverSpendsARealmdAttempt(t *testing.T) {
 	var calls int
 	stubLogin(t, nil, &calls)
-	for _, spec := range []string{"human", "1", "1,2,3,4"} {
+	for _, spec := range []string{"human", "1", "1,2,3,4", "0,1", "11,1", "1,6", "1,2,2"} {
 		code, _, errOut := runCLI("login", "--config", settingsFile(t, unreachable), "--create", spec, "harness", "Harnessb")
 		if code != exitUsage || !strings.Contains(errOut, "--create") {
 			t.Fatalf("spec %q: code %d stderr %q", spec, code, errOut)
@@ -37,5 +37,9 @@ func TestLoadFleetCreateField(t *testing.T) {
 	_, err = loadFleet(writeFile(t, "f.json", `{"members":[{"account":"A","character":"A","rpc":"127.0.0.1:9001","create":"human"}]}`), nil)
 	if err == nil || !strings.Contains(err.Error(), "--create") {
 		t.Fatalf("bad create spec: %v", err)
+	}
+	_, err = loadFleet(writeFile(t, "f.json", `{"members":[{"account":"A","character":"A","rpc":"127.0.0.1:9001","create":"1,6"}]}`), nil)
+	if err == nil || !strings.Contains(err.Error(), "class 6") {
+		t.Fatalf("unplayable class in a fleet create spec: %v", err)
 	}
 }
