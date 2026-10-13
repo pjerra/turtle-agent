@@ -615,3 +615,67 @@ func TestMarkersOfAnotherMapAreLeftOut(t *testing.T) {
 		t.Fatalf("%+v", box)
 	}
 }
+
+// A plan's bosses mark the Run they are given to and no other: the builder's next Run has none it was not given, and
+// the bosses SetBoss adds stay for every Run.
+func TestBuildWithBossesMarksOnlyThatRun(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Map = 5
+	b := NewBuilder(cfg)
+	for i := 0; i < 3; i++ {
+		b.AddFrame(Frame{T: at(float64(i) * 5), Map: 5, Hostiles: []UnitFrame{{GUID: 9, Entry: 200, Name: "Gallery King", MaxHealth: 3000, Pos: Pos{X: 40, Y: 40}}}})
+	}
+	isBoss := func(r Run) bool { return len(r.Creatures) == 1 && r.Creatures[0].Boss }
+	if r := b.BuildWithBosses(nil, nil, 200); !isBoss(r) {
+		t.Fatalf("the run's boss is not marked: %+v", r.Creatures)
+	}
+	if r := b.Build(nil, nil); isBoss(r) {
+		t.Fatal("a boss of one run is still a boss in the next")
+	}
+	b.SetBoss(200)
+	if r := b.Build(nil, nil); !isBoss(r) {
+		t.Fatal("SetBoss did not mark the boss")
+	}
+}
+
+// Members are told apart by GUID: two units that share a name are two tracks with their own samples, and Build leaves
+// the builder as it was. A botwatch sample (no GUID) joins the one member of its name that has a GUID, in time order,
+// and stays a track of its own when two units share the name.
+func TestMembersAreToldApartByGUID(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Map = 5
+	b := NewBuilder(cfg)
+	for i := 0; i < 4; i++ {
+		b.AddFrame(Frame{T: at(float64(i) * 10), Map: 5, Members: []MemberFrame{
+			{Name: "Alice", GUID: 1, Pos: Pos{X: float32(i)}, Self: true},
+			{Name: "Bob", GUID: 2, Pos: Pos{X: 100 + float32(i)}},
+			{Name: "Bob", GUID: 3, Pos: Pos{X: 200 + float32(i)}}, // another unit with the same name
+		}})
+	}
+	for range 2 {
+		run := b.Build(nil, nil)
+		if len(run.Tracks) != 3 || run.Tracks[0].Name != "Alice" || !run.Tracks[0].Leader {
+			t.Fatalf("tracks %+v", run.Tracks)
+		}
+		if bob1, bob2 := run.Tracks[1], run.Tracks[2]; bob1.Name != "Bob" || bob2.Name != "Bob" || len(bob1.Samples) != 4 ||
+			len(bob2.Samples) != 4 || bob1.Samples[0].X != 100 || bob2.Samples[0].X != 200 {
+			t.Fatalf("bobs %+v %+v", bob1, bob2)
+		}
+	}
+
+	c := NewBuilder(cfg)
+	c.AddFrame(Frame{T: at(0), Map: 5, Members: []MemberFrame{{Name: "Carl", GUID: 7, Pos: Pos{X: 1}}}})
+	c.AddFrame(Frame{T: at(20), Map: 5, Members: []MemberFrame{{Name: "Carl", GUID: 7, Pos: Pos{X: 3}}}})
+	c.AddFrame(Frame{T: at(10), Map: 5, Members: []MemberFrame{{Name: "Carl", Pos: Pos{X: 2}}}})
+	for range 2 {
+		if run := c.Build(nil, nil); len(run.Tracks) != 1 || len(run.Tracks[0].Samples) != 3 || run.Tracks[0].Samples[1].X != 2 {
+			t.Fatalf("botwatch sample not joined: %+v", run.Tracks)
+		}
+	}
+
+	d := NewBuilder(cfg)
+	d.AddFrame(Frame{T: at(0), Map: 5, Members: []MemberFrame{{Name: "Dan", GUID: 8, Pos: Pos{X: 1}}, {Name: "Dan", GUID: 9, Pos: Pos{X: 5}}, {Name: "Dan", Pos: Pos{X: 9}}}})
+	if run := d.Build(nil, nil); len(run.Tracks) != 3 {
+		t.Fatalf("tracks %+v", run.Tracks)
+	}
+}

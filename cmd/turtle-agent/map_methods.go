@@ -113,17 +113,19 @@ func registerMapMethods(srv *rpc.Server, cur func() *session.Session, planner *n
 		}
 		// Take one frame now so the picture is as of this call, then build from a copy of what was recorded.
 		rec.sample(time.Now())
-		rec.mu.Lock()
+		// The plan's bosses mark this image only: the recorder goes on after the call.
+		var bosses []uint32
 		if plan != nil {
-			rec.b.SetBoss(mapview.BossEntries(plan)...)
+			bosses = mapview.BossEntries(plan)
 		}
+		rec.mu.Lock()
 		var rep *dungeon.Report
 		if dr != nil {
 			if st := dr.status(); st.Report != nil {
 				rep = st.Report
 			}
 		}
-		run := rec.b.Build(allEvents(cur().Log()), rep)
+		run := rec.b.BuildWithBosses(allEvents(cur().Log()), rep, bosses...)
 		rec.mu.Unlock()
 
 		cfg := mapview.DefaultConfig()
@@ -139,7 +141,14 @@ func registerMapMethods(srv *rpc.Server, cur func() *session.Session, planner *n
 		var trunc bool
 		note := "background left out"
 		if p.Background == nil || *p.Background {
-			polys, trunc, note = mapview.LoadBackground(planner, run.Map, box)
+			// The box is read into a planner of its own, closed when the call returns: the tiles a live plan holds
+			// stay where they are, and nothing this call loaded outlives it.
+			var draw *navmesh.Planner
+			if planner != nil {
+				draw = planner.Scratch()
+				defer draw.Close()
+			}
+			polys, trunc, note = mapview.LoadBackground(draw, run.Map, box)
 		}
 		scene, err := mapview.NewScene(run, mapview.SceneOptions{Box: &box, Cuts: cuts, Auto: auto, Polys: polys, PolysTruncated: trunc,
 			BackgroundNote: note, Overlay: overlay, Config: cfg})

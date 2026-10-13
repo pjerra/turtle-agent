@@ -3,6 +3,7 @@ package mapview
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -11,9 +12,11 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 )
 
-// MemberFrame is where a party member stood in a Frame.
+// MemberFrame is where a party member stood in a Frame. A unit is told apart by its GUID, so two units that share a
+// name are two tracks; a member without a GUID (a botwatch sample) is told apart by its name.
 type MemberFrame struct {
 	Name string
+	GUID uint64
 	Pos
 	Self bool // the player the agent plays: the leader
 }
@@ -78,6 +81,12 @@ func DefaultConfig() Config {
 	}
 }
 
+// memberKey is the track a member's samples go to: its GUID, or with none (a botwatch sample) its name.
+type memberKey struct {
+	guid uint64
+	name string // only when guid is zero
+}
+
 type memberAcc struct {
 	name    string
 	leader  bool
@@ -116,8 +125,8 @@ type objectAcc struct {
 // concurrent use.
 type Builder struct {
 	cfg       Config
-	members   map[string]*memberAcc
-	order     []string
+	members   map[memberKey]*memberAcc
+	order     []memberKey
 	creatures map[uint64]*creatureAcc
 	objects   map[uint64]*objectAcc
 	first     time.Time
@@ -128,7 +137,7 @@ type Builder struct {
 
 // NewBuilder returns an empty Builder.
 func NewBuilder(cfg Config) *Builder {
-	return &Builder{cfg: cfg, members: map[string]*memberAcc{}, creatures: map[uint64]*creatureAcc{},
+	return &Builder{cfg: cfg, members: map[memberKey]*memberAcc{}, creatures: map[uint64]*creatureAcc{},
 		objects: map[uint64]*objectAcc{}, mapVotes: map[uint32]int{}}
 }
 
@@ -144,7 +153,8 @@ func (b *Builder) SetMap(m uint32) { b.cfg.Map = int(m) }
 // SetTitle sets the image's title.
 func (b *Builder) SetTitle(t string) { b.cfg.Title = t }
 
-// SetBoss adds creature entries to the bosses.
+// SetBoss adds creature entries to the bosses of every Run the builder makes from now on. A builder that outlives one
+// run (the RPC's recorder) passes that run's bosses to BuildWithBosses instead.
 func (b *Builder) SetBoss(entries ...uint32) {
 	if b.cfg.Boss == nil {
 		b.cfg.Boss = map[uint32]bool{}
@@ -178,11 +188,17 @@ func (b *Builder) AddFrame(f Frame) {
 	}
 	b.note(f.T)
 	for _, m := range f.Members {
-		a := b.members[m.Name]
+		k := memberKey{guid: m.GUID}
+		if m.GUID == 0 {
+			k.name = m.Name
+		}
+		a := b.members[k]
 		if a == nil {
 			a = &memberAcc{name: m.Name}
-			b.members[m.Name] = a
-			b.order = append(b.order, m.Name)
+			b.members[k] = a
+			b.order = append(b.order, k)
+		} else if a.name == "" {
+			a.name = m.Name
 		}
 		if m.Self {
 			a.leader = true
@@ -276,6 +292,12 @@ func (b *Builder) Samples() (n int) {
 
 // Build turns what was added, with the events and (optionally) the dungeon report, into a Run.
 func (b *Builder) Build(evs []events.Event, rep *dungeon.Report) Run {
+	return b.BuildWithBosses(evs, rep)
+}
+
+// BuildWithBosses is Build with bosses for this Run only, besides the builder's own (SetBoss): the entries are bosses
+// in this Run and nowhere else, so a plan's bosses drawn over a recorder that outlives the run stay with that run.
+func (b *Builder) BuildWithBosses(evs []events.Event, rep *dungeon.Report, bosses ...uint32) Run {
 	kept := make([]events.Event, 0, len(evs))
 	for _, e := range evs {
 		if b.within(e.Time) {
@@ -304,20 +326,10 @@ func (b *Builder) Build(evs []events.Event, rep *dungeon.Report) Run {
 	}
 	sec := func(t time.Time) float64 { return t.Sub(b.first).Seconds() }
 
-	// Tracks, leader first.
-	names := append([]string(nil), b.order...)
-	sort.SliceStable(names, func(i, j int) bool { return b.members[names[i]].leader && !b.members[names[j]].leader })
-	for _, n := range names {
-		a := b.members[n]
-		tr := Track{Name: n, Leader: a.leader}
-		for _, s := range a.samples {
-			tr.Samples = append(tr.Samples, Sample{T: sec(s.t), Pos: s.pos, Map: s.m})
-		}
-		run.Tracks = append(run.Tracks, tr)
-	}
+	run.Tracks = b.tracks(sec)
 	run.Gaps = countGaps(run.Tracks, run.Map, b.cfg.GapAfter.Seconds())
 
-	b.buildCreatures(&run, evs, sec)
+	b.buildCreatures(&run, evs, sec, bosses)
 	b.buildMarkers(&run, evs, rep, sec)
 	if run.Gaps > 0 {
 		run.Notes = append(run.Notes, fmt.Sprintf("%d %s of a route with no position for over %.0f s (dotted)", run.Gaps, plural(run.Gaps, "stretch", "stretches"), b.cfg.GapAfter.Seconds()))
@@ -337,6 +349,55 @@ func (b *Builder) dominantMap() uint32 {
 	return best
 }
 
+// tracks makes one track per member, leader first. A sample without a GUID (a botwatch bot) joins the one member with a
+// GUID of its name when there is only one, so a bot that a capture and a botwatch file both saw is one track; with two
+// such units, or none, it is a track of its own. The accumulators are read, not changed: a later Build sees the same
+// samples.
+func (b *Builder) tracks(sec func(time.Time) float64) []Track {
+	guidOf := map[string]memberKey{} // the member with a GUID of each name
+	named := map[string]int{}        // how many members with a GUID have each name
+	for _, k := range b.order {
+		if k.guid != 0 {
+			name := b.members[k].name
+			guidOf[name] = k
+			named[name]++
+		}
+	}
+	var targets []memberKey
+	parts := map[memberKey][]*memberAcc{}
+	for _, k := range b.order {
+		t := k
+		if k.guid == 0 && named[k.name] == 1 {
+			t = guidOf[k.name]
+		}
+		if _, ok := parts[t]; !ok {
+			targets = append(targets, t)
+		}
+		parts[t] = append(parts[t], b.members[k])
+	}
+	out := make([]Track, 0, len(targets))
+	for _, t := range targets {
+		tr := Track{Name: b.members[t].name}
+		samples := parts[t][0].samples
+		for _, a := range parts[t] {
+			tr.Leader = tr.Leader || a.leader
+		}
+		if len(parts[t]) > 1 {
+			samples = nil
+			for _, a := range parts[t] {
+				samples = append(samples, a.samples...)
+			}
+			sort.SliceStable(samples, func(i, j int) bool { return samples[i].t.Before(samples[j].t) })
+		}
+		for _, s := range samples {
+			tr.Samples = append(tr.Samples, Sample{T: sec(s.t), Pos: s.pos, Map: s.m})
+		}
+		out = append(out, tr)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Leader && !out[j].Leader })
+	return out
+}
+
 // countGaps counts the stretches of a track on the map with a hole longer than limit seconds.
 func countGaps(tracks []Track, mapID uint32, limit float64) (n int) {
 	for _, t := range tracks {
@@ -350,7 +411,7 @@ func countGaps(tracks []Track, mapID uint32, limit float64) (n int) {
 	return n
 }
 
-func (b *Builder) buildCreatures(run *Run, evs []events.Event, sec func(time.Time) float64) {
+func (b *Builder) buildCreatures(run *Run, evs []events.Event, sec func(time.Time) float64, bosses []uint32) {
 	// Deaths the event log names beat the frames' (a corpse seen later).
 	killedAt := map[uint64]time.Time{}
 	for _, e := range evs {
@@ -410,7 +471,8 @@ func (b *Builder) buildCreatures(run *Run, evs []events.Event, sec func(time.Tim
 		default:
 			c.Fate = FateSkipped
 		}
-		c.Boss = b.cfg.Boss[c.Entry] || (median > 0 && a.maxHealth >= 8000 && float64(a.maxHealth) >= 5*median)
+		c.Boss = b.cfg.Boss[c.Entry] || slices.Contains(bosses, c.Entry) ||
+			(median > 0 && a.maxHealth >= 8000 && float64(a.maxHealth) >= 5*median)
 		cs = append(cs, c)
 	}
 	groupPacks(cs, b.cfg.PackRadius)

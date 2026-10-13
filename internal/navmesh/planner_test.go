@@ -438,3 +438,39 @@ func TestBoxTilesCutsToTheLimitNearestTheCentre(t *testing.T) {
 		t.Fatalf("%v %v", all, trunc)
 	}
 }
+
+// A map image's background reads its box into a scratch planner: the planner a plan runs on keeps its tiles, even past
+// its tile limit, and the tile files it found missing stay missing until its next plan.
+func TestScratchPolygonsLeaveTheLivePlannerAlone(t *testing.T) {
+	dir := navfixture.WriteDir(t, fixtureMap, navfixture.LCorridor(0))
+	live := NewPlanner(dir)
+	defer live.Close()
+	live.max = 1
+	if _, err := live.Plan(fixtureMap, Vec3{12, 12, 0}, Vec3{48, 48, 0}); err != nil {
+		t.Fatal(err)
+	}
+	// The tile under (-588, 12) is not in the folder yet: the live planner remembers it as missing.
+	if fl, err := live.Floors(fixtureMap, -588, 12, -50, 50); err != nil || fl != nil {
+		t.Fatalf("%v %v", fl, err)
+	}
+	far := navfixture.BuildTile([]navfixture.Poly{navfixture.Square(-590, 10, -586, 14, 0)}, nil, 0, -2)
+	if err := os.WriteFile(filepath.Join(dir, tileFile(fixtureMap, -588, 12)), far, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The box holds only the far tile: a draw on the live planner would unload its own tile to make room for it.
+	draw := live.Scratch()
+	defer draw.Close()
+	polys, truncated, err := draw.Polygons(fixtureMap, -600, -20, -560, 40)
+	if err != nil || truncated || len(polys) == 0 {
+		t.Fatalf("%d polygons, truncated=%v: %v", len(polys), truncated, err)
+	}
+	if got := draw.Tiles(fixtureMap); len(got) != 1 || got[0] != tileFile(fixtureMap, -588, 12) {
+		t.Fatalf("the scratch planner holds %v", got)
+	}
+	if got := live.Tiles(fixtureMap); len(got) != 1 || got[0] != "0013131.mmtile" {
+		t.Fatalf("the live planner's tiles are now %v", got)
+	}
+	if fl, err := live.Floors(fixtureMap, -588, 12, -50, 50); err != nil || fl != nil {
+		t.Fatalf("the draw cleared the live planner's missing tile: %v %v", fl, err)
+	}
+}

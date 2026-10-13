@@ -96,3 +96,19 @@ func TestMapSnapshotUsesTheLivePlannerAndSplitsFloors(t *testing.T) {
 		t.Fatalf("%v", off)
 	}
 }
+
+// The snapshot's background is read into a planner of its own: the live planner's tile cache is left as it was.
+func TestMapSnapshotLoadsItsTilesIntoAPlannerOfItsOwn(t *testing.T) {
+	planner := navmesh.NewPlanner(navfixture.WriteDir(t, 0, []navfixture.Poly{navfixture.Square(0, 0, 60, 60, 0)}))
+	t.Cleanup(planner.Close)
+	r := newRigWith(t, session.Options{Planner: planner}, [3]float32{10, 10, 0}, methodOptions{Planner: planner})
+	if got := planner.Tiles(0); len(got) != 0 {
+		t.Fatalf("tiles before the snapshot: %v", got)
+	}
+	if res := r.call("map_snapshot", `{"pad":10}`)["result"].(map[string]any); res["background"] != true {
+		t.Fatalf("%v", res)
+	}
+	if got := planner.Tiles(0); len(got) != 0 {
+		t.Fatalf("the snapshot loaded tiles into the live planner: %v", got)
+	}
+}
