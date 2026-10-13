@@ -134,10 +134,12 @@ valid; a `session` event with state `reconnected` marks the new session. Out of 
 the flag (status stays up for 30 s, then exit 6). `--reconnect` cannot be combined with `--capture`.
 
 `--create race,class[,gender]` (off by default) creates the character at login when the account's list lacks the
-name: the agent sends `CMSG_CHAR_CREATE` with that race, class and gender (numbers; gender defaults to 0), a default
-look, outfit 0 and no challenge mode, then re-asks the list and logs the new character in. A failed create ends the
-login at once with the server's reason (name in use, reserved or invalid name, too many characters, ...), like an
-unknown character today. A fleet member's `"create": "race,class[,gender]"` passes the same spec to that child's `login`.
+name: the agent sends `CMSG_CHAR_CREATE` with that race, class and gender (numbers, checked before realmd is contacted:
+race 1-10, class 1-5, 7-9 or 11, gender 0 or 1; gender defaults to 0), a default look, outfit 0 and no challenge mode,
+then re-asks the list and logs the new character in. A failed create ends the login at once with the server's reason
+(name in use, reserved or invalid name, too many characters, ...), like an unknown character today. A fleet member's
+`"create": "race,class[,gender]"` passes the same spec to that child's `login`. It is for test servers and your own
+accounts: a typo in the name creates a character with that name.
 
 ## What the server sees
 
