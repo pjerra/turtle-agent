@@ -172,95 +172,120 @@ func load(src []byte, updates ...[]byte) (table, error) {
 	return t, nil
 }
 
-// apply reads every INSERT and REPLACE of rows into spell_template, then every UPDATE of a
-// wanted column. Each INSERT names its columns, so the entry, name and aura columns are
-// looked up per statement.
+// apply reads the INSERT and REPLACE statements of rows into spell_template and the UPDATEs of a
+// wanted column, in the order they stand in the file: an UPDATE changes the rows written before it
+// and a later REPLACE overwrites it. Each INSERT names its columns, so the entry, name and aura
+// columns are looked up per statement.
 func (t table) apply(src []byte) error {
+	type step struct {
+		at     int
+		insert []int  // stmt submatch indices
+		update string // the UPDATE's text after SET
+	}
+	var steps []step
 	for _, loc := range stmt.FindAllSubmatchIndex(src, -1) {
-		cols := strings.Split(strings.ReplaceAll(string(src[loc[2]:loc[3]]), "`", ""), ",")
-		at := map[string]int{}
-		for i, c := range cols {
-			at[strings.TrimSpace(c)] = i
+		steps = append(steps, step{at: loc[0], insert: loc})
+	}
+	for _, m := range update.FindAllSubmatchIndex(src, -1) {
+		steps = append(steps, step{at: m[0], update: string(src[m[2]:m[3]])})
+	}
+	sort.Slice(steps, func(i, j int) bool { return steps[i].at < steps[j].at })
+	for _, st := range steps {
+		var err error
+		if st.insert != nil {
+			err = t.insertAt(src, st.insert)
+		} else {
+			err = t.updateOne(st.update)
 		}
-		for _, c := range requiredCols {
-			if _, ok := at[c]; !ok {
-				return errors.New("an INSERT without entry, name or effectApplyAuraName1-3")
-			}
-		}
-		pos := make([]int, len(want)) // column of the statement for each wanted column, -1 when absent
-		for i, w := range want {
-			p, ok := at[w]
-			if !ok {
-				p = -1
-			}
-			pos[i] = p
-		}
-		rows, err := tuples(src[loc[1]:])
 		if err != nil {
 			return err
-		}
-		for _, r := range rows {
-			if len(r) != len(cols) {
-				return fmt.Errorf("a row of %d values for %d columns", len(r), len(cols))
-			}
-			id, err := strconv.ParseUint(r[at["entry"]], 10, 32)
-			if err != nil {
-				return fmt.Errorf("entry %q: %w", r[at["entry"]], err)
-			}
-			row := make([]string, len(want))
-			for i, p := range pos {
-				if p >= 0 {
-					row[i] = strings.TrimSpace(r[p])
-				}
-			}
-			t.rows[id] = row
 		}
 	}
-	return t.applyUpdates(src)
+	return nil
 }
 
-// applyUpdates applies UPDATE statements that set a wanted column. One that sets only other
-// columns (script_name, the bonus coefficients) is skipped; one this tool cannot read is an error.
-func (t table) applyUpdates(src []byte) error {
-	for _, m := range update.FindAllSubmatch(src, -1) {
-		body := string(m[1])
-		w := where.FindStringSubmatch(body)
-		if w == nil {
-			if setsWanted(body) {
-				return fmt.Errorf("an UPDATE of spell_template this tool cannot read: %.80q", body)
-			}
-			continue
+// insertAt applies one INSERT or REPLACE statement found by stmt.
+func (t table) insertAt(src []byte, loc []int) error {
+	cols := strings.Split(strings.ReplaceAll(string(src[loc[2]:loc[3]]), "`", ""), ",")
+	at := map[string]int{}
+	for i, c := range cols {
+		at[strings.TrimSpace(c)] = i
+	}
+	for _, c := range requiredCols {
+		if _, ok := at[c]; !ok {
+			return errors.New("an INSERT without entry, name or effectApplyAuraName1-3")
 		}
-		set, err := assignments(w[1])
+	}
+	pos := make([]int, len(want)) // column of the statement for each wanted column, -1 when absent
+	for i, w := range want {
+		p, ok := at[w]
+		if !ok {
+			p = -1
+		}
+		pos[i] = p
+	}
+	rows, err := tuples(src[loc[1]:])
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if len(r) != len(cols) {
+			return fmt.Errorf("a row of %d values for %d columns", len(r), len(cols))
+		}
+		id, err := strconv.ParseUint(r[at["entry"]], 10, 32)
 		if err != nil {
-			return err
+			return fmt.Errorf("entry %q: %w", r[at["entry"]], err)
 		}
-		touched := false
-		for c := range set {
-			if _, ok := col[c]; ok {
-				touched = true
+		row := make([]string, len(want))
+		for i, p := range pos {
+			if p >= 0 {
+				row[i] = strings.TrimSpace(r[p])
 			}
 		}
-		if !touched {
-			continue
+		t.rows[id] = row
+	}
+	return nil
+}
+
+// updateOne applies one UPDATE if it sets a wanted column. One that sets only other columns
+// (script_name, the bonus coefficients) is skipped; one this tool cannot read is an error.
+func (t table) updateOne(body string) error {
+	w := where.FindStringSubmatch(body)
+	if w == nil {
+		if setsWanted(body) {
+			return fmt.Errorf("an UPDATE of spell_template this tool cannot read: %.80q", body)
 		}
-		var ids []uint64
-		for _, f := range strings.FieldsFunc(w[2]+","+w[3], func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\r' || r == '\t' }) {
-			id, err := strconv.ParseUint(f, 10, 32)
-			if err != nil {
-				return fmt.Errorf("UPDATE entry %q: %w", f, err)
-			}
-			ids = append(ids, id)
+		return nil
+	}
+	set, err := assignments(w[1])
+	if err != nil {
+		return err
+	}
+	touched := false
+	for c := range set {
+		if _, ok := col[c]; ok {
+			touched = true
 		}
-		for _, id := range ids {
-			row, ok := t.rows[id]
-			if !ok {
-				continue // an update of a spell the dump does not hold changes nothing
-			}
-			for c, v := range set {
-				if i, ok := col[c]; ok {
-					row[i] = v
-				}
+	}
+	if !touched {
+		return nil
+	}
+	var ids []uint64
+	for _, f := range strings.FieldsFunc(w[2]+","+w[3], func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\r' || r == '\t' }) {
+		id, err := strconv.ParseUint(f, 10, 32)
+		if err != nil {
+			return fmt.Errorf("UPDATE entry %q: %w", f, err)
+		}
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
+		row, ok := t.rows[id]
+		if !ok {
+			continue // an update of a spell the dump does not hold changes nothing
+		}
+		for c, v := range set {
+			if i, ok := col[c]; ok {
+				row[i] = v
 			}
 		}
 	}

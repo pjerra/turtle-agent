@@ -220,6 +220,27 @@ func TestUpdatesApplyOnTop(t *testing.T) {
 	}
 }
 
+// Within one file the statements apply in the order they stand: an UPDATE hits the rows written before it,
+// and a REPLACE after it overwrites that.
+func TestStatementsApplyInFileOrder(t *testing.T) {
+	src := []byte(metaSQL(""))
+	row116 := metaSQL("")[strings.Index(metaSQL(""), "(116,") : strings.Index(metaSQL(""), "),\n(2457")+1]
+	replace := "REPLACE INTO `spell_template`\n(" + metaCols + ")\nVALUES\n" + row116 + ";\n"
+	update := "UPDATE `spell_template` SET `manaCost` = 99 WHERE `entry` = 116;\n"
+	for name, c := range map[string]struct{ file, want string }{
+		"update then replace": {update + replace, "25"},
+		"replace then update": {replace + update, "99"},
+	} {
+		tab, err := load(src, []byte(c.file))
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if got := tab.rows[116][col["manaCost"]]; got != c.want {
+			t.Errorf("%s: manaCost %q, want %q", name, got, c.want)
+		}
+	}
+}
+
 func TestDBCReaderRejectsBadFiles(t *testing.T) {
 	good := dbcFile([]uint32{1, 2, 3})
 	if rec, err := parseDBC("x", good, 3); err != nil || len(rec) != 1 || rec[0][2] != 3 {

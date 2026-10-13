@@ -129,7 +129,7 @@ func (s *Session) onCastResult(body []byte) error {
 		return err
 	}
 	s.store.EndCast(s.selfGUID(), c.SpellID)
-	reason := s.spellState.CastFailed(c.SpellID, c.Reason)
+	reason := s.spellState.CastRefused(c.SpellID, c.Reason)
 	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: s.selfGUID(), SpellID: c.SpellID, Data: map[string]any{"reason": c.Reason, "reason_name": reason}})
 	s.noteCastFailed(fmt.Sprintf("SpellCastResult %d", c.Reason))
 	return nil
@@ -143,7 +143,7 @@ func (s *Session) onSpellFailedOther(body []byte) error {
 	s.store.EndCast(c.Caster, c.SpellID)
 	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: c.Caster, SpellID: c.SpellID, Data: map[string]any{"reason": "interrupted", "reason_name": "interrupted"}})
 	if c.Caster == s.selfGUID() {
-		s.spellState.CastFailed(c.SpellID, game.CastFailedInterrupted)
+		s.spellState.CastBroken(c.SpellID)
 		s.noteCastFailed("interrupted")
 	}
 	return nil

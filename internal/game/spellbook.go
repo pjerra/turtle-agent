@@ -322,6 +322,7 @@ const SpellCastResultOK uint8 = 0xFF
 const (
 	CastFailedInterrupted uint8 = 35
 	CastFailedNotReady    uint8 = 60
+	CastFailedInProgress  uint8 = 97
 )
 
 // CastFailName names a SpellCastResult code ("out_of_range"); an unknown code reads "failed_N".

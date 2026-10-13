@@ -155,7 +155,7 @@ func TestCategoryIsShared(t *testing.T) {
 
 func TestNotReadyHold(t *testing.T) {
 	st, c := newState(fireball)
-	if reason := st.CastFailed(fireball, game.CastFailedNotReady); reason != "not_ready" {
+	if reason := st.CastRefused(fireball, game.CastFailedNotReady); reason != "not_ready" {
 		t.Errorf("reason %q", reason)
 	}
 	if left, why := st.Remaining(fireball); left != NotReadyHold || why != WhyNotReady {
@@ -165,7 +165,7 @@ func TestNotReadyHold(t *testing.T) {
 	if !st.Ready(fireball) {
 		t.Error("the hold must end")
 	}
-	st.CastFailed(fireball, 89)
+	st.CastRefused(fireball, 89)
 	if !st.Ready(fireball) {
 		t.Error("only a not-ready refusal holds a spell back")
 	}
@@ -178,11 +178,11 @@ func TestFailedCastCancelsItsGCD(t *testing.T) {
 		t.Fatal("the cast must have started the GCD")
 	}
 	// A failure of another spell leaves the running cast and its GCD alone.
-	st.CastFailed(fireBlast, 89)
+	st.CastRefused(fireBlast, 89)
 	if st.Ready(fireBlast) || st.CastState().Cast.State != "casting" {
 		t.Error("another spell's failure ended the cast")
 	}
-	st.CastFailed(fireball, game.CastFailedInterrupted)
+	st.CastBroken(fireball)
 	if !st.Ready(fireBlast) {
 		t.Error("an interrupted cast must give the GCD back")
 	}
@@ -258,7 +258,7 @@ func TestChannel(t *testing.T) {
 	}
 	// A broken channel: the interrupt names the channel's spell.
 	st.ChannelStarted(5143, 5000)
-	st.CastFailed(5143, game.CastFailedInterrupted)
+	st.CastBroken(5143)
 	if st.Casting() {
 		t.Error("an interrupted channel is over")
 	}
@@ -328,7 +328,7 @@ func TestConcurrentUse(t *testing.T) {
 			for j := 0; j < 200; j++ {
 				st.CastStarted(fireBlast, 0, 0)
 				st.CastWent(fireBlast)
-				st.CastFailed(fireball, 89)
+				st.CastRefused(fireball, 89)
 				st.ChannelStarted(5143, 100)
 			}
 		}()
@@ -345,4 +345,83 @@ func TestConcurrentUse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// A refusal of a new attempt comes from a fresh Spell object and does not touch the cast that runs: the cast
+// and its GCD stay (Spell.cpp:3545-3551, :8451).
+func TestRefusalOfANewAttemptKeepsTheRunningCast(t *testing.T) {
+	st, c := newState(fireball, fireBlast)
+	st.CastStarted(fireball, 3000, 0x77)
+	c.advance(500 * time.Millisecond)
+	// The same spell sent again while it casts: SPELL_FAILED_SPELL_IN_PROGRESS.
+	st.CastRefused(fireball, game.CastFailedInProgress)
+	cs := st.CastState()
+	if cs.Cast.State != "casting" || cs.Cast.SpellID != fireball || cs.LastFailure.ReasonName != "spell_in_progress" {
+		t.Fatalf("%+v", cs)
+	}
+	if left, why := st.Remaining(fireBlast); left != 1000*time.Millisecond || why != WhyGCD {
+		t.Errorf("the GCD of the running cast was given back: %v %s", left, why)
+	}
+	// Every other refusal of an attempt (out of range, no power, moving) is the same.
+	st.CastRefused(fireball, 89)
+	st.CastRefused(fireball, 77)
+	if !st.Casting() {
+		t.Error("a refusal ended the running cast")
+	}
+	// An instant spell sent again between its start and its go: not ready, and its GCD stays.
+	st2, _ := newState(fireBlast, fireball)
+	st2.CastStarted(fireBlast, 0, 0)
+	st2.CastRefused(fireBlast, game.CastFailedNotReady)
+	if left, why := st2.Remaining(fireball); left != 1500*time.Millisecond || why != WhyGCD {
+		t.Errorf("the GCD went: %v %s", left, why)
+	}
+	if s, ok := st2.CastWent(fireBlast); !ok || s.MS != 8000 {
+		t.Errorf("the go still starts the cooldown: %+v %v", s, ok)
+	}
+	// Only SMSG_SPELL_FAILED_OTHER ends the cast, and the pair of an interrupt counts once.
+	st.CastBroken(fireball)
+	st.CastRefused(fireball, game.CastFailedInterrupted)
+	cs = st.CastState()
+	if cs.Cast.State != "idle" || !st.Ready(fireBlast) || cs.LastFailure.ReasonName != "interrupted" {
+		t.Errorf("%+v", cs)
+	}
+	if cs.Failures != 4 { // in progress, out of range, no power, and the interrupt pair
+		t.Errorf("%d failures", cs.Failures)
+	}
+}
+
+// A spell held back while its aura is up (SPELL_ATTR_DISABLED_WHILE_ACTIVE) reads not ready from its go
+// until SMSG_COOLDOWN_EVENT starts the real cooldown; Cold Blood has a cooldown of its own, Stealth a category's.
+func TestCooldownOnFadeSpells(t *testing.T) {
+	const coldBlood, stealth = 14177, 1784
+	st, c := newState(coldBlood, stealth)
+	for _, id := range []uint32{coldBlood, stealth} {
+		st.CastStarted(id, 0, 0)
+		if s, ok := st.CastWent(id); ok {
+			t.Errorf("%d: the cast started a timed cooldown: %+v", id, s)
+		}
+		if left, why := st.Remaining(id); left < 24*time.Hour || why != WhyCooldown {
+			t.Errorf("%d: ready while its aura is up: %v %s", id, left, why)
+		}
+	}
+	if st.Pending() {
+		t.Error("an aura-held cooldown must not keep the replay ticking")
+	}
+	c.advance(time.Hour)
+	if len(st.Expired()) != 0 || st.Ready(coldBlood) {
+		t.Error("the aura-held cooldown ended by itself")
+	}
+	// The aura fades: the server says so, and the real cooldown starts.
+	if s, ok := st.StartCooldown(coldBlood, SourceEvent); !ok || s.MS != 180000 {
+		t.Fatalf("%+v %v", s, ok)
+	}
+	if left, _ := st.Remaining(coldBlood); left != 180*time.Second {
+		t.Errorf("Cold Blood %v", left)
+	}
+	if s, ok := st.StartCooldown(stealth, SourceEvent); !ok || s.MS != 10000 {
+		t.Fatalf("%+v %v", s, ok)
+	}
+	if left, why := st.Remaining(stealth); left != 10*time.Second || why != WhyCooldown {
+		t.Errorf("Stealth %v %s", left, why)
+	}
 }

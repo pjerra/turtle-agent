@@ -680,11 +680,20 @@ been seen on a live server yet.
   GCD of its group, with the reason) answer for any spell. They err on the side of waiting: talents and items that
   shorten a cooldown are not known; the server rounds a cooldown to whole seconds, so it can be up to a second shorter
   than the agent's; haste does not shorten the GCD here; an item's own cooldown (a potion) is in the item prototype and
-  is not tracked. A cast the server refuses as `not_ready` holds the spell back for one second whatever the numbers say.
+  is not tracked; Shoot and the wand (categories 76 and 351) have no cooldown in the template, the core uses the ranged
+  attack time (`Unit.cpp:11888`), so they read ready; the core stretches a 1.0-1.5 s GCD with cast speed
+  (`Spell.cpp:8420-8434`), so a slow can make it 1.5 s where the table says 1.0 s. A spell held back while its aura is up
+  (`cooldown_on_fade`: Stealth, Cold Blood, Presence of Mind, Lightning Shield) reads on cooldown from its go until
+  `SMSG_COOLDOWN_EVENT` starts the real one (`SpellAuras.cpp:6892`, `:7011-7016`). A cast the server refuses as
+  `not_ready` holds the spell back for one second whatever the numbers say.
 - **Cast state.** The player's own `SMSG_SPELL_START` (casting, with its cast time), `SMSG_SPELL_GO` (done),
   `SMSG_SPELL_DELAYED` (pushback), `MSG_CHANNEL_START` (u32 spell, u32 ms: channelling) and `MSG_CHANNEL_UPDATE` (u32
   ms left, 0: ended). A failure is `SMSG_CAST_RESULT` (u32 spell, u8 2, u8 `SpellCastResult`, with a few u32 more for
-  some reasons) or the `SMSG_SPELL_FAILED_OTHER` interrupt broadcast. The core never sends `SMSG_SPELL_FAILURE`
+  some reasons) or the `SMSG_SPELL_FAILED_OTHER` interrupt broadcast. A `SMSG_CAST_RESULT` only records the failure
+  (`last_failure`): a refusal of a new attempt (`spell_in_progress`, `not_ready`, `out_of_range`, ...) comes from a fresh
+  spell object that is not the running cast (`Spell.cpp:3545-3551`), while a failure of the running cast is always
+  preceded by `SMSG_SPELL_FAILED_OTHER` (`Spell::SendInterrupted`, `Spell.cpp:3704`, `:3786`, `:3828`), which alone ends
+  the cast and gives its GCD back (`Spell.cpp:3699`, `:8443-8458`). The core never sends `SMSG_SPELL_FAILURE`
   (`Spell.cpp:4926-4935`), so it is not handled.
 - **Combo points** are in the player's own update fields: byte 1 of `PLAYER_FIELD_BYTES` (index 0x4C6) and the guid in
   `PLAYER_FIELD_COMBO_TARGET` (0x2CA, two words); the core leaves the old guid in place when the points go to 0, so

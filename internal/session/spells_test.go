@@ -324,3 +324,25 @@ func TestSpellStateFromCapturedFight(t *testing.T) {
 		t.Errorf("%d parse errors", n)
 	}
 }
+
+// Sending a spell again while it casts is refused as spell_in_progress; the cast and its GCD go on.
+func TestResendingACastKeepsTheRunningOne(t *testing.T) {
+	h := start(t, Options{NamesWait: 50 * time.Millisecond})
+	h.enterWorld()
+	h.send(opcode.SMSGInitialSpells, gametest.InitialSpells([]uint32{fireball, fireBlast}, nil))
+	h.send(opcode.SMSGSpellStart, gametest.SpellStart(me.GUID, fireball, 3000, wolfGUID))
+	waitFor(t, func() bool { cs, _ := h.s.CastState(); return cs.Cast.State == "casting" })
+	h.send(opcode.SMSGCastResult, gametest.CastResult(fireball, int(game.CastFailedInProgress)))
+	waitFor(t, func() bool { cs, _ := h.s.CastState(); return cs.LastFailure != nil })
+	cs, _ := h.s.CastState()
+	if cs.Cast.State != "casting" || !cs.GCD.Active || cs.LastFailure.ReasonName != "spell_in_progress" {
+		t.Fatalf("%+v", cs)
+	}
+	if r := spellRow(t, h, fireBlast); r.Ready || r.Why != "gcd" {
+		t.Errorf("%+v", r)
+	}
+	// Only the interrupt broadcast ends it.
+	h.send(opcode.SMSGSpellFailedOther, gametest.SpellFailedOther(me.GUID, fireball))
+	waitFor(t, func() bool { cs, _ := h.s.CastState(); return cs.Cast.State == "idle" })
+	h.logout()
+}

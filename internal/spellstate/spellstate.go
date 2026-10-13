@@ -14,8 +14,12 @@
 // Limits, all on the side of waiting too long: talents and items that shorten a cooldown
 // (spell mods) are not known, so a shortened one still counts as running until its nominal end;
 // the server rounds cooldowns down to whole seconds (a spell cast at x.9 s is ready up to a
-// second early); haste is not applied to the GCD; the cooldown an item sets (a potion) is
-// kept in the item prototype and is not tracked. A cast the server refuses with
+// second early); haste is not applied to the GCD (the core stretches a 1.0-1.5 s GCD with the unit's
+// cast speed, clamped to 1.0-1.5 s, Spell.cpp:8420-8434, so a cast-speed slow can make the real one
+// up to 1.5 s where the table says 1.0 s); the cooldown an item sets (a potion) is
+// kept in the item prototype and is not tracked; Shoot and the wand (categories 76 and 351) have
+// no cooldown in the template: the core uses the ranged attack time (Unit.cpp:11888), which the agent
+// does not know, so they read ready (they are auto-repeat spells). A cast the server refuses with
 // SPELL_FAILED_NOT_READY is held back for a second (NotReadyHold) whatever the numbers say.
 package spellstate
 
@@ -55,6 +59,7 @@ const (
 	SourceServer = "server" // SMSG_SPELL_COOLDOWN: a school lockout, a script
 	SourceEvent  = "event"  // SMSG_COOLDOWN_EVENT
 	SourceLogin  = "login"  // SMSG_INITIAL_SPELLS
+	SourceAura   = "aura"   // held until its aura ends (no event; the end comes as SMSG_COOLDOWN_EVENT)
 )
 
 type cooldown struct {
@@ -470,7 +475,19 @@ func (st *State) CastWent(spell uint32) (Started, bool) {
 		return Started{}, false
 	}
 	m, ok := spells.Lookup(spell)
-	if !ok || m.Flags.Has(spells.FlagPassive) || m.Flags.Has(spells.FlagCooldownOnFade) {
+	if !ok || m.Flags.Has(spells.FlagPassive) {
+		return Started{}, false
+	}
+	if m.Flags.Has(spells.FlagCooldownOnFade) {
+		// A spell that is held back while its aura is up (SPELL_ATTR_DISABLED_WHILE_ACTIVE): the core puts it
+		// on an infinite cooldown when the aura is applied (SpellAuras.cpp:6892) and starts the real one with
+		// SMSG_COOLDOWN_EVENT when the aura ends (SpellAuras.cpp:7011-7016), which StartCooldown applies.
+		if m.CooldownMS > 0 || m.CategoryCDMS > 0 {
+			st.cds[spell] = cooldown{start: now, end: now.Add(infinite), source: SourceAura}
+			if m.Category != 0 && m.CategoryCDMS > 0 {
+				st.cats[m.Category] = now.Add(infinite)
+			}
+		}
 		return Started{}, false
 	}
 	return st.startCooldown(spell, m, SourceCast, now)
@@ -510,16 +527,41 @@ func (st *State) CastDelayed(delayMS uint32) {
 	}
 }
 
-// CastFailed records that the server refused or broke the player's cast of spell: code is a
-// SpellCastResult, or game.CastFailedInterrupted for the interrupt broadcast. A cast in
-// progress ends and the GCD it started is cancelled (Spell::CancelGlobalCooldown,
-// Spell.cpp:8443-8458). A refusal as not ready holds the spell back for NotReadyHold.
-// It returns the failure as stored.
-func (st *State) CastFailed(spell uint32, code uint8) (reason string) {
+// dupWindow is how long an interrupt's SMSG_SPELL_FAILED_OTHER and its SMSG_CAST_RESULT(interrupted) count as one failure.
+const dupWindow = 250 * time.Millisecond
+
+// CastRefused records an SMSG_CAST_RESULT failure: the server refused or broke a cast of spell. It
+// changes nothing about the cast in progress or the GCD. A refusal of a new attempt (Spell::prepare:
+// spell_in_progress, not_ready, out_of_range, no_power, ...) comes from a fresh Spell object that is
+// not the running cast (Spell.cpp:3545-3551), and its finish(false) leaves the running cast and its
+// GCD alone (CancelGlobalCooldown returns when GetCurrentSpell != this, Spell.cpp:8451); a failure of
+// the running cast is always preceded by SMSG_SPELL_FAILED_OTHER (Spell::SendInterrupted,
+// Spell.cpp:3704, :3725, :3786, :3828), which is CastBroken. A refusal as not ready holds the spell
+// back for NotReadyHold. It returns the reason name.
+func (st *State) CastRefused(spell uint32, code uint8) (reason string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	now := st.now()
 	reason = game.CastFailName(code)
+	if code == game.CastFailedNotReady {
+		st.notReady[spell] = now.Add(NotReadyHold)
+	}
+	// An interrupt sends both packets: count the pair once.
+	dup := code == game.CastFailedInterrupted && st.fail != nil && st.fail.spell == spell &&
+		st.fail.code == code && now.Sub(st.fail.at) < dupWindow
+	if !dup {
+		st.failCount++
+	}
+	st.fail = &lastFail{spell: spell, code: code, name: reason, at: now}
+	return reason
+}
+
+// CastBroken records SMSG_SPELL_FAILED_OTHER for the player's own cast: the running cast of spell
+// was interrupted or cancelled, so it ends, and the GCD it started is given back when it was still
+// being prepared (Spell::cancel, Spell.cpp:3699; a channel keeps its GCD).
+func (st *State) CastBroken(spell uint32) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	if st.cast != nil && st.cast.spell == spell && !st.cast.done {
 		if st.cast.gcdSet {
 			delete(st.gcd, st.cast.gcdCat)
@@ -529,12 +571,8 @@ func (st *State) CastFailed(spell uint32, code uint8) (reason string) {
 	if st.channel != nil && st.channel.spell == spell {
 		st.channel = nil
 	}
-	if code == game.CastFailedNotReady {
-		st.notReady[spell] = now.Add(NotReadyHold)
-	}
 	st.failCount++
-	st.fail = &lastFail{spell: spell, code: code, name: reason, at: now}
-	return reason
+	st.fail = &lastFail{spell: spell, code: game.CastFailedInterrupted, name: game.CastFailName(game.CastFailedInterrupted), at: st.now()}
 }
 
 // Cast is the state of the player's cast.
