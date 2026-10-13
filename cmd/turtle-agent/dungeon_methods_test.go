@@ -48,6 +48,8 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":"rig","from_leg":"third"}`, "from_leg: the plan has legs"},
 		{`{"name":"rig","from_leg":true}`, "from_leg must be a leg number"},
 		{`{"name":"rig","colour":1}`, "colour"},
+		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-200 characters"},
+		{`{"name":"rig","setup":["` + strings.Repeat("x", 201) + `"]}`, "setup[0]: needs 1-200 characters"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
@@ -106,5 +108,25 @@ func TestDungeonStopEndsARun(t *testing.T) {
 	b, _ := json.Marshal(r.call("events", `{"since":0,"kinds":["dungeon_leg","dungeon_failed"]}`)["result"])
 	if !strings.Contains(string(b), `"phase":"start"`) || !strings.Contains(string(b), `"kind":"dungeon_failed"`) || !strings.Contains(string(b), `"error":"stopped"`) {
 		t.Fatalf("%s", b)
+	}
+}
+
+// The setup commands the caller names come back in the report, trimmed, whatever the run does.
+func TestDungeonRunReportsTheSetupShortcuts(t *testing.T) {
+	r := dungeonRig(t)
+	if res := r.call("dungeon_run", `{"name":"rig","setup":[" go entrance ","levelup -15"]}`); res["error"] != nil {
+		t.Fatalf("%v", res)
+	}
+	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
+	got, _ := json.Marshal(st["report"].(map[string]any)["setup_shortcuts"])
+	if string(got) != `["go entrance","levelup -15"]` {
+		t.Fatalf("%s", got)
+	}
+	// Without any, the field is an empty list, not null.
+	r = dungeonRig(t)
+	r.call("dungeon_run", `{"name":"rig"}`)
+	st = r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
+	if l, ok := st["report"].(map[string]any)["setup_shortcuts"].([]any); !ok || len(l) != 0 {
+		t.Fatalf("%v", st["report"])
 	}
 }

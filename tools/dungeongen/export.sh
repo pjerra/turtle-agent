@@ -22,14 +22,16 @@ query() { # reads one SELECT on stdin, prints tab-separated rows without a heade
 }
 
 {
-  printf 'guid\tentry\tname\tlevel_min\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\tpatrol\n'
+  printf 'guid\tentry\tname\tlevel_min\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\tpatrol\tauras\n'
   query <<SQL
 SELECT c.guid, c.id, t.name, t.level_min, t.level_max, t.rank, t.faction, t.npc_flags,
        c.position_x, c.position_y, c.position_z, c.wander_distance, c.movement_type,
        COALESCE((SELECT g.leader_guid FROM creature_groups g WHERE g.member_guid = c.guid LIMIT 1),
                 (SELECT g.leader_guid FROM creature_groups g WHERE g.leader_guid = c.guid LIMIT 1), 0),
-       EXISTS(SELECT 1 FROM creature_movement m WHERE m.id = c.guid)
+       EXISTS(SELECT 1 FROM creature_movement m WHERE m.id = c.guid),
+       COALESCE(CONCAT_WS(' ', NULLIF(t.auras, ''), NULLIF(a.auras, '')), '')
 FROM creature c JOIN creature_template t ON t.entry = c.id
+LEFT JOIN creature_addon a ON a.guid = c.guid
 WHERE c.map = $map ORDER BY c.guid;
 SQL
 } > "$out/creatures.tsv"

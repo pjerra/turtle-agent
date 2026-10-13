@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +53,17 @@ type fakeGame struct {
 	targeted           packet.GUID
 	pathErr            error
 	partyInViewNearMax float32 // distance the party members show at, 0: not in view
+
+	reviveDelay time.Duration        // a GM revive shows in the party list this long after (negative: never)
+	revAt       map[string]time.Time // revives under way, by member name
+	onWalk      func(g *fakeGame, to Point)
+	// walkHook replaces WalkPath (it may block until ctx ends, as a long walk does). It must not touch the units: the
+	// driver's combat watch reads them from another goroutine meanwhile; aggro is the way to start a fight there.
+	walkHook  func(ctx context.Context, g *fakeGame, to Point) (WalkResult, error)
+	aggro     atomic.Bool
+	aggroGUID packet.GUID       // the unit that is in combat with the leader while aggro is set
+	afterGate func(g *fakeGame) // runs as the first rest gate looks at the party
+	selfLooks int
 }
 
 const (
@@ -79,6 +91,16 @@ func (g *fakeGame) clock() Clock {
 				u.Health = 0
 			}
 		}
+		for name, at := range g.revAt {
+			if !g.now.Before(at) {
+				for i := range g.party {
+					if g.party[i].Name == name {
+						g.party[i].Dead, g.party[i].Health = false, g.party[i].MaxHealth
+					}
+				}
+				delete(g.revAt, name)
+			}
+		}
 		if g.resting && g.healOnRest {
 			for i := range g.party {
 				m := &g.party[i]
@@ -102,7 +124,14 @@ func (g *fakeGame) add(guid packet.GUID, entry uint32, at Point) *fakeUnit {
 
 func (g *fakeGame) Position() Point { return g.pos }
 func (g *fakeGame) Map() uint32     { return g.mapID }
-func (g *fakeGame) Self() Self      { return g.self }
+func (g *fakeGame) Self() Self {
+	// The first look at the leader is the run's start, the second the first rest gate's: afterGate runs there, so
+	// that what it starts is met by the first walk, not by the gate.
+	if g.selfLooks++; g.selfLooks == 2 && g.afterGate != nil {
+		g.afterGate(g)
+	}
+	return g.self
+}
 func (g *fakeGame) Party() []Member { return append([]Member(nil), g.party...) }
 func (g *fakeGame) GameObjects() []objects.GameObject {
 	out := append([]objects.GameObject(nil), g.objs...)
@@ -116,6 +145,9 @@ func (g *fakeGame) Units() []objects.Unit {
 	var out []objects.Unit
 	for _, u := range g.units {
 		c := u.Unit
+		if g.aggro.Load() && c.GUID == g.aggroGUID && !c.Dead {
+			c.InCombat, c.Target = true, leader
+		}
 		c.Distance = float32(dist3(g.pos, Point{c.X, c.Y, c.Z}))
 		if c.Distance <= 150 {
 			out = append(out, c)
@@ -131,6 +163,9 @@ func (g *fakeGame) Units() []objects.Unit {
 
 func (g *fakeGame) WalkPath(ctx context.Context, to Point) (WalkResult, error) {
 	g.walks = append(g.walks, to)
+	if g.walkHook != nil {
+		return g.walkHook(ctx, g, to)
+	}
 	if len(g.canned) > 0 {
 		r := g.canned[0]
 		g.canned = g.canned[1:]
@@ -138,6 +173,9 @@ func (g *fakeGame) WalkPath(ctx context.Context, to Point) (WalkResult, error) {
 	}
 	if !g.walkNeverMoves {
 		g.pos = to
+	}
+	if g.onWalk != nil {
+		g.onWalk(g, to)
 	}
 	return WalkResult{Result: "arrived"}, nil
 }
@@ -187,12 +225,12 @@ func (g *fakeGame) pull() {
 			t = u
 		}
 	}
-	if t == nil {
+	if t == nil || stealthedFake(t) { // nobody attacks what it cannot see
 		return
 	}
 	n := 0
 	for _, u := range g.units {
-		if !u.Dead && dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= 25 {
+		if !u.Dead && !stealthedFake(u) && dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= 25 {
 			u.InCombat, u.Health = true, 50
 			u.dieAt = g.now.Add(g.dieIn + time.Duration(n)*2*time.Second)
 			u.Target = leader
@@ -206,11 +244,27 @@ func (g *fakeGame) GM(ctx context.Context, text string) error {
 	if strings.HasPrefix(text, ".revive ") {
 		for i := range g.party {
 			if ".revive "+g.party[i].Name == text {
-				g.party[i].Dead, g.party[i].Health = false, g.party[i].MaxHealth
+				switch {
+				case g.reviveDelay == 0:
+					g.party[i].Dead, g.party[i].Health = false, g.party[i].MaxHealth
+				case g.reviveDelay > 0:
+					if g.revAt == nil {
+						g.revAt = map[string]time.Time{}
+					}
+					g.revAt[g.party[i].Name] = g.now.Add(g.reviveDelay)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func stealthedFake(u *fakeUnit) bool { return Stealthed(u.Unit) }
+
+// stealth gives a unit the Shadowstalker Stealth aura the Uldaman Cave Lurkers carry.
+func (u *fakeUnit) stealth() *fakeUnit {
+	u.Auras = []objects.Aura{{SpellID: 5916, Name: "Shadowstalker Stealth"}}
+	return u
 }
 
 func (g *fakeGame) Teleport(ctx context.Context, to Point, mapID uint32) error {

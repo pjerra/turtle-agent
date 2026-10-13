@@ -243,7 +243,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive) | `started`, `plan`, `map`, `from_leg`, `legs[]`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them) | `started`, `plan`, `map`, `from_leg`, `legs[]`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `attack` / `stop_attack` | | |
@@ -464,11 +464,11 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   "entrance": {"x": -228.9, "y": 46.1, "z": -46},
   "legs": [
     {"name": "keystone", "to": {"x": -247.5, "y": 173.1, "z": -43.5},
-     "pull_groups": [{"entries": [4850, 4850], "positions": [{"x": -232, "y": 198.1, "z": -44.5}, {"x": -223.6, "y": 198, "z": -44.5}]}],
+     "pull_groups": [{"entries": [4850, 4850], "ambush": true, "positions": [{"x": -232, "y": 198.1, "z": -44.5}, {"x": -223.6, "y": 198, "z": -44.5}]}],
      "skip": [11073],
      "steps": [
        {"use_object": {"entry": 124371, "near": {"x": -234.7, "y": 239.6, "z": -50.9}, "stand": {"x": -234.7, "y": 237, "z": -50.4}}},
-       {"wait_for": {"gameobject": {"entry": 124372, "state": "active"}, "timeout_s": 20}}],
+       {"wait_for": {"gameobject": {"entry": 124372, "state": "active"}, "timeout_s": 60}}],
      "boss": {"entry": 7228, "position": {"x": -235.7, "y": 309.6, "z": -47.6}, "first": []}}
   ]
 }
@@ -477,7 +477,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `version` is 1 (a file of another version is refused), `map` the instance map id, `entrance` where the party stands after the
   portal. `notes` (plan and leg) are free text for people.
 - A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
-  position per member in `positions`, the first is the one to pull); run `steps` in order; walk to `boss.position` and kill the
+  position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
+  [Dungeon runs](#dungeon-runs)); run `steps` in order; walk to `boss.position` and kill the
   boss. Each part is optional, but a leg needs at least one of pull groups, steps and a boss. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
   in order.
@@ -485,7 +486,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
   driver walks next to it). `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
-  close), with a `timeout_s` (default 60, at most 600) after which the plan fails.
+  close), with a `timeout_s` (default 60, at most 600) after which the plan fails. A door that a lever or key opens may do so well after
+  the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
 - A bad file is refused with every problem at once, each with its path: `uldaman.json: legs[2].steps[0].use_object: needs an entry,
   a near position, or both`. Unknown fields are errors too, and so is an entry that is in `skip` and also in a pull group or in
   `boss.first` (the leg would fight it and never wait for it).
@@ -500,9 +502,9 @@ step whose object is out of reach gives a `walk` to the object first; such a ste
 `tools/dungeongen` writes a plan skeleton from the spawns of one map: `tools/dungeongen/export.sh <map> <dir>` reads the
 creature, game object and entrance rows of the world database with SELECTs in a read-only session (the database of the docker
 stack on the server host, over ssh; the password is expanded inside the container and never printed or stored) and writes three TSV
-files (creatures, game objects, entrances); `go run ./tools/dungeongen -dir <dir> -name uldaman -map 70 -bosses 6906,6910,7228 -out skeleton.json` turns them into legs (one
+files (creatures, game objects, entrances; a creature row carries the `auras` it spawns with, from its template and its `creature_addon` row); `go run ./tools/dungeongen -dir <dir> -name uldaman -map 70 -bosses 6906,6910,7228 -out skeleton.json` turns them into legs (one
 per boss, packs of spawns within `-cluster` yards or in one `creature_groups` group, doors and altars near a leg in its notes; friendly
-factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`). It is repeatable: the same files and flags give the same
+factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`; a pack whose members all spawn with a stealth aura gets `"ambush": true`). It is repeatable: the same files and flags give the same
 bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
 `tools/dungeongen/testdata/uldaman` is the export the Uldaman plan was written from.
 
@@ -530,6 +532,21 @@ What the driver does for each action of the plan (the stepper decides which):
 
 - **walk** is `walk_path`, tried up to 3 times (it replans after a server move by itself); a walk that cannot arrive fails the run.
 - **use_object** sends the use, waits 1.5 s, and the plan's `wait_for` step watches the door or altar change state. Walks inside a step are bounded (see above).
+- **pull of a stealthed group (ambush).** Companions never attack a unit they cannot see, so `.bot action pullback` on a stealthed mob
+  draws no fight (the Uldaman Stonevault Cave Lurkers, aura 5916 *Shadowstalker Stealth*). A pull group is therefore not pulled when
+  the members in view all carry a stealth aura (`auras` on the unit: 5916, Sneak 22766, Stealth, Prowl, Shadowmeld; or a name that says
+  so), or when none is in view and the plan marks the group `"ambush": true` (`tools/dungeongen` sets it when every member spawns
+  stealthed). A member in view without the aura is pulled as usual even in a flagged group, and in a mixed pack the visible member is
+  the target. The driver instead says `.bot action follow`, walks the leader to each of the group's positions in turn and stands
+  6 s at each, fighting whatever reveals itself (`.bot action attack` on the nearest attacker until nothing has hit the party for 3 s).
+  The group counts as cleared when none of its members is left alive in view **or after the party passed it with no fight**; the report
+  notes which (`stealthed group [4850 4850] passed with no fight; counted as cleared`, or the fights and members left) and the leg's
+  `ambushes` counts the groups. A stealthed member that was left behind aggros on a later walk and is fought there (next item). A
+  stealthed member that is not fighting never holds a normal fight open.
+- **walk aggro.** A walk is watched (every 0.5 s) for a pack that attacks the party: the walk is stopped, the party fights it
+  (`.bot action attack` on the nearest attacker, again every 10 s, until nothing has hit the party for 3 s, then the usual wait for
+  loot and adds), and the same walk is made again. It does not use up a walk try, counts as an extra pull of the leg (`pulls`, and
+  `walk_aggros` for how often), and is noted. More than 12 such fights in one walk, or a fight of over 300 s, fail the run.
 - **pull** targets the nearest living unit of the group's entries that stands near the plan's positions (walking up to within 38 yd of
   it first when it is out of 45 yd, along the navmesh path) and says `.bot action pullback` in party chat: the tank pulls and
   brings the mob back, the others join after 5 s. About every 10 s of fighting the leader targets the nearest fighting pack member
@@ -538,10 +555,16 @@ What the driver does for each action of the plan (the stepper decides which):
   at most. Hostile units still hitting the party after the fight (adds) are fought too, for up to 15 s.
 - **kill_boss** does the same for each entry of `boss.first`, then for the boss; the whole encounter counts as one fight, so
   brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss that is not in view fails the run.
-- **rest gate**, at the start of each leg and before every pull and boss: `.bot action rest`, then wait until every living member has at
-  least 90% health and 75% mana (mana only for mana users) and is within 40 yd of the leader, for up to 150 s. After that the run goes
-  on with a note if everyone has 50% health, else it fails. A dead member is revived by GM (`.revive <name>`), flagged in the report,
-  unless `no_shortcuts` is set (then the run fails).
+- **rest gate**, at the start of each leg and before every pull and boss. It starts only when the party is out of combat: while a fight
+  goes on it waits (ordering the attack on the nearest attacker like a fight does), and its 150 s count from the end of the fight (a
+  fight of over 300 s fails the run). Then `.bot action rest`, and wait until every living member has at least 90% health and 75% mana
+  (mana only for mana users) and is within 40 yd of the leader, for up to 150 s. A caster below the mana threshold whose mana has not
+  risen by 5% of its maximum for 30 s (it is not drinking) no longer holds the gate once everything else is rested: the gate passes
+  and notes `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
+  TortoiseBots, not to work around). After 150 s the run goes on with a note if everyone has 50% health, else it fails. A dead member is
+  revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set (then the run fails); after a revive the party
+  list is polled for up to 5 s for the dead flag to clear before the member is judged, and a second revive goes out only after that
+  (two revives at most, then the run fails).
 - **wipe**: the leader dead, or every member dead, ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1). The MVP does not
   release, run back or retry.
 
@@ -552,12 +575,15 @@ without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeo
 
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
 progress), `error`, `wipes`, `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
-`pull_retries`, `rest_seconds`), `notes[]` and `gm_shortcuts[]`: every GM action the run took instead of playing it, with `kind`
-(`teleport_to_entrance`, `teleport_to_leg_start`, `revive`), `leg`, `detail` and `at`. A run with any `gm_shortcuts` is not a run a player
-could have done.
+`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`), `notes[]`, `gm_shortcuts[]`: every GM action the run took instead of
+playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`), `leg`, `detail` and `at`, and
+`setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",
+"levelup -15", "tbm summon all"]`; at most 40 entries of up to 200 characters; empty when none were given). Nothing checks or sends
+them: they are there so that a report shows what a run was started with. A run with any `gm_shortcuts` or `setup_shortcuts` is not a run
+a player could have done.
 
 Limits of this first driver: no CC marks, no loot orders (the companions loot on their own), no corpse run, no stuck detection beyond
-the bounds above, and a walk is not interrupted when a pack aggros on the way (the fight is picked up at the next action). The code is
+the bounds above, and stealthed packs are walked through, not pulled. The code is
 tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
 `docs/LIVE-CHECKS.md`.
 

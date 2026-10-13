@@ -40,6 +40,7 @@ type creature struct {
 	Pos         dungeon.Point
 	GroupLeader uint64
 	Patrol      bool
+	Auras       []uint32 // spell ids of the auras the creature spawns with (template and spawn row)
 }
 
 type object struct {
@@ -263,9 +264,21 @@ func readCreatures(path string) ([]creature, error) {
 	for _, m := range rs {
 		out = append(out, creature{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Rank: int(r.num(m, "rank")),
 			Faction: int(r.num(m, "faction")), NPCFlags: uint32(r.num(m, "npc_flags")), Pos: r.pos(m), GroupLeader: uint64(r.num(m, "group_leader")),
-			Patrol: m["patrol"] == "1"})
+			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])})
 	}
 	return out, r.err
+}
+
+// parseAuras reads the auras column of creatures.tsv: spell ids separated by spaces ("6408 5916"). A file written
+// before the column existed has none, and NULL or empty is no aura.
+func parseAuras(s string) []uint32 {
+	var out []uint32
+	for _, f := range strings.Fields(s) {
+		if n, err := strconv.ParseUint(f, 10, 32); err == nil && n != 0 {
+			out = append(out, uint32(n))
+		}
+	}
+	return out
 }
 
 func readObjects(path string) ([]object, error) {
@@ -369,7 +382,7 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 	}
 
 	plan := &dungeon.Plan{Version: dungeon.Version, Name: o.Name, Map: o.Map, Entrance: *o.Entrance,
-		Notes: []string{"Skeleton from dungeongen: packs sit in the leg of the nearest boss, ordered by a nearest-neighbour walk. Walls and doors are unknown to it; reorder by hand and check every waypoint with path_to."}}
+		Notes: []string{"Skeleton from dungeongen: packs sit in the leg of the nearest boss, ordered by a nearest-neighbour walk. Walls and doors are unknown to it; reorder by hand and check every waypoint with path_to. A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use."}}
 	from := *o.Entrance
 	for i, b := range o.Bosses {
 		boss := bossAt[b]
@@ -457,14 +470,18 @@ func order(ps []pack, from dungeon.Point) []pack {
 	return out
 }
 
-// packGroup lists a pack's members nearest to from first (the one to pull), one entry and one position each.
+// packGroup lists a pack's members nearest to from first (the one to pull), one entry and one position each, and
+// marks the group ambush when all of them spawn stealthed (the party cannot pull those).
 func packGroup(p pack, from dungeon.Point) dungeon.PullGroup {
 	ms := append([]creature(nil), p.members...)
 	sort.SliceStable(ms, func(i, j int) bool { return dist(from, ms[i].Pos) < dist(from, ms[j].Pos) })
 	var g dungeon.PullGroup
+	g.Ambush = len(ms) > 0
 	for _, m := range ms {
 		g.Entries = append(g.Entries, m.Entry)
 		g.Positions = append(g.Positions, m.Pos)
+		// A pack is an ambush only when every member is stealthed; with one that can be pulled the driver pulls that one.
+		g.Ambush = g.Ambush && dungeon.StealthedAuras(m.Auras)
 	}
 	return g
 }

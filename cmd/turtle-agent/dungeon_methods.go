@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +44,9 @@ type dungeonRunParams struct {
 	FromLeg     *legParam `json:"from_leg,omitempty"`
 	Teleport    bool      `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
 	NoShortcuts bool      `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
+	// into the report's setup_shortcuts. The run sends none of them.
+	Setup []string `json:"setup,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -117,6 +121,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
 	}
+	setup, err := cleanSetup(p.Setup)
+	if err != nil {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+	}
 	from := 0
 	if l := p.FromLeg; l != nil {
 		from = l.index
@@ -146,7 +154,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
 	}
 	cfg := dungeon.DefaultConfig()
-	cfg.Teleport, cfg.Shortcuts = p.Teleport, !p.NoShortcuts
+	cfg.Teleport, cfg.Shortcuts, cfg.Setup = p.Teleport, !p.NoShortcuts, setup
 	drv := dungeon.NewDriver(plan, &sessionGame{cur: r.cur}, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
@@ -157,6 +165,28 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		_ = drv.Run(ctx, from) // the outcome is in the report and the events
 	}()
 	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names}, nil
+}
+
+// Bounds on the setup list, so a report cannot be filled with a novel.
+const (
+	maxSetup     = 40
+	maxSetupText = 200
+)
+
+// cleanSetup trims the setup entries and refuses empty or over-long ones.
+func cleanSetup(in []string) ([]string, error) {
+	if len(in) > maxSetup {
+		return nil, fmt.Errorf("setup: %d entries, at most %d", len(in), maxSetup)
+	}
+	var out []string
+	for i, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || len(s) > maxSetupText {
+			return nil, fmt.Errorf("setup[%d]: needs 1-%d characters", i, maxSetupText)
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func (r *dungeonRunner) status() dungeonStatusResult {

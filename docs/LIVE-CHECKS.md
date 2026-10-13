@@ -91,21 +91,43 @@ Nothing in it has been walked by an agent yet. Still open, for the driver (step 
 
 ## Dungeon driver on Uldaman (issue #73, step 3)
 
-`dungeon_run` is tested against a fake game and clock only; no live run has been made. One run on m910q settles what the fakes
-cannot (README, "Dungeon runs"). Needs a free slot, a GM leader and a hired party of a tank, a healer and two damage dealers at level 40-45
-(Uldaman is a level 35-45 dungeon), `mmaps_dir` with map 070, and the leader as the party leader.
+First live run 2026-10-13 on m910q (build 19f, GM leader at level 45 with a tank, a healer, a mage and a hunter, `mmaps_dir` with map 070).
+It reached Ironaya once (554 s, 0 deaths, only with a trimmed plan) and failed five other times; the findings and what was changed:
+
+| Finding | Change |
+| --- | --- |
+| Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916 *Shadowstalker Stealth*, `creature_addon.auras`; the template also has *Faded* 6408); the companions never attack them, so `pullback` drew no fight (keystone groups 2 and 4, 3 pulls each) | Stealthed packs are walked through, not pulled (`ambush`, see README "Dungeon runs"); `tools/dungeongen` exports the auras and flags all-stealthed packs |
+| The Seal of Khaz'Mul became active 27 s after the Keystone use; the wait was 20 s | `uldaman.json` waits 60 s (also the loader's default) |
+| The rest gate burned 150 s every time: the priest sat at 49% mana and never drank | A caster whose mana does not rise for 30 s no longer holds the gate; noted in the report (report to TortoiseBots) |
+| The gate gave up with "not rested" while the party was still winning a fight | The gate waits for the fight to end, its timeout counts from then |
+| A GM `.revive` was judged "still dead" 3 s later although the party list followed a moment after | The dead flag is polled for 5 s after a revive; one revive per look |
+| A pack aggroed during a walk (the walk is blocking) and the fight was only picked up at the next action | The walk is stopped, the pack fought, the walk resumed (counts as an extra pull) |
+| Setup by hand (`.go` to the entrance, `.levelup -15`, `tbm summon all`) was not in the report | `dungeon_run` takes `setup`, shown as `setup_shortcuts` |
+
+Worth knowing when reading the first run: in the world database 4852 is the *Stonevault Oracle* and 7175 the *Stonevault Ambusher* (not the
+other way round); the Ambushers spawn without a stealth aura (their AI casts Backstab at range), the Oracles are not stealthed, and the
+baelog group 1 failure of run B (`[4852 4851]`) was the Rockchewer: the tank said "pull start -> reach pull" and lost its target, which is
+a TortoiseBots matter, not stealth. The ironaya leg's Cave Lurker group was pulled in run A5 although the lurkers spawn stealthed, so the
+driver decides by the aura it sees on the unit, and the plan's `ambush` flag only when nothing is in view.
+
+Still to check live with the new driver (a free slot, a GM leader and a hired party of a tank, a healer and two damage dealers at level
+40-45, `mmaps_dir` with map 070, the leader as the party leader):
 
 1. Hire the party at the leader, log in, `invite`/`accept_invite`, walk or `.go` into Uldaman (map 70) next to the entrance
-   (-228.9, 46.1, -46). Start `dungeon_run {"name":"uldaman","from_leg":"keystone"}`, then `{"name":"uldaman"}` from the start. A
-   teleport start is `"teleport": true` (flagged).
+   (-228.9, 46.1, -46) and list the setup you did by hand in `dungeon_run`'s `setup`. Start `dungeon_run {"name":"uldaman","from_leg":"keystone",
+   "setup":["go entrance","levelup -15"]}`, then `{"name":"uldaman","setup":[...]}` from the start. A teleport start is `"teleport": true` (flagged).
 2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`); keep the capture.
-3. Pass (MVP): the run reaches and kills Ironaya from the keystone leg, or Baelog (with Eric and Olaf) from the start, and ends with a
-   report (`state` done or a clear `error`), per-leg seconds, deaths, wipes and `gm_shortcuts`.
-4. Things to look at that the fakes assume: `.bot action pullback` in party chat is accepted from a GM leader and the tank pulls from
-   range; `.bot action rest` and the rest gate's mana and distance rules end in reasonable time; `.gm visible on` takes effect; the
-   keystone and the Seal of Khaz'Mul (124371, 124372) change state after `use_object` (the plan's stand point); `.revive <name>`
-   works on a hired companion; whether a hostile unit's `in_combat` and `target` fields are filled for mobs the party fights;
-   whether Eric and Olaf really need killing (plan decision (b): no script links them to Baelog in the world database).
-5. Findings that are TortoiseBots behaviour (companions skipping a pack, not following, not looting) are reported to TortoiseBots as a bug
-   fix or a behaviour change per its vision document, not worked around here.
+3. Pass: the run reaches and kills Ironaya from the keystone leg in one run (Keystone, Seal, Ironaya) and Baelog (with Eric and Olaf) from the start,
+   and ends with a report (`state` done or a clear `error`), per-leg seconds, deaths, wipes, `gm_shortcuts` and `setup_shortcuts`.
+4. Things to look at that the fakes assume:
+   - a stealthed group (keystone group 2): the party stands at each position for 6 s, the lurkers reveal themselves or the note says
+     "passed with no fight"; whether a lurker left behind then aggros on the next walk and the walk stops, the pack is fought (`walk_aggros`),
+     and the walk resumes from where the party stands (`walk_path` after a cancelled walk);
+   - that a unit row of a stealthed mob really lists the aura (`auras[]` 5916) while the mob is out of the party's sight, and drops it once it fights;
+   - the rest gate: no 150 s waits for the priest (the note "not drinking"), no "not rested" failure during a fight, a gate that starts after a fight
+     ends in a reasonable time (the walk-aggro and ambush fights are followed by a gate before the next pull);
+   - `.revive <name>` on a companion: how long the party list takes to show it (the driver waits up to 5 s), with no second revive;
+   - the Seal of Khaz'Mul active within the 60 s wait; Eric and Olaf needing a kill (plan decision (b): no script links them to Baelog).
+5. Findings that are TortoiseBots behaviour (the priest not drinking at 49% mana, the tank losing its target after "reach pull", companions skipping a pack,
+   not following, not looting) are reported to TortoiseBots as a bug fix or a behaviour change per its vision document, not worked around here.
 

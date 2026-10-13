@@ -66,13 +66,15 @@
           "entries": [4850],
           "positions": [
             {"x": -305, "y": 131.6, "z": -46.5}
-          ]
+          ],
+          "ambush": true
         },
         {
           "entries": [4850],
           "positions": [
             {"x": -317.7, "y": 117.7, "z": -49}
-          ]
+          ],
+          "ambush": true
         },
         {
           "entries": [4852, 4850],
@@ -130,7 +132,8 @@
           "positions": [
             {"x": -232, "y": 198.1, "z": -44.5},
             {"x": -223.6, "y": 198, "z": -44.5}
-          ]
+          ],
+          "ambush": true
         },
         {
           "entries": [7175, 7175, 7175],
@@ -164,12 +167,13 @@
               "near": {"x": -234.6, "y": 294.8, "z": -47.6},
               "state": "active"
             },
-            "timeout_s": 20
+            "timeout_s": 60
           }
         }
       ],
       "notes": [
-        "Checked live on 2026-10-13 (docs/LIVE-CHECKS.md): use_object on the Keystone (124371) from 2.6 yd opened it and the Seal of Khaz'Mul (124372, 55 yd on) at once."
+        "Checked live on 2026-10-13 (docs/LIVE-CHECKS.md): use_object on the Keystone (124371) from 2.6 yd opened it; the Seal of Khaz'Mul (124372, 55 yd on) became active 27 s later, hence the 60 s wait.",
+        "The Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916), so their groups are 'ambush': the party walks through them instead of pulling."
       ]
     },
     {
@@ -180,7 +184,8 @@
           "entries": [4850],
           "positions": [
             {"x": -230.4, "y": 255.1, "z": -49.5}
-          ]
+          ],
+          "ambush": true
         }
       ],
       "boss": {
