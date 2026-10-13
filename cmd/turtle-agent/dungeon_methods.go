@@ -111,6 +111,7 @@ type dungeonRunner struct {
 	dir   string
 	root  context.Context
 	brain *brain.Controller
+	lease *brainLease
 
 	mu     sync.Mutex
 	drv    *dungeon.Driver
@@ -120,12 +121,12 @@ type dungeonRunner struct {
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
 // call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends.
-func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller) func() {
+func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease) func() {
 	if dir == "" {
 		dir = "dungeons"
 	}
 	root, cancel := context.WithCancel(context.Background())
-	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl}
+	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
 		return r.run(p)
 	}))
@@ -212,7 +213,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	if hook != nil {
-		if r.brain.Running() {
+		if r.brain.Running() || !r.lease.acquire() {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
@@ -224,6 +225,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	go func() {
 		defer close(done)
 		defer cancel()
+		if hook != nil {
+			defer r.lease.release()
+			defer hook.Stop() // whatever the run left on
+		}
 		_ = drv.Run(ctx, from) // the outcome is in the report and the events
 	}()
 	buffNames := []string{}

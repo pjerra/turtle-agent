@@ -746,7 +746,7 @@ sees: the spell state ([Agent state](#agent-state)), the object store (units, th
 list. A 1.12 client has no threat data, so the brain does not pretend to have any (see "Threat" below).
 
 **The engine.** Every tick takes one snapshot of the game, then:
-1. every active **rule** whose **trigger** is true asks for actions at a **relevance** (bands as in mod-playerbots: idle 0,
+1. every active **rule** whose **trigger** is true asks for actions at a **relevance** (the band values follow the constants of mod-playerbots, GPL-2.0+; ideas and numbers only, no code: idle 0,
    default 5, normal 10, high 20, move 30, interrupt 40, dispel 50, raid 60), and each strategy's defaults ask every tick;
 2. every **multiplier** scales a candidate's relevance; 0 is a **veto** (it is reported as `vetoed`, with the multiplier's name);
 3. the candidates are tried by relevance. An action runs only when it is **possible** (a cast: the spell is known, off
@@ -786,16 +786,18 @@ Death), positioning, line of sight, interrupts.
 - preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest`;
 - `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
-  leader within 8 yd (no Nova on a rooted mob); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
+  leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
   cone in front;
 - `mage_rest`, out of combat and with no mob to fight, only where upkeep is allowed (always for `brain_start`; in a dungeon run only
   inside a rest gate, so the leader never sits down mid-walk): Ice Armor (else Frost Armor) and Arcane Intellect when missing or,
   if the server says how long they last, under a minute from ending; Evocation below 20% mana, else drinking below 65% (the best
-  conjured or vendor water in the bags; none: Conjure Water first).
+  conjured or vendor water in the bags that the leader's level allows, from the core's `required_level`; none: Conjure Water first;
+  a drink just used is not used again for 5 s, and nothing is sent while the Drink aura is awaited, so a refusal cannot loop).
 
 **Dungeon runs.** `dungeon_run {"name":"uldaman","brain":"frost_mage"}` starts the brain at the first rest gate of each leg
 and stops it when the leg ends; the driver keeps leading and giving the party its orders. The run does **not** make the leader a
-non-GM: GM shortcuts stay as they are. A brain started by hand is not touched by a run (the run refuses to start while one runs).
+non-GM: GM shortcuts stay as they are. A brain started by hand is not touched by a run (the run refuses to start while one runs), and while a run owns the brain
+`brain_start` and `brain_stop` are refused (`brain_status` still answers).
 The report's `brain` names the strategies.
 
 Not in this step: roles other than dps, the other classes, positioning, resting and corpse runs of the leader, interrupts,

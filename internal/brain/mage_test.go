@@ -291,7 +291,7 @@ func TestMageDrinksWhenLowOnManaOutOfCombat(t *testing.T) {
 	}
 	// Sitting and drinking: nothing more to do.
 	r.g.setSelf(func(u *objects.Unit) { u.StandState = "sit"; u.Auras = append(u.Auras, objects.Aura{Name: "Drink"}) })
-	if d := r.tick(time.Second); d != nil || r.idle() != "not_useful:drink" {
+	if d := r.tick(6 * time.Second); d != nil || r.idle() != "not_useful:drink" {
 		t.Fatalf("%+v %q", d, r.idle())
 	}
 	// Full: no trigger.
@@ -304,7 +304,7 @@ func TestMageDrinksWhenLowOnManaOutOfCombat(t *testing.T) {
 func TestMagePrefersTheBestDrinkInTheBags(t *testing.T) {
 	r := restRig(t)
 	r.g.items = []objects.Item{{Entry: 1179, Count: 5}, {Entry: 8078, Count: 20}, {Entry: itemWater, Count: 2}}
-	r.g.setSelf(func(u *objects.Unit) { u.Power = 300 })
+	r.g.setSelf(func(u *objects.Unit) { u.Power = 300; u.Level = 50 })
 	r.tick(time.Second)
 	if len(r.g.used) != 1 || r.g.used[0] != 8078 {
 		t.Fatalf("%v", r.g.used)
@@ -487,5 +487,97 @@ func TestEventsCarryTheSpellAndTarget(t *testing.T) {
 	last := ev[len(ev)-1]
 	if last.SpellID != spFrostbolt || last.TargetGUID != mobA || last.Data["action"] != "frostbolt" || last.Data["trigger"] != "fight_target" || last.Data["relevance"] != RelNormal {
 		t.Fatalf("%+v", last)
+	}
+}
+
+func TestMageOnlyDrinksWhatItsLevelAllows(t *testing.T) {
+	r := restRig(t) // level 30
+	// Moonberry Juice and Conjured Mineral Water need level 35: the leader never sends them.
+	r.g.items = []objects.Item{{Entry: 1645, Count: 5}, {Entry: 8077, Count: 20}}
+	r.g.setSelf(func(u *objects.Unit) { u.Power = 300 })
+	for i := 0; i < 5; i++ {
+		if d := r.tick(200 * time.Millisecond); d != nil {
+			t.Fatalf("%+v", d)
+		}
+	}
+	if len(r.g.used) != 0 {
+		t.Fatalf("used %v", r.g.used)
+	}
+	// A drink of level 25 in the bags is used, though the better ones are there.
+	r.g.items = append(r.g.items, objects.Item{Entry: 1708, Count: 3})
+	if d := r.tick(200 * time.Millisecond); d == nil || d.Action != "drink" || len(r.g.used) != 1 || r.g.used[0] != 1708 {
+		t.Fatalf("%+v used %v", d, r.g.used)
+	}
+	// Level 35: the vendor drink of 35 then comes after the conjured water of 35.
+	r2 := restRig(t)
+	r2.g.items = []objects.Item{{Entry: 1645, Count: 5}, {Entry: 8077, Count: 20}, {Entry: 8766, Count: 1}}
+	r2.g.setSelf(func(u *objects.Unit) { u.Power = 300; u.Level = 35 })
+	r2.tick(time.Second)
+	if len(r2.g.used) != 1 || r2.g.used[0] != 8077 {
+		t.Fatalf("%v", r2.g.used)
+	}
+	// Level 45: Morning Glory Dew (45) leads the vendor drinks.
+	r3 := restRig(t)
+	r3.g.items = []objects.Item{{Entry: 1645, Count: 5}, {Entry: 8766, Count: 1}}
+	r3.g.setSelf(func(u *objects.Unit) { u.Power = 300; u.Level = 45 })
+	r3.tick(time.Second)
+	if len(r3.g.used) != 1 || r3.g.used[0] != 8766 {
+		t.Fatalf("%v", r3.g.used)
+	}
+}
+
+func TestADrinkIsNotUsedTwiceBeforeTheAuraShows(t *testing.T) {
+	r := restRig(t)
+	r.g.items = []objects.Item{{Entry: itemWater, Count: 2}}
+	r.g.setSelf(func(u *objects.Unit) { u.Power = 300 })
+	if d := r.tick(time.Second); d == nil || d.Action != "drink" {
+		t.Fatalf("%+v", d)
+	}
+	// No Drink aura ever appears (the server refused in a way the brain cannot see). Inside the settle time nothing is
+	// sent; after it, the same item is passed over for drinkUseHold, so the rest gate does not loop on it.
+	for el := 200 * time.Millisecond; el < drinkUseHold; el += 200 * time.Millisecond {
+		if d := r.tick(200 * time.Millisecond); d != nil {
+			t.Fatalf("again after %v: %+v", el, d)
+		}
+	}
+	if len(r.g.used) != 1 {
+		t.Fatalf("used %v", r.g.used)
+	}
+	if d := r.tick(time.Second); d == nil || d.Action != "drink" || len(r.g.used) != 2 {
+		t.Fatalf("after the hold: %+v %v", d, r.g.used)
+	}
+}
+
+func TestAnUnusableDrinkLetsTheNextLowerOneBeTried(t *testing.T) {
+	r := restRig(t)
+	r.g.items = []objects.Item{{Entry: 2136, Count: 5}, {Entry: itemWater, Count: 2}} // 15 and 1
+	r.g.setSelf(func(u *objects.Unit) { u.Power = 300 })
+	r.tick(time.Second)
+	r.tick(2 * time.Second) // settled, the aura never came
+	if len(r.g.used) != 2 || r.g.used[0] != 2136 || r.g.used[1] != itemWater {
+		t.Fatalf("%v", r.g.used)
+	}
+}
+
+func TestFrostNovaCountsAsAnAreaSpell(t *testing.T) {
+	r := frost(t)
+	r.g.addUnit(mob(mobA, tankG), 28, 0)
+	r.g.addUnit(mob(mobB, selfG), 4, 0)
+	r.g.addUnit(objects.Unit{GUID: 102, Type: "creature", Hostile: true, Health: 10, MaxHealth: 10}, 0, 8) // nobody fights it
+	r.tick(100 * time.Millisecond)
+	d := r.tick(2200 * time.Millisecond)
+	if d == nil || d.Action == "frost_nova" {
+		t.Fatalf("Nova would pull the loose mob: %+v", d)
+	}
+	for _, c := range r.g.castList() {
+		if c.spell == spFrostNova {
+			t.Fatalf("Nova was cast: %v", r.g.castList())
+		}
+	}
+	// With the loose mob gone, Nova goes.
+	r.g.mutate(102, func(u *objects.Unit) { u.Dead = true })
+	r.g.st.Clear(spFireBlast)
+	if d := r.tick(1600 * time.Millisecond); d == nil || d.Action != "frost_nova" {
+		t.Fatalf("%+v", d)
 	}
 }

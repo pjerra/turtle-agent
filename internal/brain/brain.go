@@ -118,7 +118,8 @@ type hold struct {
 type memory struct {
 	mu          sync.Mutex
 	holds       map[uint32]hold
-	aholds      map[string]time.Time // actions that are not casts, held back after a failed call
+	aholds      map[string]hold      // actions that are not casts, held back after a failed call or while the server answers
+	eholds      map[uint32]time.Time // items used a moment ago
 	failSeen    uint64
 	settleUntil time.Time
 	faceUntil   time.Time
@@ -155,18 +156,35 @@ func (m *memory) held(spell uint32, now time.Time) (string, bool) {
 	return h.reason, true
 }
 
-func (m *memory) holdAction(name string, until time.Time) {
+func (m *memory) holdAction(name string, until time.Time, reason string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.aholds[name] = until
+	m.aholds[name] = hold{until: until, reason: reason}
 }
 
-func (m *memory) actionHeld(name string, now time.Time) bool {
+func (m *memory) actionHeld(name string, now time.Time) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	until, ok := m.aholds[name]
-	if ok && !now.Before(until) {
+	h, ok := m.aholds[name]
+	if ok && !now.Before(h.until) {
 		delete(m.aholds, name)
+		return "", false
+	}
+	return h.reason, ok
+}
+
+func (m *memory) holdEntry(entry uint32, until time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.eholds[entry] = until
+}
+
+func (m *memory) entryHeld(entry uint32, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until, ok := m.eholds[entry]
+	if ok && !now.Before(until) {
+		delete(m.eholds, entry)
 		return false
 	}
 	return ok
@@ -222,7 +240,7 @@ func assemble(g Game, cfg Config, p Params, strats []*Strategy, names []string) 
 		p.OpeningDelay = 2 * time.Second
 	}
 	b := &Brain{g: g, cfg: cfg.withDefaults(), p: p, strategies: strats, names: names, actions: map[string]*Action{},
-		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }}
+		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]hold{}, eholds: map[uint32]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }}
 	for _, s := range strats {
 		for _, a := range s.Actions {
 			b.actions[a.Name] = a
@@ -479,8 +497,8 @@ func (b *Brain) observeFailures(c *Ctx) {
 
 // possible reports whether a can run now, and when it cannot, why.
 func (b *Brain) possible(c *Ctx, a *Action) (bool, string) {
-	if b.mem.actionHeld(a.Name, c.Now) {
-		return false, "held:error"
+	if why, held := b.mem.actionHeld(a.Name, c.Now); held {
+		return false, "held:" + why
 	}
 	if a.Spell != "" {
 		if ok, why := castable(c, a, b.mem); !ok {

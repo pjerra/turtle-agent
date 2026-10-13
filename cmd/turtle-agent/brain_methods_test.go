@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/game/gametest"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -13,6 +15,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/pjerra/turtle-agent/internal/session"
 )
 
 func TestBrainIsOffUntilStarted(t *testing.T) {
@@ -150,21 +153,101 @@ func TestDungeonRunBrainOption(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 	r.call("brain_stop", "{}")
+	r.groupWith("Gorm") // a party that is not in view: the first rest gate waits for it, so the run goes on
 	out := r.call("dungeon_run", `{"name":"rig","brain":"frost_mage"}`)
 	if out["error"] != nil || out["result"].(map[string]any)["brain"] != "frost_mage" {
 		t.Fatalf("%v", out)
 	}
+	r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+		rep, _ := m["result"].(map[string]any)["report"].(map[string]any)
+		return rep != nil && len(rep["legs"].([]any)) == 1
+	})
+	// The rest gate started the brain, with upkeep waiting for the gate.
+	st := r.eventually("brain_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["running"] == true })["result"].(map[string]any)
+	if st["rest_gate"] != true {
+		t.Fatalf("%v", st)
+	}
 	if rep := r.call("dungeon_status", "{}")["result"].(map[string]any)["report"].(map[string]any); rep["brain"] != "frost_mage" {
 		t.Fatalf("%v", rep)
+	}
+	// While the run owns the brain, starting or stopping it by hand is refused (status still answers).
+	for _, m := range []string{"brain_start", "brain_stop"} {
+		params := "{}"
+		if m == "brain_start" {
+			params = `{"strategies":["frost_mage"]}`
+		}
+		if out := r.call(m, params); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "a dungeon run owns the brain") {
+			t.Fatalf("%s during a run: %v", m, out)
+		}
+	}
+	if out := r.call("brain_status", "{}"); out["error"] != nil {
+		t.Fatalf("%v", out)
 	}
 	r.call("dungeon_stop", "{}")
 	if st := r.call("brain_status", "{}")["result"].(map[string]any); st["running"] != false {
 		t.Fatalf("a stopped run leaves the brain off: %v", st)
 	}
+	// The lease ends with the run: the brain can be started by hand again.
+	if out := r.call("brain_start", `{"strategies":["frost_mage"]}`); out["error"] != nil {
+		t.Fatalf("after the run: %v", out)
+	}
+	r.call("brain_stop", "{}")
 	// Without the option the run starts no brain and says nothing of one.
 	out = r.call("dungeon_run", `{"name":"rig"}`)
 	if out["error"] != nil || out["result"].(map[string]any)["brain"] != nil {
 		t.Fatalf("%v", out)
 	}
 	r.call("dungeon_stop", "{}")
+}
+
+func TestDriverBrainStartsAndStopsOnlyWhatItStarted(t *testing.T) {
+	r := newRig(t)
+	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
+	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
+	defer ctl.Close()
+	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+
+	d.Rest(true) // not started: ignored
+	if ctl.Running() {
+		t.Fatal("Rest started the brain")
+	}
+	if err := d.Start(); err != nil || !ctl.Running() {
+		t.Fatalf("%v", err)
+	}
+	if err := d.Start(); err != nil { // a second Start is a no-op
+		t.Fatal(err)
+	}
+	if st := ctl.Status(); !st.RestGate || st.RestOK {
+		t.Fatalf("upkeep must wait for a rest gate: %+v", st)
+	}
+	d.Rest(true)
+	if !ctl.Status().RestOK {
+		t.Fatal("Rest(true) did not allow upkeep")
+	}
+	d.Rest(false)
+	if ctl.Status().RestOK {
+		t.Fatal("Rest(false) did not forbid upkeep")
+	}
+	d.Stop()
+	if ctl.Running() {
+		t.Fatal("Stop left the brain on")
+	}
+	d.Stop()                                            // stopping twice is fine
+	if err := d.Start(); err != nil || !ctl.Running() { // and it can start again, as in the next leg
+		t.Fatalf("%v", err)
+	}
+	d.Stop()
+
+	// A brain started by hand is neither taken over nor stopped.
+	if _, err := ctl.Start(brain.Params{Strategies: []string{"frost_mage"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(); err == nil || !strings.Contains(err.Error(), "started by hand") {
+		t.Fatalf("%v", err)
+	}
+	d.Stop()
+	d.Rest(true)
+	if !ctl.Running() || ctl.Status().RestOK != true {
+		t.Fatal("the hand-started brain was touched")
+	}
 }

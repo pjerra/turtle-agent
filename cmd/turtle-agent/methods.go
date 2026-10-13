@@ -237,8 +237,8 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerNPCMethods(srv, cur)
 	registerSpellMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
-	brainCtl, stopBrain := registerBrainMethods(srv, cur)
-	stopDungeon := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl)
+	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
+	stopDungeon := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease)
 	return func() {
 		stopDungeon()
 		stopBrain()

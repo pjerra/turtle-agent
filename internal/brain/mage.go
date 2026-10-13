@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
@@ -13,6 +14,9 @@ import (
 // evocates. Spells are named; the brain casts the highest rank the spellbook holds.
 
 // Thresholds, in percent of the mana pool (mod-playerbots' ManaLow 15 / Medium 40 / High 65, rounded up).
+// drinkSettle is how long the brain waits for the Drink aura after it used a drink.
+const drinkSettle = 1500 * time.Millisecond
+
 const (
 	manaCriticalPct = 20 // Evocation
 	manaDrinkPct    = 65 // sit and drink below this
@@ -23,23 +27,40 @@ var (
 	intellectAu = []string{"Arcane Intellect", "Arcane Brilliance"}
 )
 
-// drinkItems are the water a mage drinks: the conjured waters of every rank and the vendor drinks that restore only
-// mana or both. They are item entries of the 1.12 item table.
-var drinkItems = []uint32{
-	8079, 8078, 8077, 3772, 2136, 2288, 5350, // conjured water, best rank first
-	1645, 1708, 8766, 1205, 1179, 159, // Moonberry Juice, Sweet Nectar, Morning Glory Dew, Melon Juice, Ice Cold Milk, Refreshing Spring Water
+// drinkItem is a drink the mage may have in the bags, with the character level its use needs (item_template
+// required_level in the core's world database).
+type drinkItem struct {
+	entry uint32
+	level uint8
 }
 
-// drinkEntry is the best drink in the bags, 0 when there is none.
-func drinkEntry(c *Ctx) uint32 {
+// drinkItems are the drinks a mage uses, best first: the conjured waters, then the vendor drinks that restore mana
+// (Moonberry Juice and Sweet Nectar restore mana only, the others also health). Each group runs from the highest level
+// down; the entries and levels are the core's.
+var drinkItems = []drinkItem{
+	{8079, 55}, {8078, 45}, {8077, 35}, {3772, 25}, {2136, 15}, {2288, 5}, {5350, 1}, // Conjured Crystal ... Conjured Water
+	{8766, 45}, {1645, 35}, {1708, 25}, {1205, 15}, {1179, 5}, {159, 1}, // Morning Glory Dew, Moonberry Juice, Sweet Nectar, Melon Juice, Ice Cold Milk, Refreshing Spring Water
+}
+
+// drinkUseHold is how long a drink that was just used is not used again: the Drink aura needs the server's answer, and
+// a refusal the brain cannot see (the item cooldown, a stack that is gone) must not loop.
+const drinkUseHold = 5 * time.Second
+
+// drinkEntry is the best drink in the bags the leader's level allows, 0 when there is none. Unless anyOK, a drink
+// used within drinkUseHold is passed over for the next one.
+func drinkEntry(c *Ctx, anyOK bool) uint32 {
 	have := map[uint32]bool{}
 	for _, it := range c.G.Items() {
 		have[it.Entry] = true
 	}
-	for _, e := range drinkItems {
-		if have[e] {
-			return e
+	for _, d := range drinkItems {
+		if !have[d.entry] || uint32(d.level) > c.Self.Level {
+			continue
 		}
+		if !anyOK && c.mem.entryHeld(d.entry, c.Now) {
+			continue
+		}
+		return d.entry
 	}
 	return 0
 }
@@ -62,7 +83,7 @@ func mageFrost() *Strategy {
 		Actions: []*Action{
 			{Name: "frostbolt", Spell: "Frostbolt", Harmful: true, Threat: ThreatSingle, Target: fightTarget, Pre: []string{"face_target"}},
 			{Name: "fire_blast", Spell: "Fire Blast", Harmful: true, Threat: ThreatSingle, Target: meleeMobGUID, Pre: []string{"face_target"}},
-			{Name: "frost_nova", Spell: "Frost Nova",
+			{Name: "frost_nova", Spell: "Frost Nova", Threat: ThreatAoE, // it hits everything within 10 yd
 				Possible: func(c *Ctx) bool { return ValMeleeMob.Get(c) != nil },
 				Useful:   func(c *Ctx) bool { return !HasAura(ValMeleeMob.Get(c), "Frost Nova") }},
 			{Name: "cone_of_cold", Spell: "Cone of Cold", Harmful: true, Threat: ThreatAoE,
@@ -94,16 +115,20 @@ func mageRest() *Strategy {
 			{Name: "evocation", Spell: "Evocation", Alt: []string{"drink"}, Possible: func(c *Ctx) bool { return !inCombat(c) }},
 			{Name: "conjure_water", Spell: "Conjure Water",
 				Possible: func(c *Ctx) bool { return !inCombat(c) },
-				Useful:   func(c *Ctx) bool { return drinkEntry(c) == 0 }},
-			{Name: "drink", Pre: []string{"conjure_water"},
-				Possible: func(c *Ctx) bool { return !inCombat(c) && drinkEntry(c) != 0 },
+				Useful:   func(c *Ctx) bool { return drinkEntry(c, true) == 0 }},
+			{Name: "drink", Pre: []string{"conjure_water"}, Settle: drinkSettle,
+				Possible: func(c *Ctx) bool { return !inCombat(c) && drinkEntry(c, false) != 0 },
 				Useful:   func(c *Ctx) bool { return !HasAura(&c.Self, "Drink") },
 				Do: func(ctx context.Context, c *Ctx) error {
-					e := drinkEntry(c)
+					e := drinkEntry(c, false)
 					if e == 0 {
 						return errors.New("no drink in the bags")
 					}
-					return c.G.UseItem(ctx, e)
+					if err := c.G.UseItem(ctx, e); err != nil {
+						return err
+					}
+					c.mem.holdEntry(e, c.Now.Add(drinkUseHold))
+					return nil
 				}},
 		},
 		Rules: []Rule{

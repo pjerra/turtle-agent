@@ -3,7 +3,8 @@
 // strategies list which action a trigger asks for and how relevant it is, multipliers veto or damp actions, and
 // every tick the most relevant action that is possible and useful runs. The design follows the idea of
 // mod-playerbots' engine (relevance-ordered triggers, multipliers, prerequisite and alternative chains) and shares
-// no code with it.
+// no code with it. Provenance: the relevance-band values and the health, mana and distance thresholds follow the
+// constants of mod-playerbots (GPL-2.0+; Strategy.h, playerbots.conf.dist): numbers and ideas only, no code was copied.
 package brain
 
 import (
@@ -68,7 +69,10 @@ type Action struct {
 	Possible func(*Ctx) bool
 	Useful   func(*Ctx) bool
 	// Do runs the action; nil for a cast action, which casts its spell on Target.
-	Do       func(context.Context, *Ctx) error
+	Do func(context.Context, *Ctx) error
+	// Settle holds a non-cast action back this long after it succeeded, for the server's answer to show (the Drink
+	// aura after a drink); casts settle for Config.Settle instead.
+	Settle   time.Duration
 	Pre, Alt []string
 }
 
@@ -323,13 +327,15 @@ func (b *Brain) run(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		if d.Spell != 0 {
 			b.mem.hold(d.Spell, c.Now.Add(b.cfg.ErrorHold), "error")
 		} else {
-			b.mem.holdAction(a.Name, c.Now.Add(b.cfg.ErrorHold))
+			b.mem.holdAction(a.Name, c.Now.Add(b.cfg.ErrorHold), "error")
 		}
 		return d
 	}
 	d.Result = ResultOK
 	if d.Spell != 0 {
 		b.mem.settle(c.Now.Add(b.cfg.Settle))
+	} else if a.Settle > 0 {
+		b.mem.holdAction(a.Name, c.Now.Add(a.Settle), "settle")
 	}
 	return d
 }

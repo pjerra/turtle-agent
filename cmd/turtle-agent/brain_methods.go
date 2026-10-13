@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -22,26 +23,66 @@ type brainStartParams struct {
 // registerBrainMethods wires brain_start, brain_stop and brain_status to the session cur returns at each call. The
 // brain is off until brain_start (or dungeon_run's brain option) turns it on. The returned controller is for the
 // dungeon runner; the returned func stops the brain and must be called before the process ends.
-func registerBrainMethods(srv *rpc.Server, cur func() *session.Session) (*brain.Controller, func()) {
+func registerBrainMethods(srv *rpc.Server, cur func() *session.Session) (*brain.Controller, *brainLease, func()) {
 	root, cancel := context.WithCancel(context.Background())
 	ctl := brain.NewController(root, &sessionBrainGame{cur: cur}, brain.Config{})
+	lease := &brainLease{}
 	srv.Register("brain_start", rpc.Typed(func(ctx context.Context, p brainStartParams) (brain.Status, error) {
 		if st := cur().Status().State; st != session.StatusInWorld {
 			return brain.Status{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "brain_start needs the character in the world (state " + string(st) + ")"}
+		}
+		if err := lease.check("brain_start"); err != nil {
+			return brain.Status{}, err
 		}
 		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank})
 		return st, brainErr(err)
 	}))
 	srv.Register("brain_stop", rpc.Typed(func(ctx context.Context, _ empty) (brain.Status, error) {
+		if err := lease.check("brain_stop"); err != nil {
+			return brain.Status{}, err
+		}
 		return ctl.Stop(), nil
 	}))
 	srv.Register("brain_status", rpc.Typed(func(ctx context.Context, _ empty) (brain.Status, error) {
 		return ctl.Status(), nil
 	}))
-	return ctl, func() {
+	return ctl, lease, func() {
 		cancel()
 		ctl.Close()
 	}
+}
+
+// brainLease says that a dungeon run owns the brain: brain_start and brain_stop are refused meanwhile, so that the
+// run's idea of whether the brain runs cannot drift from the real one. brain_status is always answered.
+type brainLease struct {
+	mu   sync.Mutex
+	held bool
+}
+
+// acquire takes the lease; false when a run holds it.
+func (l *brainLease) acquire() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.held {
+		return false
+	}
+	l.held = true
+	return true
+}
+
+func (l *brainLease) release() {
+	l.mu.Lock()
+	l.held = false
+	l.mu.Unlock()
+}
+
+func (l *brainLease) check(method string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.held {
+		return &rpc.Error{Code: rpc.CodeGame, Message: method + ": a dungeon run owns the brain (dungeon_stop it first)"}
+	}
+	return nil
 }
 
 func brainErr(err error) error {
