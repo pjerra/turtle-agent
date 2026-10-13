@@ -245,8 +245,16 @@ func TestStatusAfterDisconnect(t *testing.T) {
 	if st["state"] != "disconnected" || !strings.Contains(fmt.Sprint(st["error"]), "disconnected by the server") {
 		t.Fatalf("status %v (stderr %q)", st, stderr.String())
 	}
-	page := rpcCall(t, addr, "events", `{"since":0}`)["result"].(map[string]any)
-	raw, _ := json.Marshal(page)
+	// status turns disconnected before the session event is appended: read the events until it is there.
+	var page map[string]any
+	var raw []byte
+	for until := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		page = rpcCall(t, addr, "events", `{"since":0}`)["result"].(map[string]any)
+		raw, _ = json.Marshal(page)
+		if strings.Contains(string(raw), `"state":"disconnected"`) || time.Now().After(until) {
+			break
+		}
+	}
 	if !strings.Contains(string(raw), `"state":"disconnected"`) || !strings.Contains(fmt.Sprint(page), "Account: <redacted> (id 5), password <redacted>") {
 		t.Fatalf("events %s", raw)
 	}

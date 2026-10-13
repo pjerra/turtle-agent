@@ -71,13 +71,20 @@ func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 	if res["started"] != true || res["plan"] != "rig" || res["from_leg"] != float64(1) || res["map"] != float64(0) {
 		t.Fatalf("%v", res)
 	}
-	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
+	// The state reads failed while the run's goroutine is still in finish, before dungeon_failed is appended:
+	// wait until the run has ended (running false), which comes after the append.
+	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+		ds := m["result"].(map[string]any)
+		return ds["state"] == "failed" && ds["running"] == false
+	})["result"].(map[string]any)
 	rep := st["report"].(map[string]any)
 	if st["running"] != false || rep["plan"] != "rig" || rep["from_leg"] != float64(1) || !strings.Contains(rep["error"].(string), "no party") ||
 		len(rep["gm_shortcuts"].([]any)) != 0 || rep["wipes"] != float64(0) {
 		t.Fatalf("%v", st)
 	}
-	evs := r.call("events", `{"since":0,"kinds":["dungeon_failed","dungeon_done","dungeon_leg","dungeon_step"]}`)["result"].(map[string]any)["events"].([]any)
+	evs := r.eventually("events", `{"since":0,"kinds":["dungeon_failed","dungeon_done","dungeon_leg","dungeon_step"]}`, func(m map[string]any) bool {
+		return len(m["result"].(map[string]any)["events"].([]any)) == 1
+	})["result"].(map[string]any)["events"].([]any)
 	if len(evs) != 1 || evs[0].(map[string]any)["kind"] != "dungeon_failed" || !strings.Contains(evs[0].(map[string]any)["data"].(map[string]any)["error"].(string), "no party") {
 		t.Fatalf("%v", evs)
 	}

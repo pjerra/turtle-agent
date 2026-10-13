@@ -115,7 +115,10 @@ func TestUseObjectMethod(t *testing.T) {
 		res["object"].(map[string]any)["name"] != "Keystone" || res["hint"] != nil {
 		t.Fatalf("%v", res)
 	}
-	page := r.call("events", `{"since":`+fmt.Sprint(res["since"])+`,"kinds":["gameobject"]}`)["result"].(map[string]any)["events"].([]any)
+	// The answer is the flags change; the state change comes from the same update right after it, so wait for both.
+	page := r.eventually("events", `{"since":`+fmt.Sprint(res["since"])+`,"kinds":["gameobject"]}`, func(m map[string]any) bool {
+		return len(m["result"].(map[string]any)["events"].([]any)) == 2
+	})["result"].(map[string]any)["events"].([]any)
 	if len(page) != 2 || page[1].(map[string]any)["data"].(map[string]any)["new"] != "active" {
 		t.Fatalf("the cursor reads both changes: %v", page)
 	}
