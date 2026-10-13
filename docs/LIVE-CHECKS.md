@@ -173,3 +173,27 @@ Also from the review of the agent state (items not settled without a live run):
 - Resend a cast while it casts (`cast` twice): expect `spell_fail` `reason_name` `spell_in_progress` with `cast_state.cast` still `casting` and the GCD active. Resend an instant spell inside its GCD: `not_ready`, and the cooldown still starts at its `spell_go`.
 - A `cooldown_on_fade` spell (Stealth, Cold Blood): `spells` shows it on cooldown while the aura is up, and `cooldown_start` (`source` `event`) when the aura ends. If the end comes without `SMSG_COOLDOWN_EVENT`, the agent keeps it on cooldown (not seen on a live server).
 - Shoot with a wand reads `ready` always (no template cooldown; the core uses the ranged attack time). A slow on cast speed (Curse of Tongues) can stretch a 1.0 s GCD to 1.5 s; the agent says 1.0 s.
+
+## Bot brain: the leader casts on the tank's mob (issue #80 step 2)
+
+`internal/brain` is tested against a scripted fake game and the RPC rig only. Not seen live: that the server accepts the
+brain's casts as a player's, and how the opening delay and the back-off hold up with real latency. Run in Uldaman with a
+frost mage leader (any level that knows Frostbolt; the leader may still be a GM, the run makes no change to that):
+
+1. Log the mage in, hire or invite a tank (a warrior bot) and a healer. `dungeon_run {"name":"uldaman","brain":"frost_mage"}`
+   (or start the brain by hand with `brain_start {"strategies":["frost_mage"],"tank":"<tank name>"}` while the party fights).
+2. At the first pull, read `events` kinds `brain_decision`, `brain_idle`, `spell_fail`, `spell_start`. Expect: `brain_idle` with
+   `vetoed:opening_delay` for about 2 s after the tank's mob is first in combat, then `brain_decision` `frostbolt` (`result ok`,
+   `trigger fight_target`) about every GCD-plus-cast (about 2.6 s at rank 4), each followed by a `spell_start` of the same spell,
+   with the mob as target (the tank's `target`, not the leader's selection).
+3. Check no `spell_fail` repeats: a refusal (`out_of_range`, `line_of_sight`, `no_power`) must show up in `brain_status.holds`
+   and the same spell must not be sent again before the hold ended. Note every `spell_fail.reason_name` seen.
+4. If a mob gets onto the mage: `frost_nova` then `fire_blast` decisions on the mob that stands within 8 yd. If two mobs stand
+   in front on the tank, `cone_of_cold`; none while a mob nobody fights stands within 12 yd.
+5. At the rest gate (`dungeon_run`): `ice_armor` or `frost_armor`, `arcane_intellect` when the auras are missing, `drink` below
+   65% mana (the item must be a drink in the bags; `stand_state` goes to `sit`), `evocation` below 20%. The leader must not
+   sit down during a walk. `brain_status.rest_ok` is true only inside a gate.
+6. After the leg: `brain_state stopped`, `brain_status.running` false, no cast sent between legs.
+7. Grep the server's anticheat log for the run; the brain sends casts and facings only, so expect nothing new.
+
+Report the first `brain_decision` that did not match this list, with the `spell_fail` or unit rows around it.

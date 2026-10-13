@@ -25,7 +25,9 @@ type Report struct {
 	SetupShortcuts []string `json:"setup_shortcuts"`
 	// Buffs are the spells the run was asked to put on the companions (GM .aura); each application is also a "buff"
 	// entry in gm_shortcuts, so a buffed run is never mistaken for a player's.
-	Buffs []Buff      `json:"buffs"`
+	Buffs []Buff `json:"buffs"`
+	// Brain names the strategy the agent's bot brain played the leader with (dungeon_run's brain), empty for none.
+	Brain string      `json:"brain,omitempty"`
 	Legs  []LegReport `json:"legs"`
 	Notes []string    `json:"notes"`
 }

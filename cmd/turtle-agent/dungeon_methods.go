@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -79,6 +80,10 @@ type dungeonRunParams struct {
 	// level) as the run starts and after any GM revive; each application is a "buff" entry in the report's
 	// gm_shortcuts. Preset "world" is the classic world buffs.
 	Buffs *buffsParam `json:"buffs,omitempty"`
+	// Brain plays the leader's character during the run's fights with the agent's bot brain (README "Bot brain"):
+	// a preset such as "frost_mage" or a strategy name. The run keeps leading and giving the party its orders; the
+	// brain starts at a leg's first rest gate and stops at the leg's end. Off by default.
+	Brain string `json:"brain,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -87,7 +92,8 @@ type dungeonRunResult struct {
 	Map     uint32   `json:"map"`
 	FromLeg int      `json:"from_leg"`
 	Legs    []string `json:"legs"`
-	Buffs   []string `json:"buffs"` // the spells the run will put on the companions (GM), empty for none
+	Buffs   []string `json:"buffs"`           // the spells the run will put on the companions (GM), empty for none
+	Brain   string   `json:"brain,omitempty"` // the strategies that play the leader, empty for none
 }
 
 type dungeonStatusResult struct {
@@ -101,9 +107,10 @@ var planName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // dungeonRunner holds the one dungeon run the agent has at a time.
 type dungeonRunner struct {
-	cur  func() *session.Session
-	dir  string
-	root context.Context
+	cur   func() *session.Session
+	dir   string
+	root  context.Context
+	brain *brain.Controller
 
 	mu     sync.Mutex
 	drv    *dungeon.Driver
@@ -113,12 +120,12 @@ type dungeonRunner struct {
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
 // call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends.
-func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string) func() {
+func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller) func() {
 	if dir == "" {
 		dir = "dungeons"
 	}
 	root, cancel := context.WithCancel(context.Background())
-	r := &dungeonRunner{cur: cur, dir: dir, root: root}
+	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
 		return r.run(p)
 	}))
@@ -164,6 +171,16 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 		}
 	}
+	var hook dungeon.Brain
+	if p.Brain != "" {
+		if r.brain == nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the bot brain is not available"}
+		}
+		if _, _, err := brain.Resolve([]string{p.Brain}); err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "brain: " + err.Error()}
+		}
+		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}}
+	}
 	from := 0
 	if l := p.FromLeg; l != nil {
 		from = l.index
@@ -194,6 +211,12 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
+	if hook != nil {
+		if r.brain.Running() {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
+		}
+		cfg.Brain, cfg.BrainName = hook, p.Brain
+	}
 	drv := dungeon.NewDriver(plan, &sessionGame{cur: r.cur}, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
@@ -207,7 +230,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName}, nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.

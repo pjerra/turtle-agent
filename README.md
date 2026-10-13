@@ -243,9 +243,12 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_stop` | | the `brain_status` result, after the brain has ended |
+| `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
@@ -732,6 +735,72 @@ login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_
 | `channel_end` | the player; `spell_id`. MSG_CHANNEL_UPDATE with nothing left |
 | `combo_points` | the player; `target` (the unit), `points`, `was` |
 | `spell_fail` | now also `reason_name` (`reason` stays the number, or `interrupted`) |
+
+## Bot brain
+
+The brain (issue #80) lets the agent **play its own character** while it leads: a small trigger -> action engine in
+`internal/brain`. It is off until `brain_start` (or `dungeon_run`'s `brain` option). It runs in its own goroutine, ticks
+every 200 ms, and acts only through the session calls an RPC client has (`cast`, `face`, `target`, `attack`, `use_item`):
+**it sends no packet a real client would not send.** It reads only what the agent knows of itself and what a 1.12 client
+sees: the spell state ([Agent state](#agent-state)), the object store (units, their targets, flags and auras) and the party
+list. A 1.12 client has no threat data, so the brain does not pretend to have any (see "Threat" below).
+
+**The engine.** Every tick takes one snapshot of the game, then:
+1. every active **rule** whose **trigger** is true asks for actions at a **relevance** (bands as in mod-playerbots: idle 0,
+   default 5, normal 10, high 20, move 30, interrupt 40, dispel 50, raid 60), and each strategy's defaults ask every tick;
+2. every **multiplier** scales a candidate's relevance; 0 is a **veto** (it is reported as `vetoed`, with the multiplier's name);
+3. the candidates are tried by relevance. An action runs only when it is **possible** (a cast: the spell is known, off
+   cooldown and the global cooldown, paid for, not backed off, and the target is alive, hostile when the action is harmful,
+   and within the spell's range from the spell data) and **useful**. When it is not possible, its **prerequisites** (`Pre`:
+   things to do first, such as turning to face the target) are tried, then its **alternatives** (`Alt`: a lower-rank
+   buff stands in for one the mage has not learned);
+4. the first action that runs ends the tick. A cast waits 300 ms for the server's `SMSG_SPELL_START` before another goes out,
+   and nothing but an interrupt-band action goes out while the player casts or channels.
+
+Values (`Value[T]`) are named, cached computations (per tick or for a TTL) that triggers share. The engine is code, the
+strategies are data: Go literals naming actions and spells (`"Frostbolt"`, never an id: the highest known rank is cast).
+Another class is a new strategy and a preset line (`internal/brain/mage.go` is the template), not an engine change.
+
+**Events.** `brain_decision` for every tick that decided: `source` the player, `spell_id`, `target_guid`, `data.trigger`,
+`action`, `relevance`, `result` (`ok`, `not_possible`, `vetoed`, `error`), `via` (`pre` or `alt` when the action ran as a chain
+member), and `why` or `error`. An action that ran is always logged; a refused or vetoed top candidate once, then again after 3 s
+if it persists. `brain_idle` (`data.reason`: `no_trigger`, `vetoed:<multiplier>`, `not_possible:<action>:<why>`,
+`not_useful:<action>`, `not_ready`, `dead`) when a tick did nothing, at most once per reason per 10 s. `brain_state` on start
+and stop (`data.state`, `strategies`, `role`).
+
+**Back-off.** A refused cast (`last_failure.reason_name`) holds its spell back for a moment so the brain does not spam it:
+`out_of_range` 1.5 s, `too_close` 1 s, `no_power` 2 s, `line_of_sight` 3 s, `not_ready` 0.5 s, `not_infront` 0.4 s (and the brain turns
+to face the target first), `interrupted` 0.3 s, `moving` 0.5 s, `immune` 5 s, any other reason 1 s. A failed game call holds the
+action for 1 s. The holds are in `brain_status.holds`.
+
+**Threat.** The mod-playerbots threat multiplier reads the server's threat list, which a 1.12 client does not have. The brain's
+stand-ins: (1) *Opening delay*: a harmful action waits until the fight has gone on for 2 s (the fight starts when the tank's mob
+is first seen in combat; a fight is over once no mob has been there for 3 s). A mob that attacks the leader is fought at once.
+(2) *The mob's target*: the brain fights the tank's target. The tank is the party member `tank` names, else the first of warrior,
+paladin and druid (by the `class` of their unit row) in view whose target is a living hostile mob in combat; without one, a mob
+that attacks the leader, then the leader's own selected target in combat. (3) *Area spells* (Cone of Cold) are vetoed unless every
+hostile mob near the leader (12 yd) is on the tank or on the leader. Not done yet (step 3): the class threat drops (Fade, Feign
+Death), positioning, line of sight, interrupts.
+
+**Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
+- preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest`;
+- `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
+- `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
+  leader within 8 yd (no Nova on a rooted mob); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
+  cone in front;
+- `mage_rest`, out of combat and with no mob to fight, only where upkeep is allowed (always for `brain_start`; in a dungeon run only
+  inside a rest gate, so the leader never sits down mid-walk): Ice Armor (else Frost Armor) and Arcane Intellect when missing or,
+  if the server says how long they last, under a minute from ending; Evocation below 20% mana, else drinking below 65% (the best
+  conjured or vendor water in the bags; none: Conjure Water first).
+
+**Dungeon runs.** `dungeon_run {"name":"uldaman","brain":"frost_mage"}` starts the brain at the first rest gate of each leg
+and stops it when the leg ends; the driver keeps leading and giving the party its orders. The run does **not** make the leader a
+non-GM: GM shortcuts stay as they are. A brain started by hand is not touched by a run (the run refuses to start while one runs).
+The report's `brain` names the strategies.
+
+Not in this step: roles other than dps, the other classes, positioning, resting and corpse runs of the leader, interrupts,
+wand filler (Shoot), potions. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the
+live check is in `docs/LIVE-CHECKS.md`.
 
 ## Vendors, trainers and quests
 

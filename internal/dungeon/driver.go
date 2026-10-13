@@ -42,6 +42,18 @@ type Game interface {
 	Emit(kind, text string, data map[string]any)
 }
 
+// Brain is the leader's bot brain (internal/brain). The Driver starts it at the first rest gate of a leg, so it buffs and
+// fights from there on, tells it when out-of-combat upkeep (drinking, buffs) is allowed, and stops it at the end of
+// the leg. The Driver keeps its own orders to the party; the brain only casts.
+type Brain interface {
+	// Start turns the brain on; it does nothing when it already runs.
+	Start() error
+	// Stop turns the brain off and waits for it to end.
+	Stop()
+	// Rest allows (true) or forbids upkeep that sits the leader down: the Driver allows it only inside a rest gate.
+	Rest(on bool)
+}
+
 // Self is the leader as the session sees it.
 type Self struct {
 	GUID      packet.GUID
@@ -103,6 +115,9 @@ type Config struct {
 	// Buffs are put on each companion by the GM leader (".aura <id>" on the selected member) as the run starts, after a
 	// GM revive, and on a leg that finds one missing; every application is a "buff" entry in the report's gm_shortcuts.
 	Buffs []Buff
+	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
+	Brain     Brain
+	BrainName string
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -222,7 +237,8 @@ type Driver struct {
 	seen    bool
 	party   map[packet.GUID]bool // guids of the leader and the members, for "who is the unit hitting"
 	// buffedAt is the leg a member last had its buffs given or topped up at: a leg tops a member up once.
-	buffedAt map[packet.GUID]int
+	buffedAt   map[packet.GUID]int
+	brainNoted bool // the brain failed to start once and was noted
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -234,6 +250,7 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	d.rep.init(plan, clk.Now)
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
+	d.rep.r.Brain = cfg.BrainName
 	return d
 }
 
@@ -468,6 +485,7 @@ func (d *Driver) startLeg(ctx context.Context, i int) error {
 
 // endLeg closes the current leg's report with result and sends its event; it does nothing when no leg is open.
 func (d *Driver) endLeg(result string) {
+	d.brainOff()
 	i := d.curLeg
 	if i < 0 {
 		return
@@ -620,6 +638,24 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 	return fmt.Errorf("walk to %.1f %.1f %.1f failed after %d tries (%s)", p.X, p.Y, p.Z, d.cfg.WalkAttempts, last)
 }
 
+// brainOn starts the leader's brain (a no-op when there is none or it runs); a failure to start is noted once.
+func (d *Driver) brainOn() {
+	if d.cfg.Brain == nil {
+		return
+	}
+	if err := d.cfg.Brain.Start(); err != nil && !d.brainNoted {
+		d.brainNoted = true
+		d.rep.note("the leader's bot brain did not start: " + err.Error())
+	}
+}
+
+// brainOff stops the leader's brain: legs end with it off.
+func (d *Driver) brainOff() {
+	if d.cfg.Brain != nil {
+		d.cfg.Brain.Stop()
+	}
+}
+
 // maxWalkAggros bounds the fights that stop one walk, so a walk that keeps running into packs ends the run.
 const maxWalkAggros = 12
 
@@ -682,6 +718,7 @@ func (d *Driver) watchCombat(ctx context.Context, cancel context.CancelFunc) fun
 // the party onto the nearest attacker, again every AssistEvery, until nothing has hit the party for AggroQuiet.
 // It counts as an extra pull of the leg and is noted in the report.
 func (d *Driver) walkAggro(ctx context.Context) error {
+	d.brainOn()
 	first := d.attackers()
 	name := "a pack"
 	if len(first) > 0 {
@@ -755,6 +792,11 @@ func (d *Driver) doUse(ctx context.Context, a Action) error {
 // pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
 func (d *Driver) restGate(ctx context.Context) error {
+	if b := d.cfg.Brain; b != nil {
+		d.brainOn()
+		b.Rest(true)
+		defer b.Rest(false)
+	}
 	began := d.clk.Now()
 	defer func() {
 		if s := d.clk.Now().Sub(began).Seconds(); s > 0 {

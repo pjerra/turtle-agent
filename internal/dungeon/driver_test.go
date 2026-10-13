@@ -759,3 +759,91 @@ func TestDriverKillsFirstThenBoss(t *testing.T) {
 		t.Fatalf("%+v", l)
 	}
 }
+
+// fakeBrain records what the Driver tells the leader's brain.
+type fakeBrain struct {
+	log      []string
+	running  bool
+	startErr error
+}
+
+func (b *fakeBrain) Start() error {
+	if b.startErr != nil {
+		return b.startErr
+	}
+	if !b.running {
+		b.log = append(b.log, "start")
+	}
+	b.running = true
+	return nil
+}
+
+func (b *fakeBrain) Stop() {
+	if b.running {
+		b.log = append(b.log, "stop")
+	}
+	b.running = false
+}
+
+func (b *fakeBrain) Rest(on bool) { b.log = append(b.log, fmt.Sprintf("rest=%v", on)) }
+
+func TestDriverRunsTheLeadersBrainFromTheFirstRestGateToTheEndOfTheLeg(t *testing.T) {
+	g, p := runFixture(t)
+	br := &fakeBrain{}
+	d := NewDriver(p, g, Config{Brain: br, BrainName: "frost_mage"}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if d.Report().Brain != "frost_mage" {
+		t.Fatalf("%+v", d.Report())
+	}
+	// Each leg: the brain starts at its first rest gate, upkeep is allowed inside every gate only, the leg ends with it off.
+	log := strings.Join(br.log, ",")
+	start := strings.Index(log, "start")
+	if start != 0 || strings.Count(log, "start") != 2 || strings.Count(log, "stop") != 2 || br.running {
+		t.Fatalf("log %s running %v", log, br.running)
+	}
+	if strings.Count(log, "rest=true") != strings.Count(log, "rest=false") || !strings.HasPrefix(log, "start,rest=true,rest=false") {
+		t.Fatalf("every gate opens and closes upkeep: %s", log)
+	}
+	if i, j := strings.Index(log, "stop"), strings.LastIndex(log, "start"); i > j {
+		t.Fatalf("leg 0 stops before leg 1 starts: %s", log)
+	}
+}
+
+func TestDriverStopsTheBrainWhenARunIsStoppedOrFails(t *testing.T) {
+	g, p := runFixture(t)
+	br := &fakeBrain{}
+	ctx, cancel := context.WithCancel(context.Background())
+	g.onChat = func(g *fakeGame, text string) {
+		if text == ".bot action pullback" {
+			cancel()
+		}
+	}
+	d := NewDriver(p, g, Config{Brain: br}, g.clock())
+	_ = d.Run(ctx, 0)
+	if br.running {
+		t.Fatalf("a stopped run left the brain on: %v", br.log)
+	}
+}
+
+func TestDriverNotesABrainThatWillNotStartAndGoesOn(t *testing.T) {
+	g, p := runFixture(t)
+	br := &fakeBrain{startErr: errors.New("a brain is running")}
+	d := NewDriver(p, g, Config{Brain: br}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v", err)
+	}
+	notes := strings.Join(d.Report().Notes, "|")
+	if strings.Count(notes, "bot brain did not start") != 1 {
+		t.Fatalf("%q", notes)
+	}
+}
+
+func TestDriverWithoutABrainIsUnchanged(t *testing.T) {
+	g, p := runFixture(t)
+	d := NewDriver(p, g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil || d.Report().Brain != "" {
+		t.Fatalf("%v %+v", err, d.Report())
+	}
+}
