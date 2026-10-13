@@ -54,7 +54,7 @@ type useObjectResult struct {
 	Since  uint64             `json:"since"`
 	Object objects.GameObject `json:"object"`
 	// Outcome is the kind of the first answering event (loot_open, loot_error, gossip, a quest
-	// panel, gameobject, spell_start, spell_go, spell_fail, inventory_error), or "none".
+	// panel, vendor_list, trainer_list, gameobject, spell_start, spell_go), or "none".
 	Outcome string        `json:"outcome"`
 	Event   *events.Event `json:"event"`
 	// Hint says why nothing came back, when the object's state or distance makes a reason likely.
@@ -62,19 +62,20 @@ type useObjectResult struct {
 }
 
 // useObjectKinds are the events that answer a use of a game object. The ones about the object
-// (or a panel it opens) carry its guid as source; a spell is the player's or the object's.
+// (or a panel it opens) carry its guid as source; a spell is the player's cast at the object or the
+// object's own. inventory_error and spell_fail name no object, so they are not answers.
 var useObjectKinds = []string{events.KindLootOpen, events.KindLootError, events.KindGossip, events.KindGossipComplete,
 	events.KindQuestList, events.KindQuestDetails, events.KindQuestRequestItems, events.KindQuestOfferReward,
-	events.KindVendorList, events.KindTrainerList, events.KindGameObject, events.KindSpellStart, events.KindSpellGo,
-	events.KindSpellFail, events.KindInventoryError}
+	events.KindVendorList, events.KindTrainerList, events.KindGameObject, events.KindSpellStart, events.KindSpellGo}
 
-// useAnswers reports whether e is an answer to a use of object, by the player self.
+// useAnswers reports whether e is an answer to a use of object, by the player self. A spell counts
+// when the object casts it, or when the player casts it with the object as target (spell_start and
+// spell_go carry the target guid, an object included), so an unrelated buff or heal landing in
+// the window does not.
 func useAnswers(e events.Event, object, self packet.GUID) bool {
 	switch e.Kind {
-	case events.KindInventoryError:
-		return true
-	case events.KindSpellStart, events.KindSpellGo, events.KindSpellFail:
-		return e.SourceGUID == self || e.SourceGUID == object
+	case events.KindSpellStart, events.KindSpellGo:
+		return e.SourceGUID == object || (e.SourceGUID == self && e.TargetGUID == object)
 	}
 	return e.SourceGUID == object
 }

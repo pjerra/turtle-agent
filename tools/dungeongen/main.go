@@ -1,0 +1,496 @@
+// Command dungeongen writes a dungeon plan skeleton (see internal/dungeon) from the spawns of one map.
+//
+// The spawns come from three TSV files that export.sh writes from the world database (creatures.tsv,
+// gameobjects.tsv, entrances.tsv); dungeongen itself reads files only and touches no database. It is re-runnable: the same
+// files and flags give the same skeleton, byte for byte.
+//
+//	dungeongen -dir testdata/uldaman -name uldaman -map 70 -bosses 6906,6910,7228 -out /tmp/uldaman.skeleton.json
+//	dungeongen -format dungeons/uldaman.json            # check a plan and print it in the form the files are kept in
+//
+// What the skeleton is: one leg per boss, in the order of -bosses; each pack of hostile creatures (spawns within -cluster
+// yards of each other, or in one creature_groups group) goes into the leg of the boss nearest to it, packs ordered by a
+// nearest-neighbour walk from the previous leg's end; the doors, levers and altars near a leg are listed in its notes. It does
+// not know walls, doors or the order a real run takes, so it is a starting point: the hand-written plan (dungeons/uldaman.json)
+// reorders the packs, adds the door steps and checks every waypoint with path_to.
+package main
+
+import (
+	"encoding/csv"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+)
+
+type creature struct {
+	GUID        uint64
+	Entry       uint32
+	Name        string
+	Rank        int
+	Faction     int
+	NPCFlags    uint32
+	Pos         dungeon.Point
+	GroupLeader uint64
+	Patrol      bool
+}
+
+type object struct {
+	GUID  uint64
+	Entry uint32
+	Name  string
+	Type  int
+	Pos   dungeon.Point
+}
+
+// Options are the flags.
+type Options struct {
+	Name           string
+	Map            uint32
+	Bosses         []uint32
+	Entrance       *dungeon.Point // default: the first row of entrances.tsv
+	Cluster        float64        // yards between spawns of one pack
+	IgnoreFactions map[int]bool   // factions that are friendly to the players (35 by default)
+	Skip           []uint32       // entries that go into every leg's skip list, besides the rares found
+	NoteRange      float64        // yards around a leg within which doors and altars are noted
+}
+
+func main() {
+	dir := flag.String("dir", "", "folder holding creatures.tsv, gameobjects.tsv and entrances.tsv (written by export.sh)")
+	out := flag.String("out", "", "plan file to write (default: standard output)")
+	name := flag.String("name", "", "plan name (the file is dungeons/<name>.json)")
+	mapID := flag.Uint("map", 0, "instance map id")
+	bosses := flag.String("bosses", "", "boss entries in kill order, comma separated")
+	entrance := flag.String("entrance", "", "x,y,z of the entrance (default: the first row of entrances.tsv)")
+	cluster := flag.Float64("cluster", 12, "yards between the spawns of one pack")
+	ignore := flag.String("ignore-factions", "35", "comma separated factions that are not hostile (35: friendly to all)")
+	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
+	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
+	flag.Parse()
+	if *format != "" {
+		os.Exit(formatFile(*format, *out))
+	}
+	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
+		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
+		os.Exit(2)
+	}
+	o := Options{Name: *name, Map: uint32(*mapID), Cluster: *cluster, NoteRange: 20, IgnoreFactions: map[int]bool{}}
+	var err error
+	if o.Bosses, err = parseEntries(*bosses); err == nil {
+		o.Skip, err = parseEntries(*skip)
+	}
+	if err == nil {
+		var fs []uint32
+		if fs, err = parseEntries(*ignore); err == nil {
+			for _, f := range fs {
+				o.IgnoreFactions[int(f)] = true
+			}
+		}
+	}
+	if err == nil && *entrance != "" {
+		var p dungeon.Point
+		if p, err = parsePoint(*entrance); err == nil {
+			o.Entrance = &p
+		}
+	}
+	var p *dungeon.Plan
+	if err == nil {
+		p, err = run(*dir, o)
+	}
+	var b []byte
+	if err == nil {
+		b, err = dungeon.Marshal(p)
+	}
+	if err == nil {
+		if *out == "" {
+			_, err = os.Stdout.Write(b)
+		} else {
+			err = os.WriteFile(*out, b, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dungeongen:", err)
+		os.Exit(1)
+	}
+}
+
+// formatFile validates a plan and writes it back in the canonical form (dungeon.Marshal).
+func formatFile(path, out string) int {
+	p, err := dungeon.Load(path)
+	var b []byte
+	if err == nil {
+		b, err = dungeon.Marshal(p)
+	}
+	if err == nil {
+		if out == "" {
+			_, err = os.Stdout.Write(b)
+		} else {
+			err = os.WriteFile(out, b, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dungeongen:", err)
+		return 1
+	}
+	return 0
+}
+
+func parseEntries(s string) ([]uint32, error) {
+	var out []uint32
+	for _, f := range strings.Split(s, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		n, err := strconv.ParseUint(f, 10, 32)
+		if err != nil || n == 0 {
+			return nil, fmt.Errorf("%q is not a creature entry", f)
+		}
+		out = append(out, uint32(n))
+	}
+	return out, nil
+}
+
+func parsePoint(s string) (dungeon.Point, error) {
+	f := strings.Split(s, ",")
+	var v [3]float64
+	if len(f) != 3 {
+		return dungeon.Point{}, fmt.Errorf("%q is not x,y,z", s)
+	}
+	for i := range f {
+		var err error
+		if v[i], err = strconv.ParseFloat(strings.TrimSpace(f[i]), 32); err != nil {
+			return dungeon.Point{}, fmt.Errorf("%q is not x,y,z: %w", s, err)
+		}
+	}
+	return dungeon.Point{X: float32(v[0]), Y: float32(v[1]), Z: float32(v[2])}, nil
+}
+
+func run(dir string, o Options) (*dungeon.Plan, error) {
+	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	if err != nil {
+		return nil, err
+	}
+	os_, err := readObjects(filepath.Join(dir, "gameobjects.tsv"))
+	if err != nil {
+		return nil, err
+	}
+	if o.Entrance == nil {
+		e, err := readEntrance(filepath.Join(dir, "entrances.tsv"))
+		if err != nil {
+			return nil, err
+		}
+		o.Entrance = &e
+	}
+	return Generate(cs, os_, o)
+}
+
+// rows reads a TSV file and returns its rows keyed by the header names.
+func rows(path string, need ...string) ([]map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	r.Comma = '\t'
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	head, err := r.Read()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, n := range need {
+		found := false
+		for _, h := range head {
+			found = found || h == n
+		}
+		if !found {
+			return nil, fmt.Errorf("%s: no %q column (is it from this version of export.sh?)", path, n)
+		}
+	}
+	var out []map[string]string
+	for line := 2; ; line++ {
+		rec, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", path, line, err)
+		}
+		if len(rec) != len(head) {
+			return nil, fmt.Errorf("%s:%d: %d fields, the header has %d", path, line, len(rec), len(head))
+		}
+		m := map[string]string{}
+		for i, h := range head {
+			m[h] = rec[i]
+		}
+		out = append(out, m)
+	}
+}
+
+type reader struct {
+	path string
+	err  error
+}
+
+func (r *reader) num(m map[string]string, k string) float64 {
+	v, err := strconv.ParseFloat(m[k], 64)
+	if err != nil && r.err == nil {
+		r.err = fmt.Errorf("%s: %q in column %s is not a number", r.path, m[k], k)
+	}
+	return v
+}
+
+func (r *reader) pos(m map[string]string) dungeon.Point {
+	return dungeon.Point{X: float32(r.num(m, "x")), Y: float32(r.num(m, "y")), Z: float32(r.num(m, "z"))}
+}
+
+func readCreatures(path string) ([]creature, error) {
+	rs, err := rows(path, "guid", "entry", "name", "rank", "faction", "npc_flags", "x", "y", "z", "group_leader", "patrol")
+	if err != nil {
+		return nil, err
+	}
+	r := &reader{path: path}
+	var out []creature
+	for _, m := range rs {
+		out = append(out, creature{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Rank: int(r.num(m, "rank")),
+			Faction: int(r.num(m, "faction")), NPCFlags: uint32(r.num(m, "npc_flags")), Pos: r.pos(m), GroupLeader: uint64(r.num(m, "group_leader")),
+			Patrol: m["patrol"] == "1"})
+	}
+	return out, r.err
+}
+
+func readObjects(path string) ([]object, error) {
+	rs, err := rows(path, "guid", "entry", "name", "type", "x", "y", "z")
+	if err != nil {
+		return nil, err
+	}
+	r := &reader{path: path}
+	var out []object
+	for _, m := range rs {
+		out = append(out, object{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Type: int(r.num(m, "type")), Pos: r.pos(m)})
+	}
+	return out, r.err
+}
+
+func readEntrance(path string) (dungeon.Point, error) {
+	rs, err := rows(path, "x", "y", "z")
+	if err != nil {
+		return dungeon.Point{}, err
+	}
+	if len(rs) == 0 {
+		return dungeon.Point{}, fmt.Errorf("%s has no row: give -entrance x,y,z", path)
+	}
+	r := &reader{path: path}
+	p := r.pos(rs[0])
+	return p, r.err
+}
+
+// pack is spawns that pull together.
+type pack struct {
+	members []creature
+}
+
+func (p pack) center() dungeon.Point {
+	var c dungeon.Point
+	for _, m := range p.members {
+		c.X += m.Pos.X
+		c.Y += m.Pos.Y
+		c.Z += m.Pos.Z
+	}
+	n := float32(len(p.members))
+	return dungeon.Point{X: c.X / n, Y: c.Y / n, Z: c.Z / n}
+}
+
+func dist(a, b dungeon.Point) float64 {
+	return math.Sqrt(math.Pow(float64(a.X-b.X), 2) + math.Pow(float64(a.Y-b.Y), 2) + math.Pow(float64(a.Z-b.Z), 2))
+}
+
+// Generate builds the skeleton. It is deterministic: ties break on creature guid.
+func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
+	if len(o.Bosses) == 0 {
+		return nil, errors.New("no bosses given")
+	}
+	bossAt := map[uint32]creature{}
+	isBoss := map[uint32]bool{}
+	for _, b := range o.Bosses {
+		isBoss[b] = true
+	}
+	sort.Slice(cs, func(i, j int) bool { return cs[i].GUID < cs[j].GUID })
+	var trash []creature
+	skipSet := map[uint32]bool{}
+	for _, c := range cs {
+		switch {
+		case isBoss[c.Entry]:
+			if _, dup := bossAt[c.Entry]; !dup {
+				bossAt[c.Entry] = c
+			}
+		case o.IgnoreFactions[c.Faction] || c.NPCFlags != 0:
+			// friendly, a vendor, quest giver or the like: nothing to pull (and nothing to wait for)
+		case c.Rank == 2 || c.Rank == 4:
+			skipSet[c.Entry] = true // rare: never wait for it
+		default:
+			trash = append(trash, c)
+		}
+	}
+	for _, e := range o.Skip {
+		skipSet[e] = true
+	}
+	for _, b := range o.Bosses {
+		if _, ok := bossAt[b]; !ok {
+			return nil, fmt.Errorf("boss %d has no spawn in creatures.tsv (wrong map or entry?)", b)
+		}
+	}
+	var skip []uint32
+	for e := range skipSet {
+		skip = append(skip, e)
+	}
+	sort.Slice(skip, func(i, j int) bool { return skip[i] < skip[j] })
+
+	packs := cluster(trash, o.Cluster)
+	// A pack goes with the boss nearest to its centre.
+	byBoss := make([][]pack, len(o.Bosses))
+	for _, p := range packs {
+		best, bd := 0, math.MaxFloat64
+		for i, b := range o.Bosses {
+			if d := dist(p.center(), bossAt[b].Pos); d < bd {
+				best, bd = i, d
+			}
+		}
+		byBoss[best] = append(byBoss[best], p)
+	}
+
+	plan := &dungeon.Plan{Version: dungeon.Version, Name: o.Name, Map: o.Map, Entrance: *o.Entrance,
+		Notes: []string{"Skeleton from dungeongen: packs sit in the leg of the nearest boss, ordered by a nearest-neighbour walk. Walls and doors are unknown to it; reorder by hand and check every waypoint with path_to."}}
+	from := *o.Entrance
+	for i, b := range o.Bosses {
+		boss := bossAt[b]
+		ps := order(byBoss[i], from)
+		leg := dungeon.Leg{Name: strings.ReplaceAll(strings.ToLower(boss.Name), " ", "_"), Skip: skip}
+		for _, p := range ps {
+			leg.PullGroups = append(leg.PullGroups, packGroup(p, from))
+			from = p.members[len(p.members)-1].Pos
+		}
+		if len(leg.PullGroups) > 0 {
+			leg.To = leg.PullGroups[0].Positions[0]
+		} else {
+			leg.To = boss.Pos
+		}
+		leg.Boss = &dungeon.Boss{Entry: b, Position: boss.Pos}
+		leg.Notes = objectNotes(objs, leg, o.NoteRange)
+		plan.Legs = append(plan.Legs, leg)
+		from = boss.Pos
+	}
+	return plan, nil
+}
+
+// cluster groups spawns that are within radius yards of one another (single linkage) or in one creature group.
+func cluster(cs []creature, radius float64) []pack {
+	parent := make([]int, len(cs))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(i int) int {
+		for parent[i] != i {
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		}
+		return i
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[max(ra, rb)] = min(ra, rb)
+		}
+	}
+	for i := range cs {
+		for j := i + 1; j < len(cs); j++ {
+			sameGroup := cs[i].GroupLeader != 0 && cs[i].GroupLeader == cs[j].GroupLeader
+			// A patrol walks away from its spawn point, so it is not a pack with the spawns it passes.
+			if sameGroup || (!cs[i].Patrol && !cs[j].Patrol && dist(cs[i].Pos, cs[j].Pos) <= radius && math.Abs(float64(cs[i].Pos.Z-cs[j].Pos.Z)) <= 8) {
+				union(i, j)
+			}
+		}
+	}
+	by := map[int]*pack{}
+	var roots []int
+	for i := range cs {
+		r := find(i)
+		if by[r] == nil {
+			by[r] = &pack{}
+			roots = append(roots, r)
+		}
+		by[r].members = append(by[r].members, cs[i])
+	}
+	out := make([]pack, 0, len(roots))
+	for _, r := range roots {
+		out = append(out, *by[r])
+	}
+	return out
+}
+
+// order walks the packs nearest-first from a point.
+func order(ps []pack, from dungeon.Point) []pack {
+	var out []pack
+	rest := append([]pack(nil), ps...)
+	for len(rest) > 0 {
+		best, bd := 0, math.MaxFloat64
+		for i, p := range rest {
+			if d := dist(from, p.center()); d < bd {
+				best, bd = i, d
+			}
+		}
+		p := rest[best]
+		rest = append(rest[:best], rest[best+1:]...)
+		out = append(out, p)
+		from = p.center()
+	}
+	return out
+}
+
+// packGroup lists a pack's members nearest to from first (the one to pull), one entry and one position each.
+func packGroup(p pack, from dungeon.Point) dungeon.PullGroup {
+	ms := append([]creature(nil), p.members...)
+	sort.SliceStable(ms, func(i, j int) bool { return dist(from, ms[i].Pos) < dist(from, ms[j].Pos) })
+	var g dungeon.PullGroup
+	for _, m := range ms {
+		g.Entries = append(g.Entries, m.Entry)
+		g.Positions = append(g.Positions, m.Pos)
+	}
+	return g
+}
+
+// Game object types a plan may want to use: door, button, goober, spell focus is left out (the campfires).
+var interesting = map[int]string{0: "door", 1: "button", 10: "goober"}
+
+// objectNotes lists the doors, buttons and goobers within r yards of the leg's packs or boss.
+func objectNotes(objs []object, l dungeon.Leg, r float64) []string {
+	pts := []dungeon.Point{l.Boss.Position}
+	for _, g := range l.PullGroups {
+		pts = append(pts, g.Positions...)
+	}
+	var out []string
+	for _, ob := range objs {
+		kind, ok := interesting[ob.Type]
+		if !ok {
+			continue
+		}
+		for _, p := range pts {
+			if dist(p, ob.Pos) <= r {
+				out = append(out, fmt.Sprintf("%s %q entry %d at %.1f %.1f %.1f", kind, ob.Name, ob.Entry, ob.Pos.X, ob.Pos.Y, ob.Pos.Z))
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
