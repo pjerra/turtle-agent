@@ -92,6 +92,32 @@ func (e *engine) floors(x, y, lo, hi float32) ([]Floor, error) {
 	return out, nil
 }
 
+// polys is the polygons of the loaded tiles that overlap the box (x0, y0, x1, y1).
+func (e *engine) polys(box [4]float32) ([]Polygon, error) {
+	n := int(C.nd_polys(e.h, (*C.float)(unsafe.Pointer(&box[0])), nil, 0))
+	if n < 0 {
+		return nil, errors.New("navmesh: Detour failed to list the polygons")
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	buf := make([]float32, n)
+	if got := int(C.nd_polys(e.h, (*C.float)(unsafe.Pointer(&box[0])), (*C.float)(unsafe.Pointer(&buf[0])), C.int(n))); got != n {
+		return nil, errors.New("navmesh: the polygon list changed while it was read")
+	}
+	var out []Polygon
+	for i := 0; i < len(buf); {
+		nv := int(buf[i])
+		p := Polygon{Flags: uint16(buf[i+1]), Verts: make([]Vec3, nv)}
+		for k := range nv {
+			p.Verts[k] = Vec3{buf[i+2+3*k], buf[i+3+3*k], buf[i+4+3*k]}
+		}
+		out = append(out, p)
+		i += 2 + 3*nv
+	}
+	return out, nil
+}
+
 // findPath returns Detour's verdict (0 complete, 1 partial, 2 partial with the goal over
 // 7 yd from the mesh, -1 start off the mesh, -2 goal off the mesh, -3 failure), the
 // straight path between the floor points, and the floor point found for the goal.

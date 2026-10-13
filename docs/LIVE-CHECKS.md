@@ -197,3 +197,11 @@ frost mage leader (any level that knows Frostbolt; the leader may still be a GM,
 7. Grep the server's anticheat log for the run; the brain sends casts and facings only, so expect nothing new.
 
 Report the first `brain_decision` that did not match this list, with the `spell_fail` or unit rows around it.
+
+## Map images (issue #79)
+
+Not settled without a live run: the images come out of the first Uldaman captures and the committed fixtures only.
+
+1. After any dungeon run, `turtle-agent map --capture run.cap --events events.json --report report.json --plan dungeons/<name>.json --mmaps <dir> --out run.svg --html`: open the SVG and check against what the run did (the legs' order, each pull where the report says, the wipe and the GM teleports flagged `GM`).
+2. In a dungeon with stacked floors (Uldaman past the main hall, Scarlet Monastery): the cut `map` prints in its notes lands between the floors, and a run that climbs shows its route on the upper image only. If it splits a level in two or leaves two apart, say with `--floors` which heights are right.
+3. `map_snapshot` during a run (`{"plan":"uldaman","html":true}`): the party's route so far and the plan agree with the live `units`, and the call costs no visible lag on a 40-member fleet child.

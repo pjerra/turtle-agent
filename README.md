@@ -85,6 +85,7 @@ turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait 
 turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
+turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent version
 ```
 
@@ -249,6 +250,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
+| `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
@@ -925,6 +927,70 @@ planner, so a floor query waits behind a plan's Detour search only, not its disk
 once (until the next `path_to`/`walk_path` plan). The 300 ms wait and the late fallback are tested against a planner
 that stalls for 3 s; they have not been seen live.
 
+## Map images
+
+`turtle-agent map` draws a run as a top-down map from what the agent already records, so a run can be read at a glance
+instead of from thousands of event lines. It renders nothing live and takes no screenshots: the images are SVG (standard
+library only, no new dependency) and an optional single-file HTML replay.
+
+```
+turtle-agent map --capture agent.cap --events events.json --report run-report.json \
+    --plan dungeons/uldaman.json --out run.svg --html
+```
+
+What it needs: `--capture` (a `login --capture` file: the positions of the party and of the hostile creatures come from
+replaying it, the leader's route from the movement packets the agent sent, and its events from the replay) and/or
+`--botwatch` (wow-play-harness samples, JSON lines with `t` in epoch seconds and `bots[]` with `name`, `map`, `x`, `y`, `z`,
+as extra routes; `--members a,b` keeps some of them). `--events` replaces the capture's events with saved ones (the
+`events` method's pages, a JSON array or one event per line): the dungeon driver's `dungeon_*` events are in the live log
+only, so a dungeon run wants its `events.json`. `--report` is the `dungeon_status` report (the bare report, or the result
+holding it): GM shortcuts flag the teleports and revives, deaths and wipes come from it. `--plan` draws a dungeon plan
+over the run. `--mmaps DIR` (or `mmaps_dir` of the settings file that `--config` names, default the settings file) gives the
+background; without tiles, without cgo, or with `--background=false` the map is drawn on white, and says so.
+
+What the map shows:
+
+- **Background:** the navmesh floor under the run as filled polygons (ground, water, lava and slime, too-steep slopes
+  told apart by colour), clipped to the run's extent plus `--pad` yards (default 25), or to `--box x0,y0,x1,y1`.
+  `--from` and `--to` (RFC 3339, both inclusive) keep one stretch of a long run: a leg, say, with its report's times.
+- **Floors:** where one walkable surface lies at least 6 yd over another (a gallery over a hall), the map is split by
+  height, halfway between the two, into one image per floor: `run-f1.svg`, `run-f2.svg`, and so on, lowest first.
+  A route, creature or event shows on the floor its height falls on (a stretch between two floors on both). Hills and
+  ramps never split. `--floors off` keeps one image, `--floors -30,-10` cuts at the heights given.
+- **Routes:** one line per member (the leader thicker, first in the legend), a dot on every route at each time tick
+  (every 15 s to 4 h, whichever leaves about a dozen; labelled on the leader's). A hole of more than 30 s in a member's
+  positions is a dotted line; a leap of 60 yd or more (a teleport) a dashed pink arrow.
+- **Hostile creatures:** a dot at the place each was first seen, by what became of it: killed (red, from the `kill` and
+  `death` events or a corpse in view), evaded (orange: fought, then seen alive and out of combat), fought and left alive
+  (purple: a wipe, or out of view in combat), skipped (hollow: seen, never fought). Creatures within 10 yd of each other
+  are ringed as a pack. Bosses are stars with their names and the time they died: the plan's boss entries, and any
+  creature whose health is at least 5 times the median and 8000.
+- **Events:** pulls (a diamond numbered in order: the first combat of the party after 15 s of quiet), deaths (a cross
+  and the name), wipes (`dungeon_failed` with a wipe), doors, levers and altars changing state (`gameobject` events, a
+  square marked D, L or G), teleports (a triangle, marked `GM` when the report lists a matching shortcut) and the report's other GM
+  shortcuts (a revive, a buff) the same way, and the start of each plan leg.
+- **Plan overlay:** the plan's walk from the entrance through the legs' waypoints (dashed), its pull group positions,
+  bosses and the objects it uses, drawn under the run, to compare plan and reality. Only the part of the plan the run came
+  near stretches the image.
+- A legend, a scale bar, a north arrow (north is up, west left) and notes (what is missing).
+
+`--html` also writes `run.html`, one self-contained file with no external script, style or font: the same background
+and legend, a slider, play and pause, a speed choice (1x to 600x), floor tabs and an event list. The slider moves the
+members, draws their routes up to that time, shows creatures from when they were first seen and in their fate colour from
+when it was settled, and reveals the events as they happen. `run.html#t=1500` opens at 25 minutes (`#f=1` at floor 2).
+Output files are mode 0600 and an existing one is refused unless `--force`; a capture is never overwritten.
+
+`map_snapshot` is the same for the live agent: it keeps the positions of the party and of the hostile creatures the session
+shows every 2 seconds from the start (memory bounded: 40000 positions per member, 6000 creatures), and draws them with
+the event log and the `dungeon_status` report. `plan` names a plan in `dungeons_dir`; `floor` picks the image, `floors`
+lists their names. The navmesh is the one `path_to` uses, so it needs `mmaps_dir`.
+
+Limits: only what the agent saw is drawn (units outside its view distance are missing, and a creature's dot is where it
+was first seen, not where it fought); the capture's replay does not follow the agent's flights or walking after RPC calls
+except through the movement packets it sent; and there are no textures or models, only the navmesh, which has no doors
+(a door closed in the game still shows as open floor). Two full-run samples of the first live Uldaman run
+(`docs/LIVE-CHECKS.md`) are in the audit repository, not here: captures are not committed.
+
 ## Navmesh walking
 
 `walk_to` walks in a straight line and knows nothing of walls. `walk_path` plans on the navmesh the server's own
@@ -1168,9 +1234,10 @@ you set).
 | `internal/tbm` | the TortoiseBots addon (TBM) protocol: handshake commands, the `TBM:` reply lines, the generated button table, the transport rule and reply matching (`tools/tbmbuttongen` writes the table) |
 | `tools/tbmlines`, `tools/tbmcontract` | extract `TBM:` lines from an events file; replay them through the real TBM addon (Lua) |
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |
+| `internal/mapview` | map images: the run from frames, events and reports, floors by height, the SVG and HTML renderers (see [Map images](#map-images)) |
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures

@@ -230,6 +230,92 @@ func (p *Planner) Floors(mapID uint32, x, y, lo, hi float32) ([]Floor, error) {
 	return fl, err
 }
 
+// Polygon is one convex navmesh polygon for drawing: its corners in WoW (x, y, z), in the order the tile holds
+// them, and its flags (NavGround, NavWater, ...).
+type Polygon struct {
+	Flags uint16
+	Verts []Vec3
+}
+
+// Polygons lists the polygons of the map's tiles that overlap the box x0..x1, y0..y1 (WoW x and y; the corners may
+// come in any order), whole polygons, not clipped to the box. It loads the tiles under the box that are not loaded
+// yet, at most MaxTiles of them, the ones nearest the box's centre: a larger box is cut to those, and truncated
+// says so. A box over no tile file gives no polygons and no error. Ground, water, lava, slime and slopes too steep
+// to climb are all listed; the flags tell them apart.
+func (p *Planner) Polygons(mapID uint32, x0, y0, x1, y1 float32) (polys []Polygon, truncated bool, err error) {
+	if p.dir == "" {
+		return nil, false, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
+	}
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	if y0 > y1 {
+		y0, y1 = y1, y0
+	}
+	p.mu.Lock()
+	m, err := p.mesh(mapID)
+	p.mu.Unlock()
+	if err != nil {
+		return nil, false, err
+	}
+	names, err := p.list(mapID)
+	if err != nil {
+		return nil, false, err
+	}
+	want, truncated := boxTiles(names, mapID, x0, y0, x1, y1, p.max)
+	if len(want) == 0 {
+		return nil, false, nil
+	}
+	data, err := p.fetch(m, want)
+	if err != nil {
+		return nil, false, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.maps[mapID] != m {
+		return nil, false, errClosed
+	}
+	m.missing = nil
+	if err := p.load(m, want, data); err != nil {
+		return nil, false, err
+	}
+	polys, err = m.eng.polys([4]float32{x0, y0, x1, y1})
+	return polys, truncated, err
+}
+
+// boxTiles is the map's tile files that overlap the box, nearest the box's centre first and cut to limit.
+func boxTiles(names []string, mapID uint32, x0, y0, x1, y1 float32, limit int) (out []string, truncated bool) {
+	rLo, cLo := tileRC(x1, y1) // x and y fall as the grid row and column rise
+	rHi, cHi := tileRC(x0, y0)
+	cr, cc := tileRC((x0+x1)/2, (y0+y1)/2)
+	type cand struct {
+		name string
+		d    int
+	}
+	var cs []cand
+	for _, n := range names {
+		var m, r, c int
+		if _, err := fmt.Sscanf(n, "%03d%02d%02d.mmtile", &m, &r, &c); err != nil || uint32(m) != mapID {
+			continue
+		}
+		if r < rLo || r > rHi || c < cLo || c > cHi {
+			continue
+		}
+		cs = append(cs, cand{n, (r-cr)*(r-cr) + (c-cc)*(c-cc)})
+	}
+	slices.SortStableFunc(cs, func(a, b cand) int {
+		if a.d != b.d {
+			return a.d - b.d
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	truncated = len(cs) > limit
+	for _, c := range cs[:min(len(cs), limit)] {
+		out = append(out, c.name)
+	}
+	return out, truncated
+}
+
 func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
 	if m := p.maps[mapID]; m != nil {
 		return m, nil

@@ -31,6 +31,12 @@ int nd_nearest(void* h, const float* p, const float* ext, unsigned short include
 // polygon flags in flags. Returns the count, or -1 when Detour fails.
 int nd_floors(void* h, const float* p, float lo, float hi, float* z, unsigned short* flags, int max);
 
+// The polygons of every loaded tile whose bounds overlap the box box = {x0, y0, x1, y1} (WoW x/y, x0 <= x1,
+// y0 <= y1), for drawing: per polygon n, the polygon flags, then n corners as WoW (x, y, z). Off-mesh connections
+// are skipped. Returns the number of floats the answer takes; at most max of them are written to out (out may be
+// NULL with max 0 to ask the size). -1 when Detour has no mesh.
+int nd_polys(void* h, const float* box, float* out, int max);
+
 // findPath + findStraightPath between the floor points under start and end, as the
 // server's PathFinder. 0 complete, 1 partial (out ends at the reachable point nearest the
 // goal), 2 partial because the goal is over 7 yd from the mesh, -1 start off the mesh,

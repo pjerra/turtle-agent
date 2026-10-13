@@ -11,6 +11,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/game/gametest"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
@@ -195,5 +196,45 @@ func TestReplayStopsWhereTheCaptureEnds(t *testing.T) {
 func TestReplayNeedsALogin(t *testing.T) {
 	if _, _, err := Replay(nil, Options{}); err == nil {
 		t.Fatal("an empty capture replayed")
+	}
+}
+
+// ReplayWith hands every record to the observer, in order, after it was handled; the units it sees stand where the
+// capture's clock puts them, so two replays of one capture see the same positions.
+func TestReplayWithObservesEveryRecordUnderTheCapturesClock(t *testing.T) {
+	recs := fixture(t, "m6-fight.twcap")
+	positions := func() (int, map[packet.GUID][3]float32) {
+		calls, last := 0, map[packet.GUID][3]float32{}
+		_, _, err := ReplayWith(recs, Options{}, func(_ capture.Record, s *Session) {
+			calls++
+			if calls == len(recs) {
+				for _, u := range s.Units(objects.Filter{Limit: 5000}) {
+					last[u.GUID] = [3]float32{u.X, u.Y, u.Z}
+				}
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return calls, last
+	}
+	n1, p1 := positions()
+	n2, p2 := positions()
+	if n1 != len(recs) || n2 != n1 || len(p1) < 10 || !reflect.DeepEqual(p1, p2) {
+		t.Fatalf("%d and %d calls for %d records; %d and %d units; equal %v", n1, n2, len(recs), len(p1), len(p2), reflect.DeepEqual(p1, p2))
+	}
+	// Replay is ReplayWith with no observer.
+	a, _, _ := Replay(recs, Options{})
+	b, _, _ := ReplayWith(recs, Options{}, nil)
+	// Not event for event: a group list that drops two members at once emits their `left` events in map order.
+	count := func(l *events.Log) map[string]int {
+		m := map[string]int{}
+		for _, e := range allEvents(l) {
+			m[e.Kind]++
+		}
+		return m
+	}
+	if ca, cb := count(a), count(b); !reflect.DeepEqual(ca, cb) || len(ca) < 5 {
+		t.Fatalf("Replay and ReplayWith(nil) differ: %v and %v", ca, cb)
 	}
 }

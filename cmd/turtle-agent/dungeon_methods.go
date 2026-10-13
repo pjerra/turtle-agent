@@ -120,8 +120,9 @@ type dungeonRunner struct {
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
-// call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends.
-func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease) func() {
+// call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends. The
+// runner is returned for the methods that read the report (map_snapshot).
+func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease) (func(), *dungeonRunner) {
 	if dir == "" {
 		dir = "dungeons"
 	}
@@ -139,7 +140,7 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	return func() {
 		cancel()
 		r.wait(10 * time.Second)
-	}
+	}, r
 }
 
 func (r *dungeonRunner) running() bool {

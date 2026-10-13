@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="887.3" height="1084.0" viewBox="0 0 887.3 1084.0" role="img" font-family="DejaVu Sans, Verdana, Arial, sans-serif" font-size="11">
+<title>run on map 1</title>
+<desc>Top-down map of map 1: 1 routes, 0 hostile creatures, 2 events. North is up.</desc>
+<defs><clipPath id="map-clip"><rect x="24.0" y="70.0" width="535.3" height="960.0"/></clipPath><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#c2185b"/></marker></defs>
+<rect width="100%" height="100%" fill="#f7f6f2"/>
+<text x="24.0" y="38.0" font-size="17" font-weight="bold" fill="#222222">run on map 1</text>
+<text x="24.0" y="56.0" fill="#666666">map 1, 2026-10-13 11:21:05 UTC, 0:00 long, 1 members, 0 hostile creatures seen</text>
+<rect x="24.0" y="70.0" width="535.3" height="960.0" fill="#ffffff" stroke="#bbbbbb"/>
+<g clip-path="url(#map-clip)"><g transform="translate(24.0 70.0)">
+<g class="route" data-member="Harnessc" fill="none" stroke="#0072B2" stroke-linejoin="round" stroke-linecap="round">
+</g>
+<g class="creatures">
+</g>
+<path class="teleport" d="M531.9 956.5L20.4 18.5" fill="none" stroke="#c2185b" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+<g class="teleport"><path d="M20.4 11.5l7 12h-14z" fill="#c2185b" stroke="#ffffff" stroke-width="1"/><text x="20.4" y="22.0" font-size="8" font-weight="bold" text-anchor="middle" fill="#ffffff">T</text><title>teleport at 0:00</title></g>
+<path class="teleport" d="M531.9 956.5L3.5 3.5" fill="none" stroke="#c2185b" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+<g class="teleport"><path d="M3.5 -3.5l7 12h-14z" fill="#c2185b" stroke="#ffffff" stroke-width="1"/><text x="3.5" y="7.0" font-size="8" font-weight="bold" text-anchor="middle" fill="#ffffff">T</text><title>teleport at 0:00</title></g>
+</g></g>
+<g class="scale"><rect x="30.0" y="1000.0" width="135.5" height="22" fill="#ffffff" fill-opacity="0.8"/><path d="M36.0 1016.0h69.5M36.0 1016.0v-5M105.5 1016.0v-5" stroke="#222222" stroke-width="2"/><text x="111.5" y="1016.0" font-size="10" fill="#222222">500 yd</text></g>
+<g class="north"><path d="M537.3 86.0l5 14h-10z" fill="#222222"/><text x="537.3" y="112.0" font-size="11" font-weight="bold" text-anchor="middle" fill="#222222">N</text></g>
+<text x="583.3" y="86.0" font-weight="bold" fill="#222222">Party routes</text>
+<g transform="translate(594.3 101.0)"><path d="M-10 0H10" stroke="#0072B2" stroke-width="2.4" stroke-dasharray="" fill="none"/></g><text x="611.3" y="105.0" fill="#222222">Harnessc (leader), 0 yd</text>
+<g transform="translate(594.3 118.0)"><circle r="2.6" fill="#555555" stroke="#ffffff"/></g><text x="611.3" y="122.0" fill="#222222">time tick every 15s</text>
+<text x="583.3" y="143.0" font-weight="bold" fill="#222222">Events</text>
+<g transform="translate(594.3 158.0)"><path d="M0 -7l7 12h-14z" fill="#c2185b"/></g><text x="611.3" y="162.0" fill="#222222">teleport (T) or GM shortcut (GM): 2</text>
+<text x="583.3" y="183.0" font-weight="bold" fill="#222222">Notes</text>
+<text x="583.3" y="200.0" fill="#666666" font-size="10">- only what the agent saw is drawn: units</text>
+<text x="583.3" y="213.0" fill="#666666" font-size="10">  outside its view distance are missing</text>
+<text x="583.3" y="226.0" fill="#666666" font-size="10">- no navmesh background</text>
+<text x="24.0" y="1072.0" fill="#666666">turtle-agent map: drawn from what the agent saw, not from the game world. North is up.</text>
+</svg>

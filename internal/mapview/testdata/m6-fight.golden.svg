@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1252.8" height="1084.0" viewBox="0 0 1252.8 1084.0" role="img" font-family="DejaVu Sans, Verdana, Arial, sans-serif" font-size="11">
+<title>run on map 1</title>
+<desc>Top-down map of map 1: 3 routes, 62 hostile creatures, 3 events. North is up.</desc>
+<defs><clipPath id="map-clip"><rect x="24.0" y="70.0" width="900.8" height="960.0"/></clipPath><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#c2185b"/></marker></defs>
+<rect width="100%" height="100%" fill="#f7f6f2"/>
+<text x="24.0" y="38.0" font-size="17" font-weight="bold" fill="#222222">run on map 1</text>
+<text x="24.0" y="56.0" fill="#666666">map 1, 2026-10-12 14:16:57 UTC, 7:37 long, 3 members, 62 hostile creatures seen</text>
+<rect x="24.0" y="70.0" width="900.8" height="960.0" fill="#ffffff" stroke="#bbbbbb"/>
+<g clip-path="url(#map-clip)"><g transform="translate(24.0 70.0)">
+<g class="packs" fill="#000000" fill-opacity="0.04" stroke="#777777" stroke-width="1" stroke-dasharray="3 3">
+<circle cx="-2565.3" cy="157.3" r="38.6"><title>pack 1, 2 creatures</title></circle>
+<circle cx="-2879.8" cy="949.9" r="30.3"><title>pack 2, 2 creatures</title></circle>
+<circle cx="3084.9" cy="880.0" r="45.4"><title>pack 3, 2 creatures</title></circle>
+<circle cx="-537.9" cy="-3189.0" r="72.8"><title>pack 4, 3 creatures</title></circle>
+<circle cx="-1735.5" cy="3425.2" r="68.8"><title>pack 5, 2 creatures</title></circle>
+<circle cx="3800.6" cy="2001.4" r="142.3"><title>pack 6, 9 creatures</title></circle>
+</g>
+<g class="route" data-member="Khelkhos" fill="none" stroke="#009E73" stroke-linejoin="round" stroke-linecap="round">
+<path d="M463.7 547.6L463.7 484.1L459.2 537.0" stroke-width="1.5" opacity="0.9"/>
+</g>
+<g class="route" data-member="Branbewan" fill="none" stroke="#D55E00" stroke-linejoin="round" stroke-linecap="round">
+<path d="M463.7 547.6L503.5 557.2L461.7 584.6L397.4 572.3" stroke-width="1.5" opacity="0.9"/>
+</g>
+<g class="route" data-member="Tagentone" fill="none" stroke="#0072B2" stroke-linejoin="round" stroke-linecap="round">
+<path d="M482.6 375.4L463.7 547.6L431.7 556.8" stroke-width="2.2" opacity="0.9"/>
+</g>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#009E73" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="459.2" cy="537.0" r="2.4" fill="#009E73" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="459.2" cy="537.0" r="2.4" fill="#009E73" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="459.2" cy="537.0" r="2.4" fill="#009E73" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="459.2" cy="537.0" r="2.4" fill="#009E73" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#D55E00" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="503.5" cy="557.2" r="2.4" fill="#D55E00" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="503.5" cy="557.2" r="2.4" fill="#D55E00" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="503.5" cy="557.2" r="2.4" fill="#D55E00" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="397.4" cy="572.3" r="2.4" fill="#D55E00" stroke="#ffffff" stroke-width="0.8"/>
+<circle class="tick" cx="482.6" cy="375.4" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="486.6" y="371.4" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">1m</text>
+<circle class="tick" cx="482.6" cy="375.4" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="486.6" y="371.4" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">2m</text>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="467.7" y="543.6" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">3m</text>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="467.7" y="543.6" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">4m</text>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="467.7" y="543.6" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">5m</text>
+<circle class="tick" cx="463.7" cy="547.6" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="467.7" y="543.6" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">6m</text>
+<circle class="tick" cx="431.7" cy="556.8" r="2.4" fill="#0072B2" stroke="#ffffff" stroke-width="0.8"/>
+<text x="435.7" y="552.8" font-size="9" fill="#222222" stroke="#ffffff" stroke-width="2.5" paint-order="stroke">7m</text>
+<g class="creatures">
+<circle cx="-2588.1" cy="135.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Prairie Dog (entry 2620, level 1): skipped</title></circle>
+<circle cx="-2864.4" cy="967.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Lost Barrens Kodo (entry 3234, level 14): skipped</title></circle>
+<circle cx="3693.4" cy="635.6" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Lost Barrens Kodo (entry 3234, level 15): skipped</title></circle>
+<circle cx="-2319.4" cy="1831.2" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Ornery Plainstrider (entry 3245, level 16): skipped</title></circle>
+<circle cx="1206.1" cy="3977.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Ornery Plainstrider (entry 3245, level 16): skipped</title></circle>
+<circle cx="-2542.4" cy="179.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Barrens Giraffe (entry 3248, level 15): skipped</title></circle>
+<circle cx="-618.0" cy="-2051.2" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Barrens Giraffe (entry 3248, level 16): skipped</title></circle>
+<circle cx="2895.1" cy="-1019.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Barrens Giraffe (entry 3248, level 15): skipped</title></circle>
+<circle cx="412.6" cy="475.3" r="3.2" fill="#b2182b" stroke="#ffffff" stroke-width="1"><title>Barrens Giraffe (entry 3248, level 16): killed at 6:31</title></circle>
+<circle cx="-1373.4" cy="-342.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Barrens Giraffe (entry 3248, level 15): skipped</title></circle>
+<circle cx="436.2" cy="-1770.2" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Barrens Giraffe (entry 3248, level 16): skipped</title></circle>
+<circle cx="3114.8" cy="904.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Screecher (entry 3255, level 15): skipped</title></circle>
+<circle cx="1516.8" cy="2998.6" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Screecher (entry 3255, level 13): skipped</title></circle>
+<circle cx="-326.7" cy="-758.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Screecher (entry 3255, level 13): skipped</title></circle>
+<circle cx="957.7" cy="-3022.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Screecher (entry 3255, level 13): skipped</title></circle>
+<circle cx="2582.0" cy="-2425.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Screecher (entry 3255, level 14): skipped</title></circle>
+<circle cx="1591.3" cy="3171.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Scytheclaw (entry 3256, level 17): skipped</title></circle>
+<circle cx="-2895.1" cy="932.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Scytheclaw (entry 3256, level 16): skipped</title></circle>
+<circle cx="-1910.3" cy="800.3" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Scytheclaw (entry 3256, level 16): skipped</title></circle>
+<circle cx="-2589.8" cy="-473.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 13): skipped</title></circle>
+<circle cx="-382.3" cy="-2974.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 12): skipped</title></circle>
+<circle cx="-1031.6" cy="-2394.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 12): skipped</title></circle>
+<circle cx="-909.7" cy="-1982.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 12): skipped</title></circle>
+<circle cx="-1554.9" cy="-1558.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 13): skipped</title></circle>
+<circle cx="-2488.0" cy="-1523.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 12): skipped</title></circle>
+<circle cx="-516.5" cy="-1548.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Stormer (entry 3273, level 14): skipped</title></circle>
+<circle cx="-2452.5" cy="-686.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Stormer (entry 3273, level 13): skipped</title></circle>
+<circle cx="-1827.0" cy="-1538.9" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Stormer (entry 3273, level 13): skipped</title></circle>
+<circle cx="-573.7" cy="-3170.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Pack Runner (entry 3274, level 14): skipped</title></circle>
+<circle cx="-1726.4" cy="3364.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Adder (entry 3300, level 1): skipped</title></circle>
+<circle cx="3055.1" cy="855.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Adder (entry 3300, level 1): skipped</title></circle>
+<circle cx="-1765.4" cy="3048.0" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Zhevra Charger (entry 3426, level 18): skipped</title></circle>
+<circle cx="-2595.5" cy="2050.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Zhevra Charger (entry 3426, level 18): skipped</title></circle>
+<circle cx="605.0" cy="3871.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Zhevra Charger (entry 3426, level 17): skipped</title></circle>
+<circle cx="-1475.3" cy="-1842.0" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Oasis Snapjaw (entry 3461, level 15): skipped</title></circle>
+<circle cx="-1700.4" cy="-2355.6" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Oasis Snapjaw (entry 3461, level 15): skipped</title></circle>
+<circle cx="-2012.5" cy="-2201.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Oasis Snapjaw (entry 3461, level 15): skipped</title></circle>
+<circle cx="-1460.8" cy="-2442.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Oasis Snapjaw (entry 3461, level 16): skipped</title></circle>
+<circle cx="-1371.8" cy="206.6" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 16): skipped</title></circle>
+<circle cx="403.3" cy="-2434.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 16): skipped</title></circle>
+<circle cx="-1356.5" cy="8.0" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 16): skipped</title></circle>
+<circle cx="1372.2" cy="2810.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 16): skipped</title></circle>
+<circle cx="3672.0" cy="1959.5" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 16): skipped</title></circle>
+<circle cx="599.2" cy="-521.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="37.9" cy="-1946.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="78.5" cy="-736.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="3082.3" cy="1838.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="2958.4" cy="472.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="-540.1" cy="-3153.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Packhound (entry 4316, level 13): skipped</title></circle>
+<circle cx="-604.8" cy="-2905.9" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Packhound (entry 4316, level 13): skipped</title></circle>
+<circle cx="1990.0" cy="3790.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Scytheclaw (entry 3256, level 18): skipped</title></circle>
+<circle cx="3810.7" cy="2099.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3813.3" cy="2050.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3795.0" cy="1953.9" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3836.3" cy="2042.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3808.7" cy="1999.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3828.3" cy="1918.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3826.1" cy="1996.1" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="3814.9" cy="1992.8" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Gazelle (entry 4166, level 3): skipped</title></circle>
+<circle cx="-499.9" cy="-3242.7" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Kolkar Wrangler (entry 3272, level 12): skipped</title></circle>
+<circle cx="-2998.2" cy="-1025.6" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Hecklefang Hyena (entry 4127, level 15): skipped</title></circle>
+<circle cx="-1744.6" cy="3486.4" r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"><title>Sunscale Scytheclaw (entry 3256, level 16): skipped</title></circle>
+</g>
+<path class="teleport" d="M466.7 520.4L463.7 547.6" fill="none" stroke="#c2185b" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+<g class="teleport"><path d="M463.7 540.6l7 12h-14z" fill="#c2185b" stroke="#ffffff" stroke-width="1"/><text x="463.7" y="551.1" font-size="8" font-weight="bold" text-anchor="middle" fill="#ffffff">T</text><title>teleport at 2:17</title></g>
+<g class="pull"><path d="M463.7 540.6l7 7l-7 7l-7 -7z" fill="#ffffff" stroke="#e08214" stroke-width="1.8"/><text x="463.7" y="550.6" font-size="8" text-anchor="middle" fill="#222222">1</text><title>pull 1 at 2:53</title></g>
+<g class="pull"><path d="M412.6 468.3l7 7l-7 7l-7 -7z" fill="#ffffff" stroke="#e08214" stroke-width="1.8"/><text x="412.6" y="478.3" font-size="8" text-anchor="middle" fill="#222222">2</text><title>pull 2: Barrens Giraffe at 6:26</title></g>
+</g></g>
+<g class="scale"><rect x="30.0" y="1000.0" width="216.1" height="22" fill="#ffffff" fill-opacity="0.8"/><path d="M36.0 1016.0h150.1M36.0 1016.0v-5M186.1 1016.0v-5" stroke="#222222" stroke-width="2"/><text x="192.1" y="1016.0" font-size="10" fill="#222222">10 yd</text></g>
+<g class="north"><path d="M902.8 86.0l5 14h-10z" fill="#222222"/><text x="902.8" y="112.0" font-size="11" font-weight="bold" text-anchor="middle" fill="#222222">N</text></g>
+<text x="948.8" y="86.0" font-weight="bold" fill="#222222">Party routes</text>
+<g transform="translate(959.8 101.0)"><path d="M-10 0H10" stroke="#0072B2" stroke-width="2.4" stroke-dasharray="" fill="none"/></g><text x="976.8" y="105.0" fill="#222222">Tagentone (leader), 14 yd</text>
+<g transform="translate(959.8 118.0)"><path d="M-10 0H10" stroke="#D55E00" stroke-width="1.6" stroke-dasharray="" fill="none"/></g><text x="976.8" y="122.0" fill="#222222">Branbewan, 10 yd</text>
+<g transform="translate(959.8 135.0)"><path d="M-10 0H10" stroke="#009E73" stroke-width="1.6" stroke-dasharray="" fill="none"/></g><text x="976.8" y="139.0" fill="#222222">Khelkhos, 8 yd</text>
+<g transform="translate(959.8 152.0)"><circle r="2.6" fill="#555555" stroke="#ffffff"/></g><text x="976.8" y="156.0" fill="#222222">time tick every 1m</text>
+<text x="948.8" y="177.0" font-weight="bold" fill="#222222">Hostile creatures</text>
+<g transform="translate(959.8 192.0)"><circle r="3.2" fill="#b2182b" stroke="#ffffff" stroke-width="1"/></g><text x="976.8" y="196.0" fill="#222222">killed: 1</text>
+<g transform="translate(959.8 209.0)"><circle r="3.2" fill="#ffffff" stroke="#7a7a7a" stroke-width="1.4"/></g><text x="976.8" y="213.0" fill="#222222">skipped (never fought): 61</text>
+<g transform="translate(959.8 226.0)"><circle r="6" fill="none" stroke="#777777" stroke-dasharray="3 3"/></g><text x="976.8" y="230.0" fill="#222222">pack: 6 groups</text>
+<text x="948.8" y="251.0" font-weight="bold" fill="#222222">Events</text>
+<g transform="translate(959.8 266.0)"><path d="M0 -6l6 6l-6 6l-6 -6z" fill="#ffffff" stroke="#e08214" stroke-width="1.6"/></g><text x="976.8" y="270.0" fill="#222222">pull (first combat): 2</text>
+<g transform="translate(959.8 283.0)"><path d="M0 -7l7 12h-14z" fill="#c2185b"/></g><text x="976.8" y="287.0" fill="#222222">teleport (T) or GM shortcut (GM): 1</text>
+<text x="948.8" y="308.0" font-weight="bold" fill="#222222">Notes</text>
+<text x="948.8" y="325.0" fill="#666666" font-size="10">- only what the agent saw is drawn: units</text>
+<text x="948.8" y="338.0" fill="#666666" font-size="10">  outside its view distance are missing</text>
+<text x="948.8" y="351.0" fill="#666666" font-size="10">- no navmesh background</text>
+<text x="24.0" y="1072.0" fill="#666666">turtle-agent map: drawn from what the agent saw, not from the game world. North is up.</text>
+</svg>
