@@ -182,10 +182,7 @@ func (o healOption) seconds() float64 { return math.Max(float64(o.CastMS)/1000, 
 func (o healOption) hps() float64 { return o.Amount / o.seconds() }
 
 func spellCost(c *Ctx, m spells.Meta) float64 {
-	if m.Cost > 0 {
-		return float64(m.Cost)
-	}
-	return float64(m.CostPct) * float64(c.Self.MaxPower) / 100
+	return float64(spellCostOf(c, m))
 }
 
 // healOptions lists the direct heals of the kit that the player knows, pays for and has not been refused lately: every rank within

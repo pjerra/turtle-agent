@@ -9,6 +9,7 @@ package navmesh
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -397,6 +398,16 @@ func boxTiles(names []string, mapID uint32, x0, y0, x1, y1 float32, limit int) (
 	return out, truncated
 }
 
+// DataMissingError says the folder lacks a file the planner needs: the map's .mmap or its tiles. It will not change before someone copies
+// the files in, so a caller that repeats the call every tick (the bot brain's walks) may back off for long and say it once.
+type DataMissingError struct{ Err error }
+
+func (e *DataMissingError) Error() string { return e.Err.Error() }
+func (e *DataMissingError) Unwrap() error { return e.Err }
+
+// Unavailable marks the error for callers that cannot import this package (the brain asks by interface).
+func (e *DataMissingError) Unavailable() bool { return true }
+
 func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
 	if m := p.maps[mapID]; m != nil {
 		return m, nil
@@ -404,8 +415,11 @@ func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
 	name := fmt.Sprintf("%03d.mmap", mapID)
 	params, err := os.ReadFile(filepath.Join(p.dir, name))
 	if err != nil {
-		return nil, fmt.Errorf("navmesh: map %d: %w (copy the server's data/mmaps/%s and %03d*.mmtile into mmaps_dir)",
-			mapID, err, name, mapID)
+		err = fmt.Errorf("navmesh: map %d: %w (copy the server's data/mmaps/%s and %03d*.mmtile into mmaps_dir)", mapID, err, name, mapID)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, &DataMissingError{Err: err}
+		}
+		return nil, err
 	}
 	eng, err := newEngine(params)
 	if err != nil {
@@ -431,7 +445,7 @@ func (p *Planner) list(mapID uint32) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("navmesh: no %s*.mmtile files in %s", prefix, p.dir)
+		return nil, &DataMissingError{Err: fmt.Errorf("navmesh: no %s*.mmtile files in %s", prefix, p.dir)}
 	}
 	return out, nil
 }
@@ -455,7 +469,11 @@ func (p *Planner) fetch(m *mapMesh, want []string) (map[string][]byte, error) {
 	for _, n := range cold {
 		b, err := os.ReadFile(filepath.Join(p.dir, n))
 		if err != nil {
-			return nil, fmt.Errorf("navmesh: %w", err)
+			err = fmt.Errorf("navmesh: %w", err)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, &DataMissingError{Err: err}
+			}
+			return nil, err
 		}
 		data[n] = b
 	}

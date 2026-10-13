@@ -92,6 +92,10 @@ type Unit struct {
 	// its mana in UNIT_FIELD_POWER1, which Power then does not show. Left out when the unit plays on mana (Power is the mana) or has none.
 	Mana    uint32 `json:"mana,omitempty"`
 	MaxMana uint32 `json:"max_mana,omitempty"`
+	// BaseMana and BaseHealth are UNIT_FIELD_BASE_MANA and UNIT_FIELD_BASE_HEALTH, what the core takes a spell's percent cost of (Summon
+	// Voidwalker: 100% of the base mana, not of the maximum). 0 when the server did not send them.
+	BaseMana   uint32 `json:"base_mana,omitempty"`
+	BaseHealth uint32 `json:"base_health,omitempty"`
 }
 
 // Aura is a spell in one of a unit's 48 aura slots (UNIT_FIELD_AURA).
@@ -596,7 +600,7 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 		GUID: o.guid, Type: "creature", Entry: v[FieldEntry],
 		Health: v[UnitHealth], MaxHealth: v[UnitMaxHealth], PowerType: uint8(v[UnitBytes0] >> 24), Class: uint8(v[UnitBytes0] >> 8),
 		Level: v[UnitLevel], Faction: v[UnitFaction], Flags: v[UnitFlags], NPCFlags: v[UnitNPCFlags],
-		Target: guidAt(v, UnitTarget),
+		Target: guidAt(v, UnitTarget), BaseMana: v[UnitBaseMana], BaseHealth: v[UnitBaseHealth],
 	}
 	if o.typ == TypePlayer || o.guid.IsPlayer() {
 		u.Type = "player"

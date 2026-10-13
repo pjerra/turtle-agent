@@ -75,6 +75,9 @@ type Action struct {
 	// aura after a drink); casts settle for Config.Settle instead.
 	Settle   time.Duration
 	Pre, Alt []string
+	// Free marks a command that is neither a cast nor a step (the pet orders): it uses no global cooldown and breaks nothing, so the
+	// "busy" multiplier does not hold it back for a cast or a settling one, and it need not wait for a walk to end.
+	Free bool
 	// Dead lets the action's target be a dead unit (a resurrection); every other cast refuses one.
 	Dead bool
 	// Resolve finds the spell when it depends on the player (its class's interrupt, the stance it wants); it replaces Spell. false:
@@ -312,13 +315,15 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		if c.lock.stepping() {
 			// A walk is under way. An interrupt or an emergency cancels it and acts now; anything else waits for it (the player
 			// neither casts on the move nor starts a second walk).
-			if rel < RelInterrupt {
+			if rel < RelInterrupt && !a.Free {
 				if via == "" {
 					c.trace = append(c.trace, Decision{Trigger: trigger, Action: a.Name, Rel: rel, Result: ResultNotPossible, Why: "walking", at: c.Now})
 				}
 				return false, Decision{}
 			}
-			c.lock.preempt(preemptWait)
+			if !a.Free { // a pet order is no step of the walk: the walk goes on
+				c.lock.preempt(preemptWait)
+			}
 		}
 		if proceed, d := b.standOrWait(ctx, c, a, trigger, rel); !proceed {
 			if d != nil {
@@ -328,7 +333,7 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		}
 		return true, b.run(ctx, c, a, trigger, rel, via)
 	}
-	if via == "" { // a chain member that cannot run either is not worth a line: the action's own reason says more
+	if via == "" && b.worthALine(c, a, why) { // a chain member that cannot run either is not worth a line: the action's own reason says more
 		c.trace = append(c.trace, Decision{Trigger: trigger, Action: a.Name, Rel: rel, Result: ResultNotPossible, Why: why, at: c.Now})
 	}
 	chain := func(names []string, step float32, tag string) (bool, Decision) {
@@ -352,6 +357,28 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		return true, d
 	}
 	return chain(a.Alt, relAlt, "alt")
+}
+
+// unknownEvery is how seldom a spell that is not in the spellbook (a talent the player never took) is mentioned as the reason a rule
+// did nothing; the rule cannot run before the spellbook changes, so every tick would only repeat it.
+const unknownEvery = 5 * time.Minute
+
+// worthALine says a refused action is traced for the tick's report. An action whose spell the spellbook lacks never can run, so it is
+// said once in a long while; every other refusal is traced.
+func (b *Brain) worthALine(c *Ctx, a *Action, why string) bool {
+	if why != "unknown_spell" {
+		return true
+	}
+	b.mem.mu.Lock()
+	defer b.mem.mu.Unlock()
+	if at, ok := b.mem.unknownAt[a.Name]; ok && c.Now.Sub(at) < unknownEvery {
+		return false
+	}
+	if b.mem.unknownAt == nil {
+		b.mem.unknownAt = map[string]time.Time{}
+	}
+	b.mem.unknownAt[a.Name] = c.Now
+	return true
 }
 
 // run does the action and records how it went; a failed game call holds the spell back for a moment.

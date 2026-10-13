@@ -2,10 +2,12 @@ package brain
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
@@ -18,8 +20,34 @@ import (
 // band, so that it also cancels a walk and may break a cast.
 const relEmergency = RelInterrupt + 3
 
+// swingResend is the least time between two attack orders at the same mob. Auto attack is a toggle the server keeps on its own (a
+// swing refused for facing or range resumes when the player is in place), so an order that is sent again every tick only starves
+// the abilities and the turn to the mob; a swing that stopped is ordered again after this long.
+const swingResend = 3 * time.Second
+
+// swingFaceBlocked says the server refused the swing for facing (observeSwing) and the player still has its back to the mob: the
+// swing waits and face_target, its prerequisite, turns the player first.
+func swingFaceBlocked(c *Ctx, m *objects.Unit) bool {
+	if m == nil {
+		return false
+	}
+	c.mem.mel.mu.Lock()
+	until := c.mem.mel.swingFaceUntil
+	c.mem.mel.mu.Unlock()
+	return c.Now.Before(until) && math.Abs(angleDiff(c.Self.O, game.Facing(c.Self.X, c.Self.Y, m.X, m.Y))) > ConeHalfAngle/2
+}
+
+// swingSentRecently says the attack order at the mob went out less than swingResend ago.
+func swingSentRecently(c *Ctx, m *objects.Unit) bool {
+	c.mem.mel.mu.Lock()
+	defer c.mem.mel.mu.Unlock()
+	return m != nil && c.mem.mel.swingTarget == m.GUID && c.Now.Sub(c.mem.mel.swingAt) < swingResend
+}
+
 // swingAction is the auto attack at the mob mobOf picks, shared by every melee class: `target` the mob and `attack` when it is within
-// reach and the swing is not on it already (see swingingAt for how the swing is known).
+// reach, the swing is not on it already (see swingingAt for how the swing is known) and the order was not sent a moment ago. A swing
+// the server refused for facing is not ordered again; the player turns to the mob first (swingFaceBlocked), so that the swing does not
+// shut out face_target and the abilities.
 func swingAction(name string, mobOf func(*Ctx) *objects.Unit) *Action {
 	inReach := func(c *Ctx) *objects.Unit {
 		m := mobOf(c)
@@ -35,8 +63,14 @@ func swingAction(name string, mobOf func(*Ctx) *objects.Unit) *Action {
 			}
 			return 0
 		},
-		Possible: func(c *Ctx) bool { return inReach(c) != nil },
-		Useful:   func(c *Ctx) bool { return !swingingAt(c, mobOf(c)) },
+		Possible: func(c *Ctx) bool {
+			m := inReach(c)
+			return m != nil && !swingFaceBlocked(c, m)
+		},
+		Useful: func(c *Ctx) bool {
+			m := mobOf(c)
+			return !swingingAt(c, m) && !swingSentRecently(c, m)
+		},
 		Do: func(ctx context.Context, c *Ctx) error {
 			m := mobOf(c)
 			if m == nil {

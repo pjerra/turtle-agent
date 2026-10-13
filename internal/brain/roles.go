@@ -142,6 +142,7 @@ func roleTank() *Strategy {
 				}},
 		},
 		Rules: []Rule{
+			swingFacingRule(),
 			{Trigger: Trigger{Name: "loose_add", Active: func(c *Ctx) bool { return ValFight.Get(c).Source == "loose" }},
 				Do: []Next{{"taunt", RelHigh + 5}}},
 		},

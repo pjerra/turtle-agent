@@ -284,8 +284,8 @@ func fightTarget(c *Ctx) packet.GUID {
 // baseStrategy is always on: it keeps the brain from starting a second cast while one is going or being sent.
 func baseStrategy() *Strategy {
 	return &Strategy{Name: "base", Mult: []Multiplier{{Name: "busy", F: func(c *Ctx, a *Action, rel float32) float32 {
-		if rel >= RelInterrupt {
-			return 1 // an interrupt or an emergency may break a cast
+		if rel >= RelInterrupt || a.Free {
+			return 1 // an interrupt or an emergency may break a cast; a pet order is no cast
 		}
 		if c.Spells.Casting() || c.mem.settling(c.Now) {
 			return 0
@@ -339,7 +339,15 @@ func combatDPS() *Strategy {
 			}},
 		},
 		Actions: []*Action{faceTargetAction()},
+		Rules:   []Rule{swingFacingRule()},
 	}
+}
+
+// swingFacingRule turns the player to the mob right away when the server refused its swing for facing (observeSwing): the swing and the
+// abilities are at the mob's back and would be refused too, and the swing, which the server keeps on, waits for the turn.
+func swingFacingRule() Rule {
+	return Rule{Trigger: Trigger{Name: "swing_refused_facing", Active: func(c *Ctx) bool { return swingFaceBlocked(c, fightMob(c)) }},
+		Do: []Next{{"face_target", RelNormal + 9.5}}}
 }
 
 // faceTargetAction turns the player to the fight's mob after the server said it was not in front. Both the damage dealer's and the
@@ -364,6 +372,9 @@ func faceTargetAction() *Action {
 			c.mem.mu.Lock()
 			c.mem.faceUntil = time.Time{}
 			c.mem.mu.Unlock()
+			c.mem.mel.mu.Lock()
+			c.mem.mel.swingFaceUntil = time.Time{}
+			c.mem.mel.mu.Unlock()
 			return c.G.Face(ctx, m.GUID)
 		},
 	}

@@ -142,7 +142,11 @@ func combatConsumables() *Strategy {
 				Do:       useBest(manaPotions, "mana potion")},
 		},
 		Rules: []Rule{
-			{Trigger: Trigger{Name: "health_critical", Active: critical}, Do: []Next{{"healthstone", RelDispel - 3}, {"health_potion", RelDispel - 4}}},
+			// The rule asks only for what the bags hold: a healthstone that is not there is no reason to say "not possible" every few seconds.
+			{Trigger: Trigger{Name: "health_critical", Active: func(c *Ctx) bool { return critical(c) && hasItems(c, healthstones) }},
+				Do: []Next{{"healthstone", RelDispel - 3}}},
+			{Trigger: Trigger{Name: "health_critical_potion", Active: func(c *Ctx) bool { return critical(c) && hasItems(c, healthPotions) }},
+				Do: []Next{{"health_potion", RelDispel - 4}}},
 			{Trigger: Trigger{Name: "health_low_quiet", Active: func(c *Ctx) bool {
 				return inCombat(c) && healthPct(c) < bandageBelowPct && damageQuietNow(c)
 			}}, Do: []Next{{"bandage", RelNormal + 1}}},

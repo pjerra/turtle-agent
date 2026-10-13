@@ -83,7 +83,7 @@ func TestRogueBuildsComboPointsThenFinishes(t *testing.T) {
 	}
 	setEnergy(r.g, 100)
 	setCombo(r.g, 2, mobA)
-	if d := r.tick(1100 * time.Millisecond); d == nil || d.Action != "slice_and_dice" || d.Spell != spSnD || d.Target != selfG || d.Rel != RelNormal+8 {
+	if d := r.tick(1100 * time.Millisecond); d == nil || d.Action != "slice_and_dice" || d.Spell != spSnD || d.Target != mobA || d.Rel != RelNormal+8 {
 		t.Fatalf("Slice and Dice before more points: %+v idle %q", d, r.idle())
 	}
 	addAura(r.g, "Slice and Dice", spSnD, ms(20000))

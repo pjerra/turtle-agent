@@ -27,6 +27,14 @@ type Melee interface {
 	Swinging() packet.GUID
 }
 
+// SwingWatcher is the optional part of Melee that counts the swings the server refused for facing (SMSG_ATTACKSWING_BADFACING). It is
+// asked by type assertion too; a game without it never learns that its back is to the mob.
+type SwingWatcher interface {
+	// BadFacings is how many such refusals came since the game began to watch. A new count below the last one means the watch started
+	// over (a new session).
+	BadFacings() uint64
+}
+
 func meleeOf(c *Ctx) Melee { m, _ := c.G.(Melee); return m }
 
 // melMem is what the melee strategies remember between ticks.
@@ -35,7 +43,10 @@ type melMem struct {
 	swingTarget packet.GUID // the unit the last attack order named (a game without Melee)
 	swingAt     time.Time
 	stanceAt    time.Time // the last stance change the brain made
+	errSeen     uint64    // the bad_facing refusals the brain has answered (SwingWatcher)
 	faces       map[packet.GUID]faceTry
+
+	swingFaceUntil time.Time // how long a swing refused for facing waits for the turn to the mob (observeSwing, swingFaceBlocked)
 }
 
 // faceTry is how often, and when last, the tank walked to turn a mob away from the group.
@@ -70,6 +81,29 @@ const (
 	faceGap   = 6 * time.Second
 	faceKeep  = time.Minute // a mob not turned for this long is forgotten
 )
+
+// observeSwing answers a swing the server refused for facing: the player turns to the mob (face_target) and the attack order is not
+// repeated meanwhile. The server keeps the auto attack on and resumes it once the player faces the mob.
+func (b *Brain) observeSwing(c *Ctx) {
+	sw, ok := c.G.(SwingWatcher)
+	if !ok {
+		return
+	}
+	n := sw.BadFacings()
+	c.mem.mel.mu.Lock()
+	seen := c.mem.mel.errSeen
+	c.mem.mel.errSeen = n // a count that fell back is a watch that started over: what it counts now is new
+	c.mem.mel.mu.Unlock()
+	if n == seen || n == 0 {
+		return
+	}
+	b.mem.mu.Lock()
+	b.mem.faceUntil = c.Now.Add(3 * time.Second)
+	b.mem.mu.Unlock()
+	c.mem.mel.mu.Lock()
+	c.mem.mel.swingFaceUntil = c.Now.Add(3 * time.Second)
+	c.mem.mel.mu.Unlock()
+}
 
 // faceAllowed says the tank may walk again to turn the mob away from the group.
 func faceAllowed(c *Ctx, m *objects.Unit) bool {
