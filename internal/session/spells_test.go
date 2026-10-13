@@ -179,6 +179,8 @@ func TestCastCooldownsAndFailures(t *testing.T) {
 	// SMSG_CLEAR_COOLDOWN (a GM's .cooldown, a reset ability) ends the cooldown.
 	h.send(opcode.SMSGClearCooldown, gametest.CooldownEvent(fireBlast, me.GUID))
 	waitFor(t, func() bool { return spellRow(t, h, fireBlast).Ready })
+	// The spell turns ready before cooldown_clear is appended (see TestChannelState), so wait for the event too.
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindCooldownClear)) == 1 })
 	if c := ofKind(h.s.Log(), events.KindCooldownClear); len(c) != 1 || c[0].SpellID != fireBlast {
 		t.Errorf("%+v", c)
 	}
@@ -217,6 +219,8 @@ func TestServerCooldownsEndWithAnEvent(t *testing.T) {
 	// SMSG_COOLDOWN_CHEAT clears everything.
 	h.send(opcode.SMSGCooldownCheat, gametest.CooldownCheat(me.GUID))
 	waitFor(t, func() bool { return spellRow(t, h, bloodrageS).Ready })
+	// The clear is appended after the spells turn ready (see TestChannelState), so wait for the event too.
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindCooldownClear)) == 1 })
 	if c := ofKind(h.s.Log(), events.KindCooldownClear); len(c) != 1 || c[0].Data["all"] != true || c[0].SpellID != 0 {
 		t.Errorf("%+v", c)
 	}
@@ -233,6 +237,8 @@ func TestChannelState(t *testing.T) {
 	}
 	h.send(opcode.MSGChannelUpdate, gametest.ChannelUpdate(0))
 	waitFor(t, func() bool { cs, _ := h.s.CastState(); return cs.Cast.State == "idle" })
+	// The state turns idle before channel_end is appended (events go through names.go flushNames), so wait for the event.
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindChannelEnd)) == 1 })
 	st, en := ofKind(h.s.Log(), events.KindChannelStart), ofKind(h.s.Log(), events.KindChannelEnd)
 	if len(st) != 1 || st[0].SpellID != 5143 || st[0].Data["ms"] != uint32(3000) || len(en) != 1 || en[0].SpellID != 5143 {
 		t.Errorf("%+v %+v", st, en)

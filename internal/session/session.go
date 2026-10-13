@@ -400,7 +400,7 @@ func (s *Session) Run(ctx context.Context) error {
 			}
 		}
 	}()
-	if err := s.conn.WritePacket(opcode.CMSGCharEnum, nil); err != nil { // CharacterHandler.cpp:203
+	if err := s.conn.WritePacket(opcode.CMSGCharEnum, nil); err != nil { // core: WorldSession::HandleCharEnumOpcode
 		return s.connLost(err)
 	}
 	s.setState(StatusCharSelect)
@@ -675,8 +675,9 @@ func (s *Session) sendPlayerLogin() error {
 
 // onLoginFailed retries code 1 a few times: the server also sends it while the character
 // is locked for an automatic backup, which the first character list of a session from a
-// new IP schedules for characters above AutoPDump.MinCharLevel (WorldSocket.cpp:344,
-// CharacterHandler.cpp:181-182, :503-510; World.cpp:4801-4869).
+// new IP schedules for characters above AutoPDump.MinCharLevel (core: WorldSocket::HandleAuthSession
+// sets the flag, WorldSession::HandleCharEnum schedules the dump, WorldSession::HandlePlayerLoginOpcode
+// refuses while World::IsCharacterLocked, and World::AutoPDumpWorker unlocks).
 func (s *Session) onLoginFailed(body []byte) error {
 	code := -1
 	if len(body) > 0 {

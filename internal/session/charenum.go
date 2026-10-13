@@ -30,8 +30,8 @@ type Character struct {
 // SMSG_CHAR_ENUM with it, so a layout change reaches them too.
 const CharEnumTailLen = 150
 
-// ParseCharEnum reads a u8 count (CharacterHandler.cpp:164-169) and per character the
-// guid, the name and a 150-byte tail (Player.cpp:2198-2285). Bytes left over mean the
+// ParseCharEnum reads a u8 count (WorldSession::HandleCharEnum writes it) and per character the
+// guid, the name and a 150-byte tail (Player::BuildEnumData). Bytes left over mean the
 // layout drifted, which is an error rather than a silent misparse.
 func ParseCharEnum(body []byte) ([]Character, error) {
 	r := packet.NewReader(body)
