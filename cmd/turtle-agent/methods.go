@@ -123,6 +123,9 @@ type methodOptions struct {
 	DungeonsDir string
 	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
 	Planner *navmesh.Planner
+	// AccountProbeWindow is how long a dungeon run waits for the server's answer to its ".account" probe; 0 means 2 s. The
+	// tests shorten it: their server never answers, and the wait would race their own.
+	AccountProbeWindow time.Duration
 }
 
 // registerMethodsFor wires the spec's JSON-RPC methods, and every later milestone's, to whatever
@@ -242,7 +245,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerDeathMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
-	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease)
+	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow)
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
 		stopMap()

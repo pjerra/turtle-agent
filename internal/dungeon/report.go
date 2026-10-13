@@ -102,12 +102,29 @@ func (p *reporter) start(fromLeg int) {
 	})
 }
 
-func (p *reporter) end(state, errText string) {
-	p.update(func(r *Report) {
-		t := p.now()
-		r.State, r.Error, r.Ended, r.Current = state, errText, &t, ""
-		r.Seconds = t.Sub(r.Started).Seconds()
-	})
+// end publishes the end of the run at t. The event that announces it goes out first (summaryEnded): a reader that
+// sees a final state finds the event in the log.
+func (p *reporter) end(state, errText string, t time.Time) {
+	p.update(func(r *Report) { endReport(r, state, errText, t) })
+}
+
+func endReport(r *Report, state, errText string, t time.Time) {
+	r.State, r.Error, r.Ended, r.Current = state, errText, &t, ""
+	r.Seconds = t.Sub(r.Started).Seconds()
+}
+
+// snapshotEnded is snapshot and whether the run has ended, read together under the lock: a state that is not final
+// is always a run that is going.
+func (p *reporter) snapshotEnded() (Report, bool) {
+	r := p.snapshot()
+	return r, r.Ended != nil
+}
+
+// summaryEnded is summary as it will read once end(state, errText, t) is published, for the event that goes out before.
+func (p *reporter) summaryEnded(state, errText string, t time.Time) map[string]any {
+	r := p.snapshot()
+	endReport(&r, state, errText, t)
+	return summaryOf(r)
 }
 
 func (p *reporter) setCurrent(label string) { p.update(func(r *Report) { r.Current = label }) }
@@ -143,8 +160,9 @@ func (p *reporter) snapshot() Report {
 }
 
 // summary is the report's totals for the dungeon_done and dungeon_failed events.
-func (p *reporter) summary() map[string]any {
-	r := p.snapshot()
+func (p *reporter) summary() map[string]any { return summaryOf(p.snapshot()) }
+
+func summaryOf(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}

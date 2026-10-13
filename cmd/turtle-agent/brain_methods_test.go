@@ -126,6 +126,15 @@ func TestBrainCastsOnAMobThatAttacksTheLeader(t *testing.T) {
 	if got := binary.LittleEndian.Uint32(p.Body); got != 7322 {
 		t.Fatalf("cast spell %d, want Frostbolt rank 4 (7322)", got)
 	}
+	// The cast packet is on the wire before the decision is recorded: stopping now could cancel the cast's context and record "error".
+	r.eventually("brain_status", "{}", func(m map[string]any) bool {
+		last, _ := m["result"].(map[string]any)["last_decisions"].([]any)
+		if len(last) == 0 {
+			return false
+		}
+		d, _ := last[len(last)-1].(map[string]any)
+		return d["result"] == "ok"
+	})
 	st := r.call("brain_stop", "{}")["result"].(map[string]any)
 	if st["actions"].(float64) < 1 {
 		t.Fatalf("%v", st)

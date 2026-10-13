@@ -326,6 +326,10 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 // Report is a copy of the run report, usable while the run goes on.
 func (d *Driver) Report() Report { return d.rep.snapshot() }
 
+// Status is the report and whether the run has ended, read together under one lock. The run's end event is emitted before the
+// report says it ended (finish), so ended true means dungeon_done or dungeon_failed is in the event log.
+func (d *Driver) Status() (rep Report, ended bool) { return d.rep.snapshotEnded() }
+
 // Run does the plan from leg fromLeg. It returns nil when the plan is done; the error says why it ended otherwise
 // (also in the report): "wipe", a failed step, or the context's error for a stop.
 func (d *Driver) Run(ctx context.Context, fromLeg int) error {
@@ -338,28 +342,28 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 	return err
 }
 
+// finish ends the run: the end event goes out before the end state is published, so that a reader of the report (dungeon_status)
+// that sees "done", "failed" or "stopped" finds dungeon_done or dungeon_failed in the event log, and a report that is still "running"
+// is a run whose end has not been announced.
 func (d *Driver) finish(err error) {
 	leg := d.curLeg
+	var state, errText, kind, text string
 	switch {
 	case err == nil:
-		d.endLeg("done")
-		d.rep.end("done", "")
-		d.g.Emit(events.KindDungeonDone, "dungeon "+d.plan.Name+" done", d.rep.summary())
+		state, kind, text = "done", events.KindDungeonDone, "dungeon "+d.plan.Name+" done"
 	case ctxDone(err):
-		d.endLeg("stopped")
-		d.rep.end("stopped", "stopped")
-		d.g.Emit(events.KindDungeonFailed, "dungeon "+d.plan.Name+" stopped", d.failData(leg, "stopped"))
+		state, errText, kind, text = "stopped", "stopped", events.KindDungeonFailed, "dungeon "+d.plan.Name+" stopped"
 	default:
-		d.endLeg("failed")
-		d.rep.end("failed", err.Error())
-		d.g.Emit(events.KindDungeonFailed, "dungeon "+d.plan.Name+" failed: "+err.Error(), d.failData(leg, err.Error()))
+		state, errText, kind, text = "failed", err.Error(), events.KindDungeonFailed, "dungeon "+d.plan.Name+" failed: "+err.Error()
 	}
-}
-
-func (d *Driver) failData(leg int, why string) map[string]any {
-	m := d.rep.summary()
-	m["error"], m["leg"] = why, leg
-	return m
+	d.endLeg(state)
+	at := d.rep.now()
+	data := d.rep.summaryEnded(state, errText, at)
+	if err != nil {
+		data["error"], data["leg"] = errText, leg
+	}
+	d.g.Emit(kind, text, data)
+	d.rep.end(state, errText, at)
 }
 
 func ctxDone(err error) bool {

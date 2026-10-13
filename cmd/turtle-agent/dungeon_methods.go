@@ -129,6 +129,8 @@ type dungeonRunner struct {
 	root  context.Context
 	brain *brain.Controller
 	lease *brainLease
+	// probeWindow is how long a run listens for the server's answer to its ".account" probe (accountProbeWindow when 0).
+	probeWindow time.Duration
 
 	mu     sync.Mutex
 	drv    *dungeon.Driver
@@ -139,12 +141,12 @@ type dungeonRunner struct {
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
 // call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends. The
 // runner is returned for the methods that read the report (map_snapshot).
-func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease) (func(), *dungeonRunner) {
+func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease, probeWindow time.Duration) (func(), *dungeonRunner) {
 	if dir == "" {
 		dir = "dungeons"
 	}
 	root, cancel := context.WithCancel(context.Background())
-	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease}
+	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
 		return r.run(p)
 	}))
@@ -271,7 +273,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
 	}
-	game := &sessionGame{cur: r.cur}
+	game := &sessionGame{cur: r.cur, probeWindow: r.probeWindow}
 	game.refusals.mark(r.cur().Log())
 	drv := dungeon.NewDriver(plan, game, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
@@ -321,8 +323,11 @@ func (r *dungeonRunner) status() dungeonStatusResult {
 	if r.drv == nil {
 		return dungeonStatusResult{State: "idle"}
 	}
-	rep := r.drv.Report()
-	return dungeonStatusResult{Running: r.running(), State: rep.State, Report: &rep}
+	// The run's goroutine is read first: it ends after the driver published the end of the run (and its event), so a goroutine seen
+	// gone means a final report. The report and whether it ended are one snapshot; a state that is not final is a run that goes on.
+	gone := !r.running()
+	rep, ended := r.drv.Status()
+	return dungeonStatusResult{Running: !gone || !ended, State: rep.State, Report: &rep}
 }
 
 // wait blocks until the run's goroutine has ended or d has passed.
@@ -353,8 +358,9 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 // sessionGame is the dungeon driver's Game over the agent's session. It asks cur at each call, so a reconnect that
 // swaps the session does not strand a run.
 type sessionGame struct {
-	cur      func() *session.Session
-	refusals refusalCursor
+	cur         func() *session.Session
+	refusals    refusalCursor
+	probeWindow time.Duration // ProbeAccount's listening time; accountProbeWindow when 0
 }
 
 func (g *sessionGame) Position() dungeon.Point {
@@ -423,7 +429,11 @@ func (g *sessionGame) ProbeAccount(ctx context.Context) (level int, known bool, 
 	if err := s.GM(ctx, cmd); err != nil {
 		return 0, false, err
 	}
-	wctx, cancel := context.WithTimeout(ctx, accountProbeWindow)
+	window := g.probeWindow
+	if window <= 0 {
+		window = accountProbeWindow
+	}
+	wctx, cancel := context.WithTimeout(ctx, window)
 	defer cancel()
 	var seen []events.Event
 	for wctx.Err() == nil {

@@ -598,16 +598,18 @@ func (s *Session) end(err error) error { return s.endLogout(err, "") }
 // endLogout is end for a pending logout that ended without a logout: the session event
 // and the waiting Logout carry outcome.
 func (s *Session) endLogout(err error, outcome LogoutOutcome) error {
-	s.mu.Lock()
-	s.state = StatusDisconnected
-	s.lastErr = s.redact.scrub(err.Error())
-	s.mu.Unlock()
-	s.flushPending()
 	data := map[string]any{"state": string(StatusDisconnected)}
 	if outcome != "" {
 		data["outcome"] = string(outcome)
 	}
+	// The event first, with every event still waiting for a name before it, then the state: a reader that sees the session
+	// disconnected (Status) finds the events that say why in the log.
 	s.emit(events.Event{Kind: events.KindSession, Text: err.Error(), Data: data})
+	s.flushPending()
+	s.mu.Lock()
+	s.state = StatusDisconnected
+	s.lastErr = s.redact.scrub(err.Error())
+	s.mu.Unlock()
 	if s.logout != nil {
 		s.logout.finish(outcome, err)
 		s.logout = nil
@@ -637,13 +639,13 @@ func (s *Session) connLost(err error) error {
 
 // closedAtLogout records a socket closed during a pending logout as the logout's end.
 func (s *Session) closedAtLogout(cause error) error {
+	s.emit(events.Event{Kind: events.KindSession, Text: ErrClosedAtLogout.Error(),
+		Data: map[string]any{"state": string(StatusLoggedOut), "outcome": string(LogoutClosedByServer)}})
+	s.flushPending()
 	s.mu.Lock()
 	s.state = StatusLoggedOut
 	s.lastErr = s.redact.scrub(fmt.Sprintf("%v: %v", ErrClosedAtLogout, cause))
 	s.mu.Unlock()
-	s.flushPending()
-	s.emit(events.Event{Kind: events.KindSession, Text: ErrClosedAtLogout.Error(),
-		Data: map[string]any{"state": string(StatusLoggedOut), "outcome": string(LogoutClosedByServer)}})
 	if s.logout != nil {
 		s.logout.finish(LogoutClosedByServer, nil)
 		s.logout = nil
@@ -792,12 +794,12 @@ func (s *Session) onLogoutResponse(body []byte) error {
 		return err
 	}
 	if reason != 0 {
+		s.emit(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "logout_refused", "reason": reason}})
+		s.setState(StatusInWorld)
 		if s.logout != nil {
 			s.logout.finish("", &LogoutError{Reason: reason})
 			s.logout = nil
 		}
-		s.setState(StatusInWorld)
-		s.emit(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "logout_refused", "reason": reason}})
 		return nil
 	}
 	s.logoutAccepted = s.logout != nil
@@ -806,9 +808,9 @@ func (s *Session) onLogoutResponse(body []byte) error {
 }
 
 func (s *Session) onLogoutComplete([]byte) error {
-	s.setState(StatusLoggedOut)
-	s.flushPending()
 	s.emit(events.Event{Kind: events.KindSession, Data: map[string]any{"state": string(StatusLoggedOut), "outcome": string(LogoutComplete)}})
+	s.flushPending()
+	s.setState(StatusLoggedOut)
 	if s.logout != nil {
 		s.logout.finish(LogoutComplete, nil)
 		s.logout = nil

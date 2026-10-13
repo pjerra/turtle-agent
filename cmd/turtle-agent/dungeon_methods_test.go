@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -25,7 +26,7 @@ func dungeonRig(t *testing.T) *agentRig {
 	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte(`{"version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
+	return newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir, AccountProbeWindow: 50 * time.Millisecond})
 }
 
 func TestDungeonStatusIsIdleAtFirst(t *testing.T) {
@@ -71,8 +72,7 @@ func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 	if res["started"] != true || res["plan"] != "rig" || res["from_leg"] != float64(1) || res["map"] != float64(0) {
 		t.Fatalf("%v", res)
 	}
-	// The state reads failed while the run's goroutine is still in finish, before dungeon_failed is appended:
-	// wait until the run has ended (running false), which comes after the append.
+	// A final state is never read before its event: the run emits dungeon_failed, then publishes "failed". Wait until the run has ended.
 	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
 		ds := m["result"].(map[string]any)
 		return ds["state"] == "failed" && ds["running"] == false
@@ -91,6 +91,37 @@ func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 	// The finished run is replaced by the next.
 	if out := r.call("dungeon_run", `{"name":"rig","teleport":true,"no_shortcuts":true}`); out["error"] != nil || out["result"].(map[string]any)["from_leg"] != float64(0) {
 		t.Fatalf("%v", out)
+	}
+}
+
+// dungeon_status is one consistent snapshot: a state that is not final is a run that goes on, "running: false" is a final state, and
+// a final state is read only once its event is in the log (the driver emits it first).
+func TestDungeonStatusNeverRunsAheadOfItsEvent(t *testing.T) {
+	r := dungeonRig(t)
+	if out := r.call("dungeon_run", `{"name":"rig"}`); out["error"] != nil {
+		t.Fatalf("%v", out)
+	}
+	final := map[string]bool{"done": true, "failed": true, "stopped": true}
+	for deadline := time.Now().Add(2 * time.Second); ; {
+		ds := r.call("dungeon_status", "{}")["result"].(map[string]any)
+		state, running := ds["state"].(string), ds["running"].(bool)
+		if !final[state] && !running {
+			t.Fatalf("state %s but not running: %v", state, ds)
+		}
+		if final[state] {
+			// The event was in the log before the state could be read.
+			evs := r.call("events", `{"since":0,"kinds":["dungeon_failed","dungeon_done"]}`)["result"].(map[string]any)["events"].([]any)
+			if len(evs) != 1 {
+				t.Fatalf("state %s read with %d end events in the log: %v", state, len(evs), evs)
+			}
+			if !running {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the run never ended: %v", ds)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
