@@ -386,3 +386,49 @@ clock is disciplined, stepped back about a second every half minute). The client
 2. Grep the server's anticheat log for the character: the `ClockDesync` count must stay 0 over the hour.
 3. Same log: no `TimeBack`, `HeartbeatSkip` or `OverspeedZ` lines the run did not have before.
 4. `turtle-agent map --capture` on that run's capture (also one made with `login --create`) reports frames, not 0.
+
+
+## Bot brain: rogue, hunter and retribution paladin (issue #80 step 4b)
+
+Tested against a scripted fake game only. Not seen live. Run each class in a dungeon with a tank bot and a healer, `mmaps_dir` set, start the brain
+by hand (`brain_start {"strategies":["combat_rogue"],"tank":"<tank name>"}`, `marksman_hunter`, `ret_paladin`) and read the `brain_decision` and
+`brain_idle` events and `brain_status`.
+
+**Rogue** (level 30+: Slice and Dice, Kick, Evasion known)
+1. **Combo points.** `combo_points` events step 1..5 under `sinister_strike`; `slice_and_dice` once at 2+ points (the aura shows in `units` for the
+   leader), `eviscerate` at 5 (or 4 on a mob under 35%), the points back to 0 after it. Check that the combo points are on the mob the brain attacks
+   (`combo_target`): on a target switch the finisher waits for new points. No `sinister_strike` at 5 points. No `spell_fail` `no_power` repeating.
+2. **Energy.** Energy arrives in whole points in the unit rows (not tenths) and the costs (40, 30, 20) match what the server charges.
+3. **Position.** Behind the mob (`melee_reposition` once when the tank turns it to face the rogue); no walk when the mob is on the rogue.
+4. **Interrupt.** `interrupt` with Kick (spell 1767 or its rank) on a heal or crowd-control cast within 5 yd; the server's `interrupted` after it.
+5. **Threat.** A mob on the rogue while the tank is near: one `feint`, not again for 10 s. Health under 50% with a mob on the rogue in melee: `evasion`.
+   Under 25%: `vanish`. Under 30% with the tank more than 8 yd away: `sprint`, then `flee_to_tank` (the leader ends about 4 yd from the tank).
+   Note whether Feint, Evasion and Vanish are accepted in combat as cast, and whether Sprint starts the run.
+6. **Not done:** Stealth openers, Backstab, poisons.
+
+**Hunter** (level 30+ with a bow or gun and ammo)
+1. **Auto Shot.** One `auto_shot` after the opening delay and the `attack_start`/shot events keep coming; the brain sends it again every 3.5 s: check
+   that there is no second send while the shots keep coming (a resend would restart the ranged timer at 500 ms), and one after a walk. After a `hunter_reposition` walk the shots start again.
+2. **Rotation.** `hunters_mark`, `serpent_sting`, `arcane_shot` on cooldown, `multi_shot` with 2+ mobs on the tank. No sting or arcane below 20% mana.
+   No `multi_shot` when a mob near the target is not engaged.
+3. **Dead zone.** A mob within 9 yd that is not on the hunter: `hunter_reposition`, the hunter ends 12 to 29 yd from the mob with sight of it. Note any
+   `spell_fail` `out_of_range`/`too_close`/`line_of_sight` after it.
+4. **Aspects.** Out of combat: `aspect_hawk` once. Cheetah/Pack on in combat: Hawk. Below 20% mana in combat: `aspect_viper` (level 56+ on Turtle), back to
+   the Hawk from 60%. Note the aura names (`Aspect of the Hawk`, `Aspect of the Viper`).
+5. **Aggro.** A mob running at the hunter: `concussive_shot` once. A mob on the hunter within 15 yd with the tank near: `feign_death`; then no shots for 6 s.
+   The brain sends `CMSG_CANCEL_AUTO_REPEAT_SPELL` just before the Feign Death cast: check that no shot lands during the feint (Auto Shot is really off), that the mob drops the hunter, and that Auto Shot starts again after the 6 s. Without a tank: `hunter_swing`
+   and `raptor_strike` (the swing starts; Raptor Strike is not sent twice within 1.5 s).
+6. **Ammo.** With the quiver empty: `spell_fail` `no_ammo` (or `need_ammo`) once, then the shots held 30 s (`brain_status.holds`).
+7. **Pets** are not driven; nothing to check. Note whether the pet fights on its own and whether it follows the hunter's walks.
+
+**Retribution paladin** (level 30+ with Seal of Command; level 20+ for Crusader Strike on Turtle)
+1. **Seals.** A `seal` (Command) as soon as the tank's mob is within 15 yd, also before the first attack; `judgement` on cooldown (10 s), the seal gone after it
+   and cast again; `crusader_strike` between. Check the aura names `Seal of Command`, `Seal of Righteousness`.
+2. **Companion paladins.** With a companion paladin judging: the mob carries `Judgement of the Crusader` or `Wisdom` from it; the leader does not choose
+   Seal of the Crusader then, and at low mana does not choose Wisdom if the mob has Judgement of Wisdom. Check that its own Judgement does not remove theirs.
+3. **Auras and blessings.** Out of combat: `paladin_aura` (Retribution) once, `blessing` (Might) once; a companion's Devotion Aura does not stop the
+   Retribution Aura; a blessing from a companion counts as the blessing and is not cast over. Does a second paladin's blessing of the same name show twice?
+4. **Interrupts and emergencies.** `interrupt` with Hammer of Justice on a cast within 10 yd; a mob on the leader in melee below 45%: `hammer_of_justice`;
+   below 35%: `divine_protection` and no attacks while the aura lasts (does the server really pacify the leader?); below 20%: `lay_on_hands`.
+5. **Consecration** with 2+ mobs in melee, not with a loose mob near; **drink** out of combat below 65% mana at a rest gate.
+6. **Mana floor.** Run the paladin dry in a long fight: below 30% mana the seal is Wisdom (unless the mob has Judgement of Wisdom) and only that is judged, below 15% no Crusader Strike and no other seal; the swing goes on.

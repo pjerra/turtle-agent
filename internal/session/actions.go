@@ -312,6 +312,13 @@ func (s *Session) StopAttack(ctx context.Context) error {
 	return s.send(ctx, opcode.CMSGAttackstop, nil)
 }
 
+// CancelAutoRepeat stops the player's auto-repeat spell (Auto Shot, Shoot): CMSG_CANCEL_AUTO_REPEAT_SPELL, an empty body, which the core
+// answers with InterruptSpell(CURRENT_AUTOREPEAT_SPELL) (SpellHandler.cpp HandleCancelAutoRepeatSpellOpcode). A real client sends it when
+// the player toggles Auto Shot off.
+func (s *Session) CancelAutoRepeat(ctx context.Context) error {
+	return s.send(ctx, opcode.CMSGCancelAutoRepeatSpell, nil)
+}
+
 // Cast casts spell on target, or on the current target when target is 0, or on the
 // player when nothing is selected.
 func (s *Session) Cast(ctx context.Context, spell uint32, target packet.GUID) error {

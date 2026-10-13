@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -266,11 +267,15 @@ func runToTankPoint(c *Ctx) *Vec3 {
 	if tank == nil || float64(tank.Distance2D) <= pickupFrom {
 		return nil
 	}
-	me, tp := selfPos(c), unitPos(tank)
-	d := dist2(me, tp)
-	f := float32(tankMeet / d)
-	p := Vec3{tp[0] + (me[0]-tp[0])*f, tp[1] + (me[1]-tp[1])*f, tp[2]}
+	p := pointByTank(c, tank)
 	return &p
+}
+
+// pointByTank is the point tankMeet yards from the tank on the way from the tank to the player.
+func pointByTank(c *Ctx, tank *objects.Unit) Vec3 {
+	me, tp := selfPos(c), unitPos(tank)
+	f := float32(tankMeet / math.Max(dist2(me, tp), 0.1))
+	return Vec3{tp[0] + (me[0]-tp[0])*f, tp[1] + (me[1]-tp[1])*f, tp[2]}
 }
 
 // ValRootedMob is the nearest mob on the player within 12 yards that carries a root of the mage's (Frost Nova).

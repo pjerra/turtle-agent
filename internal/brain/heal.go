@@ -937,7 +937,7 @@ func restDrink() *Strategy {
 	return &Strategy{
 		Name: "rest_drink",
 		Actions: []*Action{{Name: "drink", Settle: drinkSettle,
-			Possible: func(c *Ctx) bool { return !inCombat(c) && drinkEntry(c, false) != 0 },
+			Possible: func(c *Ctx) bool { return !inCombat(c) && c.Class().Drinks && drinkEntry(c, false) != 0 },
 			Useful:   func(c *Ctx) bool { return !HasAura(&c.Self, "Drink") },
 			Do: func(ctx context.Context, c *Ctx) error {
 				e := drinkEntry(c, false)

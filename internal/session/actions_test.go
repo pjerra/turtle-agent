@@ -54,6 +54,12 @@ func TestTargetAttackStopCast(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.expect(opcode.CMSGAttackstop)
+	if err := h.s.CancelAutoRepeat(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := h.expect(opcode.CMSGCancelAutoRepeatSpell); len(p.Body) != 0 {
+		t.Fatalf("% X", p.Body)
+	}
 	if h.s.Status().Target != wolfGUID {
 		t.Fatal("status target")
 	}
