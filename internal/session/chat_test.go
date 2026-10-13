@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
 // chatBody transcribes ChatHandler::BuildChatPacket's default and say branches (Chat.cpp:2251-2314).
@@ -205,4 +208,80 @@ func TestUnansweredNameDoesNotStallAgain(t *testing.T) {
 		t.Fatalf(`"b" stalled behind the unanswered name: %+v %v`, e, ok)
 	}
 	h.logout()
+}
+
+// GMOn selects the unit and sends the command in one step of the session: however many target calls run at the same
+// time, the packet before each command is the selection of the unit it was meant for.
+func TestGMOnSelectsAndSendsAtomically(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{})
+	h.enterWorld()
+	const mine, other, n = packet.GUID(0x31), packet.GUID(0x99), 40
+
+	var got []worldconn.Packet
+	collected := make(chan struct{})
+	go func() {
+		defer close(collected)
+		chats := 0
+		for chats < n {
+			p, err := h.srv.Next(3 * time.Second)
+			if err != nil {
+				return
+			}
+			got = append(got, p)
+			if p.Op == opcode.CMSGMessagechat {
+				chats++
+			}
+		}
+	}()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { // somebody else keeps selecting another unit (the target RPC, the addon host)
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = h.s.Target(ctx, other, "")
+			}
+		}
+	}()
+	for i := 0; i < n; i++ {
+		if err := h.s.GMOn(ctx, mine, fmt.Sprintf("aura %d", 1000+i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	<-collected
+
+	cmds := 0
+	for i, p := range got {
+		if p.Op != opcode.CMSGMessagechat {
+			continue
+		}
+		cmds++
+		if i == 0 || got[i-1].Op != opcode.CMSGSetSelection || packet.NewReader(got[i-1].Body).GUID() != mine {
+			t.Fatalf("command %d (%q) was not right after the selection of its unit", cmds, p.Body)
+		}
+		if !bytes.Contains(p.Body, []byte(fmt.Sprintf(".aura %d", 1000+cmds-1))) {
+			t.Fatalf("command %d: % X", cmds, p.Body)
+		}
+	}
+	if cmds != n {
+		t.Fatalf("%d commands seen", cmds)
+	}
+	if h.s.Status().Target == 0 {
+		t.Fatal("no target")
+	}
+	for _, bad := range []string{"", "..gm"} {
+		if err := h.s.GMOn(ctx, mine, bad); err == nil {
+			t.Errorf("GMOn(%q) accepted", bad)
+		}
+	}
+	if err := h.s.GMOn(ctx, 0, "aura 1"); err == nil {
+		t.Error("GMOn without a unit accepted")
+	}
 }

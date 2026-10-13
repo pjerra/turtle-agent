@@ -334,6 +334,10 @@ func (g *sessionGame) Chat(ctx context.Context, channel, text string) error {
 
 func (g *sessionGame) GM(ctx context.Context, text string) error { return g.cur().GM(ctx, text) }
 
+func (g *sessionGame) GMOn(ctx context.Context, guid packet.GUID, text string) error {
+	return g.cur().GMOn(ctx, guid, text)
+}
+
 func (g *sessionGame) Teleport(ctx context.Context, to dungeon.Point, mapID uint32) error {
 	return g.cur().Teleport(ctx, to.X, to.Y, to.Z, int(mapID))
 }

@@ -70,6 +70,8 @@ type fakeGame struct {
 	auras       map[packet.GUID][]objects.Aura // auras the party members' unit rows show, put there by ".aura <id>"
 	auraRefused bool                           // the server ignores ".aura" (no developer level): nothing lands on the target
 	auraErr     error                          // GM fails for ".aura"
+	gmOnGUIDs   []packet.GUID                  // the unit each GMOn selected
+	hidden      map[packet.GUID]bool           // party members that are not in view
 }
 
 const (
@@ -162,6 +164,9 @@ func (g *fakeGame) Units() []objects.Unit {
 	}
 	if g.partyInViewNearMax > 0 {
 		for _, m := range g.party {
+			if g.hidden[m.GUID] {
+				continue
+			}
 			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID],
 				Auras: append([]objects.Aura(nil), g.auras[m.GUID]...)})
 		}
@@ -245,6 +250,13 @@ func (g *fakeGame) pull() {
 			n++
 		}
 	}
+}
+
+// GMOn selects and sends in one step, as the session does: a selection changed by somebody else in between cannot happen.
+func (g *fakeGame) GMOn(ctx context.Context, guid packet.GUID, text string) error {
+	g.gmOnGUIDs = append(g.gmOnGUIDs, guid)
+	g.targeted = guid
+	return g.GM(ctx, text)
 }
 
 func (g *fakeGame) GM(ctx context.Context, text string) error {

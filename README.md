@@ -578,7 +578,11 @@ What the driver does for each action of the plan (the stepper decides which):
   spells are listed in the report's `buffs[]` and in the `dungeon_done`/`dungeon_failed` totals (`data.buffs`), so a buffed run is never
   mistaken for a player's run. The server answers a refused `.aura` only in chat, so the driver looks at the companion's auras a moment
   after the first batch: a buff that is not there ends the run with `buffs: GM .aura on <name> had no effect ... the leader must be a GM
-  with developer security`. A companion out of view cannot be checked (noted). Recommended setup: hire the companions 3-5 levels above
+  with developer security`. Each `.aura` goes out together with the selection of its companion as one session operation, so a `target` call or the addon
+  host cannot move the buff onto another unit mid-batch. A companion out of view (right after a teleport) is looked at again for up to
+  10 s; if none of them could be checked in that time the run fails (`could not check the GM .aura`), if only some could the others are noted.
+  A companion whose 32 positive aura slots are full cannot take more, which looks like a refusal: use fewer spells (the list holds at
+  most 20 and the bot has buffs of its own). Recommended setup: hire the companions 3-5 levels above
   the dungeon (a boost on top of an under-levelled party only hides it) and list that in `setup`.
 - **wipe**: the leader dead, or every member dead, ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1). The MVP does not
   release, run back or retry.

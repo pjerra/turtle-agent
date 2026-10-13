@@ -34,6 +34,9 @@ type Game interface {
 	Chat(ctx context.Context, channel, text string) error
 	// GM runs a GM command (".revive Name").
 	GM(ctx context.Context, text string) error
+	// GMOn selects the unit and runs a GM command that acts on the selected unit (".aura <id>") as one operation,
+	// so that nothing else can change the selection between the two.
+	GMOn(ctx context.Context, guid packet.GUID, text string) error
 	Teleport(ctx context.Context, to Point, mapID uint32) error
 	// Emit appends an event of kind (events.KindDungeon*) to the agent's event log.
 	Emit(kind, text string, data map[string]any)
@@ -132,6 +135,7 @@ type Config struct {
 	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
 	WalkWatch      time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
 	BuffGap        time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait   time.Duration // longest wait for a companion out of view to show its auras after the first .aura
 }
 
 // DefaultConfig is the Driver's limits for a live run.
@@ -144,7 +148,7 @@ func DefaultConfig() Config {
 		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
-		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond,
+		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second,
 	}
 }
 
@@ -196,6 +200,7 @@ func (c Config) withDefaults() Config {
 	fill(&c.AmbushPause, d.AmbushPause)
 	fill(&c.WalkWatch, d.WalkWatch)
 	fill(&c.BuffGap, d.BuffGap)
+	fill(&c.BuffViewWait, d.BuffViewWait)
 	return c
 }
 

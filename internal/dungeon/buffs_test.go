@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/spells"
@@ -51,8 +52,8 @@ func TestBuffsAreAppliedToEachCompanionAndFlagged(t *testing.T) {
 	if got := auraCmds(g); len(got) != 14 || got[0] != ".aura 22888" || got[6] != ".aura 22820" || got[7] != ".aura 22888" {
 		t.Fatalf("aura commands %q", got)
 	}
-	if fmt.Sprint(g.targets[:2]) != fmt.Sprint([]packet.GUID{tank, healer}) {
-		t.Fatalf("targets %v: each companion is selected before its buffs", g.targets)
+	if len(g.gmOnGUIDs) != 14 || g.gmOnGUIDs[0] != tank || g.gmOnGUIDs[6] != tank || g.gmOnGUIDs[7] != healer || g.gmOnGUIDs[13] != healer {
+		t.Fatalf("selections %v: each .aura goes with the selection of its companion", g.gmOnGUIDs)
 	}
 	flags := buffShortcuts(rep)
 	if len(flags) != 14 || flags[0] != "Rallying Cry of the Dragonslayer on Tank" || flags[3] != "Warchief's Blessing on Tank" || flags[7] != "Rallying Cry of the Dragonslayer on Heal" {
@@ -195,5 +196,76 @@ func TestResolveBuffs(t *testing.T) {
 	}
 	if none, err := ResolveBuffs(nil, nil); err != nil || len(none) != 0 {
 		t.Fatalf("%v %v", none, err)
+	}
+}
+
+// Somebody else (the target RPC, the addon host) changing the selection between two commands must not move a buff
+// onto another unit: every .aura carries its own selection, and the other unit gets nothing.
+func TestBuffsFollowTheirOwnSelectionNotTheCurrentOne(t *testing.T) {
+	const boss packet.GUID = 107
+	g, p := runFixture(t)
+	g.onTick = func(g *fakeGame) { // the selection moves to the boss whenever time passes in the buff phase (the 300 ms gaps)
+		if len(g.gmOnGUIDs) < 14 {
+			g.targeted = boss
+		}
+	}
+	d := NewDriver(p, g, Config{Buffs: worldBuffs(t)}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if len(g.auras[boss]) != 0 || len(g.auras[tank]) != 7 || len(g.auras[healer]) != 7 {
+		t.Fatalf("auras: boss %d tank %d healer %d", len(g.auras[boss]), len(g.auras[tank]), len(g.auras[healer]))
+	}
+	for i, id := range g.gmOnGUIDs {
+		if id != tank && id != healer {
+			t.Fatalf("command %d selected %v", i, id)
+		}
+	}
+}
+
+// Companions out of view when the buffs go on (right after a teleport) are looked at again; one that shows up
+// within the wait is checked, one that never does is noted, and none at all fails the run.
+func TestBuffCheckWaitsForCompanionsToComeIntoView(t *testing.T) {
+	g, p := runFixture(t)
+	t0 := g.now
+	g.hidden = map[packet.GUID]bool{tank: true, healer: true}
+	g.onTick = func(g *fakeGame) {
+		if g.now.Sub(t0) >= 4*time.Second {
+			g.hidden = nil
+		}
+	}
+	d := NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+
+	// One shows up, one does not within the wait: noted, the run goes on.
+	g, p = runFixture(t)
+	t0 = g.now
+	g.hidden = map[packet.GUID]bool{healer: true}
+	g.onTick = func(g *fakeGame) {
+		if g.now.Sub(t0) >= 12*time.Second {
+			g.hidden = nil
+		}
+	}
+	d = NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if !strings.Contains(notes(d), "buffs on Heal could not be checked: not in view") {
+		t.Fatalf("notes %q", notes(d))
+	}
+
+	// Nobody in view in time: nothing shows the command worked, the run fails and says so.
+	g, p = runFixture(t)
+	t0 = g.now
+	g.hidden = map[packet.GUID]bool{tank: true, healer: true}
+	d = NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "could not check the GM .aura: Tank, Heal not in view within 10 s") {
+		t.Fatalf("%v", err)
+	}
+	if el := g.now.Sub(t0); el < 10*time.Second || el > 20*time.Second || len(g.walks) != 0 {
+		t.Fatalf("waited %v, walks %v", el, g.walks)
 	}
 }

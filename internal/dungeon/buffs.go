@@ -114,17 +114,11 @@ func (d *Driver) missingBuffs(m Member, want []Buff) (missing []Buff, seen bool)
 	return missing, true
 }
 
-// giveBuffs has the leader select the member and put each of list on it (".aura <id>"), every application flagged
-// in the report as a "buff" shortcut. The server answers a refused command (or one below developer level, where
-// ".aura" lands on the leader itself) only in chat, so the effect is checked afterwards in the member's auras: with
-// strict, a buff that is still missing from a member in view ends the run with a clear error, else it is a note.
-func (d *Driver) giveBuffs(ctx context.Context, m Member, list []Buff, strict bool) error {
-	if len(list) == 0 {
-		return nil
-	}
-	if err := d.g.Target(ctx, m.GUID); err != nil {
-		return fmt.Errorf("buffs: select %s: %w", m.Name, err)
-	}
+// sendBuffs has the leader put each of list on the member with ".aura <id>", every application flagged in the report
+// as a "buff" shortcut. Each command goes with the selection of the member as ONE session operation (Game.GMOn): the
+// core runs .aura on whatever is selected when it arrives, and the target RPC or the addon host could change the
+// selection between a separate Target and GM call (the world buffs would land on a boss).
+func (d *Driver) sendBuffs(ctx context.Context, m Member, list []Buff) error {
 	for i, b := range list {
 		if i > 0 {
 			if err := d.sleep(ctx, d.cfg.BuffGap); err != nil {
@@ -132,43 +126,106 @@ func (d *Driver) giveBuffs(ctx context.Context, m Member, list []Buff, strict bo
 			}
 		}
 		d.shortcut("buff", max(d.curLeg, 0), b.Name+" on "+m.Name)
-		if err := d.g.GM(ctx, fmt.Sprintf(".aura %d", b.ID)); err != nil {
+		if err := d.g.GMOn(ctx, m.GUID, fmt.Sprintf(".aura %d", b.ID)); err != nil {
 			return fmt.Errorf("buffs: .aura %d on %s: %w", b.ID, m.Name, err)
 		}
-	}
-	if err := d.sleep(ctx, d.cfg.UseSettle); err != nil {
-		return err
-	}
-	missing, seen := d.missingBuffs(m, list)
-	switch {
-	case !seen:
-		d.rep.note(fmt.Sprintf("buffs on %s could not be checked: not in view", m.Name))
-	case len(missing) > 0 && strict:
-		return fmt.Errorf("buffs: GM .aura on %s had no effect (%s still missing %.1f s after): the leader must be a GM with developer security, "+
-			"or the server refused the command (below that level .aura puts the aura on the leader itself)",
-			m.Name, strings.Join(buffNames(missing), ", "), d.cfg.UseSettle.Seconds())
-	case len(missing) > 0:
-		d.rep.note(fmt.Sprintf("leg %d: buffs still missing on %s after the GM .aura: %s", d.curLeg, m.Name, strings.Join(buffNames(missing), ", ")))
 	}
 	d.buffedAt[m.GUID] = d.curLeg
 	return nil
 }
 
-// startBuffs puts every buff on every living online member, as the run begins (strict: the first check of the
-// command).
+// checkBuffs looks for list in the member's auras. done is false when the member is not in view (nothing can be
+// told). A buff missing from a member in view is an error with strict, else a note.
+func (d *Driver) checkBuffs(m Member, list []Buff, strict bool) (done bool, err error) {
+	missing, seen := d.missingBuffs(m, list)
+	switch {
+	case !seen:
+		return false, nil
+	case len(missing) > 0 && strict:
+		return true, fmt.Errorf("buffs: GM .aura on %s had no effect (%s still missing %.1f s after): the leader must be a GM with developer security, "+
+			"or the server refused the command (below that level .aura puts the aura on the leader itself); a companion with all 32 buff slots "+
+			"full cannot take more either, so use fewer spells",
+			m.Name, strings.Join(buffNames(missing), ", "), d.cfg.UseSettle.Seconds())
+	case len(missing) > 0:
+		d.rep.note(fmt.Sprintf("leg %d: buffs still missing on %s after the GM .aura: %s", d.curLeg, m.Name, strings.Join(buffNames(missing), ", ")))
+	}
+	return true, nil
+}
+
+// giveBuffs sends list to the member and checks it a moment later, without failing the run: a revive or a leg top-up
+// that does not stick is noted.
+func (d *Driver) giveBuffs(ctx context.Context, m Member, list []Buff) error {
+	if len(list) == 0 {
+		return nil
+	}
+	if err := d.sendBuffs(ctx, m, list); err != nil {
+		return err
+	}
+	if err := d.sleep(ctx, d.cfg.UseSettle); err != nil {
+		return err
+	}
+	if done, _ := d.checkBuffs(m, list, false); !done {
+		d.rep.note(fmt.Sprintf("buffs on %s could not be checked: not in view", m.Name))
+	}
+	return nil
+}
+
+// startBuffs puts every buff on every living online member as the run begins, then checks the first effect of the
+// command (strict). Companions out of view (right after a teleport) are looked at again for up to BuffViewWait; if
+// none of them could be checked in that time the run fails, since nothing proves the command worked.
 func (d *Driver) startBuffs(ctx context.Context, fromLeg int) error {
 	if len(d.cfg.Buffs) == 0 {
 		return nil
 	}
 	d.curLeg = fromLeg // so the flags carry the leg the run starts at
 	defer func() { d.curLeg = -1 }()
+	var pending []Member
 	for _, m := range d.g.Party() {
 		if !m.Online || m.Dead {
 			continue
 		}
-		if err := d.giveBuffs(ctx, m, d.cfg.Buffs, true); err != nil {
+		if err := d.sendBuffs(ctx, m, d.cfg.Buffs); err != nil {
 			return err
 		}
+		pending = append(pending, m)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	total := len(pending)
+	deadline := d.clk.Now().Add(d.cfg.BuffViewWait)
+	if err := d.sleep(ctx, d.cfg.UseSettle); err != nil {
+		return err
+	}
+	for {
+		var still []Member
+		for _, m := range pending {
+			done, err := d.checkBuffs(m, d.cfg.Buffs, true)
+			if err != nil {
+				return err
+			}
+			if !done {
+				still = append(still, m)
+			}
+		}
+		pending = still
+		if len(pending) == 0 || !d.clk.Now().Before(deadline) {
+			break
+		}
+		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+	}
+	var names []string
+	for _, m := range pending {
+		names = append(names, m.Name)
+	}
+	switch {
+	case len(pending) == total:
+		return fmt.Errorf("buffs: could not check the GM .aura: %s not in view within %.0f s of the command, so nothing shows it worked "+
+			"(the leader needs developer security, and the companions must stand near it)", strings.Join(names, ", "), d.cfg.BuffViewWait.Seconds())
+	case len(pending) > 0:
+		d.rep.note("buffs on " + strings.Join(names, ", ") + " could not be checked: not in view")
 	}
 	return nil
 }
@@ -189,7 +246,7 @@ func (d *Driver) topUpBuffs(ctx context.Context) error {
 		if !seen || len(missing) == 0 {
 			continue
 		}
-		if err := d.giveBuffs(ctx, m, missing, false); err != nil {
+		if err := d.giveBuffs(ctx, m, missing); err != nil {
 			return err
 		}
 	}
@@ -203,7 +260,7 @@ func (d *Driver) rebuff(ctx context.Context, g packet.GUID) error {
 	}
 	for _, m := range d.g.Party() {
 		if m.GUID == g && m.Online && !m.Dead {
-			return d.giveBuffs(ctx, m, d.cfg.Buffs, false)
+			return d.giveBuffs(ctx, m, d.cfg.Buffs)
 		}
 	}
 	return nil
