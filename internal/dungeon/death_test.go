@@ -610,3 +610,94 @@ func gmsWith(g *fakeGame, prefix string) int {
 	}
 	return n
 }
+
+// ---- the leader's deaths in the recoveries count toward the cap, and a wipe that grows out of the members' recovery is recovered ----
+
+// fallsAfterBack kills the leader once it has been alive for after while cond holds, long enough for the Driver to have seen it alive.
+func fallsAfterBack(after time.Duration, cond func(g *fakeGame) bool) func(g *fakeGame) {
+	var since time.Time
+	return func(g *fakeGame) {
+		if g.self.Dead() {
+			since = time.Time{}
+			return
+		}
+		if since.IsZero() {
+			since = g.now
+		}
+		if g.now.Sub(since) >= after && cond(g) {
+			g.kill()
+			since = time.Time{}
+		}
+	}
+}
+
+// The leader dies again every time it is back while a member is still dead: the deaths in a wipe's recovery count toward the cap.
+func TestLeaderDeathsDuringAWipeRecoveryCountTowardsTheCap(t *testing.T) {
+	g, p := wipeFixture(t)
+	prev := g.onTick
+	back := fallsAfterBack(4*time.Second, func(g *fakeGame) bool { return g.party[0].Dead || g.party[1].Dead })
+	g.onTick = func(g *fakeGame) {
+		prev(g)
+		back(g)
+	}
+	d := NewDriver(p, g, Config{RecoverWipe: true, GM: GMNone, MaxLeaderDeaths: 2}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "the leader has died 3 times: giving up") || d.Report().LeaderDeaths != 2 {
+		t.Fatalf("%v %+v", err, d.Report())
+	}
+}
+
+func TestLeaderDeathsWhileBringingBackDeadMembersCountTowardsTheCap(t *testing.T) {
+	g, p := runFixture(t)
+	g.dead.graveyard, g.dead.graveMap = Point{3000, 0, 0}, 70
+	g.dead.corpse = Corpse{Found: true, Map: 70, CorpseMap: 70, Pos: Point{20, 5, 0}}
+	g.party[1].Dead = true // the priest stays dead: nobody revives it by GM
+	g.onChat = func(g *fakeGame, text string) {
+		if text == ".bot action corpse run" {
+			g.revAt = map[string]time.Time{"Heal": g.now.Add(40 * time.Minute)}
+		}
+	}
+	g.onTick = fallsAfterBack(4*time.Second, func(g *fakeGame) bool { return g.party[1].Dead })
+	d := NewDriver(p, g, Config{RecoverWipe: true, GM: GMNone, MaxLeaderDeaths: 2}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "the leader has died 3 times: giving up") || d.Report().LeaderDeaths != 2 {
+		t.Fatalf("%v %+v", err, d.Report())
+	}
+}
+
+// The leader and the tank die while the dead priest is being brought back: nobody lives, which is a wipe, recovered like one.
+func TestLeaderDyingInTheMembersRecoveryThatBecomesAWipeIsRecovered(t *testing.T) {
+	g, p := runFixture(t)
+	g.dead.graveyard, g.dead.graveMap = Point{3000, 0, 0}, 70
+	g.dead.corpse = Corpse{Found: true, Map: 70, CorpseMap: 70, Pos: Point{20, 5, 0}}
+	g.party[1].Dead = true
+	died := false
+	g.onChat = func(g *fakeGame, text string) {
+		switch text {
+		case ".bot action release": // the members' recovery has begun: the rest of the party falls
+			if !died {
+				died = true
+				g.kill()
+				g.party[0].Dead = true
+			}
+		case ".bot action corpse run":
+			if g.revAt == nil {
+				g.revAt = map[string]time.Time{}
+			}
+			for _, m := range g.party {
+				if m.Dead {
+					g.revAt[m.Name] = g.now.Add(25 * time.Second)
+				}
+			}
+		}
+	}
+	d := NewDriver(p, g, Config{RecoverWipe: true, GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v\n%q", err, d.Report(), g.chats)
+	}
+	rep := d.Report()
+	if !died || rep.State != "done" || rep.Wipes != 1 || rep.LeaderDeaths != 1 || rep.CorpseRuns != 1 {
+		t.Fatalf("died %v %+v", died, rep)
+	}
+	// With recover_wipe off the same run ends in a wipe (the dead member is not recovered at all then, so a GM would revive it: out of scope).
+}

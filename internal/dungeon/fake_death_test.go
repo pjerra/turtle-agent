@@ -69,6 +69,7 @@ func (g *fakeGame) AcceptResurrect(ctx context.Context) error {
 }
 
 func (g *fakeGame) ReleaseSpirit(ctx context.Context) error {
+	g.moved("release")
 	g.dead.releases++
 	if g.dead.noRelease {
 		return nil
@@ -104,6 +105,7 @@ func (g *fakeGame) ReclaimCorpse(ctx context.Context) error {
 }
 
 func (g *fakeGame) AreaTrigger(ctx context.Context, id uint32) error {
+	g.moved("portal")
 	g.dead.triggers++
 	g.dead.triggerIDs = append(g.dead.triggerIDs, id)
 	if g.dead.portalOK && g.self.Ghost {

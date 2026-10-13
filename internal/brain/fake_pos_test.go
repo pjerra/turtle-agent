@@ -39,9 +39,13 @@ type posFake struct {
 	rays     int
 	snaps    int
 	walkedAt []time.Time
+	stubborn chan struct{} // when set, WalkTo waits on it and ignores the context: a walker slow to answer a cancel
 }
 
 func (f *posFake) WalkTo(ctx context.Context, x, y, z float32) error {
+	if f.stubborn != nil {
+		<-f.stubborn
+	}
 	if f.hold != nil {
 		select {
 		case <-f.hold:

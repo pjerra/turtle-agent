@@ -189,7 +189,7 @@ func wandStrategy() *Strategy {
 				}
 				// Shoot repeats by itself: do not send it again for a few seconds, whatever the shots do to the spell state.
 				c.mem.holdAction("wand", c.Now.Add(3*time.Second), "shooting")
-				return c.G.Cast(ctx, id, fightTarget(c))
+				return c.cast(ctx, id, fightTarget(c))
 			}}},
 		Rules: []Rule{{Trigger: Trigger{Name: "out_of_mana", Active: func(c *Ctx) bool {
 			return onSelf(c) && c.Self.MaxPower > 0 && PowerPct(c) < wandBelowPct && ValFight.Get(c).Mob != nil

@@ -204,7 +204,7 @@ func homeStanceAction(name string, homes ...string) *Action {
 			c.mem.mel.mu.Lock()
 			c.mem.mel.stanceAt = c.Now
 			c.mem.mel.mu.Unlock()
-			return c.G.Cast(ctx, id, c.Self.GUID)
+			return c.cast(ctx, id, c.Self.GUID)
 		}}
 }
 
@@ -328,7 +328,7 @@ func nextSwing(name, spell string, threat ThreatKind) *Action {
 			other = "heroic_strike"
 		}
 		c.mem.holdAction(other, c.Now.Add(hsHold), "queued")
-		return c.G.Cast(ctx, id, fightTarget(c))
+		return c.cast(ctx, id, fightTarget(c))
 	}
 	return a
 }

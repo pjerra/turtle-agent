@@ -112,9 +112,8 @@ func (b *driverBrain) Start() error {
 	if b.ctl.Running() {
 		return errors.New("a brain was started by hand: the run leaves it alone")
 	}
-	// NoMove: the driver does not hold the move lock around its walks yet (Controller.HoldMove), so the brain must not walk the
-	// player in a run. Remove it when the driver holds the lock.
-	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true, NoMove: true}); err != nil {
+	// Movement is on: the brain positions the leader in fights, and the driver holds the move lock (HoldMove) around every walk it sends.
+	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true}); err != nil {
 		return err
 	}
 	b.started = true
@@ -128,7 +127,7 @@ func (b *driverBrain) Stop() {
 	}
 }
 
-// HoldMove is what the driver calls around a walk, once it is wired: it stops a step of the brain's and keeps the brain from
+// HoldMove is what the driver calls around every movement of the leader: it stops a step of the brain's and keeps the brain from
 // walking until the returned release is called. It works whether or not the brain runs.
 func (b *driverBrain) HoldMove(ctx context.Context) (release func(), err error) {
 	return b.ctl.HoldMove(ctx)

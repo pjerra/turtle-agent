@@ -255,7 +255,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
-| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`; empty takes the role of the strategies, `dps` when none names one; it must fit them, and `healer` is refused: not implemented), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`; empty takes the role of the strategies, `dps` when none names one; it must fit them, and `healer` is refused: not implemented), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
@@ -835,7 +835,8 @@ packets are the ones a 1.12 client sends (layouts checked against the core, `int
 | `corpse_reclaim_delay` | the player; `ms`. SMSG_CORPSE_RECLAIM_DELAY |
 | `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms` |
 
-Bounds: a corpse run longer than 10 min fails the run (`corpse run: gave up after 10 min`), the leader may die 5 times a run, and an
+Bounds: a corpse run longer than 10 min fails the run (`corpse run: gave up after 10 min`), the leader may die 5 times a run (every death
+counts, also one during a wipe's recovery or while dead members are brought back), and an
 offer that does not revive it is tried 3 times. Spirit healers are not used. The report counts `leader_deaths`, `resurrections`,
 `corpse_runs` and `seconds_dead`, in all and per leg, and the `dungeon_leader` events (`data.phase`: `died`, `resurrect_accepted`,
 `released`, `corpse_run`, `waiting_reclaim_delay`, `reclaimed`, `portal`, `back`, `gave_up`, `wipe_recovery`) tell the story. The
@@ -916,9 +917,20 @@ further refusal runs that on), as long as the leader stays within 3 yd of where 
 spot at least 4 yd from here, instead of the mage casting into the wall again when the 3 s back-off ends.
 
 **Move lock.** The dungeon driver and the brain must not walk at once. `brain.MoveLock` is the arbiter: the brain takes it for each
-step (and `walk` checks `no_move` and the driver's hold once more itself); the driver calls `Controller.HoldMove(ctx)` around its walks, which stops a step under way and keeps the brain from walking
-until the returned release is called (`brain_status.move_held`). `HoldMove` waits for the walker to stop the step, so it must not be called from inside the session's do loop. A dungeon run starts the brain with `no_move` until the driver
-does so; every other part of the brain works in a run.
+step (and `walk` checks `no_move` and the driver's hold once more itself); the driver calls `Controller.HoldMove(ctx)` (the `dungeon.Brain`
+interface's `HoldMove`) around **every call that moves the leader** and lets go right after: `walk_path` (the plan's walks, the approach to a
+target, a use_object or area trigger stand point, the ghost's corpse run), the GM teleport to a leg's start, the release of the spirit
+(the graveyard teleport) and the dungeon portal's area trigger; a `use_object` is held with its settle wait, the teleport across the wait for the arrival and the release across the wait for the ghost. The waits under a hold only wait: the look at the party (a dead leader's recovery) is made after the lock is let go. A hold stops a step of the brain's that is under way and keeps the brain
+from walking until the release (`brain_status.move_held`); holds nest. The driver holds it for one call at a time and never across a wait,
+so while a fight is fought (and between a walk and its retry) the lock is free and the brain positions the leader: `ranged_position`,
+`avoid_ground`, `step_away`, `run_to_tank`, `mage_defense` all work in a run, and **a dungeon run's brain moves** (it no longer starts with
+`no_move`). `HoldMove` waits for the walker to stop the step (the driver waits at most 5 s; a step that does not stop fails the walk like a
+refused one), so it must not be called from inside the session's do loop: the driver calls it from its own goroutine only.
+A step the brain cancels and whose walker is slow to answer leaves the lock taken for a moment: an emergency in that moment (leave a ground
+effect) is answered "the brain's earlier step is still stopping" and is **not** backed off, so the next tick retries it; "the dungeon driver is
+walking" means the driver does hold the lock. `Controller.Stop` waits (up to 2 s) for a step under way, so a restart finds the lock free.
+A `line_of_sight` refusal marks the fight's mob as a wall only when the last cast sent aimed at that mob (the refusal names the spell, not
+the target).
 
 **Interrupts** (`mage_interrupt`: Counterspell, relevance 40, which also breaks the leader's own cast). An enemy cast shows from
 `SMSG_SPELL_START` (spell, end, the unit it is aimed at). The brain interrupts, in this order: a heal or a crowd-control spell
@@ -961,13 +973,12 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 
 **Dungeon runs.** `dungeon_run {"name":"uldaman","brain":"frost_mage"}` starts the brain at the first rest gate of each leg
 and stops it when the leg ends; the driver keeps leading and giving the party its orders. The run does not decide whether the leader is a GM: pass `gm: false`
-for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by hand is not touched by a run (the run refuses to start while one runs), and while a run owns the brain
-`brain_start` and `brain_stop` are refused (`brain_status` still answers).
+for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by hand is not touched by a run (the run refuses to start while one runs: "a bot brain that was started by hand is running: brain_stop it first"; a run still ending says "the previous dungeon run still owns the brain"), and while a run owns the brain
+`brain_start` and `brain_stop` are refused (`brain_status` still answers). The run's brain moves the leader in fights; the driver holds the [move lock](#bot-brain) around its own walks.
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: the other seven classes and the healer role (step 4 of #80), wiring the move lock
-into the dungeon driver. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+idles (`dead`). Not in this step: the other seven classes and the healer role (step 4 of #80). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
 `docs/LIVE-CHECKS.md`.
 
 ### Roles and classes (step 3c)
@@ -1062,8 +1073,8 @@ Rend, a tank no Pummel).
 The warrior presets end with `rest_eat` (eat below 85% health at a rest gate), as `frost_mage` does.
 
 Examples: `brain_start {"strategies":["arms_warrior"],"tank":"<name>"}`, `dungeon_run {"name":"uldaman","brain":"fury_warrior"}`,
-`brain_start {"strategies":["tank_warrior"]}`. In a dungeon run the brain starts with `no_move` until the driver holds the move lock, so
-the melee positioning stays off there; the abilities, the swing and the interrupts work.
+`brain_start {"strategies":["tank_warrior"]}`. In a dungeon run the brain moves too (the driver holds the move lock around its own walks), so the melee
+positioning works there as well.
 
 ## Vendors, trainers and quests
 
