@@ -26,6 +26,16 @@ const (
 	UnitNPCFlags     uint16 = 0x93 // (:132; FIELD_UNIT_NPC_FLAGS = 147 at :347)
 )
 
+// Player fields (Objects/UpdateFields.h, EPlayerFields; UNIT_END = 0xBC). The owner alone gets them.
+const (
+	// PlayerComboTarget is PLAYER_FIELD_COMBO_TARGET (:221), 2 words: the guid of the unit the
+	// combo points are on. Player::SetComboPoints writes it with the points (Player.cpp:20942-20954).
+	PlayerComboTarget uint16 = 0x2CA
+	// PlayerFieldBytes is PLAYER_FIELD_BYTES (:259). Byte 1 holds the combo points, 0-5 (Player.cpp:20948);
+	// byte 0 holds the track-stealthed flag and byte 3 the honor rank (HonorMgr.cpp:804).
+	PlayerFieldBytes uint16 = 0x4C6
+)
+
 // Aura slots (Spells/SpellAuraDefines.h:25-26).
 const (
 	AuraSlots         = 48

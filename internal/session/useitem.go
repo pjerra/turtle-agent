@@ -343,6 +343,7 @@ func (s *Session) onLearnedSpell(body []byte) error {
 	}
 	s.mount.learns++
 	s.mount.learned = spell
+	s.spellState.Learn(spell)
 	s.emit(events.Event{Kind: events.KindSpellLearned, SourceGUID: s.selfGUID(), SpellID: spell})
 	s.mount.wakes.wake()
 	return nil
@@ -362,6 +363,9 @@ func (s *Session) selfChanges(c objects.Change, auras []uint32) {
 		}
 		s.emit(events.Event{Kind: events.KindMount, SourceGUID: c.GUID, Data: map[string]any{"mounted": mounted, "display_id": c.New}})
 		s.mount.wakes.wake()
+	case objects.ChangeCombo:
+		s.emit(events.Event{Kind: events.KindComboPoints, SourceGUID: c.GUID, TargetGUID: s.comboTarget(),
+			Data: map[string]any{"points": c.New, "was": c.Old}})
 	case objects.ChangeStand:
 		s.emit(events.Event{Kind: events.KindStandState, SourceGUID: c.GUID,
 			Data: map[string]any{"state": game.StandStateName(c.New), "was": game.StandStateName(c.Old)}})

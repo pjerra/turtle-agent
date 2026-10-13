@@ -38,6 +38,39 @@ func FuzzParseResultCode(f *testing.F) {
 	fuzzParse(f, func(b []byte) (uint32, error) { return game.ParseResultCode(b, "SMSG_MOUNTRESULT") },
 		opcode.SMSGMountresult, opcode.SMSGDismountresult)
 }
+func FuzzParseInitialSpells(f *testing.F) {
+	fuzzParse(f, game.ParseInitialSpells, opcode.SMSGInitialSpells)
+}
+func FuzzParseRemovedSpell(f *testing.F) {
+	fuzzParse(f, game.ParseRemovedSpell, opcode.SMSGRemovedSpell)
+}
+func FuzzParseSupercededSpell(f *testing.F) {
+	fuzzParse(f, func(b []byte) ([2]uint32, error) {
+		o, n, err := game.ParseSupercededSpell(b)
+		return [2]uint32{o, n}, err
+	}, opcode.SMSGSupercededSpell)
+}
+func FuzzParseSpellCooldown(f *testing.F) {
+	fuzzParse(f, game.ParseSpellCooldown, opcode.SMSGSpellCooldown)
+}
+func FuzzParseCooldownEvent(f *testing.F) {
+	fuzzParse(f, game.ParseCooldownEvent, opcode.SMSGCooldownEvent)
+}
+func FuzzParseClearCooldown(f *testing.F) {
+	fuzzParse(f, game.ParseClearCooldown, opcode.SMSGClearCooldown)
+}
+func FuzzParseCooldownCheat(f *testing.F) {
+	fuzzParse(f, game.ParseCooldownCheat, opcode.SMSGCooldownCheat)
+}
+func FuzzParseChannelStart(f *testing.F) {
+	fuzzParse(f, func(b []byte) ([2]uint32, error) {
+		s, ms, err := game.ParseChannelStart(b)
+		return [2]uint32{s, ms}, err
+	}, opcode.MSGChannelStart)
+}
+func FuzzParseChannelUpdate(f *testing.F) {
+	fuzzParse(f, game.ParseChannelUpdate, opcode.MSGChannelUpdate)
+}
 func FuzzParseChannelNotify(f *testing.F) {
 	fuzzParse(f, game.ParseChannelNotify, opcode.SMSGChannelNotify)
 }

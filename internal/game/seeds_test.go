@@ -85,5 +85,17 @@ var builtSeeds = func() map[uint16][][]byte {
 		opcode.SMSGPeriodicauralog:        {gametest.PeriodicDamage(unit, plr, 172, 3, 9, 32, 0, 0), gametest.PeriodicHeal(unit, plr, 774, 8, 12)},
 		opcode.SMSGSpellnonmeleedamagelog: {gametest.SpellNonMeleeDamage(unit, plr, 133, 40, 4, 0, 0, false, 0, 0)},
 		opcode.SMSGChannelNotify:          {gametest.ChannelNotice(1, "General"), gametest.ChannelYouJoined("General", 0)},
+		opcode.SMSGInitialSpells: {
+			gametest.InitialSpells([]uint32{78, 2457}, nil),
+			gametest.InitialSpells([]uint32{116}, []game.InitialCooldown{{Spell: 116, Category: 4, Cooldown: 3000, CategoryCooldown: 3000}, {Spell: 5, Item: 6, Cooldown: 1, CategoryCooldown: game.InfiniteCooldown}}),
+		},
+		opcode.SMSGRemovedSpell:    {gametest.RemovedSpell(78)},
+		opcode.SMSGSupercededSpell: {gametest.SupercededSpell(116, 205)},
+		opcode.SMSGSpellCooldown:   {gametest.SpellCooldown(plr, game.SpellCooldown{Spell: 116, MS: 8000}, game.SpellCooldown{Spell: 133, MS: 8000}), gametest.SpellCooldown(plr)},
+		opcode.SMSGCooldownEvent:   {gametest.CooldownEvent(1856, plr)},
+		opcode.SMSGClearCooldown:   {gametest.CooldownEvent(11129, plr)},
+		opcode.SMSGCooldownCheat:   {gametest.CooldownCheat(plr)},
+		opcode.MSGChannelStart:     {gametest.ChannelStart(5143, 3000)},
+		opcode.MSGChannelUpdate:    {gametest.ChannelUpdate(1500), gametest.ChannelUpdate(0)},
 	}
 }()
