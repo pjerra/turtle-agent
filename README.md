@@ -536,7 +536,10 @@ has no doors, so `path_to` walks through a closed one: the door steps are checke
 with the party it leads, the way a player would, with no help from the server beyond the companions' normal orders (issue #73).
 The call returns at once; the run is a goroutine that ends in a report. `dungeon_status` returns the state and the report
 (also while it runs), `dungeon_stop` ends a run and returns the final report. One run at a time; a second `dungeon_run` is refused
-until the first has ended. Plans are read from `dungeons_dir` (settings; default `dungeons`).
+until the first has ended. Plans are read from `dungeons_dir` (settings; default `dungeons`). `dungeon_status` is one snapshot: the end
+event (`dungeon_done` or `dungeon_failed`) is emitted before the report says `done`, `failed` or `stopped`, so a final state is never read
+before its event; a state that is not final always has `running` true; `running` stays true for a moment after a final state while the
+run's goroutine lets go of the brain.
 
 Before a run: the leader is in a group (`invite`, or hired companions), is in the world, and stands on the plan's map: either
 already inside the dungeon, or `"teleport": true`, which GM-teleports it to the start (the `entrance` for leg 0, else the place the
