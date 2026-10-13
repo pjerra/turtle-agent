@@ -107,8 +107,8 @@ func rpcAuthSetup(st config.Settings, cfgPath string, ln net.Listener, stderr io
 // the same navmesh planner. A nil planner leaves path_to and walk_path answering that
 // mmaps_dir is not set.
 func sessionOptions(character string, log *events.Log, stderr io.Writer, accounts []string, password string,
-	planner *navmesh.Planner) session.Options {
-	o := session.Options{Character: character, Log: log, Logger: stderr, Redact: accounts, RedactAnywhere: []string{password},
+	planner *navmesh.Planner, create *session.CreateSpec) session.Options {
+	o := session.Options{Character: character, Create: create, Log: log, Logger: stderr, Redact: accounts, RedactAnywhere: []string{password},
 		LogoutTimeout: logoutTimeout}
 	if planner != nil { // a nil *Planner in the interface would not read as nil
 		o.Planner = planner
@@ -160,6 +160,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	stay := fs.Duration("stay", 0, "log out after this long in world (0: until interrupted or the logout RPC)")
 	rpcAddr := fs.String("rpc", "", "JSON-RPC listen address (default: the settings file's rpc)")
 	reconnects := fs.Int("reconnect", 0, "after an unplanned disconnect, log in again up to N times (0: off)")
+	createSpec := fs.String("create", "", "create the character at login when the account lacks it: race,class[,gender] (numbers)")
 	budgetAddr := fs.String("login-budget", "", "loopback address of the fleet's shared login budget (set by `fleet`; its token is in the environment)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -171,6 +172,15 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if *reconnects < 0 {
 		fmt.Fprintln(stderr, "login: --reconnect must be 0 (off) or more")
 		return exitUsage
+	}
+	var create *session.CreateSpec // parsed before realmd so a bad spec never costs a login attempt
+	if *createSpec != "" {
+		c, err := session.ParseCreateSpec(*createSpec)
+		if err != nil {
+			fmt.Fprintln(stderr, "login:", err)
+			return exitUsage
+		}
+		create = &c
 	}
 	var budget *budgetClient // the fleet's login budget, if a fleet started this process
 	if *budgetAddr != "" {
@@ -304,7 +314,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		defer planner.Close()
 		fmt.Fprintf(stderr, "navmesh: tiles from %s\n", st.MmapsDir)
 	}
-	s := session.New(conn, sessionOptions(character, log, stderr, []string{ticket.Account, account}, password, planner))
+	s := session.New(conn, sessionOptions(character, log, stderr, []string{ticket.Account, account}, password, planner, create))
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(context.Background()) }()
 	select {
@@ -335,7 +345,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	var rc *reconnector
 	if *reconnects > 0 {
 		rc = &reconnector{total: *reconnects, window: window, st: st, account: account, password: password,
-			character: character, log: log, stderr: stderr, redact: s.Redact, planner: planner}
+			character: character, create: create, log: log, stderr: stderr, redact: s.Redact, planner: planner}
 		rc.budget = budget
 	}
 	srv := rpc.NewServer()

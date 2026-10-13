@@ -37,6 +37,8 @@ type fleetMember struct {
 	RPC       string `json:"rpc"`
 	// Reconnect overrides the fleet's --reconnect for this member (0 turns it off).
 	Reconnect *int `json:"reconnect,omitempty"`
+	// Create is the login --create spec ("race,class[,gender]") for this member.
+	Create string `json:"create,omitempty"`
 }
 
 type fleetFile struct {
@@ -89,6 +91,11 @@ func loadFleet(path string, settings *config.Settings) ([]fleetMember, error) {
 		m.RPC = net.JoinHostPort(host, strconv.Itoa(port))
 		if m.Reconnect != nil && *m.Reconnect < 0 {
 			return nil, fmt.Errorf("fleet: member %d reconnect must be 0 (off) or more", n)
+		}
+		if m.Create != "" {
+			if _, err := session.ParseCreateSpec(m.Create); err != nil {
+				return nil, fmt.Errorf("fleet: member %d (%s): %w", n, m.Character, err)
+			}
 		}
 		key := strings.ToLower(m.Character)
 		if chars[key] {
@@ -560,6 +567,9 @@ func childArgs(settings string, m fleetMember, fleetReconnect int, budgetAddr st
 	}
 	if budgetAddr != "" { // also without --reconnect: a busy answer at the first login is reported
 		args = append(args, "--login-budget", budgetAddr)
+	}
+	if m.Create != "" { // validated by loadFleet, so the child parses the same spec
+		args = append(args, "--create", m.Create)
 	}
 	return append(args, m.Account, m.Character)
 }

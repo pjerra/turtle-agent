@@ -94,6 +94,7 @@ type reconnector struct {
 	account     string
 	password    string
 	character   string
+	create      *session.CreateSpec // carried into every attempt, like the first login
 	log         *events.Log
 	stderr      io.Writer
 	redact      func(string) string
@@ -182,7 +183,7 @@ func (r *reconnector) login(ctx context.Context) (*worldSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := session.New(conn, sessionOptions(r.character, r.log, r.stderr, []string{ticket.Account, r.account}, r.password, r.planner))
+	s := session.New(conn, sessionOptions(r.character, r.log, r.stderr, []string{ticket.Account, r.account}, r.password, r.planner, r.create))
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(context.Background()) }()
 	timeout := time.NewTimer(reconnectReadyWait)

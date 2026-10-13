@@ -80,7 +80,7 @@ recorded a normal logout each time it was checked.
 ## CLI
 
 ```
-turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [<account>] <character>
+turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [<account>] <character>
 turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait DURATION] [--reconnect N] [--stop-on-failure]
 turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
@@ -131,6 +131,12 @@ that cannot change (unknown account, wrong password, ban, build) stops the attem
 towards realmd's autoban. The RPC address and the event log stay the same across a reconnect, so event cursors stay
 valid; a `session` event with state `reconnected` marks the new session. Out of attempts, the agent behaves as without
 the flag (status stays up for 30 s, then exit 6). `--reconnect` cannot be combined with `--capture`.
+
+`--create race,class[,gender]` (off by default) creates the character at login when the account's list lacks the
+name: the agent sends `CMSG_CHAR_CREATE` with that race, class and gender (numbers; gender defaults to 0), a default
+look, outfit 0 and no challenge mode, then re-asks the list and logs the new character in. A failed create ends the
+login at once with the server's reason (name in use, reserved or invalid name, too many characters, ...), like an
+unknown character today. A fleet member's `"create": "race,class[,gender]"` passes the same spec to that child's `login`.
 
 ## What the server sees
 

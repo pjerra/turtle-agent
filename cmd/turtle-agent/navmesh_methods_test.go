@@ -87,10 +87,10 @@ func TestReconnectKeepsTheNavmesh(t *testing.T) {
 
 func TestSessionOptionsCarryThePlanner(t *testing.T) {
 	p := navmesh.NewPlanner(t.TempDir())
-	if o := sessionOptions("Harnessb", nil, nil, []string{"ACC"}, "pw", p); o.Planner != p || o.RedactAnywhere[0] != "pw" {
+	if o := sessionOptions("Harnessb", nil, nil, []string{"ACC"}, "pw", p, nil); o.Planner != p || o.RedactAnywhere[0] != "pw" {
 		t.Fatalf("%+v", o)
 	}
-	if o := sessionOptions("Harnessb", nil, nil, nil, "pw", nil); o.Planner != nil {
+	if o := sessionOptions("Harnessb", nil, nil, nil, "pw", nil, nil); o.Planner != nil {
 		t.Fatal("a nil planner must stay a nil interface")
 	}
 }

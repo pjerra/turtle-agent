@@ -90,6 +90,7 @@ func (e *LogoutError) Error() string {
 
 type Options struct {
 	Character     string        // character name, case-insensitive
+	Create        *CreateSpec   // nil: no create; set: create this race/class when the list lacks the name
 	Log           *events.Log   // nil: a new 100000-event log
 	Logger        io.Writer     // diagnostics such as parse errors with hex dumps; nil: discarded
 	PingInterval  time.Duration // 0: 30 s; under 27 s is test-only: the server kicks for overspeed pings (WorldSocket.cpp:413-433)
@@ -213,6 +214,7 @@ type Session struct {
 	logoutDeadline  time.Time
 	logoutAccepted  bool // SMSG_LOGOUT_RESPONSE reason 0 for the pending logout
 	loginRetries    int
+	createSent      bool // CMSG_CHAR_CREATE sent once (Options.Create)
 	loginRetryAt    time.Time
 	names           *nameCache
 	walk            *walkState
@@ -301,6 +303,7 @@ func (s *Session) register() {
 
 func (s *Session) registerCore() {
 	s.handlers[opcode.SMSGCharEnum] = s.onCharEnum
+	s.handlers[opcode.SMSGCharCreate] = s.onCharCreate
 	s.handlers[opcode.SMSGCharacterLoginFailed] = s.onLoginFailed
 	s.handlers[opcode.SMSGLoginVerifyWorld] = s.onVerifyWorld
 	s.handlers[opcode.SMSGPong] = s.onPong
@@ -638,6 +641,13 @@ func (s *Session) onCharEnum(body []byte) error {
 			return nil
 		}
 		names = append(names, c.Name)
+	}
+	if s.opts.Create != nil && !s.createSent {
+		s.createSent = true
+		if err := s.conn.WritePacket(opcode.CMSGCharCreate, s.opts.Create.createBody(s.opts.Character)); err != nil {
+			return &fatalError{err}
+		}
+		return nil
 	}
 	return &fatalError{fmt.Errorf("character %q is not on this account (characters: %s)", s.opts.Character, strings.Join(names, ", "))}
 }
