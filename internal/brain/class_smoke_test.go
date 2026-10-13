@@ -24,7 +24,6 @@ type swingGame struct {
 	smu    sync.Mutex
 	forget bool
 	errs   uint64
-	last   string
 }
 
 func (s *swingGame) Attack(ctx context.Context) error {
@@ -44,16 +43,15 @@ func (s *swingGame) Attack(ctx context.Context) error {
 	if refused {
 		s.smu.Lock()
 		s.errs++
-		s.last = "bad_facing"
 		s.smu.Unlock()
 	}
 	return nil
 }
 
-func (s *swingGame) SwingErrors() (uint64, string) {
+func (s *swingGame) BadFacings() uint64 {
 	s.smu.Lock()
 	defer s.smu.Unlock()
-	return s.errs, s.last
+	return s.errs
 }
 
 // swingRig is a preset's brain on a swingGame: the player as the class, at (0,0) facing east.
@@ -119,8 +117,8 @@ func TestSwingRefusedForFacingTurnsToTheMobBeforeAnythingElse(t *testing.T) {
 	if d := open(r); d == nil || d.Action != "auto_attack" {
 		t.Fatalf("%+v idle %q", d, r.idle())
 	}
-	if n, last := sg.SwingErrors(); n != 1 || last != "bad_facing" {
-		t.Fatalf("the fake did not refuse the swing: %d %q", n, last)
+	if n := sg.BadFacings(); n != 1 {
+		t.Fatalf("the fake did not refuse the swing: %d", n)
 	}
 	d := r.tick(200 * time.Millisecond)
 	if d == nil || d.Action != "face_target" || d.Trigger != "swing_refused_facing" {
@@ -342,7 +340,7 @@ func TestSpellNotInTheBookIsNeverPossibleAndSaidOnceInAWhile(t *testing.T) {
 // ---- the warlock's percent costs ----
 
 func TestPercentCostIsOfTheBaseManaNotTheMaximum(t *testing.T) {
-	// Summon Voidwalker costs 100% of the base mana (the core: Spell::CalculateManaCost, Unit::GetCreateMana).
+	// Summon Voidwalker costs 100% of the base mana (the core: Spell::CalculatePowerCost, Unit::GetCreateMana).
 	// A pool of 99999 (the live run's .modify mana) with 95000 left: the base is a few hundred.
 	for _, c := range []struct {
 		name            string
@@ -399,5 +397,49 @@ func TestWalkWithoutNavmeshDataIsTriedAndSaidOnce(t *testing.T) {
 	}
 	if n := len(r.g.events("brain_decision")); n < 2 {
 		t.Fatalf("an ordinary walk failure was swallowed: %d decisions", n)
+	}
+}
+
+func TestPetOrderDuringAWalkLeavesTheWalkRunning(t *testing.T) {
+	r, pf := newPetHunter(t, Params{})
+	pf.withPet()
+	tankHolds(r)
+	r.g.clk.advance(2200 * time.Millisecond)
+	sctx, done, ok := r.b.lock.begin(context.Background())
+	if !ok {
+		t.Fatal("no step")
+	}
+	defer done()
+	d := r.b.Tick(context.Background())
+	if d == nil || d.Action != "pet_attack" {
+		t.Fatalf("%+v idle %q", d, r.idle())
+	}
+	if sctx.Err() != nil || !r.b.lock.stepping() {
+		t.Fatal("the pet order cut the walk in progress")
+	}
+}
+
+func TestSwingRefusalCountThatFellBackIsNewsAgain(t *testing.T) {
+	// A new session starts its count over: the refusal after a reconnect is answered like the first.
+	r, sg := warriorSwingRig(t, true)
+	tankFights(r.g, 7, 4, 0)
+	r.g.setSelf(func(u *objects.Unit) { u.O = math.Pi })
+	r.tick(100 * time.Millisecond)
+	open(r)
+	if d := r.tick(200 * time.Millisecond); d == nil || d.Action != "face_target" {
+		t.Fatalf("%+v", d)
+	}
+	r.g.setSelf(func(u *objects.Unit) { u.O = math.Pi })
+	sg.smu.Lock()
+	sg.errs = 0
+	sg.smu.Unlock()
+	if d := r.tick(200 * time.Millisecond); d != nil && d.Action == "face_target" {
+		t.Fatalf("the reset itself is no refusal: %+v", d)
+	}
+	sg.smu.Lock()
+	sg.errs = 1
+	sg.smu.Unlock()
+	if d := r.tick(500 * time.Millisecond); d == nil || d.Action != "face_target" {
+		t.Fatalf("%+v idle %q", d, r.idle())
 	}
 }

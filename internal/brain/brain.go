@@ -655,7 +655,7 @@ func castable(c *Ctx, a *Action, m *memory) (bool, string) {
 }
 
 // Affordable reports whether the player holds the cost of a spell in the power it is paid in. A cost given as a percent is taken of
-// the base mana (the base health for a spell paid in health), as the core does (Spell::CalculateManaCost): the update fields have it
+// the base mana (the base health for a spell paid in health), as the core does (Spell::CalculatePowerCost): the update fields have it
 // (Unit.BaseMana); a game that does not show it falls back to the maximum pool, a little more than the base, and the server's refusal
 // (no_power) backs the spell off when that is too high.
 func Affordable(c *Ctx, m spells.Meta) bool {

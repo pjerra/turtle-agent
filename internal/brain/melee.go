@@ -27,11 +27,12 @@ type Melee interface {
 	Swinging() packet.GUID
 }
 
-// SwingWatcher is the optional part of Melee that counts the swings the server refused (SMSG_ATTACKSWING_*). It is asked by type
-// assertion too; a game without it never learns that its back is to the mob.
+// SwingWatcher is the optional part of Melee that counts the swings the server refused for facing (SMSG_ATTACKSWING_BADFACING). It is
+// asked by type assertion too; a game without it never learns that its back is to the mob.
 type SwingWatcher interface {
-	// SwingErrors is how many refusals came so far, and the reason of the last one ("bad_facing", "not_in_range", ...).
-	SwingErrors() (n uint64, last string)
+	// BadFacings is how many such refusals came since the game began to watch. A new count below the last one means the watch started
+	// over (a new session).
+	BadFacings() uint64
 }
 
 func meleeOf(c *Ctx) Melee { m, _ := c.G.(Melee); return m }
@@ -42,7 +43,7 @@ type melMem struct {
 	swingTarget packet.GUID // the unit the last attack order named (a game without Melee)
 	swingAt     time.Time
 	stanceAt    time.Time // the last stance change the brain made
-	errSeen     uint64    // the swing refusals the brain has answered (SwingWatcher)
+	errSeen     uint64    // the bad_facing refusals the brain has answered (SwingWatcher)
 	faces       map[packet.GUID]faceTry
 
 	swingFaceUntil time.Time // how long a swing refused for facing waits for the turn to the mob (observeSwing, swingFaceBlocked)
@@ -88,12 +89,12 @@ func (b *Brain) observeSwing(c *Ctx) {
 	if !ok {
 		return
 	}
-	n, last := sw.SwingErrors()
+	n := sw.BadFacings()
 	c.mem.mel.mu.Lock()
 	seen := c.mem.mel.errSeen
-	c.mem.mel.errSeen = n
+	c.mem.mel.errSeen = n // a count that fell back is a watch that started over: what it counts now is new
 	c.mem.mel.mu.Unlock()
-	if n == seen || last != "bad_facing" {
+	if n == seen || n == 0 {
 		return
 	}
 	b.mem.mu.Lock()

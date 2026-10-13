@@ -860,7 +860,7 @@ login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_
 `unit` row carry `combo_points`, `combo_target` and `gcd_ms` too. A unit that plays on another power than mana (a druid in Cat Form: energy,
 in Bear Form: rage) shows that power in `power`/`max_power`; its mana pool is in `mana`/`max_mana` (`UNIT_FIELD_POWER1`, left out when
 the unit plays on mana or has none). `base_mana` and `base_health` are `UNIT_FIELD_BASE_MANA` and `UNIT_FIELD_BASE_HEALTH` (left out when
-0): the core takes a spell's percent cost of these, not of the maximum pool (`Spell::CalculateManaCost`), and the brain does the same, so
+0): the core takes a spell's percent cost of these, not of the maximum pool (`Spell::CalculatePowerCost`), and the brain does the same, so
 Summon Voidwalker (100%) is affordable at a few hundred mana whatever the maximum is.
 
 | Event | `source` / data |

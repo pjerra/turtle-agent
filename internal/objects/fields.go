@@ -27,7 +27,7 @@ const (
 	UnitNPCFlags     uint16 = 0x93 // (:132; FIELD_UNIT_NPC_FLAGS = 147 at :347)
 	// UnitBaseMana and UnitBaseHealth are UNIT_FIELD_BASE_MANA and UNIT_FIELD_BASE_HEALTH (:147-148: NPC_FLAGS 0x93, EMOTESTATE, TRAINING_POINTS,
 	// STAT0-4, RESISTANCES x7, then these two; UNIT_END 0xBC checks the count). Unit::GetCreateMana and GetCreateHealth read them, and
-	// Spell::CalculateManaCost takes a percent cost of these (Spells/Spell.cpp:7178-7189), not of the maximum pool.
+	// Spell::CalculatePowerCost takes a percent cost of these (Spells/Spell.cpp:7178-7189), not of the maximum pool.
 	UnitBaseMana   uint16 = 0xA2
 	UnitBaseHealth uint16 = 0xA3
 )

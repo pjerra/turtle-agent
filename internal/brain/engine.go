@@ -321,7 +321,9 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 				}
 				return false, Decision{}
 			}
-			c.lock.preempt(preemptWait)
+			if !a.Free { // a pet order is no step of the walk: the walk goes on
+				c.lock.preempt(preemptWait)
+			}
 		}
 		if proceed, d := b.standOrWait(ctx, c, a, trigger, rel); !proceed {
 			if d != nil {

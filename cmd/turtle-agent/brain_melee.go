@@ -24,8 +24,7 @@ type meleeWatch struct {
 	dodged   map[packet.GUID]time.Time
 	avoided  time.Time
 	swinging packet.GUID
-	errs     uint64 // the swings the server refused since the first look
-	lastErr  string
+	facings  uint64 // the swings the server refused for facing since the first look
 }
 
 // dodgeKeep is how long a dodge is remembered: Overpower can use it for five seconds.
@@ -44,7 +43,7 @@ func (g *sessionBrainGame) syncMelee() {
 	defer w.mu.Unlock()
 	if w.log != l {
 		w.log, w.cursor, w.dodged, w.avoided, w.swinging = l, l.Last(), map[packet.GUID]time.Time{}, time.Time{}, 0
-		w.errs, w.lastErr = 0, ""
+		w.facings = 0
 		// The auto attack the player already had when the brain looked first (an attack order from the RPC, a fight pulled before the
 		// brain started) is on: the server does not announce it again, so without this the brain would think it was idle and order it
 		// again every tick.
@@ -89,8 +88,9 @@ func (g *sessionBrainGame) syncMelee() {
 					w.swinging = e.TargetGUID
 				}
 			case events.KindAttackError:
-				w.errs++
-				w.lastErr, _ = e.Data["reason"].(string)
+				if reason, _ := e.Data["reason"].(string); reason == "bad_facing" {
+					w.facings++
+				}
 			case events.KindAttackStop:
 				if e.SourceGUID == self {
 					w.swinging = 0
@@ -130,10 +130,10 @@ func (g *sessionBrainGame) Swinging() packet.GUID {
 	return g.melee.swinging
 }
 
-// SwingErrors is brain.SwingWatcher: how many swings the server refused since the brain first looked, and the last reason.
-func (g *sessionBrainGame) SwingErrors() (uint64, string) {
+// BadFacings is brain.SwingWatcher: how many swings the server refused for facing since the brain first looked at this session's log.
+func (g *sessionBrainGame) BadFacings() uint64 {
 	g.syncMelee()
 	g.melee.mu.Lock()
 	defer g.melee.mu.Unlock()
-	return g.melee.errs, g.melee.lastErr
+	return g.melee.facings
 }

@@ -461,12 +461,12 @@ func TestSessionMeleeWatchFindsTheSwingThatBeganBeforeTheFirstLook(t *testing.T)
 	if g.Swinging() != mob {
 		t.Fatalf("swinging at %x, want the mob", g.Swinging())
 	}
-	if n, _ := g.SwingErrors(); n != 0 {
+	if n := g.BadFacings(); n != 0 {
 		t.Fatalf("%d refusals from before the first look", n)
 	}
 	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "bad_facing"}})
-	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "not_in_range"}})
-	if n, last := g.SwingErrors(); n != 2 || last != "not_in_range" {
-		t.Fatalf("%d refusals, last %q", n, last)
+	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "not_in_range"}}) // the last of the batch is not the one that counts
+	if n := g.BadFacings(); n != 1 {
+		t.Fatalf("%d refusals for facing, want 1", n)
 	}
 }
