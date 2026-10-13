@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -206,7 +207,16 @@ func Parse(name string, data []byte) (*Plan, error) {
 	c := &checker{file: name}
 	var rp rawPlan
 	if err := strict(data, &rp); err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+		if !strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		// An unknown field stops the strict decoder where it stands: report it, then read the file again
+		// without the check so the other mistakes are listed with it.
+		c.errs = append(c.errs, fmt.Errorf("%s: %w", name, err))
+		rp = rawPlan{}
+		if err := json.Unmarshal(data, &rp); err != nil {
+			return nil, errors.Join(c.errs...)
+		}
 	}
 	p := &Plan{Name: rp.Name, Notes: rp.Notes}
 	switch {
@@ -310,6 +320,16 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	c.entries(path+".skip", r.Skip, false)
+	for i, e := range r.Skip {
+		for j, g := range r.PullGroups {
+			if slices.Contains(g.Entries, e) {
+				c.fail(fmt.Sprintf("%s.skip[%d]", path, i), "%d is also in pull_groups[%d].entries: the leg would pull it and never wait for it", e, j)
+			}
+		}
+		if r.Boss != nil && slices.Contains(r.Boss.First, e) {
+			c.fail(fmt.Sprintf("%s.skip[%d]", path, i), "%d is also in boss.first: the leg would kill it and never wait for it", e)
+		}
+	}
 	if r.Boss != nil {
 		bp := path + ".boss"
 		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First}

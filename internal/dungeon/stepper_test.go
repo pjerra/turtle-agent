@@ -255,3 +255,59 @@ func TestStepperEmptyAndPosition(t *testing.T) {
 		t.Fatalf("%d %s %d", l, ph, i)
 	}
 }
+
+// A walk inside a use_object step that never brings the player next to the object ends the plan after
+// MaxStepWalks, and so does a step that has been going for MaxStepSeconds.
+func TestStepperBoundsTheWalksOfAStep(t *testing.T) {
+	plan := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"name":"a","to":{"x":0,"y":0,"z":0},"steps":[{"use_object":{"entry":124371}}]}]}`)
+	w := &fakeWorld{objs: doors()} // the keystone stays 20 yd away: every walk "succeeds" without getting closer
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(plan, w, clk.now)
+	for i := range MaxStepWalks {
+		if a := s.Next(); a.Kind != ActWalk {
+			t.Fatalf("walk %d: %+v", i, a)
+		}
+		s.Complete()
+	}
+	a := s.Next()
+	if a.Kind != ActFailed || a.Err != "leg 0 (a): step 0: game object 124371 is still out of reach after 4 walks" {
+		t.Fatalf("%+v", a)
+	}
+
+	s = NewStepper(plan, &fakeWorld{objs: doors()}, clk.now)
+	if a := s.Next(); a.Kind != ActWalk {
+		t.Fatalf("%+v", a)
+	}
+	clk.t = clk.t.Add((MaxStepSeconds + 1) * time.Second)
+	if a := s.Next(); a.Kind != ActFailed || a.Err != "leg 0 (a): step 0: game object 124371 is not used after 121 s" {
+		t.Fatalf("%+v", a)
+	}
+
+	// Within reach it is used, however long the step has been going.
+	w = &fakeWorld{objs: doors(), pos: Point{19, 0, 0}}
+	s = NewStepper(plan, w, clk.now)
+	if a := s.Next(); a.Kind != ActWalk { // the leg's own walk to "to"
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+	s.Next()
+	clk.t = clk.t.Add((MaxStepSeconds + 1) * time.Second)
+	if a := s.Next(); a.Kind != ActUse {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestNewStepperAtStartsInTheLeg(t *testing.T) {
+	p := mustPlan(t, doorPlan)
+	s := NewStepperAt(p, &fakeWorld{objs: doors(), pos: Point{50, 0, 0}}, nil, 1)
+	if leg, ph, _ := s.Position(); leg != 1 || ph != "walk" {
+		t.Fatalf("%d %s", leg, ph)
+	}
+	if s = NewStepperAt(p, &fakeWorld{}, nil, 9); s.Next().Kind != ActDone {
+		t.Fatal("past the end is done")
+	}
+	if s = NewStepperAt(p, &fakeWorld{}, nil, -3); s.Next().Leg != 0 {
+		t.Fatal("below 0 is the first leg")
+	}
+}
