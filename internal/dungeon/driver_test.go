@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,6 +66,10 @@ type fakeGame struct {
 	aggroGUID packet.GUID       // the unit that is in combat with the leader while aggro is set
 	afterGate func(g *fakeGame) // runs as the first rest gate looks at the party
 	selfLooks int
+
+	auras       map[packet.GUID][]objects.Aura // auras the party members' unit rows show, put there by ".aura <id>"
+	auraRefused bool                           // the server ignores ".aura" (no developer level): nothing lands on the target
+	auraErr     error                          // GM fails for ".aura"
 }
 
 const (
@@ -157,7 +162,8 @@ func (g *fakeGame) Units() []objects.Unit {
 	}
 	if g.partyInViewNearMax > 0 {
 		for _, m := range g.party {
-			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID]})
+			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID],
+				Auras: append([]objects.Aura(nil), g.auras[m.GUID]...)})
 		}
 	}
 	return out
@@ -243,12 +249,24 @@ func (g *fakeGame) pull() {
 
 func (g *fakeGame) GM(ctx context.Context, text string) error {
 	g.gms = append(g.gms, text)
+	if id, ok := strings.CutPrefix(text, ".aura "); ok {
+		if g.auraErr != nil {
+			return g.auraErr
+		}
+		if n, err := strconv.ParseUint(id, 10, 32); err == nil && !g.auraRefused {
+			if g.auras == nil {
+				g.auras = map[packet.GUID][]objects.Aura{}
+			}
+			g.auras[g.targeted] = append(g.auras[g.targeted], objects.Aura{SpellID: uint32(n)})
+		}
+	}
 	if strings.HasPrefix(text, ".revive ") {
 		for i := range g.party {
 			if ".revive "+g.party[i].Name == text {
 				switch {
 				case g.reviveDelay == 0:
 					g.party[i].Dead, g.party[i].Health = false, g.party[i].MaxHealth
+					delete(g.auras, g.party[i].GUID)
 				case g.reviveDelay > 0:
 					if g.revAt == nil {
 						g.revAt = map[string]time.Time{}

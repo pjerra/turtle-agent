@@ -128,6 +128,9 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
      ends in a reasonable time (the walk-aggro and ambush fights are followed by a gate before the next pull);
    - `.revive <name>` on a companion: how long the party list takes to show it (the driver waits up to 5 s), with no second revive;
    - the Seal of Khaz'Mul active within the 60 s wait; Eric and Olaf needing a kill (plan decision (b): no script links them to Baelog).
+   - the optional GM buffs (`"buffs": "world"`, issue #73): `.aura <id>` on each selected companion lands on the companion (not the leader; developer
+     level needed) and shows in its unit row `auras[]` within the 1.5 s the driver waits; each application is a `buff` in `gm_shortcuts`; the buffs are back
+     after a GM revive. Setup recommendation: hire the companions 3-5 levels above the dungeon and list that in `setup`; a buffed run is a GM-assisted run.
 5. Findings that are TortoiseBots behaviour (the priest not drinking at 49% mana, the tank losing its target after "reach pull", companions skipping a pack,
    not following, not looting) are reported to TortoiseBots as a bug fix or a behaviour change per its vision document, not worked around here.
 

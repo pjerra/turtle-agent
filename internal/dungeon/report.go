@@ -22,9 +22,12 @@ type Report struct {
 	// SetupShortcuts are the GM commands the caller used to set the run up (".go" to the entrance, ".levelup -15", a
 	// summon), as dungeon_run's setup parameter gave them: the run did not make them, but a run that needed any is
 	// not one a player could have started either.
-	SetupShortcuts []string    `json:"setup_shortcuts"`
-	Legs           []LegReport `json:"legs"`
-	Notes          []string    `json:"notes"`
+	SetupShortcuts []string `json:"setup_shortcuts"`
+	// Buffs are the spells the run was asked to put on the companions (GM .aura); each application is also a "buff"
+	// entry in gm_shortcuts, so a buffed run is never mistaken for a player's.
+	Buffs []Buff      `json:"buffs"`
+	Legs  []LegReport `json:"legs"`
+	Notes []string    `json:"notes"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -50,7 +53,7 @@ type Death struct {
 }
 
 // Shortcut is a GM action the run took instead of playing it: a run that used any does not count as a player's run.
-// Kind is teleport_to_entrance, teleport_to_leg_start or revive.
+// Kind is teleport_to_entrance, teleport_to_leg_start, revive or buff.
 type Shortcut struct {
 	Kind   string    `json:"kind"`
 	Leg    int       `json:"leg"`
@@ -67,7 +70,7 @@ type reporter struct {
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
 	p.now = now
-	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Legs: []LegReport{}, Notes: []string{}}
+	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Buffs: []Buff{}, Legs: []LegReport{}, Notes: []string{}}
 }
 
 func (p *reporter) start(fromLeg int) {
@@ -102,6 +105,7 @@ func (p *reporter) snapshot() Report {
 	r.Deaths = append([]Death{}, p.r.Deaths...)
 	r.Shortcuts = append([]Shortcut{}, p.r.Shortcuts...)
 	r.SetupShortcuts = append([]string{}, p.r.SetupShortcuts...)
+	r.Buffs = append([]Buff{}, p.r.Buffs...)
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)
 	if r.State == "running" {
@@ -118,5 +122,5 @@ func (p *reporter) snapshot() Report {
 func (p *reporter) summary() map[string]any {
 	r := p.snapshot()
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
-		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts)}
+		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs)}
 }

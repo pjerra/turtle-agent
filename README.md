@@ -243,7 +243,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them) | `started`, `plan`, `map`, `from_leg`, `legs[]`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `attack` / `stop_attack` | | |
@@ -567,6 +567,19 @@ What the driver does for each action of the plan (the stepper decides which):
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set (then the run fails); after a revive the party
   list is polled for up to 5 s for the dead flag to clear before the member is judged, and a second revive goes out only after that
   (two revives at most, then the run fails).
+- **buffs** (optional, `dungeon_run`'s `buffs`): a **GM boost**, off unless asked for. `buffs` is a spell id, a preset name or a list of
+  both (`"buffs": "world"`, `"buffs": [22888, 15366]`, `"buffs": ["world", 24425]`; duplicates are dropped, at most 20 spells). The
+  preset `world` is the classic world buffs that work at any level: Rallying Cry of the Dragonslayer 22888, Songflower Serenade 15366,
+  Spirit of Zandalar 24425, Warchief's Blessing 16609, Fengus' Ferocity 22817, Mol'dar's Moxie 22818 and Slip'kik's Savvy 22820 (each id
+  and name checked in the core's `spell_template`). The leader selects each living companion and sends `.aura <spell id>` (a GM command
+  of developer level; below it the server puts the aura on the leader itself), at the start of the run, again after any GM revive
+  (death strips the auras), and at the start of a leg for a companion in view that lost one (at most once per leg and member; if the
+  buff does not stick the run only notes it). **Every application is a `buff` entry in `gm_shortcuts`** (`detail` `<spell> on <member>`), the
+  spells are listed in the report's `buffs[]` and in the `dungeon_done`/`dungeon_failed` totals (`data.buffs`), so a buffed run is never
+  mistaken for a player's run. The server answers a refused `.aura` only in chat, so the driver looks at the companion's auras a moment
+  after the first batch: a buff that is not there ends the run with `buffs: GM .aura on <name> had no effect ... the leader must be a GM
+  with developer security`. A companion out of view cannot be checked (noted). Recommended setup: hire the companions 3-5 levels above
+  the dungeon (a boost on top of an under-levelled party only hides it) and list that in `setup`.
 - **wipe**: the leader dead, or every member dead, ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1). The MVP does not
   release, run back or retry.
 
@@ -578,7 +591,7 @@ without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeo
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
 progress), `error`, `wipes`, `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
 `pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`), `notes[]`, `gm_shortcuts[]`: every GM action the run took instead of
-playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`), `leg`, `detail` and `at`, and
+playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `leg`, `detail` and `at`, `buffs[]` (the spells asked for, `id` and `name`), and
 `setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",
 "levelup -15", "tbm summon all"]`; at most 40 entries of up to 200 characters; empty when none were given). Nothing checks or sends
 them: they are there so that a report shows what a run was started with. A run with any `gm_shortcuts` or `setup_shortcuts` is not a run

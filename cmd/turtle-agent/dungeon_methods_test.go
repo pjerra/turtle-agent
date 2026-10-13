@@ -48,6 +48,11 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":"rig","from_leg":"third"}`, "from_leg: the plan has legs"},
 		{`{"name":"rig","from_leg":true}`, "from_leg must be a leg number"},
 		{`{"name":"rig","colour":1}`, "colour"},
+		{`{"name":"rig","buffs":"worldly"}`, `buffs: unknown preset "worldly" (presets: world)`},
+		{`{"name":"rig","buffs":true}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[0]}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[22888,{}]}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[22888,22888,22888,22888,22888,"world","world",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}`, "at most 20"},
 		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-200 characters"},
 		{`{"name":"rig","setup":["` + strings.Repeat("x", 201) + `"]}`, "setup[0]: needs 1-200 characters"},
 	} {
@@ -128,5 +133,32 @@ func TestDungeonRunReportsTheSetupShortcuts(t *testing.T) {
 	st = r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
 	if l, ok := st["report"].(map[string]any)["setup_shortcuts"].([]any); !ok || len(l) != 0 {
 		t.Fatalf("%v", st["report"])
+	}
+}
+
+// buffs takes a preset name, a spell id or a list of both; the result names what the run will put on the party.
+func TestDungeonRunBuffsParameter(t *testing.T) {
+	for _, c := range []struct {
+		params string
+		n      int
+		first  string
+	}{
+		{`{"name":"rig"}`, 0, ""},
+		{`{"name":"rig","buffs":null}`, 0, ""},
+		{`{"name":"rig","buffs":[]}`, 0, ""},
+		{`{"name":"rig","buffs":"world"}`, 7, "Rallying Cry of the Dragonslayer (22888)"},
+		{`{"name":"rig","buffs":["world",22888,1]}`, 8, "Rallying Cry of the Dragonslayer (22888)"},
+		{`{"name":"rig","buffs":22888}`, 1, "Rallying Cry of the Dragonslayer (22888)"},
+	} {
+		r := dungeonRig(t)
+		res := r.call("dungeon_run", c.params)["result"].(map[string]any)
+		b, ok := res["buffs"].([]any)
+		if !ok || len(b) != c.n || (c.n > 0 && b[0] != c.first) {
+			t.Errorf("%s: %v", c.params, res)
+		}
+		st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
+		if rb, ok := st["report"].(map[string]any)["buffs"].([]any); !ok || len(rb) != c.n {
+			t.Errorf("%s: report %v", c.params, st["report"])
+		}
 	}
 }

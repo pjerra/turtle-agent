@@ -39,6 +39,34 @@ func (l *legParam) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// buffsParam is the buffs parameter: a preset name ("world"), a spell id, or a list mixing both.
+type buffsParam struct {
+	presets []string
+	ids     []uint32
+}
+
+func (b *buffsParam) UnmarshalJSON(raw []byte) error {
+	bad := errors.New(`buffs must be a preset name ("world"), a spell id, or a list of them`)
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		items = []json.RawMessage{raw}
+	}
+	b.presets, b.ids = nil, nil
+	for _, it := range items {
+		var name string
+		var id uint32
+		switch {
+		case json.Unmarshal(it, &name) == nil && name != "":
+			b.presets = append(b.presets, name)
+		case json.Unmarshal(it, &id) == nil && id != 0:
+			b.ids = append(b.ids, id)
+		default:
+			return bad
+		}
+	}
+	return nil
+}
+
 type dungeonRunParams struct {
 	Name        string    `json:"name"`
 	FromLeg     *legParam `json:"from_leg,omitempty"`
@@ -47,6 +75,10 @@ type dungeonRunParams struct {
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`
+	// Buffs puts spells on every companion with the GM command ".aura <id>" (the leader must be a GM of developer
+	// level) as the run starts and after any GM revive; each application is a "buff" entry in the report's
+	// gm_shortcuts. Preset "world" is the classic world buffs.
+	Buffs *buffsParam `json:"buffs,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -55,6 +87,7 @@ type dungeonRunResult struct {
 	Map     uint32   `json:"map"`
 	FromLeg int      `json:"from_leg"`
 	Legs    []string `json:"legs"`
+	Buffs   []string `json:"buffs"` // the spells the run will put on the companions (GM), empty for none
 }
 
 type dungeonStatusResult struct {
@@ -125,6 +158,12 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	}
+	var buffs []dungeon.Buff
+	if p.Buffs != nil {
+		if buffs, err = dungeon.ResolveBuffs(p.Buffs.presets, p.Buffs.ids); err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+		}
+	}
 	from := 0
 	if l := p.FromLeg; l != nil {
 		from = l.index
@@ -154,7 +193,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
 	}
 	cfg := dungeon.DefaultConfig()
-	cfg.Teleport, cfg.Shortcuts, cfg.Setup = p.Teleport, !p.NoShortcuts, setup
+	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	drv := dungeon.NewDriver(plan, &sessionGame{cur: r.cur}, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
@@ -164,7 +203,11 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		defer cancel()
 		_ = drv.Run(ctx, from) // the outcome is in the report and the events
 	}()
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names}, nil
+	buffNames := []string{}
+	for _, b := range buffs {
+		buffNames = append(buffNames, b.String())
+	}
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames}, nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.
