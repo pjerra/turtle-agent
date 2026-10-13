@@ -512,3 +512,29 @@ func TestPriestSpellData(t *testing.T) {
 		t.Errorf("do-not-dispel list %v", noDispel)
 	}
 }
+
+func TestShadowPriestBuffsBeforeTheForm(t *testing.T) {
+	r, g := shadowRig(t)
+	g.setSelf(func(u *objects.Unit) { u.InCombat = false; u.Auras = []objects.Aura{} })
+	if d := r.tick(100 * time.Millisecond); d == nil || d.Action != "inner_fire" {
+		t.Fatalf("%+v", d)
+	}
+	g.setSelf(func(u *objects.Unit) {
+		u.Auras = append(u.Auras, objects.Aura{Name: "Inner Fire", SpellID: prInnerFire})
+	})
+	if d := r.tick(2 * time.Second); d == nil || d.Action != "fortitude" {
+		t.Fatalf("%+v", d)
+	}
+	g.setSelf(func(u *objects.Unit) {
+		u.Auras = append(u.Auras, objects.Aura{Name: "Power Word: Fortitude", SpellID: prFort1})
+	})
+	if d := r.tick(2 * time.Second); d == nil || d.Spell != prShadowform {
+		t.Fatalf("then the form: %+v", d)
+	}
+	// In a fight the form does not wait for a missing buff.
+	r2, g2 := shadowRig(t)
+	g2.setSelf(func(u *objects.Unit) { u.Auras = []objects.Aura{} })
+	if d := r2.tick(100 * time.Millisecond); d == nil || d.Spell != prShadowform {
+		t.Fatalf("%+v", d)
+	}
+}

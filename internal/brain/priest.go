@@ -202,13 +202,29 @@ func fortitudeTarget(c *Ctx) packet.GUID {
 	return 0
 }
 
+// buffsAllowed says the priest may buff now: out of combat at a rest gate, with no mob to fight, not in Shadowform, with a third of the mana.
+func buffsAllowed(c *Ctx) bool {
+	return c.RestOK && onSelf(c) && !inCombat(c) && ValFight.Get(c).Mob == nil && !HasAura(&c.Self, "Shadowform") && PowerPct(c) >= 30
+}
+
+// buffsPending says a buff the priest knows is missing and it may cast now: Shadowform waits for them, since no Holy spell can be
+// cast in the form.
+func buffsPending(c *Ctx) bool {
+	if !buffsAllowed(c) {
+		return false
+	}
+	if _, ok := c.Spells.Highest("Inner Fire"); ok && auraMissing(&c.Self, "Inner Fire") {
+		return true
+	}
+	_, ok := c.Spells.Highest("Power Word: Fortitude")
+	return ok && fortitudeTarget(c) != 0
+}
+
 // priestBuffs is the upkeep out of combat, at the rest gates (and for a brain started by hand, always): Inner Fire on the priest and Power
 // Word: Fortitude on the priest and every member in view. The buffs are Holy spells, which Shadowform forbids, so a shadow priest buffs
 // before it takes the form and not after. Not with less than a third of the mana: drinking comes first.
 func priestBuffs() *Strategy {
-	ooc := func(c *Ctx) bool {
-		return c.RestOK && onSelf(c) && !inCombat(c) && ValFight.Get(c).Mob == nil && !HasAura(&c.Self, "Shadowform") && PowerPct(c) >= 30
-	}
+	ooc := buffsAllowed
 	return &Strategy{
 		Name: "priest_buffs",
 		Actions: []*Action{
@@ -269,7 +285,8 @@ func priestShadow() *Strategy {
 		},
 		Rules: []Rule{
 			{Trigger: Trigger{Name: "no_shadowform", Active: func(c *Ctx) bool {
-				return !form(c) && c.Spells.Known(spellShadowform) && (inCombat(c) || ValFight.Get(c).Mob != nil || c.RestOK)
+				// Out of combat the buffs come first (the Holy spells are barred in the form); in a fight the form does not wait.
+				return !form(c) && c.Spells.Known(spellShadowform) && (inCombat(c) || ValFight.Get(c).Mob != nil || (c.RestOK && !buffsPending(c)))
 			}}, Do: []Next{{"shadowform", RelNormal + 6}}},
 			{Trigger: Trigger{Name: "fight_target", Active: func(c *Ctx) bool { return ValFight.Get(c).Mob != nil }},
 				Do: []Next{{"vampiric_embrace", RelNormal + 5}, {"shadow_word_pain", RelNormal + 4}, {"mind_blast", RelNormal + 3}, {"mind_flay", RelNormal}}},

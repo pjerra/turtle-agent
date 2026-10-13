@@ -301,6 +301,12 @@ func (s *Session) Attack(ctx context.Context) error {
 	return err
 }
 
+// Stand stands the player up (CMSG_STANDSTATECHANGE, state 0), as a real client does when a sitting player clicks or casts: the core
+// refuses a cast from a seated player (SPELL_FAILED_NOT_STANDING) and does not stand the player by itself.
+func (s *Session) Stand(ctx context.Context) error {
+	return s.send(ctx, opcode.CMSGStandstatechange, game.BuildStandStateChange(0))
+}
+
 func (s *Session) StopAttack(ctx context.Context) error {
 	return s.send(ctx, opcode.CMSGAttackstop, nil)
 }

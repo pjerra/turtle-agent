@@ -98,12 +98,13 @@ var noDispel = []string{"Mutating Injection"}
 
 // ---- spell amounts ----
 
-// effectAmount is the average value of one effect at a caster level: base points plus dice, the average roll, and the level scaling
-// (internal/spells.Effect: PerLevel per caster level above the spell's base level, up to its max level).
+// effectAmount is the average value of one effect at a caster level: the core rolls base+1 to base+sides when the effect has more than
+// one die side and gives base+1 otherwise (SpellMgr.cpp CalculateSimpleValue), so the average is base plus (sides+1)/2, or base+1; then
+// the level scaling (internal/spells.Effect: PerLevel per caster level above the spell's base level, up to its max level).
 func effectAmount(e spells.Effect, m spells.Meta, level uint32) float64 {
-	v := float64(e.Base) + float64(e.Dice)
+	v := float64(e.Base) + 1
 	if e.Sides > 1 {
-		v += float64(e.Sides+1) / 2
+		v = float64(e.Base) + float64(e.Sides+1)/2
 	}
 	if e.PerLevel != 0 {
 		lv := level
@@ -402,15 +403,10 @@ func sightOK(c *Ctx, u *objects.Unit) bool {
 	return clear || !known
 }
 
-// memberHealth reads a member's health: the health, the maximum, and whether the server sent percentages (a maximum of 100) for
-// which the maximum is guessed from the player's own.
+// memberHealth reads a member's health and its maximum. A party member's health is absolute (the party stats the core sends), so
+// the numbers are used as they are.
 func memberHealth(c *Ctx, u *objects.Unit) (hp, max float64) {
-	hp, max = float64(u.Health), float64(u.MaxHealth)
-	if max > 0 && max <= 100 && c.Self.MaxHealth > 100 {
-		scale := float64(c.Self.MaxHealth) / 100
-		hp, max = hp*scale, max*scale
-	}
-	return hp, max
+	return float64(u.Health), float64(u.MaxHealth)
 }
 
 // incomingHeal is the healing other party members have in flight on a member (their casts read off their units), and the player's own.
@@ -526,7 +522,13 @@ type DispelPlan struct {
 	Name   string
 	Aura   uint32
 	Urgent bool
+	// Far is a member with crowd control on it that the dispel does not reach (Dispel Magic reaches 30 yd, Heal 40), when no dispel is
+	// in reach: the healer walks into range (healer_position).
+	Far *objects.Unit
 }
+
+// dispelSlack is the margin kept inside the dispel's own range.
+const dispelSlack = 1.0
 
 // ValDispel finds a harmful aura on a member that the class's dispels remove: by the dispel type of the aura's spell, urgent when it
 // is crowd control (charm, fear, sleep, stun, polymorph, horror), otherwise only with mana to spare.
@@ -539,9 +541,10 @@ func calcDispel(c *Ctx) DispelPlan {
 	}
 	tank := ValTank.Get(c)
 	var best DispelPlan
+	var far *objects.Unit
 	bestPct, bestRank := 0.0, -1
 	for _, u := range healMembers(c) {
-		if !inHealReach(u) {
+		if u.Distance < 0 {
 			continue
 		}
 		hp, max := memberHealth(c, u)
@@ -572,15 +575,22 @@ func calcDispel(c *Ctx) DispelPlan {
 			if handled || spell == 0 {
 				continue
 			}
+			urgent := ccMechanics[m.Mechanic]
+			if !urgent && PowerPct(c) < 2*dispelManaMin {
+				continue
+			}
+			// The dispel's own range, not the heal's: Dispel Magic, Cure Disease and Abolish Disease reach 30 yd.
+			if sm, ok := spells.Lookup(spell); ok && sm.RangeMax > 0 && float64(u.Distance) > float64(sm.RangeMax)-dispelSlack {
+				if urgent && far == nil && float64(u.Distance) <= healReach+float64(sm.RangeMax) {
+					far = u
+				}
+				continue
+			}
 			if !seen {
 				seen, visible = true, sightOK(c, u)
 			}
 			if !visible {
 				break
-			}
-			urgent := ccMechanics[m.Mechanic]
-			if !urgent && PowerPct(c) < 2*dispelManaMin {
-				continue
 			}
 			rank := 0
 			if urgent {
@@ -598,6 +608,9 @@ func calcDispel(c *Ctx) DispelPlan {
 				bestRank, bestPct = rank, pct
 			}
 		}
+	}
+	if best.Target == nil {
+		best.Far = far
 	}
 	return best
 }
@@ -810,10 +823,37 @@ func healerSpot(c *Ctx, tank, mob *objects.Unit) (Vec3, bool) {
 	})
 }
 
+// approachTarget is the member the healer walks toward: a hurt one out of heal reach or sight, else one with crowd control out of
+// dispel range.
+func approachTarget(c *Ctx) *objects.Unit {
+	if f := ValHealPlan.Get(c).Far; f != nil {
+		return f
+	}
+	return ValDispel.Get(c).Far
+}
+
+// spotKeepsReach says a standing spot does not take the healer out of reach of the member it has work for: the one to heal, else the one it
+// walks toward, else the one to dispel. Without it the healer ping-pongs: it walks to a hurt member, and the position rules (the band round
+// the tank) walk it back before the heal is cast.
+func spotKeepsReach(c *Ctx, spot Vec3) bool {
+	need := ValHealPlan.Get(c).Target
+	if need == nil {
+		need = approachTarget(c)
+	}
+	if need == nil {
+		need = ValDispel.Get(c).Target
+	}
+	return need == nil || dist2(spot, unitPos(need)) <= healReach-healReachMargin
+}
+
+// healReachMargin is the margin inside the heal reach that a standing spot must keep from the member to be healed.
+const healReachMargin = 4.0
+
 // healerPosition keeps the healer where it can heal from: behind the tank at range, in sight of the party; it walks toward a hurt member
-// it cannot reach; and, when a mob has picked it, it runs to the tank with it. All of it is movement, so it is off while the run switched
-// movement off and while the dungeon driver holds the move lock. It ranks under an emergency heal (rule relevance 24 against 41) so
-// that a dying tank is healed first.
+// it cannot reach (or one with crowd control beyond the dispel's range); and, when a mob has picked it, it runs to the tank with it. All of
+// it is movement, so it is off while the run switched movement off and while the dungeon driver holds the move lock. It ranks under an
+// emergency heal (rule relevance 24 against 41) so that a dying tank is healed first, and it does not walk to the band where that
+// takes the healer out of reach of the member it has work for (spotKeepsReach).
 func healerPosition() *Strategy {
 	return &Strategy{
 		Name: "healer_position",
@@ -824,8 +864,8 @@ func healerPosition() *Strategy {
 					if tank == nil || mob == nil || !canMove(c) {
 						return false
 					}
-					_, ok := healerSpot(c, tank, mob)
-					return ok
+					p, ok := healerSpot(c, tank, mob)
+					return ok && spotKeepsReach(c, p)
 				},
 				Useful: func(c *Ctx) bool { return healerIssue(c) != "" },
 				Do: func(ctx context.Context, c *Ctx) error {
@@ -842,7 +882,7 @@ func healerPosition() *Strategy {
 				}},
 			{Name: "heal_approach", Settle: 700 * time.Millisecond,
 				Possible: func(c *Ctx) bool {
-					f := ValHealPlan.Get(c).Far
+					f := approachTarget(c)
 					if f == nil || !canMove(c) {
 						return false
 					}
@@ -850,7 +890,7 @@ func healerPosition() *Strategy {
 					return ok
 				},
 				Do: func(ctx context.Context, c *Ctx) error {
-					f := ValHealPlan.Get(c).Far
+					f := approachTarget(c)
 					if f == nil {
 						return nil
 					}
@@ -874,7 +914,7 @@ func healerPosition() *Strategy {
 		Rules: []Rule{
 			{Trigger: Trigger{Name: "healer_bad_position", Active: func(c *Ctx) bool { return canMove(c) && healerIssue(c) != "" }},
 				Do: []Next{{"heal_reposition", RelHigh + 4}}},
-			{Trigger: Trigger{Name: "member_out_of_reach", Active: func(c *Ctx) bool { return canMove(c) && ValHealPlan.Get(c).Far != nil }},
+			{Trigger: Trigger{Name: "member_out_of_reach", Active: func(c *Ctx) bool { return canMove(c) && approachTarget(c) != nil }},
 				Do: []Next{{"heal_approach", RelHigh + 4}}},
 			{Trigger: Trigger{Name: "mob_on_healer_far", Active: func(c *Ctx) bool { return canMove(c) && runToTankPoint(c) != nil }},
 				Do: []Next{{"run_to_tank", RelMove}}},

@@ -383,8 +383,18 @@ func TestHealerDrinksBeforeTheTopUpAtARestGate(t *testing.T) {
 	}
 	// A healer drinks up to 80%, the shadow priest (a damage dealer) only below 65%.
 	g.setMana(85)
-	g.setSelf(func(u *objects.Unit) { u.Auras = append(u.Auras, objects.Aura{Name: "Drink"}) })
-	if d := r.tick(8 * time.Second); d == nil || d.Action != "heal" {
+	g.setSelf(func(u *objects.Unit) {
+		u.StandState = "sit"
+		u.Auras = append(u.Auras, objects.Aura{Name: "Drink"})
+	})
+	if d := r.tick(8 * time.Second); d != nil {
+		t.Fatalf("the top-up waits for the end of the drink: %+v", d)
+	}
+	g.setSelf(func(u *objects.Unit) { u.Auras = u.Auras[:len(u.Auras)-1] }) // the drink ends, the priest still sits
+	if d := r.tick(2 * time.Second); d == nil || d.Action != "stand_up" {
+		t.Fatalf("%+v", d)
+	}
+	if d := r.tick(2 * time.Second); d == nil || d.Action != "heal" {
 		t.Fatalf("%+v", d)
 	}
 }
@@ -657,5 +667,170 @@ func TestHealerUsesAManaPotionInABossFight(t *testing.T) {
 	pf2.setMana(9)
 	if d := r2.tick(100 * time.Millisecond); d != nil && d.Action == "mana_potion" {
 		t.Fatalf("%+v", d)
+	}
+}
+
+// ---- review round 1 ----
+
+func TestDispelRangeIsTheSpellsOwn(t *testing.T) {
+	poly := objects.Aura{SpellID: auraPolymorph, Name: "Polymorph", Harmful: true}
+	r, pf := healPosRig(t, Params{NoMove: true})
+	g := pf.fakeGame
+	g.member(tankG, "Tankard", 1, 1000, 1000, 32, 0) // inside the heal's 38.5 yd, outside the dispel's 30
+	g.addAura(tankG, poly)
+	g.member(dpsG1, "Mage", 8, 1000, 1000, 15, 0)
+	g.addAura(dpsG1, poly)
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "dispel" || d.Target != dpsG1 {
+		t.Fatalf("the member in range is dispelled, not the tank out of range: %+v", d)
+	}
+	for i := 0; i < 3; i++ { // and the tank is not tried again and again
+		r.tick(2 * time.Second)
+	}
+	for _, c := range g.castList() {
+		if c.target == tankG {
+			t.Fatalf("a dispel was sent at the tank out of range: %v", g.castList())
+		}
+	}
+}
+
+func TestHealerWalksIntoDispelRangeForCrowdControlOnly(t *testing.T) {
+	poly := objects.Aura{SpellID: auraPolymorph, Name: "Polymorph", Harmful: true}
+	r, pf := healPosRig(t, Params{})
+	pf.member(tankG, "Tankard", 1, 1000, 1000, 32, 0)
+	pf.addAura(tankG, poly)
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "heal_approach" {
+		t.Fatalf("%+v", d)
+	}
+	if w := pf.walkList(); len(w) != 1 || dist2(w[0], Vec3{32, 0, 0}) > 29 {
+		t.Fatalf("walks %v", w)
+	}
+	if d := r.tick(2 * time.Second); d == nil || d.Action != "dispel" || d.Target != tankG {
+		t.Fatalf("%+v", d)
+	}
+	// A slow is not worth a walk.
+	r2, pf2 := healPosRig(t, Params{})
+	pf2.member(tankG, "Tankard", 1, 1000, 1000, 32, 0)
+	pf2.addAura(tankG, objects.Aura{SpellID: auraFrostbolt, Name: "Frostbolt", Harmful: true})
+	if d := r2.tick(100 * time.Millisecond); d != nil || len(pf2.walkList()) != 0 {
+		t.Fatalf("%+v %v", d, pf2.walkList())
+	}
+}
+
+func TestHealerDoesNotWalkBackBeforeTheHeal(t *testing.T) {
+	r, pf := healPosRig(t, Params{})
+	g := pf.fakeGame
+	tankFights(g, -25, -27, math.Pi)                 // the tank 25 yd west, its mob facing away from the player
+	pf.member(dpsG1, "Kiter", 8, 300, 1000, 39.5, 0) // hurt, just out of reach, 64 yd from the tank
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "heal_approach" {
+		t.Fatalf("%+v", d)
+	}
+	d = r.tick(2 * time.Second)
+	if d == nil || d.Action != "heal" || d.Target != dpsG1 {
+		t.Fatalf("the heal comes before the walk back to the tank: %+v", d)
+	}
+	if n := len(pf.walkList()); n != 1 {
+		t.Fatalf("walks %v", pf.walkList())
+	}
+	// Healed: now the way back to the band.
+	g.setHP(dpsG1, 1000)
+	d = r.tick(2 * time.Second)
+	if d == nil || d.Action != "heal_reposition" || len(pf.walkList()) != 2 {
+		t.Fatalf("%+v %v", d, pf.walkList())
+	}
+}
+
+func TestEffectAmountMatchesTheCoresRoll(t *testing.T) {
+	// Lesser Heal 1: base 45, 11 sides: the core rolls 46 to 56, average 51 (level scaling is nil at level 1).
+	if got := amountOf(prLesser1, 1); got != 51 {
+		t.Errorf("Lesser Heal 1 heals %v", got)
+	}
+	// Renew 1: 8 base points and no die: 9 a tick, 5 ticks.
+	if got := amountOf(prRenew1, 1); got != 45 {
+		t.Errorf("Renew 1 heals %v", got)
+	}
+}
+
+// ---- sitting ----
+
+func TestNoCastWhileEatingOutOfCombatAndStandsForAFight(t *testing.T) {
+	g := newFake(spFrostbolt, spIntellect, spFrostArmor, spIceArmor)
+	g.self.Auras = []objects.Aura{{Name: "Frost Armor", SpellID: spFrostArmor}, {Name: "Drink", SpellID: 430}}
+	g.self.StandState = "sit"
+	g.setMana(50)
+	r := newRig(t, g, Params{Strategies: []string{"frost_mage"}})
+	// Arcane Intellect is missing, but the mage sits at its drink: nothing is sent, nobody stands.
+	if d := r.tick(100 * time.Millisecond); d != nil || len(g.castList()) != 0 || g.stands != 0 {
+		t.Fatalf("%+v casts %v stands %d", d, g.castList(), g.stands)
+	}
+	// A mob on the mage: the drink is broken, the mage stands (that is the tick), and casts the next.
+	g.addUnit(mob(mobA, selfG), 20, 0)
+	g.setSelf(func(u *objects.Unit) { u.InCombat = true })
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "stand_up" || g.stands != 1 || len(g.castList()) != 0 {
+		t.Fatalf("%+v stands %d", d, g.stands)
+	}
+	if d = r.tick(2 * time.Second); d == nil || d.Spell != spFrostbolt {
+		t.Fatalf("%+v", d)
+	}
+	if g.stands != 1 {
+		t.Fatalf("stood %d times", g.stands)
+	}
+}
+
+func TestStandsUpAfterAMealForUpkeep(t *testing.T) {
+	g := newFake(spIntellect, spFrostArmor)
+	g.self.Auras = []objects.Aura{{Name: "Frost Armor", SpellID: spFrostArmor}} // no Drink aura: the meal is over, the mage still sits
+	g.self.StandState = "sit"
+	r := newRig(t, g, Params{Strategies: []string{"frost_mage"}})
+	if d := r.tick(100 * time.Millisecond); d == nil || d.Action != "stand_up" {
+		t.Fatalf("%+v", d)
+	}
+	if d := r.tick(2 * time.Second); d == nil || d.Spell != spIntellect {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestPriestHealsWaitForTheMealUnlessItIsAnEmergency(t *testing.T) {
+	r, g := holyRig(t)
+	g.setSelf(func(u *objects.Unit) {
+		u.InCombat = false
+		u.StandState = "sit"
+		u.Auras = append(u.Auras, objects.Aura{Name: "Drink"})
+	})
+	g.member(dpsG1, "Mage", 8, 500, 1000, 5, 0) // 50%: a medium heal, buffs missing, none breaks the meal
+	g.mutate(dpsG1, func(u *objects.Unit) { u.InCombat = false; u.Auras = []objects.Aura{} })
+	if d := r.tick(100 * time.Millisecond); d != nil || g.stands != 0 {
+		t.Fatalf("%+v stands %d", d, g.stands)
+	}
+	g.setHP(dpsG1, 200) // 20%
+	d := r.tick(5 * time.Second)
+	if d == nil || d.Action != "stand_up" {
+		t.Fatalf("%+v", d)
+	}
+	if d = r.tick(2 * time.Second); d == nil || d.Action != "heal" || d.Target != dpsG1 {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestNotStandingRefusalBacksTheSpellOff(t *testing.T) {
+	if holdFor["not_standing"] != time.Second {
+		t.Fatalf("%v", holdFor["not_standing"])
+	}
+	g := newFake(spFrostbolt, spFrostArmor, spIntellect)
+	buffUp(g)
+	r := newRig(t, g, Params{Strategies: []string{"frost_mage"}})
+	tankFights(g, 25, 28, 0)
+	r.tick(100 * time.Millisecond)
+	d := r.tick(2200 * time.Millisecond)
+	if d == nil || d.Spell != spFrostbolt {
+		t.Fatalf("%+v", d)
+	}
+	g.st.CastRefused(spFrostbolt, codeOf(t, "not_standing"))
+	g.st.Clear(spFrostbolt)
+	if d := r.tick(200 * time.Millisecond); d != nil && d.Spell == spFrostbolt {
+		t.Fatalf("sent again at once: %+v", d)
 	}
 }

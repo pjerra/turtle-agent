@@ -318,6 +318,12 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 			}
 			c.lock.preempt(preemptWait)
 		}
+		if proceed, d := b.standOrWait(ctx, c, a, trigger, rel); !proceed {
+			if d != nil {
+				return true, *d // the player was stood up: that was this tick's action
+			}
+			return false, Decision{}
+		}
 		return true, b.run(ctx, c, a, trigger, rel, via)
 	}
 	if via == "" { // a chain member that cannot run either is not worth a line: the action's own reason says more

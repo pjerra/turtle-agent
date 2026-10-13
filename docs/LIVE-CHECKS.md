@@ -371,3 +371,8 @@ bot and two damage bots (no healer bot, or the TortoiseBots healer set to follow
 9. **Shadow.** `brain_start {"strategies":["shadow_priest"]}` with Shadowform learned: `shadowform` (15473; look at `units` for the aura named
    `Shadowform`), `vampiric_embrace`, `shadow_word_pain`, `mind_blast` on cooldown, `mind_flay` as the filler, `interrupt` with Silence (15487) on a
    heal or crowd-control cast within 20 yd. The priest stands 14 to 19 yd from the mob. Without Shadowform: `smite` when Mind Flay is out of reach.
+10. **Sitting.** After a drink or a meal the leader sits: a `brain_decision` `stand_up` (one `CMSG_STANDSTATECHANGE`, then `stand_state` `stand`) must come before
+    the first buff or cast, and no `spell_fail` `not_standing` repeats. While the Drink aura is up and nothing happens, no cast is sent; a mob on the
+    leader or a member under 45% breaks the meal with one `stand_up`. Note whether the core takes state 0 from a sitting player and whether the Drink aura goes with it.
+11. **Dispel range and walking.** A polymorphed member 32 yd away: `heal_approach` once, then `dispel`; a slowed member 32 yd away: no walk. A hurt member just out of reach: `heal_approach`,
+    then `heal`, no `heal_reposition` between them.

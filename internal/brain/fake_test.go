@@ -80,6 +80,7 @@ type fakeGame struct {
 	targets []packet.GUID
 	attacks int
 	stops   int
+	stands  int
 	evs     []events.Event
 }
 
@@ -179,6 +180,22 @@ func (f *fakeGame) StopAttack(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stops++
+	return nil
+}
+
+// Stand stands the player up: the seat and the meal auras go, as the server's update would show.
+func (f *fakeGame) Stand(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stands++
+	f.self.StandState = "stand"
+	var keep []objects.Aura
+	for _, a := range f.self.Auras {
+		if a.Name != "Drink" && a.Name != "Food" {
+			keep = append(keep, a)
+		}
+	}
+	f.self.Auras = keep
 	return nil
 }
 

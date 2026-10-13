@@ -91,3 +91,12 @@ func TestShortActionPacketsNameThePacket(t *testing.T) {
 		t.Fatalf("attack stop: %v", err)
 	}
 }
+
+func TestBuildStandStateChange(t *testing.T) {
+	if got := BuildStandStateChange(0); !bytes.Equal(got, []byte{0, 0, 0, 0}) {
+		t.Fatalf("% x", got)
+	}
+	if got := BuildStandStateChange(1); !bytes.Equal(got, []byte{1, 0, 0, 0}) {
+		t.Fatalf("% x", got)
+	}
+}

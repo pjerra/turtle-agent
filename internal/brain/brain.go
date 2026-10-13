@@ -468,6 +468,7 @@ var holdFor = map[string]time.Duration{
 	"equipped_item":        30 * time.Second, // Shoot without a wand equipped
 	"equipped_item_class":  30 * time.Second,
 	"not_ready":            500 * time.Millisecond,
+	"not_standing":         time.Second, // sitting: the engine stands the player up first (stand.go)
 	"not_infront":          400 * time.Millisecond,
 	"unit_not_infront":     400 * time.Millisecond,
 	"interrupted":          300 * time.Millisecond,

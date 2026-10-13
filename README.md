@@ -1082,7 +1082,7 @@ positioning works there as well.
 `shadow_priest` is the damage preset of the same class. The healer role is written once (`internal/brain/heal.go`) and takes its spells from
 the class row (`ClassInfo.Heals`, a `HealKit`: direct heals, the quick one, the HoT, the dispels), so the other healing classes are rows
 (step 4b). Ideas from mod-playerbots' healing (the `hp% + distance/10` triage, the health and mana bands, dispel by type; GPL-2.0+,
-numbers and ideas only, no code). Amounts come from the spell metadata (`internal/spells` effects: base points, dice, the level
+numbers and ideas only, no code). Amounts come from the spell metadata (`internal/spells` effects: the core rolls base+1 to base+sides, so the average is base + (sides+1)/2, or base+1 for an effect with no die; then the level
 scaling), without the player's bonus healing, which the agent cannot read.
 
 **Triage** (`role_healer`). Every online, living party member **in view, the player included**, within 38.5 yd and in sight (the navmesh
@@ -1105,14 +1105,21 @@ member's health).
 
 **Dispels** (`dispel_cc` 25, `dispel_debuff` 11). A harmful aura on a member whose spell has a dispel type the class removes: Dispel Magic
 for magic, Abolish Disease (else Cure Disease) for disease; no poison or curse cure for a priest. Crowd control (charm, fear, sleep, stun,
-polymorph, horror) first, then the tank, then the lowest health. Urgent dispels need 20% mana, any other 40%. One try per aura per
+polymorph, horror) first, then the tank, then the lowest health. Urgent dispels need 20% mana, any other 40%. The member must be within **the dispel's own range** (30 yd, less a yard), not the heal's: for crowd control out of
+that range the healer walks into it (`heal_approach`), for a minor debuff it does not. One try per aura per
 4 s (it may resist), nothing while Abolish Disease is already on the member, and **Mutating Injection is never dispelled** (the do-not-dispel list, as in
 TortoiseBots).
 
 **Position** (`healer_position`). In a fight with a tank in view and no mob on the player: 20 to 30 yd from the tank (a 3 yd slack),
 with sight of the tank, **out of the fight's mob's front and of ground effects**, and, when the mesh allows, with sight of every other member in
 view (else of the tank alone). It ranks at 24 under the low-health heals and walks like the mage's steps (`no_move`, the move lock and a missing
-navmesh switch it off). A mob that picks the healer is brought to the tank (`run_to_tank`, as for the mage).
+navmesh switch it off). A mob that picks the healer is brought to the tank (`run_to_tank`, as for the mage). The walk to the band is **not taken when it would
+take the healer out of reach (34.5 yd) of the member it has work for** (a heal, a dispel, or a member it walked toward): otherwise it would walk back before the heal is cast.
+
+**Sitting** (engine level, `stand.go`, for every class). The core refuses every cast of a seated player (`not_standing`) and does not stand it up. While the Food or Drink
+aura is up and nothing is going on, no cast is sent (buffs, top-up heals, dispels wait for the end of the meal). A cast in a fight, or of relevance 28 or more
+(a heal under 45% health), breaks the meal: the brain stands the player up (`CMSG_STANDSTATECHANGE`, the optional `Stander` half of the game, `Session.Stand`) as that tick's action
+`stand_up`, and the cast follows on the next. A player who sits with no meal to finish (the aura ended) is stood up for any cast. `not_standing` is also a 1 s back-off.
 
 **Rest.** `rest_drink` (the healer drinks below 80% mana at a rest gate; the driver wants 75%; a damage dealer below 65%) and `rest_eat`.
 `combat_consumables` drinks a mana potion below 10% mana in a boss fight. Below 15% mana the wand takes over (`wand`).
@@ -1128,7 +1135,7 @@ navmesh switch it off). A mob that picks the healer is brought to the tank (`run
 | | | not on a member with a shield or **Weakened Soul**, and not again for 6 s while the aura is awaited |
 | `priest_defense` | Fade (23) | a mob has the priest as its target, in combat |
 | | Psychic Scream (43) | 2 or more mobs on the priest within 8 yd, the priest under 70% health, and **no loose mob** within 30 yd (one that is not in combat, or fights someone outside the party: a feared mob runs into it) |
-| `priest_buffs` | Inner Fire (13), Power Word: Fortitude on the priest and every member in view (12) | out of combat at a rest gate, 30% mana or more, not in Shadowform (a Holy spell) |
+| `priest_buffs` | Inner Fire (13), Power Word: Fortitude on the priest and every member in view (12) | out of combat at a rest gate, 30% mana or more, not in Shadowform (a Holy spell). The shadow priest buffs first and takes the form when nothing is missing (in a fight the form does not wait); the brain cannot leave the form, so a buff that runs out while in it is not renewed |
 | `priest_shadow` | Shadowform (16, cast by id 15473) | known and not on; out of combat at a rest gate or in a fight |
 | | Vampiric Embrace (15), Shadow Word: Pain (14) | on the fight's mob; not on a mob under 30% / 25% health |
 | | Mind Blast (13), Mind Flay (10) | on cooldown (8 s); the filler; Smite (when not in Shadowform) when Mind Flay is not known or out of reach (20 yd) |
