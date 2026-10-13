@@ -1074,7 +1074,7 @@ func (d *Driver) restGate(ctx context.Context) error {
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
 	rebuff := map[packet.GUID]bool{} // revived members still to get their buffs back
-	var rezSince time.Time           // the leader's brain was given the dead members to resurrect from here
+	var rez rezWatch                 // the wait for the leader's brain to resurrect the dead members
 	mana := map[packet.GUID]manaWatch{}
 	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
 	// its combat flag), the gate as a whole is bounded.
@@ -1109,8 +1109,8 @@ func (d *Driver) restGate(ctx context.Context) error {
 		fightBegan, lastAssist = time.Time{}, time.Time{}
 		st := d.restState(mana)
 		if len(st.dead) == 0 {
-			rezSince = time.Time{}
-		} else if d.brainRezWaiting(&rezSince) {
+			rez = rezWatch{}
+		} else if d.brainRezWaiting(&rez) {
 			for _, m := range st.dead {
 				rebuff[m.GUID] = true
 			}

@@ -456,3 +456,89 @@ func TestRezSpellData(t *testing.T) {
 		t.Errorf("Shadowform %d", spellShadowform)
 	}
 }
+
+func TestCanRezHoldsThroughTheCastAndWhileAnotherHealersIsInFlight(t *testing.T) {
+	r, g, _ := rezRig(t, "holy_priest", ClassPriest, 30, priestRezKnown, false)
+	g.deadMember(deadG1, "Mage", 8, 10, 0)
+	calm(g)
+	if d := r.tick(100 * time.Millisecond); d == nil || d.Action != "rez" {
+		t.Fatalf("%+v", d)
+	}
+	// The member is held for rezSentHold, the plan has no target: the rest gate must still be told the brain is on it.
+	for at := 2; at < 14; at += 2 {
+		r.tick(2 * time.Second)
+		if !r.b.CanRez() {
+			t.Fatalf("CanRez is false %d s after the cast, with the member still dead", at)
+		}
+	}
+	// Another healer's resurrection in flight counts the same.
+	r2, g2, _ := rezRig(t, "holy_priest", ClassPriest, 30, priestRezKnown, false)
+	g2.member(dpsG1, "Paladin", 2, 1000, 1000, 8, 0)
+	g2.deadMember(deadG1, "Mage", 8, 6, 0)
+	calm(g2)
+	g2.mutate(dpsG1, func(u *objects.Unit) {
+		u.Casting = &objects.Cast{SpellID: rzRedemption1, Target: deadG1, EndsInMS: ms(30000)}
+	})
+	for i := 0; i < 5; i++ {
+		r2.tick(2 * time.Second)
+		g2.mutate(dpsG1, func(u *objects.Unit) { u.Casting.EndsInMS = ms(30000) })
+		if !r2.b.CanRez() {
+			t.Fatalf("tick %d: CanRez false while another healer casts", i)
+		}
+	}
+	// Once the member is up there is nothing to wait for.
+	g2.mutate(deadG1, func(u *objects.Unit) { u.Dead, u.Health = false, 500 })
+	r2.tick(2 * time.Second)
+	g2.clk.advance(rezSeenFor + time.Second)
+	if r2.b.CanRez() {
+		t.Fatal("CanRez with nobody dead")
+	}
+}
+
+func TestAMemberWhoStaysDeadIsOfferedThreeResurrectionsThenLeftAloneFiveMinutes(t *testing.T) {
+	r, g, _ := rezRig(t, "holy_priest", ClassPriest, 30, priestRezKnown, false)
+	g.deadMember(deadG1, "Mage", 8, 10, 0)
+	calm(g)
+	rezCasts := func() int {
+		n := 0
+		for _, c := range g.castList() {
+			if c.spell == rzResurrection2 {
+				n++
+			}
+		}
+		return n
+	}
+	r.tick(100 * time.Millisecond)
+	r.tick(rezSentHold + time.Second)
+	r.tick(rezSentHold + time.Second)
+	if n := rezCasts(); n != 3 {
+		t.Fatalf("%d casts in three offers", n)
+	}
+	if d := r.tick(rezSentHold + time.Second); d != nil && d.Action == "rez" {
+		t.Fatalf("a fourth offer: %+v", d)
+	}
+	r.tick(rezSeenFor + time.Second)
+	if r.b.CanRez() {
+		t.Fatal("the rest gate is told to wait for a member the brain gave up on")
+	}
+	if d := r.tick(4 * time.Minute); d != nil && d.Action == "rez" {
+		t.Fatalf("within the five minutes: %+v", d)
+	}
+	if d := r.tick(90 * time.Second); d == nil || d.Action != "rez" || rezCasts() != 4 {
+		t.Fatalf("after the skip: %+v casts %d", d, rezCasts())
+	}
+	// A member who got up in between starts again from nothing.
+	r2, g2, _ := rezRig(t, "holy_priest", ClassPriest, 30, priestRezKnown, false)
+	g2.deadMember(deadG1, "Mage", 8, 10, 0)
+	calm(g2)
+	r2.tick(100 * time.Millisecond)
+	r2.tick(rezSentHold + time.Second)
+	g2.mutate(deadG1, func(u *objects.Unit) { u.Dead, u.Health = false, 500 })
+	r2.tick(2 * time.Second)
+	g2.mutate(deadG1, func(u *objects.Unit) { u.Dead, u.Health = true, 0 })
+	for i := 0; i < 3; i++ {
+		if d := r2.tick(rezSentHold + time.Second); d == nil || d.Action != "rez" {
+			t.Fatalf("offer %d after the member died again: %+v", i, d)
+		}
+	}
+}

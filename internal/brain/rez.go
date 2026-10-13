@@ -38,6 +38,8 @@ const (
 	rezFarMax   = 40.0             // a dead member farther than this is not walked to (one walk step is 24 yd and the band 14 to 28 yd from the body)
 	rezSentHold = 14 * time.Second // after a resurrection went out: the 10 s cast, the offer, and the accept
 	rezSeenFor  = 3 * time.Second  // CanRez answers true this long after the brain last saw a member it could resurrect
+	rezMaxTries = 3                // resurrections sent to one member who stays dead (it keeps declining) ...
+	rezCapSkip  = 5 * time.Minute  // ... and then it is left alone this long
 )
 
 // rezSpellNames is the resurrection of each class.
@@ -53,11 +55,18 @@ var rezSpellNames = map[uint8]string{
 type rezMem struct {
 	mu     sync.Mutex
 	sent   map[packet.GUID]rezSent
+	tries  map[packet.GUID]rezTries
 	seenNS atomic.Int64 // unix nanoseconds of the last tick that had a candidate for an out-of-combat resurrection
 
 	lastTank packet.GUID // the tank the brain saw last (a dead tank is not found by findTank)
 	failSeen uint64
 	failInit bool
+}
+
+// rezTries counts the resurrections sent to a member who stayed dead, and until when it is left alone once the count is used up.
+type rezTries struct {
+	n     int
+	until time.Time
 }
 
 type rezSent struct {
@@ -73,6 +82,34 @@ func (r *rezMem) note(g packet.GUID, spell uint32, at, until time.Time) {
 		r.sent = map[packet.GUID]rezSent{}
 	}
 	r.sent[g] = rezSent{until: until, spell: spell, at: at}
+	if r.tries == nil {
+		r.tries = map[packet.GUID]rezTries{}
+	}
+	t := r.tries[g]
+	t.n++
+	if t.n >= rezMaxTries {
+		t.until = until.Add(rezCapSkip)
+	}
+	r.tries[g] = t
+}
+
+// capped says the member has had its resurrections and is left alone (it stays dead and keeps declining).
+func (r *rezMem) capped(g packet.GUID, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tries[g]
+	if ok && t.n >= rezMaxTries && !now.Before(t.until) {
+		delete(r.tries, g) // the skip is over: the count starts again
+		return false
+	}
+	return ok && t.n >= rezMaxTries
+}
+
+// forget drops the count of a member who is alive.
+func (r *rezMem) forget(g packet.GUID) {
+	r.mu.Lock()
+	delete(r.tries, g)
+	r.mu.Unlock()
 }
 
 func (r *rezMem) held(g packet.GUID, now time.Time) bool {
@@ -93,6 +130,11 @@ func (r *rezMem) refused(spell uint32, since time.Time) {
 	for g, s := range r.sent {
 		if s.spell == spell && !s.at.Before(since) {
 			delete(r.sent, g)
+			if t := r.tries[g]; t.n > 0 { // a refused cast is not a try
+				t.n--
+				t.until = time.Time{}
+				r.tries[g] = t
+			}
 		}
 	}
 }
@@ -162,6 +204,9 @@ type rezPlan struct {
 	Far *objects.Unit
 	// Combat says the plan is Rebirth's (in a fight); false is the out-of-combat resurrection.
 	Combat bool
+	// Waiting says a dead member in view has a resurrection on its way (the brain's own, in its hold, or another caster's in flight): the
+	// dungeon driver's rest gate keeps waiting for it (CanRez).
+	Waiting bool
 	// NeedMana says a member is waiting and the spell is not affordable yet.
 	NeedMana bool
 }
@@ -204,12 +249,16 @@ func calcRez(c *Ctx) rezPlan {
 		return u.Class == ClassWarrior
 	}
 	var best, far *objects.Unit
+	waiting := false
 	bestRank := 99
 	for _, m := range c.Party {
 		if !m.Online || m.GUID == c.Self.GUID {
 			continue
 		}
 		u, ok := c.Unit(m.GUID)
+		if ok && !u.Dead {
+			c.mem.rez.forget(u.GUID)
+		}
 		if !ok || !u.Dead || u.Ghost || u.Distance < 0 {
 			continue
 		}
@@ -217,10 +266,14 @@ func calcRez(c *Ctx) rezPlan {
 		if rebirth && !key {
 			continue // Rebirth is for the one the fight cannot do without
 		}
-		if rezPending(c, u.GUID) || c.mem.rez.held(u.GUID, c.Now) {
+		if float64(u.Distance) > rezFarMax {
 			continue
 		}
-		if float64(u.Distance) > rezFarMax {
+		if rezPending(c, u.GUID) || c.mem.rez.held(u.GUID, c.Now) {
+			waiting = true
+			continue
+		}
+		if c.mem.rez.capped(u.GUID, c.Now) {
 			continue
 		}
 		if float64(u.Distance) > rezReach || !sightOK(c, u) {
@@ -240,7 +293,7 @@ func calcRez(c *Ctx) rezPlan {
 			best, bestRank = u, rank
 		}
 	}
-	p := rezPlan{Spell: id, Combat: combat}
+	p := rezPlan{Spell: id, Combat: combat, Waiting: waiting}
 	switch {
 	case best != nil:
 		p.NeedMana = !Affordable(c, meta)
@@ -271,7 +324,7 @@ func noteRezSeen(c *Ctx) {
 		c.mem.rez.lastTank = t.GUID
 		c.mem.rez.mu.Unlock()
 	}
-	if p := ValRez.Get(c); !p.Combat && (p.Target != nil || p.Far != nil) {
+	if p := ValRez.Get(c); !p.Combat && (p.Target != nil || p.Far != nil || p.Waiting) {
 		c.mem.rez.seenNS.Store(c.Now.UnixNano())
 	}
 	cs := c.Spells.CastState()

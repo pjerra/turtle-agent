@@ -115,6 +115,8 @@ func blessingPlan(c *Ctx) (packet.GUID, uint32) {
 		if _, held := heldKey(c, "bless:"+guidStr(u.GUID)); held {
 			continue
 		}
+		// An aura row has no caster, so the paladin cannot tell its own blessing from a companion's recast of the same one: it renews the
+		// one on itself when the server says under a minute is left, and the worst case is one blessing cast over a fresh one.
 		have := carriedBlessing(u)
 		if have != "" && !(self && auraMissing(u, have) && knows(c, have)) {
 			continue // a blessing is there (a companion's counts); the paladin's own is renewed when under a minute is left
