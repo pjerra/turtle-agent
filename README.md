@@ -534,8 +534,8 @@ What the driver does for each action of the plan (the stepper decides which):
 - **use_object** sends the use, waits 1.5 s, and the plan's `wait_for` step watches the door or altar change state. Walks inside a step are bounded (see above).
 - **pull of a stealthed group (ambush).** Companions never attack a unit they cannot see, so `.bot action pullback` on a stealthed mob
   draws no fight (the Uldaman Stonevault Cave Lurkers, aura 5916 *Shadowstalker Stealth*). A pull group is therefore not pulled when
-  the members in view all carry a stealth aura (`auras` on the unit: 5916, Sneak 22766, Stealth, Prowl, Shadowmeld; or a name that says
-  so), or when none is in view and the plan marks the group `"ambush": true` (`tools/dungeongen` sets it when every member spawns
+  the members in view all carry a stealth aura (`auras` on the unit, by spell id only: 5916, Sneak 22766, Stealth 1784-1787 and 8822, Prowl 5215, 6783 and 9913, Shadowmeld 20580; a
+  *Stealth Detection* aura, which many ordinary spawns have, is none), or when none is in view and the plan marks the group `"ambush": true` (`tools/dungeongen` sets it when every member spawns
   stealthed). A member in view without the aura is pulled as usual even in a flagged group, and in a mixed pack the visible member is
   the target. The driver instead says `.bot action follow`, walks the leader to each of the group's positions in turn and stands
   6 s at each, fighting whatever reveals itself (`.bot action attack` on the nearest attacker until nothing has hit the party for 3 s).
@@ -557,10 +557,12 @@ What the driver does for each action of the plan (the stepper decides which):
   brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss that is not in view fails the run.
 - **rest gate**, at the start of each leg and before every pull and boss. It starts only when the party is out of combat: while a fight
   goes on it waits (ordering the attack on the nearest attacker like a fight does), and its 150 s count from the end of the fight (a
-  fight of over 300 s fails the run). Then `.bot action rest`, and wait until every living member has at least 90% health and 75% mana
+  fight of over 300 s fails the run, and so does a gate that has gone on for 150 s plus 2 x 300 s in all, whatever keeps interrupting
+  it, such as a mob that flickers in and out of range or keeps its combat flag). Then `.bot action rest`, and wait until every living member has at least 90% health and 75% mana
   (mana only for mana users) and is within 40 yd of the leader, for up to 150 s. A caster below the mana threshold whose mana has not
   risen by 5% of its maximum for 30 s (it is not drinking) no longer holds the gate once everything else is rested: the gate passes
-  and notes `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
+  and notes (not for a healer, a paladin, priest, shaman or druid by the `class` of its unit row, below 30% mana: the party would go
+  on without its heals, so that gate waits its 150 s out and the run goes on with the usual note) `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
   TortoiseBots, not to work around). After 150 s the run goes on with a note if everyone has 50% health, else it fails. A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set (then the run fails); after a revive the party
   list is polled for up to 5 s for the dead flag to clear before the member is judged, and a second revive goes out only after that
@@ -614,6 +616,8 @@ the duration the server sent; until it runs out the agent still has them that fa
 Each `units` row (and `unit`) also says what the unit is doing:
 
 - `in_combat` (`UNIT_FLAG_IN_COMBAT`) and `target`, the guid it has selected (absent when none).
+- `class`, the class id from the low-order class byte of `UNIT_FIELD_BYTES_0` (1 warrior, 2 paladin, 3 hunter, 4 rogue, 5 priest, 7 shaman, 8 mage,
+  9 warlock, 11 druid); absent when the server has not sent it. The dungeon driver uses it to tell a healer.
 - `stand_state`: `stand`, `sit`, `sit_chair` (any chair height), `sleep`, `dead` or `kneel`, from the low byte of
   `UNIT_FIELD_BYTES_1`, named as the `stand_state` event names them. Eating and drinking sit the unit down.
 - `auras[]` in slot order (never null): `slot`, `spell_id`, `name`, `stacks` (proc charges times stacks for an aura with charges, as the core counts

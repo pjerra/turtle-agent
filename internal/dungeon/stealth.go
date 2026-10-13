@@ -1,10 +1,6 @@
 package dungeon
 
-import (
-	"strings"
-
-	"github.com/pjerra/turtle-agent/internal/objects"
-)
+import "github.com/pjerra/turtle-agent/internal/objects"
 
 // StealthSpells are the auras that hide a unit from the party's companions: they never attack what they cannot see,
 // so a pull of such a unit draws no fight. 5916 is Shadowstalker Stealth, which the Uldaman Cave Lurkers (4850) carry
@@ -26,15 +22,11 @@ func StealthedAuras(ids []uint32) bool {
 	return false
 }
 
-// Stealthed reports a unit that carries a stealth aura: by spell id, or by a name that says so (a spell the id list
-// does not know).
+// Stealthed reports a unit that carries one of StealthSpells. It goes by spell id only: names would also catch
+// "Stealth Detection" (8279, 18950 ...), an aura many ordinary spawns have, and "Sneaky".
 func Stealthed(u objects.Unit) bool {
 	for _, a := range u.Auras {
 		if StealthSpells[a.SpellID] {
-			return true
-		}
-		n := strings.ToLower(a.Name)
-		if strings.Contains(n, "stealth") || strings.Contains(n, "sneak") || strings.Contains(n, "prowl") || strings.Contains(n, "shadowmeld") {
 			return true
 		}
 	}

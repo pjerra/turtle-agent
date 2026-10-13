@@ -408,13 +408,126 @@ func TestStealthed(t *testing.T) {
 	if !Stealthed(g.add(2, 1, Point{}).stealth().Unit) {
 		t.Error("5916")
 	}
+	// Decided by spell id: detection auras (common on ordinary spawns) and look-alike names are no stealth.
 	u := g.add(3, 1, Point{})
-	u.Auras = []objects.Aura{{SpellID: 99999, Name: "Greater Sneak"}}
-	if !Stealthed(u.Unit) {
-		t.Error("by name")
+	for _, a := range []objects.Aura{{SpellID: 8279, Name: "Stealth Detection"}, {SpellID: 18950, Name: "Invisibility and Stealth Detection"},
+		{SpellID: 23330, Name: "No Stealth Detection"}, {SpellID: 6151, Name: "Sneaky"}, {SpellID: 7165, Name: "Battle Stance"}} {
+		u.Auras = []objects.Aura{a}
+		if Stealthed(u.Unit) {
+			t.Errorf("%s (%d) is not stealth", a.Name, a.SpellID)
+		}
 	}
-	u.Auras = []objects.Aura{{SpellID: 7165, Name: "Battle Stance"}}
-	if Stealthed(u.Unit) {
-		t.Error("battle stance")
+	u.Auras = []objects.Aura{{SpellID: 22766}} // Sneak, no name known
+	if !Stealthed(u.Unit) {
+		t.Error("sneak by id")
+	}
+}
+
+// A pack with Stealth Detection is an ordinary pack: it is pulled, not walked past.
+func TestDriverPullsAPackWithAStealthDetectionAura(t *testing.T) {
+	g := newFake()
+	for _, e := range []packet.GUID{201, 202} {
+		u := g.add(e, 10, Point{30 + float32(e-201)*4, 0, 0})
+		u.Auras = []objects.Aura{{SpellID: 8279, Name: "Stealth Detection"}}
+	}
+	g.add(203, 3, Point{60, 0, 0})
+	d := NewDriver(mustPlan(t, ambushPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if l := d.Report().Legs[0]; l.Ambushes != 0 || l.Pulls != 2 || fmt.Sprint(g.targets) != fmt.Sprint([]packet.GUID{201, 203}) {
+		t.Fatalf("%+v targets %v", l, g.targets)
+	}
+}
+
+// A boss that carries a detection aura is fought: it does not count as untouched and "dead" before the pull.
+func TestDriverFightsABossWithAStealthDetectionAura(t *testing.T) {
+	g := newFake()
+	b := g.add(307, 7, Point{40, 0, 0})
+	b.Auras = []objects.Aura{{SpellID: 18950, Name: "Invisibility and Stealth Detection"}}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"boss","to":{"x":0,"y":0,"z":0},"boss":{"entry":7,"position":{"x":40,"y":0,"z":0}}}]}`)
+	d := NewDriver(p, g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if !b.Dead || g.count(".bot action pullback") != 1 || d.Report().Legs[0].Pulls != 1 {
+		t.Fatalf("dead %v chats %q %+v", b.Dead, g.chats, d.Report().Legs[0])
+	}
+	// Even a boss that really is stealthed is fought: only a pull group walks past stealth.
+	g = newFake()
+	b = g.add(307, 7, Point{40, 0, 0}).stealth()
+	b.Hostile = true
+	d = NewDriver(p, g, Config{PullAttempts: 1}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if g.count(".bot action pullback") != 1 || err == nil {
+		t.Fatalf("a stealthed boss is still pulled once (the fake gives no fight): chats %q err %v", g.chats, err)
+	}
+}
+
+// A healer that is low on mana and does not drink is waited for like before (the whole gate, then the run goes on with
+// a note); a healer at 30% or more, and any other caster, is let pass after 30 s.
+func TestRestGateWaitsOutALowHealer(t *testing.T) {
+	g := newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	g.party[1].Power = 100 // the priest at 25%, flat
+	d := NewDriver(mustPlan(t, restPlan), g, Config{RestTimeout: 60 * time.Second}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if n := notes(d); !strings.Contains(n, "rest gate gave up after 60 s ([Heal mana 25%])") || strings.Contains(n, "not drinking") {
+		t.Fatalf("%s", n)
+	}
+	if rs := d.Report().Legs[0].RestSeconds; rs < 120 {
+		t.Fatalf("two full gates expected: %.0f s", rs)
+	}
+
+	// At 30% the healer passes after the stall (the 30% edge counts).
+	g = newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	g.party[1].Power = 120
+	d = NewDriver(mustPlan(t, restPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(notes(d), "Heal not drinking (mana 30%)") {
+		t.Fatalf("%s", notes(d))
+	}
+
+	// A mage at 25% that does not drink passes; the healer is at full mana.
+	g = newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	const mage packet.GUID = 0x13
+	g.party = append(g.party, Member{Name: "Mage", GUID: mage, Online: true, Health: 500, MaxHealth: 500, PowerType: 0, Power: 100, MaxPower: 400})
+	g.partyClass[mage] = 8
+	d = NewDriver(mustPlan(t, restPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if n := notes(d); !strings.Contains(n, "Mage not drinking (mana 25%)") || strings.Contains(n, "gave up") {
+		t.Fatalf("%s", n)
+	}
+}
+
+// An attacker that flickers in and out of the 60 yd line (or an evade-bugged mob that keeps its combat flag) resets
+// the gate's fight and rest clocks again and again: the gate as a whole is capped, with a clear error.
+func TestRestGateIsCappedOverall(t *testing.T) {
+	g := newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	m := g.add(99, 99, Point{10, 0, 0})
+	m.Target = leader
+	g.party[0].Health = 700 // never rested
+	flick := false
+	g.onTick = func(g *fakeGame) { // in combat on every other look
+		flick = !flick
+		m.InCombat = flick
+	}
+	d := NewDriver(mustPlan(t, restPlan), g, Config{RestTimeout: 20 * time.Second, FightTimeout: 40 * time.Second}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "the rest gate has gone on for more than 100 s (fights keep interrupting it)") {
+		t.Fatalf("%v", err)
+	}
+	if rs := d.Report().Legs[0].RestSeconds; rs < 100 || rs > 110 {
+		t.Fatalf("%.0f s", rs)
 	}
 }

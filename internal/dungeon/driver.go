@@ -123,6 +123,7 @@ type Config struct {
 	ArriveTimeout  time.Duration // the party's walk to the leader after a teleport
 	ManaStall      time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
 	ManaStallPct   int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin  int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
 	ReviveWait     time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
 	AggroQuiet     time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
 	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
@@ -138,7 +139,7 @@ func DefaultConfig() Config {
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
-		ManaStall: 30 * time.Second, ManaStallPct: 5, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
+		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond,
 	}
 }
@@ -185,6 +186,7 @@ func (c Config) withDefaults() Config {
 	fill(&c.ArriveTimeout, d.ArriveTimeout)
 	fill(&c.ManaStall, d.ManaStall)
 	fillInt(&c.ManaStallPct, d.ManaStallPct)
+	fillInt(&c.HealerManaMin, d.HealerManaMin)
 	fill(&c.ReviveWait, d.ReviveWait)
 	fill(&c.AggroQuiet, d.AggroQuiet)
 	fill(&c.AmbushPause, d.AmbushPause)
@@ -734,7 +736,7 @@ func (d *Driver) doUse(ctx context.Context, a Action) error {
 // waits for the fight to end (helping with the attack order), and its timeout counts from the end of the fight.
 // A dead member is revived by GM when shortcuts are on (flagged), and given ReviveWait to show alive before it is
 // judged. A caster whose mana has not risen ManaStallPct of its maximum for ManaStall (it does not drink) is let
-// pass when everything else is rested, with a note. After RestTimeout the run goes on if everyone has at least
+// pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
 func (d *Driver) restGate(ctx context.Context) error {
 	began := d.clk.Now()
@@ -748,7 +750,13 @@ func (d *Driver) restGate(ctx context.Context) error {
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
 	mana := map[packet.GUID]manaWatch{}
+	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
+	// its combat flag), the gate as a whole is bounded.
+	limit := d.cfg.RestTimeout + 2*d.cfg.FightTimeout
 	for {
+		if el := d.clk.Now().Sub(began); el > limit {
+			return fmt.Errorf("the rest gate has gone on for more than %.0f s (fights keep interrupting it): the party is not rested", limit.Seconds())
+		}
 		if att := d.attackers(); len(att) > 0 {
 			now := d.clk.Now()
 			if fightBegan.IsZero() {
@@ -841,6 +849,10 @@ func (d *Driver) waitRevived(ctx context.Context, g packet.GUID) error {
 	}
 }
 
+// HealerClasses are the class ids (UNIT_FIELD_BYTES_0) taken for the party's healer: paladin, priest, shaman, druid.
+// The party list carries no class; the unit rows of the members in view do.
+var HealerClasses = map[uint8]bool{2: true, 5: true, 7: true, 11: true}
+
 // manaWatch is the window a rest gate keeps for a caster below the mana threshold: its mana when the window began.
 type manaWatch struct {
 	power uint32
@@ -862,6 +874,12 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 	r := restReport{ok: true, minHealth: 100}
 	var low []string
 	now := d.clk.Now()
+	classes := map[packet.GUID]uint8{}
+	for _, u := range d.g.Units() {
+		if u.Type == "player" && u.Class != 0 {
+			classes[u.GUID] = u.Class
+		}
+	}
 	pct := func(v, max uint32) int {
 		if max == 0 {
 			return 100
@@ -903,7 +921,9 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 				mana[m.GUID] = w
 			}
 			stalled := false
-			if now.Sub(w.since) >= d.cfg.ManaStall {
+			// A healer that low is waited for like before: the party would go on without its heals.
+			healerLow := HealerClasses[classes[m.GUID]] && p < d.cfg.HealerManaMin
+			if now.Sub(w.since) >= d.cfg.ManaStall && !healerLow {
 				if int(m.Power)-int(w.power) >= int(m.MaxPower)*d.cfg.ManaStallPct/100 {
 					mana[m.GUID] = manaWatch{power: m.Power, since: now}
 				} else {
@@ -1211,7 +1231,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (outco
 			if u.Dead {
 				continue
 			}
-			if Stealthed(u) && !u.InCombat && u.Health >= u.MaxHealth {
+			if sp.sneak && Stealthed(u) && !u.InCombat && u.Health >= u.MaxHealth {
 				continue // a stealthed member that has not joined is not fought (it aggros on the walk after)
 			}
 			alive++

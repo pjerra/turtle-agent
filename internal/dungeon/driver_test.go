@@ -54,8 +54,9 @@ type fakeGame struct {
 	pathErr            error
 	partyInViewNearMax float32 // distance the party members show at, 0: not in view
 
-	reviveDelay time.Duration        // a GM revive shows in the party list this long after (negative: never)
-	revAt       map[string]time.Time // revives under way, by member name
+	partyClass  map[packet.GUID]uint8 // class ids the members' unit rows show (the healer is a priest)
+	reviveDelay time.Duration         // a GM revive shows in the party list this long after (negative: never)
+	revAt       map[string]time.Time  // revives under way, by member name
 	onWalk      func(g *fakeGame, to Point)
 	// walkHook replaces WalkPath (it may block until ctx ends, as a long walk does). It must not touch the units: the
 	// driver's combat watch reads them from another goroutine meanwhile; aggro is the way to start a fight there.
@@ -76,6 +77,7 @@ func newFake() *fakeGame {
 	g := &fakeGame{now: time.Unix(1_000_000, 0), mapID: 70, dieIn: 8 * time.Second, partyInViewNearMax: 5,
 		self:  Self{GUID: leader, Name: "Lead", Health: 1000, MaxHealth: 1000},
 		party: []Member{{Name: "Tank", GUID: tank, Online: true, Health: 900, MaxHealth: 900, PowerType: 1, Power: 50, MaxPower: 100}, {Name: "Heal", GUID: healer, Online: true, Health: 500, MaxHealth: 500, PowerType: 0, Power: 400, MaxPower: 400}}}
+	g.partyClass = map[packet.GUID]uint8{tank: 1, healer: 5}
 	return g
 }
 
@@ -155,7 +157,7 @@ func (g *fakeGame) Units() []objects.Unit {
 	}
 	if g.partyInViewNearMax > 0 {
 		for _, m := range g.party {
-			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax})
+			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID]})
 		}
 	}
 	return out
