@@ -50,6 +50,90 @@ func (w stepWorld) Team() string {
 	return ""
 }
 
+// LootRules is the group's loot setting: the method by name ("free_for_all", "round_robin", "master_loot", "group_loot",
+// "need_before_greed"), the master looter (master_loot), the quality threshold, and whether the run's leader leads the group (only
+// the group leader may change the setting).
+type LootRules struct {
+	Method    string
+	Master    packet.GUID
+	Threshold uint8
+	Leader    bool
+}
+
+// LootFreeForAll is the method under which every member sees every item of a corpse.
+const LootFreeForAll = "free_for_all"
+
+// LootRuler is the optional part of a Game that reads and sets the group's loot rules (the party's SMSG_GROUP_LIST and
+// CMSG_LOOT_METHOD). Boss.LootItem needs the leader to see the item in the corpse's window: under round_robin, group_loot and
+// need_before_greed an item below the group's threshold (a white quest item like the Shaft of Tsol, quality 1 under the default
+// uncommon threshold) is shown only to the member whose turn it was at the kill, until that member opens and closes the corpse
+// (LootMgr.cpp:922-946, LootHandler.cpp:668-684). With the companions' looting off that member never does, and live run 4 found
+// the Shaft hidden from the leader. The window's permission is taken from the method when the corpse is opened
+// (Player::SendLoot, Player.cpp:9566-9590), so the driver switches the group to free_for_all just for the leader's loot and puts
+// the old method back after. A Game without it loots under whatever the group has.
+type LootRuler interface {
+	LootRules() (LootRules, bool)
+	SetLootRules(ctx context.Context, r LootRules) error
+}
+
+// seesBossLoot reports whether the rules show every item of a corpse to the leader: free_for_all, or master_loot with the leader
+// as the master looter.
+func seesBossLoot(r LootRules, self packet.GUID) bool {
+	return r.Method == LootFreeForAll || (r.Method == "master_loot" && r.Master != 0 && r.Master == self)
+}
+
+// openBossLoot makes the corpse's items visible to the leader for its loot: a group leader under another method switches to
+// free_for_all and gets back a restore that puts the old method back. A leader that does not lead the group cannot; the loot is
+// tried as it is (the item shows when the turn was the leader's) and the note says why it may be missing.
+func (d *Driver) openBossLoot(ctx context.Context, label string) func() {
+	noop := func() {}
+	lr, ok := d.g.(LootRuler)
+	if !ok {
+		return noop
+	}
+	old, known := lr.LootRules()
+	if !known || seesBossLoot(old, d.g.Self().GUID) {
+		return noop
+	}
+	if !old.Leader {
+		d.rep.note(fmt.Sprintf("%s: the group's loot method is %s and the leader does not lead the group: an item below the threshold shows only to the member whose turn it was", label, old.Method))
+		return noop
+	}
+	want := LootRules{Method: LootFreeForAll, Threshold: old.Threshold}
+	if err := lr.SetLootRules(ctx, want); err != nil {
+		d.rep.note(fmt.Sprintf("%s: could not set the group's loot to %s for the leader's loot (%v); looting under %s", label, LootFreeForAll, err, old.Method))
+		return noop
+	}
+	d.rep.note(fmt.Sprintf("%s: the group's loot is %s for the leader's loot (was %s)", label, LootFreeForAll, old.Method))
+	return func() {
+		if err := lr.SetLootRules(context.WithoutCancel(ctx), old); err != nil {
+			d.rep.note(fmt.Sprintf("%s: could not put the group's loot back to %s: %v", label, old.Method, err))
+		}
+	}
+}
+
+// checkLootRules fails a run whose legs from fromLeg take an item from a boss's corpse (Boss.LootItem) when the leader can neither
+// see every item under the group's loot method nor change it (it does not lead the group): the drop would show only when the turn is
+// the leader's. The leader must lead the group or the group must use free_for_all.
+func (d *Driver) checkLootRules(fromLeg int) error {
+	lr, ok := d.g.(LootRuler)
+	if !ok {
+		return nil
+	}
+	r, known := lr.LootRules()
+	if !known || r.Leader || seesBossLoot(r, d.g.Self().GUID) {
+		return nil
+	}
+	for i := fromLeg; i < len(d.plan.Legs); i++ {
+		if b := d.plan.Legs[i].Boss; b != nil && b.LootItem != nil {
+			return fmt.Errorf("leg %d %q takes %s from the corpse of boss %d, but the group's loot method is %s and the leader does not lead the group: "+
+				"an item below the loot threshold would show only to the member whose turn it is. Make the leader the group leader (promote) or set the loot method to free_for_all first",
+				i, d.plan.Legs[i].Name, b.LootItem, b.Entry, r.Method)
+		}
+	}
+	return nil
+}
+
 // Waits of the loot and item steps. They are not Config fields: the cast of an Opening spell and the cast of an item's spell are
 // short and fixed (the Opening spells 3365 and 6477 take 5 s in the spell table, spell 9594 takes 2 s).
 const (
@@ -261,7 +345,7 @@ func (d *Driver) restoreLoot(ctx context.Context, label string) {
 // lootRaceHint is what a refused or empty loot of the boss's corpse may mean: a companion took the drop first. Under round-robin and group loot
 // the corpse is open to the player whose turn it is, or to whoever the item was rolled to (Player.cpp:17280-17293), and the server closes the
 // window of the others.
-const lootRaceHint = "a companion may have looted it first (round-robin or group loot lets one player take it; set the boss's companions_loot to false)"
+const lootRaceHint = "a companion may have looted it first (round-robin or group loot lets one player take it; set the boss's companions_loot to false), or the loot method hid it (an item below the group's threshold shows only to the member whose turn it was; see the loot method note)"
 
 // downstream is the item a later use_item step makes out of item, when the plan has one: the Shaft of Tsol becomes the Staff of
 // Prehistoria through the Medallion's use. A run resumed with the product in the bags has no use for the corpse.
@@ -313,6 +397,8 @@ func (d *Driver) lootBoss(ctx context.Context, a Action) error {
 			return err
 		}
 	}
+	restore := d.openBossLoot(ctx, a.Label)
+	defer restore()
 	var got Looted
 	lerr := d.holdingMove(ctx, func() error {
 		var err error

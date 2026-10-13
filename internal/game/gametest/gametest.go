@@ -26,3 +26,16 @@ func GroupListAs(groupType, ownFlags uint8, leader packet.GUID, members ...game.
 	}
 	return w.Bytes()
 }
+
+// GroupListLoot is GroupList with the group's loot method, master looter and threshold.
+func GroupListLoot(leader packet.GUID, method uint8, looter packet.GUID, threshold uint8, members ...game.GroupMember) []byte {
+	w := packet.NewWriter().U8(game.GroupParty).U8(0).U32(uint32(len(members)))
+	for _, m := range members {
+		w.CString(m.Name).GUID(m.GUID).U8(m.Status).U8(m.Flags)
+	}
+	w.GUID(leader)
+	if len(members) > 0 {
+		w.U8(method).U64(uint64(looter)).U8(threshold).U8(0)
+	}
+	return w.Bytes()
+}

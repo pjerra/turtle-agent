@@ -38,6 +38,13 @@ type PartyInfo struct {
 	Leader        packet.GUID   `json:"leader,omitempty"`
 	Members       []PartyMember `json:"members"`
 	PendingInvite string        `json:"pending_invite,omitempty"`
+	// LootMethod, LootMaster and LootThreshold are the group's loot rules from SMSG_GROUP_LIST: the method by name
+	// (free_for_all, round_robin, master_loot, group_loot, need_before_greed), the master looter (master_loot only) and
+	// the quality threshold (2 uncommon). Under round_robin, group_loot and need_before_greed an item below the threshold
+	// is shown only to the member whose turn it was at the kill until that member closes the window (LootMgr.cpp:922-946).
+	LootMethod    string      `json:"loot_method,omitempty"`
+	LootMaster    packet.GUID `json:"loot_master,omitempty"`
+	LootThreshold uint8       `json:"loot_threshold,omitempty"`
 	// Marks are the group's raid icons by name (skull, cross, ...), from MSG_RAID_TARGET_UPDATE.
 	Marks map[string]packet.GUID `json:"marks,omitempty"`
 }
@@ -208,6 +215,9 @@ func (s *Session) onGroupList(body []byte) error {
 	wasRaid := s.party.Raid
 	next := PartyInfo{InGroup: len(g.Members) > 0, Leader: g.Leader, PendingInvite: s.party.PendingInvite}
 	next.Raid = next.InGroup && g.Type == game.GroupRaid
+	if next.InGroup {
+		next.LootMethod, next.LootMaster, next.LootThreshold = game.LootMethodName(g.LootMethod), g.Looter, g.LootThreshold
+	}
 	next.Assistant = next.InGroup && g.OwnFlags&game.GroupAssistant != 0
 	if next.Raid { // a party's list carries subgroup 0 for everyone
 		next.Subgroup = int(game.FlagsSubgroup(g.OwnFlags)) + 1

@@ -539,3 +539,83 @@ func TestUseItemStepNamesTheMissingUsedItem(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// ruledGame is a lootGame with the group's loot rules (LootRuler). Like the server, a corpse opened under any method other than
+// free_for_all hides the white Shaft from a leader whose turn it was not (LootMgr.cpp:922-946).
+type ruledGame struct {
+	*lootGame
+	rules LootRules
+	sets  []LootRules
+	order []string // "set:<method>" and "loot", in the order they happened
+}
+
+func (g *ruledGame) LootRules() (LootRules, bool) { return g.rules, true }
+
+func (g *ruledGame) SetLootRules(ctx context.Context, r LootRules) error {
+	if !g.rules.Leader {
+		return errors.New("needs the group leader")
+	}
+	g.sets = append(g.sets, r)
+	g.order = append(g.order, "set:"+r.Method)
+	leader := g.rules.Leader
+	g.rules = r
+	g.rules.Leader = leader
+	return nil
+}
+
+func (g *ruledGame) LootCorpse(ctx context.Context, guid packet.GUID) (Looted, error) {
+	g.order = append(g.order, "loot")
+	if g.rules.Method != LootFreeForAll {
+		g.moved("loot")
+		g.corpses = append(g.corpses, guid)
+		return Looted{Money: 263}, nil
+	}
+	return g.lootGame.LootCorpse(ctx, guid)
+}
+
+// Live run 4: the group loot hid the Shaft from the leader. A group leader switches the group to free_for_all just for its loot of
+// the corpse, takes the Shaft, and puts the old method back.
+func TestBossLootSwitchesToFreeForAllForTheLeadersLoot(t *testing.T) {
+	lg, p := lootFixture(t, bossLootPlan)
+	lg.corpse = []objects.Item{shaft()}
+	g := &ruledGame{lootGame: lg, rules: LootRules{Method: "group_loot", Threshold: 2, Leader: true}}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.order) != "[set:free_for_all loot set:group_loot]" {
+		t.Fatalf("order %v", g.order)
+	}
+	if g.sets[0].Threshold != 2 || g.sets[1] != (LootRules{Method: "group_loot", Threshold: 2, Leader: true}) {
+		t.Fatalf("sets %+v", g.sets)
+	}
+	if !strings.Contains(notes(d), "the group's loot is free_for_all for the leader's loot (was group_loot)") {
+		t.Fatalf("notes %q", notes(d))
+	}
+}
+
+// Without the switch (the same game, the leader not leading the group) the run fails before it starts, naming the fix.
+func TestBossLootNeedsTheGroupLeaderOrFreeForAll(t *testing.T) {
+	lg, p := lootFixture(t, bossLootPlan)
+	lg.corpse = []objects.Item{shaft()}
+	g := &ruledGame{lootGame: lg, rules: LootRules{Method: "group_loot", Threshold: 2}}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "the group's loot method is group_loot and the leader does not lead the group") || !strings.Contains(err.Error(), "free_for_all") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.walks) != 0 || len(g.order) != 0 {
+		t.Fatalf("the run moved: walks %v order %v", g.walks, g.order)
+	}
+	// A group on free_for_all needs no leader and no switch.
+	lg, p = lootFixture(t, bossLootPlan)
+	lg.corpse = []objects.Item{shaft()}
+	g = &ruledGame{lootGame: lg, rules: LootRules{Method: LootFreeForAll, Threshold: 2}}
+	d = NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.order) != "[loot]" {
+		t.Fatalf("order %v", g.order)
+	}
+}

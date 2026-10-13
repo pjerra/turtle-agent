@@ -267,3 +267,47 @@ func (s *Session) Disband(ctx context.Context) error {
 		return send, func(p PartyInfo) bool { return !p.InGroup }, nil
 	})
 }
+
+// SetLootMethod sets the group's loot method by name (game.LootMethodNames), its master looter (master_loot only: a
+// member's guid or name; the player when both are empty) and its threshold (an item quality 1-5; 0 keeps the group's).
+// Only the leader may (CMSG_LOOT_METHOD, GroupHandler.cpp:372-403); the call waits for the SMSG_GROUP_LIST that shows it.
+func (s *Session) SetLootMethod(ctx context.Context, method string, master packet.GUID, masterName string, threshold uint8) error {
+	m, ok := game.LootMethodByName(method)
+	if !ok {
+		return fmt.Errorf("loot_method: unknown method %q (one of %s)", method, strings.Join(game.LootMethodNames(), ", "))
+	}
+	if threshold > 5 {
+		return fmt.Errorf("loot_method: threshold %d: an item quality 1 (common) to 5 (legendary)", threshold)
+	}
+	return s.groupCommand(ctx, "loot_method", func(p PartyInfo, self packet.GUID, selfName string) (func() error, func(PartyInfo) bool, error) {
+		if err := needLeader(p, self); err != nil {
+			return nil, nil, err
+		}
+		th := threshold
+		if th == 0 {
+			th = p.LootThreshold
+		}
+		if th < 1 { // the server ignores a threshold below common (GroupHandler.cpp:383-384)
+			th = 2
+		}
+		var looter packet.GUID
+		if m == game.LootMaster {
+			if master == 0 && masterName == "" {
+				looter = self
+			} else {
+				mem, err := findMember(p, self, selfName, master, masterName)
+				if err != nil {
+					return nil, nil, err
+				}
+				looter = mem.GUID
+			}
+		}
+		done := func(p PartyInfo) bool {
+			return p.LootMethod == method && p.LootThreshold == th && (m != game.LootMaster || p.LootMaster == looter)
+		}
+		if done(p) {
+			return nil, done, nil
+		}
+		return s.write(opcode.CMSGLootMethod, game.BuildLootMethod(m, looter, th)), done, nil
+	})
+}

@@ -472,6 +472,9 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 	if err := d.checkRequiredItems(fromLeg); err != nil {
 		return err
 	}
+	if err := d.checkLootRules(fromLeg); err != nil {
+		return err
+	}
 	start, what := d.startPoint(fromLeg)
 	if fromLeg > 0 && !d.cfg.Teleport {
 		// Without teleport the party walks from where it stands to the leg: the packs of the earlier legs on that way are
@@ -1461,8 +1464,15 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			if len(gaveUp) > 0 {
 				return d.leftOver(label, sp, kills, gaveUp)
 			}
-			if sp.required && !d.deadInView(sp) {
-				return fmt.Errorf("%s: no living %v in view", label, sp.pick)
+			// A boss (required) is never taken as dead unseen: pickTarget has walked to its position, and only its corpse in view
+			// counts. Live run 4 read the note of a boss that the rest gate's fight had killed as "taken as dead while alive"; the
+			// boss's note now says what was seen.
+			if sp.required {
+				if !d.deadInView(sp) {
+					return fmt.Errorf("%s: no living %v in view at the boss's position, and no corpse of it: the boss is not where the plan puts it", label, sp.pick)
+				}
+				d.rep.note(fmt.Sprintf("%s: %v is dead already: its corpse is in view (it died in an earlier fight or during the rest gate)", label, sp.pick))
+				return nil
 			}
 			d.rep.note(fmt.Sprintf("%s: no living %v in view; taken as already dead", label, sp.pick))
 			return nil

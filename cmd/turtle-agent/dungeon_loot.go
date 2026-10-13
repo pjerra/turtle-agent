@@ -39,3 +39,18 @@ func (g *sessionGame) UseItem(ctx context.Context, entry uint32) error {
 
 // Team is the leader's side from its race (session.Team); "" until the race is known.
 func (g *sessionGame) Team() string { return g.cur().Team() }
+
+// LootRules is the group's loot method from the session's group list (dungeon.LootRuler); false outside a group.
+func (g *sessionGame) LootRules() (dungeon.LootRules, bool) {
+	s := g.cur()
+	p := s.Party()
+	if !p.InGroup || p.LootMethod == "" {
+		return dungeon.LootRules{}, false
+	}
+	return dungeon.LootRules{Method: p.LootMethod, Master: p.LootMaster, Threshold: p.LootThreshold, Leader: p.Leader != 0 && p.Leader == s.Status().GUID}, true
+}
+
+// SetLootRules sets the group's loot method (session.SetLootMethod); the leader must lead the group.
+func (g *sessionGame) SetLootRules(ctx context.Context, r dungeon.LootRules) error {
+	return g.cur().SetLootMethod(ctx, r.Method, r.Master, "", r.Threshold)
+}

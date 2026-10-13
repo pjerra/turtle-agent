@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/game/gametest"
@@ -40,5 +41,35 @@ func TestGroupControlMethods(t *testing.T) {
 	}
 	if out := r.call("raid_move", `{"name":"Gorm","subgroup":9}`); errCode(out) != rpc.CodeGame {
 		t.Fatalf("subgroup 9: %v", out)
+	}
+}
+
+// loot_method sends CMSG_LOOT_METHOD as the leader and returns when the group list shows the change; party reports the
+// group's loot rules.
+func TestLootMethodMethod(t *testing.T) {
+	r := newRig(t)
+	if out := r.call("loot_method", `{"method":"free_for_all"}`); errCode(out) != rpc.CodeGame {
+		t.Fatalf("outside a group: %v", out)
+	}
+	gorm := game.GroupMember{Name: "Gorm", GUID: 0x30, Status: game.MemberOnline}
+	r.srv.Send(opcode.SMSGGroupList, gametest.GroupList(0x2A, gorm))
+	r.expect(opcode.CMSGRequestPartyMemberStats)
+	if p := r.call("party", "{}")["result"].(map[string]any); p["loot_method"] != "group_loot" || p["loot_threshold"] != float64(2) {
+		t.Fatalf("party %v", p)
+	}
+	if out := r.call("loot_method", `{"method":"everyone"}`); errCode(out) != rpc.CodeGame {
+		t.Fatalf("unknown method: %v", out)
+	}
+	res := make(chan map[string]any, 1)
+	go func() { res <- r.call("loot_method", `{"method":"free_for_all"}`) }()
+	if p, err := r.srv.Expect(opcode.CMSGLootMethod, 2*time.Second); err != nil || string(p.Body) != string(game.BuildLootMethod(game.LootFreeForAll, 0, 2)) {
+		t.Fatalf("%v %+v", err, p)
+	}
+	r.srv.Send(opcode.SMSGGroupList, gametest.GroupListLoot(0x2A, game.LootFreeForAll, 0, 2, gorm))
+	if out := <-res; out["error"] != nil {
+		t.Fatalf("loot_method: %v", out)
+	}
+	if p := r.call("party", "{}")["result"].(map[string]any); p["loot_method"] != "free_for_all" {
+		t.Fatalf("party %v", p)
 	}
 }
