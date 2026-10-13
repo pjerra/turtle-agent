@@ -207,19 +207,16 @@ func (d *Driver) doUseItem(ctx context.Context, a Action) error {
 
 // doKillAndLoot is the boss action: the kill, then the loot of the boss's corpse when the plan names an item to take from it. With
 // Boss.CompanionsLoot false the party's corpse looting is off from before the pull until the leader has looted (also when the fight or the
-// loot fails), so that a companion cannot take the drop the plan needs.
+// loot fails), so that a companion cannot take the drop the plan needs. The restore is a blanket "on" for every party bot: TortoiseBots
+// does not hand the driver each bot's own setting, so a bot the player had turned off comes back on (README).
 func (d *Driver) doKillAndLoot(ctx context.Context, a Action) error {
 	b := a.Boss
 	if b.CompanionsLoot != nil && !*b.CompanionsLoot {
-		if err := d.order(ctx, "loot off"); err != nil {
-			return err
+		if err := d.lootOrder(ctx, "off"); err != nil {
+			return fmt.Errorf("%s: %w", a.Label, err)
 		}
 		d.rep.note(fmt.Sprintf("%s: the companions' corpse looting is off for the fight and the leader's loot", a.Label))
-		defer func() {
-			if err := d.g.Chat(context.WithoutCancel(ctx), "party", ".bot action loot on"); err != nil {
-				d.rep.note(fmt.Sprintf("%s: could not order the companions' looting back on: %v", a.Label, err))
-			}
-		}()
+		defer d.restoreLoot(context.WithoutCancel(ctx), a.Label)
 	}
 	if err := d.doKill(ctx, a); err != nil {
 		return err
@@ -228,6 +225,37 @@ func (d *Driver) doKillAndLoot(ctx context.Context, a Action) error {
 		return d.lootBoss(ctx, a)
 	}
 	return nil
+}
+
+// lootAnswerWait is how long the driver waits for the answer to a loot order (a refusal whisper) before it reads the refusals.
+const lootAnswerWait = time.Second
+
+// lootOrder says ".bot action loot <state>" in party chat. The bot module scopes the order to the one bot the leader has selected, when it
+// has one (ResolveDynamicScope), so the leader targets itself first: a target that is not a live bot leaves the order to every party bot.
+// The earlier selection is not put back afterwards.
+func (d *Driver) lootOrder(ctx context.Context, state string) error {
+	self := d.g.Self().GUID
+	if self == 0 {
+		return fmt.Errorf("cannot clear the selection before the loot %s order: the leader's guid is not known", state)
+	}
+	if err := d.g.Target(ctx, self); err != nil {
+		return fmt.Errorf("cannot clear the selection before the loot %s order: %w", state, err)
+	}
+	return d.order(ctx, "loot "+state)
+}
+
+// restoreLoot is the defer of a boss's loot-off: it orders the companions' looting back on. The refusals the fight left are read first, so
+// that they are not blamed on this order; the answer to this order is read within lootAnswerWait, while it is still the last order given
+// (a refusal whisper names no intent, and drainRefusals files it under the last order).
+func (d *Driver) restoreLoot(ctx context.Context, label string) {
+	d.drainRefusals()
+	if err := d.lootOrder(ctx, "on"); err != nil {
+		d.rep.note(fmt.Sprintf("%s: could not order the companions' looting back on: %v", label, err))
+		return
+	}
+	if d.clk.Sleep(ctx, lootAnswerWait) == nil {
+		d.drainRefusals()
+	}
 }
 
 // lootRaceHint is what a refused or empty loot of the boss's corpse may mean: a companion took the drop first. Under round-robin and group loot

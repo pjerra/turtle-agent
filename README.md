@@ -543,6 +543,13 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `boss.companions_loot: false`: the driver orders `.bot action loot off` (TortoiseBots `player-controls.md`) before the boss is pulled and `.bot action loot on` after the leader's loot, also
   when the fight or the loot fails (noted in the report). Needed for a boss whose drop the plan takes: under round-robin or group loot the corpse is open to one player at a time, and a
   companion that loots first takes the item (`Player.cpp:17280-17293`). Absent or true leaves the companions alone.
+  - Both orders reach every party bot. The bot module scopes a loot order to the one bot the leader has selected, so the leader targets itself
+    before each order; the earlier selection is not put back afterwards.
+  - **The restore is a blanket `on`.** TortoiseBots keeps each bot's own setting (`TBM:BOTSTATE|<bot>|move=…,loot=on` or `loot=off`, in the BOTSTATE
+    block of the roster response), but the driver does not read it, so a bot the player had turned off is turned on again after the boss. To keep
+    one off after the run, type `.bot behavior <Name> loot off`.
+  - **A crash between the two orders leaves the companions' looting off.** Turn it back on in party chat with no bot selected:
+    `.bot action loot on`.
 - **Team gate**: `boss.team` and a pull group's `team` (`"alliance"` or `"horde"`). The driver takes the leader's team from its race (human, dwarf, night elf, gnome and high elf
   are the Alliance; orc, undead, tauren, troll and goblin the Horde: `Player::TeamForRace`) and skips what is gated to the other team, with a line in the report's
   `notes` and a `dungeon_step` event (`action: skip_team`). A leader whose race is not known yet runs everything. Uldaman's Baelog, Eric and Olaf (6906-6908) are faction 122
@@ -734,7 +741,7 @@ playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `reviv
 them: they are there so that a report shows what a run was started with. A run with any `gm_shortcuts` or `setup_shortcuts` is not a run
 a player could have done.
 
-Limits of this driver: no CC marks, no loot orders (the companions loot on their own), no stuck detection beyond
+Limits of this driver: no CC marks, no loot orders beyond the `companions_loot` pair (the companions loot on their own), no stuck detection beyond
 the bounds above, and stealthed packs are walked through, not pulled. The code is
 tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
 `docs/LIVE-CHECKS.md`.
