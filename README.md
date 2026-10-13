@@ -1298,15 +1298,15 @@ quiet). All of its orders cost no cast and no global cooldown.
 | :--- | :--- |
 | Attack (20) | the pet is out, alive, not told to stay, and the fight's mob is in combat and **held**: it attacks the tank (the fight's tank), the player or the pet, or no tank is in the fight. The damage dealer's opening delay (2 s) holds the order like it holds the spells, so the pet never goes in before the tank has the mob, and a mob that is not in combat is never ordered at: **the pet does not pull**. One order per mob (the pet's own target shows it, and the order is not repeated within 2.5 s) |
 | Recall: `follow` (16) | the fight is over (no mob to fight, the player out of combat) and the pet still has a target. Not repeated within 3 s. A pet told to `stay` is left where it is: an explicit order beats automation |
-| Recall: `follow` (32) | the leader is fleeing: moving in combat with the pet's mob more than 40 yd off, or with a mob on it below 25% health |
+| Recall: `follow` (32) | the leader is fleeing: moving in combat with the fight's mob (or the one the pet chases) more than 40 yd off. While that holds no attack order goes out either, so the pet is not sent back in; it is sent again once the leader stops. A hurt leader with a mob on it is not fleeing: the pet stays on that mob |
 | Defensive (13) | in a group, a pet on `aggressive` is put on `defensive`, once per pet (a player who sets it back is not fought). A pet on `passive` or `defensive` is not touched, and a solo player's pet keeps its setting |
 | Taunt off (13) | with a tank in view (the class order warrior, paladin, druid, or `Params.Tank`), the autocast of the pet's Growl, Torment, Suffering is switched off, once per pet and spell. Solo it stays on. It is not switched back on |
 | Summon (14) | **hunter**: no pet out, out of combat at a rest gate, Call Pet (a refusal `no_pet`, a hunter without a pet, backs it off for a minute). **warlock**: Summon Voidwalker (needs a soul shard) else Summon Imp. Not again within 12 s of a cast |
 | Revive Pet (15) | the hunter's pet is dead, out of combat at a rest gate (a 10 s cast costing the whole base mana; it is not cast in a fight) |
 | Mend Pet (22) | the hunter's pet is within 20 yd and below 50% health in combat or 70% out of it, and not mending |
 
-Not in this step: **Feed Pet.** It is a cast at the pet with a food item as the target, and the food has to match the pet's diet (creature family data, which the
-agent does not read); `pet` shows `happiness_state`, and the hunter feeds by hand (`cast` is not enough: the item target is missing from `CMSG_CAST_SPELL`). A pet that goes
+Not in this step: **Feed Pet.** The item-targeted cast exists now (`game.BuildCastSpellOnItem`); what is missing is the pet's diet: the food has to match the pet's
+creature family, and the agent has no food-by-diet table, so it cannot pick the item. `pet` shows `happiness_state`, and the hunter feeds by hand. A pet that goes
 unhappy deals less damage and, at the lowest loyalty, can leave. Also not: Growl on purpose when no tank is there (it stays on by default), the pet's own spells
 (Cower, Dash, Firebolt, Torment are the pet's autocast or the owner's `pet_action cast`), Dismiss Pet, Tame Beast, and a pet in a fight against a crowd-controlled mob.
 

@@ -260,6 +260,16 @@ func TestPetIsCalledBackWhenTheFightEndsAndNotTwice(t *testing.T) {
 	}
 }
 
+func countPrefix(l []string, prefix string) int {
+	n := 0
+	for _, x := range l {
+		if len(x) >= len(prefix) && x[:len(prefix)] == prefix {
+			n++
+		}
+	}
+	return n
+}
+
 func countOf(l []string, s string) int {
 	n := 0
 	for _, x := range l {
@@ -271,7 +281,7 @@ func countOf(l []string, s string) int {
 }
 
 func TestPetIsCalledBackWhenTheLeaderFlees(t *testing.T) {
-	r, pf := newPetHunter(t, Params{})
+	r, pf := newPetHunter(t, Params{NoMove: true}) // the test moves the units; the hunter's own positioning would walk it back
 	pf.withPet()
 	tankHolds(r)
 	open(r)
@@ -286,6 +296,22 @@ func TestPetIsCalledBackWhenTheLeaderFlees(t *testing.T) {
 	if d == nil || d.Action != "pet_recall" || d.Trigger != "leader_fleeing" || d.Rel != RelMove+2 {
 		t.Fatalf("%+v idle %q", d, r.idle())
 	}
+	// The recall cleared the pet's target (AttackStop). Over several hold windows of the attack (2.5 s) and of the recall (3 s) the leader
+	// keeps running: the pet is not sent back in, and not called back again.
+	pf.setPet(func(p *PetState) { p.Target = 0 })
+	attacks := countPrefix(pf.orderList(), "attack:")
+	for i := 0; i < 12; i++ {
+		r.tick(1500 * time.Millisecond)
+	}
+	if got := countPrefix(pf.orderList(), "attack:"); got != attacks || countOf(pf.orderList(), "follow") != 1 {
+		t.Fatalf("ping-pong while the leader flees: %v", pf.orderList())
+	}
+	// The leader stops running: the tank still holds the mob, and the pet goes back in.
+	r.g.mutate(mobA, func(u *objects.Unit) { u.X = 28 })
+	r.g.setSelf(func(u *objects.Unit) { u.Moving = false })
+	if d := r.tick(1500 * time.Millisecond); d == nil || d.Action != "pet_attack" {
+		t.Fatalf("%+v idle %q", d, r.idle())
+	}
 	// Standing in the fight with the pet on its mob is no flight.
 	r, pf = newPetHunter(t, Params{})
 	pf.withPet()
@@ -297,6 +323,25 @@ func TestPetIsCalledBackWhenTheLeaderFlees(t *testing.T) {
 		r.tick(1100 * time.Millisecond)
 	}
 	if countOf(pf.orderList(), "follow") != 0 {
+		t.Fatalf("%v", pf.orderList())
+	}
+}
+
+func TestPetStaysOnTheMobThatIsOnAHurtLeader(t *testing.T) {
+	// A hunter below a quarter of its health, running, with a mob on it: the pet is not called off that mob, it is sent at it.
+	r, pf := newPetHunter(t, Params{})
+	pf.withPet()
+	r.g.addUnit(mob(mobA, selfG), 8, 0)
+	setHealth(r.g, 20)
+	r.g.setSelf(func(u *objects.Unit) { u.InCombat = true; u.Moving = true })
+	if d := r.tick(100 * time.Millisecond); d == nil || d.Action != "pet_attack" || d.Target != mobA {
+		t.Fatalf("%+v idle %q", d, r.idle())
+	}
+	pf.setPet(func(p *PetState) { p.Target = mobA })
+	for i := 0; i < 8; i++ {
+		r.tick(1500 * time.Millisecond)
+	}
+	if countOf(pf.orderList(), "follow") != 0 || countPrefix(pf.orderList(), "attack:") != 1 {
 		t.Fatalf("%v", pf.orderList())
 	}
 }

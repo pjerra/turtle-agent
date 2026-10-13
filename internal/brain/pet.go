@@ -21,8 +21,8 @@ import (
 //     tank (or the player, or the pet), or there is no tank to wait for. A mob that is not in combat is never ordered at, so the pet never
 //     pulls. An order is sent once per mob (the pet's own target shows it); a pet that was told to stay is left alone, since an explicit
 //     order beats automation.
-//   - Recall. `follow` when the fight is over and the pet still has a target, or when the leader is fleeing: moving in combat with the pet
-//     a long way from it, or with a mob on it below a quarter of its health.
+//   - Recall. `follow` when the fight is over and the pet still has a target, or when the leader is fleeing: moving in combat with the fight's
+//     mob a long way off. No attack order goes out while that holds, so the pet is not sent back in after the recall.
 //   - Defensive. In a group a pet on aggressive is put on defensive (an aggressive pet picks every fight in sight), once per pet. A pet on
 //     passive or on defensive is not touched, and a solo player's pet is left as it is.
 //   - Taunt. With a tank in the group the pet's taunt (Growl, Torment, Suffering) has its autocast switched off, once per pet and spell: a
@@ -122,7 +122,6 @@ const (
 	petOnce         = 20 * time.Minute // a one-shot setting (defensive, autocast off) is not made again for the same pet within this long
 	petSummonHold   = 12 * time.Second // a summon or a revive is not cast again while the pet is on its way
 	petLeash        = 40.0             // the leader is fleeing when it moves in combat with its pet's mob this far off
-	petFleeHealth   = 25               // or has a mob on it below this health, moving
 	petMendCombat   = 50               // Mend Pet below this pet health in combat
 	petMendRest     = 70               // and out of combat
 	petMendMaxRange = 20.0             // Mend Pet reaches 20 yd (spell 136...)
@@ -165,7 +164,7 @@ func petMob(c *Ctx) *objects.Unit {
 	}
 	f := ValFight.Get(c)
 	m := f.Mob
-	if m == nil || !m.InCombat || m.Dead || m.Distance < 0 {
+	if m == nil || !m.InCombat || m.Dead || m.Distance < 0 || leaderFleeing(c, p) {
 		return nil
 	}
 	if f.Tank != nil && f.Source == "tank" && m.Target != f.Tank.GUID && m.Target != c.Self.GUID && m.Target != p.GUID {
@@ -181,18 +180,22 @@ func petMobGUID(c *Ctx) packet.GUID {
 	return 0
 }
 
-// leaderFleeing says the leader is running from the fight: moving in combat while the pet's mob is a long way off, or with a mob on it
-// and little health.
+// leaderFleeing says the leader is running from the fight: moving in combat while the fight's mob (or the one the pet chases) is a long way
+// off. It does not look at the pet's own target, which a recall clears: petMob stays quiet for as long as this holds, so the pet is not sent
+// back in after it was called off. A hurt leader with a mob on it is not fleeing in this sense: the pet should stay on that mob.
 func leaderFleeing(c *Ctx, p *PetState) bool {
 	if !c.SelfOK || !c.Self.InCombat || !c.Self.Moving {
 		return false
 	}
-	if p.Target != 0 {
+	if m := ValFight.Get(c).Mob; m != nil && m.Distance > petLeash {
+		return true
+	}
+	if p != nil && p.Target != 0 {
 		if m, ok := c.Unit(p.Target); ok && m.Distance > petLeash {
 			return true
 		}
 	}
-	return healthPct(c) < petFleeHealth && ValMobOnMe.Get(c) != nil
+	return false
 }
 
 // petRecallWhy says why the pet should be called back: "fight_over", "leader_fleeing" or "".

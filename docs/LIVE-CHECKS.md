@@ -390,6 +390,7 @@ clock is disciplined, stepped back about a second every half minute). The client
    gained 1.8% x 360 s = 6.5 s on a 3.8% fast host.
 5. `turtle-agent map --capture` on that run's capture (also one made with `login --create`) reports frames, not 0.
 
+
 ## Bot brain: rogue, hunter and retribution paladin (issue #80 step 4b)
 
 Tested against a scripted fake game only. Not seen live. Run each class in a dungeon with a tank bot and a healer, `mmaps_dir` set, start the brain
@@ -471,6 +472,7 @@ shows as `Water Shield`. Run each preset in a dungeon with a tank bot (or by han
    Take the weapon off and start the brain: one `imbue` that fails (`item_gone` or the session's error), then a minute's silence.
 10. **Never**: Ghost Wolf, Prowl, Pounce, Hibernate, a heal in a form, a potion or a meal in a form. Grep `brain_decision` for those spells.
 
+
 ## Dungeon runs: required items and conjured water (run 3 follow-ups)
 
 1. **Keystone item.** Uldaman `from_leg keystone`, `gm:false`, no Staff of Prehistoria (7733) in the bags: `dungeon_run` fails at once with
@@ -506,7 +508,7 @@ hunter with a tamed pet and a warlock in a dungeon with a tank bot and a healer,
 6. **Attack timing.** With a tank bot pulling: no `pet_attack` decision during the 2 s opening delay or while the mob is on nobody; one `pet_attack` once the mob targets the tank; the pet never goes at a
    mob nobody has pulled (check on a patrol that the pet stands still while the tank walks up). The pet does not change target on every tick (no repeated `attack` order for the same mob).
 7. **Recall.** When the mob dies: one `pet_recall` (`follow`) within about 3 s if the pet still has a target; none when the pet is already following. Run away from the fight with the pet a long way
-   off: `pet_recall` with trigger `leader_fleeing`. A pet told to `stay` by hand is left alone.
+   off: `pet_recall` with trigger `leader_fleeing`, then no `pet_attack` while the run goes on (no attack/recall every 3 s), and one again when the leader stops. A hurt leader with a mob on it keeps the pet on that mob. A pet told to `stay` by hand is left alone.
 8. **Defensive and taunt.** In a group, an aggressive pet becomes `defensive` once, and a hand-set `aggressive` afterwards is not fought. With the tank bot in view the pet's Growl/Torment autocast goes
    off once per spell (check on the client's pet bar that Growl/Torment no longer glows); the tank keeps the mob. Solo: untouched. Does the pet take mobs from the tank anyway?
 9. **Hunter upkeep.** No pet out, out of combat: `pet_summon` (Call Pet) once; a hunter without a pet gets `spell_fail` `no_pet` once and then nothing for a minute. Dead pet: `pet_revive` out of
