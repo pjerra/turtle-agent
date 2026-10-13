@@ -254,6 +254,8 @@ type Session struct {
 	// spellState is the agent's spellbook, cooldowns and cast state (internal/spellstate); it
 	// locks itself, so RPC calls read it directly.
 	spellState *spellstate.State
+
+	pet petTracker // the player's pet: its action bar and what was announced of it (pet.go)
 }
 
 func New(conn *worldconn.Conn, opts Options) *Session {
@@ -322,6 +324,7 @@ func (s *Session) register() {
 	s.registerNPC()
 	s.registerSpells()
 	s.registerDeath()
+	s.registerPet()
 }
 
 func (s *Session) registerCore() {

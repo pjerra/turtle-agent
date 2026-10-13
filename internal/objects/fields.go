@@ -5,6 +5,7 @@ const (
 	FieldGUID        uint16 = 0x00 // OBJECT_FIELD_GUID, 2 words (:29)
 	FieldType        uint16 = 0x02 // (:30)
 	FieldEntry       uint16 = 0x03 // (:31)
+	UnitSummon       uint16 = 0x08 // UNIT_FIELD_SUMMON, 2 words (:73): the guid of the unit's pet (Unit::SetPet, Objects/Unit.cpp:5472-5477); a player's is public (Player::InitVisibleBits, Objects/Player.cpp:5107)
 	UnitCharmedBy    uint16 = 0x0A // UNIT_FIELD_CHARMEDBY, 2 words (:74)
 	UnitSummonedBy   uint16 = 0x0C // UNIT_FIELD_SUMMONEDBY, 2 words (:75)
 	UnitCreatedBy    uint16 = 0x0E // UNIT_FIELD_CREATEDBY, 2 words (:76); hunter pets and totems (Pet.cpp:308, Totem.cpp:162)
@@ -24,6 +25,13 @@ const (
 	UnitDynamicFlags uint16 = 0x8F // (:128; FIELD_UNIT_DYNAMIC_FLAGS = 143 at :346)
 	UnitChannelSpell uint16 = 0x90 // the spell being channelled (:129)
 	UnitNPCFlags     uint16 = 0x93 // (:132; FIELD_UNIT_NPC_FLAGS = 147 at :347)
+)
+
+// UnitPower5 and UnitMaxPower5 are POWER5 and MAXPOWER5 (UpdateFields.h:85, :91): a hunter pet's happiness, 0 to 1,000,000 (Objects/Pet.cpp:429-430, :929-936).
+// Other creatures leave them 0.
+const (
+	UnitPower5    uint16 = UnitPower1 + 4
+	UnitMaxPower5 uint16 = UnitMaxPower1 + 4
 )
 
 // Player fields (Objects/UpdateFields.h, EPlayerFields; UNIT_END = 0xBC). The owner alone gets them.

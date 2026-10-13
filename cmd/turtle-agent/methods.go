@@ -243,6 +243,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerNPCMethods(srv, cur)
 	registerSpellMethods(srv, cur)
 	registerDeathMethods(srv, cur)
+	registerPetMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow)

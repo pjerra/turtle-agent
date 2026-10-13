@@ -422,7 +422,7 @@ by hand (`brain_start {"strategies":["combat_rogue"],"tank":"<tank name>"}`, `ma
    The brain sends `CMSG_CANCEL_AUTO_REPEAT_SPELL` just before the Feign Death cast: check that no shot lands during the feint (Auto Shot is really off), that the mob drops the hunter, and that Auto Shot starts again after the 6 s. Without a tank: `hunter_swing`
    and `raptor_strike` (the swing starts; Raptor Strike is not sent twice within 1.5 s).
 6. **Ammo.** With the quiver empty: `spell_fail` `no_ammo` (or `need_ammo`) once, then the shots held 30 s (`brain_status.holds`).
-7. **Pets** are not driven; nothing to check. Note whether the pet fights on its own and whether it follows the hunter's walks.
+7. **Pets** are driven since step 4d: see "Bot brain: pets and the warlock" below.
 
 **Retribution paladin** (level 30+ with Seal of Command; level 20+ for Crusader Strike on Turtle)
 1. **Seals.** A `seal` (Command) as soon as the tank's mob is within 15 yd, also before the first attack; `judgement` on cooldown (10 s), the seal gone after it
@@ -481,3 +481,47 @@ shows as `Water Shield`. Run each preset in a dungeon with a tank bot (or by han
 2. **Conjure rank.** A level 45 mage that has learned every spell (`learn all_myspells`), no drink in the bags, at a rest gate below 65% mana:
    `brain_decision` `conjure_water` carries spell 10139 (rank 6, Conjured Sparkling Water, level 45), not 10140; the water it makes
    is drunk. Same for `conjure_food` with 10145 (Conjured Sweet Roll). At level 55 the casts are 10140 and 28612.
+
+## Bot brain: pets and the warlock (issue #80 step 4d)
+
+Tested against a scripted fake game and a scripted world server only (packet layouts checked against the core, tortoise-wow 5d79486). Not seen live. Run a
+hunter with a tamed pet and a warlock in a dungeon with a tank bot and a healer, `mmaps_dir` set; start the brain by hand (`marksman_hunter`,
+`affliction_warlock`, with `"tank":"<tank name>"`), poll `pet` and read `pet_*` events, `brain_decision` and `brain_idle`.
+
+**The pet state** (any pet, no brain needed)
+1. **Summon field.** After Call Pet / a summon, `pet` shows `present`, the right `guid`, `entry`, `name` and `level`, and one `pet_summoned` event. Does the
+   player's `UNIT_FIELD_SUMMON` arrive in the same update block as the pet's create block, or later? (`SMSG_PET_SPELLS` is sent when the pet joins the map, the field with the next
+   update; the agent keeps the bar by pet guid so either order works.) Note which came first.
+2. **Bar.** `pet.bar` true with `react` and `command` as the client shows them, and `spells[]` with Growl/Bite/Claw (hunter) or Torment/Firebolt (demon) on slots 3 to 6 and the right
+   `autocast`. Mount: `enabled` false after `SMSG_PET_MODE`, true again on dismount. Does `react`/`command` stay right after you change them with the client's own buttons (the core sends no
+   state packet for an order, so the agent only knows what it sent itself)? Note any drift.
+3. **Happiness and focus** of a hunter's pet: `happiness` falls with time and in combat, `happiness_state` 3/2/1 at 666000 and 333000, `power_type` 2.
+4. **Death.** A hunter's pet killed: `pet_died` once, `pet.dead` true, the pet stays in `pet` until Revive Pet; `pet_revived` after it. A demon killed: `pet_died`, then `pet_dismissed`
+   (`was_dead` true) about 15 s later.
+
+**Pet orders** (`pet_action`)
+5. `attack` at a mob the tank has: the pet runs and fights (`pet.target` shows the mob); at a friendly unit or none: `pet_error` `feedback` `cant_attack_target` / `nothing_to_attack`.
+   `follow` ends the attack, `stay` keeps it still, `passive` / `defensive` / `aggressive` change `react`. `cast` of Growl by `slot` / `name` at a mob: the pet growls; right after, `pet_error`
+   `reason` `not_ready` from the cooldown. `autocast_off` for Growl: the pet stops growling by itself; the client's bar shows the same.
+
+**The strategy** (hunter and warlock)
+6. **Attack timing.** With a tank bot pulling: no `pet_attack` decision during the 2 s opening delay or while the mob is on nobody; one `pet_attack` once the mob targets the tank; the pet never goes at a
+   mob nobody has pulled (check on a patrol that the pet stands still while the tank walks up). The pet does not change target on every tick (no repeated `attack` order for the same mob).
+7. **Recall.** When the mob dies: one `pet_recall` (`follow`) within about 3 s if the pet still has a target; none when the pet is already following. Run away from the fight with the pet a long way
+   off: `pet_recall` with trigger `leader_fleeing`, then no `pet_attack` while the run goes on (no attack/recall every 3 s), and one again when the leader stops. A hurt leader with a mob on it keeps the pet on that mob. A pet told to `stay` by hand is left alone.
+8. **Defensive and taunt.** In a group, an aggressive pet becomes `defensive` once, and a hand-set `aggressive` afterwards is not fought. With the tank bot in view the pet's Growl/Torment autocast goes
+   off once per spell (check on the client's pet bar that Growl/Torment no longer glows); the tank keeps the mob. Solo: untouched. Does the pet take mobs from the tank anyway?
+9. **Hunter upkeep.** No pet out, out of combat: `pet_summon` (Call Pet) once; a hunter without a pet gets `spell_fail` `no_pet` once and then nothing for a minute. Dead pet: `pet_revive` out of
+   combat only (does the 10 s cast get interrupted by a mob? note it). Hurt pet within 20 yd: `pet_mend` (below 70% out of combat, 50% in); no second Mend while the channel runs. **Feed Pet is not driven**: feed by hand when `happiness_state` is 1.
+
+**Warlock** (level 30+: Corruption, Curse of Agony, Drain Life, Life Tap, a demon known; a shard or two in the bags)
+10. **Rotation.** `corruption` then `curse` (Agony), then `shadow_bolt` as the filler; no cast while the warlock moves. A mob that already carries another warlock's curse gets none from the brain. With a mage and a priest
+    in the group and a mob above 60%, the curse is the Elements.
+11. **Position.** The warlock ends 18 to 26 yd from the mob with sight of it. Drain Life (20 yd) needs the near half: note how often `out_of_range` follows a `drain_life`.
+12. **Drains and tap.** Health under 45%: `drain_life` (the channel heals); a mob at 25% or less with fewer than 5 shards in the bags: `drain_soul`, and a shard appears if the mob dies during it. A grey mob must not get one.
+    Mana under 25% with 60%+ health in combat: `life_tap`; out of combat under 40% mana with 85%+ health: `life_tap` before the drink.
+13. **Emergencies.** A mob on the warlock below 40% health: `death_coil`; below 35% with no tank in view and no sleeping pack within 30 yd: `fear` (does the mob run into something?). **With the tank bot present: no `fear`, ever.**
+    A shadow cast aimed at the warlock: `shadow_ward` (note whether the ward goes up before the cast lands).
+14. **Upkeep and demon.** Out of combat: `demon_armor` once, `create_healthstone` when none is in the bags and two shards are (the stone shows in the bags; its aura name is `Demon Armor` or `Demon Skin`),
+    `pet_summon` with the Voidwalker when a shard is in the bags, the Imp otherwise (`pet_imp` always the Imp). Does the 10 s summon survive the mob that wanders up?
+15. **Aura names to read off the live units:** `Demon Armor` / `Demon Skin`, `Corruption`, `Curse of Agony`, `Curse of the Elements`, `Shadow Ward`, `Mend Pet`, `Drain Soul`. A different spelling breaks the matching rules.

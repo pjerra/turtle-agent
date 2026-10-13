@@ -212,3 +212,39 @@ func (g *sessionBrainGame) UseItem(ctx context.Context, entry uint32) error {
 }
 
 func (g *sessionBrainGame) Emit(e events.Event) { g.cur().Log().Append(e) }
+
+// Pet is the brain's view of the player's pet (brain.PetGame): the session's pet state, false without a pet.
+func (g *sessionBrainGame) Pet() (brain.PetState, bool) {
+	p := g.cur().Pet()
+	if !p.Present {
+		return brain.PetState{}, false
+	}
+	st := brain.PetState{GUID: p.GUID, Dead: p.Dead, Health: p.Health, MaxHealth: p.MaxHealth, Happiness: p.HappinessState,
+		React: p.React, Command: p.Command, BarKnown: p.Bar, Enabled: p.Enabled, Target: p.Target, InCombat: p.InCombat, Distance: p.Distance}
+	for _, sp := range p.Spells {
+		st.Spells = append(st.Spells, brain.PetSpell{ID: sp.SpellID, Name: sp.Name, Autocast: sp.Autocast, OnBar: sp.Slot >= 0})
+	}
+	return st, true
+}
+
+func (g *sessionBrainGame) PetAttack(ctx context.Context, target packet.GUID) error {
+	return g.cur().PetAction(ctx, session.PetOrder{Action: "attack", Target: target})
+}
+
+func (g *sessionBrainGame) PetFollow(ctx context.Context) error {
+	return g.cur().PetAction(ctx, session.PetOrder{Action: "follow"})
+}
+
+func (g *sessionBrainGame) PetReact(ctx context.Context, react string) error {
+	return g.cur().PetAction(ctx, session.PetOrder{Action: react})
+}
+
+func (g *sessionBrainGame) PetAutocast(ctx context.Context, spell uint32, on bool) error {
+	act := "autocast_off"
+	if on {
+		act = "autocast_on"
+	}
+	return g.cur().PetAction(ctx, session.PetOrder{Action: act, SpellID: spell})
+}
+
+var _ brain.PetGame = (*sessionBrainGame)(nil)

@@ -468,6 +468,7 @@ var holdFor = map[string]time.Duration{
 	"line_of_sight":        3 * time.Second,
 	"equipped_item":        30 * time.Second, // Shoot without a wand equipped
 	"equipped_item_class":  30 * time.Second,
+	"no_pet":               time.Minute,      // Call Pet of a hunter who has no pet to call (pet.go)
 	"no_ammo":              30 * time.Second, // a hunter's shots without ammo in the quiver (hunter.go)
 	"need_ammo":            30 * time.Second,
 	"not_ready":            500 * time.Millisecond,
