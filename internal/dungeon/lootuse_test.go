@@ -269,7 +269,7 @@ func TestUseItemStepSkippedWhenTheResultIsCarried(t *testing.T) {
 // A run that starts at a leg whose step needs the Staff, with neither the Staff nor a step that makes it, fails before it moves.
 func TestRequiredItemMadeByAnEarlierStep(t *testing.T) {
 	g, p := useFixture(t)
-	g.bag = []objects.Item{{Entry: 6948, Count: 1}}
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}, medallion()}
 	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
 	err := d.checkRequiredItems(0)
 	if err == nil || !strings.Contains(err.Error(), "The Shaft of Tsol (item 7741)") {
@@ -310,7 +310,7 @@ func TestBossLootItemMissing(t *testing.T) {
 	g, p := lootFixture(t, bossLootPlan)
 	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
 	err := d.Run(context.Background(), 0)
-	if err == nil || !strings.Contains(err.Error(), "The Shaft of Tsol (item 7741) is not in the leader's bags") || !strings.Contains(err.Error(), "a companion may have looted it first") {
+	if err == nil || !strings.Contains(err.Error(), "The Shaft of Tsol (item 7741) is not in the leader's bags") || !strings.Contains(err.Error(), "a companion may have looted it first") || !strings.Contains(err.Error(), "companions_loot") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -364,5 +364,129 @@ func TestAfterBossStepsRunAfterTheKill(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("events %s", g.kinds())
+	}
+}
+
+// Boss.CompanionsLoot false: the party's looting is off before the pull and on again once the leader has looted; a failed loot turns it on too.
+func TestBossCompanionsLootOffAroundTheFight(t *testing.T) {
+	plan := strings.Replace(bossLootPlan, `"position":{"x":90,"y":0,"z":0},`, `"position":{"x":90,"y":0,"z":0},"companions_loot":false,`, 1)
+	order := func(g *lootGame) (off, pull, on int) {
+		off, pull, on = -1, -1, -1
+		for i, c := range g.chats {
+			switch c {
+			case ".bot action loot off":
+				off = i
+			case ".bot action pullback":
+				if pull < 0 {
+					pull = i
+				}
+			case ".bot action loot on":
+				on = i
+			}
+		}
+		return
+	}
+	g, p := lootFixture(t, plan)
+	g.corpse = []objects.Item{shaft()}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	off, pull, on := order(g)
+	if off < 0 || pull < off || on < pull || len(g.corpses) != 1 || !strings.Contains(strings.Join(d.Report().Notes, "\n"), "corpse looting is off") {
+		t.Fatalf("off %d pull %d on %d chats %q", off, pull, on, g.chats)
+	}
+	// The Shaft does not come: the leg fails, and the looting is back on.
+	g, p = lootFixture(t, plan)
+	d = NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err == nil {
+		t.Fatal("no shaft, no success")
+	}
+	if off, _, on := order(g); off < 0 || on < off {
+		t.Fatalf("looting not back on: %q", g.chats)
+	}
+	// Left alone, a boss without the field orders nothing.
+	g, p = lootFixture(t, bossLootPlan)
+	g.corpse = []objects.Item{shaft()}
+	if err := NewDriver(p, g, Config{GM: GMNone}, g.clock()).Run(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if off, _, on := order(g); off >= 0 || on >= 0 {
+		t.Fatalf("%q", g.chats)
+	}
+}
+
+type corpseErrGame struct{ *lootGame }
+
+func (g corpseErrGame) LootCorpse(ctx context.Context, guid packet.GUID) (Looted, error) {
+	return Looted{}, errors.New("the server closed the loot at once: nothing to loot there, out of reach, or already looted")
+}
+
+// A refused or empty corpse names the companion race too, not only an item that is missing afterwards.
+func TestBossLootRefusedNamesTheCompanionRace(t *testing.T) {
+	g, p := lootFixture(t, bossLootPlan)
+	d := NewDriver(p, corpseErrGame{g}, Config{GM: GMNone}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "closed the loot at once") || !strings.Contains(err.Error(), "a companion may have looted it first") || !strings.Contains(err.Error(), "round-robin") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// Resumed with the Staff already carried, the Shaft's corpse is left alone (the Medallion's use made it); the companions' looting still goes back on.
+func TestBossLootPassesWhenTheProductIsCarried(t *testing.T) {
+	plan := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},
+  "boss":{"entry":7,"position":{"x":90,"y":0,"z":0},"loot_item":{"entry":7741,"name":"The Shaft of Tsol"},"companions_loot":false},
+  "after_boss":[{"use_item":{"entry":7740,"requires_item":{"entry":7741},"expect_item":{"entry":7733,"name":"Staff of Prehistoria"}}}]}]}`
+	g, p := lootFixture(t, plan)
+	g.bag = append(g.bag, objects.Item{Bag: 255, Slot: 24, Entry: 7733, Count: 1})
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if len(g.corpses) != 0 || len(g.items) != 0 || g.count(".bot action loot on") != 1 || !strings.Contains(strings.Join(d.Report().Notes, "\n"), "Staff of Prehistoria (item 7733), which") {
+		t.Fatalf("corpses %v items %v notes %v", g.corpses, g.items, d.Report().Notes)
+	}
+}
+
+// The start-of-run check asks for the item a use_item step uses, unless it is carried or an earlier step makes it; the message says it is the item the step uses.
+func TestStartCheckWantsTheUsedItem(t *testing.T) {
+	g, p := useFixture(t)
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}, shaft()}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	err := d.checkRequiredItems(0)
+	if err == nil || !strings.Contains(err.Error(), "Gni'kiv Medallion (item 7740)") || !strings.Contains(err.Error(), "the item this step uses") || strings.Contains(err.Error(), "which using") {
+		t.Fatalf("%v", err)
+	}
+	g.bag = append(g.bag, medallion())
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatal(err)
+	}
+	// Run, not only checked: it fails before anything moves.
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}, shaft()}
+	if err := NewDriver(p, g, Config{GM: GMNone}, g.clock()).Run(context.Background(), 0); err == nil || len(g.walks) != 0 {
+		t.Fatalf("%v walks %v", err, g.walks)
+	}
+	// An earlier step that makes the Medallion (a chest) satisfies it.
+	p.Legs[0].Steps = append([]Step{{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: 123329}, ExpectItem: &ItemRef{Entry: 7740}}}}, p.Legs[0].Steps...)
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatal(err)
+	}
+	// A run that uses the Medallion with the Staff carried is fine without it.
+	p.Legs[0].Steps = p.Legs[0].Steps[1:]
+	g.bag = []objects.Item{{Entry: 7733, Count: 1}}
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatalf("the Staff is carried: %v", err)
+	}
+}
+
+// When the used item is the one missing at the step itself, the step names it as the item it uses.
+func TestUseItemStepNamesTheMissingUsedItem(t *testing.T) {
+	g, p := useFixture(t)
+	g.bag = append(g.bag, shaft())
+	d := NewDriver(p, g, Config{GM: GMAssumed}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "does not carry Gni'kiv Medallion (item 7740)") || !strings.Contains(err.Error(), "the item this step uses") {
+		t.Fatalf("%v", err)
 	}
 }

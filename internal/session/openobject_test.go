@@ -147,3 +147,92 @@ func TestTeamOfRace(t *testing.T) {
 		}
 	}
 }
+
+func castFailCode(t *testing.T, name string) int {
+	t.Helper()
+	for c := 0; c < 256; c++ {
+		if game.CastFailName(uint8(c)) == name {
+			return c
+		}
+	}
+	t.Fatalf("no cast failure named %s", name)
+	return 0
+}
+
+func bookWith(t *testing.T, spellIDs ...uint32) *harness {
+	t.Helper()
+	h := start(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGInitialSpells, gametest.InitialSpells(spellIDs, nil))
+	waitFor(t, func() bool { return h.s.spellState.Loaded() })
+	chestNearby(h, 3)
+	return h
+}
+
+// With the spell book in, only the Opening spells the character knows are cast: no 6477 when the book lacks it.
+func TestOpenObjectCastsAKnownOpeningSpell(t *testing.T) {
+	h := bookWith(t, 6603, 3365)
+	done := make(chan error, 1)
+	go func() { _, err := h.s.OpenObject(context.Background(), chestGUID, 0, 2*time.Second); done <- err }()
+	if p := h.expect(opcode.CMSGCastSpell); string(p.Body) != string(game.BuildCastSpellOnObject(3365, chestGUID)) {
+		t.Fatalf("cast % X", p.Body)
+	}
+	h.send(opcode.SMSGLootResponse, gametest.LootResponse(chestGUID, game.LootPickpocket, 0, gametest.LootSlot{Slot: 0, Item: 7740, Count: 1}))
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A spell that is not in the book is refused here, at once, instead of being dropped by the core after the whole wait; so is a book with
+// no Opening spell at all.
+func TestOpenObjectChecksTheSpellBook(t *testing.T) {
+	h := bookWith(t, 6603)
+	if _, err := h.s.OpenObject(context.Background(), chestGUID, 0, time.Second); err == nil || !strings.Contains(err.Error(), "knows none of the Opening spells") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := h.s.OpenObject(context.Background(), chestGUID, 6477, time.Second); err == nil || !strings.Contains(err.Error(), "spell 6477 is not in the spell book") {
+		t.Fatalf("%v", err)
+	}
+	h.noPacket(opcode.CMSGCastSpell)
+}
+
+// A lock the first spell cannot open (bad targets) is tried with the next Opening spell the character knows; when all are refused the error
+// names each and the reason by name.
+func TestOpenObjectTriesTheOtherOpeningSpells(t *testing.T) {
+	bad := castFailCode(t, "bad_targets")
+	h := bookWith(t, 6477, 3365, 6247)
+	done := make(chan error, 1)
+	go func() { _, err := h.s.OpenObject(context.Background(), chestGUID, 0, 2*time.Second); done <- err }()
+	for _, sp := range []uint32{6477, 3365} {
+		if p := h.expect(opcode.CMSGCastSpell); string(p.Body) != string(game.BuildCastSpellOnObject(sp, chestGUID)) {
+			t.Fatalf("cast % X, want spell %d", p.Body, sp)
+		}
+		h.send(opcode.SMSGCastResult, gametest.CastResult(sp, bad))
+	}
+	if p := h.expect(opcode.CMSGCastSpell); string(p.Body) != string(game.BuildCastSpellOnObject(6247, chestGUID)) {
+		t.Fatalf("cast % X", p.Body)
+	}
+	h.send(opcode.SMSGLootResponse, gametest.LootResponse(chestGUID, game.LootPickpocket, 0, gametest.LootSlot{Slot: 0, Item: 7740, Count: 1}))
+	if err := <-done; err != nil {
+		t.Fatalf("the third spell opens it: %v", err)
+	}
+
+	// All refused.
+	go func() { _, err := h.s.OpenObject(context.Background(), chestGUID, 0, 2*time.Second); done <- err }()
+	for _, sp := range []uint32{6477, 3365, 6247} {
+		h.expect(opcode.CMSGCastSpell)
+		h.send(opcode.SMSGCastResult, gametest.CastResult(sp, bad))
+	}
+	err := <-done
+	if err == nil || !strings.Contains(err.Error(), "bad_targets") || !strings.Contains(err.Error(), "spell 6477: bad_targets") || !strings.Contains(err.Error(), "SpellCastResult") {
+		t.Fatalf("%v", err)
+	}
+	// Another refusal (out of range) is not retried with another spell.
+	go func() { _, err := h.s.OpenObject(context.Background(), chestGUID, 0, 2*time.Second); done <- err }()
+	h.expect(opcode.CMSGCastSpell)
+	h.send(opcode.SMSGCastResult, gametest.CastResult(6477, castFailCode(t, "out_of_range")))
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "out_of_range") {
+		t.Fatalf("%v", err)
+	}
+	h.noPacket(opcode.CMSGCastSpell)
+}

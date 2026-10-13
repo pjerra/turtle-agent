@@ -170,7 +170,7 @@ func TestParseLootUseAndTeam(t *testing.T) {
   "steps":[
    {"loot_object":{"entry":123329,"near":{"x":3,"y":0,"z":0},"stand":{"x":4,"y":0,"z":0},"expect_item":{"entry":7740,"name":"Gni'kiv Medallion"}}},
    {"use_item":{"entry":7740,"name":"Gni'kiv Medallion","requires_item":{"entry":7741},"expect_item":{"entry":7733}}}],
-  "boss":{"entry":6906,"position":{"x":5,"y":0,"z":0},"first":[6907],"team":"horde","loot_item":{"entry":7741,"name":"The Shaft of Tsol"}}}]}`
+  "boss":{"entry":6906,"position":{"x":5,"y":0,"z":0},"first":[6907],"team":"horde","loot_item":{"entry":7741,"name":"The Shaft of Tsol"},"companions_loot":false}}]}`
 	p, err := Parse("t.json", []byte(src))
 	if err != nil {
 		t.Fatal(err)
@@ -182,11 +182,14 @@ func TestParseLootUseAndTeam(t *testing.T) {
 		ui.Entry != 7740 || ui.Name != "Gni'kiv Medallion" || ui.RequiresItem.Entry != 7741 || ui.ExpectItem.Entry != 7733 {
 		t.Fatalf("%+v %+v %+v", l.Boss, lo, ui)
 	}
+	if cl := l.Boss.CompanionsLoot; cl == nil || *cl {
+		t.Fatalf("%v", cl)
+	}
 	b, err := Marshal(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"expect_item": {"entry": 7740, "name": "Gni'kiv Medallion"}`, `"requires_item": {"entry": 7741}`, `"expect_item": {"entry": 7733}`,
+	for _, want := range []string{`"companions_loot": false`, `"expect_item": {"entry": 7740, "name": "Gni'kiv Medallion"}`, `"requires_item": {"entry": 7741}`, `"expect_item": {"entry": 7733}`,
 		`"loot_item": {"entry": 7741, "name": "The Shaft of Tsol"}`, `"team": "horde"`} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("Marshal lacks %s:\n%s", want, b)

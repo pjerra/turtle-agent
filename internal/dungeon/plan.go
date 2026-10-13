@@ -96,6 +96,10 @@ type Boss struct {
 	// LootItem is the item the leader takes from the boss's corpse after the kill: the driver walks to the corpse, loots it and fails
 	// the leg when the item is not in the bags then. Without it the corpse is left to the companions.
 	LootItem *ItemRef `json:"loot_item,omitempty"`
+	// CompanionsLoot false has the driver order the party's corpse looting off (".bot action loot off") before the boss is pulled and on again after
+	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
+	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
+	CompanionsLoot *bool `json:"companions_loot,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -229,6 +233,8 @@ type rawBoss struct {
 	First    []uint32  `json:"first"`
 	Team     string    `json:"team"`
 	LootItem *rawItem  `json:"loot_item"`
+	// CompanionsLoot is Boss.CompanionsLoot.
+	CompanionsLoot *bool `json:"companions_loot"`
 }
 
 type rawStep struct {
@@ -439,7 +445,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {

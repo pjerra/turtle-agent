@@ -142,6 +142,14 @@ func (d *Driver) itemState(entry uint32) (has, known, empty bool) {
 // driver cannot see: a GM account that probed as a GM but plays with ".gm off" gets the silent failure like a player.
 func (d *Driver) itemsExempt() bool { return d.cfg.GM == GMAssumed }
 
+// missingForUse is the error for an item a use_item step lacks: the item it uses, or the one its use consumes.
+func missingForUse(it *ItemRef, where string, use ItemRef) error {
+	if it.Entry == use.Entry {
+		return fmt.Errorf("the leader does not carry %s%s, the item this step uses", it, where)
+	}
+	return fmt.Errorf("the leader does not carry %s%s, which using %s needs", it, where, use)
+}
+
 func (d *Driver) missingItem(it *ItemRef, where string) error {
 	return fmt.Errorf("the leader does not carry %s%s, which opening the object needs (the core ignores the use of a locked object by anyone but a GM in GM mode): put it in the bags first", it, where)
 }
@@ -219,11 +227,15 @@ func (d *Driver) checkRequiredItems(fromLeg int) error {
 						continue
 					}
 				}
-				if it := st.UseItem.RequiresItem; it != nil && !made[it.Entry] {
-					use := st.UseItem
-					need := func(it *ItemRef, where string) error {
-						return fmt.Errorf("the leader does not carry %s%s, which using %s needs", it, where, ItemRef{Entry: use.Entry, Name: use.Name})
+				use := ItemRef{Entry: st.UseItem.Entry, Name: st.UseItem.Name}
+				need := func(it *ItemRef, where string) error { return missingForUse(it, where, use) }
+				// The item the step uses must be in the bags or made by a step before it (a run from the revelosh leg needs the Medallion).
+				if !made[use.Entry] {
+					if err := d.needsItemMsg(&use, where, false, need); err != nil {
+						return err
 					}
+				}
+				if it := st.UseItem.RequiresItem; it != nil && !made[it.Entry] {
 					if err := d.needsItemMsg(it, where, false, need); err != nil {
 						return err
 					}

@@ -63,6 +63,9 @@ func TestUldamanPlanLoads(t *testing.T) {
 	}
 	// Revelosh drops the Shaft of Tsol; the Medallion and the Shaft make the Staff, which the Keystone needs.
 	rv := p.Legs[1]
+	if rv.Boss.CompanionsLoot == nil || *rv.Boss.CompanionsLoot {
+		t.Fatalf("the companions must not loot Revelosh: %+v", rv.Boss)
+	}
 	if rv.Boss.LootItem == nil || rv.Boss.LootItem.Entry != 7741 || len(rv.AfterBoss) != 1 || rv.Boss.Team != "" {
 		t.Fatalf("%+v", rv)
 	}
@@ -360,6 +363,11 @@ func TestUldamanRequiredItemsChain(t *testing.T) {
 	if err := d.checkRequiredItems(0); err != nil {
 		t.Fatalf("from the start the run makes the Staff: %v", err)
 	}
+	// From revelosh on the Medallion is nobody's product: a run without it (or the Staff) fails at the start.
+	if err := d.checkRequiredItems(1); err == nil || !strings.Contains(err.Error(), "Gni'kiv Medallion") {
+		t.Fatalf("from revelosh the Medallion must be carried: %v", err)
+	}
+	g.bag = append(g.bag, objects.Item{Entry: 7740, Count: 1})
 	if err := d.checkRequiredItems(1); err != nil {
 		t.Fatalf("from revelosh the Shaft comes from the boss and the Staff from the use_item: %v", err)
 	}

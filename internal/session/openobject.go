@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/game"
@@ -20,21 +21,91 @@ import (
 // spell book (SpellHandler.cpp:340-347).
 const OpeningSpell uint32 = 6477
 
+// OpeningSpells are the spells a player may cast to open a lock, in the order they are tried: 6477 first, then the other "Opening" spells of
+// every race's spell list (playercreateinfo_spell: 3365, 6247, 6478 and 22810 "Opening - No Text"). They share the effect (33,
+// SPELL_EFFECT_OPEN_LOCK) and may differ in the lock type they name (EffectMiscValue), which CanOpenLock compares with the lock's
+// (SpellEffects.cpp:1974, Spell.cpp:8049-8075): a spell for the wrong type is refused with SPELL_FAILED_BAD_TARGETS (:8081).
+var OpeningSpells = []uint32{OpeningSpell, 3365, 6247, 6478, 22810}
+
+// CastFailedError is a cast of the player that the server refused or broke: the name and number of the SpellCastResult.
+type CastFailedError struct {
+	Reason string // "bad_targets, SpellCastResult 11"
+	Code   uint8
+}
+
+func (e *CastFailedError) Error() string { return "the cast failed (" + e.Reason + ")" }
+
+// retryable is a refusal that another Opening spell may not share: the lock names a type this spell does not open (bad targets), or a skill
+// it asks for (low cast level) that another lock type of the spell list may not.
+func (e *CastFailedError) retryable() bool {
+	n := game.CastFailName(e.Code)
+	return n == "bad_targets" || n == "low_castlevel"
+}
+
 // OpenObject opens a chest or a node the way the client does: it casts an Opening spell at it (CMSG_CAST_SPELL with
 // TARGET_FLAG_OBJECT, game.BuildCastSpellOnObject) and waits up to wait for the server's loot window (SMSG_LOOT_RESPONSE).
 // CMSG_GAMEOBJ_USE on a chest only runs its scripts and sends no loot, and CMSG_LOOT on a game object guid is refused
 // (GameObject.cpp:1493-1514, LootHandler.cpp:414-450): the loot of an object comes from the spell, whose OPEN_LOCK effect checks the lock
 // and sends the window (SpellEffects.cpp:1915-1988, 1860-1912). The cast needs the player within the object's interact distance, in
-// line of sight and standing still (Spell.cpp:5920-5935); it takes the spell's cast time, so wait covers that. spell 0 is OpeningSpell.
-// A failed cast (a lock the player cannot open, out of range) is the error; one the server drops without a word (the object is not
-// spawned) runs out the wait.
+// line of sight and standing still (Spell.cpp:5920-5935); it takes the spell's cast time, so wait covers that (it is the wait for each try).
+//
+// spell 0 tries OpeningSpells: those in the spell book (the core drops a cast of a spell the player does not have without a word,
+// SpellHandler.cpp:343-348, which would run out the wait), the next one after a refusal that another spell may not share (a lock of another
+// type: bad targets; too little skill). A spell given is the only one tried and must be in the book. When the spell book has not arrived
+// yet, 6477 is cast unchecked. A failed cast is the error, with the SpellCastResult name; one the server drops without a word (the object is
+// not spawned) runs out the wait.
 func (s *Session) OpenObject(ctx context.Context, g packet.GUID, spell uint32, wait time.Duration) (*LootWindow, error) {
 	if g == 0 {
 		return nil, errors.New("open_object needs a guid")
 	}
-	if spell == 0 {
-		spell = OpeningSpell
+	var cands []uint32
+	if _, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		loaded := s.spellState.Loaded()
+		switch {
+		case spell != 0:
+			if loaded && !s.spellState.Known(spell) {
+				return nil, fmt.Errorf("spell %d is not in the spell book: the core drops a cast of it without an answer", spell)
+			}
+			cands = []uint32{spell}
+		case !loaded:
+			cands = []uint32{OpeningSpell}
+		default:
+			for _, id := range OpeningSpells {
+				if s.spellState.Known(id) {
+					cands = append(cands, id)
+				}
+			}
+			if len(cands) == 0 {
+				return nil, fmt.Errorf("the character knows none of the Opening spells %v: the core drops a cast of a spell the player does not have", OpeningSpells)
+			}
+		}
+		return nil, nil
+	}); err != nil {
+		return nil, err
 	}
+	var tried []string
+	for _, sp := range cands {
+		w, err := s.openWith(ctx, g, sp, wait)
+		if err == nil {
+			return w, nil
+		}
+		var cf *CastFailedError
+		if !errors.As(err, &cf) || !cf.retryable() || sp == cands[len(cands)-1] {
+			if len(tried) > 0 {
+				err = fmt.Errorf("%w (earlier: %s)", err, strings.Join(tried, "; "))
+			}
+			return nil, err
+		}
+		tried = append(tried, fmt.Sprintf("spell %d: %s", sp, cf.Reason))
+	}
+	return nil, errors.New("no Opening spell to try")
+}
+
+// openWith casts one spell at the chest and waits for the window.
+func (s *Session) openWith(ctx context.Context, g packet.GUID, spell uint32, wait time.Duration) (*LootWindow, error) {
 	var failed uint64
 	_, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {

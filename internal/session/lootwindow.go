@@ -143,10 +143,11 @@ func (s *Session) awaitLootAnswer(ctx context.Context, wait time.Duration, castF
 	var a lootAnswer
 	var win *LootWindow
 	var failReason string
+	var failCode uint8
 	if err := s.awaitLoot(ctx, wait, func() bool {
 		if s.loot.pending {
 			if castFailed != nil && s.mount.failed > *castFailed {
-				failReason = s.mount.fail
+				failReason, failCode = s.mount.fail, s.mount.failCode
 				return true
 			}
 			return false
@@ -159,7 +160,7 @@ func (s *Session) awaitLootAnswer(ctx context.Context, wait time.Duration, castF
 	}
 	if failReason != "" {
 		s.do(context.WithoutCancel(ctx), func() (any, error) { s.loot.pending = false; return nil, nil })
-		return nil, fmt.Errorf("the cast failed (%s)", failReason)
+		return nil, &CastFailedError{Reason: failReason, Code: failCode}
 	}
 	switch {
 	case a.refused:

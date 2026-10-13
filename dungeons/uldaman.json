@@ -128,7 +128,8 @@
       "boss": {
         "entry": 6910,
         "position": {"x": -225.6, "y": 161.2, "z": -44.5},
-        "loot_item": {"entry": 7741, "name": "The Shaft of Tsol"}
+        "loot_item": {"entry": 7741, "name": "The Shaft of Tsol"},
+        "companions_loot": false
       },
       "after_boss": [
         {
@@ -141,7 +142,7 @@
         }
       ],
       "notes": [
-        "Revelosh (6910, faction 59, hostile to both teams) drops The Shaft of Tsol (item 7741, 100%). The leader loots the corpse itself (boss.loot_item): the companions loot their kills too and may take the Shaft first, in which case the leg fails and says so. With the Shaft and the Gni'kiv Medallion from Baelog's Chest in the bags, the after_boss step uses the Medallion: its spell 9594 'Attach Medallion to Shaft' (2 s cast, reagent 7741) makes the Staff of Prehistoria (7733) that the Keystone's lock needs. A leader that carries the Staff already (a GM set it up) passes both."
+        "Revelosh (6910, faction 59, hostile to both teams) drops The Shaft of Tsol (item 7741, 100%). The leader loots the corpse itself (boss.loot_item). The companions loot their kills too, and under round-robin or group loot the Shaft goes to whoever takes it first, so the boss has companions_loot false: the driver orders '.bot action loot off' before the pull and 'on' after the leader's loot. With the Shaft and the Gni'kiv Medallion from Baelog's Chest in the bags, the after_boss step uses the Medallion: its spell 9594 'Attach Medallion to Shaft' (2 s cast, reagent 7741) makes the Staff of Prehistoria (7733) that the Keystone's lock needs. A leader that carries the Staff already (a GM set it up) passes both."
       ]
     },
     {

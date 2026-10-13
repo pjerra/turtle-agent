@@ -566,8 +566,8 @@ Opening spell at it (`SpellEffects.cpp:1915-1988`), which sends the loot window 
    in the bags, both parts gone. With only the Medallion: `spell_fail` (reagents).
 3. **The run, Alliance leader** (a human or dwarf with a tank, a healer and two damage dealers, `gm` omitted or false, no `.additem`): `dungeon_run {"name":"uldaman"}` from the
    entrance. Pass: the baelog leg pulls its packs, the report notes "boss 6906 is for team horde, the leader is alliance: skipped", Baelog's Chest is looted
-   (`took 1 x item 7740` in the notes); the revelosh leg kills Revelosh, the leader loots his corpse (item 7741; if a companion took it first the leg fails with that hint: then
-   note who looted it and report it to TortoiseBots), the Medallion is used (7733 in the bags); the keystone leg opens the Keystone (no "does not carry" failure at the start);
+   (`took 1 x item 7740` in the notes); the revelosh leg kills Revelosh, the leader loots his corpse (item 7741; the boss has `companions_loot` false, so `.bot action loot off` goes out before the pull and `on` after: check the bots loot nothing from Revelosh meanwhile and
+   that `.bot action loot` is accepted from party chat; if the Shaft is gone anyway the leg fails with the companion hint: note who looted it and report it to TortoiseBots), the Medallion is used (7733 in the bags); the keystone leg opens the Keystone (no "does not carry" failure at the start);
    the Seal of Khaz'Mul is active within 60 s; Ironaya dies. `gm_shortcuts` is empty.
 4. **The run, Horde leader** (an orc or troll): the baelog leg kills Eric and Olaf and then Baelog (hostile to the Horde, faction 122), then loots the chest. Pass criterion of the old
    run, "Baelog+Eric+Olaf dead", holds for the Horde only; the Alliance's is "loots Baelog's Chest". Check that the chest is not opened before the three are dead (it is an `after_boss` step).

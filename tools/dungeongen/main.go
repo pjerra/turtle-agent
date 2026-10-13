@@ -81,6 +81,7 @@ func main() {
 	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
 	check := flag.String("check", "", "plan file to lint against -dir's creatures.tsv: warn for a boss or pack member with npc_flags or a faction friendly to -team (no generation)")
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
+	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
 	flag.Parse()
@@ -88,7 +89,7 @@ func main() {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *strict))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -169,8 +170,8 @@ func parseFactions(s string) (map[int]bool, error) {
 }
 
 // checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
-// an export that cannot be read, 0 otherwise (warnings are for a person to read).
-func checkFile(path, dir, team, friendly string) int {
+// an export that cannot be read, 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
+func checkFile(path, dir, team, friendly string, strict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -198,6 +199,9 @@ func checkFile(path, dir, team, friendly string) int {
 		fmt.Println("warning:", w)
 	}
 	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
+	if strict && len(ws) > 0 {
+		return 1
+	}
 	return 0
 }
 

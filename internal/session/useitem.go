@@ -18,15 +18,16 @@ import (
 
 // mountState follows the player's own mount. Owner loop only.
 type mountState struct {
-	aura    uint32   // the aura that appeared with the mount display, when exactly one did; dismount cancels it
-	cands   []uint32 // the auras that appeared with it when there were several: dismount needs a spell_id
-	fail    string   // why the newest cast of the player failed
-	failed  uint64   // counts failed casts of the player
-	result  *uint32  // the newest SMSG_MOUNTRESULT, nil until one arrives
-	seq     uint64   // counts SMSG_MOUNTRESULT and SMSG_DISMOUNTRESULT
-	learns  uint64   // counts SMSG_LEARNED_SPELL: a bridle teaches its mount spell and is used up
-	learned uint32   // the newest spell SMSG_LEARNED_SPELL named
-	wakes   notifier
+	aura     uint32   // the aura that appeared with the mount display, when exactly one did; dismount cancels it
+	cands    []uint32 // the auras that appeared with it when there were several: dismount needs a spell_id
+	fail     string   // why the newest cast of the player failed
+	failCode uint8    // its SpellCastResult code (CastFailedInterrupted for an interrupt)
+	failed   uint64   // counts failed casts of the player
+	result   *uint32  // the newest SMSG_MOUNTRESULT, nil until one arrives
+	seq      uint64   // counts SMSG_MOUNTRESULT and SMSG_DISMOUNTRESULT
+	learns   uint64   // counts SMSG_LEARNED_SPELL: a bridle teaches its mount spell and is used up
+	learned  uint32   // the newest spell SMSG_LEARNED_SPELL named
+	wakes    notifier
 }
 
 func (s *Session) registerUseItem() {
@@ -302,8 +303,8 @@ func (s *Session) mountInfo(ctx context.Context, info MountInfo, waitErr error, 
 }
 
 // noteCastFailed records a failed cast of the player and wakes a mount that waits on it.
-func (s *Session) noteCastFailed(reason string) {
-	s.mount.fail = reason
+func (s *Session) noteCastFailed(reason string, code uint8) {
+	s.mount.fail, s.mount.failCode = reason, code
 	s.mount.failed++
 	s.mount.wakes.wake()
 	s.loot.wakes.wake() // an Opening cast at a chest waits on the loot window and on this

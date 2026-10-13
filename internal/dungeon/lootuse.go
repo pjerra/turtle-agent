@@ -180,9 +180,7 @@ func (d *Driver) doUseItem(ctx context.Context, a Action) error {
 		d.rep.note(fmt.Sprintf("%s: the leader carries %s already; the item is not used", a.Label, a.Expect))
 		return nil
 	}
-	need := func(it *ItemRef, where string) error {
-		return fmt.Errorf("the leader does not carry %s%s, which using %s needs", it, where, a.Item)
-	}
+	need := func(it *ItemRef, where string) error { return missingForUse(it, where, *a.Item) }
 	if err := d.checkItem(ctx, a.Item, false, need); err != nil {
 		return err
 	}
@@ -207,13 +205,50 @@ func (d *Driver) doUseItem(ctx context.Context, a Action) error {
 	return d.awaitItem(ctx, a.Expect, fmt.Sprintf("used %s", a.Item))
 }
 
-// doKillAndLoot is the boss action: the kill, then the loot of the boss's corpse when the plan names an item to take from it.
+// doKillAndLoot is the boss action: the kill, then the loot of the boss's corpse when the plan names an item to take from it. With
+// Boss.CompanionsLoot false the party's corpse looting is off from before the pull until the leader has looted (also when the fight or the
+// loot fails), so that a companion cannot take the drop the plan needs.
 func (d *Driver) doKillAndLoot(ctx context.Context, a Action) error {
+	b := a.Boss
+	if b.CompanionsLoot != nil && !*b.CompanionsLoot {
+		if err := d.order(ctx, "loot off"); err != nil {
+			return err
+		}
+		d.rep.note(fmt.Sprintf("%s: the companions' corpse looting is off for the fight and the leader's loot", a.Label))
+		defer func() {
+			if err := d.g.Chat(context.WithoutCancel(ctx), "party", ".bot action loot on"); err != nil {
+				d.rep.note(fmt.Sprintf("%s: could not order the companions' looting back on: %v", a.Label, err))
+			}
+		}()
+	}
 	if err := d.doKill(ctx, a); err != nil {
 		return err
 	}
-	if b := a.Boss; b.LootItem != nil {
+	if b.LootItem != nil {
 		return d.lootBoss(ctx, a)
+	}
+	return nil
+}
+
+// lootRaceHint is what a refused or empty loot of the boss's corpse may mean: a companion took the drop first. Under round-robin and group loot
+// the corpse is open to the player whose turn it is, or to whoever the item was rolled to (Player.cpp:17280-17293), and the server closes the
+// window of the others.
+const lootRaceHint = "a companion may have looted it first (round-robin or group loot lets one player take it; set the boss's companions_loot to false)"
+
+// downstream is the item a later use_item step makes out of item, when the plan has one: the Shaft of Tsol becomes the Staff of
+// Prehistoria through the Medallion's use. A run resumed with the product in the bags has no use for the corpse.
+func (d *Driver) downstream(leg int, item uint32) *ItemRef {
+	for li := leg; li < len(d.plan.Legs); li++ {
+		l := d.plan.Legs[li]
+		steps := append(append([]Step{}, l.Steps...), l.AfterBoss...)
+		if li == leg {
+			steps = l.AfterBoss
+		}
+		for _, st := range steps {
+			if u := st.UseItem; u != nil && u.RequiresItem != nil && u.RequiresItem.Entry == item && u.ExpectItem != nil {
+				return u.ExpectItem
+			}
+		}
 	}
 	return nil
 }
@@ -228,6 +263,10 @@ func (d *Driver) lootBoss(ctx context.Context, a Action) error {
 	}
 	if d.carries(b.LootItem) {
 		d.rep.note(fmt.Sprintf("%s: the leader carries %s already; the corpse is left alone", a.Label, b.LootItem))
+		return nil
+	}
+	if p := d.downstream(a.Leg, b.LootItem.Entry); p != nil && d.carries(p) {
+		d.rep.note(fmt.Sprintf("%s: the leader carries %s, which %s is only for; the corpse is left alone", a.Label, p, b.LootItem))
 		return nil
 	}
 	var corpse packet.GUID
@@ -269,11 +308,11 @@ func (d *Driver) lootBoss(ctx context.Context, a Action) error {
 		if errors.Is(lerr, context.Canceled) || errors.Is(lerr, context.DeadlineExceeded) {
 			return lerr
 		}
-		return fmt.Errorf("%s: loot the corpse of boss %d: %w", a.Label, b.Entry, lerr)
+		return fmt.Errorf("%s: loot the corpse of boss %d: %w; %s", a.Label, b.Entry, lerr, lootRaceHint)
 	}
 	d.rep.note(fmt.Sprintf("%s: took %s from the corpse of boss %d", a.Label, describeLooted(got), b.Entry))
 	if err := d.awaitItem(ctx, b.LootItem, fmt.Sprintf("looted the corpse of boss %d (%s)", b.Entry, describeLooted(got))); err != nil {
-		return fmt.Errorf("%w; a companion may have looted it first", err)
+		return fmt.Errorf("%w; %s", err, lootRaceHint)
 	}
 	return nil
 }

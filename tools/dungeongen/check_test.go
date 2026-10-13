@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,5 +109,26 @@ func TestGenerateWarnsAboutBossNPCs(t *testing.T) {
 		if strings.Contains(x, "WARNING") {
 			t.Fatalf("Revelosh is a mob: %q", p.Legs[1].Notes)
 		}
+	}
+}
+
+// -strict turns warnings into exit status 1; a clean plan stays 0, and without it warnings do not fail.
+func TestCheckFileStrict(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(plan, []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"boss":{"entry":6906,"position":{"x":1,"y":0,"z":0}}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join("testdata", "uldaman")
+	if got := checkFile(plan, data, "alliance", "122", false); got != 0 {
+		t.Fatalf("warnings without -strict: %d", got)
+	}
+	if got := checkFile(plan, data, "alliance", "122", true); got != 1 {
+		t.Fatalf("warnings with -strict: %d", got)
+	}
+	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
+	if got := checkFile(clean, data, "alliance", "122", true); got != 0 {
+		t.Fatalf("the committed plan: %d", got)
 	}
 }
