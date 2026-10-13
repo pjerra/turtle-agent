@@ -172,6 +172,48 @@ extern "C" int nd_floors(void* h, const float* p, float lo, float hi, float* z, 
     return count;
 }
 
+extern "C" int nd_polys(void* h, const float* box, float* out, int max) {
+    Nav* n = (Nav*)h;
+    if (!n || !n->mesh)
+        return -1;
+    long total = 0;
+    const dtNavMesh* mesh = n->mesh;
+    for (int ti = 0; ti < mesh->getMaxTiles(); ++ti) {
+        const dtMeshTile* t = mesh->getTile(ti);
+        if (!t || !t->header)
+            continue;
+        // Detour's bounds are (y, z, x): the tile's WoW box is x from bmin[2] to bmax[2], y from bmin[0] to bmax[0].
+        if (t->header->bmax[2] < box[0] || t->header->bmin[2] > box[2] || t->header->bmax[0] < box[1] ||
+            t->header->bmin[0] > box[3])
+            continue;
+        for (int pi = 0; pi < t->header->polyCount; ++pi) {
+            const dtPoly* p = &t->polys[pi];
+            if (p->getType() != DT_POLYTYPE_GROUND || p->vertCount < 3)
+                continue;
+            float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+            for (int k = 0; k < p->vertCount; ++k) {
+                const float* v = &t->verts[p->verts[k] * 3];
+                lo[0] = v[2] < lo[0] ? v[2] : lo[0];
+                hi[0] = v[2] > hi[0] ? v[2] : hi[0];
+                lo[1] = v[0] < lo[1] ? v[0] : lo[1];
+                hi[1] = v[0] > hi[1] ? v[0] : hi[1];
+            }
+            if (hi[0] < box[0] || lo[0] > box[2] || hi[1] < box[1] || lo[1] > box[3])
+                continue;
+            long need = 2 + 3L * p->vertCount;
+            if (out && total + need <= max) {
+                float* o = out + total;
+                o[0] = (float)p->vertCount;
+                o[1] = (float)p->flags;
+                for (int k = 0; k < p->vertCount; ++k)
+                    toWow(&t->verts[p->verts[k] * 3], o + 2 + 3 * k);
+            }
+            total += need;
+        }
+    }
+    return (int)total;
+}
+
 extern "C" int nd_find_path(void* h, const float* start, const float* end, unsigned short include,
                             unsigned short exclude, float* out, int max_points, int* count, float* goal) {
     Nav* n = (Nav*)h;

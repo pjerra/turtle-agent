@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -120,6 +121,8 @@ type methodOptions struct {
 	AddonDir string
 	// DungeonsDir holds the plans dungeon_run reads (settings dungeons_dir); empty means "dungeons".
 	DungeonsDir string
+	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
+	Planner *navmesh.Planner
 }
 
 // registerMethodsFor wires the spec's JSON-RPC methods, and every later milestone's, to whatever
@@ -238,8 +241,10 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerSpellMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
-	stopDungeon := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease)
+	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease)
+	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
+		stopMap()
 		stopDungeon()
 		stopBrain()
 		stopAddons()

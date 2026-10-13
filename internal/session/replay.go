@@ -44,6 +44,14 @@ type ReplayReport struct {
 // opts.Character empty: the character of the first CMSG_PLAYER_LOGIN. opts.Log nil: an
 // unbounded log.
 func Replay(recs []capture.Record, opts Options) (*events.Log, ReplayReport, error) {
+	return ReplayWith(recs, opts, nil)
+}
+
+// ReplayWith is Replay that calls observe after each record has been handled, with the session as the replay has
+// it at that record's time (a client packet is only noted, never applied: the session's own position does not
+// follow the agent's walking, so a reader that wants it parses the client movement packets itself). observe must
+// only read the session. A record whose body was redacted reaches it too, unhandled.
+func ReplayWith(recs []capture.Record, opts Options, observe func(rec capture.Record, s *Session)) (*events.Log, ReplayReport, error) {
 	rep := ReplayReport{Records: len(recs), Unknown: map[string]int{}}
 	if opts.Character == "" {
 		name, err := loggedInCharacter(recs)
@@ -62,6 +70,9 @@ func Replay(recs []capture.Record, opts Options) (*events.Log, ReplayReport, err
 	s := New(worldconn.NewOffline(), opts)
 	var clock time.Time
 	s.clockFn = func() time.Time { return clock }
+	if opts.Store == nil { // a store of the replay's own follows the capture's clock, so a moving unit is where it was then
+		s.store.SetClock(func() time.Time { return clock })
+	}
 	if len(recs) > 0 {
 		// The session's epoch is the capture's start: client times and mono_ms count from it,
 		// and no duration is negative.
@@ -87,6 +98,9 @@ func Replay(recs []capture.Record, opts Options) (*events.Log, ReplayReport, err
 		switch rec.Dir {
 		case worldconn.ClientToServer:
 			s.observeClient(rec.Op, rec.Body)
+			if observe != nil {
+				observe(rec, s)
+			}
 			continue
 		case worldconn.ServerToClient:
 		default:
@@ -94,6 +108,9 @@ func Replay(recs []capture.Record, opts Options) (*events.Log, ReplayReport, err
 		}
 		if rec.Redacted {
 			rep.Redacted++
+			if observe != nil {
+				observe(rec, s)
+			}
 			continue
 		}
 		if _, ok := s.handlers[rec.Op]; ok {
@@ -101,7 +118,11 @@ func Replay(recs []capture.Record, opts Options) (*events.Log, ReplayReport, err
 		} else {
 			rep.Unknown[opcode.Name(rec.Op)]++
 		}
-		if stop, err := s.handle(worldconn.Packet{Op: rec.Op, Body: rec.Body}); stop {
+		stop, err := s.handle(worldconn.Packet{Op: rec.Op, Body: rec.Body})
+		if observe != nil {
+			observe(rec, s)
+		}
+		if stop {
 			if err != nil {
 				rep.Ended = err.Error()
 			}

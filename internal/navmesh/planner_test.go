@@ -388,3 +388,53 @@ func TestFloorsRememberMissingTilesUntilThePlan(t *testing.T) {
 		t.Fatalf("after a plan: %v %v", fl, err)
 	}
 }
+
+func TestPolygonsListsTheTilesUnderABox(t *testing.T) {
+	polys := append(navfixture.LCorridor(0), navfixture.Square(10, 10, 14, 14, 30)) // a second floor over the first corner
+	p := planner(t, polys)
+	got, truncated, err := p.Polygons(fixtureMap, 0, 0, 60, 60)
+	if err != nil || truncated {
+		t.Fatalf("%v truncated=%v", err, truncated)
+	}
+	if len(got) != len(polys) {
+		t.Fatalf("%d polygons, want %d", len(got), len(polys))
+	}
+	var heights = map[float32]int{}
+	for _, g := range got {
+		if g.Flags != NavGround || len(g.Verts) != 4 {
+			t.Fatalf("%+v", g)
+		}
+		heights[g.Verts[0][2]]++
+	}
+	if heights[0] != len(polys)-1 || heights[30] != 1 {
+		t.Fatalf("heights %v", heights)
+	}
+	// Only the polygons that overlap the box are listed (the row's 8 cells under x 40, and the second floor), and the
+	// corners may come in any order; a box away from every polygon lists none.
+	if got, _, err := p.Polygons(fixtureMap, 40, 40, 0, 0); err != nil || len(got) != 9 {
+		t.Fatalf("swapped corners: %d polygons, %v", len(got), err)
+	}
+	if got, _, err := p.Polygons(fixtureMap, 52, 52, 58, 58); err != nil || len(got) != 0 {
+		t.Fatalf("empty corner: %d polygons, %v", len(got), err)
+	}
+	// A box over no tile file is no polygons and no error.
+	if got, _, err := p.Polygons(fixtureMap, -3000, -3000, -2900, -2900); err != nil || got != nil {
+		t.Fatalf("no tile: %v %v", got, err)
+	}
+	if _, _, err := NewPlanner("").Polygons(fixtureMap, 0, 0, 1, 1); err == nil {
+		t.Fatal("no folder gave no error")
+	}
+}
+
+func TestBoxTilesCutsToTheLimitNearestTheCentre(t *testing.T) {
+	names := []string{"0013131.mmtile", "0013132.mmtile", "0013231.mmtile", "0013232.mmtile", "0013333.mmtile"}
+	// x and y from -500 to 10 fall on tiles 31..32 in both axes.
+	got, trunc := boxTiles(names, 1, -500, -500, 10, 10, 2)
+	if !trunc || len(got) != 2 {
+		t.Fatalf("%v %v", got, trunc)
+	}
+	all, trunc := boxTiles(names, 1, -500, -500, 10, 10, 10)
+	if trunc || len(all) != 4 {
+		t.Fatalf("%v %v", all, trunc)
+	}
+}
