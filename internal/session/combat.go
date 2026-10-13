@@ -95,6 +95,9 @@ func (s *Session) onSpellStart(body []byte) error {
 		return err
 	}
 	s.store.StartCast(st.Caster, st.SpellID, st.CastTime)
+	if st.Caster == s.selfGUID() {
+		s.spellState.CastStarted(st.SpellID, st.CastTime, st.Targets.Unit)
+	}
 	s.emit(events.Event{Kind: events.KindSpellStart, SourceGUID: st.Caster, TargetGUID: st.Targets.Unit, SpellID: st.SpellID,
 		Data: map[string]any{"cast_ms": st.CastTime}})
 	return nil
@@ -106,6 +109,11 @@ func (s *Session) onSpellGo(body []byte) error {
 		return err
 	}
 	s.store.EndCast(g.Caster, g.SpellID)
+	if g.Caster == s.selfGUID() {
+		if started, ok := s.spellState.CastWent(g.SpellID); ok {
+			s.emitCooldownStart(started)
+		}
+	}
 	target := g.Targets.Unit
 	if target == 0 && len(g.Hits) > 0 {
 		target = g.Hits[0]
@@ -121,7 +129,8 @@ func (s *Session) onCastResult(body []byte) error {
 		return err
 	}
 	s.store.EndCast(s.selfGUID(), c.SpellID)
-	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: s.selfGUID(), SpellID: c.SpellID, Data: map[string]any{"reason": c.Reason}})
+	reason := s.spellState.CastFailed(c.SpellID, c.Reason)
+	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: s.selfGUID(), SpellID: c.SpellID, Data: map[string]any{"reason": c.Reason, "reason_name": reason}})
 	s.noteCastFailed(fmt.Sprintf("SpellCastResult %d", c.Reason))
 	return nil
 }
@@ -132,8 +141,9 @@ func (s *Session) onSpellFailedOther(body []byte) error {
 		return err
 	}
 	s.store.EndCast(c.Caster, c.SpellID)
-	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: c.Caster, SpellID: c.SpellID, Data: map[string]any{"reason": "interrupted"}})
+	s.emit(events.Event{Kind: events.KindSpellFail, SourceGUID: c.Caster, SpellID: c.SpellID, Data: map[string]any{"reason": "interrupted", "reason_name": "interrupted"}})
 	if c.Caster == s.selfGUID() {
+		s.spellState.CastFailed(c.SpellID, game.CastFailedInterrupted)
 		s.noteCastFailed("interrupted")
 	}
 	return nil
@@ -147,6 +157,9 @@ func (s *Session) onSpellDelayed(body []byte) error {
 		return fmt.Errorf("SMSG_SPELL_DELAYED: %w", err)
 	}
 	s.store.DelayCast(g, ms)
+	if g == s.selfGUID() {
+		s.spellState.CastDelayed(ms)
+	}
 	return nil
 }
 

@@ -19,6 +19,7 @@ const (
 	ChangeAura
 	ChangeMount // UNIT_FIELD_MOUNTDISPLAYID changed: Old and New are the display ids
 	ChangeStand // the stand state (byte 0 of UNIT_FIELD_BYTES_1) changed: Old and New are the states
+	ChangeCombo // the combo points (byte 1 of PLAYER_FIELD_BYTES) changed: Old and New are the points
 	// Game object changes on an object already known (a create block reports only ChangeCreated): Old and New are
 	// the GOState, GAMEOBJECT_FLAGS and GAMEOBJECT_DYN_FLAGS values.
 	ChangeGOState
@@ -76,8 +77,16 @@ type Unit struct {
 	InParty    bool        `json:"in_party"`
 	// StandState names byte 0 of UNIT_FIELD_BYTES_1 as the stand_state event does.
 	StandState string `json:"stand_state"`
-	Auras      []Aura `json:"auras"`   // in slot order, never null
-	Casting    *Cast  `json:"casting"` // null when not casting
+	// ComboPoints and ComboTarget are the player's own combo points (0-5) and the unit they are on,
+	// from PLAYER_FIELD_BYTES and PLAYER_FIELD_COMBO_TARGET. The core writes them on the player's own object
+	// (Player::SetComboPoints), so the player's own row is the one to read. The target is left out when there
+	// are no points: the core leaves the old guid in the field.
+	ComboPoints uint8       `json:"combo_points,omitempty"`
+	ComboTarget packet.GUID `json:"combo_target,omitempty"`
+	// GCDMS is the global cooldown left, set by the session on the player's own row only.
+	GCDMS   int64  `json:"gcd_ms,omitempty"`
+	Auras   []Aura `json:"auras"`   // in slot order, never null
+	Casting *Cast  `json:"casting"` // null when not casting
 }
 
 // Aura is a spell in one of a unit's 48 aura slots (UNIT_FIELD_AURA).
@@ -282,6 +291,8 @@ func setValues(o *object, vals map[uint16]uint32, ch []Change, report bool, now 
 			ch = append(ch, Change{GUID: o.guid, Kind: ChangeMount, Old: old, New: v})
 		case k == UnitBytes1 && old&0xFF != v&0xFF:
 			ch = append(ch, Change{GUID: o.guid, Kind: ChangeStand, Old: old & 0xFF, New: v & 0xFF})
+		case k == PlayerFieldBytes && old>>8&0xFF != v>>8&0xFF:
+			ch = append(ch, Change{GUID: o.guid, Kind: ChangeCombo, Old: old >> 8 & 0xFF, New: v >> 8 & 0xFF})
 		}
 	}
 	return ch
@@ -557,6 +568,11 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 		u.Auras = append(u.Auras, a)
 	}
 	u.StandState = game.StandStateName(v[UnitBytes1] & 0xFF)
+	if o.typ == TypePlayer || o.guid.IsPlayer() {
+		if u.ComboPoints = uint8(v[PlayerFieldBytes] >> 8 & 0xFF); u.ComboPoints > 0 {
+			u.ComboTarget = guidAt(v, PlayerComboTarget)
+		}
+	}
 	if c := o.cast; c != nil && now.Before(c.end.Add(castGrace)) {
 		ms := c.end.Sub(now).Milliseconds()
 		u.Casting = &Cast{SpellID: c.spell, Name: spells.Name(c.spell), EndsInMS: &ms}

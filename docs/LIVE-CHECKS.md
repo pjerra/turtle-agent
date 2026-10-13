@@ -134,3 +134,36 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
 5. Findings that are TortoiseBots behaviour (the priest not drinking at 49% mana, the tank losing its target after "reach pull", companions skipping a pack,
    not following, not looting) are reported to TortoiseBots as a bug fix or a behaviour change per its vision document, not worked around here.
 
+
+## Agent state: cooldowns, channels, combo points (issue #80 step 1)
+
+The spell state (README "Agent state") was written from the core's source and tested against the committed captures
+(`SMSG_INITIAL_SPELLS`, `SMSG_SPELL_START`/`GO`, `SMSG_CAST_RESULT`, `SMSG_SPELL_FAILED_OTHER`) and `gametest` packets.
+These have not been seen on a live server, because the captures hold none: `SMSG_LEARNED_SPELL` for a trainer purchase,
+`SMSG_SUPERCEDED_SPELL`, `SMSG_REMOVED_SPELL`, `SMSG_SPELL_COOLDOWN`, `SMSG_COOLDOWN_EVENT`, `SMSG_CLEAR_COOLDOWN`,
+`MSG_CHANNEL_START`/`UPDATE`, and the combo point fields. One agent on a player character of a class with all of them
+(a rogue, or a mage for the channel) settles it:
+
+1. `login`, then `spells` with `passive: false`: the list matches the spellbook the 1.12 client shows, one row per
+   spell, `highest` true on the top rank only. `.levelup` and train a spell: `spell_learned`, then `spell_superseded` for
+   the old rank (check the order and that `Highest(name)` follows).
+2. Cast a spell with a cooldown (Fire Blast, Sinister Strike then Eviscerate). Read `cast_state` right after: `gcd` is
+   active for about 1.5 s (1 s for energy users: check what `gcd.total_ms` says and whether the server agrees by
+   casting again at `remaining_ms`: no `spell_fail` with `reason_name` `not_ready`). `spells` shows the cooldown with
+   `ready` false; a `cooldown_start` (`source` `cast`) and, `ms` later, a `cooldown_end`. Compare the end with when a cast
+   of the same spell stops being refused: the server rounds to whole seconds, so expect the agent to be up to 1 s late
+   but never early. A talent that shortens the cooldown is a case where the agent stays late.
+3. Interrupt a cast of the agent's (a mob that interrupts, or a GM's `.cast`): `cast_state.last_failure`
+   `reason_name` `interrupted`, `gcd` back to 0; and if the interrupt locks a school, a `cooldown_start` with `source` `server`
+   (`SMSG_SPELL_COOLDOWN` for the player's own guid, which is the one packet of this kind a player gets).
+4. `.cooldown` (GM): a `cooldown_clear` with `all`, and `spells` all `ready`. `.cooldown <spell>`: one `cooldown_clear`.
+5. Channel Arcane Missiles: `channel_start` with its `ms`, `cast_state.cast.state` `channelling`; let it end, and move
+   to break another: `channel_end` both times.
+6. Rogue: `combo_points` events and `status.combo_points` after each Sinister Strike, `combo_target` the mob, and `0`
+   after Eviscerate. Check that `status.combo_points` is 0 for a character that has never used any (the field reads
+   byte 1 of `PLAYER_FIELD_BYTES`).
+7. The item cooldown is not tracked: drink a health potion twice in a row and note that `spells` knows nothing of it
+   (expected), and that the second `use_item` is refused with a `spell_fail` `reason_name` `not_ready`.
+
+Also: `SMSG_INITIAL_SPELLS` carries spell ids as u16, so a Turtle spell with an id above 65535 would be cut by the core;
+the m910q GM warrior's list held ids up to 56047. Look for a spell in the spellbook that `spells` lacks.

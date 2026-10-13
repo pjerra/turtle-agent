@@ -23,6 +23,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/pjerra/turtle-agent/internal/spellstate"
 	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
@@ -144,6 +146,11 @@ type StatusInfo struct {
 	BaseTime     time.Time      `json:"base_time"`      // wall time of mono_ms 0
 	WallOffsetMS int64          `json:"wall_offset_ms"` // wall clock now minus base_time + mono_ms: host clock steps and drift
 	Error        string         `json:"error,omitempty"`
+
+	// The agent's own spell state (README "Agent state").
+	ComboPoints uint8       `json:"combo_points"`           // 0-5, from the player's own update fields
+	ComboTarget packet.GUID `json:"combo_target,omitempty"` // the unit they are on; absent without points
+	GCDMS       int64       `json:"gcd_ms"`                 // global cooldown left; 0 when none
 }
 
 type handler func(body []byte) error
@@ -235,6 +242,10 @@ type Session struct {
 	last            lastMove // what the server has for the player
 	lastClock       uint32   // the last MovementInfo client time sent
 	toggles         uint32   // water walking, hover, feather fall as the server applied them
+
+	// spellState is the agent's spellbook, cooldowns and cast state (internal/spellstate); it
+	// locks itself, so RPC calls read it directly.
+	spellState *spellstate.State
 }
 
 func New(conn *worldconn.Conn, opts Options) *Session {
@@ -271,6 +282,8 @@ func New(conn *worldconn.Conn, opts Options) *Session {
 		ready: make(chan struct{}), start: time.Now(), state: StatusConnecting, unknown: map[uint16]int{},
 		names: newNameCache(), store: opts.Store, rolls: map[rollKey]*openRoll{}, npc: newNPCState(), runSpeed: defaultRunSpeed, redact: newRedactor(opts.Redact, opts.RedactAnywhere),
 	}
+	s.spellState = spellstate.New(s.now)
+	go spells.Warm() // the tables load once per process; keep the first lookup out of the loop
 	s.register()
 	return s
 }
@@ -299,6 +312,7 @@ func (s *Session) register() {
 	s.registerUseItem()
 	s.registerSocial()
 	s.registerNPC()
+	s.registerSpells()
 }
 
 func (s *Session) registerCore() {
@@ -355,10 +369,12 @@ func (s *Session) Status() StatusInfo {
 	// The player's own values from the store (zero until its create block arrives).
 	if u, ok := s.store.Get(s.self.GUID, s.pos[0], s.pos[1], s.pos[2]); ok {
 		info.Health, info.MaxHealth, info.Power, info.MaxPower = u.Health, u.MaxHealth, u.Power, u.MaxPower
+		info.ComboPoints, info.ComboTarget = u.ComboPoints, u.ComboTarget
 		if u.Level > 0 { // the live level, not the one from the character list
 			info.Level = uint8(min(u.Level, 255))
 		}
 	}
+	info.GCDMS = s.spellGCDMS()
 	return info
 }
 
@@ -522,6 +538,7 @@ func (s *Session) dispatch(p worldconn.Packet) error {
 }
 
 func (s *Session) onTick(now time.Time) error {
+	s.tickSpells()
 	s.flushNames(now)
 	s.prunePending(now)
 	if err := s.tickWalk(); err != nil {

@@ -72,6 +72,15 @@ const (
 	KindTrainerTrained = "trainer_trained" // SMSG_TRAINER_BUY_SUCCEEDED
 	KindTrainerFailed  = "trainer_failed"  // SMSG_TRAINER_BUY_FAILED
 	KindSpellLearned   = "spell_learned"   // SMSG_LEARNED_SPELL: a spell the server taught the player, spell_id
+	// The agent's own spells (README "Agent state"): the spellbook, cooldowns, channels and combo points.
+	KindSpellRemoved    = "spell_removed"    // SMSG_REMOVED_SPELL: a spell left the spellbook, spell_id
+	KindSpellSuperseded = "spell_superseded" // SMSG_SUPERCEDED_SPELL: a higher rank replaced spell_id, data.by
+	KindCooldownStart   = "cooldown_start"   // a spell's cooldown began: data.ms, category, source (cast, server, event)
+	KindCooldownEnd     = "cooldown_end"     // a spell's own cooldown ran out
+	KindCooldownClear   = "cooldown_clear"   // SMSG_CLEAR_COOLDOWN or SMSG_COOLDOWN_CHEAT ended it early; spell_id 0 with data.all is every cooldown
+	KindChannelStart    = "channel_start"    // MSG_CHANNEL_START: the player channels spell_id for data.ms
+	KindChannelEnd      = "channel_end"      // MSG_CHANNEL_UPDATE with 0 left: the channel ended or was broken
+	KindComboPoints     = "combo_points"     // the player's combo points changed: data.points, was, target
 	// Quests: the panels an NPC opens, and the result of each accept, hand-in and abandon.
 	KindQuestList         = "quest_list"          // SMSG_QUESTGIVER_QUEST_LIST
 	KindQuestDetails      = "quest_details"       // SMSG_QUESTGIVER_QUEST_DETAILS

@@ -141,13 +141,16 @@ func loggedInCharacter(recs []capture.Record) (string, error) {
 	return "", errors.New("replay: the capture has no CMSG_PLAYER_LOGIN, so no character logged in (pass a character)")
 }
 
-// tickPending reports whether a tick would do anything now: events waiting for names, or
-// a flight to land.
-func (s *Session) tickPending() bool { return len(s.names.waiting) > 0 || s.fall != nil }
+// tickPending reports whether a tick would do anything now: events waiting for names, a
+// flight to land, or a cooldown to end.
+func (s *Session) tickPending() bool {
+	return len(s.names.waiting) > 0 || s.fall != nil || s.spellState.Pending()
+}
 
-// replayTick is the part of onTick that changes events: name timeouts, expiring requests
-// and the fall simulation. Pings, logout deadlines and walks have no say in a replay.
+// replayTick is the part of onTick that changes events: cooldowns ending, name timeouts, expiring
+// requests and the fall simulation. Pings, logout deadlines and walks have no say in a replay.
 func (s *Session) replayTick() {
+	s.tickSpells()
 	s.flushNames(s.now())
 	s.prunePending(s.now())
 	_ = s.tickFall() // the offline connection takes every write

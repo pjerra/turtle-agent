@@ -226,7 +226,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, health, power, target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
+| `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
@@ -249,6 +249,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
+| `spells` | `spell_id`, `name` (a part of it), `highest` (only the highest known rank of each name), `passive` (include passives) | the known spells with their template data, cooldown and `ready`/`remaining_ms`/`why`, `affordable`; see [Agent state](#agent-state) |
+| `cast_state` | | the cast (`idle`, `casting`, `channelling`), `last_cast`, `last_failure` with its reason, the `gcd`, the combo points; see [Agent state](#agent-state) |
 | `face` | `guid` | |
 | `walk_to` | `x`, `y`, `z` (short, straight-line walks that ignore terrain; see Movement; `walk_path` follows the terrain) | |
 | `path_to` | `x`, `y`, `z` | a navmesh path from where you stand, without moving: `map`, `from`, `to`, `status` (complete, partial, no_path), `reason`, `points`, `length`, `engine` |
@@ -648,8 +650,79 @@ Each `units` row (and `unit`) also says what the unit is doing:
   sends its duration to the caster alone.
 
 Spell names come from the core's `spell_template` (`sql/base/tw_world_spell_template.sql`), packed into
-`internal/spells/names.tsv.gz` by `make spellnames CORE=<tortoise-wow checkout>`. A spell the server's database
-added later has no `name`.
+`internal/spells/names.tsv.gz` by `make spellnames CORE=<tortoise-wow checkout> DBC=<the server's dbc folder>`. A spell
+the server's database added later has no `name`.
+
+## Agent state
+
+What the agent knows about its own character's spells, for a brain (issue #80) and for `spells` and `cast_state`:
+`internal/spellstate`, kept up to date by the session loop from the packets below. All packet layouts were read from the
+core (`Player.cpp`, `Spell.cpp`, `Unit.cpp`); `SMSG_INITIAL_SPELLS`, `SMSG_SPELL_START`/`SMSG_SPELL_GO` and `SMSG_CAST_RESULT`
+are also in the committed captures. The rest is built from the core only: see `docs/LIVE-CHECKS.md` for what has not
+been seen on a live server yet.
+
+- **Known spells.** `SMSG_INITIAL_SPELLS` at login (u8 0, u16 count, count x (u16 spell, u16 0), then the cooldowns),
+  `SMSG_LEARNED_SPELL` (u32), `SMSG_REMOVED_SPELL` (u16) and `SMSG_SUPERCEDED_SPELL` (u16 old, u16 new: the spellbook
+  shows the highest rank alone, so the old one leaves the set). Spell ids are u16 on the wire in all but the learned
+  packet; the core writes them truncated. **Never hard-code a rank's id**: `State.Highest(name)` is the highest known
+  rank of a name (the N of "Rank N" in the spell's subtext, case-insensitive), and `spells` marks it `highest`.
+- **Cooldowns and the GCD.** The server sends no cooldown packet for a spell the player casts (only for a pet, a school
+  lockout after an interrupt, or a script: `Unit.cpp:11900-11907`), so the agent does what the client does and starts
+  them from the spell data when its own `SMSG_SPELL_GO` comes: the spell's cooldown, or its category's when it has
+  none, and the category lock (`Spell.cpp:3888`, `Unit.cpp:11838-11930`). The global cooldown starts at the player's own
+  `SMSG_SPELL_START` (a direct cast always sends one, `Spell.cpp:3647-3651`), for the spell's `StartRecoveryTime` and
+  in its `StartRecoveryCategory` group; a cast that fails gives it back (`Spell.cpp:8443-8458`). What the server does
+  send is applied on top: the cooldowns in `SMSG_INITIAL_SPELLS` (u16 spell, u16 item, u16 category, u32 cooldown ms,
+  u32 category cooldown ms; `0x80000000` is the month-long "infinity" kept for a few spells), `SMSG_SPELL_COOLDOWN`
+  (guid, then u32 spell, u32 ms pairs), `SMSG_COOLDOWN_EVENT` (u32 spell, guid: start the cooldown now, as when an
+  aura that blocked the spell ends), `SMSG_CLEAR_COOLDOWN` (u32 spell, guid) and `SMSG_COOLDOWN_CHEAT` (guid: all).
+  `State.Ready(spell)` and `State.Remaining(spell)` (the longest of the spell's cooldown, its category lock and the
+  GCD of its group, with the reason) answer for any spell. They err on the side of waiting: talents and items that
+  shorten a cooldown are not known; the server rounds a cooldown to whole seconds, so it can be up to a second shorter
+  than the agent's; haste does not shorten the GCD here; an item's own cooldown (a potion) is in the item prototype and
+  is not tracked. A cast the server refuses as `not_ready` holds the spell back for one second whatever the numbers say.
+- **Cast state.** The player's own `SMSG_SPELL_START` (casting, with its cast time), `SMSG_SPELL_GO` (done),
+  `SMSG_SPELL_DELAYED` (pushback), `MSG_CHANNEL_START` (u32 spell, u32 ms: channelling) and `MSG_CHANNEL_UPDATE` (u32
+  ms left, 0: ended). A failure is `SMSG_CAST_RESULT` (u32 spell, u8 2, u8 `SpellCastResult`, with a few u32 more for
+  some reasons) or the `SMSG_SPELL_FAILED_OTHER` interrupt broadcast. The core never sends `SMSG_SPELL_FAILURE`
+  (`Spell.cpp:4926-4935`), so it is not handled.
+- **Combo points** are in the player's own update fields: byte 1 of `PLAYER_FIELD_BYTES` (index 0x4C6) and the guid in
+  `PLAYER_FIELD_COMBO_TARGET` (0x2CA, two words); the core leaves the old guid in place when the points go to 0, so
+  the agent reports a target only with points (`Player.cpp:20942-21002`).
+- **Spell data** (`internal/spells/meta.tsv.gz`): per spell its rank, level, cost (power type and amount, or percent of
+  base mana), cast time, range, cooldown, category and category cooldown, GCD group and length, school, dispel type,
+  mechanic, aura duration, three effects (effect, aura, base points, dice, die sides, points per level, points per combo
+  point), reagents and flags (`passive`, `ranged`, `next_swing`, `channeled`, `combo_points`, `harmful`, `not_in_combat`,
+  `stealth_only`, `move_interrupts`, `interruptible`, `auto_repeat`, `cooldown_on_fade`, and by effect `damage`, `heal`,
+  `aura`, `dispel`, `interrupt`, `resurrect`, `energize`, `taunt`). `make spellnames` writes it from the core's
+  `spell_template` with the later `REPLACE INTO` and `UPDATE` statements of `sql/database_updates/world` applied, plus
+  `SpellCastTimes.dbc`, `SpellRange.dbc` and `SpellDuration.dbc` from the server's DBC folder (the template only holds
+  indices into them). A rage cost and the rage held are both in tenths.
+
+`spells` result (a list, sorted by name and rank; passives only with `passive: true`): `spell_id`, `name`, `rank`,
+`highest`, `meta` (false for a spell the table lacks: only id and name are known), `level`, `passive`, `flags[]`,
+`cast_ms`, `range_min`/`range_max`, `power` (`mana`, `rage`, `focus`, `energy`, `health`), `cost`, `cost_pct`,
+`cooldown_ms`, `category`, `category_cd_ms`, `gcd_ms`, `school`, `dispel`, `mechanic`, `duration_ms`, `effects[]`,
+`reagents[]`, `ready`, `remaining_ms`, `why` (`cooldown`, `category`, `gcd` or `server_refused`) and `affordable` (the
+flat cost against the power held; absent for a cost in percent of base mana).
+
+`cast_state` result: `cast` (`state` `idle`/`casting`/`channelling`, `spell_id`, `name`, `target`, `cast_ms`, `elapsed_ms`,
+`ends_in_ms`), `last_cast` (`spell_id`, `name`, `ago_ms`), `last_failure` (`spell_id`, `name`, `reason` the
+`SpellCastResult`, `reason_name` such as `out_of_range`, `no_power`, `interrupted`, `ago_ms`), `failures` (count since
+login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_target`. `status` and the player's own
+`unit` row carry `combo_points`, `combo_target` and `gcd_ms` too.
+
+| Event | `source` / data |
+| --- | --- |
+| `spell_removed` | the player; `spell_id`. SMSG_REMOVED_SPELL |
+| `spell_superseded` | the player; `spell_id` (the old rank), `by` (the new one). SMSG_SUPERCEDED_SPELL |
+| `cooldown_start` | the player; `spell_id`, `ms`, `source` (`cast`, `server`, `event`), and `category`, `category_ms` when the spell has one. Not sent for the GCD or for the cooldowns at login |
+| `cooldown_end` | the player; `spell_id`. The spell's own cooldown ran out (inferred from the clock, on a 100 ms tick; a category lock and the GCD end without an event) |
+| `cooldown_clear` | the player; `spell_id`, or `all` and `spells` for SMSG_COOLDOWN_CHEAT |
+| `channel_start` | the player; `spell_id`, `ms` |
+| `channel_end` | the player; `spell_id`. MSG_CHANNEL_UPDATE with nothing left |
+| `combo_points` | the player; `target` (the unit), `points`, `was` |
+| `spell_fail` | now also `reason_name` (`reason` stays the number, or `interrupted`) |
 
 ## Vendors, trainers and quests
 
@@ -1007,7 +1080,8 @@ you set).
 | `internal/session` | single-owner session loop: login, ping, chat, addon messages, channels, gossip, names, party, world, actions, combat, raid icons, loot rolls, inventory, equip and use, vendors, trainers and quests, corpse loot, mounts, logout, and `Replay`, which runs a capture's packets through the handlers offline |
 | `internal/game` | packet codecs for chat, addon messages, channels, gossip, queries, groups, actions, the combat log, raid icons, loot rolls, the loot window, items, mounts, vendors, trainers and quests |
 | `internal/objects` | update-object parser and the object store: units (positions, splines, auras, casts), the items in the backpack and bags, and the quest log |
-| `internal/spells` | spell names by id, from the core's `spell_template` (`tools/spellnamegen`) |
+| `internal/spells` | spell names, mounts and metadata (cost, cast time, range, cooldowns, GCD, effects) by id, from the core's `spell_template` and the server's DBCs (`tools/spellnamegen`) |
+| `internal/spellstate` | the agent's own spellbook, cooldowns, global cooldown and cast state, fed by the session (see [Agent state](#agent-state)) |
 | `internal/navmesh` | tile loading and path planning over the core's Detour (cgo); `navfixture` builds synthetic tiles |
 | `internal/events` | ordered event log with cursors |
 | `internal/dungeon`, `dungeons/`, `tools/dungeongen` | dungeon plans and runs: the JSON format, loader, stepper and the driver (`dungeon_run`), the plan files, and the skeleton generator over world database exports (see [Dungeon plans](#dungeon-plans), [Dungeon runs](#dungeon-runs)) |

@@ -101,6 +101,7 @@ func (s *Session) Unit(g packet.GUID, name string) (objects.Unit, error) {
 		// The server never moves the player's own object after its create block; the
 		// session knows where the player is.
 		u.X, u.Y, u.Z, u.O, u.PosAgeMS, u.Moving, u.Distance, u.Distance2D = x, y, z, o, 0, false, 0, 0
+		u.GCDMS = s.spellGCDMS()
 	}
 	u.Name, _ = s.cachedName(g)
 	u.InParty = s.inParty(g)
