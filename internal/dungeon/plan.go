@@ -106,7 +106,8 @@ type UseObject struct {
 	Stand *Point `json:"stand,omitempty"`
 	// RequiresItem is the item a non-GM leader must carry for the use to do anything (the object's lock names it: the
 	// Uldaman Keystone needs the Staff of Prehistoria). Without it the core ignores the use silently, so the driver checks the
-	// leader's bags before the run and before the step and fails with this item's name.
+	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
+	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
 	RequiresItem *ItemRef `json:"requires_item,omitempty"`
 }
 

@@ -27,6 +27,15 @@ const (
 	// walk on a 3.8% fast host gained 1.8% x 360 s = 6.5 s on the server, past the 5 s the
 	// anticheat allows (live run 3 still had walks of that length).
 	clockSlewMoving = 0.02
+	// clockSlewWalkFast is how much faster than the monotonic clock the client time may run while a walk
+	// is under way. The walk's heartbeats come every 500 ms of real time, and the anticheat records
+	// SKIPPED_HEARTBEATS when two moving packets are more than 1000 ms of client time apart
+	// (Movement.cpp:600-604): a client time that could run 1.5 times real time would turn a loop stall
+	// of 700 ms into one, and would make the leader walk at 1.5 times its speed. So a walk can catch up
+	// with a wall clock that is ahead (a forward step, a suspend, a slow monotonic clock) by 2% only;
+	// slowing down, when the client time is ahead of the wall clock (a fast monotonic clock), keeps the
+	// idle 0.5.
+	clockSlewWalkFast = 0.02
 	// clockRebase is how far the wall clock may stand from the client time before it counts as
 	// set (by hand, or a resume from sleep) rather than drifting: the client time then keeps
 	// its own pace and the wall clock is followed from where it now is.
@@ -40,10 +49,21 @@ type moveClock struct {
 	wallOff time.Duration // added to the wall time since the start; moved by a rebase
 }
 
+// slewLimits bound how far a reading may pull the client time off the monotonic gap since the
+// last one, as fractions of that gap: slow, how much of it may be withheld (the client time is
+// ahead of the wall clock), fast, how much may be added (it is behind).
+type slewLimits struct{ slow, fast float64 }
+
+var (
+	slewIdle    = slewLimits{clockSlewIdle, clockSlewIdle}
+	slewWalking = slewLimits{clockSlewIdle, clockSlewWalkFast}
+	slewFlight  = slewLimits{clockSlewMoving, clockSlewMoving}
+)
+
 // at is the clock at a reading taken mono (monotonic) and wall (wall-clock) after the start.
 // It never runs back, and between two readings it advances the monotonic gap give or take
-// slew of it, the part that closes on the wall clock.
-func (c moveClock) at(mono, wall time.Duration, slew float64) moveClock {
+// the part that closes on the wall clock, within sl.
+func (c moveClock) at(mono, wall time.Duration, sl slewLimits) moveClock {
 	if mono <= c.mono {
 		return c
 	}
@@ -55,26 +75,29 @@ func (c moveClock) at(mono, wall time.Duration, slew float64) moveClock {
 		off += time.Duration(ahead * float64(time.Millisecond))
 		ahead = 0
 	}
-	lim := dm * slew
-	v -= min(max(ahead, -lim), lim)
+	v -= min(max(ahead, -dm*sl.fast), dm*sl.slow)
 	return moveClock{mono: mono, ms: v, wallOff: off}
 }
 
 // clockReading is now as monotonic and wall time since the session's start. A time without a
 // monotonic reading (a replay's, a test's) gives the wall time for both.
-func (s *Session) clockReading(now time.Time) (mono, wall time.Duration, slew float64) {
-	slew = s.clockSlew()
-	return now.Sub(s.start), now.Round(0).Sub(s.start.Round(0)), slew
+func (s *Session) clockReading(now time.Time) (mono, wall time.Duration, sl slewLimits) {
+	return now.Sub(s.start), now.Round(0).Sub(s.start.Round(0)), s.slewNow()
 }
 
-// clockSlew is how fast the client time may be pulled towards the wall clock now. Only a flight
-// (a fall or knockback, timed on the monotonic clock) needs the small slew; a walk follows the
-// client time and takes the idle one.
-func (s *Session) clockSlew() float64 {
-	if s.fall != nil || s.last.flags&(game.MoveJumping|game.MoveFallingFar) != 0 {
-		return clockSlewMoving
+// slewNow is how far the client time may be pulled towards the wall clock now. A flight (a fall or
+// knockback, timed on the monotonic clock) takes the small slew both ways. A walk is timed on the
+// client time, so it may slow down as freely as standing still, but speeds up by 2% at most (see
+// clockSlewWalkFast): it counts from the walk's start to its stop packet, which still carries the
+// moving flags.
+func (s *Session) slewNow() slewLimits {
+	switch {
+	case s.fall != nil || s.last.flags&(game.MoveJumping|game.MoveFallingFar) != 0:
+		return slewFlight
+	case s.walk != nil || s.last.flags&game.MoveMaskMoving != 0:
+		return slewWalking
 	}
-	return clockSlewIdle
+	return slewIdle
 }
 
 // walkTime is the time axis of a walk: the session's start plus the client time c reads, in

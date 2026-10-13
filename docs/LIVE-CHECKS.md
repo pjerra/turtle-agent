@@ -477,7 +477,7 @@ shows as `Water Shield`. Run each preset in a dungeon with a tank bot (or by han
 
 1. **Keystone item.** Uldaman `from_leg keystone`, `gm:false`, no Staff of Prehistoria (7733) in the bags: `dungeon_run` fails at once with
    "the leader does not carry Staff of Prehistoria (item 7733) ..." (leg 2 "keystone" step 0), before any walk or order. With the staff
-   (`additem 7733`) the Keystone opens and the Seal of Khaz'Mul is active in about 27 s. With `gm` on, the staff is not asked for.
+   (`additem 7733`) the Keystone opens and the Seal of Khaz'Mul is active in about 27 s. With `gm: true` the staff is not asked for; with `gm` omitted on a GM account that plays `.gm off` (run 3), the check still fails the run (the core lets a GM through the lock only in GM mode).
 2. **Conjure rank.** A level 45 mage that has learned every spell (`learn all_myspells`), no drink in the bags, at a rest gate below 65% mana:
    `brain_decision` `conjure_water` carries spell 10139 (rank 6, Conjured Sparkling Water, level 45), not 10140; the water it makes
    is drunk. Same for `conjure_food` with 10145 (Conjured Sweet Roll). At level 55 the casts are 10140 and 28612.

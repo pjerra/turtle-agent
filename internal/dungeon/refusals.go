@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -117,36 +118,69 @@ func (d *Driver) recordRefusal(r Refusal) {
 	})
 }
 
-// leaderHasItem says whether the leader carries the item. known is false when that cannot be told: the Game has no
-// ItemSource, or the bags hold items whose create block has not arrived yet (entry 0) and the item is not among the rest.
-func (d *Driver) leaderHasItem(entry uint32) (has, known bool) {
+// itemState says what the leader's bags tell of an item: has it, known (the list can be trusted: the Game has an ItemSource and
+// no item in it waits for its create block), and empty (the list has no item at all: the inventory fields have not arrived, or the
+// bags are truly bare). An item that is missing from a known list is missing; an unknown list proves nothing.
+func (d *Driver) itemState(entry uint32) (has, known, empty bool) {
 	src, ok := d.g.(ItemSource)
 	if !ok {
-		return false, false
+		return false, false, false
 	}
+	items := src.Items()
 	pending := false
-	for _, it := range src.Items() {
+	for _, it := range items {
 		if it.Entry == entry && it.Count > 0 {
-			return true, true
+			return true, true, false
 		}
 		pending = pending || it.Entry == 0
 	}
-	return false, !pending
+	return false, len(items) > 0 && !pending, len(items) == 0
 }
 
-// needsItem fails when the step's required item is certainly not in the leader's bags. A GM passes the object's lock, so a GM
-// leader is never failed. where names the place in the message ("leg 'keystone' step 0" for the check before the run).
+// itemsExempt says whether the run takes the leader past a lock without the key: only when the caller said it is a GM (gm: true,
+// GMAssumed), because the core lets a GM through a lock in GM mode (".gm on", GameObject::PlayerCanUse -> IsGameMaster()), which the
+// driver cannot see: a GM account that probed as a GM but plays with ".gm off" gets the silent failure like a player.
+func (d *Driver) itemsExempt() bool { return d.cfg.GM == GMAssumed }
+
+func (d *Driver) missingItem(it *ItemRef, where string) error {
+	return fmt.Errorf("the leader does not carry %s%s, which opening the object needs (the core ignores the use of a locked object by anyone but a GM in GM mode): put it in the bags first", it, where)
+}
+
+// needsItem fails when the item is certainly not in the leader's bags: a known list without it. An unknown list (no ItemSource,
+// the inventory not arrived, items still loading) passes; the check before the use looks again.
 func (d *Driver) needsItem(it *ItemRef, where string) error {
-	if it == nil || d.gm {
+	if it == nil || d.itemsExempt() {
 		return nil
 	}
-	if has, known := d.leaderHasItem(it.Entry); known && !has {
-		if where != "" {
-			where = " " + where
-		}
-		return fmt.Errorf("the leader does not carry %s, which opening the object%s needs (the core ignores the use of a locked object by a non-GM): put it in the bags first", it, where)
+	if has, known, _ := d.itemState(it.Entry); known && !has {
+		return d.missingItem(it, where)
 	}
 	return nil
+}
+
+// checkUseItem is the check right before a use. An empty list is the inventory not having arrived (just after a login or a
+// teleport), not proof of a bare bag: it waits up to ItemsWait for the list to fill, and only if it stays empty the item is
+// missing. Items that are still loading are not guessed at.
+func (d *Driver) checkUseItem(ctx context.Context, it *ItemRef) error {
+	if it == nil || d.itemsExempt() {
+		return nil
+	}
+	for waited := time.Duration(0); ; waited += d.cfg.Poll {
+		has, known, empty := d.itemState(it.Entry)
+		switch {
+		case has:
+			return nil
+		case known:
+			return d.missingItem(it, "")
+		case !empty:
+			return nil
+		case waited >= d.cfg.ItemsWait:
+			return d.missingItem(it, " (the bags are empty)")
+		}
+		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+	}
 }
 
 // checkRequiredItems fails the run before it starts when a use_object step from leg fromLeg on needs an item the leader lacks.
@@ -157,7 +191,7 @@ func (d *Driver) checkRequiredItems(fromLeg int) error {
 			if st.UseObject == nil {
 				continue
 			}
-			if err := d.needsItem(st.UseObject.RequiresItem, fmt.Sprintf("(leg %d %q step %d)", li, l.Name, si)); err != nil {
+			if err := d.needsItem(st.UseObject.RequiresItem, fmt.Sprintf(" at leg %d %q step %d", li, l.Name, si)); err != nil {
 				return err
 			}
 		}

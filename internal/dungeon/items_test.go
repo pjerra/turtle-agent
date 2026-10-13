@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 )
@@ -43,6 +44,7 @@ func TestPlanRequiresItemParses(t *testing.T) {
 // A non-GM leader without the key item: the run fails before it moves or says anything, naming the item.
 func TestDriverFailsEarlyWithoutTheRequiredItem(t *testing.T) {
 	g, _ := runFixture(t)
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}} // the bags are listed, and the staff is not in them
 	p := mustPlan(t, runPlanKey)
 	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
 	err := d.Run(context.Background(), 0)
@@ -69,6 +71,7 @@ func TestDriverRunsWithTheRequiredItem(t *testing.T) {
 // A leg that starts after the keystone's does not ask for the staff.
 func TestDriverChecksOnlyTheLegsItRuns(t *testing.T) {
 	g, _ := runFixture(t)
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}}
 	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMNone}, g.clock())
 	if err := d.checkRequiredItems(1); err != nil {
 		t.Fatal(err)
@@ -78,12 +81,64 @@ func TestDriverChecksOnlyTheLegsItRuns(t *testing.T) {
 	}
 }
 
-// A GM passes the lock, so a GM leader is not failed (and the default mode takes the leader for a GM).
+// A leader the caller says is a GM (gm: true) is not asked for the key: the core lets a GM in GM mode through the lock.
 func TestDriverLetsAGMOpenWithoutTheItem(t *testing.T) {
 	g, _ := runFixture(t)
-	d := NewDriver(mustPlan(t, runPlanKey), g, Config{}, g.clock())
+	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMAssumed}, g.clock())
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+}
+
+// An account the probe finds to be a GM is not taken for a GM in GM mode: a run 3 tester played with ".gm off", and the Keystone
+// ignored the use like it does for a player. Only gm: true skips the check.
+func TestDriverChecksAProbedGMAccount(t *testing.T) {
+	g, _ := runFixture(t)
+	g.dead.probeLevel, g.dead.probeKnown = 3, true
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}}
+	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMProbe}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "does not carry Staff of Prehistoria") || !d.gm || len(g.walks) != 0 {
+		t.Fatalf("%v gm %v walks %v", err, d.gm, g.walks)
+	}
+}
+
+// An empty bag list is the inventory not having arrived, not a bare bag: the check before the run passes it, and the one before the
+// use waits for it to fill (ItemsWait) and goes on once the staff shows.
+func TestDriverWaitsForTheInventoryBeforeTheUse(t *testing.T) {
+	g, _ := runFixture(t)
+	ticks := 0
+	g.onTick = func(g *fakeGame) {
+		if ticks++; ticks == 3 {
+			g.bag = []objects.Item{staff()}
+		}
+	}
+	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMNone}, g.clock())
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatalf("an empty list failed the check before the run: %v", err)
+	}
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if len(g.used) != 1 {
+		t.Fatalf("used %v", g.used)
+	}
+}
+
+// A list that stays empty is bare: the use fails after ItemsWait, naming the item and the empty bags, without using the object.
+func TestDriverFailsWhenTheBagsStayEmpty(t *testing.T) {
+	g, _ := runFixture(t)
+	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMNone, ItemsWait: 2 * time.Second}, g.clock())
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatal(err)
+	}
+	began := g.now
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "Staff of Prehistoria") || !strings.Contains(err.Error(), "bags are empty") || len(g.used) != 0 {
+		t.Fatalf("%v used %v", err, g.used)
+	}
+	if waited := g.now.Sub(began); waited < 2*time.Second {
+		t.Fatalf("failed after %s, before the wait for the inventory ended", waited)
 	}
 }
 
@@ -108,7 +163,7 @@ type noItems struct{ Game }
 func TestDriverChecksTheItemAgainBeforeTheUse(t *testing.T) {
 	g, _ := runFixture(t)
 	g.bag = []objects.Item{staff()}
-	g.onWalk = func(g *fakeGame, to Point) { g.bag = nil }
+	g.onWalk = func(g *fakeGame, to Point) { g.bag = []objects.Item{{Entry: 6948, Count: 1}} }
 	d := NewDriver(mustPlan(t, runPlanKey), g, Config{GM: GMNone}, g.clock())
 	err := d.Run(context.Background(), 0)
 	if err == nil || !strings.Contains(err.Error(), "does not carry Staff of Prehistoria") || len(g.used) != 0 {

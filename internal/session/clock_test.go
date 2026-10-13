@@ -74,8 +74,12 @@ func TestMoveClockTracksRealTime(t *testing.T) {
 	var firstC uint32
 	started := false
 	worst := 0.0
-	read := func(bool) uint32 {
-		c = c.at(h.mono, h.wall, clockSlewIdle)
+	read := func(moving bool) uint32 {
+		sl := slewIdle
+		if moving {
+			sl = slewWalking
+		}
+		c = c.at(h.mono, h.wall, sl)
 		v := max(uint32(c.ms)+1, last)
 		if v < last {
 			t.Fatalf("client time ran back from %d to %d", last, v)
@@ -133,15 +137,15 @@ func TestMonotonicClockAloneDesyncs(t *testing.T) {
 // time neither jumps nor stalls.
 func TestMoveClockWallStep(t *testing.T) {
 	var c moveClock
-	c = c.at(10*time.Second, 10*time.Second, clockSlewIdle)
+	c = c.at(10*time.Second, 10*time.Second, slewIdle)
 	for _, step := range []time.Duration{time.Hour, -2 * time.Hour} {
 		before := c.ms
-		c = c.at(c.mono+time.Second, c.mono+time.Second+step, clockSlewIdle)
+		c = c.at(c.mono+time.Second, c.mono+time.Second+step, slewIdle)
 		if d := c.ms - before; d < 999 || d > 1001 {
 			t.Fatalf("wall step %s: client time moved %.0f ms in a second", step, d)
 		}
 		before = c.ms
-		c = c.at(c.mono+time.Second, c.mono+step, clockSlewIdle) // wall reading only lags
+		c = c.at(c.mono+time.Second, c.mono+step, slewIdle) // wall reading only lags
 		if d := c.ms - before; d < 0 || d > 1001 {
 			t.Fatalf("after wall step %s: client time moved %.0f ms in a second", step, d)
 		}
@@ -166,16 +170,16 @@ func TestClockAtHealthyHost(t *testing.T) {
 	if got := s.clockAt(start); got != 3_600_001 {
 		t.Fatalf("clockAt ran back to %d", got)
 	}
-	if _, _, slew := s.clockReading(start); slew != clockSlewIdle {
+	if _, _, slew := s.clockReading(start); slew != slewIdle {
 		t.Fatalf("standing still: slew %v", slew)
 	}
 	s.walk = &walkState{}
 	s.last.flags = game.MoveForward
-	if _, _, slew := s.clockReading(start); slew != clockSlewIdle {
-		t.Fatalf("walking (timed on the client time, so no need to hold the clock back): slew %v", slew)
+	if _, _, slew := s.clockReading(start); slew != slewWalking {
+		t.Fatalf("walking: slew %v (slowing as freely as idle, speeding up by 2%% at most)", slew)
 	}
 	s.fall = &fallState{}
-	if _, _, slew := s.clockReading(start); slew != clockSlewMoving {
+	if _, _, slew := s.clockReading(start); slew != slewFlight {
 		t.Fatalf("in a fall: slew %v", slew)
 	}
 }
@@ -193,9 +197,9 @@ func TestLongContinuousWalkOnAFastHost(t *testing.T) {
 	run := func(t *testing.T, onClientTime bool) (desynced bool) {
 		h := &driftHost{rate: 1.038}
 		start := time.Unix(1_800_000_000, 0)
-		slew := clockSlewMoving // the small slew the walk used to hold the clock to
+		slew := slewFlight // the small slew the walk used to hold the clock to
 		if onClientTime {
-			slew = clockSlewIdle
+			slew = slewWalking
 		}
 		var c moveClock
 		var lastC uint32
@@ -247,4 +251,62 @@ func TestLongContinuousWalkOnAFastHost(t *testing.T) {
 			t.Fatal("the old timing never tripped CLOCK_DESYNC: the simulation proves nothing")
 		}
 	})
+}
+
+// A wall clock that is ahead of the client time (stepped forward, a suspend the monotonic clock did not count, a slow monotonic clock)
+// must not make a walk's client time run fast: it would put two heartbeats, sent 500 ms of real time apart, more than 1000 ms apart in
+// client time after a loop stall of 700 ms (SKIPPED_HEARTBEATS, Movement.cpp:600-604), and the leader would walk at 1.5 times its speed.
+func TestWalkingClientTimeCannotRunFastToCatchUp(t *testing.T) {
+	const (
+		speed = 7.0
+		stall = 700 * time.Millisecond // an owner-loop gap: at 1.5 times real time it is 1050 ms of client time
+	)
+	run := func(sl slewLimits) (worstGap float64, ratio float64) {
+		c := moveClock{wallOff: 20 * time.Second} // the wall clock is 20 s ahead of the client time
+		var mono time.Duration
+		var lastBeat time.Duration
+		var lastC float64
+		for mono < 120*time.Second {
+			step := 100 * time.Millisecond
+			if mono == 30*time.Second || mono == 90*time.Second {
+				step = stall
+				lastBeat, lastC = mono, c.ms // a heartbeat has just gone out when the loop stalls
+			}
+			mono += step
+			c = c.at(mono, mono, sl) // a healthy host: the wall clock runs at the monotonic pace
+			if mono-lastBeat >= 500*time.Millisecond {
+				if gap := c.ms - lastC; gap > worstGap {
+					worstGap = gap
+				}
+				lastBeat, lastC = mono, c.ms
+			}
+		}
+		return worstGap, c.ms / float64(mono/time.Millisecond)
+	}
+	gap, ratio := run(slewWalking)
+	if gap > 1000 || ratio > 1+clockSlewWalkFast+1e-9 {
+		t.Fatalf("walking: worst heartbeat gap %.0f ms, client time %.3f times real", gap, ratio)
+	}
+	if want := speed * ratio; want > speed*(1+clockSlewWalkFast)+1e-9 {
+		t.Fatalf("the walk would go at %.2f yd/s, run speed %v", want, speed)
+	}
+	// The same walk at the idle slew shows the simulation catches the problem.
+	if gap, _ := run(slewIdle); gap <= 1000 {
+		t.Fatalf("at the idle slew the gap was %.0f ms: the simulation proves nothing", gap)
+	}
+	t.Logf("walking 20 s behind the wall clock: worst heartbeat gap %.0f ms, client time %.3f times real", gap, ratio)
+}
+
+// Slowing down is as free as standing still: a fast monotonic clock keeps the client time at the pace of the wall clock while walking.
+func TestWalkingClientTimeSlowsDownFreely(t *testing.T) {
+	c := moveClock{}
+	var mono, wall time.Duration
+	for range 6000 { // 10 minutes of 100 ms ticks on a host whose monotonic clock runs 3.8% fast
+		mono += 100 * time.Millisecond
+		wall += time.Duration(96339100) // 100 ms / 1.038
+		c = c.at(mono, wall, slewWalking)
+	}
+	if off := c.ms - float64(wall/time.Millisecond); off > 200 || off < -200 {
+		t.Fatalf("client time %.0f ms against the wall clock's %d ms", c.ms, wall/time.Millisecond)
+	}
 }

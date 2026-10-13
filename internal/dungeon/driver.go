@@ -153,6 +153,7 @@ type Config struct {
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
 	UseSettle      time.Duration // wait after a use for the world to answer
+	ItemsWait      time.Duration // how long the check of a required item waits for an empty bag list to fill (the inventory not yet sent)
 	PullAttempts   int           // tries to start one fight before the run fails
 	PullRange      float32       // yards: a target farther than this is approached first
 	PullStandoff   float32       // yards from the target the leader stops at when it approaches
@@ -198,7 +199,7 @@ type Config struct {
 // DefaultConfig is the Driver's limits for a live run.
 func DefaultConfig() Config {
 	return Config{
-		WalkAttempts: 3, WalkRetryDelay: 2 * time.Second, UseSettle: 1500 * time.Millisecond,
+		WalkAttempts: 3, WalkRetryDelay: 2 * time.Second, UseSettle: 1500 * time.Millisecond, ItemsWait: 3 * time.Second,
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
@@ -231,6 +232,7 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.WalkAttempts, d.WalkAttempts)
 	fill(&c.WalkRetryDelay, d.WalkRetryDelay)
 	fill(&c.UseSettle, d.UseSettle)
+	fill(&c.ItemsWait, d.ItemsWait)
 	fillInt(&c.PullAttempts, d.PullAttempts)
 	fillF(&c.PullRange, d.PullRange)
 	fillF(&c.PullStandoff, d.PullStandoff)
@@ -1017,7 +1019,7 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 // between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
 // the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
-	if err := d.needsItem(a.Requires, ""); err != nil {
+	if err := d.checkUseItem(ctx, a.Requires); err != nil {
 		return err
 	}
 	uerr := d.holdingMove(ctx, func() error { return d.use(ctx, a) })

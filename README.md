@@ -503,8 +503,11 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
   for the use to do anything, as the object's lock names it (the Uldaman Keystone needs the Staff; the core ignores the use of a
   locked object otherwise, so the run would only fail 60 s later at the wait). The driver checks the leader's bags (backpack and bags)
-  before the run starts, for every such step from the first leg on, and again before the step, and fails with an error naming the item;
-  a GM leader is not checked, and a bag whose items have not all arrived is not taken for a missing one. `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
+  before the run starts, for every such step from the first leg on, and again before the step, and fails with an error naming the item.
+  Only a leader the caller says is a GM (`gm: true`) is not checked: the core lets a GM through a lock in GM mode (`.gm on`), which the
+  agent cannot see, so an account that probes as a GM but plays with `.gm off` is checked like a player. A list of bags that is empty
+  (the inventory not sent yet) or has items still loading is not taken for a missing item: the check before the run lets it pass, and the
+  one before the use waits up to 3 s (`ItemsWait`) for an empty list to fill, then fails if it stays bare. `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
   close), with a `timeout_s` (default 60, at most 600) after which the plan fails. A door that a lever or key opens may do so well after
   the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
@@ -1394,7 +1397,10 @@ Every walk and facing packet is checked against the server anticheat's distance 
 (run speed across and up or down, so no step can trip `OVERSPEED_Z`); a walk that would break it stops where the server
 has the player. The client time never runs backwards and is never 0. It follows the wall clock's pace, not the monotonic clock's
 (which runs 3-4% fast on a WSL2 host), and a walk is timed on that same client time, so a walk of any length keeps both the
-anticheat's step bound and its clock-desync bound (`ClockDesync`: more than max(5 s, 500 ms a minute) ahead of the server).
+anticheat's step bound and its clock-desync bound (`ClockDesync`: more than max(5 s, 500 ms a minute) ahead of the server). While a
+walk goes the client time may slow down to half the monotonic pace but speeds up by 2% at most (a wall clock that is ahead, after a
+suspend or a forward step, is caught up with slowly): the heartbeats stay 500 ms of real time apart, and a loop stall must not put two
+moving packets more than 1000 ms of client time apart (`SKIPPED_HEARTBEATS`) or make the leader walk faster than its speed.
 
 `status.z_unknown` is true when the z is a guess: after a GM teleport the agent found no floor under (no navmesh, or
 none within reach), after a `walk_to` that changed height, and after a knockback that landed without a navmesh floor.
