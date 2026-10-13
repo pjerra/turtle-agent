@@ -68,6 +68,10 @@ type PullGroup struct {
 	// Driver.sneakPast). A member in view without a stealth aura is pulled as usual; the flag only decides what
 	// happens when none is in view.
 	Ambush bool `json:"ambush,omitempty"`
+	// Radius is how far from one of Positions a unit of the group's entries may stand and still be a member (yards;
+	// 0: the driver's PackRadius, 25). Packs of the same entry that stand closer to each other than that, such as the
+	// two rows of Stonevault Ambushers at the Uldaman Keystone, need a smaller one so that each group takes its own.
+	Radius float32 `json:"radius,omitempty"`
 }
 
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
@@ -149,6 +153,7 @@ type rawPullGroup struct {
 	Entries   []uint32   `json:"entries"`
 	Positions []rawPoint `json:"positions"`
 	Ambush    bool       `json:"ambush"`
+	Radius    float32    `json:"radius"`
 }
 
 type rawBoss struct {
@@ -313,7 +318,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	l.To = c.point(path+".to", r.To)
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius}
+		if g.Radius < 0 || g.Radius > 60 {
+			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
+		}
 		c.entries(gp+".entries", g.Entries, true)
 		if len(g.Positions) == 0 {
 			c.fail(gp+".positions", "needs at least one position")

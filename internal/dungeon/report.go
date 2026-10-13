@@ -30,6 +30,9 @@ type Report struct {
 	Brain string      `json:"brain,omitempty"`
 	Legs  []LegReport `json:"legs"`
 	Notes []string    `json:"notes"`
+	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
+	// intent, code and message, with how often each came in the leg.
+	Refusals []RefusalReport `json:"refusals"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -72,7 +75,7 @@ type reporter struct {
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
 	p.now = now
-	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Buffs: []Buff{}, Legs: []LegReport{}, Notes: []string{}}
+	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Buffs: []Buff{}, Legs: []LegReport{}, Notes: []string{}, Refusals: []RefusalReport{}}
 }
 
 func (p *reporter) start(fromLeg int) {
@@ -110,6 +113,7 @@ func (p *reporter) snapshot() Report {
 	r.Buffs = append([]Buff{}, p.r.Buffs...)
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)
+	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
 	if r.State == "running" {
 		now := p.now()
 		r.Seconds = now.Sub(r.Started).Seconds()

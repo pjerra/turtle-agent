@@ -219,7 +219,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
 	}
-	drv := dungeon.NewDriver(plan, &sessionGame{cur: r.cur}, cfg, dungeon.RealClock())
+	game := &sessionGame{cur: r.cur}
+	game.refusals.mark(r.cur().Log())
+	drv := dungeon.NewDriver(plan, game, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
 	r.drv, r.cancel, r.done = drv, cancel, done
@@ -242,7 +244,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 // Bounds on the setup list, so a report cannot be filled with a novel.
 const (
 	maxSetup     = 40
-	maxSetupText = 200
+	maxSetupText = 400
 )
 
 // cleanSetup trims the setup entries and refuses empty or over-long ones.
@@ -298,7 +300,10 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 
 // sessionGame is the dungeon driver's Game over the agent's session. It asks cur at each call, so a reconnect that
 // swaps the session does not strand a run.
-type sessionGame struct{ cur func() *session.Session }
+type sessionGame struct {
+	cur      func() *session.Session
+	refusals refusalCursor
+}
 
 func (g *sessionGame) Position() dungeon.Point {
 	st := g.cur().Status()

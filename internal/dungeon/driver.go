@@ -150,7 +150,8 @@ type Config struct {
 	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
 	WalkWatch      time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
 	BuffGap        time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait   time.Duration // longest wait for a companion out of view to show its auras after the first .aura
+	BuffViewWait   time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist    float32       // yards: a companion farther than this from the leader is not selected for a buff
 }
 
 // DefaultConfig is the Driver's limits for a live run.
@@ -163,7 +164,7 @@ func DefaultConfig() Config {
 		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
-		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second,
+		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
 	}
 }
 
@@ -216,6 +217,7 @@ func (c Config) withDefaults() Config {
 	fill(&c.WalkWatch, d.WalkWatch)
 	fill(&c.BuffGap, d.BuffGap)
 	fill(&c.BuffViewWait, d.BuffViewWait)
+	fillF(&c.BuffMaxDist, d.BuffMaxDist)
 	return c
 }
 
@@ -238,7 +240,13 @@ type Driver struct {
 	party   map[packet.GUID]bool // guids of the leader and the members, for "who is the unit hitting"
 	// buffedAt is the leg a member last had its buffs given or topped up at: a leg tops a member up once.
 	buffedAt   map[packet.GUID]int
-	brainNoted bool // the brain failed to start once and was noted
+	brainNoted bool            // the brain failed to start once and was noted
+	leaderBase map[uint32]bool // the leader's own auras before the buff batch under way
+	lastOrder  string          // the intent of the last "/p .bot action ..." order, which a refusal whisper (no intent of its own) answers
+	// skipped are the mobs the run gave up on (the tank could not reach them, they evaded, or they drew no fight twice):
+	// no later pick or pull group looks at them again. The value says why, for the report.
+	skipped    map[packet.GUID]string
+	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -246,7 +254,7 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	if clk.Now == nil || clk.Sleep == nil {
 		clk = RealClock()
 	}
-	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}, buffedAt: map[packet.GUID]int{}}
+	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}, buffedAt: map[packet.GUID]int{}, skipped: map[packet.GUID]string{}}
 	d.rep.init(plan, clk.Now)
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
@@ -389,6 +397,11 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 		d.rep.note("could not send .gm visible on: " + err.Error())
 	}
 	start, what := d.startPoint(fromLeg)
+	if fromLeg > 0 && !d.cfg.Teleport {
+		// Without teleport the party walks from where it stands to the leg: the packs of the earlier legs on that way are
+		// fought as walk aggros (live run 2: from_leg keystone from the entrance was a 167 s walk and 7 fights).
+		d.rep.note(fmt.Sprintf("from_leg %d without teleport: the run starts where the party stands and assumes the legs before it are cleared; packs of the earlier legs on the walk are fought as they aggro", fromLeg))
+	}
 	switch {
 	case d.cfg.Teleport && (d.g.Map() != d.plan.Map || dist3(d.g.Position(), start) > 15):
 		d.shortcut("teleport_to_"+what, fromLeg, fmt.Sprintf("GM teleport to %.1f %.1f %.1f on map %d", start.X, start.Y, start.Z, d.plan.Map))
@@ -517,6 +530,7 @@ func (d *Driver) sleep(ctx context.Context, dur time.Duration) error {
 	if err := d.clk.Sleep(ctx, dur); err != nil {
 		return err
 	}
+	d.drainRefusals()
 	return d.observe()
 }
 
@@ -748,7 +762,7 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
 				lastAssist = now
 				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
+					if err := d.order(ctx, "attack"); err != nil {
 						return err
 					}
 				}
@@ -763,6 +777,12 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// order says ".bot action <intent>" in party chat and remembers the intent: a bot's whisper refusing it carries none.
+func (d *Driver) order(ctx context.Context, intent string) error {
+	d.lastOrder = intent
+	return d.g.Chat(ctx, "party", ".bot action "+intent)
 }
 
 func (d *Driver) doUse(ctx context.Context, a Action) error {
@@ -827,7 +847,7 @@ func (d *Driver) restGate(ctx context.Context) error {
 			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
 				lastAssist = now
 				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
+					if err := d.order(ctx, "attack"); err != nil {
 						return err
 					}
 				}
@@ -1019,10 +1039,10 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 // doPull pulls each member group of the action: the leader targets the nearest member and the tank walks up and
 // pulls it (.bot action pullback); the fight ends when the pack is dead.
 func (d *Driver) doPull(ctx context.Context, a Action) error {
-	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true}
+	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{}}
 	// A group whose members in view all carry a stealth aura cannot be pulled (the companions never attack what they
 	// cannot see); with none in view the plan's flag decides. Members in view without the aura are pulled as usual.
-	if cs := d.candidates(sp.pick, sp.skip, sp.anchors); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allStealthed(cs)) {
+	if cs := d.candidates(sp, sp.pick); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allStealthed(cs)) {
 		return d.sneakPast(ctx, a.Label, sp)
 	}
 	return d.engage(ctx, a.Label, sp)
@@ -1073,7 +1093,7 @@ func (d *Driver) sneakPast(ctx context.Context, label string, sp fightSpec) erro
 		}
 	}
 	left := 0
-	for _, u := range d.candidates(sp.pick, sp.skip, sp.anchors) {
+	for _, u := range d.candidates(sp, sp.pick) {
 		if u.Distance <= 80 {
 			left++
 		}
@@ -1095,7 +1115,7 @@ func (d *Driver) doKill(ctx context.Context, a Action) error {
 	b := a.Boss
 	enc := append(slices.Clone(b.First), b.Entry)
 	for _, e := range enc {
-		spec := fightSpec{pick: []uint32{e}, track: enc, skip: a.Skip, anchors: []Point{b.Position}, limit: d.cfg.BossTimeout, required: e == b.Entry}
+		spec := fightSpec{pick: []uint32{e}, track: enc, skip: a.Skip, anchors: []Point{b.Position}, limit: d.cfg.BossTimeout, required: e == b.Entry, wide: true}
 		if err := d.engage(ctx, a.Label, spec); err != nil {
 			return err
 		}
@@ -1109,8 +1129,13 @@ type fightSpec struct {
 	skip     []uint32
 	anchors  []Point // where the pack stands
 	limit    time.Duration
-	required bool // not finding the target fails the run (a boss), else the fight is taken as already won
-	sneak    bool // a target that turns out stealthed is walked past (sneakPast) instead of pulled
+	required bool    // not finding the target fails the run (a boss), else the fight is taken as already won
+	sneak    bool    // a target that turns out stealthed is walked past (sneakPast) instead of pulled
+	wide     bool    // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
+	radius   float32 // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
+	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
+	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
+	passed map[packet.GUID]bool
 }
 
 type outcome int
@@ -1119,10 +1144,36 @@ const (
 	won outcome = iota
 	noEngage
 	evaded
+	refused  // the bots refused the pull: the mob is unreachable or evading
+	retarget // the target died or was lost before the order arrived: pick again
 )
 
+// fightResult is how one pull went: the outcome and how many members of the fight died in it (progress, even when the
+// rest of the pack stood idle and the pull was given up).
+type fightResult struct {
+	out   outcome
+	kills int
+	why   string // the refusal that ended the pull
+}
+
+// maxRetargets bounds the picks of one group that the bots answered with dead-target or no-target.
+const maxRetargets = 3
+
+// passedOver is a mob a group's pulls gave up on.
+type passedOver struct {
+	text    string
+	refused bool // the bots refused to pull it (unreachable, evading), not just: it drew no fight
+}
+
 func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
-	for attempt := 1; attempt <= d.cfg.PullAttempts; attempt++ {
+	if sp.passed == nil {
+		sp.passed = map[packet.GUID]bool{}
+	}
+	kills, retargets := 0, 0
+	var gaveUp []passedOver
+	// An attempt that killed something is progress and does not use up a PullAttempt: a pack of stationary mobs that
+	// do not link comes one or two at a time, and each partial pull used to count as a failed one (live run 2, 7175 x3).
+	for attempt, loops := 1, 0; attempt <= d.cfg.PullAttempts && loops < 4*d.cfg.PullAttempts+12; loops++ {
 		if err := d.restGate(ctx); err != nil {
 			return err
 		}
@@ -1131,6 +1182,9 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			return err
 		}
 		if !ok {
+			if len(gaveUp) > 0 {
+				return d.leftOver(label, sp, kills, gaveUp)
+			}
 			if sp.required && !d.deadInView(sp) {
 				return fmt.Errorf("%s: no living %v in view", label, sp.pick)
 			}
@@ -1150,11 +1204,37 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 		if err != nil {
 			return err
 		}
-		if res == won {
+		kills += res.kills
+		if res.out == won {
 			return nil
 		}
-		why := map[outcome]string{noEngage: "drew no fight", evaded: "evaded"}[res]
-		d.rep.note(fmt.Sprintf("%s: pull %d of %s %s", label, attempt, t.Name, why))
+		if res.out == retarget && retargets < maxRetargets {
+			retargets++
+			d.rep.note(fmt.Sprintf("%s: the bots could not take %s (%s); picking again", label, t.Name, res.why))
+			continue
+		}
+		where := fmt.Sprintf("%s at %.0f %.0f", t.Name, t.X, t.Y)
+		why := map[outcome]string{noEngage: "drew no fight", evaded: "evaded", refused: "was refused (" + res.why + ")", retarget: "was lost (" + res.why + ")"}[res.out]
+		switch {
+		case res.out == refused:
+			// The bots said the mob cannot be reached or is evading: no group of this run tries it again.
+			d.skipped[t.GUID] = res.why
+			gaveUp = append(gaveUp, passedOver{text: where + ": " + res.why, refused: true})
+		case res.kills > 0:
+			why += fmt.Sprintf(", after %d kills", res.kills)
+		case res.out == noEngage || res.out == evaded:
+			// A pull in which nothing died and nothing was refused: the mob drew no fight or evaded. The next try takes
+			// another member when the group has one. This is this group's alone (sp.passed), not the run's: a mob that sits in
+			// the area of the next group is still that group's to pull.
+			if len(d.candidates(sp, sp.pick)) > 1 {
+				sp.passed[t.GUID] = true
+				gaveUp = append(gaveUp, passedOver{text: where + ": " + why})
+			}
+		}
+		if res.kills == 0 {
+			attempt++
+		}
+		d.rep.note(fmt.Sprintf("%s: pull of %s %s", label, t.Name, why))
 		if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
 			return err
 		}
@@ -1162,44 +1242,97 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			return err
 		}
 	}
+	return d.leftOver(label, sp, kills, gaveUp)
+}
+
+// leftOver ends a group whose pulls are used up or whose members are all dead or given up on. It counts as cleared
+// (noted) when the group made progress or the bots refused every mob left (unreachable, evading): the party goes on and
+// what is still standing aggros on the walks after. Else the run fails: nothing came of the pulls.
+func (d *Driver) leftOver(label string, sp fightSpec, kills int, gaveUp []passedOver) error {
+	allRefused := len(gaveUp) > 0
+	var texts []string
+	for _, g := range gaveUp {
+		allRefused = allRefused && g.refused
+		texts = append(texts, g.text)
+	}
+	if kills > 0 || allRefused {
+		rest := strings.Join(texts, "; ")
+		if rest == "" {
+			rest = "the last pulls drew no fight"
+		}
+		d.rep.note(fmt.Sprintf("%s: gave up with %d kills (%s); counted as cleared", label, kills, rest))
+		return nil
+	}
 	return fmt.Errorf("%s: %d pulls of %v failed (no fight, or the mobs evaded)", label, d.cfg.PullAttempts, sp.pick)
 }
 
-// deadInView reports a corpse of the fight's target entries within 80 yards or PackRadius of an anchor: the unit
-// was killed in the fight before (a boss that joined the fight of its brother).
-func (d *Driver) deadInView(sp fightSpec) bool {
-	for _, u := range d.g.Units() {
-		if u.Type == "player" || !u.Dead || !slices.Contains(sp.pick, u.Entry) {
-			continue
-		}
-		if u.Distance >= 0 && u.Distance <= 80 {
+// groupRadius is how far from an anchor a member of the group may stand.
+func (d *Driver) groupRadius(sp fightSpec) float32 {
+	if sp.radius > 0 {
+		return sp.radius
+	}
+	return d.cfg.PackRadius
+}
+
+// nearAnchor says whether the unit stands within the group's radius of one of the anchors.
+func (d *Driver) nearAnchor(sp fightSpec, u objects.Unit) bool {
+	for _, a := range sp.anchors {
+		if dist3(Point{u.X, u.Y, u.Z}, a) <= float64(d.groupRadius(sp)) {
 			return true
 		}
 	}
 	return false
 }
 
-// candidates are the living hostile units of entries (not skipped) in view, nearest to the leader first; of those
-// within PackRadius of an anchor when any are, else all within 80 yards (they wander and patrol).
-func (d *Driver) candidates(entries, skip []uint32, anchors []Point) []objects.Unit {
-	var all, near []objects.Unit
+// deadInView reports a corpse of the fight's target entries that belongs to the group: within the group's radius of an
+// anchor (the group was killed before, say by a walk aggro). A boss encounter (wide) takes any corpse within 80 yards of
+// the leader: a brother that joined the fight of the boss's. A corpse elsewhere says nothing about this group.
+func (d *Driver) deadInView(sp fightSpec) bool {
 	for _, u := range d.g.Units() {
-		if u.Type == "player" || u.Dead || !u.Hostile || u.Distance < 0 || !slices.Contains(entries, u.Entry) || slices.Contains(skip, u.Entry) {
+		if u.Type == "player" || !u.Dead || !slices.Contains(sp.pick, u.Entry) {
+			continue
+		}
+		if sp.wide || len(sp.anchors) == 0 {
+			if u.Distance >= 0 && u.Distance <= 80 {
+				return true
+			}
+		} else if d.nearAnchor(sp, u) {
+			return true
+		}
+	}
+	return false
+}
+
+// candidates are the living hostile units of entries (not skipped) in view, nearest to the leader first. With anchors
+// only the units within the group's radius of an anchor count (plus any that is fighting the party: a pulled mob leaves
+// its spawn to come at the tank): a pack whose own members are dead is cleared, and a mob of the same entry in another
+// pack, 40 yards off, is no member of it (the first live run pulled a Rockchewer that stood in the next pack and the
+// tank answered "unreachable"). Without anchors, or with wide (a boss encounter, whose brothers may stand off the boss's
+// spot) and none near, every unit within 80 yards counts. Mobs the run was refused (d.skipped) and mobs this group passed
+// over (sp.passed) are left out.
+func (d *Driver) candidates(sp fightSpec, entries []uint32) []objects.Unit {
+	var all, near, fighting []objects.Unit
+	for _, u := range d.g.Units() {
+		if u.Type == "player" || u.Dead || !u.Hostile || u.Distance < 0 || !slices.Contains(entries, u.Entry) || slices.Contains(sp.skip, u.Entry) {
+			continue
+		}
+		if _, refused := d.skipped[u.GUID]; refused || sp.passed[u.GUID] {
 			continue
 		}
 		if u.Distance <= 80 {
 			all = append(all, u)
 		}
-		for _, a := range anchors {
-			if dist3(Point{u.X, u.Y, u.Z}, a) <= float64(d.cfg.PackRadius) {
-				near = append(near, u)
-				break
-			}
+		isNear := d.nearAnchor(sp, u)
+		if isNear {
+			near = append(near, u)
+		}
+		if !isNear && u.InCombat && u.Distance <= 80 && d.party[u.Target] {
+			fighting = append(fighting, u)
 		}
 	}
 	out := all
-	if len(near) > 0 {
-		out = near
+	if len(near) > 0 || (len(sp.anchors) > 0 && !sp.wide) {
+		out = append(near, fighting...)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Distance < out[j].Distance })
 	return out
@@ -1210,7 +1343,7 @@ func (d *Driver) candidates(entries, skip []uint32, anchors []Point) []objects.U
 func (d *Driver) pickTarget(ctx context.Context, sp fightSpec) (objects.Unit, bool, error) {
 	const looks = 3
 	for look := 1; look <= looks; look++ {
-		if cs := d.candidates(sp.pick, sp.skip, sp.anchors); len(cs) > 0 {
+		if cs := d.candidates(sp, sp.pick); len(cs) > 0 {
 			cs = preferVisible(cs)
 			if c := cs[0]; c.Distance <= d.cfg.PullRange || look == looks {
 				return c, true, nil
@@ -1259,27 +1392,46 @@ func (d *Driver) approach(ctx context.Context, p Point) error {
 	return d.doWalk(ctx, stand)
 }
 
-func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (outcome, error) {
+func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fightResult, error) {
 	if err := d.g.Target(ctx, t.GUID); err != nil {
-		return 0, fmt.Errorf("target %s: %w", t.Name, err)
+		return fightResult{}, fmt.Errorf("target %s: %w", t.Name, err)
 	}
-	if err := d.g.Chat(ctx, "party", ".bot action pullback"); err != nil {
-		return 0, err
+	d.pendingRef = nil
+	if err := d.order(ctx, "pullback"); err != nil {
+		return fightResult{}, err
 	}
 	began := d.clk.Now()
 	tracked := map[packet.GUID]bool{t.GUID: true}
-	for _, u := range d.candidates(sp.track, sp.skip, sp.anchors) {
-		if dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= float64(d.cfg.PackRadius) {
+	for _, u := range d.candidates(sp, sp.track) {
+		if dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= float64(d.groupRadius(sp)) {
 			tracked[u.GUID] = true
 		}
 	}
 	engaged := false
 	lastCombat, lastAssist := began, began
+	killed := map[packet.GUID]bool{} // members seen dead: the pull's progress
+	assistRefusals := 0
 	for {
 		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
-			return 0, err
+			return fightResult{}, err
 		}
 		now := d.clk.Now()
+		// What the bots answered to the orders: a pull refused as unreachable or evading ends this pull (the mob is skipped),
+		// a target that died or was never selected is picked again; a refused assist order is sent again at once.
+		for _, r := range d.takeRefusals() {
+			switch c := classify(r); {
+			case pullIntent(r) && c == refUnreachable:
+				return fightResult{out: refused, kills: len(killed), why: r.Code + ": " + r.Message}, nil
+			case pullIntent(r) && (c == refDead || c == refNoTarget):
+				return fightResult{out: retarget, kills: len(killed), why: r.Code + ": " + r.Message}, nil
+			case c == refDead || c == refNoTarget || c == refUnreachable:
+				// The assist order is sent again at once, twice; a bot that keeps refusing it (the mob evades, it is
+				// out of reach) is not asked every poll: the usual cadence goes on.
+				if assistRefusals++; assistRefusals <= 2 {
+					lastAssist = now.Add(-d.cfg.AssistEvery)
+				}
+			}
+		}
 		units := d.g.Units()
 		byGUID := make(map[packet.GUID]objects.Unit, len(units))
 		for _, u := range units {
@@ -1298,6 +1450,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (outco
 				continue
 			}
 			if u.Dead {
+				killed[g] = true
 				continue
 			}
 			if sp.sneak && Stealthed(u) && !u.InCombat && u.Health >= u.MaxHealth {
@@ -1317,19 +1470,19 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (outco
 		}
 		switch {
 		case alive == 0:
-			return won, d.afterFight(ctx)
+			return fightResult{out: won, kills: len(killed)}, d.afterFight(ctx)
 		case !engaged && now.Sub(began) > d.cfg.EngageTimeout:
-			return noEngage, nil
+			return fightResult{out: noEngage, kills: len(killed)}, nil
 		case engaged && now.Sub(lastCombat) > d.cfg.EvadeGrace:
-			return evaded, nil
+			return fightResult{out: evaded, kills: len(killed)}, nil
 		case now.Sub(began) > sp.limit:
-			return 0, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
+			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
 		}
 		if engaged && nearest != nil && now.Sub(lastAssist) >= d.cfg.AssistEvery {
 			lastAssist = now
 			if err := d.g.Target(ctx, nearest.GUID); err == nil {
-				if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
-					return 0, err
+				if err := d.order(ctx, "attack"); err != nil {
+					return fightResult{}, err
 				}
 			}
 		}
@@ -1355,7 +1508,7 @@ func (d *Driver) afterFight(ctx context.Context) error {
 			return nil
 		}
 		if err := d.g.Target(ctx, add.GUID); err == nil {
-			if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
+			if err := d.order(ctx, "attack"); err != nil {
 				return err
 			}
 		}

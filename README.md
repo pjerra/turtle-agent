@@ -485,7 +485,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   portal. `notes` (plan and leg) are free text for people.
 - A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
-  [Dungeon runs](#dungeon-runs)); run `steps` in order; walk to `boss.position` and kill the
+  [Dungeon runs](#dungeon-runs); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
+  a member of the group, for packs of one entry that stand closer together than that); run `steps` in order; walk to `boss.position` and kill the
   boss. Each part is optional, but a leg needs at least one of pull groups, steps and a boss. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
   in order.
@@ -532,7 +533,11 @@ until the first has ended. Plans are read from `dungeons_dir` (settings; default
 Before a run: the leader is in a group (`invite`, or hired companions), is in the world, and stands on the plan's map: either
 already inside the dungeon, or `"teleport": true`, which GM-teleports it to the start (the `entrance` for leg 0, else the place the
 previous leg ended), summons every companion (`.bot summon`) and waits up to 60 s for them to arrive. `from_leg` starts at another
-leg, by number or by name (`"from_leg": "keystone"`). The leader is expected to be a GM account (the run sends `.gm visible on`
+leg, by number or by name (`"from_leg": "keystone"`). **`from_leg` assumes the legs before it are cleared**: without `teleport` the party
+walks from where it stands (from the entrance too) to the leg, and fights the packs of the earlier legs on the way as walk aggros (the
+second live run: `from_leg keystone` from the entrance was a 167 s walk with 7 such fights); the report says so in a note. To start clean
+at the leg, run with `"teleport": true` next to `from_leg`: the leader is GM-teleported to the leg start (the place the previous leg ended),
+the party is summoned, and the run is flagged `teleport_to_leg_start` in `gm_shortcuts`. The leader is expected to be a GM account (the run sends `.gm visible on`
 first, because a hidden GM changes what mobs and companions do); a run on a player account works without teleport and revive.
 
 What the driver does for each action of the plan (the stepper decides which):
@@ -554,12 +559,29 @@ What the driver does for each action of the plan (the stepper decides which):
   (`.bot action attack` on the nearest attacker, again every 10 s, until nothing has hit the party for 3 s, then the usual wait for
   loot and adds), and the same walk is made again. It does not use up a walk try, counts as an extra pull of the leg (`pulls`, and
   `walk_aggros` for how often), and is noted. More than 12 such fights in one walk, or a fight of over 300 s, fail the run.
-- **pull** targets the nearest living unit of the group's entries that stands near the plan's positions (walking up to within 38 yd of
-  it first when it is out of 45 yd, along the navmesh path) and says `.bot action pullback` in party chat: the tank pulls and
+- **pull** targets the nearest living unit of the group's entries that stands within 25 yd of one of the plan's positions (the group's optional `radius`
+  replaces the 25: the two rows of Ambushers in the Uldaman Keystone room use 10 so that each group takes its own) or is
+  fighting the party (a pulled mob leaves its spawn), walking up to within 38 yd of it first when it is out of 45 yd, along the navmesh
+  path. **A mob of the same entry in another pack, farther from the positions, is not a member**: a group whose own mobs are all dead
+  (an earlier walk aggro killed them: a corpse within the group's radius of a position says so, a corpse elsewhere does not, and with
+  nothing of the group in view the party walks to the positions first) is "taken as already dead" and nobody is sent at the distant one (second live run: a Rockchewer 42 yd
+  away that the tank could not reach). The leader says `.bot action pullback` in party chat: the tank pulls and
   brings the mob back, the others join after 5 s. About every 10 s of fighting the leader targets the nearest fighting pack member
   and says `.bot action attack`. The fight is won when every pack member in sight is dead; units of `skip` are never part of it.
   A pull that draws no fight in 25 s, or whose mobs stop fighting for 12 s (evade), is tried again (`.bot action follow` first), 3 pulls
-  at most. Hostile units still hitting the party after the fight (adds) are fought too, for up to 15 s.
+  at most; a pull in which a member died is progress and does not use up a try (stationary mobs with no group link come one or two at a
+  time: the six Stonevault Ambushers of the Uldaman Keystone room). A mob that drew no fight or evaded with nothing dying (a zero-kill `noEngage`/`evaded` pull) is passed over for
+  the next try when the group has another member; that is this group's alone, a later group whose area holds the mob still pulls it.
+  Mobs the bots refused (below) are skipped by the whole run. When the tries are used up and the group made progress, it counts as cleared with a note (the leftovers
+  aggro on the walks after); with no progress at all the run fails. Hostile units still hitting the party after the fight (adds) are
+  fought too, for up to 15 s.
+- **refusals.** The driver reads what the bots answer to its orders (`TBM:ACTION_ERR|<command>|<code>|<message>` in the event log, and the
+  whisper `<mob> is evading` / `is dead` of an attack order; that whisper is read from the module source, not yet seen in a capture) and keeps them in the report's `refusals[]` (`intent`, `code`, `message`,
+  `leg`, `count`, `first`). `pullback`/`pull` `unreachable` (the tank cannot start moving to a firing position) or an evading mob: the
+  mob is skipped for the rest of the run (noted), the next member of the group is pulled, and a group with nothing left to pull counts as
+  cleared with a note after the bounded tries. `dead-target`/`no-target` on a pull: the target is picked again (3 times at most, not a
+  try). The same on an assist `attack` order: sent again at once, twice; a bot that keeps refusing is then asked on the usual 10 s
+  cadence. The whisper names no command, so it counts as the answer to the last order the driver gave, and only from a party member. `no-tank` and other codes are only recorded.
 - **kill_boss** does the same for each entry of `boss.first`, then for the boss; the whole encounter counts as one fight, so
   brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss that is not in view fails the run.
 - **rest gate**, at the start of each leg and before every pull and boss. It starts only when the party is out of combat: while a fight
@@ -586,8 +608,14 @@ What the driver does for each action of the plan (the stepper decides which):
   mistaken for a player's run. The server answers a refused `.aura` only in chat, so the driver looks at the companion's auras a moment
   after the first batch: a buff that is not there ends the run with `buffs: GM .aura on <name> had no effect ... the leader must be a GM
   with developer security`. Each `.aura` goes out together with the selection of its companion as one session operation, so a `target` call or the addon
-  host cannot move the buff onto another unit mid-batch. A companion out of view (right after a teleport) is looked at again for up to
-  10 s; if none of them could be checked in that time the run fails (`could not check the GM .aura`), if only some could the others are noted.
+  host cannot move the buff onto another unit mid-batch. The first `.aura` of each companion is checked: the companion must be in the leader's object store and within 80 yd before it
+  is sent (right after a teleport it may not be: all are waited for up to 10 s together; a companion that never shows gets nothing and is
+  noted, and if none shows the run fails with `could not check the GM .aura`), and it must then show the aura within 3 s. If it does not
+  (the second live run: the first `.aura` of the 4th companion landed on the leader, whose own aura list gained it), the selection is made
+  again and the command is sent once more; a second miss stops the batch and fails the run (`... the aura landed on the leader itself,
+  so the selection of <name> did not hold`) once the 10 s (counted from the first command) are up. "Landed on the leader" is judged against
+  the leader's auras from before the batch, so an aura the leader already had is no misfire. An aura on the leader never counts as
+  success; every resend is a `buff` entry too.
   A companion whose 32 positive aura slots are full cannot take more, which looks like a refusal: use fewer spells (the list holds at
   most 20 and the bot has buffs of its own). Recommended setup: hire the companions 3-5 levels above
   the dungeon (a boost on top of an under-levelled party only hides it) and list that in `setup`.
@@ -601,10 +629,10 @@ without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeo
 
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
 progress), `error`, `wipes`, `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
-`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`), `notes[]`, `gm_shortcuts[]`: every GM action the run took instead of
+`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
 playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `leg`, `detail` and `at`, `buffs[]` (the spells asked for, `id` and `name`), and
 `setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",
-"levelup -15", "tbm summon all"]`; at most 40 entries of up to 200 characters; empty when none were given). Nothing checks or sends
+"levelup -15", "tbm summon all"]`; at most 40 entries of up to 400 characters; empty when none were given). Nothing checks or sends
 them: they are there so that a report shows what a run was started with. A run with any `gm_shortcuts` or `setup_shortcuts` is not a run
 a player could have done.
 

@@ -56,6 +56,7 @@ type Action struct {
 	Entries   []uint32            // pull: the group's entries
 	Positions []Point             // pull: where its members stand
 	Ambush    bool                // pull: the group is stealthed (PullGroup.Ambush)
+	Radius    float32             // pull: PullGroup.Radius, 0 for the default
 	Skip      []uint32            // pull and boss: entries not to wait for
 	Boss      *Boss               // boss
 	Object    *objects.GameObject // use
@@ -198,7 +199,7 @@ func (s *Stepper) next() Action {
 				continue
 			}
 			g := l.PullGroups[s.idx]
-			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Skip: l.Skip,
+			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
 				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
 		case phSteps:
 			if s.idx >= len(l.Steps) {
