@@ -51,6 +51,13 @@ func FuzzParseNameQueryResponse(f *testing.F) {
 func FuzzParseCreatureQueryResponse(f *testing.F) {
 	fuzzParse(f, game.ParseCreatureQueryResponse, opcode.SMSGCreatureQueryResponse)
 }
+func FuzzParseGameObjectQueryResponse(f *testing.F) {
+	fuzzParse(f, game.ParseGameObjectQueryResponse, opcode.SMSGGameobjectQueryResponse)
+}
+func FuzzParseGameObjectAnim(f *testing.F) {
+	fuzzParse(f, func(b []byte) (game.GameObjectAnim, error) { return game.ParseGameObjectAnim(b, true) },
+		opcode.SMSGGameobjectCustomAnim, opcode.SMSGGameobjectResetState)
+}
 
 // Movement orders and world changes.
 

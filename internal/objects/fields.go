@@ -74,3 +74,37 @@ const (
 	BagFirst      uint8 = 19
 	BagEnd        uint8 = 23
 )
+
+// Game object fields (Objects/UpdateFields.h:283-304, EGameObjectFields; OBJECT_END = 0x06).
+const (
+	GOCreatedBy uint16 = 0x06 // OBJECT_FIELD_CREATED_BY, 2 words: the summoner of a spawned object
+	GODisplayID uint16 = 0x08
+	GOFlags     uint16 = 0x09 // GO_FLAG_* (SharedDefines.h:293-299)
+	GOState     uint16 = 0x0E // GOState (GameObject.h:601-605)
+	GOPosX      uint16 = 0x0F // POS_X..POS_Y..POS_Z, FACING: four floats
+	GODynFlags  uint16 = 0x13 // GO_DYNFLAG_LO_* (SharedDefines.h:326-328)
+	GOFaction   uint16 = 0x14
+	GOTypeID    uint16 = 0x15 // GameobjectTypes (SharedDefines.h:253-284)
+	GOLevel     uint16 = 0x16
+)
+
+// Game object flags (SharedDefines.h:293-299).
+const (
+	GOFlagInUse        uint32 = 0x01 // disables interaction while animated
+	GOFlagLocked       uint32 = 0x02 // needs a key, spell or event
+	GOFlagInteractCond uint32 = 0x04 // cannot interact (condition)
+	GOFlagNoInteract   uint32 = 0x10 // players cannot interact
+)
+
+// Game object states (GameObject.h:601-605).
+const (
+	GOStateActive    uint32 = 0 // used: a closed door open
+	GOStateReady     uint32 = 1 // ready: a closed door closed
+	GOStateActiveAlt uint32 = 2 // used the alternative way
+)
+
+// Game object types (SharedDefines.h:253-284).
+const (
+	GOTypeDoor    uint8 = 0
+	GOTypeGeneric uint8 = 5
+)
