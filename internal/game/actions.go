@@ -10,6 +10,9 @@ import (
 // BuildSetSelection is CMSG_SET_SELECTION (MiscHandler.cpp:488-493).
 func BuildSetSelection(g packet.GUID) []byte { return packet.NewWriter().GUID(g).Bytes() }
 
+// BuildStandStateChange is CMSG_STANDSTATECHANGE (MiscHandler.cpp HandleStandStateChangeOpcode): the u32 stand state to take, 0 to stand.
+func BuildStandStateChange(state uint32) []byte { return packet.NewWriter().U32(state).Bytes() }
+
 // BuildAttackSwing is CMSG_ATTACKSWING (CombatHandler.cpp:30-33); CMSG_ATTACKSTOP is empty.
 func BuildAttackSwing(g packet.GUID) []byte { return packet.NewWriter().GUID(g).Bytes() }
 

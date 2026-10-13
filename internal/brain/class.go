@@ -39,7 +39,7 @@ type ClassInfo struct {
 	ID    uint8
 	Name  string
 	Power uint8 // the primary power: mana, rage or energy
-	// Interrupts are the spells the class interrupts with, best first. Rogue and shaman are listed for step 4; no preset
+	// Interrupts are the spells the class interrupts with, best first. Rogue and shaman are listed for step 4b; no preset
 	// uses them yet.
 	Interrupts []InterruptSpell
 	// Drinks and ConjuredDrinks: the class drinks at rest (mana users), and conjures its own water (mages).
@@ -48,6 +48,11 @@ type ClassInfo struct {
 	ManaPotions bool
 	// Taunt is the class's single-target taunt, for a player who tanks (empty: the class does not tank).
 	Taunt string
+	// Heals is what the healer role casts with (heal.go); nil: the class does not heal.
+	Heals *HealKit
+	// Band is the distance from the fight's mob (min, max yards) a ranged class of this row stands at in ranged_position; zero: the
+	// mage's 20 to 28. A class whose main spell reaches less than a Frostbolt (the shadow priest's Mind Flay, 20 yd) sets a nearer one.
+	Band [2]float64
 }
 
 // Stance auras of the warrior.
@@ -71,7 +76,8 @@ var classTable = map[uint8]ClassInfo{
 	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning"},
 	ClassHunter:  {ID: ClassHunter, Name: "hunter", Power: powerMana, Drinks: true, ManaPotions: true},
 	ClassRogue:   {ID: ClassRogue, Name: "rogue", Power: powerEnergy, Interrupts: []InterruptSpell{{Spell: "Kick"}}},
-	ClassPriest:  {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true},
+	ClassPriest: {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &priestHeals, Band: [2]float64{14, 19},
+		Interrupts: []InterruptSpell{{Spell: "Silence"}}}, // a talent (spell 15487): the spellbook has it or it is skipped
 	ClassShaman: {ID: ClassShaman, Name: "shaman", Power: powerMana, Drinks: true, ManaPotions: true,
 		Interrupts: []InterruptSpell{{Spell: "Earth Shock"}}},
 	ClassMage: {ID: ClassMage, Name: "mage", Power: powerMana, Drinks: true, ConjuredDrinks: true, ManaPotions: true,

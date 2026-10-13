@@ -37,8 +37,9 @@ func TestBrainStartRefusals(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{}`, "name at least one"},
 		{`{"strategies":[]}`, "name at least one"},
-		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, `},
-		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer": the healer role is not implemented yet`},
+		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, holy_priest, shadow_priest, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, `},
+		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer" does not match the strategies`},
+		{`{"strategies":["mage_rest"],"role":"healer"}`, `role "healer" needs the role_healer strategy`},
 		{`{"strategies":["arms_warrior"],"role":"tank"}`, `role "tank" does not match the strategies`},
 		{`{"strategies":["frost_mage"],"role":"bard"}`, `role "bard": want dps, tank or healer`},
 		{`{"strategies":["mage_frost"]}`, "face_target"},
@@ -150,10 +151,11 @@ func TestDungeonRunBrainOption(t *testing.T) {
 	if errCode(bad) != rpc.CodeInvalidParams || !strings.Contains(bad["error"].(map[string]any)["message"].(string), "brain: strategy") {
 		t.Fatalf("%v", bad)
 	}
-	// A preset of any role is a brain option; the healer's stub is refused up front, not at the first rest gate.
-	bad = r.call("dungeon_run", `{"name":"rig","brain":"role_healer"}`)
-	if errCode(bad) != rpc.CodeInvalidParams || !strings.Contains(bad["error"].(map[string]any)["message"].(string), "not implemented yet") {
-		t.Fatalf("%v", bad)
+	// A preset of any role is a brain option: the priest presets resolve (the run itself is not started here).
+	for _, n := range []string{"holy_priest", "shadow_priest", "role_healer"} {
+		if _, _, err := brain.Resolve([]string{n}); err != nil {
+			t.Fatalf("%s: %v", n, err)
+		}
 	}
 	// A brain started by hand blocks a run that wants its own.
 	if out := r.call("brain_start", `{"strategies":["frost_mage"]}`); out["error"] != nil {

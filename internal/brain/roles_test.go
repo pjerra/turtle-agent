@@ -26,8 +26,13 @@ func TestRoleResolution(t *testing.T) {
 		{Params{Strategies: []string{"tank_warrior"}, Role: "dps"}, "", `role "dps" does not match the strategies`},
 		{Params{Strategies: []string{"frost_mage"}, Role: "tank"}, "", `role "tank"`},
 		{Params{Strategies: []string{"mage_rest"}, Role: "tank"}, "", `role "tank" needs the role_tank strategy`},
-		{Params{Strategies: []string{"frost_mage"}, Role: "healer"}, "", "the healer role is not implemented yet"},
-		{Params{Strategies: []string{"role_healer"}}, "", `strategy "role_healer" is not implemented yet`},
+		{Params{Strategies: []string{"holy_priest"}}, "healer", ""},
+		{Params{Strategies: []string{"holy_priest"}, Role: "Healer"}, "healer", ""},
+		{Params{Strategies: []string{"shadow_priest"}}, "dps", ""},
+		{Params{Strategies: []string{"role_healer"}}, "healer", ""},
+		{Params{Strategies: []string{"frost_mage"}, Role: "healer"}, "", `role "healer" does not match the strategies`},
+		{Params{Strategies: []string{"holy_priest"}, Role: "dps"}, "", `role "dps" does not match the strategies`},
+		{Params{Strategies: []string{"mage_rest"}, Role: "healer"}, "", `role "healer" needs the role_healer strategy`},
 		{Params{Strategies: []string{"role_tank", "role_dps"}}, "", "play more than one role"},
 		{Params{Strategies: []string{"frost_mage"}, Role: "bard"}, "", `role "bard": want dps, tank or healer`},
 	} {
@@ -52,20 +57,20 @@ func TestRoleResolution(t *testing.T) {
 	}
 }
 
-// Resolve alone refuses what could never run, so that dungeon_run's brain option fails at once.
-func TestResolveRefusesTheStubAndMixedRoles(t *testing.T) {
+// Resolve alone refuses what could never run (strategies of two roles), so that dungeon_run's brain option fails at once.
+func TestResolveRefusesMixedRoles(t *testing.T) {
 	for _, c := range []struct {
 		names []string
 		want  string
 	}{
-		{[]string{"role_healer"}, "not implemented yet"},
 		{[]string{"tank_warrior", "frost_mage"}, "play more than one role"},
+		{[]string{"holy_priest", "combat_dps"}, "play more than one role"},
 	} {
 		if _, _, err := Resolve(c.names); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%v: %v", c.names, err)
 		}
 	}
-	for _, n := range []string{"tank_warrior", "arms_warrior", "fury_warrior", "frost_mage"} {
+	for _, n := range []string{"tank_warrior", "arms_warrior", "fury_warrior", "frost_mage", "holy_priest", "shadow_priest", "role_healer"} {
 		if _, _, err := Resolve([]string{n}); err != nil {
 			t.Errorf("%s: %v", n, err)
 		}

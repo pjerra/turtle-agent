@@ -255,7 +255,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
-| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`; empty takes the role of the strategies, `dps` when none names one; it must fit them, and `healer` is refused: not implemented), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
@@ -951,7 +951,7 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 3 s; a server that says no wand is equipped backs it off for 30 s.
 
 **Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
-- presets: `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`; the warrior presets are in "Roles and classes" below;
+- presets: `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`; the warrior presets are in "Roles and classes" and the priest presets in "The healer and the priest" below;
 - `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
   leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
@@ -978,7 +978,7 @@ for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by han
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: the other seven classes and the healer role (step 4 of #80). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+idles (`dead`). Not in this step: the other classes (step 4b of #80; the priest and the healer role are in "The healer and the priest" below). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
 `docs/LIVE-CHECKS.md`.
 
 ### Roles and classes (step 3c)
@@ -986,7 +986,7 @@ idles (`dead`). Not in this step: the other seven classes and the healer role (s
 **Roles.** A role is a set of strategies that share a discipline; a strategy names its role, and `brain_start.role` (`Params.Role`) is
 checked against the active strategies: left empty it takes the role they play (`dps` when none names one), a role that does not fit
 them is refused (`role "tank" does not match the strategies [...], which play dps`), more than one role among the strategies is
-refused, and so is `healer`.
+refused. `healer` needs the `role_healer` strategy (preset `holy_priest`).
 - `role_dps` (the name of `combat_dps`): wait out the opening delay, veto area abilities while a mob is loose, fight the tank's mob.
 - `role_tank`: the player holds the mobs. The fight's mob is **a loose add first** (a mob in combat within 30 yd that attacks a party
   member), then the nearest mob that attacks the player, then the player's selected target in combat. There is no opening delay. A loose add is answered with the
@@ -994,8 +994,8 @@ refused, and so is `healer`.
   paladin and druid, which have no preset yet). **A tank only fights mobs that are already in combat; it never opens a pull** (Charge works in
   Battle Stance only, and nothing in the role walks up to a sleeping mob): the dungeon driver or a companion tank bot pulls, the
   tank player picks the mob up when it is in combat and attacks a party member or the player, or the player has it selected.
-- `role_healer`: a stub. Naming it, or asking for `role healer`, fails with `the healer role is not implemented yet (step 4 of issue
-  #80)`; `dungeon_run`'s `brain` option is refused the same way, at once. Nothing heals yet; a TortoiseBots healer in the party does.
+- `role_healer`: the player heals the party; see "The healer and the priest" below. Its place in the class tables is the class's `Heals` row (a kit of heal, HoT and
+  dispel spell names): the role is the same for every healing class, the class is a row.
 
 **Class tables** (`internal/brain/class.go`). What the brain needs to know of a class that is not a rotation: the power it plays on, the
 spells it interrupts with (and the stances those work in), whether it drinks and uses mana potions, whether it conjures its own water
@@ -1004,7 +1004,7 @@ spells it interrupts with (and the stances those work in), whether it drinks and
 `combat_consumables` take their drink and mana-potion tables from the leader's class (the mage's conjured waters are the mage's row;
 a warrior drinks nothing, a priest only vendor drinks). `mage_interrupt` is the same strategy under the mage's name, and `frost_mage`
 is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick) and shaman (Earth Shock)
-rows are there for step 4; no preset uses them. The brain **does not change stance for an interrupt**: a stance change costs a warrior
+rows are there for step 4b; no preset uses them (the priest's Silence is used by `shadow_priest`). The brain **does not change stance for an interrupt**: a stance change costs a warrior
 its rage (without Tactical Mastery) and Pummel costs rage. It uses the highest rank the stance allows: the core's data lets Pummel 6552 work in
 Battle and Berserker Stance and the Turtle rank 13491 in Battle Stance only (`SpellStances`), Shield Bash in Battle and Defensive Stance; a
 tank in Defensive Stance has Shield Bash only (it needs a shield: the server's refusal backs it off).
@@ -1075,6 +1075,80 @@ The warrior presets end with `rest_eat` (eat below 85% health at a rest gate), a
 Examples: `brain_start {"strategies":["arms_warrior"],"tank":"<name>"}`, `dungeon_run {"name":"uldaman","brain":"fury_warrior"}`,
 `brain_start {"strategies":["tank_warrior"]}`. In a dungeon run the brain moves too (the driver holds the move lock around its own walks), so the melee
 positioning works there as well.
+
+### The healer and the priest (step 4a)
+
+`brain_start {"strategies":["holy_priest"]}` / `dungeon_run {"name":"uldaman","brain":"holy_priest"}` play the leader as a healer;
+`shadow_priest` is the damage preset of the same class. The healer role is written once (`internal/brain/heal.go`) and takes its spells from
+the class row (`ClassInfo.Heals`, a `HealKit`: direct heals, the quick one, the HoT, the dispels), so the other healing classes are rows
+(step 4b). Ideas from mod-playerbots' healing (the `hp% + distance/10` triage, the health and mana bands, dispel by type; GPL-2.0+,
+numbers and ideas only, no code). Amounts come from the spell metadata (`internal/spells` effects: the core rolls base+1 to base+sides, so the average is base + (sides+1)/2, or base+1 for an effect with no die; then the level
+scaling), without the player's bonus healing, which the agent cannot read.
+
+**Triage** (`role_healer`). Every online, living party member **in view, the player included**, within 38.5 yd and in sight (the navmesh
+ray, the 250 ms line-of-sight cache; a server refusal for line of sight is remembered for a few seconds, as for a mob) is scored
+`hp% + distance/10`, minus 8 for the tank; the lowest score is healed first. The hp% counts the heals other party members have in
+flight on the member (read off their cast), and a member is a candidate below 85% in a fight (the tank below 90%), below 90% at a
+rest gate (the dungeon driver's rested threshold), and below 70% (tank 75%, never below 25%) when mana is short. Relevance by band:
+under 25% (the tank under 35%) 41, which also cuts a walk short but never the heal that is being cast; under 45% 28; under 65% 20;
+above that 10, or 8 at a rest gate so that drinking comes first. Nobody in reach but a member under 70% out of reach: `heal_approach` walks
+toward it (the spot search covers 24 yd of walking).
+
+**The spell** is chosen by the deficit: all known ranks of the kit's direct heals (ranks more than 30 levels under the player are left
+out, the highest of each name is always in), the **smallest that covers 90% of the deficit**, else the biggest. A member under 45%
+gets the quickest that covers it (else the best health per second), under 25% (tank 35%) the biggest Flash Heal. A fast heal is not
+used for a member who is not low, nor under 40% mana unless the member is under 35%. **No heal is started** on a deficit under half of
+the smallest heal in play, and damage taken in the last 3 s is added to the deficit for the time the heal takes (up to 30% of the
+member's health).
+
+**HoT.** Renew on the tank in combat, without it, under 98% health or losing health, with 40% mana or more (relevance 9.5, under every heal).
+
+**Dispels** (`dispel_cc` 25, `dispel_debuff` 11). A harmful aura on a member whose spell has a dispel type the class removes: Dispel Magic
+for magic, Abolish Disease (else Cure Disease) for disease; no poison or curse cure for a priest. Crowd control (charm, fear, sleep, stun,
+polymorph, horror) first, then the tank, then the lowest health. Urgent dispels need 20% mana, any other 40%. The member must be within **the dispel's own range** (30 yd, less a yard), not the heal's: for crowd control out of
+that range the healer walks into it (`heal_approach`), for a minor debuff it does not. One try per aura per
+4 s (it may resist), nothing while Abolish Disease is already on the member, and **Mutating Injection is never dispelled** (the do-not-dispel list, as in
+TortoiseBots).
+
+**Position** (`healer_position`). In a fight with a tank in view and no mob on the player: 20 to 30 yd from the tank (a 3 yd slack),
+with sight of the tank, **out of the fight's mob's front and of ground effects**, and, when the mesh allows, with sight of every other member in
+view (else of the tank alone). It ranks at 24 under the low-health heals and walks like the mage's steps (`no_move`, the move lock and a missing
+navmesh switch it off). A mob that picks the healer is brought to the tank (`run_to_tank`, as for the mage). The walk to the band is **not taken when it would
+take the healer out of reach (34.5 yd) of the member it has work for** (a heal, a dispel, or a member it walked toward): otherwise it would walk back before the heal is cast.
+
+**Sitting** (engine level, `stand.go`, for every class). The core refuses every cast of a seated player (`not_standing`) and does not stand it up. While the Food or Drink
+aura is up and nothing is going on, no cast is sent (buffs, top-up heals, dispels wait for the end of the meal). A cast in a fight, or of relevance 28 or more
+(a heal under 45% health), breaks the meal: the brain stands the player up (`CMSG_STANDSTATECHANGE`, the optional `Stander` half of the game, `Session.Stand`) as that tick's action
+`stand_up`, and the cast follows on the next. A player who sits with no meal to finish (the aura ended) is stood up for any cast. `not_standing` is also a 1 s back-off.
+
+**Rest.** `rest_drink` (the healer drinks below 80% mana at a rest gate; the driver wants 75%; a damage dealer below 65%) and `rest_eat`.
+`combat_consumables` drinks a mana potion below 10% mana in a boss fight. Below 15% mana the wand takes over (`wand`).
+
+**Priest** (`internal/brain/priest.go`; spell data pinned by `TestPriestSpellData`).
+
+| Strategy | Ability (relevance) | When |
+| :--- | :--- | :--- |
+| `role_healer` | Lesser Heal, Heal, Greater Heal, Flash Heal (10 to 41) | triage above |
+| | Renew (9.5), Dispel Magic / Abolish Disease / Cure Disease (25, 11) | HoT and dispels above |
+| `priest_holy` | Power Word: Shield (26) | a member that lost a quarter of its health within 3 s and is under 85%; 20% mana at least |
+| | Power Word: Shield (21) | the tank, once it has a living mob as its target (the pull) or a fight is on, with 50% mana or more |
+| | | not on a member with a shield or **Weakened Soul**, and not again for 6 s while the aura is awaited |
+| `priest_defense` | Fade (23) | a mob has the priest as its target, in combat |
+| | Psychic Scream (43) | 2 or more mobs on the priest within 8 yd, the priest under 70% health, and **no loose mob** within 30 yd (one that is not in combat, or fights someone outside the party: a feared mob runs into it) |
+| `priest_buffs` | Inner Fire (13), Power Word: Fortitude on the priest and every member in view (12) | out of combat at a rest gate, 30% mana or more, not in Shadowform (a Holy spell). The shadow priest buffs first and takes the form when nothing is missing (in a fight the form does not wait); the brain cannot leave the form, so a buff that runs out while in it is not renewed |
+| `priest_shadow` | Shadowform (16, cast by id 15473) | known and not on; out of combat at a rest gate or in a fight |
+| | Vampiric Embrace (15), Shadow Word: Pain (14) | on the fight's mob; not on a mob under 30% / 25% health |
+| | Mind Blast (13), Mind Flay (10) | on cooldown (8 s); the filler; Smite (when not in Shadowform) when Mind Flay is not known or out of reach (20 yd) |
+| | Power Word: Shield on the priest (24) | a mob on the priest, under 80% health, not in Shadowform |
+| `class_interrupt` | Silence (40) | a talent; the class row's interrupt, for `shadow_priest` only |
+
+Presets: `holy_priest` = `role_healer` + `priest_holy` + `priest_defense` + `priest_buffs` + `healer_position` + `avoid_ground` +
+`combat_consumables` + `wand` + `rest_eat` + `rest_drink`; `shadow_priest` = `combat_dps` + `priest_shadow` + `priest_defense` +
+`priest_buffs` + `ranged_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `wand` + `rest_eat` + `rest_drink`. The shadow priest stands
+14 to 19 yd from the mob (the class row's `Band`; the mage's is 20 to 28) because Mind Flay reaches 20 yd. `dungeon_run`'s `brain` option takes either.
+The dungeon driver's own orders are unchanged: a priest leader in a TortoiseBots party that has its own healer bot has two healers; the triage
+counts the other's heals in flight, so they do not heal the same member twice. Not in this step: Prayer of Healing, resurrecting a dead member,
+Divine Spirit and Shadow Protection, and every other class (step 4b).
 
 ## Vendors, trainers and quests
 

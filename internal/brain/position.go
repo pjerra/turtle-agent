@@ -35,16 +35,25 @@ func positionIssue(c *Ctx) string {
 	if clear, known := c.LineOfSight(m); known && !clear {
 		return issueNoLOS
 	}
-	if m.Distance2D <= rangedMax+bandSlack && inFront(m, selfPos(c)) {
+	lo, hi := rangedBand(c)
+	if float64(m.Distance2D) <= hi+bandSlack && inFront(m, selfPos(c)) {
 		return issueFrontal
 	}
 	switch d := float64(m.Distance2D); {
-	case d < rangedMin-bandSlack:
+	case d < lo-bandSlack:
 		return issueTooClose
-	case d > rangedMax+bandSlack:
+	case d > hi+bandSlack:
 		return issueTooFar
 	}
 	return ""
+}
+
+// rangedBand is the distance from the fight's mob a ranged player of this class stands at: the class row's Band, else the mage's.
+func rangedBand(c *Ctx) (lo, hi float64) {
+	if b := c.Class().Band; b[1] > 0 {
+		return b[0], b[1]
+	}
+	return rangedMin, rangedMax
 }
 
 func fightMob(c *Ctx) *objects.Unit { return ValFight.Get(c).Mob }

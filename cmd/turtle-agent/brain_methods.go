@@ -183,6 +183,8 @@ func (g *sessionBrainGame) Target(ctx context.Context, t packet.GUID) error {
 
 func (g *sessionBrainGame) Attack(ctx context.Context) error { return g.cur().Attack(ctx) }
 
+func (g *sessionBrainGame) Stand(ctx context.Context) error { return g.cur().Stand(ctx) }
+
 func (g *sessionBrainGame) StopAttack(ctx context.Context) error { return g.cur().StopAttack(ctx) }
 
 func (g *sessionBrainGame) UseItem(ctx context.Context, entry uint32) error {

@@ -339,8 +339,9 @@ func forgetSpot(c *Ctx) {
 func bandSpot(c *Ctx, kind string, u *objects.Unit) (Vec3, bool) {
 	blocked := losBlocked(c, u)
 	return memoSpot(c, kind, u.GUID, func() (Vec3, bool) {
-		mid := (rangedMin + rangedMax) / 2
-		sp := spotSpec{kind: kind, center: unitPos(u), radii: []float64{rangedMin + 2, mid, rangedMax - 1}, target: u,
+		lo, hi := rangedBand(c)
+		mid := (lo + hi) / 2
+		sp := spotSpec{kind: kind, center: unitPos(u), radii: []float64{lo + 2, mid, hi - 1}, target: u,
 			base: bearing(unitPos(u), selfPos(c)),
 			extra: func(p Vec3) bool {
 				// Sight the mesh cannot deny but the server did: the spot must be somewhere else than here.
