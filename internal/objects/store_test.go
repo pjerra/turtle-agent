@@ -204,3 +204,28 @@ func TestMoveSplineFacesTravelDirection(t *testing.T) {
 		t.Fatalf("a vertical move keeps the facing: %+v", u)
 	}
 }
+
+// A unit that plays on another power than mana keeps its mana in UNIT_FIELD_POWER1: a druid in Cat Form (energy, power type 3) or Bear Form
+// (rage, 1) shows the form's power in Power and its mana in Mana.
+func TestManaOfAShapeshiftedUnit(t *testing.T) {
+	s := NewStore()
+	s.Apply([]Block{
+		createBlock(0x30, TypePlayer, 1, 1, map[uint16]uint32{UnitHealth: 500, UnitMaxHealth: 600, UnitBytes0: 3 << 24, UnitPower1: 700, UnitMaxPower1: 1000,
+			UnitPower1 + 3: 80, UnitMaxPower1 + 3: 100}),
+		createBlock(0x31, TypePlayer, 2, 2, map[uint16]uint32{UnitHealth: 500, UnitMaxHealth: 600, UnitBytes0: 0, UnitPower1: 300, UnitMaxPower1: 900}),
+		createBlock(0x32, TypePlayer, 3, 3, map[uint16]uint32{UnitHealth: 500, UnitMaxHealth: 600, UnitBytes0: 1 << 24, UnitPower1 + 1: 40, UnitMaxPower1 + 1: 100}),
+	})
+	byGUID := map[packet.GUID]Unit{}
+	for _, u := range s.Units(Filter{}, 0, 0, 0) {
+		byGUID[u.GUID] = u
+	}
+	if u := byGUID[0x30]; u.PowerType != 3 || u.Power != 80 || u.MaxPower != 100 || u.Mana != 700 || u.MaxMana != 1000 {
+		t.Fatalf("a cat: %+v", u)
+	}
+	if u := byGUID[0x31]; u.PowerType != 0 || u.Power != 300 || u.MaxPower != 900 || u.Mana != 0 || u.MaxMana != 0 {
+		t.Fatalf("a unit on mana has its mana in Power: %+v", u)
+	}
+	if u := byGUID[0x32]; u.PowerType != 1 || u.Power != 40 || u.Mana != 0 || u.MaxMana != 0 {
+		t.Fatalf("a warrior has no mana pool to show: %+v", u)
+	}
+}

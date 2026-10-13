@@ -39,8 +39,8 @@ type ClassInfo struct {
 	ID    uint8
 	Name  string
 	Power uint8 // the primary power: mana, rage or energy
-	// Interrupts are the spells the class interrupts with, best first. Kick (rogue) and Hammer of Justice (paladin, a stun) are used by
-	// the step-4b presets; Earth Shock (shaman) has no preset yet.
+	// Interrupts are the spells the class interrupts with, best first. Kick (rogue), Hammer of Justice (paladin, a stun) and Earth Shock (shaman)
+	// are used by the step-4b and 4c presets.
 	Interrupts []InterruptSpell
 	// Drinks and ConjuredDrinks: the class drinks at rest (mana users), and conjures its own water (mages).
 	Drinks, ConjuredDrinks bool
@@ -78,12 +78,12 @@ var classTable = map[uint8]ClassInfo{
 	ClassRogue:   {ID: ClassRogue, Name: "rogue", Power: powerEnergy, Interrupts: []InterruptSpell{{Spell: "Kick"}}},
 	ClassPriest: {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &priestHeals, Band: [2]float64{14, 19},
 		Interrupts: []InterruptSpell{{Spell: "Silence"}}}, // a talent (spell 15487): the spellbook has it or it is skipped
-	ClassShaman: {ID: ClassShaman, Name: "shaman", Power: powerMana, Drinks: true, ManaPotions: true,
+	ClassShaman: {ID: ClassShaman, Name: "shaman", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &shamanHeals, Band: [2]float64{14, 19}, // the shocks reach 20 yd
 		Interrupts: []InterruptSpell{{Spell: "Earth Shock"}}},
 	ClassMage: {ID: ClassMage, Name: "mage", Power: powerMana, Drinks: true, ConjuredDrinks: true, ManaPotions: true,
 		Interrupts: []InterruptSpell{{Spell: "Counterspell"}}},
 	ClassWarlock: {ID: ClassWarlock, Name: "warlock", Power: powerMana, Drinks: true, ManaPotions: true},
-	ClassDruid:   {ID: ClassDruid, Name: "druid", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Growl"},
+	ClassDruid:   {ID: ClassDruid, Name: "druid", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Growl", Heals: &druidHeals},
 }
 
 // ClassOf is the table row of a class id. An id the table does not know (0: the class field is not read yet) answers as a

@@ -87,6 +87,12 @@ type HealKit struct {
 	Direct []string
 	// Fast is the part of Direct that is quick and dear, kept for low health and used sparingly.
 	Fast []string
+	// DirectOnly is the part of Direct whose heal over time is left out of the amount (Regrowth: a direct heal and a HoT in one spell):
+	// the spell is chosen by what it heals at once.
+	DirectOnly []string
+	// Multi lists heals that hit several members (Chain Heal): a candidate only while two or more members in reach are hurt, since on a
+	// single member they cost more than the plain heal for the same health.
+	Multi []string
 	// HoT is the heal over time the healer keeps on the tank.
 	HoT string
 	// Dispels, in the order of preference.
@@ -133,6 +139,29 @@ func healAmount(m spells.Meta, level uint32) float64 {
 	return total
 }
 
+// healDirectAmount is what a heal spell heals at once, without its heal over time.
+func healDirectAmount(m spells.Meta, level uint32) float64 {
+	var total float64
+	for _, e := range m.Effects {
+		if e.Effect == 10 { // SPELL_EFFECT_HEAL
+			total += effectAmount(e, m, level)
+		}
+	}
+	return total
+}
+
+// membersHurt counts the members in reach and in sight who are below the combat threshold: the party that a heal on several members is for.
+func membersHurt(c *Ctx) int {
+	n := 0
+	for _, u := range healMembers(c) {
+		hp, max := memberHealth(c, u)
+		if max > 0 && hp/max*100 < healBelowPct && inHealReach(u) && sightOK(c, u) {
+			n++
+		}
+	}
+	return n
+}
+
 // healOption is a heal spell the player could cast now, as far as its own state tells.
 type healOption struct {
 	ID     uint32
@@ -142,6 +171,7 @@ type healOption struct {
 	Cost   float64
 	CastMS uint32
 	Fast   bool
+	Multi  bool // hits several members (HealKit.Multi)
 }
 
 // seconds the heal takes to land (at least the global cooldown).
@@ -160,7 +190,11 @@ func spellCost(c *Ctx, m spells.Meta) float64 {
 // healRankWindow levels of the player, and the highest rank of each name whatever its level.
 func healOptions(c *Ctx, kit *HealKit) []healOption {
 	var out []healOption
-	for _, name := range kit.Direct {
+	names := kit.Direct
+	if len(kit.Multi) > 0 && membersHurt(c) >= 2 {
+		names = append(slices.Clone(names), kit.Multi...)
+	}
+	for _, name := range names {
 		ranks := c.Spells.Ranks(name) // lowest first
 		for i, id := range ranks {
 			m, ok := spells.Lookup(id)
@@ -173,8 +207,12 @@ func healOptions(c *Ctx, kit *HealKit) []healOption {
 			if _, held := c.mem.held(id, c.Now); held || !Affordable(c, m) {
 				continue
 			}
-			out = append(out, healOption{ID: id, Name: name, Level: m.Level, Amount: healAmount(m, c.Self.Level), Cost: spellCost(c, m),
-				CastMS: m.CastMS, Fast: slices.Contains(kit.Fast, name)})
+			amount := healAmount(m, c.Self.Level)
+			if slices.Contains(kit.DirectOnly, name) {
+				amount = healDirectAmount(m, c.Self.Level)
+			}
+			out = append(out, healOption{ID: id, Name: name, Level: m.Level, Amount: amount, Cost: spellCost(c, m),
+				CastMS: m.CastMS, Fast: slices.Contains(kit.Fast, name), Multi: slices.Contains(kit.Multi, name)})
 		}
 	}
 	return out
@@ -236,8 +274,13 @@ func chooseHeal(c *Ctx, kit *HealKit, need, pct float64, tank bool) (healOption,
 		sort.SliceStable(opts, func(i, j int) bool { return opts[i].hps() > opts[j].hps() })
 		return opts[0], true
 	}
-	if len(covering) > 0 { // the smallest that covers
-		sort.SliceStable(covering, func(i, j int) bool { return covering[i].Amount < covering[j].Amount })
+	if len(covering) > 0 { // the smallest that covers; a heal on several members first, since two or more are hurt
+		sort.SliceStable(covering, func(i, j int) bool {
+			if covering[i].Multi != covering[j].Multi {
+				return covering[i].Multi
+			}
+			return covering[i].Amount < covering[j].Amount
+		})
 		return covering[0], true
 	}
 	sort.SliceStable(opts, func(i, j int) bool { return opts[i].Amount > opts[j].Amount })

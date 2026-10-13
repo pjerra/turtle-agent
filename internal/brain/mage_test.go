@@ -448,7 +448,7 @@ func TestEveryPresetAndStrategyBuilds(t *testing.T) {
 		standalone := map[string]bool{"combat_dps": true, "role_dps": true, "role_tank": true, "mage_rest": true, "avoid_ground": true, "ranged_position": true, "combat_consumables": true,
 			"mage_interrupt": true, "class_interrupt": true, "melee_position": true, "rest_eat": true,
 			"role_healer": true, "healer_position": true, "rest_drink": true, "hunter_position": true, "priest_holy": true, "priest_defense": true, "priest_buffs": true}
-		if !standalone[n] && err == nil {
+		if !standalone[n] && !standaloneClass[n] && err == nil {
 			t.Errorf("%s alone must be refused: it uses an action another strategy defines", n)
 		}
 		if err != nil && !strings.Contains(err.Error(), "face_target") && !strings.Contains(err.Error(), "step_away") {

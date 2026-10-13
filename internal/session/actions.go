@@ -340,6 +340,39 @@ func (s *Session) Cast(ctx context.Context, spell uint32, target packet.GUID) er
 	return err
 }
 
+// CancelAura removes one of the player's own auras, as a right-click on the buff does (CMSG_CANCEL_AURA, SpellHandler.cpp
+// HandleCancelAuraOpcode): a druid leaves its shapeshift form with it, a mount aura is the same packet (Dismount). The server refuses
+// an aura that cannot be cancelled and a harmful one without a word.
+func (s *Session) CancelAura(ctx context.Context, spell uint32) error {
+	if spell == 0 {
+		return errors.New("cancel_aura needs a spell id")
+	}
+	return s.send(ctx, opcode.CMSGCancelAura, game.BuildCancelAura(spell))
+}
+
+// mainHandSlot is the inventory slot of the main-hand weapon (EQUIPMENT_SLOT_MAINHAND, 1.12).
+const mainHandSlot = 15
+
+// CastOnMainHand casts an enchanting spell (a shaman's weapon imbue) at the weapon in the main hand: CMSG_CAST_SPELL with
+// TARGET_FLAG_ITEM and the weapon's guid, as the client sends it for a spell that needs an item. The server answers with the
+// enchantment or a spell failure (item gone) when the hand is empty.
+func (s *Session) CastOnMainHand(ctx context.Context, spell uint32) error {
+	if spell == 0 {
+		return errors.New("cast needs a spell id")
+	}
+	_, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		it, ok := s.store.ItemAt(s.selfGUID(), objects.BackpackBag, mainHandSlot)
+		if !ok {
+			return nil, errors.New("no weapon in the main hand")
+		}
+		return nil, s.conn.WritePacket(opcode.CMSGCastSpell, game.BuildCastSpellOnItem(spell, it.GUID))
+	})
+	return err
+}
+
 // CancelCast cancels the cast, channel or auto-repeat of spell, or of any spell when spell
 // is 0 (CMSG_CANCEL_CAST, SpellHandler.cpp:411-426, Object.cpp:5428-5440).
 func (s *Session) CancelCast(ctx context.Context, spell uint32) error {

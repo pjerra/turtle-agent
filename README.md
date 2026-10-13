@@ -796,7 +796,9 @@ flat cost against the power held; absent for a cost in percent of base mana).
 `ends_in_ms`), `last_cast` (`spell_id`, `name`, `ago_ms`), `last_failure` (`spell_id`, `name`, `reason` the
 `SpellCastResult`, `reason_name` such as `out_of_range`, `no_power`, `interrupted`, `ago_ms`), `failures` (count since
 login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_target`. `status` and the player's own
-`unit` row carry `combo_points`, `combo_target` and `gcd_ms` too.
+`unit` row carry `combo_points`, `combo_target` and `gcd_ms` too. A unit that plays on another power than mana (a druid in Cat Form: energy,
+in Bear Form: rage) shows that power in `power`/`max_power`; its mana pool is in `mana`/`max_mana` (`UNIT_FIELD_POWER1`, left out when
+the unit plays on mana or has none).
 
 | Event | `source` / data |
 | --- | --- |
@@ -981,7 +983,7 @@ for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by han
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: the other classes (shaman, warlock, druid; rogue, hunter and retribution paladin are in "Roles and classes", the priest and the healer role in "The healer and the priest"). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+idles (`dead`). Not in this step: the other classes (warlock and pets, holy paladin; rogue, hunter and retribution paladin are in "Roles and classes", the priest and the healer role in "The healer and the priest", the druid and the shaman in "The druid and the shaman"). Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
 `docs/LIVE-CHECKS.md`.
 
 ### Roles and classes (step 3c)
@@ -989,12 +991,12 @@ idles (`dead`). Not in this step: the other classes (shaman, warlock, druid; rog
 **Roles.** A role is a set of strategies that share a discipline; a strategy names its role, and `brain_start.role` (`Params.Role`) is
 checked against the active strategies: left empty it takes the role they play (`dps` when none names one), a role that does not fit
 them is refused (`role "tank" does not match the strategies [...], which play dps`), more than one role among the strategies is
-refused. `healer` needs the `role_healer` strategy (preset `holy_priest`).
+refused. `healer` needs the `role_healer` strategy (presets `holy_priest`, `resto_druid`, `resto_shaman`); `tank` needs `role_tank` (`tank_warrior`, `bear_tank_druid`).
 - `role_dps` (the name of `combat_dps`): wait out the opening delay, veto area abilities while a mob is loose, fight the tank's mob.
 - `role_tank`: the player holds the mobs. The fight's mob is **a loose add first** (a mob in combat within 30 yd that attacks a party
   member), then the nearest mob that attacks the player, then the player's selected target in combat. There is no opening delay. A loose add is answered with the
-  class's taunt at relevance 25 (`taunt`: Taunt, Defensive Stance only; the class table also has Hand of Reckoning and Growl for the
-  paladin and druid, which have no preset yet). **A tank only fights mobs that are already in combat; it never opens a pull** (Charge works in
+  class's taunt at relevance 25 (`taunt`: Taunt, Defensive Stance only; Growl, Bear Form only, for the druid; the class table also has Hand of Reckoning for
+  the paladin, which has no tank preset yet). **A tank only fights mobs that are already in combat; it never opens a pull** (Charge works in
   Battle Stance only, and nothing in the role walks up to a sleeping mob): the dungeon driver or a companion tank bot pulls, the
   tank player picks the mob up when it is in combat and attacks a party member or the player, or the player has it selected.
 - `role_healer`: the player heals the party; see "The healer and the priest" below. Its place in the class tables is the class's `Heals` row (a kit of heal, HoT and
@@ -1007,7 +1009,7 @@ spells it interrupts with (and the stances those work in), whether it drinks and
 `combat_consumables` take their drink and mana-potion tables from the leader's class (the mage's conjured waters are the mage's row;
 a warrior drinks nothing, a priest only vendor drinks). `mage_interrupt` is the same strategy under the mage's name, and `frost_mage`
 is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick), paladin (Hammer of Justice) and shaman (Earth Shock)
-rows are used by `combat_rogue`, `ret_paladin` and (Kick, Hammer of Justice) step 4b; the shaman has no preset yet (the priest's Silence is used by `shadow_priest`). The brain **does not change stance for an interrupt**: a stance change costs a warrior
+rows are used by `combat_rogue`, `ret_paladin` (step 4b) and `elemental_shaman`, `enhancement_shaman` (step 4c); the priest's Silence is used by `shadow_priest`. The brain **does not change stance for an interrupt**: a stance change costs a warrior
 its rage (without Tactical Mastery) and Pummel costs rage. It uses the highest rank the stance allows: the core's data lets Pummel 6552 work in
 Battle and Berserker Stance and the Turtle rank 13491 in Battle Stance only (`SpellStances`), Shield Bash in Battle and Defensive Stance; a
 tank in Defensive Stance has Shield Bash only (it needs a shield: the server's refusal backs it off).
@@ -1234,6 +1236,92 @@ type), blessings for the party, Redemption, Righteous Fury and Hand of Reckoning
 
 Examples: `brain_start {"strategies":["combat_rogue"],"tank":"<name>"}`, `brain_start {"strategies":["marksman_hunter"]}`,
 `dungeon_run {"name":"uldaman","brain":"ret_paladin"}`.
+
+### The druid and the shaman (step 4c)
+
+Both classes come as presets over the roles that exist: `resto_druid` and `resto_shaman` are `role_healer` with their class's kit
+(`ClassInfo.Heals`, `internal/brain/heal.go`), `bear_tank_druid` is `role_tank`, the other four are damage dealers. The rotations are ideas from
+mod-playerbots' druid and shaman behaviour (GPL-2.0+, ideas and numbers only, no code); every spell name, level, cost, range, cast time, form mask and totem slot is checked
+against the core's spell data (tortoise-wow 5d79486) in `TestDruidSpellData`, `TestFormGatesFollowTheCoreData`, `TestShamanSpellData` and
+`TestTotemSpellsFollowTheCoreData`. Spells are named and the highest known rank is cast, except the shapeshift forms and the totems, which are cast by id (their
+names are also those of passives and of the auras the totems cast).
+
+**Kits.** What the healer role takes from the class row. Two small additions to the kit serve these classes: `DirectOnly` (Regrowth is chosen by what it heals *at once*; its
+heal over time is left out of the amount) and `Multi` (Chain Heal is a candidate only while two or more members in reach are hurt, and then wins over a single-target heal that covers
+the deficit equally).
+
+| Class | Direct heals (fast) | HoT | Dispels |
+| :--- | :--- | :--- | :--- |
+| Druid | Healing Touch, Regrowth (Regrowth) | Rejuvenation on the tank, as a priest keeps Renew | Abolish Poison (leaves its cure on the target 8 s, as Abolish Disease), Cure Poison, Remove Curse |
+| Shaman | Healing Wave, Lesser Healing Wave (Lesser Healing Wave), Chain Heal with 2 or more hurt | none (the 1.12 shaman has no heal over time) | Cure Poison, Cure Disease |
+
+**Druid forms** (`internal/brain/druid.go`). A shapeshift form is an aura, like a warrior's stance. The core's rules (`SpellEntry::GetErrorAtShapeshiftedCast`) are what the presets follow, and
+they are in the data: every heal, cure, Mark of the Wild and Innervate carry `SPELL_ATTR_NOT_SHAPESHIFT` (barred in every form); Moonkin Form (stances bit `0x40000000`) is additionally barred for the heals by `stancesNot`;
+Wrath, Moonfire, Starfire, Insect Swarm, Thorns and Hibernate carry the flag that lets them be cast without a form and `stances` `0x40000000`, so they work in caster form and in Moonkin Form; the feral abilities need their form: Claw, Shred,
+Rake, Rip, Ferocious Bite and Tiger's Fury Cat (`0x1`), Maul, Swipe, Demoralizing Roar, Growl, Enrage, Frenzied Regeneration and Bash Bear or Dire Bear (`0x90`), Faerie Fire (Feral) any of the three (`0x91`).
+The abilities name their forms (`druidAbilityForms`, pinned by `TestFormGatesFollowTheCoreData` against the `stances` of every rank), and an ability in the wrong form is simply not possible.
+**The core also refuses every item used in a form** (`SPELL_FAILED_NO_ITEMS_WHILE_SHAPESHIFTED`, `SpellHandler.cpp`): food, drink, potions, bandages and healthstones.
+
+- *Leaving a form* is `CMSG_CANCEL_AURA` for the form's aura (`Session.CancelAura`, the optional `brain.AuraCanceller` half of the game, like `Stander`); a game without it never leaves a form. It is not a cast: no mana, no global cooldown, and the action holds itself for 2 s while the aura goes.
+- *Entering a form* is a cast of the form's spell **from caster form** (Cat Form 768, Bear Form 5487, Dire Bear Form 9634, each 35% of the base mana): from another form the unit's `power` is energy or rage, so the brain could not tell whether the mana is there. The brain reads the mana pool of a shifted druid off `Unit.Mana`.
+- *`druid_caster`* (resto, balance): in any form, `leave_form` at relevance 42, above an emergency heal (41), and a multiplier vetoes every cast while the aura is there (`vetoed:caster_form_only`).
+- *`druid_form_cat` / `druid_form_bear`* (feral, bear): `enter_form` (22) when a fight is on, or out of combat at a rest gate when nothing else is to be done (not at a meal, no Mark of the Wild to give, not hungry or thirsty); the bear takes Dire Bear Form when it has it. **In combat the druid never leaves
+  its form**, whatever its mana or health, and a multiplier vetoes the item actions (`eat`, `drink`, `healthstone`, `health_potion`, `bandage`, `mana_potion`) while it is in one. Out of combat, at a rest gate, it leaves the form (`leave_form`, 14) to **drink** (mana under 50% and a drink in the bags), to **eat**
+  (health under 85% and food in the bags) or to **buff** (Mark of the Wild missing on someone and mana 60% or more, because the shift back costs a third of it), and shifts back after. A form that is not its home form (Travel, Aquatic, Moonkin, Tree, or Bear for a cat) is left out of combat.
+
+| Strategy | Ability (relevance) | When |
+| :--- | :--- | :--- |
+| `druid_buffs` | Mark of the Wild (13) on the druid, then on each member in view | out of combat at a rest gate, caster form, 30% mana or more; the aura missing or under a minute left (Gift of the Wild counts) |
+| | Thorns (12) | the same, on the tank only. `druid_buffs_feral` (cat and bear) has no Thorns: it is barred in a form |
+| `druid_innervate` | Innervate (23) | on the druid itself in a fight, below 20% mana, caster form (barred in every form); level 40, a 6 minute cooldown |
+| `druid_balance` | Moonfire (15), Insect Swarm (14, if known) | on the fight's mob when it lacks the aura and is above 35% / 40% health; instants, so also on the move |
+| | Starfire (11) | not on the move, 35% mana or more, the mob above 30% health; else Wrath |
+| | Wrath (10) | the filler, not on the move |
+| | Entangling Roots (26) | a mob on the druid within 10 yd, the druid under 80% health, the mob not rooted; **outdoors only** (`SPELL_ATTR_OUTDOORS_ONLY`: indoors, in a dungeon, the server refuses it and the refusal backs it off 30 s). A rooted mob that stays on the druid is stepped away from (`step_away`, as for the mage's Frost Nova) |
+| `druid_cat` | Auto attack (19) | as the warrior's |
+| | Rip (18) | 4 combo points or more on the mob, no Rip on it, the mob above 40% health |
+| | Ferocious Bite (17) | 5 combo points, or 3 or more on a mob at or below 35% health |
+| | Faerie Fire (Feral) (16) | the mob lacks it and is above 50% health (it costs nothing) |
+| | Tiger's Fury (15) | energy 60% or more, the mob above 40% health, not up |
+| | Rake (14) | the mob lacks the bleed, is above 50% health, under 5 combo points |
+| | Shred (13), Claw (12) | builders; Shred only from **behind** the mob (more than 100 degrees round from the way it faces, a margin inside the half plane the server wants), Claw instead otherwise or when Shred is out of energy |
+| `druid_bear` | Auto attack (19) | |
+| | Swipe (15), Demoralizing Roar (13) | 2 or more mobs within 8 yd (Roar: some without the debuff) |
+| | Enrage (12) | rage under 10, health above 50%, a mob in reach |
+| | Maul (10) | from 40 rage, once per swing (held 1.5 s) |
+| | Frenzied Regeneration (43) | health under 35% and 10 rage or more |
+| `role_tank` | Growl (25) | a loose add; Bear Form only |
+
+Combo points are the player's own (`combo_points`/`combo_target`), counted only when they are on the fight's mob. **Never used:** Prowl, Pounce and Ravage (no stealth play), Hibernate (a sleeping mob that wakes pulls the pack), Moonkin Form, Tree Form, Travel Form and Aquatic Form, Rebirth, Tranquility, Gift of the Wild, Mangle, Bash and Challenging Roar.
+
+Presets: `resto_druid` = `role_healer` + `druid_caster` + `druid_buffs` + `druid_innervate` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `balance_druid` = `combat_dps` + `druid_caster` + `druid_balance` + `druid_buffs` + `druid_innervate` +
+`ranged_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `feral_cat_druid` = `combat_dps` + `druid_form_cat` + `druid_cat` + `druid_buffs_feral` + `melee_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`;
+`bear_tank_druid` = `role_tank` + `druid_form_bear` + `druid_bear` + `druid_buffs_feral` + `melee_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`. The balance druid keeps the mage's 20 to 28 yd band (Wrath and Starfire reach 30).
+
+**Shaman** (`internal/brain/shaman.go`).
+
+| Strategy | Ability (relevance) | When |
+| :--- | :--- | :--- |
+| `shaman_shield` | Water Shield (13) for a healer that has it, else Lightning Shield (13); 8 in combat | out of combat at a rest gate with 25% mana, or in a fight with 50% when the aura (charges used up) is gone |
+| `shaman_imbue` | Windfury Weapon, else Flametongue Weapon, else Rockbiter Weapon (12) | out of combat at a rest gate, 30% mana: **a cast at the weapon in the main hand** (`CMSG_CAST_SPELL` with `TARGET_FLAG_ITEM` and the weapon's guid: `Session.CastOnMainHand`, the optional `brain.WeaponImbuer`). The agent cannot read the enchantment off the weapon, so it remembers the imbue and renews it 5 minutes before its hour (the spell's base points are 3599) is up, once at the start of a run. A refusal (`item_gone`: no weapon) is tried again after a minute. The off hand is left alone |
+| `shaman_elemental` | Flame Shock (15) | the mob lacks it, is above 40% health, 30% mana or more; instant, also on the move |
+| | Chain Lightning (13) | 2 or more mobs within 12 yd of the fight's mob, not on the move, and `combat_dps`'s area veto allows it (no mob near the shaman that is not on the tank or the shaman) |
+| | Lightning Bolt (10) | the filler, not on the move |
+| `shaman_enhancement` | Auto attack (19), Stormstrike (17) | in reach; Stormstrike on its 8 s cooldown |
+| | Flame Shock (15), Earth Shock (13) | Flame Shock on a mob above 50% health; Earth Shock only above 60% mana (the shocks share a 6 s cooldown, so it is the filler between Stormstrikes) |
+| `class_interrupt` | Earth Shock (40) | elemental and enhancement: a heal, crowd-control or damage cast aimed at the party, within 20 yd |
+| `role_healer` | Healing Wave, Lesser Healing Wave, Chain Heal (10 to 41), Cure Poison / Cure Disease (25, 11) | triage above |
+
+**Totems.** A totem is a self cast that fills the slot of its element and unsummons what stood there: the spell's effects 87 (fire), 88 (earth), 89 (water) and 90 (air) are the four slot effects, and the spell needs the element's **totem tool in the bags**
+(Earth Totem 5175, Flame Totem 5176, Water Totem 5177, Air Totem 5178; `SPELL_FAILED_ITEM_GONE` otherwise: the brain looks in the bags first, and a refusal backs the spell off 60 s). There is no Totemic Recall in 1.12, so "recalling" a totem is dropping the next
+one. The totem manager (`shaman_totems_*`) keeps its own record of each slot (spell, place, time, and the lifetime the spell's data gives: Searing Totem 30 to 55 s, Mana Spring Totem and Healing Stream Totem 60 s, the earth and air totems 2 minutes) and drops a totem when
+a fight is on (the player in combat or a mob to fight), the tank in view is within 30 yd, the mob is above 25% health, the mana is 25% or more, and the slot is **empty, expired, more than 30 yd from the player (the party has moved on), or its creature has gone** (a creature whose name holds the totem's name and "Totem"
+within 8 yd of the drop; one whose name is not known yet counts as ours, so a slow name query cannot make the shaman drop the same totem again and again), never twice into one slot within 10 s, one per tick, in the order fire, air, water, earth. The preset decides the totems (the first of each list the spellbook has):
+`resto_shaman` Mana Spring Totem (else Healing Stream Totem) and Stoneskin Totem, at relevance 7, under every heal; `elemental_shaman` Searing Totem and Mana Spring Totem, at 11; `enhancement_shaman` Searing Totem, Windfury Totem (else Grace of Air Totem) and Strength of Earth Totem, at 11. **Ghost Wolf is never cast.**
+
+Presets: `resto_shaman` = `role_healer` + `shaman_shield` + `shaman_totems_resto` + `healer_position` + `avoid_ground` + `combat_consumables` + `rest_eat` + `rest_drink`; `elemental_shaman` = `combat_dps` + `shaman_elemental` + `shaman_shield` + `shaman_totems_elemental` +
+`ranged_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat` + `rest_drink` (the elemental shaman stands 14 to 19 yd from the mob, the class row's `Band`, because the shocks reach 20 yd); `enhancement_shaman` = `combat_dps` + `shaman_enhancement` + `shaman_shield` + `shaman_imbue` + `shaman_totems_enhancement` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat` + `rest_drink`.
+`dungeon_run`'s `brain` option takes any of them. Not in this step: Gift of the Wild, Prayer-style group heals, Earth Shield, Water Breathing, Reincarnation, off-hand imbues, Moonkin Form, resurrecting a dead member (Rebirth, Ancestral Spirit), and the warlock, the pets and the holy paladin (step 4d).
 
 ## Vendors, trainers and quests
 

@@ -41,6 +41,12 @@ func BuildCastSpell(spell uint32, target packet.GUID) []byte {
 	return w.U16(TargetFlagUnit).PackedGUID(target).Bytes()
 }
 
+// BuildCastSpellOnItem is CMSG_CAST_SPELL aimed at an item of the caster (TARGET_FLAG_ITEM, Spell.cpp:166-176): a shaman's weapon
+// imbue. The item is named by its guid.
+func BuildCastSpellOnItem(spell uint32, item packet.GUID) []byte {
+	return packet.NewWriter().U32(spell).U16(TargetFlagItem).PackedGUID(item).Bytes()
+}
+
 // BuildMovement is a client MSG_MOVE_*: MovementInfo, no guid (MovementHandler.cpp:295-321).
 func BuildMovement(m MoveInfo) []byte {
 	w := packet.NewWriter()

@@ -142,6 +142,7 @@ type memory struct {
 	ext         memExt  // positioning, line of sight, interrupts, items (world.go)
 	mel         melMem  // auto attack and stance changes (melee.go)
 	heal        healMem // health history, shields, dispels and the last friendly cast (heal.go)
+	sham        shamMem // the shaman's totems and weapon imbue (shaman.go)
 
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
