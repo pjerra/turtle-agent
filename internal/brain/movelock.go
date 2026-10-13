@@ -12,6 +12,11 @@ import (
 // position), so each takes the lock for its walk. The driver's hold wins: Hold stops a step of the brain's that is under way
 // and, while it lasts, the brain's movement actions are not possible (casting goes on). A nil *MoveLock is a lock nobody
 // holds, so code that has none (the driver of a test, a brain started without a controller) needs no special case.
+//
+// Deadlock note: Hold (HoldMove on the controller) waits for a step of the brain's to end, and a step ends only when the game's walker
+// answers its cancel. So Hold must not be called from inside the session's do loop (the goroutine that runs the session's handlers
+// and the walker's ticks): the walker would never see the cancel, and Hold and the loop would wait for each other. Call it from the
+// driver's own goroutine, as the dungeon driver does.
 type MoveLock struct {
 	mu      sync.Mutex
 	drivers int
@@ -64,6 +69,37 @@ func (l *MoveLock) Hold(ctx context.Context) (release func(), err error) {
 	return release, nil
 }
 
+// stepping reports whether a step of the brain's is under way.
+func (l *MoveLock) stepping() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.step != nil
+}
+
+// preempt cancels the step of the brain's that is under way, if one is, and waits up to wait for its walker to stop: a more
+// relevant action (an interrupt, an emergency) then runs in the same tick instead of after the walk.
+func (l *MoveLock) preempt(wait time.Duration) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	st := l.step
+	l.mu.Unlock()
+	if st == nil {
+		return
+	}
+	st.cancel()
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-st.done:
+	case <-t.C:
+	}
+}
+
 // begin takes the lock for one step of the brain's. It fails while the driver holds the lock or another step runs. The returned
 // context ends when the driver takes the lock; done lets the lock go.
 func (l *MoveLock) begin(parent context.Context) (context.Context, func(), bool) {
@@ -90,28 +126,48 @@ func (l *MoveLock) begin(parent context.Context) (context.Context, func(), bool)
 // stepTimeout bounds one step of the brain's walk; a longer way is walked in several steps, the brain deciding again between them.
 const stepTimeout = 2500 * time.Millisecond
 
+// preemptWait is how long a more relevant action waits for the step it cancels to stop.
+const preemptWait = 400 * time.Millisecond
+
 var (
 	errMoveLocked = errors.New("the dungeon driver is walking")
+	errNoMove     = errors.New("movement is off for this run")
 	errNoMover    = errors.New("the game cannot walk")
 )
 
-// walk steps the player to a point through the game's walker, under the move lock. A walk cut short (by stepTimeout, or by the
-// driver taking the lock) is not a failure: the brain decides again on the next tick.
+// walk starts a step of the player to a point through the game's walker, under the move lock, and returns at once: the step runs
+// on its own goroutine, so the brain goes on ticking while the player walks. While a step runs, only an action at RelInterrupt
+// or above runs (the tick cancels the step first, see Brain.try); every other action waits, so the player neither casts on the
+// move nor starts a second walk. A step cut short (by stepTimeout, by a more relevant action, or by the driver taking the lock)
+// is not a failure; a walk the game refuses is: the action is held back for ErrorHold and the failure is reported as a decision.
+// The checks of canMove are repeated here as a second guard, so an action that forgot them still never walks the driver's player.
 func (c *Ctx) walk(ctx context.Context, to Vec3) error {
+	if c.P.NoMove {
+		return errNoMove
+	}
+	if c.lock.Held() {
+		return errMoveLocked
+	}
 	m, ok := c.G.(Mover)
 	if !ok {
 		return errNoMover
 	}
-	sctx, done, ok := c.lock.begin(ctx)
+	run := c.run
+	if run == nil {
+		run = ctx
+	}
+	sctx, done, ok := c.lock.begin(run)
 	if !ok {
 		return errMoveLocked
 	}
-	defer done()
-	tctx, cancel := context.WithTimeout(sctx, stepTimeout)
-	defer cancel()
-	err := m.WalkTo(tctx, to[0], to[1], to[2])
-	if err != nil && tctx.Err() != nil {
-		return nil
-	}
-	return err
+	b, name := c.b, c.act
+	go func() {
+		defer done()
+		tctx, cancel := context.WithTimeout(sctx, stepTimeout)
+		defer cancel()
+		if err := m.WalkTo(tctx, to[0], to[1], to[2]); err != nil && tctx.Err() == nil && b != nil {
+			b.walkFailed(name, err)
+		}
+	}()
+	return nil
 }

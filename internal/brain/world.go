@@ -90,10 +90,13 @@ type pendingBandage struct {
 
 // ---- line of sight ----
 
-// losTTL is how long a line-of-sight answer for a target stands, if neither end has moved more than losMoved.
+// losTTL is how long a line-of-sight answer for a target stands, if neither end has moved more than losMoved. A server refusal
+// (markLOSBlocked) stands for losBlockFor, as long as the player has not walked more than losBlockMoved from where it was refused.
 const (
-	losTTL   = 250 * time.Millisecond
-	losMoved = 1.0
+	losTTL        = 250 * time.Millisecond
+	losMoved      = 1.0
+	losBlockFor   = 5 * time.Second
+	losBlockMoved = 3.0
 )
 
 type losEntry struct {
@@ -101,10 +104,21 @@ type losEntry struct {
 	from, to Vec3
 	clear    bool
 	known    bool
+	// A "line_of_sight" refusal by the server overrides the mesh, which cannot see walls it has no vmaps for: until blockedUntil the
+	// target counts as known blocked, while the player stays near blockedFrom and the target near blockedTo.
+	blockedUntil time.Time
+	blockedFrom  Vec3
+	blockedTo    Vec3
+}
+
+// blockedNow says the entry is a standing server refusal for these positions.
+func (e losEntry) blockedNow(now time.Time, from, to Vec3) bool {
+	return now.Before(e.blockedUntil) && dist2(e.blockedFrom, from) < losBlockMoved && dist2(e.blockedTo, to) < losBlockMoved
 }
 
 // LineOfSight is whether the player has sight of the unit, by the navmesh ray (see Sight.LineClear), cached per target for
-// 250 ms while neither end moves a yard. known false means the brain cannot tell, which callers treat as clear.
+// 250 ms while neither end moves a yard. known false means the brain cannot tell, which callers treat as clear. A target the
+// server refused a cast at for line of sight is known blocked for a few seconds, whatever the mesh says (markLOSBlocked).
 func (c *Ctx) LineOfSight(u *objects.Unit) (clear, known bool) {
 	s := sightOf(c)
 	if s == nil || u == nil || !c.SelfOK || u.Distance < 0 {
@@ -113,9 +127,14 @@ func (c *Ctx) LineOfSight(u *objects.Unit) (clear, known bool) {
 	from, to := selfPos(c), unitPos(u)
 	e := &c.mem.ext
 	e.mu.Lock()
-	if hit, ok := e.los[u.GUID]; ok && c.Now.Sub(hit.at) < losTTL && dist2(hit.from, from) < losMoved && dist2(hit.to, to) < losMoved {
+	prev, had := e.los[u.GUID]
+	if had && prev.blockedNow(c.Now, from, to) {
 		e.mu.Unlock()
-		return hit.clear, hit.known
+		return false, true
+	}
+	if had && c.Now.Sub(prev.at) < losTTL && dist2(prev.from, from) < losMoved && dist2(prev.to, to) < losMoved {
+		e.mu.Unlock()
+		return prev.clear, prev.known
 	}
 	e.mu.Unlock()
 	clear, known = s.LineClear(from, to)
@@ -123,14 +142,51 @@ func (c *Ctx) LineOfSight(u *objects.Unit) (clear, known bool) {
 	if e.los == nil {
 		e.los = map[packet.GUID]losEntry{}
 	}
-	e.los[u.GUID] = losEntry{at: c.Now, from: from, to: to, clear: clear, known: known}
+	ne := losEntry{at: c.Now, from: from, to: to, clear: clear, known: known}
+	if old, ok := e.los[u.GUID]; ok && old.blockedNow(c.Now, from, to) {
+		ne.blockedUntil, ne.blockedFrom, ne.blockedTo = old.blockedUntil, old.blockedFrom, old.blockedTo
+	}
+	e.los[u.GUID] = ne
 	for g, old := range e.los { // forget targets not asked about for a while
-		if c.Now.Sub(old.at) > 10*time.Second {
+		if c.Now.Sub(old.at) > 10*time.Second && !c.Now.Before(old.blockedUntil) {
 			delete(e.los, g)
 		}
 	}
 	e.mu.Unlock()
 	return clear, known
+}
+
+// markLOSBlocked records that the server refused a cast at the unit for line of sight: it is known blocked for losBlockFor from
+// where the player and the unit stand now. A repeated refusal extends it. The remembered standing spot is dropped, so that the
+// next search looks again (and, with the block standing, for a place away from here).
+func markLOSBlocked(c *Ctx, u *objects.Unit) {
+	if u == nil || !c.SelfOK {
+		return
+	}
+	from, to := selfPos(c), unitPos(u)
+	e := &c.mem.ext
+	e.mu.Lock()
+	if e.los == nil {
+		e.los = map[packet.GUID]losEntry{}
+	}
+	le := e.los[u.GUID]
+	le.at, le.from, le.to, le.clear, le.known = c.Now, from, to, false, true
+	le.blockedUntil, le.blockedFrom, le.blockedTo = c.Now.Add(losBlockFor), from, to
+	e.los[u.GUID] = le
+	e.spot = spotMemo{}
+	e.mu.Unlock()
+}
+
+// losBlocked says the server's refusal stands for this unit from where the player is.
+func losBlocked(c *Ctx, u *objects.Unit) bool {
+	if u == nil || !c.SelfOK {
+		return false
+	}
+	e := &c.mem.ext
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	le, ok := e.los[u.GUID]
+	return ok && le.blockedNow(c.Now, selfPos(c), unitPos(u))
 }
 
 // ---- standing spots ----
@@ -271,11 +327,18 @@ func forgetSpot(c *Ctx) {
 
 // bandSpot is a standing place in the ranged band of the unit with sight of it, out of its front, near the player.
 func bandSpot(c *Ctx, kind string, u *objects.Unit) (Vec3, bool) {
+	blocked := losBlocked(c, u)
 	return memoSpot(c, kind, u.GUID, func() (Vec3, bool) {
 		mid := (rangedMin + rangedMax) / 2
 		sp := spotSpec{kind: kind, center: unitPos(u), radii: []float64{rangedMin + 2, mid, rangedMax - 1}, target: u,
-			base:  bearing(unitPos(u), selfPos(c)),
-			extra: func(p Vec3) bool { return !inFront(u, p) && !inGroundHazard(c, p, 2) }}
+			base: bearing(unitPos(u), selfPos(c)),
+			extra: func(p Vec3) bool {
+				// Sight the mesh cannot deny but the server did: the spot must be somewhere else than here.
+				if blocked && dist2(p, selfPos(c)) < losBlockMoved+1 {
+					return false
+				}
+				return !inFront(u, p) && !inGroundHazard(c, p, 2)
+			}}
 		return findSpot(c, sp)
 	})
 }

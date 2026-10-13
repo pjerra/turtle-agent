@@ -241,37 +241,43 @@ func TestDriverHoldStopsAStepThatIsUnderWay(t *testing.T) {
 	r, pf := newPosRig(t, Params{})
 	pf.hold = make(chan struct{}) // the walk never arrives by itself
 	tankFights(r.g, 8, 12, math.Pi)
-	done := make(chan *Decision, 1)
-	go func() { done <- r.tick(100 * time.Millisecond) }()
-	// Wait until the brain's step has begun.
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		r.b.lock.mu.Lock()
-		started := r.b.lock.step != nil
-		r.b.lock.mu.Unlock()
-		if started {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the brain never began its step")
-		}
-		time.Sleep(5 * time.Millisecond)
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "reposition" || d.Result != ResultOK {
+		t.Fatalf("%+v", d)
 	}
-	release, err := r.b.lock.Hold(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if !r.b.lock.stepping() {
+		t.Fatal("the brain's step is not under way")
 	}
-	defer release()
+	hold := make(chan error, 1)
+	var release func()
+	go func() {
+		var err error
+		release, err = r.b.lock.Hold(context.Background())
+		hold <- err
+	}()
 	select {
-	case d := <-done:
-		if d == nil || d.Result != ResultOK {
-			t.Fatalf("a cut-short step is not a failure: %+v", d)
+	case err := <-hold:
+		if err != nil {
+			t.Fatal(err)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the brain's walk was not stopped")
 	}
+	defer release()
+	if r.b.lock.stepping() {
+		t.Fatal("the step is still there")
+	}
 	if len(pf.walkList()) != 0 {
 		t.Fatal("the cancelled walk arrived")
+	}
+	// A step cut short is not a failure: nothing is held back and nothing is reported as an error.
+	if _, held := r.b.mem.actionHeld("reposition", r.g.clk.Now().Add(time.Millisecond)); held && r.b.mem.aholds["reposition"].reason == "error" {
+		t.Fatal("a cut-short step held the action back as an error")
+	}
+	for _, d := range r.recent() {
+		if d.Result == ResultError {
+			t.Fatalf("%+v", d)
+		}
 	}
 }
 
@@ -280,8 +286,18 @@ func TestAFailedWalkBacksOffTheAction(t *testing.T) {
 	tankFights(r.g, 8, 12, math.Pi)
 	pf.walkErr = errTest
 	d := r.tick(100 * time.Millisecond)
-	if d == nil || d.Action != "reposition" || d.Result != ResultError {
+	if d == nil || d.Action != "reposition" {
 		t.Fatalf("%+v", d)
+	}
+	// The step runs on its own goroutine: the game's refusal shows a moment later, as an error decision, and holds the action.
+	var failed *Decision
+	for _, x := range r.recent() {
+		if x.Result == ResultError {
+			failed = &x
+		}
+	}
+	if failed == nil || failed.Action != "reposition" || failed.Error != errTest.Error() {
+		t.Fatalf("no error decision for the failed walk: %+v", r.recent())
 	}
 	if d := r.tick(300 * time.Millisecond); d != nil && d.Action == "reposition" {
 		t.Fatalf("tried again inside the hold: %+v", d)

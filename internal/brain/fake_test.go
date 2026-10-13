@@ -302,7 +302,25 @@ func newRig(t *testing.T, g *fakeGame, p Params) *rig {
 func (r *rig) tick(d time.Duration) *Decision {
 	r.t.Helper()
 	r.g.clk.advance(d)
-	return r.b.Tick(context.Background())
+	dec := r.b.Tick(context.Background())
+	r.settleStep(200 * time.Millisecond)
+	return dec
+}
+
+// settleStep waits (in real time, up to max) for the brain's walk step to end: the fake walker answers at once, so a step started by
+// the tick is over a moment later. A walker held on purpose (posFake.hold) outlasts the wait, which is what those tests want.
+func (r *rig) settleStep(max time.Duration) {
+	r.t.Helper()
+	for end := time.Now().Add(max); r.b.lock.stepping() && time.Now().Before(end); {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// recent is the decisions the brain kept, oldest first.
+func (r *rig) recent() []Decision {
+	r.b.mem.mu.Lock()
+	defer r.b.mem.mu.Unlock()
+	return append([]Decision{}, r.b.mem.recent...)
 }
 
 func (r *rig) idle() string {
