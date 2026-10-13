@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
@@ -240,4 +241,46 @@ func TestUldamanOnNavmesh(t *testing.T) {
 		t.Fatalf("only %d waypoints checked", checked)
 	}
 	t.Logf("%d waypoints on the map 70 navmesh in %s", checked, dir)
+}
+
+// The groups marked ambush are exactly the ones whose members all spawn stealthed in the export (creature template
+// and spawn auras), and the Seal wait is long enough for the 27 s it took live.
+func TestUldamanAmbushGroupsAreTheStealthedOnes(t *testing.T) {
+	p := loadUldaman(t)
+	cs := tsv(t, "creatures.tsv")
+	stealthed := func(entry uint32, at Point) bool {
+		for _, m := range cs {
+			if m["entry"] == strconv.Itoa(int(entry)) && near(m, at) {
+				var ids []uint32
+				for _, f := range strings.Fields(m["auras"]) {
+					n, _ := strconv.ParseUint(f, 10, 32)
+					ids = append(ids, uint32(n))
+				}
+				return StealthedAuras(ids)
+			}
+		}
+		t.Errorf("no spawn of %d at %v", entry, at)
+		return false
+	}
+	n := 0
+	for i, l := range p.Legs {
+		for j, g := range l.PullGroups {
+			all := true
+			for k, at := range g.Positions {
+				all = all && stealthed(g.Entries[k], at)
+			}
+			if all != g.Ambush {
+				t.Errorf("legs[%d].pull_groups[%d] %v: all members stealthed %v, ambush %v", i, j, g.Entries, all, g.Ambush)
+			}
+			if g.Ambush {
+				n++
+			}
+		}
+	}
+	if n != 4 {
+		t.Errorf("%d ambush groups, want 4 (the lurkers)", n)
+	}
+	if w := p.Legs[2].Steps[1].WaitFor; w.TimeoutS != 60 {
+		t.Errorf("the Seal wait is %d s", w.TimeoutS)
+	}
 }

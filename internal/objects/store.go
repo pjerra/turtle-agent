@@ -65,6 +65,7 @@ type Unit struct {
 	Power      uint32      `json:"power"`
 	MaxPower   uint32      `json:"max_power"`
 	Level      uint32      `json:"level"`
+	Class      uint8       `json:"class,omitempty"` // class id 1-11 from UNIT_FIELD_BYTES_0 (5 priest); creatures have one too
 	Faction    uint32      `json:"faction"`
 	Target     packet.GUID `json:"target,omitempty"`
 	Flags      uint32      `json:"flags"`
@@ -524,7 +525,7 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 	v := o.values
 	u := Unit{
 		GUID: o.guid, Type: "creature", Entry: v[FieldEntry],
-		Health: v[UnitHealth], MaxHealth: v[UnitMaxHealth], PowerType: uint8(v[UnitBytes0] >> 24),
+		Health: v[UnitHealth], MaxHealth: v[UnitMaxHealth], PowerType: uint8(v[UnitBytes0] >> 24), Class: uint8(v[UnitBytes0] >> 8),
 		Level: v[UnitLevel], Faction: v[UnitFaction], Flags: v[UnitFlags], NPCFlags: v[UnitNPCFlags],
 		Target: guidAt(v, UnitTarget),
 	}

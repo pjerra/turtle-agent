@@ -62,6 +62,12 @@ type Leg struct {
 type PullGroup struct {
 	Entries   []uint32 `json:"entries"`
 	Positions []Point  `json:"positions"`
+	// Ambush marks a pack whose members are stealthed (tools/dungeongen sets it from the spawn's stealth aura): a
+	// companion never attacks a stealthed unit, so `.bot action pullback` draws no fight. The driver does not pull
+	// such a group: it walks the party through the group's positions and fights whatever shows itself (see
+	// Driver.sneakPast). A member in view without a stealth aura is pulled as usual; the flag only decides what
+	// happens when none is in view.
+	Ambush bool `json:"ambush,omitempty"`
 }
 
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
@@ -142,6 +148,7 @@ type rawLeg struct {
 type rawPullGroup struct {
 	Entries   []uint32   `json:"entries"`
 	Positions []rawPoint `json:"positions"`
+	Ambush    bool       `json:"ambush"`
 }
 
 type rawBoss struct {
@@ -306,7 +313,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	l.To = c.point(path+".to", r.To)
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush}
 		c.entries(gp+".entries", g.Entries, true)
 		if len(g.Positions) == 0 {
 			c.fail(gp+".positions", "needs at least one position")

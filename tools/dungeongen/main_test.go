@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -177,4 +178,51 @@ func TestReadErrors(t *testing.T) {
 	if p, err := parsePoint("1, 2, 3"); err != nil || p != pt(1, 2, 3) {
 		t.Fatalf("%v %v", p, err)
 	}
+}
+
+// A pack is an ambush when every member spawns stealthed; one that can be pulled makes it a normal pack. The auras
+// column is read as spell ids, and a file without it (an export from before the column) has none.
+func TestGenerateMarksStealthedPacks(t *testing.T) {
+	cs := []creature{
+		{GUID: 1, Entry: 100, Name: "Lurker A", Faction: 59, Pos: pt(10, 0, 0), Auras: parseAuras("6408 5916")},
+		{GUID: 2, Entry: 100, Name: "Lurker B", Faction: 59, Pos: pt(14, 0, 0), Auras: parseAuras("5916")},
+		{GUID: 3, Entry: 101, Name: "Oracle", Faction: 59, Pos: pt(60, 0, 0)},
+		{GUID: 4, Entry: 100, Name: "Lurker C", Faction: 59, Pos: pt(63, 0, 0), Auras: parseAuras("5916")}, // beside a pullable one
+		{GUID: 5, Entry: 102, Name: "Plain", Faction: 59, Pos: pt(120, 0, 0), Auras: parseAuras("7165")},   // an aura, not a stealth
+		{GUID: 50, Entry: 900, Name: "Boss", Faction: 59, Rank: 3, Pos: pt(200, 0, 0)},
+	}
+	e := pt(0, 0, 0)
+	p, err := Generate(cs, nil, Options{Name: "st", Map: 9, Bosses: []uint32{900}, Entrance: &e, Cluster: 12, NoteRange: 20, IgnoreFactions: map[int]bool{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, g := range p.Legs[0].PullGroups {
+		s := fmtEntries(g.Entries)
+		if g.Ambush {
+			s += " ambush"
+		}
+		got = append(got, s)
+	}
+	if strings.Join(got, "|") != "100,100 ambush|101,100|102" {
+		t.Fatalf("%v", got)
+	}
+	b, _ := dungeon.Marshal(p)
+	if !strings.Contains(string(b), `"ambush": true`) || strings.Count(string(b), `"ambush"`) != 1 {
+		t.Fatalf("%s", b)
+	}
+	if a := parseAuras(""); len(a) != 0 {
+		t.Fatal(a)
+	}
+	if a := parseAuras("NULL 12 0 x"); len(a) != 1 || a[0] != 12 {
+		t.Fatal(a)
+	}
+}
+
+func fmtEntries(es []uint32) string {
+	var out []string
+	for _, e := range es {
+		out = append(out, strconv.Itoa(int(e)))
+	}
+	return strings.Join(out, ",")
 }

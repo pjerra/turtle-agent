@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -94,6 +95,8 @@ type Config struct {
 	// Options of the run, not limits (set by the caller).
 	Teleport  bool // GM-teleport to the start of the first leg and bring the party along (flagged in the report)
 	Shortcuts bool // allow the GM revive of a dead party member at a rest gate (flagged in the report)
+	// Setup lists the GM commands the caller used to set the run up; they are copied into the report (setup_shortcuts).
+	Setup []string
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -118,6 +121,13 @@ type Config struct {
 	WaitPoll       time.Duration // time between two looks at a wait step
 	Poll           time.Duration // time between two looks at a fight
 	ArriveTimeout  time.Duration // the party's walk to the leader after a teleport
+	ManaStall      time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct   int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin  int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait     time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet     time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch      time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
 }
 
 // DefaultConfig is the Driver's limits for a live run.
@@ -129,6 +139,8 @@ func DefaultConfig() Config {
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
+		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
+		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond,
 	}
 }
 
@@ -172,6 +184,13 @@ func (c Config) withDefaults() Config {
 	fill(&c.WaitPoll, d.WaitPoll)
 	fill(&c.Poll, d.Poll)
 	fill(&c.ArriveTimeout, d.ArriveTimeout)
+	fill(&c.ManaStall, d.ManaStall)
+	fillInt(&c.ManaStallPct, d.ManaStallPct)
+	fillInt(&c.HealerManaMin, d.HealerManaMin)
+	fill(&c.ReviveWait, d.ReviveWait)
+	fill(&c.AggroQuiet, d.AggroQuiet)
+	fill(&c.AmbushPause, d.AmbushPause)
+	fill(&c.WalkWatch, d.WalkWatch)
 	return c
 }
 
@@ -201,6 +220,7 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	}
 	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}}
 	d.rep.init(plan, clk.Now)
+	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	return d
 }
 
@@ -531,16 +551,40 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 }
 
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it
-// gave up on (a root that outlasted its wait, a server move too many).
+// gave up on (a root that outlasted its wait, a server move too many). A pack that aggros on the way stops the walk:
+// the party fights it until the fight is over (walkAggro), then the walk goes on. That does not use up a try.
 func (d *Driver) doWalk(ctx context.Context, p Point) error {
 	var last string
-	for try := 1; try <= d.cfg.WalkAttempts; try++ {
-		r, err := d.g.WalkPath(ctx, p)
+	aggros := 0
+	for try := 1; try <= d.cfg.WalkAttempts; {
+		if d.partyInCombat() {
+			if aggros++; aggros > maxWalkAggros {
+				return fmt.Errorf("walk to %.1f %.1f %.1f: the party was pulled into a fight %d times on the way", p.X, p.Y, p.Z, maxWalkAggros)
+			}
+			if err := d.walkAggro(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		wctx, cancel := context.WithCancel(ctx)
+		stop := d.watchCombat(wctx, cancel)
+		r, err := d.g.WalkPath(wctx, p)
+		aggro := stop()
+		cancel()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if oerr := d.observe(); oerr != nil {
 			return oerr
+		}
+		if aggro {
+			if aggros++; aggros > maxWalkAggros {
+				return fmt.Errorf("walk to %.1f %.1f %.1f: the party was pulled into a fight %d times on the way", p.X, p.Y, p.Z, maxWalkAggros)
+			}
+			if err := d.walkAggro(ctx); err != nil {
+				return err
+			}
+			continue
 		}
 		switch {
 		case err != nil:
@@ -555,8 +599,117 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 				return err
 			}
 		}
+		try++
 	}
 	return fmt.Errorf("walk to %.1f %.1f %.1f failed after %d tries (%s)", p.X, p.Y, p.Z, d.cfg.WalkAttempts, last)
+}
+
+// maxWalkAggros bounds the fights that stop one walk, so a walk that keeps running into packs ends the run.
+const maxWalkAggros = 12
+
+// attackers are the living hostile units in combat with the party within 60 yards: what "the party is in combat"
+// means to the walk and the rest gate.
+func (d *Driver) attackers() []objects.Unit {
+	return attackersOf(d.g.Units(), d.party)
+}
+
+func attackersOf(units []objects.Unit, party map[packet.GUID]bool) []objects.Unit {
+	var out []objects.Unit
+	for _, u := range units {
+		if u.Type != "player" && u.Hostile && !u.Dead && u.InCombat && u.Distance >= 0 && u.Distance <= 60 && party[u.Target] {
+			out = append(out, u)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Distance < out[j].Distance })
+	return out
+}
+
+func (d *Driver) partyInCombat() bool { return len(d.attackers()) > 0 }
+
+// watchCombat looks, in real time every WalkWatch, for the party being in combat while a walk goes on and calls
+// cancel when it is (that stops the walk). The returned func ends the look and says whether it cancelled. It reads
+// the game from another goroutine, which the Game must allow (the session does).
+func (d *Driver) watchCombat(ctx context.Context, cancel context.CancelFunc) func() bool {
+	party := make(map[packet.GUID]bool, len(d.party))
+	for g := range d.party {
+		party[g] = true
+	}
+	done, finished := make(chan struct{}), make(chan struct{})
+	fired := false
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(d.cfg.WalkWatch)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if len(attackersOf(d.g.Units(), party)) > 0 {
+					fired = true
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() bool {
+		close(done)
+		<-finished
+		return fired
+	}
+}
+
+// walkAggro fights what came at the party during a walk (or was still on it when a walk was due): the leader orders
+// the party onto the nearest attacker, again every AssistEvery, until nothing has hit the party for AggroQuiet.
+// It counts as an extra pull of the leg and is noted in the report.
+func (d *Driver) walkAggro(ctx context.Context) error {
+	first := d.attackers()
+	name := "a pack"
+	if len(first) > 0 {
+		name = first[0].Name
+	}
+	d.legStat(func(l *LegReport) {
+		l.Pulls++
+		l.WalkAggros++
+	})
+	d.rep.note(fmt.Sprintf("leg %d: %s aggroed during a walk; the walk was stopped and the party fought it", d.curLeg, name))
+	if err := d.fightAttackers(ctx); err != nil {
+		return err
+	}
+	return d.afterFight(ctx)
+}
+
+// fightAttackers orders the party onto the nearest attacker until none has hit it for AggroQuiet (or FightTimeout).
+func (d *Driver) fightAttackers(ctx context.Context) error {
+	began := d.clk.Now()
+	lastSeen := began
+	var lastAssist time.Time
+	for {
+		now := d.clk.Now()
+		att := d.attackers()
+		if len(att) > 0 {
+			lastSeen = now
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
+				lastAssist = now
+				if err := d.g.Target(ctx, att[0].GUID); err == nil {
+					if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
+						return err
+					}
+				}
+			}
+		} else if now.Sub(lastSeen) >= d.cfg.AggroQuiet {
+			return nil
+		}
+		if now.Sub(began) > d.cfg.FightTimeout {
+			return fmt.Errorf("the fight on the way lasted more than %.0f s", d.cfg.FightTimeout.Seconds())
+		}
+		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+	}
 }
 
 func (d *Driver) doUse(ctx context.Context, a Action) error {
@@ -579,8 +732,12 @@ func (d *Driver) doUse(ctx context.Context, a Action) error {
 }
 
 // restGate waits until every living online member is rested (health and mana at the thresholds, near the leader),
-// ordering the bots to eat and drink. A dead member is revived by GM when shortcuts are on (flagged). After
-// RestTimeout the run goes on if everyone has at least RestMinHealth percent, else it fails.
+// ordering the bots to eat and drink. It starts only once the party is out of combat: while it is fighting the gate
+// waits for the fight to end (helping with the attack order), and its timeout counts from the end of the fight.
+// A dead member is revived by GM when shortcuts are on (flagged), and given ReviveWait to show alive before it is
+// judged. A caster whose mana has not risen ManaStallPct of its maximum for ManaStall (it does not drink) is let
+// pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
+// RestMinHealth percent, else it fails.
 func (d *Driver) restGate(ctx context.Context) error {
 	began := d.clk.Now()
 	defer func() {
@@ -589,9 +746,42 @@ func (d *Driver) restGate(ctx context.Context) error {
 		}
 	}()
 	ordered := false
+	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
+	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
+	mana := map[packet.GUID]manaWatch{}
+	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
+	// its combat flag), the gate as a whole is bounded.
+	limit := d.cfg.RestTimeout + 2*d.cfg.FightTimeout
 	for {
-		st := d.restState()
+		if el := d.clk.Now().Sub(began); el > limit {
+			return fmt.Errorf("the rest gate has gone on for more than %.0f s (fights keep interrupting it): the party is not rested", limit.Seconds())
+		}
+		if att := d.attackers(); len(att) > 0 {
+			now := d.clk.Now()
+			if fightBegan.IsZero() {
+				fightBegan = now
+			}
+			if now.Sub(fightBegan) > d.cfg.FightTimeout {
+				return fmt.Errorf("the party is still in combat after %.0f s at a rest gate", d.cfg.FightTimeout.Seconds())
+			}
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
+				lastAssist = now
+				if err := d.g.Target(ctx, att[0].GUID); err == nil {
+					if err := d.g.Chat(ctx, "party", ".bot action attack"); err != nil {
+						return err
+					}
+				}
+			}
+			ordered, calm = false, now
+			clear(mana)
+			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+				return err
+			}
+			continue
+		}
+		fightBegan, lastAssist = time.Time{}, time.Time{}
+		st := d.restState(mana)
 		for _, m := range st.dead {
 			if !d.cfg.Shortcuts {
 				return fmt.Errorf("%s is dead and GM shortcuts are off", m.Name)
@@ -604,18 +794,30 @@ func (d *Driver) restGate(ctx context.Context) error {
 			if err := d.g.GM(ctx, ".revive "+m.Name); err != nil {
 				return fmt.Errorf("revive %s: %w", m.Name, err)
 			}
+			// The party list follows the revive a moment later: look for the dead flag to clear before judging, and
+			// never send the second revive before then.
+			if err := d.waitRevived(ctx, m.GUID); err != nil {
+				return err
+			}
+			calm = d.clk.Now()
 		}
-		if len(st.dead) == 0 && st.ok {
+		if len(st.dead) > 0 {
+			continue
+		}
+		if st.ok {
+			if len(st.stalled) > 0 {
+				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
+			}
 			return nil
 		}
-		if len(st.dead) == 0 && d.clk.Now().Sub(began) > d.cfg.RestTimeout {
+		if d.clk.Now().Sub(calm) > d.cfg.RestTimeout {
 			if st.minHealth >= d.cfg.RestMinHealth {
 				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, d.cfg.RestTimeout.Seconds(), st.why, st.minHealth))
 				return nil
 			}
 			return fmt.Errorf("the party is not rested after %.0f s: %s", d.cfg.RestTimeout.Seconds(), st.why)
 		}
-		if !ordered && len(st.dead) == 0 {
+		if !ordered {
 			ordered = true
 			if err := d.g.Chat(ctx, "party", ".bot action rest"); err != nil {
 				return err
@@ -627,16 +829,57 @@ func (d *Driver) restGate(ctx context.Context) error {
 	}
 }
 
+// waitRevived polls the party list for up to ReviveWait until the member's dead flag is clear (the sleep also counts
+// deaths and notices a wipe). A member still dead afterwards is left to the caller.
+func (d *Driver) waitRevived(ctx context.Context, g packet.GUID) error {
+	deadline := d.clk.Now().Add(d.cfg.ReviveWait)
+	for {
+		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+		still := false
+		for _, m := range d.g.Party() {
+			if m.GUID == g && m.Dead {
+				still = true
+			}
+		}
+		if !still || !d.clk.Now().Before(deadline) {
+			return nil
+		}
+	}
+}
+
+// HealerClasses are the class ids (UNIT_FIELD_BYTES_0) taken for the party's healer: paladin, priest, shaman, druid.
+// The party list carries no class; the unit rows of the members in view do.
+var HealerClasses = map[uint8]bool{2: true, 5: true, 7: true, 11: true}
+
+// manaWatch is the window a rest gate keeps for a caster below the mana threshold: its mana when the window began.
+type manaWatch struct {
+	power uint32
+	since time.Time
+}
+
 type restReport struct {
 	ok        bool
 	why       string // what is missing, for the report
 	minHealth int    // lowest health percent among the living online members and the leader
 	dead      []Member
+	stalled   []string // casters let pass because their mana does not rise ("Name 49%")
 }
 
-func (d *Driver) restState() restReport {
+// restState looks at the party. mana holds a window per caster below the mana threshold: when it has run for ManaStall
+// and the caster gained less than ManaStallPct of its maximum, the caster does not hold the gate (it is not drinking);
+// else the window starts again.
+func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 	r := restReport{ok: true, minHealth: 100}
 	var low []string
+	now := d.clk.Now()
+	classes := map[packet.GUID]uint8{}
+	for _, u := range d.g.Units() {
+		if u.Type == "player" && u.Class != 0 {
+			classes[u.GUID] = u.Class
+		}
+	}
 	pct := func(v, max uint32) int {
 		if max == 0 {
 			return 100
@@ -667,7 +910,29 @@ func (d *Driver) restState() restReport {
 			low = append(low, fmt.Sprintf("%s health %d%%", m.Name, h))
 		}
 		if m.PowerType == 0 && m.MaxPower > 0 {
-			if p := pct(m.Power, m.MaxPower); p < d.cfg.RestManaPct {
+			p := pct(m.Power, m.MaxPower)
+			if p >= d.cfg.RestManaPct {
+				delete(mana, m.GUID)
+				continue
+			}
+			w, ok := mana[m.GUID]
+			if !ok {
+				w = manaWatch{power: m.Power, since: now}
+				mana[m.GUID] = w
+			}
+			stalled := false
+			// A healer that low is waited for like before: the party would go on without its heals.
+			healerLow := HealerClasses[classes[m.GUID]] && p < d.cfg.HealerManaMin
+			if now.Sub(w.since) >= d.cfg.ManaStall && !healerLow {
+				if int(m.Power)-int(w.power) >= int(m.MaxPower)*d.cfg.ManaStallPct/100 {
+					mana[m.GUID] = manaWatch{power: m.Power, since: now}
+				} else {
+					stalled = true
+				}
+			}
+			if stalled {
+				r.stalled = append(r.stalled, fmt.Sprintf("%s not drinking (mana %d%%)", m.Name, p))
+			} else {
 				r.ok = false
 				low = append(low, fmt.Sprintf("%s mana %d%%", m.Name, p))
 			}
@@ -677,6 +942,7 @@ func (d *Driver) restState() restReport {
 		r.ok = false
 		low = append(low, fmt.Sprintf("not near the leader: %v", far))
 	}
+	low = append(low, r.stalled...)
 	r.why = fmt.Sprint(low)
 	return r
 }
@@ -684,7 +950,74 @@ func (d *Driver) restState() restReport {
 // doPull pulls each member group of the action: the leader targets the nearest member and the tank walks up and
 // pulls it (.bot action pullback); the fight ends when the pack is dead.
 func (d *Driver) doPull(ctx context.Context, a Action) error {
-	return d.engage(ctx, a.Label, fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout})
+	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true}
+	// A group whose members in view all carry a stealth aura cannot be pulled (the companions never attack what they
+	// cannot see); with none in view the plan's flag decides. Members in view without the aura are pulled as usual.
+	if cs := d.candidates(sp.pick, sp.skip, sp.anchors); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allStealthed(cs)) {
+		return d.sneakPast(ctx, a.Label, sp)
+	}
+	return d.engage(ctx, a.Label, sp)
+}
+
+func allStealthed(us []objects.Unit) bool {
+	for _, u := range us {
+		if !Stealthed(u) {
+			return false
+		}
+	}
+	return len(us) > 0
+}
+
+// sneakPast is the pull of a stealthed group: nothing can be pulled, so the party is walked through the group's
+// positions (follow on, a pause of AmbushPause at each) and fights whatever shows itself. The group counts as cleared
+// when none of its members is left alive in view, or when the party has passed it with no fight (noted in the
+// report): the leg goes on, and what is still hidden aggros on the walks after (walkAggro).
+func (d *Driver) sneakPast(ctx context.Context, label string, sp fightSpec) error {
+	if err := d.restGate(ctx); err != nil {
+		return err
+	}
+	d.legStat(func(l *LegReport) { l.Ambushes++ })
+	if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+		return err
+	}
+	fights := 0
+	for _, at := range sp.anchors {
+		if err := d.doWalk(ctx, at); err != nil {
+			return err
+		}
+		pause := d.clk.Now().Add(d.cfg.AmbushPause)
+		for d.clk.Now().Before(pause) {
+			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+				return err
+			}
+			if d.partyInCombat() {
+				fights++
+				d.legStat(func(l *LegReport) { l.Pulls++ })
+				if err := d.fightAttackers(ctx); err != nil {
+					return err
+				}
+				if err := d.afterFight(ctx); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	left := 0
+	for _, u := range d.candidates(sp.pick, sp.skip, sp.anchors) {
+		if u.Distance <= 80 {
+			left++
+		}
+	}
+	switch {
+	case fights > 0 && left == 0:
+		d.rep.note(fmt.Sprintf("%s: stealthed group %v revealed itself and was killed (%d fights)", label, sp.pick, fights))
+	case fights > 0:
+		d.rep.note(fmt.Sprintf("%s: stealthed group %v: %d fights, %d members still alive in view; went on", label, sp.pick, fights, left))
+	default:
+		d.rep.note(fmt.Sprintf("%s: stealthed group %v passed with no fight; counted as cleared", label, sp.pick))
+	}
+	return nil
 }
 
 // doKill kills Boss.First in order, then the boss; the whole encounter is tracked so that its brothers dying with
@@ -708,6 +1041,7 @@ type fightSpec struct {
 	anchors  []Point // where the pack stands
 	limit    time.Duration
 	required bool // not finding the target fails the run (a boss), else the fight is taken as already won
+	sneak    bool // a target that turns out stealthed is walked past (sneakPast) instead of pulled
 }
 
 type outcome int
@@ -733,6 +1067,9 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			}
 			d.rep.note(fmt.Sprintf("%s: no living %v in view; taken as already dead", label, sp.pick))
 			return nil
+		}
+		if sp.sneak && Stealthed(t) {
+			return d.sneakPast(ctx, label, sp)
 		}
 		d.legStat(func(l *LegReport) {
 			l.Pulls++
@@ -805,6 +1142,7 @@ func (d *Driver) pickTarget(ctx context.Context, sp fightSpec) (objects.Unit, bo
 	const looks = 3
 	for look := 1; look <= looks; look++ {
 		if cs := d.candidates(sp.pick, sp.skip, sp.anchors); len(cs) > 0 {
+			cs = preferVisible(cs)
 			if c := cs[0]; c.Distance <= d.cfg.PullRange || look == looks {
 				return c, true, nil
 			} else if err := d.approach(ctx, Point{c.X, c.Y, c.Z}); err != nil {
@@ -823,6 +1161,20 @@ func (d *Driver) pickTarget(ctx context.Context, sp fightSpec) (objects.Unit, bo
 		}
 	}
 	return objects.Unit{}, false, nil
+}
+
+// preferVisible puts the units without a stealth aura first (a companion can be sent at those), keeping the order.
+func preferVisible(cs []objects.Unit) []objects.Unit {
+	out := make([]objects.Unit, 0, len(cs))
+	for _, u := range cs {
+		if !Stealthed(u) {
+			out = append(out, u)
+		}
+	}
+	if len(out) == 0 {
+		return cs
+	}
+	return out
 }
 
 // approach walks to a point PullStandoff yards short of p along the planned path (nothing when already that close).
@@ -878,6 +1230,9 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (outco
 			}
 			if u.Dead {
 				continue
+			}
+			if sp.sneak && Stealthed(u) && !u.InCombat && u.Health >= u.MaxHealth {
+				continue // a stealthed member that has not joined is not fought (it aggros on the walk after)
 			}
 			alive++
 			if u.InCombat || u.Health < u.MaxHealth {
