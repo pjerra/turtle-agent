@@ -24,6 +24,13 @@ func TestSelectionAttackAndCastLayouts(t *testing.T) {
 	}
 }
 
+func TestCastSpellOnItemLayout(t *testing.T) {
+	const sword = packet.GUID(0x4000000000000003)
+	if b := BuildCastSpellOnItem(8232, sword); !bytes.Equal(b, packet.NewWriter().U32(8232).U16(0x0010).PackedGUID(sword).Bytes()) {
+		t.Fatalf("item cast % X", b)
+	}
+}
+
 func TestFacing(t *testing.T) {
 	for _, c := range []struct{ x, y, want float32 }{{1, 0, 0}, {0, 1, math.Pi / 2}, {-1, 0, math.Pi}, {0, -1, 3 * math.Pi / 2}} {
 		if got := Facing(0, 0, c.x, c.y); math.Abs(float64(got-c.want)) > 1e-5 {

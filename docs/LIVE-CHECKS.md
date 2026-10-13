@@ -432,3 +432,39 @@ by hand (`brain_start {"strategies":["combat_rogue"],"tank":"<tank name>"}`, `ma
    below 35%: `divine_protection` and no attacks while the aura lasts (does the server really pacify the leader?); below 20%: `lay_on_hands`.
 5. **Consecration** with 2+ mobs in melee, not with a loose mob near; **drink** out of combat below 65% mana at a rest gate.
 6. **Mana floor.** Run the paladin dry in a long fight: below 30% mana the seal is Wisdom (unless the mob has Judgement of Wisdom) and only that is judged, below 15% no Crusader Strike and no other seal; the swing goes on.
+## Bot brain: the druid and the shaman (issue #80 step 4c)
+
+Tested against a scripted fake game only. Not seen live, and the first four are the ones that decide whether the presets work at all:
+that the form aura shows under its spell's name in the player's own unit row (`Cat Form`, `Bear Form`, `Dire Bear Form`) and the unit's `power_type` follows it
+(3 energy, 1 rage) with the mana in `mana`/`max_mana`; that `CMSG_CANCEL_AURA` for the form's aura takes the form off (the brain sends it with the aura's own spell id)
+and a heal sent after it is accepted; that the core really refuses food, drink and potions in a form (`no_items_while_shapeshifted`; the brain does not try); that a weapon imbue
+cast with `TARGET_FLAG_ITEM` and the main-hand weapon's guid is accepted (`Session.CastOnMainHand`; spell 8232 / 8024 / 8017 and the like); that the totem creatures show in `units`
+under a name that holds the totem's spell name and `Totem`; that Water Shield (spells 45527 and 51533 to 51536, level 26 and up) is in the spellbook of a Turtle shaman and the aura
+shows as `Water Shield`. Run each preset in a dungeon with a tank bot (or by hand with `brain_start {"strategies":[...],"tank":"<name>"}`; a dungeon run starts the brain with
+`no_move`, so check the positioning by hand), `mmaps_dir` set, and read `brain_decision`, `brain_idle` and `brain_status.holds`.
+
+1. **Resto druid** (`resto_druid`, level 30+): `heal` with Healing Touch (5185 to 25297) on a deficit that fits, Regrowth (8936 to 9858) under 25% health (the tank 35%) and for a member under
+   45% when it covers sooner; `hot_tank` Rejuvenation on the tank in a fight; `dispel` with Abolish Poison (2893; none again while its aura stands), Cure Poison (8946), Remove Curse (2782).
+   Out of combat at a rest gate: `mark_of_the_wild` on the druid and each member, `thorns` on the tank, `drink` below 80% mana. In a fight below 20% mana: `innervate` (level 40).
+   Shift into a form by hand (Cat Form) with a member hurt: one `leave_form` (relevance 42) before the first `heal`, no `spell_fail` `not_shapeshift`, and `brain_idle` `vetoed:caster_form_only`
+   in between. Report whether the unit row still shows the aura for a moment after the cancel (the brain holds `leave_form` 2 s and cancels again after that).
+2. **Balance** (`balance_druid`): `moonfire` (and `insect_swarm` from level 20), then `starfire` or `wrath`; no cast with a cast time while moving. A mob on the druid under 80% health:
+   `entangling_roots` **outdoors** and then `step_away`; indoors the server refuses it (`only_outdoors`), which must be a 30 s back-off in `holds`, not a repeat. The band is 20 to 28 yd.
+3. **Cat** (`feral_cat_druid`, level 20+ with Cat Form): at a pull `enter_form` casts 768 (or at a rest gate with nothing to do) and the unit row shows `Cat Form`, `power_type` 3; then
+   `faerie_fire_feral`, `tigers_fury`, `rake`, `shred` from behind the mob (compare the mob's `o` with the way to the druid) and `claw` otherwise, `rip` at 4 combo points and
+   `ferocious_bite` at 5 (or 3 on a mob under 35%). Report any `spell_fail` `not_behind`, `no_combo_points`, `only_shapeshift` or `no_power` that repeats. Never `leave_form` in a fight, whatever the mana or health.
+4. **Cat, out of combat**: below 50% mana with a drink in the bags a `leave_form`, then `drink` (the Drink aura, the druid sits), then `enter_form`; below 85% health with food, `leave_form` then `eat`;
+   with Mark of the Wild missing and 60% mana, `leave_form`, `mark_of_the_wild`, `enter_form`. Report if an item is used in a form (`inventory_error`/`spell_fail` `no_items_while_shapeshifted`).
+5. **Bear** (`bear_tank_druid`, level 10+, Dire Bear Form from 40): `enter_form` 5487 or 9634 at a pull, `enrage` at the start with no rage, `swipe` and `demoralizing_roar` with 2+ mobs, `maul`
+   from 40 rage (once per swing: no `spell_fail` repeating), `taunt` with Growl (6795) on a loose add within 5 yd, `frenzied_regeneration` under 35% health with rage. Growl is not tried in another form.
+6. **Resto shaman** (`resto_shaman`): `heal` Healing Wave (331 to 25357) for most deficits, Lesser Healing Wave (8004 to 10468) in an emergency, `chain_heal` (1064) only with two or more members
+   under 85%; `dispel` Cure Poison (526) and Cure Disease (2870), nothing for a curse or magic; `shield` Water Shield when known, else Lightning Shield.
+7. **Totems** (any shaman preset, with the four totem tools in the bags): one `drop_totem` per tick at the start of a fight, in the order of the preset (fire, air, water, earth), none again for 10 s and
+   none while the creature stands within 8 yd of the drop; look at `units` for the totem's name. Walk 30+ yd away with the group and fight again: the slot is dropped again. Without the tool: no `drop_totem`
+   at all (report if the tool is not needed in Turtle, then `spell_fail` `totems`/`item_gone` is the only answer). Kill a totem or let it run out: it is dropped again. Report if the name never matches (the manager then drops it again after 10 s each time; an unresolved name counts as ours).
+8. **Elemental** (`elemental_shaman`): `flame_shock`, then `lightning_bolt`; `chain_lightning` (level 32) with 2+ mobs near the target and none loose near the shaman; none of the bolts while moving; `interrupt`
+   with Earth Shock (8042 to 10414) on a heal or crowd-control cast within 20 yd. The shaman stands 14 to 19 yd from the mob (the shocks reach 20, Lightning Bolt 30).
+9. **Enhancement** (`enhancement_shaman`): out of combat at a rest gate `imbue` once (Windfury Weapon from level 30, Flametongue Weapon from 10, Rockbiter Weapon before)
+   enchantment in the client or with `inspect`; it is not cast again for 55 minutes. In a fight `auto_attack`, `stormstrike` (level 30) every 8 s, `flame_shock`, `earth_shock` above 60% mana; the shaman stands behind the mob.
+   Take the weapon off and start the brain: one `imbue` that fails (`item_gone` or the session's error), then a minute's silence.
+10. **Never**: Ghost Wolf, Prowl, Pounce, Hibernate, a heal in a form, a potion or a meal in a form. Grep `brain_decision` for those spells.

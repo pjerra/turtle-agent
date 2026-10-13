@@ -191,6 +191,21 @@ func (g *sessionBrainGame) CancelAutoRepeat(ctx context.Context) error {
 
 func (g *sessionBrainGame) StopAttack(ctx context.Context) error { return g.cur().StopAttack(ctx) }
 
+// CancelAura and CastOnMainHand are the optional halves brain.AuraCanceller (a druid leaves its form) and brain.WeaponImbuer (a shaman
+// imbues its weapon).
+var (
+	_ brain.AuraCanceller = (*sessionBrainGame)(nil)
+	_ brain.WeaponImbuer  = (*sessionBrainGame)(nil)
+)
+
+func (g *sessionBrainGame) CancelAura(ctx context.Context, spell uint32) error {
+	return g.cur().CancelAura(ctx, spell)
+}
+
+func (g *sessionBrainGame) CastOnMainHand(ctx context.Context, spell uint32) error {
+	return g.cur().CastOnMainHand(ctx, spell)
+}
+
 func (g *sessionBrainGame) UseItem(ctx context.Context, entry uint32) error {
 	_, err := g.cur().UseItem(ctx, session.EquipRef{Entry: entry}, 0)
 	return err

@@ -88,6 +88,10 @@ type Unit struct {
 	GCDMS   int64  `json:"gcd_ms,omitempty"`
 	Auras   []Aura `json:"auras"`   // in slot order, never null
 	Casting *Cast  `json:"casting"` // null when not casting
+	// Mana and MaxMana are the mana pool of a unit that plays on another power: a druid in Cat Form (energy) or Bear Form (rage) keeps
+	// its mana in UNIT_FIELD_POWER1, which Power then does not show. Left out when the unit plays on mana (Power is the mana) or has none.
+	Mana    uint32 `json:"mana,omitempty"`
+	MaxMana uint32 `json:"max_mana,omitempty"`
 }
 
 // Aura is a spell in one of a unit's 48 aura slots (UNIT_FIELD_AURA).
@@ -568,6 +572,9 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 	}
 	if u.PowerType < 5 {
 		u.Power, u.MaxPower = v[UnitPower1+uint16(u.PowerType)], v[UnitMaxPower1+uint16(u.PowerType)]
+		if u.PowerType != 0 {
+			u.Mana, u.MaxMana = v[UnitPower1], v[UnitMaxPower1]
+		}
 	}
 	u.InCombat = u.Flags&UnitFlagInCombat != 0
 	u.Dead = u.MaxHealth > 0 && u.Health == 0

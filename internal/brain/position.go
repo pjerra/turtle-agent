@@ -278,11 +278,12 @@ func pointByTank(c *Ctx, tank *objects.Unit) Vec3 {
 	return Vec3{tp[0] + (me[0]-tp[0])*f, tp[1] + (me[1]-tp[1])*f, tp[2]}
 }
 
-// ValRootedMob is the nearest mob on the player within 12 yards that carries a root of the mage's (Frost Nova).
+// ValRootedMob is the nearest mob on the player within 12 yards that carries a root of the party's own casters (a mage's Frost Nova,
+// a druid's Entangling Roots).
 var ValRootedMob = &Value[*objects.Unit]{Name: "rooted_mob", Calc: func(c *Ctx) *objects.Unit {
 	for i := range c.Units {
 		u := &c.Units[i]
-		if hostileMob(u) && u.InCombat && u.Target == c.Self.GUID && u.Distance >= 0 && u.Distance <= 12 && HasAura(u, "Frost Nova") {
+		if hostileMob(u) && u.InCombat && u.Target == c.Self.GUID && u.Distance >= 0 && u.Distance <= 12 && HasAura(u, "Frost Nova", "Entangling Roots") {
 			return u
 		}
 	}
