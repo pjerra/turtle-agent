@@ -240,7 +240,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `convert_raid` | | Leader only: turns the party into a raid |
 | `raid_move` | `guid` or `name`, `subgroup` (1-8), `swap_with` (name) | Leader or assistant of a raid: puts the member in the subgroup; with `swap_with` trades places with that member of the target subgroup, which also works when it is full (five) |
 | `disband` | | Leader only: removes every other member, which ends the group. `leave_group` only takes the player out and the group lives on |
-| `party` | | `in_group`, `raid`, `leader`, `assistant` and `subgroup` (the player's own), `members[]` with health, online state, `assistant` and `subgroup`, `marks` (raid icon name to guid) |
+| `loot_method` | `method` (`free_for_all`, `round_robin`, `master_loot`, `group_loot`, `need_before_greed`), `master` or `master_name` (master_loot: the master looter; the player when neither), `threshold` (item quality 1-5; 0 keeps the group's) | Leader only (`CMSG_LOOT_METHOD`, GroupHandler.cpp:372-403). Returns once the group list shows the new rules |
+| `party` | | `in_group`, `raid`, `leader`, `assistant` and `subgroup` (the player's own), `members[]` with health, online state, `assistant` and `subgroup`, `marks` (raid icon name to guid), `loot_method`, `loot_master` and `loot_threshold` (the group's loot rules from the group list) |
 | `units` | `within` (yards, 3D; `near` is its older name), `entry`, `hostile`, `name`, `limit` | nearby units, nearest first: guid, name, level, health, dead, hostile, in_party, `x`/`y`/`z`/`o`, `pos_age_ms`, `moving`, `distance` (3D) and `distance_2d` from the player (see [Unit positions](#unit-positions)), `in_combat`, `target`, `stand_state`, `auras[]`, `casting` (see [Unit state](#unit-state)); `hostile` means an attackable-looking creature (no NPC flags, not player-controlled), not a faction check: it counts neutral critters and never an enemy-faction player |
 | `unit` | `guid` or `name` (prefers living units; the player's own name or guid gives the player, at the `status` position) | one unit, as a `units` row; an error when none is in view |
 | `target` | `guid` or `name` (prefers living units) | |
@@ -322,7 +323,7 @@ auras, deaths, kills, party changes, raid icons (`raid_mark`), the pet (`pet_sum
 A chat or system line whose colour codes were stripped keeps the original in `data.raw` (protocol lines such as
 `TBM:ROSTER|…|removing` lose `|r` otherwise).
 
-Group control (`promote`, `assistant`, `convert_raid`, `raid_move`, `disband`): the server drops a group command it
+Group control (`promote`, `assistant`, `convert_raid`, `raid_move`, `disband`, `loot_method`): the server drops a group command it
 refuses without a reply, so each call checks the rank it can see (leader, or assistant for `raid_move`), sends the
 packet and waits up to the `MarkWait` setting (default 2 s) for the group list that shows the change; it errors at once without the rank or outside a
 raid, and on timeout with "no SMSG_GROUP_LIST". A call that finds the group already in the wanted state (already
@@ -542,6 +543,14 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `boss.loot_item` (`{"entry": 7741, "name": "The Shaft of Tsol"}`): after the kill the leader walks to the boss's corpse, loots it and checks that the item is in
   its bags; the leg fails otherwise (a refused or empty corpse says the same: a companion may have looted it first). A leader that carries the item, or the product a later
   `use_item` makes of it (the Staff), passes. Without it the corpse is left to the companions, who loot their kills too.
+  - **The loot method.** Under `round_robin`, `group_loot` and `need_before_greed` an item below the group's threshold (the Shaft is a white,
+    quality 1, under the default uncommon threshold) shows only to the member whose turn it was at the kill, until that member opens and closes
+    the corpse (LootMgr.cpp:922-946, LootHandler.cpp:668-684). With the companions' looting off that member never does: live run 4 found the
+    Shaft (a plain 100 % drop of Revelosh, `creature_loot_template` 6910/7741, no quest needed) hidden from the leader, the window showing only the
+    money and the rolled gloves. The window's rights come from the method at the moment the corpse is opened (Player.cpp:9566-9590), so a leader
+    that leads the group sets `free_for_all` (keeping the threshold) just before its loot and puts the old method back after (both noted). The run
+    fails at the start when a leg from `from_leg` on has a `boss.loot_item`, the group is not on `free_for_all` (or `master_loot` with the
+    leader as master) and the leader does not lead the group: promote it, or set `loot_method free_for_all` first.
 - `boss.companions_loot: false`: the driver orders `.bot action loot off` (TortoiseBots `player-controls.md`) before the boss is pulled and `.bot action loot on` after the leader's loot, also
   when the fight or the loot fails (noted in the report). Needed for a boss whose drop the plan takes: under round-robin or group loot the corpse is open to one player at a time, and a
   companion that loots first takes the item (`Player.cpp:17280-17293`). Absent or true leaves the companions alone.
@@ -681,7 +690,11 @@ What the driver does for each action of the plan (the stepper decides which):
   try). The same on an assist `attack` order: sent again at once, twice; a bot that keeps refusing is then asked on the usual 10 s
   cadence. The whisper names no command, so it counts as the answer to the last order the driver gave, and only from a party member. `no-tank` and other codes are only recorded.
 - **kill_boss** does the same for each entry of `boss.first`, then for the boss; the whole encounter counts as one fight, so
-  brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss that is not in view fails the run.
+  brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss is never taken as dead unseen:
+  when it is not in view the leader walks toward its position (up to the standoff, three looks), and only its corpse in view counts
+  (noted "dead already: its corpse is in view"); a boss neither alive nor dead there fails the run. (Live run 4's "taken as already
+  dead" came after a 150 s rest gate during which the party had killed Revelosh, who had joined the last pack's fight: the corpse was
+  there.)
 - **rest gate**, at the start of each leg and before every pull and boss. It starts only when the party is out of combat: while a fight
   goes on it waits (ordering the attack on the nearest attacker like a fight does), and its 150 s count from the end of the fight (a
   fight of over 300 s fails the run, and so does a gate that has gone on for 150 s plus 2 x 300 s in all, whatever keeps interrupting

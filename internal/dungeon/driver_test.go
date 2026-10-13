@@ -939,3 +939,30 @@ func (g *fakeGame) Refusals() []Refusal {
 
 // SelfAuras implements SelfAuraSource.
 func (g *fakeGame) SelfAuras() ([]objects.Aura, bool) { return g.auras[leader], true }
+
+// A boss out of view at the end of the leg's walk is not taken as dead: the leader walks toward its position, sees it and kills it.
+// A boss whose corpse lies there is dead already, and the note says the corpse was seen.
+func TestDriverWalksToAnOutOfViewBoss(t *testing.T) {
+	plan := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"far","to":{"x":10,"y":0,"z":0},"boss":{"entry":7,"position":{"x":240,"y":0,"z":0}}}]}`
+	g := newFake()
+	g.add(107, 7, Point{240, 0, 0}) // 230 yd from the leg's end: beyond the 150 yd the fake shows
+	d := NewDriver(mustPlan(t, plan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.targets) != fmt.Sprint([]packet.GUID{107}) || strings.Contains(notes(d), "dead already") || strings.Contains(notes(d), "taken as already dead") {
+		t.Fatalf("targets %v notes %q", g.targets, notes(d))
+	}
+
+	g = newFake()
+	u := g.add(107, 7, Point{240, 0, 0})
+	u.Dead, u.Health = true, 0
+	d = NewDriver(mustPlan(t, plan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if len(g.targets) != 0 || !strings.Contains(notes(d), "[7] is dead already: its corpse is in view") {
+		t.Fatalf("targets %v notes %q", g.targets, notes(d))
+	}
+}

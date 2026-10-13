@@ -330,3 +330,31 @@ func TestGroupControlNeedsWorld(t *testing.T) {
 		}
 	}
 }
+
+// loot_method: master_loot names the player by default; a group already on the wanted rules sends nothing; only the leader may.
+func TestSetLootMethod(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	failWith(t, asyncErr(func() error { return h.s.SetLootMethod(context.Background(), "free_for_all", 0, "", 0) }), "needs a group")
+	inGroup(h)
+	failWith(t, asyncErr(func() error { return h.s.SetLootMethod(context.Background(), "everyone", 0, "", 0) }), "unknown method")
+	done := asyncErr(func() error { return h.s.SetLootMethod(context.Background(), "master_loot", 0, "", 0) })
+	if p := h.expect(opcode.CMSGLootMethod); string(p.Body) != string(game.BuildLootMethod(game.LootMaster, me.GUID, 2)) {
+		t.Fatalf("% X", p.Body)
+	}
+	h.send(opcode.SMSGGroupList, gametest.GroupListLoot(me.GUID, game.LootMaster, me.GUID, 2, gorm))
+	finish(t, done)
+	if p := h.s.Party(); p.LootMethod != "master_loot" || p.LootMaster != me.GUID || p.LootThreshold != 2 {
+		t.Fatalf("%+v", p)
+	}
+	if err := h.s.SetLootMethod(context.Background(), "master_loot", 0, "", 2); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGLootMethod, 50*time.Millisecond); err == nil {
+		t.Fatalf("unexpected packet % X", p.Body)
+	}
+	h.send(opcode.SMSGGroupList, gametest.GroupList(0x30, gorm))
+	waitFor(t, func() bool { return h.s.Party().Leader == 0x30 })
+	failWith(t, asyncErr(func() error { return h.s.SetLootMethod(context.Background(), "free_for_all", 0, "", 0) }), "group leader")
+	h.logout()
+}
