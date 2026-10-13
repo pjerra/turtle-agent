@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
@@ -27,6 +28,13 @@ type lootTakeParams struct {
 	All    bool   `json:"all,omitempty"`
 	Money  bool   `json:"money,omitempty"`
 	WaitMS int    `json:"wait_ms,omitempty"`
+}
+
+type openObjectParams struct {
+	GUID    packet.GUID `json:"guid"`
+	SpellID uint32      `json:"spell_id,omitempty"` // the Opening spell; 6477 when omitted
+	Take    bool        `json:"take,omitempty"`     // take everything and close the window
+	WaitMS  int         `json:"wait_ms,omitempty"`  // for the cast and the window; 15 s when omitted
 }
 
 type waitParams struct {
@@ -60,6 +68,15 @@ func registerItemMethods(srv *rpc.Server, cur func() *session.Session) {
 		}
 		w, err := cur().OpenLoot(ctx, p.GUID, p.Name, waitBound(p.WaitMS, 3000))
 		return w, rpcErr(err)
+	}))
+	srv.Register("open_object", rpc.Typed(func(ctx context.Context, p openObjectParams) (session.LootedObject, error) {
+		wait := waitBound(p.WaitMS, 15000)
+		if p.Take {
+			r, err := cur().LootObject(ctx, p.GUID, p.SpellID, wait, 5*time.Second)
+			return r, rpcErr(err)
+		}
+		w, err := cur().OpenObject(ctx, p.GUID, p.SpellID, wait)
+		return session.LootedObject{Window: w, Taken: []session.LootSlot{}}, rpcErr(err)
 	}))
 	srv.Register("loot_take", rpc.Typed(func(ctx context.Context, p lootTakeParams) (session.LootTaken, error) {
 		r, err := cur().TakeLoot(ctx, session.LootTake{Slot: p.Slot, All: p.All, Money: p.Money}, waitBound(p.WaitMS, 3000))

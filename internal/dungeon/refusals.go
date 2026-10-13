@@ -142,6 +142,14 @@ func (d *Driver) itemState(entry uint32) (has, known, empty bool) {
 // driver cannot see: a GM account that probed as a GM but plays with ".gm off" gets the silent failure like a player.
 func (d *Driver) itemsExempt() bool { return d.cfg.GM == GMAssumed }
 
+// missingForUse is the error for an item a use_item step lacks: the item it uses, or the one its use consumes.
+func missingForUse(it *ItemRef, where string, use ItemRef) error {
+	if it.Entry == use.Entry {
+		return fmt.Errorf("the leader does not carry %s%s, the item this step uses", it, where)
+	}
+	return fmt.Errorf("the leader does not carry %s%s, which using %s needs", it, where, use)
+}
+
 func (d *Driver) missingItem(it *ItemRef, where string) error {
 	return fmt.Errorf("the leader does not carry %s%s, which opening the object needs (the core ignores the use of a locked object by anyone but a GM in GM mode): put it in the bags first", it, where)
 }
@@ -149,11 +157,16 @@ func (d *Driver) missingItem(it *ItemRef, where string) error {
 // needsItem fails when the item is certainly not in the leader's bags: a known list without it. An unknown list (no ItemSource,
 // the inventory not arrived, items still loading) passes; the check before the use looks again.
 func (d *Driver) needsItem(it *ItemRef, where string) error {
-	if it == nil || d.itemsExempt() {
+	return d.needsItemMsg(it, where, d.itemsExempt(), d.missingItem)
+}
+
+// needsItemMsg is needsItem with the error and the exemption of the caller.
+func (d *Driver) needsItemMsg(it *ItemRef, where string, exempt bool, missing func(it *ItemRef, where string) error) error {
+	if it == nil || exempt {
 		return nil
 	}
 	if has, known, _ := d.itemState(it.Entry); known && !has {
-		return d.missingItem(it, where)
+		return missing(it, where)
 	}
 	return nil
 }
@@ -162,7 +175,13 @@ func (d *Driver) needsItem(it *ItemRef, where string) error {
 // teleport), not proof of a bare bag: it waits up to ItemsWait for the list to fill, and only if it stays empty the item is
 // missing. Items that are still loading are not guessed at.
 func (d *Driver) checkUseItem(ctx context.Context, it *ItemRef) error {
-	if it == nil || d.itemsExempt() {
+	return d.checkItem(ctx, it, d.itemsExempt(), d.missingItem)
+}
+
+// checkItem is checkUseItem for any item and message: missing builds the error for an item the bags lack (where says how the bags
+// looked), exempt skips the check.
+func (d *Driver) checkItem(ctx context.Context, it *ItemRef, exempt bool, missing func(it *ItemRef, where string) error) error {
+	if it == nil || exempt {
 		return nil
 	}
 	for waited := time.Duration(0); ; waited += d.cfg.Poll {
@@ -171,11 +190,11 @@ func (d *Driver) checkUseItem(ctx context.Context, it *ItemRef) error {
 		case has:
 			return nil
 		case known:
-			return d.missingItem(it, "")
+			return missing(it, "")
 		case !empty:
 			return nil
 		case waited >= d.cfg.ItemsWait:
-			return d.missingItem(it, " (the bags are empty)")
+			return missing(it, " (the bags are empty)")
 		}
 		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 			return err
@@ -183,17 +202,61 @@ func (d *Driver) checkUseItem(ctx context.Context, it *ItemRef) error {
 	}
 }
 
-// checkRequiredItems fails the run before it starts when a use_object step from leg fromLeg on needs an item the leader lacks.
+// checkRequiredItems fails the run before it starts when a use_object step from leg fromLeg on needs an item the leader lacks and
+// no earlier step of the run brings it: a loot_object or use_item with that expect_item, or a boss whose loot_item it is, is
+// where the Staff of Prehistoria comes from.
 func (d *Driver) checkRequiredItems(fromLeg int) error {
+	made := map[uint32]bool{}
+	scan := func(steps []Step, li int, name, list string) error {
+		for si, st := range steps {
+			where := fmt.Sprintf(" at leg %d %q %s %d", li, name, list, si)
+			switch {
+			case st.UseObject != nil:
+				if it := st.UseObject.RequiresItem; it != nil && !made[it.Entry] {
+					if err := d.needsItem(it, where); err != nil {
+						return err
+					}
+				}
+			case st.LootObject != nil && st.LootObject.ExpectItem != nil:
+				made[st.LootObject.ExpectItem.Entry] = true
+			case st.UseItem != nil:
+				// A leader that carries the result already (a GM set it up) has no use for the reagent.
+				if e := st.UseItem.ExpectItem; e != nil {
+					if has, _, _ := d.itemState(e.Entry); has {
+						made[e.Entry] = true
+						continue
+					}
+				}
+				use := ItemRef{Entry: st.UseItem.Entry, Name: st.UseItem.Name}
+				need := func(it *ItemRef, where string) error { return missingForUse(it, where, use) }
+				// The item the step uses must be in the bags or made by a step before it (a run from the revelosh leg needs the Medallion).
+				if !made[use.Entry] {
+					if err := d.needsItemMsg(&use, where, false, need); err != nil {
+						return err
+					}
+				}
+				if it := st.UseItem.RequiresItem; it != nil && !made[it.Entry] {
+					if err := d.needsItemMsg(it, where, false, need); err != nil {
+						return err
+					}
+				}
+				if st.UseItem.ExpectItem != nil {
+					made[st.UseItem.ExpectItem.Entry] = true
+				}
+			}
+		}
+		return nil
+	}
 	for li := fromLeg; li < len(d.plan.Legs); li++ {
 		l := d.plan.Legs[li]
-		for si, st := range l.Steps {
-			if st.UseObject == nil {
-				continue
-			}
-			if err := d.needsItem(st.UseObject.RequiresItem, fmt.Sprintf(" at leg %d %q step %d", li, l.Name, si)); err != nil {
-				return err
-			}
+		if err := scan(l.Steps, li, l.Name, "step"); err != nil {
+			return err
+		}
+		if b := l.Boss; b != nil && b.LootItem != nil {
+			made[b.LootItem.Entry] = true
+		}
+		if err := scan(l.AfterBoss, li, l.Name, "after_boss step"); err != nil {
+			return err
 		}
 	}
 	return nil

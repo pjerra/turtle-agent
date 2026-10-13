@@ -189,3 +189,54 @@ func TestUseObjectMethod(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 }
+
+// open_object casts the Opening spell at a chest (CMSG_CAST_SPELL, target mask 0x0800) and answers with the window; take loots it and closes.
+func TestOpenObjectMethod(t *testing.T) {
+	const chest packet.GUID = 0xF11001E1C1000001 // Baelog's Chest, entry 123329
+	r := newRig(t)                               // the character stands at 1, 2, 3
+	r.goCreate(chest, 123329, "Baelog's Chest", 4, 2, 3, map[uint16]uint32{objects.GOTypeID: 3, objects.GOState: objects.GOStateReady})
+	r.eventually("gameobjects", "{}", func(m map[string]any) bool {
+		l := m["result"].([]any)
+		return len(l) == 1 && l[0].(map[string]any)["name"] == "Baelog's Chest"
+	})
+
+	// Without take the window stays open for loot_take.
+	open := r.callAsync("open_object", `{"guid":"0xF11001E1C1000001","wait_ms":3000}`)
+	r.expectBody(opcode.CMSGCastSpell, game.BuildCastSpellOnObject(6477, chest))
+	r.srv.Send(opcode.SMSGLootResponse, gametest.LootResponse(chest, game.LootPickpocket, 0, gametest.LootSlot{Slot: 0, Item: 7740, Count: 1}))
+	res := (<-open)["result"].(map[string]any)
+	w := res["window"].(map[string]any)
+	if w["guid"] != "0xF11001E1C1000001" || len(w["items"].([]any)) != 1 || len(res["taken"].([]any)) != 0 {
+		t.Fatalf("%v", res)
+	}
+	shut := r.callAsync("loot_close", `{"wait_ms":3000}`)
+	r.expectBody(opcode.CMSGLootRelease, game.BuildLootRelease(chest))
+	r.srv.Send(opcode.SMSGLootReleaseResponse, gametest.LootRelease(chest))
+	if out := <-shut; out["error"] != nil {
+		t.Fatalf("%v", out)
+	}
+
+	// With take and another spell: the item is taken and the emptied window released.
+	loot := r.callAsync("open_object", `{"guid":"0xF11001E1C1000001","spell_id":3365,"take":true,"wait_ms":3000}`)
+	r.expectBody(opcode.CMSGCastSpell, game.BuildCastSpellOnObject(3365, chest))
+	r.srv.Send(opcode.SMSGLootResponse, gametest.LootResponse(chest, game.LootPickpocket, 0, gametest.LootSlot{Slot: 0, Item: 7740, Count: 1}))
+	r.expectBody(opcode.CMSGAutostoreLootItem, []byte{0})
+	r.srv.Send(opcode.SMSGLootRemoved, gametest.LootRemoved(0))
+	r.expectBody(opcode.CMSGLootRelease, game.BuildLootRelease(chest))
+	r.srv.Send(opcode.SMSGLootReleaseResponse, gametest.LootRelease(chest))
+	res = (<-loot)["result"].(map[string]any)
+	taken := res["taken"].([]any)
+	if len(taken) != 1 || taken[0].(map[string]any)["item_entry"] != float64(7740) {
+		t.Fatalf("%v", res)
+	}
+
+	// Errors: no guid, not in view, an unknown field.
+	for _, params := range []string{`{}`, `{"guid":"0xF11001E1C2000001"}`} {
+		if out := r.call("open_object", params); errCode(out) != rpc.CodeGame {
+			t.Fatalf("%s: %v", params, out)
+		}
+	}
+	if out := r.call("open_object", `{"guid":"0x1","extra":1}`); errCode(out) != rpc.CodeInvalidParams {
+		t.Fatalf("%v", out)
+	}
+}

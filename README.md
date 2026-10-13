@@ -246,6 +246,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
+| `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
 | `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
@@ -460,8 +461,21 @@ what the update fields make likely (distance over 5 yards, unusable flags, locke
 (`walk_path`).
 
 Chests, mining and herb nodes and other locked objects are not opened by `CMSG_GAMEOBJ_USE` on this core: its chest branch only runs the
-object's scripts, and the client opens them by casting an Opening spell at the object (`SMSG_LOOT_RESPONSE` follows from the spell). Using one
-with `use_object` therefore ends in `none`. Opening them is not implemented yet.
+object's scripts (`GameObject.cpp:1493-1514`), `CMSG_LOOT` on a game object guid is refused (`LootHandler.cpp:414-450`), and the client
+opens them by casting an Opening spell at the object. `use_object` on one therefore ends in `none`; `open_object` is the call for them.
+
+Without `spell_id`, `open_object` casts the Opening spells the character's spell book has, 6477 first (the core drops a cast of a spell the player does not have without an answer, so an unknown one would only run out the wait; a given `spell_id` that is not in the book is refused at once). A refusal that another Opening spell may not share (`bad_targets`: the lock names another type; `low_castlevel`: skill) goes on to the next one; the error then lists each spell and the `SpellCastResult` by name and number.
+
+`open_object` casts the spell (default 6477 "Opening", effect 33 `SPELL_EFFECT_OPEN_LOCK`; every race has 3365, 6247, 6477, 6478, 21651 and 22810, all
+the same, and the core lets a client cast only a spell in its book, `SpellHandler.cpp:340-347`) with `CMSG_CAST_SPELL`: `u32 spell`, `u16 0x0800`
+(`TARGET_FLAG_OBJECT`), the object's packed guid (`Spell.cpp:198-199`). The server checks the lock (`CanOpenLock`, `SpellEffects.cpp:1915-1988`),
+the reach (the interact distance, about 5 yards) and the line of sight (`Spell.cpp:5920-5935`), and after the cast time (about 5 s in the
+spell table) answers with `SMSG_LOOT_RESPONSE` (type 2 on the wire: `Player.cpp:9614-9637`), the same window a corpse gives, so
+`loot_take` and `loot_close` work on it, and `CMSG_AUTOSTORE_LOOT_ITEM` and `CMSG_LOOT_RELEASE` are the corpse's. The player must stand within
+reach and not walk during the cast. With `take: true` the call takes everything and closes the window (`taken` lists the slots). A cast
+that fails ends the call with the reason (`spell_fail` carries the code); a server that says nothing (the object is not spawned, or
+gone) runs out the wait. An object that is not a chest (type 3) is refused before anything is sent: doors, levers and goobers take `use_object`.
+Which lock types the Opening spells open (lock 93 of Baelog's Chest was not readable without `Lock.dbc`) is checked live: [LIVE-CHECKS.md](docs/LIVE-CHECKS.md).
 
 A change of a game object the agent already knows is a `gameobject` event with the object as `source` and `data.change`: `state`
 (`old`, `new` as above), `flags` (`old`, `new` numbers, `locked`), `dyn_flags` (numbers), `animation` (`anim`: `SMSG_GAMEOBJECT_CUSTOM_ANIM`),
@@ -497,10 +511,10 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
   [Dungeon runs](#dungeon-runs); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
   a member of the group, for packs of one entry that stand closer together than that); run `steps` in order; walk to `boss.position` and kill the
-  boss. Each part is optional, but a leg needs at least one of pull groups, steps and a boss. `skip` lists creature entries the leg
+  boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
   in order.
-- A **step** is exactly one of `use_object` and `wait_for`. `use_object` names a game object by `entry`, by `near` (a position;
+- A **step** is exactly one of `use_object`, `wait_for`, `loot_object` and `use_item`. `use_object` names a game object by `entry`, by `near` (a position;
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
   driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
   for the use to do anything, as the object's lock names it (the Uldaman Keystone needs the Staff; the core ignores the use of a
@@ -513,12 +527,32 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
   close), with a `timeout_s` (default 60, at most 600) after which the plan fails. A door that a lever or key opens may do so well after
   the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
+- `loot_object` is `use_object` for a chest or node: the same reference (`entry`, `near`, `range`), `stand`, the same walk to it, then the Opening
+  cast and the loot (`open_object` with `take`: see [Game objects](#game-objects)), and `expect_item` (`{"entry": 7740, "name": "Gni'kiv Medallion"}`):
+  the item that must be in the bags afterwards. The driver waits up to 8 s for it to show and fails the step, naming the item, when it does not;
+  a leader that carries it already (a chest looted before, a GM's `.additem`) passes the step without opening anything (noted). One retry on a failed open.
+- `use_item` uses an item from the leader's bags (`entry`, `name` for the messages) with `CMSG_USE_ITEM` on itself, waits for the
+  cast, and checks `expect_item` the same way (spell 9594 of the Gni'kiv Medallion makes the Staff of Prehistoria, 7733). `requires_item` is a
+  second item the use consumes (the Shaft of Tsol, 7741): checked before the use, so that the failure names it. A leader that carries the
+  `expect_item` already passes the step. `requires_item` of a `use_object` that an earlier step of the run makes (a `loot_object` or `use_item` with that `expect_item`,
+  or a `boss.loot_item`) is not asked for at the start of the run; a `use_item` step's own `entry` is asked for there unless an earlier step makes it (a run that starts at the
+  revelosh leg needs the Medallion or the Staff in the bags).
+- `boss.loot_item` (`{"entry": 7741, "name": "The Shaft of Tsol"}`): after the kill the leader walks to the boss's corpse, loots it and checks that the item is in
+  its bags; the leg fails otherwise (a refused or empty corpse says the same: a companion may have looted it first). A leader that carries the item, or the product a later
+  `use_item` makes of it (the Staff), passes. Without it the corpse is left to the companions, who loot their kills too.
+- `boss.companions_loot: false`: the driver orders `.bot action loot off` (TortoiseBots `player-controls.md`) before the boss is pulled and `.bot action loot on` after the leader's loot, also
+  when the fight or the loot fails (noted in the report). Needed for a boss whose drop the plan takes: under round-robin or group loot the corpse is open to one player at a time, and a
+  companion that loots first takes the item (`Player.cpp:17280-17293`). Absent or true leaves the companions alone.
+- **Team gate**: `boss.team` and a pull group's `team` (`"alliance"` or `"horde"`). The driver takes the leader's team from its race (human, dwarf, night elf, gnome and high elf
+  are the Alliance; orc, undead, tauren, troll and goblin the Horde: `Player::TeamForRace`) and skips what is gated to the other team, with a line in the report's
+  `notes` and a `dungeon_step` event (`action: skip_team`). A leader whose race is not known yet runs everything. Uldaman's Baelog, Eric and Olaf (6906-6908) are faction 122
+  quest givers, friendly to the Alliance and hostile to the Horde only: their boss is `"team": "horde"`.
 - A bad file is refused with every problem at once, each with its path: `uldaman.json: legs[2].steps[0].use_object: needs an entry,
   a near position, or both`. Unknown fields are errors too, and so is an entry that is in `skip` and also in a pull group or in
   `boss.first` (the leg would fight it and never wait for it).
 
 The stepper (`dungeon.NewStepper(plan, world, clock)`) does no networking. `Next` returns the action to do now (`walk`, `pull`,
-`use_object`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
+`use_object`, `loot_object`, `use_item`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
 it asks a `World` (position, game objects in view, hostiles within a radius) and decides by itself that a walk is not needed when the
 player stands at `to`, that a wait is over when its condition holds, and that a wait failed when it timed out. A `use_object`
 step whose object is out of reach gives a `walk` to the object first; such a step fails after `MaxStepWalks` (4) walks or
@@ -532,6 +566,14 @@ per boss, packs of spawns within `-cluster` yards or in one `creature_groups` gr
 factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`; a pack whose members all spawn with a stealth aura gets `"ambush": true`). It is repeatable: the same files and flags give the same
 bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
 `tools/dungeongen/testdata/uldaman` is the export the Uldaman plan was written from.
+
+`go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122` lints a plan against
+the export (`creatures.tsv`) and prints a warning for each boss, `boss.first` entry or pack member that has `npc_flags` (a quest giver, vendor or trainer is no
+mob) or a faction named friendly to the leader's team; what is gated to the other team is not looked at, and the flags of a part gated to a team are not repeated.
+dungeongen cannot tell friend from foe by itself: that is in `FactionTemplate.dbc`, which the export does not carry, so only 35 and the factions of
+`-friendly-factions` count as friendly, and a faction that creatures with `npc_flags` also use is noted as possibly friendly. Faction 122, for one, is
+the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile to the Horde but the data of the users of 122 (Bael'dun soldiers are Horde kill targets).
+`-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
@@ -589,6 +631,8 @@ What the driver does for each action of the plan (the stepper decides which):
 
 - **walk** is `walk_path`, tried up to 3 times (it replans after a server move by itself); a walk that cannot arrive fails the run.
 - **use_object** sends the use, waits 1.5 s, and the plan's `wait_for` step watches the door or altar change state. Walks inside a step are bounded (see above).
+- **loot_object**, **use_item**, **boss loot**: the game must offer them (the agent's session does; a test game without them fails the step with "this game cannot open objects").
+  Each holds the brain's move lock around the cast, the result is a `dungeon_step` event, and what was taken goes in the report's `notes` ("took 1 x item 7740").
 - **pull of a stealthed group (ambush).** Companions never attack a unit they cannot see, so `.bot action pullback` on a stealthed mob
   draws no fight (the Uldaman Stonevault Cave Lurkers, aura 5916 *Shadowstalker Stealth*). A pull group is therefore not pulled when
   the members in view all carry a stealth aura (`auras` on the unit, by spell id only: 5916, Sneak 22766, Stealth 1784-1787 and 8822, Prowl 5215, 6783 and 9913, Shadowmeld 20580; a

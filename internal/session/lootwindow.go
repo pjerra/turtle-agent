@@ -133,10 +133,23 @@ func (s *Session) OpenLoot(ctx context.Context, g packet.GUID, name string, wait
 	if err != nil {
 		return nil, err
 	}
+	return s.awaitLootAnswer(ctx, wait, nil)
+}
+
+// awaitLootAnswer waits for the answer to the loot request that was just sent (pending is set) and turns a refusal or a
+// release into an error. With castFailed set, it also ends when a cast of the player fails (the Opening spell of a chest),
+// and the error names the reason. castFailed is the count of failed casts before the request.
+func (s *Session) awaitLootAnswer(ctx context.Context, wait time.Duration, castFailed *uint64) (*LootWindow, error) {
 	var a lootAnswer
 	var win *LootWindow
+	var failReason string
+	var failCode uint8
 	if err := s.awaitLoot(ctx, wait, func() bool {
 		if s.loot.pending {
+			if castFailed != nil && s.mount.failed > *castFailed {
+				failReason, failCode = s.mount.fail, s.mount.failCode
+				return true
+			}
 			return false
 		}
 		a, win = s.loot.ans, s.loot.ansWin
@@ -144,6 +157,10 @@ func (s *Session) OpenLoot(ctx context.Context, g packet.GUID, name string, wait
 	}); err != nil {
 		s.do(context.WithoutCancel(ctx), func() (any, error) { s.loot.pending = false; return nil, nil })
 		return nil, fmt.Errorf("no loot window from the server within %s: %w", wait, err)
+	}
+	if failReason != "" {
+		s.do(context.WithoutCancel(ctx), func() (any, error) { s.loot.pending = false; return nil, nil })
+		return nil, &CastFailedError{Reason: failReason, Code: failCode}
 	}
 	switch {
 	case a.refused:

@@ -71,7 +71,8 @@ Run on m910q build 17, 2026-10-13 (GM account, `.gm visible on`, own character o
 - `use_object` on the Keystone door 2.6 yd away answered at once: `gameobject` events `flags` 32 to 5 and `state` ready to active, and the linked
   Seal of Khaz'Mul door opened with the same two changes. It stayed open for the 45 s watched.
 - `use_object` on chests ends in `none`: the Food Crate (1.3 yd away, `dyn_flags` 1), Baelog's Chest and the Iron Deposit (3.1 yd) got no answer.
-  The core's `GameObject::Use` for a chest only runs scripts, so the client opens a chest by casting an Opening spell at it. Not covered yet.
+  The core's `GameObject::Use` for a chest only runs scripts, so the client opens a chest by casting an Opening spell at it. `open_object` (and the plan's
+  `loot_object`) now does that; the live check is "Chests open by an Opening cast" at the end of this file.
 - The capture of the run is `testdata/captures/m7-gameobjects.twcap` (trimmed: no creature moves, spell hits, chat), used by the objects, game
   and session tests.
 
@@ -133,7 +134,8 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
    (-228.9, 46.1, -46) and list the setup you did by hand in `dungeon_run`'s `setup`. Start `dungeon_run {"name":"uldaman","from_leg":"keystone",
    "setup":["go entrance","levelup -15"]}`, then `{"name":"uldaman","setup":[...]}` from the start. A teleport start is `"teleport": true` (flagged).
 2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`); keep the capture.
-3. Pass: the run reaches and kills Ironaya from the keystone leg in one run (Keystone, Seal, Ironaya) and Baelog (with Eric and Olaf) from the start,
+3. Pass: the run reaches and kills Ironaya from the keystone leg in one run (Keystone, Seal, Ironaya), and from the start an Alliance leader loots Baelog's Chest
+   (Baelog, Eric and Olaf are friendly to it and skipped) while a Horde leader kills the three (see the last section),
    and ends with a report (`state` done or a clear `error`), per-leg seconds, deaths, wipes, `gm_shortcuts` and `setup_shortcuts`.
 4. Things to look at that the fakes assume:
    - a stealthed group (keystone group 2): the party stands at each position for 6 s, the lurkers reveal themselves or the note says
@@ -143,7 +145,7 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
    - the rest gate: no 150 s waits for the priest (the note "not drinking"), no "not rested" failure during a fight, a gate that starts after a fight
      ends in a reasonable time (the walk-aggro and ambush fights are followed by a gate before the next pull);
    - `.revive <name>` on a companion: how long the party list takes to show it (the driver waits up to 5 s), with no second revive;
-   - the Seal of Khaz'Mul active within the 60 s wait; Eric and Olaf needing a kill (plan decision (b): no script links them to Baelog).
+   - the Seal of Khaz'Mul active within the 60 s wait; Eric and Olaf needing a kill for a Horde leader (plan decision (b): no script links them to Baelog; an Alliance leader skips the three, they are friendly).
    - the optional GM buffs (`"buffs": "world"`, issue #73): `.aura <id>` on each selected companion lands on the companion (not the leader; developer
      level needed) and shows in its unit row `auras[]` within the 1.5 s the driver waits; each application is a `buff` in `gm_shortcuts`; the buffs are back
      after a GM revive. Look at the report's `refusals[]` (an `unreachable` pull, a `dead-target`) and at the `notes` ("landed on the leader; selecting ... again"
@@ -547,3 +549,26 @@ Tested against a scripted fake game and clock only. Run `holy_paladin` and the o
 7. **Divine Favor**: the five ranks in this data (51312 to 51316) are talent passives; confirm they are in the spellbook as passives and that no castable Divine Favor (20216 is `[Deprecated] Divine Favor`) exists, so `divine_favor` never fires. If a castable one turns up, check that the heal after it is Holy Light.
 8. **`paladin_judge`** (`brain_start {"strategies":["holy_paladin","paladin_judge"]}`): Seal of Light / Wisdom and Judgement only with 60%+ mana, nobody to heal, the tank holding the mob and the mob within 9 yd of the paladin. Judgement reaches 10 yd, so look for it only when a mob stands near.
 9. **The three follow-ups of #102**: (a) a totem the server refuses (no tool, `item_gone`) is not in the slot's record: `drop_totem` for the same totem is tried again after the hold, not 10 s later; (b) as an enhancement shaman swap the main-hand weapon after the imbue: one `imbue` within a few seconds, and no second one 10 s after it (that proves the item's `temp_enchant` field arrives: if the brain imbues every 10 s forever instead, the field reads 0 and the brain should have fallen back to the timer after it first read it; report which), and the imbue running out (60 min) gives another; (c) a feral druid with a party member out of reach through a wall: `mark_of_the_wild` fails twice (`line_of_sight` / `out_of_range`), then no more `leave_form` for the buff for 60 s.
+
+## Chests open by an Opening cast; an honest Uldaman run (Lane C, #73)
+
+Built and tested against the core's source and packet fixtures only (no server was run): `CMSG_GAMEOBJ_USE` on a chest runs its scripts and nothing else
+(`GameObject.cpp:1493-1514`), `CMSG_LOOT` on a game object guid is logged and dropped (`LootHandler.cpp:421-425`), so a chest opens by `CMSG_CAST_SPELL` of an
+Opening spell at it (`SpellEffects.cpp:1915-1988`), which sends the loot window (`Player.cpp:9242-9340`, `9660-9677`). What the source does not settle, and the run must:
+
+1. **Chest open.** A character next to Baelog's Chest (123329 at -356.0, 112.8, -43.2; it needs no kill): `open_object {"guid":"<chest guid from gameobjects>","take":true}`.
+   Expect `spell_start` 6477 with the chest as `target_guid` (cast time about 5 s), `loot_open` (`type` pickpocket) with item 7740 (Gni'kiv Medallion), `loot_taken`, `loot_closed`,
+   and the Medallion in `inventory`. Without `take`: the window stays, `loot_take` and `loot_close` work on it. Record: whether 6477 opens lock 93 (if the cast fails,
+   `spell_fail` has the `SpellCastResult`: SPELL_FAILED_BAD_TARGETS means the lock needs another spell or a key, SPELL_FAILED_LINE_OF_SIGHT that the character
+   must stand where the chest is seen, SPELL_FAILED_LOW_CASTLEVEL a skill), and whether the Opening spells 3365, 6247, 6478 differ (`spell_id`). The same on the Iron Deposit
+   (a node, mining skill) and the Large Mithril Bound Chest (lock flag 2): the old "chests end in `none`" item is closed when these answer.
+2. **Item use.** With the Medallion (7740) and the Shaft of Tsol (7741) in the bags, `use_item {"item_entry":7740}`: `spell_start` 9594 (2 s), the Staff of Prehistoria (7733)
+   in the bags, both parts gone. With only the Medallion: `spell_fail` (reagents).
+3. **The run, Alliance leader** (a human or dwarf with a tank, a healer and two damage dealers, `gm` omitted or false, no `.additem`): `dungeon_run {"name":"uldaman"}` from the
+   entrance. Pass: the baelog leg pulls its packs, the report notes "boss 6906 is for team horde, the leader is alliance: skipped", Baelog's Chest is looted
+   (`took 1 x item 7740` in the notes); the revelosh leg kills Revelosh, the leader loots his corpse (item 7741; the boss has `companions_loot` false, so `.bot action loot off` goes out before the pull and `on` after: check the bots loot nothing from Revelosh meanwhile and
+   that `.bot action loot` is accepted from party chat; if the Shaft is gone anyway the leg fails with the companion hint: note who looted it and report it to TortoiseBots), the Medallion is used (7733 in the bags); the keystone leg opens the Keystone (no "does not carry" failure at the start);
+   the Seal of Khaz'Mul is active within 60 s; Ironaya dies. `gm_shortcuts` is empty.
+4. **The run, Horde leader** (an orc or troll): the baelog leg kills Eric and Olaf and then Baelog (hostile to the Horde, faction 122), then loots the chest. Pass criterion of the old
+   run, "Baelog+Eric+Olaf dead", holds for the Horde only; the Alliance's is "loots Baelog's Chest". Check that the chest is not opened before the three are dead (it is an `after_boss` step).
+5. **Team from the race.** The skip notes name the leader's team: they are the evidence that the race was read from the player's `UNIT_FIELD_BYTES_0`. A leader whose race stayed 0 runs everything (no note), and an Alliance leader then walks into Baelog's camp: look for that.

@@ -136,6 +136,7 @@ const (
 // Game object types (SharedDefines.h:253-284).
 const (
 	GOTypeDoor    uint8 = 0
+	GOTypeChest   uint8 = 3 // a chest or a gathering node
 	GOTypeGeneric uint8 = 5
 )
 

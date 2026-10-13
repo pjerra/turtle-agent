@@ -31,6 +31,16 @@ func TestCastSpellOnItemLayout(t *testing.T) {
 	}
 }
 
+// A chest is opened by a cast at it: spell, target mask 0x0800 (TARGET_FLAG_OBJECT), the object's guid packed. The bytes are written
+// out so a change of layout shows (Baelog's Chest, entry 123329 = 0x01E1C1, counter 1; spell 6477 = 0x194D).
+func TestCastSpellOnObjectLayout(t *testing.T) {
+	const chest = packet.GUID(0xF11001E1C1000001)
+	want := []byte{0x4D, 0x19, 0x00, 0x00, 0x00, 0x08, 0xF9, 0x01, 0xC1, 0xE1, 0x01, 0x10, 0xF1}
+	if b := BuildCastSpellOnObject(6477, chest); !bytes.Equal(b, want) {
+		t.Fatalf("object cast % X, want % X", b, want)
+	}
+}
+
 func TestFacing(t *testing.T) {
 	for _, c := range []struct{ x, y, want float32 }{{1, 0, 0}, {0, 1, math.Pi / 2}, {-1, 0, math.Pi}, {0, -1, 3 * math.Pi / 2}} {
 		if got := Facing(0, 0, c.x, c.y); math.Abs(float64(got-c.want)) > 1e-5 {

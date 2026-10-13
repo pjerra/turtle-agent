@@ -58,7 +58,10 @@ type Leg struct {
 	Skip  []uint32 `json:"skip,omitempty"`
 	Steps []Step   `json:"steps,omitempty"`
 	Boss  *Boss    `json:"boss,omitempty"`
-	Notes []string `json:"notes,omitempty"`
+	// AfterBoss are steps done once the boss is dead (or skipped for the leader's team): the chest by the camp that a hostile boss
+	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
+	AfterBoss []Step   `json:"after_boss,omitempty"`
+	Notes     []string `json:"notes,omitempty"`
 }
 
 // PullGroup is one pack: the entries it holds and where its members stand (one position each, or fewer when they
@@ -76,6 +79,8 @@ type PullGroup struct {
 	// 0: the driver's PackRadius, 25). Packs of the same entry that stand closer to each other than that, such as the
 	// two rows of Stonevault Ambushers at the Uldaman Keystone, need a smaller one so that each group takes its own.
 	Radius float32 `json:"radius,omitempty"`
+	// Team limits the group to a leader of that team ("alliance" or "horde"); the driver skips it for the other (see Team).
+	Team string `json:"team,omitempty"`
 }
 
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
@@ -84,12 +89,31 @@ type Boss struct {
 	Entry    uint32   `json:"entry"`
 	Position Point    `json:"position"`
 	First    []uint32 `json:"first,omitempty"`
+	// Team limits the fight to a leader of that team ("alliance" or "horde"): the driver skips the boss, with its First entries,
+	// for the other one, and the leg goes on without it. Uldaman's Baelog, Eric and Olaf are friendly to the Alliance (faction 122,
+	// quest givers) and hostile to the Horde only.
+	Team string `json:"team,omitempty"`
+	// LootItem is the item the leader takes from the boss's corpse after the kill: the driver walks to the corpse, loots it and fails
+	// the leg when the item is not in the bags then. Without it the corpse is left to the companions.
+	LootItem *ItemRef `json:"loot_item,omitempty"`
+	// CompanionsLoot false has the driver order the party's corpse looting off (".bot action loot off") before the boss is pulled and on again after
+	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
+	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
+	CompanionsLoot *bool `json:"companions_loot,omitempty"`
 }
 
-// Step is one thing to do between the pulls and the boss: exactly one of UseObject and WaitFor is set.
+// The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
+const (
+	TeamAlliance = "alliance"
+	TeamHorde    = "horde"
+)
+
+// Step is one thing to do between the pulls and the boss: exactly one of its fields is set.
 type Step struct {
-	UseObject *UseObject `json:"use_object,omitempty"`
-	WaitFor   *WaitFor   `json:"wait_for,omitempty"`
+	UseObject  *UseObject  `json:"use_object,omitempty"`
+	WaitFor    *WaitFor    `json:"wait_for,omitempty"`
+	LootObject *LootObject `json:"loot_object,omitempty"`
+	UseItem    *UseItem    `json:"use_item,omitempty"`
 }
 
 // ObjectRef picks a game object: by entry, by position, or both (the nearest object of that entry to Near).
@@ -109,6 +133,27 @@ type UseObject struct {
 	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
 	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
 	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+}
+
+// LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
+// spell at it (session.OpenObject: CMSG_GAMEOBJ_USE alone does not open a chest in this core), takes every item and closes the
+// window. ExpectItem is the item that must be in the bags afterwards; the step fails when it is not. A leader that already carries
+// it has nothing to fetch and the step is passed (noted), so a run can be resumed.
+type LootObject struct {
+	ObjectRef
+	Stand      *Point   `json:"stand,omitempty"`
+	ExpectItem *ItemRef `json:"expect_item,omitempty"`
+}
+
+// UseItem uses an item from the leader's bags (a right-click: CMSG_USE_ITEM) and waits for its effect. ExpectItem is the item the use
+// must put in the bags (the Gni'kiv Medallion's spell 9594 makes the Staff of Prehistoria); without it the step ends after the
+// cast has had time to finish. RequiresItem is a second item the use consumes (spell 9594 takes the Shaft of Tsol as a reagent), checked
+// before the use so that the failure names it. An ExpectItem the leader already carries passes the step without a use.
+type UseItem struct {
+	Entry        uint32   `json:"entry"`
+	Name         string   `json:"name,omitempty"`
+	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+	ExpectItem   *ItemRef `json:"expect_item,omitempty"`
 }
 
 // ItemRef names an item: its entry and, for the messages, its name.
@@ -170,6 +215,7 @@ type rawLeg struct {
 	Skip       []uint32          `json:"skip"`
 	Steps      []json.RawMessage `json:"steps"`
 	Boss       *rawBoss          `json:"boss"`
+	AfterBoss  []json.RawMessage `json:"after_boss"`
 	Notes      []string          `json:"notes"`
 }
 
@@ -178,17 +224,37 @@ type rawPullGroup struct {
 	Positions []rawPoint `json:"positions"`
 	Ambush    bool       `json:"ambush"`
 	Radius    float32    `json:"radius"`
+	Team      string     `json:"team"`
 }
 
 type rawBoss struct {
 	Entry    uint32    `json:"entry"`
 	Position *rawPoint `json:"position"`
 	First    []uint32  `json:"first"`
+	Team     string    `json:"team"`
+	LootItem *rawItem  `json:"loot_item"`
+	// CompanionsLoot is Boss.CompanionsLoot.
+	CompanionsLoot *bool `json:"companions_loot"`
 }
 
 type rawStep struct {
-	UseObject *rawUse  `json:"use_object"`
-	WaitFor   *rawWait `json:"wait_for"`
+	UseObject  *rawUse     `json:"use_object"`
+	WaitFor    *rawWait    `json:"wait_for"`
+	LootObject *rawLoot    `json:"loot_object"`
+	UseItem    *rawUseItem `json:"use_item"`
+}
+
+type rawLoot struct {
+	rawRef
+	Stand      *rawPoint `json:"stand"`
+	ExpectItem *rawItem  `json:"expect_item"`
+}
+
+type rawUseItem struct {
+	Entry        uint32   `json:"entry"`
+	Name         string   `json:"name"`
+	RequiresItem *rawItem `json:"requires_item"`
+	ExpectItem   *rawItem `json:"expect_item"`
 }
 
 type rawRef struct {
@@ -349,7 +415,8 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	l.To = c.point(path+".to", r.To)
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team}
+		c.team(gp+".team", g.Team)
 		if g.Radius < 0 || g.Radius > 60 {
 			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
 		}
@@ -378,7 +445,9 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot}
+		c.team(bp+".team", r.Boss.Team)
+		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
 			c.fail(bp+".entry", "required")
 		}
@@ -405,8 +474,17 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
-	if len(l.PullGroups) == 0 && len(l.Steps) == 0 && l.Boss == nil {
-		c.fail(path, "has no pull_groups, steps or boss: it would only walk to \"to\"; fold it into the next leg or add one")
+	for i, rs := range r.AfterBoss {
+		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
+		var s rawStep
+		if err := strict(rs, &s); err != nil {
+			c.fail(sp, "%v", err)
+			continue
+		}
+		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
+	}
+	if len(l.PullGroups) == 0 && len(l.Steps) == 0 && len(l.AfterBoss) == 0 && l.Boss == nil {
+		c.fail(path, "has no pull_groups, steps, boss or after_boss: it would only walk to \"to\"; fold it into the next leg or add one")
 	}
 	return l
 }
@@ -433,26 +511,61 @@ func (c *checker) ref(path string, r *rawRef) ObjectRef {
 	return o
 }
 
+// team checks a team field: empty, "alliance" or "horde".
+func (c *checker) team(path, team string) {
+	if team != "" && team != TeamAlliance && team != TeamHorde {
+		c.fail(path, "%q is neither %q nor %q", team, TeamAlliance, TeamHorde)
+	}
+}
+
+// item checks an optional item reference and returns it; nil when absent.
+func (c *checker) item(path string, r *rawItem) *ItemRef {
+	if r == nil {
+		return nil
+	}
+	if r.Entry == 0 {
+		c.fail(path+".entry", "required (the item entry)")
+	}
+	return &ItemRef{Entry: r.Entry, Name: r.Name}
+}
+
 func (c *checker) step(path string, r *rawStep) Step {
 	var s Step
+	n := 0
+	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil} {
+		if set {
+			n++
+		}
+	}
 	switch {
-	case r.UseObject != nil && r.WaitFor != nil:
-		c.fail(path, "has both use_object and wait_for: one step does one thing")
-	case r.UseObject == nil && r.WaitFor == nil:
-		c.fail(path, "needs use_object or wait_for")
+	case n > 1:
+		c.fail(path, "has more than one of use_object, wait_for, loot_object and use_item: one step does one thing")
+	case n == 0:
+		c.fail(path, "needs use_object, wait_for, loot_object or use_item")
 	case r.UseObject != nil:
 		u := &UseObject{ObjectRef: c.ref(path+".use_object", &r.UseObject.rawRef)}
 		if r.UseObject.Stand != nil {
 			p := c.point(path+".use_object.stand", r.UseObject.Stand)
 			u.Stand = &p
 		}
-		if ri := r.UseObject.RequiresItem; ri != nil {
-			if ri.Entry == 0 {
-				c.fail(path+".use_object.requires_item.entry", "required (the item entry)")
-			}
-			u.RequiresItem = &ItemRef{Entry: ri.Entry, Name: ri.Name}
-		}
+		u.RequiresItem = c.item(path+".use_object.requires_item", r.UseObject.RequiresItem)
 		s.UseObject = u
+	case r.LootObject != nil:
+		l := &LootObject{ObjectRef: c.ref(path+".loot_object", &r.LootObject.rawRef)}
+		if r.LootObject.Stand != nil {
+			p := c.point(path+".loot_object.stand", r.LootObject.Stand)
+			l.Stand = &p
+		}
+		l.ExpectItem = c.item(path+".loot_object.expect_item", r.LootObject.ExpectItem)
+		s.LootObject = l
+	case r.UseItem != nil:
+		u := &UseItem{Entry: r.UseItem.Entry, Name: r.UseItem.Name}
+		if u.Entry == 0 {
+			c.fail(path+".use_item.entry", "required (the item entry)")
+		}
+		u.RequiresItem = c.item(path+".use_item.requires_item", r.UseItem.RequiresItem)
+		u.ExpectItem = c.item(path+".use_item.expect_item", r.UseItem.ExpectItem)
+		s.UseItem = u
 	default:
 		s.WaitFor = c.wait(path+".wait_for", r.WaitFor)
 	}

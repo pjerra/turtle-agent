@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/objects"
 )
 
 const (
@@ -50,6 +51,26 @@ func TestUldamanPlanLoads(t *testing.T) {
 	// Eric and Olaf are fought before Baelog: no script in the world database makes them die with him.
 	if b := p.Legs[0].Boss; fmt.Sprint(b.First) != "[6907 6908]" || len(p.Legs[0].Skip) != 0 {
 		t.Fatalf("%+v skip %v", b, p.Legs[0].Skip)
+	}
+	// The Lost Dwarves are the Alliance's friends (faction 122, questgivers): the boss is for the Horde, and the chest after it is
+	// looted by both for the Gni'kiv Medallion.
+	if b := p.Legs[0].Boss; b.Team != TeamHorde || len(p.Legs[0].Steps) != 0 || len(p.Legs[0].AfterBoss) != 1 {
+		t.Fatalf("%+v", p.Legs[0])
+	}
+	lo := p.Legs[0].AfterBoss[0].LootObject
+	if lo == nil || lo.Entry != 123329 || lo.ExpectItem == nil || lo.ExpectItem.Entry != 7740 {
+		t.Fatalf("%+v", p.Legs[0].AfterBoss)
+	}
+	// Revelosh drops the Shaft of Tsol; the Medallion and the Shaft make the Staff, which the Keystone needs.
+	rv := p.Legs[1]
+	if rv.Boss.CompanionsLoot == nil || *rv.Boss.CompanionsLoot {
+		t.Fatalf("the companions must not loot Revelosh: %+v", rv.Boss)
+	}
+	if rv.Boss.LootItem == nil || rv.Boss.LootItem.Entry != 7741 || len(rv.AfterBoss) != 1 || rv.Boss.Team != "" {
+		t.Fatalf("%+v", rv)
+	}
+	if ui := rv.AfterBoss[0].UseItem; ui == nil || ui.Entry != 7740 || ui.RequiresItem.Entry != 7741 || ui.ExpectItem.Entry != 7733 {
+		t.Fatalf("%+v", rv.AfterBoss)
 	}
 	// The Keystone leg has no boss; the door steps are the Keystone, then the Seal of Khaz'Mul opening.
 	k := p.Legs[2]
@@ -147,7 +168,7 @@ func TestUldamanPlanMatchesTheWorldExport(t *testing.T) {
 				}
 			}
 		}
-		for j, s := range l.Steps {
+		for j, s := range append(append([]Step{}, l.Steps...), l.AfterBoss...) {
 			for _, r := range []*ObjectRef{objRef(s)} {
 				if r != nil && r.Near != nil && !hasObject(r.Entry, *r.Near) {
 					t.Errorf("legs[%d].steps[%d]: no game object %d at %v", i, j, r.Entry, *r.Near)
@@ -161,6 +182,8 @@ func objRef(s Step) *ObjectRef {
 	switch {
 	case s.UseObject != nil:
 		return &s.UseObject.ObjectRef
+	case s.LootObject != nil:
+		return &s.LootObject.ObjectRef
 	case s.WaitFor != nil && s.WaitFor.GameObject != nil:
 		return &s.WaitFor.GameObject.ObjectRef
 	}
@@ -199,6 +222,16 @@ func waypoints(l Leg) []Point {
 	}
 	if l.Boss != nil {
 		pts = append(pts, l.Boss.Position)
+	}
+	for _, s := range l.AfterBoss { // the driver walks to a chest's own position unless the step says where to stand
+		if lo := s.LootObject; lo != nil {
+			switch {
+			case lo.Stand != nil:
+				pts = append(pts, *lo.Stand)
+			case lo.Near != nil:
+				pts = append(pts, *lo.Near)
+			}
+		}
 	}
 	return pts
 }
@@ -282,5 +315,60 @@ func TestUldamanAmbushGroupsAreTheStealthedOnes(t *testing.T) {
 	}
 	if w := p.Legs[2].Steps[1].WaitFor; w.TimeoutS != 60 {
 		t.Errorf("the Seal wait is %d s", w.TimeoutS)
+	}
+}
+
+// The plan's honest run for the Alliance, read by the Stepper: leg 0 pulls its packs, skips Baelog (a Horde fight) and loots the chest
+// for the Medallion; leg 1 kills Revelosh and combines; no GM item is needed for the Keystone. The Horde fights Baelog first.
+func TestUldamanHonestRunSteps(t *testing.T) {
+	p := loadUldaman(t)
+	run := func(team string) (kinds []ActionKind, bosses []uint32, skipped []string) {
+		w := teamWorld{&fakeWorld{objs: []objects.GameObject{{GUID: 0x77, Entry: 123329, X: -356, Y: 112.8, Z: -43.2, State: "ready"}}}, team}
+		s := NewStepperAt(p, w, nil, 0)
+		for i := 0; i < 80; i++ {
+			a := s.Next()
+			skipped = append(skipped, s.Skipped()...)
+			if a.Kind == ActDone || a.Leg > 1 {
+				break
+			}
+			if a.Kind == ActWalk {
+				w.pos = a.To
+			}
+			if a.Kind == ActKill {
+				bosses = append(bosses, a.Boss.Entry)
+			}
+			if a.Kind == ActLoot || a.Kind == ActItem {
+				kinds = append(kinds, a.Kind)
+			}
+			s.Complete()
+		}
+		return
+	}
+	kinds, bosses, skipped := run("alliance")
+	if fmt.Sprint(kinds) != "[loot_object use_item]" || fmt.Sprint(bosses) != "[6910]" || len(skipped) != 1 || !strings.Contains(skipped[0], "boss 6906 is for team horde, the leader is alliance") {
+		t.Fatalf("alliance: %v %v %q", kinds, bosses, skipped)
+	}
+	kinds, bosses, skipped = run("horde")
+	if fmt.Sprint(kinds) != "[loot_object use_item]" || fmt.Sprint(bosses) != "[6906 6910]" || len(skipped) != 0 {
+		t.Fatalf("horde: %v %v %q", kinds, bosses, skipped)
+	}
+}
+
+// A non-GM run from the start asks for no item it makes itself, and a run from the keystone leg still wants the Staff.
+func TestUldamanRequiredItemsChain(t *testing.T) {
+	p := loadUldaman(t)
+	g := newFake()
+	g.bag = []objects.Item{{Entry: 6948, Count: 1}}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.checkRequiredItems(0); err != nil {
+		t.Fatalf("from the start the run makes the Staff: %v", err)
+	}
+	// From revelosh on the Medallion is nobody's product: a run without it (or the Staff) fails at the start.
+	if err := d.checkRequiredItems(1); err == nil || !strings.Contains(err.Error(), "Gni'kiv Medallion") {
+		t.Fatalf("from revelosh the Medallion must be carried: %v", err)
+	}
+	g.bag = append(g.bag, objects.Item{Entry: 7740, Count: 1})
+	if err := d.checkRequiredItems(1); err != nil {
+		t.Fatalf("from revelosh the Shaft comes from the boss and the Staff from the use_item: %v", err)
 	}
 }
