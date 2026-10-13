@@ -34,6 +34,13 @@ func Living(w *packet.Writer, flags uint8, mi game.MoveInfo, spline func(*packet
 	}
 }
 
+// Static writes Object::BuildMovementUpdate for a game object or other stationary object
+// (Objects/Object.cpp:452-471, :474-484): update flags HAS_POSITION and ALL (0x50), the
+// position and facing, and the all word.
+func Static(w *packet.Writer, x, y, z, o float32) {
+	w.U8(0x50).F32(x).F32(y).F32(z).F32(o).U32(1)
+}
+
 // Values writes Object::BuildValuesUpdate's mask and values (Objects/Object.cpp:553-556)
 // for an object of count fields: u8 mask block count, the u32 mask words, then one u32
 // per set bit in index order.

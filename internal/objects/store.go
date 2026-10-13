@@ -19,6 +19,11 @@ const (
 	ChangeAura
 	ChangeMount // UNIT_FIELD_MOUNTDISPLAYID changed: Old and New are the display ids
 	ChangeStand // the stand state (byte 0 of UNIT_FIELD_BYTES_1) changed: Old and New are the states
+	// Game object changes on an object already known (a create block reports only ChangeCreated): Old and New are
+	// the GOState, GAMEOBJECT_FLAGS and GAMEOBJECT_DYN_FLAGS values.
+	ChangeGOState
+	ChangeGOFlags
+	ChangeGODynFlags
 )
 
 // DefaultLimit is the Units limit when the filter sets none.
@@ -254,6 +259,17 @@ func setValues(o *object, vals map[uint16]uint32, ch []Change, report bool, now 
 		old := o.values[k]
 		o.values[k] = v
 		if !report || old == v {
+			continue
+		}
+		if isGameObject(o) { // its fields reuse the unit indices, so the unit cases below must not see them
+			switch k {
+			case GOState:
+				ch = append(ch, Change{GUID: o.guid, Kind: ChangeGOState, Old: old, New: v})
+			case GOFlags:
+				ch = append(ch, Change{GUID: o.guid, Kind: ChangeGOFlags, Old: old, New: v})
+			case GODynFlags:
+				ch = append(ch, Change{GUID: o.guid, Kind: ChangeGODynFlags, Old: old, New: v})
+			}
 			continue
 		}
 		switch {

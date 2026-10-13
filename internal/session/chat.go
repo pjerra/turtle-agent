@@ -17,6 +17,7 @@ func (s *Session) registerChat() {
 	s.handlers[opcode.SMSGChatPlayerNotFound] = s.onPlayerNotFound
 	s.handlers[opcode.SMSGNameQueryResponse] = s.onNameQueryResponse
 	s.handlers[opcode.SMSGCreatureQueryResponse] = s.onCreatureQueryResponse
+	s.handlers[opcode.SMSGGameobjectQueryResponse] = s.onGameObjectQueryResponse
 }
 
 // chatKind maps a chat type to its event kind. For whisper_inform the server puts the

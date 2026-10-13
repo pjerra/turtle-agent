@@ -54,6 +54,9 @@ const (
 	KindLootMoney      = "loot_money"       // SMSG_LOOT_CLEAR_MONEY: the window's money was taken
 	KindLootMoneyShare = "loot_money_share" // SMSG_LOOT_MONEY_NOTIFY: this player's share of split money
 	KindLootClosed     = "loot_closed"      // SMSG_LOOT_RELEASE_RESPONSE
+	// KindGameObject is a game object changing: data.change is state, flags, dyn_flags, animation, reset,
+	// spawn or destroyed (see the README, "Game objects"); the object is the source.
+	KindGameObject = "gameobject"
 	// Self state changes seen in the player's own update fields.
 	KindMount       = "mount"        // UNIT_FIELD_MOUNTDISPLAYID went to or from 0: data.mounted
 	KindMountResult = "mount_result" // SMSG_MOUNTRESULT and SMSG_DISMOUNTRESULT: data.result

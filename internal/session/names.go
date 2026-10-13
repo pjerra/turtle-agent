@@ -14,14 +14,19 @@ import (
 // nameQueryInterval spaces repeated name or creature queries for one GUID or entry.
 const nameQueryInterval = 5 * time.Second
 
-// nameCache maps player GUIDs and creature entries to names. A creature's entry comes
-// from the object store (OBJECT_FIELD_ENTRY), never from a pet's GUID bits, and a creature
-// whose entry is unknown (0) stays nameless and unasked until its values arrive. mu guards
-// the two maps, which RPC goroutines read; the rest belongs to the owner loop.
+// goKey tells a game object's entry from a creature's in the asked and silent maps, which key
+// by entry: entries stay under 2^24, so bit 31 is free.
+const goKey uint32 = 1 << 31
+
+// nameCache maps player GUIDs, creature entries and game object entries to names. A creature's
+// entry comes from the object store (OBJECT_FIELD_ENTRY), never from a pet's GUID bits, and a
+// creature or game object whose entry is unknown (0) stays nameless and unasked until its values
+// arrive. mu guards the three maps, which RPC goroutines read; the rest belongs to the owner loop.
 type nameCache struct {
 	mu         sync.RWMutex
 	players    map[packet.GUID]string
 	creatures  map[uint32]string
+	objects    map[uint32]string // game object entries
 	askedGUID  map[packet.GUID]time.Time
 	askedEntry map[uint32]time.Time
 	// silentGUID and silentEntry hold queries whose wait ran out unanswered: until the
@@ -39,7 +44,7 @@ type pendingEvent struct {
 
 func newNameCache() *nameCache {
 	return &nameCache{
-		players: map[packet.GUID]string{}, creatures: map[uint32]string{},
+		players: map[packet.GUID]string{}, creatures: map[uint32]string{}, objects: map[uint32]string{},
 		askedGUID: map[packet.GUID]time.Time{}, askedEntry: map[uint32]time.Time{},
 		silentGUID: map[packet.GUID]time.Time{}, silentEntry: map[uint32]time.Time{},
 	}
@@ -57,8 +62,14 @@ func (c *nameCache) setCreature(entry uint32, name string) {
 	c.mu.Unlock()
 }
 
-// lookup returns the cached name, using entry for a creature; ok is false while a query
-// is owed or, for a creature, while its entry is unknown.
+func (c *nameCache) setObject(entry uint32, name string) {
+	c.mu.Lock()
+	c.objects[entry] = name
+	c.mu.Unlock()
+}
+
+// lookup returns the cached name, using entry for a creature or game object; ok is false while
+// a query is owed or, for those, while the entry is unknown.
 func (c *nameCache) lookup(g packet.GUID, entry uint32) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -71,8 +82,11 @@ func (c *nameCache) lookup(g packet.GUID, entry uint32) (string, bool) {
 	case g.IsCreature():
 		n, ok := c.creatures[entry]
 		return n, ok && entry != 0
+	case g.IsGameObject():
+		n, ok := c.objects[entry]
+		return n, ok && entry != 0
 	}
-	return "", true // game objects and corpses have no name query in v1
+	return "", true // corpses and transports have no name query in v1
 }
 
 // nameOf returns g's name and sends a name or creature query when it is unknown. A GUID
@@ -93,7 +107,7 @@ func (s *Session) nameOf(g packet.GUID) (string, bool) {
 // cachedName is lookup with the creature entry taken from the store.
 func (s *Session) cachedName(g packet.GUID) (string, bool) {
 	var entry uint32
-	if g.IsCreature() {
+	if g.IsCreature() || g.IsGameObject() {
 		entry = s.store.Entry(g)
 	}
 	return s.names.lookup(g, entry)
@@ -109,10 +123,10 @@ func (s *Session) silent(g packet.GUID, now time.Time) bool {
 		}
 		return ok
 	}
-	entry := s.store.Entry(g)
-	until, ok := s.names.silentEntry[entry]
+	key := s.entryKey(g)
+	until, ok := s.names.silentEntry[key]
 	if ok && !now.Before(until) {
-		delete(s.names.silentEntry, entry)
+		delete(s.names.silentEntry, key)
 		return false
 	}
 	return ok
@@ -132,14 +146,23 @@ func (s *Session) giveUp(g packet.GUID) {
 		}
 		return
 	}
-	entry := s.store.Entry(g)
-	if t, ok := s.names.askedEntry[entry]; ok {
-		s.names.silentEntry[entry] = t.Add(nameQueryInterval)
+	key := s.entryKey(g)
+	if t, ok := s.names.askedEntry[key]; ok {
+		s.names.silentEntry[key] = t.Add(nameQueryInterval)
 	}
 }
 
-// askName sends CMSG_NAME_QUERY or CMSG_CREATURE_QUERY, at most once per
-// nameQueryInterval for a GUID or entry. A creature whose entry is not known yet is not
+// entryKey is the key of g's entry in the asked and silent maps: the entry, with goKey set for a
+// game object.
+func (s *Session) entryKey(g packet.GUID) uint32 {
+	if g.IsGameObject() {
+		return s.store.Entry(g) | goKey
+	}
+	return s.store.Entry(g)
+}
+
+// askName sends CMSG_NAME_QUERY, CMSG_CREATURE_QUERY or CMSG_GAMEOBJECT_QUERY, at most once
+// per nameQueryInterval for a GUID or entry. A creature or game object whose entry is not known yet is not
 // asked: its create block brings the entry and asks again. A write error surfaces on the
 // next send.
 func (s *Session) askName(g packet.GUID) {
@@ -156,10 +179,15 @@ func (s *Session) askName(g packet.GUID) {
 	if entry == 0 {
 		return
 	}
-	if t, ok := s.names.askedEntry[entry]; ok && now.Sub(t) < nameQueryInterval {
+	key := s.entryKey(g)
+	if t, ok := s.names.askedEntry[key]; ok && now.Sub(t) < nameQueryInterval {
 		return
 	}
-	s.names.askedEntry[entry] = now
+	s.names.askedEntry[key] = now
+	if g.IsGameObject() {
+		_ = s.conn.WritePacket(opcode.CMSGGameobjectQuery, game.BuildGameObjectQuery(entry, g))
+		return
+	}
 	_ = s.conn.WritePacket(opcode.CMSGCreatureQuery, game.BuildCreatureQuery(entry, g))
 }
 
@@ -220,6 +248,20 @@ func (s *Session) onCreatureQueryResponse(body []byte) error {
 		name = fmt.Sprintf("creature %d", info.Entry)
 	}
 	s.names.setCreature(info.Entry, name)
+	s.flushNames(s.now())
+	return nil
+}
+
+func (s *Session) onGameObjectQueryResponse(body []byte) error {
+	info, err := game.ParseGameObjectQueryResponse(body)
+	if err != nil {
+		return err
+	}
+	name := info.Name
+	if !info.Found {
+		name = fmt.Sprintf("gameobject %d", info.Entry)
+	}
+	s.names.setObject(info.Entry, name)
 	s.flushNames(s.now())
 	return nil
 }

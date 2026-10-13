@@ -234,6 +234,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `units` | `within` (yards, 3D; `near` is its older name), `entry`, `hostile`, `name`, `limit` | nearby units, nearest first: guid, name, level, health, dead, hostile, in_party, `x`/`y`/`z`/`o`, `pos_age_ms`, `moving`, `distance` (3D) and `distance_2d` from the player (see [Unit positions](#unit-positions)), `in_combat`, `target`, `stand_state`, `auras[]`, `casting` (see [Unit state](#unit-state)); `hostile` means an attackable-looking creature (no NPC flags, not player-controlled), not a faction check: it counts neutral critters and never an enemy-faction player |
 | `unit` | `guid` or `name` (prefers living units; the player's own name or guid gives the player, at the `status` position) | one unit, as a `units` row; an error when none is in view |
 | `target` | `guid` or `name` (prefers living units) | |
+| `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
+| `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
@@ -282,7 +284,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 
 Events have `seq`, `time`, `mono_ms` (ms since the agent started, from the monotonic clock, so it never jumps with the host clock; `time` stays the wall clock), `kind`, `source`, `target`, `spell_id`, `amount`, `crit`, `text`, `party` and `data`.
 Kinds cover chat, system, whispers, melee, spell damage, periodic ticks, heals, energize, spell start/go/miss/fail,
-auras, deaths, kills, party changes, raid icons (`raid_mark`), group loot rolls (`loot_roll_start`, `loot_roll`, `loot_roll_won`,
+auras, deaths, kills, party changes, raid icons (`raid_mark`), game object changes (`gameobject`), group loot rolls (`loot_roll_start`, `loot_roll`, `loot_roll_won`,
 `loot_all_passed`, tied together by `data.roll_id`), refused equips and item uses (`inventory_error`), NPC dealings (vendor, trainer and quest events, see
 [Vendors, trainers and quests](#vendors-trainers-and-quests)), corpse loot (`loot_open`,
 `loot_taken`, `loot_money`, `loot_money_share`, `loot_error`, `loot_closed`), the player's own mount and stand state (`mount`,
@@ -402,6 +404,42 @@ that run (turtle-agent#64), which read the use as having no cast; the use is a 4
 above is not run live yet, so mount by `spell_id` until it is. The packets of the trainer list, the quest
 panels, the loot window and the forced run speed are tested against bytes from that run
 (`internal/game/realpackets_live_test.go`).
+
+## Game objects
+
+`gameobjects` lists the game objects the server has put in view: doors, levers, chests, altars, braziers, nodes, campfires, seats.
+They come from the same update stream as `units` and never appear in it. A row says what the object is (`entry`, `name`,
+`type` and `type_name`, the core's `GameobjectTypes`), where it is (`x`/`y`/`z`/`o`, `distance` and `distance_2d` from the player;
+both -1 for a ship or elevator that rides a transport path and has no position of its own) and what state it is in:
+
+- `state` is `GAMEOBJECT_STATE`: `ready` for a door that is closed or an object not yet used, `active` for one that is open or used,
+  `active_alt` for the alternative use. An absent field is `active` (0), as the client reads it.
+- `flags` is `GAMEOBJECT_FLAGS` (1 in use, 2 locked, 4 interact condition, 16 no interact, 32 never despawn) and `dyn_flags`
+  `GAMEOBJECT_DYN_FLAGS` (bit 0 is the sparkle of a chest or node that can be opened). `locked` is flag 2.
+- `usable` is a hint, not the server's verdict: false for a generic object and for one flagged no-interact, in use or with an
+  interact condition. The server also checks reach and its own conditions (a key, a quest, a faction), and says nothing when it refuses.
+- `name` is empty until the server's `SMSG_GAMEOBJECT_QUERY_RESPONSE` has arrived; the agent asks for it when the object comes into view,
+  once per entry (an entry the server does not know is named `gameobject <entry>`).
+
+`use_object` sends `CMSG_GAMEOBJ_USE` for a game object in view, as a right-click does, and waits up to `wait_ms` for the first thing the
+server does about it: a `gameobject` event of that object (a door or lever changing), a `loot_open` or `loot_error`, a `gossip` or quest
+panel, a `vendor_list` or `trainer_list` of the object, a spell of the player's or the object's (`spell_start`, `spell_go`,
+`spell_fail`) or an `inventory_error`. `outcome` is that event's kind and `event` the event; `since` is the log cursor from before the
+use, so `events` with `since` reads everything that followed (a door sends a `flags` change and a `state` change, and a lever
+may open other doors). An object not in view is an error. The core ignores a use out of reach, of a generic object, of one flagged
+no-interact and of one the player may not use (`HandleGameObjectUseOpcode`), without a reply: then `outcome` is `none` and `hint` names
+what the update fields make likely (distance over 5 yards, unusable flags, locked). `use_object` does not walk: bring the player next to the object first
+(`walk_path`).
+
+Chests, mining and herb nodes and other locked objects are not opened by `CMSG_GAMEOBJ_USE` on this core: its chest branch only runs the
+object's scripts, and the client opens them by casting an Opening spell at the object (`SMSG_LOOT_RESPONSE` follows from the spell). Using one
+with `use_object` therefore ends in `none`. Opening them is not implemented yet.
+
+A change of a game object the agent already knows is a `gameobject` event with the object as `source` and `data.change`: `state`
+(`old`, `new` as above), `flags` (`old`, `new` numbers, `locked`), `dyn_flags` (numbers), `animation` (`anim`: `SMSG_GAMEOBJECT_CUSTOM_ANIM`),
+`reset` (`SMSG_GAMEOBJECT_RESET_STATE`), `spawn` and `despawn` (the animation packets) and `destroyed` (`SMSG_DESTROY_OBJECT`). `data.entry` and
+`data.type` (the type name) go along. The create block of an object reports nothing, so entering a zone does not flood the log, and an object
+leaving range is not reported either.
 
 ## Unit positions
 

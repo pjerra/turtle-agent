@@ -231,6 +231,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerSocialMethods(srv, cur)
 	registerGroupMethods(srv, cur)
 	registerItemMethods(srv, cur)
+	registerGameObjectMethods(srv, cur)
 	registerNPCMethods(srv, cur)
 	return registerAddonHost(srv, cur, opts.AddonDir)
 }

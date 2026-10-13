@@ -13,7 +13,7 @@ import (
 const hangLimit = 5 * time.Second
 
 // fixtureCaptures are the committed captures that seed the fuzz corpora.
-var fixtureCaptures = []string{"m1-login.twcap", "m2-chat.twcap", "m3-party.twcap", "m4-world.twcap", "m5-attack.twcap", "m6-fight.twcap"}
+var fixtureCaptures = []string{"m1-login.twcap", "m2-chat.twcap", "m3-party.twcap", "m4-world.twcap", "m5-attack.twcap", "m6-fight.twcap", "m7-gameobjects.twcap"}
 
 var (
 	loadOnce sync.Once

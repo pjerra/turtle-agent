@@ -20,10 +20,11 @@ const (
 	HighPet        uint16 = 0xF140
 )
 
-func (g GUID) High() uint16     { return uint16(g >> 48) }
-func (g GUID) IsPlayer() bool   { return g != 0 && g.High() == HighPlayer }
-func (g GUID) IsCreature() bool { h := g.High(); return h == HighUnit || h == HighPet }
-func (g GUID) String() string   { return fmt.Sprintf("0x%016X", uint64(g)) }
+func (g GUID) High() uint16       { return uint16(g >> 48) }
+func (g GUID) IsPlayer() bool     { return g != 0 && g.High() == HighPlayer }
+func (g GUID) IsCreature() bool   { h := g.High(); return h == HighUnit || h == HighPet }
+func (g GUID) IsGameObject() bool { return g.High() == HighGameObject }
+func (g GUID) String() string     { return fmt.Sprintf("0x%016X", uint64(g)) }
 
 // Entry is the entry a creature or game-object GUID encodes, and 0 for every other
 // HighGuid, pets included: their bits 24-47 are a pet number. The object's

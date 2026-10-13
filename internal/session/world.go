@@ -28,6 +28,7 @@ func (s *Session) registerWorld() {
 	s.handlers[opcode.SMSGUpdateObject] = func(b []byte) error { return s.onUpdate(objects.ParseUpdate(b)) }
 	s.handlers[opcode.SMSGCompressedUpdateObject] = func(b []byte) error { return s.onUpdate(objects.ParseCompressedUpdate(b)) }
 	s.handlers[opcode.SMSGDestroyObject] = s.onDestroy
+	s.registerGameObjects()
 	s.handlers[opcode.SMSGMonsterMove] = s.onMonsterMove
 	s.handlers[opcode.SMSGCompressedMoves] = s.onCompressedMoves
 	for _, op := range moveRelays {
@@ -130,9 +131,11 @@ func (s *Session) applyBlocks(blocks []objects.Block) {
 		}
 		switch c.Kind {
 		case objects.ChangeCreated:
-			if c.GUID.IsPlayer() || c.GUID.IsCreature() {
+			if c.GUID.IsPlayer() || c.GUID.IsCreature() || c.GUID.IsGameObject() {
 				s.nameOf(c.GUID) // warm the name cache
 			}
+		case objects.ChangeGOState, objects.ChangeGOFlags, objects.ChangeGODynFlags:
+			s.emitGameObjectChange(c)
 		case objects.ChangeHealth:
 			if c.Old > 0 && c.New == 0 {
 				s.emit(events.Event{Kind: events.KindDeath, SourceGUID: c.GUID})
@@ -157,6 +160,9 @@ func (s *Session) onDestroy(body []byte) error {
 	g := r.GUID() // Object.cpp:410-411
 	if err := r.Err(); err != nil {
 		return err
+	}
+	if s.store.IsGameObject(g) {
+		s.emitGameObject(g, "destroyed", nil)
 	}
 	s.store.Destroy(g)
 	return nil
