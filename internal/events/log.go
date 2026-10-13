@@ -107,7 +107,10 @@ const (
 	// The bot brain (brain_start, README "Bot brain"): what it decided each tick, and why it did nothing.
 	KindBrainDecision = "brain_decision" // data.trigger, action, relevance, result (ok, not_possible, vetoed, error), via; spell_id and target_guid set
 	KindBrainIdle     = "brain_idle"     // the brain had nothing to do (throttled): data.reason
-	KindBrainState    = "brain_state"    // the brain started or stopped: data.state, strategies, role
+	// KindBotViewFrame is a TBM:VIEW frame of the remote commander's perception feed (README "Remote leader"), throttled: data.seq,
+	// lead, party (name, hp_pct, power_pct, dead, state), hostiles, engaged, threats, and the feed's counters.
+	KindBotViewFrame = "bot_view_frame"
+	KindBrainState   = "brain_state" // the brain started or stopped: data.state, strategies, role
 
 	// The player's pet (README "Pets", issue #80 step 4d). The pet's guid is source.
 	KindPetSummoned  = "pet_summoned"  // UNIT_FIELD_SUMMON of the player names a pet: data.entry, data.dead; target the owner

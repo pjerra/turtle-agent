@@ -588,3 +588,31 @@ Run again with a level 40 character of each class that has its spells (`.learn a
 4. **Noise.** No `healthstone not_possible condition` without a healthstone, no `battle_shout ... no_power` at 0 rage, `unknown_spell` for a missing talent spell at most once per 5 min.
 5. **Warlock.** `affliction_warlock` with the natural mana pool (and once with `.modify mana`): Summon Voidwalker (100% of the base mana) is not refused with `no_power`; `unit` shows `base_mana`.
 6. **Missing mmaps.** Remove map 001 from `mmaps_dir` and fight in Kalimdor: `melee_reposition` reports the missing `001.mmap` once, then not for 5 min. `mmaps_dir` must hold every map you play on.
+
+## Remote leader (issue #83)
+
+Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B` truncated field of #901 when that is in) and
+`AiPlayerbot.RemoteCommander = 1`; build 19g, which the m910q server runs, answers `.bot commander` with an unknown command and sends no
+`TBM:VIEW`. The code is tested against fixtures built from the documented grammar only; nothing below has run live.
+
+1. **Toggle off.** With the switch off, `commander {"op":"bind","lead_bot":"<Name>"}` answers `err` `disabled`; `dungeon_run ... "mode":"remote"` fails
+   with `disabled (...): AiPlayerbot.RemoteCommander is off` and sends nothing more (a refused bind is no binding).
+2. **Bind and feed.** Five owned bots in a bot-only party, the agent on a character outside the group (another zone is fine). `commander bind`
+   with the lead bot and the others: `ack`; `commander status` lists the party; `commander view on`; `bot_view` shows frames about once a second (`age_ms`
+   under 1500, `stats.missed` near 0, `stats.invalid` 0). Check a frame against `.bot commander status`: the party records, positions and
+   health, a hostile pulled by hand shows in `hostiles` with `threats`. A frame with `truncated` appears only with many hostiles.
+3. **Orders by hand.** `commander cmd move` to a point 40 yd away: the lead bot walks there (`bot_view` lead position), the others follow. `cmd
+   pullback <guid>` at a hostile from `bot_view` (use its guid as printed): the tank pulls, the party fights, the threat record shows the tank at 100.
+   `cmd cc moon <guid>`, `cmd rest`, `cmd revive <dead bot>`. Note every ERR code seen and whether it matches the documentation.
+4. **Uldaman, agent outside.** The group inside Uldaman (the entrance leg), the agent in Ironforge or at the instance portal outside. `dungeon_run
+   {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","from_leg":0}`: watch `dungeon_status.report.remote`: `bound`,
+   `frames_received` rising, `orders` by verb, `threat_holds`/`threat_waits`/`threat_overrides`, `move_stalls`, `refused`. Expect the first leg's
+   walk to take several `move` legs, pulls to start with `pullback` at feed guids, the party to be sent in once the tank holds the mob. The run is
+   expected to **fail at the first object step** (`remote mode: object step needs the agent nearby`); that is the designed limit. Run a leg range
+   without object steps (or accept the failure) and check that it ends with `unbound: true`.
+5. **Exits.** `dungeon_stop` in the middle of a fight: `remote.unbound` true, `.bot commander status` answers `not-bound`, the bots hold where they
+   stand. Log the lead bot out during a run: the module's automatic `commander unbind` ACK ends the run with `the commander binding ended`.
+6. **Open questions the fixtures cannot answer.** How close `move` stops (arrival radius 5 yd assumed), how long a 120 yd leg takes in a dungeon (the
+   leg timeout is 30 s + 1 s per 3 yd), whether the tank-like inference picks the real tank (name it with `tank` otherwise), whether `pullback` at a
+   mob that is not yet in the lead bot's range answers `too-far`, and whether a hostile that dies is dropped from `H` at once (the fight counts a
+   mob gone from the feed as dead).

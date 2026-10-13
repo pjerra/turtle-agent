@@ -247,7 +247,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank` and `cc` for it | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -288,6 +288,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `tbm_buttons` | `tab` (Fight, Camp, Party, Roster, Guild, Raid, BotPanel; default all) | `addon_commit`, `send_delay_ms`, `poll_after_cmd_ms`, `action_timeout_ms`, `buttons[]` (`name`, `label`, `tab`, `command`, `bot_command`, `args`, `optional`, `scope`, `toggle`, `needs_enemy`, `pull_seconds`, `reply`, `intent`, `ok`, `fail`, `follow_up`, `mini_bar`, `requires_cap`, `multi`, `source`) |
 | `tbm_click` | `button` (`Fight.AoE`), `args` (`state`, `bot`, `name`, `mark`, `seconds`, `bag`, `slot`, …), `transport` (auto, chat, addon), `wait_ms` (default 8000), `force`, `follow_up` | `since`, `next`, `button`, `scope`, `sent` (`transport`, `text`, `channel`, `prefix`), `transport_reason`, `refreshed`, `reply` (`kind` ack, err, text, inventory, snapshot or timeout; `ok`, `line`, `ack`, `acks`, `err`, `lines`), `follow_up` (the roster response) |
 | `tbm_send` | `command` (with or without `.bot`), `transport`, `wait_ms` | like `tbm_click` without `button` and `scope`: the reply is the first ACK/ERR or roster response |
+| `commander` | `op` (`bind`, `unbind`, `status`, `view` or `cmd`), `lead_bot` and `bots` (bind), `on` (view), `verb` and `args` (cmd: `attack`, `pull`, `pullback`, `cc`, `focus`, `move`, `stay`, `follow`, `rest`, `revive`, `summon`), `wait_ms` (default 4000) | `sent` (the `.bot` line), `reply` (`kind` `ack`, `err` or `timeout`, `ack`/`err` parsed, `lines`). The [remote commander](#remote-leader) by hand |
+| `bot_view` | `after_n` and `wait_ms` (wait for a frame newer than the `n` of the last answer) | `have`, `n`, `age_ms`, `frame` (`seq`, `lead`, `party[]`, `hostiles[]`, `threats[]`, `truncated`), `stats` (the feed's counters), `binding_ends[]`. The latest `TBM:VIEW` frame, see [Remote leader](#remote-leader) |
 | `addon_start` | `clock` (real, the default, or manual); the addon is the settings' `tbm_addon_dir`, else `.cache/tbmcontract/addon-<pinned commit>` under the working directory, run by `lua5.1` from PATH | `dir`, `version` (the .toc version), `files`, `clock`, `sent` (what the addon sent while loading) |
 | `addon_stop` | | |
 | `addon_click` | `button` (a `tbm_buttons` name or label), or `tab` + `label` for any widget; `bot` (BotPanel; the Party row), `name`/`names` (Roster and Guild rows to tick), `mark` (CC marks row), `row`, `view` (BotPanel Gear, Bags, Behaviour), `bag` + `slot` (BotPanel items), `before`, `force`, `wait_ms` (real clock; default 8000, 0 = no wait) | `clicked` (each widget pressed and `/tbm` typed), `sent[]` (`mono_ms`, `kind` addon, chat or target, `channel`, `prefix`, `text`, `to`, `error`), `reply` (server lines the addon got), `timed_out`, `state` (as `addon_state`) |
@@ -874,6 +876,75 @@ Summon Voidwalker (100%) is affordable at a few hundred mana whatever the maximu
 | `channel_end` | the player; `spell_id`. MSG_CHANNEL_UPDATE with nothing left |
 | `combo_points` | the player; `target` (the unit), `points`, `was` |
 | `spell_fail` | now also `reason_name` (`reason` stays the number, or `interrupted`) |
+
+## Remote leader
+
+Issue #83. `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"Tanky"}` leads a bot group **without being in it**, through the
+TortoiseBots remote commander (TortoiseBots #884: `.bot commander`, `.bot cmd`, the `TBM:VIEW` perception feed;
+[player-controls.md section 1a](https://github.com/Sagiroth/TortoiseBots/blob/dev/docs/guides/player-controls.md)). The agent can stand in
+another zone or outside the instance; it needs no fighting brain, and the bots do the fighting. The module needs the build with the
+remote commander and `AiPlayerbot.RemoteCommander = 1` (off by default: the first command answers `disabled`).
+
+**Perception: `TBM:VIEW`.** While bound with the view on, the module sends a frame about once a second as system lines
+`TBM:VIEW|v1|<seq>|B|<lead>,<party>,<hostiles>,<threats>[,<truncated>]`, then `P` (party records: guid, name, health, power, position, map,
+target, spell, dead, state, last action), `H` (hostiles the bots fight or see: guid, entry, position, health %, target, flags `s` stealthed,
+`e` evading, `c` crowd-controlled), `T` (threat: per hostile the top three `guid:pct`) and `E|<lines>`. `internal/tbm` assembles them by
+`seq`: a frame is published when its `B` and `E` are in, the line total matches `E` and the record counts match `B`; frames that lost lines are
+dropped when a newer one completes, a late frame behind the newest is dropped as stale, a `seq` that goes back by more than 3 is a new binding,
+a line of another version (`v2`) is counted and skipped, a malformed line is counted and skipped. The counters (`lines`, `frames`, `missed`,
+`stale`, `invalid`, `incomplete`, `orphans`, `unsupported`, `malformed`, `truncated`, `restarts`) are in `bot_view.stats` and the run report.
+A `truncated` frame (the module dropped records to fit) is flagged in the frame and counted. The feed follows the event log, so it needs no
+registration: it reads every `TBM:VIEW` system line (or addon line) as it arrives. `bot_view` returns the newest frame (with `after_n` and
+`wait_ms` it waits for a newer one). The events log gets a throttled `bot_view_frame` (the first frame, then every 5 s, or sooner when a bot
+dies or the party enters or leaves combat, never faster than once a second): `data.seq`, `lead`, `party[]` (name, hp_pct, power_pct, dead,
+state), `hostiles[]` (guid, entry, hp_pct, flags, threat_holder), `engaged`, `in_combat`. The `VIEW` lines stay in the event log too (about 5-8
+a second while bound); the log keeps 100000 events.
+
+**Orders.** `commander {"op":"bind","lead_bot":"Tanky","bots":["Healy"]}` (also `unbind`, `status`, `view` with `on`) and `commander {"op":"cmd",
+"verb":"pullback","args":["0xF130000C5E0012AB"]}` send `.bot commander ...` / `.bot cmd ...` as say chat and wait for the `TBM:ACTION_ACK` or
+`TBM:ACTION_ERR` with intent `commander <verb>` / `cmd <verb>`; a reply that does not come in `wait_ms` is `kind: "timeout"`. Only these verbs are
+sent, and an argument may hold letters, digits and `_ . , : + -` (not starting with a dot): nothing can ride along on the line.
+
+**The run.** `bind` (the lead bot and `bots`; none: the lead bot's party as it is), `commander view on` (the feed is off at bind in newer
+builds), a wait of up to 20 s for the first frame, then the plan with the same stepper, plan format, pull groups, stealth packs and rest gates
+as a group run, but everything comes from the feed and goes out as an order:
+
+| Plan action | Remote mode |
+| --- | --- |
+| walk | `.bot cmd move x y z` on the lead bot, in legs of at most 120 yd (the server takes 150; legs follow the navmesh path when the agent has one, else the straight line), then a wait for the lead bot's position in the feed to come within 5 yd. A lead bot that gained no ground in 10 s gets the move again; a refused move (`too-far`, `off-mesh`, `unreachable`) is retried with a shorter leg; `lead-unavailable` is waited out for up to 30 s |
+| pull group / boss | the nearest hostile of the group's entries **as the bots see it** (not the agent's view), `.bot cmd pullback <guid>`; out of range, the lead bot is moved up to 38 yd first; `too-far` moves it closer and retries; `unreachable`/`evading` skips the mob; `no-tank` falls back to `.bot cmd attack` |
+| fight | the feed's hostiles, targets, health and threat; `.bot cmd attack <guid>` at the nearest engaged mob every 10 s; the fight is won when its mobs are gone from the feed, `evaded` when they walk home |
+| cc | `cc` option: `[{"entry":4863,"mark":"moon","bot":"Magey"}]` sends `.bot cmd cc <mark> <guid> [bot]` for mobs of that entry around the pull target, before the pull; such a mob is not picked as the pull target while another is there |
+| rest gate | party health and mana, and everybody near the lead bot, from the feed; `.bot cmd rest` (again every 45 s); a dead bot gets `.bot cmd revive <name>` (owner or GM; refused: the run fails) |
+| wipe / death | from the feed: every bot dead is a wipe; with `recover_wipe` a revive order for each and the step is tried again |
+| `use_object`, `loot_object`, `use_item`, `wait_for` a game object | **not possible**: the agent's own character does these and it is not with the group. The run fails at the step, before any order, with `remote mode: object step needs the agent nearby` and the step; `wait_for hostiles_gone` works (it counts the feed's hostiles). The report's `remote.object_steps_ahead` and a note at the start say how many such steps the plan still has |
+
+**Threat decides when the party goes in.** After a pull the party is sent at a mob (`.bot cmd attack`) once the tank **holds its threat**: the top
+of the mob's `T` record is the tank and the mob is hitting it. The tank is `tank` (a name) or, when not given, the first bot seen holding a
+pulled mob (a rage user when the party has one). A mob that is not on the tank holds the party back for up to 6 s (`threat_waits`), then it goes in
+anyway (`threat_overrides`); `threat_holds` counts the mobs that were on the tank in time, `threat_warnings` the bots that came within 90 % of the
+top threat. Naming the `tank` is the reliable way.
+
+**Always unbound.** The unbind (`commander unbind`) is deferred inside the run: done, failed, stopped (`dungeon_stop`) or a panic, it goes out with
+its own context before the report says the run ended. A bind the module refused is no binding (nothing to unbind); one that got no answer is
+unbound anyway. The module can end the binding itself (the lead bot logged out or left, the party disbanded, a player joined, the switch turned
+off): its `commander unbind` ACK or a `not-bound`/`disabled` answer fails the run with `the commander binding ended: <reason>`.
+
+**No GM.** The remote run sends no GM command (no teleport, `.revive`, `.aura`, `.gm visible`): `teleport`, `buffs`, `brain`, `gm`,
+`gm_level` and `wait_sickness` are refused with `mode: "remote"`, `leader_gm` is `false`, `gm_shortcuts` is empty and `remote.gm_commands` is 0.
+The lead bot must be on the plan's map when the run starts (bring the group into the dungeon first); `from_leg` works as in a group run.
+
+**Report.** `dungeon_status.report.remote`: `mode`, `lead_bot`, `bots`, `tank`, `bound`, `unbound`, `unbind_via` (`ack`, `already unbound`, `no
+answer`, ...), `ended_by_module`, `gm_commands`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
+(since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
+in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `cc_orders`,
+`revives`, `object_steps_ahead`. The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
+`remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
+
+**Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not),
+no loot or dead flag for hostiles (a hostile that leaves the feed after fighting is counted dead), and the bots see only what they see: a pack
+nobody has in sight is not pulled until the lead bot has walked up to its positions. A feed that goes quiet for 6 s makes the fight loops wait
+(`feed_stalls`); one quiet for 45 s fails the run.
 
 ## Death and the corpse run
 

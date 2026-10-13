@@ -24,7 +24,7 @@ vet:
 # `make test` runs only their seeds. A crash is saved under <package>/testdata/fuzz/<target>/: commit it
 # with the fix as a regression seed.
 FUZZTIME ?= 5s
-FUZZPKGS := ./internal/game ./internal/objects
+FUZZPKGS := ./internal/game ./internal/objects ./internal/tbm
 fuzz:
 	@set -e; for pkg in $(FUZZPKGS); do \
 		for t in $$($(GO) test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
