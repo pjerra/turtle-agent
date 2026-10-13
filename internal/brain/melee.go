@@ -35,6 +35,13 @@ type melMem struct {
 	swingTarget packet.GUID // the unit the last attack order named (a game without Melee)
 	swingAt     time.Time
 	stanceAt    time.Time // the last stance change the brain made
+	faces       map[packet.GUID]faceTry
+}
+
+// faceTry is how often, and when last, the tank walked to turn a mob away from the group.
+type faceTry struct {
+	n  int
+	at time.Time
 }
 
 const (
@@ -57,7 +64,36 @@ const (
 	// meleeKeepAway keeps a melee spot this far from mobs that have not noticed the party; fighting mobs near the target are not in
 	// the way, a melee fighter stands among them.
 	meleeKeepAway = 10.0
+	// A tank turns a mob away from the group at most faceTries times, faceGap apart: the mob's facing in the update fields may not
+	// follow it, and a tank that re-walks every 700 ms never gets to Sunder or Revenge.
+	faceTries = 2
+	faceGap   = 6 * time.Second
+	faceKeep  = time.Minute // a mob not turned for this long is forgotten
 )
+
+// faceAllowed says the tank may walk again to turn the mob away from the group.
+func faceAllowed(c *Ctx, m *objects.Unit) bool {
+	c.mem.mel.mu.Lock()
+	defer c.mem.mel.mu.Unlock()
+	t, ok := c.mem.mel.faces[m.GUID]
+	return !ok || (t.n < faceTries && c.Now.Sub(t.at) >= faceGap)
+}
+
+// faceNoted records a walk to turn the mob away.
+func faceNoted(c *Ctx, m *objects.Unit) {
+	c.mem.mel.mu.Lock()
+	defer c.mem.mel.mu.Unlock()
+	if c.mem.mel.faces == nil {
+		c.mem.mel.faces = map[packet.GUID]faceTry{}
+	}
+	for g, t := range c.mem.mel.faces {
+		if c.Now.Sub(t.at) > faceKeep {
+			delete(c.mem.mel.faces, g)
+		}
+	}
+	t := c.mem.mel.faces[m.GUID]
+	c.mem.mel.faces[m.GUID] = faceTry{n: t.n + 1, at: c.Now}
+}
 
 // canWalk says the brain may walk the player now: the game can walk, the run did not switch movement off and the driver is not
 // walking. Unlike canMove it does not ask for the navmesh: a melee fighter walks to its mob along the walker's own route.
@@ -133,17 +169,17 @@ func meleeIssue(c *Ctx) string {
 			return issueTooFar
 		}
 		if m.Target == c.Self.GUID {
-			if g, ok := groupCenter(c); ok && math.Abs(angleDiff(m.O, float32(bearing(unitPos(m), g)))) < tankFacingMax {
+			if g, ok := groupCenter(c); ok && math.Abs(angleDiff(m.O, float32(bearing(unitPos(m), g)))) < tankFacingMax && faceAllowed(c, m) {
 				return issueFacesGroup
 			}
 		}
 		return ""
 	}
-	if ValMobOnMe.Get(c) != nil {
-		return ""
-	}
-	if d > meleeFar {
+	if d > meleeFar { // a mob on the player that stays away (a caster, an archer) is walked up to like any other
 		return issueTooFar
+	}
+	if ValMobOnMe.Get(c) != nil { // within reach, a mob on the player is the tank's business: no stepping round it
+		return ""
 	}
 	if inFront(m, selfPos(c)) {
 		return issueFrontal
@@ -231,9 +267,13 @@ func meleePosition() *Strategy {
 					if m == nil {
 						return nil
 					}
-					p, ok := meleeSpot(c, m, meleeIssue(c))
+					issue := meleeIssue(c)
+					p, ok := meleeSpot(c, m, issue)
 					if !ok {
 						return errors.New("no spot")
+					}
+					if issue == issueFacesGroup {
+						faceNoted(c, m)
 					}
 					forgetSpot(c)
 					return c.walk(ctx, p)

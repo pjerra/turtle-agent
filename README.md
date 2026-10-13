@@ -980,20 +980,23 @@ refused, and so is `healer`.
 - `role_tank`: the player holds the mobs. The fight's mob is **a loose add first** (a mob in combat within 30 yd that attacks a party
   member), then the nearest mob that attacks the player, then the player's selected target in combat. There is no opening delay. A loose add is answered with the
   class's taunt at relevance 25 (`taunt`: Taunt, Defensive Stance only; the class table also has Hand of Reckoning and Growl for the
-  paladin and druid, which have no preset yet).
+  paladin and druid, which have no preset yet). **A tank only fights mobs that are already in combat; it never opens a pull** (Charge works in
+  Battle Stance only, and nothing in the role walks up to a sleeping mob): the dungeon driver or a companion tank bot pulls, the
+  tank player picks the mob up when it is in combat and attacks a party member or the player, or the player has it selected.
 - `role_healer`: a stub. Naming it, or asking for `role healer`, fails with `the healer role is not implemented yet (step 4 of issue
   #80)`; `dungeon_run`'s `brain` option is refused the same way, at once. Nothing heals yet; a TortoiseBots healer in the party does.
 
 **Class tables** (`internal/brain/class.go`). What the brain needs to know of a class that is not a rotation: the power it plays on, the
 spells it interrupts with (and the stances those work in), whether it drinks and uses mana potions, whether it conjures its own water
 (mage), its taunt. A strategy asks for the leader's class at the tick instead of being written for one class: the interrupt strategy
-`class_interrupt` is Counterspell for a mage, Pummel (Berserker Stance) then Shield Bash (Battle or Defensive Stance) for a warrior; `mage_rest` and
+`class_interrupt` is Counterspell for a mage, Pummel (Battle or Berserker Stance) then Shield Bash (Battle or Defensive Stance) for a warrior; `mage_rest` and
 `combat_consumables` take their drink and mana-potion tables from the leader's class (the mage's conjured waters are the mage's row;
 a warrior drinks nothing, a priest only vendor drinks). `mage_interrupt` is the same strategy under the mage's name, and `frost_mage`
 is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick) and shaman (Earth Shock)
 rows are there for step 4; no preset uses them. The brain **does not change stance for an interrupt**: a stance change costs a warrior
-its rage (without Tactical Mastery) and Pummel costs rage, so an Arms warrior in Battle Stance interrupts with Shield Bash if it
-carries a shield and otherwise not at all.
+its rage (without Tactical Mastery) and Pummel costs rage. It uses the highest rank the stance allows: the core's data lets Pummel 6552 work in
+Battle and Berserker Stance and the Turtle rank 13491 in Battle Stance only (`SpellStances`), Shield Bash in Battle and Defensive Stance; a
+tank in Defensive Stance has Shield Bash only (it needs a shield: the server's refusal backs it off).
 
 **Melee** (`melee_position`; the swing is in `warrior_melee`). The melee strategies share:
 - **Auto attack** (`auto_attack`, relevance 19): `target` the fight's mob and `attack` when the mob is within 8 yd and the swing is not on
@@ -1012,11 +1015,13 @@ carries a shield and otherwise not at all.
   group's side), so that the mob turns to face away.
 - **Gap closers** (`warrior_melee`/`warrior_fury`, relevance 32, above a walk): **Charge** out of combat in Battle Stance, **Intercept**
   in combat in Berserker Stance, at a mob 8 to 25 yd away, only when the tank holds the mob and the opening delay is over, never into an untanked pull
-  (the multiplier `gap_closer_needs_tank`; a tanking player may). While one of them is about to fire, the fighter does not walk the distance.
+  (the multiplier `gap_closer_needs_tank`; a tanking player may, and so may a player a mob has pulled already: it attacks the player). While one of them is about to fire, the fighter does not walk the distance.
 
 **Warrior** (`internal/brain/warrior.go`). Spells are named; the highest known rank is cast. Rage and rage costs are in tenths.
 Stances are cast by id (the spellbook also holds the stances' passive spells under the same names). The abilities are checked against
-the core's spell data in `TestWarriorSpellData`. The relevance is the band the rule asks for.
+the core's spell data in `TestWarriorSpellData`, and the stance each ability works in is the core's `spell_template.stances` of every rank
+(tortoise-wow 5d79486; `warriorStances`, pinned by `TestStanceGatesFollowTheCoreData`). Thunder Clap, for one, works in Battle **and** Defensive
+Stance there, all six ranks, so the tank claps without a stance change. The relevance is the band the rule asks for.
 
 | Strategy | Ability (relevance) | When |
 | :--- | :--- | :--- |
@@ -1044,7 +1049,7 @@ the core's spell data in `TestWarriorSpellData`. The relevance is the band the r
 **Stance policy.** Each spec has a home stance and leaves it for nothing: no dance for Pummel, Charge or Intercept. The brain goes home
 when it is out of its stance and the change is cheap: out of combat, or with 25 rage or less. A stance cast is not repeated within 2 s.
 An ability names the stances it works in; in a stance that does not allow it, it is simply not possible (Fury has no Overpower and no
-Rend, Arms no Pummel).
+Rend, a tank no Pummel).
 
 **Presets.**
 - `arms_warrior` = `combat_dps` + `warrior_arms` + `warrior_melee` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat`.

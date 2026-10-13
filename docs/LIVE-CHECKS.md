@@ -310,7 +310,7 @@ and a healer, `mmaps_dir` set, and start it by hand with `brain_start {"strategi
    `spell_fail`/`attack_error` `bad_facing`/`not_in_range` after the walk.
 4. **Gap closers.** The leader 10 to 20 yd from the tank's mob when the fight starts: Arms `charge` after the opening delay (out of combat,
    Battle Stance), no walk before it; Fury `intercept` when in combat. Never a Charge into a mob the tank does not hold.
-5. **Interrupts.** Fury: `interrupt` with Pummel on a heal or a crowd-control cast within 5 yd; Arms with a shield: Shield Bash; Arms without: none.
+5. **Interrupts.** `interrupt` with Pummel on a heal or a crowd-control cast within 5 yd, in Berserker (Fury) or Battle Stance (Arms; the data says it works there, check it, and whether the spellbook holds rank 13491 as well); a tank with a shield: Shield Bash.
 6. **Berserker Rage** (Fury) when feared: one `berserker_rage`, the fear ends. Note whether the server allows the cast while feared.
 7. **Tank.** `brain_start {"strategies":["tank_warrior"]}` in Defensive Stance with a shield: `sunder` to 5 stacks, `revenge` after a dodge or parry,
    `thunder_clap` and `demoralizing_shout` with 2+ mobs, `taunt` when a mob attacks the healer (note the range: Taunt reaches 5 yd and the tank walks

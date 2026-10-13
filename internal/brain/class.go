@@ -28,8 +28,9 @@ const (
 // InterruptSpell is a spell a class interrupts a cast with, and the stance it needs.
 type InterruptSpell struct {
 	Spell string
-	// Stances are the stance auras the spell works in (a warrior's Pummel needs "Berserker Stance"); empty: any. The brain does
-	// not change stance for an interrupt: a stance change costs a warrior its rage (without Tactical Mastery), and Pummel costs rage.
+	// Stances are the stance auras the spell works in, from the core's spell_template `stances`; empty: any. SpellStances overrides
+	// them for a spell id whose data differs. The brain does not change stance for an interrupt: a stance change costs a warrior its
+	// rage (without Tactical Mastery), and Pummel costs rage.
 	Stances []string
 }
 
@@ -56,9 +57,15 @@ const (
 	stanceBerserker = "Berserker Stance"
 )
 
+// SpellStances are the stances of a spell id where it differs from the class table's row (core tortoise-wow 5d79486,
+// sql/base/tw_world_spell_template.sql, `stances` bitmask: 0x10000 Battle, 0x20000 Defensive, 0x40000 Berserker).
+var SpellStances = map[uint32][]string{
+	13491: {stanceBattle}, // Pummel, the rank-1 spell of level 6
+}
+
 var classTable = map[uint8]ClassInfo{
 	ClassWarrior: {ID: ClassWarrior, Name: "warrior", Power: powerRage, Taunt: "Taunt", Interrupts: []InterruptSpell{
-		{Spell: "Pummel", Stances: []string{stanceBerserker}},
+		{Spell: "Pummel", Stances: []string{stanceBattle, stanceBerserker}},      // spell 6552; the Turtle rank 13491 is Battle only (SpellStances)
 		{Spell: "Shield Bash", Stances: []string{stanceBattle, stanceDefensive}}, // needs a shield; the server's refusal backs it off
 	}},
 	ClassPaladin: {ID: ClassPaladin, Name: "paladin", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Hand of Reckoning"},

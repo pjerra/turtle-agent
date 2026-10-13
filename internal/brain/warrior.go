@@ -17,7 +17,7 @@ import (
 // Stances. A stance change costs a warrior its rage (without the Tactical Mastery talent), so the brain keeps a home stance and
 // leaves it for nothing: Arms stays in Battle Stance, Fury in Berserker Stance (Battle below level 30, which is when the stance
 // is learned), the tank in Defensive Stance. The abilities each name the stances they work in, and an ability the stance does not
-// allow is simply not possible: Fury has no Overpower and Rend, Arms has no Pummel (Shield Bash if it carries a shield), and neither
+// allow is simply not possible: Fury has no Overpower and Rend, Arms and Fury both Pummel (Battle and Berserker per the core's data), and neither
 // dances for a gap closer (Arms Charges out of combat from Battle Stance, Fury Intercepts in combat from Berserker Stance).
 
 // The stance spells. They are listed by id: the spellbook also holds the stance's passive spells under the same names, and "the
@@ -29,6 +29,26 @@ const (
 )
 
 var stanceSpells = map[string]uint32{stanceBattle: spellBattleStance, stanceDefensive: spellDefensiveStance, stanceBerserker: spellBerserkerStance}
+
+// warriorStances are the stances each gated warrior ability works in: the core's spell_template `stances` of every rank (tortoise-wow
+// 5d79486, sql/base/tw_world_spell_template.sql; the database_updates change none of them), pinned by TestWarriorSpellData. A spell
+// that lacks an entry works in any stance. Thunder Clap works in Battle and Defensive Stance in this data, and Pummel (class.go) in
+// Battle and Berserker.
+var warriorStances = map[string][]string{
+	"Execute":          {stanceBattle, stanceBerserker},
+	"Hamstring":        {stanceBattle, stanceBerserker},
+	"Charge":           {stanceBattle},
+	"Overpower":        {stanceBattle},
+	"Rend":             {stanceBattle, stanceDefensive},
+	"Sweeping Strikes": {stanceBattle},
+	"Thunder Clap":     {stanceBattle, stanceDefensive},
+	"Whirlwind":        {stanceBerserker},
+	"Berserker Rage":   {stanceBerserker},
+	"Intercept":        {stanceBerserker},
+	"Revenge":          {stanceDefensive},
+	"Shield Block":     {stanceDefensive},
+	"Taunt":            {stanceDefensive},
+}
 
 // Thresholds, in tenths of rage and in percent.
 const (
@@ -228,7 +248,7 @@ func warriorMelee() *Strategy {
 			if (a.Name != "charge" && a.Name != "intercept") || c.P.Role == RoleTank {
 				return 1
 			}
-			if ValFight.Get(c).Tank == nil {
+			if f := ValFight.Get(c); f.Tank == nil && f.Source != "self" { // a mob that attacks the player is pulled already
 				return 0
 			}
 			return 1
@@ -255,15 +275,15 @@ func warriorMelee() *Strategy {
 					c.mem.mel.mu.Unlock()
 					return nil
 				}},
-			meleeAction("execute", "Execute", ThreatSingle, []string{stanceBattle, stanceBerserker}, func(c *Ctx) bool {
+			meleeAction("execute", "Execute", ThreatSingle, warriorStances["Execute"], func(c *Ctx) bool {
 				return mobHealthPct(fightMob(c)) < executePct
 			}),
-			meleeAction("hamstring", "Hamstring", ThreatSingle, []string{stanceBattle, stanceBerserker}, func(c *Ctx) bool { return fleeing(fightMob(c)) }),
+			meleeAction("hamstring", "Hamstring", ThreatSingle, warriorStances["Hamstring"], func(c *Ctx) bool { return fleeing(fightMob(c)) }),
 			nextSwing("heroic_strike", "Heroic Strike", ThreatSingle),
 			nextSwing("cleave", "Cleave", ThreatAoE),
 			selfAction("battle_shout", "Battle Shout", nil, nil, func(c *Ctx) bool { return auraMissing(&c.Self, "Battle Shout") }),
 			selfAction("bloodrage", "Bloodrage", nil, nil, func(c *Ctx) bool { return !HasAura(&c.Self, "Bloodrage") }),
-			meleeAction("charge", "Charge", ThreatSingle, []string{stanceBattle}, func(c *Ctx) bool { return !c.Self.InCombat }),
+			meleeAction("charge", "Charge", ThreatSingle, warriorStances["Charge"], func(c *Ctx) bool { return !c.Self.InCombat }),
 		},
 		Rules: []Rule{
 			{Trigger: Trigger{Name: "mob_in_reach", Active: mobInReach}, Do: []Next{{"auto_attack", RelNormal + 9}}},
@@ -286,7 +306,7 @@ func warriorMelee() *Strategy {
 				return onWarrior(c) && m != nil && m.Distance >= 0 && m.Distance <= 12 && rageNow(c) < rageBloodrage && healthPct(c) > bloodrageHP
 			}}, Do: []Next{{"bloodrage", RelNormal + 3}}},
 			{Trigger: Trigger{Name: "mob_far_ooc", Active: func(c *Ctx) bool {
-				return onWarrior(c) && !c.Self.InCombat && InStance(&c.Self, stanceBattle) && mobGap(c)
+				return onWarrior(c) && !c.Self.InCombat && InStance(&c.Self, warriorStances["Charge"]...) && mobGap(c)
 			}}, Do: []Next{{"charge", RelMove + 2}}},
 		},
 	}
@@ -336,17 +356,19 @@ func warriorArms() *Strategy {
 		Name: "warrior_arms",
 		Actions: []*Action{
 			meleeAction("mortal_strike", "Mortal Strike", ThreatSingle, nil, nil),
-			meleeAction("overpower", "Overpower", ThreatSingle, []string{stanceBattle}, dodgedRecently),
+			meleeAction("overpower", "Overpower", ThreatSingle, warriorStances["Overpower"], dodgedRecently),
 			// Rend is a bleed: the server refuses it on a mob that cannot bleed (undead, elementals, mechanicals) and the refusal backs it
 			// off. A 1.12 client sees no creature type.
-			meleeAction("rend", "Rend", ThreatSingle, []string{stanceBattle, stanceDefensive}, func(c *Ctx) bool {
+			meleeAction("rend", "Rend", ThreatSingle, warriorStances["Rend"], func(c *Ctx) bool {
 				m := fightMob(c)
 				return m != nil && !HasAura(m, "Rend") && mobHealthPct(m) > rendMinPct
 			}),
 			// Sweeping Strikes makes the next hits hit a second mob: an area ability for the veto, a buff on the player.
 			{Name: "sweeping_strikes", Spell: "Sweeping Strikes", Harmful: true, Threat: ThreatAoE,
-				Possible: func(c *Ctx) bool { return InStance(&c.Self, stanceBattle) && ValMeleeMobs.Get(c) >= 2 },
-				Useful:   func(c *Ctx) bool { return !HasAura(&c.Self, "Sweeping Strikes") }},
+				Possible: func(c *Ctx) bool {
+					return InStance(&c.Self, warriorStances["Sweeping Strikes"]...) && ValMeleeMobs.Get(c) >= 2
+				},
+				Useful: func(c *Ctx) bool { return !HasAura(&c.Self, "Sweeping Strikes") }},
 			homeStanceAction("stance_arms", stanceBattle),
 		},
 		Rules: []Rule{
@@ -370,16 +392,16 @@ func warriorFury() *Strategy {
 		Name: "warrior_fury",
 		Actions: []*Action{
 			meleeAction("bloodthirst", "Bloodthirst", ThreatSingle, nil, nil),
-			meleeAction("whirlwind", "Whirlwind", ThreatAoE, []string{stanceBerserker}, func(c *Ctx) bool { return ValMeleeMobs.Get(c) >= 1 }),
-			selfAction("berserker_rage", "Berserker Rage", []string{stanceBerserker}, nil, func(c *Ctx) bool { return feared(c) }),
-			meleeAction("intercept", "Intercept", ThreatSingle, []string{stanceBerserker}, func(c *Ctx) bool { return c.Self.InCombat }),
+			meleeAction("whirlwind", "Whirlwind", ThreatAoE, warriorStances["Whirlwind"], func(c *Ctx) bool { return ValMeleeMobs.Get(c) >= 1 }),
+			selfAction("berserker_rage", "Berserker Rage", warriorStances["Berserker Rage"], nil, func(c *Ctx) bool { return feared(c) }),
+			meleeAction("intercept", "Intercept", ThreatSingle, warriorStances["Intercept"], func(c *Ctx) bool { return c.Self.InCombat }),
 			homeStanceAction("stance_fury", stanceBerserker, stanceBattle),
 		},
 		Rules: []Rule{
 			{Trigger: Trigger{Name: "mob_in_reach_fury", Active: mobInReach}, Do: []Next{{"bloodthirst", RelNormal + 6}, {"whirlwind", RelNormal + 5}}},
 			{Trigger: Trigger{Name: "feared", Active: func(c *Ctx) bool { return onWarrior(c) && feared(c) }}, Do: []Next{{"berserker_rage", RelDispel - 5}}},
 			{Trigger: Trigger{Name: "mob_far_in_combat", Active: func(c *Ctx) bool {
-				return onWarrior(c) && c.Self.InCombat && InStance(&c.Self, stanceBerserker) && mobGap(c)
+				return onWarrior(c) && c.Self.InCombat && InStance(&c.Self, warriorStances["Intercept"]...) && mobGap(c)
 			}}, Do: []Next{{"intercept", RelMove + 2}}},
 			{Trigger: Trigger{Name: "off_berserker_stance", Active: offHome(stanceBerserker, stanceBattle)}, Do: []Next{{"stance_fury", RelNormal + 2}}},
 		},
@@ -396,11 +418,11 @@ func warriorTank() *Strategy {
 		Name: "warrior_tank",
 		Actions: []*Action{
 			meleeAction("sunder", "Sunder Armor", ThreatSingle, nil, func(c *Ctx) bool { return sunderStacksOn(fightMob(c)) < sunderStacks }),
-			meleeAction("revenge", "Revenge", ThreatSingle, []string{stanceDefensive}, avoidedRecently),
-			selfAction("shield_block", "Shield Block", []string{stanceDefensive}, nil, func(c *Ctx) bool { return !HasAura(&c.Self, "Shield Block") }),
+			meleeAction("revenge", "Revenge", ThreatSingle, warriorStances["Revenge"], avoidedRecently),
+			selfAction("shield_block", "Shield Block", warriorStances["Shield Block"], nil, func(c *Ctx) bool { return !HasAura(&c.Self, "Shield Block") }),
 			{Name: "thunder_clap", Spell: "Thunder Clap", Harmful: true, Threat: ThreatAoE,
 				Possible: func(c *Ctx) bool {
-					return InStance(&c.Self, stanceBattle, stanceDefensive) && ValMeleeMobs.Get(c) >= 2 && mobsLacking(c, "Thunder Clap") > 0
+					return InStance(&c.Self, warriorStances["Thunder Clap"]...) && ValMeleeMobs.Get(c) >= 2 && mobsLacking(c, "Thunder Clap") > 0
 				}},
 			{Name: "demoralizing_shout", Spell: "Demoralizing Shout", Harmful: true, Threat: ThreatAoE,
 				Possible: func(c *Ctx) bool { return ValMeleeMobs.Get(c) >= 2 && mobsLacking(c, "Demoralizing Shout") > 0 }},

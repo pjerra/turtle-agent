@@ -32,6 +32,7 @@ const (
 	spBerserkRage = 18499
 	spIntercept   = 20252
 	spPummel      = 6552
+	spPummelT     = 13491 // the Turtle rank 1 of level 6, Battle Stance only
 	spShieldBash  = 72
 	spTaunt       = 355
 	spSunder      = 7386
@@ -447,45 +448,57 @@ func TestBerserkerRageBreaksAFear(t *testing.T) {
 	}
 }
 
-func TestInterruptPummelInBerserkerShieldBashInBattle(t *testing.T) {
+func TestInterruptPummelInBattleOrBerserkerShieldBashInBattleOrDefensive(t *testing.T) {
 	cast := func(r *rig) {
 		r.g.mutate(mobA, func(u *objects.Unit) {
 			u.Casting = &objects.Cast{SpellID: spShadowBolt, EndsInMS: ms(1500), Target: tankG}
 		})
 	}
-	// Fury in Berserker Stance: Pummel.
-	r, mf := newWarriorRig(t, "fury_warrior", stanceBerserker, Params{})
-	meleeFight(r, mf)
-	setRage(r.g, 500)
-	cast(r)
-	d := r.tick(100 * time.Millisecond)
-	if d == nil || d.Action != "interrupt" || d.Spell != spPummel || d.Target != mobA || d.Rel != RelInterrupt {
-		t.Fatalf("%+v idle %q", d, r.idle())
+	try := func(preset, stance string, known ...uint32) (*rig, *Decision) {
+		r, mf := newWarriorRig(t, preset, stance, Params{}, known...)
+		meleeFight(r, mf)
+		setRage(r.g, 500)
+		cast(r)
+		return r, r.tick(100 * time.Millisecond)
 	}
-	// Arms in Battle Stance: Pummel is not allowed there, Shield Bash is.
-	r, mf = newWarriorRig(t, "arms_warrior", stanceBattle, Params{})
-	meleeFight(r, mf)
-	setRage(r.g, 500)
-	cast(r)
-	d = r.tick(100 * time.Millisecond)
-	if d == nil || d.Action != "interrupt" || d.Spell != spShieldBash {
-		t.Fatalf("%+v idle %q", d, r.idle())
+	// Pummel (6552) works in Battle and Berserker Stance, by the core's data: fury in Berserker and arms in Battle both use it, first.
+	for _, c := range []struct{ preset, stance string }{{"fury_warrior", stanceBerserker}, {"arms_warrior", stanceBattle}} {
+		r, d := try(c.preset, c.stance)
+		if d == nil || d.Action != "interrupt" || d.Spell != spPummel || d.Target != mobA || d.Rel != RelInterrupt {
+			t.Fatalf("%s: %+v idle %q", c.stance, d, r.idle())
+		}
 	}
-	// ... and without a Shield Bash the arms warrior has nothing to interrupt with: it does not change stance for it.
-	r, mf = newWarriorRig(t, "arms_warrior", stanceBattle, Params{}, spBattleSt, spPummel, spBattleShout, spMortal)
-	meleeFight(r, mf)
-	setRage(r.g, 500)
-	cast(r)
-	for i := 0; i < 3; i++ {
-		r.tick(100 * time.Millisecond)
+	// Shield Bash (Battle, Defensive) when Pummel is not there; not from Berserker Stance.
+	if _, d := try("arms_warrior", stanceBattle, spBattleSt, spShieldBash, spBattleShout); d == nil || d.Spell != spShieldBash {
+		t.Fatalf("%+v", d)
+	}
+	if r, d := try("tank_warrior", stanceDefensive, spDefSt, spShieldBash, spPummel, spBattleShout); d == nil || d.Spell != spShieldBash {
+		t.Fatalf("a tank has Shield Bash, not Pummel: %+v idle %q", d, r.idle())
+	}
+	r, d := try("fury_warrior", stanceBerserker, spBerserkSt, spShieldBash, spBattleShout)
+	if d != nil && d.Action == "interrupt" {
+		t.Fatalf("Shield Bash from Berserker Stance: %+v", d)
 	}
 	for _, id := range casts(r.g) {
-		if id == spPummel || id == spBerserkSt {
-			t.Fatalf("it interrupted from the wrong stance or danced for it: %v", casts(r.g))
+		if id == spShieldBash || id == spBattleSt {
+			t.Fatalf("%v", casts(r.g))
+		}
+	}
+	// The Turtle rank 13491 is Battle Stance only: used there, left alone in Berserker Stance.
+	if _, d := try("arms_warrior", stanceBattle, spBattleSt, spPummelT, spBattleShout); d == nil || d.Spell != spPummelT {
+		t.Fatalf("%+v", d)
+	}
+	r, d = try("fury_warrior", stanceBerserker, spBerserkSt, spPummelT, spBattleShout)
+	if d != nil && d.Action == "interrupt" {
+		t.Fatalf("%+v", d)
+	}
+	for _, id := range casts(r.g) {
+		if id == spPummelT || id == spBattleSt {
+			t.Fatalf("%v", casts(r.g))
 		}
 	}
 	// A cast out of Pummel's reach is left to others.
-	r, mf = newWarriorRig(t, "fury_warrior", stanceBerserker, Params{})
+	r, mf := newWarriorRig(t, "fury_warrior", stanceBerserker, Params{})
 	meleeFight(r, mf)
 	caster := mob(mobB, tankG)
 	caster.Casting = &objects.Cast{SpellID: spShadowBolt, EndsInMS: ms(1500), Target: tankG}
@@ -729,5 +742,105 @@ func TestDrinkTableByClass(t *testing.T) {
 	c = r.b.newCtx(g.clk.Now())
 	if e := drinkEntry(c, true); e != 0 {
 		t.Fatalf("warrior: %d", e)
+	}
+}
+
+// coreStances is what the core's spell_template says about the stances of every player rank of the gated warrior abilities: the
+// `stances` bitmask (0x10000 Battle, 0x20000 Defensive, 0x40000 Berserker) of the rows in tortoise-wow 5d79486,
+// sql/base/tw_world_spell_template.sql; no file of sql/database_updates/world sets `stances` for these spells. B Battle, D Defensive,
+// Z Berserker. Thunder Clap works in Battle and Defensive Stance in this data, all six ranks.
+var coreStances = map[string]struct {
+	stances string
+	ids     []uint32
+}{
+	"Rend":             {"BD", []uint32{772, 6546, 6547, 6548, 11572, 11573, 11574}},
+	"Execute":          {"BZ", []uint32{5308, 20658, 20660, 20661, 20662}},
+	"Hamstring":        {"BZ", []uint32{1715, 7372, 7373}},
+	"Overpower":        {"B", []uint32{7384, 7887, 11584, 11585}},
+	"Revenge":          {"D", []uint32{6572, 6574, 7379, 11600, 11601, 25288}},
+	"Charge":           {"B", []uint32{100, 6178, 11578}},
+	"Intercept":        {"Z", []uint32{20252, 20616, 20617}},
+	"Taunt":            {"D", []uint32{355}},
+	"Thunder Clap":     {"BD", []uint32{6343, 8198, 8204, 8205, 11580, 11581}},
+	"Sweeping Strikes": {"B", []uint32{12292}},
+	"Shield Block":     {"D", []uint32{2565}},
+	"Berserker Rage":   {"Z", []uint32{18499}},
+	"Whirlwind":        {"Z", []uint32{1680}},
+	"Shield Bash":      {"BD", []uint32{72, 1671, 1672}},
+	"Pummel":           {"BZ", []uint32{6552}},
+}
+
+func stanceLetters(names []string) string {
+	out := ""
+	for _, c := range []struct{ name, letter string }{{stanceBattle, "B"}, {stanceDefensive, "D"}, {stanceBerserker, "Z"}} {
+		for _, n := range names {
+			if n == c.name {
+				out += c.letter
+			}
+		}
+	}
+	return out
+}
+
+func TestStanceGatesFollowTheCoreData(t *testing.T) {
+	for name, c := range coreStances {
+		for _, id := range c.ids {
+			if spells.Name(id) != name {
+				t.Errorf("%d is %q, want %q", id, spells.Name(id), name)
+			}
+		}
+		var have []string
+		switch name {
+		case "Shield Bash", "Pummel":
+			for _, is := range classTable[ClassWarrior].Interrupts {
+				if is.Spell == name {
+					have = is.Stances
+				}
+			}
+		default:
+			have = warriorStances[name]
+		}
+		if got := stanceLetters(have); got != c.stances {
+			t.Errorf("%s: the brain gates it to %q, the core's data says %q", name, got, c.stances)
+		}
+	}
+	// The Turtle rank of Pummel is Battle Stance only.
+	if got := stanceLetters(SpellStances[spPummelT]); got != "B" || spells.Name(spPummelT) != "Pummel" {
+		t.Errorf("Pummel %d: %q", spPummelT, got)
+	}
+	// The abilities that work in every stance are not gated.
+	for _, n := range []string{"Mortal Strike", "Bloodthirst", "Heroic Strike", "Cleave", "Sunder Armor", "Demoralizing Shout", "Battle Shout", "Bloodrage"} {
+		if _, gated := warriorStances[n]; gated {
+			t.Errorf("%s is gated, the data gates it to no stance", n)
+		}
+	}
+}
+
+// A mob that attacks the leader from afar (a caster, an archer) is walked up to, not stood in front of: the too-far check comes
+// before "a mob on the player is the tank's business".
+func TestMeleeWalksUpToAMobOnItThatKeepsItsDistance(t *testing.T) {
+	r, mf := newWarriorRig(t, "arms_warrior", stanceBattle, Params{})
+	m := mob(mobA, selfG)
+	r.g.addUnit(m, 20, 0)
+	r.g.setSelf(func(u *objects.Unit) { u.InCombat = true })
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "melee_reposition" || len(mf.walkList()) != 1 {
+		t.Fatalf("%+v walks %v idle %q", d, mf.walkList(), r.idle())
+	}
+	if w := mf.walkList()[0]; dist2(w, Vec3{20, 0, 0}) > 4.7 {
+		t.Fatalf("walked to %v, not up to the mob", w)
+	}
+}
+
+// ... and a fury warrior in combat intercepts it at once: no tank holds this mob, but it has pulled the leader already.
+func TestInterceptAMobOnTheLeaderWithoutATank(t *testing.T) {
+	r, mf := newWarriorRig(t, "fury_warrior", stanceBerserker, Params{})
+	r.g.addUnit(mob(mobA, selfG), 20, 0)
+	mf.setSwing(mobA)
+	setRage(r.g, 300)
+	r.g.setSelf(func(u *objects.Unit) { u.InCombat = true })
+	d := r.tick(100 * time.Millisecond)
+	if d == nil || d.Action != "intercept" || d.Spell != spIntercept {
+		t.Fatalf("%+v idle %q", d, r.idle())
 	}
 }

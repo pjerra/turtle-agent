@@ -261,3 +261,34 @@ func TestTankChoosesItsMob(t *testing.T) {
 		t.Fatalf("%+v", f)
 	}
 }
+
+// The mob's facing in the update fields may not follow it: the tank turns it away from the group twice at most, six seconds apart,
+// and goes on with Sunder and the rest between.
+func TestTankDoesNotWalkForeverToTurnAMobThatStaysPut(t *testing.T) {
+	r, mf := tankRig(t)
+	m := mob(mobA, selfG)
+	m.O = math.Pi // never changes
+	r.g.addUnit(m, 3, 0)
+	addHealer(r.g, -6, 0)
+	setRage(r.g, 100)
+	mf.setSwing(mobA)
+	var walkTicks, sunders int
+	for i := 0; i < 24; i++ { // 19 s
+		before := len(mf.walkList())
+		d := r.tick(800 * time.Millisecond)
+		if len(mf.walkList()) > before {
+			walkTicks++
+		}
+		if d != nil && d.Action == "sunder" {
+			sunders++
+		}
+		setRage(r.g, 100)
+		r.g.mutate(mobA, func(u *objects.Unit) { u.Auras = nil })
+	}
+	if walkTicks != 2 || len(mf.walkList()) != 2 {
+		t.Fatalf("walked %d times: %v", walkTicks, mf.walkList())
+	}
+	if sunders < 2 {
+		t.Fatalf("the tank never got to Sunder: %d", sunders)
+	}
+}

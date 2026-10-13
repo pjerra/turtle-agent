@@ -136,7 +136,7 @@ func roleTank() *Strategy {
 						return false
 					}
 					// A warrior's Taunt works in Defensive Stance only.
-					return c.Class().ID != ClassWarrior || InStance(&c.Self, stanceDefensive)
+					return c.Class().ID != ClassWarrior || InStance(&c.Self, warriorStances["Taunt"]...)
 				}},
 		},
 		Rules: []Rule{
