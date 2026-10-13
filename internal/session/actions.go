@@ -162,12 +162,13 @@ func (s *Session) inWorld() error {
 	return nil
 }
 
-// clockAt is the MovementInfo client time at now: milliseconds on the session's monotonic
-// clock, plus one, because the anticheat flags a zero time and a clock that runs backwards
-// or more than 5 s ahead of the server's (Movement.cpp:377, :434-475). It never goes back,
-// even for a now read before the last packet's. Owner loop only.
+// clockAt is the MovementInfo client time at now: moveClock's milliseconds (real time, slewed
+// to the wall clock so it keeps the server's pace), plus one, because the anticheat flags a
+// zero time and a clock that runs backwards or ahead of the server's (Movement.cpp:377,
+// :434-475). It never goes back, even for a now read before the last packet's. Owner loop only.
 func (s *Session) clockAt(now time.Time) uint32 {
-	c := max(uint32(now.Sub(s.start).Milliseconds())+1, s.lastClock)
+	s.mclock = s.mclock.at(s.clockReading(now))
+	c := max(uint32(s.mclock.ms)+1, s.lastClock)
 	s.lastClock = c
 	return c
 }
@@ -176,7 +177,7 @@ func (s *Session) clock() uint32 { return s.clockAt(s.now()) }
 
 // peekClock is the client time clockAt(now) will give, without taking it.
 func (s *Session) peekClock(now time.Time) uint32 {
-	return max(uint32(now.Sub(s.start).Milliseconds())+1, s.lastClock)
+	return max(uint32(s.mclock.at(s.clockReading(now)).ms)+1, s.lastClock)
 }
 
 // moveInfoAt is the player's MovementInfo at now, its client time read from the same
