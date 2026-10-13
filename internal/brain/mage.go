@@ -34,26 +34,39 @@ type drinkItem struct {
 	level uint8
 }
 
-// drinkItems are the drinks a mage uses, best first: the conjured waters, then the vendor drinks that restore mana
-// (Moonberry Juice and Sweet Nectar restore mana only, the others also health). Each group runs from the highest level
-// down; the entries and levels are the core's.
-var drinkItems = []drinkItem{
-	{8079, 55}, {8078, 45}, {8077, 35}, {3772, 25}, {2136, 15}, {2288, 5}, {5350, 1}, // Conjured Crystal ... Conjured Water
-	{8766, 45}, {1645, 35}, {1708, 25}, {1205, 15}, {1179, 5}, {159, 1}, // Morning Glory Dew, Moonberry Juice, Sweet Nectar, Melon Juice, Ice Cold Milk, Refreshing Spring Water
+// conjuredDrinks are the waters a mage conjures, best first; vendorDrinks are the ones every mana class buys, best first (Moonberry
+// Juice and Sweet Nectar restore mana only, the others also health). Each group runs from the highest level down; the entries
+// and levels are the core's.
+var (
+	conjuredDrinks = []drinkItem{{8079, 55}, {8078, 45}, {8077, 35}, {3772, 25}, {2136, 15}, {2288, 5}, {5350, 1}} // Conjured Crystal ... Conjured Water
+	vendorDrinks   = []drinkItem{{8766, 45}, {1645, 35}, {1708, 25}, {1205, 15}, {1179, 5}, {159, 1}}              // Morning Glory Dew, Moonberry Juice, Sweet Nectar, Melon Juice, Ice Cold Milk, Refreshing Spring Water
+)
+
+// drinksFor is the drink table of a class, best first: a mage's own waters then the vendor drinks, the vendor drinks for the other
+// mana classes, none for a class that plays on rage or energy.
+func drinksFor(ci ClassInfo) []drinkItem {
+	var out []drinkItem
+	if ci.ConjuredDrinks {
+		out = append(out, conjuredDrinks...)
+	}
+	if ci.Drinks {
+		out = append(out, vendorDrinks...)
+	}
+	return out
 }
 
 // drinkUseHold is how long a drink that was just used is not used again: the Drink aura needs the server's answer, and
 // a refusal the brain cannot see (the item cooldown, a stack that is gone) must not loop.
 const drinkUseHold = 5 * time.Second
 
-// drinkEntry is the best drink in the bags the leader's level allows, 0 when there is none. Unless anyOK, a drink
+// drinkEntry is the best drink of the leader's class in the bags that its level allows, 0 when there is none. Unless anyOK, a drink
 // used within drinkUseHold is passed over for the next one.
 func drinkEntry(c *Ctx, anyOK bool) uint32 {
 	have := map[uint32]bool{}
 	for _, it := range c.G.Items() {
 		have[it.Entry] = true
 	}
-	for _, d := range drinkItems {
+	for _, d := range drinksFor(c.Class()) {
 		if !have[d.entry] || uint32(d.level) > c.Self.Level {
 			continue
 		}

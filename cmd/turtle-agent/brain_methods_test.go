@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/game/gametest"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -34,8 +35,10 @@ func TestBrainStartRefusals(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{}`, "name at least one"},
 		{`{"strategies":[]}`, "name at least one"},
-		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: frost_mage; strategies: avoid_ground, combat_consumables, combat_dps, mage_defense, mage_frost, mage_interrupt, mage_rest, ranged_position, rest_eat, wand)`},
-		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer"`},
+		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, `},
+		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer": the healer role is not implemented yet`},
+		{`{"strategies":["arms_warrior"],"role":"tank"}`, `role "tank" does not match the strategies`},
+		{`{"strategies":["frost_mage"],"role":"bard"}`, `role "bard": want dps, tank or healer`},
 		{`{"strategies":["mage_frost"]}`, "face_target"},
 		{`{"strategies":["frost_mage"],"colour":1}`, "colour"},
 		{`{"strategies":"frost_mage"}`, "strategies"},
@@ -143,6 +146,11 @@ func TestDungeonRunBrainOption(t *testing.T) {
 	r := dungeonRig(t)
 	bad := r.call("dungeon_run", `{"name":"rig","brain":"lock_fire"}`)
 	if errCode(bad) != rpc.CodeInvalidParams || !strings.Contains(bad["error"].(map[string]any)["message"].(string), "brain: strategy") {
+		t.Fatalf("%v", bad)
+	}
+	// A preset of any role is a brain option; the healer's stub is refused up front, not at the first rest gate.
+	bad = r.call("dungeon_run", `{"name":"rig","brain":"role_healer"}`)
+	if errCode(bad) != rpc.CodeInvalidParams || !strings.Contains(bad["error"].(map[string]any)["message"].(string), "not implemented yet") {
 		t.Fatalf("%v", bad)
 	}
 	// A brain started by hand blocks a run that wants its own.
@@ -310,5 +318,63 @@ func TestSessionBrainGameNavmeshHalfWithoutAPlanner(t *testing.T) {
 	}
 	if len(g.DynamicObjects()) != 0 {
 		t.Fatal("ground effects out of nowhere")
+	}
+}
+
+// The role is the strategies' role unless one is asked for, and it must fit them.
+func TestBrainStartTakesTheRoleOfItsPreset(t *testing.T) {
+	r := newRig(t)
+	for _, c := range []struct{ params, role string }{
+		{`{"strategies":["tank_warrior"]}`, "tank"},
+		{`{"strategies":["tank_warrior"],"role":"tank"}`, "tank"},
+		{`{"strategies":["arms_warrior"]}`, "dps"},
+		{`{"strategies":["fury_warrior"],"role":"dps"}`, "dps"},
+	} {
+		out := r.call("brain_start", c.params)
+		st, ok := out["result"].(map[string]any)
+		if !ok || st["running"] != true || st["role"] != c.role {
+			t.Fatalf("%s: %v", c.params, out)
+		}
+		r.call("brain_stop", "{}")
+	}
+}
+
+// The melee half of the brain's Game reads the session's event log from where the brain first asked: a dodge of the player's
+// swing, an attack of the mob's that the player avoided, and the auto attack's start and stop.
+func TestSessionMeleeWatchReadsTheEventLog(t *testing.T) {
+	r := newRig(t)
+	g := &sessionBrainGame{cur: func() *session.Session { return r.s }}
+	const mob, other packet.GUID = 0xF13000012B000001, 0xF13000012B000002
+	self := r.s.Status().GUID
+	log := r.s.Log()
+	log.Append(events.Event{Kind: events.KindMelee, SourceGUID: self, TargetGUID: mob, Data: map[string]any{"outcome": "dodge"}}) // before the brain looked
+	if !g.LastDodge(mob).IsZero() || !g.LastAvoided().IsZero() || g.Swinging() != 0 {
+		t.Fatal("news from before the first look")
+	}
+	log.Append(events.Event{Kind: events.KindMelee, SourceGUID: self, TargetGUID: mob, Data: map[string]any{"outcome": "dodge"}})
+	log.Append(events.Event{Kind: events.KindMelee, SourceGUID: self, TargetGUID: other, Data: map[string]any{"outcome": "normal"}})
+	log.Append(events.Event{Kind: events.KindMelee, SourceGUID: other, TargetGUID: self, Data: map[string]any{"outcome": "normal"}})
+	if g.LastDodge(mob).IsZero() || !g.LastDodge(other).IsZero() || !g.LastAvoided().IsZero() {
+		t.Fatalf("dodge %v other %v avoided %v", g.LastDodge(mob), g.LastDodge(other), g.LastAvoided())
+	}
+	log.Append(events.Event{Kind: events.KindSpellMiss, SourceGUID: other, TargetGUID: self, Data: map[string]any{"miss": "parry"}})
+	if g.LastAvoided().IsZero() {
+		t.Fatal("a parried attack of the mob's is an avoided attack")
+	}
+	log.Append(events.Event{Kind: events.KindSpellMiss, SourceGUID: self, TargetGUID: other, Data: map[string]any{"miss": "dodge"}})
+	if g.LastDodge(other).IsZero() {
+		t.Fatal("a dodged ability is a dodge")
+	}
+	log.Append(events.Event{Kind: events.KindAttackStart, SourceGUID: self, TargetGUID: mob})
+	if g.Swinging() != mob {
+		t.Fatalf("swinging at %x", g.Swinging())
+	}
+	log.Append(events.Event{Kind: events.KindAttackStart, SourceGUID: mob, TargetGUID: self}) // the mob's swing is not ours
+	if g.Swinging() != mob {
+		t.Fatalf("swinging at %x", g.Swinging())
+	}
+	log.Append(events.Event{Kind: events.KindAttackStop, SourceGUID: self, TargetGUID: mob})
+	if g.Swinging() != 0 {
+		t.Fatalf("swinging at %x after the stop", g.Swinging())
 	}
 }

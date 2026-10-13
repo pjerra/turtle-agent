@@ -30,9 +30,11 @@ func healthPct(c *Ctx) int {
 // cooldown and the global cooldown, paid for, and not backed off after a refusal.
 func canCast(c *Ctx, name string) bool {
 	id, ok := c.Spells.Highest(name)
-	if !ok {
-		return false
-	}
+	return ok && canCastID(c, id)
+}
+
+// canCastID is canCast for a spell id.
+func canCastID(c *Ctx, id uint32) bool {
 	if _, held := c.mem.held(id, c.Now); held {
 		return false
 	}

@@ -142,7 +142,10 @@ func (b *driverBrain) Rest(on bool) {
 
 // sessionBrainGame is the brain's Game over the agent's session. It asks cur at each call, so a reconnect that swaps
 // the session does not strand the brain.
-type sessionBrainGame struct{ cur func() *session.Session }
+type sessionBrainGame struct {
+	cur   func() *session.Session
+	melee meleeWatch
+}
 
 func (g *sessionBrainGame) Self() (objects.Unit, bool) {
 	s := g.cur()
