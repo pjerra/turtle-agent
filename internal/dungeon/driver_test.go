@@ -88,6 +88,10 @@ type fakeGame struct {
 	lateAuras     []lateAura
 	failGMOn      map[packet.GUID]int // the next n ".aura" commands selecting this unit land on the leader instead
 	dead          fakeDeath           // the leader's death (fake_death_test.go)
+	moveHeld      func() int          // the holds of the brain's move lock now (nil: not recorded)
+	moveLog       []string            // "walk:1", "teleport:1" ...: each movement of the leader and the holds standing at it
+
+	onEmit func(kind string, data map[string]any) // sees each event as it is emitted
 }
 
 const (
@@ -197,7 +201,15 @@ func (g *fakeGame) Units() []objects.Unit {
 	return out
 }
 
+// moved records how many holds of the brain's move lock stand while the Driver moves the leader (moveHeld reads them).
+func (g *fakeGame) moved(kind string) {
+	if g.moveHeld != nil {
+		g.moveLog = append(g.moveLog, fmt.Sprintf("%s:%d", kind, g.moveHeld()))
+	}
+}
+
 func (g *fakeGame) WalkPath(ctx context.Context, to Point) (WalkResult, error) {
+	g.moved("walk")
 	g.walks = append(g.walks, to)
 	if g.walkHook != nil {
 		return g.walkHook(ctx, g, to)
@@ -224,6 +236,7 @@ func (g *fakeGame) PathPoints(ctx context.Context, to Point) ([]Point, error) {
 }
 
 func (g *fakeGame) UseObject(ctx context.Context, guid packet.GUID) error {
+	g.moved("use")
 	g.used = append(g.used, guid)
 	if g.onUse != nil {
 		g.onUse(g, guid)
@@ -342,12 +355,16 @@ func (u *fakeUnit) stealth() *fakeUnit {
 }
 
 func (g *fakeGame) Teleport(ctx context.Context, to Point, mapID uint32) error {
+	g.moved("teleport")
 	g.teleports = append(g.teleports, to)
 	g.pos, g.mapID = to, mapID
 	return nil
 }
 
 func (g *fakeGame) Emit(kind, text string, data map[string]any) {
+	if g.onEmit != nil {
+		g.onEmit(kind, data)
+	}
 	g.events = append(g.events, fakeEvent{kind, data})
 }
 
@@ -809,6 +826,26 @@ type fakeBrain struct {
 	log      []string
 	running  bool
 	startErr error
+	held     int   // holds of the move lock standing now
+	holds    int   // holds taken in all
+	maxHeld  int   // most holds at once
+	holdErr  error // HoldMove fails with this
+}
+
+func (b *fakeBrain) HoldMove(ctx context.Context) (func(), error) {
+	if b.holdErr != nil {
+		return func() {}, b.holdErr
+	}
+	b.held++
+	b.holds++
+	b.maxHeld = max(b.maxHeld, b.held)
+	var once bool
+	return func() {
+		if !once {
+			once = true
+			b.held--
+		}
+	}, nil
 }
 
 func (b *fakeBrain) Start() error {

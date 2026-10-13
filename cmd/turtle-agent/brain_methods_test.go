@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -172,8 +174,8 @@ func TestDungeonRunBrainOption(t *testing.T) {
 	})
 	// The rest gate started the brain, with upkeep waiting for the gate.
 	st := r.eventually("brain_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["running"] == true })["result"].(map[string]any)
-	if st["rest_gate"] != true {
-		t.Fatalf("%v", st)
+	if st["rest_gate"] != true || st["no_move"] != nil {
+		t.Fatalf("a run's brain keeps upkeep for the gates and may move the leader: %v", st)
 	}
 	if rep := r.call("dungeon_status", "{}")["result"].(map[string]any)["report"].(map[string]any); rep["brain"] != "frost_mage" {
 		t.Fatalf("%v", rep)
@@ -274,9 +276,8 @@ func TestBrainStartCanSwitchMovementOff(t *testing.T) {
 	r.call("brain_stop", "{}")
 }
 
-// The driver's brain does not walk the player until the driver holds the move lock around its own walks (lane A wires
-// HoldMove into the driver and then drops NoMove); HoldMove itself works at once.
-func TestDriverBrainKeepsMovementOffAndOffersTheMoveLock(t *testing.T) {
+// The driver's brain may walk the player (the driver holds the move lock around its own walks); HoldMove works whether or not it runs.
+func TestDriverBrainMovesAndOffersTheMoveLock(t *testing.T) {
 	r := newRig(t)
 	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
 	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
@@ -291,7 +292,7 @@ func TestDriverBrainKeepsMovementOffAndOffersTheMoveLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Stop()
-	if st := ctl.Status(); !st.NoMove || st.MoveHeld {
+	if st := ctl.Status(); st.NoMove || st.MoveHeld {
 		t.Fatalf("%+v", st)
 	}
 	release, err = d.HoldMove(context.Background())
@@ -301,6 +302,38 @@ func TestDriverBrainKeepsMovementOffAndOffersTheMoveLock(t *testing.T) {
 	release()
 	if ctl.Status().MoveHeld {
 		t.Fatal("the lock was not let go")
+	}
+}
+
+// The error of a run that cannot take the brain says who holds it: a run still ending, or a brain started by hand.
+func TestDungeonRunSaysWhoHoldsTheBrain(t *testing.T) {
+	r := dungeonRig(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rig.json"), []byte(rigPlan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
+	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
+	defer ctl.Close()
+	lease := &brainLease{}
+	run := &dungeonRunner{cur: func() *session.Session { return r.s }, dir: dir, root: context.Background(), brain: ctl, lease: lease}
+	if !lease.acquire() {
+		t.Fatal("a free lease was refused")
+	}
+	_, err := run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage"})
+	if err == nil || !strings.Contains(err.Error(), "previous dungeon run still owns the brain") || strings.Contains(err.Error(), "brain_stop") {
+		t.Fatalf("lease held: %v", err)
+	}
+	lease.release()
+	if _, err := ctl.Start(brain.Params{Strategies: []string{"frost_mage"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage"})
+	if err == nil || !strings.Contains(err.Error(), "started by hand") || !strings.Contains(err.Error(), "brain_stop it first") {
+		t.Fatalf("hand brain: %v", err)
+	}
+	if !lease.acquire() { // the refused run gave the lease back
+		t.Fatal("the lease stayed taken")
 	}
 }
 

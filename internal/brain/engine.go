@@ -9,6 +9,7 @@ package brain
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -195,6 +196,16 @@ type Ctx struct {
 	trace []Decision
 }
 
+// cast sends a cast and remembers its target: the server's refusal names the spell but not the target, and a refusal for line of
+// sight is only a wall to the fight's mob when that was what the last cast aimed at (observeFailures). Every cast of the brain goes
+// through here (TestEveryCastGoesThroughCtxCast).
+func (c *Ctx) cast(ctx context.Context, spell uint32, target packet.GUID) error {
+	c.mem.mu.Lock()
+	c.mem.lastCastTarget = target
+	c.mem.mu.Unlock()
+	return c.G.Cast(ctx, spell, target)
+}
+
 // Unit finds a unit by guid in the snapshot (the player included).
 func (c *Ctx) Unit(g packet.GUID) (*objects.Unit, bool) {
 	u, ok := c.byID[g]
@@ -355,10 +366,13 @@ func (b *Brain) run(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		if a.Target == nil {
 			t, d.Target = c.Self.GUID, c.Self.GUID
 		}
-		err = c.G.Cast(cctx, d.Spell, t)
+		err = c.cast(cctx, d.Spell, t)
 	}
 	if err != nil {
 		d.Result, d.Error = ResultError, err.Error()
+		if errors.Is(err, errStepStopping) {
+			return d // a moment's matter, not a failure: no hold, the next tick tries again
+		}
 		if d.Spell != 0 {
 			b.mem.hold(d.Spell, c.Now.Add(b.cfg.ErrorHold), "error")
 		} else {

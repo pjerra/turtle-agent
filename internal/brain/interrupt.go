@@ -166,7 +166,7 @@ func interruptStrategy(name string) *Strategy {
 				if p.Unit == nil || p.ID == 0 || p.Unit.Casting == nil {
 					return nil
 				}
-				if err := c.G.Cast(ctx, p.ID, p.Unit.GUID); err != nil {
+				if err := c.cast(ctx, p.ID, p.Unit.GUID); err != nil {
 					return err
 				}
 				e := &c.mem.ext

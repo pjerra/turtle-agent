@@ -262,11 +262,12 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if hook != nil {
 		// The lease comes first: checking Running() before it left a window in which a brain_start could slip in between.
 		if !r.lease.acquire() {
-			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
+			// A run that has not finished ending still owns the brain (r.running() above is already false once its context is done).
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the previous dungeon run still owns the brain (it is ending): try again in a moment"}
 		}
 		if r.brain.Running() {
 			r.lease.release()
-			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain that was started by hand is running: brain_stop it first"}
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
 	}

@@ -165,24 +165,26 @@ func (d *Driver) healerAlive() bool {
 // recoverLeader gets a dead leader back (see the top of this file), then gathers the party and rests. It returns nil when
 // the run can go on, errWipe when the whole party died meanwhile, or why the leader could not come back.
 func (d *Driver) recoverLeader(ctx context.Context) error {
-	d.leaderDeaths++
-	if d.leaderDeaths > d.cfg.MaxLeaderDeaths {
-		return fmt.Errorf("the leader has died %d times: giving up", d.leaderDeaths)
-	}
 	if err := d.bringBack(ctx, nil); err != nil {
 		return err
 	}
 	return d.afterBack(ctx)
 }
 
-// bringBack is recoverLeader and the leader's part of recoverWipe. orders, when set, is called at every poll to keep the
-// members' own recovery going (recoverWipe).
+// bringBack is recoverLeader and the leader's part of every other recovery (a wipe's, the dead members'): each death of the leader
+// is counted here, once, against MaxLeaderDeaths. orders, when set, is called at every poll to keep the members' own recovery going
+// (recoverWipe).
 func (d *Driver) bringBack(ctx context.Context, orders func(context.Context) error) error {
+	if !d.deathCounted { // a wipe that overtakes a leader's recovery goes on with the same death
+		if d.leaderDeaths++; d.leaderDeaths > d.cfg.MaxLeaderDeaths {
+			return fmt.Errorf("the leader has died %d times: giving up", d.leaderDeaths)
+		}
+	}
 	began := d.clk.Now()
 	prev := d.recovering
 	d.recovering = true
 	leg := max(d.curLeg, 0)
-	if !d.deathCounted { // a wipe that overtakes a leader's recovery goes on with the same death
+	if !d.deathCounted {
 		d.deathCounted = true
 		d.rep.update(func(r *Report) { r.LeaderDeaths++ })
 		d.legStat(func(l *LegReport) { l.LeaderDeaths++ })
@@ -302,8 +304,14 @@ func (d *Driver) acceptOffer(ctx context.Context, o *Offer) (bool, error) {
 
 // release sends the release and waits for the ghost (the server moves it to the graveyard).
 func (d *Driver) release(ctx context.Context, orders func(context.Context) error) error {
+	// The lock stays on across the wait for the ghost (the graveyard teleport is under way).
+	hold, err := d.holdMove(ctx)
+	if err != nil {
+		return err
+	}
+	defer hold()
 	for try := 1; try <= 3; try++ {
-		if err := d.g.ReleaseSpirit(ctx); err != nil {
+		if err := d.g.ReleaseSpirit(ctx); err != nil { // under the hold above
 			if dt := d.g.Death(); dt.Ghost || !dt.Dead {
 				return nil
 			}
@@ -428,7 +436,7 @@ func (d *Driver) corpseRun(ctx context.Context, orders func(context.Context) err
 			}
 			ownWay = true
 			d.leaderEvent("portal", map[string]any{"trigger": d.plan.EntranceTrigger, "try": portalTries})
-			if err := d.g.AreaTrigger(ctx, d.plan.EntranceTrigger); err != nil {
+			if err := d.areaTrigger(ctx, d.plan.EntranceTrigger); err != nil {
 				return "", fmt.Errorf("area trigger %d: %w", d.plan.EntranceTrigger, err)
 			}
 			if err := d.sleepQuiet(ctx, 3*time.Second); err != nil {
@@ -448,15 +456,15 @@ func (d *Driver) corpseRun(ctx context.Context, orders func(context.Context) err
 // ghostWalk walks the ghost along the navmesh toward p, stopping the walk when a resurrection is offered or the leader
 // lives again. A walk that could not arrive is not an error: the corpse run looks again after a pause.
 //
-// TODO(#88 move lock): when the driver holds the brain's move lock during walks (as doWalk will), this walk must hold it too, or the
-// brain's own steps could fight it; today the brain is stopped for the whole recovery (bringBack).
+// The walk holds the brain's move lock like every walk of the Driver (walkPath), though the brain is stopped for the whole recovery
+// (bringBack): a brain that was started by hand cannot be, so the lock is what keeps its steps off the ghost's.
 func (d *Driver) ghostWalk(ctx context.Context, p Point) error {
 	wctx, cancel := context.WithCancel(ctx)
 	stop := d.watchUntil(wctx, cancel, func() bool {
 		dt := d.g.Death()
 		return dt.Offer != nil || (!dt.Dead && !dt.Ghost)
 	})
-	r, err := d.g.WalkPath(wctx, p)
+	r, err := d.walkPath(wctx, p)
 	fired := stop()
 	cancel()
 	if cerr := ctx.Err(); cerr != nil {

@@ -100,6 +100,27 @@ func (l *MoveLock) preempt(wait time.Duration) {
 	}
 }
 
+// settle waits up to wait for the step of the brain's that is under way to end; false when it was still there.
+func (l *MoveLock) settle(wait time.Duration) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	st := l.step
+	l.mu.Unlock()
+	if st == nil {
+		return true
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-st.done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
 // begin takes the lock for one step of the brain's. It fails while the driver holds the lock or another step runs. The returned
 // context ends when the driver takes the lock; done lets the lock go.
 func (l *MoveLock) begin(parent context.Context) (context.Context, func(), bool) {
@@ -129,10 +150,17 @@ const stepTimeout = 2500 * time.Millisecond
 // preemptWait is how long a more relevant action waits for the step it cancels to stop.
 const preemptWait = 400 * time.Millisecond
 
+// stopWait bounds how long Controller.Stop waits for the step that was under way when the brain was stopped.
+const stopWait = 2 * time.Second
+
 var (
 	errMoveLocked = errors.New("the dungeon driver is walking")
 	errNoMove     = errors.New("movement is off for this run")
 	errNoMover    = errors.New("the game cannot walk")
+	// errStepStopping: an earlier step of the brain's was cancelled but its walker has not answered yet (a slow cancel), so the
+	// player cannot be sent a new walk. It is a matter of a moment, not a failure: the action is not held back (see Brain.run) and
+	// the next tick tries again.
+	errStepStopping = errors.New("the brain's earlier step is still stopping")
 )
 
 // walk starts a step of the player to a point through the game's walker, under the move lock, and returns at once: the step runs
@@ -152,13 +180,18 @@ func (c *Ctx) walk(ctx context.Context, to Vec3) error {
 	if !ok {
 		return errNoMover
 	}
+	// A tick sets c.run, always. A Ctx built by hand (a test) has none: the action's own ctx would end the step when the action
+	// returns, so the step hangs on a context that outlives it; stepTimeout still bounds the step.
 	run := c.run
 	if run == nil {
-		run = ctx
+		run = context.WithoutCancel(ctx)
 	}
 	sctx, done, ok := c.lock.begin(run)
 	if !ok {
-		return errMoveLocked
+		if c.lock.Held() { // the driver took the lock between the check above and here
+			return errMoveLocked
+		}
+		return errStepStopping
 	}
 	b, name := c.b, c.act
 	go func() {

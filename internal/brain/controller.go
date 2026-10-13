@@ -130,6 +130,9 @@ func (c *Controller) Stop() Status {
 	if cancel != nil {
 		cancel()
 		<-done
+		// A step of the brain's runs on its own goroutine and ends when its walker answers the cancel. Wait for it (bounded), so that
+		// a restart right after the stop does not meet a lock still taken (errStepStopping on its first walk).
+		c.lock.settle(stopWait)
 	}
 	return c.Status()
 }

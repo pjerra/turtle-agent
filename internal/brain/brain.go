@@ -141,6 +141,9 @@ type memory struct {
 	lastErr     string
 	ext         memExt // positioning, line of sight, interrupts, items (world.go)
 	mel         melMem // auto attack and stance changes (melee.go)
+
+	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
+	lastCastTarget packet.GUID
 }
 
 func (m *memory) hold(spell uint32, until time.Time, reason string) {
@@ -500,7 +503,14 @@ func (b *Brain) observeFailures(c *Ctx) {
 	if f.ReasonName == "line_of_sight" {
 		// The mesh cannot see every wall; the server just did. Let the position rules know, so the player moves instead of
 		// casting into the wall again when the hold ends.
-		markLOSBlocked(c, ValFight.Get(c).Mob)
+		// The refusal does not say whom the cast aimed at: only a cast at the fight's mob is a wall to it (not a heal or a buff, or
+		// a spell at another mob).
+		b.mem.mu.Lock()
+		last := b.mem.lastCastTarget
+		b.mem.mu.Unlock()
+		if mob := ValFight.Get(c).Mob; mob != nil && mob.GUID == last {
+			markLOSBlocked(c, mob)
+		}
 	}
 	if f.ReasonName == "not_infront" || f.ReasonName == "unit_not_infront" {
 		b.mem.mu.Lock()

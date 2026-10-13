@@ -66,6 +66,12 @@ type Brain interface {
 	Stop()
 	// Rest allows (true) or forbids upkeep that sits the leader down: the Driver allows it only inside a rest gate.
 	Rest(on bool)
+	// HoldMove takes the brain's move lock for one movement of the leader (a walk, a teleport, a portal): a step of the brain's
+	// that is under way is cancelled and waited for first, and until release is called the brain starts no walk of its own. It
+	// works whether or not the brain runs, and holds nest. The Driver holds it around every call that moves the leader, and only
+	// from its own goroutine: the wait for a cancelled step needs the session's loop to run, so a call from inside that loop
+	// would wait for itself. The error is the context's.
+	HoldMove(ctx context.Context) (release func(), err error)
 }
 
 // Self is the leader as the session sees it.
@@ -459,10 +465,16 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 	switch {
 	case d.cfg.Teleport && (d.g.Map() != d.plan.Map || dist3(d.g.Position(), start) > 15):
 		d.shortcut("teleport_to_"+what, fromLeg, fmt.Sprintf("GM teleport to %.1f %.1f %.1f on map %d", start.X, start.Y, start.Z, d.plan.Map))
-		if err := d.g.Teleport(ctx, start, d.plan.Map); err != nil {
-			return fmt.Errorf("teleport to the %s: %w", what, err)
+		// The lock stays on across the wait for the arrival, so that no step of a brain started by hand carries the leader off meanwhile.
+		if err := d.holdingMove(ctx, func() error {
+			if err := d.g.Teleport(ctx, start, d.plan.Map); err != nil {
+				return fmt.Errorf("teleport to the %s: %w", what, err)
+			}
+			return d.sleepHeld(ctx, 3*time.Second)
+		}); err != nil {
+			return err
 		}
-		if err := d.sleep(ctx, 3*time.Second); err != nil {
+		if err := d.check(ctx); err != nil { // the look the wait would have made, now that the lock is let go
 			return err
 		}
 		if err := d.gather(ctx); err != nil {
@@ -667,6 +679,17 @@ func (d *Driver) sleep(ctx context.Context, dur time.Duration) error {
 	return d.check(ctx)
 }
 
+// sleepHeld is sleep for a wait made under the brain's move lock: it only waits (and drains refusals), with no look at the party. A leader
+// found dead would start its recovery (a corpse run, a rest gate) with the lock held for all of it; the caller lets the lock go and
+// then calls check.
+func (d *Driver) sleepHeld(ctx context.Context, dur time.Duration) error {
+	if err := d.clk.Sleep(ctx, dur); err != nil {
+		return err
+	}
+	d.drainRefusals()
+	return nil
+}
+
 func (d *Driver) observeInit() {
 	self := d.g.Self()
 	d.party = map[packet.GUID]bool{self.GUID: true}
@@ -752,7 +775,7 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 		wctx, cancel := context.WithCancel(ctx)
 		stop := d.watchCombat(wctx, cancel)
 		recovered := d.recoveries
-		r, err := d.g.WalkPath(wctx, p)
+		r, err := d.walkPath(wctx, p)
 		aggro := stop()
 		cancel()
 		if err := ctx.Err(); err != nil {
@@ -789,6 +812,61 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 		try++
 	}
 	return fmt.Errorf("walk to %.1f %.1f %.1f failed after %d tries (%s)", p.X, p.Y, p.Z, d.cfg.WalkAttempts, last)
+}
+
+// holdTimeout bounds the wait for a step of the brain's to stop when the Driver takes the brain's move lock; a step that has not
+// stopped by then fails the movement like a refused walk (a walk would be refused by the session anyway).
+const holdTimeout = 5 * time.Second
+
+// holdMove takes the brain's move lock for one movement of the leader; the caller defers the release it returns. Without a
+// brain it holds nothing. It runs on the Driver's goroutine, never inside the session's do loop (see Brain.HoldMove).
+func (d *Driver) holdMove(ctx context.Context) (func(), error) {
+	if d.cfg.Brain == nil {
+		return func() {}, nil
+	}
+	hctx, cancel := context.WithTimeout(ctx, holdTimeout)
+	defer cancel()
+	release, err := d.cfg.Brain.HoldMove(hctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			err = fmt.Errorf("the brain's own step did not stop within %s: %w", holdTimeout, err)
+		}
+		return func() {}, err
+	}
+	return release, nil
+}
+
+// The calls that move the leader, each under the brain's move lock, and the only places the Driver calls them: walk_path (doWalk
+// for the plan's walks, approaches and stand points; ghostWalk for the corpse run), the GM teleport to a leg's start (held across the
+// wait for the arrival), the release of the spirit (the graveyard teleport, held across the wait for the ghost) and the dungeon portal's
+// area trigger. A use_object is held with its settle wait (doUse), since the leader must stay where the walk put it.
+
+func (d *Driver) walkPath(ctx context.Context, to Point) (WalkResult, error) {
+	release, err := d.holdMove(ctx)
+	if err != nil {
+		return WalkResult{}, err
+	}
+	defer release()
+	return d.g.WalkPath(ctx, to)
+}
+
+// holdingMove runs fn under one hold of the move lock: for a movement together with the wait for its arrival.
+func (d *Driver) holdingMove(ctx context.Context, fn func() error) error {
+	release, err := d.holdMove(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return fn()
+}
+
+func (d *Driver) areaTrigger(ctx context.Context, id uint32) error {
+	release, err := d.holdMove(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return d.g.AreaTrigger(ctx, id)
 }
 
 // brainOn starts the leader's brain (a no-op when there is none or it runs); a failure to start is noted once.
@@ -928,7 +1006,18 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 	return d.g.Chat(ctx, "party", ".bot action "+intent)
 }
 
+// doUse uses the object under the move lock, the settle wait included: a brain step must not carry the leader out of the object's reach
+// between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
+// the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
+	uerr := d.holdingMove(ctx, func() error { return d.use(ctx, a) })
+	if err := d.check(ctx); err != nil {
+		return err
+	}
+	return uerr
+}
+
+func (d *Driver) use(ctx context.Context, a Action) error {
 	var err error
 	for try := 0; try < 2; try++ {
 		if err = d.g.UseObject(ctx, a.GUID); err == nil {
@@ -937,14 +1026,14 @@ func (d *Driver) doUse(ctx context.Context, a Action) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
-		if serr := d.sleep(ctx, time.Second); serr != nil {
+		if serr := d.sleepHeld(ctx, time.Second); serr != nil {
 			return serr
 		}
 	}
 	if err != nil {
 		return fmt.Errorf("use game object %s: %w", a.GUID, err)
 	}
-	return d.sleep(ctx, d.cfg.UseSettle)
+	return d.sleepHeld(ctx, d.cfg.UseSettle)
 }
 
 // restGate waits until every living online member is rested (health and mana at the thresholds, near the leader),
@@ -1006,6 +1095,11 @@ func (d *Driver) restGate(ctx context.Context) error {
 		st := d.restState(mana)
 		if len(st.dead) > 0 && !d.cfg.Shortcuts && d.cfg.RecoverWipe {
 			if err := d.recoverDeadMembers(ctx); err != nil {
+				// The leader died while the members' recovery went on and nobody is left alive: that is a wipe, which RecoverWipe (on
+				// here) recovers from instead of ending the run.
+				if errors.Is(err, errWipe) {
+					return d.recoverWipe(ctx, err)
+				}
 				return err
 			}
 			calm = d.clk.Now()

@@ -228,8 +228,7 @@ Not settled without a live run: the images come out of the first Uldaman capture
 Tested against a scripted fake game and a fake navmesh only; the raycast against the navmesh fixtures. Not seen live: that the
 mesh ray agrees with the server's sight in a real dungeon, that Detour's `walk_path` steps behave in a fight, that `SMSG_SPELL_START`
 of enemies carries the target the brain reads, that dynamic objects arrive with a position and a radius, and the item and First
-Aid behaviour. Run a frost mage with `brain_start {"strategies":["frost_mage"],"tank":"<name>"}` (movement is on by default; a
-dungeon run starts the brain with `no_move` until the driver holds the move lock) in a dungeon with a warrior tank, with
+Aid behaviour. Run a frost mage with `brain_start {"strategies":["frost_mage"],"tank":"<name>"}` (movement is on by default, also in a dungeon run, where the driver holds the move lock around its walks) in a dungeon with a warrior tank, with
 `mmaps_dir` set:
 
 1. **Band and sight.** At a pull, `brain_decision` `reposition` (`trigger bad_position`) when the mage is closer than 19 yd or
@@ -237,8 +236,9 @@ dungeon run starts the brain with `no_move` until the driver holds the move lock
    and the next `frostbolt` must not be refused with `line_of_sight`. Note every `spell_fail` `line_of_sight` while the brain
    believed it had sight: each is a place where the mesh ray and the server disagree (report map, x, y, z of both ends). A `line_of_sight` refusal must be followed by a `reposition` (the fight's mob counts as blocked for 5 s), not by the same
    cast again after 3 s.
-2. **No walk against the driver.** In a dungeon run (`no_move`) there is no `reposition`, `step_away`, `run_to_tank` or
-   `leave_ground_aoe` decision. By hand, with `brain_status.move_held` true (once the driver holds the lock), none either.
+2. **No walk against the driver.** In a dungeon run the brain moves the leader in fights: `reposition`, `step_away`, `run_to_tank` and
+   `leave_ground_aoe` decisions appear (see "The brain positions the leader in a run" below). While `brain_status.move_held` is true (the
+   driver is in a walk) there is none, in a run or by hand.
    While a walk step runs (2.5 s at most), a `counterspell`, `ice_block`, potion or `leave_ground_aoe` must still come in the next
    tick: the step is cancelled (the mage stops) and the action is a `brain_decision` as usual; no `frostbolt` starts mid-step.
 3. **Aggro.** Let a mob run to the mage: `run_to_tank` while it is over 9 yd away and the tank over 8 yd, then `frost_nova` at melee,
@@ -255,6 +255,29 @@ dungeon run starts the brain with `no_move` until the driver holds the move lock
    minutes: note whether the mage has the skill). A mana potion in a boss fight below 10% mana.
 7. **Wand.** Out of mana with a wand equipped: `wand` (Shoot) once, shots continue; without a wand: `spell_fail`
    `equipped_item_class` once, then nothing for 30 s.
+
+## The brain positions the leader in a run (issue #80, move lock wired)
+
+Tested against the fake game (the driver's holds around every walk, teleport, release and portal; the brain's lock, steps and
+cancels) and the RPC rig; the lock ordering is exercised by `go test -race`. Not seen live: that `walk_path` honours the cancel of a
+brain step in a fight, how often the hold and the retry cost a pull a second, and the timing of an emergency escape during a slow
+cancel. Run `dungeon_run {"name":"uldaman","gm":false,"brain":"frost_mage"}` with a tank, a healer and two damage dealers, `mmaps_dir` set:
+
+1. **Moves in a run.** `brain_status` during the run has no `no_move`. At a pull, `brain_decision` shows `reposition`
+   (`bad_position`) or `run_to_tank`, and `units` shows the mage move to its band; nothing moves it between the decision and the
+   arrival except that step.
+2. **Never both.** While the driver walks (`brain_status.move_held` true) there is no brain decision with a walk and no `walk` error
+   in `brain_decision` (`the dungeon driver is walking`). When a pull starts in the middle of a driver walk, the walk stops (the
+   driver cancels it), the lock is let go (`move_held` absent) and the next step of the brain is a `reposition`, not an error.
+3. **A driver walk cancels a brain step.** Start a pull so that the mage is mid-step when the party finishes (the fight ends): the next
+   driver walk begins within a second or so; there is no `walk_path` refusal "already walking" in the run's events.
+4. **Emergency during a step.** Stand the mage in a boss's fire while it walks: `leave_ground_aoe` runs within a tick or two, and if
+   a decision says `the brain's earlier step is still stopping` the next tick shows `leave_ground_aoe` ok (it is not backed off for 1 s).
+5. **Corpse run.** Let the leader die and run back (see below) with the brain started by hand before the run: the ghost's `walk_path`
+   steps are not interrupted by brain steps. Note any hold that times out (`did not stop within 5s` in the report notes).
+6. **Deaths count.** Let the leader die during a wipe recovery (`recover_wipe`) five times in one run: the sixth stops the run with "the
+   leader has died 6 times". A leader dying while dead members are brought back, so that nobody lives, is recovered as a wipe (a
+   `wipe_recovery` event), not ended with "wipe".
 
 ## A non-GM leader: death, resurrection and the corpse run (issue #80 step 3a)
 
