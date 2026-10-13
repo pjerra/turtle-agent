@@ -90,7 +90,9 @@ func (s *Session) emitGameObjectChange(c objects.Change) {
 }
 
 // emitGameObject logs a gameobject event for g. data may carry a change already; change names it
-// otherwise. The entry and type of the object go along, so a reader need not look it up.
+// otherwise. The entry and type of the object go along, so a reader need not look it up; for an
+// object the store does not hold (an animation packet for one never sent) they are left out rather
+// than guessed.
 func (s *Session) emitGameObject(g packet.GUID, change string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
@@ -98,8 +100,9 @@ func (s *Session) emitGameObject(g packet.GUID, change string, data map[string]a
 	if change != "" {
 		data["change"] = change
 	}
-	data["entry"] = s.store.Entry(g)
-	data["type"] = objects.GOTypeName(uint8(s.store.Field(g, objects.GOTypeID)))
+	if o, ok := s.store.GameObject(g, 0, 0, 0); ok {
+		data["entry"], data["type"] = o.Entry, o.TypeName
+	}
 	s.emit(events.Event{Kind: events.KindGameObject, SourceGUID: g, Data: data})
 }
 

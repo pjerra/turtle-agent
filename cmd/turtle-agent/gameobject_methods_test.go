@@ -145,11 +145,34 @@ func TestUseObjectMethod(t *testing.T) {
 	if ev := res["event"].(map[string]any); res["outcome"] != "gossip" || ev["source_guid"] != "0xF11001E5D3003839" || ev["data"].(map[string]any)["text_id"] != float64(2) {
 		t.Fatalf("%v", res)
 	}
-	// A refusal to loot, and a spell of the player's, answer as well; a spell of someone else does not.
+	// A refusal to loot answers as well.
 	use = r.callAsync("use_object", `{"guid":"0xF11001E5D3003839","wait_ms":3000}`)
 	r.expect(opcode.CMSGGameobjUse)
 	r.srv.Send(opcode.SMSGLootResponse, gametest.LootRefused(door, 0))
 	if res = (<-use)["result"].(map[string]any); res["outcome"] != "loot_error" {
+		t.Fatalf("%v", res)
+	}
+
+	// A spell of the player's at the object answers, one landing in the same window at something else does not,
+	// and neither does an inventory error or a spell failure, which name no object.
+	const self, wolf packet.GUID = 0x2A, 0xF130000123000001
+	use = r.callAsync("use_object", `{"guid":"0xF11001E5D3003839","wait_ms":3000}`)
+	r.expect(opcode.CMSGGameobjUse)
+	r.srv.Send(opcode.SMSGSpellGo, gametest.SpellGo(self, 1459, []packet.GUID{wolf}, nil, nil, wolf))
+	r.srv.Send(opcode.SMSGSpellStart, gametest.SpellStart(self, 1459, 0, wolf))
+	r.srv.Send(opcode.SMSGInventoryChangeFailure, gametest.InventoryChangeFailure(1, 0, 0, 0))
+	r.srv.Send(opcode.SMSGSpellGo, gametest.SpellGo(wolf, 133, nil, nil, nil, door))
+	time.Sleep(250 * time.Millisecond)
+	r.srv.Send(opcode.SMSGSpellStart, gametest.SpellStart(self, 6477, 0, door))
+	res = (<-use)["result"].(map[string]any)
+	if ev := res["event"].(map[string]any); res["outcome"] != "spell_start" || ev["spell_id"] != float64(6477) || ev["target_guid"] != "0xF11001E5D3003839" {
+		t.Fatalf("an unrelated spell is no answer: %v", res)
+	}
+	// With nothing but unrelated events, the use ends in none.
+	use = r.callAsync("use_object", `{"guid":"0xF11001E5D3003839","wait_ms":400}`)
+	r.expect(opcode.CMSGGameobjUse)
+	r.srv.Send(opcode.SMSGSpellGo, gametest.SpellGo(self, 1459, []packet.GUID{wolf}, nil, nil, wolf))
+	if res = (<-use)["result"].(map[string]any); res["outcome"] != "none" {
 		t.Fatalf("%v", res)
 	}
 

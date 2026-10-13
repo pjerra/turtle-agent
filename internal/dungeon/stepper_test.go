@@ -1,0 +1,257 @@
+package dungeon
+
+import (
+	"testing"
+	"time"
+
+	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
+)
+
+// fakeWorld is a World the test moves by hand.
+type fakeWorld struct {
+	pos      Point
+	objs     []objects.GameObject
+	hostiles int
+}
+
+func (f *fakeWorld) Position() Point                   { return f.pos }
+func (f *fakeWorld) HostilesWithin(Point, float32) int { return f.hostiles }
+func (f *fakeWorld) GameObjects() []objects.GameObject {
+	out := make([]objects.GameObject, len(f.objs))
+	for i, o := range f.objs {
+		o.Distance = float32(dist3(f.pos, Point{o.X, o.Y, o.Z}))
+		out[i] = o
+	}
+	return out
+}
+
+func (f *fakeWorld) set(guid packet.GUID, state string) {
+	for i := range f.objs {
+		if f.objs[i].GUID == guid {
+			f.objs[i].State = state
+		}
+	}
+}
+
+type fakeClock struct{ t time.Time }
+
+func (c *fakeClock) now() time.Time { return c.t }
+
+func mustPlan(t *testing.T, s string) *Plan {
+	t.Helper()
+	p, err := Parse("t.json", []byte(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const (
+	keystone packet.GUID = 0xF11001E5D3003839
+	seal     packet.GUID = 0xF11001E5D4003856
+)
+
+func doors() []objects.GameObject {
+	return []objects.GameObject{
+		{GUID: keystone, Entry: 124371, X: 20, Y: 0, Z: 0, State: "ready"},
+		{GUID: seal, Entry: 124372, X: 30, Y: 0, Z: 0, State: "ready"},
+	}
+}
+
+const doorPlan = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"skip":[9],
+  "pull_groups":[{"entries":[1,2],"positions":[{"x":12,"y":0,"z":0}]},{"entries":[3],"positions":[{"x":14,"y":0,"z":0}]}],
+  "steps":[{"use_object":{"entry":124371}},{"wait_for":{"gameobject":{"entry":124372,"state":"active"},"timeout_s":20}}],
+  "boss":{"entry":7,"position":{"x":40,"y":0,"z":0},"first":[8]}},
+ {"to":{"x":50,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`
+
+func TestStepperWalksALeg(t *testing.T) {
+	w := &fakeWorld{objs: doors()}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(mustPlan(t, doorPlan), w, clk.now)
+
+	a := s.Next()
+	if a.Kind != ActWalk || a.To != (Point{10, 0, 0}) || a.Leg != 0 {
+		t.Fatalf("%+v", a)
+	}
+	if b := s.Next(); b.Kind != ActWalk {
+		t.Fatalf("Next repeats its action until it is completed: %+v", b)
+	}
+	w.pos = Point{10, 0, 0}
+	s.Complete()
+
+	a = s.Next()
+	if a.Kind != ActPull || len(a.Entries) != 2 || a.Positions[0] != (Point{12, 0, 0}) || a.Skip[0] != 9 {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+	if a = s.Next(); a.Kind != ActPull || a.Entries[0] != 3 {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+
+	// The keystone is 10 yards away: walk next to it, then use it; a walk inside a step does not finish the step.
+	a = s.Next()
+	if a.Kind != ActWalk || a.To != (Point{20, 0, 0}) || a.Step != 0 {
+		t.Fatalf("%+v", a)
+	}
+	w.pos = Point{18, 0, 0}
+	s.Complete()
+	a = s.Next()
+	if a.Kind != ActUse || a.GUID != keystone || a.Object.Entry != 124371 {
+		t.Fatalf("a walk inside a step does not end it: %+v", a)
+	}
+	s.Complete()
+
+	// The seal opens a moment later; until then the stepper waits, and the wait is not completed by the driver.
+	a = s.Next()
+	if a.Kind != ActWait || a.Remaining != 20*time.Second || a.Step != 1 {
+		t.Fatalf("%+v", a)
+	}
+	clk.t = clk.t.Add(5 * time.Second)
+	s.Complete() // no effect on a wait
+	if a = s.Next(); a.Kind != ActWait || a.Remaining != 15*time.Second {
+		t.Fatalf("%+v", a)
+	}
+	w.set(keystone, "active")
+	w.set(seal, "active")
+
+	a = s.Next()
+	if a.Kind != ActKill || a.Boss.Entry != 7 || a.Boss.First[0] != 8 || a.Skip[0] != 9 {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+
+	// Leg 1: the player is far from its To, hostiles stand around; the wait passes at once when they are gone.
+	a = s.Next()
+	if a.Kind != ActWalk || a.Leg != 1 || a.To != (Point{50, 0, 0}) {
+		t.Fatalf("%+v", a)
+	}
+	w.pos = Point{49, 0, 0}
+	w.hostiles = 2
+	s.Complete()
+	if a = s.Next(); a.Kind != ActWait || a.Leg != 1 {
+		t.Fatalf("%+v", a)
+	}
+	w.hostiles = 0
+	if a = s.Next(); a.Kind != ActDone {
+		t.Fatalf("%+v", a)
+	}
+	if a = s.Next(); a.Kind != ActDone {
+		t.Fatalf("done stays done: %+v", a)
+	}
+}
+
+func TestStepperSkipsWhatIsAlreadyTrue(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{10, 1, 0}} // within 3 yards of leg 0's To
+	w.set(keystone, "active")
+	w.set(seal, "active")
+	w.objs[0].X, w.objs[0].Y = 11, 1 // the keystone is next to the player
+	s := NewStepper(mustPlan(t, doorPlan), w, nil)
+	if a := s.Next(); a.Kind != ActPull {
+		t.Fatalf("no walk when already there: %+v", a)
+	}
+	s.Complete()
+	s.Complete()
+	// Already open: the keystone is used (the stepper does not judge it), the wait passes at once.
+	a := s.Next()
+	if a.Kind != ActUse {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+	if a = s.Next(); a.Kind != ActKill {
+		t.Fatalf("a wait that already holds is over: %+v", a)
+	}
+}
+
+func TestStepperWaitTimesOutAndFails(t *testing.T) {
+	w := &fakeWorld{pos: Point{49, 0, 0}, hostiles: 1}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"name":"b","to":{"x":50,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`)
+	s := NewStepper(p, w, clk.now)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("%+v", a)
+	}
+	clk.t = clk.t.Add(11 * time.Second)
+	a := s.Next()
+	if a.Kind != ActFailed || a.Err != "leg 0 (b): step 0: waited 10 s for no hostiles within 30 yd" {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete() // a failed plan stays failed
+	if a = s.Next(); a.Kind != ActFailed {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestStepperFailures(t *testing.T) {
+	// An object that is not in view and has no place to look for it ends the plan; the driver can fail it as well.
+	w := &fakeWorld{}
+	s := NewStepper(mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"to":{"x":0,"y":0,"z":0},"steps":[{"use_object":{"entry":5}}]}]}`), w, nil)
+	if a := s.Next(); a.Kind != ActFailed || a.Err != "leg 0: step 0: game object 5 is not in view" {
+		t.Fatalf("%+v", a)
+	}
+	s = NewStepper(mustPlan(t, doorPlan), &fakeWorld{objs: doors()}, nil)
+	s.Next()
+	s.Fail("path blocked")
+	s.Fail("later reason")
+	if a := s.Next(); a.Kind != ActFailed || a.Err != "path blocked" {
+		t.Fatalf("the first failure stays: %+v", a)
+	}
+}
+
+// An object not in view is looked for where the plan says it stands (stand, else near) before the plan gives up.
+func TestStepperLooksWhereThePlanSays(t *testing.T) {
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"to":{"x":0,"y":0,"z":0},"steps":[{"use_object":{"entry":124371,"near":{"x":20,"y":0,"z":0},"stand":{"x":17,"y":0,"z":0}}}]}]}`)
+	w := &fakeWorld{}
+	s := NewStepper(p, w, nil)
+	a := s.Next()
+	if a.Kind != ActWalk || a.To != (Point{17, 0, 0}) {
+		t.Fatalf("%+v", a)
+	}
+	w.pos = Point{17, 0, 0}
+	w.objs = doors()
+	s.Complete()
+	if a = s.Next(); a.Kind != ActUse || a.GUID != keystone {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// Of two objects with the same entry the one nearest to the given position is used, and one out of range is not.
+func TestStepperPicksTheNearestToNear(t *testing.T) {
+	near := objects.GameObject{GUID: 1, Entry: 77, X: 101, Y: 0, Z: 0}
+	far := objects.GameObject{GUID: 2, Entry: 77, X: 120, Y: 0, Z: 0}
+	w := &fakeWorld{pos: Point{100, 0, 0}, objs: []objects.GameObject{far, near}}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"to":{"x":100,"y":0,"z":0},"steps":[{"use_object":{"near":{"x":119,"y":0,"z":0},"entry":77,"range":4}}]}]}`)
+	s := NewStepper(p, w, nil)
+	if a := s.Next(); a.Kind != ActWalk || a.To != (Point{120, 0, 0}) {
+		t.Fatalf("the object nearest to near, not to the player: %+v", a)
+	}
+	p = mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"to":{"x":100,"y":0,"z":0},"steps":[{"use_object":{"near":{"x":50,"y":0,"z":0},"entry":77}}]}]}`)
+	s = NewStepper(p, w, nil)
+	if a := s.Next(); a.Kind != ActWalk || a.To != (Point{50, 0, 0}) {
+		t.Fatalf("nothing within range of near: go and look there: %+v", a)
+	}
+	w.pos = Point{50, 0, 0}
+	if a := s.Next(); a.Kind != ActFailed {
+		t.Fatalf("nothing there either: %+v", a)
+	}
+}
+
+func TestStepperEmptyAndPosition(t *testing.T) {
+	w := &fakeWorld{objs: doors()}
+	s := NewStepper(mustPlan(t, doorPlan), w, nil)
+	if l, ph, i := s.Position(); l != 0 || ph != "walk" || i != 0 {
+		t.Fatalf("%d %s %d", l, ph, i)
+	}
+	s.Next()
+	s.Complete()
+	if l, ph, i := s.Position(); l != 0 || ph != "pull_groups" || i != 0 {
+		t.Fatalf("%d %s %d", l, ph, i)
+	}
+}

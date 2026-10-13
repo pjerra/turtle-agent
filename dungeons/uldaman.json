@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "name": "uldaman",
+  "map": 70,
+  "entrance": {"x": -228.9, "y": 46.1, "z": -46},
+  "notes": [
+    "Uldaman (map 70) from the main entrance (areatrigger 286) to Ironaya, the first boss on the way in. Order of the legs follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859): Baelog, Revelosh, Ironaya.",
+    "Baelog and Revelosh stand in side rooms: the navmesh route from the entrance to the Keystone leaves the Baelog branch at -250 135 and passes 23 yd from Revelosh. A run that wants the shortest way starts at the leg 'keystone'.",
+    "Packs are the spawns of the world database within 8 yd of the route, grouped by tools/dungeongen (12 yd, creature groups). Doors are not on the navmesh: path_to walks through a closed door, so the door steps are not checked by it.",
+    "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh."
+  ],
+  "legs": [
+    {
+      "name": "baelog",
+      "to": {"x": -236.5, "y": 54.9, "z": -46},
+      "pull_groups": [
+        {
+          "entries": [4852, 4851],
+          "positions": [
+            {"x": -273.9, "y": 62.1, "z": -48.7},
+            {"x": -280.3, "y": 59.6, "z": -48.7}
+          ]
+        },
+        {
+          "entries": [4851, 4851, 4852],
+          "positions": [
+            {"x": -280.8, "y": 79.9, "z": -48.7},
+            {"x": -287.4, "y": 83.3, "z": -48.7},
+            {"x": -280.4, "y": 87.4, "z": -48.7}
+          ]
+        },
+        {
+          "entries": [4852],
+          "positions": [
+            {"x": -266.3, "y": 90.8, "z": -48.7}
+          ]
+        },
+        {
+          "entries": [4851, 4852, 7175],
+          "positions": [
+            {"x": -244.2, "y": 90.1, "z": -48},
+            {"x": -245.2, "y": 96.1, "z": -48},
+            {"x": -244.2, "y": 108, "z": -48}
+          ]
+        },
+        {
+          "entries": [4852],
+          "positions": [
+            {"x": -243.8, "y": 121, "z": -46.6}
+          ]
+        },
+        {
+          "entries": [4852, 4851],
+          "positions": [
+            {"x": -271.7, "y": 140.4, "z": -47.3},
+            {"x": -276.4, "y": 136.5, "z": -47.3}
+          ]
+        },
+        {
+          "entries": [4852],
+          "positions": [
+            {"x": -296.9, "y": 140.8, "z": -46.6}
+          ]
+        },
+        {
+          "entries": [4850],
+          "positions": [
+            {"x": -305, "y": 131.6, "z": -46.5}
+          ]
+        },
+        {
+          "entries": [4850],
+          "positions": [
+            {"x": -317.7, "y": 117.7, "z": -49}
+          ]
+        },
+        {
+          "entries": [4852, 4850],
+          "positions": [
+            {"x": -332.6, "y": 118.8, "z": -53.6},
+            {"x": -332, "y": 112.3, "z": -54}
+          ]
+        }
+      ],
+      "skip": [6907, 6908],
+      "boss": {
+        "entry": 6906,
+        "position": {"x": -353, "y": 117.2, "z": -44.4}
+      },
+      "notes": [
+        "Baelog, Eric 'The Swift' (6907) and Olaf (6908) stand together at the campfire; Eric and Olaf die with Baelog (TortoiseBots PR 859), so the leg ends with Baelog."
+      ]
+    },
+    {
+      "name": "revelosh",
+      "to": {"x": -286.7, "y": 143.2, "z": -47.2},
+      "pull_groups": [
+        {
+          "entries": [4851, 4852, 4851],
+          "positions": [
+            {"x": -281.8, "y": 163.8, "z": -47.3},
+            {"x": -282.7, "y": 170.5, "z": -47.3},
+            {"x": -276, "y": 169.2, "z": -47.3}
+          ]
+        },
+        {
+          "entries": [4852],
+          "positions": [
+            {"x": -234, "y": 161.2, "z": -44.6}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 6910,
+        "position": {"x": -225.6, "y": 161.2, "z": -44.5}
+      }
+    },
+    {
+      "name": "keystone",
+      "to": {"x": -247.5, "y": 173.1, "z": -43.5},
+      "pull_groups": [
+        {
+          "entries": [4851],
+          "positions": [
+            {"x": -228.1, "y": 177.5, "z": -44.6}
+          ]
+        },
+        {
+          "entries": [4850, 4850],
+          "positions": [
+            {"x": -232, "y": 198.1, "z": -44.5},
+            {"x": -223.6, "y": 198, "z": -44.5}
+          ]
+        },
+        {
+          "entries": [7175, 7175, 7175],
+          "positions": [
+            {"x": -235.3, "y": 214.8, "z": -49.4},
+            {"x": -243.2, "y": 215.4, "z": -46.7},
+            {"x": -243.3, "y": 220.8, "z": -46.3}
+          ]
+        },
+        {
+          "entries": [4852, 4850, 4850],
+          "positions": [
+            {"x": -248.2, "y": 240.7, "z": -46.5},
+            {"x": -242.1, "y": 241.3, "z": -48},
+            {"x": -246.7, "y": 246, "z": -46.9}
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "use_object": {
+            "entry": 124371,
+            "near": {"x": -234.7, "y": 239.6, "z": -50.9},
+            "stand": {"x": -234.7, "y": 237, "z": -50.4}
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 124372,
+              "near": {"x": -234.6, "y": 294.8, "z": -47.6},
+              "state": "active"
+            },
+            "timeout_s": 20
+          }
+        }
+      ],
+      "notes": [
+        "Checked live on 2026-10-13 (docs/LIVE-CHECKS.md): use_object on the Keystone (124371) from 2.6 yd opened it and the Seal of Khaz'Mul (124372, 55 yd on) at once."
+      ]
+    },
+    {
+      "name": "ironaya",
+      "to": {"x": -234.7, "y": 256, "z": -49.4},
+      "pull_groups": [
+        {
+          "entries": [4850],
+          "positions": [
+            {"x": -230.4, "y": 255.1, "z": -49.5}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 7228,
+        "position": {"x": -235.7, "y": 309.6, "z": -47.6}
+      }
+    }
+  ]
+}

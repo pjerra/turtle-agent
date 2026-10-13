@@ -423,8 +423,9 @@ both -1 for a ship or elevator that rides a transport path and has no position o
 
 `use_object` sends `CMSG_GAMEOBJ_USE` for a game object in view, as a right-click does, and waits up to `wait_ms` for the first thing the
 server does about it: a `gameobject` event of that object (a door or lever changing), a `loot_open` or `loot_error`, a `gossip` or quest
-panel, a `vendor_list` or `trainer_list` of the object, a spell of the player's or the object's (`spell_start`, `spell_go`,
-`spell_fail`) or an `inventory_error`. `outcome` is that event's kind and `event` the event; `since` is the log cursor from before the
+panel, a `vendor_list` or `trainer_list` of the object, or a spell the object casts or the player casts at the object (`spell_start`,
+`spell_go`; one at another target, a `spell_fail` and an `inventory_error` name no object and are no answers, read them with `events`
+from `since`). A door that another player opens during the wait counts as well: it is the same `gameobject` event. `outcome` is that event's kind and `event` the event; `since` is the log cursor from before the
 use, so `events` with `since` reads everything that followed (a door sends a `flags` change and a `state` change, and a lever
 may open other doors). An object not in view is an error. The core ignores a use out of reach, of a generic object, of one flagged
 no-interact and of one the player may not use (`HandleGameObjectUseOpcode`), without a reply: then `outcome` is `none` and `hint` names
@@ -438,8 +439,66 @@ with `use_object` therefore ends in `none`. Opening them is not implemented yet.
 A change of a game object the agent already knows is a `gameobject` event with the object as `source` and `data.change`: `state`
 (`old`, `new` as above), `flags` (`old`, `new` numbers, `locked`), `dyn_flags` (numbers), `animation` (`anim`: `SMSG_GAMEOBJECT_CUSTOM_ANIM`),
 `reset` (`SMSG_GAMEOBJECT_RESET_STATE`), `spawn` and `despawn` (the animation packets) and `destroyed` (`SMSG_DESTROY_OBJECT`). `data.entry` and
-`data.type` (the type name) go along. The create block of an object reports nothing, so entering a zone does not flood the log, and an object
+`data.type` (the type name) go along when the object is known; an animation packet for one the agent never saw has neither. The create block of an object reports nothing, so entering a zone does not flood the log, and an object
 leaving range is not reported either.
+
+## Dungeon plans
+
+A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
+opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
+that carries the plan out through the RPC is not written yet, so no RPC reads a plan today. `dungeons/uldaman.json` is the first one.
+
+```json
+{
+  "version": 1, "name": "uldaman", "map": 70,
+  "entrance": {"x": -228.9, "y": 46.1, "z": -46},
+  "legs": [
+    {"name": "keystone", "to": {"x": -247.5, "y": 173.1, "z": -43.5},
+     "pull_groups": [{"entries": [4850, 4850], "positions": [{"x": -232, "y": 198.1, "z": -44.5}, {"x": -223.6, "y": 198, "z": -44.5}]}],
+     "skip": [11073],
+     "steps": [
+       {"use_object": {"entry": 124371, "near": {"x": -234.7, "y": 239.6, "z": -50.9}, "stand": {"x": -234.7, "y": 237, "z": -50.4}}},
+       {"wait_for": {"gameobject": {"entry": 124372, "state": "active"}, "timeout_s": 20}}],
+     "boss": {"entry": 7228, "position": {"x": -235.7, "y": 309.6, "z": -47.6}, "first": []}}
+  ]
+}
+```
+
+- `version` is 1 (a file of another version is refused), `map` the instance map id, `entrance` where the party stands after the
+  portal. `notes` (plan and leg) are free text for people.
+- A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
+  position per member in `positions`, the first is the one to pull); run `steps` in order; walk to `boss.position` and kill the
+  boss. Each part is optional, but a leg needs at least one of pull groups, steps and a boss. `skip` lists creature entries the leg
+  never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
+  in order.
+- A **step** is exactly one of `use_object` and `wait_for`. `use_object` names a game object by `entry`, by `near` (a position;
+  the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
+  driver walks next to it). `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
+  `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
+  close), with a `timeout_s` (default 60, at most 600) after which the plan fails.
+- A bad file is refused with every problem at once, each with its path: `uldaman.json: legs[2].steps[0].use_object: needs an entry,
+  a near position, or both`. Unknown fields are errors too.
+
+The stepper (`dungeon.NewStepper(plan, world, clock)`) does no networking. `Next` returns the action to do now (`walk`, `pull`,
+`use_object`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
+it asks a `World` (position, game objects in view, hostiles within a radius) and decides by itself that a walk is not needed when the
+player stands at `to`, that a wait is over when its condition holds, and that a wait failed when it timed out. A `use_object`
+step whose object is out of reach gives a `walk` to the object first.
+
+`tools/dungeongen` writes a plan skeleton from the spawns of one map: `tools/dungeongen/export.sh <map> <dir>` reads the
+creature, game object and entrance rows of the world database with SELECTs in a read-only session (the database of the docker
+stack on the server host, over ssh; the password is expanded inside the container and never printed or stored) and writes three TSV
+files; `go run ./tools/dungeongen -dir <dir> -name uldaman -map 70 -bosses 6906,6910,7228 -out skeleton.json` turns them into legs (one
+per boss, packs of spawns within `-cluster` yards or in one `creature_groups` group, doors and altars near a leg in its notes; friendly
+factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`). It is repeatable: the same files and flags give the same
+bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
+`tools/dungeongen/testdata/uldaman` is the export the Uldaman plan was written from.
+
+`internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
+a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
+in the plan is a spawn in the export. The navmesh test needs the map 70 files (`070.mmap` and the three `070*.mmtile`) in
+`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle070` or `~/tortoise-wow-server/data/mmaps`, and a cgo build; it skips otherwise. The navmesh
+has no doors, so `path_to` walks through a closed one: the door steps are checked in the game, not by that test.
 
 ## Unit positions
 
@@ -843,6 +902,7 @@ you set).
 | `internal/spells` | spell names by id, from the core's `spell_template` (`tools/spellnamegen`) |
 | `internal/navmesh` | tile loading and path planning over the core's Detour (cgo); `navfixture` builds synthetic tiles |
 | `internal/events` | ordered event log with cursors |
+| `internal/dungeon`, `dungeons/`, `tools/dungeongen` | dungeon plans: the JSON format, loader and stepper, the plan files, and the skeleton generator over world database exports (see [Dungeon plans](#dungeon-plans)) |
 | `internal/tbm` | the TortoiseBots addon (TBM) protocol: handshake commands, the `TBM:` reply lines, the generated button table, the transport rule and reply matching (`tools/tbmbuttongen` writes the table) |
 | `tools/tbmlines`, `tools/tbmcontract` | extract `TBM:` lines from an events file; replay them through the real TBM addon (Lua) |
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |

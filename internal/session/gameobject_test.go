@@ -109,6 +109,22 @@ func TestGameObjectsNamesEventsAndUse(t *testing.T) {
 	h.logout()
 }
 
+// An animation packet for an object the store never held reports neither entry nor type: not "door", not 0.
+func TestGameObjectEventOfUnheldObject(t *testing.T) {
+	h := start(t, Options{NamesWait: 100 * time.Millisecond})
+	h.enterWorld()
+	h.send(opcode.SMSGGameobjectDespawnAnim, packet.NewWriter().GUID(crateGUID).Bytes())
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindGameObject)) == 1 })
+	ghost := ofKind(h.s.Log(), events.KindGameObject)[0]
+	if _, ok := ghost.Data["entry"]; ok || ghost.Data["change"] != "despawn" {
+		t.Fatalf("%+v", ghost)
+	}
+	if _, ok := ghost.Data["type"]; ok {
+		t.Fatalf("%+v", ghost)
+	}
+	h.logout()
+}
+
 // An entry the server does not know is named after the entry, so the event does not wait for ever; a
 // creature and a game object of the same entry keep their own names and queries.
 func TestGameObjectAndCreatureOfOneEntry(t *testing.T) {
