@@ -570,19 +570,24 @@ func TestWalkPathRootOutlastsTheWait(t *testing.T) {
 
 // A root after the first corner of a two-leg path: walked counts the first leg and the part of
 // the second walked before the root, along the path, not the straight line from the start.
+// The root is sent when a heartbeat shows the walk well up the second leg (not after a sleep), and
+// the second leg is long enough that the walk is still going when the root reaches it, so a slow
+// machine cannot make the walk arrive first or the root come before the corner.
 func TestWalkPathCountsAlongThePathWhenRootedAfterACorner(t *testing.T) {
 	old := rootWait
 	rootWait = 300 * time.Millisecond
 	t.Cleanup(func() { rootWait = old })
 	f := &fakePlanner{replies: []func(from, to navmesh.Vec3) navmesh.Path{via}}
 	h := start(t, Options{Planner: f})
-	h.enterWorld()                                 // 7 yd/s
-	goal := navmesh.Vec3{me.X + 7, me.Y + 8, me.Z} // 7 yd east, then 8 yd north
+	h.enterWorld()                                  // 7 yd/s
+	goal := navmesh.Vec3{me.X + 7, me.Y + 40, me.Z} // 7 yd east, then 40 yd north: a walk of 6.7 s
 	done := make(chan WalkReport, 1)
 	go func() { r, _ := h.s.WalkPath(context.Background(), goal[0], goal[1], goal[2]); done <- r }()
 	h.expect(opcode.MSGMoveStartForward)
-	h.expect(opcode.MSGMoveSetFacing)  // the corner
-	time.Sleep(400 * time.Millisecond) // about 2.8 yd up the second leg
+	h.expect(opcode.MSGMoveSetFacing) // the corner
+	if beat := moveInfo(h.expect(opcode.MSGMoveHeartbeat).Body); beat.Y <= me.Y+1 {
+		t.Fatalf("heartbeat %+v is not up the second leg", beat)
+	}
 	h.send(opcode.SMSGForceMoveRoot, packet.NewWriter().PackedGUID(me.GUID).U32(5).Bytes())
 	stop := moveInfo(h.expect(opcode.MSGMoveStop).Body)
 	h.expect(opcode.CMSGForceMoveRootAck)

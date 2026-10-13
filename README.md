@@ -50,7 +50,8 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`).
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `dungeons_dir` is the folder
+`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)).
 
 Log a character in and keep it online with the RPC server running:
 
@@ -236,6 +237,9 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive) | `started`, `plan`, `map`, `from_leg`, `legs[]`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
+| `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
@@ -446,7 +450,7 @@ leaving range is not reported either.
 
 A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
 opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
-that carries the plan out through the RPC is not written yet, so no RPC reads a plan today. `dungeons/uldaman.json` is the first one.
+that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one.
 
 ```json
 {
@@ -477,18 +481,20 @@ that carries the plan out through the RPC is not written yet, so no RPC reads a 
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
   close), with a `timeout_s` (default 60, at most 600) after which the plan fails.
 - A bad file is refused with every problem at once, each with its path: `uldaman.json: legs[2].steps[0].use_object: needs an entry,
-  a near position, or both`. Unknown fields are errors too.
+  a near position, or both`. Unknown fields are errors too, and so is an entry that is in `skip` and also in a pull group or in
+  `boss.first` (the leg would fight it and never wait for it).
 
 The stepper (`dungeon.NewStepper(plan, world, clock)`) does no networking. `Next` returns the action to do now (`walk`, `pull`,
 `use_object`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
 it asks a `World` (position, game objects in view, hostiles within a radius) and decides by itself that a walk is not needed when the
 player stands at `to`, that a wait is over when its condition holds, and that a wait failed when it timed out. A `use_object`
-step whose object is out of reach gives a `walk` to the object first.
+step whose object is out of reach gives a `walk` to the object first; such a step fails after `MaxStepWalks` (4) walks or
+`MaxStepSeconds` (120 s), so a door that cannot be reached ends the plan instead of looping.
 
 `tools/dungeongen` writes a plan skeleton from the spawns of one map: `tools/dungeongen/export.sh <map> <dir>` reads the
 creature, game object and entrance rows of the world database with SELECTs in a read-only session (the database of the docker
 stack on the server host, over ssh; the password is expanded inside the container and never printed or stored) and writes three TSV
-files; `go run ./tools/dungeongen -dir <dir> -name uldaman -map 70 -bosses 6906,6910,7228 -out skeleton.json` turns them into legs (one
+files (creatures, game objects, entrances); `go run ./tools/dungeongen -dir <dir> -name uldaman -map 70 -bosses 6906,6910,7228 -out skeleton.json` turns them into legs (one
 per boss, packs of spawns within `-cluster` yards or in one `creature_groups` group, doors and altars near a leg in its notes; friendly
 factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`). It is repeatable: the same files and flags give the same
 bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
@@ -499,6 +505,55 @@ a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport
 in the plan is a spawn in the export. The navmesh test needs the map 70 files (`070.mmap` and the three `070*.mmtile`) in
 `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle070` or `~/tortoise-wow-server/data/mmaps`, and a cgo build; it skips otherwise. The navmesh
 has no doors, so `path_to` walks through a closed one: the door steps are checked in the game, not by that test.
+
+## Dungeon runs
+
+`dungeon_run {"name":"uldaman"}` makes the logged-in character the **dungeon leader**: it carries out a [plan](#dungeon-plans)
+with the party it leads, the way a player would, with no help from the server beyond the companions' normal orders (issue #73).
+The call returns at once; the run is a goroutine that ends in a report. `dungeon_status` returns the state and the report
+(also while it runs), `dungeon_stop` ends a run and returns the final report. One run at a time; a second `dungeon_run` is refused
+until the first has ended. Plans are read from `dungeons_dir` (settings; default `dungeons`).
+
+Before a run: the leader is in a group (`invite`, or hired companions), is in the world, and stands on the plan's map: either
+already inside the dungeon, or `"teleport": true`, which GM-teleports it to the start (the `entrance` for leg 0, else the place the
+previous leg ended), summons every companion (`.bot summon`) and waits up to 60 s for them to arrive. `from_leg` starts at another
+leg, by number or by name (`"from_leg": "keystone"`). The leader is expected to be a GM account (the run sends `.gm visible on`
+first, because a hidden GM changes what mobs and companions do); a run on a player account works without teleport and revive.
+
+What the driver does for each action of the plan (the stepper decides which):
+
+- **walk** is `walk_path`, tried up to 3 times (it replans after a server move by itself); a walk that cannot arrive fails the run.
+- **use_object** sends the use, waits 1.5 s, and the plan's `wait_for` step watches the door or altar change state. Walks inside a step are bounded (see above).
+- **pull** targets the nearest living unit of the group's entries that stands near the plan's positions (walking up to within 38 yd of
+  it first when it is out of 45 yd, along the navmesh path) and says `.bot action pullback` in party chat: the tank pulls and
+  brings the mob back, the others join after 5 s. About every 10 s of fighting the leader targets the nearest fighting pack member
+  and says `.bot action attack`. The fight is won when every pack member in sight is dead; units of `skip` are never part of it.
+  A pull that draws no fight in 25 s, or whose mobs stop fighting for 12 s (evade), is tried again (`.bot action follow` first), 3 pulls
+  at most. Hostile units still hitting the party after the fight (adds) are fought too, for up to 15 s.
+- **kill_boss** does the same for each entry of `boss.first`, then for the boss; the whole encounter counts as one fight, so
+  brothers that join are fought and a boss already dead in the fight before is taken as killed. A boss that is not in view fails the run.
+- **rest gate**, at the start of each leg and before every pull and boss: `.bot action rest`, then wait until every living member has at
+  least 90% health and 75% mana (mana only for mana users) and is within 40 yd of the leader, for up to 150 s. After that the run goes
+  on with a note if everyone has 50% health, else it fails. A dead member is revived by GM (`.revive <name>`), flagged in the report,
+  unless `no_shortcuts` is set (then the run fails).
+- **wipe**: the leader dead, or every member dead, ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1). The MVP does not
+  release, run back or retry.
+
+Events (`events` kinds `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`): `dungeon_leg` at the start and end of
+each leg (`data.phase`, `result`, `seconds`, `deaths`, `pulls`, `rest_seconds`); `dungeon_step` when an action finishes (`data.action`
+walk, use_object, pull, kill_boss, or wait when a wait step begins; `ok`, `seconds`, `error`); `dungeon_failed` when the run ends
+without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeon_done` with the totals.
+
+The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
+progress), `error`, `wipes`, `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
+`pull_retries`, `rest_seconds`), `notes[]` and `gm_shortcuts[]`: every GM action the run took instead of playing it, with `kind`
+(`teleport_to_entrance`, `teleport_to_leg_start`, `revive`), `leg`, `detail` and `at`. A run with any `gm_shortcuts` is not a run a player
+could have done.
+
+Limits of this first driver: no CC marks, no loot orders (the companions loot on their own), no corpse run, no stuck detection beyond
+the bounds above, and a walk is not interrupted when a pack aggros on the way (the fight is picked up at the next action). The code is
+tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
+`docs/LIVE-CHECKS.md`.
 
 ## Unit positions
 
@@ -902,7 +957,7 @@ you set).
 | `internal/spells` | spell names by id, from the core's `spell_template` (`tools/spellnamegen`) |
 | `internal/navmesh` | tile loading and path planning over the core's Detour (cgo); `navfixture` builds synthetic tiles |
 | `internal/events` | ordered event log with cursors |
-| `internal/dungeon`, `dungeons/`, `tools/dungeongen` | dungeon plans: the JSON format, loader and stepper, the plan files, and the skeleton generator over world database exports (see [Dungeon plans](#dungeon-plans)) |
+| `internal/dungeon`, `dungeons/`, `tools/dungeongen` | dungeon plans and runs: the JSON format, loader, stepper and the driver (`dungeon_run`), the plan files, and the skeleton generator over world database exports (see [Dungeon plans](#dungeon-plans), [Dungeon runs](#dungeon-runs)) |
 | `internal/tbm` | the TortoiseBots addon (TBM) protocol: handshake commands, the `TBM:` reply lines, the generated button table, the transport rule and reply matching (`tools/tbmbuttongen` writes the table) |
 | `tools/tbmlines`, `tools/tbmcontract` | extract `TBM:` lines from an events file; replay them through the real TBM addon (Lua) |
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |

@@ -82,6 +82,11 @@ const (
 	KindQuestAbandoned    = "quest_abandoned"     // the quest left the quest log
 	KindQuestError        = "quest_error"         // SMSG_QUESTGIVER_QUEST_INVALID, _FAILED or SMSG_QUESTLOG_FULL
 	KindQuestUpdate       = "quest_update"        // SMSG_QUESTUPDATE_*: progress, completion or failure
+	// The dungeon driver (dungeon_run): data holds the leg, step, seconds and, at the end, the run report's totals.
+	KindDungeonLeg    = "dungeon_leg"    // a leg started or ended: data.phase start|end, data.result, seconds, deaths
+	KindDungeonStep   = "dungeon_step"   // an action of the plan finished (or a wait began): data.action, ok, seconds, error
+	KindDungeonFailed = "dungeon_failed" // the run ended without finishing: data.error ("wipe", a failed step, "stopped")
+	KindDungeonDone   = "dungeon_done"   // the plan is finished
 )
 
 // ChatKinds is what the chat_log method returns.

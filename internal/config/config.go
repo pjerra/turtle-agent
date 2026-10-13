@@ -45,6 +45,9 @@ type Settings struct {
 	// TBMAddonDir is the TortoiseBotsManager checkout addon_start runs (default: the pinned copy
 	// tools/tbmcontract/fetch.sh keeps under the working directory). A leading ~/ is the home folder.
 	TBMAddonDir string `json:"tbm_addon_dir,omitempty"`
+	// DungeonsDir holds the dungeon plans dungeon_run reads (<name>.json; default "dungeons" under the
+	// working directory). A leading ~/ is the home folder.
+	DungeonsDir string `json:"dungeons_dir,omitempty"`
 	// Addons overrides the addon list sent at world login (default: a stock 1.12.1 client's
 	// Blizzard_* set). It must include the four fingerprint addons, see worldconn.StockAddons.
 	Addons []string `json:"addons,omitempty"`
@@ -98,7 +101,7 @@ func Load(path string) (Settings, error) {
 	if s.RPC == "" {
 		s.RPC = DefaultRPC
 	}
-	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir} {
+	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir, &s.DungeonsDir} {
 		if rest, ok := strings.CutPrefix(*p, "~/"); ok {
 			if home, err := os.UserHomeDir(); err == nil {
 				*p = filepath.Join(home, rest)

@@ -88,3 +88,24 @@ Nothing in it has been walked by an agent yet. Still open, for the driver (step 
 - Pack positions are spawn points. Pack members that patrol (`creature_movement`) or wander, and the Stonevault Ambushers (stealth),
   may stand elsewhere when the party arrives.
 - The Seal at 55 yd must be in view (listed by `gameobjects`) from the Keystone's stand point for the `wait_for` to see its state change.
+
+## Dungeon driver on Uldaman (issue #73, step 3)
+
+`dungeon_run` is tested against a fake game and clock only; no live run has been made. One run on m910q settles what the fakes
+cannot (README, "Dungeon runs"). Needs a free slot, a GM leader and a hired party of a tank, a healer and two damage dealers at level 40-45
+(Uldaman is a level 35-45 dungeon), `mmaps_dir` with map 070, and the leader as the party leader.
+
+1. Hire the party at the leader, log in, `invite`/`accept_invite`, walk or `.go` into Uldaman (map 70) next to the entrance
+   (-228.9, 46.1, -46). Start `dungeon_run {"name":"uldaman","from_leg":"keystone"}`, then `{"name":"uldaman"}` from the start. A
+   teleport start is `"teleport": true` (flagged).
+2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`); keep the capture.
+3. Pass (MVP): the run reaches and kills Ironaya from the keystone leg, or Baelog (with Eric and Olaf) from the start, and ends with a
+   report (`state` done or a clear `error`), per-leg seconds, deaths, wipes and `gm_shortcuts`.
+4. Things to look at that the fakes assume: `.bot action pullback` in party chat is accepted from a GM leader and the tank pulls from
+   range; `.bot action rest` and the rest gate's mana and distance rules end in reasonable time; `.gm visible on` takes effect; the
+   keystone and the Seal of Khaz'Mul (124371, 124372) change state after `use_object` (the plan's stand point); `.revive <name>`
+   works on a hired companion; whether a hostile unit's `in_combat` and `target` fields are filled for mobs the party fights;
+   whether Eric and Olaf really need killing (plan decision (b): no script links them to Baelog in the world database).
+5. Findings that are TortoiseBots behaviour (companions skipping a pack, not following, not looting) are reported to TortoiseBots as a bug
+   fix or a behaviour change per its vision document, not worked around here.
+

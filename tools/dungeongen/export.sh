@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Export the creature and game object spawns of one map from the Tortoise world database to two TSV files that
-# dungeongen reads:   export.sh <map> <outdir>      (writes <outdir>/creatures.tsv and <outdir>/gameobjects.tsv)
+# Export the creature and game object spawns and the entrances of one map from the Tortoise world database to the
+# three TSV files that dungeongen reads:   export.sh <map> <outdir>   (writes <outdir>/creatures.tsv, gameobjects.tsv and entrances.tsv)
 #
 # The database is the one in the docker stack on the server host. SELECTs only: the session is opened with
 # SET SESSION TRANSACTION READ ONLY and every statement below is a SELECT. No credential is read, printed or stored here:

@@ -24,6 +24,14 @@ const (
 	UseRange     = 4.5 // the core ignores a use out of 5 yards (see the README, use_object)
 )
 
+// Bounds on one step, so a door that cannot be reached or a walk that never gets close ends the plan instead of
+// looping: a use_object step fails after MaxStepWalks walks (each brings the player next to the object, or to its
+// stand point) or MaxStepSeconds since it began, whichever comes first. A wait has its own timeout_s.
+const (
+	MaxStepWalks   = 4
+	MaxStepSeconds = 120
+)
+
 // ActionKind says what the driver is asked to do.
 type ActionKind string
 
@@ -73,12 +81,14 @@ type Stepper struct {
 	w    World
 	now  func() time.Time
 
-	leg   int
-	ph    phase
-	idx   int        // pull group or step index
-	since time.Time  // when the current wait started; zero when not waiting
-	last  ActionKind // the kind of the action Next returned last
-	err   string
+	leg       int
+	ph        phase
+	idx       int        // pull group or step index
+	since     time.Time  // when the current wait started; zero when not waiting
+	stepAt    time.Time  // when the current step was first looked at; zero before
+	stepWalks int        // walks Complete has seen in the current step
+	last      ActionKind // the kind of the action Next returned last
+	err       string
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -91,8 +101,16 @@ func NewStepper(p *Plan, w World, now func() time.Time) *Stepper {
 	return s
 }
 
+// NewStepperAt is NewStepper starting at leg (0 <= leg <= len(plan.Legs); the last is a plan that is done).
+func NewStepperAt(p *Plan, w World, now func() time.Time, leg int) *Stepper {
+	s := NewStepper(p, w, now)
+	s.enterLeg(max(0, min(leg, len(p.Legs))))
+	return s
+}
+
 func (s *Stepper) enterLeg(i int) {
 	s.leg, s.idx, s.since = i, 0, time.Time{}
+	s.stepAt, s.stepWalks = time.Time{}, 0
 	if i >= len(s.plan.Legs) {
 		s.ph = phDone
 		return
@@ -115,13 +133,20 @@ func (s *Stepper) Complete() {
 		s.idx++
 	case phSteps:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
-		if s.last == ActUse {
-			s.idx++
-			s.since = time.Time{}
+		switch s.last {
+		case ActUse:
+			s.nextStep()
+		case ActWalk:
+			s.stepWalks++
 		}
 	case phBoss:
 		s.enterLeg(s.leg + 1)
 	}
+}
+
+func (s *Stepper) nextStep() {
+	s.idx++
+	s.since, s.stepAt, s.stepWalks = time.Time{}, time.Time{}, 0
 }
 
 // Fail ends the plan: the driver could not do the action (the group wiped it, the path is blocked). Next then keeps
@@ -181,8 +206,7 @@ func (s *Stepper) next() Action {
 			}
 			a, advance := s.step(&l.Steps[s.idx])
 			if advance {
-				s.idx++
-				s.since = time.Time{}
+				s.nextStep()
 				continue
 			}
 			return a
@@ -196,8 +220,28 @@ func (s *Stepper) next() Action {
 	}
 }
 
-// step evaluates one step. advance is true when it is already satisfied (a wait that holds).
+// step evaluates one step. advance is true when it is already satisfied (a wait that holds). A use_object step
+// that would walk once more than MaxStepWalks times, or after MaxStepSeconds, fails instead.
 func (s *Stepper) step(st *Step) (a Action, advance bool) {
+	if s.stepAt.IsZero() {
+		s.stepAt = s.now()
+	}
+	a, advance = s.stepOnce(st)
+	if a.Kind != ActWalk || st.UseObject == nil {
+		return a, advance
+	}
+	ref := describeRef(&st.UseObject.ObjectRef)
+	if s.stepWalks >= MaxStepWalks {
+		s.Fail(s.label("step %d: ", s.idx) + fmt.Sprintf("%s is still out of reach after %d walks", ref, s.stepWalks))
+	} else if el := s.now().Sub(s.stepAt); el > MaxStepSeconds*time.Second {
+		s.Fail(s.label("step %d: ", s.idx) + fmt.Sprintf("%s is not used after %.0f s", ref, el.Seconds()))
+	} else {
+		return a, false
+	}
+	return Action{Kind: ActFailed, Leg: s.leg, Step: s.idx, Err: s.err, Label: s.err}, false
+}
+
+func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 	base := Action{Leg: s.leg, Step: s.idx}
 	fail := func(format string, args ...any) (Action, bool) {
 		s.Fail(s.label("step %d: ", s.idx) + fmt.Sprintf(format, args...))

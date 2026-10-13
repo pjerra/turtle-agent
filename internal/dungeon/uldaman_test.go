@@ -46,6 +46,10 @@ func TestUldamanPlanLoads(t *testing.T) {
 	if fmt.Sprint(names) != "[baelog revelosh keystone ironaya]" || fmt.Sprint(bosses) != "[6906 6910 0 7228]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
+	// Eric and Olaf are fought before Baelog: no script in the world database makes them die with him.
+	if b := p.Legs[0].Boss; fmt.Sprint(b.First) != "[6907 6908]" || len(p.Legs[0].Skip) != 0 {
+		t.Fatalf("%+v skip %v", b, p.Legs[0].Skip)
+	}
 	// The Keystone leg has no boss; the door steps are the Keystone, then the Seal of Khaz'Mul opening.
 	k := p.Legs[2]
 	if k.Boss != nil || len(k.Steps) != 2 || k.Steps[0].UseObject.Entry != 124371 || k.Steps[0].UseObject.Stand == nil ||
@@ -125,6 +129,22 @@ func TestUldamanPlanMatchesTheWorldExport(t *testing.T) {
 		}
 		if l.Boss != nil && !hasCreature(l.Boss.Entry, l.Boss.Position) {
 			t.Errorf("legs[%d].boss: no spawn of %d at %v", i, l.Boss.Entry, l.Boss.Position)
+		}
+		if l.Boss != nil {
+			for _, e := range l.Boss.First { // killed before the boss: they stand within the encounter's reach of it
+				found := false
+				for _, m := range cs {
+					x, _ := strconv.ParseFloat(m["x"], 64)
+					y, _ := strconv.ParseFloat(m["y"], 64)
+					z, _ := strconv.ParseFloat(m["z"], 64)
+					if m["entry"] == strconv.Itoa(int(e)) && dist3(l.Boss.Position, Point{float32(x), float32(y), float32(z)}) < 25 {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("legs[%d].boss.first: no spawn of %d within 25 yd of the boss", i, e)
+				}
+			}
 		}
 		for j, s := range l.Steps {
 			for _, r := range []*ObjectRef{objRef(s)} {

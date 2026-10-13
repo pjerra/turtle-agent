@@ -82,13 +82,13 @@
           ]
         }
       ],
-      "skip": [6907, 6908],
       "boss": {
         "entry": 6906,
-        "position": {"x": -353, "y": 117.2, "z": -44.4}
+        "position": {"x": -353, "y": 117.2, "z": -44.4},
+        "first": [6907, 6908]
       },
       "notes": [
-        "Baelog, Eric 'The Swift' (6907) and Olaf (6908) stand together at the campfire; Eric and Olaf die with Baelog (TortoiseBots PR 859), so the leg ends with Baelog."
+        "Baelog, Eric 'The Swift' (6907) and Olaf (6908) stand together at the campfire. TortoiseBots PR 859 says Eric and Olaf die with Baelog, but the world database has no script for it (no creature_linking row; their creature_ai events only cast Rushing Charge and Shield Slam, Baelog flees at 15% health), so the leg kills them first (boss.first) and ends with Baelog."
       ]
     },
     {

@@ -94,6 +94,17 @@ func TestOnlyAccount(t *testing.T) {
 	}
 }
 
+func TestDungeonsDir(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"dungeons_dir":"~/plans"}`))
+	home, _ := os.UserHomeDir()
+	if err != nil || s.DungeonsDir != filepath.Join(home, "plans") {
+		t.Fatalf("%q %v", s.DungeonsDir, err)
+	}
+	if s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"}}`)); err != nil || s.DungeonsDir != "" {
+		t.Fatalf("%q %v", s.DungeonsDir, err)
+	}
+}
+
 func TestMmapsDir(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Load(writeSettings(t, 0o600, fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"mmaps_dir":%q}`, dir)))

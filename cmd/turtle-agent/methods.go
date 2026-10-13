@@ -118,6 +118,8 @@ type methodOptions struct {
 	// AddonDir is the TortoiseBotsManager checkout addon_start loads (settings tbm_addon_dir);
 	// empty means the pinned copy tools/tbmcontract/fetch.sh keeps under the working directory.
 	AddonDir string
+	// DungeonsDir holds the plans dungeon_run reads (settings dungeons_dir); empty means "dungeons".
+	DungeonsDir string
 }
 
 // registerMethodsFor wires the spec's JSON-RPC methods, and every later milestone's, to whatever
@@ -233,7 +235,12 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerItemMethods(srv, cur)
 	registerGameObjectMethods(srv, cur)
 	registerNPCMethods(srv, cur)
-	return registerAddonHost(srv, cur, opts.AddonDir)
+	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
+	stopDungeon := registerDungeonMethods(srv, cur, opts.DungeonsDir)
+	return func() {
+		stopDungeon()
+		stopAddons()
+	}
 }
 
 // readEvents long-polls up to waitMS (at most 25 s) until a matching event exists. A

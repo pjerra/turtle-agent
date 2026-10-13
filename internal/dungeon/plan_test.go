@@ -80,6 +80,8 @@ func TestParseErrors(t *testing.T) {
 		{"boss no position", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4}}`), "legs[1].boss.position: required"},
 		{"first holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"first":[4],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].boss.first[0]: the boss (4) is killed last"},
 		{"skip holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[4],"boss":{"entry":4,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: skips the boss (4)"},
+		{"skip also pulled", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[1],"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].skip[0]: 1 is also in pull_groups[0].entries"},
+		{"skip also first", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[3],"boss":{"entry":4,"first":[3],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: 3 is also in boss.first"},
 		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object or wait_for"},
 		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has both use_object and wait_for"},
 		{"unknown step field", step(`{"click":{"entry":1}}`), `legs[0].steps[0]: json: unknown field "click"`},
@@ -102,8 +104,15 @@ func TestParseErrors(t *testing.T) {
 		}
 	}
 
+	// A top-level unknown field is listed with the other mistakes, not instead of them.
+	_, err := Parse("top.json", []byte(`{"version":1,"colour":1,"map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[]}`))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "colour"`) || !strings.Contains(err.Error(), "name: required") ||
+		!strings.Contains(err.Error(), "legs: needs at least one leg") {
+		t.Fatalf("%v", err)
+	}
+
 	// Everything wrong at once is reported at once, one per line, each with the file name.
-	_, err := Parse("bad.json", []byte(`{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	_, err = Parse("bad.json", []byte(`{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
 	  {"to":{"x":0,"y":0,"z":0},"boss":{"entry":0,"position":{"x":0,"y":0,"z":0}}},
 	  {"boss":{"entry":2,"position":{"x":0,"y":0,"z":0}}}]}`))
 	if err == nil {
