@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
@@ -198,5 +201,25 @@ func TestDungeonRunBuffsParameter(t *testing.T) {
 		if rb, ok := st["report"].(map[string]any)["buffs"].([]any); !ok || len(rb) != c.n {
 			t.Errorf("%s: report %v", c.params, st["report"])
 		}
+	}
+}
+
+// The driver's Game reads the leader's team from its race (UNIT_FIELD_BYTES_0, low byte) and uses an item by entry.
+func TestSessionGameTeamAndUseItem(t *testing.T) {
+	r := newRig(t)
+	g := &sessionGame{cur: func() *session.Session { return r.s }}
+	if got := g.Team(); got != "" {
+		t.Fatalf("race unknown: %q", got)
+	}
+	r.giveSelf(0x4000000000000003, 7740, map[uint16]uint32{objects.UnitBytes0: 2 | 1<<8}) // an orc warrior
+	if got := g.Team(); got != "horde" {
+		t.Fatalf("an orc: %q", got)
+	}
+	if err := g.UseItem(context.Background(), 7740); err != nil {
+		t.Fatal(err)
+	}
+	r.expectBody(opcode.CMSGUseItem, game.BuildUseItem(255, 23, 0))
+	if err := g.UseItem(context.Background(), 1); err == nil {
+		t.Fatal("an item that is not carried")
 	}
 }

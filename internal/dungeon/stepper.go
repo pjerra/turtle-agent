@@ -3,6 +3,7 @@ package dungeon
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -36,13 +37,15 @@ const (
 type ActionKind string
 
 const (
-	ActWalk   ActionKind = "walk"       // walk the navmesh to To
-	ActPull   ActionKind = "pull"       // pull and kill the group in Entries/Positions
-	ActUse    ActionKind = "use_object" // use game object GUID (it is within UseRange)
-	ActKill   ActionKind = "kill_boss"  // kill Boss, First entries before it
-	ActWait   ActionKind = "wait"       // nothing to do yet: look again with Next
-	ActDone   ActionKind = "done"       // the plan is finished
-	ActFailed ActionKind = "failed"     // the plan cannot go on: Err says why
+	ActWalk   ActionKind = "walk"        // walk the navmesh to To
+	ActPull   ActionKind = "pull"        // pull and kill the group in Entries/Positions
+	ActUse    ActionKind = "use_object"  // use game object GUID (it is within UseRange)
+	ActLoot   ActionKind = "loot_object" // open and loot game object GUID (it is within UseRange)
+	ActItem   ActionKind = "use_item"    // use the item Item from the bags
+	ActKill   ActionKind = "kill_boss"   // kill Boss, First entries before it
+	ActWait   ActionKind = "wait"        // nothing to do yet: look again with Next
+	ActDone   ActionKind = "done"        // the plan is finished
+	ActFailed ActionKind = "failed"      // the plan cannot go on: Err says why
 )
 
 // Action is the Stepper's current request. Leg and Step locate it in the plan (Step is -1 outside the steps).
@@ -61,7 +64,9 @@ type Action struct {
 	Boss      *Boss               // boss
 	Object    *objects.GameObject // use
 	GUID      packet.GUID         // use
-	Requires  *ItemRef            // use: the item a non-GM leader needs to carry (UseObject.RequiresItem)
+	Requires  *ItemRef            // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
+	Item      *ItemRef            // use_item: the item to use
+	Expect    *ItemRef            // loot_object, use_item: the item that must be in the bags afterwards
 	Remaining time.Duration       // wait: time left before the plan fails
 	Err       string              // failed
 }
@@ -73,6 +78,7 @@ const (
 	phPulls
 	phSteps
 	phBoss
+	phAfter // the steps after the boss (Leg.AfterBoss)
 	phDone
 	phFailed
 )
@@ -92,6 +98,7 @@ type Stepper struct {
 	stepWalks int        // walks Complete has seen in the current step
 	last      ActionKind // the kind of the action Next returned last
 	err       string
+	skipped   []string // what the team gate passed over since Skipped was last called
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -123,7 +130,7 @@ func (s *Stepper) enterLeg(i int) {
 
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
-	return s.leg, [...]string{"walk", "pull_groups", "steps", "boss", "done", "failed"}[s.ph], s.idx
+	return s.leg, [...]string{"walk", "pull_groups", "steps", "boss", "after_boss", "done", "failed"}[s.ph], s.idx
 }
 
 // Complete reports that the action Next last returned (walk, pull, use_object or kill_boss) is done. After a walk
@@ -134,16 +141,16 @@ func (s *Stepper) Complete() {
 		s.ph, s.idx = phPulls, 0
 	case phPulls:
 		s.idx++
-	case phSteps:
+	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse:
+		case ActUse, ActLoot, ActItem:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
 		}
 	case phBoss:
-		s.enterLeg(s.leg + 1)
+		s.ph, s.idx = phAfter, 0
 	}
 }
 
@@ -166,7 +173,11 @@ func (s *Stepper) label(format string, args ...any) string {
 	if l.Name != "" {
 		name += " (" + l.Name + ")"
 	}
-	return name + ": " + fmt.Sprintf(format, args...)
+	msg := fmt.Sprintf(format, args...)
+	if s.ph == phAfter { // a step of the list after the boss: its index is that list's
+		msg = strings.Replace(msg, "step ", "after_boss step ", 1)
+	}
+	return name + ": " + msg
 }
 
 // Next returns the action to do now. It returns the same action until it is completed, and ActWait while a step
@@ -200,14 +211,27 @@ func (s *Stepper) next() Action {
 				continue
 			}
 			g := l.PullGroups[s.idx]
-			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
-				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
-		case phSteps:
-			if s.idx >= len(l.Steps) {
-				s.ph = phBoss
+			if !s.teamOK(g.Team) {
+				s.skipped = append(s.skipped, s.label("pull group %d of %d (%v) is for team %s, the leader is %s: skipped", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team()))
+				s.idx++
 				continue
 			}
-			a, advance := s.step(&l.Steps[s.idx])
+			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
+				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
+		case phSteps, phAfter:
+			steps := l.Steps
+			if s.ph == phAfter {
+				steps = l.AfterBoss
+			}
+			if s.idx >= len(steps) {
+				if s.ph == phAfter {
+					s.enterLeg(s.leg + 1)
+				} else {
+					s.ph = phBoss
+				}
+				continue
+			}
+			a, advance := s.step(&steps[s.idx])
 			if advance {
 				s.nextStep()
 				continue
@@ -215,7 +239,12 @@ func (s *Stepper) next() Action {
 			return a
 		case phBoss:
 			if l.Boss == nil {
-				s.enterLeg(s.leg + 1)
+				s.ph, s.idx = phAfter, 0
+				continue
+			}
+			if !s.teamOK(l.Boss.Team) {
+				s.skipped = append(s.skipped, s.label("boss %d is for team %s, the leader is %s: skipped", l.Boss.Entry, l.Boss.Team, s.team()))
+				s.ph, s.idx = phAfter, 0
 				continue
 			}
 			return Action{Kind: ActKill, Leg: s.leg, Step: -1, Boss: l.Boss, Skip: l.Skip, Label: s.label("kill boss %d", l.Boss.Entry)}
@@ -230,10 +259,11 @@ func (s *Stepper) step(st *Step) (a Action, advance bool) {
 		s.stepAt = s.now()
 	}
 	a, advance = s.stepOnce(st)
-	if a.Kind != ActWalk || st.UseObject == nil {
+	obj, _ := objectOf(st)
+	if a.Kind != ActWalk || obj == nil {
 		return a, advance
 	}
-	ref := describeRef(&st.UseObject.ObjectRef)
+	ref := describeRef(obj)
 	if s.stepWalks >= MaxStepWalks {
 		s.Fail(s.label("step %d: ", s.idx) + fmt.Sprintf("%s is still out of reach after %d walks", ref, s.stepWalks))
 	} else if el := s.now().Sub(s.stepAt); el > MaxStepSeconds*time.Second {
@@ -251,37 +281,51 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		return Action{Kind: ActFailed, Leg: s.leg, Step: s.idx, Err: s.err, Label: s.err}, false
 	}
 	switch {
-	case st.UseObject != nil:
-		u := st.UseObject
-		o, ok := s.find(&u.ObjectRef)
+	case st.UseItem != nil:
+		u := st.UseItem
+		base.Kind, base.Item, base.Requires, base.Expect = ActItem, &ItemRef{Entry: u.Entry, Name: u.Name}, u.RequiresItem, u.ExpectItem
+		base.Label = s.label("step %d: use item %s", s.idx, base.Item)
+		return base, false
+	case st.UseObject != nil || st.LootObject != nil:
+		ref, stand := objectOf(st)
+		kind, verb := ActUse, "use"
+		if st.LootObject != nil {
+			kind, verb = ActLoot, "loot"
+		}
+		o, ok := s.find(ref)
 		if !ok || o.Distance < 0 {
 			// Not in view yet: the objects load as the player nears them, so go to where it stands.
 			target, have := Point{}, false
 			switch {
-			case u.Stand != nil:
-				target, have = *u.Stand, true
-			case u.Near != nil:
-				target, have = *u.Near, true
+			case stand != nil:
+				target, have = *stand, true
+			case ref.Near != nil:
+				target, have = *ref.Near, true
 			}
 			if have && dist3(s.w.Position(), target) > ArriveRadius {
 				base.Kind, base.To = ActWalk, target
-				base.Label = s.label("step %d: walk to %.1f %.1f %.1f to bring %s into view", s.idx, target.X, target.Y, target.Z, describeRef(&u.ObjectRef))
+				base.Label = s.label("step %d: walk to %.1f %.1f %.1f to bring %s into view", s.idx, target.X, target.Y, target.Z, describeRef(ref))
 				return base, false
 			}
-			return fail("%s is not in view", describeRef(&u.ObjectRef))
+			return fail("%s is not in view", describeRef(ref))
 		}
-		if u.Stand != nil && dist3(s.w.Position(), *u.Stand) > ArriveRadius && o.Distance > UseRange {
-			base.Kind, base.To = ActWalk, *u.Stand
-			base.Label = s.label("step %d: walk to the stand point for %s", s.idx, describeRef(&u.ObjectRef))
+		if stand != nil && dist3(s.w.Position(), *stand) > ArriveRadius && o.Distance > UseRange {
+			base.Kind, base.To = ActWalk, *stand
+			base.Label = s.label("step %d: walk to the stand point for %s", s.idx, describeRef(ref))
 			return base, false
 		}
 		if o.Distance > UseRange {
 			base.Kind, base.To = ActWalk, Point{o.X, o.Y, o.Z}
-			base.Label = s.label("step %d: walk next to %s (%.1f yd away)", s.idx, describeRef(&u.ObjectRef), o.Distance)
+			base.Label = s.label("step %d: walk next to %s (%.1f yd away)", s.idx, describeRef(ref), o.Distance)
 			return base, false
 		}
-		base.Kind, base.Object, base.GUID, base.Requires = ActUse, &o, o.GUID, u.RequiresItem
-		base.Label = s.label("step %d: use %s", s.idx, describeRef(&u.ObjectRef))
+		base.Kind, base.Object, base.GUID = kind, &o, o.GUID
+		if st.UseObject != nil {
+			base.Requires = st.UseObject.RequiresItem
+		} else {
+			base.Expect = st.LootObject.ExpectItem
+		}
+		base.Label = s.label("step %d: %s %s", s.idx, verb, describeRef(ref))
 		return base, false
 	case st.WaitFor != nil:
 		w := st.WaitFor
@@ -301,6 +345,43 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		return base, false
 	}
 	return fail("is empty")
+}
+
+// objectOf is the game object a use_object or loot_object step works on, and where to stand for it; nil for the other steps.
+func objectOf(st *Step) (*ObjectRef, *Point) {
+	switch {
+	case st.UseObject != nil:
+		return &st.UseObject.ObjectRef, st.UseObject.Stand
+	case st.LootObject != nil:
+		return &st.LootObject.ObjectRef, st.LootObject.Stand
+	}
+	return nil, nil
+}
+
+// TeamWorld is the optional part of a World that tells the leader's team ("alliance", "horde", "" when unknown). Without it, or
+// when unknown, the team gate (Boss.Team, PullGroup.Team) passes everything.
+type TeamWorld interface {
+	Team() string
+}
+
+func (s *Stepper) team() string {
+	if tw, ok := s.w.(TeamWorld); ok {
+		return tw.Team()
+	}
+	return ""
+}
+
+// teamOK reports whether something gated to team is for the leader.
+func (s *Stepper) teamOK(team string) bool {
+	t := s.team()
+	return team == "" || t == "" || t == team
+}
+
+// Skipped returns what the team gate passed over since the last call, one line each, for the report.
+func (s *Stepper) Skipped() []string {
+	out := s.skipped
+	s.skipped = nil
+	return out
 }
 
 func (s *Stepper) holds(w *WaitFor) bool {

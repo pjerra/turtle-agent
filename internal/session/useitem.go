@@ -306,6 +306,7 @@ func (s *Session) noteCastFailed(reason string) {
 	s.mount.fail = reason
 	s.mount.failed++
 	s.mount.wakes.wake()
+	s.loot.wakes.wake() // an Opening cast at a chest waits on the loot window and on this
 }
 
 func (s *Session) onMountResult(body []byte) error {

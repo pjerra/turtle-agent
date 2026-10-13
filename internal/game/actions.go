@@ -47,6 +47,13 @@ func BuildCastSpellOnItem(spell uint32, item packet.GUID) []byte {
 	return packet.NewWriter().U32(spell).U16(TargetFlagItem).PackedGUID(item).Bytes()
 }
 
+// BuildCastSpellOnObject is CMSG_CAST_SPELL aimed at a game object (TARGET_FLAG_OBJECT, Spell.cpp:198-199): u32 spell, u16 target mask
+// 0x0800, the object's guid packed. A locked chest or a node is opened this way with an Opening spell (SPELL_EFFECT_OPEN_LOCK,
+// SpellEffects.cpp:1915-1988); CMSG_GAMEOBJ_USE alone only runs a chest's scripts (GameObject.cpp:1493-1514).
+func BuildCastSpellOnObject(spell uint32, object packet.GUID) []byte {
+	return packet.NewWriter().U32(spell).U16(TargetFlagObject).PackedGUID(object).Bytes()
+}
+
 // BuildMovement is a client MSG_MOVE_*: MovementInfo, no guid (MovementHandler.cpp:295-321).
 func BuildMovement(m MoveInfo) []byte {
 	w := packet.NewWriter()

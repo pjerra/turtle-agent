@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -309,5 +310,91 @@ func TestNewStepperAtStartsInTheLeg(t *testing.T) {
 	}
 	if s = NewStepperAt(p, &fakeWorld{}, nil, -3); s.Next().Leg != 0 {
 		t.Fatal("below 0 is the first leg")
+	}
+}
+
+// teamWorld is a fakeWorld whose leader has a team.
+type teamWorld struct {
+	*fakeWorld
+	team string
+}
+
+func (w teamWorld) Team() string { return w.team }
+
+const teamPlan = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":0,"y":0,"z":0},
+  "pull_groups":[{"entries":[1],"positions":[{"x":5,"y":0,"z":0}],"team":"horde"},{"entries":[2],"positions":[{"x":6,"y":0,"z":0}]}],
+  "steps":[{"loot_object":{"entry":123329,"near":{"x":30,"y":0,"z":0},"expect_item":{"entry":7740}}},{"use_item":{"entry":7740,"expect_item":{"entry":7733}}}],
+  "boss":{"entry":6906,"position":{"x":9,"y":0,"z":0},"team":"horde"}},
+ {"name":"b","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[3],"positions":[{"x":7,"y":0,"z":0}]}]}]}`
+
+// The team gate passes over a pack and a boss of the other team and says so; steps and ungated packs stay.
+func TestStepperTeamGate(t *testing.T) {
+	var kinds []ActionKind
+	run := func(team string) []ActionKind {
+		p := mustPlan(t, teamPlan)
+		w := teamWorld{&fakeWorld{objs: []objects.GameObject{{GUID: 0x77, Entry: 123329, X: 30, State: "ready"}}}, team}
+		s := NewStepper(p, w, nil)
+		kinds = nil
+		var skipped []string
+		for i := 0; i < 40; i++ {
+			a := s.Next()
+			skipped = append(skipped, s.Skipped()...)
+			if a.Kind == ActDone {
+				break
+			}
+			if a.Kind == ActWalk {
+				w.pos = a.To
+			}
+			kinds = append(kinds, a.Kind)
+			s.Complete()
+		}
+		if team == "alliance" && (len(skipped) != 2 || skipped[0] == "" || len(s.Skipped()) != 0) {
+			t.Fatalf("skipped %q", skipped)
+		}
+		if team != "alliance" && len(skipped) != 0 {
+			t.Fatalf("%s skipped %q", team, skipped)
+		}
+		return kinds
+	}
+	want := func(ks ...ActionKind) string { return fmt.Sprint(ks) }
+	// Leg a: pulls [1 horde-only, 2], loot (a walk next to the chest first), use_item, boss (horde-only); leg b: a walk back and its pack.
+	if got := run("alliance"); fmt.Sprint(got) != want(ActPull, ActWalk, ActLoot, ActItem, ActWalk, ActPull) {
+		t.Fatalf("alliance %v", got)
+	}
+	if got := run("horde"); fmt.Sprint(got) != want(ActPull, ActPull, ActWalk, ActLoot, ActItem, ActKill, ActWalk, ActPull) {
+		t.Fatalf("horde %v", got)
+	}
+	if got := run(""); len(got) != 8 {
+		t.Fatalf("unknown team %v", got)
+	}
+}
+
+// A loot_object step walks to the chest like a use_object, then asks for the loot with the item it expects.
+func TestStepperLootAndItemActions(t *testing.T) {
+	p := mustPlan(t, teamPlan)
+	w := &fakeWorld{objs: []objects.GameObject{{GUID: 0x77, Entry: 123329, X: 30, State: "ready"}}}
+	s := NewStepper(p, w, nil)
+	s.Complete() // walk
+	s.Complete() // pull 1 (team unknown: not skipped)
+	s.Complete() // pull 2
+	a := s.Next()
+	if a.Kind != ActWalk || a.To != (Point{30, 0, 0}) {
+		t.Fatalf("%+v", a)
+	}
+	w.pos = a.To
+	s.Complete()
+	a = s.Next()
+	if a.Kind != ActLoot || a.GUID != 0x77 || a.Expect == nil || a.Expect.Entry != 7740 || a.Object == nil {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+	a = s.Next()
+	if a.Kind != ActItem || a.Item.Entry != 7740 || a.Expect.Entry != 7733 {
+		t.Fatalf("%+v", a)
+	}
+	s.Complete()
+	if a = s.Next(); a.Kind != ActKill {
+		t.Fatalf("%+v", a)
 	}
 }
