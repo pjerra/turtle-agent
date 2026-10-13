@@ -339,5 +339,35 @@ and a healer, `mmaps_dir` set, and start it by hand with `brain_start {"strategi
    `thunder_clap` and `demoralizing_shout` with 2+ mobs, `taunt` when a mob attacks the healer (note the range: Taunt reaches 5 yd and the tank walks
    to the mob), `melee_reposition` once when the mob faces the group, `shield_block` when hurt. Report `brain_idle` reasons that
    repeat.
-8. **Healer.** `brain_start {"strategies":["role_healer"]}` and `{"role":"healer",...}` are refused with `not implemented yet`.
+8. **Healer.** Done in step 4a; see the next section.
 
+## Bot brain: the healer and the priest (issue #80 step 4a)
+
+Tested against a scripted fake game only. Not seen live: that a party member's unit row carries its real health (not a percentage) and the
+cast of another healer (`casting` with its target), that the auras `Weakened Soul`, `Power Word: Shield`, `Shadowform`, `Inner Fire`,
+`Power Word: Fortitude` and `Abolish Disease` show under those names, that Priest spells reach 40 yd with the 38.5 yd the brain assumes, and
+that Silence and Shadowform are in the spellbook of a talented priest. Run a level 30+ priest with `mmaps_dir` set in a dungeon with a tank
+bot and two damage bots (no healer bot, or the TortoiseBots healer set to follow), start it by hand with
+`brain_start {"strategies":["holy_priest"],"tank":"<tank name>"}`; a dungeon run starts the brain with `no_move`, so check the position by hand:
+
+1. **Triage.** In a fight, `brain_decision` `heal` targets the member with the lowest health (the tank a little earlier), the player itself when it is
+   the lowest. Pull a member's health down with `.damage` (GM) and watch the order; `target` in the decision is the guid. With a TortoiseBots healer in the
+   party, no two `heal` decisions on the same member within one cast.
+2. **Rank.** A small deficit takes a small rank (`spell_id` 2052, 2053), a big one a Heal or Greater Heal rank, a member under 45% Flash Heal.
+   Report any `heal` decision on a member who was above 90% (overheal) and any `spell_fail` `no_power` repeating.
+3. **Range and sight.** A member 45 yd away or behind a wall is left alone (`brain_idle` `not_possible` only when nobody else needs a heal);
+   a `spell_fail` `line_of_sight` for a heal must be followed by a heal on someone else, not by the same member within 3 s.
+4. **Shield.** `shield` on the tank when it targets the mob, none while the tank carries `Weakened Soul` (look at `units` for the aura's
+   name), and `shield` on a member who just lost a quarter of its health. Report if the server refuses a shield for the Weakened Soul
+   the brain did not see.
+5. **Dispel.** Let a mob polymorph or slow a member: `dispel` with Dispel Magic (527, 988) on it, once per aura per 4 s. A diseased member:
+   Cure Disease (528) or Abolish Disease (552) and then nothing while the Abolish aura stands. A poison or a curse: no cast.
+6. **Position.** By hand (no `no_move`): `heal_reposition` once at the start of a fight to a spot 20 to 30 yd from the tank, out of the
+   mob's front and with sight of the party; no walk while a heal is cast. A mob that attacks the priest: `fade` and `run_to_tank`.
+7. **Fade and Scream.** Two mobs on the priest at 70% health or less and nothing sleeping within 30 yd: `psychic_scream`; with a sleeping mob within 30 yd: only
+   `fade`. Note what the feared mobs did.
+8. **Rest.** At a rest gate: `inner_fire`, `fortitude` on the priest and then on each member, `heal` of members under 90%, `drink` below
+   80% mana (before the top-up heal). In a boss fight below 10% mana: `mana_potion`.
+9. **Shadow.** `brain_start {"strategies":["shadow_priest"]}` with Shadowform learned: `shadowform` (15473; look at `units` for the aura named
+   `Shadowform`), `vampiric_embrace`, `shadow_word_pain`, `mind_blast` on cooldown, `mind_flay` as the filler, `interrupt` with Silence (15487) on a
+   heal or crowd-control cast within 20 yd. The priest stands 14 to 19 yd from the mob. Without Shadowform: `smite` when Mind Flay is out of reach.

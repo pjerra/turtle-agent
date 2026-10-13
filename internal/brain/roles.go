@@ -14,7 +14,8 @@ import (
 //     area ability, never hold a mob the tank does not have.
 //   - tank   (role_tank): fight the loose add first (a mob attacking a party member), then the mob on the player, hold it, face it
 //     away from the group, taunt what is not on the player.
-//   - healer (role_healer): not implemented; a request for it fails with a clear message instead of a brain that does nothing.
+//   - healer (role_healer): heal the party by triage (heal.go): the member with the lowest health, tank first, by the deficit, dispel,
+//     save mana, stand behind the tank at range.
 //
 // A strategy names its role (Strategy.Role); Params.Role is checked against the active ones in resolveRole. A class adds its abilities
 // as strategies next to the role (warrior_arms, warrior_tank, frost mage), so the same role discipline serves every class.
@@ -24,10 +25,6 @@ const (
 	RoleTank   = "tank"
 	RoleHealer = "healer"
 )
-
-// healerNotImplemented is the answer to a healer: the engine can hold the strategy (triage, rank by deficit, dispels, mana), but it is
-// not written yet.
-const healerNotImplemented = "the healer role is not implemented yet (step 4 of issue #80); use role dps or tank"
 
 // resolveRole settles the role of a brain: the one asked for, checked against the roles of the active strategies, or (none asked) the
 // role they play, "dps" when none names one.
@@ -42,9 +39,6 @@ func resolveRole(want string, strats []*Strategy, names []string) (string, error
 		if s.NotImplemented != "" {
 			return "", fmt.Errorf("strategy %q is not implemented yet: %s", s.Name, s.NotImplemented)
 		}
-	}
-	if want == RoleHealer {
-		return "", fmt.Errorf("role %q: %s", want, healerNotImplemented)
 	}
 	var active []string
 	seen := map[string]bool{}
@@ -65,6 +59,8 @@ func resolveRole(want string, strats []*Strategy, names []string) (string, error
 		return "", fmt.Errorf("role %q does not match the strategies %v, which play %s", want, names, active[0])
 	case len(active) == 0 && want == RoleTank:
 		return "", fmt.Errorf("role %q needs the role_tank strategy (preset tank_warrior): %v do not play it", want, names)
+	case len(active) == 0 && want == RoleHealer:
+		return "", fmt.Errorf("role %q needs the role_healer strategy (preset holy_priest): %v do not play it", want, names)
 	}
 	return want, nil
 }
@@ -144,12 +140,4 @@ func roleTank() *Strategy {
 				Do: []Next{{"taunt", RelHigh + 5}}},
 		},
 	}
-}
-
-// ---- role_healer ----
-
-// roleHealer is the healer's place in the strategy list, so that the role is named and asked for; it refuses to run (healers come
-// with step 4).
-func roleHealer() *Strategy {
-	return &Strategy{Name: "role_healer", Role: RoleHealer, NotImplemented: healerNotImplemented}
 }

@@ -52,7 +52,7 @@ type Params struct {
 	// Strategies are strategy or preset names (see Strategies); the base strategy is always added.
 	Strategies []string `json:"strategies"`
 	// Role is "dps", "tank" or "healer" (see roles.go): what the active strategies play. Empty takes the role of the strategies, "dps"
-	// when none names one. A role must match the strategies: "tank" needs role_tank (preset tank_warrior); "healer" is not implemented.
+	// when none names one. A role must match the strategies: "tank" needs role_tank (preset tank_warrior), "healer" needs role_healer (preset holy_priest).
 	Role string `json:"role,omitempty"`
 	// Tank names the party member whose target the brain fights; empty finds the tank by class and target.
 	Tank string `json:"tank,omitempty"`
@@ -139,8 +139,9 @@ type memory struct {
 	idleAt      time.Time
 	idle        string
 	lastErr     string
-	ext         memExt // positioning, line of sight, interrupts, items (world.go)
-	mel         melMem // auto attack and stance changes (melee.go)
+	ext         memExt  // positioning, line of sight, interrupts, items (world.go)
+	mel         melMem  // auto attack and stance changes (melee.go)
+	heal        healMem // health history, shields, dispels and the last friendly cast (heal.go)
 
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
