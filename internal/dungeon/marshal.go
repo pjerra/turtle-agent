@@ -11,6 +11,7 @@ var pointLines = regexp.MustCompile(`\{\s*"x": ([^,\s]+),\s*"y": ([^,\s]+),\s*"z
 
 // An item reference too.
 var itemLines = regexp.MustCompile(`\{\s*"entry": (\d+),\s*"name": ("[^"]*")\s*\}`)
+var bareItemLines = regexp.MustCompile(`\{\s*"entry": (\d+)\s*\}`)
 
 // A list of entries is too.
 var numberLists = regexp.MustCompile(`\[[\d,\s]+\]`)
@@ -23,6 +24,7 @@ func Marshal(p *Plan) ([]byte, error) {
 	}
 	b = pointLines.ReplaceAll(b, []byte(`{"x": $1, "y": $2, "z": $3}`))
 	b = itemLines.ReplaceAll(b, []byte(`{"entry": $1, "name": $2}`))
+	b = bareItemLines.ReplaceAll(b, []byte(`{"entry": $1}`))
 	b = numberLists.ReplaceAllFunc(b, func(m []byte) []byte {
 		inner := bytes.Join(bytes.Fields(bytes.Trim(m, "[]")), nil)
 		return append(append([]byte("["), bytes.ReplaceAll(inner, []byte(","), []byte(", "))...), ']')

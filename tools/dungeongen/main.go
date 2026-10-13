@@ -66,6 +66,7 @@ type Options struct {
 	IgnoreFactions map[int]bool   // factions that are friendly to the players (35 by default)
 	Skip           []uint32       // entries that go into every leg's skip list, besides the rares found
 	NoteRange      float64        // yards around a leg within which doors and altars are noted
+	Friendly       map[int]bool   // factions known to be friendly to the leader's team (-friendly-factions): a boss of one is warned about
 }
 
 func main() {
@@ -78,10 +79,16 @@ func main() {
 	cluster := flag.Float64("cluster", 12, "yards between the spawns of one pack")
 	ignore := flag.String("ignore-factions", "35", "comma separated factions that are not hostile (35: friendly to all)")
 	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
+	check := flag.String("check", "", "plan file to lint against -dir's creatures.tsv: warn for a boss or pack member with npc_flags or a faction friendly to -team (no generation)")
+	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
+	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
 	flag.Parse()
 	if *format != "" {
 		os.Exit(formatFile(*format, *out))
+	}
+	if *check != "" {
+		os.Exit(checkFile(*check, *dir, *team, *friendly))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -99,6 +106,9 @@ func main() {
 				o.IgnoreFactions[int(f)] = true
 			}
 		}
+	}
+	if err == nil {
+		o.Friendly, err = parseFactions(*friendly)
 	}
 	if err == nil && *entrance != "" {
 		var p dungeon.Point
@@ -145,6 +155,49 @@ func formatFile(path, out string) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
 	}
+	return 0
+}
+
+// parseFactions reads a comma separated list of faction ids into a set.
+func parseFactions(s string) (map[int]bool, error) {
+	fs, err := parseEntries(s)
+	m := map[int]bool{}
+	for _, f := range fs {
+		m[int(f)] = true
+	}
+	return m, err
+}
+
+// checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
+// an export that cannot be read, 0 otherwise (warnings are for a person to read).
+func checkFile(path, dir, team, friendly string) int {
+	fail := func(err error) int {
+		fmt.Fprintln(os.Stderr, "dungeongen:", err)
+		return 1
+	}
+	if dir == "" {
+		return fail(errors.New("-check needs -dir"))
+	}
+	if team != "" && team != dungeon.TeamAlliance && team != dungeon.TeamHorde {
+		return fail(fmt.Errorf("-team %q is neither alliance nor horde", team))
+	}
+	p, err := dungeon.Load(path)
+	if err != nil {
+		return fail(err)
+	}
+	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	if err != nil {
+		return fail(err)
+	}
+	fm, err := parseFactions(friendly)
+	if err != nil {
+		return fail(err)
+	}
+	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm})
+	for _, w := range ws {
+		fmt.Println("warning:", w)
+	}
+	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
 	return 0
 }
 
@@ -411,7 +464,7 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 			leg.To = boss.Pos
 		}
 		leg.Boss = &dungeon.Boss{Entry: b, Position: boss.Pos}
-		leg.Notes = objectNotes(objs, leg, o.NoteRange)
+		leg.Notes = append(bossWarnings(boss, o.Friendly), objectNotes(objs, leg, o.NoteRange)...)
 		plan.Legs = append(plan.Legs, leg)
 		from = boss.Pos
 	}

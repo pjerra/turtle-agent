@@ -69,7 +69,7 @@ func TestParseErrors(t *testing.T) {
 		{"two documents", validPlan + validPlan, "more than one JSON value"},
 		{"unknown leg field", leg(`{"to":{"x":0,"y":0,"z":0},"bosses":[]}`), `legs[1]: json: unknown field "bosses"`},
 		{"leg without to", leg(`{"boss":{"entry":1,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].to: required"},
-		{"empty leg", leg(`{"to":{"x":0,"y":0,"z":0}}`), "legs[1]: has no pull_groups, steps or boss"},
+		{"empty leg", leg(`{"to":{"x":0,"y":0,"z":0}}`), "legs[1]: has no pull_groups, steps, boss or after_boss"},
 		{"huge coordinate", leg(`{"to":{"x":1e9,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":5}}}]}`), "legs[1].to.x: 1e+09 is not a map coordinate"},
 		{"group no entries", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].pull_groups[0].entries: needs at least one entry"},
 		{"entry zero", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5,0],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].pull_groups[0].entries[1]: 0 is no creature entry"},
@@ -82,8 +82,8 @@ func TestParseErrors(t *testing.T) {
 		{"skip holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[4],"boss":{"entry":4,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: skips the boss (4)"},
 		{"skip also pulled", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[1],"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].skip[0]: 1 is also in pull_groups[0].entries"},
 		{"skip also first", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[3],"boss":{"entry":4,"first":[3],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: 3 is also in boss.first"},
-		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object or wait_for"},
-		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has both use_object and wait_for"},
+		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object, wait_for, loot_object or use_item"},
+		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has more than one of use_object, wait_for, loot_object and use_item"},
 		{"unknown step field", step(`{"click":{"entry":1}}`), `legs[0].steps[0]: json: unknown field "click"`},
 		{"use nothing", step(`{"use_object":{}}`), "legs[0].steps[0].use_object: needs an entry, a near position, or both"},
 		{"range without near", step(`{"use_object":{"entry":1,"range":5}}`), "legs[0].steps[0].use_object.range: only means something with near"},
@@ -95,6 +95,16 @@ func TestParseErrors(t *testing.T) {
 		{"no state", step(`{"wait_for":{"gameobject":{"entry":1}}}`), `wait_for.gameobject.state: "" is none of`},
 		{"no radius", step(`{"wait_for":{"hostiles_gone":{}}}`), "legs[0].steps[0].wait_for.hostiles_gone.radius: required"},
 		{"radius", step(`{"wait_for":{"hostiles_gone":{"radius":-1}}}`), "legs[0].steps[0].wait_for.hostiles_gone.radius: -1 yards is outside"},
+		{"loot nothing", step(`{"loot_object":{}}`), "legs[0].steps[0].loot_object: needs an entry, a near position, or both"},
+		{"loot expect no entry", step(`{"loot_object":{"entry":1,"expect_item":{"name":"x"}}}`), "legs[0].steps[0].loot_object.expect_item.entry: required"},
+		{"loot bad stand", step(`{"loot_object":{"entry":1,"stand":{"x":0,"y":0}}}`), "legs[0].steps[0].loot_object.stand.z: required"},
+		{"loot and use", step(`{"loot_object":{"entry":1},"use_object":{"entry":1}}`), "has more than one of"},
+		{"use_item no entry", step(`{"use_item":{"name":"x"}}`), "legs[0].steps[0].use_item.entry: required"},
+		{"use_item expect no entry", step(`{"use_item":{"entry":1,"expect_item":{}}}`), "legs[0].steps[0].use_item.expect_item.entry: required"},
+		{"use_item unknown field", step(`{"use_item":{"entry":1,"slot":3}}`), `unknown field "slot"`},
+		{"bad group team", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"team":"orcs","positions":[{"x":0,"y":0,"z":0}]}]}`), `legs[1].pull_groups[0].team: "orcs" is neither "alliance" nor "horde"`},
+		{"bad boss team", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"team":"Horde","position":{"x":0,"y":0,"z":0}}}`), `legs[1].boss.team: "Horde" is neither`},
+		{"boss loot item no entry", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"loot_item":{"name":"x"},"position":{"x":0,"y":0,"z":0}}}`), "legs[1].boss.loot_item.entry: required"},
 		{"timeout", step(`{"wait_for":{"timeout_s":9999,"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for.timeout_s: 9999 s is outside 1-600"},
 	}
 	for _, c := range cases {
@@ -149,5 +159,63 @@ func TestPlanEntranceTrigger(t *testing.T) {
 	p := mustPlan(t, `{"version":1,"name":"x","map":70,"entrance":{"x":1,"y":2,"z":3},"entrance_trigger":286,"legs":[{"to":{"x":1,"y":2,"z":3},"pull_groups":[{"entries":[1],"positions":[{"x":2,"y":2,"z":3}]}]}]}`)
 	if p.EntranceTrigger != 286 {
 		t.Fatalf("%d", p.EntranceTrigger)
+	}
+}
+
+// The steps and fields of the loot, item and team parts read, and Marshal writes them back on the lines a hand-kept plan uses.
+func TestParseLootUseAndTeam(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":1,"y":0,"z":0},
+  "pull_groups":[{"entries":[5],"positions":[{"x":2,"y":0,"z":0}],"team":"horde"}],
+  "steps":[
+   {"loot_object":{"entry":123329,"near":{"x":3,"y":0,"z":0},"stand":{"x":4,"y":0,"z":0},"expect_item":{"entry":7740,"name":"Gni'kiv Medallion"}}},
+   {"use_item":{"entry":7740,"name":"Gni'kiv Medallion","requires_item":{"entry":7741},"expect_item":{"entry":7733}}}],
+  "boss":{"entry":6906,"position":{"x":5,"y":0,"z":0},"first":[6907],"team":"horde","loot_item":{"entry":7741,"name":"The Shaft of Tsol"}}}]}`
+	p, err := Parse("t.json", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := p.Legs[0]
+	lo, ui := l.Steps[0].LootObject, l.Steps[1].UseItem
+	if l.PullGroups[0].Team != TeamHorde || l.Boss.Team != TeamHorde || l.Boss.LootItem.Entry != 7741 || l.Boss.LootItem.Name != "The Shaft of Tsol" ||
+		lo.Entry != 123329 || *lo.Near != (Point{3, 0, 0}) || *lo.Stand != (Point{4, 0, 0}) || lo.ExpectItem.Entry != 7740 ||
+		ui.Entry != 7740 || ui.Name != "Gni'kiv Medallion" || ui.RequiresItem.Entry != 7741 || ui.ExpectItem.Entry != 7733 {
+		t.Fatalf("%+v %+v %+v", l.Boss, lo, ui)
+	}
+	b, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"expect_item": {"entry": 7740, "name": "Gni'kiv Medallion"}`, `"requires_item": {"entry": 7741}`, `"expect_item": {"entry": 7733}`,
+		`"loot_item": {"entry": 7741, "name": "The Shaft of Tsol"}`, `"team": "horde"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("Marshal lacks %s:\n%s", want, b)
+		}
+	}
+	q, err := Parse("t.json", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := Marshal(q)
+	if string(b) != string(b2) {
+		t.Fatalf("not stable:\n%s\n%s", b, b2)
+	}
+}
+
+// after_boss holds the same kinds of steps, is checked like steps and counts as something to do for a leg.
+func TestParseAfterBoss(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":1,"y":0,"z":0},"after_boss":[{"use_item":{"entry":7740}},{"wait_for":{"hostiles_gone":{"radius":5}}}]}]}`
+	p, err := Parse("t.json", []byte(src))
+	if err != nil || len(p.Legs[0].AfterBoss) != 2 || p.Legs[0].AfterBoss[0].UseItem.Entry != 7740 || p.Legs[0].AfterBoss[1].WaitFor == nil {
+		t.Fatalf("%+v %v", p, err)
+	}
+	bad := strings.Replace(src, `{"use_item":{"entry":7740}}`, `{"use_item":{}}`, 1)
+	if _, err := Parse("t.json", []byte(bad)); err == nil || !strings.Contains(err.Error(), "legs[0].after_boss[0].use_item.entry: required") {
+		t.Fatalf("%v", err)
+	}
+	b, _ := Marshal(p)
+	if q, err := Parse("t.json", b); err != nil || len(q.Legs[0].AfterBoss) != 2 {
+		t.Fatalf("%v", err)
 	}
 }

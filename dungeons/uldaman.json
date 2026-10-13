@@ -6,6 +6,7 @@
   "entrance_trigger": 286,
   "notes": [
     "Uldaman (map 70) from the main entrance (areatrigger 286) to Ironaya, the first boss on the way in. Order of the legs follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859): Baelog, Revelosh, Ironaya.",
+    "Honest (non-GM) run, Alliance leader: the Lost Dwarves are friendly, so the baelog leg pulls its packs and loots Baelog's Chest; revelosh kills Revelosh, loots the Shaft of Tsol and makes the Staff of Prehistoria; keystone opens the Keystone with it. A Horde leader also kills Baelog, Eric and Olaf (team: horde). Pass criteria: docs/LIVE-CHECKS.md.",
     "Baelog and Revelosh stand in side rooms: the navmesh route from the entrance to the Keystone leaves the Baelog branch at -250 135 and passes 23 yd from Revelosh. A run that wants the shortest way starts at the leg 'keystone'.",
     "Packs are the spawns of the world database within 8 yd of the route, grouped by tools/dungeongen (12 yd, creature groups). Doors are not on the navmesh: path_to walks through a closed door, so the door steps are not checked by it.",
     "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh."
@@ -88,10 +89,21 @@
       "boss": {
         "entry": 6906,
         "position": {"x": -353, "y": 117.2, "z": -44.4},
-        "first": [6907, 6908]
+        "first": [6907, 6908],
+        "team": "horde"
       },
+      "after_boss": [
+        {
+          "loot_object": {
+            "entry": 123329,
+            "near": {"x": -356, "y": 112.8, "z": -43.2},
+            "expect_item": {"entry": 7740, "name": "Gni'kiv Medallion"}
+          }
+        }
+      ],
       "notes": [
-        "Baelog, Eric 'The Swift' (6907) and Olaf (6908) stand together at the campfire. TortoiseBots PR 859 says Eric and Olaf die with Baelog, but the world database has no script for it (no creature_linking row; their creature_ai events only cast Rushing Charge and Shield Slam, Baelog flees at 15% health), so the leg kills them first (boss.first) and ends with Baelog."
+        "Baelog, Eric 'The Swift' (6907) and Olaf (6908) are the Lost Dwarves: faction 122 (the Ironforge dwarves), npc_flags 2 (questgiver), no script that turns them hostile (world database, Lane C investigation 2026-10-13). They are friendly to the Alliance, so the boss is 'team': 'horde' and an Alliance leader skips it (noted in the report); only a Horde leader kills Eric and Olaf first (boss.first) and Baelog last. TortoiseBots PR 859 says Eric and Olaf die with Baelog, but the world database has no script for it (no creature_linking row; their creature_ai events only cast Rushing Charge and Shield Slam, Baelog flees at 15% health).",
+        "Baelog's Chest (game object 123329, a chest, lock 93, loot 5066: the Gni'kiv Medallion, item 7740, 100%) stands 3-4 yd from Baelog. Anyone may open it, no kill needed, so the last step of the leg, after the boss, is loot_object: the leader casts the Opening spell at it (use_object on a chest does nothing in this core) and takes the Medallion, which the Revelosh leg combines with the Shaft of Tsol into the Staff of Prehistoria. The chest respawns after 7 days: a character that looted it before and still carries the Medallion or the Staff skips the step."
       ]
     },
     {
@@ -115,8 +127,22 @@
       ],
       "boss": {
         "entry": 6910,
-        "position": {"x": -225.6, "y": 161.2, "z": -44.5}
-      }
+        "position": {"x": -225.6, "y": 161.2, "z": -44.5},
+        "loot_item": {"entry": 7741, "name": "The Shaft of Tsol"}
+      },
+      "after_boss": [
+        {
+          "use_item": {
+            "entry": 7740,
+            "name": "Gni'kiv Medallion",
+            "requires_item": {"entry": 7741, "name": "The Shaft of Tsol"},
+            "expect_item": {"entry": 7733, "name": "Staff of Prehistoria"}
+          }
+        }
+      ],
+      "notes": [
+        "Revelosh (6910, faction 59, hostile to both teams) drops The Shaft of Tsol (item 7741, 100%). The leader loots the corpse itself (boss.loot_item): the companions loot their kills too and may take the Shaft first, in which case the leg fails and says so. With the Shaft and the Gni'kiv Medallion from Baelog's Chest in the bags, the after_boss step uses the Medallion: its spell 9594 'Attach Medallion to Shaft' (2 s cast, reagent 7741) makes the Staff of Prehistoria (7733) that the Keystone's lock needs. A leader that carries the Staff already (a GM set it up) passes both."
+      ]
     },
     {
       "name": "keystone",

@@ -385,6 +385,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			return err
 		}
 		a := d.st.Next()
+		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
@@ -421,7 +422,11 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		case ActPull:
 			err = d.doPull(ctx, a)
 		case ActKill:
-			err = d.doKill(ctx, a)
+			err = d.doKillAndLoot(ctx, a)
+		case ActLoot:
+			err = d.doLoot(ctx, a)
+		case ActItem:
+			err = d.doUseItem(ctx, a)
 		default:
 			err = fmt.Errorf("unknown action %q", a.Kind)
 		}

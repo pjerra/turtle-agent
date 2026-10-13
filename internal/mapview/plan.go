@@ -60,15 +60,23 @@ func OverlayFromPlan(p *dungeon.Plan) *Overlay {
 		if l.Boss != nil {
 			o.Bosses = append(o.Bosses, OverlayBoss{Leg: l.Name, Entry: l.Boss.Entry, Pos: pos(l.Boss.Position)})
 		}
-		for _, s := range l.Steps {
-			if u := s.UseObject; u != nil {
-				at := u.Stand
-				if at == nil {
-					at = u.Near
-				}
-				if at != nil {
-					o.Uses = append(o.Uses, OverlayUse{Leg: l.Name, Entry: u.Entry, Pos: pos(*at)})
-				}
+		for _, s := range append(append([]dungeon.Step{}, l.Steps...), l.AfterBoss...) {
+			var ref *dungeon.ObjectRef
+			var stand *dungeon.Point
+			switch {
+			case s.UseObject != nil:
+				ref, stand = &s.UseObject.ObjectRef, s.UseObject.Stand
+			case s.LootObject != nil: // a chest to open is marked like a door to use
+				ref, stand = &s.LootObject.ObjectRef, s.LootObject.Stand
+			default:
+				continue
+			}
+			at := stand
+			if at == nil {
+				at = ref.Near
+			}
+			if at != nil {
+				o.Uses = append(o.Uses, OverlayUse{Leg: l.Name, Entry: ref.Entry, Pos: pos(*at)})
 			}
 		}
 	}
