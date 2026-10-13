@@ -276,10 +276,10 @@ func warriorMelee() *Strategy {
 				return mobInReach(c) && rageNow(c) >= rageDump && ValMeleeMobs.Get(c) >= 2
 			}}, Do: []Next{{"cleave", RelNormal + 1}}},
 			{Trigger: Trigger{Name: "shout_missing_ooc", Active: func(c *Ctx) bool {
-				return c.RestOK && onWarrior(c) && !c.Self.InCombat && ValFight.Get(c).Mob == nil && auraMissing(&c.Self, "Battle Shout")
+				return c.RestOK && onWarrior(c) && !c.Self.InCombat && ValFight.Get(c).Mob == nil && auraMissing(&c.Self, "Battle Shout") && canCast(c, "Battle Shout")
 			}}, Do: []Next{{"battle_shout", RelNormal + 2}}},
 			{Trigger: Trigger{Name: "shout_missing_in_combat", Active: func(c *Ctx) bool {
-				return onWarrior(c) && c.Self.InCombat && auraMissing(&c.Self, "Battle Shout")
+				return onWarrior(c) && c.Self.InCombat && auraMissing(&c.Self, "Battle Shout") && canCast(c, "Battle Shout")
 			}}, Do: []Next{{"battle_shout", RelNormal - 2}}},
 			{Trigger: Trigger{Name: "fight_start_low_rage", Active: func(c *Ctx) bool {
 				m := fightMob(c)

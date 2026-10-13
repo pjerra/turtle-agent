@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -128,8 +129,10 @@ type memory struct {
 	failSeen    uint64
 	settleUntil time.Time
 	faceUntil   time.Time
-	fightStart  time.Time // the fight began (the first mob to fight after a quiet spell)
-	lastMob     time.Time // a mob to fight was last seen
+	walkErrAt   map[string]time.Time // walk failures of missing navmesh data, and when each was last said
+	unknownAt   map[string]time.Time // actions whose spell the spellbook lacks, and when that was last said (unknownEvery)
+	fightStart  time.Time            // the fight began (the first mob to fight after a quiet spell)
+	lastMob     time.Time            // a mob to fight was last seen
 	ticks       uint64
 	acted       uint64
 	recent      []Decision
@@ -345,6 +348,7 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 		return nil
 	}
 	b.observeFailures(c)
+	b.observeSwing(c)
 	for _, s := range b.strategies {
 		if s.Before != nil {
 			s.Before(c)
@@ -491,6 +495,9 @@ var holdFor = map[string]time.Duration{
 
 const defaultHold = time.Second
 
+// selfBadTargetsHold is how long a cast at the player itself stays off after the server named its target wrong.
+const selfBadTargetsHold = 10 * time.Second
+
 // observeFailures reads the newest refused cast off the spell state and holds that spell back for a moment, so the
 // brain does not repeat a cast the server just refused (out of range, no power, no line of sight, not ready).
 func (b *Brain) observeFailures(c *Ctx) {
@@ -506,6 +513,16 @@ func (b *Brain) observeFailures(c *Ctx) {
 	d, ok := holdFor[f.ReasonName]
 	if !ok {
 		d = defaultHold
+	}
+	if f.ReasonName == "bad_targets" {
+		// A refusal of the target for a cast at the player itself is a wrong target, not a moment's matter: it will be the same next
+		// time, so the cast stays off for long.
+		b.mem.mu.Lock()
+		last := b.mem.lastCastTarget
+		b.mem.mu.Unlock()
+		if last == c.Self.GUID {
+			d = selfBadTargetsHold
+		}
 	}
 	b.mem.hold(f.SpellID, c.Now.Add(d), f.ReasonName)
 	if f.ReasonName == "line_of_sight" {
@@ -529,15 +546,41 @@ func (b *Brain) observeFailures(c *Ctx) {
 
 // walkFailed reports a step of the player that the game refused: the action is held back for ErrorHold and the failure shows as an
 // error decision. It runs on the step's goroutine, a moment after the action that started the step was recorded as ok.
+//
+// A walk that fails because the navmesh data is not there (the folder lacks the map's file or tiles) will fail the same way every time:
+// the action is held back for navMissingHold instead, and the error is said once per navMissingHold, not at every try.
 func (b *Brain) walkFailed(action string, err error) {
 	now := b.cfg.Now()
-	if action != "" {
-		b.mem.holdAction(action, now.Add(b.cfg.ErrorHold), "error")
+	hold := b.cfg.ErrorHold
+	var missing interface{ Unavailable() bool }
+	if errors.As(err, &missing) && missing.Unavailable() {
+		hold = navMissingHold
+		b.mem.mu.Lock()
+		at, said := b.mem.walkErrAt[err.Error()]
+		if !said || now.Sub(at) >= navMissingHold {
+			if b.mem.walkErrAt == nil {
+				b.mem.walkErrAt = map[string]time.Time{}
+			}
+			b.mem.walkErrAt[err.Error()] = now
+			said = false
+		}
+		b.mem.mu.Unlock()
+		if action != "" {
+			b.mem.holdAction(action, now.Add(hold), "navmesh_missing")
+		}
+		if said {
+			return
+		}
+	} else if action != "" {
+		b.mem.holdAction(action, now.Add(hold), "error")
 	}
 	d := Decision{Trigger: "walk", Action: action, Result: ResultError, Error: err.Error(), at: now}
 	b.record(d)
 	b.emitDecision(d)
 }
+
+// navMissingHold is how long a walk that failed for lack of navmesh data stays off, and how seldom the failure is reported again.
+const navMissingHold = 5 * time.Minute
 
 // possible reports whether a can run now, and when it cannot, why.
 func (b *Brain) possible(c *Ctx, a *Action) (bool, string) {
@@ -611,14 +654,12 @@ func castable(c *Ctx, a *Action, m *memory) (bool, string) {
 	return true, ""
 }
 
-// Affordable reports whether the player holds the cost of a spell in the power it is paid in. A cost given as a
-// percent of the base mana is taken of the maximum mana, which is a little more than the base: the server's
-// refusal (no_power) backs the spell off when that is too high.
+// Affordable reports whether the player holds the cost of a spell in the power it is paid in. A cost given as a percent is taken of
+// the base mana (the base health for a spell paid in health), as the core does (Spell::CalculateManaCost): the update fields have it
+// (Unit.BaseMana); a game that does not show it falls back to the maximum pool, a little more than the base, and the server's refusal
+// (no_power) backs the spell off when that is too high.
 func Affordable(c *Ctx, m spells.Meta) bool {
-	cost := m.Cost
-	if cost == 0 && m.CostPct > 0 {
-		cost = m.CostPct * c.Self.MaxPower / 100
-	}
+	cost := spellCostOf(c, m)
 	if cost == 0 {
 		return true
 	}
@@ -629,4 +670,21 @@ func Affordable(c *Ctx, m spells.Meta) bool {
 		return false
 	}
 	return int8(c.Self.PowerType) == m.Power && c.Self.Power >= cost
+}
+
+// spellCostOf is what the core takes for the spell now: the flat cost plus the percent cost of the base mana or base health (of the
+// maximum pool for rage, focus and energy).
+func spellCostOf(c *Ctx, m spells.Meta) uint32 {
+	cost := m.Cost
+	if m.CostPct > 0 {
+		base := c.Self.MaxPower
+		switch {
+		case m.Power == spells.PowerHealth && c.Self.BaseHealth > 0:
+			base = c.Self.BaseHealth
+		case m.Power == spells.PowerMana && c.Self.BaseMana > 0:
+			base = c.Self.BaseMana
+		}
+		cost += m.CostPct * base / 100
+	}
+	return cost
 }

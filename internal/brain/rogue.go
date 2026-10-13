@@ -81,7 +81,10 @@ func rogueCombat() *Strategy {
 			swingAction("auto_attack", fightMob),
 			meleeAction("sinister_strike", "Sinister Strike", ThreatSingle, nil, func(c *Ctx) bool { return comboOnMob(c) < comboMax }),
 			meleeAction("eviscerate", "Eviscerate", ThreatSingle, nil, finisherDue),
-			selfAction("slice_and_dice", "Slice and Dice", nil, sndDue, nil),
+			// Slice and Dice is a buff on the rogue, but the core's spell asks for a selected enemy (effect 1 targets TARGET_UNIT_ENEMY, the combo
+			// points sit on that mob) and the aura goes on the caster by the second effect: it is cast at the mob, not at the rogue itself
+			// (the server refuses a cast at the own guid with bad_targets).
+			{Name: "slice_and_dice", Spell: "Slice and Dice", Target: fightTarget, Useful: sndDue},
 			selfAction("evasion", "Evasion", nil, meleeMob, func(c *Ctx) bool { return !HasAura(&c.Self, "Evasion") }),
 			// Vanish drops the rogue out of combat and threat (a threat wipe, so the mob goes back to the tank) and leaves it stealthed; the next
 			// swing or Sinister Strike breaks the stealth, so there is no opener to follow it up with: it is the emergency's last resort, not a rotation.

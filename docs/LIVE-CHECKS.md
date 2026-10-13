@@ -572,3 +572,19 @@ Opening spell at it (`SpellEffects.cpp:1915-1988`), which sends the loot window 
 4. **The run, Horde leader** (an orc or troll): the baelog leg kills Eric and Olaf and then Baelog (hostile to the Horde, faction 122), then loots the chest. Pass criterion of the old
    run, "Baelog+Eric+Olaf dead", holds for the Horde only; the Alliance's is "loots Baelog's Chest". Check that the chest is not opened before the three are dead (it is an `after_boss` step).
 5. **Team from the race.** The skip notes name the leader's team: they are the evidence that the race was read from the player's `UNIT_FIELD_BYTES_0`. A leader whose race stayed 0 runs everything (no note), and an Alliance leader then walks into Baelog's camp: look for that.
+
+## Bot brain: fixes from the live class smoke test (issue #80, PR "Bot brain: fixes from the live class smoke test")
+
+Built and tested against the scripted fake game; the symptoms come from the 2026-10-13 live run of all presets at level 40 (Tanaris, `~/TortoiseBots-audit/tests/live-classes/REPORT.md`).
+Run again with a level 40 character of each class that has its spells (`.learn all_trainer`, `.maxskill` on yourself) and read `brain_decision`:
+
+1. **Swing.** `brain_start {"strategies":["arms_warrior"]}`, stand with the back to a mob 1 to 10 yd away and `attack`. Expect `attack_error` `bad_facing` once,
+   then `face_target` (trigger `swing_refused_facing`) within a tick, then Mortal Strike, Rend and the rest; `auto_attack` appears once, not every 200 ms (count `attack_start` and
+   the `auto_attack` decisions over 60 s: at most one per 3 s while the swing is not on). The same with `combat_rogue`, `marksman_hunter` (`hunter_swing`) next to a mob, `feral_cat_druid`, `ret_paladin`, `enhancement_shaman`.
+   Also: `brain_start` after `attack` was sent by hand, with the swing already on: no `auto_attack` decision at all.
+2. **Slice and Dice.** `combat_rogue` with 2 or more combo points: the `slice_and_dice` decision has the mob as `target_guid`, no `spell_fail` `bad_targets`, the Slice and Dice aura appears on the rogue.
+   If the server still refuses it, record the `SpellCastResult` and the cast packet's target flags.
+3. **Hunter pet.** With a pet out, `marksman_hunter` behind a tank: `pet_attack` runs within about 3 s of the tank holding the mob (2 s opening delay), also while a cast is in progress; no `vetoed:busy` for it.
+4. **Noise.** No `healthstone not_possible condition` without a healthstone, no `battle_shout ... no_power` at 0 rage, `unknown_spell` for a missing talent spell at most once per 5 min.
+5. **Warlock.** `affliction_warlock` with the natural mana pool (and once with `.modify mana`): Summon Voidwalker (100% of the base mana) is not refused with `no_power`; `unit` shows `base_mana`.
+6. **Missing mmaps.** Remove map 001 from `mmaps_dir` and fight in Kalimdor: `melee_reposition` reports the missing `001.mmap` once, then not for 5 min. `mmaps_dir` must hold every map you play on.

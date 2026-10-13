@@ -859,7 +859,9 @@ flat cost against the power held; absent for a cost in percent of base mana).
 login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_target`. `status` and the player's own
 `unit` row carry `combo_points`, `combo_target` and `gcd_ms` too. A unit that plays on another power than mana (a druid in Cat Form: energy,
 in Bear Form: rage) shows that power in `power`/`max_power`; its mana pool is in `mana`/`max_mana` (`UNIT_FIELD_POWER1`, left out when
-the unit plays on mana or has none).
+the unit plays on mana or has none). `base_mana` and `base_health` are `UNIT_FIELD_BASE_MANA` and `UNIT_FIELD_BASE_HEALTH` (left out when
+0): the core takes a spell's percent cost of these, not of the maximum pool (`Spell::CalculateManaCost`), and the brain does the same, so
+Summon Voidwalker (100%) is affordable at a few hundred mana whatever the maximum is.
 
 | Event | `source` / data |
 | --- | --- |
@@ -938,11 +940,14 @@ Another class is a new strategy and a preset line (`internal/brain/mage.go` is t
 member), and `why` or `error`. An action that ran is always logged; a refused or vetoed top candidate once, then again after 3 s
 if it persists. `brain_idle` (`data.reason`: `no_trigger`, `vetoed:<multiplier>`, `not_possible:<action>:<why>`,
 `not_useful:<action>`, `not_ready`, `dead`) when a tick did nothing, at most once per reason per 10 s. `brain_state` on start
-and stop (`data.state`, `strategies`, `role`).
+and stop (`data.state`, `strategies`, `role`). A rule whose action can never run is not reported at every try: an action whose spell is not
+in the spellbook (a talent the character never took: Stormstrike, Death Coil, Seal of Command) is mentioned as `not_possible ... unknown_spell`
+once per 5 min and is never cast; the healthstone and health potion rules are active only while the bags hold one; Battle Shout is asked for
+only while the rage pays for it.
 
 **Back-off.** A refused cast (`last_failure.reason_name`) holds its spell back for a moment so the brain does not spam it:
 `out_of_range` 1.5 s, `too_close` 1 s, `no_power` 2 s, `line_of_sight` 3 s, `not_ready` 0.5 s, `not_infront` 0.4 s (and the brain turns
-to face the target first), `interrupted` 0.3 s, `moving` 0.5 s, `immune` 5 s, any other reason 1 s. A failed game call holds the
+to face the target first), `interrupted` 0.3 s, `moving` 0.5 s, `immune` 5 s, any other reason 1 s. `bad_targets` of a cast aimed at the player itself holds 10 s (a wrong target stays wrong). A failed game call holds the
 action for 1 s. The holds are in `brain_status.holds`.
 
 **Threat.** The mod-playerbots threat multiplier reads the server's threat list, which a 1.12 client does not have. The brain's
@@ -1079,8 +1084,15 @@ tank in Defensive Stance has Shield Bash only (it needs a shield: the server's r
 **Melee** (`melee_position`; the swing is in `warrior_melee`). The melee strategies share:
 - **Auto attack** (`auto_attack`, relevance 19): `target` the fight's mob and `attack` when the mob is within 8 yd and the swing is not on
   it already. The swing is read off the event log (`attack_start`/`attack_stop`, through the optional `brain.Melee` half of the game,
-  like Sight); a game without it remembers its last order and repeats it every 6 s (the server ignores an attack order on a unit
-  already attacked). It waits out the opening delay like every attack of a damage dealer.
+  like Sight; the first look also reads an attack that began before it); a game without it remembers its last order and repeats it every
+  6 s (the server ignores an attack order on a unit already attacked). The order is **never sent twice within 3 s**, whatever the game
+  shows: auto attack is a toggle the server keeps on, and an order repeated every tick shut out `face_target` and every ability (a
+  live warrior sent 1015 in 205 s). The same holds for `hunter_swing` and the druid's, paladin's, shaman's and rogue's swing. It waits out
+  the opening delay like every attack of a damage dealer.
+- **A swing the server refused for facing** (`attack_error` `bad_facing`, read through the optional `brain.SwingWatcher` half of the
+  game; the session counts the refusals in its event log): the swing is not ordered again, and the rule `swing_refused_facing`
+  (relevance 19.5, above the swing) runs `face_target` at once, for 3 s or until the player faces the mob. The server resumes the
+  auto attack by itself once the player faces the mob.
 - **Positioning** (`melee_reposition`, relevance 30): a damage dealer stays within 6 yd (2D) of the fight's mob and **out of its front**
   (the 90 degree cone it faces: its cleave, breath, tail swipe). When one of these is wrong and no mob is on the player, the brain looks for the
   nearest spot on rings of 3.2, 4 and 4.6 yd round the mob that is **behind it** (at least 100 degrees round from the way it faces), has sight of
@@ -1233,7 +1245,7 @@ It stands behind the mob like the warrior.
 | Ability (relevance) | When |
 | :--- | :--- |
 | Auto attack (19) | a mob within 8 yd, not swinging at it yet |
-| Slice and Dice (18) | 2 or more combo points on the mob, the mob above 40% health, and the buff missing or with under 1.5 s left (when the server says how long) |
+| Slice and Dice (18) | 2 or more combo points on the mob, the mob above 40% health, and the buff missing or with under 1.5 s left (when the server says how long). **Cast at the mob that holds the combo points**, not at the rogue: the core's spell has an explicit enemy target (effect 1 `TARGET_UNIT_ENEMY`, the finisher needs its combo target) and the aura goes on the caster by the second effect; a cast at the rogue's own guid is refused with `bad_targets` |
 | Eviscerate (17) | 5 combo points, or 4 when the mob is at 35% or less. The points count only when they are on the fight's mob (`combo_target`) |
 | Sinister Strike (15) | the builder, below 5 points (it does not overshoot) |
 | Kick (40, `class_interrupt`) | a heal, crowd-control or damage cast within 5 yd |
@@ -1348,7 +1360,7 @@ quiet). All of its orders cost no cast and no global cooldown.
 
 | Rule (relevance) | When |
 | :--- | :--- |
-| Attack (20) | the pet is out, alive, not told to stay, and the fight's mob is in combat and **held**: it attacks the tank (the fight's tank), the player or the pet, or no tank is in the fight. The damage dealer's opening delay (2 s) holds the order like it holds the spells, so the pet never goes in before the tank has the mob, and a mob that is not in combat is never ordered at: **the pet does not pull**. One order per mob (the pet's own target shows it, and the order is not repeated within 2.5 s) |
+| Attack (20) | the pet is out, alive, not told to stay, and the fight's mob is in combat and **held**: it attacks the tank (the fight's tank), the player or the pet, or no tank is in the fight. The damage dealer's opening delay (2 s, counted from the start of the fight) holds the order like it holds the spells, so the pet never goes in before the tank has the mob, and a mob that is not in combat is never ordered at: **the pet does not pull**. One order per mob (the pet's own target shows it, and the order is not repeated within 2.5 s). A pet order is no cast: the `busy` veto (a cast in progress, the settle after one) and the wait for a walk do not hold it (`Action.Free`), so it goes out within a tick of the opening delay's end (a live hunter's order was vetoed `busy` through its fights) |
 | Recall: `follow` (16) | the fight is over (no mob to fight, the player out of combat) and the pet still has a target. Not repeated within 3 s. A pet told to `stay` is left where it is: an explicit order beats automation |
 | Recall: `follow` (32) | the leader is fleeing: moving in combat with the fight's mob (or the one the pet chases) more than 40 yd off. While that holds no attack order goes out either, so the pet is not sent back in; it is sent again once the leader stops. A hurt leader with a mob on it is not fleeing: the pet stays on that mob |
 | Defensive (13) | in a group, a pet on `aggressive` is put on `defensive`, once per pet (a player who sets it back is not fought). A pet on `passive` or `defensive` is not touched, and a solo player's pet keeps its setting |
@@ -1734,7 +1746,10 @@ wow-play-harness tile cache folder (one subfolder per server) works as it is. Ti
 tiles (a dungeon) loads whole, a bigger one the tiles round the start and the goal, one tile wider, and three wider
 when that gives no complete path. At most 64 tiles stay loaded per map: a box that would hold more keeps the tiles
 nearest the straight line from start to goal, and the least recently used tiles are unloaded first. Tiles copied in
-later are picked up on the next call. A map image's background (see [Map images](#map-images)) reads its tiles into a
+later are picked up on the next call. **`mmaps_dir` must hold every map you play on** (Kalimdor is map 1, the eastern kingdoms 0): a
+map without its `.mmap` or tiles fails with a `DataMissingError` (`errors.As`). The bot brain's walks tell it from other failures: the
+action that walked (`melee_reposition`, `heal_reposition`...) stays off for 5 min and the error is reported once per 5 min, not at every
+tick. A map image's background (see [Map images](#map-images)) reads its tiles into a
 planner of its own, so drawing an image unloads none of these.
 
 **Engine.** The planner is the core's own Detour (recastnavigation, as vendored by

@@ -444,3 +444,29 @@ func TestSessionMeleeWatchReadsTheEventLog(t *testing.T) {
 		t.Fatalf("swinging at %x after the stop", g.Swinging())
 	}
 }
+
+// An auto attack that began before the brain looked first (an attack order by RPC, a fight pulled before brain_start) is on: the server
+// announces it once, so the first look must find it in the log. Without it the brain saw an idle swing and ordered it every tick (the
+// live class smoke test: 1015 orders in 205 s). The refusals of a swing are counted from the first look on.
+func TestSessionMeleeWatchFindsTheSwingThatBeganBeforeTheFirstLook(t *testing.T) {
+	r := newRig(t)
+	g := &sessionBrainGame{cur: func() *session.Session { return r.s }}
+	const mob, other packet.GUID = 0xF13000012B000001, 0xF13000012B000002
+	self := r.s.Status().GUID
+	log := r.s.Log()
+	log.Append(events.Event{Kind: events.KindAttackStart, SourceGUID: self, TargetGUID: other})
+	log.Append(events.Event{Kind: events.KindAttackStop, SourceGUID: self, TargetGUID: other})
+	log.Append(events.Event{Kind: events.KindAttackStart, SourceGUID: self, TargetGUID: mob})
+	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "bad_facing"}}) // before the first look: not counted
+	if g.Swinging() != mob {
+		t.Fatalf("swinging at %x, want the mob", g.Swinging())
+	}
+	if n, _ := g.SwingErrors(); n != 0 {
+		t.Fatalf("%d refusals from before the first look", n)
+	}
+	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "bad_facing"}})
+	log.Append(events.Event{Kind: events.KindAttackError, Data: map[string]any{"reason": "not_in_range"}})
+	if n, last := g.SwingErrors(); n != 2 || last != "not_in_range" {
+		t.Fatalf("%d refusals, last %q", n, last)
+	}
+}

@@ -3,6 +3,7 @@
 package navmesh
 
 import (
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -472,5 +473,17 @@ func TestScratchPolygonsLeaveTheLivePlannerAlone(t *testing.T) {
 	}
 	if fl, err := live.Floors(fixtureMap, -588, 12, -50, 50); err != nil || fl != nil {
 		t.Fatalf("the draw cleared the live planner's missing tile: %v %v", fl, err)
+	}
+}
+
+// A folder without the map's files is a standing condition, not a moment's failure: callers that retry every tick tell it from other
+// errors by the DataMissingError.
+func TestMissingMapFileIsDataMissing(t *testing.T) {
+	p := NewPlanner(t.TempDir())
+	defer p.Close()
+	_, err := p.Plan(1, Vec3{0, 0, 0}, Vec3{10, 10, 0})
+	var dm *DataMissingError
+	if !errors.As(err, &dm) || !dm.Unavailable() {
+		t.Fatalf("%v", err)
 	}
 }

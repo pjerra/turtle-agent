@@ -288,7 +288,7 @@ func petStrategy(name string) *Strategy {
 	return &Strategy{
 		Name: name,
 		Actions: []*Action{
-			{Name: "pet_attack", Harmful: true, Target: petMobGUID,
+			{Name: "pet_attack", Harmful: true, Free: true, Target: petMobGUID,
 				Possible: func(c *Ctx) bool { return petMob(c) != nil },
 				Useful: func(c *Ctx) bool {
 					m, p := petMob(c), ValPet.Get(c)
@@ -306,7 +306,7 @@ func petStrategy(name string) *Strategy {
 					setKey(c, keyPetAttack, petAttackHold, guidStr(m.GUID))
 					return c.G.(PetGame).PetAttack(ctx, m.GUID)
 				}},
-			{Name: "pet_recall", Target: func(c *Ctx) packet.GUID {
+			{Name: "pet_recall", Free: true, Target: func(c *Ctx) packet.GUID {
 				if p := ValPet.Get(c); p != nil {
 					return p.GUID
 				}
@@ -318,7 +318,7 @@ func petStrategy(name string) *Strategy {
 					setKey(c, keyPetRecall, petRecallHold, petRecallWhy(c))
 					return c.G.(PetGame).PetFollow(ctx)
 				}},
-			{Name: "pet_defensive",
+			{Name: "pet_defensive", Free: true,
 				Possible: func(c *Ctx) bool {
 					p := petUsable(c)
 					return p != nil && p.BarKnown && p.React == "aggressive" && groupedWithOthers(c) && !petOnceHeld(c, "defensive", p.GUID, 0)
@@ -331,7 +331,7 @@ func petStrategy(name string) *Strategy {
 					setKey(c, onceKey("defensive", p.GUID, 0), petOnce, "set")
 					return c.G.(PetGame).PetReact(ctx, "defensive")
 				}},
-			{Name: "pet_taunt_off",
+			{Name: "pet_taunt_off", Free: true,
 				Possible: func(c *Ctx) bool { _, ok := petTauntOn(c); return ok },
 				Do: func(ctx context.Context, c *Ctx) error {
 					sp, ok := petTauntOn(c)
