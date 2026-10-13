@@ -288,3 +288,33 @@ hired party of a tank, a healer and two damage dealers; set up by hand (stand at
    the session only, so expect nothing new.
 
 Report the first thing that did not match this list, with the `dungeon_leader` events and the `status`/`death_status` rows around it.
+
+## Bot brain: roles and the warrior (issue #80 step 3c)
+
+Tested against a scripted fake game only. Not seen live: that the warrior's stance shows as an aura under the stance's name
+(`Battle Stance`, `Defensive Stance`, `Berserker Stance`), that rage arrives in the unit rows in tenths, that `SMSG_ATTACKERSTATEUPDATE` reaches the log with the
+outcome `dodge`, that the server accepts Heroic Strike queued by a `cast`, and how the melee spot behind a mob holds up with real
+mob movement. Run a warrior (a level 30+ character with Berserker Stance and Mortal Strike or Bloodthirst, ideally level 40+) in a dungeon with a tank bot
+and a healer, `mmaps_dir` set, and start it by hand with `brain_start {"strategies":["arms_warrior"],"tank":"<tank name>"}` (or
+`fury_warrior`); a dungeon run starts the brain with `no_move`, so check the positioning by hand:
+
+1. **Stance.** Out of combat, in the wrong stance: one `stance_arms` (or `stance_fury`) `brain_decision` casting 2457 (2458), and `units` for the
+   leader shows the stance aura within a second. If it casts again every 2 s, the aura name does not match: report the aura's `name`.
+   In combat with over 25 rage no stance change happens.
+2. **Opening.** At a pull, `brain_idle` `vetoed:opening_delay` for about 2 s, then `auto_attack` (the log shows `attack_start` with the leader as source)
+   and the rotation: Arms `mortal_strike`, `rend`, `overpower` after a `melee` event with `outcome dodge` on the mob (and not otherwise), `execute` below 20% health,
+   `heroic_strike` with spare rage (not twice within 1.5 s); Fury `bloodthirst`, `whirlwind`, `heroic_strike`. Rage use: no `spell_fail` `no_power`
+   repeating (each is a back-off in `brain_status.holds`).
+3. **Positioning.** A mob that faces the leader (the tank holds it): `melee_reposition` once, then the leader stands within 6 yd and behind
+   the mob (compare the mob's `o` with the way to the leader: at least 100 degrees round). No walk when the mob is on the leader. Note a
+   `spell_fail`/`attack_error` `bad_facing`/`not_in_range` after the walk.
+4. **Gap closers.** The leader 10 to 20 yd from the tank's mob when the fight starts: Arms `charge` after the opening delay (out of combat,
+   Battle Stance), no walk before it; Fury `intercept` when in combat. Never a Charge into a mob the tank does not hold.
+5. **Interrupts.** Fury: `interrupt` with Pummel on a heal or a crowd-control cast within 5 yd; Arms with a shield: Shield Bash; Arms without: none.
+6. **Berserker Rage** (Fury) when feared: one `berserker_rage`, the fear ends. Note whether the server allows the cast while feared.
+7. **Tank.** `brain_start {"strategies":["tank_warrior"]}` in Defensive Stance with a shield: `sunder` to 5 stacks, `revenge` after a dodge or parry,
+   `thunder_clap` and `demoralizing_shout` with 2+ mobs, `taunt` when a mob attacks the healer (note the range: Taunt reaches 5 yd and the tank walks
+   to the mob), `melee_reposition` once when the mob faces the group, `shield_block` when hurt. Report `brain_idle` reasons that
+   repeat.
+8. **Healer.** `brain_start {"strategies":["role_healer"]}` and `{"role":"healer",...}` are refused with `not implemented yet`.
+

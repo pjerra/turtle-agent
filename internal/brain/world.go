@@ -224,6 +224,9 @@ type spotSpec struct {
 	extra  func(p Vec3) bool
 	// others are the mobs the spot must keep away from besides target (nil: every hostile mob in view).
 	others bool
+	// keepAway and busyAway override mobKeepAway and mobBusyAway (0: the default). A negative busyAway lets the spot be anywhere
+	// near mobs that are fighting, as a melee fighter's is.
+	keepAway, busyAway float64
 }
 
 // findSpot searches for a standing spot. It asks the mesh at most spotChecks times.
@@ -258,7 +261,7 @@ func findSpot(c *Ctx, sp spotSpec) (Vec3, bool) {
 		if checked >= spotChecks {
 			break
 		}
-		if !spotSafe(c, cd.p, sp.target) || (sp.extra != nil && !sp.extra(cd.p)) {
+		if !spotSafeAway(c, cd.p, sp.target, sp.keepAway, sp.busyAway) || (sp.extra != nil && !sp.extra(cd.p)) {
 			continue
 		}
 		checked++
@@ -280,16 +283,23 @@ func findSpot(c *Ctx, sp spotSpec) (Vec3, bool) {
 	return Vec3{}, false
 }
 
-// spotSafe keeps a candidate away from mobs that are not the target: from sleeping ones so that standing there does not pull
-// them, from fighting ones so that standing there is not in their way.
-func spotSafe(c *Ctx, p Vec3, target *objects.Unit) bool {
+// spotSafeAway keeps a candidate away from mobs that are not the target: from sleeping ones (keep yards; 0: mobKeepAway) so that
+// standing there does not pull them, from fighting ones (busy yards; 0: mobBusyAway, below 0: no limit) so that standing there is
+// not in their way.
+func spotSafeAway(c *Ctx, p Vec3, target *objects.Unit, keep, busy float64) bool {
+	if keep <= 0 {
+		keep = mobKeepAway
+	}
+	if busy == 0 {
+		busy = mobBusyAway
+	}
 	for i := range c.Units {
 		u := &c.Units[i]
 		if !hostileMob(u) || u.Distance < 0 || (target != nil && u.GUID == target.GUID) {
 			continue
 		}
 		d := dist2(p, unitPos(u))
-		if (!u.InCombat && d < mobKeepAway) || (u.InCombat && d < mobBusyAway) {
+		if (!u.InCombat && d < keep) || (u.InCombat && d < busy) {
 			return false
 		}
 	}

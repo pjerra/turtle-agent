@@ -36,6 +36,9 @@ var (
 	}
 )
 
+// aliases are other names of strategies: role_dps is combat_dps under the name of its role (see roles.go).
+var aliases = map[string]string{}
+
 // Strategies lists the names brain_start accepts: presets, then strategies.
 func Strategies() (presetNames, strategyNames []string) {
 	for n := range presets {
@@ -45,6 +48,9 @@ func Strategies() (presetNames, strategyNames []string) {
 		if n != "base" {
 			strategyNames = append(strategyNames, n)
 		}
+	}
+	for n := range aliases {
+		strategyNames = append(strategyNames, n)
 	}
 	sort.Strings(presetNames)
 	sort.Strings(strategyNames)
@@ -56,6 +62,9 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 	var flat []string
 	for _, w := range want {
 		w = strings.ToLower(strings.TrimSpace(w))
+		if a, ok := aliases[w]; ok {
+			w = a
+		}
 		if p, ok := presets[w]; ok {
 			flat = append(flat, p...)
 		} else {
@@ -80,6 +89,11 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 		out = append(out, mk())
 		names = append(names, n)
 	}
+	// The strategies must make a brain: no stub among them, and one role at most (so that dungeon_run's brain option is refused up
+	// front, not at the first rest gate).
+	if _, err := resolveRole("", out, names); err != nil {
+		return nil, nil, err
+	}
 	return out, names, nil
 }
 
@@ -89,7 +103,7 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 type Fight struct {
 	Mob    *objects.Unit
 	Tank   *objects.Unit
-	Source string        // "tank" (the tank's target), "self" (a mob that attacks the player) or "selected"
+	Source string        // "tank" (the tank's target), "self" (a mob that attacks the player), "selected", or "loose" (a tanking player's add)
 	Since  time.Duration // how long a mob has been there to fight, 0 when none
 }
 
@@ -117,9 +131,14 @@ func hostileMob(u *objects.Unit) bool { return u != nil && u.Type != "player" &&
 // when it is in combat. It also keeps the fight's clock for the opening delay.
 var ValFight = &Value[Fight]{Name: "fight", Calc: func(c *Ctx) Fight {
 	f := Fight{}
+	tankRole := c.P.Role == RoleTank
+	if tankRole { // the player holds the mobs: a loose add, then a mob on the player (roles.go)
+		f.Tank = &c.Self
+		f.Mob, f.Source = tankMob(c)
+	}
 	var tanks []*objects.Unit
 	for _, m := range c.Party {
-		if !m.Online || m.Dead {
+		if tankRole || !m.Online || m.Dead {
 			continue
 		}
 		u, ok := c.Unit(m.GUID)
@@ -283,6 +302,7 @@ func baseStrategy() *Strategy {
 func combatDPS() *Strategy {
 	return &Strategy{
 		Name: "combat_dps",
+		Role: RoleDPS,
 		// The fight's clock must run every tick, also while no rule asks for the fight.
 		Before: func(c *Ctx) { ValFight.Get(c) },
 		Mult: []Multiplier{
@@ -318,27 +338,33 @@ func combatDPS() *Strategy {
 				return 1
 			}},
 		},
-		Actions: []*Action{{
-			Name: "face_target", Target: fightTarget,
-			Possible: func(c *Ctx) bool {
-				c.mem.mu.Lock()
-				defer c.mem.mu.Unlock()
-				return c.Now.Before(c.mem.faceUntil)
-			},
-			Useful: func(c *Ctx) bool {
-				m := ValFight.Get(c).Mob
-				return m != nil && math.Abs(angleDiff(c.Self.O, game.Facing(c.Self.X, c.Self.Y, m.X, m.Y))) > ConeHalfAngle/2
-			},
-			Do: func(ctx context.Context, c *Ctx) error {
-				m := ValFight.Get(c).Mob
-				if m == nil {
-					return nil
-				}
-				c.mem.mu.Lock()
-				c.mem.faceUntil = time.Time{}
-				c.mem.mu.Unlock()
-				return c.G.Face(ctx, m.GUID)
-			},
-		}},
+		Actions: []*Action{faceTargetAction()},
+	}
+}
+
+// faceTargetAction turns the player to the fight's mob after the server said it was not in front. Both the damage dealer's and the
+// tank's discipline use it as a prerequisite of their attacks.
+func faceTargetAction() *Action {
+	return &Action{
+		Name: "face_target", Target: fightTarget,
+		Possible: func(c *Ctx) bool {
+			c.mem.mu.Lock()
+			defer c.mem.mu.Unlock()
+			return c.Now.Before(c.mem.faceUntil)
+		},
+		Useful: func(c *Ctx) bool {
+			m := ValFight.Get(c).Mob
+			return m != nil && math.Abs(angleDiff(c.Self.O, game.Facing(c.Self.X, c.Self.Y, m.X, m.Y))) > ConeHalfAngle/2
+		},
+		Do: func(ctx context.Context, c *Ctx) error {
+			m := ValFight.Get(c).Mob
+			if m == nil {
+				return nil
+			}
+			c.mem.mu.Lock()
+			c.mem.faceUntil = time.Time{}
+			c.mem.mu.Unlock()
+			return c.G.Face(ctx, m.GUID)
+		},
 	}
 }

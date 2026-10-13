@@ -138,7 +138,7 @@ func combatConsumables() *Strategy {
 					return nil
 				}},
 			{Name: "mana_potion", Settle: itemGroupCooldown,
-				Possible: func(c *Ctx) bool { return onSelf(c) && hasItems(c, manaPotions) },
+				Possible: func(c *Ctx) bool { return onSelf(c) && c.Class().ManaPotions && hasItems(c, manaPotions) },
 				Do:       useBest(manaPotions, "mana potion")},
 		},
 		Rules: []Rule{

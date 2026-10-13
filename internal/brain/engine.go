@@ -74,7 +74,21 @@ type Action struct {
 	// aura after a drink); casts settle for Config.Settle instead.
 	Settle   time.Duration
 	Pre, Alt []string
+	// Resolve finds the spell when it depends on the player (its class's interrupt, the stance it wants); it replaces Spell. false:
+	// there is none to cast now.
+	Resolve func(*Ctx) (uint32, bool)
 }
+
+// spell is the spell id a cast action casts now: Resolve's answer, else the highest known rank of Spell.
+func (a *Action) spell(c *Ctx) (uint32, bool) {
+	if a.Resolve != nil {
+		return a.Resolve(c)
+	}
+	return c.Spells.Highest(a.Spell)
+}
+
+// isCast reports whether the action is a cast (it names a spell or a way to find one).
+func (a *Action) isCast() bool { return a.Spell != "" || a.Resolve != nil }
 
 // Trigger is a named condition on the agent's state.
 type Trigger struct {
@@ -112,6 +126,11 @@ type Strategy struct {
 	Actions []*Action
 	// Before runs at the start of every tick, for state that must be followed continuously.
 	Before func(*Ctx)
+	// Role is the role the strategy plays ("dps", "tank" or "healer"); empty for a strategy that serves any role (buffs, upkeep,
+	// positioning). Params.Role is checked against the roles of the active strategies.
+	Role string
+	// NotImplemented, when set, keeps the strategy from running: New refuses a brain that includes it, with this text.
+	NotImplemented string
 }
 
 // ---- values ----
@@ -319,8 +338,8 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 // run does the action and records how it went; a failed game call holds the spell back for a moment.
 func (b *Brain) run(ctx context.Context, c *Ctx, a *Action, trigger string, rel float32, via string) Decision {
 	d := Decision{Trigger: trigger, Action: a.Name, Rel: rel, Via: via, at: c.Now}
-	if a.Spell != "" {
-		d.Spell, _ = c.Spells.Highest(a.Spell)
+	if a.isCast() {
+		d.Spell, _ = a.spell(c)
 	}
 	if a.Target != nil {
 		d.Target = a.Target(c)

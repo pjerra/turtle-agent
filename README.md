@@ -255,7 +255,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
-| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`; empty takes the role of the strategies, `dps` when none names one; it must fit them, and `healer` is refused: not implemented), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
@@ -939,7 +939,7 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 3 s; a server that says no wand is equipped backs it off for 30 s.
 
 **Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
-- preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`;
+- presets: `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`; the warrior presets are in "Roles and classes" below;
 - `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
   leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
@@ -966,9 +966,99 @@ for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by han
 The report's `brain` names the strategies.
 
 The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
-idles (`dead`). Not in this step: roles other than dps, the other classes, melee positioning (behind the mob),
-wiring the move lock into the dungeon driver. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the
-live check is in `docs/LIVE-CHECKS.md`.
+idles (`dead`). Not in this step: the other seven classes and the healer role (step 4 of #80), wiring the move lock
+into the dungeon driver. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the live check is in
+`docs/LIVE-CHECKS.md`.
+
+### Roles and classes (step 3c)
+
+**Roles.** A role is a set of strategies that share a discipline; a strategy names its role, and `brain_start.role` (`Params.Role`) is
+checked against the active strategies: left empty it takes the role they play (`dps` when none names one), a role that does not fit
+them is refused (`role "tank" does not match the strategies [...], which play dps`), more than one role among the strategies is
+refused, and so is `healer`.
+- `role_dps` (the name of `combat_dps`): wait out the opening delay, veto area abilities while a mob is loose, fight the tank's mob.
+- `role_tank`: the player holds the mobs. The fight's mob is **a loose add first** (a mob in combat within 30 yd that attacks a party
+  member), then the nearest mob that attacks the player, then the player's selected target in combat. There is no opening delay. A loose add is answered with the
+  class's taunt at relevance 25 (`taunt`: Taunt, Defensive Stance only; the class table also has Hand of Reckoning and Growl for the
+  paladin and druid, which have no preset yet).
+- `role_healer`: a stub. Naming it, or asking for `role healer`, fails with `the healer role is not implemented yet (step 4 of issue
+  #80)`; `dungeon_run`'s `brain` option is refused the same way, at once. Nothing heals yet; a TortoiseBots healer in the party does.
+
+**Class tables** (`internal/brain/class.go`). What the brain needs to know of a class that is not a rotation: the power it plays on, the
+spells it interrupts with (and the stances those work in), whether it drinks and uses mana potions, whether it conjures its own water
+(mage), its taunt. A strategy asks for the leader's class at the tick instead of being written for one class: the interrupt strategy
+`class_interrupt` is Counterspell for a mage, Pummel (Berserker Stance) then Shield Bash (Battle or Defensive Stance) for a warrior; `mage_rest` and
+`combat_consumables` take their drink and mana-potion tables from the leader's class (the mage's conjured waters are the mage's row;
+a warrior drinks nothing, a priest only vendor drinks). `mage_interrupt` is the same strategy under the mage's name, and `frost_mage`
+is unchanged (the existing tests are its proof). An unread class (id 0) acts as a mage. The rogue (Kick) and shaman (Earth Shock)
+rows are there for step 4; no preset uses them. The brain **does not change stance for an interrupt**: a stance change costs a warrior
+its rage (without Tactical Mastery) and Pummel costs rage, so an Arms warrior in Battle Stance interrupts with Shield Bash if it
+carries a shield and otherwise not at all.
+
+**Melee** (`melee_position`; the swing is in `warrior_melee`). The melee strategies share:
+- **Auto attack** (`auto_attack`, relevance 19): `target` the fight's mob and `attack` when the mob is within 8 yd and the swing is not on
+  it already. The swing is read off the event log (`attack_start`/`attack_stop`, through the optional `brain.Melee` half of the game,
+  like Sight); a game without it remembers its last order and repeats it every 6 s (the server ignores an attack order on a unit
+  already attacked). It waits out the opening delay like every attack of a damage dealer.
+- **Positioning** (`melee_reposition`, relevance 30): a damage dealer stays within 6 yd (2D) of the fight's mob and **out of its front**
+  (the 90 degree cone it faces: its cleave, breath, tail swipe). When one of these is wrong and no mob is on the player, the brain looks for the
+  nearest spot on rings of 3.2, 4 and 4.6 yd round the mob that is **behind it** (at least 100 degrees round from the way it faces), has sight of
+  it over the navmesh, is not in a ground effect and 10 yd from mobs that have not noticed the party (mobs that are fighting do not
+  keep it away: a melee fighter stands among them), then walks there in steps like the mage's. A mob out of range of the search (over 24 yd) is run at in a straight line. A game with a walker
+  but no navmesh gets the point behind the mob without a search (`canWalk` instead of `canMove`: the walker has its own route). It does not walk
+  while `no_move` is on or the driver holds the move lock, and it does not walk to a spot when Charge or Intercept is about to fire (below).
+- **A tank** (role `tank`) stays within 6 yd and turns the mob **away from the group**: when the mob is on the tank and faces the middle of the party members in view
+  (within 60 degrees), the tank walks to the far side of the mob from the group (rings of 2.6, 3.2 and 4 yd, at least 110 degrees round from the
+  group's side), so that the mob turns to face away.
+- **Gap closers** (`warrior_melee`/`warrior_fury`, relevance 32, above a walk): **Charge** out of combat in Battle Stance, **Intercept**
+  in combat in Berserker Stance, at a mob 8 to 25 yd away, only when the tank holds the mob and the opening delay is over, never into an untanked pull
+  (the multiplier `gap_closer_needs_tank`; a tanking player may). While one of them is about to fire, the fighter does not walk the distance.
+
+**Warrior** (`internal/brain/warrior.go`). Spells are named; the highest known rank is cast. Rage and rage costs are in tenths.
+Stances are cast by id (the spellbook also holds the stances' passive spells under the same names). The abilities are checked against
+the core's spell data in `TestWarriorSpellData`. The relevance is the band the rule asks for.
+
+| Strategy | Ability (relevance) | When |
+| :--- | :--- | :--- |
+| `warrior_melee` | Auto attack (19) | a mob within 8 yd, not swinging at it yet |
+| | Execute (18) | the mob below 20% health; Battle or Berserker Stance |
+| | Charge (32) / Hamstring (12) | see gap closers; Hamstring on a mob at or below 25% health that is moving, within 7 yd |
+| | Bloodrage (13) | a fight mob within 12 yd, below 20 rage and above 50% health |
+| | Battle Shout (12 out of combat at a rest gate, 8 in combat) | the aura missing or, if the server says how long it lasts, under a minute left. It costs 10 rage, so out of combat it only goes while some rage is left |
+| | Cleave (11) / Heroic Strike (10) | from 50 rage on; Cleave with 2 or more mobs within 8 yd, and the area veto allows it. A sent Heroic Strike or Cleave holds both for 1.5 s (the server queues it for the next swing and the rage is spent then) |
+| `warrior_arms` | Overpower (17) | the fight's mob dodged an attack within the last 4.5 s; Battle Stance. The dodge comes from `melee` events and `spell_miss` events |
+| | Mortal Strike (16) | on cooldown |
+| | Rend (14) | the mob has no Rend and is above 35% health; Battle or Defensive Stance. The server's `immune` refusal (undead, elementals, mechanicals bleed no) backs it off 5 s |
+| | Sweeping Strikes (13) | 2 or more mobs within 8 yd, in Battle Stance, area veto allowing it |
+| | stance home (12) | back to Battle Stance |
+| `warrior_fury` | Bloodthirst (16), Whirlwind (15) | on cooldown; Whirlwind in Berserker Stance, one mob or more (the area veto applies) |
+| | Berserker Rage (45) | a fear or horror aura (by the aura spell's mechanic) on the leader; Berserker Stance |
+| | Intercept (32) | see gap closers |
+| | stance home (12) | Berserker Stance; Battle Stance below level 30, when it is not known |
+| `warrior_tank` | Revenge (16) | the leader dodged, parried or blocked an attack within 3.5 s; Defensive Stance |
+| | Thunder Clap (15), Demoralizing Shout (13) | 2 or more mobs within 8 yd, some without the debuff |
+| | Sunder Armor (14) | up to 5 stacks on the fight's mob |
+| | Shield Block (12) | a mob on the leader within reach and health below 90% |
+| | stance home (12) | Defensive Stance |
+
+**Stance policy.** Each spec has a home stance and leaves it for nothing: no dance for Pummel, Charge or Intercept. The brain goes home
+when it is out of its stance and the change is cheap: out of combat, or with 25 rage or less. A stance cast is not repeated within 2 s.
+An ability names the stances it works in; in a stance that does not allow it, it is simply not possible (Fury has no Overpower and no
+Rend, Arms no Pummel).
+
+**Presets.**
+- `arms_warrior` = `combat_dps` + `warrior_arms` + `warrior_melee` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat`.
+- `fury_warrior` = the same with `warrior_fury` for `warrior_arms`.
+- `tank_warrior` = `role_tank` + `warrior_tank` + `warrior_melee` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_eat`.
+  A tank needs Defensive Stance (level 10) and a shield; the brain does not check the shield (a Shield Bash or Shield Block without one is refused by
+  the server and backed off).
+  The tank role changes what the dungeon driver should do (the party's tank bot then has a second tank in the party); this step only makes the
+  brain able to tank, it does not change the driver's orders.
+The warrior presets end with `rest_eat` (eat below 85% health at a rest gate), as `frost_mage` does.
+
+Examples: `brain_start {"strategies":["arms_warrior"],"tank":"<name>"}`, `dungeon_run {"name":"uldaman","brain":"fury_warrior"}`,
+`brain_start {"strategies":["tank_warrior"]}`. In a dungeon run the brain starts with `no_move` until the driver holds the move lock, so
+the melee positioning stays off there; the abilities, the swing and the interrupts work.
 
 ## Vendors, trainers and quests
 

@@ -51,7 +51,8 @@ type Game interface {
 type Params struct {
 	// Strategies are strategy or preset names (see Strategies); the base strategy is always added.
 	Strategies []string `json:"strategies"`
-	// Role is "dps" (the default). Tank and healer arrive with their strategies.
+	// Role is "dps", "tank" or "healer" (see roles.go): what the active strategies play. Empty takes the role of the strategies, "dps"
+	// when none names one. A role must match the strategies: "tank" needs role_tank (preset tank_warrior); "healer" is not implemented.
 	Role string `json:"role,omitempty"`
 	// Tank names the party member whose target the brain fights; empty finds the tank by class and target.
 	Tank string `json:"tank,omitempty"`
@@ -139,6 +140,7 @@ type memory struct {
 	idle        string
 	lastErr     string
 	ext         memExt // positioning, line of sight, interrupts, items (world.go)
+	mel         melMem // auto attack and stance changes (melee.go)
 }
 
 func (m *memory) hold(spell uint32, until time.Time, reason string) {
@@ -235,13 +237,11 @@ func New(g Game, cfg Config, p Params) (*Brain, error) {
 
 // assemble builds a brain from strategies already in hand (the tests give their own).
 func assemble(g Game, cfg Config, p Params, strats []*Strategy, names []string) (*Brain, error) {
-	switch p.Role {
-	case "":
-		p.Role = "dps"
-	case "dps":
-	default:
-		return nil, fmt.Errorf("role %q: only \"dps\" is available (tank and healer come with their strategies)", p.Role)
+	role, err := resolveRole(p.Role, strats, names)
+	if err != nil {
+		return nil, err
 	}
+	p.Role = role
 	if p.OpeningDelay <= 0 {
 		p.OpeningDelay = 2 * time.Second
 	}
@@ -526,7 +526,7 @@ func (b *Brain) possible(c *Ctx, a *Action) (bool, string) {
 	if why, held := b.mem.actionHeld(a.Name, c.Now); held {
 		return false, "held:" + why
 	}
-	if a.Spell != "" {
+	if a.isCast() {
 		if ok, why := castable(c, a, b.mem); !ok {
 			return false, why
 		}
@@ -542,7 +542,7 @@ const rangeSlack = 1.5
 
 // castable checks a cast action against the spell state, the spell's metadata and the target.
 func castable(c *Ctx, a *Action, m *memory) (bool, string) {
-	id, ok := c.Spells.Highest(a.Spell)
+	id, ok := a.spell(c)
 	if !ok {
 		return false, "unknown_spell"
 	}

@@ -445,7 +445,14 @@ func TestEveryPresetAndStrategyBuilds(t *testing.T) {
 	}
 	for _, n := range sn {
 		_, err := New(g, DefaultConfig(), Params{Strategies: []string{n}})
-		standalone := map[string]bool{"combat_dps": true, "mage_rest": true, "avoid_ground": true, "ranged_position": true, "combat_consumables": true, "mage_interrupt": true, "rest_eat": true}
+		if n == "role_healer" { // the healer's place in the list: it refuses to run
+			if err == nil || !strings.Contains(err.Error(), "not implemented yet") {
+				t.Errorf("role_healer: %v", err)
+			}
+			continue
+		}
+		standalone := map[string]bool{"combat_dps": true, "role_dps": true, "role_tank": true, "mage_rest": true, "avoid_ground": true, "ranged_position": true, "combat_consumables": true,
+			"mage_interrupt": true, "class_interrupt": true, "melee_position": true, "rest_eat": true}
 		if !standalone[n] && err == nil {
 			t.Errorf("%s alone must be refused: it uses an action another strategy defines", n)
 		}
@@ -465,7 +472,7 @@ func TestBadParams(t *testing.T) {
 		want string
 	}{
 		{Params{}, "name at least one"},
-		{Params{Strategies: []string{"frost_mage", "warlock_fire"}}, `strategy "warlock_fire" is unknown (presets: frost_mage; strategies: avoid_ground, combat_consumables, combat_dps, mage_defense, mage_frost, mage_interrupt, mage_rest, ranged_position, rest_eat, wand)`},
+		{Params{Strategies: []string{"frost_mage", "warlock_fire"}}, `strategy "warlock_fire" is unknown (presets: arms_warrior, frost_mage, fury_warrior, tank_warrior; strategies: avoid_ground, class_interrupt, combat_consumables, combat_dps, `},
 		{Params{Strategies: []string{"frost_mage"}, Role: "tank"}, `role "tank"`},
 		{Params{Strategies: []string{"mage_frost"}}, "face_target"},
 	} {
