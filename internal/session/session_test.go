@@ -93,7 +93,7 @@ func startTapped(t *testing.T, opts Options, clientKey, serverKey []byte, wrap f
 	return h
 }
 
-// charEnumBody builds SMSG_CHAR_ENUM the way Player::BuildEnumData writes it (Player.cpp:2198-2285).
+// charEnumBody builds SMSG_CHAR_ENUM the way Player::BuildEnumData writes it.
 func charEnumBody(chars ...Character) []byte {
 	w := packet.NewWriter().U8(uint8(len(chars)))
 	for _, c := range chars {
@@ -537,8 +537,9 @@ func TestPingScheduledFromSendTime(t *testing.T) {
 
 // Live on m910q (Task 11): the first character list of a session schedules an automatic
 // character backup and locks the character until the backup worker runs, up to ~5 s later
-// (CharacterHandler.cpp:181-182, World.cpp:4801-4869). A CMSG_PLAYER_LOGIN sent straight
-// after the list gets SMSG_CHARACTER_LOGIN_FAILED code 1, so the session tries again.
+// (WorldSession::HandleCharEnum calls World::SchedulePlayerDump; World::AutoPDumpWorker
+// unlocks). A CMSG_PLAYER_LOGIN sent straight after the list gets SMSG_CHARACTER_LOGIN_FAILED
+// code 1, so the session tries again.
 func TestLockedCharacterLoginIsRetried(t *testing.T) {
 	var log bytes.Buffer
 	h := start(t, Options{LoginRetryDelay: 20 * time.Millisecond, Logger: &log})
