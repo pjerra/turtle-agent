@@ -297,7 +297,7 @@ func (b *Brain) Strategies() []string { return slices.Clone(b.names) }
 // newCtx takes the snapshot of the game a tick decides on.
 func (b *Brain) newCtx(now time.Time) *Ctx {
 	b.tick++
-	c := &Ctx{G: b.g, Now: now, Tick: b.tick, Spells: b.g.Spells(), P: b.p, vals: b.vals, mem: b.mem, RestOK: b.restOK(), lock: b.lock,
+	c := &Ctx{G: b.g, Now: now, Tick: b.tick, Spells: b.g.Spells(), P: b.p, vals: b.vals, mem: b.mem, RestOK: b.restOK(), lock: b.lock, b: b,
 		byID: map[packet.GUID]*objects.Unit{}}
 	c.Self, c.SelfOK = b.g.Self()
 	c.Units = b.g.Units()
@@ -325,6 +325,7 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 		}
 	}()
 	c := b.newCtx(now)
+	c.run = ctx
 	b.mem.mu.Lock()
 	b.mem.ticks++
 	b.mem.mu.Unlock()
@@ -496,11 +497,28 @@ func (b *Brain) observeFailures(c *Ctx) {
 		d = defaultHold
 	}
 	b.mem.hold(f.SpellID, c.Now.Add(d), f.ReasonName)
+	if f.ReasonName == "line_of_sight" {
+		// The mesh cannot see every wall; the server just did. Let the position rules know, so the player moves instead of
+		// casting into the wall again when the hold ends.
+		markLOSBlocked(c, ValFight.Get(c).Mob)
+	}
 	if f.ReasonName == "not_infront" || f.ReasonName == "unit_not_infront" {
 		b.mem.mu.Lock()
 		b.mem.faceUntil = c.Now.Add(3 * time.Second)
 		b.mem.mu.Unlock()
 	}
+}
+
+// walkFailed reports a step of the player that the game refused: the action is held back for ErrorHold and the failure shows as an
+// error decision. It runs on the step's goroutine, a moment after the action that started the step was recorded as ok.
+func (b *Brain) walkFailed(action string, err error) {
+	now := b.cfg.Now()
+	if action != "" {
+		b.mem.holdAction(action, now.Add(b.cfg.ErrorHold), "error")
+	}
+	d := Decision{Trigger: "walk", Action: action, Result: ResultError, Error: err.Error(), at: now}
+	b.record(d)
+	b.emitDecision(d)
 }
 
 // possible reports whether a can run now, and when it cannot, why.

@@ -821,7 +821,9 @@ rooted, and, while the mob is still coming (over 9 yd away, not rooted), a run t
 these is wrong and no mob is on the leader, the brain looks for the nearest standing spot that meets all of them: candidate points
 on rings of 22, 24 and 27 yd round the mob, each snapped to the navmesh (within 2.5 yd), reachable in a straight line over the
 mesh, within 24 yd of the leader, and at least 15 yd from any mob that has not noticed the party (8 yd from one that is
-fighting), then it walks there in steps of 2.5 s and decides again. No spot is looked for more than every 0.6 s (1.5 s after a miss).
+fighting), then it walks there in steps of 2.5 s and decides again. A step runs in the background, so the brain keeps ticking while
+the leader walks: an action at the interrupt band or above (Counterspell, Blink, Ice Block, a potion, leaving a ground effect)
+cancels the step and acts in the same tick; everything else waits until the step ends (no casting on the move, no second walk). No spot is looked for more than every 0.6 s (1.5 s after a miss).
 It never walks while casting (a cast of its own comes first), only an interrupt-band action may break a cast. **Ground effects**:
 a dynamic object (Blizzard, Rain of Fire, a fire patch) of an enemy (its caster a hostile mob in view; or the source of a periodic
 damage aura the leader carries; or, with its caster out of view, a harmful spell) that covers the leader makes it walk out along the
@@ -834,10 +836,13 @@ ends, so the ray stops there; what the mesh does not show (a bridge over the ray
 as a block. The ray reaches the target if it stops within 1.5 yd of it (a unit stands on the mesh's edge as often as inside it).
 The answer is cached per target for 250 ms, and until the leader or the target moves 1 yd. If the mesh cannot say (no `mmaps_dir`, a
 missing tile, the leader off the mesh) the brain takes the line as clear and does not move for it.
+The server's own refusal beats the mesh: after a `line_of_sight` cast failure the fight's mob counts as **known blocked** for 5 s (a
+further refusal runs that on), as long as the leader stays within 3 yd of where it was refused, so `reposition` fires and looks for a
+spot at least 4 yd from here, instead of the mage casting into the wall again when the 3 s back-off ends.
 
 **Move lock.** The dungeon driver and the brain must not walk at once. `brain.MoveLock` is the arbiter: the brain takes it for each
-step; the driver calls `Controller.HoldMove(ctx)` around its walks, which stops a step under way and keeps the brain from walking
-until the returned release is called (`brain_status.move_held`). A dungeon run starts the brain with `no_move` until the driver
+step (and `walk` checks `no_move` and the driver's hold once more itself); the driver calls `Controller.HoldMove(ctx)` around its walks, which stops a step under way and keeps the brain from walking
+until the returned release is called (`brain_status.move_held`). `HoldMove` waits for the walker to stop the step, so it must not be called from inside the session's do loop. A dungeon run starts the brain with `no_move` until the driver
 does so; every other part of the brain works in a run.
 
 **Interrupts** (`mage_interrupt`: Counterspell, relevance 40, which also breaks the leader's own cast). An enemy cast shows from

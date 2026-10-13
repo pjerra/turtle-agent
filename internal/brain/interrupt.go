@@ -19,6 +19,8 @@ const (
 	interruptMinLeft = 350 * time.Millisecond
 	// interruptedHold is how long the brain leaves a cast alone that it already tried to interrupt.
 	interruptedHold = 3 * time.Second
+	// interruptedKeep is how long an entry of that memory stays before it is pruned.
+	interruptedKeep = 10 * time.Second
 )
 
 // crowd-control mechanics (SpellDefines.h Mechanics): charm, fear, sleep, stun, knockout, polymorph, horror.
@@ -123,6 +125,11 @@ func interruptStrategy(name, spell string) *Strategy {
 					e.interrupted = map[interruptKey]time.Time{}
 				}
 				e.interrupted[interruptKey{u.GUID, u.Casting.SpellID}] = c.Now
+				for k, t := range e.interrupted { // forget casts long gone
+					if c.Now.Sub(t) > interruptedKeep {
+						delete(e.interrupted, k)
+					}
+				}
 				e.mu.Unlock()
 				return nil
 			}}},

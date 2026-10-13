@@ -168,6 +168,9 @@ type Ctx struct {
 
 	vals  valueCache
 	lock  *MoveLock
+	b     *Brain          // the brain, for what a step on its own goroutine reports
+	run   context.Context // the tick's context: a step outlives the action that started it, so it hangs on this one
+	act   string          // the action that runs now
 	byID  map[packet.GUID]*objects.Unit
 	mem   *memory
 	trace []Decision
@@ -274,6 +277,17 @@ func (b *Brain) try(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 		if a.Useful != nil && !a.Useful(c) {
 			return false, Decision{}
 		}
+		if c.lock.stepping() {
+			// A walk is under way. An interrupt or an emergency cancels it and acts now; anything else waits for it (the player
+			// neither casts on the move nor starts a second walk).
+			if rel < RelInterrupt {
+				if via == "" {
+					c.trace = append(c.trace, Decision{Trigger: trigger, Action: a.Name, Rel: rel, Result: ResultNotPossible, Why: "walking", at: c.Now})
+				}
+				return false, Decision{}
+			}
+			c.lock.preempt(preemptWait)
+		}
 		return true, b.run(ctx, c, a, trigger, rel, via)
 	}
 	if via == "" { // a chain member that cannot run either is not worth a line: the action's own reason says more
@@ -313,6 +327,7 @@ func (b *Brain) run(ctx context.Context, c *Ctx, a *Action, trigger string, rel 
 	}
 	cctx, cancel := context.WithTimeout(ctx, b.cfg.DoTimeout)
 	defer cancel()
+	c.act = a.Name
 	var err error
 	if a.Do != nil {
 		err = a.Do(cctx, c)
