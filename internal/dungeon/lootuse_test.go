@@ -416,6 +416,55 @@ func TestBossCompanionsLootOffAroundTheFight(t *testing.T) {
 	}
 }
 
+// A companion the leader has selected takes a loot order alone (ResolveDynamicScope): both orders go out with the leader targeted, and the
+// companion is never selected again, so nothing puts the earlier selection back.
+func TestCompanionsLootOrdersClearTheBotSelection(t *testing.T) {
+	plan := strings.Replace(bossLootPlan, `"position":{"x":90,"y":0,"z":0},`, `"position":{"x":90,"y":0,"z":0},"companions_loot":false,`, 1)
+	g, p := lootFixture(t, plan)
+	g.corpse = []objects.Item{shaft()}
+	g.targeted = healer
+	var selected []packet.GUID
+	g.onChat = func(f *fakeGame, text string) {
+		if strings.HasPrefix(text, ".bot action loot ") {
+			selected = append(selected, f.targeted)
+		}
+	}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(selected) != fmt.Sprint([]packet.GUID{leader, leader}) {
+		t.Fatalf("the loot orders went out with %v selected, chats %q", selected, g.chats)
+	}
+	for _, guid := range g.targets {
+		if guid == healer {
+			t.Fatalf("the companion was selected again: targets %v", g.targets)
+		}
+	}
+}
+
+// A refusal whisper that answers the restoring "loot on" order is filed under that order, not under the last one before it.
+func TestRestoreLootAttributesARefusalToLootOn(t *testing.T) {
+	plan := strings.Replace(bossLootPlan, `"position":{"x":90,"y":0,"z":0},`, `"position":{"x":90,"y":0,"z":0},"companions_loot":false,`, 1)
+	g, p := lootFixture(t, plan)
+	g.corpse = []objects.Item{shaft()}
+	g.onChat = func(f *fakeGame, text string) {
+		if text == ".bot action loot on" {
+			f.refusals = append(f.refusals, Refusal{Code: "no-bot", Message: "No live owned party bots are controllable."})
+		}
+	}
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	for _, r := range d.Report().Refusals {
+		if r.Intent == "loot on" && r.Code == "no-bot" && r.Count == 1 {
+			return
+		}
+	}
+	t.Fatalf("refusals %+v", d.Report().Refusals)
+}
+
 type corpseErrGame struct{ *lootGame }
 
 func (g corpseErrGame) LootCorpse(ctx context.Context, guid packet.GUID) (Looted, error) {
