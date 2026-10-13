@@ -364,7 +364,7 @@ func TestShadowDrinksBelowSixtyFiveNotEighty(t *testing.T) {
 
 func TestPriestPresetsListTheirStrategies(t *testing.T) {
 	for preset, want := range map[string]string{
-		"holy_priest":   "base,role_healer,priest_holy,priest_defense,priest_buffs,healer_position,avoid_ground,combat_consumables,wand,rest_eat,rest_drink",
+		"holy_priest":   "base,role_healer,priest_holy,priest_defense,priest_buffs,rez,healer_position,avoid_ground,combat_consumables,wand,rest_eat,rest_drink",
 		"shadow_priest": "base,combat_dps,priest_shadow,priest_defense,priest_buffs,ranged_position,avoid_ground,class_interrupt,combat_consumables,wand,rest_eat,rest_drink",
 	} {
 		b, err := New(newFake(), DefaultConfig(), Params{Strategies: []string{preset}})

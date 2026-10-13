@@ -107,10 +107,23 @@ type shamMem struct {
 	totems     [elements]totemRec
 	imbueAt    time.Time // the last imbue that went out
 	imbueSpell uint32
-	imbueTry   time.Time // an imbue that was refused: the next try waits for imbueRetry
+	imbueTry   time.Time   // an imbue that was refused: the next try waits for imbueRetry
+	imbueItem  packet.GUID // the main-hand item the imbue was sent to
+	fieldSeen  bool        // the main hand's temporary enchantment has read as set once: the server sends the field, so a zero means no imbue
 	failSeen   uint64
 	failInit   bool
+	pend       *totemPend // a totem whose cast is on its way: it is recorded when the spell goes off
 }
+
+// totemPend is a totem cast that was sent and has not gone off yet.
+type totemPend struct {
+	el     int
+	rec    totemRec
+	sentAt time.Time
+}
+
+// totemPendTTL is how long a sent totem cast is waited for before it is given up (the cast is instant: a refusal or a lost packet).
+const totemPendTTL = 4 * time.Second
 
 const imbueRetry = 60 * time.Second
 
@@ -124,6 +137,41 @@ func (s *shamMem) setTotem(el int, r totemRec) {
 	s.mu.Lock()
 	s.totems[el] = r
 	s.mu.Unlock()
+}
+
+// pending says a totem cast into the slot is on its way.
+func (s *shamMem) pending(el int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pend != nil && s.pend.el == el
+}
+
+// noteTotemGo turns a sent totem cast into the slot's record once the spell went off (SMSG_SPELL_GO: the spell state's last cast), and
+// forgets it when the server refused it or nothing came within totemPendTTL: a totem that never came must not stand in the record.
+func noteTotemGo(c *Ctx) {
+	s := &c.mem.sham
+	s.mu.Lock()
+	p := s.pend
+	s.mu.Unlock()
+	if p == nil {
+		return
+	}
+	cs := c.Spells.CastState()
+	since := p.sentAt.Add(-200 * time.Millisecond)
+	switch {
+	case cs.LastCast != nil && cs.LastCast.SpellID == p.rec.spell && !c.Now.Add(-time.Duration(cs.LastCast.AgoMS)*time.Millisecond).Before(since):
+		rec := p.rec
+		rec.at = c.Now.Add(-time.Duration(cs.LastCast.AgoMS) * time.Millisecond)
+		s.mu.Lock()
+		s.totems[p.el] = rec
+		s.pend = nil
+		s.mu.Unlock()
+	case cs.LastFailure != nil && cs.LastFailure.SpellID == p.rec.spell && !c.Now.Add(-time.Duration(cs.LastFailure.AgoMS)*time.Millisecond).Before(since),
+		c.Now.Sub(p.sentAt) > totemPendTTL:
+		s.mu.Lock()
+		s.pend = nil
+		s.mu.Unlock()
+	}
 }
 
 // ---- the heal kit ----
@@ -151,7 +199,7 @@ func init() {
 	}
 	strategyBuilders["shaman_elemental"] = shamanElemental
 	strategyBuilders["shaman_enhancement"] = shamanEnhancement
-	presets["resto_shaman"] = []string{"role_healer", "shaman_shield", "shaman_totems_resto", "healer_position", "avoid_ground",
+	presets["resto_shaman"] = []string{"role_healer", "shaman_shield", "shaman_totems_resto", "rez", "healer_position", "avoid_ground",
 		"combat_consumables", "rest_eat", "rest_drink"}
 	presets["elemental_shaman"] = []string{"combat_dps", "shaman_elemental", "shaman_shield", "shaman_totems_elemental", "ranged_position",
 		"avoid_ground", "class_interrupt", "combat_consumables", "rest_eat", "rest_drink"}
@@ -300,6 +348,9 @@ func totemWanted(c *Ctx, prefs totemPrefs) (totemPlan, bool) {
 		if id == 0 || !(totemNoTool[id] || haveItem(c, totemTools[el])) {
 			continue
 		}
+		if c.mem.sham.pending(el) {
+			continue
+		}
 		if r := c.mem.sham.totem(el); r.spell != 0 && c.Now.Sub(r.at) < totemGap {
 			continue
 		}
@@ -315,7 +366,8 @@ func totemWanted(c *Ctx, prefs totemPrefs) (totemPlan, bool) {
 func shamanTotems(name string, prefs totemPrefs, rel float32) *Strategy {
 	plan := func(c *Ctx) (totemPlan, bool) { return totemWanted(c, prefs) }
 	return &Strategy{
-		Name: name,
+		Name:   name,
+		Before: noteTotemGo,
 		Actions: []*Action{{Name: "drop_totem",
 			Resolve: func(c *Ctx) (uint32, bool) { p, ok := plan(c); return p.Spell, ok },
 			Target:  func(c *Ctx) packet.GUID { return c.Self.GUID },
@@ -328,8 +380,18 @@ func shamanTotems(name string, prefs totemPrefs, rel float32) *Strategy {
 				if m, found := spells.Lookup(p.Spell); found && m.DurationMS > 0 {
 					life = time.Duration(m.DurationMS) * time.Millisecond
 				}
-				c.mem.sham.setTotem(p.Element, totemRec{spell: p.Spell, name: p.Name, at: c.Now, pos: selfPos(c), life: life})
-				return c.cast(ctx, p.Spell, c.Self.GUID)
+				// The record waits for the spell to go off (noteTotemGo): a refused cast leaves no totem in the slot.
+				s := &c.mem.sham
+				s.mu.Lock()
+				s.pend = &totemPend{el: p.Element, rec: totemRec{spell: p.Spell, name: p.Name, at: c.Now, pos: selfPos(c), life: life}, sentAt: c.Now}
+				s.mu.Unlock()
+				if err := c.cast(ctx, p.Spell, c.Self.GUID); err != nil {
+					s.mu.Lock()
+					s.pend = nil
+					s.mu.Unlock()
+					return err
+				}
+				return nil
 			}}},
 		Rules: []Rule{{Trigger: Trigger{Name: "totem_wanted", Active: func(c *Ctx) bool { _, ok := plan(c); return ok }},
 			Do: []Next{{"drop_totem", rel}}}},
@@ -343,6 +405,21 @@ func shamanTotems(name string, prefs totemPrefs, rel float32) *Strategy {
 type WeaponImbuer interface {
 	CastOnMainHand(ctx context.Context, spell uint32) error
 }
+
+// MainHand is the weapon in the main hand as the player's own item rows show it.
+type MainHand struct {
+	Item        packet.GUID
+	TempEnchant uint32 // the temporary enchantment (ITEM_FIELD_ENCHANTMENT, slot 1): a weapon imbue, 0 for none
+}
+
+// MainHandReader is the optional half of the Game that reads the main-hand weapon. With it the shaman imbues again when the weapon is
+// another one or carries no imbue, instead of going by its own timer alone; a game without it keeps to the timer.
+type MainHandReader interface {
+	MainHand() (MainHand, bool)
+}
+
+// imbueShowWithin is how long after an imbue was sent the item's update may take to show it.
+const imbueShowWithin = 10 * time.Second
 
 // imbueNames are the weapon imbues of the enhancement preset, best first: Windfury Weapon (level 30) for the extra attacks, Flametongue
 // Weapon (level 10) for the damage on a slow weapon, Rockbiter Weapon (level 1) before that.
@@ -380,7 +457,28 @@ func imbueDue(c *Ctx) bool {
 	if c.Now.Before(s.imbueTry) {
 		return false
 	}
-	return s.imbueAt.IsZero() || c.Now.Sub(s.imbueAt) >= life-imbueRefresh
+	timer := s.imbueAt.IsZero() || c.Now.Sub(s.imbueAt) >= life-imbueRefresh
+	r, can := c.G.(MainHandReader)
+	if !can {
+		return timer
+	}
+	mh, seen := r.MainHand()
+	if !seen || mh.Item == 0 {
+		return timer
+	}
+	if mh.TempEnchant != 0 {
+		s.fieldSeen = true
+	}
+	if !s.imbueAt.IsZero() && c.Now.Sub(s.imbueAt) < imbueShowWithin {
+		return false // the item's update has not come yet
+	}
+	switch {
+	case s.imbueItem != 0 && mh.Item != s.imbueItem:
+		return true // another weapon in the hand: the imbue stayed on the old one
+	case s.fieldSeen && mh.TempEnchant == 0:
+		return true // the imbue ran out, or went with a weapon swapped back and forth
+	}
+	return timer
 }
 
 // noteImbueRefusal forgets an imbue the server refused (no weapon in the hand), so that it is tried again after imbueRetry.
@@ -423,6 +521,12 @@ func shamanImbue() *Strategy {
 				s := &c.mem.sham
 				s.mu.Lock()
 				s.imbueSpell, s.imbueAt = id, c.Now
+				s.imbueItem = 0
+				if r, can := c.G.(MainHandReader); can {
+					if mh, seen := r.MainHand(); seen {
+						s.imbueItem = mh.Item
+					}
+				}
 				s.mu.Unlock()
 				c.mem.mu.Lock()
 				c.mem.lastCastTarget = 0

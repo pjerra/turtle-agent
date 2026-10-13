@@ -661,6 +661,9 @@ type Item struct {
 	GUID  packet.GUID `json:"guid"`
 	Entry uint32      `json:"item_entry"` // 0, like Count, until the item's create block arrives
 	Count uint32      `json:"count"`
+	// TempEnchant is the id of the item's temporary enchantment (a shaman's weapon imbue, a poison), 0 for none: the first word of
+	// ITEM_FIELD_ENCHANTMENT slot 1.
+	TempEnchant uint32 `json:"temp_enchant,omitempty"`
 }
 
 // Backpack lists the items in player's backpack, in slot order, from the player's own
@@ -740,7 +743,7 @@ func (s *Store) item(bag, slot uint8, g packet.GUID) (Item, bool) {
 	}
 	it := Item{Bag: bag, Slot: slot, GUID: g}
 	if o, ok := s.objs[g]; ok {
-		it.Entry, it.Count = o.values[FieldEntry], o.values[ItemStackCount]
+		it.Entry, it.Count, it.TempEnchant = o.values[FieldEntry], o.values[ItemStackCount], o.values[ItemTempEnchantID]
 	}
 	return it, true
 }

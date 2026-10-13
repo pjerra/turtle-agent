@@ -353,6 +353,11 @@ func (s *Session) CancelAura(ctx context.Context, spell uint32) error {
 // mainHandSlot is the inventory slot of the main-hand weapon (EQUIPMENT_SLOT_MAINHAND, 1.12).
 const mainHandSlot = 15
 
+// MainHandItem is the weapon in the main hand, with its temporary enchantment, false when the hand is empty.
+func (s *Session) MainHandItem() (objects.Item, bool) {
+	return s.store.ItemAt(s.selfGUID(), objects.BackpackBag, mainHandSlot)
+}
+
 // CastOnMainHand casts an enchanting spell (a shaman's weapon imbue) at the weapon in the main hand: CMSG_CAST_SPELL with
 // TARGET_FLAG_ITEM and the weapon's guid, as the client sends it for a spell that needs an item. The server answers with the
 // enchantment or a spell failure (item gone) when the hand is empty.

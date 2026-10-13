@@ -83,6 +83,9 @@ const CorpseOwner uint16 = 0x06
 // Item and player inventory fields (Objects/UpdateFields.h).
 const (
 	ItemStackCount uint16 = 0x0E // ITEM_FIELD_STACK_COUNT, OBJECT_END + 0x08 (:43)
+	// ItemTempEnchantID is the id word of TEMP_ENCHANTMENT_SLOT (1) of ITEM_FIELD_ENCHANTMENT (OBJECT_END + 0x10, three words a slot:
+	// id, duration, charges; Item.h ENCHANTMENT_*_OFFSET): 0x16 + 3.
+	ItemTempEnchantID uint16 = 0x19
 	// PlayerInvSlotHead is PLAYER_FIELD_INV_SLOT_HEAD (:202): the guid of inventory slot i,
 	// two words each. The 23 equipment and bag slots run on into the 16 backpack slots,
 	// PLAYER_FIELD_PACK_SLOT_1 (:204) = head + 46. The owner alone gets these fields.

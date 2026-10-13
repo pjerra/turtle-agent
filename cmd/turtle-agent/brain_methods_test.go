@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/game/gametest"
@@ -219,6 +220,27 @@ func TestDungeonRunBrainOption(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 	r.call("dungeon_stop", "{}")
+}
+
+// The driver's hold on the brain tells the rest gate when the brain can resurrect a dead member (dungeon.RezBrain); a brain that does
+// not run, or a class without a resurrection, cannot.
+func TestDriverBrainAnswersCanRez(t *testing.T) {
+	var _ dungeon.RezBrain = (*driverBrain)(nil)
+	r := newRig(t)
+	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
+	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
+	defer ctl.Close()
+	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+	if d.CanRez() {
+		t.Fatal("not started")
+	}
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if d.CanRez() || ctl.CanRez() {
+		t.Fatal("a mage resurrects nobody")
+	}
+	d.Stop()
 }
 
 func TestDriverBrainStartsAndStopsOnlyWhatItStarted(t *testing.T) {

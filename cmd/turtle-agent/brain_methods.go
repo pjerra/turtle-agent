@@ -133,6 +133,9 @@ func (b *driverBrain) HoldMove(ctx context.Context) (release func(), err error) 
 	return b.ctl.HoldMove(ctx)
 }
 
+// CanRez is the optional half dungeon.RezBrain: the brain started for the run can resurrect a dead member of the party now.
+func (b *driverBrain) CanRez() bool { return b.started && b.ctl.CanRez() }
+
 func (b *driverBrain) Rest(on bool) {
 	if b.started {
 		b.ctl.Rest(on)
@@ -191,11 +194,21 @@ func (g *sessionBrainGame) CancelAutoRepeat(ctx context.Context) error {
 
 func (g *sessionBrainGame) StopAttack(ctx context.Context) error { return g.cur().StopAttack(ctx) }
 
+// MainHand is the optional half brain.MainHandReader: the weapon in the main hand and its temporary enchantment.
+func (g *sessionBrainGame) MainHand() (brain.MainHand, bool) {
+	it, ok := g.cur().MainHandItem()
+	if !ok {
+		return brain.MainHand{}, false
+	}
+	return brain.MainHand{Item: it.GUID, TempEnchant: it.TempEnchant}, true
+}
+
 // CancelAura and CastOnMainHand are the optional halves brain.AuraCanceller (a druid leaves its form) and brain.WeaponImbuer (a shaman
 // imbues its weapon).
 var (
-	_ brain.AuraCanceller = (*sessionBrainGame)(nil)
-	_ brain.WeaponImbuer  = (*sessionBrainGame)(nil)
+	_ brain.AuraCanceller  = (*sessionBrainGame)(nil)
+	_ brain.WeaponImbuer   = (*sessionBrainGame)(nil)
+	_ brain.MainHandReader = (*sessionBrainGame)(nil)
 )
 
 func (g *sessionBrainGame) CancelAura(ctx context.Context, spell uint32) error {

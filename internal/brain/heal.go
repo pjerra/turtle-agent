@@ -93,6 +93,8 @@ type HealKit struct {
 	// Multi lists heals that hit several members (Chain Heal): a candidate only while two or more members in reach are hurt, since on a
 	// single member they cost more than the plain heal for the same health.
 	Multi []string
+	// NoFast, when set and true, leaves the fast heals out of the choice: the paladin's Divine Favor makes the next big heal the one to cast.
+	NoFast func(*Ctx) bool
 	// HoT is the heal over time the healer keeps on the tank.
 	HoT string
 	// Dispels, in the order of preference.
@@ -130,7 +132,7 @@ func healAmount(m spells.Meta, level uint32) float64 {
 	var total float64
 	for _, e := range m.Effects {
 		switch {
-		case e.Effect == 10: // SPELL_EFFECT_HEAL
+		case e.Effect == 10 || (e.Effect == 77 && scriptHeal(m)): // SPELL_EFFECT_HEAL, or the script effect of Flash of Light
 			total += effectAmount(e, m, level)
 		case e.Effect == 6 && e.Aura == 8 && m.DurationMS > 0: // apply aura: periodic heal
 			total += effectAmount(e, m, level) * float64(m.DurationMS) / float64(hotTick.Milliseconds())
@@ -143,7 +145,7 @@ func healAmount(m spells.Meta, level uint32) float64 {
 func healDirectAmount(m spells.Meta, level uint32) float64 {
 	var total float64
 	for _, e := range m.Effects {
-		if e.Effect == 10 { // SPELL_EFFECT_HEAL
+		if e.Effect == 10 || (e.Effect == 77 && scriptHeal(m)) { // SPELL_EFFECT_HEAL
 			total += effectAmount(e, m, level)
 		}
 	}
@@ -198,7 +200,7 @@ func healOptions(c *Ctx, kit *HealKit) []healOption {
 		ranks := c.Spells.Ranks(name) // lowest first
 		for i, id := range ranks {
 			m, ok := spells.Lookup(id)
-			if !ok || !m.Flags.Has(spells.FlagHeal) {
+			if !ok || !isHealSpell(m) {
 				continue
 			}
 			if i != len(ranks)-1 && int(m.Level) < int(c.Self.Level)-healRankWindow {
@@ -227,6 +229,11 @@ func chooseHeal(c *Ctx, kit *HealKit, need, pct float64, tank bool) (healOption,
 	opts := healOptions(c, kit)
 	if len(opts) == 0 || need <= 0 {
 		return healOption{}, false
+	}
+	if kit.NoFast != nil && kit.NoFast(c) {
+		if p := withoutFast(opts); len(p) > 0 {
+			opts = p
+		}
 	}
 	urgent := pct < healLowPct
 	saving := PowerPct(c) < manaSavePct
@@ -460,7 +467,7 @@ func incomingHeal(c *Ctx, g packet.GUID) float64 {
 			return
 		}
 		m, ok := spells.Lookup(spell)
-		if !ok || !m.Flags.Has(spells.FlagHeal) || m.Flags.Has(spells.FlagAura) {
+		if !ok || !isHealSpell(m) || m.Flags.Has(spells.FlagAura) {
 			return
 		}
 		if endsIn != nil && *endsIn < -500 {
@@ -972,6 +979,9 @@ func healerPosition() *Strategy {
 // vendor table of drinksFor). A drink just used is not used again for 5 s and nothing is sent while the Drink aura is awaited.
 func restDrink() *Strategy {
 	below := func(c *Ctx) int {
+		if rezNeedsMana(c) {
+			return 101 // a resurrection waits for the mana: drink to the top
+		}
 		if c.P.Role == RoleHealer {
 			return healerDrinkPct
 		}

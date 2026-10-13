@@ -44,7 +44,7 @@ func init() {
 	strategyBuilders["priest_defense"] = priestDefense
 	strategyBuilders["priest_buffs"] = priestBuffs
 	strategyBuilders["priest_shadow"] = priestShadow
-	presets["holy_priest"] = []string{"role_healer", "priest_holy", "priest_defense", "priest_buffs", "healer_position", "avoid_ground",
+	presets["holy_priest"] = []string{"role_healer", "priest_holy", "priest_defense", "priest_buffs", "rez", "healer_position", "avoid_ground",
 		"combat_consumables", "wand", "rest_eat", "rest_drink"}
 	presets["shadow_priest"] = []string{"combat_dps", "priest_shadow", "priest_defense", "priest_buffs", "ranged_position", "avoid_ground",
 		"class_interrupt", "combat_consumables", "wand", "rest_eat", "rest_drink"}
