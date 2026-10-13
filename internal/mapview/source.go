@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/capture"
@@ -74,7 +75,8 @@ type CaptureInfo struct {
 	First     time.Time
 	Last      time.Time
 	Frames    int
-	// Warning is why the capture ended early (a cut-off record), empty for a clean file.
+	// Warning is why the capture or its replay ended early (a cut-off record, a login the replay could not follow),
+	// empty for a clean file.
 	Warning string
 }
 
@@ -127,6 +129,9 @@ func AddCapture(b *Builder, path string, cfg Config) ([]events.Event, CaptureInf
 		return nil, info, err
 	}
 	info.Character, info.Records, info.Redacted, info.First, info.Last = rep.Character, rep.Records, rep.Redacted, rep.First, rep.Last
+	if rep.Ended != "" { // the replay stopped early (it could not log in, say): say why rather than draw nothing
+		info.Warning = strings.TrimPrefix(info.Warning+"; replay ended: "+rep.Ended, "; ")
+	}
 	var out []events.Event
 	for since := uint64(0); ; {
 		page := log.Read(events.Query{Since: since, Limit: events.MaxLimit})

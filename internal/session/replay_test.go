@@ -14,6 +14,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
 func allEvents(l *events.Log) []events.Event {
@@ -236,5 +237,35 @@ func TestReplayWithObservesEveryRecordUnderTheCapturesClock(t *testing.T) {
 	}
 	if ca, cb := count(a), count(b); !reflect.DeepEqual(ca, cb) || len(ca) < 5 {
 		t.Fatalf("Replay and ReplayWith(nil) differ: %v and %v", ca, cb)
+	}
+}
+
+// A capture of login --create (live run 3): the first character list lacks the character,
+// the agent creates it and logs in from the second list. The replay follows the same path
+// into the world instead of ending at the first list.
+func TestReplayFollowsLoginCreate(t *testing.T) {
+	at := time.Unix(1_800_000_000, 0)
+	rec := func(dir worldconn.Direction, op uint16, body []byte) capture.Record {
+		at = at.Add(10 * time.Millisecond)
+		return capture.Record{Dir: dir, Time: at, Op: op, Body: body}
+	}
+	alt := Character{GUID: 0x2B, Name: "Alt", Level: 1}
+	recs := []capture.Record{
+		rec(worldconn.ClientToServer, opcode.CMSGCharEnum, nil),
+		rec(worldconn.ServerToClient, opcode.SMSGCharEnum, charEnumBody(alt)),
+		rec(worldconn.ClientToServer, opcode.CMSGCharCreate, CreateSpec{Race: 1, Class: 1}.createBody(me.Name)),
+		rec(worldconn.ServerToClient, opcode.SMSGCharCreate, []byte{46}),
+		rec(worldconn.ClientToServer, opcode.CMSGCharEnum, nil),
+		rec(worldconn.ServerToClient, opcode.SMSGCharEnum, charEnumBody(alt, me)),
+		rec(worldconn.ClientToServer, opcode.CMSGPlayerLogin, packet.NewWriter().GUID(me.GUID).Bytes()),
+		rec(worldconn.ServerToClient, opcode.SMSGLoginVerifyWorld, packet.NewWriter().U32(0).F32(me.X).F32(me.Y).F32(me.Z).F32(1.5).Bytes()),
+	}
+	var last StatusInfo
+	_, rep, err := ReplayWith(recs, Options{}, func(_ capture.Record, s *Session) { last = s.Status() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ended != "" || rep.Character != me.Name || last.State != StatusInWorld {
+		t.Fatalf("replay ended %q, character %q, state %s; want in world as %s", rep.Ended, rep.Character, last.State, me.Name)
 	}
 }

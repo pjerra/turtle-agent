@@ -61,6 +61,12 @@ func ReplayWith(recs []capture.Record, opts Options, observe func(rec capture.Re
 		opts.Character = name
 	}
 	rep.Character = opts.Character
+	if opts.Create == nil && createdInCapture(recs) {
+		// login --create: the first character list lacks the character, so the replay must
+		// take the create path as the live session did, or it ends at that list. The spec
+		// itself goes nowhere (the offline connection drops what the session writes).
+		opts.Create = &CreateSpec{}
+	}
 	if opts.Log == nil {
 		opts.Log = events.New(math.MaxInt)
 	}
@@ -131,6 +137,23 @@ func ReplayWith(recs []capture.Record, opts Options, observe func(rec capture.Re
 	}
 	s.flushPending()
 	return opts.Log, rep, nil
+}
+
+// createdInCapture reports a CMSG_CHAR_CREATE before the first CMSG_PLAYER_LOGIN: the agent
+// created the character it then logged in (login --create).
+func createdInCapture(recs []capture.Record) bool {
+	for _, rec := range recs {
+		if rec.Dir != worldconn.ClientToServer {
+			continue
+		}
+		switch rec.Op {
+		case opcode.CMSGCharCreate:
+			return true
+		case opcode.CMSGPlayerLogin:
+			return false
+		}
+	}
+	return false
 }
 
 // loggedInCharacter names the character the capture picked: the GUID of the first

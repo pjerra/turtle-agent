@@ -151,7 +151,6 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
 5. Findings that are TortoiseBots behaviour (the priest not drinking at 49% mana, the tank losing its target after "reach pull", companions skipping a pack,
    not following, not looting) are reported to TortoiseBots as a bug fix or a behaviour change per its vision document, not worked around here.
 
-
 ## Agent state: cooldowns, channels, combo points (issue #80 step 1)
 
 The spell state (README "Agent state") was written from the core's source and tested against the committed captures
@@ -376,3 +375,14 @@ bot and two damage bots (no healer bot, or the TortoiseBots healer set to follow
     leader or a member under 45% breaks the meal with one `stand_up`. Note whether the core takes state 0 from a sitting player and whether the Drink aura goes with it.
 11. **Dispel range and walking.** A polymorphed member 32 yd away: `heal_approach` once, then `dispel`; a slowed member 32 yd away: no walk. A hurt member just out of reach: `heal_approach`,
     then `heal`, no `heal_reposition` between them.
+
+## Movement client time over a long session (ClockDesync)
+
+Live run 3 (Uldaman, agent on a WSL2 laptop) logged 49 `ClockDesync` Inform lines for the leader, the desync growing from 6.9 s to 73 s in
+40 minutes: the agent counted the movement client time on the monotonic clock, which runs about 3-4% fast under WSL2 (only the wall
+clock is disciplined, stepped back about a second every half minute). The client time now follows the wall clock's pace (clock.go).
+
+1. Run the agent for at least an hour with walking (a dungeon run, or walks of a minute or two with idle between), on the WSL2 laptop.
+2. Grep the server's anticheat log for the character: the `ClockDesync` count must stay 0 over the hour.
+3. Same log: no `TimeBack`, `HeartbeatSkip` or `OverspeedZ` lines the run did not have before.
+4. `turtle-agent map --capture` on that run's capture (also one made with `login --create`) reports frames, not 0.

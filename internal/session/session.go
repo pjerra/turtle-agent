@@ -244,11 +244,12 @@ type Session struct {
 	gossip          *game.GossipMenu // the open gossip menu, nil once closed
 	npc             npcState         // vendor, trainer and quest requests awaiting their results
 	fall            *fallState
-	traceSeq        uint64   // the last floor search sent off the loop (fall.go)
-	placed          uint64   // counts the positions the server put the player at (serverPosition)
-	last            lastMove // what the server has for the player
-	lastClock       uint32   // the last MovementInfo client time sent
-	toggles         uint32   // water walking, hover, feather fall as the server applied them
+	traceSeq        uint64    // the last floor search sent off the loop (fall.go)
+	placed          uint64    // counts the positions the server put the player at (serverPosition)
+	last            lastMove  // what the server has for the player
+	lastClock       uint32    // the last MovementInfo client time sent
+	mclock          moveClock // the movement client time, in step with real time (clock.go)
+	toggles         uint32    // water walking, hover, feather fall as the server applied them
 
 	// spellState is the agent's spellbook, cooldowns and cast state (internal/spellstate); it
 	// locks itself, so RPC calls read it directly.
