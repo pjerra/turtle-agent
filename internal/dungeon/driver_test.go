@@ -17,9 +17,16 @@ import (
 
 type fakeUnit struct {
 	objects.Unit
-	dieAt  time.Time
-	noJoin bool // pulling a neighbour does not bring it into the fight (stationary mobs with no link)
-	stuck  bool // pulling it draws no fight at all
+	dieAt      time.Time
+	noJoin     bool // pulling a neighbour does not bring it into the fight (stationary mobs with no link)
+	stuck      bool // pulling it draws no fight at all
+	stuckPulls int  // the next n pulls of it draw no fight
+}
+
+type lateAura struct {
+	at  time.Time
+	who packet.GUID
+	id  uint32
 }
 
 type fakeEvent struct {
@@ -77,7 +84,9 @@ type fakeGame struct {
 
 	refusals      []Refusal                 // what the bots refused since the last look (the Driver reads them through RefusalSource)
 	refuseTargets map[packet.GUID][]Refusal // a pullback at this target is refused with the first of these (and it is dropped), no fight starts
-	failGMOn      map[packet.GUID]int       // the next n ".aura" commands selecting this unit land on the leader instead
+	auraDelay     time.Duration             // an ".aura" shows on its target only this long after
+	lateAuras     []lateAura
+	failGMOn      map[packet.GUID]int // the next n ".aura" commands selecting this unit land on the leader instead
 }
 
 const (
@@ -104,6 +113,13 @@ func (g *fakeGame) clock() Clock {
 			if !u.dieAt.IsZero() && !g.now.Before(u.dieAt) {
 				u.Dead, u.InCombat, u.dieAt = true, false, time.Time{}
 				u.Health = 0
+			}
+		}
+		for i := 0; i < len(g.lateAuras); i++ {
+			if l := g.lateAuras[i]; !g.now.Before(l.at) {
+				g.auras[l.who] = append(g.auras[l.who], objects.Aura{SpellID: l.id})
+				g.lateAuras = append(g.lateAuras[:i], g.lateAuras[i+1:]...)
+				i--
 			}
 		}
 		for name, at := range g.revAt {
@@ -250,6 +266,10 @@ func (g *fakeGame) pull() {
 	if t == nil || stealthedFake(t) || t.stuck { // nobody attacks what it cannot see; a stuck mob does not come
 		return
 	}
+	if t.stuckPulls > 0 {
+		t.stuckPulls--
+		return
+	}
 	n := 0
 	for _, u := range g.units {
 		if u != t && u.noJoin {
@@ -286,7 +306,11 @@ func (g *fakeGame) GM(ctx context.Context, text string) error {
 				g.failGMOn[who]--
 				who = leader
 			}
-			g.auras[who] = append(g.auras[who], objects.Aura{SpellID: uint32(n)})
+			if g.auraDelay > 0 {
+				g.lateAuras = append(g.lateAuras, lateAura{at: g.now.Add(g.auraDelay), who: who, id: uint32(n)})
+			} else {
+				g.auras[who] = append(g.auras[who], objects.Aura{SpellID: uint32(n)})
+			}
 		}
 	}
 	if strings.HasPrefix(text, ".revive ") {

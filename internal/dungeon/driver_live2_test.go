@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
@@ -44,11 +45,12 @@ func TestAMobFightingThePartyIsStillTheGroups(t *testing.T) {
 	g.units[0].InCombat, g.units[0].Target = true, tank
 	d := NewDriver(mustPlan(t, onePackPlan), g, Config{}, g.clock())
 	d.party[tank] = true
-	if cs := d.candidates([]uint32{1, 2}, nil, []Point{{30, 0, 0}, {32, 0, 0}}, false); len(cs) != 1 || cs[0].GUID != 101 {
+	sp := fightSpec{pick: []uint32{1, 2}, anchors: []Point{{30, 0, 0}, {32, 0, 0}}}
+	if cs := d.candidates(sp, sp.pick); len(cs) != 1 || cs[0].GUID != 101 {
 		t.Fatalf("%+v", cs)
 	}
 	g.units[0].InCombat = false
-	if cs := d.candidates([]uint32{1, 2}, nil, []Point{{30, 0, 0}, {32, 0, 0}}, false); len(cs) != 0 {
+	if cs := d.candidates(sp, sp.pick); len(cs) != 0 {
 		t.Fatalf("an idle mob 40 yd from the anchors is no member: %+v", cs)
 	}
 }
@@ -311,5 +313,187 @@ func TestNoBuffIsSentToACompanionOutOfView(t *testing.T) {
 	}
 	if len(auraCmds(g)) != 0 {
 		t.Fatalf("sent %q", auraCmds(g))
+	}
+}
+
+// --- review round 1 ---
+
+const overlappingGroupsPlan = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},
+  "pull_groups":[
+   {"entries":[5,5],"positions":[{"x":30,"y":0,"z":0},{"x":31,"y":0,"z":0}]},
+   {"entries":[5],"positions":[{"x":40,"y":0,"z":0}]}]}]}`
+
+// A mob that drew no fight in one group is passed over by that group only: it stands in the area of the next group too, and
+// that group pulls it (a run-wide skip would have left it alive and counted that group as "already dead").
+func TestAPassedOverMobIsStillTheNextGroupsToPull(t *testing.T) {
+	g := newFake()
+	for i, x := range []float32{30, 31, 40} {
+		u := g.add(packet.GUID(301+i), 5, Point{x, 0, 0})
+		u.noJoin = true
+	}
+	g.units[0].stuckPulls = 1
+	d := NewDriver(mustPlan(t, overlappingGroupsPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.targets) != fmt.Sprint([]packet.GUID{301, 302, 303, 301}) {
+		t.Fatalf("targets %v: the second group must pull the mob the first passed over", g.targets)
+	}
+	if strings.Contains(notes(d), "already dead") {
+		t.Fatalf("notes %q", notes(d))
+	}
+	// A refusal, in contrast, is the run's.
+	g = newFake()
+	for i, x := range []float32{30, 31, 40} {
+		g.add(packet.GUID(301+i), 5, Point{x, 0, 0}).noJoin = true
+	}
+	g.refuseTargets = map[packet.GUID][]Refusal{301: {refuse("pullback", "unreachable", "x")}}
+	d = NewDriver(mustPlan(t, overlappingGroupsPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	for _, tg := range g.targets[1:] {
+		if tg == 301 {
+			t.Fatalf("targets %v: a refused mob is left alone by every group", g.targets)
+		}
+	}
+}
+
+// A group's radius keeps its members apart from a pack of the same entry next to it.
+func TestAGroupRadiusSeparatesTwoRows(t *testing.T) {
+	g := newFake()
+	g.add(401, 5, Point{30, 0, 0})
+	g.add(402, 5, Point{44, 0, 0})
+	d := NewDriver(mustPlan(t, overlappingGroupsPlan), g, Config{}, g.clock())
+	sp := fightSpec{pick: []uint32{5}, anchors: []Point{{30, 0, 0}}}
+	if cs := d.candidates(sp, sp.pick); len(cs) != 2 {
+		t.Fatalf("default radius: %d members", len(cs))
+	}
+	sp.radius = 10
+	if cs := d.candidates(sp, sp.pick); len(cs) != 1 || cs[0].GUID != 401 {
+		t.Fatalf("radius 10: %+v", cs)
+	}
+
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":30,"y":0,"z":0}],"radius":10}]}]}`)
+	if r := p.Legs[0].PullGroups[0].Radius; r != 10 {
+		t.Fatalf("radius %v", r)
+	}
+	if _, err := Parse("t.json", []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":30,"y":0,"z":0}],"radius":-3}]}]}`)); err == nil || !strings.Contains(err.Error(), "radius") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// The two Uldaman rows of Ambushers do not share members.
+func TestUldamanAmbusherRowsAreSeparate(t *testing.T) {
+	p := loadUldaman(t)
+	var rows []PullGroup
+	for _, g := range p.Legs[2].PullGroups {
+		if len(g.Entries) > 0 && g.Entries[0] == 7175 {
+			rows = append(rows, g)
+		}
+	}
+	if len(rows) != 2 || rows[0].Radius == 0 || rows[1].Radius == 0 {
+		t.Fatalf("%+v", rows)
+	}
+	for _, a := range rows[0].Positions {
+		for _, b := range rows[1].Positions {
+			if d := dist3(a, b); d <= float64(max(rows[0].Radius, rows[1].Radius)) {
+				t.Errorf("%v and %v are %.1f yd apart, radii %v and %v", a, b, d, rows[0].Radius, rows[1].Radius)
+			}
+		}
+	}
+}
+
+// A corpse of the entry that lies elsewhere (an earlier walk aggro) is no sign that this group is dead: the party walks to the
+// group's positions first.
+func TestACorpseElsewhereDoesNotMakeAGroupAlreadyDead(t *testing.T) {
+	const plan = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":200,"y":0,"z":0}]}]}]}`
+	g := newFake()
+	c := g.add(501, 1, Point{20, 0, 0})
+	c.Dead, c.Health = true, 0
+	g.add(502, 1, Point{200, 0, 0})
+	d := NewDriver(mustPlan(t, plan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.targets) != fmt.Sprint([]packet.GUID{502}) || strings.Contains(notes(d), "already dead") {
+		t.Fatalf("targets %v notes %q", g.targets, notes(d))
+	}
+}
+
+// A whisper names no intent: it answers the last order, so "X is evading" to a pullback skips the mob.
+func TestAnEvadingWhisperAnswersThePullback(t *testing.T) {
+	g := newFake()
+	g.add(101, 1, Point{30, 0, 0}).noJoin = true
+	g.add(102, 2, Point{32, 0, 0})
+	g.refuseTargets = map[packet.GUID][]Refusal{101: {{Code: "evading", Message: "mob1 is evading"}}}
+	d := NewDriver(mustPlan(t, onePackPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if fmt.Sprint(g.targets) != fmt.Sprint([]packet.GUID{101, 102}) {
+		t.Fatalf("targets %v", g.targets)
+	}
+	if r := d.Report().Refusals; len(r) != 1 || r[0].Intent != "pullback" || r[0].Code != "evading" {
+		t.Fatalf("refusals %+v", r)
+	}
+}
+
+// A bot that refuses every assist order is not asked every poll: two immediate resends, then the 10 s cadence.
+func TestARefusingBotIsNotAskedEveryPoll(t *testing.T) {
+	g := newFake()
+	g.add(101, 1, Point{30, 0, 0})
+	g.add(102, 2, Point{32, 0, 0})
+	g.dieIn = 60 * time.Second
+	g.onChat = func(g *fakeGame, text string) {
+		if text == ".bot action attack" {
+			g.refusals = append(g.refusals, refuse("attack", "no-target", "Select a live non-bot target first."))
+		}
+	}
+	d := NewDriver(mustPlan(t, onePackPlan), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if n := g.count(".bot action attack"); n > 14 {
+		t.Fatalf("%d attack orders in a 60 s fight", n)
+	}
+}
+
+// An aura the leader already carried is not a misfire: the first aura that lands nowhere is "on nobody", not "on the leader".
+func TestALeadersOwnAuraIsNotAMisfire(t *testing.T) {
+	g, p := runFixture(t)
+	g.auras = map[packet.GUID][]objects.Aura{leader: {{SpellID: 22888}}}
+	g.failGMOn = map[packet.GUID]int{tank: 1}
+	d := NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if !strings.Contains(notes(d), "landed on nobody") || strings.Contains(notes(d), "landed on the leader") {
+		t.Fatalf("notes %q", notes(d))
+	}
+}
+
+// A slow aura gets the whole BuffViewWait before the run is failed, counted from the first command.
+func TestABuffGetsTheWholeViewWaitToShow(t *testing.T) {
+	g, p := runFixture(t)
+	g.auraDelay = 8 * time.Second
+	d := NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+
+	g, p = runFixture(t)
+	g.auraRefused = true
+	t0 := g.now
+	d = NewDriver(p, g, Config{Buffs: worldBuffs(t)[:1]}, g.clock())
+	if err := d.Run(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "had no effect") {
+		t.Fatalf("%v", err)
+	}
+	if el := g.now.Sub(t0); el < 10*time.Second {
+		t.Fatalf("failed after %v, before the 10 s wait", el)
 	}
 }

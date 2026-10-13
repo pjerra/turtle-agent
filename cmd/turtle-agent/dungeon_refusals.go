@@ -27,13 +27,13 @@ func (c *refusalCursor) mark(l *events.Log) {
 }
 
 // next returns the refusals logged since the last call.
-func (c *refusalCursor) next(l *events.Log) []dungeon.Refusal {
+func (c *refusalCursor) next(l *events.Log, fromParty func(name string) bool) []dungeon.Refusal {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []dungeon.Refusal
 	for {
 		p := l.Read(events.Query{Since: c.seq, Kinds: []string{events.KindSystem, events.KindAddon, events.KindWhisper}, Limit: 500})
-		out = append(out, refusalsIn(p.Events)...)
+		out = append(out, refusalsIn(p.Events, fromParty)...)
 		c.seq = p.Next
 		if !p.More {
 			return out
@@ -43,8 +43,9 @@ func (c *refusalCursor) next(l *events.Log) []dungeon.Refusal {
 
 var whisperRefusal = regexp.MustCompile(`^(.{1,60}) is (evading|dead|too far away)\.?$`)
 
-// refusalsIn picks the refusals out of events.
-func refusalsIn(evs []events.Event) []dungeon.Refusal {
+// refusalsIn picks the refusals out of events. A whisper counts only from a member of the party (fromParty), and names
+// no intent: the driver matches it to the order it gave last.
+func refusalsIn(evs []events.Event, fromParty func(name string) bool) []dungeon.Refusal {
 	var out []dungeon.Refusal
 	for _, e := range evs {
 		line, ok := tbm.Line(e)
@@ -57,19 +58,29 @@ func refusalsIn(evs []events.Event) []dungeon.Refusal {
 			}
 			continue
 		}
-		if e.Kind != events.KindWhisper {
+		if e.Kind != events.KindWhisper || fromParty == nil || !fromParty(e.Source) {
 			continue
 		}
 		if m := whisperRefusal.FindStringSubmatch(strings.TrimSpace(e.Text)); m != nil {
 			code := map[string]string{"evading": "evading", "dead": "dead-target", "too far away": "too-far"}[m[2]]
-			out = append(out, dungeon.Refusal{Intent: "attack", Code: code, Message: strings.TrimSpace(e.Text)})
+			out = append(out, dungeon.Refusal{Code: code, Message: strings.TrimSpace(e.Text)})
 		}
 	}
 	return out
 }
 
 // Refusals implements dungeon.RefusalSource.
-func (g *sessionGame) Refusals() []dungeon.Refusal { return g.refusals.next(g.cur().Log()) }
+func (g *sessionGame) Refusals() []dungeon.Refusal {
+	s := g.cur()
+	return g.refusals.next(s.Log(), func(name string) bool {
+		for _, m := range s.Party().Members {
+			if strings.EqualFold(m.Name, name) {
+				return true
+			}
+		}
+		return false
+	})
+}
 
 // SelfAuras implements dungeon.SelfAuraSource: the leader's own auras from its object in the store.
 func (g *sessionGame) SelfAuras() ([]objects.Aura, bool) {

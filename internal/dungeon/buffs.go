@@ -147,19 +147,29 @@ func (d *Driver) hasBuff(m Member, b Buff) (has, seen bool) {
 	return seen && len(missing) == 0, seen
 }
 
-// leaderHas says whether the leader itself carries one of the buffs (false when that cannot be told).
-func (d *Driver) leaderHas(list []Buff) bool {
+// leaderAuraIDs are the spell ids the leader itself carries now (nil when that cannot be told).
+func (d *Driver) leaderAuraIDs() map[uint32]bool {
 	src, ok := d.g.(SelfAuraSource)
 	if !ok {
-		return false
+		return nil
 	}
 	auras, ok := src.SelfAuras()
 	if !ok {
-		return false
+		return nil
 	}
-	return slices.ContainsFunc(list, func(b Buff) bool {
-		return slices.ContainsFunc(auras, func(a objects.Aura) bool { return a.SpellID == b.ID })
-	})
+	ids := make(map[uint32]bool, len(auras))
+	for _, a := range auras {
+		ids[a.SpellID] = true
+	}
+	return ids
+}
+
+// leaderHas says whether the leader carries one of the buffs that it did not carry before the batch began
+// (d.leaderBase): an aura the leader already had, say a Rallying Cry of its own, is no sign of a misfire. False when
+// the leader's auras cannot be told.
+func (d *Driver) leaderHas(list []Buff) bool {
+	now := d.leaderAuraIDs()
+	return slices.ContainsFunc(list, func(b Buff) bool { return now[b.ID] && !d.leaderBase[b.ID] })
 }
 
 // sendBuffs has the leader put each of list on the member with ".aura <id>", every application flagged in the report
@@ -171,6 +181,7 @@ func (d *Driver) leaderHas(list []Buff) bool {
 // (the aura sits on the leader, or nowhere) the selection is made again and the command sent once more; a second miss
 // stops the batch (the rest would land on the leader too) and is the outcome. An aura on the leader is never a success.
 func (d *Driver) sendBuffs(ctx context.Context, m Member, list []Buff) (buffOutcome, error) {
+	d.leaderBase = d.leaderAuraIDs() // what the leader carries before this batch
 	for i, b := range list {
 		if i > 0 {
 			if err := d.sleep(ctx, d.cfg.BuffGap); err != nil {
@@ -200,7 +211,13 @@ func (d *Driver) sendBuff(ctx context.Context, m Member, b Buff) error {
 }
 
 func (d *Driver) sendFirst(ctx context.Context, m Member, b Buff, list []Buff) (buffOutcome, error) {
-	var oc buffOutcome
+	began := d.clk.Now()
+	missed := func() buffOutcome {
+		if d.leaderHas([]Buff{b}) {
+			return buffOnLeader
+		}
+		return buffNone
+	}
 	for try := 1; try <= 2; try++ {
 		if try == 2 {
 			// Selected again by the command itself; make sure the member is still in the leader's view first.
@@ -211,28 +228,36 @@ func (d *Driver) sendFirst(ctx context.Context, m Member, b Buff, list []Buff) (
 		if err := d.sendBuff(ctx, m, b); err != nil {
 			return buffNone, err
 		}
-		for look := 0; look < 2; look++ {
-			if err := d.sleep(ctx, d.cfg.UseSettle); err != nil {
-				return buffNone, err
-			}
-			has, seen := d.hasBuff(m, b)
-			if has || !seen {
-				return buffTaken, nil
-			}
-		}
-		oc = buffNone
-		if d.leaderHas([]Buff{b}) {
-			oc = buffOnLeader
-		}
 		if try == 1 {
+			// The first look is at 2 x UseSettle; a miss then is answered with the second command.
+			for look := 0; look < 2; look++ {
+				if err := d.sleep(ctx, d.cfg.UseSettle); err != nil {
+					return buffNone, err
+				}
+				if has, seen := d.hasBuff(m, b); has || !seen {
+					return buffTaken, nil
+				}
+			}
 			where := "on nobody"
-			if oc == buffOnLeader {
+			if missed() == buffOnLeader {
 				where = "on the leader"
 			}
 			d.rep.note(fmt.Sprintf("leg %d: the first .aura (%s) for %s landed %s; selecting %s again and sending it once more", max(d.curLeg, 0), b.Name, m.Name, where, m.Name))
 		}
 	}
-	return oc, nil
+	// The second command is given the rest of BuffViewWait, counted from the first, to show: the run is not failed
+	// before then.
+	for {
+		if err := d.sleep(ctx, min(d.cfg.UseSettle, max(began.Add(d.cfg.BuffViewWait).Sub(d.clk.Now()), time.Millisecond))); err != nil {
+			return buffNone, err
+		}
+		if has, seen := d.hasBuff(m, b); has || !seen {
+			return buffTaken, nil
+		}
+		if !d.clk.Now().Before(began.Add(d.cfg.BuffViewWait)) {
+			return missed(), nil
+		}
+	}
 }
 
 // noEffectError is the failure of a batch whose first command did not take.

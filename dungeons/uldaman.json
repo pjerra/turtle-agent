@@ -141,7 +141,8 @@
             {"x": -235.3, "y": 214.8, "z": -49.4},
             {"x": -243.2, "y": 215.4, "z": -46.7},
             {"x": -243.3, "y": 220.8, "z": -46.3}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [7175, 7175, 7175],
@@ -149,7 +150,8 @@
             {"x": -221.4, "y": 214.3, "z": -49.4},
             {"x": -213.3, "y": 215.4, "z": -46.7},
             {"x": -211.8, "y": 220.4, "z": -46.7}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4852, 4850, 4850],
@@ -182,7 +184,7 @@
       "notes": [
         "Checked live on 2026-10-13 (docs/LIVE-CHECKS.md): use_object on the Keystone (124371) from 2.6 yd opened it; the Seal of Khaz'Mul (124372, 55 yd on) became active 27 s later, hence the 60 s wait.",
         "The Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916), so their groups are 'ambush': the party walks through them instead of pulling.",
-        "The Stonevault Ambushers (7175) of the room at y 215 are NOT stealthed and do not evade (world export: no aura in creature_template or creature_addon, movement_type 0, wander 0; second live run: 5 of the 6 died). They are six stationary spawns in two rows of three with no creature group, so a pull brings one or two; hence two pull groups (west, east) and a driver that counts a pull that killed something as progress."
+        "The Stonevault Ambushers (7175) of the room at y 215 are NOT stealthed and do not evade (world export: no aura in creature_template or creature_addon, movement_type 0, wander 0; second live run: 5 of the 6 died). They are six stationary spawns in two rows of three with no creature group, so a pull brings one or two; hence two pull groups (west, east; radius 10 yd so that each takes its own row, the rows being 14 yd apart) and a driver that counts a pull that killed something as progress."
       ]
     },
     {

@@ -21,16 +21,17 @@ func TestRefusalCursorReadsTBMErrorsAndWhispers(t *testing.T) {
 	l.Append(events.Event{Kind: events.KindWhisper, Source: "Gelpanbrad", Text: "Stonevault Ambusher is evading"})
 	l.Append(events.Event{Kind: events.KindWhisper, Source: "Gelpanbrad", Text: "Stonevault Ambusher is dead"})
 	l.Append(events.Event{Kind: events.KindWhisper, Source: "Gelpanbrad", Text: "hello there"})
+	l.Append(events.Event{Kind: events.KindWhisper, Source: "Stranger", Text: "Stonevault Ambusher is evading"}) // not from the party
 	l.Append(events.Event{Kind: events.KindChat, Text: "Stonevault Ambusher is evading"})
 
 	want := []dungeon.Refusal{
 		{Intent: "pullback", Code: "unreachable", Message: "The tank could not start moving to a firing position for the pull."},
 		{Intent: "attack", Code: "no-target", Message: "Select a live non-bot target first."},
 		{Intent: "pullback", Code: "no-tank", Message: "No live tank-capable owned party bot can pull this target."},
-		{Intent: "attack", Code: "evading", Message: "Stonevault Ambusher is evading"},
-		{Intent: "attack", Code: "dead-target", Message: "Stonevault Ambusher is dead"},
+		{Code: "evading", Message: "Stonevault Ambusher is evading"},
+		{Code: "dead-target", Message: "Stonevault Ambusher is dead"},
 	}
-	got := c.next(l)
+	got := c.next(l, func(n string) bool { return n == "Gelpanbrad" })
 	if len(got) != len(want) {
 		t.Fatalf("%d refusals %+v, want %d", len(got), got, len(want))
 	}
@@ -39,7 +40,7 @@ func TestRefusalCursorReadsTBMErrorsAndWhispers(t *testing.T) {
 			t.Errorf("refusal %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	if again := c.next(l); len(again) != 0 {
+	if again := c.next(l, nil); len(again) != 0 {
 		t.Fatalf("read twice: %+v", again)
 	}
 }

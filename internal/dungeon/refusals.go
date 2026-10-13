@@ -8,7 +8,8 @@ import (
 )
 
 // Refusal is TortoiseBots saying no to one of the driver's orders: the TBM:ACTION_ERR|<intent>|<code>|<message> reply to
-// a "/p .bot action ..." order (internal/tbm), or a whispered "<mob> is evading" / "<mob> is dead" for an attack.
+// a "/p .bot action ..." order (internal/tbm), or a whispered "<mob> is evading" / "<mob> is dead". A whisper names no
+// intent (Intent empty): the driver takes it for an answer to the last order it gave.
 type Refusal struct {
 	Intent  string `json:"intent"`
 	Code    string `json:"code"`
@@ -74,6 +75,12 @@ func (d *Driver) drainRefusals() {
 		return
 	}
 	for _, r := range src.Refusals() {
+		if r.Intent == "" { // a whisper: it answers the last order given
+			r.Intent = d.lastOrder
+			if r.Intent == "" {
+				r.Intent = "attack"
+			}
+		}
 		d.recordRefusal(r)
 		if len(d.pendingRef) < 32 {
 			d.pendingRef = append(d.pendingRef, r)
