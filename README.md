@@ -247,9 +247,9 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
-| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
-| `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
+| `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
@@ -809,8 +809,54 @@ is first seen in combat; a fight is over once no mob has been there for 3 s). A 
 (2) *The mob's target*: the brain fights the tank's target. The tank is the party member `tank` names, else the first of warrior,
 paladin and druid (by the `class` of their unit row) in view whose target is a living hostile mob in combat; without one, a mob
 that attacks the leader, then the leader's own selected target in combat. (3) *Area spells* (Cone of Cold) are vetoed unless every
-hostile mob near the leader (12 yd) is on the tank or on the leader. Not done yet (step 3): the class threat drops (Fade, Feign
-Death), positioning, line of sight, interrupts.
+hostile mob near the leader (12 yd) is on the tank or on the leader. (4) *The hard signal*: a mob whose target is the leader. The mage
+answers it by relevance: Ice Block below 20% health (a talent: only if the spellbook has it), Blink out of melee below 50% health
+when Frost Nova is not available (see below), Frost Nova when the mob is in melee (existing), a step back out of reach once the mob is
+rooted, and, while the mob is still coming (over 9 yd away, not rooted), a run toward the tank so that the tank can take it (to
+4 yd from the tank; not if the tank is within 8 yd already).
+
+**Positioning** (`ranged_position`, `avoid_ground`; the walks go through `walk_path`, so they follow the navmesh). The leader stays
+**20 to 28 yd** from the fight's mob (Frostbolt reaches 30, the top leaves room for the server's reach; the band is only left past
+1 yd of slack), **with sight of it** and **outside the front of the mob** (a 90 degree cone in front of the mob's facing). When one of
+these is wrong and no mob is on the leader, the brain looks for the nearest standing spot that meets all of them: candidate points
+on rings of 22, 24 and 27 yd round the mob, each snapped to the navmesh (within 2.5 yd), reachable in a straight line over the
+mesh, within 24 yd of the leader, and at least 15 yd from any mob that has not noticed the party (8 yd from one that is
+fighting), then it walks there in steps of 2.5 s and decides again. No spot is looked for more than every 0.6 s (1.5 s after a miss).
+It never walks while casting (a cast of its own comes first), only an interrupt-band action may break a cast. **Ground effects**:
+a dynamic object (Blizzard, Rain of Fire, a fire patch) of an enemy (its caster a hostile mob in view; or the source of a periodic
+damage aura the leader carries; or, with its caster out of view, a harmful spell) that covers the leader makes it walk out along the
+mesh to a point 2 yd past the edge, at relevance 42, which also breaks a cast. Effects of the party's own casters (a bot's
+Blizzard, a Consecration) and of the leader are ignored.
+
+**Line of sight.** The agent has no vmaps (the server's collision geometry), so sight is a **navmesh raycast**: Detour's walkability
+ray over the polygons a player on foot may stand on, from the leader to the target. A wall, a pillar or a drop is where the mesh
+ends, so the ray stops there; what the mesh does not show (a bridge over the ray, a ceiling) is not seen, and a gap or a cliff counts
+as a block. The ray reaches the target if it stops within 1.5 yd of it (a unit stands on the mesh's edge as often as inside it).
+The answer is cached per target for 250 ms, and until the leader or the target moves 1 yd. If the mesh cannot say (no `mmaps_dir`, a
+missing tile, the leader off the mesh) the brain takes the line as clear and does not move for it.
+
+**Move lock.** The dungeon driver and the brain must not walk at once. `brain.MoveLock` is the arbiter: the brain takes it for each
+step; the driver calls `Controller.HoldMove(ctx)` around its walks, which stops a step under way and keeps the brain from walking
+until the returned release is called (`brain_status.move_held`). A dungeon run starts the brain with `no_move` until the driver
+does so; every other part of the brain works in a run.
+
+**Interrupts** (`mage_interrupt`: Counterspell, relevance 40, which also breaks the leader's own cast). An enemy cast shows from
+`SMSG_SPELL_START` (spell, end, the unit it is aimed at). The brain interrupts, in this order: a heal or a crowd-control spell
+(fear, stun, sleep, polymorph, charm, horror; by the spell's mechanic) on anyone, then a damage spell aimed at a party member or
+the leader, only if the spell can be interrupted, has at least 350 ms left, and its caster is in the spell's range. A cast tried
+once is left alone for 3 s; a refused call backs the spell off as any cast.
+
+**Consumables** (`combat_consumables`). Below 25% health in combat: a healthstone, then a health potion (the best in the bags that
+the level allows; not while Ice Block is up); below 45% health in combat, with no mob on the leader and no health lost for 4 s: a
+bandage (the best in the bags, not while "Recently Bandaged" is up or while moving or casting; the agent does not know the First Aid
+skill, so a bandage that started no channel within 1.5 s is left alone for 5 minutes). A mana potion below 10% mana when the mob
+looks like a boss (3 or more levels above the leader, or 6 times its health: a 1.12 client sees no creature rank). Required levels
+and cooldowns (2 minutes, shared by a group) are the core's `item_template`; the agent does not see item cooldowns, so a used
+item is not used again for 2 minutes.
+
+**Wand** (`wand`). Below 15% mana, with a mob to fight in range: `Shoot` (relevance 9, behind Frostbolt, so it takes over when the
+bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3 s or while the spell state shows a shot in the last
+3 s; a server that says no wand is equipped backs it off for 30 s.
 
 **Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
 - preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest`;
@@ -818,6 +864,10 @@ Death), positioning, line of sight, interrupts.
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
   leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
   cone in front;
+- `ranged_position`, `avoid_ground`, `mage_defense` (Ice Block, Blink, step back from a rooted mob), `mage_interrupt`,
+  `combat_consumables`, `wand`: see above. The preset `frost_mage` is now `combat_dps` + `mage_frost` + `mage_rest` + these six.
+  Blink lands up to 20 yd ahead of the way the leader faces and the brain has no way to turn on the spot, so it only blinks with the
+  mob behind it, 12 yd of walkable mesh ahead and a landing 8 yd farther from the mob;
 - `mage_rest`, out of combat and with no mob to fight, only where upkeep is allowed (always for `brain_start`; in a dungeon run only
   inside a rest gate, so the leader never sits down mid-walk): Ice Armor (else Frost Armor) and Arcane Intellect when missing or,
   if the server says how long they last, under a minute from ending; Evocation below 20% mana, else drinking below 65% (the best
@@ -830,8 +880,8 @@ non-GM: GM shortcuts stay as they are. A brain started by hand is not touched by
 `brain_start` and `brain_stop` are refused (`brain_status` still answers).
 The report's `brain` names the strategies.
 
-Not in this step: roles other than dps, the other classes, positioning, resting and corpse runs of the leader, interrupts,
-wand filler (Shoot), potions. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the
+Not in this step: roles other than dps, the other classes, resting and corpse runs of the leader, melee positioning (behind the mob),
+wiring the move lock into the dungeon driver. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the
 live check is in `docs/LIVE-CHECKS.md`.
 
 ## Vendors, trainers and quests

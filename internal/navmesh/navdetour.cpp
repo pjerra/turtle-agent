@@ -214,6 +214,30 @@ extern "C" int nd_polys(void* h, const float* box, float* out, int max) {
     return (int)total;
 }
 
+extern "C" int nd_raycast(void* h, const float* start, const float* end, unsigned short include,
+                          unsigned short exclude, float* t) {
+    Nav* n = (Nav*)h;
+    if (!n || !n->mesh || !n->query || !t)
+        return -3;
+    *t = 0;
+    dtQueryFilter f = makeFilter(include, exclude);
+    float s[3], e[3], sc[3], sdist = 0, normal[3] = {0, 0, 0};
+    toDt(start, s);
+    toDt(end, e);
+    dtPolyRef sref = findWalkPoly(n, s, f, sc, &sdist);
+    if (!sref)
+        return -1;
+    // The ray runs from the floor point under start; Detour reads only the horizontal part of end.
+    const int maxPath = 256;
+    dtPolyRef visited[maxPath];
+    int visitedCount = 0;
+    float hit = 0;
+    if (dtStatusFailed(n->query->raycast(sref, sc, e, &f, &hit, normal, visited, &visitedCount, maxPath)))
+        return -3;
+    *t = hit;
+    return 0;
+}
+
 extern "C" int nd_find_path(void* h, const float* start, const float* end, unsigned short include,
                             unsigned short exclude, float* out, int max_points, int* count, float* goal) {
     Nav* n = (Nav*)h;

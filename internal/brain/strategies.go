@@ -21,9 +21,17 @@ var (
 		"combat_dps": combatDPS,
 		"mage_frost": mageFrost,
 		"mage_rest":  mageRest,
+
+		"ranged_position":    rangedPosition,
+		"avoid_ground":       avoidGround,
+		"mage_defense":       mageDefense,
+		"mage_interrupt":     mageInterrupt,
+		"combat_consumables": combatConsumables,
+		"wand":               wandStrategy,
 	}
 	presets = map[string][]string{
-		"frost_mage": {"combat_dps", "mage_frost", "mage_rest"},
+		"frost_mage": {"combat_dps", "mage_frost", "mage_rest", "ranged_position", "avoid_ground", "mage_defense", "mage_interrupt",
+			"combat_consumables", "wand"},
 	}
 )
 

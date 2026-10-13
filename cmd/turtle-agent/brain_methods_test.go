@@ -34,7 +34,7 @@ func TestBrainStartRefusals(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{}`, "name at least one"},
 		{`{"strategies":[]}`, "name at least one"},
-		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: frost_mage; strategies: combat_dps, mage_frost, mage_rest)`},
+		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: frost_mage; strategies: avoid_ground, combat_consumables, combat_dps, mage_defense, mage_frost, mage_interrupt, mage_rest, ranged_position, wand)`},
 		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer"`},
 		{`{"strategies":["mage_frost"]}`, "face_target"},
 		{`{"strategies":["frost_mage"],"colour":1}`, "colour"},
@@ -57,7 +57,7 @@ func TestBrainStartStopAndEvents(t *testing.T) {
 	if !ok || st["running"] != true || st["role"] != "dps" || st["tank"] != "Gorm" || st["rest_ok"] != true {
 		t.Fatalf("%v", out)
 	}
-	if s := st["strategies"].([]any); len(s) != 4 || s[0] != "base" || s[1] != "combat_dps" || s[2] != "mage_frost" || s[3] != "mage_rest" {
+	if s := st["strategies"].([]any); len(s) != 10 || s[0] != "base" || s[1] != "combat_dps" || s[2] != "mage_frost" || s[3] != "mage_rest" || s[9] != "wand" {
 		t.Fatalf("%v", s)
 	}
 	if out := r.call("brain_start", `{"strategies":["frost_mage"]}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "brain_stop it first") {
@@ -65,7 +65,7 @@ func TestBrainStartStopAndEvents(t *testing.T) {
 	}
 	// The spellbook is not loaded yet: the brain waits, and says why.
 	r.eventually("brain_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["idle"] == "not_ready" })
-	if st := r.call("brain_stop", "{}")["result"].(map[string]any); st["running"] != false || len(st["strategies"].([]any)) != 4 {
+	if st := r.call("brain_stop", "{}")["result"].(map[string]any); st["running"] != false || len(st["strategies"].([]any)) != 10 {
 		t.Fatalf("%v", st)
 	}
 	ev := r.call("events", `{"since":0,"kinds":["brain_state","brain_idle"]}`)["result"].(map[string]any)["events"].([]any)
@@ -249,5 +249,66 @@ func TestDriverBrainStartsAndStopsOnlyWhatItStarted(t *testing.T) {
 	d.Rest(true)
 	if !ctl.Running() || ctl.Status().RestOK != true {
 		t.Fatal("the hand-started brain was touched")
+	}
+}
+
+func TestBrainStartCanSwitchMovementOff(t *testing.T) {
+	r := newRig(t)
+	st := r.call("brain_start", `{"strategies":["frost_mage"],"no_move":true}`)["result"].(map[string]any)
+	if st["running"] != true || st["no_move"] != true {
+		t.Fatalf("%v", st)
+	}
+	r.call("brain_stop", "{}")
+	st = r.call("brain_start", `{"strategies":["frost_mage"]}`)["result"].(map[string]any)
+	if st["no_move"] != nil || st["move_held"] != nil {
+		t.Fatalf("movement is on by default: %v", st)
+	}
+	r.call("brain_stop", "{}")
+}
+
+// The driver's brain does not walk the player until the driver holds the move lock around its own walks (lane A wires
+// HoldMove into the driver and then drops NoMove); HoldMove itself works at once.
+func TestDriverBrainKeepsMovementOffAndOffersTheMoveLock(t *testing.T) {
+	r := newRig(t)
+	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
+	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
+	defer ctl.Close()
+	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+	release, err := d.HoldMove(context.Background()) // before the brain runs: a free lock
+	if err != nil || !ctl.Status().MoveHeld {
+		t.Fatalf("%v %+v", err, ctl.Status())
+	}
+	release()
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+	if st := ctl.Status(); !st.NoMove || st.MoveHeld {
+		t.Fatalf("%+v", st)
+	}
+	release, err = d.HoldMove(context.Background())
+	if err != nil || !ctl.Status().MoveHeld {
+		t.Fatalf("%v %+v", err, ctl.Status())
+	}
+	release()
+	if ctl.Status().MoveHeld {
+		t.Fatal("the lock was not let go")
+	}
+}
+
+func TestSessionBrainGameNavmeshHalfWithoutAPlanner(t *testing.T) {
+	r := newRig(t)
+	g := &sessionBrainGame{cur: func() *session.Session { return r.s }}
+	if err := g.WalkTo(context.Background(), 1, 2, 3); err == nil || !strings.Contains(err.Error(), "mmaps_dir") {
+		t.Fatalf("%v", err)
+	}
+	if clear, known := g.LineClear(brain.Vec3{}, brain.Vec3{5, 5, 0}); clear || known {
+		t.Fatalf("clear %v known %v without a navmesh", clear, known)
+	}
+	if _, ok := g.SnapToMesh(brain.Vec3{}); ok {
+		t.Fatal("snapped without a navmesh")
+	}
+	if len(g.DynamicObjects()) != 0 {
+		t.Fatal("ground effects out of nowhere")
 	}
 }

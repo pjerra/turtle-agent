@@ -37,6 +37,13 @@ int nd_floors(void* h, const float* p, float lo, float hi, float* z, unsigned sh
 // NULL with max 0 to ask the size). -1 when Detour has no mesh.
 int nd_polys(void* h, const float* box, float* out, int max);
 
+// A walkability ray along the mesh surface from start to end (WoW x, y, z; the height of end is ignored, the ray runs
+// over the polygons). 0 done: *t = the fraction of the way from start to end at which the ray meets the mesh's edge
+// (an unwalkable polygon, a missing tile, a wall of the mesh), or a value over 1 when it reaches end; -1 start is off the mesh;
+// -3 Detour failure. The visited-polygon list the query fills is bounded (256), so a long ray cannot overrun it.
+int nd_raycast(void* h, const float* start, const float* end, unsigned short include, unsigned short exclude,
+               float* t);
+
 // findPath + findStraightPath between the floor points under start and end, as the
 // server's PathFinder. 0 complete, 1 partial (out ends at the reachable point nearest the
 // goal), 2 partial because the goal is over 7 yd from the mesh, -1 start off the mesh,

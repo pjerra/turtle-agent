@@ -59,6 +59,10 @@ type Params struct {
 	OpeningDelay time.Duration `json:"-"`
 	// RestGate leaves the out-of-combat upkeep to Controller.Rest (the dungeon driver); false allows it always.
 	RestGate bool `json:"-"`
+	// NoMove keeps the brain from walking the player (positioning, stepping out of ground effects, running to the tank). A
+	// dungeon run sets it until the driver holds the move lock (Controller.HoldMove) around its own walks. Blink, a spell, is not
+	// a walk and is not affected.
+	NoMove bool `json:"no_move,omitempty"`
 }
 
 // Config holds the engine's timings. A zero field takes the default of DefaultConfig.
@@ -134,6 +138,7 @@ type memory struct {
 	idleAt      time.Time
 	idle        string
 	lastErr     string
+	ext         memExt // positioning, line of sight, interrupts, items (world.go)
 }
 
 func (m *memory) hold(spell uint32, until time.Time, reason string) {
@@ -215,6 +220,7 @@ type Brain struct {
 	vals       valueCache
 	tick       uint64
 	restOK     func() bool
+	lock       *MoveLock // who moves the player; the controller gives the one the dungeon driver shares
 }
 
 // New builds a brain on the game for p. It refuses an unknown strategy or role, and strategies whose rules or
@@ -240,7 +246,7 @@ func assemble(g Game, cfg Config, p Params, strats []*Strategy, names []string) 
 		p.OpeningDelay = 2 * time.Second
 	}
 	b := &Brain{g: g, cfg: cfg.withDefaults(), p: p, strategies: strats, names: names, actions: map[string]*Action{},
-		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]hold{}, eholds: map[uint32]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }}
+		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]hold{}, eholds: map[uint32]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }, lock: NewMoveLock()}
 	for _, s := range strats {
 		for _, a := range s.Actions {
 			b.actions[a.Name] = a
@@ -291,7 +297,7 @@ func (b *Brain) Strategies() []string { return slices.Clone(b.names) }
 // newCtx takes the snapshot of the game a tick decides on.
 func (b *Brain) newCtx(now time.Time) *Ctx {
 	b.tick++
-	c := &Ctx{G: b.g, Now: now, Tick: b.tick, Spells: b.g.Spells(), P: b.p, vals: b.vals, mem: b.mem, RestOK: b.restOK(),
+	c := &Ctx{G: b.g, Now: now, Tick: b.tick, Spells: b.g.Spells(), P: b.p, vals: b.vals, mem: b.mem, RestOK: b.restOK(), lock: b.lock,
 		byID: map[packet.GUID]*objects.Unit{}}
 	c.Self, c.SelfOK = b.g.Self()
 	c.Units = b.g.Units()
@@ -454,6 +460,8 @@ var holdFor = map[string]time.Duration{
 	"too_close":            time.Second,
 	"no_power":             2 * time.Second,
 	"line_of_sight":        3 * time.Second,
+	"equipped_item":        30 * time.Second, // Shoot without a wand equipped
+	"equipped_item_class":  30 * time.Second,
 	"not_ready":            500 * time.Millisecond,
 	"not_infront":          400 * time.Millisecond,
 	"unit_not_infront":     400 * time.Millisecond,

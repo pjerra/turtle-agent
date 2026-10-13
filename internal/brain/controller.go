@@ -30,6 +30,8 @@ type Status struct {
 	Role       string     `json:"role,omitempty"`
 	Tank       string     `json:"tank,omitempty"`
 	RestGate   bool       `json:"rest_gate,omitempty"` // upkeep (buffs, drinking) waits for the dungeon driver's rest gates
+	NoMove     bool       `json:"no_move,omitempty"`   // the brain never walks the player (a dungeon run until the driver holds the move lock)
+	MoveHeld   bool       `json:"move_held,omitempty"` // the dungeon driver holds the move lock now
 	RestOK     bool       `json:"rest_ok"`
 	Ticks      uint64     `json:"ticks"`
 	Actions    uint64     `json:"actions"`        // ticks on which an action ran
@@ -51,11 +53,12 @@ type Controller struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	rest   atomic.Bool
+	lock   *MoveLock // shared with every brain this controller runs
 }
 
 // NewController makes a controller whose brains run under root (cancel it to end them).
 func NewController(root context.Context, g Game, cfg Config) *Controller {
-	return &Controller{g: g, cfg: cfg.withDefaults(), root: root}
+	return &Controller{g: g, cfg: cfg.withDefaults(), root: root, lock: NewMoveLock()}
 }
 
 func (c *Controller) running() bool {
@@ -90,6 +93,7 @@ func (c *Controller) Start(p Params) (Status, error) {
 		return Status{}, err
 	}
 	b.restOK = func() bool { return !b.p.RestGate || c.rest.Load() }
+	b.lock = c.lock
 	ctx, cancel := context.WithCancel(c.root)
 	done := make(chan struct{})
 	c.b, c.cancel, c.done = b, cancel, done
@@ -130,6 +134,13 @@ func (c *Controller) Stop() Status {
 	return c.Status()
 }
 
+// HoldMove is for the dungeon driver: call it before a walk and call the release it returns when the walk ends. While it is held the
+// brain starts no walk of its own, and a step of the brain's that is under way is stopped first, so the two never walk at once.
+// It works whether or not a brain runs. The error is the context's.
+func (c *Controller) HoldMove(ctx context.Context) (release func(), err error) {
+	return c.lock.Hold(ctx)
+}
+
 // Rest allows or forbids out-of-combat upkeep for a brain started with Params.RestGate (the dungeon driver
 // calls it at its rest gates).
 func (c *Controller) Rest(on bool) { c.rest.Store(on) }
@@ -143,14 +154,14 @@ func (c *Controller) Status() Status {
 
 func (c *Controller) statusLocked() Status {
 	if c.b == nil {
-		return Status{Strategies: []string{}, Last: []Decision{}, Holds: []HoldInfo{}}
+		return Status{Strategies: []string{}, Last: []Decision{}, Holds: []HoldInfo{}, MoveHeld: c.lock.Held()}
 	}
 	b := c.b
 	now := b.cfg.Now()
 	m := b.mem
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := Status{Running: c.running(), Strategies: b.Strategies(), Role: b.p.Role, Tank: b.p.Tank, RestGate: b.p.RestGate,
+	st := Status{Running: c.running(), Strategies: b.Strategies(), Role: b.p.Role, Tank: b.p.Tank, RestGate: b.p.RestGate, NoMove: b.p.NoMove, MoveHeld: c.lock.Held(),
 		RestOK: !b.p.RestGate || c.rest.Load(), Ticks: m.ticks, Actions: m.acted, Idle: m.idle, Error: m.lastErr,
 		Last: make([]Decision, 0, len(m.recent)), Holds: []HoldInfo{}}
 	for _, d := range m.recent {

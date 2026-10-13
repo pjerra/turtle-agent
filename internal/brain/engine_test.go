@@ -361,7 +361,7 @@ func TestStatusShowsStrategiesDecisionsAndHolds(t *testing.T) {
 		return c
 	}())
 	st, err := ctl.Start(Params{Strategies: []string{"frost_mage"}})
-	if err != nil || !st.Running || len(st.Strategies) != 4 || st.Strategies[0] != "base" || st.Strategies[1] != "combat_dps" {
+	if err != nil || !st.Running || len(st.Strategies) != 1+len(presets["frost_mage"]) || st.Strategies[0] != "base" || st.Strategies[1] != "combat_dps" {
 		t.Fatalf("%+v %v", st, err)
 	}
 	defer ctl.Stop()
