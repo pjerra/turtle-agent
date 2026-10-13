@@ -49,6 +49,11 @@ type object struct {
 	Name  string
 	Type  int
 	Pos   dungeon.Point
+	// KeyItem and KeyName are the item a non-GM needs to open the object (its lock's key in Lock.dbc), from the optional
+	// key_item and key_name columns of gameobjects.tsv. export.sh does not write them: the key is in Lock.dbc, not in the
+	// world database, so they are filled in by hand (or by a tool that reads the DBC); without them nothing is noted.
+	KeyItem uint32
+	KeyName string
 }
 
 // Options are the flags.
@@ -289,7 +294,15 @@ func readObjects(path string) ([]object, error) {
 	r := &reader{path: path}
 	var out []object
 	for _, m := range rs {
-		out = append(out, object{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Type: int(r.num(m, "type")), Pos: r.pos(m)})
+		ob := object{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Type: int(r.num(m, "type")), Pos: r.pos(m), KeyName: m["key_name"]}
+		if k := m["key_item"]; k != "" {
+			n, err := strconv.ParseUint(k, 10, 32)
+			if err != nil && r.err == nil {
+				r.err = fmt.Errorf("%s: %q in column key_item is not an item entry", path, k)
+			}
+			ob.KeyItem = uint32(n)
+		}
+		out = append(out, ob)
 	}
 	return out, r.err
 }
@@ -503,11 +516,23 @@ func objectNotes(objs []object, l dungeon.Leg, r float64) []string {
 		}
 		for _, p := range pts {
 			if dist(p, ob.Pos) <= r {
-				out = append(out, fmt.Sprintf("%s %q entry %d at %.1f %.1f %.1f", kind, ob.Name, ob.Entry, ob.Pos.X, ob.Pos.Y, ob.Pos.Z))
+				note := fmt.Sprintf("%s %q entry %d at %.1f %.1f %.1f", kind, ob.Name, ob.Entry, ob.Pos.X, ob.Pos.Y, ob.Pos.Z)
+				if ob.KeyItem != 0 {
+					// The plan's use_object step for it needs "requires_item" (see internal/dungeon), or the core ignores the use.
+					note += fmt.Sprintf(", locked: a non-GM needs item %d%s (set requires_item on its use_object step)", ob.KeyItem, nameSuffix(ob.KeyName))
+				}
+				out = append(out, note)
 				break
 			}
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+func nameSuffix(n string) string {
+	if n == "" {
+		return ""
+	}
+	return fmt.Sprintf(" %q", n)
 }

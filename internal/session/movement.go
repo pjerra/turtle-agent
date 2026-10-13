@@ -83,7 +83,7 @@ func (s *Session) sendWalkMove(op uint16, mi game.MoveInfo, body []byte, now tim
 		return err
 	}
 	if w := s.walk; w != nil {
-		w.sent = w.walked(now)
+		w.sent = w.walked(s.walkAxis(now))
 	}
 	return nil
 }

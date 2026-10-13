@@ -168,7 +168,8 @@
           "use_object": {
             "entry": 124371,
             "near": {"x": -234.7, "y": 239.6, "z": -50.9},
-            "stand": {"x": -234.7, "y": 237, "z": -50.4}
+            "stand": {"x": -234.7, "y": 237, "z": -50.4},
+            "requires_item": {"entry": 7733, "name": "Staff of Prehistoria"}
           }
         },
         {
@@ -183,6 +184,7 @@
         }
       ],
       "notes": [
+        "The Keystone's lock (359) needs the Staff of Prehistoria (item 7733) for a non-GM; without it the use is silently ignored (live run 3), so the step carries requires_item and the driver fails early, naming the item, when the leader's bags lack it. A GM passes the lock. The real game gives the staff through a quest.",
         "Checked live on 2026-10-13 (docs/LIVE-CHECKS.md): use_object on the Keystone (124371) from 2.6 yd opened it; the Seal of Khaz'Mul (124372, 55 yd on) became active 27 s later, hence the 60 s wait.",
         "The Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916), so their groups are 'ambush': the party walks through them instead of pulling.",
         "The Stonevault Ambushers (7175) of the room at y 215 are NOT stealthed and do not evade (world export: no aura in creature_template or creature_addon, movement_type 0, wander 0; second live run: 5 of the 6 died). They are six stationary spawns in two rows of three with no creature group, so a pull brings one or two; hence two pull groups (west, east; radius 10 yd so that each takes its own row, the rows being 14 yd apart) and a driver that counts a pull that killed something as progress."

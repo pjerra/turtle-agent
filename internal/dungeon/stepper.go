@@ -61,6 +61,7 @@ type Action struct {
 	Boss      *Boss               // boss
 	Object    *objects.GameObject // use
 	GUID      packet.GUID         // use
+	Requires  *ItemRef            // use: the item a non-GM leader needs to carry (UseObject.RequiresItem)
 	Remaining time.Duration       // wait: time left before the plan fails
 	Err       string              // failed
 }
@@ -279,7 +280,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 			base.Label = s.label("step %d: walk next to %s (%.1f yd away)", s.idx, describeRef(&u.ObjectRef), o.Distance)
 			return base, false
 		}
-		base.Kind, base.Object, base.GUID = ActUse, &o, o.GUID
+		base.Kind, base.Object, base.GUID, base.Requires = ActUse, &o, o.GUID, u.RequiresItem
 		base.Label = s.label("step %d: use %s", s.idx, describeRef(&u.ObjectRef))
 		return base, false
 	case st.WaitFor != nil:

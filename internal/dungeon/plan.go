@@ -104,6 +104,25 @@ type ObjectRef struct {
 type UseObject struct {
 	ObjectRef
 	Stand *Point `json:"stand,omitempty"`
+	// RequiresItem is the item a non-GM leader must carry for the use to do anything (the object's lock names it: the
+	// Uldaman Keystone needs the Staff of Prehistoria). Without it the core ignores the use silently, so the driver checks the
+	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
+	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
+	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+}
+
+// ItemRef names an item: its entry and, for the messages, its name.
+type ItemRef struct {
+	Entry uint32 `json:"entry"`
+	Name  string `json:"name,omitempty"`
+}
+
+// String is "Staff of Prehistoria (item 7733)", or "item 7733" without a name.
+func (i ItemRef) String() string {
+	if i.Name == "" {
+		return fmt.Sprintf("item %d", i.Entry)
+	}
+	return fmt.Sprintf("%s (item %d)", i.Name, i.Entry)
 }
 
 // WaitFor waits for a condition, up to TimeoutS seconds, and fails the plan when it does not come. Exactly one of
@@ -180,7 +199,13 @@ type rawRef struct {
 
 type rawUse struct {
 	rawRef
-	Stand *rawPoint `json:"stand"`
+	Stand        *rawPoint `json:"stand"`
+	RequiresItem *rawItem  `json:"requires_item"`
+}
+
+type rawItem struct {
+	Entry uint32 `json:"entry"`
+	Name  string `json:"name"`
 }
 
 type rawWait struct {
@@ -420,6 +445,12 @@ func (c *checker) step(path string, r *rawStep) Step {
 		if r.UseObject.Stand != nil {
 			p := c.point(path+".use_object.stand", r.UseObject.Stand)
 			u.Stand = &p
+		}
+		if ri := r.UseObject.RequiresItem; ri != nil {
+			if ri.Entry == 0 {
+				c.fail(path+".use_object.requires_item.entry", "required (the item entry)")
+			}
+			u.RequiresItem = &ItemRef{Entry: ri.Entry, Name: ri.Name}
 		}
 		s.UseObject = u
 	default:

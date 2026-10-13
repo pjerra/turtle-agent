@@ -219,7 +219,7 @@ func (s *Session) syncWalk(now time.Time) {
 	if s.walk == nil {
 		return
 	}
-	p := s.walk.at(now)
+	p := s.walk.at(s.walkAxis(now))
 	p[2] = clampZ(p[2], s.last, s.peekClock(now), s.walk.speed)
 	s.mu.Lock()
 	s.pos[0], s.pos[1], s.pos[2] = p[0], p[1], p[2]
@@ -468,6 +468,7 @@ func (s *Session) walkStraight(ctx context.Context, to [3]float32, o walkOpts) e
 		now := s.now()
 		pts := append(append([][3]float32{from}, o.via...), [3]float32{x, y, z})
 		w := newWalk(pts, s.runSpeed, now, done)
+		w.start = s.walkAxis(now) // progress runs on the client time, the beats on real time
 		if w.length() < 0.1 {
 			done <- nil
 			return done, nil
@@ -523,7 +524,8 @@ func (s *Session) tickWalk() error {
 	if turned, err := s.tickTurn(w, now); turned {
 		return err
 	}
-	if w.arrived(now) {
+	ax := s.walkAxis(now) // where the walk is: on the client time
+	if w.arrived(ax) {
 		s.walk = nil
 		z := clampZ(w.to[2], s.last, s.peekClock(now), w.speed)
 		s.mu.Lock()
@@ -541,7 +543,7 @@ func (s *Session) tickWalk() error {
 			return s.abortWalk(w, err)
 		}
 		s.mu.Lock()
-		s.walkDist = w.walked(now) // the whole path, as walk_path counts an arrival, once checkStep passes the stop
+		s.walkDist = w.walked(ax) // the whole path, as walk_path counts an arrival, once checkStep passes the stop
 		s.mu.Unlock()
 		err := s.sendMove(opcode.MSGMoveStop, mi, game.BuildMovement(mi))
 		w.done <- err
@@ -589,7 +591,7 @@ func (s *Session) stopWalk(reason error, sendStop bool) {
 		s.syncWalk(now)
 	}
 	s.mu.Lock()
-	s.walkDist = w.walked(now)
+	s.walkDist = w.walked(s.walkAxis(now))
 	s.mu.Unlock()
 	s.walk = nil
 	if sendStop {
@@ -767,7 +769,8 @@ func (s *Session) setRunSpeed(speed float32, now time.Time) {
 	}
 	s.runSpeed = speed
 	if w := s.walk; w != nil {
-		w.base, w.start, w.speed = w.walked(now), now, speed
+		ax := s.walkAxis(now)
+		w.base, w.start, w.speed = w.walked(ax), ax, speed
 	}
 }
 

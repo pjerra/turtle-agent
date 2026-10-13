@@ -385,7 +385,10 @@ clock is disciplined, stepped back about a second every half minute). The client
 1. Run the agent for at least an hour with walking (a dungeon run, or walks of a minute or two with idle between), on the WSL2 laptop.
 2. Grep the server's anticheat log for the character: the `ClockDesync` count must stay 0 over the hour.
 3. Same log: no `TimeBack`, `HeartbeatSkip` or `OverspeedZ` lines the run did not have before.
-4. `turtle-agent map --capture` on that run's capture (also one made with `login --create`) reports frames, not 0.
+4. Also one continuous walk of six minutes or more (`walk_path` across a big zone, or a dungeon leg with no pack on the way): the
+   same log shows no `ClockDesync` for it. The walk is timed on the client time itself (`walkTime`), since a monotonic-timed walk
+   gained 1.8% x 360 s = 6.5 s on a 3.8% fast host.
+5. `turtle-agent map --capture` on that run's capture (also one made with `login --create`) reports frames, not 0.
 
 
 ## Bot brain: rogue, hunter and retribution paladin (issue #80 step 4b)
@@ -468,3 +471,13 @@ shows as `Water Shield`. Run each preset in a dungeon with a tank bot (or by han
    enchantment in the client or with `inspect`; it is not cast again for 55 minutes. In a fight `auto_attack`, `stormstrike` (level 30) every 8 s, `flame_shock`, `earth_shock` above 60% mana; the shaman stands behind the mob.
    Take the weapon off and start the brain: one `imbue` that fails (`item_gone` or the session's error), then a minute's silence.
 10. **Never**: Ghost Wolf, Prowl, Pounce, Hibernate, a heal in a form, a potion or a meal in a form. Grep `brain_decision` for those spells.
+
+
+## Dungeon runs: required items and conjured water (run 3 follow-ups)
+
+1. **Keystone item.** Uldaman `from_leg keystone`, `gm:false`, no Staff of Prehistoria (7733) in the bags: `dungeon_run` fails at once with
+   "the leader does not carry Staff of Prehistoria (item 7733) ..." (leg 2 "keystone" step 0), before any walk or order. With the staff
+   (`additem 7733`) the Keystone opens and the Seal of Khaz'Mul is active in about 27 s. With `gm: true` the staff is not asked for; with `gm` omitted on a GM account that plays `.gm off` (run 3), the check still fails the run (the core lets a GM through the lock only in GM mode).
+2. **Conjure rank.** A level 45 mage that has learned every spell (`learn all_myspells`), no drink in the bags, at a rest gate below 65% mana:
+   `brain_decision` `conjure_water` carries spell 10139 (rank 6, Conjured Sparkling Water, level 45), not 10140; the water it makes
+   is drunk. Same for `conjure_food` with 10145 (Conjured Sweet Roll). At level 55 the casts are 10140 and 28612.

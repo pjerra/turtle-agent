@@ -92,6 +92,7 @@ type fakeGame struct {
 	moveLog       []string            // "walk:1", "teleport:1" ...: each movement of the leader and the holds standing at it
 
 	onEmit func(kind string, data map[string]any) // sees each event as it is emitted
+	bag    []objects.Item                         // what the leader carries (ItemSource)
 }
 
 const (
