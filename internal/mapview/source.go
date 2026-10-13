@@ -34,14 +34,14 @@ func SessionFrame(s *session.Session, t time.Time, leader *Pos) (f Frame, ok boo
 	if leader != nil {
 		self = *leader
 	}
-	f.Members = append(f.Members, MemberFrame{Name: st.Character, Pos: self, Self: true})
+	f.Members = append(f.Members, MemberFrame{Name: st.Character, GUID: uint64(st.GUID), Pos: self, Self: true})
 	for _, u := range s.Units(objects.Filter{Limit: 5000}) {
 		if u.PosAgeMS < 0 {
 			continue
 		}
 		switch {
 		case u.Type == "player" && u.InParty:
-			f.Members = append(f.Members, MemberFrame{Name: u.Name, Pos: Pos{u.X, u.Y, u.Z}})
+			f.Members = append(f.Members, MemberFrame{Name: u.Name, GUID: uint64(u.GUID), Pos: Pos{u.X, u.Y, u.Z}})
 		case u.Type == "creature" && u.Hostile && !u.InParty:
 			f.Hostiles = append(f.Hostiles, UnitFrame{GUID: uint64(u.GUID), Entry: u.Entry, Name: u.Name, Level: u.Level,
 				Health: u.Health, MaxHealth: u.MaxHealth, InCombat: u.InCombat, Dead: u.Dead, Pos: Pos{u.X, u.Y, u.Z}})

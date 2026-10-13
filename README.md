@@ -1036,8 +1036,10 @@ What the map shows:
   A route, creature or event shows on the floor its height falls on (a stretch between two floors on both). Hills and
   ramps never split. `--floors off` keeps one image, `--floors -30,-10` cuts at the heights given.
 - **Routes:** one line per member (the leader thicker, first in the legend), a dot on every route at each time tick
-  (every 15 s to 4 h, whichever leaves about a dozen; labelled on the leader's). A hole of more than 30 s in a member's
-  positions is a dotted line; a leap of 60 yd or more (a teleport) a dashed pink arrow.
+  (every 15 s to 4 h, whichever leaves about a dozen; labelled on the leader's). A member is told apart by its GUID, so two
+  units with the same name are two lines; a botwatch bot, which has no GUID, joins the one member of its name that has
+  one, when there is only one. A hole of more than 30 s in a member's positions is a dotted line; a leap of 60 yd or more
+  (a teleport) a dashed pink arrow.
 - **Hostile creatures:** a dot at the place each was first seen, by what became of it: killed (red, from the `kill` and
   `death` events or a corpse in view), evaded (orange: fought, then seen alive and out of combat), fought and left alive
   (purple: a wipe, or out of view in combat), skipped (hollow: seen, never fought). Creatures within 10 yd of each other
@@ -1061,7 +1063,9 @@ Output files are mode 0600 and an existing one is refused unless `--force`; a ca
 `map_snapshot` is the same for the live agent: it keeps the positions of the party and of the hostile creatures the session
 shows every 2 seconds from the start (memory bounded: 40000 positions per member, 6000 creatures), and draws them with
 the event log and the `dungeon_status` report. `plan` names a plan in `dungeons_dir`; `floor` picks the image, `floors`
-lists their names. The navmesh is the one `path_to` uses, so it needs `mmaps_dir`.
+lists their names. The navmesh is the one `path_to` uses, so it needs `mmaps_dir`. The background is read into a navmesh
+planner of the call's own, closed when the call returns, so a snapshot never unloads the tiles a running plan is walking
+on; a `plan`'s bosses mark that image only, not the next one.
 
 Limits: only what the agent saw is drawn (units outside its view distance are missing, and a creature's dot is where it
 was first seen, not where it fought); the capture's replay does not follow the agent's flights or walking after RPC calls
@@ -1110,7 +1114,8 @@ wow-play-harness tile cache folder (one subfolder per server) works as it is. Ti
 tiles (a dungeon) loads whole, a bigger one the tiles round the start and the goal, one tile wider, and three wider
 when that gives no complete path. At most 64 tiles stay loaded per map: a box that would hold more keeps the tiles
 nearest the straight line from start to goal, and the least recently used tiles are unloaded first. Tiles copied in
-later are picked up on the next call.
+later are picked up on the next call. A map image's background (see [Map images](#map-images)) reads its tiles into a
+planner of its own, so drawing an image unloads none of these.
 
 **Engine.** The planner is the core's own Detour (recastnavigation, as vendored by
 [tortoise-wow](https://github.com/tortoise-wow/tortoise-wow) with its 64-bit poly refs), compiled in through cgo, and

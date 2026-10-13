@@ -97,6 +97,11 @@ func NewPlanner(dir string) *Planner {
 	return &Planner{dir: dir, maps: map[uint32]*mapMesh{}, max: MaxTiles}
 }
 
+// Scratch returns a planner on the same folder with a tile cache of its own. Work that must not unload this planner's
+// tiles (a map image's background, read with Polygons, while a dungeon run plans on this one) draws with a scratch
+// planner and closes it when done.
+func (p *Planner) Scratch() *Planner { return NewPlanner(p.dir) }
+
 // Close frees the Detour meshes.
 func (p *Planner) Close() {
 	p.mu.Lock()
@@ -316,7 +321,8 @@ type Polygon struct {
 // come in any order), whole polygons, not clipped to the box. It loads the tiles under the box that are not loaded
 // yet, at most MaxTiles of them, the ones nearest the box's centre: a larger box is cut to those, and truncated
 // says so. A box over no tile file gives no polygons and no error. Ground, water, lava, slime and slopes too steep
-// to climb are all listed; the flags tell them apart.
+// to climb are all listed; the flags tell them apart. The tiles load into this planner's cache, which unloads the least
+// recently wanted ones to make room: a caller that must not unload a plan's tiles uses a Scratch planner.
 func (p *Planner) Polygons(mapID uint32, x0, y0, x1, y1 float32) (polys []Polygon, truncated bool, err error) {
 	if p.dir == "" {
 		return nil, false, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
