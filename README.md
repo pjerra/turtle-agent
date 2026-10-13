@@ -253,6 +253,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `corpse_query` | | MSG_CORPSE_QUERY: `found`, `map`, `x`/`y`/`z`, `corpse_map`. A corpse in a dungeon the ghost is not in shows the dungeon's entrance (`map` is the entrance's map, `corpse_map` the dungeon's) |
 | `reclaim_corpse` | | CMSG_RECLAIM_CORPSE for a ghost within 39 yd of its corpse and past the reclaim delay (an error before it) |
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
+| `pet` | | The player's pet, from `UNIT_FIELD_SUMMON` of the player and the pet's own unit row: `present` (false: no pet), `guid`, `entry`, `name`, `level`, `dead`, `health`, `max_health`, `power_type` (2 focus for a hunter's pet, 0 mana for a demon), `power`, `max_power`, `happiness` (the pet's POWER5, 0 to 1,000,000) and `happiness_state` (1 unhappy, 2 content, 3 happy; absent for a demon), `loyalty`, `in_combat`, `target` (what it attacks), `distance`, `moving`; and its action bar, from `SMSG_PET_SPELLS`: `bar` (the session has it), `react` (`passive`, `defensive`, `aggressive`), `command` (`stay`, `follow`), `enabled` (false while the bar is off, e.g. mounted), `spells[]` (`spell_id`, `name`, `slot` 3 to 6 or -1 off the bar, `autocast`, `passive`), `refused` (the reason of its last refused cast). See [Pets](#pets) |
+| `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
@@ -309,7 +311,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 
 Events have `seq`, `time`, `mono_ms` (ms since the agent started, from the monotonic clock, so it never jumps with the host clock; `time` stays the wall clock), `kind`, `source`, `target`, `spell_id`, `amount`, `crit`, `text`, `party` and `data`.
 Kinds cover chat, system, whispers, melee, spell damage, periodic ticks, heals, energize, spell start/go/miss/fail,
-auras, deaths, kills, party changes, raid icons (`raid_mark`), game object changes (`gameobject`), group loot rolls (`loot_roll_start`, `loot_roll`, `loot_roll_won`,
+auras, deaths, kills, party changes, raid icons (`raid_mark`), the pet (`pet_summoned`, `pet_died`, `pet_revived`, `pet_dismissed`, `pet_error`; see [Pets](#pets)), game object changes (`gameobject`), group loot rolls (`loot_roll_start`, `loot_roll`, `loot_roll_won`,
 `loot_all_passed`, tied together by `data.roll_id`), refused equips and item uses (`inventory_error`), NPC dealings (vendor, trainer and quest events, see
 [Vendors, trainers and quests](#vendors-trainers-and-quests)), corpse loot (`loot_open`,
 `loot_taken`, `loot_money`, `loot_money_share`, `loot_error`, `loot_closed`), the player's own mount and stand state (`mount`,
@@ -858,7 +860,7 @@ behaviour follows mod-playerbots' dead strategy (ideas only; its code is GPL and
 
 The brain (issue #80) lets the agent **play its own character** while it leads: a small trigger -> action engine in
 `internal/brain`. It is off until `brain_start` (or `dungeon_run`'s `brain` option). It runs in its own goroutine, ticks
-every 200 ms, and acts only through the session calls an RPC client has (`cast`, `face`, `target`, `attack`, `use_item`):
+every 200 ms, and acts only through the session calls an RPC client has (`cast`, `face`, `target`, `attack`, `use_item`, and for a pet `pet_action`):
 **it sends no packet a real client would not send.** It reads only what the agent knows of itself and what a 1.12 client
 sees: the spell state ([Agent state](#agent-state)), the object store (units, their targets, flags and auras) and the party
 list. A 1.12 client has no threat data, so the brain does not pretend to have any (see "Threat" below).
@@ -1191,7 +1193,7 @@ It stands behind the mob like the warrior.
 Not in this step: Stealth openers (they need a walk up to a sleeping mob; a tank or the dungeon driver pulls), Backstab (it needs a dagger, which
 the agent cannot tell from the equipment) and poisons (applying one needs a target item; `Game.UseItem` takes none).
 
-**Hunter** (`marksman_hunter` = `combat_dps` + `hunter_marksman` + `hunter_position` + `avoid_ground` + `combat_consumables` + `rest_drink` + `rest_eat`).
+**Hunter** (`marksman_hunter` = `combat_dps` + `hunter_marksman` + `hunter_position` + `pet` + `avoid_ground` + `combat_consumables` + `rest_drink` + `rest_eat`).
 Ranged, 8 to 35 yd; the first 8 yd are the dead zone. Auto Shot is spell 75 started like the mage's wand: one `cast` at the mob, and the server ignores a
 second start while it runs but restarts the
 ranged timer at 500 ms, so the brain does not repeat it: it takes Auto Shot as running while it sees a shot (the spell state's last cast, within 6 s)
@@ -1215,10 +1217,8 @@ the standing spots are searched 12 to 29 yd from the mob like the mage's band. A
 Shot, Feign Death, `run_to_tank`, the melee kit). A server refusal for ammo (`no_ammo`, `need_ammo`) holds the spell back for 30 s
 (`brain_status.holds`, the decision log says `held:no_ammo`); the ammo in the quiver is not in the backpack list, so there is no count to warn on.
 
-**Pets are not driven.** What the agent is missing: the pet's guid (`Store.Owners` finds a unit's summoner, but the brain's `Game` and the unit rows
-do not carry it), the pet's health and happiness, and a call that sends `CMSG_PET_ACTION` (the opcode is there, nothing sends it): so no
-`pet attack` on the tank's mob, and Call Pet, Revive Pet, Mend Pet and Feed Pet are not cast (the brain cannot tell whether a pet is out or
-hurt). A hunter plays without its pet until those exist.
+**The pet** is the shared `pet` strategy, described under [Pets](#pets) below; the hunter's preset carries it. A game that cannot drive a pet (no `PetGame`
+half) plays the hunter without it, as before step 4d.
 
 **Retribution paladin** (`ret_paladin` = `combat_dps` + `paladin_retribution` + `melee_position` + `avoid_ground` + `class_interrupt` + `combat_consumables` + `rest_drink` + `rest_eat`).
 It stands behind the mob.
@@ -1242,8 +1242,76 @@ that leave a debuff, and both look at the mob first). Drinking is `rest_drink` (
 mana, out of combat at a rest gate). Not in this step: Exorcism and Holy Wrath (undead and demons only, and a 1.12 client sees no creature
 type), blessings for the party, Redemption, Righteous Fury and Hand of Reckoning.
 
+**Warlock** (`affliction_warlock` = `combat_dps` + `warlock_affliction` + `warlock_upkeep` + `pet` + `ranged_position` + `avoid_ground` + `combat_consumables` + `wand` + `rest_eat` + `rest_drink`).
+Ranged: the class row's band is 18 to 26 yd from the mob (Drain Life and Fear reach 20 yd, Shadow Bolt 30). The rotation is ideas from mod-playerbots' warlock
+behaviour (GPL-2.0+; ideas and numbers only), the spells are pinned to the core's data in `TestWarlockSpellData`; no warlock spell has a stance or form.
+A cast with a cast time (Shadow Bolt, Corruption, Drain Life, Drain Soul, Fear) waits until the warlock stands still.
+
+| Ability (relevance) | When |
+| :--- | :--- |
+| Corruption (16) | the mob has none and is above 30% health |
+| Curse (15) | **one curse per mob, and never over another**: a mob with any `Curse of ...` aura (the aura does not say whose it is, so another warlock's counts) gets none. Curse of Agony on a mob above 40% health; Curse of the Elements instead on a mob above 60% when two or more other casters (mage, warlock, priest, shaman, druid) are in the group |
+| Drain Soul (14) | the mob is at 25% or less, the bags hold fewer than 5 soul shards (item 6265), and a kill of the mob still gives experience (a grey mob gives no shard: the 1.12 gray-level formula) |
+| Shadow Bolt (10) | the filler |
+| Drain Life (18) | the warlock is below 45% health and the mob above 15% (within 20 yd, so inside the band's near half) |
+| Life Tap (17) | in combat below 25% mana with 60% health or more; out of combat below 40% mana with 85% health or more, before the drink (`rest_drink`) |
+| Death Coil (43) | a mob on the warlock and health below 40% |
+| Fear (42) | the same mob and health below 35%, **only with no tank in view** and no unengaged mob within 30 yd: a feared mob runs into the next pack, so in a dungeon group it is never cast |
+| Shadow Ward (41) | a mob in combat is casting a shadow spell at the warlock |
+| Demon Armor (12) | out of combat at a rest gate when it is down (Turtle names the old Demon Skin ranks 1 and 2 "Demon Armor"; "Demon Skin" is tried second) |
+| Create Healthstone (11) | out of combat at a rest gate, 40% mana or more, when the bags hold no stone of the best tier the warlock can make or a better one, and two shards (one stays for the demon; one is enough with the demon out) |
+
+The demon is the `pet` strategy (below): Summon Voidwalker when the spellbook has it and the bags hold a shard, else Summon Imp (no shard). The strategy
+`pet_imp` in place of `pet` asks for the Imp first, which is how a spec that wants Firebolt and Blood Pact picks it; the one preset so far is
+affliction, which takes the Voidwalker. Not in this step: Immolate, Siphon Life, Health Funnel, Soulstone, Banish, Enslave, the other demons (the Succubus and
+the Felhunter need a shard each and have no rules), soul shard use beyond the demon and the stone.
+
+## Pets
+
+The player's pet (a hunter's pet, a warlock's demon) is controlled the way a client does it, through the pet's action bar. Packet layouts are verified
+against the core (tortoise-wow 5d79486, `src/game`; the cites are in `internal/game/pet.go`).
+
+**What the agent knows.** The pet is the unit the player's `UNIT_FIELD_SUMMON` names (`Unit::SetPet`, `Objects/Pet.cpp:401`; the field is public,
+`Player::InitVisibleBits`, `Objects/Player.cpp:5107`); `Store.SummonOf` reads it and `Store.PetOf` falls back to a pet-class creature in view that names the
+player as its summoner, creator or charmer (`Store.Owners`). The pet's health, power, target and combat flag are its ordinary unit row; a hunter's pet plays
+on focus and carries its **happiness** in `UNIT_FIELD_POWER5` (0 to 1,000,000; a third each for unhappy, content and happy, `Pet::GetHappinessState`) and its
+loyalty in byte 1 of `UNIT_FIELD_BYTES_1`. The **action bar** comes from `SMSG_PET_SPELLS` (`Player::PetSpellInitialize`): ten buttons (attack, follow, stay,
+four spells, aggressive, defensive, passive), each a u32 with the action in the low 24 bits and the type in the top byte (`0x07` command, `0x06` reaction,
+`0xC1` spell with autocast on, `0x81` autocast off), the pet's reaction and command state, and its cooldowns; `SMSG_PET_MODE` switches the bar on or off (a
+mount turns it off). The core does not repeat the state when an order changes it, so the agent applies a sent order to its copy and the next
+`SMSG_PET_SPELLS` corrects it. A pet that is gone clears the bar with an empty `SMSG_PET_SPELLS` (`Player::RemovePetActionBar`).
+
+**Events.** `pet_summoned` (source: the pet; `data.entry`, `data.dead`), `pet_died` (health reached 0: a hunter's pet stays as a corpse until revived, a demon is
+gone in 15 s), `pet_revived`, `pet_dismissed` (the summon field was cleared: dismissed, replaced, unsummoned or despawned; `data.was_dead`), `pet_error`
+(`SMSG_PET_CAST_FAILED`: `spell_id`, `data.reason`; or `SMSG_PET_ACTION_FEEDBACK`: `data.feedback` `pet_dead`, `nothing_to_attack`, `cant_attack_target` or `no_path`).
+
+**RPC.** `pet` and `pet_action` (the table above). `pet_action` sends `CMSG_PET_ACTION` (u64 pet, u32 button, u64 target) for the commands, the reactions and a
+spell cast from the bar, and `CMSG_PET_SPELL_AUTOCAST` (u64 pet, u32 spell, u8 state) for the autocast actions; a cast uses the button type the bar has, so
+a spell with autocast on goes out as `0xC1` and one with it off as `0x81`. Examples: `pet_action {"action":"attack","target":"0xF130..."}`,
+`pet_action {"action":"cast","name":"Growl","target":"0xF130..."}`, `pet_action {"action":"autocast_off","name":"Growl"}`. Not sent: `CMSG_PET_ABANDON`
+(it deletes a hunter's pet) and the dismiss command; `CMSG_PET_CAST_SPELL` is not needed (the bar's button casts).
+
+**The `pet` strategy** (`internal/brain/pet.go`; the hunter's and the warlock's presets carry it; a game without the `PetGame` half has no pet and every rule stays
+quiet). All of its orders cost no cast and no global cooldown.
+
+| Rule (relevance) | When |
+| :--- | :--- |
+| Attack (20) | the pet is out, alive, not told to stay, and the fight's mob is in combat and **held**: it attacks the tank (the fight's tank), the player or the pet, or no tank is in the fight. The damage dealer's opening delay (2 s) holds the order like it holds the spells, so the pet never goes in before the tank has the mob, and a mob that is not in combat is never ordered at: **the pet does not pull**. One order per mob (the pet's own target shows it, and the order is not repeated within 2.5 s) |
+| Recall: `follow` (16) | the fight is over (no mob to fight, the player out of combat) and the pet still has a target. Not repeated within 3 s. A pet told to `stay` is left where it is: an explicit order beats automation |
+| Recall: `follow` (32) | the leader is fleeing: moving in combat with the pet's mob more than 40 yd off, or with a mob on it below 25% health |
+| Defensive (13) | in a group, a pet on `aggressive` is put on `defensive`, once per pet (a player who sets it back is not fought). A pet on `passive` or `defensive` is not touched, and a solo player's pet keeps its setting |
+| Taunt off (13) | with a tank in view (the class order warrior, paladin, druid, or `Params.Tank`), the autocast of the pet's Growl, Torment, Suffering is switched off, once per pet and spell. Solo it stays on. It is not switched back on |
+| Summon (14) | **hunter**: no pet out, out of combat at a rest gate, Call Pet (a refusal `no_pet`, a hunter without a pet, backs it off for a minute). **warlock**: Summon Voidwalker (needs a soul shard) else Summon Imp. Not again within 12 s of a cast |
+| Revive Pet (15) | the hunter's pet is dead, out of combat at a rest gate (a 10 s cast costing the whole base mana; it is not cast in a fight) |
+| Mend Pet (22) | the hunter's pet is within 20 yd and below 50% health in combat or 70% out of it, and not mending |
+
+Not in this step: **Feed Pet.** It is a cast at the pet with a food item as the target, and the food has to match the pet's diet (creature family data, which the
+agent does not read); `pet` shows `happiness_state`, and the hunter feeds by hand (`cast` is not enough: the item target is missing from `CMSG_CAST_SPELL`). A pet that goes
+unhappy deals less damage and, at the lowest loyalty, can leave. Also not: Growl on purpose when no tank is there (it stays on by default), the pet's own spells
+(Cower, Dash, Firebolt, Torment are the pet's autocast or the owner's `pet_action cast`), Dismiss Pet, Tame Beast, and a pet in a fight against a crowd-controlled mob.
+
 Examples: `brain_start {"strategies":["combat_rogue"],"tank":"<name>"}`, `brain_start {"strategies":["marksman_hunter"]}`,
-`dungeon_run {"name":"uldaman","brain":"ret_paladin"}`.
+`brain_start {"strategies":["affliction_warlock"]}`, `dungeon_run {"name":"uldaman","brain":"ret_paladin"}`.
 
 ### The druid and the shaman (step 4c)
 

@@ -231,3 +231,11 @@ func FuzzParseCorpseReclaimDelay(f *testing.F) {
 func FuzzParseCorpseQuery(f *testing.F) {
 	fuzzParse(f, game.ParseCorpseQuery, opcode.MSGCorpseQuery)
 }
+func FuzzParsePetSpells(f *testing.F) { fuzzParse(f, game.ParsePetSpells, opcode.SMSGPetSpells) }
+func FuzzParsePetMode(f *testing.F)   { fuzzParse(f, game.ParsePetMode, opcode.SMSGPetMode) }
+func FuzzParsePetCastFailed(f *testing.F) {
+	fuzzParse(f, game.ParsePetCastFailed, opcode.SMSGPetCastFailed)
+}
+func FuzzParsePetActionFeedback(f *testing.F) {
+	fuzzParse(f, func(b []byte) (uint8, error) { return game.ParsePetActionFeedback(b) }, opcode.SMSGPetActionFeedback)
+}

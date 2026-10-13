@@ -108,6 +108,13 @@ const (
 	KindBrainDecision = "brain_decision" // data.trigger, action, relevance, result (ok, not_possible, vetoed, error), via; spell_id and target_guid set
 	KindBrainIdle     = "brain_idle"     // the brain had nothing to do (throttled): data.reason
 	KindBrainState    = "brain_state"    // the brain started or stopped: data.state, strategies, role
+
+	// The player's pet (README "Pets", issue #80 step 4d). The pet's guid is source.
+	KindPetSummoned  = "pet_summoned"  // UNIT_FIELD_SUMMON of the player names a pet: data.entry, data.dead; target the owner
+	KindPetDied      = "pet_died"      // the pet's health reached 0 (a hunter's pet stays as a corpse until revived; a demon is gone in 15 s)
+	KindPetRevived   = "pet_revived"   // the pet, dead before, has health again
+	KindPetDismissed = "pet_dismissed" // the field was cleared: the pet was dismissed, replaced, unsummoned or despawned; data.was_dead
+	KindPetError     = "pet_error"     // SMSG_PET_CAST_FAILED (data.spell_id, data.reason) or SMSG_PET_ACTION_FEEDBACK (data.feedback): the pet's refusal
 )
 
 // ChatKinds is what the chat_log method returns.

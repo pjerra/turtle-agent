@@ -507,6 +507,40 @@ func (s *Store) Owners(g packet.GUID) [3]packet.GUID {
 	return [3]packet.GUID{guidAt(o.values, UnitCharmedBy), guidAt(o.values, UnitSummonedBy), guidAt(o.values, UnitCreatedBy)}
 }
 
+// SummonOf is the pet an owner's UNIT_FIELD_SUMMON names, 0 when it names none or the owner is unknown. A player's own field is sent to the
+// player and to everyone in view (Player::InitVisibleBits, Objects/Player.cpp:5107-5108).
+func (s *Store) SummonOf(owner packet.GUID) packet.GUID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	o, ok := s.objs[owner]
+	if !ok {
+		return 0
+	}
+	return guidAt(o.values, UnitSummon)
+}
+
+// PetOf is the pet of an owner: the unit its UNIT_FIELD_SUMMON names, else a creature of the pet guid class (packet.HighPet) in view that
+// names the owner as its summoner, creator or charmer (Owners), the lowest guid first. 0 when there is none.
+func (s *Store) PetOf(owner packet.GUID) packet.GUID {
+	if g := s.SummonOf(owner); g != 0 {
+		return g
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best packet.GUID
+	for g, o := range s.objs {
+		if g.High() != packet.HighPet || !isUnit(o) {
+			continue
+		}
+		for _, w := range []uint16{UnitSummonedBy, UnitCreatedBy, UnitCharmedBy} {
+			if guidAt(o.values, w) == owner && (best == 0 || g < best) {
+				best = g
+			}
+		}
+	}
+	return best
+}
+
 func guidAt(v map[uint16]uint32, i uint16) packet.GUID {
 	return packet.GUID(uint64(v[i]) | uint64(v[i+1])<<32)
 }

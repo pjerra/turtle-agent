@@ -30,10 +30,11 @@ import (
 //   - The dead zone is kept: hunter_position steps back to 12 to 29 yards from the fight's mob when it stands within 9, out of its
 //     front, with sight of it.
 //
-// Not in this step: the pet. The agent has no pet control (see README "Roles and classes"): it does not know the pet's guid, health or
-// happiness and has no CMSG_PET_ACTION call, so Call Pet, Revive Pet, Mend Pet, Feed Pet and `pet attack` are not driven; a hunter that
-// is asked for the preset plays without them. The ammo in the quiver is not in the backpack list either: the brain reacts to the
-// server's refusal (no_ammo, need_ammo) by holding the shots back for 30 s, and the decision log says so.
+// The pet is the shared strategy "pet" (pet.go), which the preset carries: the pet is sent at the tank's mob once the tank holds it, called
+// back when the fight ends, kept defensive in a group with its Growl off when a tank is there, and Call Pet, Revive Pet and Mend Pet are
+// cast. Feed Pet is not driven (the diet); the pet RPC shows its happiness. A game that cannot drive a pet (no PetGame half) plays the
+// hunter without it. The ammo in the quiver is not in the backpack list: the brain reacts to the server's refusal (no_ammo, need_ammo) by
+// holding the shots back for 30 s, and the decision log says so.
 
 const (
 	spellAutoShot uint32 = 75 // Auto Shot (the other spell of that name, 52636, is a test spell)
@@ -373,5 +374,5 @@ func hunterPosition() *Strategy {
 func init() {
 	strategyBuilders["hunter_marksman"] = hunterMarksman
 	strategyBuilders["hunter_position"] = hunterPosition
-	presets["marksman_hunter"] = []string{"combat_dps", "hunter_marksman", "hunter_position", "avoid_ground", "combat_consumables", "rest_drink", "rest_eat"}
+	presets["marksman_hunter"] = []string{"combat_dps", "hunter_marksman", "hunter_position", "pet", "avoid_ground", "combat_consumables", "rest_drink", "rest_eat"}
 }

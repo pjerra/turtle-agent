@@ -23,6 +23,14 @@ var builtSeeds = func() map[uint16][][]byte {
 			gametest.ResurrectRequest(plr, "", false, true),
 			gametest.ResurrectRequest(npc, "Spirit Healer", true, true),
 		},
+		opcode.SMSGPetSpells: {
+			gametest.PetSpells(unit, 1, 1, false, gametest.PetBar(game.PetBarSpell{Spell: 2649, Autocast: true}), []uint32{game.PetButton(2649, game.PetActEnabled)},
+				game.PetCooldown{SpellID: 2649, MS: 5000}),
+			gametest.PetSpellsCleared(),
+		},
+		opcode.SMSGPetMode:            {gametest.PetMode(unit, 1, 1, false)},
+		opcode.SMSGPetCastFailed:      {gametest.PetCastFailed(2649, 60)},
+		opcode.SMSGPetActionFeedback:  {gametest.PetActionFeedback(2)},
 		opcode.SMSGCorpseReclaimDelay: {gametest.CorpseReclaimDelay(30000)},
 		opcode.MSGCorpseQuery: {
 			gametest.CorpseQuery(0, -6053.7, -2954.6, 213.7, 70),

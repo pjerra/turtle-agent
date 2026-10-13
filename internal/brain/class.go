@@ -82,7 +82,7 @@ var classTable = map[uint8]ClassInfo{
 		Interrupts: []InterruptSpell{{Spell: "Earth Shock"}}},
 	ClassMage: {ID: ClassMage, Name: "mage", Power: powerMana, Drinks: true, ConjuredDrinks: true, ManaPotions: true,
 		Interrupts: []InterruptSpell{{Spell: "Counterspell"}}},
-	ClassWarlock: {ID: ClassWarlock, Name: "warlock", Power: powerMana, Drinks: true, ManaPotions: true},
+	ClassWarlock: {ID: ClassWarlock, Name: "warlock", Power: powerMana, Drinks: true, ManaPotions: true, Band: [2]float64{18, 26}}, // Drain Life and Fear reach 20 yd, Shadow Bolt 30
 	ClassDruid:   {ID: ClassDruid, Name: "druid", Power: powerMana, Drinks: true, ManaPotions: true, Taunt: "Growl", Heals: &druidHeals},
 }
 

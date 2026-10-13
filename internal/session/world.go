@@ -154,6 +154,7 @@ func (s *Session) applyBlocks(blocks []objects.Block) {
 			}
 		}
 	}
+	s.watchPet()
 }
 
 func (s *Session) onDestroy(body []byte) error {
@@ -166,6 +167,7 @@ func (s *Session) onDestroy(body []byte) error {
 		s.emitGameObject(g, "destroyed", nil)
 	}
 	s.store.Destroy(g)
+	s.watchPet()
 	return nil
 }
 
