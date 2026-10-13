@@ -34,6 +34,9 @@ type Game interface {
 	Chat(ctx context.Context, channel, text string) error
 	// GM runs a GM command (".revive Name").
 	GM(ctx context.Context, text string) error
+	// GMOn selects the unit and runs a GM command that acts on the selected unit (".aura <id>") as one operation,
+	// so that nothing else can change the selection between the two.
+	GMOn(ctx context.Context, guid packet.GUID, text string) error
 	Teleport(ctx context.Context, to Point, mapID uint32) error
 	// Emit appends an event of kind (events.KindDungeon*) to the agent's event log.
 	Emit(kind, text string, data map[string]any)
@@ -97,6 +100,9 @@ type Config struct {
 	Shortcuts bool // allow the GM revive of a dead party member at a rest gate (flagged in the report)
 	// Setup lists the GM commands the caller used to set the run up; they are copied into the report (setup_shortcuts).
 	Setup []string
+	// Buffs are put on each companion by the GM leader (".aura <id>" on the selected member) as the run starts, after a
+	// GM revive, and on a leg that finds one missing; every application is a "buff" entry in the report's gm_shortcuts.
+	Buffs []Buff
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -128,6 +134,8 @@ type Config struct {
 	AggroQuiet     time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
 	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
 	WalkWatch      time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap        time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait   time.Duration // longest wait for a companion out of view to show its auras after the first .aura
 }
 
 // DefaultConfig is the Driver's limits for a live run.
@@ -140,7 +148,7 @@ func DefaultConfig() Config {
 		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
-		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond,
+		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second,
 	}
 }
 
@@ -191,6 +199,8 @@ func (c Config) withDefaults() Config {
 	fill(&c.AggroQuiet, d.AggroQuiet)
 	fill(&c.AmbushPause, d.AmbushPause)
 	fill(&c.WalkWatch, d.WalkWatch)
+	fill(&c.BuffGap, d.BuffGap)
+	fill(&c.BuffViewWait, d.BuffViewWait)
 	return c
 }
 
@@ -211,6 +221,8 @@ type Driver struct {
 	prevDea map[packet.GUID]bool // who was dead at the last look, to count each death once
 	seen    bool
 	party   map[packet.GUID]bool // guids of the leader and the members, for "who is the unit hitting"
+	// buffedAt is the leg a member last had its buffs given or topped up at: a leg tops a member up once.
+	buffedAt map[packet.GUID]int
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -218,9 +230,10 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	if clk.Now == nil || clk.Sleep == nil {
 		clk = RealClock()
 	}
-	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}}
+	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}, buffedAt: map[packet.GUID]int{}}
 	d.rep.init(plan, clk.Now)
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
+	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
 	return d
 }
 
@@ -374,7 +387,7 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 	case d.g.Map() != d.plan.Map:
 		return fmt.Errorf("the leader is on map %d and the plan needs map %d: enter the dungeon first, or run with teleport", d.g.Map(), d.plan.Map)
 	}
-	return nil
+	return d.startBuffs(ctx, fromLeg)
 }
 
 // startPoint is where a run from leg i begins: the entrance, or where the leg before ended.
@@ -447,6 +460,9 @@ func (d *Driver) startLeg(ctx context.Context, i int) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	if err := d.topUpBuffs(ctx); err != nil {
+		return err
+	}
 	return d.restGate(ctx)
 }
 
@@ -749,6 +765,7 @@ func (d *Driver) restGate(ctx context.Context) error {
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
+	rebuff := map[packet.GUID]bool{} // revived members still to get their buffs back
 	mana := map[packet.GUID]manaWatch{}
 	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
 	// its combat flag), the gate as a whole is bounded.
@@ -800,9 +817,19 @@ func (d *Driver) restGate(ctx context.Context) error {
 				return err
 			}
 			calm = d.clk.Now()
+			rebuff[m.GUID] = true
 		}
 		if len(st.dead) > 0 {
 			continue
+		}
+		for g := range rebuff {
+			if !slices.ContainsFunc(d.g.Party(), func(m Member) bool { return m.GUID == g && m.Dead }) {
+				delete(rebuff, g)
+				if err := d.rebuff(ctx, g); err != nil {
+					return err
+				}
+				calm = d.clk.Now()
+			}
 		}
 		if st.ok {
 			if len(st.stalled) > 0 {

@@ -9,6 +9,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 func (s *Session) registerChat() {
@@ -116,15 +117,59 @@ func (s *Session) AddonSend(ctx context.Context, channel, prefix, text, to strin
 // (Chat.cpp:1769-1779), so GM refuses those. An account below GM level without
 // PlayerCommands also says it aloud (Chat.cpp:1773-1774); that is server configuration.
 func (s *Session) GM(ctx context.Context, text string) error {
+	text, err := gmLine(text)
+	if err != nil {
+		return err
+	}
+	return s.Chat(ctx, "say", text, "")
+}
+
+// gmLine checks a GM command and adds the leading ".".
+func gmLine(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, ".") {
 		text = "." + text
 	}
 	if strings.TrimSpace(text[1:]) == "" {
-		return errors.New("gm: empty command")
+		return "", errors.New("gm: empty command")
 	}
 	if strings.HasPrefix(text, "..") {
-		return fmt.Errorf("gm: %q starts with \"..\", which the server says aloud instead of running", text)
+		return "", fmt.Errorf("gm: %q starts with \"..\", which the server says aloud instead of running", text)
 	}
-	return s.Chat(ctx, "say", text, "")
+	return text, nil
+}
+
+// GMOn selects the unit g and sends the GM command text as ONE operation of the session's owner goroutine: no other
+// request (a target call, the addon host's click) can change the selection between the two packets. Use it for a
+// command that acts on the selected unit (".aura <id>", ".revive"), which the core runs on whatever is selected
+// when it arrives (Chat.cpp:2329-2340).
+func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
+	if g == 0 {
+		return errors.New("gm: no unit to select")
+	}
+	text, err := gmLine(text)
+	if err != nil {
+		return err
+	}
+	say, err := game.ChatTypeByName("say")
+	if err != nil {
+		return err
+	}
+	body, err := game.BuildMessageChat(say, "", text)
+	if err != nil {
+		return err
+	}
+	_, err = s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		if err := s.conn.WritePacket(opcode.CMSGSetSelection, game.BuildSetSelection(g)); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.target = g
+		s.mu.Unlock()
+		return nil, s.conn.WritePacket(opcode.CMSGMessagechat, body)
+	})
+	return err
 }

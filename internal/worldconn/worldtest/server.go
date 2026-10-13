@@ -178,6 +178,19 @@ func (s *Server) Expect(op uint16, timeout time.Duration) (worldconn.Packet, err
 	}
 }
 
+// Next returns the next client packet whatever its opcode, in the order it was sent.
+func (s *Server) Next(timeout time.Duration) (worldconn.Packet, error) {
+	select {
+	case p, ok := <-s.in:
+		if !ok {
+			return worldconn.Packet{}, errors.New("worldtest: client connection closed")
+		}
+		return p, nil
+	case <-time.After(timeout):
+		return worldconn.Packet{}, fmt.Errorf("worldtest: no packet within %s", timeout)
+	}
+}
+
 func (s *Server) Skipped() []worldconn.Packet {
 	s.mu.Lock()
 	defer s.mu.Unlock()
