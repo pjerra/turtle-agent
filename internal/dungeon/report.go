@@ -46,6 +46,9 @@ type Report struct {
 	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
 	// intent, code and message, with how often each came in the leg.
 	Refusals []RefusalReport `json:"refusals"`
+	// Remote is set for a run in remote mode (dungeon_run mode "remote"): the commander binding, the feed, the orders and the
+	// decisions taken from the feed. Absent in group mode.
+	Remote *RemoteReport `json:"remote,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -149,6 +152,7 @@ func (p *reporter) snapshot() Report {
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)
 	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
+	r.Remote = p.r.Remote.clone()
 	if r.State == "running" {
 		now := p.now()
 		r.Seconds = now.Sub(r.Started).Seconds()
@@ -163,6 +167,15 @@ func (p *reporter) snapshot() Report {
 func (p *reporter) summary() map[string]any { return summaryOf(p.snapshot()) }
 
 func summaryOf(r Report) map[string]any {
+	m := summaryBase(r)
+	if r.Remote != nil {
+		m["remote"], m["lead_bot"], m["frames_received"] = true, r.Remote.LeadBot, r.Remote.FramesReceived
+		m["orders_sent"], m["orders_refused"] = r.Remote.OrdersSent, r.Remote.OrdersRefused
+	}
+	return m
+}
+
+func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}

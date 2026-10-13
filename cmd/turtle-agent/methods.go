@@ -246,11 +246,13 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerPetMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
-	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow)
+	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner)
+	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
 		stopMap()
 		stopDungeon()
+		stopCommander()
 		stopBrain()
 		stopAddons()
 	}

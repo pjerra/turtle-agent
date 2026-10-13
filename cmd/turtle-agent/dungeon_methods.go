@@ -98,6 +98,17 @@ type dungeonRunParams struct {
 	RecoverWipe bool `json:"recover_wipe,omitempty"`
 	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
 	WaitSickness bool `json:"wait_sickness,omitempty"`
+	// Mode is "group" (the default: the agent's character leads the party it is in) or "remote": the agent leads a bot group
+	// from outside it through the TortoiseBots remote commander (README "Remote leader"). Remote mode takes lead_bot, and
+	// optionally bots, tank and cc; it sends no GM command and refuses teleport, buffs, brain, gm and gm_level.
+	Mode string `json:"mode,omitempty"`
+	// LeadBot is the bot that walks in remote mode; bots are the other bots to bind with it (empty: its party as it is).
+	LeadBot string   `json:"lead_bot,omitempty"`
+	Bots    []string `json:"bots,omitempty"`
+	// Tank names the bot that holds threat (remote mode); empty: the bot that holds the first pulled mob.
+	Tank string `json:"tank,omitempty"`
+	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
+	CC []dungeon.CCRule `json:"cc,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -111,6 +122,9 @@ type dungeonRunResult struct {
 	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
 	// server at the start; the report's leader_gm has the answer).
 	LeaderGM string `json:"leader_gm"`
+	// Mode is "group" or "remote"; LeadBot is the remote run's lead bot.
+	Mode    string `json:"mode"`
+	LeadBot string `json:"lead_bot,omitempty"`
 }
 
 type dungeonStatusResult struct {
@@ -131,9 +145,11 @@ type dungeonRunner struct {
 	lease *brainLease
 	// probeWindow is how long a run listens for the server's answer to its ".account" probe (accountProbeWindow when 0).
 	probeWindow time.Duration
+	// remote is the commander service remote mode runs on; nil in tests that do not build it.
+	remote *commanderService
 
 	mu     sync.Mutex
-	drv    *dungeon.Driver
+	drv    dungeon.Runner
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -141,12 +157,12 @@ type dungeonRunner struct {
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
 // call (see registerMethodsFor). The returned func stops a run still going; call it before the process ends. The
 // runner is returned for the methods that read the report (map_snapshot).
-func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease, probeWindow time.Duration) (func(), *dungeonRunner) {
+func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir string, brainCtl *brain.Controller, lease *brainLease, probeWindow time.Duration, remote *commanderService) (func(), *dungeonRunner) {
 	if dir == "" {
 		dir = "dungeons"
 	}
 	root, cancel := context.WithCancel(context.Background())
-	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow}
+	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow, remote: remote}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
 		return r.run(p)
 	}))
@@ -192,7 +208,11 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 		}
 	}
-	if p.GMLevel != nil {
+	remote, err := checkMode(p)
+	if err != nil {
+		return dungeonRunResult{}, err
+	}
+	if p.GMLevel != nil && !remote {
 		switch {
 		case p.GM == nil || !*p.GM:
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level goes with gm true (it states the GM account's level instead of probing it)"}
@@ -200,7 +220,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level must be 1 (observer) to 6 (console)"}
 		}
 	}
-	if p.GM != nil && !*p.GM {
+	if p.GM != nil && !*p.GM && !remote {
 		switch {
 		case p.Teleport:
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "teleport needs a GM account (.go xyz): with gm false stand at the entrance and run without teleport"}
@@ -209,7 +229,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		}
 	}
 	var hook dungeon.Brain
-	if p.Brain != "" {
+	if p.Brain != "" && !remote {
 		if r.brain == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the bot brain is not available"}
 		}
@@ -245,6 +265,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	defer r.mu.Unlock()
 	if r.running() {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
+	}
+	if remote {
+		return r.startRemote(p, plan, setup, from, names)
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
@@ -292,7 +315,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group"}, nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.

@@ -107,7 +107,10 @@ const (
 	// The bot brain (brain_start, README "Bot brain"): what it decided each tick, and why it did nothing.
 	KindBrainDecision = "brain_decision" // data.trigger, action, relevance, result (ok, not_possible, vetoed, error), via; spell_id and target_guid set
 	KindBrainIdle     = "brain_idle"     // the brain had nothing to do (throttled): data.reason
-	KindBrainState    = "brain_state"    // the brain started or stopped: data.state, strategies, role
+	// KindBotViewFrame is a TBM:VIEW frame of the remote commander's perception feed (README "Remote leader"), throttled: data.seq,
+	// lead, party (name, hp_pct, power_pct, dead, state), hostiles, engaged, threats, and the feed's counters.
+	KindBotViewFrame = "bot_view_frame"
+	KindBrainState   = "brain_state" // the brain started or stopped: data.state, strategies, role
 
 	// The player's pet (README "Pets", issue #80 step 4d). The pet's guid is source.
 	KindPetSummoned  = "pet_summoned"  // UNIT_FIELD_SUMMON of the player names a pet: data.entry, data.dead; target the owner
@@ -200,6 +203,8 @@ type Log struct {
 	buf     []Event
 	last    uint64
 	changed chan struct{}
+	// intercept sees every event before it is stored and may consume it (SetIntercept).
+	intercept func(Event) bool
 }
 
 func New(capacity int) *Log {
@@ -209,8 +214,28 @@ func New(capacity int) *Log {
 	return &Log{limit: capacity, changed: make(chan struct{})}
 }
 
-// Append stores e with the next sequence number, stamps Time if unset and wakes waiters.
+// SetIntercept installs fn, which Append calls with every event before storing it. When fn returns true the event is consumed: it is
+// not stored, gets no sequence number and wakes nobody. The remote commander's feed uses it to take the TBM:VIEW lines (about five a
+// second while bound) out of the log, so they do not push chat, dungeon and brain events out of the ring. fn runs on the appender's
+// goroutine, outside the log's lock, and may itself call Append for other events. nil removes it.
+func (l *Log) SetIntercept(fn func(Event) bool) {
+	l.mu.Lock()
+	l.intercept = fn
+	l.mu.Unlock()
+}
+
+// Append stores e with the next sequence number, stamps Time if unset and wakes waiters. A consumed event (SetIntercept) is returned
+// with Seq 0.
 func (l *Log) Append(e Event) Event {
+	l.mu.Lock()
+	fn := l.intercept
+	l.mu.Unlock()
+	if fn != nil {
+		Stamp(&e)
+		if fn(e) {
+			return e
+		}
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.last++
