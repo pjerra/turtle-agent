@@ -53,8 +53,8 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":"rig","buffs":[0]}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[22888,{}]}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[22888,22888,22888,22888,22888,"world","world",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}`, "at most 20"},
-		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-200 characters"},
-		{`{"name":"rig","setup":["` + strings.Repeat("x", 201) + `"]}`, "setup[0]: needs 1-200 characters"},
+		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-400 characters"},
+		{`{"name":"rig","setup":["` + strings.Repeat("x", 401) + `"]}`, "setup[0]: needs 1-400 characters"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)

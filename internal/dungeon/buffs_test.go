@@ -153,13 +153,13 @@ func TestBuffTopUpIsOncePerLegPerMember(t *testing.T) {
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v\n%+v", err, d.Report())
 	}
-	if n := countOf(g.gms, ".aura 22888"); n != 3 { // two at the start, one top-up of Tank at leg 1
+	if n := countOf(g.gms, ".aura 22888"); n != 4 { // two at the start, the top-up of Tank at leg 1 and its one repeat
 		t.Fatalf("aura commands %q", auraCmds(g))
 	}
-	if !strings.Contains(notes(d), "buffs still missing on Tank") {
+	if !strings.Contains(notes(d), "buffs on Tank did not take") {
 		t.Fatalf("notes %q", notes(d))
 	}
-	if fl := buffShortcuts(d.Report()); len(fl) != 3 || fl[2] != "Rallying Cry of the Dragonslayer on Tank" {
+	if fl := buffShortcuts(d.Report()); len(fl) != 4 || fl[3] != "Rallying Cry of the Dragonslayer on Tank" {
 		t.Fatalf("%q", fl)
 	}
 }
@@ -252,7 +252,7 @@ func TestBuffCheckWaitsForCompanionsToComeIntoView(t *testing.T) {
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v\n%+v", err, d.Report())
 	}
-	if !strings.Contains(notes(d), "buffs on Heal could not be checked: not in view") {
+	if !strings.Contains(notes(d), "buffs on Heal not given: not in view") {
 		t.Fatalf("notes %q", notes(d))
 	}
 

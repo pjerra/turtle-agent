@@ -17,7 +17,9 @@ import (
 
 type fakeUnit struct {
 	objects.Unit
-	dieAt time.Time
+	dieAt  time.Time
+	noJoin bool // pulling a neighbour does not bring it into the fight (stationary mobs with no link)
+	stuck  bool // pulling it draws no fight at all
 }
 
 type fakeEvent struct {
@@ -72,6 +74,10 @@ type fakeGame struct {
 	auraErr     error                          // GM fails for ".aura"
 	gmOnGUIDs   []packet.GUID                  // the unit each GMOn selected
 	hidden      map[packet.GUID]bool           // party members that are not in view
+
+	refusals      []Refusal                 // what the bots refused since the last look (the Driver reads them through RefusalSource)
+	refuseTargets map[packet.GUID][]Refusal // a pullback at this target is refused with the first of these (and it is dropped), no fight starts
+	failGMOn      map[packet.GUID]int       // the next n ".aura" commands selecting this unit land on the leader instead
 }
 
 const (
@@ -220,7 +226,10 @@ func (g *fakeGame) Chat(ctx context.Context, channel, text string) error {
 	case ".bot action rest":
 		g.resting = true
 	case ".bot action pullback":
-		if !g.noEngage {
+		if rs := g.refuseTargets[g.targeted]; len(rs) > 0 {
+			g.refusals = append(g.refusals, rs[0])
+			g.refuseTargets[g.targeted] = rs[1:]
+		} else if !g.noEngage {
 			g.pull()
 		}
 	}
@@ -238,11 +247,14 @@ func (g *fakeGame) pull() {
 			t = u
 		}
 	}
-	if t == nil || stealthedFake(t) { // nobody attacks what it cannot see
+	if t == nil || stealthedFake(t) || t.stuck { // nobody attacks what it cannot see; a stuck mob does not come
 		return
 	}
 	n := 0
 	for _, u := range g.units {
+		if u != t && u.noJoin {
+			continue // a stationary mob that does not link to the pack
+		}
 		if !u.Dead && !stealthedFake(u) && dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= 25 {
 			u.InCombat, u.Health = true, 50
 			u.dieAt = g.now.Add(g.dieIn + time.Duration(n)*2*time.Second)
@@ -269,7 +281,12 @@ func (g *fakeGame) GM(ctx context.Context, text string) error {
 			if g.auras == nil {
 				g.auras = map[packet.GUID][]objects.Aura{}
 			}
-			g.auras[g.targeted] = append(g.auras[g.targeted], objects.Aura{SpellID: uint32(n)})
+			who := g.targeted
+			if g.failGMOn[who] > 0 {
+				g.failGMOn[who]--
+				who = leader
+			}
+			g.auras[who] = append(g.auras[who], objects.Aura{SpellID: uint32(n)})
 		}
 	}
 	if strings.HasPrefix(text, ".revive ") {
@@ -847,3 +864,13 @@ func TestDriverWithoutABrainIsUnchanged(t *testing.T) {
 		t.Fatalf("%v %+v", err, d.Report())
 	}
 }
+
+// Refusals implements RefusalSource.
+func (g *fakeGame) Refusals() []Refusal {
+	out := g.refusals
+	g.refusals = nil
+	return out
+}
+
+// SelfAuras implements SelfAuraSource.
+func (g *fakeGame) SelfAuras() ([]objects.Aura, bool) { return g.auras[leader], true }
