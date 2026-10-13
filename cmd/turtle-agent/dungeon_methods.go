@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,6 +85,19 @@ type dungeonRunParams struct {
 	// a preset such as "frost_mage" or a strategy name. The run keeps leading and giving the party its orders; the
 	// brain starts at a leg's first rest gate and stops at the leg's end. Off by default.
 	Brain string `json:"brain,omitempty"`
+	// GM says whether the leader's account is a GM. false: a player's account, the run sends no GM command (no
+	// ".gm visible on", no teleport, no revive, no ".aura"; teleport and buffs are refused). true: a GM of level GMLevel
+	// (developer when omitted), no probe. Omitted: the run sends ".account" once and reads the level from the reply; no
+	// clear answer counts as a player (pass gm true to override). The level gates each GM command (dungeon.capsFor).
+	GM *bool `json:"gm,omitempty"`
+	// GMLevel is the account level a gm true leader has (1 observer: teleport; 2 moderator: also .gm visible on;
+	// 3 developer and above: also revive and buffs). Only with gm true.
+	GMLevel *int `json:"gm_level,omitempty"`
+	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
+	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
+	RecoverWipe bool `json:"recover_wipe,omitempty"`
+	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
+	WaitSickness bool `json:"wait_sickness,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -94,6 +108,9 @@ type dungeonRunResult struct {
 	Legs    []string `json:"legs"`
 	Buffs   []string `json:"buffs"`           // the spells the run will put on the companions (GM), empty for none
 	Brain   string   `json:"brain,omitempty"` // the strategies that play the leader, empty for none
+	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
+	// server at the start; the report's leader_gm has the answer).
+	LeaderGM string `json:"leader_gm"`
 }
 
 type dungeonStatusResult struct {
@@ -173,6 +190,22 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 		}
 	}
+	if p.GMLevel != nil {
+		switch {
+		case p.GM == nil || !*p.GM:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level goes with gm true (it states the GM account's level instead of probing it)"}
+		case *p.GMLevel < 1 || *p.GMLevel > 6:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "gm_level must be 1 (observer) to 6 (console)"}
+		}
+	}
+	if p.GM != nil && !*p.GM {
+		switch {
+		case p.Teleport:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "teleport needs a GM account (.go xyz): with gm false stand at the entrance and run without teleport"}
+		case p.Buffs != nil:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "buffs need a GM account (.aura, developer level): with gm false run without buffs"}
+		}
+	}
 	var hook dungeon.Brain
 	if p.Brain != "" {
 		if r.brain == nil {
@@ -213,8 +246,26 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
+	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
+	leaderGM := "probe"
+	switch {
+	case p.GM == nil:
+		cfg.GM = dungeon.GMProbe
+	case *p.GM:
+		cfg.GM, leaderGM = dungeon.GMAssumed, "true"
+		if p.GMLevel != nil {
+			cfg.GMLevel = *p.GMLevel
+		}
+	default:
+		cfg.GM, leaderGM = dungeon.GMNone, "false"
+	}
 	if hook != nil {
-		if r.brain.Running() || !r.lease.acquire() {
+		// The lease comes first: checking Running() before it left a window in which a brain_start could slip in between.
+		if !r.lease.acquire() {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
+		}
+		if r.brain.Running() {
+			r.lease.release()
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
@@ -238,7 +289,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM}, nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.
@@ -320,7 +371,92 @@ func (g *sessionGame) Units() []objects.Unit { return g.cur().Units(objects.Filt
 
 func (g *sessionGame) Self() dungeon.Self {
 	st := g.cur().Status()
-	return dungeon.Self{GUID: st.GUID, Name: st.Character, Health: st.Health, MaxHealth: st.MaxHealth}
+	return dungeon.Self{GUID: st.GUID, Name: st.Character, Health: st.Health, MaxHealth: st.MaxHealth, Ghost: st.Ghost}
+}
+
+func (g *sessionGame) Death() dungeon.DeathState {
+	d := g.cur().Death()
+	out := dungeon.DeathState{Dead: d.Dead, Ghost: d.Ghost, ReclaimIn: time.Duration(d.ReclaimInMS) * time.Millisecond}
+	if d.Resurrect != nil {
+		out.Offer = &dungeon.Offer{Name: d.Resurrect.Name, Sickness: d.Resurrect.Sickness}
+	}
+	return out
+}
+
+func (g *sessionGame) AcceptResurrect(ctx context.Context) error {
+	_, err := g.cur().AcceptResurrect(ctx)
+	return err
+}
+
+func (g *sessionGame) ReleaseSpirit(ctx context.Context) error { return g.cur().ReleaseSpirit(ctx) }
+
+func (g *sessionGame) CorpseQuery(ctx context.Context) (dungeon.Corpse, error) {
+	c, err := g.cur().CorpseQuery(ctx)
+	if err != nil || !c.Found {
+		return dungeon.Corpse{}, err
+	}
+	return dungeon.Corpse{Found: true, Map: uint32(max(c.Map, 0)), CorpseMap: c.CorpseMap, Pos: dungeon.Point{X: c.X, Y: c.Y, Z: c.Z}, Inside: c.Inside()}, nil
+}
+
+func (g *sessionGame) ReclaimCorpse(ctx context.Context) error { return g.cur().ReclaimCorpse(ctx) }
+
+func (g *sessionGame) AreaTrigger(ctx context.Context, id uint32) error {
+	return g.cur().AreaTrigger(ctx, id)
+}
+
+// accountProbeWindow is how long ProbeAccount listens for the server's answer to ".account".
+const accountProbeWindow = 2 * time.Second
+
+// accountLevelReply is LANG_ACCOUNT_LEVEL, "Your account level is: %u" (mangos_string 11), the answer of ".account"
+// (HandleAccountCommand, Commands.cpp:6283-6291; SEC_PLAYER, Chat.cpp:77, so any account may ask).
+var accountLevelReply = regexp.MustCompile(`^\s*Your account level is: (\d+)\s*$`)
+
+// ProbeAccount sends ".account" and reads the account's security level from the reply. With PlayerCommands = 0 (not the
+// shipped default) the server says the line aloud instead (Chat.cpp:1773-1774), which is read as level 0: the account may
+// not run commands. Any other system line in the window is no answer.
+func (g *sessionGame) ProbeAccount(ctx context.Context) (level int, known bool, err error) {
+	s := g.cur()
+	const cmd = ".account"
+	since := s.Log().Last()
+	self := s.Status().GUID
+	if err := s.GM(ctx, cmd); err != nil {
+		return 0, false, err
+	}
+	wctx, cancel := context.WithTimeout(ctx, accountProbeWindow)
+	defer cancel()
+	var seen []events.Event
+	for wctx.Err() == nil {
+		_ = s.Log().Wait(wctx, since) // wakes on each new event; the window ends it
+		page := s.Log().Read(events.Query{Since: since, Kinds: []string{events.KindChat, events.KindSystem}})
+		since = page.Next
+		seen = append(seen, page.Events...)
+		if level, known := classifyAccountProbe(seen, self, cmd); known {
+			return level, true, nil
+		}
+	}
+	return 0, false, ctx.Err()
+}
+
+// classifyAccountProbe reads the events after the line cmd was sent: the reply "Your account level is: N" gives N; the
+// player's own line coming back in "say" means the server did not run it, level 0. Anything else, system lines
+// included, is ignored. known is false when neither came.
+func classifyAccountProbe(evs []events.Event, self packet.GUID, cmd string) (level int, known bool) {
+	for _, e := range evs {
+		switch e.Kind {
+		case events.KindSystem:
+			if m := accountLevelReply.FindStringSubmatch(e.Text); m != nil {
+				n, err := strconv.Atoi(m[1])
+				if err == nil {
+					return n, true
+				}
+			}
+		case events.KindChat:
+			if e.SourceGUID == self && strings.TrimSpace(e.Text) == cmd {
+				return 0, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func (g *sessionGame) Party() []dungeon.Member {

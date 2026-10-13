@@ -3,6 +3,7 @@
   "name": "uldaman",
   "map": 70,
   "entrance": {"x": -228.9, "y": 46.1, "z": -46},
+  "entrance_trigger": 286,
   "notes": [
     "Uldaman (map 70) from the main entrance (areatrigger 286) to Ironaya, the first boss on the way in. Order of the legs follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859): Baelog, Revelosh, Ironaya.",
     "Baelog and Revelosh stand in side rooms: the navmesh route from the entrance to the Keystone leaves the Baelog branch at -250 135 and passes 23 yd from Revelosh. A run that wants the shortest way starts at the leg 'keystone'.",

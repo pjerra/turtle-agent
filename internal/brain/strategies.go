@@ -28,10 +28,11 @@ var (
 		"mage_interrupt":     mageInterrupt,
 		"combat_consumables": combatConsumables,
 		"wand":               wandStrategy,
+		"rest_eat":           restEat,
 	}
 	presets = map[string][]string{
 		"frost_mage": {"combat_dps", "mage_frost", "mage_rest", "ranged_position", "avoid_ground", "mage_defense", "mage_interrupt",
-			"combat_consumables", "wand"},
+			"combat_consumables", "wand", "rest_eat"},
 	}
 )
 

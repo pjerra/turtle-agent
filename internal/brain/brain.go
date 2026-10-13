@@ -333,7 +333,7 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 		b.idle(now, "not_ready", nil)
 		return nil
 	}
-	if c.Self.Dead || (c.Self.MaxHealth > 0 && c.Self.Health == 0) {
+	if c.Self.Dead || c.Self.Ghost || (c.Self.MaxHealth > 0 && c.Self.Health == 0) { // a ghost has 1 health
 		b.idle(now, "dead", nil)
 		return nil
 	}

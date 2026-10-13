@@ -87,6 +87,7 @@ type fakeGame struct {
 	auraDelay     time.Duration             // an ".aura" shows on its target only this long after
 	lateAuras     []lateAura
 	failGMOn      map[packet.GUID]int // the next n ".aura" commands selecting this unit land on the leader instead
+	dead          fakeDeath           // the leader's death (fake_death_test.go)
 }
 
 const (
@@ -484,18 +485,20 @@ func TestDriverWithoutAParty(t *testing.T) {
 }
 
 func TestDriverWipeEndsTheRun(t *testing.T) {
+	// The leader and every member dead is a wipe: the run ends.
 	g, p := runFixture(t)
 	g.dieIn = 30 * time.Second
 	g.onTick = func(g *fakeGame) {
 		if g.targeted == 101 && len(g.targets) == 1 && g.now.After(time.Unix(1_000_000, 0).Add(5*time.Second)) && g.units[0].InCombat {
 			g.self.Health = 0
+			g.party[0].Dead, g.party[1].Dead = true, true
 		}
 	}
 	d := NewDriver(p, g, Config{}, g.clock())
 	err := d.Run(context.Background(), 0)
 	rep := d.Report()
-	if err == nil || err.Error() != "wipe" || rep.State != "failed" || rep.Error != "wipe" || rep.Wipes != 1 || len(rep.Deaths) != 1 || rep.Deaths[0].Name != "Lead" ||
-		rep.Legs[0].Result != "failed" || rep.Legs[0].Deaths != 1 {
+	if err == nil || err.Error() != "wipe" || rep.State != "failed" || rep.Error != "wipe" || rep.Wipes != 1 || len(rep.Deaths) != 3 || rep.Deaths[0].Name != "Lead" ||
+		rep.Legs[0].Result != "failed" || rep.Legs[0].Deaths != 3 {
 		t.Fatalf("%v %+v", err, rep)
 	}
 	last := g.events[len(g.events)-1]

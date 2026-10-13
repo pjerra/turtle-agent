@@ -19,6 +19,15 @@ var builtSeeds = func() map[uint16][][]byte {
 	)
 	quest := []gametest.QuestReward{{Entry: 1001, Count: 2, Display: 3}}
 	return map[uint16][][]byte{
+		opcode.SMSGResurrectRequest: {
+			gametest.ResurrectRequest(plr, "", false, true),
+			gametest.ResurrectRequest(npc, "Spirit Healer", true, true),
+		},
+		opcode.SMSGCorpseReclaimDelay: {gametest.CorpseReclaimDelay(30000)},
+		opcode.MSGCorpseQuery: {
+			gametest.CorpseQuery(0, -6053.7, -2954.6, 213.7, 70),
+			gametest.NoCorpse(),
+		},
 		opcode.SMSGListInventory: {
 			gametest.ListInventory(npc),
 			gametest.ListInventory(npc, gametest.VendorLine{Entry: 159, Display: 18, Stock: 0xFFFFFFFF, Price: 25, BuyCount: 1}),

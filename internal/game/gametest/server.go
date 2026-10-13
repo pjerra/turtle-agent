@@ -128,3 +128,27 @@ func ProcResist(caster, target packet.GUID, spell uint32) []byte {
 func PartyKill(killer, victim packet.GUID) []byte {
 	return packet.NewWriter().GUID(killer).GUID(victim).Bytes()
 }
+
+// ResurrectRequest is Spell::SendResurrectRequest (Spells/Spell.cpp:5153-5174 on tortoise-wow 5d79486): the caster's guid,
+// the length of the name with its terminator, the name (empty when the caster is a player), the sickness byte and the timer byte.
+func ResurrectRequest(caster packet.GUID, name string, sickness, timer bool) []byte {
+	b := func(v bool) uint8 {
+		if v {
+			return 1
+		}
+		return 0
+	}
+	return packet.NewWriter().GUID(caster).U32(uint32(len(name) + 1)).CString(name).U8(b(sickness)).U8(b(timer)).Bytes()
+}
+
+// CorpseReclaimDelay is Player::SendCorpseReclaimDelay (Objects/Player.cpp:22237-22239): the delay in milliseconds.
+func CorpseReclaimDelay(ms uint32) []byte { return packet.NewWriter().U32(ms).Bytes() }
+
+// CorpseQuery is WorldSession::HandleCorpseQueryOpcode (Handlers/QueryHandler.cpp:271-327) for a corpse that exists: u8 1, the
+// map, the position and the corpse's own map.
+func CorpseQuery(mapID int32, x, y, z float32, corpseMap uint32) []byte {
+	return packet.NewWriter().U8(1).I32(mapID).F32(x).F32(y).F32(z).U32(corpseMap).Bytes()
+}
+
+// NoCorpse is the same handler's answer when the player has no corpse: a single zero byte (:281-286).
+func NoCorpse() []byte { return []byte{0} }
