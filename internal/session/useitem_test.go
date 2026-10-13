@@ -307,6 +307,9 @@ func TestMountCastsTheSpellABridleTeaches(t *testing.T) {
 	if info := <-done; !info.Mounted || info.DisplayID != 2405 || info.Via != "item" || info.Learned != 6648 || info.Result != "ok" {
 		t.Fatalf("%+v", info)
 	}
+	// spell_learned goes through emit, which can queue it behind an event waiting for a name, so Mount
+	// returning does not mean it is in the log yet.
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindSpellLearned)) == 1 })
 	if l := ofKind(h.s.Log(), events.KindSpellLearned); len(l) != 1 || l[0].SpellID != 6648 {
 		t.Fatalf("%+v", l)
 	}
