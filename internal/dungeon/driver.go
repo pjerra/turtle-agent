@@ -460,6 +460,9 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 	if err := d.setupGM(ctx); err != nil {
 		return err
 	}
+	if err := d.checkRequiredItems(fromLeg); err != nil {
+		return err
+	}
 	start, what := d.startPoint(fromLeg)
 	if fromLeg > 0 && !d.cfg.Teleport {
 		// Without teleport the party walks from where it stands to the leg: the packs of the earlier legs on that way are
@@ -1014,6 +1017,9 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 // between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
 // the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
+	if err := d.needsItem(a.Requires, ""); err != nil {
+		return err
+	}
 	uerr := d.holdingMove(ctx, func() error { return d.use(ctx, a) })
 	if err := d.check(ctx); err != nil {
 		return err

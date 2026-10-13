@@ -91,3 +91,6 @@ func (g *sessionGame) SelfAuras() ([]objects.Aura, bool) {
 	}
 	return u.Auras, true
 }
+
+// Items implements dungeon.ItemSource: the backpack and the bags of the leader.
+func (g *sessionGame) Items() []objects.Item { return g.cur().Items() }

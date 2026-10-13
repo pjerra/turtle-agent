@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,6 +28,12 @@ type RefusalSource interface {
 // out). ok is false when they cannot be told. The buff batch uses it to see a ".aura" that landed on the leader.
 type SelfAuraSource interface {
 	SelfAuras() (auras []objects.Aura, ok bool)
+}
+
+// ItemSource is the optional part of a Game that tells what the leader carries (the backpack and the bags). A Game without
+// it never fails a required_item check.
+type ItemSource interface {
+	Items() []objects.Item
 }
 
 // RefusalReport is one kind of refusal in the report, with how often it came in the leg.
@@ -108,4 +115,52 @@ func (d *Driver) recordRefusal(r Refusal) {
 			rep.Refusals = append(rep.Refusals, RefusalReport{Intent: r.Intent, Code: r.Code, Message: r.Message, Leg: d.curLeg, Count: 1, First: d.clk.Now()})
 		}
 	})
+}
+
+// leaderHasItem says whether the leader carries the item. known is false when that cannot be told: the Game has no
+// ItemSource, or the bags hold items whose create block has not arrived yet (entry 0) and the item is not among the rest.
+func (d *Driver) leaderHasItem(entry uint32) (has, known bool) {
+	src, ok := d.g.(ItemSource)
+	if !ok {
+		return false, false
+	}
+	pending := false
+	for _, it := range src.Items() {
+		if it.Entry == entry && it.Count > 0 {
+			return true, true
+		}
+		pending = pending || it.Entry == 0
+	}
+	return false, !pending
+}
+
+// needsItem fails when the step's required item is certainly not in the leader's bags. A GM passes the object's lock, so a GM
+// leader is never failed. where names the place in the message ("leg 'keystone' step 0" for the check before the run).
+func (d *Driver) needsItem(it *ItemRef, where string) error {
+	if it == nil || d.gm {
+		return nil
+	}
+	if has, known := d.leaderHasItem(it.Entry); known && !has {
+		if where != "" {
+			where = " " + where
+		}
+		return fmt.Errorf("the leader does not carry %s, which opening the object%s needs (the core ignores the use of a locked object by a non-GM): put it in the bags first", it, where)
+	}
+	return nil
+}
+
+// checkRequiredItems fails the run before it starts when a use_object step from leg fromLeg on needs an item the leader lacks.
+func (d *Driver) checkRequiredItems(fromLeg int) error {
+	for li := fromLeg; li < len(d.plan.Legs); li++ {
+		l := d.plan.Legs[li]
+		for si, st := range l.Steps {
+			if st.UseObject == nil {
+				continue
+			}
+			if err := d.needsItem(st.UseObject.RequiresItem, fmt.Sprintf("(leg %d %q step %d)", li, l.Name, si)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

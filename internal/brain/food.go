@@ -186,7 +186,7 @@ func restEat() *Strategy {
 	return &Strategy{
 		Name: "rest_eat",
 		Actions: []*Action{
-			{Name: "conjure_food", Spell: "Conjure Food",
+			{Name: "conjure_food", Spell: "Conjure Food", Resolve: conjureFoodSpell,
 				Possible: func(c *Ctx) bool { return !inCombat(c) },
 				Useful:   func(c *Ctx) bool { return foodEntry(c, true) == 0 }},
 			{Name: "eat", Pre: []string{"conjure_food"}, Settle: foodSettle,

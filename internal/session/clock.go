@@ -18,10 +18,14 @@ const (
 	// clockSlewIdle is how much slower or faster than the monotonic clock the client time may
 	// run while the player stands still: the server bounds no step by it then.
 	clockSlewIdle = 0.5
-	// clockSlewMoving is the same while a walk, fall or movement is under way. The anticheat
-	// allows a step the run speed times the client-time gap, so a slower client time shortens
-	// what a walk timed on the monotonic clock may cover: 2% of a 900 ms heartbeat gap at 11 yd/s
-	// is 0.2 yd, inside stepMargin.
+	// clockSlewMoving is the same while a knockback or fall is under way: a flight is timed on the
+	// monotonic clock (fall.go), and the anticheat allows a step the speed times the client-time gap,
+	// so a slower client time shortens what a flight may cover: 2% of a 900 ms heartbeat gap at
+	// 11 yd/s is 0.2 yd, inside stepMargin. A walk is not held to it: it is timed on the client time
+	// itself (walkAxis), so its steps keep the bound whatever the clock does, and the clock may
+	// follow real time as fast as it does standing still. Timed on the monotonic clock, a 6-minute
+	// walk on a 3.8% fast host gained 1.8% x 360 s = 6.5 s on the server, past the 5 s the
+	// anticheat allows (live run 3 still had walks of that length).
 	clockSlewMoving = 0.02
 	// clockRebase is how far the wall clock may stand from the client time before it counts as
 	// set (by hand, or a resume from sleep) rather than drifting: the client time then keeps
@@ -59,9 +63,29 @@ func (c moveClock) at(mono, wall time.Duration, slew float64) moveClock {
 // clockReading is now as monotonic and wall time since the session's start. A time without a
 // monotonic reading (a replay's, a test's) gives the wall time for both.
 func (s *Session) clockReading(now time.Time) (mono, wall time.Duration, slew float64) {
-	slew = clockSlewIdle
-	if s.walk != nil || s.fall != nil || s.last.flags&game.MoveMaskMoving != 0 {
-		slew = clockSlewMoving
-	}
+	slew = s.clockSlew()
 	return now.Sub(s.start), now.Round(0).Sub(s.start.Round(0)), slew
+}
+
+// clockSlew is how fast the client time may be pulled towards the wall clock now. Only a flight
+// (a fall or knockback, timed on the monotonic clock) needs the small slew; a walk follows the
+// client time and takes the idle one.
+func (s *Session) clockSlew() float64 {
+	if s.fall != nil || s.last.flags&(game.MoveJumping|game.MoveFallingFar) != 0 {
+		return clockSlewMoving
+	}
+	return clockSlewIdle
+}
+
+// walkTime is the time axis of a walk: the session's start plus the client time c reads, in
+// place of the monotonic clock the walk used to count on. A walk covers speed x (its axis gap)
+// between two readings, and the packets carry that same client time, so no step is longer than
+// the run speed times the client-time gap whichever way the host's clock drifts.
+func walkTime(start time.Time, c moveClock) time.Time {
+	return start.Add(time.Duration(c.ms * float64(time.Millisecond)))
+}
+
+// walkAxis is the walk axis at now (see walkTime). Owner loop only.
+func (s *Session) walkAxis(now time.Time) time.Time {
+	return walkTime(s.start, s.mclock.at(s.clockReading(now)))
 }

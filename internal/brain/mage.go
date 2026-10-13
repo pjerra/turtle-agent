@@ -126,7 +126,7 @@ func mageRest() *Strategy {
 			{Name: "ice_armor", Spell: "Ice Armor", Alt: []string{"frost_armor"}, Useful: func(c *Ctx) bool { return auraMissing(&c.Self, armorAuras...) }},
 			{Name: "frost_armor", Spell: "Frost Armor", Useful: func(c *Ctx) bool { return auraMissing(&c.Self, armorAuras...) }},
 			{Name: "evocation", Spell: "Evocation", Alt: []string{"drink"}, Possible: func(c *Ctx) bool { return !inCombat(c) }},
-			{Name: "conjure_water", Spell: "Conjure Water",
+			{Name: "conjure_water", Spell: "Conjure Water", Resolve: conjureWaterSpell,
 				Possible: func(c *Ctx) bool { return !inCombat(c) },
 				Useful:   func(c *Ctx) bool { return drinkEntry(c, true) == 0 }},
 			{Name: "drink", Pre: []string{"conjure_water"}, Settle: drinkSettle,

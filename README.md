@@ -500,7 +500,11 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   in order.
 - A **step** is exactly one of `use_object` and `wait_for`. `use_object` names a game object by `entry`, by `near` (a position;
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
-  driver walks next to it). `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
+  driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
+  for the use to do anything, as the object's lock names it (the Uldaman Keystone needs the Staff; the core ignores the use of a
+  locked object otherwise, so the run would only fail 60 s later at the wait). The driver checks the leader's bags (backpack and bags)
+  before the run starts, for every such step from the first leg on, and again before the step, and fails with an error naming the item;
+  a GM leader is not checked, and a bag whose items have not all arrived is not taken for a missing one. `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
   close), with a `timeout_s` (default 60, at most 600) after which the plan fails. A door that a lever or key opens may do so well after
   the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
@@ -968,12 +972,13 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 - `rest_eat` (any class): out of combat, with no mob to fight, and below 85% health, only where upkeep is allowed like `mage_rest`: sit
   and eat the best **food** in the bags that the leader's level allows (a table of the core's `item_template` foods that restore health
   and nothing else, each with its `required_level`; the highest tier first), one step under drinking, so a leader low on both drinks
-  first. A mage with no food casts Conjure Food first. A piece just used is not used again for 5 s; nothing is sent while the Food aura is
+  first. A mage with no food casts Conjure Food first, in the highest rank whose conjured item the leader's level can use (rank 7
+  makes the level 55 Cinnamon Roll: a level 45 mage casts rank 6, whatever it has learned). A piece just used is not used again for 5 s; nothing is sent while the Food aura is
   awaited.
 - `mage_rest`, out of combat and with no mob to fight, only where upkeep is allowed (always for `brain_start`; in a dungeon run only
   inside a rest gate, so the leader never sits down mid-walk): Ice Armor (else Frost Armor) and Arcane Intellect when missing or,
   if the server says how long they last, under a minute from ending; Evocation below 20% mana, else drinking below 65% (the best
-  conjured or vendor water in the bags that the leader's level allows, from the core's `required_level`; none: Conjure Water first;
+  conjured or vendor water in the bags that the leader's level allows, from the core's `required_level`; none: Conjure Water first, in the highest rank whose water the leader's level can drink, as for food;
   a drink just used is not used again for 5 s, and nothing is sent while the Drink aura is awaited, so a refusal cannot loop).
 
 **Dungeon runs.** `dungeon_run {"name":"uldaman","brain":"frost_mage"}` starts the brain at the first rest gate of each leg
@@ -1387,7 +1392,9 @@ movement packets. The agent answers the server's movement orders the way the 1.1
 
 Every walk and facing packet is checked against the server anticheat's distance bound for the time since the last one
 (run speed across and up or down, so no step can trip `OVERSPEED_Z`); a walk that would break it stops where the server
-has the player. The client time never runs backwards and is never 0.
+has the player. The client time never runs backwards and is never 0. It follows the wall clock's pace, not the monotonic clock's
+(which runs 3-4% fast on a WSL2 host), and a walk is timed on that same client time, so a walk of any length keeps both the
+anticheat's step bound and its clock-desync bound (`ClockDesync`: more than max(5 s, 500 ms a minute) ahead of the server).
 
 `status.z_unknown` is true when the z is a guess: after a GM teleport the agent found no floor under (no navmesh, or
 none within reach), after a `walk_to` that changed height, and after a knockback that landed without a navmesh floor.

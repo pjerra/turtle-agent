@@ -146,6 +146,34 @@ func TestGenerateUldaman(t *testing.T) {
 	}
 }
 
+// The optional key_item and key_name columns of gameobjects.tsv (a door's key from Lock.dbc) are noted on the leg, so the
+// use_object step gets requires_item; without the columns nothing changes.
+func TestKeyItemColumnsAreNoted(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("gameobjects.tsv", "guid\tentry\tname\ttype\tx\ty\tz\tkey_item\tkey_name\n1\t124371\tKeystone\t10\t18\t0\t0\t7733\tStaff of Prehistoria\n2\t5000\tGate\t0\t18\t1\t0\t\t\n")
+	os_, err := readObjects(filepath.Join(dir, "gameobjects.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os_[0].KeyItem != 7733 || os_[0].KeyName != "Staff of Prehistoria" || os_[1].KeyItem != 0 {
+		t.Fatalf("%+v", os_)
+	}
+	l := dungeon.Leg{Boss: &dungeon.Boss{Entry: 1, Position: pt(20, 0, 0)}}
+	n := objectNotes(os_, l, 20)
+	if len(n) != 2 || !strings.Contains(n[1], `a non-GM needs item 7733 "Staff of Prehistoria"`) || strings.Contains(n[0], "non-GM") {
+		t.Fatalf("%q", n)
+	}
+	write("gameobjects.tsv", "guid\tentry\tname\ttype\tx\ty\tz\tkey_item\n1\t1\tK\t10\t0\t0\t0\tabc\n")
+	if _, err := readObjects(filepath.Join(dir, "gameobjects.tsv")); err == nil || !strings.Contains(err.Error(), "key_item") {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestReadErrors(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, s string) string {

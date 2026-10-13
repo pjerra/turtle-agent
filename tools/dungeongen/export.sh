@@ -36,6 +36,9 @@ WHERE c.map = $map ORDER BY c.guid;
 SQL
 } > "$out/creatures.tsv"
 
+# A locked object's key item is in Lock.dbc, not in this database, so gameobjects.tsv has no key_item/key_name columns here.
+# dungeongen reads them when someone adds them (the item a non-GM needs, e.g. 7733 "Staff of Prehistoria" for the Uldaman Keystone)
+# and notes them on the leg; the plan's use_object step then carries requires_item.
 {
   printf 'guid\tentry\tname\ttype\tflags\tx\ty\tz\tstate\n'
   query <<SQL

@@ -330,7 +330,8 @@ func (w *walkState) facing(k int) float32 {
 // from that same facing, so small corners add up to one. The next heartbeat comes 500 ms after
 // a turn it sends. It reports whether it sent (or aborted the walk).
 func (s *Session) tickTurn(w *walkState, now time.Time) (bool, error) {
-	leg := w.legAt(w.walked(now))
+	ax := s.walkAxis(now)
+	leg := w.legAt(w.walked(ax))
 	if leg == w.leg {
 		return false, nil
 	}
@@ -344,7 +345,7 @@ func (s *Session) tickTurn(w *walkState, now time.Time) (bool, error) {
 	if d > math.Pi {
 		d = 2*math.Pi - d
 	}
-	if w.arrived(now) || d < minTurn { // the stop carries the last leg's facing
+	if w.arrived(ax) || d < minTurn { // the stop carries the last leg's facing
 		return false, nil
 	}
 	w.nextBeat = now.Add(500 * time.Millisecond)
