@@ -107,6 +107,8 @@ type Cast struct {
 	SpellID uint32 `json:"spell_id"`
 	Name    string `json:"name,omitempty"`
 	Channel bool   `json:"channel"`
+	// Target is the unit the cast is aimed at, as SMSG_SPELL_START names it (0: none, or an area).
+	Target packet.GUID `json:"target,omitempty"`
 	// EndsInMS is the time to the cast's end (negative a little past it, while the spell
 	// goes off); a channel's end is not sent to other clients, so it has none.
 	EndsInMS *int64 `json:"ends_in_ms,omitempty"`
@@ -153,8 +155,9 @@ type pendingDuration struct {
 const pendingAuraWindow = 5 * time.Second
 
 type casting struct {
-	spell uint32
-	end   time.Time
+	spell  uint32
+	end    time.Time
+	target packet.GUID
 }
 
 // castGrace is how long past its end a cast still shows when its SMSG_SPELL_GO did not
@@ -372,11 +375,14 @@ func (o *object) pos(now time.Time) (p [3]float32, face float32, moving bool) {
 
 // StartCast records SMSG_SPELL_START: g casts spell for castMS. An instant spell (cast
 // time 0) is not a cast; its SMSG_SPELL_GO follows at once.
-func (s *Store) StartCast(g packet.GUID, spell, castMS uint32) {
+func (s *Store) StartCast(g packet.GUID, spell, castMS uint32) { s.StartCastAt(g, spell, castMS, 0) }
+
+// StartCastAt is StartCast with the unit the cast is aimed at (the target of SMSG_SPELL_START), 0 for none.
+func (s *Store) StartCastAt(g packet.GUID, spell, castMS uint32, target packet.GUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if o, ok := s.objs[g]; ok && castMS > 0 {
-		o.cast = &casting{spell: spell, end: s.now().Add(time.Duration(castMS) * time.Millisecond)}
+		o.cast = &casting{spell: spell, end: s.now().Add(time.Duration(castMS) * time.Millisecond), target: target}
 	}
 }
 
@@ -575,7 +581,7 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 	}
 	if c := o.cast; c != nil && now.Before(c.end.Add(castGrace)) {
 		ms := c.end.Sub(now).Milliseconds()
-		u.Casting = &Cast{SpellID: c.spell, Name: spells.Name(c.spell), EndsInMS: &ms}
+		u.Casting = &Cast{SpellID: c.spell, Name: spells.Name(c.spell), EndsInMS: &ms, Target: c.target}
 	} else if ch := v[UnitChannelSpell]; ch != 0 {
 		u.Casting = &Cast{SpellID: ch, Name: spells.Name(ch), Channel: true}
 	}

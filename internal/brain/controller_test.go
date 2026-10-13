@@ -107,7 +107,7 @@ func TestStartStopStatusLifecycle(t *testing.T) {
 		t.Fatalf("a second start: %v", err)
 	}
 	st := ctl.Stop()
-	if st.Running || len(st.Strategies) != 4 {
+	if st.Running || len(st.Strategies) != 1+len(presets["frost_mage"]) {
 		t.Fatalf("the stopped brain still reports what it ran: %+v", st)
 	}
 	m.mu.Lock()

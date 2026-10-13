@@ -167,6 +167,7 @@ type Ctx struct {
 	RestOK bool
 
 	vals  valueCache
+	lock  *MoveLock
 	byID  map[packet.GUID]*objects.Unit
 	mem   *memory
 	trace []Decision

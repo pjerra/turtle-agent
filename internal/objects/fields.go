@@ -61,6 +61,7 @@ const (
 	TypeUnit       uint8 = 3
 	TypePlayer     uint8 = 4
 	TypeGameObject uint8 = 5
+	TypeDynamic    uint8 = 6 // TYPEID_DYNAMICOBJECT: the area a ground spell leaves (Blizzard, a fire patch)
 )
 
 // Item and player inventory fields (Objects/UpdateFields.h).
@@ -117,4 +118,12 @@ const (
 const (
 	GOTypeDoor    uint8 = 0
 	GOTypeGeneric uint8 = 5
+)
+
+// Dynamic object fields (Objects/UpdateFields.h, EDynamicObjectFields; OBJECT_END = 0x06).
+const (
+	DynCaster uint16 = 0x06 // DYNAMICOBJECT_CASTER, 2 words
+	DynSpell  uint16 = 0x09 // DYNAMICOBJECT_SPELLID
+	DynRadius uint16 = 0x0A // a float
+	DynPosX   uint16 = 0x0B // POS_X..POS_Z, FACING: four floats
 )

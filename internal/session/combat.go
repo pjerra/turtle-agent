@@ -94,7 +94,7 @@ func (s *Session) onSpellStart(body []byte) error {
 	if err != nil {
 		return err
 	}
-	s.store.StartCast(st.Caster, st.SpellID, st.CastTime)
+	s.store.StartCastAt(st.Caster, st.SpellID, st.CastTime, st.Targets.Unit)
 	if st.Caster == s.selfGUID() {
 		s.spellState.CastStarted(st.SpellID, st.CastTime, st.Targets.Unit)
 	}

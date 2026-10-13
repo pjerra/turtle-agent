@@ -189,32 +189,7 @@ func (p *Planner) Floors(mapID uint32, x, y, lo, hi float32) ([]Floor, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := tileFile(mapID, x, y)
-	if m.missing[name] {
-		return nil, nil
-	}
-	var data map[string][]byte
-	if m.tiles[name] == nil {
-		// Read the tile with the lock let go, as fetch does for Plan.
-		p.mu.Unlock()
-		b, err := os.ReadFile(filepath.Join(p.dir, name))
-		p.mu.Lock()
-		if p.maps[mapID] != m {
-			return nil, errClosed
-		}
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			if m.missing == nil {
-				m.missing = map[string]bool{}
-			}
-			m.missing[name] = true
-			return nil, nil
-		case err != nil:
-			return nil, fmt.Errorf("navmesh: %w", err)
-		}
-		data = map[string][]byte{name: b}
-	}
-	if err := p.load(m, []string{name}, data); err != nil {
+	if ok, err := p.ensureTile(mapID, m, x, y); err != nil || !ok {
 		return nil, err
 	}
 	fl, err := m.eng.floors(x, y, lo, hi)
@@ -228,6 +203,106 @@ func (p *Planner) Floors(mapID uint32, x, y, lo, hi float32) ([]Floor, error) {
 		return 0
 	})
 	return fl, err
+}
+
+// ensureTile makes the one tile under (x, y) loaded (or counted as used), reading its file with the lock let go. It reports
+// false for a point whose tile file is missing (remembered until the next Plan). The caller holds p.mu, which is held on return.
+func (p *Planner) ensureTile(mapID uint32, m *mapMesh, x, y float32) (bool, error) {
+	name := tileFile(mapID, x, y)
+	if m.missing[name] {
+		return false, nil
+	}
+	var data map[string][]byte
+	if m.tiles[name] == nil {
+		// Read the tile with the lock let go, as fetch does for Plan.
+		p.mu.Unlock()
+		b, err := os.ReadFile(filepath.Join(p.dir, name))
+		p.mu.Lock()
+		if p.maps[mapID] != m {
+			return false, errClosed
+		}
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			if m.missing == nil {
+				m.missing = map[string]bool{}
+			}
+			m.missing[name] = true
+			return false, nil
+		case err != nil:
+			return false, fmt.Errorf("navmesh: %w", err)
+		}
+		data = map[string][]byte{name: b}
+	}
+	if err := p.load(m, []string{name}, data); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Ray is the answer of Raycast.
+type Ray struct {
+	// Known is false when the mesh cannot say: the start is off the mesh, or a tile under an end is missing.
+	Known bool `json:"known"`
+	// Clear says the straight line from the start to the end stays on walkable ground of the mesh.
+	Clear bool `json:"clear"`
+	// Hit is how far from the start the line meets the mesh's edge (0 when Clear).
+	Hit float32 `json:"hit,omitempty"`
+}
+
+// Raycast casts a walkability ray over the mesh from one point to the other (Detour's raycast, over the polygons a player
+// on foot may stand on). Clear means the straight line never leaves them, so a straight walk is possible. It is also the
+// agent's stand-in for line of sight: the server tests sight against the world's collision geometry (vmaps), which the agent
+// does not have, and the mesh edge is where a wall, a pillar or a drop begins. It misses what is above the ground (a bridge,
+// a ceiling) and calls a gap or a cliff a block. It loads the tiles under both ends when they are not loaded (a ray of up to a
+// tile's width crosses at most two; a longer one over an unloaded tile reads as blocked there), and gives Known false for an end whose
+// tile file is missing.
+func (p *Planner) Raycast(mapID uint32, from, to Vec3) (Ray, error) {
+	if p.dir == "" {
+		return Ray{}, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m, err := p.mesh(mapID)
+	if err != nil {
+		return Ray{}, err
+	}
+	for _, pt := range []Vec3{from, to} {
+		if ok, err := p.ensureTile(mapID, m, pt[0], pt[1]); err != nil {
+			return Ray{}, err
+		} else if !ok {
+			return Ray{}, nil
+		}
+	}
+	t, rc := m.eng.raycast(from, to)
+	switch {
+	case rc == -1:
+		return Ray{}, nil
+	case rc != 0:
+		return Ray{}, errors.New("navmesh: Detour failed to cast the ray")
+	}
+	if t >= 1 {
+		return Ray{Known: true, Clear: true}, nil
+	}
+	return Ray{Known: true, Hit: t * dist2D(from, to)}, nil
+}
+
+// Nearest is the walkable point of the mesh nearest to p within 4 yd round and 6 yd up and down (ok false when there is none or
+// the tile is missing).
+func (p *Planner) Nearest(mapID uint32, pt Vec3) (Vec3, bool, error) {
+	if p.dir == "" {
+		return Vec3{}, false, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m, err := p.mesh(mapID)
+	if err != nil {
+		return Vec3{}, false, err
+	}
+	if ok, err := p.ensureTile(mapID, m, pt[0], pt[1]); err != nil || !ok {
+		return Vec3{}, false, err
+	}
+	out, ok := m.eng.nearest(pt, Vec3{4, 4, 6})
+	return out, ok, nil
 }
 
 // Polygon is one convex navmesh polygon for drawing: its corners in WoW (x, y, z), in the order the tile holds

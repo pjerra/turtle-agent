@@ -130,4 +130,12 @@ func (e *engine) findPath(from, to Vec3) (int, []Vec3, Vec3) {
 	return int(rc), out[:int(n)], goal
 }
 
+// raycast casts a walkability ray over the mesh from one point to another: the fraction of the way at which it meets the mesh's
+// edge (over 1 when it reaches the end), and 0 for done, -1 when the start is off the mesh, -3 on a Detour failure.
+func (e *engine) raycast(from, to Vec3) (float32, int) {
+	var t C.float
+	rc := C.nd_raycast(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags), &t)
+	return float32(t), int(rc)
+}
+
 func cvec(v *Vec3) *C.float { return (*C.float)(unsafe.Pointer(&v[0])) }

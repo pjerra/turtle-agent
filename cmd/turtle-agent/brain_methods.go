@@ -18,6 +18,7 @@ type brainStartParams struct {
 	Strategies []string `json:"strategies"`
 	Role       string   `json:"role,omitempty"`
 	Tank       string   `json:"tank,omitempty"`
+	NoMove     bool     `json:"no_move,omitempty"`
 }
 
 // registerBrainMethods wires brain_start, brain_stop and brain_status to the session cur returns at each call. The
@@ -34,7 +35,7 @@ func registerBrainMethods(srv *rpc.Server, cur func() *session.Session) (*brain.
 		if err := lease.check("brain_start"); err != nil {
 			return brain.Status{}, err
 		}
-		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank})
+		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank, NoMove: p.NoMove})
 		return st, brainErr(err)
 	}))
 	srv.Register("brain_stop", rpc.Typed(func(ctx context.Context, _ empty) (brain.Status, error) {
@@ -111,7 +112,9 @@ func (b *driverBrain) Start() error {
 	if b.ctl.Running() {
 		return errors.New("a brain was started by hand: the run leaves it alone")
 	}
-	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true}); err != nil {
+	// NoMove: the driver does not hold the move lock around its walks yet (Controller.HoldMove), so the brain must not walk the
+	// player in a run. Remove it when the driver holds the lock.
+	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true, NoMove: true}); err != nil {
 		return err
 	}
 	b.started = true
@@ -123,6 +126,12 @@ func (b *driverBrain) Stop() {
 		b.ctl.Stop()
 		b.started = false
 	}
+}
+
+// HoldMove is what the driver calls around a walk, once it is wired: it stops a step of the brain's and keeps the brain from
+// walking until the returned release is called. It works whether or not the brain runs.
+func (b *driverBrain) HoldMove(ctx context.Context) (release func(), err error) {
+	return b.ctl.HoldMove(ctx)
 }
 
 func (b *driverBrain) Rest(on bool) {

@@ -222,3 +222,33 @@ Not settled without a live run: the images come out of the first Uldaman capture
 1. After any dungeon run, `turtle-agent map --capture run.cap --events events.json --report report.json --plan dungeons/<name>.json --mmaps <dir> --out run.svg --html`: open the SVG and check against what the run did (the legs' order, each pull where the report says, the wipe and the GM teleports flagged `GM`).
 2. In a dungeon with stacked floors (Uldaman past the main hall, Scarlet Monastery): the cut `map` prints in its notes lands between the floors, and a run that climbs shows its route on the upper image only. If it splits a level in two or leaves two apart, say with `--floors` which heights are right.
 3. `map_snapshot` during a run (`{"plan":"uldaman","html":true}`): the party's route so far and the plan agree with the live `units`, and the call costs no visible lag on a 40-member fleet child.
+
+## Bot brain: positioning, sight, aggro, interrupts, consumables (issue #80 step 3b)
+
+Tested against a scripted fake game and a fake navmesh only; the raycast against the navmesh fixtures. Not seen live: that the
+mesh ray agrees with the server's sight in a real dungeon, that Detour's `walk_path` steps behave in a fight, that `SMSG_SPELL_START`
+of enemies carries the target the brain reads, that dynamic objects arrive with a position and a radius, and the item and First
+Aid behaviour. Run a frost mage with `brain_start {"strategies":["frost_mage"],"tank":"<name>"}` (movement is on by default; a
+dungeon run starts the brain with `no_move` until the driver holds the move lock) in a dungeon with a warrior tank, with
+`mmaps_dir` set:
+
+1. **Band and sight.** At a pull, `brain_decision` `reposition` (`trigger bad_position`) when the mage is closer than 19 yd or
+   farther than 29 yd from the tank's mob, in its front or out of its sight. After the step, `units` must show the mob 20-28 yd away,
+   and the next `frostbolt` must not be refused with `line_of_sight`. Note every `spell_fail` `line_of_sight` while the brain
+   believed it had sight: each is a place where the mesh ray and the server disagree (report map, x, y, z of both ends).
+2. **No walk against the driver.** In a dungeon run (`no_move`) there is no `reposition`, `step_away`, `run_to_tank` or
+   `leave_ground_aoe` decision. By hand, with `brain_status.move_held` true (once the driver holds the lock), none either.
+3. **Aggro.** Let a mob run to the mage: `run_to_tank` while it is over 9 yd away and the tank over 8 yd, then `frost_nova` at melee,
+   then `step_away` (the mob carries the Frost Nova aura), then back to `frostbolt`. Below 50% health in melee with Frost Nova on
+   cooldown and the mob behind: `blink`; below 20% with a mob on the mage: `ice_block` if the talent is known. Note whether the
+   server accepts Blink and where the mage lands.
+4. **Ground effects.** Stand in a boss's fire patch or Blizzard of an enemy: `leave_ground_aoe` within a second, the mage ends
+   outside. Check `units`/dynamic objects: the object must have a position and radius; a bot's own Blizzard must not trigger it.
+5. **Interrupts.** An enemy healer or caster: `interrupt` (`enemy_casting`) with Counterspell on a heal or crowd-control cast, or a
+   damage cast on a party member, not on a cast with under 350 ms left. Read `spell_start` `target_guid` of the enemy cast and note
+   whether it is the party member the spell is aimed at; note how often the Counterspell is `interrupted` or `not_ready`.
+6. **Items.** With a healthstone and potions in the bags: below 25% health `healthstone`, then `health_potion`, and not again for 2
+   minutes. A bandage below 45% with no mob on the mage: the First Aid channel must start (otherwise the bandage is skipped for 5
+   minutes: note whether the mage has the skill). A mana potion in a boss fight below 10% mana.
+7. **Wand.** Out of mana with a wand equipped: `wand` (Shoot) once, shots continue; without a wand: `spell_fail`
+   `equipped_item_class` once, then nothing for 30 s.
