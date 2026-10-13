@@ -151,6 +151,10 @@ type StatusInfo struct {
 	ComboPoints uint8       `json:"combo_points"`           // 0-5, from the player's own update fields
 	ComboTarget packet.GUID `json:"combo_target,omitempty"` // the unit they are on; absent without points
 	GCDMS       int64       `json:"gcd_ms"`                 // global cooldown left; 0 when none
+
+	// Dead is health 0 with the spirit not released; Ghost is a released spirit (health 1). Both false: alive.
+	Dead  bool `json:"dead"`
+	Ghost bool `json:"ghost"`
 }
 
 type handler func(body []byte) error
@@ -206,6 +210,8 @@ type Session struct {
 	parseErrs int
 	lastErr   string
 	party     PartyInfo
+	offer     *resurrectOffer                 // the open resurrection offer, death.go
+	reclaimAt time.Time                       // the corpse may be reclaimed from here, death.go
 	marks     [game.RaidIconCount]packet.GUID // the group's raid icons
 	target    packet.GUID
 	falling   bool // s.fall != nil, for Status
@@ -229,6 +235,7 @@ type Session struct {
 	rooted          bool
 	splineUntil     time.Time // a server spline moves the player until then
 	teleportWaiters []chan struct{}
+	corpseWaiters   []chan game.Corpse // calls waiting for MSG_CORPSE_QUERY (death.go)
 	markWaiters     []markWaiter
 	rolls           map[rollKey]*openRoll
 	lastRollID      uint64
@@ -313,6 +320,7 @@ func (s *Session) register() {
 	s.registerSocial()
 	s.registerNPC()
 	s.registerSpells()
+	s.registerDeath()
 }
 
 func (s *Session) registerCore() {
@@ -370,6 +378,7 @@ func (s *Session) Status() StatusInfo {
 	if u, ok := s.store.Get(s.self.GUID, s.pos[0], s.pos[1], s.pos[2]); ok {
 		info.Health, info.MaxHealth, info.Power, info.MaxPower = u.Health, u.MaxHealth, u.Power, u.MaxPower
 		info.ComboPoints, info.ComboTarget = u.ComboPoints, u.ComboTarget
+		info.Dead, info.Ghost = u.Dead, u.Ghost
 		if u.Level > 0 { // the live level, not the one from the character list
 			info.Level = uint8(min(u.Level, 255))
 		}

@@ -144,3 +144,10 @@ func TestReadmeExampleParses(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPlanEntranceTrigger(t *testing.T) {
+	p := mustPlan(t, `{"version":1,"name":"x","map":70,"entrance":{"x":1,"y":2,"z":3},"entrance_trigger":286,"legs":[{"to":{"x":1,"y":2,"z":3},"pull_groups":[{"entries":[1],"positions":[{"x":2,"y":2,"z":3}]}]}]}`)
+	if p.EntranceTrigger != 286 {
+		t.Fatalf("%d", p.EntranceTrigger)
+	}
+}

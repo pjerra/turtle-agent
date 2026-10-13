@@ -35,6 +35,11 @@ const (
 	KindAttackError = "attack_error"
 	KindParseError  = "parse_error"
 	KindRaidMark    = "raid_mark" // MSG_RAID_TARGET_UPDATE: a raid icon set on or cleared from a unit
+
+	// Resurrection and the corpse run (README "Death and the corpse run").
+	KindResurrectRequest   = "resurrect_request"    // SMSG_RESURRECT_REQUEST: a spell offers to resurrect the player; source the caster, data.caster, name, sickness, timer
+	KindCorpseReclaimDelay = "corpse_reclaim_delay" // SMSG_CORPSE_RECLAIM_DELAY after the release: data.ms until the corpse may be reclaimed
+
 	// Group loot rolls, tied together by data.roll_id.
 	KindLootStart     = "loot_roll_start" // SMSG_LOOT_START_ROLL: an item is up for rolls
 	KindLootRoll      = "loot_roll"       // SMSG_LOOT_ROLL: a member's need/greed/pass, or their dice
@@ -96,6 +101,9 @@ const (
 	KindDungeonStep   = "dungeon_step"   // an action of the plan finished (or a wait began): data.action, ok, seconds, error
 	KindDungeonFailed = "dungeon_failed" // the run ended without finishing: data.error ("wipe", a failed step, "stopped")
 	KindDungeonDone   = "dungeon_done"   // the plan is finished
+	// KindDungeonLeader is the leader's death and its way back during a run: data.phase died, resurrected, released,
+	// corpse_run, reclaimed, back or gave_up (data.leg, seconds dead, how).
+	KindDungeonLeader = "dungeon_leader"
 	// The bot brain (brain_start, README "Bot brain"): what it decided each tick, and why it did nothing.
 	KindBrainDecision = "brain_decision" // data.trigger, action, relevance, result (ok, not_possible, vetoed, error), via; spell_id and target_guid set
 	KindBrainIdle     = "brain_idle"     // the brain had nothing to do (throttled): data.reason

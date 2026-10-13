@@ -75,6 +75,7 @@ type Unit struct {
 	Dead       bool        `json:"dead"`
 	Hostile    bool        `json:"hostile"`
 	InParty    bool        `json:"in_party"`
+	Ghost      bool        `json:"ghost,omitempty"` // a player who released the spirit (PLAYER_FLAGS_GHOST): its health is 1, so Dead is false
 	// StandState names byte 0 of UNIT_FIELD_BYTES_1 as the stand_state event does.
 	StandState string `json:"stand_state"`
 	// ComboPoints and ComboTarget are the player's own combo points (0-5) and the unit they are on,
@@ -456,6 +457,19 @@ func (s *Store) Get(g packet.GUID, ox, oy, oz float32) (Unit, bool) {
 	return toUnit(o, s.now(), ox, oy, oz), true
 }
 
+// OwnCorpse is the guid of the corpse object that belongs to the player, 0 when the store holds none (the client sends it in
+// CMSG_RECLAIM_CORPSE; the server ignores it).
+func (s *Store) OwnCorpse(owner packet.GUID) packet.GUID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for g, o := range s.objs {
+		if o.typ == TypeCorpse && guidAt(o.values, CorpseOwner) == owner {
+			return g
+		}
+	}
+	return 0
+}
+
 // Entry is g's creature entry: its OBJECT_FIELD_ENTRY when the store holds that, else
 // what the GUID encodes (packet.GUID.Entry), which is 0 for a pet whose values are unknown.
 func (s *Store) Entry(g packet.GUID) uint32 {
@@ -557,6 +571,7 @@ func toUnit(o *object, now time.Time, ox, oy, oz float32) Unit {
 	}
 	u.InCombat = u.Flags&UnitFlagInCombat != 0
 	u.Dead = u.MaxHealth > 0 && u.Health == 0
+	u.Ghost = u.Type == "player" && v[PlayerFlags]&PlayerFlagGhost != 0
 	u.Hostile = u.Type == "creature" && !u.Dead && u.NPCFlags == 0 &&
 		u.Flags&(UnitFlagSpawning|UnitFlagPlayerControlled|UnitFlagImmuneToPlayer|UnitFlagNotSelectable) == 0
 	u.Auras = []Aura{}

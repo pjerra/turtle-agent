@@ -84,6 +84,16 @@ type dungeonRunParams struct {
 	// a preset such as "frost_mage" or a strategy name. The run keeps leading and giving the party its orders; the
 	// brain starts at a leg's first rest gate and stops at the leg's end. Off by default.
 	Brain string `json:"brain,omitempty"`
+	// GM says whether the leader's account is a GM. false: a player's account, the run sends no GM command (no
+	// ".gm visible on", no teleport, no revive, no ".aura"; teleport and buffs are refused). true: a GM, as before.
+	// Omitted: the run sends ".gm visible on" once and reads the server's answer; a player account has it said aloud
+	// in "say", which is how it is told. No clear answer counts as a GM.
+	GM *bool `json:"gm,omitempty"`
+	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
+	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
+	RecoverWipe bool `json:"recover_wipe,omitempty"`
+	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
+	WaitSickness bool `json:"wait_sickness,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -94,6 +104,9 @@ type dungeonRunResult struct {
 	Legs    []string `json:"legs"`
 	Buffs   []string `json:"buffs"`           // the spells the run will put on the companions (GM), empty for none
 	Brain   string   `json:"brain,omitempty"` // the strategies that play the leader, empty for none
+	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
+	// server at the start; the report's leader_gm has the answer).
+	LeaderGM string `json:"leader_gm"`
 }
 
 type dungeonStatusResult struct {
@@ -173,6 +186,14 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 		}
 	}
+	if p.GM != nil && !*p.GM {
+		switch {
+		case p.Teleport:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "teleport needs a GM account (.go xyz): with gm false stand at the entrance and run without teleport"}
+		case p.Buffs != nil:
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "buffs need a GM account (.aura, developer level): with gm false run without buffs"}
+		}
+	}
 	var hook dungeon.Brain
 	if p.Brain != "" {
 		if r.brain == nil {
@@ -213,8 +234,23 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
+	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
+	leaderGM := "probe"
+	switch {
+	case p.GM == nil:
+		cfg.GM = dungeon.GMProbe
+	case *p.GM:
+		cfg.GM, leaderGM = dungeon.GMAssumed, "true"
+	default:
+		cfg.GM, leaderGM = dungeon.GMNone, "false"
+	}
 	if hook != nil {
-		if r.brain.Running() || !r.lease.acquire() {
+		// The lease comes first: checking Running() before it left a window in which a brain_start could slip in between.
+		if !r.lease.acquire() {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
+		}
+		if r.brain.Running() {
+			r.lease.release()
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain is running: brain_stop it first"}
 		}
 		cfg.Brain, cfg.BrainName = hook, p.Brain
@@ -238,7 +274,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM}, nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.
@@ -320,7 +356,89 @@ func (g *sessionGame) Units() []objects.Unit { return g.cur().Units(objects.Filt
 
 func (g *sessionGame) Self() dungeon.Self {
 	st := g.cur().Status()
-	return dungeon.Self{GUID: st.GUID, Name: st.Character, Health: st.Health, MaxHealth: st.MaxHealth}
+	return dungeon.Self{GUID: st.GUID, Name: st.Character, Health: st.Health, MaxHealth: st.MaxHealth, Ghost: st.Ghost}
+}
+
+func (g *sessionGame) Death() dungeon.DeathState {
+	d := g.cur().Death()
+	out := dungeon.DeathState{Dead: d.Dead, Ghost: d.Ghost, ReclaimIn: time.Duration(d.ReclaimInMS) * time.Millisecond}
+	if d.Resurrect != nil {
+		out.Offer = &dungeon.Offer{Name: d.Resurrect.Name, Sickness: d.Resurrect.Sickness}
+	}
+	return out
+}
+
+func (g *sessionGame) AcceptResurrect(ctx context.Context) error {
+	_, err := g.cur().AcceptResurrect(ctx)
+	return err
+}
+
+func (g *sessionGame) ReleaseSpirit(ctx context.Context) error { return g.cur().ReleaseSpirit(ctx) }
+
+func (g *sessionGame) CorpseQuery(ctx context.Context) (dungeon.Corpse, error) {
+	c, err := g.cur().CorpseQuery(ctx)
+	if err != nil || !c.Found {
+		return dungeon.Corpse{}, err
+	}
+	return dungeon.Corpse{Found: true, Map: uint32(max(c.Map, 0)), CorpseMap: c.CorpseMap, Pos: dungeon.Point{X: c.X, Y: c.Y, Z: c.Z}, Inside: c.Inside()}, nil
+}
+
+func (g *sessionGame) ReclaimCorpse(ctx context.Context) error { return g.cur().ReclaimCorpse(ctx) }
+
+func (g *sessionGame) AreaTrigger(ctx context.Context, id uint32) error {
+	return g.cur().AreaTrigger(ctx, id)
+}
+
+// gmProbeWindow is how long ProbeGM listens for the server's answer to ".gm visible on".
+const gmProbeWindow = 2 * time.Second
+
+// ProbeGM sends ".gm visible on" and tells from the events that follow whether the server ran it. A GM account runs the
+// command and answers with a notification (a system event) and nothing else of the line. A player account has the line said
+// aloud: the server echoes it as a "say" chat event from the player (Chat.cpp:1773-1774: without PlayerCommands the line is
+// ordinary chat).
+func (g *sessionGame) ProbeGM(ctx context.Context) (gm, known bool, err error) {
+	s := g.cur()
+	const cmd = ".gm visible on"
+	since := s.Log().Last()
+	self := s.Status().GUID
+	if err := s.GM(ctx, cmd); err != nil {
+		return false, false, err
+	}
+	wctx, cancel := context.WithTimeout(ctx, gmProbeWindow)
+	defer cancel()
+	var seen []events.Event
+	for wctx.Err() == nil {
+		_ = s.Log().Wait(wctx, since) // wakes on each new event; the window ends it
+		page := s.Log().Read(events.Query{Since: since, Kinds: []string{events.KindChat, events.KindSystem}})
+		since = page.Next
+		seen = append(seen, page.Events...)
+		if gm, known := classifyGMProbe(seen, self, cmd); known && !gm {
+			return false, true, nil // an echo is final
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, false, err
+	}
+	gm, known = classifyGMProbe(seen, self, cmd)
+	return gm, known, nil
+}
+
+// classifyGMProbe reads the events after the line cmd was sent. The player's own line coming back as "say" means the
+// server did not run it: not a GM (known, false). Else any system event (the notification a GM gets) means it ran: a GM
+// (known, true). Neither: unknown.
+func classifyGMProbe(evs []events.Event, self packet.GUID, cmd string) (gm, known bool) {
+	system := false
+	for _, e := range evs {
+		switch e.Kind {
+		case events.KindChat:
+			if e.SourceGUID == self && strings.TrimSpace(e.Text) == cmd {
+				return false, true
+			}
+		case events.KindSystem:
+			system = true
+		}
+	}
+	return system, system
 }
 
 func (g *sessionGame) Party() []dungeon.Member {

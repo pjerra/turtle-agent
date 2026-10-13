@@ -36,12 +36,16 @@ type Point struct {
 
 // Plan is a loaded, validated dungeon plan.
 type Plan struct {
-	Version  int      `json:"version"`
-	Name     string   `json:"name"`
-	Map      uint32   `json:"map"`
-	Entrance Point    `json:"entrance"`
-	Notes    []string `json:"notes,omitempty"`
-	Legs     []Leg    `json:"legs"`
+	Version  int    `json:"version"`
+	Name     string `json:"name"`
+	Map      uint32 `json:"map"`
+	Entrance Point  `json:"entrance"`
+	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
+	// database; Uldaman 286). A ghost whose corpse lies inside sends it at the portal to be taken in and revived (the client
+	// does the same on stepping into it). Without it a corpse run into the dungeon is refused; the rest of the run does not need it.
+	EntranceTrigger uint32   `json:"entrance_trigger,omitempty"`
+	Notes           []string `json:"notes,omitempty"`
+	Legs            []Leg    `json:"legs"`
 }
 
 // Leg is one stretch of the dungeon. The driver walks to To, clears PullGroups in order, runs Steps in order, then
@@ -135,6 +139,7 @@ type rawPlan struct {
 	Name     string            `json:"name"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
+	Trigger  uint32            `json:"entrance_trigger"`
 	Notes    []string          `json:"notes"`
 	Legs     []json.RawMessage `json:"legs"`
 }
@@ -248,6 +253,7 @@ func Parse(name string, data []byte) (*Plan, error) {
 		p.Map = *rp.Map
 	}
 	p.Entrance = c.point("entrance", rp.Entrance)
+	p.EntranceTrigger = rp.Trigger
 	if len(rp.Legs) == 0 {
 		c.fail("legs", "needs at least one leg")
 	}

@@ -255,3 +255,33 @@ dungeon run starts the brain with `no_move` until the driver holds the move lock
    minutes: note whether the mage has the skill). A mana potion in a boss fight below 10% mana.
 7. **Wand.** Out of mana with a wand equipped: `wand` (Shoot) once, shots continue; without a wand: `spell_fail`
    `equipped_item_class` once, then nothing for 30 s.
+
+## A non-GM leader: death, resurrection and the corpse run (issue #80 step 3a)
+
+Tested against the fake game and the RPC rig only. Not seen live: the layouts of the death packets against a real server, the ghost's
+walk, the portal and the probe. Run in Uldaman with a **player** account (no GM level), a frost mage leader of level 35-45 and a
+hired party of a tank, a healer and two damage dealers; set up by hand (stand at the entrance, -228.9 46.1 -46, or outside at the portal).
+
+1. `dungeon_run {"name":"uldaman","gm":false,"brain":"frost_mage","setup":["by hand: entrance"]}`. Expect `leader_gm` `false` in the
+   answer and in the report, and **no `say` line starting with `.`** in the chat log; `teleport` and `buffs` are refused with `gm: false`.
+2. The probe: the same without `gm`, once on the player account and once on a GM account. Player: `report.leader_gm` false, a note
+   "the leader's account is not a GM", and exactly one `.gm visible on` said aloud. GM: `leader_gm` true. Report anything else.
+3. Resurrection: let the leader die in a fight with the healer alive (pull two packs at once, or `levelup -10` before). Expect
+   `dungeon_leader` `died`, then `resurrect_request` (the healer casts Resurrection) and `resurrect_accepted`, `back`; `status` `dead`
+   false; `resurrections` 1 in the report. Note how long the healer takes (the driver waits 60 s) and whether it resurrects in combat.
+4. Corpse run: kill or stop the healer first (`.bot action` or a second death), so that nobody resurrects. Expect `released`, a
+   `ghost` true status at the graveyard, `corpse_run`, the walk (`walk_path` results), `waiting_reclaim_delay` while
+   `corpse_reclaim_delay` runs, `reclaimed`, `back`, and `resurrection sickness` in the notes. Look at: whether the ghost reaches the
+   corpse along the navmesh (ghosts walk through water and over the same terrain), the reclaim within 34 yd, the delay the server sent.
+5. Corpse inside Uldaman: die in the dungeon. Expect the graveyard outside (map 0), a `corpse_query` with `map` 0 and `corpse_map` 70,
+   a walk to the entrance (about -6053.7 -2954.6 213.7), `portal` with trigger 286, and the leader alive at the dungeon entrance. Report
+   what the server does if the trigger is refused (4 tries, then `area trigger 286 did not take the ghost into map 70`).
+6. Wipe: let all die. Without `recover_wipe`: the run ends `wipe`. With `"recover_wipe":true`: `.bot action release` and
+   `.bot action corpse run` go to the party, the leader runs back, the bots stand up one by one (note which do and which do not: that
+   is TortoiseBots behaviour), the run gathers, rests and goes on from the step; `wipes` counts it.
+7. The rest gate after the return: `rest_eat` eats when health is under 85% (`brain_decision` `eat`, the Food aura, `stand_state` sit),
+   after `drink`; the gate passes once the leader has 90% health.
+8. Grep the server's anticheat log for the run: the ghost's movement, `CMSG_AREATRIGGER` and `CMSG_RECLAIM_CORPSE` come from the walk and
+   the session only, so expect nothing new.
+
+Report the first thing that did not match this list, with the `dungeon_leader` events and the `status`/`death_status` rows around it.

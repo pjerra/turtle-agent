@@ -38,6 +38,19 @@ type Game interface {
 	// so that nothing else can change the selection between the two.
 	GMOn(ctx context.Context, guid packet.GUID, text string) error
 	Teleport(ctx context.Context, to Point, mapID uint32) error
+	// ProbeGM sends ".gm visible on" and reports whether the server ran it as a GM command (gm), and whether it could tell
+	// (known). A GM answers with a notification; a player account has the command said aloud in "say".
+	ProbeGM(ctx context.Context) (gm, known bool, err error)
+
+	// The leader's death (README "Death and the corpse run"): the state, the answer to a resurrection offer, the release of
+	// the spirit, the corpse's position, the reclaim of the corpse, and the portal's area trigger a ghost sends to enter a
+	// dungeon with its corpse. The resurrection sickness is read through the optional SelfAuraSource.
+	Death() DeathState
+	AcceptResurrect(ctx context.Context) error
+	ReleaseSpirit(ctx context.Context) error
+	CorpseQuery(ctx context.Context) (Corpse, error)
+	ReclaimCorpse(ctx context.Context) error
+	AreaTrigger(ctx context.Context, id uint32) error
 	// Emit appends an event of kind (events.KindDungeon*) to the agent's event log.
 	Emit(kind, text string, data map[string]any)
 }
@@ -60,10 +73,11 @@ type Self struct {
 	Name      string
 	Health    uint32
 	MaxHealth uint32
+	Ghost     bool // the spirit is released: health is 1, but the leader is dead
 }
 
-// Dead reports a leader with no health left (a ghost shows 0 too).
-func (s Self) Dead() bool { return s.MaxHealth > 0 && s.Health == 0 }
+// Dead reports a leader with no health left, or a ghost.
+func (s Self) Dead() bool { return s.Ghost || (s.MaxHealth > 0 && s.Health == 0) }
 
 // Member is a party member as the session's party list shows it.
 type Member struct {
@@ -110,6 +124,14 @@ type Config struct {
 	// Options of the run, not limits (set by the caller).
 	Teleport  bool // GM-teleport to the start of the first leg and bring the party along (flagged in the report)
 	Shortcuts bool // allow the GM revive of a dead party member at a rest gate (flagged in the report)
+	// GM says how the Driver learns whether the leader's account is a GM. Without one the driver sends no GM command: no
+	// ".gm visible on", no teleport, no revive, no ".aura" (a Teleport or Buffs option then fails the run at once).
+	GM GMMode
+	// RecoverWipe lets the whole party, dead, do a corpse run and the run go on from the current step, instead of ending
+	// with "wipe". Dead members at a rest gate with no GM revive are recovered the same way. Off by default.
+	RecoverWipe bool
+	// WaitSickness waits resurrection sickness out after a corpse run (up to SicknessMax); else it is only noted.
+	WaitSickness bool
 	// Setup lists the GM commands the caller used to set the run up; they are copied into the report (setup_shortcuts).
 	Setup []string
 	// Buffs are put on each companion by the GM leader (".aura <id>" on the selected member) as the run starts, after a
@@ -152,6 +174,16 @@ type Config struct {
 	BuffGap        time.Duration // wait between two .aura commands (the server throttles chat)
 	BuffViewWait   time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
 	BuffMaxDist    float32       // yards: a companion farther than this from the leader is not selected for a buff
+
+	// The leader's death.
+	ResWait            time.Duration // after the leader died, how long a living healer is given to resurrect it before the spirit is released
+	ResAcceptWait      time.Duration // after accepting a resurrection, how long to wait for the leader to live
+	ReleaseWait        time.Duration // after the release, how long to wait for the ghost
+	CorpseRunTimeout   time.Duration // a corpse run that takes longer fails the run
+	MaxLeaderDeaths    int           // deaths of the leader in one run before it gives up
+	MaxWipeRecoveries  int           // recovered wipes in one run (RecoverWipe)
+	WipeRecoverTimeout time.Duration // the members' corpse runs after a wipe
+	SicknessMax        time.Duration // longest wait for resurrection sickness (WaitSickness)
 }
 
 // DefaultConfig is the Driver's limits for a live run.
@@ -165,6 +197,8 @@ func DefaultConfig() Config {
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
+		ResWait: 60 * time.Second, ResAcceptWait: 10 * time.Second, ReleaseWait: 15 * time.Second, CorpseRunTimeout: 10 * time.Minute,
+		MaxLeaderDeaths: 5, MaxWipeRecoveries: 2, WipeRecoverTimeout: 12 * time.Minute, SicknessMax: 11 * time.Minute,
 	}
 }
 
@@ -218,10 +252,18 @@ func (c Config) withDefaults() Config {
 	fill(&c.BuffGap, d.BuffGap)
 	fill(&c.BuffViewWait, d.BuffViewWait)
 	fillF(&c.BuffMaxDist, d.BuffMaxDist)
+	fill(&c.ResWait, d.ResWait)
+	fill(&c.ResAcceptWait, d.ResAcceptWait)
+	fill(&c.ReleaseWait, d.ReleaseWait)
+	fill(&c.CorpseRunTimeout, d.CorpseRunTimeout)
+	fillInt(&c.MaxLeaderDeaths, d.MaxLeaderDeaths)
+	fillInt(&c.MaxWipeRecoveries, d.MaxWipeRecoveries)
+	fill(&c.WipeRecoverTimeout, d.WipeRecoverTimeout)
+	fill(&c.SicknessMax, d.SicknessMax)
 	return c
 }
 
-// errWipe ends the run: the leader is dead or the whole party is. The MVP does not retry.
+// errWipe ends the run: every member of the party is dead (the leader may be too). RecoverWipe lets the party recover.
 var errWipe = errors.New("wipe")
 
 // Driver runs a Plan with the party: it asks a Stepper what to do, does it through the Game, and keeps the Report.
@@ -247,6 +289,14 @@ type Driver struct {
 	// no later pick or pull group looks at them again. The value says why, for the report.
 	skipped    map[packet.GUID]string
 	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
+
+	gm             bool // the leader's account is taken for a GM (decided in begin)
+	recovering     bool // the leader's recovery is going on: its waits do not start another
+	inWipe         bool // a wipe is being recovered from: the waits do not report it again
+	deathCounted   bool // the leader's current death is in the report
+	recoveries     int  // how often the leader came back; a walk does not count the interruption as a failed try
+	leaderDeaths   int
+	wipeRecoveries int
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -392,9 +442,8 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 		return errors.New("the leader has no party: invite the companions first (invite, hire)")
 	}
 	d.observeInit()
-	d.rep.note("leader made visible with .gm visible on")
-	if err := d.g.GM(ctx, ".gm visible on"); err != nil {
-		d.rep.note("could not send .gm visible on: " + err.Error())
+	if err := d.setupGM(ctx); err != nil {
+		return err
 	}
 	start, what := d.startPoint(fromLeg)
 	if fromLeg > 0 && !d.cfg.Teleport {
@@ -418,6 +467,49 @@ func (d *Driver) begin(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("the leader is on map %d and the plan needs map %d: enter the dungeon first, or run with teleport", d.g.Map(), d.plan.Map)
 	}
 	return d.startBuffs(ctx, fromLeg)
+}
+
+// setupGM settles whether the run may use GM commands and, if so, makes the leader visible. The mode comes from the option
+// (Config.GM); without a GM the run refuses the options that need one before it sends anything.
+func (d *Driver) setupGM(ctx context.Context) error {
+	switch d.cfg.GM {
+	case GMNone:
+		d.gm = false
+	case GMProbe:
+		gm, known, err := d.g.ProbeGM(ctx)
+		switch {
+		case err != nil:
+			d.gm = true
+			d.rep.note("could not tell whether the leader is a GM (" + err.Error() + "); taken for one")
+		case !known:
+			d.gm = true
+			d.rep.note("the server gave no sign whether .gm visible on ran; the leader is taken for a GM (pass gm: false for a player account)")
+		default:
+			d.gm = gm
+			if gm {
+				d.rep.note("leader made visible with .gm visible on")
+			} else {
+				d.rep.note("the leader's account is not a GM (the server said .gm visible on aloud): the run sends no GM command")
+			}
+		}
+	default:
+		d.gm = true
+		d.rep.note("leader made visible with .gm visible on")
+		if err := d.g.GM(ctx, ".gm visible on"); err != nil {
+			d.rep.note("could not send .gm visible on: " + err.Error())
+		}
+	}
+	d.rep.update(func(r *Report) { r.LeaderGM = d.gm })
+	if !d.gm {
+		d.cfg.Shortcuts = false
+		switch {
+		case d.cfg.Teleport:
+			return errors.New("teleport needs a GM account (.go xyz); the leader is a player: stand at the entrance and run without teleport")
+		case len(d.cfg.Buffs) > 0:
+			return errors.New("buffs need a GM account (.aura, developer level); the leader is a player: run without buffs")
+		}
+	}
+	return nil
 }
 
 // startPoint is where a run from leg i begins: the entrance, or where the leg before ended.
@@ -525,13 +617,14 @@ func (d *Driver) legStat(f func(*LegReport)) {
 	})
 }
 
-// sleep waits d, then looks at the party: deaths are counted, and a wipe ends the wait with errWipe.
+// sleep waits d, then looks at the party (check): deaths are counted, a dead leader is brought back, and a wipe ends the
+// wait with errWipe.
 func (d *Driver) sleep(ctx context.Context, dur time.Duration) error {
 	if err := d.clk.Sleep(ctx, dur); err != nil {
 		return err
 	}
 	d.drainRefusals()
-	return d.observe()
+	return d.check(ctx)
 }
 
 func (d *Driver) observeInit() {
@@ -545,8 +638,16 @@ func (d *Driver) observeInit() {
 	d.seen = true
 }
 
-// observe counts each death once (leader or member) and returns errWipe when the leader is dead or every member is.
+// observe counts each death once (leader or member) and returns errWipe when every member is dead.
 func (d *Driver) observe() error {
+	if d.countDeaths() {
+		return fmt.Errorf("%w: the whole party is dead", errWipe)
+	}
+	return nil
+}
+
+// countDeaths counts each death once (leader or member) and reports whether every online member is dead.
+func (d *Driver) countDeaths() (wholePartyDead bool) {
 	if !d.seen {
 		d.observeInit()
 	}
@@ -574,13 +675,7 @@ func (d *Driver) observe() error {
 			allDown = false
 		}
 	}
-	if self.Dead() {
-		return fmt.Errorf("%w: the leader is dead", errWipe)
-	}
-	if allDown && anyDead {
-		return fmt.Errorf("%w: the whole party is dead", errWipe)
-	}
-	return nil
+	return allDown && anyDead
 }
 
 // stepWorld is the Stepper's World over a Game.
@@ -616,14 +711,18 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 		}
 		wctx, cancel := context.WithCancel(ctx)
 		stop := d.watchCombat(wctx, cancel)
+		recovered := d.recoveries
 		r, err := d.g.WalkPath(wctx, p)
 		aggro := stop()
 		cancel()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if oerr := d.observe(); oerr != nil {
+		if oerr := d.check(ctx); oerr != nil {
 			return oerr
+		}
+		if d.recoveries != recovered { // the leader died on the way and came back: the walk is made again, from where it stands
+			continue
 		}
 		if aggro {
 			if aggros++; aggros > maxWalkAggros {
@@ -715,6 +814,10 @@ func (d *Driver) watchCombat(ctx context.Context, cancel context.CancelFunc) fun
 			case <-t.C:
 				if len(attackersOf(d.g.Units(), party)) > 0 {
 					fired = true
+					cancel()
+					return
+				}
+				if d.g.Self().Dead() { // not a fight: the walk ends and the caller finds the leader dead
 					cancel()
 					return
 				}
@@ -861,9 +964,16 @@ func (d *Driver) restGate(ctx context.Context) error {
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
 		st := d.restState(mana)
+		if len(st.dead) > 0 && !d.cfg.Shortcuts && d.cfg.RecoverWipe {
+			if err := d.recoverDeadMembers(ctx); err != nil {
+				return err
+			}
+			calm = d.clk.Now()
+			continue
+		}
 		for _, m := range st.dead {
 			if !d.cfg.Shortcuts {
-				return fmt.Errorf("%s is dead and GM shortcuts are off", m.Name)
+				return fmt.Errorf("%s is dead and GM shortcuts are off (recover_wipe lets the party run back to its corpses)", m.Name)
 			}
 			if revived[m.GUID] >= 2 {
 				return fmt.Errorf("%s is still dead after two GM revives", m.Name)

@@ -34,7 +34,7 @@ func TestBrainStartRefusals(t *testing.T) {
 	for _, c := range []struct{ params, want string }{
 		{`{}`, "name at least one"},
 		{`{"strategies":[]}`, "name at least one"},
-		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: frost_mage; strategies: avoid_ground, combat_consumables, combat_dps, mage_defense, mage_frost, mage_interrupt, mage_rest, ranged_position, wand)`},
+		{`{"strategies":["lock_fire"]}`, `strategy "lock_fire" is unknown (presets: frost_mage; strategies: avoid_ground, combat_consumables, combat_dps, mage_defense, mage_frost, mage_interrupt, mage_rest, ranged_position, rest_eat, wand)`},
 		{`{"strategies":["frost_mage"],"role":"healer"}`, `role "healer"`},
 		{`{"strategies":["mage_frost"]}`, "face_target"},
 		{`{"strategies":["frost_mage"],"colour":1}`, "colour"},
@@ -57,7 +57,7 @@ func TestBrainStartStopAndEvents(t *testing.T) {
 	if !ok || st["running"] != true || st["role"] != "dps" || st["tank"] != "Gorm" || st["rest_ok"] != true {
 		t.Fatalf("%v", out)
 	}
-	if s := st["strategies"].([]any); len(s) != 10 || s[0] != "base" || s[1] != "combat_dps" || s[2] != "mage_frost" || s[3] != "mage_rest" || s[9] != "wand" {
+	if s := st["strategies"].([]any); len(s) != 11 || s[0] != "base" || s[1] != "combat_dps" || s[2] != "mage_frost" || s[3] != "mage_rest" || s[9] != "wand" || s[10] != "rest_eat" {
 		t.Fatalf("%v", s)
 	}
 	if out := r.call("brain_start", `{"strategies":["frost_mage"]}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "brain_stop it first") {
@@ -65,7 +65,7 @@ func TestBrainStartStopAndEvents(t *testing.T) {
 	}
 	// The spellbook is not loaded yet: the brain waits, and says why.
 	r.eventually("brain_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["idle"] == "not_ready" })
-	if st := r.call("brain_stop", "{}")["result"].(map[string]any); st["running"] != false || len(st["strategies"].([]any)) != 10 {
+	if st := r.call("brain_stop", "{}")["result"].(map[string]any); st["running"] != false || len(st["strategies"].([]any)) != 11 {
 		t.Fatalf("%v", st)
 	}
 	ev := r.call("events", `{"since":0,"kinds":["brain_state","brain_idle"]}`)["result"].(map[string]any)["events"].([]any)

@@ -221,3 +221,13 @@ func FuzzParseTrainerSucceeded(f *testing.F) {
 func FuzzParseTrainerFailed(f *testing.F) {
 	fuzzParse(f, game.ParseTrainerFailed, opcode.SMSGTrainerBuyFailed)
 }
+
+func FuzzParseResurrectRequest(f *testing.F) {
+	fuzzParse(f, game.ParseResurrectRequest, opcode.SMSGResurrectRequest)
+}
+func FuzzParseCorpseReclaimDelay(f *testing.F) {
+	fuzzParse(f, func(b []byte) (uint32, error) { return game.ParseCorpseReclaimDelay(b) }, opcode.SMSGCorpseReclaimDelay)
+}
+func FuzzParseCorpseQuery(f *testing.F) {
+	fuzzParse(f, game.ParseCorpseQuery, opcode.MSGCorpseQuery)
+}

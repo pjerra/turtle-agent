@@ -34,6 +34,10 @@ const (
 	// PlayerFieldBytes is PLAYER_FIELD_BYTES (:259). Byte 1 holds the combo points, 0-5 (Player.cpp:20948);
 	// byte 0 holds the track-stealthed flag and byte 3 the honor rank (HonorMgr.cpp:804).
 	PlayerFieldBytes uint16 = 0x4C6
+	// PlayerFlags is PLAYER_FLAGS (UpdateFields.h:178; FIELD_PLAYER_FLAGS = 190 at :348). PlayerFlagGhost (0x10,
+	// Objects/Player.h:387) is set from the release of the spirit to the resurrection: a ghost has 1 health, not 0.
+	PlayerFlags     uint16 = 0xBE
+	PlayerFlagGhost uint32 = 0x10
 )
 
 // Aura slots (Spells/SpellAuraDefines.h:25-26).
@@ -62,7 +66,11 @@ const (
 	TypePlayer     uint8 = 4
 	TypeGameObject uint8 = 5
 	TypeDynamic    uint8 = 6 // TYPEID_DYNAMICOBJECT: the area a ground spell leaves (Blizzard, a fire patch)
+	TypeCorpse     uint8 = 7 // TYPEID_CORPSE
 )
+
+// CorpseOwner is CORPSE_FIELD_OWNER (Objects/UpdateFields.h, OBJECT_END + 0x00), 2 words: the player the corpse belongs to.
+const CorpseOwner uint16 = 0x06
 
 // Item and player inventory fields (Objects/UpdateFields.h).
 const (

@@ -7,18 +7,27 @@ import (
 
 // Report is what a run did, kept while it goes and complete at the end. dungeon_status returns it as JSON.
 type Report struct {
-	Plan      string     `json:"plan"`
-	Map       uint32     `json:"map"`
-	State     string     `json:"state"` // running, done, failed or stopped
-	FromLeg   int        `json:"from_leg"`
-	Started   time.Time  `json:"started"`
-	Ended     *time.Time `json:"ended,omitempty"`
-	Seconds   float64    `json:"seconds"`
-	Current   string     `json:"current,omitempty"` // the action in progress
-	Error     string     `json:"error,omitempty"`
-	Wipes     int        `json:"wipes"`
-	Deaths    []Death    `json:"deaths"`
-	Shortcuts []Shortcut `json:"gm_shortcuts"`
+	Plan    string     `json:"plan"`
+	Map     uint32     `json:"map"`
+	State   string     `json:"state"` // running, done, failed or stopped
+	FromLeg int        `json:"from_leg"`
+	Started time.Time  `json:"started"`
+	Ended   *time.Time `json:"ended,omitempty"`
+	Seconds float64    `json:"seconds"`
+	Current string     `json:"current,omitempty"` // the action in progress
+	Error   string     `json:"error,omitempty"`
+	Wipes   int        `json:"wipes"`
+	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
+	// leader_gm false sent none.
+	LeaderGM bool `json:"leader_gm"`
+	// The leader's own deaths (README "Death and the corpse run"): how often it died, came back by an accepted
+	// resurrection or by a corpse run, and for how long it was dead in all.
+	LeaderDeaths  int        `json:"leader_deaths"`
+	Resurrections int        `json:"resurrections"`
+	CorpseRuns    int        `json:"corpse_runs"`
+	SecondsDead   float64    `json:"seconds_dead"`
+	Deaths        []Death    `json:"deaths"`
+	Shortcuts     []Shortcut `json:"gm_shortcuts"`
 	// SetupShortcuts are the GM commands the caller used to set the run up (".go" to the entrance, ".levelup -15", a
 	// summon), as dungeon_run's setup parameter gave them: the run did not make them, but a run that needed any is
 	// not one a player could have started either.
@@ -48,6 +57,11 @@ type LegReport struct {
 	RestSeconds float64   `json:"rest_seconds"` // time in the rest gates
 	WalkAggros  int       `json:"walk_aggros"`  // packs that aggroed during a walk and were fought there (each also counts in pulls)
 	Ambushes    int       `json:"ambushes"`     // stealthed pull groups walked through instead of pulled
+	// The leader's deaths in this leg: how many, how it came back, and the time it was dead.
+	LeaderDeaths  int     `json:"leader_deaths"`
+	Resurrections int     `json:"resurrections"`
+	CorpseRuns    int     `json:"corpse_runs"`
+	SecondsDead   float64 `json:"seconds_dead"`
 }
 
 // Death is one death of the leader or a companion.
@@ -128,5 +142,6 @@ func (p *reporter) snapshot() Report {
 func (p *reporter) summary() map[string]any {
 	r := p.snapshot()
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
-		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs)}
+		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
+		"leader_gm": r.LeaderGM, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}
 }

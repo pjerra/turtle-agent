@@ -229,7 +229,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
+| `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
@@ -246,7 +246,13 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `target` | `guid` or `name` (prefers living units) | |
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server, see [Dungeon runs](#dungeon-runs)), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`); the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
+| `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
+| `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
+| `corpse_query` | | MSG_CORPSE_QUERY: `found`, `map`, `x`/`y`/`z`, `corpse_map`. A corpse in a dungeon the ghost is not in shows the dungeon's entrance (`map` is the entrance's map, `corpse_map` the dungeon's) |
+| `reclaim_corpse` | | CMSG_RECLAIM_CORPSE for a ghost within 39 yd of its corpse and past the reclaim delay (an error before it) |
+| `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, the default), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
@@ -539,8 +545,17 @@ leg, by number or by name (`"from_leg": "keystone"`). **`from_leg` assumes the l
 walks from where it stands (from the entrance too) to the leg, and fights the packs of the earlier legs on the way as walk aggros (the
 second live run: `from_leg keystone` from the entrance was a 167 s walk with 7 such fights); the report says so in a note. To start clean
 at the leg, run with `"teleport": true` next to `from_leg`: the leader is GM-teleported to the leg start (the place the previous leg ended),
-the party is summoned, and the run is flagged `teleport_to_leg_start` in `gm_shortcuts`. The leader is expected to be a GM account (the run sends `.gm visible on`
-first, because a hidden GM changes what mobs and companions do); a run on a player account works without teleport and revive.
+the party is summoned, and the run is flagged `teleport_to_leg_start` in `gm_shortcuts`.
+
+**GM or player.** A GM leader gets `.gm visible on` first (a hidden GM changes what mobs and companions do) and may use the GM
+shortcuts. A **player account works too** (issue #80 step 3a): `"gm": false` makes the driver send **no GM command at all**: no
+`.gm visible on`, no `.go` teleport, no `.revive` of a member, no `.aura`. `teleport` and `buffs` are then refused with a clear error
+(at the RPC, before anything is sent), the setup (standing at the entrance, the companions' levels) is done by hand and may be
+listed in `setup`. `"gm": true` is the old behaviour with no probe. With `gm` left out the run **probes** once: it sends `.gm visible on`
+and reads what the server does with it. A GM account runs it and answers with a notification; an account below GM level has the line
+said aloud in "say" (Chat.cpp:1773-1774), which shows up as the player's own chat echo within 2 s. An echo means a player, a notification
+means a GM, silence is taken for a GM (noted). A probe on a player account therefore costs one line said aloud; pass `gm: false` to
+avoid even that. The report has `leader_gm`, and `dungeon_run` answers `leader_gm` `true`, `false` or `probe`.
 
 What the driver does for each action of the plan (the stepper decides which):
 
@@ -595,7 +610,9 @@ What the driver does for each action of the plan (the stepper decides which):
   and notes (not for a healer, a paladin, priest, shaman or druid by the `class` of its unit row, below 30% mana: the party would go
   on without its heals, so that gate waits its 150 s out and the run goes on with the usual note) `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
   TortoiseBots, not to work around). After 150 s the run goes on with a note if everyone has 50% health, else it fails. A dead member is
-  revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set (then the run fails); after a revive the party
+  revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
+  naming `recover_wipe`; with `recover_wipe` the member gets a minute for a healer's resurrection, then `.bot action release` and
+  `.bot action corpse run`, and the gate waits for it up to 12 min); after a revive the party
   list is polled for up to 5 s for the dead flag to clear before the member is judged, and a second revive goes out only after that
   (two revives at most, then the run fails).
 - **buffs** (optional, `dungeon_run`'s `buffs`): a **GM boost**, off unless asked for. `buffs` is a spell id, a preset name or a list of
@@ -621,24 +638,28 @@ What the driver does for each action of the plan (the stepper decides which):
   A companion whose 32 positive aura slots are full cannot take more, which looks like a refusal: use fewer spells (the list holds at
   most 20 and the bot has buffs of its own). Recommended setup: hire the companions 3-5 levels above
   the dungeon (a boost on top of an under-levelled party only hides it) and list that in `setup`.
-- **wipe**: the leader dead, or every member dead, ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1). The MVP does not
-  release, run back or retry.
+- **the leader's death** is not a wipe while a member lives: the driver pauses its orders and gets the leader back (see [Death and the
+  corpse run](#death-and-the-corpse-run)), gathers the party (`.bot action follow`) and rests, then the run goes on from where it was.
+- **wipe**: every online member dead (the leader too, or not) ends the run at once (`state` `failed`, `error` `wipe`, `wipes` 1),
+  unless `recover_wipe` is set: then the members are told `.bot action release`, the leader does its corpse run, the members are told
+  `.bot action corpse run` (again every 30 s while any is dead), and when all live the run gathers, rests and goes on from the current
+  step. At most 2 recoveries a run and 12 min each; the next wipe ends the run. Every wipe counts in `wipes`, recovered or not.
 
-Events (`events` kinds `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`): `dungeon_leg` at the start and end of
+Events (`events` kinds `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`, and `dungeon_leader` for the leader's death): `dungeon_leg` at the start and end of
 each leg (`data.phase`, `result`, `seconds`, `deaths`, `pulls`, `rest_seconds`); `dungeon_step` when an action finishes (`data.action`
 walk, use_object, pull, kill_boss, or wait when a wait step begins; `ok`, `seconds`, `error`); `dungeon_failed` when the run ends
 without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeon_done` with the totals.
 
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
-progress), `error`, `wipes`, `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
-`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
+progress), `error`, `wipes`, `leader_gm`, `leader_deaths`, `resurrections` (accepted), `corpse_runs`, `seconds_dead` (per leg too), `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
+`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`, `leader_deaths`, `resurrections`, `corpse_runs`, `seconds_dead`), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
 playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `leg`, `detail` and `at`, `buffs[]` (the spells asked for, `id` and `name`), and
 `setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",
 "levelup -15", "tbm summon all"]`; at most 40 entries of up to 400 characters; empty when none were given). Nothing checks or sends
 them: they are there so that a report shows what a run was started with. A run with any `gm_shortcuts` or `setup_shortcuts` is not a run
 a player could have done.
 
-Limits of this first driver: no CC marks, no loot orders (the companions loot on their own), no corpse run, no stuck detection beyond
+Limits of this driver: no CC marks, no loot orders (the companions loot on their own), no stuck detection beyond
 the bounds above, and stealthed packs are walked through, not pulled. The code is
 tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
 `docs/LIVE-CHECKS.md`.
@@ -768,6 +789,40 @@ login), `gcd` (`active`, `remaining_ms`, `total_ms`), `combo_points` and `combo_
 | `combo_points` | the player; `target` (the unit), `points`, `was` |
 | `spell_fail` | now also `reason_name` (`reason` stays the number, or `interrupted`) |
 
+## Death and the corpse run
+
+Issue #80 step 3a. The leader is a player: when it dies it comes back the way a player does, with **no GM revive or teleport**. The
+packets are the ones a 1.12 client sends (layouts checked against the core, `internal/game/death.go`); `death_status`, `accept_resurrect`,
+`release_spirit`, `corpse_query`, `reclaim_corpse` and `area_trigger` are the RPC calls, the driver uses the same session calls.
+
+1. **Resurrection first.** A resurrection spell cast at the dead leader arrives as `SMSG_RESURRECT_REQUEST` (an event `resurrect_request`
+   and `death_status.resurrect`); the driver answers with `CMSG_RESURRECT_RESPONSE` (guid, 1). After the leader's death it waits up to
+   60 s for that while a living member could cast one (a healer class by its unit row, or a member whose class is not in view). A
+   healer bot resurrects party members by itself.
+2. **Release.** Else `CMSG_REPOP_REQUEST` (no body): the player becomes a ghost (health 1, `PLAYER_FLAGS_GHOST`) at the nearest graveyard
+   and gets `SMSG_CORPSE_RECLAIM_DELAY` (30 s, more after repeated deaths). `status` and `death_status` show `ghost`.
+3. **Corpse run.** `MSG_CORPSE_QUERY` gives the corpse. On the ghost's map the driver walks the navmesh to it (`walk_path`; a ghost walks
+   as anybody), waits out the reclaim delay and sends `CMSG_RECLAIM_CORPSE` within 34 yd (the server takes 39 yd): the player lives at 50%
+   health and mana with **resurrection sickness**, which is noted in the report (`wait_sickness` waits it out, up to 11 min). A corpse
+   **inside a dungeon** is reached through the entrance portal: the query then names the entrance on the outer map, the ghost walks
+   there and sends `CMSG_AREATRIGGER` for the plan's `entrance_trigger` (Uldaman 286); the core revives a ghost that enters the map of
+   its corpse (`Player::TeleportTo`), at the dungeon's entrance. A plan without `entrance_trigger` cannot do this and the run fails with
+   that reason (the id is `areatrigger_teleport.id` in the world database). A resurrection offered on the way is accepted at once.
+4. **Back.** The driver says `.bot action follow`, then runs a rest gate (the brain eats and drinks there), and the run goes on from the
+   step it was on; a walk the death interrupted is made again and does not use up a try.
+
+| Event | `source` / data |
+| --- | --- |
+| `resurrect_request` | the caster; `caster`, `name` (when the server sent one), `sickness` (accepting costs resurrection sickness: a spirit healer), `timer`. SMSG_RESURRECT_REQUEST |
+| `corpse_reclaim_delay` | the player; `ms`. SMSG_CORPSE_RECLAIM_DELAY |
+| `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms` |
+
+Bounds: a corpse run longer than 10 min fails the run (`corpse run: gave up after 10 min`), the leader may die 5 times a run, and an
+offer that does not revive it is tried 3 times. Spirit healers are not used. The report counts `leader_deaths`, `resurrections`,
+`corpse_runs` and `seconds_dead`, in all and per leg, and the `dungeon_leader` events (`data.phase`: `died`, `resurrect_accepted`,
+`released`, `corpse_run`, `waiting_reclaim_delay`, `reclaimed`, `portal`, `back`, `gave_up`, `wipe_recovery`) tell the story. The
+behaviour follows mod-playerbots' dead strategy (ideas only; its code is GPL and this repo is MIT).
+
 ## Bot brain
 
 The brain (issue #80) lets the agent **play its own character** while it leads: a small trigger -> action engine in
@@ -866,15 +921,20 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
 3 s; a server that says no wand is equipped backs it off for 30 s.
 
 **Strategies** (`brain_start.strategies`; the `base` strategy, which stops a second cast while one is going, is always added):
-- preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest`;
+- preset `frost_mage` = `combat_dps` + `mage_frost` + `mage_rest` + (step 3b) the six below + `rest_eat`;
 - `combat_dps`: the opening delay and the area-spell veto above, and `face_target`;
 - `mage_frost`: Frostbolt (normal) at the fight's mob; Frost Nova (high) and Fire Blast (normal + 2) on a mob that attacks the
   leader within 8 yd (no Nova on a rooted mob; Nova hits everything within 10 yd, so it is an area spell for the veto above); Cone of Cold (normal + 5) with 2 or more mobs in combat within 10 yd in a 90 degree
   cone in front;
 - `ranged_position`, `avoid_ground`, `mage_defense` (Ice Block, Blink, step back from a rooted mob), `mage_interrupt`,
-  `combat_consumables`, `wand`: see above. The preset `frost_mage` is now `combat_dps` + `mage_frost` + `mage_rest` + these six.
+  `combat_consumables`, `wand`: see above. The preset `frost_mage` is now `combat_dps` + `mage_frost` + `mage_rest` + these six + `rest_eat`.
   Blink lands up to 20 yd ahead of the way the leader faces and the brain has no way to turn on the spot, so it only blinks with the
   mob behind it, 12 yd of walkable mesh ahead and a landing 8 yd farther from the mob;
+- `rest_eat` (any class): out of combat, with no mob to fight, and below 85% health, only where upkeep is allowed like `mage_rest`: sit
+  and eat the best **food** in the bags that the leader's level allows (a table of the core's `item_template` foods that restore health
+  and nothing else, each with its `required_level`; the highest tier first), one step under drinking, so a leader low on both drinks
+  first. A mage with no food casts Conjure Food first. A piece just used is not used again for 5 s; nothing is sent while the Food aura is
+  awaited.
 - `mage_rest`, out of combat and with no mob to fight, only where upkeep is allowed (always for `brain_start`; in a dungeon run only
   inside a rest gate, so the leader never sits down mid-walk): Ice Armor (else Frost Armor) and Arcane Intellect when missing or,
   if the server says how long they last, under a minute from ending; Evocation below 20% mana, else drinking below 65% (the best
@@ -882,12 +942,13 @@ bolt cannot be paid for). Shoot repeats by itself, so it is not sent again for 3
   a drink just used is not used again for 5 s, and nothing is sent while the Drink aura is awaited, so a refusal cannot loop).
 
 **Dungeon runs.** `dungeon_run {"name":"uldaman","brain":"frost_mage"}` starts the brain at the first rest gate of each leg
-and stops it when the leg ends; the driver keeps leading and giving the party its orders. The run does **not** make the leader a
-non-GM: GM shortcuts stay as they are. A brain started by hand is not touched by a run (the run refuses to start while one runs), and while a run owns the brain
+and stops it when the leg ends; the driver keeps leading and giving the party its orders. The run does not decide whether the leader is a GM: pass `gm: false`
+for a player account (see [Dungeon runs](#dungeon-runs)). A brain started by hand is not touched by a run (the run refuses to start while one runs), and while a run owns the brain
 `brain_start` and `brain_stop` are refused (`brain_status` still answers).
 The report's `brain` names the strategies.
 
-Not in this step: roles other than dps, the other classes, resting and corpse runs of the leader, melee positioning (behind the mob),
+The leader's death is handled by the driver, not the brain (see [Death and the corpse run](#death-and-the-corpse-run)); a dead brain
+idles (`dead`). Not in this step: roles other than dps, the other classes, melee positioning (behind the mob),
 wiring the move lock into the dungeon driver. Tested against a scripted fake game and clock (`internal/brain`) and the agent's RPC rig; the
 live check is in `docs/LIVE-CHECKS.md`.
 
