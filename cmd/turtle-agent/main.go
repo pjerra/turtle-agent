@@ -80,6 +80,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return traceScoreCmd(args[1:], stdout, stderr)
 	case "pulltest":
 		return pulltestCmd(args[1:], stdout, stderr)
+	case "dashboard":
+		return dashboardCmd(ctx, args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -100,5 +102,6 @@ func usage(w io.Writer) {
   turtle-agent tune-diff <trace.jsonl>
   turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
   turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
+  turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]]
   turtle-agent version`)
 }
