@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -135,23 +136,47 @@ func TestRemoteAttackResendWhenAHealerHoldsTheMobAndNoTankIsKnown(t *testing.T) 
 	}
 }
 
-// A dead tank does not hold the mob either, whatever the feed's threat record still says.
-func TestRemoteAttackResendWhenTheTankIsDead(t *testing.T) {
-	g, _, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
-		a.hold = gMage // the named tank (below) holds it ...
-		g.ignorePull = true
-		g.killRate = 2
-		inner := g.onTick
-		g.onTick = func(g *fakeRemote) {
-			if a.engaged {
-				g.party[2].Dead, g.party[2].HP = true, 0 // ... and dies
+// attackAllowed on a frame built by hand: who counts as "the tank holds the mob" once AssistEvery has passed since the first order.
+func TestAttackAllowedWhoHoldsTheMob(t *testing.T) {
+	mob := tbm.HostileRec{GUID: 0xF130000001, Entry: 299, HPPct: 100, X: 10, Y: 0, Z: 0}
+	for _, c := range []struct {
+		name   string
+		tank   packet.GUID // the named tank (0: none known)
+		holder packet.GUID
+		dead   packet.GUID // a member that is dead
+		far    packet.GUID // a member standing 60 yd from the mob
+		want   bool        // the order is sent again
+	}{
+		{"the named tank holds it", gTank, gTank, 0, 0, false},
+		{"the named tank is dead", gTank, gTank, gTank, 0, true},
+		{"the named tank is far away", gTank, gTank, 0, gTank, true},
+		{"a healer holds it, the tank is named", gTank, gHealer, 0, 0, true},
+		{"no tank known, a healer holds it", 0, gHealer, 0, 0, true},
+		{"no tank known, a warrior (rage) holds it", 0, gTank, 0, 0, false},
+		{"no tank known, the warrior holding it is dead", 0, gTank, gTank, 0, true},
+	} {
+		g := newFakeRemote(t)
+		d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{5, 0, 0}}), g, DefaultConfig(), opts(), g.clock())
+		var party []tbm.PartyRec
+		for _, p := range g.party {
+			r := *p
+			r.X, r.Y, r.Z = 8, 0, 0
+			r.Dead = r.GUID == c.dead
+			if r.GUID == c.far {
+				r.X = 70
 			}
-			if inner != nil {
-				inner(g)
-			}
+			party = append(party, r)
 		}
-	}, func() RemoteOptions { o := opts(); o.Tank = "Magey"; return o }())
-	if rep.Remote.AttackResends < 1 {
-		t.Fatalf("no resend with a dead tank: %v\n%s", g.orders, notesOf(rep))
+		d.fr = tbm.ViewFrame{Party: party, Hostiles: []tbm.HostileRec{mob}, Threats: []tbm.ThreatRec{{Hostile: mob.GUID, Top: []tbm.ThreatEntry{{GUID: c.holder, Pct: 100}}}}}
+		d.tank = c.tank
+		d.tf.sentGUID, d.tf.sentAt = mob.GUID, g.now
+		g.now = g.now.Add(4 * time.Second)
+		if d.attackAllowed(mob) { // before AssistEvery (and the 5 s floor) nothing is sent again
+			t.Fatalf("%s: sent again after 4 s", c.name)
+		}
+		g.now = g.now.Add(8 * time.Second)
+		if got := d.attackAllowed(mob); got != c.want {
+			t.Errorf("%s: attackAllowed = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
