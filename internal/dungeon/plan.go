@@ -356,7 +356,6 @@ type rawPlan struct {
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Band     []int             `json:"level_band"`
-	Hire     []string          `json:"hire_composition"`
 	CCPrio   []uint32          `json:"cc_priority"`
 	CCAlways []uint32          `json:"cc_always"`
 	Notes    []string          `json:"notes"`
@@ -559,13 +558,6 @@ func Parse(name string, data []byte) (*Plan, error) {
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
 	}
-	if len(rp.Hire) > 0 {
-		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
-			c.fail("hire_composition", "%v", err)
-		} else {
-			p.HireComposition = slices.Clone(rp.Hire)
-		}
-	}
 	if len(rp.CCPrio) > 0 {
 		p.CCPriority = slices.Clone(rp.CCPrio)
 	}
@@ -626,7 +618,7 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 		} else if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
 			c.fail("hire_composition", "%v", strings.TrimPrefix(err.Error(), "prepare.hire.composition: "))
 		} else {
-			p.HireComposition = rp.Hire
+			p.HireComposition = slices.Clone(rp.Hire)
 		}
 	}
 	switch {
