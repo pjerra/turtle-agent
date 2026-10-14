@@ -153,6 +153,8 @@ type dungeonRunParams struct {
 	// Carrier names the bot that does the object steps in remote mode (loot_object, a boss's loot_item, use_item, use_object): it loots,
 	// opens and uses items on `cmd` orders. Empty: the first living bot that is not the lead bot, the tank or the healer.
 	Carrier string `json:"carrier,omitempty"`
+	// CCBot names the bot that takes the big-pack CC mark (README "big packs"); a hired party sets its mage.
+	CCBot string `json:"cc_bot,omitempty"`
 	// LootRestore is the loot method put back after the carrier's free-for-all loot (remote mode): group (default), rr, master or nbg.
 	LootRestore string `json:"loot_restore,omitempty"`
 	// ObjectFallback is what an object step does when the carrier's order fails twice (remote mode): "agent" (the default) lets the

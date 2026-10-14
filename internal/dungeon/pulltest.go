@@ -341,6 +341,7 @@ func (d *RemoteDriver) forgetMobs() {
 	clear(d.waitNoted)
 	clear(d.warned)
 	clear(d.ccDone)
+	clear(d.ccOrdered)
 	clear(d.skipped)
 	clear(d.killedAt)
 	d.killedGUID = nil

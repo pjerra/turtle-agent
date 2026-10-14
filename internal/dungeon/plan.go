@@ -57,8 +57,17 @@ type Plan struct {
 	Portal *Portal `json:"portal,omitempty"`
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
-	LevelBand []int    `json:"level_band,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	LevelBand []int `json:"level_band,omitempty"`
+	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
+	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
+	HireComposition []string `json:"hire_composition,omitempty"`
+	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPriority []uint32 `json:"cc_priority,omitempty"`
+	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
+	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
+	CCAlways []uint32 `json:"cc_always,omitempty"`
+	Notes    []string `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	Legs     []Leg           `json:"legs"`
@@ -310,6 +319,9 @@ type rawPlan struct {
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Band     []int             `json:"level_band"`
+	Hire     []string          `json:"hire_composition"`
+	CCPrio   []uint32          `json:"cc_priority"`
+	CCAlways []uint32          `json:"cc_always"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
@@ -508,6 +520,19 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if len(rp.Hire) > 0 {
+		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", err)
+		} else {
+			p.HireComposition = slices.Clone(rp.Hire)
+		}
+	}
+	if len(rp.CCPrio) > 0 {
+		p.CCPriority = slices.Clone(rp.CCPrio)
+	}
+	if len(rp.CCAlways) > 0 {
+		p.CCAlways = slices.Clone(rp.CCAlways)
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
