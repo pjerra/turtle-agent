@@ -258,7 +258,7 @@ func (d *RemoteDriver) runPulltest(ctx context.Context) (err error) {
 func (d *RemoteDriver) ptAction(leg, group, try int) Action {
 	l := d.plan.Legs[leg]
 	g := l.PullGroups[group]
-	return Action{Kind: ActPull, Leg: leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
+	return Action{Kind: ActPull, Leg: leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Patrol: g.Patrol, Skip: l.Skip,
 		Label: fmt.Sprintf("leg %d%s: pulltest try %d, pull group %d of %d", leg, nameSuffix(l.Name), try, group+1, len(l.PullGroups))}
 }
 

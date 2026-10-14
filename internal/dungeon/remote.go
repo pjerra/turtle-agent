@@ -322,6 +322,19 @@ type RemoteReport struct {
 	BigPacks        int `json:"big_packs"`        // pulls of a pack of big_pack or more mobs
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
+	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
+	// and marks put again on a mob whose CC lapsed while the fight went on.
+	ReactiveCC int `json:"reactive_cc"`
+	CCRenews   int `json:"cc_renews"`
+	// Patrols (PullGroup.Patrol): pulls that waited for a patrol to walk out of patrol_aggro, the seconds of those waits, the waits that
+	// ran out with the patrol still near (the pack was pulled with it counted in), and patrols pulled alone before their group.
+	PatrolWaits    int     `json:"patrol_waits"`
+	PatrolWaitS    float64 `json:"patrol_wait_s"`
+	PatrolTimeouts int     `json:"patrol_timeouts"`
+	PatrolPulls    int     `json:"patrol_pulls"`
+	// TinyMoves are walks whose last stretch was shorter than min_move (the module ignores such a move): the order went to a point
+	// min_move+1 yd along the line instead.
+	TinyMoves int `json:"tiny_moves"`
 	// Tank first (README "Tank first"): TankThreatShare is the mean share of the top threat the tank held on the mobs of the fight, in
 	// percent (100: top of every list, 0: not among the top three), over TankThreatSamples frames of fighting; LooseAddOrders are the
 	// tank orders at a mob that hit a bot that was not the tank; CCRespected the crowd-controlled mobs the party was not sent at
@@ -453,6 +466,8 @@ type RemoteDriver struct {
 	warned     map[string]bool
 	ccDone     map[packet.GUID]bool
 	ccOrdered  map[packet.GUID]time.Time // when a big-pack CC order went out for a mob (remote_cc.go)
+	rccLast    time.Time                 // the last reactive CC order (remote_patrol.go)
+	rccN       map[packet.GUID]int       // reactive CC orders per mob
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
@@ -1595,6 +1610,16 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 				return err
 			}
 		}
+		// The module carries out no move shorter than about 6 yd (ZF-1 run 4: a last stretch of 5.2 yd was ignored five times and failed
+		// the walk). Such a stretch is sent as a move to min_move+1 yd along the same line: the lead bot walks through the point and stops
+		// just past it, and the arrival counts within that overshoot.
+		tiny := 0.0
+		if dd := dist3(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) {
+			past := lerp(here, wp, (float64(d.tx.MinMove)+1)/dd)
+			args = moveArgs(past)
+			tiny = float64(d.tx.MinMove) + 1 - dd
+			d.remote(func(r *RemoteReport) { r.TinyMoves++ })
+		}
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
@@ -1633,6 +1658,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		arrive := arriveAt
 		if wp != p {
 			arrive = max(arrive, 8)
+		}
+		if tiny > 0 {
+			arrive = max(arrive, float32(tiny)+0.5)
 		}
 		ahead := wp != p && d.opt.LookAhead > 0
 		res, err := d.waitArrival(ctx, wp, arrive, ahead, &meter)

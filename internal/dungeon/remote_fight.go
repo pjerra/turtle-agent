@@ -21,7 +21,8 @@ func (d *RemoteDriver) doPull(ctx context.Context, a Action) error {
 	if skip, err := d.gatedLook(ctx, a); skip || err != nil {
 		return err
 	}
-	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{}}
+	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{},
+		patrol: a.Patrol, patrolSt: &patrolState{}}
 	// A group whose members in view are all stealthed cannot be pulled (the bots never attack what they cannot see); with none in
 	// view the plan's flag decides.
 	if cs := d.candidates(sp, sp.pick); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allHostilesStealthed(cs)) {
@@ -215,6 +216,12 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		if sp.sneak && t.Stealthed() {
 			return d.sneakPast(ctx, label, sp)
+		}
+		// A patrol that would walk into the pull is waited for, or pulled alone first (remote_patrol.go); after a fight, pick again.
+		if fought, err := d.patrolGate(ctx, t, sp); err != nil {
+			return err
+		} else if fought {
+			continue
 		}
 		// The party gathers on the lead bot before the pull (remote_gather.go): a bot left behind is not the one the pack finds first.
 		if err := d.gather(ctx, "the pull of "+d.hostileName(t)); err != nil {
@@ -612,6 +619,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			if err := d.tankFirstTick(ctx, fightingMobs); err != nil {
 				return fightResult{}, err
 			}
+			if err := d.reactiveCC(ctx, t.GUID, fightingMobs); err != nil {
+				return fightResult{}, err
+			}
 		}
 		d.wd.fightSignal(len(killed), hostilesHP(fightingMobs))
 		if d.wdRepick.take() {
@@ -881,6 +891,9 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 			d.wd.mobHealth(hostilesHP(eng))
 			d.watchThreat(eng)
 			if err := d.tankFirstTick(ctx, eng); err != nil {
+				return err
+			}
+			if err := d.reactiveCC(ctx, 0, eng); err != nil {
 				return err
 			}
 			if err := d.assist(ctx, eng); err != nil {

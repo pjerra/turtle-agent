@@ -1609,6 +1609,9 @@ type fightSpec struct {
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool
+	// patrol is the group's patrol (PullGroup.Patrol, remote mode only), and patrolSt what its gate has done for this group so far.
+	patrol   *Patrol
+	patrolSt *patrolState
 }
 
 type outcome int
