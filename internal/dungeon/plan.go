@@ -198,7 +198,25 @@ type PullGroup struct {
 	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
 	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
 	Equiv string `json:"equiv,omitempty"`
+	// Patrol is a patrol that walks near the group (remote_patrol.go): before the group is pulled the driver waits until it is out of
+	// patrol_aggro of the pull, or pulls it alone first when it passes the party away from the pack, and counts it in the pack while
+	// it stands within patrol_aggro of the pull. Nil: no patrol comes by.
+	Patrol *Patrol `json:"patrol,omitempty"`
 }
+
+// Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
+// waypoints in the order it walks them (it goes on from the last to the first, as the core's waypoint movement does), PeriodS how long
+// one round takes, in seconds (the path's length at the mobs' walk speed, 2.5 yd/s for speed_walk 1).
+type Patrol struct {
+	Entries []uint32 `json:"entries"`
+	Path    []Point  `json:"path"`
+	PeriodS float32  `json:"period_s"`
+	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
+	Source string `json:"source,omitempty"`
+}
+
+// maxPatrolPeriod bounds a patrol's round (seconds).
+const maxPatrolPeriod = 900
 
 // MaxEquivLen is the longest Equiv label.
 const MaxEquivLen = 40
@@ -393,6 +411,14 @@ type rawPullGroup struct {
 	Radius    float32    `json:"radius"`
 	Team      string     `json:"team"`
 	Equiv     string     `json:"equiv"`
+	Patrol    *rawPatrol `json:"patrol"`
+}
+
+type rawPatrol struct {
+	Entries []uint32   `json:"entries"`
+	Path    []rawPoint `json:"path"`
+	PeriodS float32    `json:"period_s"`
+	Source  string     `json:"source"`
 }
 
 type rawBoss struct {
@@ -731,6 +757,21 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		for j := range g.Positions {
 			pg.Positions = append(pg.Positions, c.point(fmt.Sprintf("%s.positions[%d]", gp, j), &g.Positions[j]))
+		}
+		if rp := g.Patrol; rp != nil {
+			pp := gp + ".patrol"
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, Source: rp.Source}
+			c.entries(pp+".entries", rp.Entries, true)
+			if len(rp.Path) < 2 {
+				c.fail(pp+".path", "needs at least two points")
+			}
+			for j := range rp.Path {
+				pat.Path = append(pat.Path, c.point(fmt.Sprintf("%s.path[%d]", pp, j), &rp.Path[j]))
+			}
+			if rp.PeriodS <= 0 || rp.PeriodS > maxPatrolPeriod {
+				c.fail(pp+".period_s", "%g: one round of the path takes 1-%d seconds", rp.PeriodS, maxPatrolPeriod)
+			}
+			pg.Patrol = pat
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}
