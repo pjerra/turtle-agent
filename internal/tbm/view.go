@@ -79,6 +79,10 @@ func (p PartyRec) PowerPct() int { return pctOf(p.Power, p.MaxPower) }
 // UsesMana says whether the bot's power is mana and it has any.
 func (p PartyRec) UsesMana() bool { return p.PowerType == 0 && p.MaxPower > 0 }
 
+// DrinkFailed says the bot's last action was a drink that failed, for whatever reason (TortoiseBots reports a failed item action
+// as `drink,F,-`, with no reason).
+func (p PartyRec) DrinkFailed() bool { return strings.EqualFold(p.Action, "drink") && p.Result == "F" }
+
 // DrinkFailedNoItem says the bot's last action was a drink that failed for want of one in the bags.
 func (p PartyRec) DrinkFailedNoItem() bool {
 	return strings.EqualFold(p.Action, "drink") && p.Result == "F" && p.Reason == "no-item"

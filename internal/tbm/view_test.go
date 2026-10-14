@@ -349,3 +349,13 @@ func TestParsePartyRecResultAndReason(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 }
+
+func TestDrinkFailedAnyReason(t *testing.T) {
+	base := "0x2A,Priesty,4000,5000,35,100,0,1,2,3,0,0,0,0,0,0,n,drink"
+	for tail, want := range map[string]bool{",F,-": true, ",F,no-item": true, ",F,oom": true, ",O,-": false, "": false} {
+		p, err := ParsePartyRec(base + tail)
+		if err != nil || p.DrinkFailed() != want {
+			t.Errorf("%q: %v %+v", tail, err, p)
+		}
+	}
+}

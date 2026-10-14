@@ -14,7 +14,9 @@ import (
 // most once per bot per leg, when
 //   - the bot's drink count (the last `.bot inv` read; read afresh once per bot per leg) is under Config.RefillBelow, or
 //   - its drink nudge fired (the mana did not rise at all for DrinkNudge), or
-//   - the feed says its last action was a drink that failed for want of one (action "drink", result F, reason no-item, TB #924),
+//   - the feed says its last action was a drink that failed for want of one (action "drink", result F, reason no-item, TB #924), or a
+//     drink that failed for any reason (TortoiseBots reports item-action failures as `drink,F,-`, no reason) in two different frames
+//     within DrinkFailWindow,
 //
 // then reads `.bot inv` again for the count it came to. Without a BotLiner, or with maintenance off on the server, nothing is sent.
 
@@ -22,8 +24,8 @@ import (
 type Refill struct {
 	Bot string `json:"bot"`
 	Leg int    `json:"leg"`
-	// Why is "low-drinks" (the count was under the limit), "nudge" (the mana did not rise) or "no-item" (the feed said the drink failed
-	// for want of one).
+	// Why is "low-drinks" (the count was under the limit), "nudge" (the mana did not rise), "no-item" (the feed said the drink failed
+	// for want of one) or "drink-failed" (it failed in two frames within DrinkFailWindow, no reason given).
 	Why string `json:"why"`
 	// Before and After are the drinks the bags held before and after (-1: not read). Maintenance is its verdict ("maintained", ...).
 	Before      int    `json:"before"`
@@ -31,12 +33,47 @@ type Refill struct {
 	Maintenance string `json:"maintenance"`
 }
 
+// DrinkFailWindow is the time in which a drink that fails in two different frames counts as a bot that cannot drink.
+const DrinkFailWindow = 10 * time.Second
+
 // restKit is what the rest gates know of the bots' bags.
 type restKit struct {
 	drinks  map[string]int // the drinks each bot held at its last `.bot inv` read (by lower-case name)
 	readLeg map[string]int // the leg of that read (-1: the preflight)
 	doneLeg map[string]int // the leg a bot was refilled in
 	off     bool           // maintenance is off on the server, or the game cannot send it: no more refills
+	failAt  map[string][]failSight
+}
+
+// failSight is one frame in which a bot's last action was a failed drink.
+type failSight struct {
+	frame uint64
+	at    time.Time
+}
+
+// drinkFailing notes the frame (n) in which m's last action is a failed drink and says whether it has been one in another frame within
+// DrinkFailWindow before. A bot whose last action is anything else forgets its sightings.
+func (k *restKit) drinkFailing(m tbm.PartyRec, n uint64, now time.Time) bool {
+	k.init()
+	key := strings.ToLower(m.Name)
+	if !m.DrinkFailed() {
+		delete(k.failAt, key)
+		return false
+	}
+	var keep []failSight
+	for _, f := range k.failAt[key] {
+		if now.Sub(f.at) <= DrinkFailWindow {
+			keep = append(keep, f)
+		}
+	}
+	if len(keep) == 0 || keep[len(keep)-1].frame != n {
+		keep = append(keep, failSight{n, now})
+	}
+	if k.failAt == nil {
+		k.failAt = map[string][]failSight{}
+	}
+	k.failAt[key] = keep
+	return len(keep) >= 2
 }
 
 func (k *restKit) init() {
@@ -67,10 +104,12 @@ func (d *RemoteDriver) readDrinks(ctx context.Context, bl BotLiner, name string)
 
 // refillWhy says why the short caster m is due a refill, or "" when it is not. It reads the bot's bags when its count is older than
 // the leg (once per bot per leg).
-func (d *RemoteDriver) refillWhy(ctx context.Context, bl BotLiner, m tbm.PartyRec, nudged bool) string {
+func (d *RemoteDriver) refillWhy(ctx context.Context, bl BotLiner, m tbm.PartyRec, nudged, failing bool) string {
 	switch {
 	case m.DrinkFailedNoItem():
 		return "no-item"
+	case failing:
+		return "drink-failed"
 	case nudged:
 		return "nudge"
 	}
@@ -103,6 +142,7 @@ func (d *RemoteDriver) refill(ctx context.Context, rw *restWatch, rec *gateRec) 
 			continue
 		}
 		key := strings.ToLower(m.Name)
+		failing := d.kit.drinkFailing(m, d.n, d.clk.Now())
 		if leg, ok := d.kit.doneLeg[key]; ok && leg == d.curLeg {
 			continue
 		}
@@ -112,7 +152,7 @@ func (d *RemoteDriver) refill(ctx context.Context, rw *restWatch, rec *gateRec) 
 			d.rep.note("refill: skipped, this game cannot send .bot maintenance")
 			return done, nil
 		}
-		why := d.refillWhy(ctx, bl, m, rw.nudged[m.GUID])
+		why := d.refillWhy(ctx, bl, m, rw.nudged[m.GUID], failing)
 		if why == "" {
 			continue
 		}

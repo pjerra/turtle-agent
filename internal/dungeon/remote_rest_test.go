@@ -133,6 +133,7 @@ func TestRemoteRefillNudgeAndPlentyOfDrinks(t *testing.T) {
 }
 
 // The feed says a caster's last action was a drink that failed for want of one: it is refilled at once, with a count that looked fine.
+// A drink that fails with no reason, twice, does the same.
 func TestRemoteRefillOnDrinkNoItem(t *testing.T) {
 	g := newRefillFake(t, 12)
 	g.party[2].Action, g.party[2].Result, g.party[2].Reason = "drink", "F", "no-item"
@@ -146,10 +147,31 @@ func TestRemoteRefillOnDrinkNoItem(t *testing.T) {
 		t.Fatalf("the refill came %v after the preflight's maintenance: not at once", ts[len(ts)-1].Sub(ts[0]))
 	}
 
-	// A failed drink for another reason, or another failed action, is no cause.
-	for _, c := range [][3]string{{"drink", "F", "oom"}, {"heal", "F", "no-item"}, {"drink", "O", "-"}} {
+	// A drink that fails with no reason (TortoiseBots reports item-action failures as `drink,F,-`) that is still failing in the next frame
+	// counts as a bot that cannot drink: refilled within the poll after, long before the nudge.
+	g = newRefillFake(t, 12)
+	g.party[2].Action, g.party[2].Result, g.party[2].Reason = "drink", "F", ""
+	rep, err = runRemote(t, g, plan, kitOpts(), nil)
+	ts = g.times["maintenance Magey"]
+	if err != nil || len(rep.Remote.Refills) != 1 || rep.Remote.Refills[0].Why != "drink-failed" || len(ts) != 2 || ts[1].Sub(ts[0]) >= 15*time.Second {
+		t.Fatalf("%v %+v %v", err, rep.Remote.Refills, ts)
+	}
+
+	// One failed drink, gone in the next frame, is no cause; nor is another failed action, or a drink that went well.
+	g = newRefillFake(t, 12)
+	g.party[2].Action, g.party[2].Result = "drink", "F"
+	g.onTick = func(g *fakeRemote) {
+		if len(g.ordersOf("cmd rest")) > 0 {
+			g.party[2].Action, g.party[2].Result = "eat", "O"
+		}
+	}
+	rep, err = runRemote(t, g, plan, kitOpts(), func(c *Config) { c.DrinkNudge = time.Hour })
+	if err != nil || len(rep.Remote.Refills) != 0 {
+		t.Fatalf("a single failed drink: %v %+v", err, rep.Remote.Refills)
+	}
+	for _, c := range [][3]string{{"heal", "F", "no-item"}, {"heal", "F", ""}, {"drink", "O", ""}} {
 		g = newRefillFake(t, 12)
-		g.party[2].Action, g.party[2].Result, g.party[2].Reason = c[0], c[1], strings.TrimPrefix(c[2], "-")
+		g.party[2].Action, g.party[2].Result, g.party[2].Reason = c[0], c[1], c[2]
 		rep, err = runRemote(t, g, plan, kitOpts(), func(cfg *Config) { cfg.DrinkNudge = time.Hour })
 		if err != nil || len(rep.Remote.Refills) != 0 {
 			t.Fatalf("%v: %v %+v", c, err, rep.Remote.Refills)
@@ -267,6 +289,30 @@ func TestRemoteWalkingRest(t *testing.T) {
 	rep, err := runRemote(t, g, pull, o, func(c *Config) { c.RestTimeout = 20 * time.Second })
 	if err != nil || rep.RestWalkPasses != 0 {
 		t.Fatalf("%v %+v", err, rep.RestGates)
+	}
+}
+
+// The walking pass is only the start gate's: the gate before the first pull of the same leg still waits for the targets.
+func TestRemoteWalkingRestThenHeldPullGate(t *testing.T) {
+	o := opts()
+	o.Healer = "Healy"
+	g := newFakeRemote(t)
+	g.addMob(299, Point{150, 5, 0})
+	g.party[1].Power = 450 // 45%: under the healer target (50), over the walking floor (40)
+	plan := remotePlan(Leg{Name: "a", To: Point{100, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{150, 5, 0}}}}})
+	rep, err := runRemote(t, g, plan, o, func(c *Config) { c.RestTimeout = 20 * time.Second })
+	if err != nil || len(rep.RestGates) < 2 {
+		t.Fatalf("%v %+v", err, rep.RestGates)
+	}
+	first, pull := rep.RestGates[0], rep.RestGates[1]
+	if first.Result != "walking" || !first.Skipped || first.Seconds > 1 || rep.RestWalkPasses != 1 {
+		t.Fatalf("%+v", first)
+	}
+	if pull.Result == "walking" || pull.Skipped || pull.Seconds < 15 || !slices.Equal(pull.Short, []string{"Healy mana 45%"}) {
+		t.Fatalf("the pull gate did not hold: %+v", pull)
+	}
+	if rep.RestSeconds < 15 {
+		t.Fatalf("rest %.1f s", rep.RestSeconds)
 	}
 }
 

@@ -777,7 +777,7 @@ What the driver does for each action of the plan (the stepper decides which):
   and the `trace-score` `rest_share` check, which still sums the `rest` events' seconds). **Refills (remote mode):** the preflight sends `.bot maintenance <bot>` once and the module
   buys only 6-7 drinks a bot. At a gate where a mana user is short of mana, the driver sends `.bot maintenance <bot>` again, at most once per bot per leg, when its drink count
   (`.bot inv`, read afresh once per bot per leg) is under 3 (`low-drinks`), its drink nudge fired (`nudge`), or the feed says its last action was a drink that failed for want
-  of one (`drink` `F` `no-item`, `no-item`: at once), then reads `.bot inv` again and orders the party to rest anew. `remote.refills[]` has `bot`, `leg`, `why`, `before`, `after`
+  of one (`drink` `F` `no-item`: at once) or a drink that failed in two different frames within 10 s (`drink-failed`; TortoiseBots reports item-action failures as `drink,F,-`, with no reason), then reads `.bot inv` again and orders the party to rest anew. `remote.refills[]` has `bot`, `leg`, `why`, `before`, `after`
   (drinks, `-1`: not read) and `maintenance`; each is a `refill` trace event and a note, and `refills` is in the summary. With maintenance off on the server (the preflight's
   `disabled`) or a game that cannot send `.bot` lines, none is sent. A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
