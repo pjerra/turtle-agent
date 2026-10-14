@@ -16,7 +16,7 @@
     "Left out of this plan because the driver cannot do them yet (all listed in dungeons/zulfarrak-extra.json or here): (1) Witch Doctor Zum'rah (7271): faction 35 (friendly) until the area trigger 962 (at_zumrah, centre 1909.3 1015.1 11.5, radius 10) fires, and a trigger is only taken from a client packet; the TortoiseBots bots send CMSG_AREATRIGGER only when their master does, and the remote agent stays outside. dungeongen -check -strict would also flag a faction 35 boss. Needs an area_trigger step the agent takes while standing in the instance, or a bot-side order. (2) The stairs event (Sergeant Bly's crew in the cages at the top of the pyramid stairs, three waves of Sandfury trolls, wave 3 summons Nekrum Gutchewer 7796 and Shadowpriest Sezz'ziz 7275: they have NO spawn row, the instance script summons them) and (3) Chief Ukorz Sandscalp + Ruuzlu: Ukorz sits behind the End Door (146084), which only Weegli Blastfuse (7607) opens, through his gossip menu after the stairs event; the driver has no gossip/talk step, and a wait inside a step does not fight the waves. (4) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (5) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here.",
     "No team gate is needed: every mob of the route is hostile to both teams (factions 37, 16 and 107); the friendly NPCs (Sergeant Bly's crew faction 35, Elder Wildmane 15578 faction 35 npc_flags 3 at the gong, the three arena NPCs) are not in any pull group.",
     "The End Door (146084, 1854.5 1142.9 16.1) is shut (state ready, flags 32, seen live) and in the middle of the navmesh route between the graveyard (Zum'rah) and the gong: the navmesh has no doors, so the shortest Theka -\u003e Velratha path (562 yd) walks THROUGH the closed door (a GM did, live; bots would too, a player could not). The Velratha leg therefore starts west of the junction at (1645 909) and goes north by the west road (366 yd from the junction, walked live in 12 hops with no replan); no leg may route through the door, which TestZulfarrakOnNavmesh checks along the whole path. The graveyard (x 1832-1898, y 967-1054, about 70 Shallow Grave chests 128308/128403 with a trap 128972 each) is also off every route of this plan.",
-    "Entry: the game has no game_tele inside Zul'Farrak (game_tele 160 \"Zul'Farrak\" is outside, map 1 at -6801.2 -2893.0 9.0, 28 yd from the portal), so there is no entrance_tele: a remote run enters by walking the lead bot into area trigger 924 (map 1, centre -6773.5 -2889.8 15.1, radius 20), the 'walk' method (not verified live for bots whose master is outside the group). outside_tele \"farrak\" is a partial match that only game_tele 160 has, for prepare.fresh. Live: a GM's `.go xyz 1212.7 842 8.9 209` made a private instance; the bots still need the trigger walk (not checked).",
+    "Entry: THE WALK ENTRY IS EXPECTED TO FAIL until TortoiseBots has a `cmd enter` order. The game has no game_tele inside Zul'Farrak (game_tele 160 \"Zul'Farrak\" is outside, map 1 at -6801.2 -2893.0 9.0, 28 yd from the portal), so there is no entrance_tele and `.tele name` (game_tele names only) cannot put a bot inside; `.go xyz` moves only the caller; and a bot that stands in area trigger 924 (map 1, centre -6773.5 -2889.8 15.1, radius 20) is not taken in, because the module handles CMSG_AREATRIGGER only from the master (PlayerbotAI.cpp:304, TeleportAction.cpp:41-47) and a headless bot never sends its own. The plan therefore gives what `cmd enter` will need: entrance_trigger 924, whose areatrigger_teleport row sends to map 209 at 1212.67 842.04 8.93346 (o 6.28319, required level 35), which is the plan's entrance. outside_tele \"farrak\" is a partial match that only game_tele 160 has, for prepare.fresh. Live: a GM's `.go xyz 1212.7 842 8.9 209` made a private instance for the mapping walk; that is not an entry for a bound party.",
     "Scarabs (7269, 65 seen live, faction 15) swarm near Theka and are in every leg's skip list; so are the two rare elites Sandarr Dunereaver (10080) and Zerillis (10082), which the walk did not see (probably not up in a fresh instance), and Elder Wildmane (15578), absent live."
   ],
   "legs": [
@@ -77,6 +77,16 @@
           "radius": 30
         },
         {
+          "entries": [5648, 5648, 5648, 5648],
+          "positions": [
+            {"x": 1504.9, "y": 818.6, "z": 9},
+            {"x": 1505.3, "y": 844.5, "z": 9.4},
+            {"x": 1505.5, "y": 846.1, "z": 9.7},
+            {"x": 1511.3, "y": 844.8, "z": 9.7}
+          ],
+          "radius": 15
+        },
+        {
           "entries": [5649, 5648, 5649, 5649],
           "positions": [
             {"x": 1521.9, "y": 826.4, "z": 8.9},
@@ -123,7 +133,7 @@
           "positions": [
             {"x": 1793.5, "y": 753.4, "z": 14.3}
           ],
-          "radius": 30
+          "radius": 50
         },
         {
           "entries": [8095],
@@ -148,7 +158,7 @@
         "position": {"x": 1815.8, "y": 670.4, "z": 15}
       },
       "notes": [
-        "Fourteen pull groups on the road (patrolling ones with a 30 yd radius) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs."
+        "Fifteen pull groups on the road (patrolling ones with a 30 yd radius) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50."
       ]
     },
     {
@@ -170,7 +180,7 @@
         "position": {"x": 1778, "y": 859.7, "z": 8.9}
       },
       "notes": [
-        "Theka the Martyr (7272) PATROLS (movement type 2, wander 5): live he walked a loop of about 45 yd east and north-east of his table (1778 859.7): seen at 1783 858, 1792 854, 1798 852, 1820 875, 1822 885 and 1790 889. The boss position is his spawn point; a boss fight looks for the entry within 80 yd of the lead bot, so the loop is inside it. At 30% health he casts Theka Transform (11089) and goes on fighting; the Tablet of Theka (142715, 1800.8 857.6) is a quest object. The pair next to him (Soul Eater 7247 + Blood Drinker 5649, patrolling) is the one pull group, radius 30. The scarabs around him are skipped (7269)."
+        "Theka the Martyr (7272) PATROLS (movement type 2, wander 5): live he walked a loop of about 45 yd east and north-east of his table (1778 859.7): seen at 1783 858, 1792 854, 1798 852, 1820 875, 1822 885 and 1790 889. The boss position is his spawn point; a boss fight looks for the entry within 80 yd of the lead bot, so the loop is inside it. At 30% health he casts Theka Transform (11089) and goes on fighting; the Tablet of Theka (142715, 1800.8 857.6) is a quest object. The pair next to him (Soul Eater 7247 + Blood Drinker 5649, patrolling) is the one pull group, radius 30. The scarabs around him are skipped (7269). The patrolling Blood Drinker of the Antu'sul leg (5649, radius 50) may still be alive near this leg's start (1807 798); a pull in the Antu'sul leg catches it, else walk aggro does."
       ]
     },
     {
