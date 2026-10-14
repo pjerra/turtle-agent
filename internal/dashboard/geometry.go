@@ -37,11 +37,13 @@ type GeoLeg struct {
 
 // Geometry is a plan ready to draw: the static SVG layer and the box it fits in.
 type Geometry struct {
-	Plan    string     `json:"plan"`
-	Map     uint32     `json:"map"`
-	ViewBox [4]float64 `json:"view_box"` // min x, min y, width, height
-	Legs    []GeoLeg   `json:"legs"`
-	SVG     string     `json:"svg"` // the inner markup of the <svg>: routes, pull groups, bosses, objects
+	Plan    string            `json:"plan"`
+	Map     uint32            `json:"map"`
+	ViewBox [4]float64        `json:"view_box"` // min x, min y, width, height
+	Bounds  [4]float64        `json:"bounds"`   // the same without the margin: the tight box of everything drawn
+	Legs    []GeoLeg          `json:"legs"`
+	Names   map[string]string `json:"names,omitempty"` // creature entry (decimal) -> name, as far as the plan's notes name them
+	SVG     string            `json:"svg"`             // the inner markup of the <svg>: routes, pull groups, bosses, objects
 }
 
 type box struct {
@@ -65,6 +67,22 @@ func groupRadius(g dungeon.PullGroup) float64 {
 	return defaultPackRadius
 }
 
+// bounds is the tight box of everything added (min x, min y, width, height), or the padded default for an empty one.
+func (b box) bounds() [4]float64 {
+	if !b.set {
+		return [4]float64{-minSpan / 2, -minSpan / 2, minSpan, minSpan}
+	}
+	return [4]float64{round1(b.minX), round1(b.minY), round1(b.maxX - b.minX), round1(b.maxY - b.minY)}
+}
+
+// label draws a text on a dark, semi-transparent plate. The markers are drawn in pixels around their own origin
+// and the page scales them by the zoom, so the plate's width is an estimate from the character count.
+func label(text string, x, y float64, cls string) string {
+	n := float64(len([]rune(text)))
+	return fmt.Sprintf(`<rect class="lbg" x="%.1f" y="%.1f" width="%.1f" height="15" rx="3"/><text class="%s" x="%.1f" y="%.1f">%s</text>`,
+		x-3, y-11.5, n*6.6+6, cls, x, y, html.EscapeString(text))
+}
+
 // BuildGeometry draws plan: the route of every leg (via points, direct steps dashed, then the leg's end), the pull groups as
 // circles of their radius, the bosses, and the doors and objects the steps use. The view box fits all of it with a margin.
 func BuildGeometry(plan *dungeon.Plan) Geometry {
@@ -73,7 +91,7 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 	var sb strings.Builder
 	prevX, prevY := Project(plan.Entrance.X, plan.Entrance.Y)
 	bb.add(prevX, prevY, 0)
-	fmt.Fprintf(&sb, `<g class="entrance"><circle cx="%.1f" cy="%.1f" r="3"/><text x="%.1f" y="%.1f">entrance</text></g>`, prevX, prevY, prevX+4, prevY-4)
+	fmt.Fprintf(&sb, `<g class="mk entrance" data-x="%.1f" data-y="%.1f"><circle r="7"/>%s</g>`, prevX, prevY, label("entrance", 11, -9, "lt"))
 	for i, leg := range plan.Legs {
 		gl := GeoLeg{Index: i, Name: leg.Name, Groups: len(leg.PullGroups)}
 		gl.Path = append(gl.Path, GeoPoint{X: prevX, Y: prevY})
@@ -100,31 +118,33 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 			}
 			if len(pg.Positions) > 0 {
 				x, y := Project(pg.Positions[0].X, pg.Positions[0].Y)
-				fmt.Fprintf(&sb, `<g class="pin" data-leg="%d" data-group="%d"><circle cx="%.1f" cy="%.1f" r="2.2"/><text x="%.1f" y="%.1f">%d</text></g>`, i, k, x, y, x+3, y-3, k+1)
+				fmt.Fprintf(&sb, `<g class="mk pin" data-leg="%d" data-group="%d" data-x="%.1f" data-y="%.1f"><circle r="9"/><text class="num" y="4">%d</text></g>`, i, k, x, y, k+1)
 			}
 		}
 		if b := leg.Boss; b != nil {
 			x, y := Project(b.Position.X, b.Position.Y)
 			bb.add(x, y, 6)
 			gl.Boss = b.Entry
-			fmt.Fprintf(&sb, `<g class="boss" data-leg="%d"><polygon points="%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f"/><text x="%.1f" y="%.1f">boss %d</text></g>`,
-				i, x, y-5, x+5, y, x, y+5, x-5, y, x+7, y+2, b.Entry)
+			fmt.Fprintf(&sb, `<g class="mk boss" data-leg="%d" data-x="%.1f" data-y="%.1f"><polygon points="0,-14 14,0 0,14 -14,0"/><path d="M-5,-4 L5,4 M5,-4 L-5,4"/>%s</g>`,
+				i, x, y, label(fmt.Sprintf("boss %d", b.Entry), 18, 5, "lt"))
 		}
 		for _, p := range stepPoints(leg) {
 			x, y := Project(p.pt.X, p.pt.Y)
 			bb.add(x, y, 2)
-			fmt.Fprintf(&sb, `<g class="obj %s" data-leg="%d"><rect x="%.1f" y="%.1f" width="4" height="4"/><text x="%.1f" y="%.1f">%s</text></g>`,
-				p.kind, i, x-2, y-2, x+4, y+1, html.EscapeString(p.label))
+			fmt.Fprintf(&sb, `<g class="mk obj %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><rect x="-5" y="-5" width="10" height="10"/>%s</g>`,
+				p.kind, i, x, y, label(p.label, 9, 4, "lt"))
 		}
 		name := leg.Name
 		if name == "" {
 			name = fmt.Sprintf("leg %d", i)
 		}
-		fmt.Fprintf(&sb, `<text class="legname" x="%.1f" y="%.1f">%d %s</text></g>`, toX+3, toY+8, i, html.EscapeString(name))
+		fmt.Fprintf(&sb, `<g class="mk legname" data-x="%.1f" data-y="%.1f">%s</g></g>`, toX, toY, label(fmt.Sprintf("%d %s", i, name), 8, 20, "lt"))
 		prevX, prevY = toX, toY
 		g.Legs = append(g.Legs, gl)
 	}
 	g.ViewBox = fit(bb)
+	g.Bounds = bb.bounds()
+	g.Names = EntryNames(plan)
 	g.SVG = sb.String()
 	return g
 }
@@ -140,14 +160,16 @@ func writeRoute(sb *strings.Builder, leg int, path []GeoPoint) {
 		for i, p := range run {
 			pts[i] = fmt.Sprintf("%.1f,%.1f", p.X, p.Y)
 		}
-		fmt.Fprintf(sb, `<polyline class="route" data-leg="%d" points="%s"/>`, leg, strings.Join(pts, " "))
+		joined := strings.Join(pts, " ")
+		fmt.Fprintf(sb, `<polyline class="halo" data-leg="%d" points="%s"/><polyline class="route" data-leg="%d" points="%s"/>`, leg, joined, leg, joined)
 	}
 	for i, p := range path {
 		if i > 0 && p.Direct {
 			flush()
 			run = []GeoPoint{p}
 			prev := path[i-1]
-			fmt.Fprintf(sb, `<line class="direct" data-leg="%d" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, leg, prev.X, prev.Y, p.X, p.Y)
+			fmt.Fprintf(sb, `<line class="halo dhalo" data-leg="%d" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/><line class="direct" data-leg="%d" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`,
+				leg, prev.X, prev.Y, p.X, p.Y, leg, prev.X, prev.Y, p.X, p.Y)
 			continue
 		}
 		run = append(run, p)
