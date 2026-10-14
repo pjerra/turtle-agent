@@ -120,11 +120,13 @@ func TestRemoteLooseAddOrdersHaveACooldown(t *testing.T) {
 }
 
 func TestRemoteTankStaysOnOneLooseAddAtATime(t *testing.T) {
+	o := opts()
+	o.Healer = "Healy" // named: the mage is no healer, so the hold stands (with none named every mana user breaks it)
 	g, a, b, _ := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
 		a.hold, b.hold = gMage, gMage // both loose on the mage
 		g.ignorePull = true           // the tank never takes them
 		g.killRate = 2                // the fight lasts a minute
-	}, opts())
+	}, o)
 	type sent struct {
 		mob string
 		at  time.Time
@@ -144,6 +146,25 @@ func TestRemoteTankStaysOnOneLooseAddAtATime(t *testing.T) {
 	}
 	if len(mobs) != 2 {
 		t.Fatalf("the tank was sent at %v, want both adds in turn", tankOrders)
+	}
+}
+
+// The hold on one loose add gives way to a mob that hits the healer: A is loose on the mage, B on the healer. The tank is sent at A first
+// (the nearer), and at B at the next look instead of after the hold.
+func TestRemoteTankHoldBreaksForTheHealer(t *testing.T) {
+	o := opts()
+	o.Healer = "Healy"
+	g, a, b, _ := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold, b.hold = gMage, gHealer
+		g.ignorePull = true // the tank never takes them
+		g.killRate = 2
+	}, o)
+	ia, ib := g.indexOf("cmd attack "+tbm.GUIDArg(a.guid)+" Tanky"), g.indexOf("cmd attack "+tbm.GUIDArg(b.guid)+" Tanky")
+	if ia < 0 || ib < 0 || ib < ia {
+		t.Fatalf("orders %v", g.orders)
+	}
+	if gap := g.orderAt[ib].Sub(g.orderAt[ia]); gap >= tankSwitchHold {
+		t.Fatalf("the tank was sent at the add on the healer %v after the first add (hold %v)", gap, tankSwitchHold)
 	}
 }
 

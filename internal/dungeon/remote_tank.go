@@ -191,9 +191,10 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		return nil
 	}
 	now := d.clk.Now()
-	// The tank is on its way to the add it was last sent at: it stays on it while the add is alive and still off the tank.
+	// The tank is on its way to the add it was last sent at: it stays on it while the add is alive and still off the tank. A mob that
+	// is hitting the healer breaks the hold (onHealer): the healer cannot wait out the hold.
 	hold := d.tf.lastAdd != 0 && now.Sub(d.tf.lastAddAt) < tankSwitchHold && slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool {
-		return h.GUID == d.tf.lastAdd && h.Target != d.tank && d.tankShare(h) < 100
+		return h.GUID == d.tf.lastAdd && h.HPPct > 0 && h.Target != d.tank && d.tankShare(h) < 100
 	})
 	for _, h := range d.respectCC(mobs) {
 		if _, ok := d.engagedAt[h.GUID]; !ok {
@@ -209,7 +210,7 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		if now.Sub(d.tf.offTankAt[h.GUID]) < looseGrace {
 			continue
 		}
-		if hold {
+		if hold && !d.onHealer(h.Target) {
 			continue
 		}
 		if d.tankShare(h) >= 100 { // the tank tops its list: the mob is about to turn
@@ -243,6 +244,22 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		return nil
 	}
 	return nil
+}
+
+// onHealer says whether g is the healer: the named one (RemoteOptions.Healer), or, with none named, any mana user of the party that is
+// not the tank.
+func (d *RemoteDriver) onHealer(g packet.GUID) bool {
+	if g == 0 || g == d.tank {
+		return false
+	}
+	m, ok := d.fr.Member(g)
+	if !ok {
+		return false
+	}
+	if d.opt.Healer != "" {
+		return strings.EqualFold(m.Name, d.opt.Healer)
+	}
+	return m.PowerType == 0
 }
 
 // noteFocus records the mob the party was sent at, counting a switch when the one before is still among mobs.
