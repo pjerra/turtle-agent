@@ -367,6 +367,9 @@ type RemoteReport struct {
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
 	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
+	// RejoinTPs are the `cmd summon <bot>` orders the commander sent to bring a bot back to the lead bot (remote_rejoin.go); each is also a
+	// run_gm_assists.
+	RejoinTPs int `json:"rejoin_tps"`
 	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
 	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
 	DirectGathers        int     `json:"direct_gathers"`
@@ -513,6 +516,7 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	rejoin        rejoinState                // bots brought back to the lead bot with cmd summon (remote_rejoin.go)
 	entry         entryState                 // object steps by entry and game-object waits on cmd state (remote_entry.go)
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
@@ -1652,6 +1656,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			meter = walkMeter{} // the fight is not a stop of the walk
 			continue
 		}
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		careful := d.careful()
 		hop := leg
 		if careful {
@@ -2197,6 +2204,9 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 		fightBegan = time.Time{}
 		ft.set(false)
 		gh.set(true)
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		st := d.restState(rw)
 		rec.g.Short = st.short
 		if len(st.dead) > 0 {

@@ -453,7 +453,7 @@ func jsonNumber(v float64) string { b, _ := json.Marshal(v); return string(b) }
 func TestTuneExtraDefaultsAreTheConstants(t *testing.T) {
 	x := defaultTuneExtra()
 	if x.LookStandoff != LookStandoff || x.LookArrive != lookArrive || x.GatherNear != GatherNear || x.AggroGuard != AggroGuard || x.MaxAheadPulls != maxAheadPulls ||
-		x.PartyDownDead != partyDownDead || x.GatherProgress != gatherProgress || x.AheadMaxDZ != aheadMaxDZ || x.RespawnSettle != respawnSettle || x.AttackHoldYd != attackHoldYd || x.TankBusyRounds != maxTankBusyRounds || x.AddOrders != maxAddOrders || x.FallbackTries != objectFallbackTries {
+		x.PartyDownDead != partyDownDead || x.GatherProgress != gatherProgress || x.AheadMaxDZ != aheadMaxDZ || x.RespawnSettle != respawnSettle || x.AttackHoldYd != attackHoldYd || x.TankBusyRounds != maxTankBusyRounds || x.AddOrders != maxAddOrders || x.FallbackTries != objectFallbackTries || x.RejoinTPDist != rejoinTPDist || x.RejoinGap != rejoinGap {
 		t.Fatalf("%+v", x)
 	}
 }
