@@ -936,7 +936,7 @@ group **walk** has nothing to cancel (each try plans again from where the leader
 enclosing phase's; with none the stall is noted and the failure comes at `fail_s`.
 
 The watchdog is looked at from the drivers' own waits, never from a goroutine: a single game call that blocks is bounded by its own
-timeout and is judged at the next wait. A player order that reported `ACTION_PENDING` waits for its final answer at most 90 s, whatever budget the
+timeout and is judged at the next wait. A player order that reported `ACTION_PENDING` waits for its final answer at most 90 s (`cmd enter`: 130 s), whatever budget the
 server named (`tbm.MaxPendingWait`).
 
 **RPC.** `dungeon_status` has `last_progress_at`, `stalled_for_s` (0 while the clock is paused) and `stall_level`, and the same with the limits
