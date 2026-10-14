@@ -2756,6 +2756,26 @@ leg's name where it starts and the step number on hover. The walked path is the 
 current leg ("-> pack 2: Relic Hunter, 34 yd"). When several groups run on the same map each has its own colour and a chip to show or hide its
 path and dots. A door or object is a small door symbol; its name shows on hover or when zoomed in.
 
+**Marks, hover box, events and run line.** New layers (the **Marks** and **Run** groups of the panel; bosses and health bars start on, the rest off):
+**boss mark** (a live boss gets a bigger gold ring, a crown and its name always shown; "boss" comes from the plan), **health bars** over bots and
+creatures, **status icons** (skull dead, spark casting, sheep crowd controlled, cup resting/drinking/eating, arrow fleeing), **threat colours**
+(a creature's ring is blue when it attacks the tank, red when it attacks anyone else; a white outline marks the tank's current target and a
+dashed yellow ring the pull target), **names of hostile mobs** (off), **event pins** (deaths, wipes, boss kills, doors and chests opened or
+looted), **event feed** (the last 8 events under the map) and **run line** (timer, section x of y, pack, boss checklist with the next boss).
+The Layers panel has a **Legend** that explains every mark. Hovering a unit with the mouse (or tapping it on a phone; tap elsewhere to close)
+opens a small box: name or "creature <entry>", kind (boss, hostile, neutral, friendly, critter, bot role), level, health %, what it is
+doing ("casting Fireball on Forthur", "drinking", "fighting X", "crowd controlled"), its target, spell, distance to the lead and pack. A row the
+feed does not carry is left out. The party table has a **Doing** column. The words and the box are built in `static/unitinfo.js` (tested under node,
+`testdata/unitinfo_check.js`); the page puts every string in with `textContent`.
+What the feed carries: bots have state, last action and its result, target and now `cast` (the spell name from `Spell` of the P record);
+creatures have health, target, flags (crowd controlled, evading, stealthed), `cast` (the spell of the H record) and reaction. The feed has **no level**
+for a bot or creature, no creature name (only the plan's notes name them) and no crowd-control flag for bots: those rows and icons are absent.
+Card fields added: `bots[].cast`, `mobs[].cast` and `events`. `events` (`{at, kind, text, pos, x, y}`, kinds death, wipe, boss, section, open, loot,
+use) is kept per agent by the dashboard process, from the run report (its death list with times, `wipes`, finished legs: a finished leg with a
+boss is a boss kill, named from the plan's notes) and from the accepted open, loot and use orders of the trace; at most 80, reset by a new run. An
+event seen already in the first report after the dashboard started has no time of its own (the kill of a boss is stamped when the leg is seen
+finished, to the poll); a pin sits where the bot died, at the boss's place, or at the party for an order.
+
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
 answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.

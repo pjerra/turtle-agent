@@ -38,6 +38,14 @@
     { key: "critter", label: "Critters", group: "Mobs", def: false, needs: "critter", why: "no critter in the feed" },
     { key: "threat", label: "Threat lines (mob to whom it targets)", group: "Mobs", def: false, needs: "threat", why: "no mob has a target I can place" },
     { key: "aggro", label: "Aggro range (20 yd) around pull targets", group: "Mobs", def: false, needs: "pulltargets", why: "no pull target now" },
+    { key: "hostilenames", label: "Names of hostile mobs", group: "Marks", def: false, needs: "hostile", why: "no hostile mob in the feed" },
+    { key: "bossmark", label: "Boss mark (bigger ring, crown, name always shown)", group: "Marks", def: true, needs: "bossmob", why: "no boss in the feed now" },
+    { key: "hpbars", label: "Health bars over units", group: "Marks", def: true, needs: "hpunits", why: "no unit with a health reading" },
+    { key: "statusicons", label: "Status icons (dead, casting, crowd controlled, resting, fleeing)", group: "Marks", def: false, needs: "status", why: "no unit has a status to show now" },
+    { key: "threatcolors", label: "Threat colours (ring = whom a mob attacks), tank's target, pull target", group: "Marks", def: false, needs: "threatcolor", why: "no mob has a target I can place" },
+    { key: "events", label: "Event pins (deaths, wipes, boss kills, doors and chests)", group: "Run", def: false, needs: "events", why: "nothing has happened in this run yet" },
+    { key: "feed", label: "Event feed under the map", group: "Run", def: false, needs: "events", why: "nothing has happened in this run yet" },
+    { key: "runinfo", label: "Run timer, section and boss checklist", group: "Run", def: false, needs: "runinfo", why: "no run on this card" },
   ];
 
   const keys = () => DEFS.map((d) => d.key);
