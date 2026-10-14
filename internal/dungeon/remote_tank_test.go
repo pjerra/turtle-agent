@@ -119,6 +119,34 @@ func TestRemoteLooseAddOrdersHaveACooldown(t *testing.T) {
 	}
 }
 
+func TestRemoteTankStaysOnOneLooseAddAtATime(t *testing.T) {
+	g, a, b, _ := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold, b.hold = gMage, gMage // both loose on the mage
+		g.ignorePull = true           // the tank never takes them
+		g.killRate = 2                // the fight lasts a minute
+	}, opts())
+	type sent struct {
+		mob string
+		at  time.Time
+	}
+	var tankOrders []sent
+	for i, o := range g.orders {
+		if strings.HasPrefix(o, "cmd attack ") && strings.HasSuffix(o, " Tanky") {
+			tankOrders = append(tankOrders, sent{strings.Fields(o)[2], g.orderAt[i]})
+		}
+	}
+	mobs := map[string]bool{}
+	for i, o := range tankOrders {
+		mobs[o.mob] = true
+		if i > 0 && o.mob != tankOrders[i-1].mob && o.at.Sub(tankOrders[i-1].at) < tankSwitchHold {
+			t.Fatalf("the tank was sent from %s to %s %v later (orders %v; a %s b %s)", tankOrders[i-1].mob, o.mob, o.at.Sub(tankOrders[i-1].at), tankOrders, tbm.GUIDArg(a.guid), tbm.GUIDArg(b.guid))
+		}
+	}
+	if len(mobs) != 2 {
+		t.Fatalf("the tank was sent at %v, want both adds in turn", tankOrders)
+	}
+}
+
 func TestRemoteStunnedMobStaysTheFocus(t *testing.T) {
 	// The feed's `c` flag covers stuns and roots too. A mob the party is fighting that gets stunned (no cc order for it) is not
 	// abandoned: the party does not turn to the other mob and back.
