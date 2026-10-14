@@ -218,6 +218,11 @@ type RemoteReport struct {
 	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
 	// other (no revive, aura or visibility).
 	GMCommands int `json:"gm_commands"`
+	// RunGMAssists is the GM `.appear <lead bot>` lines sent DURING the run to keep the agent's character near the party (a GM account;
+	// remote_near.go). They are GM assists, not part of the party's play: gm_commands does not count them, so a target of "0 GM commands"
+	// has to read this counter too. AgentWalks is the walks of the agent's own character behind the party (any other account).
+	RunGMAssists int `json:"run_gm_assists"`
+	AgentWalks   int `json:"agent_walks"`
 	// Enter is the enter phase (absent when the party was already inside the plan's map).
 	Enter *EnterReport `json:"enter,omitempty"`
 
@@ -353,9 +358,11 @@ type RemoteDriver struct {
 	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
-	obj           objState           // the object steps' carrier, corpses and step reports (remote_objects.go)
-	team          string             // the party's team for the team gate ("" when unknown: everything runs)
-	killedAt      map[uint32][]Point // where mobs of an entry were killed in this run (evidence that a pack is gone)
+	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
+	team          string                     // the party's team for the team gate ("" when unknown: everything runs)
+	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
+	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
+	near          nearState                  // the agent kept near the party (remote_near.go)
 
 	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	trSeen    uint64             // the feed frame count the trace last took
@@ -476,6 +483,10 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := d.nearBeforeObjectStep(ctx); err != nil {
+			d.stepFailedRecover(ctx, err)
+			continue
+		}
 		d.objectTouched = false
 		a := d.st.Next()
 		d.noteSkipped()
@@ -518,7 +529,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		var err error
 		switch a.Kind {
 		case ActWalk:
-			err = d.tracedWalk(ctx, a.To)
+			if err = d.tracedWalk(ctx, a.To); err == nil {
+				_, err = d.keepNear(ctx) // the leg's walk is over: bring the agent up
+			}
 		case ActPull:
 			err = d.doPull(ctx, a)
 		case ActKill:
@@ -583,6 +596,7 @@ func objectStepKind(st Step) string {
 // It reports whether the run goes on.
 func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
+		d.ledgerClearAbsences()
 		d.rep.update(func(r *Report) { r.Wipes++ })
 		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
 		d.rep.note(err.Error())
@@ -871,6 +885,7 @@ func (d *RemoteDriver) look() {
 	}
 	if !d.haveFr || n != d.n {
 		d.fr, d.n, d.haveFr = fr, n, true
+		d.noteLedger()
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
 		}

@@ -44,6 +44,9 @@ func attackGUIDs(g *fakeRemote) []string {
 	var out []string
 	for _, o := range g.ordersOf("cmd attack") {
 		f := strings.Fields(o)
+		if len(f) > 3 {
+			continue // bot-scoped: the tank alone at a loose add
+		}
 		if len(out) == 0 || out[len(out)-1] != f[2] {
 			out = append(out, f[2])
 		}
@@ -80,12 +83,13 @@ func TestRemoteTankIsSentAtALooseAdd(t *testing.T) {
 			}
 		}
 	}, opts())
-	pulls := g.ordersOf("cmd pull ")
-	if len(pulls) != 1 || pulls[0] != "cmd pull "+tbm.GUIDArg(a.guid)+" 0" || rep.Remote.LooseAddOrders != 1 {
-		t.Fatalf("pulls %v %+v", pulls, rep.Remote)
+	// The tank goes alone (`cmd attack <guid> <tank>`, #928), never as a `cmd pull` (refused tank-busy while it melees).
+	sent := g.ordersOf("cmd attack " + tbm.GUIDArg(a.guid) + " ")
+	if len(sent) != 1 || sent[0] != "cmd attack "+tbm.GUIDArg(a.guid)+" Tanky" || rep.Remote.LooseAddOrders != 1 || len(g.ordersOf("cmd pull ")) != 0 {
+		t.Fatalf("orders %v %+v", g.orders, rep.Remote)
 	}
 	// It came after the mob had hit the mage for looseGrace, not at once.
-	if at := g.orderAt[g.indexOf("cmd pull ")]; at.Sub(engagedAt) < looseGrace {
+	if at := g.orderAt[g.indexOf("cmd attack "+tbm.GUIDArg(a.guid)+" Tanky")]; at.Sub(engagedAt) < looseGrace {
 		t.Fatalf("the tank was sent %v after the mob engaged", at.Sub(engagedAt))
 	}
 }
@@ -98,7 +102,7 @@ func TestRemoteLooseAddOrdersHaveACooldown(t *testing.T) {
 	}, opts())
 	var at []time.Time
 	for i, o := range g.orders {
-		if strings.HasPrefix(o, "cmd pull ") {
+		if strings.HasSuffix(o, " Tanky") && strings.HasPrefix(o, "cmd attack ") {
 			at = append(at, g.orderAt[i])
 		}
 	}
@@ -266,11 +270,30 @@ func TestRemoteLooseGraceCountsFromTheMoveOffTheTank(t *testing.T) {
 			}
 		}
 	}, opts())
-	i := g.indexOf("cmd pull ")
+	i := g.indexOf("cmd attack " + tbm.GUIDArg(a.guid) + " Tanky")
 	if i < 0 || !strings.Contains(g.orders[i], tbm.GUIDArg(a.guid)) || rep.Remote.LooseAddOrders < 1 {
-		t.Fatalf("pulls %v %+v", g.ordersOf("cmd pull "), rep.Remote)
+		t.Fatalf("pulls %v %+v", g.ordersOf("cmd attack "), rep.Remote)
 	}
 	if d := g.orderAt[i].Sub(movedAt); d < looseGrace {
 		t.Fatalf("the tank was sent %v after the mob left it", d)
+	}
+}
+
+// A module that ignores the bot name answers party-scoped: the loose-add orders stop for the run.
+func TestRemoteLooseAddOrdersStopOnAPartyScopedAnswer(t *testing.T) {
+	g, _, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold = gMage
+		g.ignorePull = true
+		g.killRate = 2
+		g.oldModule = true
+	}, opts())
+	n := 0
+	for _, o := range g.ordersOf("cmd attack ") {
+		if strings.HasSuffix(o, " Tanky") {
+			n++
+		}
+	}
+	if n != 1 || rep.Remote.LooseAddOrders != 1 || !strings.Contains(notesOf(rep), "no more loose-add orders this run") {
+		t.Fatalf("orders %d %+v\n%s", n, rep.Remote, notesOf(rep))
 	}
 }

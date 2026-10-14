@@ -286,3 +286,28 @@ func (g remoteGame) TeleName(ctx context.Context, player, location string) error
 // Recent and Record implement dungeon.EntryLedger over the account's ledger file.
 func (g remoteGame) Recent(now time.Time) []time.Time { return g.c.ledger.Recent(now) }
 func (g remoteGame) Record(now time.Time) error       { return g.c.ledger.Record(now) }
+
+// Keeping the agent near the party (dungeon.Follower): its own character follows the bots after each leg's walk and before the object
+// steps. `.appear` is a GM line; it is a setup shortcut of the run (the driver reports it so), not a run GM command.
+
+func (g remoteGame) AgentPlace() (dungeon.Point, uint32, bool) {
+	st := g.c.cur().Status()
+	return dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}, st.Map, st.State == session.StatusInWorld
+}
+
+// Appear sends ".appear <player>"; the name is checked first.
+func (g remoteGame) Appear(ctx context.Context, player string) error {
+	if !botName.MatchString(player) {
+		return fmt.Errorf("appear: %q is not a bot name", player)
+	}
+	return g.c.cur().GM(ctx, ".appear "+player)
+}
+
+// WalkSelf is walk_path for the agent's character.
+func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.WalkResult, error) {
+	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
+	return dungeon.WalkResult{Result: r.Result, Reason: r.Reason, DistLeft: r.DistLeft}, err
+}
+
+// Units implements dungeon.UnitSource: the units in the agent's own view (a boss corpse the feed does not list).
+func (g remoteGame) Units() []objects.Unit { return g.c.cur().Units(objects.Filter{Limit: 5000}) }

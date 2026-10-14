@@ -54,13 +54,21 @@ func (d *RemoteDriver) noteKilled(res fightResult) {
 }
 
 // bossDead says whether a unit of the entries the step picks (the boss) is known dead: killed in a won pull of this run (its own, or a
-// First add's it joined), or listed dead in the feed (near the position; for a boss encounter within 80 yd of the lead bot, like the
+// First add's it joined), fought and then gone in any fight of the run (the kill ledger), or listed dead in the feed (near the position; for a boss encounter within 80 yd of the lead bot, like the
 // group driver's deadInView).
 func (d *RemoteDriver) bossDead(sp fightSpec) (bool, string) {
 	for _, e := range sp.pick {
 		if len(d.killedAt[e]) > 0 {
 			return true, "killed in this run"
 		}
+	}
+	// It may have died in another group's fight (a joiner that pull did not track): the kill ledger saw it fight and then die or go.
+	if d.ledgerDead(sp.pick) {
+		return true, "killed in this run, in another fight (seen fighting, then dead or gone from two whole frames)"
+	}
+	// Or its corpse stands in the agent's own view (a boss killed before this driver ran: a resume).
+	if d.bossCorpseSeen(sp) {
+		return true, "its corpse is in the agent's view"
 	}
 	for _, h := range d.fr.Hostiles {
 		if h.Entry == 0 || h.HPPct > 0 || !slices.Contains(sp.pick, h.Entry) {

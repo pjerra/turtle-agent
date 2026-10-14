@@ -164,6 +164,9 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			// A boss that died, in its own pull or in a First add's that it joined, is not in the feed any more (the feed lists no
 			// corpses for long): the kill this run (or its corpse in view) is the evidence, as the group driver's deadInView.
 			if sp.required {
+				if err := d.nearForBoss(ctx, sp); err != nil {
+					return err
+				}
 				if dead, why := d.bossDead(sp); dead {
 					d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
 					return nil
@@ -433,6 +436,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		return res, err
 	}
 	began := d.clk.Now()
+	limit := sp.limit
 	tracked := map[packet.GUID]bool{t.GUID: true}
 	last := map[packet.GUID]tbm.HostileRec{t.GUID: t} // each tracked mob as the feed last showed it: where a kill happened
 	for _, h := range d.candidates(sp, sp.track) {
@@ -471,8 +475,12 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		}
 		now := d.clk.Now()
 		for _, h := range d.fr.Hostiles {
-			// A member of the encounter that joins is part of it.
-			if h.HPPct > 0 && d.engagedWith(h) && slices.Contains(sp.track, h.Entry) && !slices.Contains(sp.skip, h.Entry) {
+			// Anything that joins the fight is part of it, the step's own entries or not: a boss that comes into a group's fight and
+			// dies there is that fight's kill (a unit of another entry used to be left untracked, and its death went unrecorded).
+			if h.HPPct > 0 && h.Entry != 0 && d.engagedWith(h) && !slices.Contains(sp.skip, h.Entry) {
+				if !tracked[h.GUID] && !slices.Contains(sp.track, h.Entry) {
+					limit = max(limit, d.cfg.BossTimeout) // a boss's fight can be longer than a pack's
+				}
 				tracked[h.GUID], last[h.GUID] = true, h
 			}
 		}
@@ -487,7 +495,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 					absent[g]++
 				}
 				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
-					if fought[g] {
+					// The pulled mob and its group's entries: gone after fighting is dead. A joiner of another entry (a boss) is dead only
+					// when it was nearly dead with a bot by (the ledger's rule): one chased out of view alive is no kill.
+					if fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])) {
 						killed[g] = true
 					}
 					delete(tracked, g)
@@ -537,8 +547,8 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			return fightResult{out: noEngage, kills: len(killed), dead: deadOf()}, nil
 		case engaged && now.Sub(lastCombat) > d.cfg.EvadeGrace:
 			return fightResult{out: evaded, kills: len(killed), dead: deadOf()}, nil
-		case now.Sub(began) > sp.limit:
-			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
+		case now.Sub(began) > limit:
+			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, limit.Seconds())
 		}
 		if engaged && len(fightingMobs) > 0 {
 			if err := d.assistEvery(ctx, fightingMobs, &lastAssist); err != nil {
