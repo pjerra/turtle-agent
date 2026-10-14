@@ -126,6 +126,9 @@ type methodOptions struct {
 	// AccountProbeWindow is how long a dungeon run waits for the server's answer to its ".account" probe; 0 means 2 s. The
 	// tests shorten it: their server never answers, and the wait would race their own.
 	AccountProbeWindow time.Duration
+	// EntryLedgerPath is the file that keeps the account's instance entries of the last hour (a remote run's enter phase refuses a 6th);
+	// empty keeps them in memory only.
+	EntryLedgerPath string
 }
 
 // registerMethodsFor wires the spec's JSON-RPC methods, and every later milestone's, to whatever
@@ -247,7 +250,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerPetMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
-	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner)
+	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner, opts.EntryLedgerPath, opts.AccountProbeWindow)
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {

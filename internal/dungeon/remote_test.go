@@ -101,6 +101,12 @@ type fakeRemote struct {
 	moveOrderDest []Point // and the point it was sent to
 	moveOrderAt   []time.Time
 	killTimes     []time.Time // when each mob died
+
+	// the enter-phase tests: memberMap puts single bots on another map than mapID; busyFor keeps the tank (the first bot) in combat that
+	// long after a tank-busy refusal.
+	memberMap   map[packet.GUID]uint32
+	busyFor     time.Duration
+	combatUntil time.Time
 }
 
 func newFakeRemote(t *testing.T) *fakeRemote {
@@ -198,6 +204,9 @@ func (g *fakeRemote) advance(d time.Duration) {
 			}
 		}
 	}
+	if g.now.Before(g.combatUntil) && !g.party[0].Dead {
+		g.party[0].State = "c"
+	}
 	if !anyEngaged && g.allRested() {
 		g.resting = false
 	}
@@ -244,6 +253,9 @@ func (g *fakeRemote) publish() {
 	for _, p := range g.party {
 		c := *p
 		c.Map = g.mapID
+		if m, ok := g.memberMap[p.GUID]; ok {
+			c.Map = m
+		}
 		f.Party = append(f.Party, c)
 	}
 	for _, m := range g.mobs {
@@ -296,6 +308,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 	intent := f[0] + " " + f[1]
 	if codes := g.cmdErr[f[1]]; f[0] == "cmd" && len(codes) > 0 {
 		g.cmdErr[f[1]] = codes[1:]
+		if codes[0] == "tank-busy" {
+			g.combatUntil = g.now.Add(g.busyFor)
+		}
 		return errReply(intent, codes[0]), nil
 	}
 	switch intent {

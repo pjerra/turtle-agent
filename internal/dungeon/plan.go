@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -43,9 +44,21 @@ type Plan struct {
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
 	// database; Uldaman 286). A ghost whose corpse lies inside sends it at the portal to be taken in and revived (the client
 	// does the same on stepping into it). Without it a corpse run into the dungeon is refused; the rest of the run does not need it.
-	EntranceTrigger uint32   `json:"entrance_trigger,omitempty"`
-	Notes           []string `json:"notes,omitempty"`
-	Legs            []Leg    `json:"legs"`
+	EntranceTrigger uint32 `json:"entrance_trigger,omitempty"`
+	// EntranceTele is the name of the game_tele row that puts a player at the entrance inside the dungeon (Uldaman "ulda", game_tele
+	// 169): a remote run's enter phase sends `.tele name <lead bot> <name>` with it when the account is a developer-level GM.
+	EntranceTele string `json:"entrance_tele,omitempty"`
+	// Portal is the entrance portal on the outer map (the area trigger of EntranceTrigger): where a remote run's enter phase walks the
+	// lead bot when it has no GM rights.
+	Portal *Portal  `json:"portal,omitempty"`
+	Notes  []string `json:"notes,omitempty"`
+	Legs   []Leg    `json:"legs"`
+}
+
+// Portal is a point of the outer map: the centre of the entrance's area trigger.
+type Portal struct {
+	Map uint32 `json:"map"`
+	Point
 }
 
 // Leg is one stretch of the dungeon. The driver walks to To, clears PullGroups in order, runs Steps in order, then
@@ -216,8 +229,15 @@ type rawPlan struct {
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
 	Trigger  uint32            `json:"entrance_trigger"`
+	Tele     string            `json:"entrance_tele"`
+	Portal   *rawPortal        `json:"portal"`
 	Notes    []string          `json:"notes"`
 	Legs     []json.RawMessage `json:"legs"`
+}
+
+type rawPortal struct {
+	Map     *uint32 `json:"map"`
+	X, Y, Z *float32
 }
 
 type rawLeg struct {
@@ -358,6 +378,18 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	p.Entrance = c.point("entrance", rp.Entrance)
 	p.EntranceTrigger = rp.Trigger
+	if rp.Tele != "" && !teleName.MatchString(rp.Tele) {
+		c.fail("entrance_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Tele)
+	} else {
+		p.EntranceTele = rp.Tele
+	}
+	if rp.Portal != nil {
+		if rp.Portal.Map == nil {
+			c.fail("portal.map", "required (the outer map id)")
+		} else {
+			p.Portal = &Portal{Map: *rp.Portal.Map, Point: c.point("portal", &rawPoint{rp.Portal.X, rp.Portal.Y, rp.Portal.Z})}
+		}
+	}
 	if len(rp.Legs) == 0 {
 		c.fail("legs", "needs at least one leg")
 	}
@@ -388,6 +420,9 @@ func strict(data []byte, v any) error {
 	}
 	return nil
 }
+
+// teleName is what a game_tele name may be here: it goes into a GM command line.
+var teleName = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
 
 func (c *checker) point(path string, p *rawPoint) Point {
 	if p == nil {

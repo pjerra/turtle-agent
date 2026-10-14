@@ -295,6 +295,7 @@ func kitFake(t *testing.T) *botFake {
 	g := &botFake{fakeRemote: newFakeRemote(t), replies: map[string][]string{}}
 	for _, n := range []string{"Tanky", "Healy", "Magey"} {
 		g.replies["maintenance "+n] = []string{"Maintained " + n + " (consumables, reagents, ammo, repair)."}
+		g.replies["command "+n+" talents"] = []string{"Forwarded command for " + n + ": talents; action success is not guaranteed.", "My current talent spec is: Protection (0/5/31) Link: 05-31"}
 	}
 	water, bow, gun, arrow, shield := drinkEntries[0], arrowWeaponEntries[0], bulletWeaponEntries[0], arrowEntries[0], shieldEntries[0]
 	_ = bow
@@ -338,7 +339,7 @@ func TestRemotePreflightReportsWhatIsMissing(t *testing.T) {
 		t.Fatalf("%v", g.lines)
 	}
 	// Maintenance goes out before any inventory is read, and before the first order of the run.
-	if g.lines[0] != "maintenance Tanky" || g.lines[3] != "inv Tanky" {
+	if g.lines[0] != "maintenance Tanky" || g.lines[3] != "command Tanky talents" || g.lines[4] != "inv Tanky" {
 		t.Fatalf("%v", g.lines)
 	}
 }

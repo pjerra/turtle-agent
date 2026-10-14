@@ -117,16 +117,34 @@ var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": t
 // botNameRe is what a bot's name can be (1.12 names are letters).
 var botNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
 
-// CheckBotLine refuses a line that is not "<maintenance|inv|logout> <bot name>".
+// CheckBotLine refuses a line that is not "<maintenance|inv|logout> <bot name>" or "command <bot name> talents". The talents
+// read-back is the only `.bot command` the agent sends here: any other word after it (reset, auto, a build link) would change
+// the bot's talents.
 func CheckBotLine(command string) error {
 	f := strings.Fields(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot ")))
+	if len(f) == 3 && strings.EqualFold(f[0], "command") && f[2] == "talents" {
+		if !botNameRe.MatchString(f[1]) {
+			return fmt.Errorf("%q: %q is not a bot name", command, f[1])
+		}
+		return nil
+	}
 	if len(f) != 2 || !botLineVerbs[strings.ToLower(f[0])] {
-		return fmt.Errorf("%q: Lines sends maintenance, inv or logout with one bot name", command)
+		return fmt.Errorf("%q: Lines sends maintenance, inv or logout with one bot name, or command <bot name> talents", command)
 	}
 	if !botNameRe.MatchString(f[1]) {
 		return fmt.Errorf("%q: %q is not a bot name", command, f[1])
 	}
 	return nil
+}
+
+// replyFrom is the bot whose chat reply a line sent to the bot is read with: the name of "command <bot> ...". The bot answers a
+// forwarded command in its own words (a whisper to the sender), not with a system line.
+func replyFrom(command string) string {
+	f := strings.Fields(command)
+	if len(f) >= 2 && strings.EqualFold(f[0], "command") {
+		return f[1]
+	}
+	return ""
 }
 
 // maxLines bounds the lines one Lines call keeps.
@@ -154,10 +172,22 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 	defer cancel()
 	lines = []string{}
 	cursor := since
+	from := replyFrom(command)
+	kinds := []string{events.KindSystem, events.KindAddon}
+	if from != "" {
+		kinds = append(kinds, events.KindWhisper, events.KindChat)
+	}
 	for {
-		p := log.Read(events.Query{Since: cursor, Kinds: []string{events.KindSystem, events.KindAddon}, Limit: events.MaxLimit})
+		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
 		for _, e := range p.Events {
-			line, ok := LineOf(e)
+			var line string
+			var ok bool
+			if e.Kind == events.KindWhisper || e.Kind == events.KindChat {
+				// Only the named bot's own words count (not a whisper inform of ours, not another player's chat).
+				line, ok = e.Text, from != "" && strings.EqualFold(e.Source, from) && e.Text != "" && e.Data["type"] != "whisper_inform"
+			} else {
+				line, ok = LineOf(e)
+			}
 			if !ok || strings.HasPrefix(line, ViewPrefix) {
 				continue
 			}
@@ -179,4 +209,32 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 			return lines, false, nil
 		}
 	}
+}
+
+// Talents is what a bot answered to `.bot command <bot> talents`: "My current talent spec is: Protection (0/5/31) Link: ...".
+type Talents struct {
+	Trees [3]int // the points spent in each tree
+	Total int
+}
+
+var (
+	talentsRe = regexp.MustCompile(`(?i)talent spec is:.*?\((\d+)/(\d+)/(\d+)\)`)
+	// markup is the colour and link codes the module's text carries; a stray "|h" survives the session's colour strip.
+	markup = regexp.MustCompile(`(?i)\|c[0-9a-f]{8}|\|[hr]`)
+)
+
+// ParseTalents reads the spent points per tree out of the bot's reply lines; ok is false when none of them is the spec line.
+func ParseTalents(lines []string) (t Talents, ok bool) {
+	for _, l := range lines {
+		m := talentsRe.FindStringSubmatch(markup.ReplaceAllString(l, ""))
+		if m == nil {
+			continue
+		}
+		for i := range t.Trees {
+			t.Trees[i], _ = strconv.Atoi(m[i+1])
+			t.Total += t.Trees[i]
+		}
+		return t, true
+	}
+	return Talents{}, false
 }

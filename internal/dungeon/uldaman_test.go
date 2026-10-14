@@ -78,6 +78,10 @@ func TestUldamanPlanLoads(t *testing.T) {
 		k.Steps[1].WaitFor.GameObject.Entry != 124372 || k.Steps[1].WaitFor.GameObject.State != "active" {
 		t.Fatalf("%+v", k)
 	}
+	// The enter phase's data: the game_tele name and the portal on the outer map.
+	if p.EntranceTele != "ulda" || p.Portal == nil || p.Portal.Map != 0 || p.EntranceTrigger != 286 {
+		t.Errorf("tele %q portal %+v trigger %d", p.EntranceTele, p.Portal, p.EntranceTrigger)
+	}
 	// The file is kept in the form Marshal writes, so regenerating it shows only real changes.
 	raw, err := os.ReadFile(uldamanPlan)
 	if err != nil {
@@ -370,5 +374,28 @@ func TestUldamanRequiredItemsChain(t *testing.T) {
 	g.bag = append(g.bag, objects.Item{Entry: 7740, Count: 1})
 	if err := d.checkRequiredItems(1); err != nil {
 		t.Fatalf("from revelosh the Shaft comes from the boss and the Staff from the use_item: %v", err)
+	}
+}
+
+func TestPlanEntryFields(t *testing.T) {
+	const head = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},`
+	const legs = `"legs":[{"to":{"x":1,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`
+	p, err := Parse("t.json", []byte(head+`"entrance_tele":"ulda","portal":{"map":0,"x":-6053.7,"y":-2954.6,"z":213.7},`+legs))
+	if err != nil || p.EntranceTele != "ulda" || p.Portal == nil || p.Portal.X != -6053.7 || p.Portal.Map != 0 {
+		t.Fatalf("%v %+v", err, p)
+	}
+	if out, err := Marshal(p); err != nil || !bytes.Contains(out, []byte(`"entrance_tele": "ulda"`)) {
+		t.Fatalf("%v %s", err, out)
+	}
+	for in, want := range map[string]string{
+		`"entrance_tele":"ulda; .gm on",`:             "entrance_tele",
+		`"portal":{"x":1,"y":2,"z":3},`:               "portal.map",
+		`"portal":{"map":0,"x":1,"y":2},`:             "portal.z",
+		`"portal":{"map":0,"x":1,"y":2,"z":3,"w":4},`: "unknown field",
+		`"entrance_tele":"a b",`:                      "entrance_tele",
+	} {
+		if _, err := Parse("t.json", []byte(head+in+legs)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", in, err)
+		}
 	}
 }

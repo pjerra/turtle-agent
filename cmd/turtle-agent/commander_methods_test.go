@@ -172,6 +172,8 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","enter":"fly"}`, "enter:"},
+		{`{"name":"rig","mode":"group","enter":"gm"}`, "go with mode"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
@@ -209,6 +211,9 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot maintenance Tanky"))
 	r.system("Maintained Tanky (consumables, reagents, ammo, repair).")
+	// The talents read-back: the one `.bot command` line the agent sends, answered here as a system line.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot command Tanky talents"))
+	r.system("My current talent spec is: Protection (0/5/31) Link: 05-31")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot inv Tanky"))
 	r.system("TBM:INV_BEGIN|Tanky|0", "TBM:INV_EQ|16|2000|10|10", "TBM:INV_END|Tanky|10|16")
 	// The end of the run: the bots are stood still, then the binding is ended.
@@ -235,8 +240,53 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	if rem["end_stay"] != "ack" {
 		t.Fatalf("end_stay: %v", rem)
 	}
-	if pf, _ := rem["preflight"].(map[string]any); pf == nil || pf["bots"].([]any)[0].(map[string]any)["maintenance"] != "maintained" {
+	if pf, _ := rem["preflight"].(map[string]any); pf == nil || pf["bots"].([]any)[0].(map[string]any)["maintenance"] != "maintained" || pf["bots"].([]any)[0].(map[string]any)["talents"] != "0/5/31" {
 		t.Fatalf("preflight: %v", rem["preflight"])
+	}
+}
+
+// A remote run whose lead bot is outside the plan's map enters it: with enter "gm" the agent teleports the lead bot with the one GM line
+// `.tele name`, sends nothing else of the sort, waits for the feed to show the bot on the plan's map, and goes on. The agent is not in a
+// group and stays outside.
+func TestDungeonRunRemoteEntersByTele(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"version":1,"name":"rem","map":70,"entrance":{"x":5,"y":5,"z":5},"entrance_tele":"ulda","legs":[{"name":"here","to":{"x":5,"y":5,"z":5},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "rem.json"), []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"gm","preflight":"off"}`))
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
+	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
+	r.system("TBM:ACTION_ACK|commander view|party|2|on")
+	r.system(viewFrame(1, false)...) // outside: map 0
+	r.expectBody(opcode.CMSGMessagechat, say(".tele name Tanky ulda"))
+	inside := viewFrame(2, false)
+	inside[1] = strings.Replace(inside[1], ",1.50,0,0,", ",1.50,70,0,", 1)
+	r.system(inside...)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
+	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|1|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
+	r.system("TBM:ACTION_ACK|commander unbind|party|1|0")
+	var st map[string]any
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		st = resultOf(t, r.call("dungeon_status", `{}`))
+		if st["state"] == "done" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if st["state"] != "done" {
+		t.Fatalf("%v", st)
+	}
+	rem := st["report"].(map[string]any)["remote"].(map[string]any)
+	en, _ := rem["enter"].(map[string]any)
+	if en == nil || en["method"] != "gm" || en["tele"] != "ulda" || en["entries"].(float64) != 1 || en["agent_left_group"] != false || rem["gm_commands"].(float64) != 1 {
+		t.Fatalf("enter: %v / %v", en, rem["gm_commands"])
 	}
 }
 
@@ -248,7 +298,7 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))

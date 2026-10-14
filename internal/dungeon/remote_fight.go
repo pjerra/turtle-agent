@@ -372,6 +372,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // sendPull sends the pull order for t and reads the answer. done is true when the pull is over with res (refused, lost); false when
 // the order went (or fell back to attack) and the fight is on.
 func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res fightResult, done bool, err error) {
+	busy := 0
 	for try := 0; try < 3; try++ {
 		r, err := d.order(ctx, "pullback", tbm.GUIDArg(t.GUID))
 		if err != nil {
@@ -391,6 +392,21 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 			if err := d.approach(ctx, hostilePoint(t), 20); err != nil {
 				return fightResult{}, true, err
 			}
+			continue
+		case ref.Code == "tank-busy":
+			// The only tank is in combat (it cannot start a pull while it fights): wait for the fight to end or the mob to come, then
+			// pull again. Never an attack order in its place: the party would go in with no tank holding the mob.
+			if busy++; busy > maxTankBusyRounds {
+				return fightResult{out: noEngage, why: fmt.Sprintf("tank-busy: the tank was still fighting after %d waits of %.0f s", maxTankBusyRounds, d.opt.TankBusyWait.Seconds())}, true, nil
+			}
+			engaged, err := d.waitTankFree(ctx, t)
+			if err != nil {
+				return fightResult{}, true, err
+			}
+			if engaged {
+				return fightResult{}, false, nil // the mob came to the party by itself: the fight is on
+			}
+			try-- // a wait is not a failed pull
 			continue
 		case ref.Code == "no-tank":
 			// No bot of the party is a tank: the party goes in as it is.
@@ -854,4 +870,44 @@ func (d *RemoteDriver) holdHere(ctx context.Context) {
 	if _, bad := refusedOf(r); !bad {
 		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
 	}
+}
+
+// maxTankBusyRounds bounds the waits of one pull for a tank that stays in combat.
+const maxTankBusyRounds = 3
+
+// waitTankFree waits up to TankBusyWait, polling the feed, until the tank is out of combat or t is engaged with the party. It reports
+// whether t is engaged. The tank is the named (or inferred) one; with none known, the whole party stands for it.
+func (d *RemoteDriver) waitTankFree(ctx context.Context, t tbm.HostileRec) (engaged bool, err error) {
+	d.remote(func(r *RemoteReport) { r.TankBusyWaits++ })
+	d.rep.note(fmt.Sprintf("pull of %s: the module answered tank-busy; waiting up to %.0f s for the tank to leave its fight", d.hostileName(t), d.opt.TankBusyWait.Seconds()))
+	deadline := d.clk.Now().Add(d.opt.TankBusyWait)
+	for {
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return false, err
+		}
+		if h, ok := d.fr.Hostile(t.GUID); ok && d.engagedWith(h) {
+			return true, nil
+		}
+		if !d.stale() && !d.tankFighting() {
+			return false, nil
+		}
+		if !d.clk.Now().Before(deadline) {
+			return false, nil
+		}
+	}
+}
+
+// tankFighting says whether the tank is in combat in the newest frame: the named one if it is in the party, else any bot.
+func (d *RemoteDriver) tankFighting() bool {
+	if d.tank != 0 {
+		if m, ok := d.fr.Member(d.tank); ok {
+			return m.InCombat()
+		}
+	}
+	for _, p := range d.fr.Party {
+		if p.InCombat() {
+			return true
+		}
+	}
+	return false
 }

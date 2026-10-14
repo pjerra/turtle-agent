@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -36,6 +37,9 @@ type commanderService struct {
 	cmdr    *tbm.Commander
 	feed    *tbm.ViewFeed
 	planner *navmesh.Planner
+	// ledger is the account's list of instance entries (the enter phase of a remote run); probeWindow is how long ".account" is awaited.
+	ledger      *entryLedger
+	probeWindow time.Duration
 
 	viewLogEvery atomic.Int64 // 0: no VIEW line is logged; n: every nth frame's lines are (debug)
 	viewLines    atomic.Uint64
@@ -43,12 +47,13 @@ type commanderService struct {
 }
 
 // newCommanderService wires the feed into the session's event log (the log outlives reconnects).
-func newCommanderService(cur func() *session.Session, planner *navmesh.Planner) *commanderService {
+func newCommanderService(cur func() *session.Session, planner *navmesh.Planner, ledgerPath string, probeWindow time.Duration) *commanderService {
 	log := cur().Log()
 	emit := func(kind, text string, data map[string]any) {
 		log.Append(events.Event{Kind: kind, Text: text, Data: data})
 	}
-	c := &commanderService{cur: cur, cmdr: tbm.NewCommander(sessionLink{cur}), feed: tbm.NewViewFeed(log, emit, tbm.DefaultEventEvery), planner: planner}
+	c := &commanderService{cur: cur, cmdr: tbm.NewCommander(sessionLink{cur}), feed: tbm.NewViewFeed(log, emit, tbm.DefaultEventEvery), planner: planner,
+		ledger: &entryLedger{path: ledgerPath}, probeWindow: probeWindow}
 	log.SetIntercept(c.intercept)
 	return c
 }
@@ -183,8 +188,8 @@ func (c *commanderService) view(ctx context.Context, p botViewParams) (botViewRe
 }
 
 // registerCommanderMethods wires commander and bot_view. The returned func removes the log's intercept.
-func registerCommanderMethods(srv *rpc.Server, cur func() *session.Session, planner *navmesh.Planner) (*commanderService, func()) {
-	c := newCommanderService(cur, planner)
+func registerCommanderMethods(srv *rpc.Server, cur func() *session.Session, planner *navmesh.Planner, ledgerPath string, probeWindow time.Duration) (*commanderService, func()) {
+	c := newCommanderService(cur, planner, ledgerPath, probeWindow)
 	srv.Register("commander", rpc.Typed(func(ctx context.Context, p commanderParams) (commanderResult, error) {
 		return c.do(ctx, p)
 	}))
@@ -253,3 +258,31 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	}
 	return out, nil
 }
+
+// The enter phase of a remote run (dungeon.Enterer): the agent's own character, which stays outside and ungrouped, and the one GM
+// command the phase sends.
+
+func (g remoteGame) InGroup() bool    { return g.c.cur().Party().InGroup }
+func (g remoteGame) AgentMap() uint32 { return g.c.cur().Status().Map }
+
+func (g remoteGame) LeaveGroup(ctx context.Context) error { return g.c.cur().LeaveGroup(ctx) }
+
+// AccountLevel reads the account's security level with ".account", as the group driver's probe does.
+func (g remoteGame) AccountLevel(ctx context.Context) (int, bool, error) {
+	return (&sessionGame{cur: g.c.cur, probeWindow: g.c.probeWindow}).ProbeAccount(ctx)
+}
+
+// teleLocation is what a game_tele name can be in the line TeleName sends.
+var teleLocation = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
+
+// TeleName sends ".tele name <bot> <location>": the only GM line the remote run sends. Both words are checked first.
+func (g remoteGame) TeleName(ctx context.Context, player, location string) error {
+	if !botName.MatchString(player) || !teleLocation.MatchString(location) {
+		return fmt.Errorf("tele name: %q %q is not a bot name and a game_tele name", player, location)
+	}
+	return g.c.cur().GM(ctx, ".tele name "+player+" "+location)
+}
+
+// Recent and Record implement dungeon.EntryLedger over the account's ledger file.
+func (g remoteGame) Recent(now time.Time) []time.Time { return g.c.ledger.Recent(now) }
+func (g remoteGame) Record(now time.Time) error       { return g.c.ledger.Record(now) }
