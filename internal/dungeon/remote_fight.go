@@ -133,11 +133,24 @@ func (d *RemoteDriver) ccRule(entry uint32) (CCRule, bool) {
 
 func (d *RemoteDriver) optCC() []CCRule { return d.opt.CC }
 
+// engage pulls the group until it is gone. Its exits (README "Remote mode", G3):
+//   - an error of the rest gate, the pick, a fight, an order or a wait: the run stops;
+//   - nothing to pick, a required step (the boss) known dead (bossDead): done;
+//   - nothing to pick, and confirmGone fails (a position cannot be looked at): error; finds a hostile on its look: pick again;
+//   - nothing to pick, every position confirmed: with given-up mobs, leftOver; a required step not known dead: error ("no living ...
+//     seen"); else done (with kills, or seen empty);
+//   - a stealthed target of a sneak group: sneakPast;
+//   - a won pull, or a lost target (up to maxRetargets): pick again;
+//   - the pulls used up (PullAttempts failed pulls, or the loops cap): leftOver.
+//
+// leftOver passes only with progress (kills, or every mob left refused by the bots), every position seen, and a required step's boss
+// known dead.
 func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) error {
 	if sp.passed == nil {
 		sp.passed = map[packet.GUID]bool{}
 	}
 	kills, retargets := 0, 0
+	cl := newClearing()
 	var gaveUp []passedOver
 	for attempt, loops := 1, 0; attempt <= d.cfg.PullAttempts && loops < 4*d.cfg.PullAttempts+12; loops++ {
 		if err := d.restGate(ctx, true); err != nil {
@@ -148,13 +161,34 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			return err
 		}
 		if !ok {
+			// A boss that died, in its own pull or in a First add's that it joined, is not in the feed any more (the feed lists no
+			// corpses for long): the kill this run (or its corpse in view) is the evidence, as the group driver's deadInView.
+			if sp.required {
+				if dead, why := d.bossDead(sp); dead {
+					d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
+					return nil
+				}
+			}
+			// Nothing of the group in view: it counts as gone only with evidence, else the lead bot walks to its positions to look. This
+			// holds after mobs were given up on too: a position the bots never saw is not cleared by a give-up at another.
+			cleared, why, err := d.confirmGone(ctx, sp, cl)
+			if err != nil {
+				return err
+			}
+			if !cleared {
+				continue // a hostile of the group showed itself on the way: pick it
+			}
 			if len(gaveUp) > 0 {
-				return d.leftOver(label, sp, kills, gaveUp)
+				return d.leftOver(label, sp, kills, gaveUp, cl)
 			}
 			if sp.required {
-				return fmt.Errorf("%s: no living %v seen by the bots", label, sp.pick)
+				return fmt.Errorf("%s: no living %v seen by the bots (%s)", label, sp.pick, why)
 			}
-			d.rep.note(fmt.Sprintf("%s: no living %v seen by the bots; taken as already dead", label, sp.pick))
+			if kills > 0 {
+				d.rep.note(fmt.Sprintf("%s: %d kills; nothing more of %v at its positions: %s", label, kills, sp.pick, why))
+				return nil
+			}
+			d.rep.note(fmt.Sprintf("%s: no living %v seen by the bots; counted as cleared: %s", label, sp.pick, why))
 			return nil
 		}
 		if sp.sneak && t.Stealthed() {
@@ -172,7 +206,12 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		kills += res.kills
 		if res.out == won {
-			return nil
+			// The fight tracked only the pulled mob and what joined it: the group's other positions, out of the bots' sight, are not
+			// known to be clear (G3). Pick again: what is left in view is pulled, else confirmGone clears this position by its kill
+			// (noteKilled) and walks to the others. A won pull has kills, so attempt does not grow; the loops cap bounds a group that
+			// keeps showing mobs.
+			d.noteKilled(res)
+			continue
 		}
 		if res.out == retarget && retargets < maxRetargets {
 			retargets++
@@ -181,6 +220,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		where := fmt.Sprintf("%s at %.0f %.0f", d.hostileName(t), t.X, t.Y)
 		why := map[outcome]string{noEngage: "drew no fight", evaded: "evaded", refused: "was refused (" + res.why + ")", retarget: "was lost (" + res.why + ")"}[res.out]
+		cl.given = append(cl.given, hostilePoint(t)) // the bots saw the spot; the note below names the mob
 		switch {
 		case res.out == refused:
 			d.skipped[t.GUID] = res.why
@@ -204,7 +244,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			return err
 		}
 	}
-	return d.leftOver(label, sp, kills, gaveUp)
+	return d.leftOver(label, sp, kills, gaveUp, cl)
 }
 
 // hostileName names a hostile for the report: the feed has no names, only entries.
@@ -212,22 +252,34 @@ func (d *RemoteDriver) hostileName(h tbm.HostileRec) string {
 	return fmt.Sprintf("entry %d (%s)", h.Entry, h.GUID)
 }
 
-func (d *RemoteDriver) leftOver(label string, sp fightSpec, kills int, gaveUp []passedOver) error {
+// leftOver ends a group whose pulls are used up or whose mobs left in view were all given up on. As in group mode it counts as cleared
+// (noted) with progress: kills, or every mob left refused by the bots. Unlike group mode, progress is not enough (G3): every position of
+// the group needs evidence (positionSure), since a kill at one says nothing about another out of sight; and a required step (the boss)
+// needs the boss known dead, not just kills of its adds, unless the bots refused it outright.
+func (d *RemoteDriver) leftOver(label string, sp fightSpec, kills int, gaveUp []passedOver, cl *clearing) error {
 	allRefused := len(gaveUp) > 0
 	var texts []string
 	for _, g := range gaveUp {
 		allRefused = allRefused && g.refused
 		texts = append(texts, g.text)
 	}
-	if kills > 0 || allRefused {
-		rest := strings.Join(texts, "; ")
-		if rest == "" {
-			rest = "the last pulls drew no fight"
-		}
-		d.rep.note(fmt.Sprintf("%s: gave up with %d kills (%s); counted as cleared", label, kills, rest))
-		return nil
+	if kills == 0 && !allRefused {
+		return fmt.Errorf("%s: %d pulls of %v failed (no fight, or the mobs evaded)", label, d.cfg.PullAttempts, sp.pick)
 	}
-	return fmt.Errorf("%s: %d pulls of %v failed (no fight, or the mobs evaded)", label, d.cfg.PullAttempts, sp.pick)
+	rest := strings.Join(texts, "; ")
+	if rest == "" {
+		rest = "the last pulls drew no fight"
+	}
+	if miss := d.unseenPositions(sp, cl); len(miss) > 0 {
+		return fmt.Errorf("%s: gave up with %d kills (%s), and the group's positions %s were never seen: not counting it as cleared", label, kills, rest, strings.Join(miss, ", "))
+	}
+	if sp.required && !allRefused {
+		if dead, _ := d.bossDead(sp); !dead {
+			return fmt.Errorf("%s: gave up with %d kills (%s), and %v was not seen dead: not counting the boss as killed", label, kills, rest, sp.pick)
+		}
+	}
+	d.rep.note(fmt.Sprintf("%s: gave up with %d kills (%s); counted as cleared", label, kills, rest))
+	return nil
 }
 
 // pickTarget finds the hostile to pull, walking the lead bot up to PullStandoff yards from it when it is out of PullRange (or from
@@ -366,9 +418,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	began := d.clk.Now()
 	tracked := map[packet.GUID]bool{t.GUID: true}
+	last := map[packet.GUID]tbm.HostileRec{t.GUID: t} // each tracked mob as the feed last showed it: where a kill happened
 	for _, h := range d.candidates(sp, sp.track) {
 		if dist3(hostilePoint(h), hostilePoint(t)) <= float64(d.groupRadius(sp)) {
-			tracked[h.GUID] = true
+			tracked[h.GUID], last[h.GUID] = true, h
 		}
 	}
 	engaged := false
@@ -385,6 +438,13 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	lastN := d.n
 	sawEvade := false
+	deadOf := func() []deadAt {
+		var out []deadAt
+		for g := range killed {
+			out = append(out, deadAt{entry: last[g].Entry, at: hostilePoint(last[g])})
+		}
+		return out
+	}
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
 			return fightResult{}, err
@@ -397,7 +457,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		for _, h := range d.fr.Hostiles {
 			// A member of the encounter that joins is part of it.
 			if h.HPPct > 0 && d.engagedWith(h) && slices.Contains(sp.track, h.Entry) && !slices.Contains(sp.skip, h.Entry) {
-				tracked[h.GUID] = true
+				tracked[h.GUID], last[h.GUID] = true, h
 			}
 		}
 		newFrame := d.n != lastN
@@ -420,7 +480,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				}
 				continue
 			}
-			absent[g] = 0
+			absent[g], last[g] = 0, h
 			if h.HPPct <= 0 {
 				killed[g] = true
 				delete(tracked, g)
@@ -451,16 +511,16 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		}
 		switch {
 		case alive == 0 && len(killed) > 0:
-			return fightResult{out: won, kills: len(killed)}, d.afterFight(ctx)
+			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
 		case alive == 0 && sawEvade:
 			return fightResult{out: evaded}, nil
 		case alive == 0:
 			// Everything tracked went without the feed ever showing it fight: nothing was killed.
 			return fightResult{out: noEngage}, nil
 		case !engaged && now.Sub(began) > d.cfg.EngageTimeout:
-			return fightResult{out: noEngage, kills: len(killed)}, nil
+			return fightResult{out: noEngage, kills: len(killed), dead: deadOf()}, nil
 		case engaged && now.Sub(lastCombat) > d.cfg.EvadeGrace:
-			return fightResult{out: evaded, kills: len(killed)}, nil
+			return fightResult{out: evaded, kills: len(killed), dead: deadOf()}, nil
 		case now.Sub(began) > sp.limit:
 			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
 		}

@@ -71,6 +71,18 @@ type RemoteOptions struct {
 	// Healer names the bot the healer mana target applies to (the feed carries no class). Empty: every caster is held to the healer target.
 	Healer string
 	CC     []CCRule
+	// Team is the party's team for the team gate (Boss.Team, PullGroup.Team): "alliance" or "horde". Empty: the game's (the agent's own
+	// race, as the feed carries none), which is right when the bots share the agent's account faction.
+	Team string
+	// Preflight is the pre-run kit check: "warn" (the default; `.bot maintenance` and `.bot inv` for each bot, what is missing is reported),
+	// "strict" (a warning fails the run) or "off".
+	Preflight string
+	// OnEnd is what the run does with the bots at its end: "stay" (the default: `cmd stay` before the unbind, so that they do not follow the
+	// agent), "logout" (stay, unbind, then `.bot logout` for each) or "none".
+	OnEnd string
+	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
+	// 0: 30 s; negative: no wait.
+	RezWait time.Duration
 
 	FeedWait   time.Duration // the first frame after the bind
 	FeedStale  time.Duration // without a new frame this long the feed is "stalled": the loops wait instead of deciding
@@ -96,15 +108,32 @@ type RemoteOptions struct {
 	UnbindWait  time.Duration // the unbind at the end of the run
 }
 
+// Values of RemoteOptions.OnEnd.
+const (
+	OnEndStay   = "stay"
+	OnEndLogout = "logout"
+	OnEndNone   = "none"
+)
+
 // DefaultRemoteOptions are the limits of a live run.
 func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
 		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
-		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second}
+		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second, RezWait: 30 * time.Second}
 }
 
 func (o RemoteOptions) withDefaults() RemoteOptions {
 	d := DefaultRemoteOptions()
+	o.Team, o.Preflight, o.OnEnd = strings.ToLower(o.Team), strings.ToLower(o.Preflight), strings.ToLower(o.OnEnd)
+	if o.Preflight == "" {
+		o.Preflight = PreflightWarn
+	}
+	if o.OnEnd == "" {
+		o.OnEnd = OnEndStay
+	}
+	if o.RezWait == 0 {
+		o.RezWait = d.RezWait
+	}
 	fill := func(dst *time.Duration, def time.Duration) {
 		if *dst <= 0 {
 			*dst = def
@@ -147,9 +176,16 @@ type RemoteReport struct {
 	LeadBot   string   `json:"lead_bot"`
 	Bots      []string `json:"bots"`
 	Tank      string   `json:"tank,omitempty"` // the bot taken for the tank (named, or inferred from the first pull)
+	Team      string   `json:"team,omitempty"` // the team the team gate ran with, and where it came from
 	Bound     bool     `json:"bound"`          // the bind was acknowledged (or unanswered)
 	Unbound   bool     `json:"unbound"`        // the run's end sent the unbind and it was answered
 	UnbindVia string   `json:"unbind_via,omitempty"`
+	// EndStay is the answer to the `cmd stay` sent before the unbind ("ack", "refused: ...", "no answer"); LoggedOut the bots logged out
+	// after it (OnEnd logout).
+	EndStay   string   `json:"end_stay,omitempty"`
+	LoggedOut []string `json:"logged_out,omitempty"`
+	// Preflight is the pre-run kit check (absent with preflight off).
+	Preflight *Preflight `json:"preflight,omitempty"`
 	// EndedByModule is the reason the module gave when it ended the binding itself (lead bot gone, party disbanded, a player joined).
 	EndedByModule string `json:"ended_by_module,omitempty"`
 	// GMCommands is always 0: the remote run sends no GM command (no teleport, revive or aura).
@@ -190,6 +226,10 @@ type RemoteReport struct {
 	LooseAddOrders    int     `json:"loose_add_orders"`
 	CCRespected       int     `json:"cc_respected"`
 	TargetSwitches    int     `json:"target_switches"`
+	RezWaits          int     `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
+	Rezzed            int     `json:"rezzed"`           // bots that got up during those waits
+	PackLooks         int     `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
+	PacksSeenEmpty    int     `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -207,6 +247,8 @@ func (r *RemoteReport) clone() *RemoteReport {
 	}
 	c := *r
 	c.Bots = slices.Clone(r.Bots)
+	c.LoggedOut = slices.Clone(r.LoggedOut)
+	c.Preflight = r.Preflight.clone()
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
 	return &c
@@ -271,6 +313,8 @@ type RemoteDriver struct {
 	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
+	team          string             // the party's team for the team gate ("" when unknown: everything runs)
+	killedAt      map[uint32][]Point // where mobs of an entry were killed in this run (evidence that a pack is gone)
 }
 
 // NewRemoteDriver prepares a run of plan in remote mode. A zero clock is the wall clock.
@@ -281,7 +325,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d := &RemoteDriver{plan: plan, g: g, cfg: cfg.withDefaults(), opt: opt.withDefaults(), clk: clk, curLeg: -1,
 		prevDead: map[packet.GUID]bool{}, revived: map[packet.GUID]int{}, lastRevive: map[packet.GUID]time.Time{},
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
-		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}}
+		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
 	d.rep.init(plan, clk.Now)
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
@@ -370,6 +414,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	if err := d.begin(ctx, fromLeg); err != nil {
 		return err
 	}
+	d.resolveTeam()
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
 	if d.cfg.Resume {
 		if r, ok := d.st.ResumeAt(); ok {
@@ -384,6 +429,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		}
 		d.objectTouched = false
 		a := d.st.Next()
+		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		if d.objectTouched {
 			// The step looked for a game object (the agent sees none): it is a step only the agent could do. Fail before any order.
@@ -512,6 +558,10 @@ func (w remoteWorld) GameObjects() []objects.GameObject {
 	w.d.objectTouched = true // only the object steps and game-object waits ask
 	return nil
 }
+
+// Team makes the world a TeamWorld: the team gate skips what is for the other team (a boss friendly to the party never shows in the feed).
+func (w remoteWorld) Team() string { return w.d.team }
+
 func (w remoteWorld) PartyNear(c Point, r float32) bool {
 	for _, m := range w.d.fr.Party {
 		if !m.Dead && dist3(partyPoint(m), c) <= float64(r) {
@@ -544,6 +594,36 @@ func (d *RemoteDriver) leadPos() (Point, bool) {
 		return Point{}, false
 	}
 	return partyPoint(l), true
+}
+
+// resolveTeam takes the party's team for the team gate: the run's team option, else the game's (the agent's own race; the feed carries
+// no race, and the owned bots share the account's faction). Without either, nothing is gated and the report says so.
+func (d *RemoteDriver) resolveTeam() {
+	src := ""
+	switch {
+	case d.opt.Team != "":
+		d.team, src = d.opt.Team, "the team option"
+	default:
+		if ts, ok := d.g.(TeamSource); ok {
+			if t := ts.Team(); t != "" {
+				d.team, src = t, "the agent's own race (the bots are taken to share it; pass team to override)"
+			}
+		}
+	}
+	if d.team == "" {
+		d.rep.note("team gate: the party's team is unknown (no team option, the agent's race is not known); every team-gated step runs")
+		return
+	}
+	d.remote(func(r *RemoteReport) { r.Team = d.team })
+	d.rep.note(fmt.Sprintf("team gate: %s, from %s", d.team, src))
+}
+
+// noteSkipped reports what the team gate passed over since the last look, in the report and as dungeon_step events.
+func (d *RemoteDriver) noteSkipped() {
+	for _, text := range d.st.Skipped() {
+		d.rep.note(text)
+		d.g.Emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true, "mode": "remote"})
+	}
 }
 
 // begin binds the party, switches the feed on, waits for the first frame and checks the lead bot is where the plan starts.
@@ -600,7 +680,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 			d.rep.note(fmt.Sprintf("tank %s is not in the party of the feed; the tank will be taken from the first pull", d.opt.Tank))
 		}
 	}
-	return nil
+	return d.preflight(ctx)
 }
 
 func botsSuffix(bots []string) string {
@@ -678,6 +758,10 @@ func (d *RemoteDriver) unbind() {
 	d.unbinding = true
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), d.opt.UnbindWait+5*time.Second)
 	defer cancel()
+	if d.opt.OnEnd != OnEndNone {
+		// Once the commander lets go the bots follow their master, the agent, wherever it is: stand them still first.
+		d.endStay(ctx)
+	}
 	r, err := d.g.Command(ctx, "commander unbind")
 	via := ""
 	switch {
@@ -697,6 +781,11 @@ func (d *RemoteDriver) unbind() {
 	})
 	d.rep.note("commander unbind: " + via)
 	d.bound = false
+	if d.opt.OnEnd == OnEndLogout {
+		lctx, lcancel := context.WithTimeout(context.WithoutCancel(context.Background()), 30*time.Second)
+		defer lcancel()
+		d.endLogout(lctx)
+	}
 }
 
 func (d *RemoteDriver) setStats0(s tbm.ViewStats) {
@@ -1197,6 +1286,9 @@ func (d *RemoteDriver) ensureAlive(ctx context.Context) error {
 // reviveDead sends a revive order for every dead bot (the lead bot first) and waits for them to show alive. A member that stays
 // dead after two orders fails the run.
 func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
+	if err := d.waitForRez(ctx, why); err != nil {
+		return err
+	}
 	deadline := d.clk.Now().Add(d.cfg.WipeRecoverTimeout)
 	for {
 		dead := d.deadMembers()
@@ -1225,6 +1317,85 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 			}
 		}
 		if err := d.tick(ctx, d.cfg.Poll*3); err != nil && !errors.Is(err, errWipe) {
+			return err
+		}
+	}
+}
+
+// resurrectors are the living bots out of combat that may raise a dead one: the named healer, else any bot that uses mana (the feed
+// carries no class, so a mage counts; the wait is bounded and a mage's absence of a resurrection costs RezWait at most).
+func (d *RemoteDriver) resurrectors() []tbm.PartyRec {
+	var out []tbm.PartyRec
+	for _, p := range d.fr.Party {
+		if p.Dead || !p.UsesMana() || p.InCombat() {
+			continue
+		}
+		if d.opt.Healer != "" && !strings.EqualFold(d.opt.Healer, p.Name) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// waitForRez leaves dead bots to a living healer's resurrection before they are released: `cmd revive` makes a bot release its spirit
+// and run back (or revives it at once for a GM), and a released bot cannot be raised in place any more. It waits while a resurrector
+// is alive out of combat, up to RezWait of calm (fights in the meantime are helped and do not count), and ends at once when none is
+// left: a wipe goes straight to the revive orders. It returns when nobody is dead or the wait is over.
+func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
+	if d.opt.RezWait <= 0 {
+		return nil
+	}
+	began := d.clk.Now()
+	last := began
+	var calm time.Duration
+	noted := false
+	seenDead := map[packet.GUID]bool{} // every bot seen dead during the wait, including ones that fell meanwhile
+	defer func() {
+		raised := 0
+		for g := range seenDead {
+			if m, ok := d.fr.Member(g); ok && !m.Dead {
+				raised++
+			}
+		}
+		if raised > 0 {
+			d.remote(func(r *RemoteReport) { r.Rezzed += raised })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots were raised within %.0f s of waiting", max(d.curLeg, 0), raised, d.clk.Now().Sub(began).Seconds()))
+		}
+	}()
+	for {
+		dead := d.deadMembers()
+		for _, m := range dead {
+			seenDead[m.GUID] = true
+		}
+		if len(dead) == 0 {
+			return nil
+		}
+		now := d.clk.Now()
+		if len(d.resurrectors()) == 0 {
+			if noted {
+				d.rep.note(fmt.Sprintf("leg %d: no living caster out of combat to raise %d dead bots (%s); releasing them", max(d.curLeg, 0), len(dead), why))
+			}
+			return nil
+		}
+		if calm >= d.opt.RezWait || now.Sub(began) > d.opt.RezWait+d.cfg.FightTimeout {
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots were not raised in %.0f s (%s); releasing them", max(d.curLeg, 0), len(dead), d.opt.RezWait.Seconds(), why))
+			return nil
+		}
+		if !noted {
+			noted = true
+			d.remote(func(r *RemoteReport) { r.RezWaits++ })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots (%s); waiting up to %.0f s for a living caster to raise them before releasing", max(d.curLeg, 0), len(dead), why, d.opt.RezWait.Seconds()))
+		}
+		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
+			if err := d.assist(ctx, eng); err != nil {
+				return err
+			}
+		} else {
+			calm += now.Sub(last)
+		}
+		last = now
+		if err := d.tick(ctx, d.cfg.Poll*2); err != nil && !errors.Is(err, errWipe) {
 			return err
 		}
 	}

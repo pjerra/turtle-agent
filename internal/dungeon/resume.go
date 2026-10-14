@@ -9,12 +9,16 @@ import (
 // waypoint. The leg's route is the straight lines from where the leg starts (the entrance, or the end of the leg before) through
 // its `to`, the first position of each pull group, and the boss. When the leader stands close to that route, everything it has
 // already passed is skipped: the walk to `to`, and the pull groups behind it that are surely gone. A group counts as gone only when
-// a party member stands within ResumeSeeRadius of its positions and no hostile is listed there: the feed and the unit list hold only
+// a party member stands within ClearSeeRadius of each of its positions and no hostile is listed there: the feed and the unit list hold only
 // what someone sees (about 60 yd, and a frame may be cut short), so a pack out of everyone's sight proves nothing. Any other group
 // is pulled (an empty pull passes quickly); the groups from the first unsure one on are all kept.
 
-// ResumeSeeRadius is how near a party member must stand to a pull group's positions for an empty view of them to be believed.
-const ResumeSeeRadius = 40
+// ClearSeeRadius is how near a party member must stand to a pull group's positions for an empty view of them to be believed: the
+// resume rule and the remote driver's "is this group gone" rule (remote_clear.go) share it.
+const ClearSeeRadius = 25
+
+// ResumeSeeRadius is ClearSeeRadius, under the name the resume rule has used.
+const ResumeSeeRadius = ClearSeeRadius
 
 // ResumeMaxOff is how far (yards) from the leg's route the leader may stand for the run to take it for inside the leg.
 const ResumeMaxOff = 80.0
@@ -93,10 +97,10 @@ func (s *Stepper) ResumeAt() (r Resumed, ok bool) {
 			radius = 25
 		}
 		pw, known := s.w.(PartyWorld)
-		seen, alive := false, 0
+		seen, alive := known, 0
 		for _, p := range g.Positions {
 			alive += s.w.HostilesWithin(p, radius)
-			seen = seen || (known && pw.PartyNear(p, ResumeSeeRadius))
+			seen = seen && pw.PartyNear(p, ResumeSeeRadius) // a party member must have looked at every position
 		}
 		if alive > 0 || !seen {
 			break // a pack the party passed but did not kill, or one nobody has looked at: it is still to be pulled

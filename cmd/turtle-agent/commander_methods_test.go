@@ -145,6 +145,11 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","tank":"x;y"}`, "tank:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","healer":"x;y"}`, "healer:"},
 		{`{"name":"rig","healer":"Healy"}`, `go with mode "remote"`},
+		{`{"name":"rig","team":"horde"}`, `go with mode "remote"`},
+		{`{"name":"rig","on_end":"stay"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
@@ -176,6 +181,14 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|2|on")
 	r.system(viewFrame(1, false)...)
+	// The pre-run kit check: maintenance, then the bags (plain `.bot` lines, answered by system messages).
+	r.expectBody(opcode.CMSGMessagechat, say(".bot maintenance Tanky"))
+	r.system("Maintained Tanky (consumables, reagents, ammo, repair).")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot inv Tanky"))
+	r.system("TBM:INV_BEGIN|Tanky|0", "TBM:INV_EQ|16|2000|10|10", "TBM:INV_END|Tanky|10|16")
+	// The end of the run: the bots are stood still, then the binding is ended.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
 	r.system("TBM:ACTION_ACK|commander unbind|party|2|0")
 	var st map[string]any
@@ -194,6 +207,12 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	if rem["mode"] != "remote" || rem["bound"] != true || rem["unbound"] != true || rem["frames_received"].(float64) != 1 || rem["gm_commands"].(float64) != 0 {
 		t.Fatalf("%v", rem)
 	}
+	if rem["end_stay"] != "ack" {
+		t.Fatalf("end_stay: %v", rem)
+	}
+	if pf, _ := rem["preflight"].(map[string]any); pf == nil || pf["bots"].([]any)[0].(map[string]any)["maintenance"] != "maintained" {
+		t.Fatalf("preflight: %v", rem["preflight"])
+	}
 }
 
 // A run that fails still unbinds.
@@ -210,6 +229,8 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|2|on")
 	r.system(viewFrame(1, false)...) // the lead bot is on map 0, the plan needs 70
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|1|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
 	r.system("TBM:ACTION_ACK|commander unbind|party|2|0")
 	var st map[string]any

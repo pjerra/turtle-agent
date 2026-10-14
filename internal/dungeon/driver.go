@@ -1520,7 +1520,8 @@ const (
 type fightResult struct {
 	out   outcome
 	kills int
-	why   string // the refusal that ended the pull
+	why   string   // the refusal that ended the pull
+	dead  []deadAt // remote: the units that died, where the feed last showed them
 }
 
 // maxRetargets bounds the picks of one group that the bots answered with dead-target or no-target.

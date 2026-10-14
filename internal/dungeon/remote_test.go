@@ -40,6 +40,8 @@ type rmob struct {
 	hold     packet.GUID
 	noTarget bool
 	tankPct  int
+	// inert: a pull at it is acknowledged and does nothing (the mob never comes: no fight)
+	inert bool
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -84,6 +86,7 @@ type fakeRemote struct {
 	vanish      bool // after a pullback the mob leaves the world without a fight
 	ignorePull  bool // a `cmd pull` at an engaged mob changes nothing (the tank does not take it)
 	orderAt     []time.Time
+	sight       float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -244,6 +247,9 @@ func (g *fakeRemote) publish() {
 		f.Party = append(f.Party, c)
 	}
 	for _, m := range g.mobs {
+		if dx, dy := float64(m.pos.X-g.lead().X), float64(m.pos.Y-g.lead().Y); g.sight > 0 && !m.engaged && sqrt(dx*dx+dy*dy) > g.sight {
+			continue
+		}
 		h := tbm.HostileRec{GUID: m.guid, Entry: m.entry, X: m.pos.X, Y: m.pos.Y, Z: m.pos.Z, HPPct: int(m.hp), Target: m.target, Flags: m.flags}
 		f.Hostiles = append(f.Hostiles, h)
 		if m.engaged {
@@ -341,6 +347,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		if m == nil {
 			return errReply(intent, "invalid-target"), nil
 		}
+		if m.inert {
+			return ack(intent), nil
+		}
 		m.pulled, m.pullAt = true, g.now
 		if intent == "cmd pull" && m.engaged && !g.ignorePull {
 			m.hold = 0 // the tank takes the mob
@@ -416,7 +425,10 @@ func remotePlan(legs ...Leg) *Plan {
 
 func opts() RemoteOptions { return RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}} }
 
-func runRemote(t *testing.T, g *fakeRemote, plan *Plan, o RemoteOptions, mod func(*Config)) (Report, error) {
+func runRemote(t *testing.T, g interface {
+	RemoteGame
+	clock() Clock
+}, plan *Plan, o RemoteOptions, mod func(*Config)) (Report, error) {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.PostFight = 2 * time.Second
