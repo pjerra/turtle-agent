@@ -1192,7 +1192,7 @@ do the leg's object steps; run them from a character that stands in or beside th
 
 **Bringing the agent into view of each object step** (remote mode, with a game that can move the agent). Before any step that needs an object's GUID
 from the agent's store (`use_object`, `loot_object`, a `wait_for` on a game object) the driver first brings the agent toward the lead bot as above, then,
-when the step's own object (its `near`, else its `stand`) is still not in the store, looks for it for up to 12 s: after 4 s (at once when the agent did not move
+when the step's own object (its `near`, else its `stand`) is still not in the store, looks for it for up to 12 s (and 12 s again after a walk): after 4 s (at once when the agent did not move
 for the lead bot) the agent walks to 20 yd short of the object's position (`walk_path`, counted in `agent_walks`, 40 s ceiling, out of combat, never when a
 hostile the bots see stands near its way). The lead bot can stand more than the view range from a door or chest of the step (uldaman-remote-4: the Seal, 41 yd). If the
 object stays out of view, a `use_object`/`loot_object` step fails with `... within view of game object <entry> near <x y z>, the agent stands <n> yd from it, after

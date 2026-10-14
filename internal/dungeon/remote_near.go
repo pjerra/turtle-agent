@@ -268,7 +268,7 @@ func (d *RemoteDriver) nearBeforeObjectStep(ctx context.Context) error {
 // names, and the store holds what the server sent for the agent's position (uldaman-remote-4: the lead bot stood 41 yd from the Seal
 // the next step waited for). The server's view range is not read anywhere, so the object is simply looked for.
 const (
-	objectViewWait    = 12 * time.Second // the object is looked for this long (the store takes new surroundings in over a few updates)
+	objectViewWait    = 12 * time.Second // the object is looked for this long, from the start and again after the walk (the store takes new surroundings in over a few updates)
 	objectViewSettle  = 4 * time.Second  // ... before the agent is walked toward it (after a move toward the lead bot: this long to see)
 	objectViewStand   = 20.0             // yards short of the object a walking agent stops at
 	objectViewWalkMax = 40 * time.Second // ceiling of that walk
@@ -317,7 +317,7 @@ func (d *RemoteDriver) stepByKey(key [2]int) *Step {
 
 // viewObject looks for the step's game object in the agent's store, and moves the agent toward it when it is not there: a short wait
 // (when keepNear just moved the agent), then the agent walks to objectViewStand yards short of the object (out of combat, never past a
-// hostile the bots see), then a wait again, ending objectViewWait after the start. It gives up quietly: the Stepper then fails the step
+// hostile the bots see), then a wait again; the look ends objectViewWait after the start, or after the walk when there was one. It gives up quietly: the Stepper then fails the step
 // naming how far the agent stood (objectViewError), or a game-object wait goes on as unchecked. The error is the run's.
 func (d *RemoteDriver) viewObject(ctx context.Context, key [2]int, moved bool) error {
 	f, ok := d.g.(Follower)
@@ -326,13 +326,14 @@ func (d *RemoteDriver) viewObject(ctx context.Context, key [2]int, moved bool) e
 		return nil
 	}
 	began := d.clk.Now()
+	until := began.Add(objectViewWait) // the walk's own time does not count: the store gets objectViewWait after it
 	walked := false
 	for {
 		if d.objectSeen(ref) {
 			d.rep.note(fmt.Sprintf("leg %d: keep near: %s is in the agent's view after %.0f s", d.curLeg, describeRef(ref), d.clk.Now().Sub(began).Seconds()))
 			return nil
 		}
-		if d.clk.Now().Sub(began) >= objectViewWait {
+		if !d.clk.Now().Before(until) {
 			d.rep.note(fmt.Sprintf("leg %d: keep near: %s is not in the agent's view after %.0f s%s", d.curLeg, describeRef(ref), objectViewWait.Seconds(), d.agentFarText(at)))
 			return nil
 		}
@@ -341,6 +342,7 @@ func (d *RemoteDriver) viewObject(ctx context.Context, key [2]int, moved bool) e
 			if err := d.walkToObject(ctx, f, *at, ref); err != nil {
 				return err
 			}
+			until = d.clk.Now().Add(objectViewWait)
 			continue
 		}
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
