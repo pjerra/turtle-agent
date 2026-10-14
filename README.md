@@ -1076,7 +1076,9 @@ if it persists. `brain_idle` (`data.reason`: `no_trigger`, `vetoed:<multiplier>`
 and stop (`data.state`, `strategies`, `role`). A rule whose action can never run is not reported at every try: an action whose spell is not
 in the spellbook (a talent the character never took: Stormstrike, Death Coil, Seal of Command) is mentioned as `not_possible ... unknown_spell`
 once per 5 min and is never cast; the healthstone and health potion rules are active only while the bags hold one; Battle Shout is asked for
-only while the rage pays for it.
+only while the rage pays for it. `rest_drink` is off with no drink in the bags and says `no_drink` once per rest (the first tick
+of a low-mana rest at a rest gate), not on every tick; a feral cat asks for Rip and Ferocious Bite only from their combo points,
+and a shapeshifted player asks for no meal (it leaves its form first when it has food).
 
 **Back-off.** A refused cast (`last_failure.reason_name`) holds its spell back for a moment so the brain does not spam it:
 `out_of_range` 1.5 s, `too_close` 1 s, `no_power` 2 s, `line_of_sight` 3 s, `not_ready` 0.5 s, `not_infront` 0.4 s (and the brain turns

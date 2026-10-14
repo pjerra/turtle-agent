@@ -205,8 +205,9 @@ func restEat() *Strategy {
 				}},
 		},
 		Rules: []Rule{
-			// One step under drinking: a leader low on both drinks first, then eats.
-			{Trigger: Trigger{Name: "health_low", Active: func(c *Ctx) bool { return ooc(c) && HealthPct(c) < foodEatPct }},
+			// One step under drinking: a leader low on both drinks first, then eats. A shapeshifted player asks for no meal: the core
+			// refuses every item in a form. A feral druid with food leaves its form to eat first (druidHome's leave_form_to_rest).
+			{Trigger: Trigger{Name: "health_low", Active: func(c *Ctx) bool { return ooc(c) && HealthPct(c) < foodEatPct && formOf(c) == "" }},
 				Do: []Next{{"eat", RelNormal - 1}}},
 		},
 	}
