@@ -714,3 +714,37 @@ func TestReadmeListsEveryTunable(t *testing.T) {
 		}
 	}
 }
+
+// The tunables file counts from the start of the run, before the enter phase and the preflight: the first look of the bind already has
+// its values, and the change is a run_start one.
+func TestLiveTuneFileIsReadBeforeLegZero(t *testing.T) {
+	r := newLiveRig(t, nil)
+	r.write(r.tunePath, `{"move_leg": 60}`)
+	var first []float32
+	r.g.onTick = func(g *fakeRemote) {
+		if len(first) == 0 {
+			first = append(first, r.d.opt.MoveLeg)
+		}
+	}
+	rep := r.run()
+	if len(first) != 1 || first[0] != 60 {
+		t.Fatalf("the first tick saw move_leg %v", first)
+	}
+	if got := rep.Remote.TuneChanges; len(got) != 1 || got[0].Key != "move_leg" || got[0].Boundary != boundaryRun || got[0].Leg != 0 {
+		t.Fatalf("%+v", got)
+	}
+	if evs := r.events("tune_change"); len(evs) != 1 || evs[0].D["boundary"] != boundaryRun {
+		t.Fatalf("%+v", evs)
+	}
+}
+
+func TestValidateTuneFile(t *testing.T) {
+	for in, ok := range map[string]bool{
+		`{}`: true, `{"pull_range": 40, "_x": 1}`: true, `{"pull_range": 5}`: false, `{"nope": 1}`: false, `{`: false,
+		`{"pull_standoff": 60}`: false, `{"rest_min_health_pct": 19}`: false, `{"rest_min_health_pct": 20}`: true,
+	} {
+		if err := ValidateTuneFile([]byte(in)); (err == nil) != ok {
+			t.Errorf("%s: %v", in, err)
+		}
+	}
+}

@@ -121,7 +121,7 @@ var tuneSpecs = []tuneSpec{
 	ints("rest_mana_pct", "pct", 10, 100, "rested: every other mana user's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestManaPct }),
 	ints("rest_healer_mana_pct", "pct", 10, 100, "rested: every healer's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestHealerManaPct }),
 	secs("rest_timeout_s", 5, 300, "longest rest gate", func(t *tuneTarget) *time.Duration { return &t.cfg.RestTimeout }),
-	ints("rest_min_health_pct", "pct", 1, 100, "after the timeout the run goes on only with this health (at most rest_health_pct)", func(t *tuneTarget) *int { return &t.cfg.RestMinHealth }),
+	ints("rest_min_health_pct", "pct", 20, 100, "after the timeout the run goes on only with this health (at most rest_health_pct)", func(t *tuneTarget) *int { return &t.cfg.RestMinHealth }),
 	yds("rest_walk_yd", 10, 500, "the walk length from which the start gate lets the party rest while it walks", func(t *tuneTarget) *float32 { return &t.cfg.RestWalkYd }),
 	ints("rest_walk_health_pct", "pct", 10, 100, "health floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealthPct }),
 	ints("rest_walk_healer_mana_pct", "pct", 5, 100, "healer mana floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealerManaPct }),
@@ -206,6 +206,17 @@ func readTarget(t *tuneTarget) map[string]float64 {
 func TuneDefaults() map[string]float64 {
 	cfg, opt, x := DefaultConfig().withDefaults(), DefaultRemoteOptions().withDefaults(), defaultTuneExtra()
 	return readTarget(&tuneTarget{cfg: &cfg, opt: &opt, x: &x})
+}
+
+// ValidateTuneFile checks the contents of a tunables file as the run would: it must parse, keep every value inside its limits and
+// keep the rules between values, against the defaults. dungeon_run uses it on a file it is named, so that a typo is an error at the
+// call and not a note in the middle of a run.
+func ValidateTuneFile(data []byte) error {
+	vals, err := ParseTuneFile(data)
+	if err != nil {
+		return err
+	}
+	return checkTuneSet(layered(TuneDefaults(), vals, nil))
 }
 
 // ParseTuneFile reads a tunables file: one JSON object of key to number. Keys that start with "_" are comments. An unknown key, a

@@ -88,9 +88,15 @@ func (r *dungeonRunner) tuneFile(p dungeonRunParams, planPath string) (string, e
 			path = filepath.Join(home, path[2:])
 		}
 	}
-	if p.Tune != "" {
-		if _, err := os.Stat(path); err != nil {
-			return "", &rpc.Error{Code: rpc.CodeInvalidParams, Message: "tune: " + err.Error()}
+	// A file the call names must exist and be good: a typo is an error here, not a note in the middle of the run. The login's --tune may
+	// be created later, but when it is there it is checked as well.
+	data, err := os.ReadFile(path)
+	switch {
+	case err != nil && p.Tune != "":
+		return "", &rpc.Error{Code: rpc.CodeInvalidParams, Message: "tune: " + err.Error()}
+	case err == nil:
+		if verr := dungeon.ValidateTuneFile(data); verr != nil {
+			return "", &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("tune: %s: %v", path, verr)}
 		}
 	}
 	return path, nil
