@@ -198,3 +198,24 @@ func TestRemoteHoldStillSentWhenTheLeadBotWasCarriedAway(t *testing.T) {
 		t.Fatalf("%v %+v", err, rep.Remote)
 	}
 }
+
+// A direct hop shorter than the usual 5 yd "arrived" distance is still sent (live, uldaman hires-2: the lip was 3.97 yd from the first
+// hop under the overhang; the walk counted it as reached and sent only the long hop, which the module refused no-los).
+func TestRemoteShortDirectHopIsStillSent(t *testing.T) {
+	g := newFakeRemote(t)
+	plan := remotePlan(Leg{Name: "gap", Via: []Waypoint{{Point: Point{40, 0, 0}}, {Point: Point{43.5, 0, 1}, Direct: true}, {Point: Point{55, 0, 4}, Direct: true}}, To: Point{55, 0, 4},
+		Steps: []Step{{WaitFor: &WaitFor{HostilesGone: &HostilesGone{Radius: 30}, TimeoutS: 5}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v %+v", err, rep.Notes)
+	}
+	var direct []string
+	for _, m := range g.ordersOf("cmd move") {
+		if strings.HasSuffix(m, "direct") {
+			direct = append(direct, m)
+		}
+	}
+	if len(direct) != 2 || direct[0] != "cmd move 43.50 0.00 1.00 direct" || direct[1] != "cmd move 55.00 0.00 4.00 direct" {
+		t.Fatalf("direct steps sent: %v", direct)
+	}
+}
