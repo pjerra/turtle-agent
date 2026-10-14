@@ -840,8 +840,8 @@ has run live. Use short levels so that the checks do not take ten minutes: `"wat
 1. **Quiet while it works.** A normal remote run (and a group run) to the first boss with the default levels: `dungeon_status.stall_level` is `none`
    at every poll, `stalled_for_s` stays under ~60 (a rest gate, a long walk), and `report.watchdog.warnings` is 0. Check `longest_stall_s` against the
    slowest gate in `rest_gates[]`: if a normal gate (the 60 s cap, a leg's `rest.max_s`) ever warns, the defaults are too tight for that plan.
-2. **A boss fight of many minutes.** The Revelosh or Ironaya fight: no `stall` events while the boss's health falls; `last_progress` reads `the fought
-   mobs lost health` or `kill`. A tank that holds a boss that is not being hurt (everyone dead but the healer) stalls for real.
+2. **A boss fight of many minutes.** The Revelosh or Ironaya fight: no `stall` events while the boss's health falls; `last_progress` reads `a fought
+   mob's health fell to a new low` or `kill`; a boss that an add heals back up is progress only when it goes below its lowest health. A tank that holds a boss that is not being hurt (everyone dead but the healer) stalls for real.
 3. **Rest gate.** Make a caster out of drinks (`.bot maintenance` refused, or no drinks): the gate runs to its own cap (`rest.max_s`, default 60 s)
    with `stalled_for_s` not growing and no `stall` event (the watchdog's clock waits for a gate while the party is out of combat); a fight inside
    the gate is watched like any other.

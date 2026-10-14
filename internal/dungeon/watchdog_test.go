@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // wdRig is a watchdog on a clock the test moves, with the events and notes it produced.
@@ -294,25 +296,27 @@ func TestWatchdogProgressKinds(t *testing.T) {
 		t.Fatalf("alternating orders are no progress: %+v", got)
 	}
 
-	// A fight: the first look takes the state; a kill and less health are progress, the same health is not.
+	// A fight: the first look takes the state; a kill and a mob's health at a new low (by 1 % or more) are progress, the same health is
+	// not, nor a mob that joins at full health.
+	const m1, m2 = packet.GUID(1), packet.GUID(2)
 	r.w.fightBegin()
-	r.w.fightSignal(0, 200)
+	r.w.fightSignal(0, map[packet.GUID]int{m1: 100, m2: 100})
 	r.adv(50)
-	r.w.fightSignal(0, 200)
+	r.w.fightSignal(0, map[packet.GUID]int{m1: 100, m2: 100})
 	if got := r.w.report(); got.StalledForS != 90 {
 		t.Fatalf("%+v", got)
 	}
-	r.w.fightSignal(0, 190)
-	if got := r.w.report(); got.LastProgress != "the fought mobs lost health" || got.StalledForS != 0 {
+	r.w.fightSignal(0, map[packet.GUID]int{m1: 90, m2: 100})
+	if got := r.w.report(); got.LastProgress != "a fought mob's health fell to a new low" || got.StalledForS != 0 {
 		t.Fatalf("%+v", got)
 	}
 	r.adv(50)
-	r.w.fightSignal(1, 190)
+	r.w.fightSignal(1, map[packet.GUID]int{m2: 100})
 	if got := r.w.report(); got.LastProgress != "kill" || got.StalledForS != 0 {
 		t.Fatalf("%+v", got)
 	}
 	r.adv(50)
-	r.w.fightSignal(1, 290) // a mob joined: more health in the fight is no progress
+	r.w.fightSignal(1, map[packet.GUID]int{m2: 100, 3: 100}) // a mob joined: more health in the fight is no progress
 	if got := r.w.report(); got.StalledForS != 50 {
 		t.Fatalf("%+v", got)
 	}
@@ -347,7 +351,8 @@ func TestWatchdogNilIsInert(t *testing.T) {
 	w.acked("x")
 	w.ordered("x")
 	w.fightBegin()
-	w.fightSignal(1, 1)
+	w.fightSignal(1, map[packet.GUID]int{1: 1})
+	w.mobHealth(map[packet.GUID]int{1: 1})
 	w.hold()()
 	w.enter("a", "b", nil)()
 	w.stop()
@@ -452,7 +457,7 @@ func TestWatchdogMovementIsNetDisplacement(t *testing.T) {
 // at fail_s. In a walk the recovery plans again, and the walk getting on afterwards is progress.
 func TestWatchdogMovementAfterTheRecovery(t *testing.T) {
 	r := newWDRig(t, WatchdogConfig{})
-	defer r.w.enter("pull", "boss", func(context.Context) (string, error) { return "followed", nil })()
+	defer r.w.enter(wdFightPhase, "boss", func(context.Context) (string, error) { return "followed", nil })()
 	r.ok, r.pos, r.lead = true, wdPos{0, "pull_groups", 0}, Point{0, 0, 0}
 	r.watch()
 	r.adv(240)
@@ -482,5 +487,132 @@ func TestWatchdogMovementAfterTheRecovery(t *testing.T) {
 	}
 	if got := r.w.report(); got.StallLevel != "none" || got.Recoveries != 1 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// A fight is judged by each mob's lowest health since the stall began, not by the health at the last look: a mob that flips between
+// 100 % and 90 % (it evades and comes back, or an add heals it) is progress once, and the stall fails at fail_s with the recovery on.
+func TestWatchdogFightHealthThatComesBackIsNoProgress(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	defer r.w.enter(wdFightPhase, "boss", func(context.Context) (string, error) { return "followed", nil })()
+	const boss, add = packet.GUID(7), packet.GUID(8)
+	r.w.fightBegin()
+	start := r.now
+	var err error
+	for i := 0; i < 200 && err == nil; i++ {
+		hp := map[packet.GUID]int{boss: 100, add: 100}
+		if i%4 >= 2 {
+			hp[boss] = 90
+		}
+		if i%3 == 0 {
+			delete(hp, boss) // evading: out of the fight for a look
+		}
+		if i%2 == 1 {
+			r.w.fightBegin() // the recovery's re-pull starts the fight over: the lows stay
+		}
+		r.w.fightSignal(0, hp)
+		err = r.watch()
+		r.adv(5)
+	}
+	el := r.now.Sub(start)
+	if !errors.Is(err, errStalled) || el > 440*time.Second || r.w.report().Recoveries != 1 {
+		t.Fatalf("100/90/100/90: %v after %v %+v", err, el, r.w.report())
+	}
+
+	// A boss healed back by an add is no progress until it goes below its low; the add worn down is.
+	r = newWDRig(t, WatchdogConfig{})
+	r.w.fightBegin()
+	r.w.fightSignal(0, map[packet.GUID]int{boss: 50, add: 100})
+	r.adv(10)
+	r.w.fightSignal(0, map[packet.GUID]int{boss: 60, add: 100})
+	r.adv(10)
+	r.w.fightSignal(0, map[packet.GUID]int{boss: 55, add: 100})
+	if got := r.w.report(); got.StalledForS != 20 {
+		t.Fatalf("healed and worn back above the low: %+v", got)
+	}
+	r.w.fightSignal(0, map[packet.GUID]int{boss: 55, add: 99})
+	if got := r.w.report(); got.StalledForS != 0 {
+		t.Fatalf("the add lost 1 %%: %+v", got)
+	}
+	r.adv(10)
+	r.w.fightSignal(0, map[packet.GUID]int{boss: 49, add: 99})
+	if got := r.w.report(); got.StalledForS != 0 {
+		t.Fatalf("the boss below its low: %+v", got)
+	}
+	// A fight at a rest gate or on the way has no kill count: the same lows.
+	r.adv(10)
+	r.w.mobHealth(map[packet.GUID]int{boss: 60})
+	r.adv(10)
+	r.w.mobHealth(map[packet.GUID]int{boss: 49})
+	if got := r.w.report(); got.StalledForS != 20 {
+		t.Fatalf("%+v", got)
+	}
+	r.w.mobHealth(map[packet.GUID]int{boss: 48})
+	if got := r.w.report(); got.StalledForS != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A boss that is worn down 1 % every 9 s while an add heals it a little now and then never stalls (a fight of 15 minutes).
+func TestWatchdogSteadyWearNeverStalls(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	defer r.w.enter(wdFightPhase, "boss", nil)()
+	r.w.fightBegin()
+	for s := 0; s <= 900; s++ {
+		hp := 100 - s/9
+		if s%30 < 5 {
+			hp += 3 // healed for a moment
+		}
+		r.w.fightSignal(0, map[packet.GUID]int{7: min(hp, 100)})
+		if err := r.watch(); err != nil {
+			t.Fatalf("stalled at %d s: %v", s, err)
+		}
+		r.adv(1)
+	}
+	if w := r.w.report(); w.Warnings != 0 || w.LongestStall > 40 {
+		t.Fatalf("%+v", w)
+	}
+}
+
+// A walk inside a pull step (to the standoff point, through a stealthed pack, to a position to look at) is a walk: after the recovery
+// it gets on and that is progress. The fight's own phase is not: movement in it stays soft.
+func TestWatchdogWalkInAPullStepAfterTheRecovery(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("pull", "leg 0: pull group 1", nil)() // the step's phase (wdPhaseName(ActPull))
+	r.ok, r.pos, r.lead = true, wdPos{0, "pull_groups", 0}, Point{0, 0, 0}
+	r.watch()
+	r.adv(240)
+	r.watch() // warn and recover
+	if r.w.report().Recoveries != 1 {
+		t.Fatalf("%+v", r.w.report())
+	}
+	leave := r.w.enter("walk", "to 1000 0 0", nil)
+	for i := 1; i <= 300; i++ {
+		r.adv(1)
+		r.lead = Point{float32(3 * i), 0, 0}
+		if err := r.watch(); err != nil {
+			t.Fatalf("a walk in a pull step stalled after the recovery: %v", err)
+		}
+	}
+	leave()
+	if got := r.w.report(); got.StallLevel != "none" {
+		t.Fatalf("%+v", got)
+	}
+
+	r = newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("pull", "leg 0: pull group 1", nil)()
+	defer r.w.enter(wdFightPhase, "mob", func(context.Context) (string, error) { return "followed", nil })()
+	r.ok, r.pos, r.lead = true, wdPos{0, "pull_groups", 0}, Point{0, 0, 0}
+	r.watch()
+	r.adv(240)
+	r.watch()
+	var err error
+	for i := 1; i <= 300 && err == nil; i++ {
+		r.adv(1)
+		r.lead = Point{float32(3 * i), 0, 0}
+		err = r.watch()
+	}
+	if !errors.Is(err, errStalled) {
+		t.Fatalf("movement in a fight after the recovery kept the run alive: %v", err)
 	}
 }

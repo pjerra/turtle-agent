@@ -275,11 +275,7 @@ func (d *Driver) traceEnd(state, errText string, at time.Time) {
 func (d *Driver) tracedWalk(ctx context.Context, p Point) error {
 	began := d.clk.Now()
 	d.tr.Event("walk_start", map[string]any{"leg": d.curLeg, "x": p.X, "y": p.Y, "z": p.Z})
-	leave := d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(context.Context) (string, error) {
-		return "nothing to cancel: every try of the walk plans its path again from where the leader stands", nil
-	})
 	err := d.doWalk(ctx, p)
-	leave()
 	end := map[string]any{"leg": d.curLeg, "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds()}
 	if err != nil {
 		end["error"] = err.Error()
@@ -295,7 +291,7 @@ func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) 
 	d.wd.softProgress("pull started: " + t.Name)
 	d.wd.fightBegin()
 	d.wdRepick.clear() // a request left by an earlier fight is not this fight's
-	leave := d.wd.enter("pull", t.Name, func(ctx context.Context) (string, error) {
+	leave := d.wd.enter(wdFightPhase, t.Name, func(ctx context.Context) (string, error) {
 		d.wdRepick.set()
 		err := d.chat(ctx, ".bot action follow")
 		return "told the party to follow and ended the fight to pick the target again", err
@@ -449,7 +445,7 @@ func (d *RemoteDriver) tracedFight(ctx context.Context, t tbm.HostileRec, sp fig
 	d.wd.softProgress("pull started: " + d.hostileName(t))
 	d.wd.fightBegin()
 	d.wdRepick.clear() // a request left by an earlier fight is not this fight's
-	leave := d.wd.enter("pull", d.hostileName(t), func(ctx context.Context) (string, error) {
+	leave := d.wd.enter(wdFightPhase, d.hostileName(t), func(ctx context.Context) (string, error) {
 		d.wdRepick.set()
 		_, err := d.order(ctx, "follow")
 		return "sent cmd follow and ended the fight to pick the target again", err

@@ -560,7 +560,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				return fightResult{}, err
 			}
 		}
-		d.wd.fightSignal(len(killed), hostilesPct(fightingMobs))
+		d.wd.fightSignal(len(killed), hostilesHP(fightingMobs))
 		if d.wdRepick.take() {
 			return fightResult{out: retarget, kills: len(killed), dead: deadOf(), why: "the watchdog ended a stalled fight"}, nil
 		}
@@ -776,12 +776,14 @@ func (d *RemoteDriver) walkAggro(ctx context.Context) error {
 
 // fightEngaged sends the party at the engaged mobs until none has fought it for AggroQuiet (or FightTimeout).
 func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
+	defer d.wd.enter(wdFightPhase, "on the way", wdWaitFight)()
 	began := d.clk.Now()
 	lastSeen := began
 	for {
 		now := d.clk.Now()
 		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
 			lastSeen = now
+			d.wd.mobHealth(hostilesHP(eng))
 			d.watchThreat(eng)
 			if err := d.tankFirstTick(ctx, eng); err != nil {
 				return err

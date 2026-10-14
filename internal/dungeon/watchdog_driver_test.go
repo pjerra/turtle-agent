@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -148,7 +149,7 @@ func TestRemoteWatchdogFailsAFightThatGoesNowhere(t *testing.T) {
 		c.FightTimeout = 3000 * time.Second
 		c.Watchdog = WatchdogConfig{WarnS: 60, RecoverS: -1, FailS: 200}
 	})
-	if err == nil || !strings.HasPrefix(rep.Error, "stalled: pull leg 0 (a): pull group 1 of 1 for 20") || g.unbinds != 1 {
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: fight leg 0 (a): pull group 1 of 1 for 20") || g.unbinds != 1 {
 		t.Fatalf("%v unbinds %d", err, g.unbinds)
 	}
 	if !strings.Contains(rep.Error, "last progress pull started") && !strings.Contains(rep.Error, "last progress order acked") {
@@ -332,5 +333,206 @@ func TestRemoteWatchdogCancelsTheCarrierRetries(t *testing.T) {
 	}
 	if rep.Watchdog.Recoveries != 1 || !strings.Contains(notesOf(rep), "cancelled the carrier order's retries: the step retries it once, then takes the fallback") {
 		t.Fatalf("%+v\n%s", rep.Watchdog, notesOf(rep))
+	}
+}
+
+// ---- round 3: a fight is judged by each mob's low; a walk in a pull step is a walk; fights at a gate or on the way are watched ----
+
+// Remote: a mob whose health flips between 100 % and 90 % (it evades and comes back, or is healed) is progress once: the pull is
+// recovered once and the run fails at fail_s, not by the fight's own 300 s limit after each re-pull.
+func TestRemoteWatchdogFailsAFightWhoseHealthComesBack(t *testing.T) {
+	g := newFakeRemote(t)
+	m := g.addMob(299, Point{30, 5, 0})
+	g.killRate = 0
+	var flipAt time.Time
+	g.onTick = func(g *fakeRemote) {
+		if !m.engaged {
+			return
+		}
+		if flipAt.IsZero() {
+			flipAt = g.now
+		}
+		m.hp = 100
+		if int(g.now.Sub(flipAt)/(10*time.Second))%2 == 1 {
+			m.hp = 90
+		}
+	}
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 5, 0}}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: ") {
+		t.Fatalf("%v %q\n%s", err, rep.Error, notesOf(rep))
+	}
+	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 430 || rep.Seconds > 560 {
+		t.Fatalf("%.0f s %+v\n%s", rep.Seconds, w, notesOf(rep))
+	}
+}
+
+// Group: the same with the leader's party.
+func TestDriverWatchdogFailsAFightWhoseHealthComesBack(t *testing.T) {
+	g := stuckFight()
+	m := g.units[0]
+	var flipAt time.Time
+	g.onTick = func(g *fakeGame) {
+		if !m.InCombat || m.Dead {
+			return
+		}
+		if flipAt.IsZero() {
+			flipAt = g.now
+		}
+		m.Health = 50
+		if int(g.now.Sub(flipAt)/(10*time.Second))%2 == 1 {
+			m.Health = 40
+		}
+	}
+	d := NewDriver(mustPlan(t, restPlan), g, Config{}, g.clock())
+	err := d.Run(t.Context(), 0)
+	rep := d.Report()
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: ") {
+		t.Fatalf("%v %q\n%s", err, rep.Error, notes(d))
+	}
+	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 430 {
+		t.Fatalf("%+v\n%s", w, notes(d))
+	}
+}
+
+// Remote: a walk inside a pull step (here the walk to a group's position to look at it) that gets on after the walk's recovery is
+// progress: the lead bot's first move is ignored, the recovery plans the walk again, and the 1500 yd walk after it does not fail the run.
+func TestRemoteWatchdogCountsAWalkInAPullStepAfterTheRecovery(t *testing.T) {
+	g := newFakeRemote(t)
+	g.ignoreMoves = 1
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{1500, 0, 0}}}}})
+	o := opts()
+	o.MoveStall = 1000 * time.Second
+	rep, err := runRemote(t, g, plan, o, func(c *Config) { c.Watchdog = WatchdogConfig{WarnS: 20, RecoverS: 30, FailS: 150} })
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %q\n%s", err, rep.State, rep.Error, notesOf(rep))
+	}
+	if rep.Watchdog.Recoveries < 1 || rep.Seconds < 150 {
+		t.Fatalf("%.0f s %+v\n%s", rep.Seconds, rep.Watchdog, notesOf(rep))
+	}
+}
+
+// Group: the walk to a group's standoff point inside its pull step. The first try stands still for 250 s (the stall recovers), the
+// second gets there after 200 s: that is progress, so the pull goes on and the run is done.
+func TestDriverWatchdogCountsAWalkInAPullStepAfterTheRecovery(t *testing.T) {
+	plan := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1000,"y":0,"z":0}]}]}]}`
+	g := newFake()
+	g.add(201, 1, Point{1000, 0, 0})
+	tries := 0
+	g.walkHook = func(ctx context.Context, g *fakeGame, to Point) (WalkResult, error) {
+		if dist3(to, Point{}) < 1 {
+			g.pos = to
+			return WalkResult{Result: "arrived"}, nil
+		}
+		if tries++; tries == 1 {
+			g.now = g.now.Add(250 * time.Second)
+			return WalkResult{Result: "failed", Reason: "stuck"}, nil
+		}
+		g.now = g.now.Add(200 * time.Second)
+		g.pos = to
+		return WalkResult{Result: "arrived"}, nil
+	}
+	d := NewDriver(mustPlan(t, plan), g, Config{}, g.clock())
+	if err := d.Run(t.Context(), 0); err != nil {
+		t.Fatalf("%v\n%s", err, notes(d))
+	}
+	if w := d.Report().Watchdog; w.Recoveries != 1 || tries != 2 {
+		t.Fatalf("tries %d %+v\n%s", tries, w, notes(d))
+	}
+}
+
+// wayMob makes a mob aggro on the party once the lead bot is 50 yd into its walk; engagedAt is when it joined the fight.
+func wayMob(g *fakeRemote, engagedAt *time.Time) {
+	var m *rmob
+	g.onTick = func(g *fakeRemote) {
+		if m == nil && g.lead().X >= 50 {
+			m = g.addMob(300, Point{g.lead().X + 3, 0, 0})
+			m.pulled, m.pullAt = true, g.now
+		}
+		if m != nil && m.engaged && engagedAt.IsZero() {
+			*engagedAt = g.now
+		}
+	}
+}
+
+// Remote: a fight on the way that goes nowhere stalls inside the walk; the recovery sends no `cmd move` while the party fights (the
+// walk would drag the lead bot off its fight), and the run ends by the fight's own limit or at fail_s.
+func TestRemoteWatchdogSendsNoMoveWhileTheWayFightGoesOn(t *testing.T) {
+	g := newFakeRemote(t)
+	g.killRate = 0
+	var engagedAt time.Time
+	wayMob(g, &engagedAt)
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), opts(), nil)
+	if err == nil || engagedAt.IsZero() {
+		t.Fatalf("%v engaged %v", err, engagedAt)
+	}
+	for i, at := range g.moveOrderAt {
+		if !at.Before(engagedAt) {
+			t.Fatalf("cmd move to %v sent %.0f s into the fight\n%s", g.moveOrderDest[i], at.Sub(engagedAt).Seconds(), notesOf(rep))
+		}
+	}
+	if rep.Watchdog.Recoveries < 1 || rep.Watchdog.StalledForS > 430 {
+		t.Fatalf("%+v\n%s", rep.Watchdog, notesOf(rep))
+	}
+}
+
+// Remote: a fight on the way of 280 s that wears its mob down never stalls: it has the same health signal as a pull.
+func TestRemoteWatchdogWayFightThatWearsDownNeverStalls(t *testing.T) {
+	g := newFakeRemote(t)
+	g.killRate = 100.0 / 280
+	var engagedAt time.Time
+	wayMob(g, &engagedAt)
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), opts(), nil)
+	if err != nil || rep.State != "done" || engagedAt.IsZero() || g.mobsKilled != 1 {
+		t.Fatalf("%v %s killed %d\n%s", err, rep.State, g.mobsKilled, notesOf(rep))
+	}
+	if w := rep.Watchdog; w.Warnings != 0 || w.LongestStall >= 120 {
+		t.Fatalf("%+v\n%s", w, notesOf(rep))
+	}
+}
+
+// Remote: a fight at a rest gate of 280 s that wears its mob down never stalls.
+func TestRemoteWatchdogGateFightThatWearsDownNeverStalls(t *testing.T) {
+	g := newFakeRemote(t)
+	g.party[2].HP = 600 // the gate before the pull rests the mage; a pack comes at the party there
+	g.killRate = 100.0 / 280
+	var m *rmob
+	g.onTick = func(g *fakeRemote) {
+		if m == nil && g.indexOf("cmd rest") >= 0 {
+			m = g.addMob(300, Point{g.lead().X + 3, 0, 0})
+			m.pulled, m.pullAt = true, g.now
+		}
+	}
+	g.addMob(301, Point{25, 0, 0})
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{301}, Positions: []Point{{25, 0, 0}}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || rep.State != "done" || m == nil || g.mobsKilled != 2 {
+		t.Fatalf("%v %s killed %d\n%s", err, rep.State, g.mobsKilled, notesOf(rep))
+	}
+	if w := rep.Watchdog; w.Warnings != 0 || w.LongestStall >= 120 {
+		t.Fatalf("%+v\n%s", w, notesOf(rep))
+	}
+}
+
+// Group: a fight at a rest gate of 285 s that wears its mob down never stalls.
+func TestDriverWatchdogGateFightThatWearsDownNeverStalls(t *testing.T) {
+	g := newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	m := g.add(99, 99, Point{10, 0, 0})
+	m.InCombat, m.Target, m.MaxHealth, m.Health = true, leader, 1000, 1000
+	start := g.now
+	m.dieAt = start.Add(285 * time.Second)
+	g.onTick = func(g *fakeGame) {
+		if !m.Dead {
+			m.Health = uint32(max(1000-3.5*g.now.Sub(start).Seconds(), 1))
+		}
+	}
+	d := NewDriver(mustPlan(t, restPlan), g, Config{}, g.clock())
+	if err := d.Run(t.Context(), 0); err != nil {
+		t.Fatalf("%v\n%s", err, notes(d))
+	}
+	if w := d.Report().Watchdog; w.Warnings != 0 || w.LongestStall >= 120 || !m.Dead {
+		t.Fatalf("%+v\n%s", w, notes(d))
 	}
 }

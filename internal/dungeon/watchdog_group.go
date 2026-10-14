@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // The group driver's side of the watchdog (watchdog.go).
@@ -30,15 +31,15 @@ func wdPhaseName(k ActionKind) string {
 // wdObjectKind says whether k is an object step: its end is progress.
 func wdObjectKind(k ActionKind) bool { return k == ActLoot || k == ActUse || k == ActItem }
 
-// healthPct is the summed health percent of the units: it falls while the party wears them down.
-func healthPct(us []objects.Unit) int {
-	n := 0
+// unitsHP is each unit's health percent, for the watchdog's per-mob lows (watchdog.lowLocked).
+func unitsHP(us []objects.Unit) map[packet.GUID]int {
+	out := make(map[packet.GUID]int, len(us))
 	for _, u := range us {
 		if u.MaxHealth > 0 {
-			n += int(100 * uint64(u.Health) / uint64(u.MaxHealth))
+			out[u.GUID] = int(100 * uint64(u.Health) / uint64(u.MaxHealth))
 		}
 	}
-	return n
+	return out
 }
 
 func (d *Driver) initWatchdog() {

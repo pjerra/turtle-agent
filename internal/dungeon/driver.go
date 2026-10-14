@@ -863,7 +863,14 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it
 // gave up on (a root that outlasted its wait, a server move too many). A pack that aggros on the way stops the walk:
 // the party fights it until the fight is over (walkAggro), then the walk goes on. That does not use up a try.
+//
+// Every walk of the leader (the plan's, an approach to a standoff point, a walk through a stealthed pack, an object step's) is the
+// watchdog's walk phase, and the watchdog looks at the leader after each walk_path (which blocks while it walks): a walk inside a pull
+// step that gets on after the recovery is progress there, not after the walk has ended.
 func (d *Driver) doWalk(ctx context.Context, p Point) error {
+	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(context.Context) (string, error) {
+		return "nothing to cancel: every try of the walk plans its path again from where the leader stands", nil
+	})()
 	var last string
 	aggros := 0
 	for try := 1; try <= d.cfg.WalkAttempts; {
@@ -887,6 +894,9 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 		}
 		if oerr := d.check(ctx); oerr != nil {
 			return oerr
+		}
+		if werr := d.wd.watch(ctx); werr != nil {
+			return werr
 		}
 		if d.recoveries != recovered { // the leader died on the way and came back: the walk is made again, from where it stands
 			continue
@@ -1076,6 +1086,7 @@ func (d *Driver) walkAggro(ctx context.Context) error {
 
 // fightAttackers orders the party onto the nearest attacker until none has hit it for AggroQuiet (or FightTimeout).
 func (d *Driver) fightAttackers(ctx context.Context) error {
+	defer d.wd.enter(wdFightPhase, "on the way", wdWaitFight)()
 	began := d.clk.Now()
 	lastSeen := began
 	var lastAssist time.Time
@@ -1084,6 +1095,7 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 		att := d.attackers()
 		if len(att) > 0 {
 			lastSeen = now
+			d.wd.mobHealth(unitsHP(att))
 			if err := d.tankFirstGroup(ctx, att); err != nil {
 				return err
 			}
@@ -1173,6 +1185,8 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 	defer d.wd.enter("rest gate", "", nil)()
 	gh := &gateHold{w: d.wd}
 	defer gh.set(false)
+	ft := &fightToggle{w: d.wd, detail: "at a rest gate"} // a fight in the gate is watched by its mobs' health
+	defer ft.set(false)
 	ordered, refusedSeen := false, false
 	held := false // the gate has waited for something: its first frame did not pass it
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
@@ -1190,6 +1204,8 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 		}
 		if att := d.attackers(); len(att) > 0 {
 			gh.set(false)
+			ft.set(true)
+			d.wd.mobHealth(unitsHP(att))
 			now := d.clk.Now()
 			if fightBegan.IsZero() {
 				fightBegan = now
@@ -1216,6 +1232,7 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 			continue
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
+		ft.set(false)
 		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
@@ -1933,7 +1950,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		if fighting {
 			engaged, lastCombat = true, now
 		}
-		d.wd.fightSignal(len(killed), healthPct(fighters))
+		d.wd.fightSignal(len(killed), unitsHP(fighters))
 		if d.wdRepick.take() {
 			return fightResult{out: retarget, kills: len(killed), why: "the watchdog ended a stalled fight"}, nil
 		}

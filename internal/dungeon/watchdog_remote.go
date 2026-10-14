@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -37,13 +38,13 @@ func (d *RemoteDriver) wdLook() (wdPos, Point, bool) {
 	return wdPos{leg, ph, idx}, lead, true
 }
 
-// hostilesPct is the summed health percent of the hostiles: it falls while the party wears them down.
-func hostilesPct(hs []tbm.HostileRec) int {
-	n := 0
+// hostilesHP is each hostile's health percent, for the watchdog's per-mob lows (watchdog.lowLocked).
+func hostilesHP(hs []tbm.HostileRec) map[packet.GUID]int {
+	out := make(map[packet.GUID]int, len(hs))
 	for _, h := range hs {
-		n += max(h.HPPct, 0)
+		out[h.GUID] = max(h.HPPct, 0)
 	}
-	return n
+	return out
 }
 
 // feedQuiet says whether the feed has gone quiet: no frame yet, or none for FeedStale.
@@ -88,7 +89,13 @@ func (d *RemoteDriver) wdSilent(ctx context.Context) (string, bool, error) {
 
 // wdReplanWalk is the recovery of a walk that stalled: the walk is planned again from where the lead bot stands now, with a shorter
 // leg than the walk's own.
+//
+// While the party fights (a pack that came at it on the way, before the walk's loop has seen it) no move is sent: it would drag the lead
+// bot off the fight. The walk's loop fights it and walks on after it.
 func (d *RemoteDriver) wdReplanWalk(ctx context.Context, p Point) (string, error) {
+	if d.haveFr && len(d.fr.EngagedHostiles()) > 0 {
+		return "the party is fighting: no move sent (the walk goes on after the fight)", nil
+	}
 	here, ok := d.leadPos()
 	if !ok {
 		return "the lead bot is not in the feed: nothing to plan from", nil

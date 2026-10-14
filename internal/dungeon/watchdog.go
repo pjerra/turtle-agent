@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // The progress watchdog (README "Run watchdog"). A run that waits on something that never comes (an order nobody answers, a rest gate
@@ -15,10 +17,11 @@ import (
 // feed one watchdog with their progress and ask it at every wait; after warn_s without progress it warns, after recover_s it makes one
 // recovery attempt suited to the phase the run is in, after fail_s it fails the run with the reason.
 //
-// Progress is any of: the step or leg index advanced, a pull started or ended, a kill (or the fought mobs lost health), the lead or the
-// leader got more than wdMoveYards farther from where the stall began than it had been (net displacement: a bot that runs to and fro is
-// not progress), a new order was ACKed, a rest gate finished, an object step ended. Movement in a fight, and anything a stuck run can
-// fake by repeating itself after the recovery has fired, is soft (softProgress). The clock is the driver's, so the tests move it by
+// Progress is any of: the step or leg index advanced, a pull started or ended, a kill, a fought mob's health at a new low since the stall
+// began (a mob healed back up, or one that evades and comes back, is no progress until it goes below that low), the lead or the leader
+// got more than wdMoveYards farther from where the stall began than it had been (net displacement: a bot that runs to and fro is not
+// progress), a new order was ACKed, a rest gate finished, an object step ended. Movement in a fight, and anything a stuck run can fake by
+// repeating itself after the recovery has fired, is soft (softProgress). The clock is the driver's, so the tests move it by
 // hand. The watchdog is looked at from the drivers' own waits (the group driver's sleep, the remote driver's
 // tick), never from a goroutine: a single game call that blocks is bounded by its own timeout and is judged at the next wait.
 
@@ -29,6 +32,14 @@ const (
 	DefaultWatchdogFailS    = 420
 	maxWatchdogS            = 24 * 3600
 )
+
+// wdFightPhase is the phase of a fight while it goes on: a pull's fight (tracedFight), a fight at a rest gate, a fight on the way. It is
+// not the pull step's phase ("pull"), which also holds the step's walks (to a standoff point, through a stealthed pack, to a position to
+// look at): those are walks.
+const wdFightPhase = "fight"
+
+// wdHealthStep is how many percent of its maximum a fought mob must go below its lowest health of the stall for that to be progress.
+const wdHealthStep = 1
 
 // wdMoveYards is how much farther from the stall's start point than ever before in the stall the lead (or the leader) must get for
 // that to be progress.
@@ -189,7 +200,9 @@ type watchdog struct {
 	degraded  bool     // the recovery has fired and nothing real has happened since: soft progress is ignored
 	fightOn   bool
 	fightKill int
-	fightHP   int
+	// low is each fought mob's lowest health percent since the stall began (the last progress other than movement or a new low): only a
+	// look below it by wdHealthStep is progress, so health that dips and comes back keeps nothing alive.
+	low map[packet.GUID]int
 
 	warnings, recoveries int
 	longest              time.Duration
@@ -223,7 +236,7 @@ func (w *watchdog) progress(what string) {
 const wdRecentAcks = 16
 
 // softProgress is progress that a stuck run can fake by repeating itself: a pull started or ended, a new order ACKed. After a recovery
-// has fired it does not count until something real happens (a kill, health lost, a step, movement, a gate or an object step done),
+// has fired it does not count until something real happens (a kill, a new health low, a step, a walk getting on, an object step done),
 // so that a recovery which re-pulls a mob that is stuck cannot keep the run alive for ever: the next interval without real progress goes
 // to the failure.
 func (w *watchdog) softProgress(what string) {
@@ -244,6 +257,7 @@ func (w *watchdog) progressLocked(what string) {
 		return
 	}
 	w.ref, w.haveRef, w.far = w.lead, w.haveLead, 0
+	w.low = nil
 	w.clockLocked(what)
 }
 
@@ -377,24 +391,53 @@ func (w *watchdog) fightBegin() {
 	w.mu.Unlock()
 }
 
-// fightSignal takes a fight's state at a look: the kills so far and the summed health percent of the mobs being fought. A kill, or
-// less health than at the last look, is progress: a long boss fight that wears the boss down never stalls.
-func (w *watchdog) fightSignal(kills, hp int) {
+// fightSignal takes a pull's fight state at a look: the kills so far and the health percent of each mob being fought. A kill, or a mob
+// at a new low (lowLocked), is progress: a long boss fight that wears the boss down never stalls.
+func (w *watchdog) fightSignal(kills int, hp map[packet.GUID]int) {
 	if w == nil {
 		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.fightOn {
-		w.fightOn, w.fightKill, w.fightHP = true, kills, hp
+		w.fightOn, w.fightKill = true, kills
+	} else if kills > w.fightKill {
+		w.fightKill = kills
+		w.progressLocked("kill")
+	}
+	w.lowLocked(hp)
+}
+
+// mobHealth is fightSignal for a fight with no kill count of its own (one at a rest gate, one on the way): the mobs' health percent.
+func (w *watchdog) mobHealth(hp map[packet.GUID]int) {
+	if w == nil {
 		return
 	}
-	if kills > w.fightKill {
-		w.progressLocked("kill")
-	} else if hp < w.fightHP {
-		w.progressLocked("the fought mobs lost health")
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lowLocked(hp)
+}
+
+// lowLocked takes the mobs' health at a look. A mob seen for the first time in the stall only sets its low; one at least wdHealthStep
+// below its low is progress. The lows are kept across the look (a mob that is out of the fight for a while, evading, keeps its low) and
+// across a new low; real progress of another kind starts them over (progressLocked).
+func (w *watchdog) lowLocked(hp map[packet.GUID]int) {
+	lower := false
+	for g, p := range hp {
+		low, ok := w.low[g]
+		switch {
+		case !ok:
+			if w.low == nil {
+				w.low = map[packet.GUID]int{}
+			}
+			w.low[g] = p
+		case p <= low-wdHealthStep:
+			w.low[g], lower = p, true
+		}
 	}
-	w.fightKill, w.fightHP = kills, hp
+	if lower {
+		w.clockLocked("a fought mob's health fell to a new low")
+	}
 }
 
 // inPhaseLocked says whether a phase of that name is open (innermost or not).
@@ -403,10 +446,11 @@ func (w *watchdog) inPhaseLocked(name string) bool {
 }
 
 // movedLocked takes the lead's position at a look. Movement is progress only as net displacement: more than wdMoveYards farther from
-// the stall's start point than any counted look before (to and fro is nothing). In a fight it is soft progress: the pull's own recovery
-// (`cmd follow`) runs the tank away and the re-pull runs it back, and a fight is judged by kills and health. After the recovery has
-// fired it counts only in a walk (the walk's recovery plans it again, and the walk getting on is what that recovery is for); anywhere
-// else only a kill, lost health, a step or an object step result is real then.
+// the stall's start point than any counted look before (to and fro is nothing). In a fight (wdFightPhase open) it is soft progress: the
+// pull's own recovery (`cmd follow`) runs the tank away and the re-pull runs it back, and a fight is judged by kills and health. After
+// the recovery has fired it counts only in a walk that is not inside a fight (the walk's recovery plans it again, and the walk getting on
+// is what that recovery is for; a walk of the pull step, to a standoff point or through a stealthed pack, is such a walk); anywhere else
+// only a kill, a new health low, a step or an object step result is real then.
 func (w *watchdog) movedLocked(lead Point) {
 	w.lead, w.haveLead = lead, true
 	if !w.haveRef {
@@ -417,7 +461,7 @@ func (w *watchdog) movedLocked(lead Point) {
 	if d <= w.far+wdMoveYards {
 		return
 	}
-	fight := w.inPhaseLocked("pull")
+	fight := w.inPhaseLocked(wdFightPhase)
 	walk := len(w.phases) > 0 && w.phases[len(w.phases)-1].name == "walk"
 	if w.degraded && (fight || !walk) {
 		w.far = max(w.far, d) // the run must get beyond where it already was before movement counts again
@@ -565,6 +609,30 @@ func (w *watchdog) note(text string) {
 	if w.hooks.note != nil {
 		w.hooks.note(text)
 	}
+}
+
+// fightToggle opens the fight phase while a fight goes on inside a loop that waits on something else (a rest gate): set(true) at each
+// look that finds the party fighting, set(false) at one that does not and when the loop ends.
+type fightToggle struct {
+	w      *watchdog
+	detail string
+	leave  func()
+}
+
+func (f *fightToggle) set(on bool) {
+	switch {
+	case on && f.leave == nil:
+		f.leave = f.w.enter(wdFightPhase, f.detail, wdWaitFight)
+	case !on && f.leave != nil:
+		f.leave()
+		f.leave = nil
+	}
+}
+
+// wdWaitFight is the recovery of a fight at a rest gate or on the way: it sends nothing. The fight has its own bound (FightTimeout), and an
+// order of an enclosing phase's recovery (a walk's `cmd move`) would drag the party off its fight.
+func wdWaitFight(context.Context) (string, error) {
+	return "the party is fighting: nothing sent (the fight has its own limit, and the walk goes on after it)", nil
 }
 
 // fire does what one level says.

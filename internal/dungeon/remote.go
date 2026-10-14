@@ -1734,6 +1734,8 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 	defer d.wd.enter("rest gate", "", nil)()
 	gh := &gateHold{w: d.wd}
 	defer gh.set(false)
+	ft := &fightToggle{w: d.wd, detail: "at a rest gate"} // a fight in the gate is watched by its mobs' health
+	defer ft.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
 	var lastRest time.Time
@@ -1753,6 +1755,8 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
 			now := d.clk.Now()
 			gh.set(false)
+			ft.set(true)
+			d.wd.mobHealth(hostilesHP(eng))
 			if fightBegan.IsZero() {
 				fightBegan = now
 			}
@@ -1770,6 +1774,7 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 			continue
 		}
 		fightBegan = time.Time{}
+		ft.set(false)
 		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
