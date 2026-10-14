@@ -177,7 +177,7 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 			return nil, false // its state is in the agent's view: the usual wait
 		}
 		key := [2]int{a.Leg, a.Step}
-		if d.obj.waitKey != key {
+		if d.obj.waitKey != key || d.obj.waitAt.IsZero() { // a timer that is not running starts now (stepFailedRecover resets it)
 			d.obj.waitKey, d.obj.waitAt = key, d.clk.Now()
 		}
 		left := objectWaitSettle - d.clk.Now().Sub(d.obj.waitAt)
@@ -463,23 +463,26 @@ func (d *RemoteDriver) waitForItem(ctx context.Context, bot string, it *ItemRef)
 }
 
 // withFFA runs fn with the party's loot method set to free-for-all, then puts it back (RemoteOptions.LootRestore, "group" by default).
-// A quest item rolled or handed to another member would not reach the carrier.
+// A quest item rolled or handed to another member would not reach the carrier. The loot method goes back whatever the ffa order was
+// answered: an ERR, a timeout or a cancel while it waited may still have changed it.
 func (d *RemoteDriver) withFFA(ctx context.Context, rec *objRec, fn func() error) error {
 	og, _ := d.orderGame()
 	began := d.clk.Now()
 	res, err := og.Order(ctx, "cmd lootmethod ffa")
-	if err != nil {
-		return fmt.Errorf("cmd lootmethod ffa: %w", err)
+	if err == nil {
+		rec.order(res, began)
+		d.countOrder("lootmethod", res)
 	}
-	rec.order(res, began)
-	d.countOrder("lootmethod", res)
 	switch {
+	case err != nil:
+		err = fmt.Errorf("cmd lootmethod ffa: %w", err)
 	case res.Kind != tbm.KindAck:
-		return fmt.Errorf("could not set free-for-all loot: %w", orderError(res))
+		err = fmt.Errorf("could not set free-for-all loot: %w", orderError(res))
 	case !strings.EqualFold(res.Method, "ffa"):
-		return fmt.Errorf("could not set free-for-all loot: the party's method is %q now", res.Method)
+		err = fmt.Errorf("could not set free-for-all loot: the party's method is %q now", res.Method)
+	default:
+		err = fn()
 	}
-	err = fn()
 	restore := strings.ToLower(strings.TrimSpace(d.opt.LootRestore))
 	if restore == "" {
 		restore = "group"
@@ -759,6 +762,25 @@ func behaviorWhy(r tbm.Reply, err error) string {
 		return r.Err.Code + " (" + r.Err.Message + ")"
 	}
 	return "no answer"
+}
+
+// lootOnAtStart turns corpse looting on for every bound bot when a remote run starts. A run that ended between a boss's `loot off` and
+// its deferred `loot on` (a crash, say) leaves the bots loot-off, so every run sets it back. A refusal is noted; the run goes on.
+func (d *RemoteDriver) lootOnAtStart(ctx context.Context) {
+	og, ok := d.orderGame()
+	if !ok {
+		return
+	}
+	var on []string
+	for _, m := range d.fr.Party {
+		r, err := og.Behavior(ctx, m.Name, "loot", true)
+		if err != nil || r.Kind != tbm.KindAck {
+			d.rep.note(fmt.Sprintf("remote mode: could not turn %s's corpse looting on at the start of the run: %s", m.Name, behaviorWhy(r, err)))
+			continue
+		}
+		on = append(on, m.Name)
+	}
+	d.rep.note(fmt.Sprintf("remote mode: corpse looting turned on for %v at the start of the run", on))
 }
 
 // lootBossHint is what a failed boss loot may mean.

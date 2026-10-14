@@ -550,6 +550,7 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
 			d.wipeRecover++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
+				d.obj.waitAt = time.Time{} // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
 				return true
 			} else {
 				d.st.Fail("wipe: " + rerr.Error())
@@ -697,6 +698,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 			d.rep.note(fmt.Sprintf("tank %s is not in the party of the feed; the tank will be taken from the first pull", d.opt.Tank))
 		}
 	}
+	d.lootOnAtStart(ctx)
 	return d.preflight(ctx)
 }
 
