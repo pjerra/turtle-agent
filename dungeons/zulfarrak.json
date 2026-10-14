@@ -160,7 +160,7 @@
     },
     {
       "name": "antusul_a4",
-      "to": {"x": 1485.6, "y": 825.5, "z": 8.9},
+      "to": {"x": 1506, "y": 844.9, "z": 10.2},
       "pull_groups": [
         {
           "entries": [5648, 5648, 5648, 5648],
@@ -175,26 +175,15 @@
       ],
       "skip": [7269, 10080, 10082],
       "notes": [
-        "Group 8 (the four Shadowcasters at 1505 819-846), pulled from 1485.6 825.5 on the road, 20-27 yd from them (inside pull range, no approach walk). ZF-2 run 12: from the end of group 7 the approach to them (1501 852) went by the navmesh north over the ramp (1533 945) into the Farraki arena wing (62496-62499) and wiped; the walk on to x 1535 goes by direct hops in the next leg."
+        "Group 8 (the four Shadowcasters at 1505 819-846), pulled from 1485.6 825.5 on the road, 20-27 yd from them (inside pull range, no approach walk). ZF-2 run 12: from the end of group 7 the approach to them (1501 852) went by the navmesh north over the ramp (1533 945) into the Farraki arena wing (62496-62499) and wiped; the walk on to x 1535 goes by direct hops in the next leg.",
+        "zf2-run3 (2026-10-14): the leg ends at 1506 844.9 z 10.2, where the Shadowcaster pull leaves the party; the walk back from there to 1485.6 825.5 went by the navmesh north over the ramp into the Farraki arena wing (wipe 23:14), so the next leg starts here and its first two vias (1485.6 825.5, 1498.7 829.9) are dropped."
       ]
     },
     {
       "name": "antusul",
       "to": {"x": 1535, "y": 834, "z": 9},
       "via": [
-        {"x": 1485.6, "y": 825.5, "z": 8.9},
-        {
-          "x": 1498.7,
-          "y": 829.9,
-          "z": 8.9,
-          "direct": true
-        },
-        {
-          "x": 1506,
-          "y": 844.9,
-          "z": 10.2,
-          "direct": true
-        },
+        {"x": 1506, "y": 844.9, "z": 10.2},
         {
           "x": 1520,
           "y": 840,
@@ -377,7 +366,23 @@
             {"x": 1776.9, "y": 813.7, "z": 23.2}
           ],
           "radius": 15
-        },
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
+        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
+        "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it).",
+        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+      ]
+    },
+    {
+      "name": "antusul_b",
+      "to": {"x": 1787.8, "y": 790.6, "z": 17.7},
+      "via": [
+        {"x": 1769.03, "y": 802.98, "z": 24.04}
+      ],
+      "pull_groups": [
         {
           "entries": [5649],
           "positions": [
@@ -408,10 +413,7 @@
         "position": {"x": 1815.8, "y": 670.4, "z": 15}
       },
       "notes": [
-        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
-        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
-        "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it).",
-        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+        "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals)."
       ]
     },
     {
@@ -438,7 +440,12 @@
     },
     {
       "name": "velratha",
-      "to": {"x": 1676.1, "y": 833.5, "z": 9.5},
+      "to": {"x": 1658.35, "y": 878.91, "z": 13.06},
+      "via": [
+        {"x": 1676.1, "y": 833.5, "z": 9.5},
+        {"x": 1678.48, "y": 856.47, "z": 8.95},
+        {"x": 1668.92, "y": 872.47, "z": 11.57}
+      ],
       "pull_groups": [
         {
           "entries": [5648, 5650, 5650, 5650],

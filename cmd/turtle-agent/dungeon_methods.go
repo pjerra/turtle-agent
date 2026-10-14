@@ -176,7 +176,8 @@ type dungeonRunParams struct {
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
 	// KeepOnFail (remote mode): a FAILED run keeps its binding and the party in its instance, so that a resume re-enters the same
-	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding.
+	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding. dungeon_pause
+	// halts a running run with the binding kept, keep_on_fail or not.
 	KeepOnFail bool `json:"keep_on_fail,omitempty"`
 	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
 	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
@@ -293,6 +294,9 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	}))
 	srv.Register("dungeon_stop", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.stop(), nil
+	}))
+	srv.Register("dungeon_pause", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
+		return r.pause()
 	}))
 	registerTuneMethods(srv, r)
 	return func() {
@@ -596,6 +600,29 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 	}
 	r.unbindKept()
 	return r.status()
+}
+
+// pause halts a remote run so that it can be resumed: the run ends "stopped" with the bots stood still and the commander binding KEPT,
+// so the next dungeon_run (resume, from_leg) re-enters the same group and instance. dungeon_stop unbinds, which returns the hires to the
+// commander's raid and loses the instance. With no run going it changes nothing (a kept binding stays kept). Group-mode runs have no
+// binding: pause is refused for them.
+func (r *dungeonRunner) pause() (dungeonStatusResult, error) {
+	r.mu.Lock()
+	cancel, drv, running := r.cancel, r.drv, r.running()
+	r.mu.Unlock()
+	if !running {
+		return r.status(), nil
+	}
+	p, ok := drv.(interface{ Pause() })
+	if !ok {
+		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_pause: the run is a group-mode run with no commander binding to keep; dungeon_stop ends it"}
+	}
+	p.Pause()
+	if cancel != nil {
+		cancel()
+		r.wait(10 * time.Second)
+	}
+	return r.status(), nil
 }
 
 // keptFrom notes the hires of the binding a finished run kept (keep_on_fail), from its report; nothing when it unbound.
