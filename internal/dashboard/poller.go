@@ -17,6 +17,7 @@ type Options struct {
 	TestsDir    string        // the only folder whose files are served
 	TracesDir   string        // where the agents write run traces (read, never served)
 	PlansDirs   []string      // folders with dungeon plan files
+	MinimapDir  string        // images from `turtle-agent minimap-extract` (<map>.png + <map>.json), drawn under the plan; "" for none
 	Interval    time.Duration // poll period
 	CallTimeout time.Duration // bound on one agent's polls
 	Now         func() time.Time

@@ -6,6 +6,8 @@ const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
 const plans = new Map(); // name -> geometry | "loading" | null
+const minimaps = new Map(); // map id -> [layer] | "loading" | null (no image for that map; looked for again after a while)
+const minimapMiss = new Map(); // map id -> when it was found to have no image
 let view = "grid", activeTab = null, last = null;
 try { view = localStorage.getItem("view") === "tabs" ? "tabs" : "grid"; } catch (e) { /* storage may be blocked */ }
 
@@ -33,7 +35,7 @@ function bar(pct, cls) {
 }
 
 function makeCard(c) {
-  const parts = {};
+  const parts = {}, rec = { geo: null, planName: null, svg: null, layerName: null, layerApplied: null };
   parts.head = h("div", { class: "chead" });
   parts.map = h("div", { class: "map" });
   parts.info = h("div", { class: "info" });
@@ -41,10 +43,14 @@ function makeCard(c) {
     ...[["var(--bot)", "bot"], ["#d49a1f", "tank"], ["var(--cmd)", "commander"], ["var(--hostile)", "hostile"], ["var(--neutral)", "neutral"], ["var(--pull)", "pull group"]]
       .map(([col, t]) => h("span", {}, h("i", { style: "background:" + col }), t)),
     h("span", {}, "dimmed = cleared; ring = in a fight"));
+  parts.layer = h("select", { hidden: true, title: "background image of the map (extracted from your own client by turtle-agent minimap-extract)", "aria-label": "map background" });
+  parts.layer.addEventListener("change", () => { rec.layerName = parts.layer.value; rec.layerApplied = null; if (last) render(last); });
+  parts.legend.append(parts.layer);
   parts.debug = h("details", {}, h("summary", { text: "Debug: raw status and files" }), h("div", { class: "files" }), h("pre", { text: "(open to load)" }));
   parts.debug.addEventListener("toggle", () => { if (parts.debug.open) loadRaw(c.id, parts); });
   const el = h("section", { class: "card", "data-id": c.id }, parts.head, h("div", { class: "cbody" }, parts.map, parts.info, parts.legend), parts.debug);
-  return { el, parts, geo: null, planName: null, svg: null };
+  rec.el = el; rec.parts = parts;
+  return rec;
 }
 
 async function loadRaw(id, parts) {
@@ -62,6 +68,35 @@ function ensurePlan(name) {
     .then((g) => { plans.set(name, g); if (last) render(last); })
     .catch(() => plans.set(name, null));
   return "loading";
+}
+
+function ensureMinimap(id) {
+  if (id == null) return undefined;
+  if (minimaps.has(id) && !(minimaps.get(id) === null && Date.now() - (minimapMiss.get(id) || 0) > 30000)) return minimaps.get(id);
+  minimaps.set(id, "loading");
+  fetch("/api/minimap/" + encodeURIComponent(id), { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((ls) => { minimaps.set(id, ls && ls.length ? ls : null); minimapMiss.set(id, Date.now()); if (last) render(last); })
+    .catch(() => { minimaps.set(id, null); minimapMiss.set(id, Date.now()); });
+  return "loading";
+}
+
+// The image goes under the plan drawing; its rectangle is in the drawing's plane (yards), so the plan lines up with it.
+function applyLayer(rec, svg, geo) {
+  const ls = ensureMinimap(geo.map), sel = rec.parts.layer;
+  const have = Array.isArray(ls) ? ls : [];
+  sel.hidden = have.length < 2;
+  const names = have.map((l) => l.name).join("|");
+  if (have.length >= 2 && sel.dataset.names !== names) { sel.dataset.names = names; sel.replaceChildren(...have.map((l) => h("option", { value: l.name, text: l.name }))); }
+  const pick = have.find((l) => l.name === rec.layerName) || have[0];
+  const key = pick ? pick.url : "";
+  if (rec.layerApplied === key) return;
+  rec.layerApplied = key;
+  svg.querySelectorAll("image.bg").forEach((e) => e.remove());
+  if (!pick) return;
+  sel.value = pick.name;
+  const img = s("image", { class: "bg", href: pick.url, x: pick.x, y: pick.y, width: pick.w, height: pick.h, preserveAspectRatio: "none" });
+  svg.insertBefore(img, svg.firstChild);
 }
 
 function renderHead(c, rec) {
@@ -137,7 +172,7 @@ function ensureSvg(rec, geo) {
   stat.innerHTML = geo.svg; // built by the server from the plan file, text escaped
   svg.append(stat, s("g", { class: "dyn" }));
   rec.parts.map.replaceChildren(svg);
-  rec.svg = svg; rec.geoName = geo.plan;
+  rec.svg = svg; rec.geoName = geo.plan; rec.layerApplied = null;
   return svg;
 }
 
@@ -147,6 +182,7 @@ function renderMap(c, rec) {
   if (geo && geo.error) { rec.svg = null; m.replaceChildren(h("div", { class: "nomap", text: "plan " + name + ": " + geo.error })); return; }
   if (!geo || geo === "loading") { rec.svg = null; m.replaceChildren(h("div", { class: "nomap", text: name ? "loading the plan " + name + "..." : "no run, no plan to draw" })); return; }
   const svg = ensureSvg(rec, geo);
+  applyLayer(rec, svg, geo);
   const vb = geo.view_box, w = svg.clientWidth || 400;
   const k = vb[2] / w; // yards per pixel
   svg.style.setProperty("--k", k.toFixed(4));

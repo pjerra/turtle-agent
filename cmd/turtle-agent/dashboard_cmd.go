@@ -16,7 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
-const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
+const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
 	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command"
 
 // expandHome turns a leading ~/ into the home folder.
@@ -40,6 +40,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	tests := fs.String("tests-dir", filepath.Join(home, "TortoiseBots-audit", "tests"), "the only folder whose files the page serves (run traces and reports)")
 	traces := fs.String("traces-dir", filepath.Join(home, "turtle-agent", "traces"), "where the agents write run traces (read for orders and the binary SHA, never served)")
 	plans := fs.String("plans-dir", filepath.Join(home, "turtle-agent", "dungeons"), "folder(s) with the dungeon plan files, comma separated")
+	minimaps := fs.String("minimap-dir", filepath.Join(home, "turtle-agent-minimaps"), "folder with the map images `turtle-agent minimap-extract` wrote (<map>.png, <map>.json); the run map draws over the image of its map id when there is one")
 	embed := fs.String("embed-from", "", "extra origins (http://host:port, comma separated) that may show this page in a frame; loopback pages always may")
 	cfgDir := fs.String("config-dir", dashboard.DefaultConfigDir(), "folder with settings*.json and the rpc-<port>.token files")
 	if err := fs.Parse(args); err != nil {
@@ -87,7 +88,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stderr, "dashboard: --tests-dir %s is not a folder: no files will be linked\n", testsDir)
 		testsDir = ""
 	}
-	p := dashboard.NewPoller(dashboard.Options{ConfigDir: expandHome(*cfgDir), Agents: *agents, TestsDir: testsDir, TracesDir: expandHome(*traces), PlansDirs: planDirs})
+	p := dashboard.NewPoller(dashboard.Options{ConfigDir: expandHome(*cfgDir), Agents: *agents, TestsDir: testsDir, TracesDir: expandHome(*traces), PlansDirs: planDirs, MinimapDir: minimapDir(expandHome(*minimaps), stderr)})
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", *listen)
 	if err != nil {
 		fmt.Fprintln(stderr, "dashboard:", err)
@@ -103,4 +104,13 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		return 1
 	}
 	return exitOK
+}
+
+// minimapDir is dir when it is a folder, else "" (the page then draws no background).
+func minimapDir(dir string, stderr io.Writer) string {
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		fmt.Fprintf(stderr, "dashboard: --minimap-dir %s is not a folder: the map has no background image (run turtle-agent minimap-extract)\n", dir)
+		return ""
+	}
+	return dir
 }

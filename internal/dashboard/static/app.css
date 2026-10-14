@@ -64,6 +64,8 @@ details pre { max-height: 320px; overflow: auto; font-size: 11px; margin: 6px 0;
 a { color: var(--accent); }
 
 svg { --k: 1; }
+svg image.bg { opacity: .9; }
+.legend select { font-size: 11px; margin-left: auto; }
 svg .legname, svg .pin text, svg .obj text, svg .boss text, svg .entrance text { font-size: calc(10px * var(--k)); fill: var(--muted); }
 svg .pin text { font-weight: 600; }
 svg .route, svg .direct { fill: none; stroke: var(--route); stroke-width: 1.6; vector-effect: non-scaling-stroke; opacity: .45; }
