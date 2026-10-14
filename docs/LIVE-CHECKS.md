@@ -944,3 +944,16 @@ meets them:
 5. **Archaedas** (leg 13): the stand point of the door is 39 yd from his spawn (he resets beyond 38); the altar side is 11 yd. Count the minions that wake (one per 10 s, six Guardians at 66 %,
    two Vault Warders at 33 %), the time to kill, and that the Vault door 124369 reads `active` after the kill.
 6. **The pace**: legs 4-13 are 2714 yd and 45 pull groups (147 mobs); the estimate is 50 to 80 min. Record `seconds` per leg and the watchdog stalls.
+
+## Dungeon plan: Zul'Farrak (`dungeons/zulfarrak.json`, #130; written from the world data, walked by a GM invisible on 2026-10-14, not run as a party)
+
+Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. `dungeons/zulfarrak-extra.json` is a record of what the driver cannot do, not a plan to run. What the first live run has to settle, in the order it meets them:
+
+1. **Entry.** The walk entry (the lead bot into area trigger 924, map 1) is expected to fail until the module has a `cmd enter` order: a bot never sends `CMSG_AREATRIGGER` itself. Record what happens (the run's "stood at the portal and did not enter" error is the expected one); with `cmd enter` the lead bot must land on map 209 at 1212.7 842.0, then the others by `cmd summon`, and the group must not change after that. `prepare.fresh` uses `outside_tele` `farrak` (partial match of game_tele 160): check that the bots and the agent land outside, map 1, near -6801 -2893.
+2. **The road to Antu'sul** (leg 0): the 15 pull groups come in the order of the plan; the four static Shadowcasters at 1505-1511 845 are their own group; the patrolling groups (radius 30) are found where they walk, not at their spawn rows. Count walk aggros and the time (about 807 yd).
+3. **Antu'sul**: Broodlings (8138) on aggro, the totem and ward, the minions at 75% and 25%; the three Hatchlings read friendly to a GM but are mobs; keep the party off the campfire trap 2061 at 1810 673.
+4. **Theka** patrols a ~45 yd loop from (1778 860): the boss fight must find him (it looks within 80 yd of the lead bot); the 30% transform must not end the fight early; the scarabs (7269) are skipped, not waited for.
+5. **The way to Velratha** goes by the west road (junction 1645 909), NOT through the End Door: check that no bot is ever at 1854.5 1142.9 and that nothing opened the door (`gameobjects` entry 146084 stays `ready`).
+6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
+7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
+8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
