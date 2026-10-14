@@ -19,6 +19,14 @@ type World interface {
 	HostilesWithin(center Point, radius float32) int
 }
 
+// EntryWorld is the optional part of a World whose object steps are done by entry: the carrier's order names the object by its entry
+// and the plan's point (`cmd open entry:<id>@x,y,z`), and a game-object wait asks `cmd state`, so the agent need not see the object. With
+// it a use_object or loot_object step whose object has an entry is returned as an action at once (no walk to bring the object into view;
+// the driver's approach does the walking), and a game-object wait with an entry never holds on the agent's own copy: the driver polls.
+type EntryWorld interface {
+	EntryTargets() bool
+}
+
 // PartyWorld is the optional part of a World that knows where the party stands: ResumeAt skips a pull group only when a member
 // stands near it (and sees it empty), because a World lists only the hostiles that someone sees.
 type PartyWorld interface {
@@ -70,12 +78,16 @@ type Action struct {
 	Skip      []uint32            // pull and boss: entries not to wait for
 	Boss      *Boss               // boss
 	Object    *objects.GameObject // use
-	GUID      packet.GUID         // use
-	Requires  *ItemRef            // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
-	Item      *ItemRef            // use_item: the item to use
-	Expect    *ItemRef            // loot_object, use_item: the item that must be in the bags afterwards
-	Remaining time.Duration       // wait: time left before the plan fails
-	Err       string              // failed
+	GUID      packet.GUID         // use (0 when the agent does not see the object: an entry-form action, see Entry)
+	// Entry and EntryAt are set when the World names objects by entry (EntryWorld): the order says `entry:<Entry>@EntryAt` and the server
+	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
+	Entry     uint32
+	EntryAt   *Point
+	Requires  *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
+	Item      *ItemRef      // use_item: the item to use
+	Expect    *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
+	Remaining time.Duration // wait: time left before the plan fails
+	Err       string        // failed
 	// TeamGate is set on a pull or kill of a part gated to the other team that a World with TeamGateLook runs only after a look: the
 	// driver looks at the part's positions and skips it only if none of its mobs is there (or hostile). It reads like the skip note,
 	// "pull group 1 of 1 ([1]) is for team horde, the leader is alliance".
@@ -322,6 +334,28 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		if st.LootObject != nil {
 			kind, verb = ActLoot, "loot"
 		}
+		if ew, isEntry := s.w.(EntryWorld); isEntry && ref.Entry != 0 && ew.EntryTargets() {
+			base.Kind, base.Entry = kind, ref.Entry
+			switch {
+			case ref.Near != nil:
+				base.EntryAt = ref.Near
+			case stand != nil:
+				base.EntryAt = stand
+			}
+			if o, seen := s.find(ref); seen && o.Distance >= 0 {
+				base.Object, base.GUID = &o, o.GUID
+				if base.EntryAt == nil {
+					base.EntryAt = &Point{o.X, o.Y, o.Z}
+				}
+			}
+			if st.UseObject != nil {
+				base.Requires = st.UseObject.RequiresItem
+			} else {
+				base.Expect = st.LootObject.ExpectItem
+			}
+			base.Label = s.label("step %d: %s %s", s.idx, verb, describeRef(ref))
+			return base, false
+		}
 		o, ok := s.find(ref)
 		if !ok || o.Distance < 0 {
 			// Not in view yet: the objects load as the player nears them, so go to where it stands.
@@ -454,6 +488,9 @@ func (s *Stepper) Skipped() []string {
 func (s *Stepper) holds(w *WaitFor) bool {
 	switch {
 	case w.GameObject != nil:
+		if ew, isEntry := s.w.(EntryWorld); isEntry && w.GameObject.Entry != 0 && ew.EntryTargets() {
+			return false // the driver asks the module (cmd state): the agent's copy of the object proves nothing
+		}
 		o, ok := s.find(&w.GameObject.ObjectRef)
 		return ok && o.State == w.GameObject.State
 	case w.HostilesGone != nil:

@@ -105,8 +105,8 @@ func (d *RemoteDriver) agentDistance(f Follower) (dist float64, ok bool) {
 // (a binding lost, a wipe while it waited); a failed appear or walk is noted and is no error.
 func (d *RemoteDriver) keepNear(ctx context.Context) (moved bool, err error) {
 	f, ok := d.g.(Follower)
-	if !ok {
-		return false, nil
+	if !ok || d.entry.only {
+		return false, nil // entry targets and cmd state: no step needs the agent in view (remote_entry.go)
 	}
 	d.look()
 	dist, ok := d.agentDistance(f)
@@ -292,7 +292,7 @@ func (d *RemoteDriver) inCombat() bool {
 // (viewObject): the lead bot can stand more than the view range from the door or chest of the step.
 func (d *RemoteDriver) nearBeforeObjectStep(ctx context.Context) error {
 	key, ok := d.objectStepNext()
-	if !ok {
+	if !ok || d.entry.only {
 		return nil
 	}
 	if d.near.tried == nil {

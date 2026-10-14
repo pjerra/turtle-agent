@@ -159,3 +159,84 @@ func TestBehavior(t *testing.T) {
 		t.Fatal("bad bot")
 	}
 }
+
+func TestEntryArgsAreCommands(t *testing.T) {
+	at := [3]float32{-235, 262.5, -48}
+	for cmd, want := range map[string]string{
+		"cmd open " + EntryArg(124371, &at) + " Healy":   "cmd open entry:124371@-235.00,262.50,-48.00 Healy",
+		"cmd loot " + EntryArg(124371, nil) + " Healy 7": "cmd loot entry:124371 Healy 7",
+		"cmd state " + EntryArg(124372, &at):             "cmd state entry:124372@-235.00,262.50,-48.00",
+		"cmd use 7740 Healy " + EntryArg(5, &at):         "cmd use 7740 Healy entry:5@-235.00,262.50,-48.00",
+	} {
+		if cmd != want {
+			t.Errorf("%q != %q", cmd, want)
+		}
+		if err := CheckCommand(cmd); err != nil {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+	for _, bad := range []string{"cmd open entry:1@0,0,0;say hi Healy", "cmd open @entry:1 Healy", "cmd state entry:1@0,0,0;say"} {
+		if err := CheckCommand(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestParseTarget(t *testing.T) {
+	tg, ok := ParseTarget("TBM:ACTION_TARGET|cmd open|bot:Healy|8246337208325079209|124371")
+	if !ok || tg.Intent != "cmd open" || tg.Bot != "Healy" || uint64(tg.GUID) != 8246337208325079209 || tg.Entry != 124371 {
+		t.Fatalf("%+v %v", tg, ok)
+	}
+	for _, bad := range []string{"TBM:ACTION_TARGET|cmd open|party|1|2", "TBM:ACTION_TARGET|cmd open|bot:A|x|2", "TBM:ACTION_TARGET|cmd open|bot:A|1", "TBM:ACTION_PENDING|cmd open|bot:A|1|2"} {
+		if _, ok := ParseTarget(bad); ok {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestParseGOState(t *testing.T) {
+	s, ok := ParseGOState("guid:123,entry:124372,type:0,state:active,loot:ready,flags:in-use+locked")
+	if !ok || s.GUID != 123 || s.Entry != 124372 || s.State != "active" || s.Loot != "ready" || s.Flags != "in-use+locked" {
+		t.Fatalf("%+v %v", s, ok)
+	}
+	for _, bad := range []string{"-", "guid:1,entry:2,type:3", "guid:x,entry:2,state:active", "opened"} {
+		if _, ok := ParseGOState(bad); ok {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestOrderTargetPendingAck(t *testing.T) {
+	l := newFakeLink()
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_TARGET|cmd open|bot:Healy|123|124371", "TBM:ACTION_PENDING|cmd open|bot:Healy|12|0x7B", "TBM:ACTION_ACK|cmd open|bot:Healy|1|opened"}
+	}
+	r, err := fastCommander(l).Order(context.Background(), "cmd open entry:124371@1,2,3 Healy")
+	if err != nil || !r.OK || !r.Opened || r.Target == nil || r.Target.GUID != 123 || r.Target.Entry != 124371 || r.Pending == nil {
+		t.Fatalf("%v %+v", err, r)
+	}
+	// A target line of another bot's order is not this order's.
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_TARGET|cmd open|bot:Magey|9|1", "TBM:ACTION_ERR|cmd open|not-found|nothing there"}
+	}
+	r, _ = fastCommander(l).Order(context.Background(), "cmd open entry:1 Healy")
+	if r.Target != nil || r.Code() != "not-found" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestOrderState(t *testing.T) {
+	l := newFakeLink()
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_ACK|cmd state|party|1|guid:77,entry:124372,type:0,state:ready,loot:not-ready,flags:none"}
+	}
+	r, err := fastCommander(l).Order(context.Background(), "cmd state entry:124372@-234,294,-47")
+	if err != nil || !r.OK || r.State == nil || r.State.State != "ready" || r.State.GUID != 77 || r.Bot != "" {
+		t.Fatalf("%v %+v", err, r)
+	}
+	l.reply = func(string) []string { return []string{"TBM:ACTION_ERR|cmd state|not-found|No spawned game object"} }
+	r, _ = fastCommander(l).Order(context.Background(), "cmd state entry:124372")
+	if r.Code() != "not-found" || r.State != nil {
+		t.Fatalf("%+v", r)
+	}
+}
