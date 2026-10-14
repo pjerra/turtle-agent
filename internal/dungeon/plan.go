@@ -36,10 +36,41 @@ type Point struct {
 	Z float32 `json:"z"`
 }
 
+// The kinds of plan: a 5-man (or smaller) dungeon, run with a hired party, and a raid, run with a raid group.
+const (
+	KindDungeon = "dungeon"
+	KindRaid    = "raid"
+)
+
+// Plan status: how far a plan has been checked. The field is free text after one of these words, so a plan can say what is
+// missing ("draft (not mapped, not live-checked)"). Only a plan that is mapped or live-checked has had its route corrected from a
+// walk; a draft is a skeleton from the world database export (tools/dungeongen) and is not to be run before its mapping walk.
+const (
+	StatusDraft       = "draft"
+	StatusMapped      = "mapped"
+	StatusLiveChecked = "live-checked"
+
+	// DraftStatus is the status line tools/dungeongen writes.
+	DraftStatus = "draft (not mapped, not live-checked)"
+)
+
+// RaidSpec is a raid plan's group: how many players and, as a placeholder until a raid has been run, the roles they are split into.
+// Size is 10, 20 or 40 and Tanks + Healers + DPS must add up to it.
+type RaidSpec struct {
+	Size    int `json:"size"`
+	Tanks   int `json:"tanks"`
+	Healers int `json:"healers"`
+	DPS     int `json:"dps"`
+}
+
 // Plan is a loaded, validated dungeon plan.
 type Plan struct {
-	Version  int    `json:"version"`
-	Name     string `json:"name"`
+	Version int    `json:"version"`
+	Name    string `json:"name"`
+	// Kind is "dungeon" (the default when absent) or "raid".
+	Kind string `json:"kind,omitempty"`
+	// Status says how far the plan has been checked: draft, mapped or live-checked, then free text (see StatusDraft). Absent: not said.
+	Status   string `json:"status,omitempty"`
 	Map      uint32 `json:"map"`
 	Entrance Point  `json:"entrance"`
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
@@ -57,8 +88,13 @@ type Plan struct {
 	Portal *Portal `json:"portal,omitempty"`
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
-	LevelBand []int    `json:"level_band,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	LevelBand []int `json:"level_band,omitempty"`
+	// HireComposition is the party the plan wants hired, "class:role" each (see HireSpec.Composition): the prepare step takes it when its own
+	// hire block gives none. Dungeon plans only.
+	HireComposition []string `json:"hire_composition,omitempty"`
+	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
+	Raid  *RaidSpec `json:"raid,omitempty"`
+	Notes []string  `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	Legs     []Leg           `json:"legs"`
@@ -303,6 +339,10 @@ type rawPoint struct {
 type rawPlan struct {
 	Version  *int              `json:"version"`
 	Name     string            `json:"name"`
+	Kind     string            `json:"kind"`
+	Status   string            `json:"status"`
+	Hire     []string          `json:"hire_composition"`
+	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
 	Trigger  uint32            `json:"entrance_trigger"`
@@ -490,6 +530,7 @@ func Parse(name string, data []byte) (*Plan, error) {
 	} else {
 		p.Map = *rp.Map
 	}
+	c.kindStatus(p, &rp)
 	p.Entrance = c.point("entrance", rp.Entrance)
 	p.EntranceTrigger = rp.Trigger
 	if rp.Tele != "" && !teleName.MatchString(rp.Tele) {
@@ -540,6 +581,54 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	return p, nil
 }
+
+// kindStatus checks and copies the kind, status, hire_composition and raid fields.
+func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
+	switch rp.Kind {
+	case "", KindDungeon, KindRaid:
+		p.Kind = rp.Kind
+	default:
+		c.fail("kind", "%q: use %q or %q", rp.Kind, KindDungeon, KindRaid)
+	}
+	if rp.Status != "" {
+		word, _, _ := strings.Cut(rp.Status, " ")
+		if !slices.Contains([]string{StatusDraft, StatusMapped, StatusLiveChecked}, word) {
+			c.fail("status", "%q: start with %s, %s or %s", rp.Status, StatusDraft, StatusMapped, StatusLiveChecked)
+		} else {
+			p.Status = rp.Status
+		}
+	}
+	if len(rp.Hire) > 0 {
+		if rp.Kind == KindRaid {
+			c.fail("hire_composition", "a raid plan has a raid block instead")
+		} else if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", strings.TrimPrefix(err.Error(), "prepare.hire.composition: "))
+		} else {
+			p.HireComposition = rp.Hire
+		}
+	}
+	switch {
+	case rp.Raid == nil && rp.Kind == KindRaid:
+		c.fail("raid", "required for a raid plan: {\"size\": 40, \"tanks\": .., \"healers\": .., \"dps\": ..}")
+	case rp.Raid != nil && rp.Kind != KindRaid:
+		c.fail("raid", "only a plan of kind %q has a raid block", KindRaid)
+	case rp.Raid != nil:
+		r := *rp.Raid
+		switch {
+		case !slices.Contains([]int{10, 20, 40}, r.Size):
+			c.fail("raid.size", "%d: use 10, 20 or 40", r.Size)
+		case r.Tanks < 1 || r.Healers < 1 || r.DPS < 1:
+			c.fail("raid", "needs at least one tank, one healer and one damage dealer")
+		case r.Tanks+r.Healers+r.DPS != r.Size:
+			c.fail("raid", "%d tanks + %d healers + %d dps is %d, the size is %d", r.Tanks, r.Healers, r.DPS, r.Tanks+r.Healers+r.DPS, r.Size)
+		default:
+			p.Raid = &r
+		}
+	}
+}
+
+// IsRaid says whether the plan is a raid plan.
+func (p *Plan) IsRaid() bool { return p.Kind == KindRaid }
 
 // strict decodes JSON that must hold exactly one value of v's shape and no unknown field.
 func strict(data []byte, v any) error {

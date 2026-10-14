@@ -6,6 +6,7 @@
 //
 //	dungeongen -dir testdata/uldaman -name uldaman -map 70 -bosses 6906,6910,7228 -out /tmp/uldaman.skeleton.json
 //	dungeongen -format dungeons/uldaman.json            # check a plan and print it in the form the files are kept in
+//	dungeongen -spec tools/dungeongen/plans.json -out-dir dungeons -table docs/PLANS.md   # every draft dungeon and raid plan, and their table
 //
 // What the skeleton is: one leg per boss, in the order of -bosses; each pack of hostile creatures (spawns within -cluster
 // yards of each other, or in one creature_groups group) goes into the leg of the boss nearest to it, packs ordered by a
@@ -35,6 +36,7 @@ type creature struct {
 	Entry       uint32
 	Name        string
 	Rank        int
+	LevelMax    int
 	Faction     int
 	NPCFlags    uint32
 	Pos         dungeon.Point
@@ -61,12 +63,14 @@ type Options struct {
 	Name           string
 	Map            uint32
 	Bosses         []uint32
-	Entrance       *dungeon.Point // default: the first row of entrances.tsv
-	Cluster        float64        // yards between spawns of one pack
-	IgnoreFactions map[int]bool   // factions that are friendly to the players (35 by default)
-	Skip           []uint32       // entries that go into every leg's skip list, besides the rares found
-	NoteRange      float64        // yards around a leg within which doors and altars are noted
-	Friendly       map[int]bool   // factions known to be friendly to the leader's team (-friendly-factions): a boss of one is warned about
+	Entrance       *dungeon.Point  // default: the first row of entrances.tsv
+	Cluster        float64         // yards between spawns of one pack
+	IgnoreFactions map[int]bool    // factions that are friendly to the players (35 by default)
+	Skip           []uint32        // entries that go into every leg's skip list, besides the rares found
+	NoteRange      float64         // yards around a leg within which doors and altars are noted
+	Friendly       map[int]bool    // factions known to be friendly to the leader's team (-friendly-factions): a boss of one is warned about
+	Exclude        map[uint32]bool // entries that are no pack of their own (a boss's "first" entries): dropped from the trash
+	Scripted       map[uint32]bool // bosses that are NPCs until a script or gossip makes them hostile: no npc_flags warning in the leg notes
 }
 
 func main() {
@@ -84,13 +88,22 @@ func main() {
 	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
+	spec := flag.String("spec", "", "plan spec (tools/dungeongen/plans.json): with -out-dir writes every draft plan it lists, with -table docs/PLANS.md")
+	dataRoot := flag.String("data-root", "tools/dungeongen/testdata", "with -spec: the folder holding the export folders the spec names")
+	outDir := flag.String("out-dir", "", "with -spec: the folder to write the plan files to (dungeons)")
+	table := flag.String("table", "", "with -spec: write the plan table (docs/PLANS.md) to this file")
+	plansDir := flag.String("plans-dir", "dungeons", "with -spec -table: the folder the plan files are read from")
+	scripted := flag.String("scripted", "", "with -check: comma separated creature entries that are NPCs (npc_flags, faction 35) until a script or dialogue makes them hostile; no warning for them")
 	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
 	flag.Parse()
+	if *spec != "" {
+		os.Exit(runSpec(*spec, *dataRoot, *outDir, *table, *plansDir))
+	}
 	if *format != "" {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *strict))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -172,7 +185,7 @@ func parseFactions(s string) (map[int]bool, error) {
 
 // checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
 // an export that cannot be read, 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
-func checkFile(path, dir, team, friendly, awakened string, strict bool) int {
+func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -203,7 +216,11 @@ func checkFile(path, dir, team, friendly, awakened string, strict bool) int {
 	for _, e := range aw {
 		am[e] = true
 	}
-	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am})
+	sc, err := parseEntries(scripted)
+	if err != nil {
+		return fail(err)
+	}
+	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
@@ -333,9 +350,13 @@ func readCreatures(path string) ([]creature, error) {
 	r := &reader{path: path}
 	var out []creature
 	for _, m := range rs {
-		out = append(out, creature{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Rank: int(r.num(m, "rank")),
+		c := creature{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Rank: int(r.num(m, "rank")),
 			Faction: int(r.num(m, "faction")), NPCFlags: uint32(r.num(m, "npc_flags")), Pos: r.pos(m), GroupLeader: uint64(r.num(m, "group_leader")),
-			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])})
+			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])}
+		if l, err := strconv.Atoi(m["level_max"]); err == nil { // optional: only the band of a spec plan needs it
+			c.LevelMax = l
+		}
+		out = append(out, c)
 	}
 	return out, r.err
 }
@@ -425,6 +446,8 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 			if _, dup := bossAt[c.Entry]; !dup {
 				bossAt[c.Entry] = c
 			}
+		case o.Exclude[c.Entry]:
+			// part of a boss encounter (boss.first): not a pack
 		case o.IgnoreFactions[c.Faction] || c.NPCFlags != 0:
 			// friendly, a vendor, quest giver or the like: nothing to pull (and nothing to wait for)
 		case c.Rank == 2 || c.Rank == 4:
@@ -477,7 +500,11 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 			leg.To = boss.Pos
 		}
 		leg.Boss = &dungeon.Boss{Entry: b, Position: boss.Pos}
-		leg.Notes = append(bossWarnings(boss, o.Friendly), objectNotes(objs, leg, o.NoteRange)...)
+		var warns []string
+		if !o.Scripted[b] {
+			warns = bossWarnings(boss, o.Friendly)
+		}
+		leg.Notes = append(warns, objectNotes(objs, leg, o.NoteRange)...)
 		plan.Legs = append(plan.Legs, leg)
 		from = boss.Pos
 	}
