@@ -40,6 +40,8 @@ type rmob struct {
 	hold     packet.GUID
 	noTarget bool
 	tankPct  int
+	// inert: a pull at it is acknowledged and does nothing (the mob never comes: no fight)
+	inert bool
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -344,6 +346,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		m := g.mobByArg(f[2])
 		if m == nil {
 			return errReply(intent, "invalid-target"), nil
+		}
+		if m.inert {
+			return ack(intent), nil
 		}
 		m.pulled, m.pullAt = true, g.now
 		if intent == "cmd pull" && m.engaged && !g.ignorePull {

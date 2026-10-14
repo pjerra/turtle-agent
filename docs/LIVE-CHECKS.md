@@ -642,7 +642,8 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
    `could not get a view of the pack` failure shows up on a real position. Uldaman's ledge packs (a position up on a ledge the navmesh path does not
    bring the lead bot within 25 yd of) are the expected case: an unreachable position fails the step on purpose, because passing it would count an
    unseen pack as dead. Note which positions fail; the plan may need a closer `to` or a different pull for them. A kill clears only its own position of a
-   multi-position group: the lead bot still walks to the others.
+   multi-position group: the lead bot still walks to the others. A group given up on (a mob that drew no fight, evaded or was refused) fails with
+   `were never seen` when one of its positions was never looked at; note how often that happens with the Oracles (G10).
 4. **Rez wait.** Let a DPS bot die with the priest alive and out of combat: no `cmd revive` should go out; the priest should raise it within the
    30 s (`rez_waits` 1, `rezzed` 1, the note `were raised`). Then kill the priest too (or stun it in combat): the wait ends at once and `cmd revive`
    goes out. Check the module's priest actually casts Resurrection on a body that has not released, and how long it takes.

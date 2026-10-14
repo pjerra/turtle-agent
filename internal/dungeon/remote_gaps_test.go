@@ -486,8 +486,8 @@ func TestRemoteKillAtOnePositionDoesNotClearTheOther(t *testing.T) {
 	}
 	d.curLeg = 0
 	sp := fightSpec{pick: []uint32{299}, track: []uint32{299}, anchors: []Point{a, b}}
-	d.noteKilled(sp, tbm.HostileRec{Entry: 299, X: a.X, Y: a.Y, Z: a.Z}) // the pack at A died
-	cleared, why, err := d.confirmGone(ctx, sp, map[int]bool{})
+	d.noteKilled(fightResult{out: won, kills: 1, dead: []deadAt{{entry: 299, at: a}}}) // the pack at A died
+	cleared, why, err := d.confirmGone(ctx, sp, newClearing())
 	if err != nil || cleared {
 		t.Fatalf("a kill at A cleared B: cleared %v (%s) %v", cleared, why, err)
 	}
@@ -499,7 +499,7 @@ func TestRemoteKillAtOnePositionDoesNotClearTheOther(t *testing.T) {
 	}
 	// B's mob really is there, now in view; once it is gone and B is looked at, the group is cleared.
 	g.mobs = nil
-	if cleared, why, err = d.confirmGone(ctx, sp, map[int]bool{}); err != nil || !cleared {
+	if cleared, why, err = d.confirmGone(ctx, sp, newClearing()); err != nil || !cleared {
 		t.Fatalf("%v %s %v", cleared, why, err)
 	}
 }
@@ -575,6 +575,126 @@ func TestRemoteWonPullAtAConfirmsEmptyB(t *testing.T) {
 		t.Fatalf("the lead bot got no nearer than %.0f yd to B", near)
 	}
 	if !strings.Contains(notesOf(rep), "1 kills; nothing more of [299] at its positions: killed earlier in this run; the lead bot stood there and saw none") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// Round 3 of the G3 review, item 1: a boss whose First add is already dead, the boss standing at its position. The First add's step
+// judges the position by the entries it can pick (the add), as the group driver does: the boss in view there is no add, and it shows
+// the bots have the spot in sight, so the step ends without a walk and the boss's own step pulls the boss.
+func TestRemoteBossWhoseFirstAddIsDead(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(6906, Point{60, 0, 0})
+	plan := remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, Boss: &Boss{Entry: 6906, Position: Point{60, 0, 0}, First: []uint32{6907}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || g.mobsKilled != 1 || len(g.ordersOf("cmd pullback")) != 1 {
+		t.Fatalf("%v killed %d orders %v\n%s", err, g.mobsKilled, g.orders, notesOf(rep))
+	}
+	if rep.Remote.PackLooks != 0 || !strings.Contains(notesOf(rep), "the bots see 6906 standing there and none of [6907]") {
+		t.Fatalf("%+v\n%s", rep.Remote, notesOf(rep))
+	}
+}
+
+// Item 2: a group that gave up on a mob still has every position confirmed. At A one mob draws no fight and the other dies; B, out of
+// the bots' sight, holds a pack: the lead bot walks to B and pulls it instead of "gave up with 1 kills ... counted as cleared".
+func TestRemoteGaveUpStillConfirmsTheOtherPositions(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 30
+	a, b := Point{300, 0, 0}, Point{300, 120, 0}
+	g.addMob(299, Point{297, 0, 0}).inert = true
+	g.addMob(299, Point{303, 0, 0})
+	g.addMob(299, b)
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{a, b}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if g.mobsKilled != 2 || len(g.mobs) != 1 || !g.mobs[0].inert {
+		t.Fatalf("B's pack was left: killed %d, orders %v\n%s", g.mobsKilled, g.orders, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "gave up with 2 kills") || strings.Contains(notesOf(rep), "gave up with 1 kills") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// Item 3: at the cap (the pulls used up) a group with kills counts as cleared only when every position has evidence. A's mob dies, A's
+// other mob never comes, and B was never looked at: the run fails instead of counting B cleared.
+func TestRemoteCapNeedsEveryPositionSeen(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 60 // A's two mobs are in view together; B, 120 yd on, is not
+	a, b := Point{300, 0, 0}, Point{300, 120, 0}
+	g.addMob(299, Point{290, 0, 0})
+	g.addMob(299, Point{316, 0, 0}).inert = true // 26 yd from the first: not in its fight
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{a, b}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err == nil || !strings.Contains(err.Error(), "were never seen") || !strings.Contains(err.Error(), "300 120 0") {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if g.mobsKilled != 1 || len(g.ordersOf("cmd pullback")) != 4 || !strings.Contains(notesOf(rep), "drew no fight") {
+		t.Fatalf("killed %d, orders %v\n%s", g.mobsKilled, g.orders, notesOf(rep))
+	}
+	// With the second position next to the first (the kill and the failed pull are evidence for it), the same pulls count as cleared.
+	g = newFakeRemote(t)
+	g.sight = 60
+	g.addMob(299, Point{290, 0, 0})
+	g.addMob(299, Point{316, 0, 0}).inert = true
+	plan = remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{a, {300, 10, 0}}}}})
+	rep, err = runRemote(t, g, plan, opts(), nil)
+	if err != nil || !strings.Contains(notesOf(rep), "gave up with 1 kills") {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+// Item 4: only the units that died in a won pull mark their spot. The boss is pulled, its add joins and dies, the boss never comes and
+// then walks off out of sight: its spot is not "killed earlier", and the boss is not counted dead.
+func TestRemoteBossThatEvadesAfterItsAddIsNotDead(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 45
+	boss := g.addMob(777, Point{50, 0, 0})
+	boss.inert = true
+	add := g.addMob(778, Point{55, 0, 0})
+	plan := remotePlan(Leg{Name: "b", To: Point{0, 0, 0}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	ctx := context.Background()
+	if err := d.begin(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	d.curLeg = 0
+	follows := len(g.ordersOf("cmd follow"))
+	g.onTick = func(g *fakeRemote) {
+		if add.hp > 0 && !add.pulled && len(g.ordersOf("cmd pullback "+tbm.GUIDArg(boss.guid))) > 0 {
+			add.pulled, add.pullAt = true, g.now // the boss's add answers the pull
+		}
+		if len(g.ordersOf("cmd follow")) > follows {
+			boss.pos = Point{50, 300, 0} // the boss walked off after the fight
+		}
+	}
+	sp := fightSpec{pick: []uint32{777}, track: []uint32{778, 777}, anchors: []Point{{50, 0, 0}}, limit: d.cfg.BossTimeout, required: true, wide: true}
+	err := d.engage(ctx, "boss", sp)
+	if err == nil || !strings.Contains(err.Error(), "no living [777]") {
+		t.Fatalf("a boss that never died was counted dead: %v\n%s", err, notesOf(d.Report()))
+	}
+	if add.hp > 0 {
+		t.Fatal("the add did not die")
+	}
+}
+
+// Item 5: a boss that dies in its First add's won pull is killed: its step does not fail with "no living [777] seen".
+func TestRemoteBossKilledInItsAddsPull(t *testing.T) {
+	g := newFakeRemote(t)
+	boss := g.addMob(777, Point{60, 0, 0})
+	add := g.addMob(778, Point{63, 0, 0})
+	g.onTick = func(g *fakeRemote) {
+		if add.pulled && !boss.pulled {
+			boss.pulled, boss.pullAt = true, g.now // linked: the boss comes with its add
+		}
+	}
+	plan := remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, Boss: &Boss{Entry: 777, Position: Point{60, 0, 0}, First: []uint32{778}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || g.mobsKilled != 2 || len(g.ordersOf("cmd pullback")) != 1 {
+		t.Fatalf("%v killed %d orders %v\n%s", err, g.mobsKilled, g.orders, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "[777] is dead (killed in this run)") {
 		t.Fatalf("%s", notesOf(rep))
 	}
 }
