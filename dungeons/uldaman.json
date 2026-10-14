@@ -21,7 +21,7 @@
     "Remote run entry: entrance_tele is game_tele 169 (\"ulda\", map 70, next to the entrance); portal is the centre of areatrigger 286 on map 0 (areatrigger_template, radius 10), where a non-GM remote run walks the lead bot in. Both are for the enter phase only (docs/LIVE-CHECKS.md).",
     "Order of legs 4-13. The TortoiseBots guide lists the Altar of the Keepers between the Sentinel and the Ancient Stone Keeper; on the navmesh the Hall of the Keepers lies past Grimlok and the Ancient Stone Keeper is a dead-end side room, so the legs follow the route: scorpid cave (and the hole in the mesh), Sentinel, Ancient Stone Keeper, Galgann, Grimlok, Keepers, Archaedas. Grimlok is the 7th boss of the dungeon, as the guide says. Ironaya's room is a dead end: the way on goes back south and east through the cave to the pit with the Cleft Scorpid nest (the live map walk found this; the first draft assumed an exit north of the room). Walk lengths on the navmesh: see README, The Uldaman plan.",
     "The Hall of the Keepers and the Vault: two levels (z -26.5 and z -52) joined only by the ramp behind the Temple Door 124367. The doors: 124368 (hall entrance) and 141869 (Archaedas) are plain doors spawned closed with no script and lock 86; 124370 (Echomok) is one too but off the route; 124367 and 124369 (faction 114, lock 85) are opened by the instance script (all four Stone Keepers dead; Archaedas dead), 124372 by the Keystone's script. The navmesh has no doors and `walk_path` goes through closed ones, so a door step comes before the walk through it. Lock.dbc is not in the export: whether lock 86 asks for anything is unverified, and the first live run settles it.",
-    "Both altars are summoning rituals of three participants (see the notes of keepers_altar and archaedas) and the driver cannot carry out an object step with three bots yet: that is the missing feature of legs 10 and 13. The plan holds the use_object steps, each followed by a 20 s wait for the altar to be active whose fail_text names the reason, so a run stops at the altar with that message and not 600 s later at the door of the next leg.",
+    "Both altars are summoning rituals of three participants (see the notes of keepers_altar and archaedas): the plan's ritual step has three bots use the altar (remote runs; the group driver cannot take that step yet) and its final answer is the result: the altar reads ready again once the bots are let go, so nothing waits for it to be active.",
     "Turtle 1.18.1 additions found in the map 70 data: the Ancient Treasure Chest (2010828, behind the Vault) and the quest 'Rebuilding the Relic' (41733; item 41800 drops from the Stone Keepers at -100 % for it). Nothing found changes how a boss fights: the instance, Ironaya, Archaedas and minion scripts are the ScriptDev2 C++ ones in src/scripts/dungeons/uldaman, the Sentinel, Galgann, Grimlok and Stone Keepers run EventAI rows. The live map walk found no difference from the SQL in the visited area. No quest or item gates any of legs 4-13 (the Staff is only for the Keystone).",
     "Dormant statues: the Stone Keepers, the Vault's Earthen Custodians, Guardians and Hallshapers and the four Vault Warders are faction 35 in the SQL but read as hostile in the agent's unit rows (live map walk). If the TBM feed lists them as hostile too, the driver may see them as targets before they are woken: the Archaedas leg lists them in skip, the Keepers group is pulled only after the altar step.",
     "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh. Legs 4-13: the pull groups are the spawns of the export within 10 yd of the navmesh route from the previous leg's end to the leg's boss (the Keepers' hall: 31 yd), grouped as dungeongen groups them and put in the order of the route; the Galgann room's two caster pairs and the Grimlok corridor's pair at 38 439 are added by hand (8-12 yd off the route)."
@@ -662,27 +662,17 @@
       ],
       "steps": [
         {
-          "use_object": {
+          "ritual": {
             "entry": 130511,
-            "near": {"x": 104.8, "y": 272.5, "z": -26.5},
+            "position": {"x": 104.8, "y": 272.5, "z": -26.5},
+            "participants": 3,
             "stand": {"x": 101.5, "y": 271.2, "z": -26.5}
-          }
-        },
-        {
-          "wait_for": {
-            "gameobject": {
-              "entry": 130511,
-              "near": {"x": 104.8, "y": 272.5, "z": -26.5},
-              "state": "active"
-            },
-            "timeout_s": 20,
-            "fail_text": "the ritual did not start: it needs three participants (summoning ritual, game object type 18, 3 required) and one carrier cannot fire it. Driver feature missing: three bots using the altar in turn (README, The Uldaman plan)"
           }
         }
       ],
       "notes": [
         "The Hall of the Keepers (z -26.5) is a large room with three squads of Earthen guards (four Stonebreakers 7396, a Stonecarver 7397 and a Stone Steward 4860 each, faction 415, level 44-45, wander 2): west of the altar on the route (73-89 / 251-269), east (112-130 / 244-264) and north (88-108 / 292-301), both 22 yd from the altar. All three are pulled BEFORE the ritual (radius 31 around the route, not the 10 of the other legs), because the Stone Keepers that the ritual wakes fight in the middle of the room and the squads would join. Four Stone Keepers (4857, faction 35, stoned) stand around the altar at 91-118 / 259-286 and are left alone until the altar.",
-        "Altar of the Keepers (130511, 104.8 272.5 -26.5) is a summoning ritual (game object type 18) with three participants: gameobject_template data0 3, spell 11568, animation spell 11206, ritualPersistent 1, castersGrouped 1. GameObject::Use counts the different players of the first user's group that used it; each stands channelling the animation, a user who moves is taken out of the count; with the third the ritual spell sends the scripted event 2228 (event_awaken_stone_keeper), which wakes the first Stone Keeper. One bot using it is not enough. MISSING DRIVER FEATURE: use_object makes the carrier alone use an object, so the ritual does not fire. The step after it, a 20 s wait for the altar to be active with a fail_text, makes the run stop here with that reason instead of waiting 600 s for the door of the next leg (the one carrier's `cmd open` may be answered 'opened' because it starts the channel). Carrying the step out needs three different bots to `cmd open entry:130511@104.8,272.5,-26.5 \u003cbot\u003e` in turn, standing still at the altar until the third has used it, and the ACK 'opened' of the third (or `cmd state` showing it active). The plan has the step; the driver does not carry it out yet."
+        "Altar of the Keepers (130511, 104.8 272.5 -26.5) is a summoning ritual (game object type 18) with three participants: gameobject_template data0 3, spell 11568, animation spell 11206, ritualPersistent 1, castersGrouped 1. GameObject::Use counts the different players of the first user's group that used it; each stands channelling the animation, a user who moves is taken out of the count; with the third the ritual spell sends the scripted event 2228 (event_awaken_stone_keeper), which wakes the first Stone Keeper. One bot using it is not enough: the ritual step orders cmd ritual for three bots, which walk to the altar, use it in turn and stand still until it is active and the ritual spell (5 s) has run; its final answer is the step's result. The altar itself reads ready again once the bots are let go (their movement ends the channel), so the plan does not wait for it to be active: the next leg waits for the door the Keepers' death opens. Core, read from GameObject::Use: the use that brings the count to three makes the object active and casts the spell, a participant that moves is taken out of the count again."
       ]
     },
     {
@@ -786,21 +776,11 @@
           }
         },
         {
-          "use_object": {
+          "ritual": {
             "entry": 133234,
-            "near": {"x": 96.5, "y": 269.1, "z": -52.1},
+            "position": {"x": 96.5, "y": 269.1, "z": -52.1},
+            "participants": 3,
             "stand": {"x": 94, "y": 267.8, "z": -52}
-          }
-        },
-        {
-          "wait_for": {
-            "gameobject": {
-              "entry": 133234,
-              "near": {"x": 96.5, "y": 269.1, "z": -52.1},
-              "state": "active"
-            },
-            "timeout_s": 20,
-            "fail_text": "the ritual did not start: it needs three participants (summoning ritual, game object type 18, 3 required) and one carrier cannot fire it. Driver feature missing: three bots using the altar in turn (README, The Uldaman plan)"
           }
         }
       ],
@@ -828,7 +808,7 @@
       },
       "notes": [
         "The Temple Door 141869 (70.7 256.9 -52.1, plain door, lock 86 like the other two) is the way into the Vault. Archaedas' script shuts it when the fight starts (DoResetDoor, no-interact) and opens it again on his death or a reset.",
-        "Altar of Archaedas (133234, 96.5 269.1 -52.1): a summoning ritual like the Altar of the Keepers (three participants, spell 10340, animation 11206, scripted event 2268 event_awaken_archaedas). MISSING DRIVER FEATURE: the same as the Keepers' altar, three bots using it in turn; the wait for the altar to be active (20 s, fail_text) stops the run here with that reason. The comment in boss_archaedas.cpp says one click is enough since 3.0.8; the Turtle gameobject_template still says three.",
+        "Altar of Archaedas (133234, 96.5 269.1 -52.1): a summoning ritual like the Altar of the Keepers (three participants, spell 10340, animation 11206, scripted event 2268 event_awaken_archaedas). The ritual step has three bots use it in turn, as at the Keepers' altar; Archaedas waking and appearing in the feed is what the boss part waits for. The comment in boss_archaedas.cpp says one click is enough since 3.0.8; the Turtle gameobject_template still says three.",
         "Archaedas (2748, level 47, 29850 hp, boss_archaedas) spawns stoned at 104.3 272.3 -51.7 and awakens 4 s after the ritual; he attacks the nearest player within 80 yd. Every 10 s one more stoned wall minion wakes (Earthen Custodians 7309 and Hallshapers 7077 along the walls: the Custodians cast Reconstruct (10260) on him below 50 % health); at 66 % he wakes the six Earthen Guardians (7076); at 33 % the two Vault Warders of the room (10120: Trample, 7392 hp) and the furniture pair despawns; Ground Tremor (6524) first after 60 s, then every 45 s. He evades when he or his target is more than 38 yd from his spawn point (the door at 70.7 256.9 is 37.0 yd from it, the stand point in front of it 39.0): keep the party at the altar side of the Vault, the stand point of the altar step is 11 yd from him. On a reset the door opens and everything stands up stoned again; the altar stays active (unverified, see the Keepers).",
         "On his death the instance script despawns every minion that is left, so `skip` lists the adds (7076, 7077, 7309, 10120) and the leg waits only for the Vault door 124369 (137.7 288.1 -52.1), which opens at once. Behind it: Lore Keeper of Norgannon (7172, 147.6 311.1), The Discs of Norgannon (131474, 161.8 298.3) and the Turtle-custom Ancient Treasure Chest (2010828, 167.7 287.4, loot item 60195 at 100 %, respawn 5 s); the plan does not loot them."
       ]

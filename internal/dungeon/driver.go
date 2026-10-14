@@ -483,6 +483,8 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			err = d.doLoot(ctx, a)
 		case ActItem:
 			err = d.doUseItem(ctx, a)
+		case ActRitual:
+			err = errors.New("a ritual step needs several bots using the object: it runs in remote mode only (dungeon_run with a bound commander party), not with the agent's own companions yet")
 		default:
 			err = fmt.Errorf("unknown action %q", a.Kind)
 		}

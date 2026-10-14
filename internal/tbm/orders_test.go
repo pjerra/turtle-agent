@@ -14,7 +14,11 @@ func TestParsePending(t *testing.T) {
 	if !ok || p.Intent != "cmd loot" || p.Bot != "Healy" || p.BudgetS != 24 || p.GUID != "0xF130000C5E0012AB" {
 		t.Fatalf("%+v %v", p, ok)
 	}
-	for _, bad := range []string{"TBM:ACTION_PENDING|cmd loot|party|24|0", "TBM:ACTION_PENDING|cmd loot|bot:A|x|0", "TBM:ACTION_PENDING|cmd loot|bot:A|1", "TBM:ACTION_ACK|cmd loot|bot:A|1|-"} {
+	// An order for the whole party (cmd ritual) says party where the bot would be.
+	if p, ok := ParsePending("TBM:ACTION_PENDING|cmd ritual|party|41|1234"); !ok || p.Intent != "cmd ritual" || p.Bot != "" || p.BudgetS != 41 || p.GUID != "1234" {
+		t.Fatalf("%+v %v", p, ok)
+	}
+	for _, bad := range []string{"TBM:ACTION_PENDING|cmd loot|party|x|0", "TBM:ACTION_PENDING|cmd loot|bot:|24|0", "TBM:ACTION_PENDING|cmd loot|bot:A|x|0", "TBM:ACTION_PENDING|cmd loot|bot:A|1", "TBM:ACTION_ACK|cmd loot|bot:A|1|-"} {
 		if _, ok := ParsePending(bad); ok {
 			t.Errorf("%q accepted", bad)
 		}
@@ -237,6 +241,29 @@ func TestOrderState(t *testing.T) {
 	l.reply = func(string) []string { return []string{"TBM:ACTION_ERR|cmd state|not-found|No spawned game object"} }
 	r, _ = fastCommander(l).Order(context.Background(), "cmd state entry:124372")
 	if r.Code() != "not-found" || r.State != nil {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// cmd ritual speaks for the whole party: its PENDING and ACK say party, not bot:<Name>, and the ACK's detail is "done".
+func TestOrderRitual(t *testing.T) {
+	l := newFakeLink()
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_TARGET|cmd ritual|bot:Magey|123|130511", "TBM:ACTION_PENDING|cmd ritual|party|41|123", "TBM:ACTION_ACK|cmd ritual|party|3|done"}
+	}
+	cmd := "cmd ritual entry:130511@104.80,272.50,-26.50 Magey Dpsy Rogy"
+	if err := CheckCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	r, err := fastCommander(l).Order(context.Background(), cmd)
+	if err != nil || !r.OK || !r.Ritual || r.Participants != 3 || r.Pending == nil || r.Pending.BudgetS != 41 || r.Bot != "" || r.Target == nil || r.Target.Entry != 130511 {
+		t.Fatalf("%v %+v", err, r)
+	}
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_PENDING|cmd ritual|party|41|123", "TBM:ACTION_ERR|cmd ritual|interrupted|a participant stopped"}
+	}
+	r, _ = fastCommander(l).Order(context.Background(), cmd)
+	if r.OK || r.Ritual || r.Code() != "interrupted" || r.Pending == nil {
 		t.Fatalf("%+v", r)
 	}
 }

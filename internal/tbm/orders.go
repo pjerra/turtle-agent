@@ -13,7 +13,7 @@ import (
 )
 
 // The per-bot player orders of the remote commander (docs/guides/player-controls.md section 1a of TortoiseBots, "Player orders"):
-// `.bot cmd loot <guid> <bot> [itemId]`, `cmd open <guid> <bot>`, `cmd use <itemId> <bot> [target-guid]` and `cmd lootmethod`, plus the read-only `cmd state <guid|entry:<id>[@x,y,z]>`; loot, open and use also take `entry:<id>[@x,y,z]` for a GUID. They
+// `.bot cmd loot <guid> <bot> [itemId]`, `cmd open <guid> <bot>`, `cmd use <itemId> <bot> [target-guid]`, `cmd ritual <target> <bot> <bot> [<bot>...]` (several bots at one summoning ritual; its PENDING and ACK say `party`) and `cmd lootmethod`, plus the read-only `cmd state <guid|entry:<id>[@x,y,z]>`; loot, open and use also take `entry:<id>[@x,y,z]` for a GUID. They
 // are asynchronous: a refusal is one ERR line; an accepted order that has to walk answers TBM:ACTION_PENDING first and its final ACK
 // or ERR later. Order sends one and waits for the final line.
 
@@ -21,7 +21,8 @@ import (
 const PendingPrefix = "TBM:ACTION_PENDING|"
 
 // Pending is a TBM:ACTION_PENDING|cmd <verb>|bot:<Name>|<budget seconds>|<object guid or 0> line: the order is accepted and runs; the
-// final ACK or ERR of the same intent and bot follows within the budget.
+// final ACK or ERR of the same intent and bot follows within the budget. An order for the whole party (`cmd ritual`) says `party` where
+// the bot's name would be: Bot is then empty.
 type Pending struct {
 	Intent  string `json:"intent"`
 	Bot     string `json:"bot"`
@@ -36,14 +37,19 @@ func ParsePending(line string) (Pending, bool) {
 		return Pending{}, false
 	}
 	f := strings.Split(rest, "|")
-	if len(f) != 4 || strings.TrimSpace(f[0]) == "" || !strings.HasPrefix(f[1], "bot:") || len(f[1]) == 4 {
+	party := len(f) == 4 && f[1] == "party"
+	if len(f) != 4 || strings.TrimSpace(f[0]) == "" || (!party && (!strings.HasPrefix(f[1], "bot:") || len(f[1]) == 4)) {
 		return Pending{}, false
 	}
 	n, err := strconv.Atoi(f[2])
 	if err != nil || n < 0 {
 		return Pending{}, false
 	}
-	return Pending{Intent: f[0], Bot: f[1][4:], BudgetS: n, GUID: f[3]}, true
+	bot := ""
+	if !party {
+		bot = f[1][4:]
+	}
+	return Pending{Intent: f[0], Bot: bot, BudgetS: n, GUID: f[3]}, true
 }
 
 // TargetPrefix starts the line that names the object an order by entry chose.
@@ -192,11 +198,14 @@ type OrderResult struct {
 	Err     *Err     `json:"err,omitempty"`
 	// The ACK payload, by verb: Loot for loot (and for open on a chest), Opened for open on anything else, Spell for use (0: none),
 	// Method and Threshold for lootmethod.
-	Loot      *Loot  `json:"loot,omitempty"`
-	Opened    bool   `json:"opened,omitempty"`
-	Spell     uint32 `json:"spell,omitempty"`
-	Method    string `json:"method,omitempty"`
-	Threshold string `json:"threshold,omitempty"`
+	Loot   *Loot `json:"loot,omitempty"`
+	Opened bool  `json:"opened,omitempty"`
+	// Ritual is the ACK of `cmd ritual` (`party|<participants>|done`): the object turned active and the bots stayed through its cast.
+	Ritual       bool   `json:"ritual,omitempty"`
+	Participants int    `json:"participants,omitempty"`
+	Spell        uint32 `json:"spell,omitempty"`
+	Method       string `json:"method,omitempty"`
+	Threshold    string `json:"threshold,omitempty"`
 	// Target is the object an order by entry chose (the ACTION_TARGET line); nil for an order by GUID or one refused before the choice.
 	Target *Target `json:"target,omitempty"`
 	// State is the answer of `cmd state`.
@@ -365,6 +374,10 @@ func interpretAck(r *OrderResult, a Ack) {
 			if n, err := strconv.ParseUint(id, 10, 32); err == nil {
 				r.Spell = uint32(n)
 			}
+		}
+	case "ritual":
+		if strings.EqualFold(a.Executor, "done") {
+			r.Ritual, r.Participants = true, a.Count
 		}
 	case "lootmethod":
 		r.Method, r.Threshold, _ = strings.Cut(a.Executor, ":")

@@ -85,6 +85,8 @@ type ObjectStepReport struct {
 	CarrierResult string          `json:"carrier_result,omitempty"`
 	FallbackUsed  bool            `json:"fallback_used"`
 	Fallback      *FallbackReport `json:"fallback,omitempty"`
+	// Participants are the bots a ritual step ordered, the carrier first.
+	Participants []string `json:"participants,omitempty"`
 }
 
 func cloneObjectSteps(in []ObjectStepReport) []ObjectStepReport {
@@ -97,6 +99,7 @@ func cloneObjectSteps(in []ObjectStepReport) []ObjectStepReport {
 		out[i].Orders = slices.Clone(s.Orders)
 		out[i].Gained = slices.Clone(s.Gained)
 		out[i].Fallback = s.Fallback.clone()
+		out[i].Participants = slices.Clone(s.Participants)
 	}
 	return out
 }
@@ -401,6 +404,8 @@ var orderHints = map[string]string{
 	"locked":         "the carrier lacks the skill to open it",
 	"denied":         "the agent's account is not the bot's owner",
 	"no-bot":         "the carrier is not in the commanded party",
+	"not-enough":     "the ritual needs more different bots than were named",
+	"interrupted":    "a participant moved, was hit or stunned while the ritual channeled",
 	"unavailable":    "the carrier is dead or left the party",
 	"invalid-target": "no such corpse or object on the carrier's map",
 	"not-found":      "no object of that entry is within the bots' reach of the point",
@@ -470,7 +475,7 @@ func (d *RemoteDriver) carry(ctx context.Context, rec *objRec, command string, n
 		case code == "cancelled" && cancelled < objectCancelTries:
 			cancelled++
 			err = d.tick(ctx, d.cfg.Poll)
-		case code == "in-combat" && d.clk.Now().Before(combatUntil):
+		case code == "in-combat" && verb != "ritual" && d.clk.Now().Before(combatUntil): // a ritual is never re-sent blindly: stepRitual asks the altar first
 			err = d.tick(ctx, d.cfg.Poll*2)
 		case code == "lead-unavailable" && d.clk.Now().Before(leadUntil):
 			err = d.tick(ctx, d.cfg.Poll*2)
@@ -658,6 +663,8 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 		note, err = d.stepOpen(ctx, a, c.Name, rec)
 	case ActItem:
 		note, err = d.stepItem(ctx, a, c.Name, rec)
+	case ActRitual:
+		note, err = d.stepRitual(ctx, a, c, rec)
 	}
 	if err == nil && note != "carries it already" {
 		err = d.waitRejoin(ctx, c.Name)

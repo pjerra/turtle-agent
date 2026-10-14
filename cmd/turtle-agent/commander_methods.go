@@ -144,7 +144,7 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 }
 
 // orderVerbs are the `cmd` verbs that run for a while and answer ACTION_PENDING before their final line.
-var orderVerbs = []string{"loot", "open", "use"}
+var orderVerbs = []string{"loot", "open", "use", "ritual"}
 
 type botViewParams struct {
 	AfterN uint64 `json:"after_n,omitempty"` // wait for a frame newer than this counter (the n of the last result)
