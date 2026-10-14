@@ -339,7 +339,17 @@ type RemoteReport struct {
 	GatherTimeouts int     `json:"gather_timeouts"`
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
-	Unreachable    int     `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
+	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
+	DirectGathers        int     `json:"direct_gathers"`
+	DirectGatherWaitS    float64 `json:"direct_gather_wait_s"`
+	DirectGatherTimeouts int     `json:"direct_gather_timeouts"`
+	DirectGatherMoves    int     `json:"direct_gather_moves"`
+	DirectGatherStays    int     `json:"direct_gather_stays"`
+	// Tank orders and pulls held back while the tank is dead, released or far from the mob / the lead bot (remote_tank.go).
+	TankOrdersHeld int `json:"tank_orders_held"`
+	TankAwayWaits  int `json:"tank_away_waits"`
+	Unreachable    int `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -1542,6 +1552,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 	leg := d.opt.MoveLeg
 	var last string
 	var meter walkMeter
+	named, regathered, gaveUp := "", false, false // a bot the module's too-far named: brought at once, once per step; a gather that ran out
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1597,6 +1608,17 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 				return err
 			}
 		}
+		if direct && (!gaveUp || named != "") {
+			// The module takes the step only with every follower on the lead bot (#948): the party stands on it first.
+			fight, timedOut, err := d.gatherDirect(ctx, "a direct step", named)
+			if err != nil {
+				return err
+			}
+			named, gaveUp = "", gaveUp || timedOut
+			if fight {
+				continue // the loop's combat branch takes it
+			}
+		}
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
@@ -1609,6 +1631,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			if direct {
 				if ref.Code == "invalid" {
 					return errDirectUnsupported(p, ref)
+				}
+				if bot := farBotName(ref.Message); ref.Code == "too-far" && bot != "" && !regathered {
+					// A follower fell behind after the gather: bring that bot (follow, then summon), and send the step again.
+					regathered, named = true, bot
+					d.rep.note(fmt.Sprintf("direct step to %.1f %.1f %.1f: %s; regathering %s", p.X, p.Y, p.Z, last, bot))
+					continue
 				}
 				if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries || ref.Code == "no-ground" || ref.Code == "no-los" {
 					return fmt.Errorf("direct step to %.1f %.1f %.1f: the lead bot was refused (%s)", p.X, p.Y, p.Z, last)
@@ -1647,6 +1675,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			d.remote(func(r *RemoteReport) { r.LookAheadMoves++ })
 		case arrivedAt:
 			if wp == p {
+				if direct {
+					// The next step (or the pull after the crossing) starts with the party up: wait for the followers now.
+					if _, _, err := d.gatherDirect(ctx, "the next step", ""); err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 		case stalledAt:
