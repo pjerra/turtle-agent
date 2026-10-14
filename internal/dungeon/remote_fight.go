@@ -185,7 +185,15 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 				continue // a hostile of the group showed itself on the way: pick it
 			}
 			if len(gaveUp) > 0 {
-				return d.leftOver(label, sp, kills, gaveUp, cl)
+				// A mob the pulls passed over may have come to the party by itself and died in a fight no pull tracked (ZF-2: the pull
+				// drew no fight, the pack walked up 3 s later and was killed): the kill ledger saw it fight and die, which is the
+				// evidence a kill needs, so it counts as a kill instead of failing the group as "no fight".
+				n := d.passedDeadInLedger(sp, gaveUp)
+				if n == 0 {
+					return d.leftOver(label, sp, kills, gaveUp, cl)
+				}
+				kills += n
+				d.rep.note(fmt.Sprintf("%s: %d mob(s) given up on were killed in a fight no pull tracked (kill ledger)", label, n))
 			}
 			if sp.required {
 				return fmt.Errorf("%s: no living %v seen by the bots (%s)", label, sp.pick, why)
@@ -259,6 +267,26 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 	}
 	return d.leftOver(label, sp, kills, gaveUp, cl)
+}
+
+// passedDeadInLedger counts the mobs the pulls passed over when every one of them is dead in the kill ledger (seen fighting, then dead
+// or gone from two whole frames with a living bot by, remote_ledger.go) and none was refused; else 0: a mob that drew no fight and
+// is not known dead is still a living one.
+func (d *RemoteDriver) passedDeadInLedger(sp fightSpec, gaveUp []passedOver) int {
+	if len(sp.passed) == 0 || len(sp.passed) != len(gaveUp) {
+		return 0
+	}
+	for _, g := range gaveUp {
+		if g.refused {
+			return 0
+		}
+	}
+	for guid := range sp.passed {
+		if m := d.ledger[guid]; m == nil || !m.dead {
+			return 0
+		}
+	}
+	return len(sp.passed)
 }
 
 // hostileName names a hostile for the report: the feed has no names, only entries.
