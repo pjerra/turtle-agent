@@ -1,6 +1,7 @@
 {
   "version": 1,
   "name": "uldaman",
+  "status": "live-checked",
   "map": 70,
   "entrance": {"x": -228.9, "y": 46.1, "z": -46},
   "entrance_trigger": 286,
@@ -13,6 +14,13 @@
     "z": 213.686
   },
   "level_band": [41, 45],
+  "hire_composition": [
+    "warrior:tank",
+    "priest:healer",
+    "mage:dps",
+    "rogue:dps",
+    "warlock:dps"
+  ],
   "notes": [
     "Uldaman (map 70) from the main entrance (areatrigger 286) to Archaedas, the last boss. Legs 0-3 (Baelog, Revelosh, Keystone, Ironaya) are the west wing and were run remotely end to end (remote run 5); legs 4-13 go on from Ironaya's room and were written from the world database of tortoise-wow 5d79486 (map 70 creature and game object spawns, templates, EventAI, the C++ scripts of src/scripts/dungeons/uldaman) and the map 70 navmesh, then compared with the live map walk of 2026-10-14 (a GM walker, nothing fought or used). They have NOT been run as a party: Obsidian Sentinel, Ancient Stone Keeper, Galgann, Grimlok, the Altar of the Keepers with its four Stone Keepers, Archaedas. Order of legs 0-3 follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859).",
     "Honest (non-GM) run: the baelog leg pulls its packs and loots Baelog's Chest; revelosh kills Revelosh, loots the Shaft of Tsol and makes the Staff of Prehistoria; keystone opens the Keystone with it. A Horde leader kills Baelog, Eric and Olaf (team: horde); for an Alliance leader the boss is skipped unless the lost dwarves show up hostile in the feed (remote run 2: they were hostile to an Alliance party and joined the pull of the last pack), then it is fought like a pull group. Pass criteria: docs/LIVE-CHECKS.md.",
