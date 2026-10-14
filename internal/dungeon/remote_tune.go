@@ -21,6 +21,7 @@ import (
 const (
 	boundaryLeg  = "leg_start"
 	boundaryPull = "pull_group_start"
+	boundaryRun  = "run_start" // before the enter phase and the preflight (the walk to the portal, the first bind)
 )
 
 // maxLiveRecords bounds the tune changes and plan reloads one report keeps.

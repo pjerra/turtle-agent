@@ -577,6 +577,9 @@ func (d *RemoteDriver) finish(err error) {
 
 func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	defer d.unbind() // every way out: done, failed, stopped, a panic
+	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
+	// plan is not read again here, it was loaded a moment ago.
+	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
 	setupAt := d.clk.Now()
 	err = d.begin(ctx, fromLeg)
 	setupS := d.clk.Now().Sub(setupAt).Seconds()

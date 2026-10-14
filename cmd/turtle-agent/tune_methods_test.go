@@ -53,6 +53,22 @@ func TestTuneFileChoice(t *testing.T) {
 	if p, err := r.tuneFile(dungeonRunParams{Tune: named}, "dungeons/x.json"); p != named || err != nil {
 		t.Fatalf("%q %v", p, err) // the run's own wins and must exist
 	}
+	// The contents are checked at the call: a typo, a value over a limit and a broken rule are refused with the problems listed.
+	bad := filepath.Join(dir, "bad.json")
+	for _, content := range []string{`{"pul_range": 40}`, `{"pull_range": 500}`, `{"pull_standoff": 70}`, `{`} {
+		if err := os.WriteFile(bad, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := r.tuneFile(dungeonRunParams{Tune: bad}, "dungeons/x.json")
+		if e, ok := err.(*rpc.Error); !ok || e.Code != rpc.CodeInvalidParams || !strings.Contains(e.Message, "tune: "+bad) {
+			t.Errorf("%s: %v", content, err)
+		}
+		r.tunePath = bad // the login's file is checked when it is there
+		if _, err := r.tuneFile(dungeonRunParams{}, "dungeons/x.json"); err == nil {
+			t.Errorf("login --tune %s accepted", content)
+		}
+		r.tunePath = "login.tune.json"
+	}
 }
 
 func TestTuneDiffCommand(t *testing.T) {

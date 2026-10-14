@@ -265,7 +265,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `dungeon_run` (live tuning) | `tune` (remote mode: the tunables file; default the login's `--tune`, else `<plan>.tune.json` beside the plan file, which may be absent; a named file must exist), `live_reload` (`false`: the run does not read the plan file and the tunables file again) | the report's `remote.tune_changes[]` and `remote.plan_reloads[]`; see [Live tuning](#live-tuning) |
-| `tune_set` | `key` (a tunable, see [Live tuning](#live-tuning)), `value` (a number, or `"default"` to put the key back) | `key`, `old` (the value now), `new`, `applies`. Refused at once as invalid params when the key is unknown, the value is outside its limits or a whole number is wanted, or it breaks a rule between two values; else taken, with the same `tune_change` event as a file's change, at the run's next leg start or pull-group start. Errors when no remote run goes |
+| `tune_set` | `key` (a tunable, see [Live tuning](#live-tuning)), `value` (a number, or `"default"` or `null` to put the key back) | `key`, `old` (the value now), `new`, `applies`. Refused at once as invalid params when the key is unknown, the value is outside its limits or a whole number is wanted, or it breaks a rule between two values; else taken, with the same `tune_change` event as a file's change, at the run's next leg start or pull-group start. Errors when no remote run goes |
 | `tune_list` | | `tunables[]`: `key`, `unit`, `min`, `max`, `default`, `base` (what the run was made with), `value` (now), `source` (`base`, `file`, `rpc`), `queued` (a `tune_set` waiting for the boundary), `doc` |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
@@ -1669,13 +1669,14 @@ of a bound lead bot, `.respawn` in an instance and the visibility distance it re
 Fixes on the spot during a live run, without a restart: the remote driver's thresholds are named, bounded **tunables**, the plan file and a
 tunables file are read again as the run goes, and every change is a trace event, so a fix made at the keyboard becomes a PR afterwards.
 
-**Where.** The driver looks at the files and at the `tune_set` requests at two places only: **before a leg starts** and **before a pull group
+**Where.** The driver looks at the files and at the `tune_set` requests **once at the start of the run** (`boundary` `run_start`, before the
+enter phase and the preflight, so the entry walk reads them too) and then at two places only: **before a leg starts** and **before a pull group
 starts** (also the first group of a leg, after the leg's start gate). What it finds applies to the next step; nothing changes in the middle of
 a walk, a fight or a wait. A file is read when its modification time or size changed. `live_reload: false` (a `dungeon_run` parameter) turns
 the two file reloads off; `tune_set` still works.
 
 **The tunables file.** JSON, one object of key to number, `<plan>.tune.json` beside the plan file (`dungeons/zulfarrak.tune.json`), or the file named
-by `dungeon_run`'s `tune` or the login's `--tune FILE`. It is optional; a file named by `tune` must exist at the start. Keys that start with `_` are
+by `dungeon_run`'s `tune` or the login's `--tune FILE`. It is optional; a file named by `tune` must exist and be good when `dungeon_run` is called (an invalid one is refused there, with every problem listed; the login's `--tune` file is checked the same way when it exists). Keys that start with `_` are
 comments. A key left out has the value the run was made with, so taking a key out of the file puts it back.
 
 ```json
@@ -1727,7 +1728,7 @@ with `ok: false`, once for that version of the file. A file that goes away chang
 | `rest_mana_pct` | pct | 10 to 100 | 35 | rested: every other mana user's mana at least this |
 | `rest_healer_mana_pct` | pct | 10 to 100 | 50 | rested: every healer's mana at least this |
 | `rest_timeout_s` | s | 5 to 300 | 60 | longest rest gate |
-| `rest_min_health_pct` | pct | 1 to 100 | 50 | after the timeout the run goes on only with this health (at most rest_health_pct) |
+| `rest_min_health_pct` | pct | 20 to 100 | 50 | after the timeout the run goes on only with this health (at most rest_health_pct) |
 | `rest_walk_yd` | yd | 10 to 500 | 60 | the walk length from which the start gate lets the party rest while it walks |
 | `rest_walk_health_pct` | pct | 10 to 100 | 70 | health floor for resting on a walk |
 | `rest_walk_healer_mana_pct` | pct | 5 to 100 | 40 | healer mana floor for resting on a walk |
@@ -1750,7 +1751,7 @@ Not tunable on purpose: the evidence radii of the clear and boss rules (25 yd, 2
 tunables file before its first try and before each later try (the plan is the test, so it is not reloaded); a change between two tries is in
 the report, but an A/B comparison should keep them still.
 
-**`tune_set`.** `{"key": "pull_range", "value": 40}` (RPC `tune_set`; `"default"` puts the key back, `tune_list` shows the keys with limits, the
+**`tune_set`.** `{"key": "pull_range", "value": 40}` (RPC `tune_set`; `"default"` or `null` puts the key back, `tune_list` shows the keys with limits, the
 value now and a queued request). It is checked at once with the same limits as the file and answers `old`, `new` and where it applies; it is
 taken at the next leg start or pull-group start like a file's change, with the same events. For one-off changes from the run worker.
 
@@ -1764,7 +1765,7 @@ Groups of a leg are matched by position in the list, so edit only the groups fro
 `plan_reload` record's `ignored`, so a change that was not taken is not a surprise.
 
 **Events and the report.** Each change is a trace event `tune_change` (`key`, `old`, `new`, `source` = `file`, `rpc` or `reset`, `at`, `leg`,
-`boundary` = `leg_start` or `pull_group_start`) and a line in `remote.tune_changes[]`; each reload is a `plan_reload` event (`ok`,
+`boundary` = `run_start`, `leg_start` or `pull_group_start`) and a line in `remote.tune_changes[]`; each reload is a `plan_reload` event (`ok`,
 `file`, `at`, `leg`, `boundary`, `ops` as JSON patch operations with the old value, `ignored`, or `error`) and a line in `remote.plan_reloads[]`.
 Both also leave a note. A refused file is a `tune_change` or `plan_reload` event with `ok: false`.
 
