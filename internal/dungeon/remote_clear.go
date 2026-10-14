@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // When is a pull group gone? The feed lists only what the bots see (their line of sight, a frame cut short drops hostiles), so a group
@@ -28,6 +30,7 @@ import (
 type deadAt struct {
 	entry uint32
 	at    Point
+	guid  packet.GUID // the corpse keeps it: a loot order names it
 }
 
 // clearing is what one engage has learnt about the positions of its group.
@@ -46,6 +49,7 @@ func (d *RemoteDriver) noteKilled(res fightResult) {
 	}
 	for _, u := range res.dead {
 		d.killedAt[u.entry] = append(d.killedAt[u.entry], u.at)
+		d.noteCorpse(u)
 	}
 }
 

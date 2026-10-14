@@ -112,6 +112,11 @@ type dungeonRunParams struct {
 	Tank string `json:"tank,omitempty"`
 	// Healer names the bot that gets the healer mana target at the rest gates (remote mode); empty: every caster does.
 	Healer string `json:"healer,omitempty"`
+	// Carrier names the bot that does the object steps in remote mode (loot_object, a boss's loot_item, use_item, use_object): it loots,
+	// opens and uses items on `cmd` orders. Empty: the first living bot that is not the lead bot, the tank or the healer.
+	Carrier string `json:"carrier,omitempty"`
+	// LootRestore is the loot method put back after the carrier's free-for-all loot (remote mode): group (default), rr, master or nbg.
+	LootRestore string `json:"loot_restore,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the

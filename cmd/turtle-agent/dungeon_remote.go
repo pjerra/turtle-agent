@@ -22,8 +22,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch strings.ToLower(p.Mode) {
 	case "", "group":
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" {
-			return false, bad(`lead_bot, bots, tank, healer, cc, team, preflight and on_end go with mode "remote"`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.Carrier != "" || p.LootRestore != "" {
+			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, cc, team, preflight and on_end go with mode "remote"`)
 		}
 		return false, nil
 	case "remote":
@@ -48,6 +48,12 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	if p.Healer != "" && !botName.MatchString(p.Healer) {
 		return true, bad("healer: %q is not a bot name", p.Healer)
+	}
+	if p.Carrier != "" && !botName.MatchString(p.Carrier) {
+		return true, bad("carrier: %q is not a bot name", p.Carrier)
+	}
+	if lr := strings.ToLower(p.LootRestore); lr != "" && !slices.Contains([]string{"group", "rr", "master", "nbg"}, lr) {
+		return true, bad("loot_restore: %q is not group, rr, master or nbg", p.LootRestore)
 	}
 	if t := strings.ToLower(p.Team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
 		return true, bad("team: %q is neither %q nor %q", p.Team, dungeon.TeamAlliance, dungeon.TeamHorde)
@@ -86,7 +92,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, plan *dungeon.Plan, setu
 	cfg := dungeon.DefaultConfig()
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
 	cfg.Resume = p.Resume != nil && *p.Resume
-	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd}
+	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)

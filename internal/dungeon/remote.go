@@ -80,6 +80,12 @@ type RemoteOptions struct {
 	// OnEnd is what the run does with the bots at its end: "stay" (the default: `cmd stay` before the unbind, so that they do not follow the
 	// agent), "logout" (stay, unbind, then `.bot logout` for each) or "none".
 	OnEnd string
+	// Carrier names the bot that does the object steps (loot_object, a boss's loot_item, use_item, use_object): it walks to the chest or
+	// corpse, loots, opens and uses items on `cmd open|loot|use` orders (remote_objects.go). Empty: the first living bot that is neither
+	// the lead bot, the tank nor the healer.
+	Carrier string
+	// LootRestore is the loot method put back after a free-for-all loot ("group" by default; the module cannot be asked for the old one).
+	LootRestore string
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -238,7 +244,10 @@ type RemoteReport struct {
 	LookAheadMoves int     `json:"look_ahead_moves"`
 	FightHolds     int     `json:"fight_holds"`
 
-	ObjectStepsAhead int `json:"object_steps_ahead"` // use_object, loot_object, use_item and game-object waits the plan has from the first leg on: they fail the run
+	ObjectStepsAhead int `json:"object_steps_ahead"` // use_object, loot_object, use_item and game-object waits the plan has from the first leg on
+	// Carrier is the bot that did (or will do) the object steps; ObjectSteps is what each did (remote_objects.go).
+	Carrier     string             `json:"carrier,omitempty"`
+	ObjectSteps []ObjectStepReport `json:"object_steps,omitempty"`
 }
 
 func (r *RemoteReport) clone() *RemoteReport {
@@ -249,6 +258,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.Bots = slices.Clone(r.Bots)
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
+	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
 	return &c
@@ -313,6 +323,7 @@ type RemoteDriver struct {
 	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
+	obj           objState           // the object steps' carrier, corpses and step reports (remote_objects.go)
 	team          string             // the party's team for the team gate ("" when unknown: everything runs)
 	killedAt      map[uint32][]Point // where mobs of an entry were killed in this run (evidence that a pack is gone)
 }
@@ -432,8 +443,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		if d.objectTouched {
-			// The step looked for a game object (the agent sees none): it is a step only the agent could do. Fail before any order.
-			return d.objectStepError(a)
+			if err, handled := d.objectLook(ctx, a); handled {
+				if err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
@@ -469,9 +484,11 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		case ActPull:
 			err = d.doPull(ctx, a)
 		case ActKill:
-			err = d.doKill(ctx, a)
+			err = d.doBoss(ctx, a)
+		case ActLoot, ActUse, ActItem:
+			err = d.doObjectStep(ctx, a)
 		default:
-			err = fmt.Errorf("remote mode cannot do %q: %s", a.Kind, remoteObjectShort)
+			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
 		}
 		data := map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds(), "mode": "remote"}
 		if err != nil {
@@ -556,7 +573,7 @@ func (w remoteWorld) Position() Point {
 }
 func (w remoteWorld) GameObjects() []objects.GameObject {
 	w.d.objectTouched = true // only the object steps and game-object waits ask
-	return nil
+	return w.d.objectsInView()
 }
 
 // Team makes the world a TeamWorld: the team gate skips what is for the other team (a boss friendly to the party never shows in the feed).
@@ -727,7 +744,7 @@ func (d *RemoteDriver) countObjectSteps(fromLeg int) {
 	}
 	d.remote(func(r *RemoteReport) { r.ObjectStepsAhead = n })
 	if n > 0 {
-		d.rep.note(fmt.Sprintf("remote mode: the plan has %d object steps (use_object, loot_object, use_item, game-object waits) from leg %d on; each fails the run when reached, because the agent is not with the group", n, fromLeg))
+		d.rep.note(d.objectStepsNote(n, fromLeg))
 	}
 }
 
