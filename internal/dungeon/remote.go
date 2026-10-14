@@ -125,6 +125,9 @@ type RemoteOptions struct {
 	OpenerDelay time.Duration
 	AddCooldown time.Duration
 	UnbindWait  time.Duration // the unbind at the end of the run
+	// EndFightWait is how long the end of a run (done, failed or stopped) keeps the binding and the fight logic going while the party is
+	// still in combat, before the stay and the unbind (remote_end.go). 0: DefaultEndFightWait; negative: unbind at once.
+	EndFightWait time.Duration
 }
 
 // Values of RemoteOptions.OnEnd.
@@ -173,6 +176,9 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 		o.OpenerDelay = d.OpenerDelay
 	}
 	fill(&o.UnbindWait, d.UnbindWait)
+	if o.EndFightWait == 0 {
+		o.EndFightWait = DefaultEndFightWait
+	}
 	fill(&o.EnterVerify, d.EnterVerify)
 	fill(&o.EnterGrace, d.EnterGrace)
 	fill(&o.SummonGap, d.SummonGap)
@@ -209,7 +215,10 @@ type RemoteReport struct {
 	UnbindVia string   `json:"unbind_via,omitempty"`
 	// EndStay is the answer to the `cmd stay` sent before the unbind ("ack", "refused: ...", "no answer"); LoggedOut the bots logged out
 	// after it (OnEnd logout).
-	EndStay   string   `json:"end_stay,omitempty"`
+	EndStay string `json:"end_stay,omitempty"`
+	// EndFight is what the end of the run did about a fight still on ("out of combat after 12 s", "still in combat after 90 s; gave up");
+	// empty when the party was out of combat.
+	EndFight  string   `json:"end_fight,omitempty"`
 	LoggedOut []string `json:"logged_out,omitempty"`
 	// Preflight is the pre-run kit check (absent with preflight off).
 	Preflight *Preflight `json:"preflight,omitempty"`
@@ -268,6 +277,7 @@ type RemoteReport struct {
 	Rezzed            int     `json:"rezzed"`           // bots that got up during those waits
 	PackLooks         int     `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
 	PacksSeenEmpty    int     `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
+	Unreachable       int     `json:"unreachable"`      // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -367,6 +377,7 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	seenHostile   map[uint32]bool            // entries listed alive in the feed at some point of the run (the team gate's evidence)
 
 	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	trSeen    uint64             // the feed frame count the trace last took
@@ -637,6 +648,9 @@ func (w remoteWorld) GameObjects() []objects.GameObject {
 // Team makes the world a TeamWorld: the team gate skips what is for the other team (a boss friendly to the party never shows in the feed).
 func (w remoteWorld) Team() string { return w.d.team }
 
+// HostileSeen makes the world a HostileWorld: the team gate fights a part gated to the other team when the feed lists its mobs hostile.
+func (w remoteWorld) HostileSeen(entries []uint32) bool { return w.d.hostileSeen(entries) }
+
 func (w remoteWorld) PartyNear(c Point, r float32) bool {
 	for _, m := range w.d.fr.Party {
 		if !m.Dead && dist3(partyPoint(m), c) <= float64(r) {
@@ -697,7 +711,11 @@ func (d *RemoteDriver) resolveTeam() {
 func (d *RemoteDriver) noteSkipped() {
 	for _, text := range d.st.Skipped() {
 		d.rep.note(text)
-		d.emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true, "mode": "remote"})
+		action := "skip_team"
+		if strings.HasSuffix(text, ": fought") {
+			action = "team_override"
+		}
+		d.emit(events.KindDungeonStep, text, map[string]any{"action": action, "ok": true, "mode": "remote"})
 	}
 }
 
@@ -715,9 +733,17 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if err != nil {
 		return fmt.Errorf("commander bind: %w", err)
 	}
+	adopted := false
 	switch r.Kind {
 	case tbm.KindErr:
-		return fmt.Errorf("commander bind refused: %s", describeBindErr(r.Err))
+		if r.Err == nil || r.Err.Code != "already-bound" {
+			return fmt.Errorf("commander bind refused: %s", describeBindErr(r.Err))
+		}
+		// The account's commander already commands a party: that is this run's party, or another's.
+		if err := d.adoptBinding(ctx, r.Err); err != nil {
+			return err
+		}
+		adopted = true
 	case tbm.KindTimeout:
 		// No answer: it may have gone through. The unbind at the end clears it either way.
 		d.rep.note("commander bind: no ACK or ERR came; going on with the feed (the module may be an older build without the remote commander)")
@@ -733,6 +759,13 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	}
 	if err := d.waitFirstFrame(ctx); err != nil {
 		return err
+	}
+	if adopted {
+		if err := d.checkAdopted(); err != nil {
+			d.bound = false // not this run's binding: leave it as it is
+			d.remote(func(r *RemoteReport) { r.Bound = false })
+			return err
+		}
 	}
 	if _, ok := d.fr.LeadRec(); !ok {
 		return fmt.Errorf("the first frame does not list the lead bot %s (lead guid %s)", d.opt.Lead, d.fr.Lead)
@@ -765,6 +798,38 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	}
 	d.lootOnAtStart(ctx)
 	return d.preflight(ctx)
+}
+
+// adoptBinding answers a bind refused as already-bound: the binding the account holds is reused when it is this run's own (the same lead
+// bot, and the same number of bots when the run names them; the names are checked against the first frame), else the run is refused
+// with a message that names the binding in the way. refusal is the bind's own refusal.
+func (d *RemoteDriver) adoptBinding(ctx context.Context, refusal *tbm.Err) error {
+	sr, err := d.g.Command(ctx, "commander status")
+	if err != nil {
+		return fmt.Errorf("commander bind refused: %s; commander status: %w", describeBindErr(refusal), err)
+	}
+	if sr.Kind != tbm.KindAck || sr.Ack == nil {
+		return fmt.Errorf("commander bind refused: %s (and commander status gave no answer to compare it with)", describeBindErr(refusal))
+	}
+	lead, n, want := strings.TrimSpace(sr.Ack.Executor), sr.Ack.Count, 1+len(d.opt.Bots)
+	if !strings.EqualFold(lead, d.opt.Lead) || (len(d.opt.Bots) > 0 && n != want) {
+		return fmt.Errorf("the commander is already bound to another group: lead bot %s with %d bots, not %s%s; unbind it first (commander op unbind)", lead, n, d.opt.Lead, botsSuffix(d.opt.Bots))
+	}
+	d.rep.note(fmt.Sprintf("commander bind: already bound to %s with %d bots, the same group; reusing the binding", lead, n))
+	return nil
+}
+
+// checkAdopted checks the first frame of a reused binding: the lead bot leads it and the named bots are in its party.
+func (d *RemoteDriver) checkAdopted() error {
+	if l, ok := d.fr.LeadRec(); !ok || !strings.EqualFold(l.Name, d.opt.Lead) {
+		return fmt.Errorf("the commander is already bound to another group: its lead guid is %s, not %s; unbind it first (commander op unbind)", d.fr.Lead, d.opt.Lead)
+	}
+	for _, b := range d.opt.Bots {
+		if _, ok := d.memberByName(b); !ok {
+			return fmt.Errorf("the commander is already bound to a group that does not hold %s: unbind it first (commander op unbind)", b)
+		}
+	}
+	return nil
 }
 
 func botsSuffix(bots []string) string {
@@ -841,6 +906,7 @@ func (d *RemoteDriver) unbind() {
 	if !d.bound {
 		return
 	}
+	d.finishFights() // before unbinding is set: a binding the module ended is noticed
 	d.unbinding = true
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), d.opt.UnbindWait+5*time.Second)
 	defer cancel()
@@ -1215,6 +1281,9 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 			last = ref.Code + ": " + ref.Message
 			if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries {
 				return fmt.Errorf("walk to %.1f %.1f %.1f: the lead bot was refused %d times (%s)", p.X, p.Y, p.Z, refusals, last)
+			}
+			if ref.Code == "unreachable" {
+				d.noteUnreachable("move", wp, fmt.Sprintf("walk to %.1f %.1f %.1f, leg of %.0f yd from %.1f %.1f %.1f", p.X, p.Y, p.Z, leg, here.X, here.Y, here.Z))
 			}
 			if ref.Code == "too-far" || ref.Code == "off-mesh" || ref.Code == "unreachable" {
 				leg = max(leg/2, 15) // a shorter leg: closer, and nearer the mesh

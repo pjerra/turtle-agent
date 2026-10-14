@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -90,7 +91,13 @@ func cloneObjectSteps(in []ObjectStepReport) []ObjectStepReport {
 type corpseRef struct {
 	guid packet.GUID
 	at   Point
+	// ageMS is the agent's own copy's position age when the corpse came from its unit store (0 for the bots' frames and kills this
+	// run saw): a copy older than staleCorpseMS that the server calls an invalid target is gone.
+	ageMS int64
 }
+
+// staleCorpseMS is the position age (ms) from which the agent's copy of a corpse is taken for stale once the server answers invalid-target.
+const staleCorpseMS = 300_000
 
 // objState is the driver's state for the object steps.
 type objState struct {
@@ -807,8 +814,10 @@ func (d *RemoteDriver) downstreamItem(leg int, item uint32) *ItemRef {
 	return nil
 }
 
-// corpseOf is the corpse of the boss: the GUID a won pull saw die, else a unit of the entry the feed lists dead.
-func (d *RemoteDriver) corpseOf(entry uint32) (corpseRef, bool) {
+// corpseOf is the corpse of the boss: the GUID a won pull saw die, else a unit of the entry the feed lists dead, else a dead creature of
+// the entry in the agent's own unit store within 80 yd of near (the boss's position; any when nil): the bots' frames list no corpses for
+// long, and a boss killed in another fight, or by a party that moved on, is only in the store of an agent that stood near.
+func (d *RemoteDriver) corpseOf(entry uint32, near *Point) (corpseRef, bool) {
 	if c, ok := d.obj.corpses[entry]; ok {
 		return c, true
 	}
@@ -817,7 +826,28 @@ func (d *RemoteDriver) corpseOf(entry uint32) (corpseRef, bool) {
 			return corpseRef{guid: h.GUID, at: hostilePoint(h)}, true
 		}
 	}
-	return corpseRef{}, false
+	us, ok := d.g.(UnitSource)
+	if !ok {
+		return corpseRef{}, false
+	}
+	var best corpseRef
+	bestD, found := math.MaxFloat64, false
+	for _, u := range us.Units() {
+		if u.Type != "creature" || u.Entry != entry || u.PosAgeMS < 0 || !(u.Dead || (u.MaxHealth > 0 && u.Health == 0)) {
+			continue
+		}
+		at := Point{u.X, u.Y, u.Z}
+		dist := 0.0
+		if near != nil {
+			if dist = dist3(at, *near); dist > 80 {
+				continue
+			}
+		}
+		if dist < bestD {
+			best, bestD, found = corpseRef{guid: u.GUID, at: at, ageMS: u.PosAgeMS}, dist, true
+		}
+	}
+	return best, found
 }
 
 // lootBossItem has the carrier take Boss.LootItem from the corpse: free-for-all loot, `cmd loot <corpse> <carrier> <item>`, the old loot
@@ -837,9 +867,10 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 		d.rep.note(fmt.Sprintf("%s: %s carries %s, which %s is only for; the corpse is left alone", a.Label, carrier, p, it))
 		return "carries the product already", nil
 	}
-	corpse, ok := d.corpseOf(b.Entry)
+	corpse, ok := d.corpseOf(b.Entry, &b.Position)
 	if !ok {
-		return "", fmt.Errorf("the bots never saw boss %d die, so there is no corpse GUID to loot %s from", b.Entry, it)
+		// A boss step that passed on a corpse seen in the agent's view must not pass here without a GUID to loot from: say what happened.
+		return "", fmt.Errorf("boss %d died out of sight (the bots did not see it die and no corpse of it is in the agent's view); its loot can't be reached: %s is not obtainable from it in this run", b.Entry, it)
 	}
 	var res tbm.OrderResult
 	err = d.withFFA(ctx, rec, func() error {
@@ -848,6 +879,12 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 		return err
 	})
 	if err != nil {
+		if res.Code() == "invalid-target" {
+			if corpse.ageMS > staleCorpseMS {
+				return "", fmt.Errorf("boss %d's corpse %s is gone on the server (invalid-target) and the agent's copy of it is stale (position %d s old); its loot can't be reached: %w", b.Entry, corpse.guid, corpse.ageMS/1000, err)
+			}
+			return "", fmt.Errorf("boss %d's corpse %s is gone on the server (invalid-target); its loot can't be reached: %w", b.Entry, corpse.guid, err)
+		}
 		return "", fmt.Errorf("%w; %s", err, lootBossHint)
 	}
 	rec.loot(res.Loot)

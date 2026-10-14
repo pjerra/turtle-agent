@@ -61,7 +61,8 @@ type fakeRemote struct {
 	orders   []string
 	bound    bool
 	unbinds  int
-	bindErr  string // code the bind is refused with
+	bindErr  string   // code the bind is refused with
+	status   *tbm.Ack // the answer to `commander status` (the default: the lead bot with 3 bots)
 	ends     []tbm.BindingEnd
 	stats    tbm.ViewStats
 	frame    tbm.ViewFrame
@@ -322,6 +323,11 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		g.bound = true
 		return ack(intent), nil
 	case "commander view":
+		return ack(intent), nil
+	case "commander status":
+		if g.status != nil {
+			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: g.status, Lines: []string{}}, nil
+		}
 		return ack(intent), nil
 	case "commander unbind":
 		g.unbinds++
@@ -669,7 +675,7 @@ func TestRemoteThreatGate(t *testing.T) {
 
 func TestRemotePullRefusals(t *testing.T) {
 	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
-	// unreachable: the mob is given up on and the group counts as cleared.
+	// unreachable: the party is walked nearer and the mob is pulled again from there (the group is not cleared with the mob alive).
 	g := newFakeRemote(t)
 	g.addMob(299, Point{30, 0, 0})
 	g.cmdErr["pullback"] = []string{"unreachable"}
@@ -680,8 +686,8 @@ func TestRemotePullRefusals(t *testing.T) {
 	if rep.Remote.OrdersRefused != 1 || len(rep.Refusals) != 1 || rep.Refusals[0].Code != "unreachable" || rep.Refusals[0].Intent != "cmd pullback" {
 		t.Fatalf("%+v %+v", rep.Remote, rep.Refusals)
 	}
-	if len(g.ordersOf("cmd pullback")) != 1 {
-		t.Fatalf("the refused mob was pulled again: %v", g.orders)
+	if len(g.ordersOf("cmd pullback")) != 2 || g.mobsKilled != 1 || rep.Remote.Unreachable != 1 {
+		t.Fatalf("the refused mob was not pulled again: %v %+v", g.orders, rep.Remote)
 	}
 	// no-tank: the party is sent in with an attack order.
 	g = newFakeRemote(t)
@@ -710,7 +716,7 @@ func TestRemotePullRefusals(t *testing.T) {
 }
 
 func TestRemoteBindRefused(t *testing.T) {
-	for code, want := range map[string]string{"disabled": "RemoteCommander is off", "already-bound": "already commands", "no-bot": "not an online bot"} {
+	for code, want := range map[string]string{"disabled": "RemoteCommander is off", "no-bot": "not an online bot"} {
 		g := newFakeRemote(t)
 		g.bindErr = code
 		rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), opts(), nil)

@@ -1575,8 +1575,11 @@ const (
 type fightResult struct {
 	out   outcome
 	kills int
-	why   string   // the refusal that ended the pull
-	dead  []deadAt // remote: the units that died, where the feed last showed them
+	why   string // the refusal that ended the pull
+	// unreachable (remote): the tank answered "unreachable" to the pull from every approach point tried; the mob is alive and the party
+	// could not get at it, so its group is not cleared.
+	unreachable bool
+	dead        []deadAt // remote: the units that died, where the feed last showed them
 }
 
 // maxRetargets bounds the picks of one group that the bots answered with dead-target or no-target.

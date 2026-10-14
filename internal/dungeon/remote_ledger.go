@@ -35,6 +35,12 @@ func (d *RemoteDriver) noteLedger() {
 			continue
 		}
 		seen[h.GUID] = true
+		if h.HPPct > 0 {
+			if d.seenHostile == nil {
+				d.seenHostile = map[uint32]bool{}
+			}
+			d.seenHostile[h.Entry] = true
+		}
 		m := d.ledger[h.GUID]
 		fighting := h.HPPct > 0 && (d.engagedWith(h) || h.HPPct < 100)
 		if m == nil {
@@ -106,6 +112,27 @@ func (d *RemoteDriver) ledgerClearAbsences() {
 func (d *RemoteDriver) ledgerDead(entries []uint32) bool {
 	for _, m := range d.ledger {
 		if m.dead && slices.Contains(entries, m.last.Entry) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostileSeen says whether the party has met a unit of one of entries as a hostile: one is listed alive in the feed now, or an entry was
+// listed alive earlier in the run and is not known dead since (killed in a won pull, or dead in the kill ledger). The feed lists only
+// what is hostile to the party, so this is the data behind the team gate (HostileWorld): a boss gated to the other team that shows up
+// here is fought. A mob that was never listed (friendly, or never in sight) is not "seen hostile".
+func (d *RemoteDriver) hostileSeen(entries []uint32) bool {
+	for _, e := range entries {
+		if e == 0 {
+			continue
+		}
+		for _, h := range d.fr.Hostiles {
+			if h.Entry == e && h.HPPct > 0 {
+				return true
+			}
+		}
+		if d.seenHostile[e] && len(d.killedAt[e]) == 0 && !d.ledgerDead([]uint32{e}) {
 			return true
 		}
 	}
