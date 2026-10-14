@@ -64,6 +64,7 @@ func TestParseErrors(t *testing.T) {
 		{"no entrance", `{"version":1,"name":"t","map":1}`, "entrance: required"},
 		{"entrance z", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0}}`, "entrance.z: required"},
 		{"no legs", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[]}`, "legs: needs at least one leg"},
+		{"fail_text with a line break", step(`{"wait_for":{"hostiles_gone":{"radius":5},"fail_text":"a\nb"}}`), "wait_for.fail_text"},
 		{"unknown top field", `{"version":1,"colour":1}`, `unknown field "colour"`},
 		{"not json", `{`, "t.json:"},
 		{"two documents", validPlan + validPlan, "more than one JSON value"},

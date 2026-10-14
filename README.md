@@ -577,7 +577,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   (the inventory not sent yet) or has items still loading is not taken for a missing item: the check before the run lets it pass, and the
   one before the use waits up to 3 s (`ItemsWait`) for an empty list to fill, then fails if it stays bare. `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
-  close), with a `timeout_s` (default 60, at most 600) after which the plan fails. A door that a lever or key opens may do so well after
+  close), with a `timeout_s` (default 60, at most 600) after which the plan fails, and an optional `fail_text` (up to 400 characters, one line) that is added to that failure: the reason a person should read (Uldaman's altar waits name the three-participant ritual). A door that a lever or key opens may do so well after
   the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
 - `loot_object` is `use_object` for a chest or node: the same reference (`entry`, `near`, `range`), `stand`, the same walk to it, then the Opening
   cast and the loot (`open_object` with `take`: see [Game objects](#game-objects)), and `expect_item` (`{"entry": 7740, "name": "Gni'kiv Medallion"}`):
@@ -652,10 +652,11 @@ has no doors, so `path_to` walks through a closed one: the door steps are checke
 
 ### The Uldaman plan
 
-`dungeons/uldaman.json` runs the whole dungeon, 13 legs, from the main entrance to the last boss. Legs 0-3 (the west wing) were run end to end by a remote run
-(run 5, 22.4 min); legs 4-12 were written from the world database (map 70 spawns, templates, EventAI, the C++ scripts of the core) and the map 70 navmesh, and have not been
-run. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-12 2347 yd, 3167 yd in all (about 8 min of walking at 6.6 yd/s). The plan holds 56 pull groups, 8 bosses and the four Stone Keepers; from the pace of run 5 (22.4 min for 18 groups and 3 bosses)
-legs 4-12 are a rough 45 to 70 min.
+`dungeons/uldaman.json` runs the whole dungeon, 14 legs, from the main entrance to the last boss. Legs 0-3 (the west wing) were run end to end by a remote run
+(run 5, 22.4 min); legs 4-13 were written from the world database (map 70 spawns, templates, EventAI, the C++ scripts of the core) and the map 70 navmesh, and compared with a live
+map walk of the whole route (a GM walker, nothing fought or used; `tests/uldaman-map/MAP.md` of the audit repo: same spawns at the same places, no SQL difference in the visited
+area). They have not been run as a party. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-13 2714 yd, 3534 yd in all (about 9 min of walking at 6.6 yd/s). The plan holds 62 pull
+groups, 8 bosses and the four Stone Keepers; from the pace of run 5 (22.4 min for 18 groups and 3 bosses) legs 4-13 are a rough 50 to 80 min.
 
 | Leg | Name | Boss (entry) | What the leg does |
 | --- | --- | --- | --- |
@@ -663,25 +664,29 @@ legs 4-12 are a rough 45 to 70 min.
 | 1 | `revelosh` | Revelosh (6910) | the Shaft of Tsol, combined with the Medallion into the Staff of Prehistoria |
 | 2 | `keystone` | none | the Keystone (needs the Staff), the Seal of Khaz'Mul |
 | 3 | `ironaya` | Ironaya (7228) | |
-| 4 | `sentinel` | Obsidian Sentinel (7023) | crosses the navmesh hole north of Ironaya's room to the Back Entrance corridor, opens the Echomok Door (124370) |
-| 5 | `ancient_stone_keeper` | Ancient Stone Keeper (7206) | the central hall: Shadowforge, Earthen guards |
-| 6 | `galgann` | Galgann Firehammer (7291), Geologists (7030 x2) first | the scorpid nest, Shadowforge groups, the Galgann room |
-| 7 | `grimlok` | Grimlok (4854), his Brawler, Geomancer and Basilisk first | the Stonevault corridor |
-| 8 | `keepers_door` | none | the Stonevault rooms down to the Hall of the Keepers, opens its door (124368) |
-| 9 | `keepers_altar` | none | the three Earthen squads of the hall, then the Altar of the Keepers (130511) |
-| 10 | `keepers` | none | the four Stone Keepers (4857), woken one after the other; waits for the Temple Door 124367 (600 s) |
-| 11 | `descent` | none | the ramp down to the Vault level, the squads on it |
-| 12 | `archaedas` | Archaedas (2748) | the door 141869, the Altar of Archaedas (133234), the fight, the Vault door 124369 |
+| 4 | `scorpid_cave` | none | back out of Ironaya's room (a dead end) and east to the lip of the Cleft Scorpid pit: a bat and the nest of ten |
+| 5 | `sentinel` | Obsidian Sentinel (7023), two Relic Hunters (4847) first | over the one hole of the navmesh (16 yd hop), Venomlash, a second scorpid nest, the Basilisk, the Relic Hunter camp |
+| 6 | `ancient_stone_keeper` | Ancient Stone Keeper (7206) | the central hall's Earthen guards |
+| 7 | `galgann` | Galgann Firehammer (7291), Geologists (7030 x2) first | the scorpid nest, Shadowforge groups, the Galgann room |
+| 8 | `grimlok` | Grimlok (4854), his Brawler, Geomancer and Basilisk first | the Stonevault corridor |
+| 9 | `keepers_door` | none | the Stonevault rooms down to the Hall of the Keepers, opens its door (124368) |
+| 10 | `keepers_altar` | none | the three Earthen squads of the hall, then the Altar of the Keepers (130511) and a wait for it to be active |
+| 11 | `keepers` | none | the four Stone Keepers (4857), woken one after the other; waits for the Temple Door 124367 (600 s) |
+| 12 | `descent` | none | the ramp down to the Vault level, the squads on it |
+| 13 | `archaedas` | Archaedas (2748) | the door 141869, the Altar of Archaedas (133234) and a wait for it, the fight, the Vault door 124369 |
 
 The legs follow the navmesh route, not the order of the TortoiseBots guide (which lists the Altar of the Keepers before the Ancient Stone Keeper): the Hall of the Keepers lies past
-Grimlok and the Ancient Stone Keeper is a dead-end side room of the central hall. The notes of each leg in the file hold the mechanics read from the data (EventAI rows, the
-Keepers' and Archaedas' scripts, the ritual of the altars, the doors). The two points a run needs the driver for are open:
+Grimlok and the Ancient Stone Keeper is a dead-end side room of the central hall. Ironaya's room is a dead end as well; the way on is back south and east. The notes of each leg in
+the file hold the mechanics read from the data (EventAI rows, the Keepers' and Archaedas' scripts, the ritual of the altars, the doors). What a run still needs from the driver:
 
 - **Both altars are summoning rituals of three participants** (`gameobject_template` type 18, `data0` 3). The plan's `use_object` step is one carrier using the object;
   the ritual needs three different bots of the group, standing still at the altar, to use it. The step cannot finish until the driver can order `cmd open entry:<id>@x,y,z <bot>`
-  for three bots in turn (legs 9 and 12).
-- **The navmesh has a hole of about 45 yd** between Ironaya's room and the Back Entrance corridor (leg 4's first walk): the walk goes over it on the straight line, and whether
-  the server accepts that move (`off-mesh`, `unreachable`) is not tried. `TestUldamanOnNavmesh` accepts that one hole.
+  for three bots in turn (legs 10 and 13). Each altar step is followed by a `wait_for` of the altar to be `active` within 20 s with a `fail_text`, so the run stops at the altar
+  with that reason (one `cmd open` is likely answered "opened" because it starts the channel, and without the wait the run would go on and fail 600 s later at the next door).
+- **The navmesh has one hole**, at the Cleft Scorpid pit: the west part ends at -163.5 298.7 -52.5 and the east part begins at -158.4 283.7 -48.9, a continuous ramp of 15 yd
+  that the mesh does not link (a straight walk worked both ways in the live map walk). Leg 5's `to` is the east end; the walk follows the mesh to the lip and the last 16 yd are one
+  direct move. The plan format has no direct-walk waypoint; the hop relies on the driver sending `to` itself when it is within `MoveLeg`. `TestUldamanOnNavmesh` accepts that one hole.
+- `walk_path` goes through closed doors, so a door step comes before the walk through it (legs 9 and 13). The Echomok Door (124370) is not on the route.
 
 ## Dungeon runs
 

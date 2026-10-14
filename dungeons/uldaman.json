@@ -13,17 +13,18 @@
     "z": 213.686
   },
   "notes": [
-    "Uldaman (map 70) from the main entrance (areatrigger 286) to Archaedas, the last boss. Legs 0-3 (Baelog, Revelosh, Keystone, Ironaya) are the west wing and were run remotely end to end (remote run 5); legs 4-12 go on from Ironaya's room and were written from the world database of tortoise-wow 5d79486 (map 70 creature and game object spawns, templates, EventAI, the C++ scripts of src/scripts/dungeons/uldaman) and the map 70 navmesh, and have NOT been run: Sentinel, Ancient Stone Keeper, Galgann, Grimlok, the Altar of the Keepers with its four Stone Keepers, Archaedas. Order of legs 0-3 follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859).",
+    "Uldaman (map 70) from the main entrance (areatrigger 286) to Archaedas, the last boss. Legs 0-3 (Baelog, Revelosh, Keystone, Ironaya) are the west wing and were run remotely end to end (remote run 5); legs 4-13 go on from Ironaya's room and were written from the world database of tortoise-wow 5d79486 (map 70 creature and game object spawns, templates, EventAI, the C++ scripts of src/scripts/dungeons/uldaman) and the map 70 navmesh, then compared with the live map walk of 2026-10-14 (a GM walker, nothing fought or used). They have NOT been run as a party: Obsidian Sentinel, Ancient Stone Keeper, Galgann, Grimlok, the Altar of the Keepers with its four Stone Keepers, Archaedas. Order of legs 0-3 follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859).",
     "Honest (non-GM) run: the baelog leg pulls its packs and loots Baelog's Chest; revelosh kills Revelosh, loots the Shaft of Tsol and makes the Staff of Prehistoria; keystone opens the Keystone with it. A Horde leader kills Baelog, Eric and Olaf (team: horde); for an Alliance leader the boss is skipped unless the lost dwarves show up hostile in the feed (remote run 2: they were hostile to an Alliance party and joined the pull of the last pack), then it is fought like a pull group. Pass criteria: docs/LIVE-CHECKS.md.",
     "Baelog and Revelosh stand in side rooms: the navmesh route from the entrance to the Keystone leaves the Baelog branch at -250 135 and passes 23 yd from Revelosh. A run that wants the shortest way starts at the leg 'keystone'.",
     "Packs are the spawns of the world database within 8 yd of the route, grouped by tools/dungeongen (12 yd, creature groups). Doors are not on the navmesh: path_to walks through a closed door, so the door steps are not checked by it.",
     "Quests: none is needed for this plan. The Alliance chain around it is 'The Lost Dwarves' (2398, from Prospector Stormpike, 1356, in the Hall of Explorers, Ironforge; ends at Baelog in Uldaman) then 'The Hidden Chamber' (2240, from Baelog, 6906; read Baelog's Journal, explore the Chamber of Khaz'mul behind the Keystone door, report to Stormpike). Neither gates the Medallion (gameobject_loot_template 5066/7740, 100%, no condition) or the Shaft (creature_loot_template 6910/7741, 100%, no condition), world database of tortoise-wow 5d79486.",
     "Remote run entry: entrance_tele is game_tele 169 (\"ulda\", map 70, next to the entrance); portal is the centre of areatrigger 286 on map 0 (areatrigger_template, radius 10), where a non-GM remote run walks the lead bot in. Both are for the enter phase only (docs/LIVE-CHECKS.md).",
-    "Order of legs 4-12. The TortoiseBots guide lists the Altar of the Keepers between the Sentinel and the Ancient Stone Keeper; on the navmesh the Hall of the Keepers lies past Grimlok (route from the Sentinel: Ancient Stone Keeper 448 yd, Galgann 413, Grimlok 235, the Hall's door 354) and the Ancient Stone Keeper is a side room, so the legs follow the route: Sentinel, Ancient Stone Keeper, Galgann, Grimlok, Keepers, Archaedas. Grimlok is the 7th boss of the dungeon, as the guide says. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-12 2347 yd, 3167 yd in all.",
-    "The Hall of the Keepers and the Vault: two levels (z -26.5 and z -52) joined only by the ramp behind the Temple Door 124367. The doors: 124368 (hall entrance), 124370 (Echomok) and 141869 (Archaedas) are plain doors spawned closed with no script and lock 86; 124367 and 124369 (faction 114, lock 85) are opened by the instance script (all four Stone Keepers dead; Archaedas dead), 124372 by the Keystone's script. Lock.dbc is not in the export: whether lock 86 asks for anything is unverified, and the first live run of legs 4-12 settles it.",
-    "Both altars are summoning rituals of three participants (see the notes of keepers_altar and archaedas) and the driver cannot carry out an object step with three bots yet: that is the missing feature of legs 9 and 12 (the plan holds the steps).",
-    "Turtle 1.18.1 additions found in the map 70 data: the Ancient Treasure Chest (2010828, behind the Vault) and the quest 'Rebuilding the Relic' (41733; item 41800 drops from the Stone Keepers at -100 % for it). Nothing found changes how a boss fights: the instance, Ironaya, Archaedas and minion scripts are the ScriptDev2 C++ ones in src/scripts/dungeons/uldaman, the Sentinel, Galgann, Grimlok and Stone Keepers run EventAI rows. No quest or item gates any of legs 4-12 (the Staff is only for the Keystone).",
-    "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh. Legs 4-12: the pull groups are the spawns of the export within 10 yd of the navmesh route from the previous leg's end to the leg's boss (the Keepers' hall: 31 yd), grouped as dungeongen groups them and put in the order of the route; the Galgann room's two caster pairs are added by hand (10-12 yd off the route)."
+    "Order of legs 4-13. The TortoiseBots guide lists the Altar of the Keepers between the Sentinel and the Ancient Stone Keeper; on the navmesh the Hall of the Keepers lies past Grimlok and the Ancient Stone Keeper is a dead-end side room, so the legs follow the route: scorpid cave (and the hole in the mesh), Sentinel, Ancient Stone Keeper, Galgann, Grimlok, Keepers, Archaedas. Grimlok is the 7th boss of the dungeon, as the guide says. Ironaya's room is a dead end: the way on goes back south and east through the cave to the pit with the Cleft Scorpid nest (the live map walk found this; the first draft assumed an exit north of the room). Walk lengths on the navmesh: see README, The Uldaman plan.",
+    "The Hall of the Keepers and the Vault: two levels (z -26.5 and z -52) joined only by the ramp behind the Temple Door 124367. The doors: 124368 (hall entrance) and 141869 (Archaedas) are plain doors spawned closed with no script and lock 86; 124370 (Echomok) is one too but off the route; 124367 and 124369 (faction 114, lock 85) are opened by the instance script (all four Stone Keepers dead; Archaedas dead), 124372 by the Keystone's script. The navmesh has no doors and `walk_path` goes through closed ones, so a door step comes before the walk through it. Lock.dbc is not in the export: whether lock 86 asks for anything is unverified, and the first live run settles it.",
+    "Both altars are summoning rituals of three participants (see the notes of keepers_altar and archaedas) and the driver cannot carry out an object step with three bots yet: that is the missing feature of legs 10 and 13. The plan holds the use_object steps, each followed by a 20 s wait for the altar to be active whose fail_text names the reason, so a run stops at the altar with that message and not 600 s later at the door of the next leg.",
+    "Turtle 1.18.1 additions found in the map 70 data: the Ancient Treasure Chest (2010828, behind the Vault) and the quest 'Rebuilding the Relic' (41733; item 41800 drops from the Stone Keepers at -100 % for it). Nothing found changes how a boss fights: the instance, Ironaya, Archaedas and minion scripts are the ScriptDev2 C++ ones in src/scripts/dungeons/uldaman, the Sentinel, Galgann, Grimlok and Stone Keepers run EventAI rows. The live map walk found no difference from the SQL in the visited area. No quest or item gates any of legs 4-13 (the Staff is only for the Keystone).",
+    "Dormant statues: the Stone Keepers, the Vault's Earthen Custodians, Guardians and Hallshapers and the four Vault Warders are faction 35 in the SQL but read as hostile in the agent's unit rows (live map walk). If the TBM feed lists them as hostile too, the driver may see them as targets before they are woken: the Archaedas leg lists them in skip, the Keepers group is pulled only after the altar step.",
+    "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh. Legs 4-13: the pull groups are the spawns of the export within 10 yd of the navmesh route from the previous leg's end to the leg's boss (the Keepers' hall: 31 yd), grouped as dungeongen groups them and put in the order of the route; the Galgann room's two caster pairs and the Grimlok corridor's pair at 38 439 are added by hand (8-12 yd off the route)."
   ],
   "legs": [
     {
@@ -249,37 +250,65 @@
       }
     },
     {
-      "name": "sentinel",
-      "to": {"x": -212.9, "y": 382.4, "z": -38.5},
-      "steps": [
+      "name": "scorpid_cave",
+      "to": {"x": -205, "y": 265, "z": -49},
+      "pull_groups": [
         {
-          "use_object": {
-            "entry": 124370,
-            "near": {"x": -185.4, "y": 389.6, "z": -36.4},
-            "stand": {"x": -188.5, "y": 389.6, "z": -38.4}
-          }
+          "entries": [4861],
+          "positions": [
+            {"x": -186.1, "y": 284.9, "z": -47.9}
+          ]
+        },
+        {
+          "entries": [7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078],
+          "positions": [
+            {"x": -174.7, "y": 292.8, "z": -53.6},
+            {"x": -172.6, "y": 288.6, "z": -53.2},
+            {"x": -172.6, "y": 291.7, "z": -53.6},
+            {"x": -170.8, "y": 285.2, "z": -53.1},
+            {"x": -170.3, "y": 292.2, "z": -53.7},
+            {"x": -171.5, "y": 295.8, "z": -54.2},
+            {"x": -167.6, "y": 284, "z": -53.3},
+            {"x": -169.5, "y": 293.4, "z": -53.9},
+            {"x": -166.4, "y": 289.7, "z": -53.5},
+            {"x": -164.8, "y": 286.4, "z": -53.3}
+          ]
         }
       ],
-      "boss": {
-        "entry": 7023,
-        "position": {"x": -163.8, "y": 388, "z": -36.4}
-      },
       "notes": [
-        "Starts across the one hole of the map 70 navmesh: Ironaya's room (y 301-331) and the corridor of the Back Entrance (areatrigger 902 at -212.95 382.4 -38.7, y 367 and north) are two islands of the mesh with 43-53 yd and no polygon between them (the nearest reachable point of the room is -225.9 331.7 -46.4, 52.9 yd short of the corridor floor point -212.9 382.4); the real passage is a ramp from z -46 up to z -38 that the mesh lacks. The first walk of this leg is a straight line over it; whether the server's `cmd move` takes it (`off-mesh`, `unreachable`) was not tried. Every other waypoint of legs 4-12 is on the mesh and reachable from the one before it (TestUldamanOnNavmesh); that test checks the first waypoint of this leg only as a hole of at most 60 yd.",
-        "The Echomok Door (124370, -185.4 389.6 -36.4) is a plain door in the world data: type 0, lock 86, spawned closed, no script touches it (the instance script handles 124367, 124369, 124372 and 141869 only). Lock.dbc is not in the export, so what lock 86 asks for is unverified; the step is use_object from 3 yd west of it, and a door that refuses answers with an error that names it. Left closed it would also block the line of sight to the Sentinel.",
-        "Obsidian Sentinel (7023, level 42, 8255 hp, faction 54, EventAI): re-casts Spell Reflection (9941, 'Obsidian Reflection') whenever the aura is missing (event type 27), so casters lose a spell now and then; at 80, 60, 40 and 20 % health it summons an Obsidian Shard (10061) and casts Splintered Obsidian (10072). No group, no add of its own. The Shadowforge Relic Hunters at -160.9 364 and -151.8 368.5 (4847 x2, ledge at z -34) stand 22-24 yd from it and are not on the route: they are left alone here; the leg after it passes the other five Shadowforge mobs."
+        "Ironaya's room is a dead end. The way on goes back south through the Seal of Khaz'Mul (open since leg 2) and east through the cave at -205 265 to the west lip of the map 70 navmesh at -163.5 298.7 -52.5, 126 yd from Ironaya, and the leg walks it with the navmesh. Packs on it: a Shrike Bat (4861, wander 3) at -186 285 and, at the lip, the nest of ten Cleft Scorpids (7078, level 35-36, wander 1, sleeping) at -175 to -165 / 284 to 296, z -53: the route passes within 2.5 yd, so the nest is pulled. The live map walk of 2026-10-14 (~/TortoiseBots-audit/tests/uldaman-map/MAP.md) saw the same spawns at the same places.",
+        "Nothing is pulled from Ironaya's room: the first group of the leg is the bat. Stonevault Cave Lurkers (4850, stealth) near -250 270 are 25+ yd west of the route and left alone."
       ]
     },
     {
-      "name": "ancient_stone_keeper",
-      "to": {"x": -149, "y": 381, "z": -37},
+      "name": "sentinel",
+      "to": {"x": -158.4, "y": 283.7, "z": -48.9},
       "pull_groups": [
         {
-          "entries": [4847, 7030, 4847],
+          "entries": [7022],
           "positions": [
-            {"x": -143.1, "y": 389, "z": -39.8},
-            {"x": -139.3, "y": 393.8, "z": -40.2},
-            {"x": -137.3, "y": 386.4, "z": -40.2}
+            {"x": -153, "y": 275.1, "z": -46.8}
+          ]
+        },
+        {
+          "entries": [7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078, 7078],
+          "positions": [
+            {"x": -144.6, "y": 266.5, "z": -52},
+            {"x": -141.6, "y": 270.5, "z": -52.5},
+            {"x": -140.6, "y": 276.7, "z": -52.8},
+            {"x": -140.6, "y": 272.4, "z": -52.8},
+            {"x": -136.7, "y": 268.3, "z": -52.8},
+            {"x": -138.3, "y": 262.5, "z": -54.3},
+            {"x": -140.1, "y": 260.1, "z": -54.2},
+            {"x": -135.8, "y": 260.7, "z": -53.5},
+            {"x": -137.3, "y": 258, "z": -53.5},
+            {"x": -133.1, "y": 259.5, "z": -53.5}
+          ]
+        },
+        {
+          "entries": [4863],
+          "positions": [
+            {"x": -141, "y": 312.5, "z": -44.4}
           ]
         },
         {
@@ -289,12 +318,36 @@
           ]
         },
         {
-          "entries": [7011, 7011, 7012, 7011, 7011],
+          "entries": [4847, 4847, 7030],
+          "positions": [
+            {"x": -137.3, "y": 386.4, "z": -40.2},
+            {"x": -143.1, "y": 389, "z": -39.8},
+            {"x": -139.3, "y": 393.8, "z": -40.2}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 7023,
+        "position": {"x": -163.8, "y": 388, "z": -36.4},
+        "first": [4847, 4847]
+      },
+      "notes": [
+        "Starts across the one hole of the map 70 navmesh, found by `path_to` and confirmed by the live map walk (MAP.md): the west part (entrance, legs 0-4) ends at the scorpid pit's lip (-163.5 298.7 -52.5), the east part (the rest of the dungeon) begins at -158.4 283.7 -48.9, and between them is a continuous ramp of 15 yd that the mesh does not link (a straight walk over it worked both ways for a GM walker; `walk_path` alone returns partial). The leg's `to` is the east end: the walk goes along the mesh to the lip, and the last hop is a direct move of 16 yd (the driver sends `to` itself when it is within MoveLeg, without planning). The plan has no step for a direct walk and needs none for this; whether the bots' `cmd move` takes the hop (`off-mesh`, `unreachable`) is open. MISSING DRIVER FEATURE if it does not: a waypoint walked on the straight line, not the navmesh.",
+        "East of the hole: the Venomlash Scorpid (7022, wander 5) at -153 275, the second nest of ten Cleft Scorpids (7078) at -145 to -133 / 258 to 277, which stands 11.7 yd off the route and is pulled all the same because of its size, the Jadespine Basilisk (4863, Crystalline Slumber) at -141 312.5, then the Relic Hunter camp: a Relic Hunter (4847) at -139.4 370.1, and the trio of two Relic Hunters and a Geologist (7030) at -143 to -137 / 386 to 394.",
+        "Obsidian Sentinel (7023, level 42, 8255 hp, faction 54, EventAI) stands in a dead-end room at -163.8 388; the Echomok Door (124370, -185.4 389.6) is on its west side, between the room and the Back Entrance corridor, and is not on this route, so there is no door step (the earlier draft of this plan had one). The Sentinel re-casts Spell Reflection (9941, 'Obsidian Reflection') whenever the aura is missing (event type 27), so casters lose a spell now and then; at 80, 60, 40 and 20 % health it summons an Obsidian Shard (10061) and casts Splintered Obsidian (10072). The two Relic Hunters at -160.9 364 and -151.8 368.5 (ledge at z -34, one wanders 6 yd) stand 23-24 yd from it and would join its fight, so boss.first kills them before it."
+      ]
+    },
+    {
+      "name": "ancient_stone_keeper",
+      "to": {"x": -149, "y": 381, "z": -37},
+      "pull_groups": [
+        {
+          "entries": [7011, 7011, 7011, 7012, 7011],
           "positions": [
             {"x": -110.7, "y": 324.6, "z": -46.9},
             {"x": -97.7, "y": 332.3, "z": -47.5},
-            {"x": -100.3, "y": 322.7, "z": -49.3},
             {"x": -108.9, "y": 315.1, "z": -48},
+            {"x": -100.3, "y": 322.7, "z": -49.3},
             {"x": -101, "y": 315.5, "z": -49.3}
           ]
         },
@@ -323,20 +376,20 @@
           ]
         },
         {
-          "entries": [7011, 7012, 7011, 7012, 7011, 7011],
-          "positions": [
-            {"x": -87.7, "y": 240.6, "z": -49.6},
-            {"x": -80.2, "y": 237.2, "z": -49.6},
-            {"x": -70.3, "y": 239.6, "z": -49.7},
-            {"x": -89.1, "y": 232.4, "z": -49.6},
-            {"x": -81, "y": 225.4, "z": -49.7},
-            {"x": -73, "y": 219.8, "z": -49.7}
-          ]
-        },
-        {
           "entries": [4860],
           "positions": [
             {"x": -73.7, "y": 231.7, "z": -49.8}
+          ]
+        },
+        {
+          "entries": [7012, 7011, 7011, 7011, 7012, 7011],
+          "positions": [
+            {"x": -80.2, "y": 237.2, "z": -49.6},
+            {"x": -70.3, "y": 239.6, "z": -49.7},
+            {"x": -81, "y": 225.4, "z": -49.7},
+            {"x": -73, "y": 219.8, "z": -49.7},
+            {"x": -89.1, "y": 232.4, "z": -49.6},
+            {"x": -87.7, "y": 240.6, "z": -49.6}
           ]
         },
         {
@@ -351,7 +404,7 @@
         "position": {"x": -38.4, "y": 221.3, "z": -48.4}
       },
       "notes": [
-        "From the Sentinel south-west through the big central hall (x -110 to -40, y 200 to 340): Shadowforge pack (4847 x2, Geologist 7030) and a single Relic Hunter, then the Earthen guards of the hall (Earthen Rocksmashers 7011, Sculptors 7012, faction 415, hostile to both teams, stationary or wandering 2-5 yd) in five groups, two Stone Stewards (4860, waypoint patrols: their spawn point is where the plan looks first). Packs are the spawns within 10 yd of the navmesh route (the older legs use 8), grouped by tools/dungeongen (12 yd, creature groups).",
+        "From the Sentinel south-west through the big central hall (x -110 to -40, y 200 to 340): the Earthen guards of the hall (Earthen Rocksmashers 7011, Sculptors 7012, faction 415, hostile to both teams, stationary or wandering 2-5 yd) in five groups, two Stone Stewards (4860, waypoint patrols: their spawn point is where the plan looks first). Packs are the spawns within 10 yd of the navmesh route (the older legs use 8), grouped by tools/dungeongen (12 yd, creature groups).",
         "Ancient Stone Keeper (7206, level 44, 8910 hp, faction 415, no script, one spell, 10132) stands alone at the south end of the central hall, a dead end off the way on: it is a mini boss, nothing opens behind it."
       ]
     },
@@ -472,6 +525,13 @@
             {"x": 55.8, "y": 416.1, "z": -41},
             {"x": 49.8, "y": 418.5, "z": -41},
             {"x": 49.5, "y": 425.6, "z": -41}
+          ]
+        },
+        {
+          "entries": [4853, 4855],
+          "positions": [
+            {"x": 37.6, "y": 438.8, "z": -41},
+            {"x": 40.1, "y": 445.2, "z": -41}
           ]
         }
       ],
@@ -599,11 +659,22 @@
             "near": {"x": 104.8, "y": 272.5, "z": -26.5},
             "stand": {"x": 101.5, "y": 271.2, "z": -26.5}
           }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 130511,
+              "near": {"x": 104.8, "y": 272.5, "z": -26.5},
+              "state": "active"
+            },
+            "timeout_s": 20,
+            "fail_text": "the ritual did not start: it needs three participants (summoning ritual, game object type 18, 3 required) and one carrier cannot fire it. Driver feature missing: three bots using the altar in turn (README, The Uldaman plan)"
+          }
         }
       ],
       "notes": [
         "The Hall of the Keepers (z -26.5) is a large room with three squads of Earthen guards (four Stonebreakers 7396, a Stonecarver 7397 and a Stone Steward 4860 each, faction 415, level 44-45, wander 2): west of the altar on the route (73-89 / 251-269), east (112-130 / 244-264) and north (88-108 / 292-301), both 22 yd from the altar. All three are pulled BEFORE the ritual (radius 31 around the route, not the 10 of the other legs), because the Stone Keepers that the ritual wakes fight in the middle of the room and the squads would join. Four Stone Keepers (4857, faction 35, stoned) stand around the altar at 91-118 / 259-286 and are left alone until the altar.",
-        "Altar of the Keepers (130511, 104.8 272.5 -26.5) is a summoning ritual (game object type 18) with three participants: gameobject_template data0 3, spell 11568, animation spell 11206, ritualPersistent 1, castersGrouped 1. GameObject::Use counts the different players of the first user's group that used it; each stands channelling the animation, a user who moves is taken out of the count; with the third the ritual spell sends the scripted event 2228 (event_awaken_stone_keeper), which wakes the first Stone Keeper. One bot using it is not enough. MISSING DRIVER FEATURE: use_object makes the carrier alone use an object, so this step cannot finish: it needs three different bots to `cmd open entry:130511@104.8,272.5,-26.5 \u003cbot\u003e` in turn, standing still at the altar until the third has used it, and the ACK 'opened' of the third (or `cmd state` showing it active). The plan has the step; the driver does not carry it out yet."
+        "Altar of the Keepers (130511, 104.8 272.5 -26.5) is a summoning ritual (game object type 18) with three participants: gameobject_template data0 3, spell 11568, animation spell 11206, ritualPersistent 1, castersGrouped 1. GameObject::Use counts the different players of the first user's group that used it; each stands channelling the animation, a user who moves is taken out of the count; with the third the ritual spell sends the scripted event 2228 (event_awaken_stone_keeper), which wakes the first Stone Keeper. One bot using it is not enough. MISSING DRIVER FEATURE: use_object makes the carrier alone use an object, so the ritual does not fire. The step after it, a 20 s wait for the altar to be active with a fail_text, makes the run stop here with that reason instead of waiting 600 s for the door of the next leg (the one carrier's `cmd open` may be answered 'opened' because it starts the channel). Carrying the step out needs three different bots to `cmd open entry:130511@104.8,272.5,-26.5 \u003cbot\u003e` in turn, standing still at the altar until the third has used it, and the ACK 'opened' of the third (or `cmd state` showing it active). The plan has the step; the driver does not carry it out yet."
       ]
     },
     {
@@ -712,6 +783,17 @@
             "near": {"x": 96.5, "y": 269.1, "z": -52.1},
             "stand": {"x": 94, "y": 267.8, "z": -52}
           }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 133234,
+              "near": {"x": 96.5, "y": 269.1, "z": -52.1},
+              "state": "active"
+            },
+            "timeout_s": 20,
+            "fail_text": "the ritual did not start: it needs three participants (summoning ritual, game object type 18, 3 required) and one carrier cannot fire it. Driver feature missing: three bots using the altar in turn (README, The Uldaman plan)"
+          }
         }
       ],
       "boss": {
@@ -738,7 +820,7 @@
       },
       "notes": [
         "The Temple Door 141869 (70.7 256.9 -52.1, plain door, lock 86 like the other two) is the way into the Vault. Archaedas' script shuts it when the fight starts (DoResetDoor, no-interact) and opens it again on his death or a reset.",
-        "Altar of Archaedas (133234, 96.5 269.1 -52.1): a summoning ritual like the Altar of the Keepers (three participants, spell 10340, animation 11206, scripted event 2268 event_awaken_archaedas). MISSING DRIVER FEATURE: the same as the Keepers' altar, three bots using it in turn. The comment in boss_archaedas.cpp says one click is enough since 3.0.8; the Turtle gameobject_template still says three.",
+        "Altar of Archaedas (133234, 96.5 269.1 -52.1): a summoning ritual like the Altar of the Keepers (three participants, spell 10340, animation 11206, scripted event 2268 event_awaken_archaedas). MISSING DRIVER FEATURE: the same as the Keepers' altar, three bots using it in turn; the wait for the altar to be active (20 s, fail_text) stops the run here with that reason. The comment in boss_archaedas.cpp says one click is enough since 3.0.8; the Turtle gameobject_template still says three.",
         "Archaedas (2748, level 47, 29850 hp, boss_archaedas) spawns stoned at 104.3 272.3 -51.7 and awakens 4 s after the ritual; he attacks the nearest player within 80 yd. Every 10 s one more stoned wall minion wakes (Earthen Custodians 7309 and Hallshapers 7077 along the walls: the Custodians cast Reconstruct (10260) on him below 50 % health); at 66 % he wakes the six Earthen Guardians (7076); at 33 % the two Vault Warders of the room (10120: Trample, 7392 hp) and the furniture pair despawns; Ground Tremor (6524) first after 60 s, then every 45 s. He evades when he or his target is more than 38 yd from his spawn point (the door at 70.7 256.9 is 37.0 yd from it, the stand point in front of it 39.0): keep the party at the altar side of the Vault, the stand point of the altar step is 11 yd from him. On a reset the door opens and everything stands up stoned again; the altar stays active (unverified, see the Keepers).",
         "On his death the instance script despawns every minion that is left, so `skip` lists the adds (7076, 7077, 7309, 10120) and the leg waits only for the Vault door 124369 (137.7 288.1 -52.1), which opens at once. Behind it: Lore Keeper of Norgannon (7172, 147.6 311.1), The Discs of Norgannon (131474, 161.8 298.3) and the Turtle-custom Ancient Treasure Chest (2010828, 167.7 287.4, loot item 60195 at 100 %, respawn 5 s); the plan does not loot them."
       ]

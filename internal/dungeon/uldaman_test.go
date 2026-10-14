@@ -32,7 +32,7 @@ func loadUldaman(t *testing.T) *Plan {
 
 func TestUldamanPlanLoads(t *testing.T) {
 	p := loadUldaman(t)
-	if p.Map != 70 || p.Name != "uldaman" || len(p.Legs) != 13 {
+	if p.Map != 70 || p.Name != "uldaman" || len(p.Legs) != 14 {
 		t.Fatalf("%+v", p)
 	}
 	legs := p.Legs
@@ -114,8 +114,8 @@ func TestUldamanFullPlan(t *testing.T) {
 		}
 		bosses = append(bosses, b)
 	}
-	if fmt.Sprint(names) != "[sentinel ancient_stone_keeper galgann grimlok keepers_door keepers_altar keepers descent archaedas]" ||
-		fmt.Sprint(bosses) != "[7023 7206 7291 4854 0 0 0 0 2748]" {
+	if fmt.Sprint(names) != "[scorpid_cave sentinel ancient_stone_keeper galgann grimlok keepers_door keepers_altar keepers descent archaedas]" ||
+		fmt.Sprint(bosses) != "[0 7023 7206 7291 4854 0 0 0 0 2748]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The doors a player clicks (lock 86, no script) and the ones the instance script opens, each in the leg that needs it.
@@ -136,7 +136,7 @@ func TestUldamanFullPlan(t *testing.T) {
 		t.Fatalf("no leg %q", name)
 		return Leg{}
 	}
-	for name, want := range map[string]string{"sentinel": "[124370]", "keepers_door": "[124368]", "keepers_altar": "[130511]", "archaedas": "[141869 133234]"} {
+	for name, want := range map[string]string{"sentinel": "[]", "keepers_door": "[124368]", "keepers_altar": "[130511]", "archaedas": "[141869 133234]"} {
 		if got := fmt.Sprint(use(leg(name))); got != want {
 			t.Errorf("%s: use_object steps %s, want %s", name, got, want)
 		}
@@ -149,6 +149,26 @@ func TestUldamanFullPlan(t *testing.T) {
 	}
 	if len(k.PullGroups) != 1 || fmt.Sprint(k.PullGroups[0].Entries) != "[4857 4857 4857 4857]" {
 		t.Errorf("keepers: %+v", k.PullGroups)
+	}
+	// The altar steps are followed by a short wait for the altar to be active, with the reason in fail_text: one carrier cannot fire a ritual of three
+	// participants, and the run must stop there with that message, not 600 s later at the next leg's door.
+	for name, altar := range map[string]uint32{"keepers_altar": 130511, "archaedas": 133234} {
+		l := leg(name)
+		var found bool
+		for i, st := range l.Steps {
+			if st.UseObject != nil && st.UseObject.Entry == altar {
+				w := l.Steps[i+1].WaitFor
+				found = w != nil && w.GameObject != nil && w.GameObject.Entry == altar && w.GameObject.State == "active" && w.TimeoutS == 20 &&
+					strings.Contains(w.FailText, "three participants")
+			}
+		}
+		if !found {
+			t.Errorf("%s: no 20 s wait with a fail_text after the use of altar %d: %+v", name, altar, l.Steps)
+		}
+	}
+	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
+	if f := leg("sentinel").Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+		t.Errorf("sentinel first %v", f)
 	}
 	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
 	a := leg("archaedas")
@@ -323,8 +343,9 @@ func waypoints(l Leg) []Point {
 	return pts
 }
 
-// sentinelLeg is the index of the first leg after Ironaya's: its first waypoint is across the navmesh hole north of Ironaya's room.
-const sentinelLeg = 4
+// sentinelLeg is the index of the leg whose first waypoint, the east end of the ramp at -158.4 283.7, is across the one hole of the map 70
+// navmesh from the west lip at -163.5 298.7 where the leg before it ends (the scorpid pit).
+const sentinelLeg = 5
 
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
@@ -349,13 +370,16 @@ func TestUldamanOnNavmesh(t *testing.T) {
 				t.Fatalf("legs[%d] waypoint %d: %v", i, j, err)
 			}
 			if i == sentinelLeg && j == 0 && path.Status != navmesh.Complete {
-				// The one known hole of the map 70 navmesh: Ironaya's room (west part) is not linked to the Back Entrance corridor
-				// (east part) by a tile of the mesh; the way is a passage of about 45 yd north of the room that the mesh lacks. The
-				// walk crosses it on the straight line (server-side movement), which this test cannot check: the waypoints after it
-				// are checked from the leg's own start. A mesh that closes the hole makes this branch dead; delete it then.
+				// The one known hole of the map 70 navmesh (found by path_to, confirmed by the live map walk of 2026-10-14): the west part ends
+				// at the lip of the Cleft Scorpid pit, the east part begins about 4 yd (horizontally; 15 yd along the ramp) from the nearest
+				// reachable point. The walk crosses it with one direct move, which this test cannot check; the waypoints after it are checked
+				// from the leg's own start. A mesh that closes the hole makes this branch dead; delete it then.
+				if len(path.Points) == 0 {
+					t.Fatalf("legs[%d] waypoint 0: partial path with no points", i)
+				}
 				end := path.Points[len(path.Points)-1]
-				if gap := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); gap > 60 {
-					t.Errorf("legs[%d] waypoint 0: the navmesh hole is %.0f yd wide, the plan assumes about 45-55", i, gap)
+				if gap := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); gap > 20 {
+					t.Errorf("legs[%d] waypoint 0: the navmesh hole is %.0f yd wide, the plan assumes at most about 16", i, gap)
 				}
 				from = to
 				checked++

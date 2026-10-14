@@ -402,6 +402,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		timeout := time.Duration(w.TimeoutS) * time.Second
 		left := timeout - s.now().Sub(s.since)
 		if left <= 0 {
+			if w.FailText != "" {
+				return fail("waited %d s for %s: %s", w.TimeoutS, describeWait(w), w.FailText)
+			}
 			return fail("waited %d s for %s", w.TimeoutS, describeWait(w))
 		}
 		base.Kind, base.Remaining = ActWait, left
