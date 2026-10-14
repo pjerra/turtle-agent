@@ -1,6 +1,7 @@
 {
   "version": 1,
   "name": "zulfarrak-extra",
+  "status": "mapped (a record of steps the driver cannot do yet, not for running)",
   "map": 209,
   "entrance": {"x": 1212.7, "y": 842, "z": 8.9},
   "entrance_trigger": 924,

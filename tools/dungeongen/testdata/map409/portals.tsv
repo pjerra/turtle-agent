@@ -1,0 +1,4 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+409	2886	Molten Core - Entrance	50	230	1097.99	-466.494	-96.0719	20	0	0	0	1091.89	-466.985	-105.084
+409	3528	Molten Core - Window Entrance	50	0	-7510.87	-1035.87	182.952	0	3.833	0.3611	2.056	1091.89	-466.985	-105.084
+409	3529	Molten Core - Window Lava Entrance	50	0	-7512.16	-1034.78	177.208	4	0	0	0	1091.89	-466.985	-105.084
