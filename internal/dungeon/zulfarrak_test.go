@@ -133,6 +133,7 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 		return false
 	}
 	summoned := map[uint32]bool{7273: true}
+	patrolBosses := map[uint32]bool{7272: true, 7795: true} // Theka walks a 45 yd loop, Velratha the strip by the gong
 	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
 		p := loadPlan(t, f)
 		for i, l := range p.Legs {
@@ -148,7 +149,19 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 				}
 			}
 			if l.Boss != nil && !summoned[l.Boss.Entry] && !has(cs, l.Boss.Entry, l.Boss.Position) {
-				t.Errorf("%s legs[%d].boss: no spawn of %d at %v", p.Name, i, l.Boss.Entry, l.Boss.Position)
+				// A patrolling boss is met on its patrol (live walk 2026-10-14): the plan's position may be off the spawn row, within 80 yd of it (a boss fight looks for the entry within 80 yd of the lead bot).
+				ok := false
+				for _, m := range cs {
+					x, _ := strconv.ParseFloat(m["x"], 64)
+					y, _ := strconv.ParseFloat(m["y"], 64)
+					z, _ := strconv.ParseFloat(m["z"], 64)
+					if m["entry"] == strconv.Itoa(int(l.Boss.Entry)) && patrolBosses[l.Boss.Entry] && dist3(l.Boss.Position, Point{float32(x), float32(y), float32(z)}) < 80 {
+						ok = true
+					}
+				}
+				if !ok {
+					t.Errorf("%s legs[%d].boss: no spawn of %d at %v", p.Name, i, l.Boss.Entry, l.Boss.Position)
+				}
 			}
 			if l.Boss != nil {
 				for _, e := range l.Boss.First {
@@ -193,7 +206,8 @@ func zulfarrakMmaps() string {
 }
 
 // Every waypoint of the plans is on the navmesh (within 2.5 yd: the Sul'lithuz Hatchlings stand on a cliff edge) and reachable from the one before it, and no leg's route passes the End Door (the
-// navmesh has no doors, so the shortest Theka -> Velratha path would walk through it; the Velratha leg starts west of the junction to avoid that).
+// navmesh has no doors, so the shortest Theka -> Velratha path would walk through it; the Velratha leg starts west of the junction to avoid that) and
+// none crosses the graveyard of Shallow Grave chests and traps.
 func TestZulfarrakOnNavmesh(t *testing.T) {
 	dir := zulfarrakMmaps()
 	if dir == "" {
@@ -219,6 +233,15 @@ func TestZulfarrakOnNavmesh(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s legs[%d] waypoint %d: %v", p.Name, i, j, err)
 				}
+				if path.Status == navmesh.Partial && isPullPosition(l, w) && len(path.Points) > 0 {
+					// A pack off the mesh (on a ledge or in a pit) is pulled from where the party can stand: the nearest reachable point within 20 yd is enough.
+					e := path.Points[len(path.Points)-1]
+					if math.Hypot(float64(e[0]-w.X), float64(e[1]-w.Y)) <= 20 && math.Abs(float64(e[2]-w.Z)) <= 4 {
+						from = [3]float32{e[0], e[1], e[2]}
+						checked++
+						continue
+					}
+				}
 				if path.Status != navmesh.Complete {
 					t.Errorf("%s legs[%d] (%s) waypoint %d %v from %v: %s %s", p.Name, i, l.Name, j, w, from, path.Status, path.Reason)
 					continue
@@ -228,9 +251,21 @@ func TestZulfarrakOnNavmesh(t *testing.T) {
 					t.Errorf("%s legs[%d] waypoint %d: the path ends %.1f yd (z %.1f) from %v", p.Name, i, j, d, end[2]-w.Z, w)
 				}
 				if p.Name == "zulfarrak" {
-					for _, c := range path.Points {
-						if math.Hypot(float64(c[0]-endDoor.X), float64(c[1]-endDoor.Y)) < 12 {
-							t.Errorf("%s legs[%d] (%s) waypoint %d: the route passes the End Door at %v", p.Name, i, l.Name, j, c)
+					// The route is the straight lines between the corners: sample them every 2 yd.
+					for k := 1; k < len(path.Points); k++ {
+						a, b := path.Points[k-1], path.Points[k]
+						n := int(math.Hypot(float64(b[0]-a[0]), float64(b[1]-a[1]))/2) + 1
+						for q := 0; q <= n; q++ {
+							f := float32(q) / float32(n)
+							x, y := a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f
+							if math.Hypot(float64(x-endDoor.X), float64(y-endDoor.Y)) < 12 {
+								t.Errorf("%s legs[%d] (%s) waypoint %d: the route passes the End Door at (%.0f %.0f)", p.Name, i, l.Name, j, x, y)
+								break
+							}
+							if x > 1824 && x < 1906 && y > 959 && y < 1062 { // the graveyard of Shallow Grave chests and traps, 8 yd margin
+								t.Errorf("%s legs[%d] (%s) waypoint %d: the route crosses the graveyard at (%.0f %.0f)", p.Name, i, l.Name, j, x, y)
+								break
+							}
 						}
 					}
 				}
@@ -243,4 +278,15 @@ func TestZulfarrakOnNavmesh(t *testing.T) {
 		}
 		t.Logf("%s: %d waypoints on the map 209 navmesh in %s", p.Name, checked, dir)
 	}
+}
+
+func isPullPosition(l Leg, w Point) bool {
+	for _, g := range l.PullGroups {
+		for _, q := range g.Positions {
+			if q == w {
+				return true
+			}
+		}
+	}
+	return false
 }

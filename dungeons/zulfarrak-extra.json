@@ -12,7 +12,7 @@
     "z": 15.1
   },
   "notes": [
-    "The parts of Zul'Farrak that dungeons/zulfarrak.json leaves out because the driver cannot do them yet: the Gong and Gahz'rilla (needs the Mallet), the stairs event with Nekrum Gutchewer and Shadowpriest Sezz'ziz (waves, no step that fights or waits for the event), and Chief Ukorz Sandscalp + Ruuzlu (behind a door only Weegli's gossip opens). Do not run it as a plan: it is the record of the positions, entries and steps for the day the driver gets a talk/gossip step and an event wait. Witch Doctor Zum'rah is in neither file (see zulfarrak.json notes: faction 35 until area trigger 962)."
+    "The parts of Zul'Farrak that dungeons/zulfarrak.json leaves out because the driver cannot do them yet: the Gong and Gahz'rilla (needs the Mallet), the stairs event with Nekrum Gutchewer and Shadowpriest Sezz'ziz (waves, no step that fights or waits for the event), and Chief Ukorz Sandscalp + Ruuzlu (behind a door only Weegli's gossip opens). Do not run it as a plan: it is the record of the positions, entries and steps for the day the driver gets a talk/gossip step and an event wait. Witch Doctor Zum'rah is in neither file (see zulfarrak.json notes: faction 35 until area trigger 962). Checked live 2026-10-14 by a GM-invisible walk of the instance (tests/zf-map/MAP.md): positions of the objects below match the export; nothing was used."
   ],
   "legs": [
     {
@@ -34,7 +34,7 @@
         "position": {"x": 1659.4, "y": 1193, "z": 9.2}
       },
       "notes": [
-        "Gahz'rilla (7273, faction 107, level 46) is summoned by the Gong of Zul'Farrak (goober 141832, lock 459, event 2488): event_scripts 2488 summons him in the pit at 1664.7 1187.7 -2.9 for 3600 s and despawns the gong object 209001; he has no spawn row, so the boss position is the nearest point of the navmesh (1659.4 1193.0 9.2, 14 yd from the pit), where he comes out. The Gong needs the Mallet of Zul'Farrak (item 9240, quest item 'Mallet of Zul'Farrak' from the Sacred Mallet chain): no honest run has one, so this leg stays out of the first run (the run checks the carrier's bags for requires_item at the start when this leg is from from_leg on). Event 2489 also pops six Sandfury trolls (entry 0, template summon) around the pit: not verified. Unverified in the driver: use_object on a goober with an item lock."
+        "Gahz'rilla (7273, faction 107, level 46) is summoned by the Gong of Zul'Farrak (goober 141832, lock 459, event 2488): event_scripts 2488 summons him in the pit at 1664.7 1187.7 -2.9 for 3600 s and despawns the gong object 209001; he has no spawn row, so the boss position is the nearest point of the navmesh (1659.4 1193.0 9.2, 14 yd from the pit), where he comes out. The Gong needs the Mallet of Zul'Farrak (item 9240, quest item 'Mallet of Zul'Farrak' from the Sacred Mallet chain): no honest run has one, so this leg stays out of the first run (the run checks the carrier's bags for requires_item at the start when this leg is from from_leg on). Event 2489 also pops six Sandfury trolls (entry 0, template summon) around the pit: not verified. Unverified in the driver: use_object on a goober with an item lock. Live: the Gong stood closed (state ready, flags 32, usable true as the client sees it; the lock is checked by the server) and Elder Wildmane (15578) was absent in a fresh instance."
       ]
     },
     {
@@ -64,7 +64,8 @@
               "radius": 70,
               "center": {"x": 1884, "y": 1245, "z": 25}
             },
-            "timeout_s": 600
+            "timeout_s": 600,
+            "fail_text": "The stairs event (three troll waves, the last with Nekrum Gutchewer and Shadowpriest Sezz'ziz) did not end in 600 s: the party may have lost the top of the stairs, or a wave is still running. The event is not restartable."
           }
         },
         {
@@ -73,12 +74,13 @@
               "radius": 70,
               "center": {"x": 1884, "y": 1245, "z": 25}
             },
-            "timeout_s": 600
+            "timeout_s": 600,
+            "fail_text": "The stairs event (three troll waves, the last with Nekrum Gutchewer and Shadowpriest Sezz'ziz) did not end in 600 s: the party may have lost the top of the stairs, or a wave is still running. The event is not restartable."
           }
         }
       ],
       "notes": [
-        "NOT FOR THE FIRST RUN (driver gaps). The stairs event (instance_zulfarrak.cpp): using any Troll Cage (141070-141074, go_troll_cage) frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608), faction 250, who walk to the top of the stairs (1887 1264 41); when Weegli arrives, wave 1 (23 trolls, 7787/7788/7789/8876/8877) spawns at the bottom of the stairs (1874-1899, 1202-1226, z 8.87) and a group of 2, 3, 4, ... runs up every 10 s; wave 2 (24) follows 10 s after wave 1 is dead; wave 3 (Sandfury 7787/7788/8876 plus Shadowpriest Sezz'ziz 7275 and Nekrum Gutchewer 7796) 5 s after wave 2; when wave 3 is dead the crew walks back down to the bottom and the event is over (PYRAMID_KILLED_ALL_TROLLS). None of those units has a spawn row, so nothing here is checked against the export. Missing in the driver: (1) a wait step does not fight: the party's own fight loop only runs for pulls and walks, so the two 600 s waits rely on the bots' own defence at the top of the stairs (not tested); (2) no step ends on 'event data' - hostiles_gone is the only handle, and it can pass between waves (10 s gap, 5 s before wave 3). Wave members come up as the instance script walks them (MovePoint 1880+x, 1274, 42): the party stands at 1887 1274 42, the top. The Sandfury Executioner (7274) at the cages is the one pack there."
+        "NOT FOR THE FIRST RUN (driver gaps). The stairs event (instance_zulfarrak.cpp): using any Troll Cage (141070-141074, go_troll_cage) frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608), faction 250, who walk to the top of the stairs (1887 1264 41); when Weegli arrives, wave 1 (23 trolls, 7787/7788/7789/8876/8877) spawns at the bottom of the stairs (1874-1899, 1202-1226, z 8.87) and a group of 2, 3, 4, ... runs up every 10 s; wave 2 (24) follows 10 s after wave 1 is dead; wave 3 (Sandfury 7787/7788/8876 plus Shadowpriest Sezz'ziz 7275 and Nekrum Gutchewer 7796) 5 s after wave 2; when wave 3 is dead the crew walks back down to the bottom and the event is over (PYRAMID_KILLED_ALL_TROLLS). Sergeant Bly, Raven, Oro, Weegli and Murta DO have spawn rows (in the cages, faction 35, Bly and Weegli npc_flags 1 gossip, live at 1881-1891 1294-1299 48.3, cages all closed at 1881.3/1883.3/1886.9/1889.8/1891.0 z 48.2); the wave units, Nekrum and Sezz'ziz have none, so those are not checked against the export. Missing in the driver: (1) a wait step does not fight: the party's own fight loop only runs for pulls and walks, so the two 600 s waits rely on the bots' own defence at the top of the stairs (not tested); (2) no step ends on 'event data' - hostiles_gone is the only handle, and it can pass between waves (10 s gap, 5 s before wave 3). Wave members come up as the instance script walks them (MovePoint 1880+x, 1274, 42): the party stands at 1887 1274 42, the top. The Sandfury Executioner (7274) at the cages is the one pack there."
       ]
     },
     {
@@ -131,7 +133,7 @@
         "first": [7797]
       },
       "notes": [
-        "NOT FOR THE FIRST RUN. Chief Ukorz Sandscalp (7267, level 48, yells at 60% and 30% and casts Frenzy 8269) and Ruuzlu (7797, executes at 20%) stand on top of the pyramid (1727.5 1017.4 54.9). The way up is the spiral ramp from the End Door (146084, 1854.5 1142.9): the door is shut until the stairs event is over and Weegli Blastfuse (7607) has been asked 'Will you blow up that door now?' in his gossip menu (npc_weegli_blastfuse: he walks to 1858.6 1146.4, plants a barrel and the instance sets EVENT_END_DOOR). The driver has no gossip/talk step, so someone must do that by hand; the navmesh test cannot tell, it has no doors (the path from the door to the top is 193 yd). Sandfury Guardians (7268) and Sul'lithuz Abominations (8120) hold the top of the ramp."
+        "NOT FOR THE FIRST RUN. Chief Ukorz Sandscalp (7267, level 48, yells at 60% and 30% and casts Frenzy 8269) and Ruuzlu (7797, executes at 20%) stand on top of the pyramid (1727.5 1017.4 54.9). The way up is the spiral ramp from the End Door (146084, 1854.5 1142.9): the door is shut until the stairs event is over and Weegli Blastfuse (7607) has been asked 'Will you blow up that door now?' in his gossip menu (npc_weegli_blastfuse: he walks to 1858.6 1146.4, plants a barrel and the instance sets EVENT_END_DOOR). The driver has no gossip/talk step, so someone must do that by hand; the navmesh test cannot tell, it has no doors (the path from the door to the top is 193 yd). Sandfury Guardians (7268) and Sul'lithuz Abominations (8120) hold the top of the ramp. Live (2026-10-14): the End Door was shut (state ready, flags 32, usable true); a GM walked through it because the mesh has no doors, so the 193 yd path is real only after the blast. The top: Ukorz and Ruuzlu stand at their spawn points, the Flame of Farrak (2020161, 1724.1 1029.1 53.5, flags 32) beside them; Guardians at 1721.7 1057.8 and 1765.8 1019.1, Abominations at 1744.9 1066.8 and 1769.7 1047.7, a pair of Shadowhunters patrolling the lower ramp (live centre 1805 1102 z 35)."
       ]
     }
   ]
