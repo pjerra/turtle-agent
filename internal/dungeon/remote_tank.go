@@ -28,6 +28,10 @@ const (
 	stickShare = 50
 	// switchLead is how many points of share another mob must lead the one the party fights by, below stickShare, to be taken instead.
 	switchLead = 25
+	// tankSwitchHold is how long the tank is left on the loose add it was last sent at, while that add is alive and still off the tank,
+	// before it is sent at another one. With one order per look and a cooldown per mob only, a pack of loose adds had the tank sent at
+	// a different mob every second (ZF hires-2 run 3b: four mobs in 3.4 s, twice): it walked between them and never landed a Taunt.
+	tankSwitchHold = 5 * time.Second
 )
 
 // tankFirst is the driver's state for the rules; its maps are made on first use.
@@ -41,6 +45,8 @@ type tankFirst struct {
 	ccNoted    map[packet.GUID]bool      // crowd-controlled mobs already counted in cc_respected
 	addAt      map[packet.GUID]time.Time // the last tank order at a loose add
 	addN       map[packet.GUID]int
+	lastAdd    packet.GUID               // the loose add the tank was last sent at
+	lastAddAt  time.Time                 // ... and when
 	offTankAt  map[packet.GUID]time.Time // when a mob was first seen on a bot that is not the tank (it is taken back to 0 when it goes back)
 	sampledN   uint64                    // the frame the tank's share was last sampled at
 	shareSum   float64                   // the sum of the samples
@@ -173,7 +179,8 @@ func (d *RemoteDriver) tankFirstTick(ctx context.Context, mobs []tbm.HostileRec)
 // that first showed it on that bot). The order is `.bot cmd attack <guid> <tank>` (TortoiseBots #928: with a bot name only that bot of the
 // party goes). It is not `cmd pull`: that was refused `tank-busy` whenever the tank was already meleeing another mob, which is exactly
 // when a loose add needs it (the first remote Uldaman run: 19 refusals). `cmd pull` stays for opening pulls (sendPull).
-// At most one order per look; AddCooldown apart for the same mob, maxAddOrders for the fight.
+// At most one order per look; AddCooldown apart for the same mob, maxAddOrders for the fight; and tankSwitchHold on one add (alive, still
+// off the tank) before the tank is sent at another.
 func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRec) error {
 	d.tf.init()
 	if d.tank == 0 || d.tf.looseOff {
@@ -184,6 +191,11 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		return nil
 	}
 	now := d.clk.Now()
+	// The tank is on its way to the add it was last sent at: it stays on it while the add is alive and still off the tank. A mob that
+	// is hitting the healer breaks the hold (onHealer): the healer cannot wait out the hold.
+	hold := d.tf.lastAdd != 0 && now.Sub(d.tf.lastAddAt) < tankSwitchHold && slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool {
+		return h.GUID == d.tf.lastAdd && h.HPPct > 0 && h.Target != d.tank && d.tankShare(h) < 100
+	})
 	for _, h := range d.respectCC(mobs) {
 		if _, ok := d.engagedAt[h.GUID]; !ok {
 			d.engagedAt[h.GUID] = now
@@ -198,6 +210,9 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		if now.Sub(d.tf.offTankAt[h.GUID]) < looseGrace {
 			continue
 		}
+		if hold && !d.onHealer(h.Target) {
+			continue
+		}
 		if d.tankShare(h) >= 100 { // the tank tops its list: the mob is about to turn
 			continue
 		}
@@ -206,6 +221,7 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		}
 		d.tf.addAt[h.GUID] = now
 		d.tf.addN[h.GUID]++
+		d.tf.lastAdd, d.tf.lastAddAt = h.GUID, now
 		d.remote(func(r *RemoteReport) { r.LooseAddOrders++ })
 		who := h.Target.String()
 		if m, ok := d.fr.Member(h.Target); ok {
@@ -228,6 +244,22 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		return nil
 	}
 	return nil
+}
+
+// onHealer says whether g is the healer: the named one (RemoteOptions.Healer), or, with none named, any mana user of the party that is
+// not the tank.
+func (d *RemoteDriver) onHealer(g packet.GUID) bool {
+	if g == 0 || g == d.tank {
+		return false
+	}
+	m, ok := d.fr.Member(g)
+	if !ok {
+		return false
+	}
+	if d.opt.Healer != "" {
+		return strings.EqualFold(m.Name, d.opt.Healer)
+	}
+	return m.PowerType == 0
 }
 
 // noteFocus records the mob the party was sent at, counting a switch when the one before is still among mobs.
