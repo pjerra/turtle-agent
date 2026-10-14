@@ -566,7 +566,10 @@ func remotePlan(legs ...Leg) *Plan {
 	return &Plan{Version: 1, Name: "rt", Map: 0, Legs: legs}
 }
 
-func opts() RemoteOptions { return RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}} }
+// The tests assert the unbind of a failed run (UnbindOnFail); TestRemoteFailedRunKeepsTheBinding covers the default.
+func opts() RemoteOptions {
+	return RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}, UnbindOnFail: true}
+}
 
 func runRemote(t *testing.T, g interface {
 	RemoteGame

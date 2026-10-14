@@ -29,7 +29,7 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		if p.Tune != "" || p.LiveReload != nil {
 			return false, bad(`tune and live_reload go with mode "remote"`)
 		}
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.UnbindOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
 			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, enter, ignore_entry_limit and prepare go with mode "remote"`)
 		}
 		return false, nil
@@ -126,7 +126,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
-	opt := dungeon.RemoteOptions{PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, UnbindOnFail: p.UnbindOnFail, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

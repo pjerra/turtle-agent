@@ -169,6 +169,9 @@ type dungeonRunParams struct {
 	// OnEnd is what happens to the bots at the end of a remote run: "stay" (the default: `cmd stay` before the unbind), "logout" (stay,
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
+	// UnbindOnFail (remote mode): a FAILED run also sends `commander unbind`. Off by default: a failed run keeps its binding and the party
+	// in its instance, so that a resume re-enters the same instance (a stopped or finished run always unbinds).
+	UnbindOnFail bool `json:"unbind_on_fail,omitempty"`
 	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
 	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
 	// "gm", "walk", or "off" (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.

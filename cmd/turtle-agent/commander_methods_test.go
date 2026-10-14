@@ -396,7 +396,7 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off","unbind_on_fail":true}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
@@ -493,7 +493,7 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0}`))
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0,"unbind_on_fail":true}`))
 	if start["from_leg"] != float64(0) || start["from_pull_group"] != float64(0) {
 		t.Fatalf("%v", start)
 	}
