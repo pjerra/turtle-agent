@@ -161,6 +161,14 @@ func (s *Stepper) Complete() {
 	}
 }
 
+// SkipStep gives up the step the stepper is on and goes to the next: the driver's way past a wait it cannot check (a game object the
+// agent does not see). It does nothing outside a leg's steps.
+func (s *Stepper) SkipStep() {
+	if s.ph == phSteps || s.ph == phAfter {
+		s.nextStep()
+	}
+}
+
 func (s *Stepper) nextStep() {
 	s.idx++
 	s.since, s.stepAt, s.stepWalks = time.Time{}, time.Time{}, 0

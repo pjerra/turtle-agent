@@ -73,6 +73,25 @@ func TestCommanderMethod(t *testing.T) {
 	}
 }
 
+// A loot, open or use order is answered in two steps: ACTION_PENDING says it runs, the final ACK comes later, and the typed order result
+// is returned.
+func TestCommanderMethodOrderWaitsThroughPending(t *testing.T) {
+	r := newRig(t)
+	got := make(chan map[string]any, 1)
+	go func() {
+		got <- r.call("commander", `{"op":"cmd","verb":"open","args":["0x1F1000000000AAA1","Magey"],"wait_ms":3000}`)
+	}()
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd open 0x1F1000000000AAA1 Magey"))
+	r.system("TBM:ACTION_PENDING|cmd open|bot:Magey|14|0x1F1000000000AAA1")
+	time.Sleep(100 * time.Millisecond)
+	r.system("TBM:ACTION_ACK|cmd open|bot:Magey|1|7740:1,copper:5")
+	res := resultOf(t, <-got)
+	rep, ord := res["reply"].(map[string]any), res["order"].(map[string]any)
+	if rep["kind"] != "ack" || ord["pending"].(map[string]any)["budget_s"] != float64(14) || ord["loot"].(map[string]any)["copper"] != float64(5) {
+		t.Fatalf("%v", res)
+	}
+}
+
 func TestCommanderMethodRefusals(t *testing.T) {
 	r := newRig(t)
 	for _, c := range []string{
@@ -147,6 +166,9 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","healer":"Healy"}`, `go with mode "remote"`},
 		{`{"name":"rig","team":"horde"}`, `go with mode "remote"`},
 		{`{"name":"rig","on_end":"stay"}`, `go with mode "remote"`},
+		{`{"name":"rig","carrier":"Magey"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","carrier":"Ma gey"}`, "carrier:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","loot_restore":"ffa"}`, "loot_restore:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},

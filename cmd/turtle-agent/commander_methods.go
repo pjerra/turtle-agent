@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -87,6 +89,8 @@ type commanderParams struct {
 type commanderResult struct {
 	Sent  string    `json:"sent"`
 	Reply tbm.Reply `json:"reply"`
+	// Order is the typed outcome of a loot, open, use or lootmethod order, which waits for its final line (through ACTION_PENDING).
+	Order *tbm.OrderResult `json:"order,omitempty"`
 }
 
 // do runs one commander call.
@@ -124,9 +128,17 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 	if p.WaitMS > 0 {
 		wait = waitBound(p.WaitMS, 4000)
 	}
+	if verb := strings.Fields(command); len(verb) > 1 && strings.EqualFold(verb[0], "cmd") && slices.Contains(orderVerbs, strings.ToLower(verb[1])) {
+		o, err := c.cmdr.OrderWait(ctx, command, wait)
+		rep := tbm.Reply{Kind: o.Kind, OK: o.OK, Line: o.Final, Ack: o.Ack, Err: o.Err, Lines: o.Lines}
+		return commanderResult{Sent: ".bot " + command, Reply: rep, Order: &o}, rpcErr(err)
+	}
 	r, err := c.cmdr.DoWait(ctx, command, wait)
 	return commanderResult{Sent: ".bot " + command, Reply: r}, rpcErr(err)
 }
+
+// orderVerbs are the `cmd` verbs that run for a while and answer ACTION_PENDING before their final line.
+var orderVerbs = []string{"loot", "open", "use"}
 
 type botViewParams struct {
 	AfterN uint64 `json:"after_n,omitempty"` // wait for a frame newer than this counter (the n of the last result)
@@ -187,6 +199,21 @@ type remoteGame struct{ c *commanderService }
 
 func (g remoteGame) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	return g.c.cmdr.Do(ctx, command)
+}
+
+// Order implements dungeon.OrderGame: a `cmd loot|open|use|lootmethod` order, waited for through ACTION_PENDING to its final line.
+func (g remoteGame) Order(ctx context.Context, command string) (tbm.OrderResult, error) {
+	return g.c.cmdr.Order(ctx, command)
+}
+
+// Behavior implements dungeon.OrderGame: `.bot behavior <bot> <key> on|off`.
+func (g remoteGame) Behavior(ctx context.Context, bot, key string, on bool) (tbm.Reply, error) {
+	return g.c.cmdr.Behavior(ctx, bot, key, on)
+}
+
+// GameObjects implements dungeon.OrderGame: the game objects the agent's own character has in view.
+func (g remoteGame) GameObjects() []objects.GameObject {
+	return g.c.cur().GameObjects(objects.GOFilter{Limit: 5000})
 }
 
 func (g remoteGame) Frame() (tbm.ViewFrame, uint64, bool) { return g.c.feed.Latest() }

@@ -441,7 +441,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	deadOf := func() []deadAt {
 		var out []deadAt
 		for g := range killed {
-			out = append(out, deadAt{entry: last[g].Entry, at: hostilePoint(last[g])})
+			out = append(out, deadAt{entry: last[g].Entry, at: hostilePoint(last[g]), guid: g})
 		}
 		return out
 	}

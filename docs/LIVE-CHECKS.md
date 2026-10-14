@@ -612,8 +612,7 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
    {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","from_leg":0}`: watch `dungeon_status.report.remote`: `bound`,
    `frames_received` rising, `orders` by verb, `threat_holds`/`threat_waits`/`threat_overrides`, `move_stalls`, `refused`. Expect the first leg's
    walk to take several `move` legs, pulls to start with `pullback` at feed guids, the party to be sent in once the tank holds the mob. The run is
-   expected to **fail at the first object step** (`remote mode: object step needs the agent nearby`); that is the designed limit. Run a leg range
-   without object steps (or accept the failure) and check that it ends with `unbound: true`.
+   object steps are done by the carrier since the object-steps work (see "Remote Uldaman: the carrier does the object steps" below); before that they failed with `remote mode: object step needs the agent nearby`.
 5. **Exits.** `dungeon_stop` in the middle of a fight: `remote.unbound` true, `.bot commander status` answers `not-bound`, the bots hold where they
    stand. Log the lead bot out during a run: the module's automatic `commander unbind` ACK ends the run with `the commander binding ended`.
 6. **Open questions the fixtures cannot answer.** How close `move` stops (arrival radius 5 yd assumed), how long a 120 yd leg takes in a dungeon (the
@@ -689,3 +688,27 @@ lead-bot tank at 15-25 % of the top threat while the rogue led: compare `report.
    targets (check the tank's `target` in `units`), not the nearest. `report.tank_first.tank` names the tank; `tank_threat_share` is the share of mobs on it.
 6. **Group mode, loose add and CC.** Let a mob run at the healer: `loose_add_orders` 1, the chat shows `.bot action pull 0` right after the leader targeted the mob, and the tank goes for it. Polymorph one mob (`.bot action cc moon`) and set the moon icon: the leader never targets it for the attack order until it is the last (`cc_respected`).
    Check `unit.auras` of a sheep shows the Polymorph name/mechanic the rule matches (Sap, Shackle Undead, Hibernate, Banish, Freezing Trap Effect too).
+
+## Remote Uldaman: the carrier does the object steps (issue #83, gap G2)
+
+Tested with a fake commander only (`internal/dungeon/remote_objects_test.go`, `internal/tbm/orders_test.go`); nothing below has run live. Needs the TortoiseBots
+build with #928 (`cmd loot|open|use|lootmethod`, `ACTION_PENDING`), `RemoteCommander = 1`, five owned alts in Uldaman and the agent's character **in view of the
+objects** (in the instance, or at its edge with the objects loaded). Read the order lines in the event log or `commander` replies for every item.
+
+1. **Manual orders first.** `commander {"op":"bind",...}`, then with the party at the chest: `commander {"op":"cmd","verb":"open","args":["0x<chest guid from gameobjects>","<DPS>"],"wait_ms":4000}`.
+   The result has `order.pending` (the budget) and `order.loot`. Note: does the chest answer with its item list (Gni'kiv Medallion 7740), is lock 93 opened by a bot
+   with no key, what is the PENDING budget and how long the whole order takes, and does the DPS bot rejoin the formation by itself (position in `bot_view` over 30 s).
+2. **Loot method.** `cmd lootmethod ffa` then `group`: the ACK reads back `ffa:<threshold>` and `group:<threshold>`; check the threshold is the one the party had (the run
+   puts back `group` and cannot know the old method: if the party was on round robin, set `loot_restore`).
+3. **Leg 0, the chest.** Kill Baelog, Eric and Olaf (Horde agent: the team gate decides), then the run's `loot_object`: `remote.object_steps[0]` with orders `lootmethod ffa`, `open`, `lootmethod group`; the
+   Medallion in the carrier's `.bot inv`; seconds. If `no-item` or `locked` comes, the ERR text says which kind.
+4. **Leg 1, the Shaft.** With `companions_loot: false` in the plan: `.bot behavior <bot> loot off` for four bots and `on` after (does the module answer an ACK, and does the BOTSTATE line change?). After
+   Revelosh dies: `cmd loot <corpse guid> <carrier> 7741` under free-for-all. The corpse GUID is the one the feed showed dying: check the module accepts it (`invalid-target` would mean the corpse
+   keeps another GUID). The ACK lists `7741:1`. Try it once with the method left on `group`/round robin to see the `failed` the documentation promises, and that the run says so.
+5. **Leg 1, the combine.** `cmd use 7740 <carrier>`: ACK `spell:9594`, and the Staff 7733 in `.bot inv` within 8 s; note whether the cast needs the party to stand still and whether `busy` shows up.
+6. **Leg 2, the Keystone.** Staff in the carrier's bags: `cmd open <keystone guid> <carrier>` answers `opened` (the Keystone is a goober that may despawn between looks: a `failed` "no change" with the
+   Seal opened anyway is the documented case). Then the Seal: with the Seal in the agent's view the wait follows its state; out of view the run waits 10 s and goes on (a note). Does the Seal open?
+7. **Refusals.** A carrier with an empty bag for `cmd use`: `no-item`. The Keystone with the Staff on another bot: the run fails before the order naming the carrier. Kill the carrier mid-walk: `unavailable`.
+   A fight starting during the walk: `in-combat`, and the run waits it out and orders again. Send `cmd move` by hand during an order: `cancelled`, then the run sends it again.
+8. **Agent out of view.** Run the leg with the agent in Ironforge: the step fails at once with `the agent must be within view of game object 123329`, with no order sent and the bots unbound.
+9. **Totals.** For a clean leg 0-2 run, `remote.object_steps` should list the chest, the Shaft, the combine and the Keystone, every order `ack`, seconds per step, `refused` empty.

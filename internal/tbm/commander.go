@@ -20,7 +20,7 @@ import (
 // Intents of the commander commands (the first two words of the command).
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
-	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon"}
+	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "loot", "open", "use", "lootmethod"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.
@@ -45,6 +45,8 @@ type Commander struct {
 	link Link
 	// Wait is how long a command waits for its reply (DefaultOrderWait when 0).
 	Wait time.Duration
+	// PendingSlack is what an order that reports itself running (ACTION_PENDING) may take beyond its budget (DefaultPendingSlack when 0).
+	PendingSlack time.Duration
 
 	mu sync.Mutex
 }
