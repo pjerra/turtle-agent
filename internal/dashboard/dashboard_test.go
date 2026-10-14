@@ -289,7 +289,7 @@ func TestGeometry(t *testing.T) {
 	}
 	svg := g.SVG
 	for _, want := range []string{`class="route" data-leg="0"`, `class="direct" data-leg="0"`, `class="pull" data-leg="0" data-group="0"`, `r="10.0"`, `r="5.0"`, `r="25.0"`,
-		`class="boss"`, `boss 6001`, `class="obj use"`, `use 555`, `class="entrance"`, `data-leg="1" data-group="0"`} {
+		`class="mk boss"`, `boss 6001`, `class="mk obj use"`, `use 555`, `class="mk entrance"`, `data-leg="1" data-group="0"`} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("svg lacks %q", want)
 		}
@@ -300,6 +300,14 @@ func TestGeometry(t *testing.T) {
 	// the direct step is its own dashed line, so leg 0 has a plain route (entrance, via) and a direct line to the second via point
 	if strings.Count(svg, `class="direct"`) != 1 {
 		t.Errorf("want one direct line, got %d", strings.Count(svg, `class="direct"`))
+	}
+	// the tight bounds hold the same points as the padded view box, without the margin
+	bd := g.Bounds
+	if bd[2] <= 0 || bd[3] <= 0 || bd[0] < vb[0] || bd[1] < vb[1] || bd[0]+bd[2] > vb[0]+vb[2] || bd[1]+bd[3] > vb[1]+vb[3] {
+		t.Errorf("bounds %v must lie inside the view box %v", bd, vb)
+	}
+	if nh, nl := strings.Count(svg, `class="halo`), strings.Count(svg, `class="route"`)+strings.Count(svg, `class="direct"`); nh != nl || nh == 0 {
+		t.Errorf("each route line has a dark halo under it: %d halos for %d lines", nh, nl)
 	}
 	if !json.Valid(mustJSON(t, g)) {
 		t.Error("geometry is not JSON")

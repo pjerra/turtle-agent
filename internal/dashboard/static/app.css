@@ -39,11 +39,21 @@ footer { padding: 8px 16px 20px; font-size: 12px; }
 .pill.failed { color: var(--bad); border-color: var(--bad); }
 .pill.yellow { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .pill.red { color: #fff; background: var(--bad); border-color: var(--bad); }
-.cbody { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 0; }
-@media (max-width: 720px) { .cbody { grid-template-columns: 1fr; } }
-.map { background: var(--mapbg); border-right: 1px solid var(--line); min-height: 260px; position: relative; }
-.map svg { width: 100%; height: 100%; min-height: 300px; max-height: 70vh; display: block; }
-.map .nomap { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 12px; text-align: center; }
+.cbody { display: grid; grid-template-columns: 1fr; gap: 0; }
+.map { background: var(--mapbg); border-bottom: 1px solid var(--line); position: relative; display: flex; flex-direction: column; }
+.mapbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.mapbar[hidden] { display: none; }
+.mb { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; min-width: 34px; height: 30px; padding: 0 10px; font: inherit; cursor: pointer; }
+.mb.follow.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mb.chip { background: #ffd400; border-color: #000; color: #000; font-size: 12px; }
+.mb[hidden] { display: none; }
+.dimlbl { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dimlbl input { width: 110px; }
+.stage { position: relative; height: 72vh; min-height: 420px; max-height: 960px; background: #0b0e13; touch-action: none; user-select: none; }
+.stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.stage svg:active { cursor: grabbing; }
+.map .nomap { position: absolute; inset: 0; display: grid; place-items: center; color: #cbd2de; padding: 12px; text-align: center; }
+.map .nomap.note { inset: auto 0 0 0; display: block; padding: 4px 10px; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; pointer-events: none; }
 .info { padding: 10px 12px; display: grid; gap: 10px; align-content: start; min-width: 0; }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px 10px; }
 .kv div { min-width: 0; } .kv b { display: block; font-size: 15px; } .kv span { color: var(--muted); font-size: 11px; }
@@ -63,33 +73,49 @@ details { border-top: 1px solid var(--line); padding: 6px 12px; }
 details pre { max-height: 320px; overflow: auto; font-size: 11px; margin: 6px 0; background: var(--bg); padding: 6px; border-radius: 4px; }
 a { color: var(--accent); }
 
-svg { --k: 1; }
-svg image.bg { opacity: .9; }
+.sum { font-weight: 600; }
+.now { font-size: 15px; font-weight: 600; }
+.yellow { color: var(--warn); } .red { color: var(--bad); font-weight: 600; }
+td.bn { cursor: pointer; text-decoration: underline dotted; white-space: nowrap; } td.bn.off { cursor: default; text-decoration: none; }
+
+/* The drawing sits on the game's own map picture, so its colours are fixed and bright, with dark outlines, in light and dark mode. */
+svg image.bg { filter: brightness(var(--bright, .7)); }
+svg .halo { fill: none; stroke: #000; stroke-width: 6.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .9; }
+svg .route, svg .direct { fill: none; stroke: #00e5ff; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+svg .direct, svg .dhalo { stroke-dasharray: 9 6; stroke-linecap: butt; }
+svg .direct { stroke: #9df7ff; }
+svg .leg.current .route, svg .leg.current .direct { stroke: #5df4ff; stroke-width: 5.5; }
+svg .leg.current .halo { stroke-width: 8.5; opacity: 1; }
+svg .leg.done .route, svg .leg.done .direct, svg .leg.done .halo { opacity: .35; }
+svg .pull { fill: rgba(255, 212, 0, .10); stroke: #ffd400; stroke-width: 2; stroke-dasharray: 8 5; vector-effect: non-scaling-stroke; }
+svg .pull.ambush { stroke-dasharray: 2 5; }
+svg .pull.active { fill: rgba(255, 212, 0, .28); stroke-width: 3.5; }
+svg .pull.cleared, svg .leg.done .pull, svg .pin.cleared, svg .leg.done .pin { opacity: .35; }
+svg .lbg { fill: rgba(0, 0, 0, .72); }
+svg text { font: 600 11px system-ui, sans-serif; }
+svg text.lt { fill: #fff; }
+svg .entrance circle { fill: #22c55e; stroke: #000; stroke-width: 2; }
+svg .pin circle { fill: #ffd400; stroke: #000; stroke-width: 2; }
+svg .pin text.num { fill: #000; text-anchor: middle; }
+svg .boss polygon { fill: #ff2fd6; stroke: #000; stroke-width: 2.5; stroke-linejoin: round; }
+svg .boss path { stroke: #000; stroke-width: 2.5; fill: none; }
+svg .leg.done .boss { opacity: .5; }
+svg .obj rect { fill: #fff; stroke: #000; stroke-width: 2; }
+svg .legname .lbg { fill: rgba(0, 0, 0, .55); } svg .legname text { fill: #d6dbe5; }
+svg .mob { stroke: #000; stroke-width: 1.5; }
+svg .mob.hostile { fill: #ff3b3b; } svg .mob.neutral { fill: #9aa3b2; } svg .mob.friendly { fill: #22c55e; }
+svg .mob.boss { stroke: #ff2fd6; stroke-width: 3; }
+svg .mob.cleared { opacity: .35; }
+svg .mob.engaged { stroke: #fff; stroke-width: 2.5; }
+svg .bot { stroke: #fff; stroke-width: 2.5; } svg .bot.tank { fill: #2f80ff; } svg .bot.healer { fill: #22c55e; } svg .bot.dps { fill: #ff9f1c; }
+svg .bot.dead { fill: #6b7280; opacity: .75; }
+svg .cmd { fill: #c084fc; stroke: #fff; stroke-width: 2.5; }
+svg g.dead text { text-decoration: line-through; }
+.legend { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); padding: 6px 12px; border-top: 1px solid var(--line); }
+.legend i { display: inline-block; vertical-align: middle; margin-right: 4px; background: var(--c); border: 1.5px solid #000; box-sizing: border-box; }
+.legend i.dot { width: 12px; height: 12px; border-radius: 50%; }
+.legend i.ring { width: 14px; height: 14px; border-radius: 50%; background: rgba(255, 212, 0, .15); border: 2px dashed var(--c); }
+.legend i.dia { width: 11px; height: 11px; transform: rotate(45deg); }
+.legend i.sq { width: 11px; height: 11px; }
+.legend i.line { width: 20px; height: 5px; border-radius: 3px; }
 .legend select { font-size: 11px; margin-left: auto; }
-svg .legname, svg .pin text, svg .obj text, svg .boss text, svg .entrance text { font-size: calc(10px * var(--k)); fill: var(--muted); }
-svg .pin text { font-weight: 600; }
-svg .route, svg .direct { fill: none; stroke: var(--route); stroke-width: 1.6; vector-effect: non-scaling-stroke; opacity: .45; }
-svg .direct { stroke-dasharray: 5 4; stroke: var(--cmd); }
-svg .pull { fill: var(--pull); fill-opacity: .12; stroke: var(--pull); stroke-opacity: .55; stroke-width: 1; vector-effect: non-scaling-stroke; }
-svg .pull.ambush { stroke-dasharray: 3 3; }
-svg .pin circle { fill: var(--pull); }
-svg .boss polygon { fill: var(--bad); fill-opacity: .8; }
-svg .obj rect { fill: var(--cmd); }
-svg .entrance circle { fill: var(--ok); }
-svg .leg.done .route, svg .leg.done .direct { opacity: .2; }
-svg .leg.done .pull, svg .pull.cleared { fill-opacity: .03; stroke-opacity: .2; }
-svg .pin.cleared circle, svg .leg.done .pin circle { opacity: .35; }
-svg .leg.current .route { opacity: 1; stroke-width: 3; }
-svg .leg.current .direct { opacity: 1; stroke-width: 3; }
-svg .pull.active { fill-opacity: .3; stroke-opacity: 1; stroke-width: 2; }
-svg .dyn .mob { stroke: var(--panel); stroke-width: 1; vector-effect: non-scaling-stroke; }
-svg .dyn .mob.hostile { fill: var(--hostile); } svg .dyn .mob.neutral { fill: var(--neutral); } svg .dyn .mob.friendly { fill: var(--friendly); }
-svg .dyn .mob.cleared { opacity: .3; }
-svg .dyn .mob.engaged { stroke: var(--ink); stroke-width: 2; }
-svg .dyn .bot { fill: var(--bot); stroke: var(--panel); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-svg .dyn .bot.tank { fill: #d49a1f; } svg .dyn .bot.healer { fill: var(--friendly); }
-svg .dyn .bot.dead { fill: var(--muted); opacity: .6; }
-svg .dyn .cmd { fill: var(--cmd); stroke: var(--panel); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-svg .dyn text { font-size: calc(10px * var(--k)); fill: var(--ink); paint-order: stroke; stroke: var(--mapbg); stroke-width: calc(3px * var(--k)); }
-.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 4px 12px; border-top: 1px solid var(--line); grid-column: 1 / -1; }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px; vertical-align: baseline; }

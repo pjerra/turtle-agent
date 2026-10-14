@@ -2684,6 +2684,18 @@ refused (a 404 that does not say why). Only GET and HEAD are answered, a request
 dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
 example `--embed-from http://m910q:8095`, must be named).
 
+**Reading and moving the map.** Each card opens on the whole map picture and the whole plan, fitted to a large panel. The mouse wheel
+zooms around the cursor, a drag pans, two fingers pinch and pan on a phone, a double click zooms in, and the `+`, `-` and `Fit`
+buttons do the same; the view is remembered per map in the browser. **Follow party** (on by default while a run is live) eases the view
+to the middle of the party at every update and keeps the zoom (first the party plus about 60 yards around it); dragging the map pauses it
+(a yellow "Following paused, click to resume" chip) and the toggle resumes it. A click on a bot's name in the party table centres the map
+on it. **Dim map** darkens the game picture under the drawing (0-80 %). The drawing's colours are fixed and bright with dark outlines
+(route cyan, current leg thicker, tank blue, healer green, damage orange, commander purple, hostile red, neutral grey, packs dashed yellow,
+bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page is read-only and loads no outside script or
+font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
+explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
+them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
+
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
 answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.
