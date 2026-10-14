@@ -1594,6 +1594,9 @@ with the ordinary per-leg logic (the rest gate at the leg's start, walks, pulls,
 2. `.go xyz <x> <y> <z> <map>` (the agent's own character; `session.Teleport`, which waits for the teleport and lands the agent on the navmesh);
 3. `.bot summon <lead bot>`, a player command of the commander's account: `cmd summon` fetches a bot to the **lead bot**, so the lead bot has to
    come first;
+   `.bot summon` makes the commander the bot's master and puts it on follow, so the lead bot would chase the GM: right after it lands the
+   agent sends `cmd move <the point it landed on>` (the module's hold-this-spot order; `cmd stay` as the last try) and watches the feed for 4 s
+   to see the bot stay within 4 yd of it (three tries, then the run fails);
 4. `cmd summon <bot>` for every other living bot that is not with the lead bot, and a wait until all stand together.
 
 The two GM lines are the only GM commands; neither is aimed at another player. They count in `remote.gm_commands` and are listed in
@@ -1607,6 +1610,12 @@ player's account the run fails before it sends anything, naming the level. Every
 - **The start point of a pull group** is its *gather spot*: 55 yd short of the group's first position on the navmesh path from the leg's `to`,
   moved back along the path (70, then 85 yd) until no other pack or boss of the plan is within 30 yd of it; `start.warning` says when none was.
   The run then starts at that pull group (the leg's walk and the earlier groups of the leg are skipped).
+- **A step that needs something a skipped leg makes fails the start at once**, before anything is sent: the plan is read for steps from the
+  start leg on that need an item (`use_object.requires_item`, `use_item` and its `requires_item`) which only a leg before the start makes (a
+  boss's `loot_item`, a `loot_object`'s or `use_item`'s `expect_item`). Uldaman: from leg 1 the Gni'kiv Medallion (7740) is missing, from leg 2 the
+  Staff of Prehistoria (7733). The error names the item, the step and the leg; `have_items: [7733]` (script: `--have-items 7733,7740`) says the
+  party already carries it. A game-object wait whose opener is in a skipped leg (a door) is not detected: it fails at its own `timeout_s`.
+  The skipped legs are not in the `legs` totals of the summary event and the trace counters.
 - **What is skipped is reported as skipped, never as cleared** (driver rule 1): `report.legs[]` lists every leg before `from_leg` with `result`
   `"skipped (from_leg)"`; `start.skipped[]` has the texts, including `pull groups 0-N skipped (from_pull_group)`. The report's `start` has the
   start point, its kind (`entrance`, `leg_start`, `pull_gather`), the map, the GM lines, whether the lead bot was summoned, the bots `cmd summon`
@@ -1624,7 +1633,7 @@ pull. Between tries the pack is brought back (`reset`):
 | :--- | :--- |
 | `auto` (default) | an equivalent pack first, then `.respawn`; when neither is possible the scenario says `one try per spawn: <why>` and stops with the tries it has |
 | `equivalent` | the next pack of the leg that has the same `equiv` label as the tested one (a `pull_groups[]` field of the plan, up to 40 characters) and was not tried yet; the party walks to its gather spot |
-| `respawn` | the party walks back to the gather spot, then the commander sends its own `.respawn` (developer level; Commands.cpp `HandleRespawnCommand`: with nothing selected, it respawns the creatures and game objects within the map's visibility distance of the commander; the agent clears its selection first and waits for the server to show it cleared). A GM assist during the run: `remote.run_gm_assists`, `setup_shortcuts` (`.respawn (GM assist during the run: pulltest reset)`) and `pulltest.gm_commands`. The commander must be within 80 yd of the pack (it is: it stands at the gather spot) |
+| `respawn` | the party walks back to the gather spot, then the commander sends its own `.respawn` (developer level; Commands.cpp `HandleRespawnCommand`: with nothing selected, it respawns **every dead or despawned creature and game object within the map's visibility distance of the commander**: other corpses, a boss the party killed, looted chests; the agent clears its selection first and waits for the server to show it cleared). A GM assist during the run: `remote.run_gm_assists`, `setup_shortcuts` (`.respawn (GM assist during the run: pulltest reset)`) and `pulltest.gm_commands`. The commander must be within 80 yd of the pack (it is: it stands at the gather spot). **It is refused** (`one try per spawn: respawn would revive boss N of leg L`) when a boss of the plan lies within 250 yd of the commander (the largest instance visibility distance; the default is 170) and the bots do not see it alive; prefer `equivalent` packs or `none` where bosses are near |
 | `none` | one try |
 
 A try is scored only when something was killed: a reset that brings nothing back ends the scenario with the try marked `no_pack` and not

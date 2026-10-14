@@ -105,6 +105,8 @@ type RemoteOptions struct {
 	FromPullGroup *int
 	StartHere     bool
 	StartWait     time.Duration
+	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
+	HaveItems []uint32
 	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
 	Pulltest *PulltestSpec
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.

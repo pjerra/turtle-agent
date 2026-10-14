@@ -992,7 +992,8 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
 3. **`.bot summon <lead bot>` of a bound lead bot** (a player command, the only way to bring the lead bot without a GM line aimed at it): the answer line
    (`Summoning Tanky to a safe position near you (3s)...`), whether the bot lands within 12 yd of the commander in 3-6 s, and whether the binding survives it (`remote.ended_by_module`
    stays empty, the feed does not stall). After the arrival the module puts the bot on `follow` (its master is the commander): check the first `cmd move` of the run still moves it, and that it
-   does not wander after the commander before that. A refusal ("in combat", "pending") is retried three times; record how often it happens.
+   does not wander after the commander before that: the run sends `cmd move <landed point>` at once and watches 4 s (`start` notes "the lead bot holds at ..."); if it still walks after the commander
+   the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
 4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
 5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
    start `skipped (from_leg)`, and that nothing of them was pulled or walked. A pack of those legs that is still alive near the start point (a fresh instance) will aggro: write down which.
@@ -1001,6 +1002,7 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
 7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
    selection field going to 0 before the `.respawn` chat line). Record what comes back within 80 yd of the commander in the instance: the killed pack (same GUIDs, full health), other
    corpses, game objects (chests, doors that were opened). The visibility distance of an instance map decides how far it reaches; the run refuses to send it when the commander is farther than 80 yd from the pack.
+   Also check what `.respawn` brought back that it should not (a boss the party killed, looted chests, other corpses): the run refuses it when a plan boss is within 250 yd and not seen alive; see whether that is too strict on Uldaman.
 8. **Respawned mobs and the driver's memory**: the second try of a respawned pack must show `threat_overrides` 0 when the tank holds the mob, and the same `time_to_kill_s` order of magnitude as the
    first; a try that ends `no_pack` means the respawn did not bring the pack (or the bots could not see it from the gather spot): look at `pack_looks` and the feed.
 9. **The numbers a try holds**: `off_tank_s` and `adds` against `bot_view` and the trace's threat records for one try read by hand; `healer_min_mana_pct` against the healer's mana in the frames;

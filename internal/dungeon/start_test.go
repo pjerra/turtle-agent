@@ -28,14 +28,19 @@ type startFake struct {
 	respawnFn func(g *startFake) // what a .respawn brings back
 	respawnOK bool               // the account may .respawn (a developer): level >= 3 is enough, this is for a Respawner-less game
 
-	apart      map[string]bool      // bots that stand far from the lead bot until a `cmd summon` lands
-	arrive     map[string]time.Time // when a summoned bot lands
-	stuckBots  map[string]bool      // `cmd summon` of these does nothing
-	neverLead  bool                 // `.bot summon <lead>` does nothing
-	leadTo     *Point
-	leadToAt   time.Time
-	extra      func(g *startFake) // per tick
-	summonsLog []string
+	apart     map[string]bool      // bots that stand far from the lead bot until a `cmd summon` lands
+	arrive    map[string]time.Time // when a summoned bot lands
+	stuckBots map[string]bool      // `cmd summon` of these does nothing
+	neverLead bool                 // `.bot summon <lead>` does nothing
+	leadTo    *Point
+	leadToAt  time.Time
+	extra     func(g *startFake) // per tick
+	// followAgent: after `.bot summon` the module makes the commander the bot's master and puts it on follow (SetBotFollow): the lead bot
+	// walks after the agent until a `cmd move` or `cmd stay` is sent. drift moves the agent away when that starts.
+	followAgent bool
+	drift       *Point
+	driftNow    bool
+	summonsLog  []string
 }
 
 func newStartFake(t *testing.T) *startFake {
@@ -49,8 +54,20 @@ func (g *startFake) tick(*fakeRemote) {
 		l := g.lead()
 		l.X, l.Y, l.Z = g.leadTo.X, g.leadTo.Y, g.leadTo.Z
 		g.leadTo = nil
+		g.followAgent = true
+		g.driftNow = g.drift != nil
 		for _, p := range g.party[1:] {
 			p.X, p.Y, p.Z = l.X, l.Y, l.Z
+		}
+	}
+	if g.driftNow && g.leadTo == nil && g.now.After(g.leadToAt) {
+		g.driftNow, g.agent = false, *g.drift
+	}
+	if g.followAgent {
+		l := g.lead()
+		if d := dist3(Point{l.X, l.Y, l.Z}, g.agent); d > 3 {
+			step := float32(min(d, 10)) / float32(d)
+			l.X, l.Y, l.Z = l.X+(g.agent.X-l.X)*step, l.Y+(g.agent.Y-l.Y)*step, l.Z+(g.agent.Z-l.Z)*step
 		}
 	}
 	for name, at := range g.arrive {
@@ -71,6 +88,9 @@ func (g *startFake) tick(*fakeRemote) {
 
 func (g *startFake) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	f := strings.Fields(command)
+	if len(f) > 1 && f[0] == "cmd" && (f[1] == "move" || f[1] == "stay") && len(g.cmdErr[f[1]]) == 0 {
+		g.followAgent = false // the order replaces the follow
+	}
 	if len(f) > 2 && f[0] == "cmd" && f[1] == "summon" {
 		g.summonsLog = append(g.summonsLog, f[2])
 		if g.apart[f[2]] && !g.stuckBots[f[2]] {
@@ -165,6 +185,7 @@ func TestStartFromLegMovesTheCommanderAndSummonsTheParty(t *testing.T) {
 	g.addMob(299, Point{150, 5, 0})
 	g.addMob(300, Point{250, 5, 0})
 	g.apart["Healy"] = true
+	g.drift = &Point{140, 0, 0} // the commander walks off as soon as the lead bot lands: a bot still on follow would go with it
 	rep, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
@@ -198,8 +219,30 @@ func TestStartFromLegMovesTheCommanderAndSummonsTheParty(t *testing.T) {
 	if n := len(g.ordersOf("cmd pullback")); n != 1 {
 		t.Fatalf("pullbacks %v", g.ordersOf("cmd pullback"))
 	}
+	// The lead bot was told to hold where it landed, before the others were summoned, and the commander's drift did not take it along.
+	hold := g.indexOf("cmd move 100.00 0.00 0.00")
+	if hold < 0 || hold > g.indexOf("cmd summon") || g.followAgent {
+		t.Fatalf("no hold after .bot summon (or it still follows): %v", g.orders)
+	}
 	// The GM lines come before any order of the run itself, and none is aimed at another player.
-	if g.indexOf("cmd summon") < 0 || g.indexOf("cmd summon") > g.indexOf("cmd move") {
+	if g.indexOf("cmd summon") < 0 || g.indexOf("cmd summon") > g.indexOf("cmd move 200.00") {
+		t.Fatalf("orders %v", g.orders)
+	}
+}
+
+// The lead bot that cannot be told to hold fails the run after three orders, instead of chasing the commander through the dungeon.
+func TestStartLeadThatKeepsFollowingFails(t *testing.T) {
+	g := newStartFake(t)
+	g.addMob(300, Point{250, 5, 0})
+	g.drift = &Point{140, 0, 0}
+	g.cmdErr["move"] = []string{"invalid", "invalid", "invalid", "invalid", "invalid"}
+	g.cmdErr["stay"] = []string{"invalid", "invalid"}
+	rep, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
+	if err == nil || !strings.Contains(err.Error(), "does not hold still after .bot summon") || rep.State != "failed" || g.unbinds != 1 {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	// Two moves and a stay were refused; the last stay is the end of the run's.
+	if len(g.ordersOf("cmd move")) != 2 || len(g.ordersOf("cmd stay")) != 2 || len(g.summonsLog) != 0 {
 		t.Fatalf("orders %v", g.orders)
 	}
 }
@@ -423,3 +466,72 @@ func TestPlanEquivLabel(t *testing.T) {
 }
 
 var _ = packet.GUID(0)
+
+// A step that needs an item only a skipped leg makes fails the start at once, naming the item and the leg: nothing is sent, the party is not
+// moved, and the step does not wait out its timeout for an item that cannot come.
+func TestStartRefusesWhatASkippedLegWasToProvide(t *testing.T) {
+	plan := remotePlan(
+		Leg{Name: "boss", To: Point{10, 0, 0}, Boss: &Boss{Entry: 5, Position: Point{20, 0, 0}, LootItem: &ItemRef{Entry: 777, Name: "Odd Key"}}},
+		Leg{Name: "door", To: Point{30, 0, 0}, Steps: []Step{{UseObject: &UseObject{ObjectRef: ObjectRef{Entry: 900}, RequiresItem: &ItemRef{Entry: 777, Name: "Odd Key"}}}}})
+	g := newStartFake(t)
+	_, err := runFrom(t, g, plan, startOpts(), 1)
+	if err == nil || !strings.Contains(err.Error(), "needs Odd Key (item 777) from skipped leg 0 (boss)") || !strings.Contains(err.Error(), "have_items [777]") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.orders) != 0 || len(g.appears)+len(g.gos) != 0 {
+		t.Fatalf("something was sent: %v %v %v", g.orders, g.appears, g.gos)
+	}
+	// From the leg that makes it, or with the item declared, or for a pull test (no steps run), the start is allowed.
+	if err := plan.SkippedNeeds(0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.SkippedNeeds(1, []uint32{777}); err != nil {
+		t.Fatal(err)
+	}
+	o := startOpts()
+	o.Pulltest = &PulltestSpec{}
+	if err := NewRemoteDriver(plan, g, DefaultConfig(), o, g.clock()).checkStart(1); err != nil {
+		t.Fatalf("a pull test runs no step: %v", err)
+	}
+}
+
+// The real Uldaman plan: the keystone (leg 2) needs the Staff of Prehistoria that leg 1's use_item makes, and that needs the Medallion of leg 0
+// and the Shaft of leg 1's boss.
+func TestSkippedNeedsOnUldaman(t *testing.T) {
+	p, err := Load("../../dungeons/uldaman.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		from int
+		have []uint32
+		want string
+	}{
+		{0, nil, ""},
+		{1, nil, "needs Gni'kiv Medallion (item 7740) from skipped leg 0 (baelog)"},
+		{1, []uint32{7740}, ""},
+		{2, nil, "needs Staff of Prehistoria (item 7733) from skipped leg 1 (revelosh)"},
+		{2, []uint32{7733}, ""},
+		{3, nil, ""},
+		{9, nil, ""},
+	} {
+		err := p.SkippedNeeds(c.from, c.have)
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("from %d have %v: %v, want %q", c.from, c.have, err, c.want)
+		}
+	}
+}
+
+// The skipped legs are in the report's legs, but not in the run's "legs" totals (the summary event and the trace's counters).
+func TestSkippedLegsAreNotInTheLegsTotal(t *testing.T) {
+	g := newStartFake(t)
+	g.addMob(300, Point{250, 5, 0})
+	g.lead().X = 100
+	rep, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Legs) != 2 || traceCounters(rep)["legs"] != 1 || summaryBase(rep)["legs"] != 1 {
+		t.Fatalf("legs %d, counters %v, summary %v", len(rep.Legs), traceCounters(rep)["legs"], summaryBase(rep)["legs"])
+	}
+}

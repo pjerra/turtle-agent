@@ -353,3 +353,36 @@ func TestPulltestPackThatNeverComes(t *testing.T) {
 		t.Fatalf("%v %+v at %s", err, pt, g.now)
 	}
 }
+
+// `.respawn` also revives a killed boss within the visibility range: the reset refuses, says which boss, and sends nothing. A boss the bots
+// see alive, or one out of range, does not stop it.
+func TestPulltestRespawnRefusesToReviveABoss(t *testing.T) {
+	run := func(bossAt Point, bossAlive bool) (*startFake, Report) {
+		g := newStartFake(t)
+		g.addMob(299, Point{200, 0, 0})
+		g.respawnFn = func(g *startFake) { g.addMob(299, Point{200, 0, 0}) }
+		if bossAlive {
+			g.addMob(9, bossAt)
+		}
+		plan := pulltestPlan("")
+		plan.Legs = append(plan.Legs, Leg{Name: "boss", To: Point{bossAt.X, bossAt.Y, 0}, Boss: &Boss{Entry: 9, Position: bossAt}})
+		rep, err := runPulltestOn(t, g, plan, PulltestSpec{Leg: 0, PullGroup: 0, Tries: 2})
+		if err != nil {
+			t.Fatalf("%v\n%s", err, notesOf(rep))
+		}
+		return g, rep
+	}
+	g, rep := run(Point{300, 100, 0}, false) // killed (not in the feed), 150 yd from the commander
+	pt := rep.Pulltest
+	if len(pt.Tries) != 1 || g.respawns != 0 || !strings.Contains(pt.Stopped, "one try per spawn: respawn would revive boss 9 of leg 1 (boss)") || rep.Remote.RunGMAssists != 0 {
+		t.Fatalf("%+v respawns %d", pt, g.respawns)
+	}
+	g, rep = run(Point{1000, 0, 0}, false) // 855 yd away: nothing in its range
+	if len(rep.Pulltest.Tries) != 2 || g.respawns != 1 {
+		t.Fatalf("%+v respawns %d", rep.Pulltest, g.respawns)
+	}
+	g, rep = run(Point{300, 100, 0}, true) // alive in the feed: the respawn changes nothing for it
+	if len(rep.Pulltest.Tries) != 2 || g.respawns != 1 {
+		t.Fatalf("%+v respawns %d", rep.Pulltest, g.respawns)
+	}
+}

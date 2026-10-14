@@ -218,6 +218,7 @@ func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
 		{[]string{"--from-leg", "3", "--print-params"}, 3, -1, false, ""},
 		{[]string{"--from-leg", "1", "--pull-group", "0", "--print-params"}, 1, 0, false, ""},
 		{[]string{"--from-leg", "4", "--start-here", "--print-params"}, 4, -1, true, ""},
+		{[]string{"--from-leg", "2", "--have-items", "7733,7740", "--print-params"}, 2, -1, false, ""},
 		{[]string{"--hire", "--from-leg", "1", "--pull-group", "1", "--print-params"}, 1, 1, false, ""},
 		{[]string{"--pulltest", "1:0", "--print-params"}, 1, 0, false, "1:0:0:"},
 		{[]string{"--pulltest", "1:1:5:respawn", "--hire", "--print-params"}, 1, 1, false, "1:1:5:respawn"},
@@ -256,6 +257,7 @@ func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"--pull-group", "x", "--print-params"},
+		{"--have-items", "7733;7740", "--print-params"},
 		{"--from-leg", "2", "--pull-group", "1", "--start-here", "--print-params"},
 		{"--start-here", "--print-params"},
 		{"--pulltest", "2", "--print-params"},

@@ -36,7 +36,11 @@ const (
 	startNear      = 20.0 // yards: the party is "at" the start point within this of it (the lead bot), and each bot within startTogether of the lead bot
 	startTogether  = 25.0
 	startSettle    = 12.0 // yards: the summoned lead bot lands within this of the agent
+	holdSlack      = 4.0  // yards: the lead bot "holds" while it stays within this of the point it was told to hold
 )
+
+// holdWatch is how long the feed has to show the lead bot holding.
+const holdWatch = 4 * time.Second
 
 // The values of StartReport.Kind.
 const (
@@ -173,17 +177,89 @@ func (d *RemoteDriver) startGroup() int {
 	return *d.opt.FromPullGroup
 }
 
-// checkStart refuses a start the plan does not have.
+// checkStart refuses a start the plan does not have, and a start past an item the plan needs from a leg it skips. It runs before anything
+// is sent.
 func (d *RemoteDriver) checkStart(fromLeg int) error {
-	if d.opt.FromPullGroup == nil {
+	if d.opt.FromPullGroup != nil {
+		g := d.startGroup()
+		if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
+			return fmt.Errorf("from_pull_group: leg %d is not in the plan (legs 0-%d)", fromLeg, len(d.plan.Legs)-1)
+		}
+		if n := len(d.plan.Legs[fromLeg].PullGroups); g < 0 || g >= n {
+			return fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", g, fromLeg, d.plan.Legs[fromLeg].Name, n, n-1)
+		}
+	}
+	if d.opt.Pulltest == nil {
+		return d.plan.SkippedNeeds(fromLeg, d.opt.HaveItems)
+	}
+	return nil
+}
+
+// itemNeed is a step that needs an item (or the item the step uses itself).
+type itemNeed struct {
+	leg  int
+	what string
+	item ItemRef
+}
+
+// SkippedNeeds fails when a step of the legs from `from` on needs an item that only a leg before `from` produces (a boss's loot_item, a
+// loot_object's or a use_item's expect_item): those legs are skipped, nothing of theirs happened, and the step would wait out its timeout
+// for the item (Uldaman leg 2's keystone needs the Staff of Prehistoria that leg 1's use_item makes, then a 60 s wait). haveItems are
+// entries the caller says the party already carries; an item no leg of the plan produces is not checked.
+func (p *Plan) SkippedNeeds(from int, haveItems []uint32) error {
+	if from <= 0 || from > len(p.Legs) {
 		return nil
 	}
-	g := d.startGroup()
-	if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
-		return fmt.Errorf("from_pull_group: leg %d is not in the plan (legs 0-%d)", fromLeg, len(d.plan.Legs)-1)
+	made := func(li int, e uint32) bool {
+		l := p.Legs[li]
+		if l.Boss != nil && l.Boss.LootItem != nil && l.Boss.LootItem.Entry == e {
+			return true
+		}
+		for _, st := range append(slices.Clone(l.Steps), l.AfterBoss...) {
+			switch {
+			case st.LootObject != nil && st.LootObject.ExpectItem != nil && st.LootObject.ExpectItem.Entry == e:
+				return true
+			case st.UseItem != nil && st.UseItem.ExpectItem != nil && st.UseItem.ExpectItem.Entry == e:
+				return true
+			}
+		}
+		return false
 	}
-	if n := len(d.plan.Legs[fromLeg].PullGroups); g < 0 || g >= n {
-		return fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", g, fromLeg, d.plan.Legs[fromLeg].Name, n, n-1)
+	for li := from; li < len(p.Legs); li++ {
+		l := p.Legs[li]
+		for _, group := range [][]Step{l.Steps, l.AfterBoss} {
+			for si, st := range group {
+				var needs []ItemRef
+				switch {
+				case st.UseObject != nil && st.UseObject.RequiresItem != nil:
+					needs = append(needs, *st.UseObject.RequiresItem)
+				case st.UseItem != nil:
+					needs = append(needs, ItemRef{Entry: st.UseItem.Entry, Name: st.UseItem.Name})
+					if st.UseItem.RequiresItem != nil {
+						needs = append(needs, *st.UseItem.RequiresItem)
+					}
+				}
+			item:
+				for _, n := range needs {
+					if slices.Contains(haveItems, n.Entry) {
+						continue
+					}
+					// Made in a leg that runs (from `from` up to this one) before the step: fine. The same leg's boss or earlier steps count;
+					// a producer later in the same leg or after it does not make this step's item, but the plan's own order is its author's.
+					for lj := from; lj <= li; lj++ {
+						if made(lj, n.Entry) {
+							continue item
+						}
+					}
+					for lj := 0; lj < from; lj++ {
+						if made(lj, n.Entry) {
+							return fmt.Errorf("leg %d%s step %d needs %s from skipped leg %d%s: nothing before it in this run makes it. Start at leg %d, or pass have_items [%d] if the party already carries it",
+								li, nameSuffix(l.Name), si, n, lj, nameSuffix(p.Legs[lj].Name), lj, n.Entry)
+						}
+					}
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -424,7 +500,7 @@ func (d *RemoteDriver) bringLead(ctx context.Context, h StartHands, at Point) er
 			if p, _, ok := h.AgentPlace(); ok {
 				if lead, ok := d.leadPos(); ok && hdist(lead, p) <= startSettle {
 					d.startReport(func(s *StartReport) { s.LeadSummoned = true })
-					return nil
+					return d.holdLead(ctx)
 				}
 			}
 			if d.clk.Now().After(deadline) {
@@ -436,6 +512,52 @@ func (d *RemoteDriver) bringLead(ctx context.Context, h StartHands, at Point) er
 		}
 	}
 	return fmt.Errorf("the lead bot %s did not come to the commander after three .bot summon (last answer: %s)", d.opt.Lead, last)
+}
+
+// holdLead stops the lead bot following the commander. `.bot summon` makes the commander the bot's master and puts the bot on follow
+// (TortoiseBots HandleSummon, PlayerConvenience: SetBotFollow), so the tank would chase the GM instead of holding the start point. A
+// `cmd move` to the point it landed on is the module's hold-this-spot order (the same one a walk ends with); `cmd stay` is the fallback. The
+// feed then has to show the lead bot within holdSlack yards of that point for holdWatch: up to three orders, then the run fails.
+func (d *RemoteDriver) holdLead(ctx context.Context) error {
+	d.look()
+	landed, ok := d.leadPos()
+	if !ok {
+		return errors.New("the lead bot is not in the feed after .bot summon")
+	}
+	var last string
+	for try := 1; try <= 3; try++ {
+		verb, args := "move", moveArgs(landed)
+		if try == 3 {
+			verb, args = "stay", nil
+		}
+		r, err := d.order(ctx, verb, args...)
+		if err != nil {
+			return err
+		}
+		if ref, bad := refusedOf(r); bad {
+			last = fmt.Sprintf("cmd %s was refused: %s (%s)", verb, ref.Code, ref.Message)
+			if err := d.tick(ctx, d.opt.SummonGap); err != nil {
+				return err
+			}
+			continue
+		}
+		held := true
+		for end := d.clk.Now().Add(holdWatch); d.clk.Now().Before(end); {
+			if err := d.tick(ctx, d.cfg.Poll); err != nil {
+				return err
+			}
+			if p, ok := d.leadPos(); ok && dist3(p, landed) > holdSlack {
+				held, last = false, fmt.Sprintf("after cmd %s the lead bot was %.0f yd from where it landed", verb, dist3(p, landed))
+				landed = p
+				break
+			}
+		}
+		if held {
+			d.startNote(fmt.Sprintf("the lead bot holds at %.1f %.1f %.1f (cmd %s), not following the commander", landed.X, landed.Y, landed.Z, verb))
+			return nil
+		}
+	}
+	return fmt.Errorf("the lead bot %s does not hold still after .bot summon (it follows the commander): %s", d.opt.Lead, last)
 }
 
 // gatherParty fetches every living bot that is not with the lead bot with `cmd summon <bot>` and waits for all to stand together. A bot

@@ -42,7 +42,8 @@ const (
 const (
 	DefaultPulltestTries = 3
 	MaxPulltestTries     = 10
-	respawnReach         = 80.0 // yards: the commander must stand this close to the pack for `.respawn` (the map's visibility distance is larger)
+	respawnReach         = 80.0  // yards: the commander must stand this close to the pack for `.respawn` (the map's visibility distance is larger)
+	respawnVisibility    = 250.0 // yards: the largest visibility distance an instance map has (mangosd.conf Visibility.Distance.Instances, default 170); `.respawn` reaches this far
 	respawnSettle        = 6 * time.Second
 )
 
@@ -409,6 +410,12 @@ func (d *RemoteDriver) ptReset(ctx context.Context, spec PulltestSpec, pr *Pullt
 			return 0, "", fmt.Sprintf("one try per spawn: the commander is not within %.0f yd of the pack (.respawn reaches the creatures around the commander)", respawnReach), nil
 		}
 	}
+	// `.respawn` revives everything dead or despawned in the commander's visibility range: other corpses, a boss the party killed, looted
+	// chests. A boss of the plan in range that the bots do not see alive would come back with it.
+	p, _, _ := h.AgentPlace()
+	if boss := d.respawnWouldRevive(p); boss != "" {
+		return 0, "", "one try per spawn: respawn would revive " + boss + " (it reaches everything dead within " + fmt.Sprintf("%.0f", respawnVisibility) + " yd of the commander); use equivalent packs (the plan's equiv label) or reset none", nil
+	}
 	if err := rs.Respawn(ctx); err != nil {
 		return 0, "", "", fmt.Errorf(".respawn: %w", err)
 	}
@@ -427,6 +434,26 @@ func (d *RemoteDriver) ptReset(ctx context.Context, spec PulltestSpec, pr *Pullt
 		}
 	}
 	return cur, "respawn", "", nil
+}
+
+// respawnWouldRevive names a boss of the plan within respawnVisibility of at that the feed does not show alive ("" when none): `.respawn`
+// would bring it back. A boss the bots see alive is no loss.
+func (d *RemoteDriver) respawnWouldRevive(at Point) string {
+	d.look()
+	for li, l := range d.plan.Legs {
+		b := l.Boss
+		if b == nil || dist3(at, b.Position) > respawnVisibility {
+			continue
+		}
+		alive := false
+		for _, h := range d.fr.Hostiles {
+			alive = alive || (h.Entry == b.Entry && h.HPPct > 0)
+		}
+		if !alive {
+			return fmt.Sprintf("boss %d of leg %d%s", b.Entry, li, nameSuffix(l.Name))
+		}
+	}
+	return ""
 }
 
 // writePulltestFile writes the result beside the run's trace: <trace path without .jsonl>.pulltest.json. A run without a trace file writes

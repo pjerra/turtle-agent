@@ -225,6 +225,17 @@ func (p *reporter) snapshot() Report {
 	return r
 }
 
+// runLegs counts the legs the run walked: the legs before from_leg are in Legs as skipped, not as part of the run.
+func (r Report) runLegs() int {
+	n := 0
+	for _, l := range r.Legs {
+		if l.Result != SkippedFromLeg {
+			n++
+		}
+	}
+	return n
+}
+
 // setRestShare puts the rest gates' share of the run's seconds, in percent with one decimal, in RestShare.
 func (r *Report) setRestShare() {
 	if r.Seconds > 0 {
@@ -246,7 +257,7 @@ func summaryOf(r Report) map[string]any {
 }
 
 func summaryBase(r Report) map[string]any {
-	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
+	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": r.runLegs(), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
 		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}

@@ -18,6 +18,9 @@
 #                  lead bot is brought with `.bot summon`, the others with `cmd summon`; the legs before are reported "skipped (from_leg)", never cleared
 #                  (README "Start anywhere and the pull test"). The two GM lines count in gm_commands and setup_shortcuts.
 #   --pull-group M start inside leg N at pull group M: the party is gathered at a safe spot short of that pack (the leg is --from-leg, default 0)
+#   --have-items 7733,7740
+#                  item entries the party already carries: a start past the leg that makes an item a later step needs (Uldaman: the Medallion 7740 from
+#                  leg 0, the Staff of Prehistoria 7733 from leg 1) is refused without them
 #   --start-here   with --from-leg: no move, the run starts where the lead bot stands (the old behaviour)
 #   --pulltest LEG:GROUP[:TRIES[:RESET]]
 #                  the pull-test scenario instead of the dungeon: pull that one pack TRIES times (default 3; RESET auto, equivalent, respawn or none, default
@@ -53,7 +56,7 @@ MAX_MIN=${MAX_MIN:-90}
 POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
-FRESH=true FROM_LEG=0 PULL_GROUP= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
+FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
 COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
@@ -66,6 +69,7 @@ while [ $# -gt 0 ]; do
     --from-leg) shift; FROM_LEG=${1:?--from-leg needs a number} ;;
     --pull-group) shift; PULL_GROUP=${1:?--pull-group needs a number} ;;
     --start-here) START_HERE=1 ;;
+    --have-items) shift; HAVE_ITEMS=${1:?--have-items needs a comma list of item entries} ;;
     --pulltest) shift; PULLTEST=${1:?--pulltest needs LEG:GROUP[:TRIES[:RESET]]} ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
@@ -85,6 +89,7 @@ for n in "$LEAD" "$TANK" "$HEALER" "$CHARACTER"; do name_ok "$n" || die "not a c
 [ -z "$PULL_GROUP" ] || [[ $PULL_GROUP =~ ^[0-9]+$ ]] || die "--pull-group needs a number"
 [ -z "$PULL_GROUP" ] || [ "$START_HERE" = 0 ] || die "--pull-group and --start-here exclude each other"
 [ "$START_HERE" = 0 ] || [ "$FROM_LEG" != 0 ] || die "--start-here goes with --from-leg N (N above 0)"
+[ -z "$HAVE_ITEMS" ] || [[ $HAVE_ITEMS =~ ^[0-9]+(,[0-9]+){0,19}$ ]] || die "--have-items needs up to 20 item entries, comma separated"
 pulltest_json=""
 if [ -n "$PULLTEST" ]; then
   [ "$FROM_LEG" = 0 ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] || die "--pulltest names its own start: leave --from-leg, --pull-group and --start-here out"
@@ -125,6 +130,7 @@ if [ -n "$pulltest_json" ]; then
 else
   [ -z "$PULL_GROUP" ] || start_json+="\"from_pull_group\":$PULL_GROUP,"
   [ "$START_HERE" = 0 ] || start_json+="\"start_here\":true,"
+  [ -z "$HAVE_ITEMS" ] || start_json+="\"have_items\":[$HAVE_ITEMS],"
 fi
 
 sha_label=${SHA8:-unknown}

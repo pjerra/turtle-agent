@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,11 +104,13 @@ type dungeonRunParams struct {
 	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
 	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
-	FromPullGroup *int           `json:"from_pull_group,omitempty"`
-	StartHere     bool           `json:"start_here,omitempty"`
-	Pulltest      *pulltestParam `json:"pulltest,omitempty"`
-	Teleport      bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
-	NoShortcuts   bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	FromPullGroup *int `json:"from_pull_group,omitempty"`
+	StartHere     bool `json:"start_here,omitempty"`
+	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
+	HaveItems   []uint32       `json:"have_items,omitempty"`
+	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
+	Teleport    bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
+	NoShortcuts bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`
@@ -446,6 +449,9 @@ func checkStartParams(p dungeonRunParams, plan *dungeon.Plan, from int) error {
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf(format, a...)}
 	}
 	resume := p.Resume != nil && *p.Resume
+	if len(p.HaveItems) > 20 || slices.Contains(p.HaveItems, 0) {
+		return bad("have_items: at most 20 item entries, none 0")
+	}
 	if g := p.FromPullGroup; g != nil {
 		if n := len(plan.Legs[from].PullGroups); *g < 0 || *g >= n {
 			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *g, from, plan.Legs[from].Name, n, n-1)
