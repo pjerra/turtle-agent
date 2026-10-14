@@ -845,10 +845,14 @@ Issue #73, #83. A run must never sit stuck without making progress (the live Uld
 silent feed for minutes). Both drivers (group and remote) feed one watchdog (`internal/dungeon/watchdog.go`) and ask it at every wait.
 
 **Progress** is any of: the step or leg index advanced; a pull started or ended; a kill, or the fought mobs lost health (so a long boss fight
-that wears the boss down never stalls); the lead bot (remote) or the leader (group) moved more than 5 yd; an order was ACKed, *if it is not the
-order that was ACKed last* (the same `cmd move` or `cmd rest` sent again and again does not keep a stuck run alive; remote orders only, a chat
-order has no ACK); a rest gate finished; an object step ended. A death's recovery (corpse runs, resurrection waits) and a plan's `wait_for`
-(its own `timeout_s`) pause the clock; it starts over when they end.
+that wears the boss down never stalls); the lead bot (remote) or the leader (group) moved more than 5 yd; an order was ACKed, *if it is not one of the last 16
+orders ACKed* (the same `cmd move` or `cmd rest`, or two orders alternating, sent again and again does not keep a stuck run alive; remote
+orders only, a chat order has no ACK); a rest gate finished; an object step ended. A death's recovery (corpse runs, resurrection waits), a
+plan's `wait_for` (its own `timeout_s`) and a rest gate while the party is out of combat (its own cap) pause the clock: the time held is not
+counted, the stall before it is. **After the recovery has fired**, what a stuck run can fake by repeating itself (a pull started or ended,
+an order ACKed, a rest gate passed) is not progress any more; only a kill, lost health, a step, movement or an object step is. So a recovery
+that re-pulls a boss that stays stuck at full health cannot keep the run alive: `fail_s` is a ceiling, and the next interval without real
+progress goes to the failure.
 
 **Levels**, seconds without progress, `watchdog {warn_s, recover_s, fail_s}` in the plan or in `dungeon_run` (defaults 120/240/420; a
 negative field turns that level off; `dungeon_run`'s field wins over the plan's; levels out of order are refused). Each fires once per stall;
@@ -860,16 +864,16 @@ progress ends the stall and the levels can fire again.
 | recover | one bounded recovery attempt, by phase (below); noted, and a `stall` event with `recovery` |
 | fail | the run stops cleanly: `error` is `stalled: <phase> <step> for N s, last progress <what>`, `state` is `failed`; the end-of-run fight handling and the unbind still run (the watchdog is off by then) |
 
-Recoveries. Remote: **walk** re-plans from the lead bot's position with a shorter leg (`cmd move` at most 40 yd on), **rest gate** ends the
-gate (`gave_up`, the party goes on as it is), **object step** cancels the carrier order's retries so that the step's retry or fallback takes
+Recoveries. Remote: **walk** re-plans from the lead bot's position with a shorter leg (`cmd move` at most 40 yd on), **object step** cancels the carrier order's retries so that the step's retry or fallback takes
 over, **pull/fight** sends `cmd follow` and ends the fight so that the target is picked again, **feed silent** (no frame for `FeedStale`)
 sends `commander view on` again. The feed is also switched on again once, at half of `FeedLost` silence, before the run is failed for it.
-Group: **rest gate** ends the gate, **pull/fight** orders `follow` and picks again, an **object step** gives up its wait for the item; a
+Group: **pull/fight** orders `follow` and picks again, an **object step** gives up its wait for the item; a
 group **walk** has nothing to cancel (each try plans again from where the leader stands). A phase with no recovery of its own uses the
 enclosing phase's; with none the stall is noted and the failure comes at `fail_s`.
 
 The watchdog is looked at from the drivers' own waits, never from a goroutine: a single game call that blocks is bounded by its own
-timeout and is judged at the next wait.
+timeout and is judged at the next wait. A player order that reported `ACTION_PENDING` waits for its final answer at most 90 s, whatever budget the
+server named (`tbm.MaxPendingWait`).
 
 **RPC.** `dungeon_status` has `last_progress_at`, `stalled_for_s` (0 while the clock is paused) and `stall_level`, and the same with the limits
 and totals in `report.watchdog`: `warn_s`/`recover_s`/`fail_s` (0: off), `last_progress_at`, `last_progress` (what it was), `stalled_for_s`,
@@ -877,8 +881,7 @@ and totals in `report.watchdog`: `warn_s`/`recover_s`/`fail_s` (0: off), `last_p
 `warn` and `recover` a run that is being looked after, `fail` a run that has been stopped.
 
 Tests: `internal/dungeon/watchdog_test.go` (the watchdog on a fake clock: each level fires once per stall, progress resets it, the recovery is
-attempted once, the failure text, the pause) and `watchdog_driver_test.go` (both drivers: a stuck rest gate ended and failed, a stalled pull
-recovered, a long fight that wears its mob down never stalls, a walk re-planned, a silent feed, the carrier's retries cancelled); the RPC
+attempted once, the failure text, the pause) and `watchdog_driver_test.go` (both drivers: a rest gate holds the clock, a stalled pull recovered once and then failed at `fail_s`, a long fight that wears its mob down never stalls, a walk re-planned, a silent feed, the carrier's retries cancelled); the RPC
 fields in `cmd/turtle-agent/dungeon_methods_test.go`. Not verified live: see `docs/LIVE-CHECKS.md`, "Run watchdog".
 
 ## Run traces and checks

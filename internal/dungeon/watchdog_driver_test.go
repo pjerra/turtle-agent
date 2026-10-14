@@ -8,59 +8,27 @@ import (
 
 // The watchdog in both drivers, on their fake clocks (watchdog_test.go has the watchdog alone).
 
-// stuckRest is a one-leg plan whose rest gate can wait ten minutes, and a party whose mage is hurt and never heals: the gate waits for
+// stuckRemote is a one-leg plan whose rest gate may wait ten minutes, and a party whose mage is hurt and never heals: the gate waits for
 // nothing.
 func stuckRemote(t *testing.T) (*fakeRemote, *Plan) {
 	g := newFakeRemote(t)
-	g.party[2].HP = 300
+	g.party[2].HP = 600
 	g.healRate = 0
 	return g, remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, Rest: &RestSpec{MaxS: 600}})
 }
 
-// Remote: a rest gate that waits for nothing is warned about at 120 s, ended at 240 s (its one recovery), and the run goes on and is done.
-func TestRemoteWatchdogEndsAStuckRestGate(t *testing.T) {
+// Remote: a rest gate has limits of its own (here 600 s): the watchdog's clock waits for it, and the gate ends by its own limit.
+func TestRemoteWatchdogHoldsDuringARestGate(t *testing.T) {
 	g, plan := stuckRemote(t)
 	rep, err := runRemote(t, g, plan, opts(), nil)
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
 	}
-	w := rep.Watchdog
-	if w == nil || w.Warnings < 1 || w.Recoveries != 1 || w.WarnS != 120 || w.RecoverS != 240 || w.FailS != 420 {
-		t.Fatalf("%+v", w)
-	}
-	n := notesOf(rep)
-	for _, want := range []string{"stall warning: no progress for 12", "waiting on rest gate", "stall recovery after 24", "ended the rest gate", "rest gate ended by the watchdog after a stall"} {
-		if !strings.Contains(n, want) {
-			t.Fatalf("missing %q in\n%s", want, n)
-		}
-	}
-	if gate := rep.RestGates[0]; gate.Result != "gave_up" || gate.Seconds < 240 || gate.Seconds > 250 {
+	if gate := rep.RestGates[0]; gate.Result != "gave_up" || gate.Seconds < 600 {
 		t.Fatalf("%+v", gate)
 	}
-	// The gate was ended once per stall: the rest orders went out every 45 s and are not progress.
-	if rep.Watchdog.StallLevel != "none" && rep.Watchdog.StallLevel != "warn" {
-		t.Fatalf("%+v", rep.Watchdog)
-	}
-}
-
-// Remote: with the recovery off the same stall fails the run at fail_s, with the reason, after the end-of-run handling (unbind).
-func TestRemoteWatchdogFailsAStuckRun(t *testing.T) {
-	g, plan := stuckRemote(t)
-	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.Watchdog = WatchdogConfig{RecoverS: -1, FailS: 300} })
-	if err == nil || rep.State != "failed" {
-		t.Fatalf("%v %s", err, rep.State)
-	}
-	if !strings.HasPrefix(rep.Error, "stalled: rest gate leg 0 (a): walk to 20.0 0.0 0.0 for 30") || !strings.Contains(rep.Error, ", last progress ") {
-		t.Fatalf("%q", rep.Error)
-	}
-	if g.unbinds != 1 || g.bound || rep.Remote == nil || !rep.Remote.Unbound {
-		t.Fatalf("the run is unbound: unbinds %d bound %v %+v", g.unbinds, g.bound, rep.Remote)
-	}
-	if w := rep.Watchdog; w.StallLevel != "fail" || w.Recoveries != 0 || w.StalledForS < 300 || w.StalledForS > 310 {
-		t.Fatalf("%+v", w)
-	}
-	if !strings.Contains(notesOf(rep), rep.Error) {
-		t.Fatalf("the reason is in the notes: %s", notesOf(rep))
+	if w := rep.Watchdog; w.Warnings != 0 || w.Recoveries != 0 || strings.Contains(notesOf(rep), "stall") {
+		t.Fatalf("%+v\n%s", w, notesOf(rep))
 	}
 }
 
@@ -97,6 +65,56 @@ func TestRemoteWatchdogLongProgressingFightNeverStalls(t *testing.T) {
 	}
 	if w := rep.Watchdog; w.Warnings != 0 || w.Recoveries != 0 || w.LongestStall >= 120 || strings.Contains(notesOf(rep), "stall") {
 		t.Fatalf("%+v\n%s", w, notesOf(rep))
+	}
+}
+
+// Remote: a boss stuck in combat at full health. The pull is recovered once (cmd follow, pick again); the re-pull, the rest gate it goes
+// through and the orders it ACKs are not progress, so the next interval without real progress goes to the failure: fail_s is a ceiling.
+func TestRemoteWatchdogFailsAPullThatRecoveryDoesNotFix(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 5, 0})
+	g.killRate = 0
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 5, 0}}}}})
+	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.FightTimeout = 3000 * time.Second; c.BossTimeout = 3000 * time.Second })
+	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "leg 0 (a): pull group 1 of 1 for 4") {
+		t.Fatalf("%v %q", err, rep.Error)
+	}
+	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 430 {
+		t.Fatalf("recovery on, fail at the ceiling: %+v", w)
+	}
+	if n := len(g.ordersOf("cmd follow")); n < 1 {
+		t.Fatalf("the recovery sent cmd follow: %v", g.orders)
+	}
+	if g.unbinds != 1 {
+		t.Fatalf("unbinds %d", g.unbinds)
+	}
+}
+
+// Both drivers: a request a recovery left behind (it set the flag, the loop it was for had ended) is not the next step's or fight's.
+func TestWatchdogStaleRequestsAreCleared(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 5, 0})
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 5, 0}}}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	d.wdRepick.set()
+	d.wdObject.set()
+	if err := d.Run(t.Context(), 0); err != nil {
+		t.Fatalf("%v", err)
+	}
+	rep := d.Report()
+	if rep.Legs[0].Pulls != 1 || strings.Contains(notesOf(rep), "watchdog") || d.wdRepick.take() || d.wdObject.take() {
+		t.Fatalf("%+v\n%s", rep.Legs[0], notesOf(rep))
+	}
+
+	gg, p := runFixture(t)
+	gd := NewDriver(p, gg, Config{}, gg.clock())
+	gd.wdRepick.set()
+	gd.wdObject.set()
+	if err := gd.Run(t.Context(), 0); err != nil {
+		t.Fatalf("%v\n%s", err, notes(gd))
+	}
+	if strings.Contains(notes(gd), "watchdog") || gd.wdRepick.take() || gd.wdObject.take() {
+		t.Fatalf("%s", notes(gd))
 	}
 }
 
@@ -193,45 +211,59 @@ func stuckGroup() *fakeGame {
 	return g
 }
 
-// Group: the stuck gate is warned about, ended at the recovery, and the run is done; each gate of the leg is its own stall.
-func TestDriverWatchdogEndsAStuckRestGate(t *testing.T) {
+// Group: a rest gate has limits of its own (here 600 s): the watchdog's clock waits for it.
+func TestDriverWatchdogHoldsDuringARestGate(t *testing.T) {
 	g := stuckGroup()
 	d := runRest(t, g, stuckRestPlan, Config{})
 	rep := d.Report()
-	if rep.State != "done" || rep.Watchdog == nil || rep.Watchdog.Recoveries != 2 || rep.Watchdog.Warnings < 2 {
-		t.Fatalf("%s %+v", rep.State, rep.Watchdog)
-	}
-	n := notes(d)
-	for _, want := range []string{"stall warning: no progress for 12", "stall recovery after 24", "rest gate ended by the watchdog after a stall"} {
-		if !strings.Contains(n, want) {
-			t.Fatalf("missing %q in\n%s", want, n)
-		}
+	if rep.State != "done" || rep.Watchdog.Warnings != 0 || rep.Watchdog.Recoveries != 0 || strings.Contains(notes(d), "stall") {
+		t.Fatalf("%s %+v\n%s", rep.State, rep.Watchdog, notes(d))
 	}
 	for _, gate := range rep.RestGates {
-		if gate.Result != "gave_up" || gate.Seconds < 240 || gate.Seconds > 250 {
+		if gate.Result != "gave_up" || gate.Seconds < 600 {
 			t.Fatalf("%+v", gate)
 		}
 	}
 }
 
-// Group: the plan's own watchdog levels apply, and the run parameter wins over them; the failure ends the run with the reason.
-func TestDriverWatchdogFailsAStuckRun(t *testing.T) {
-	plan := strings.Replace(stuckRestPlan, `"legs"`, `"watchdog":{"warn_s":50,"recover_s":-1,"fail_s":150},"legs"`, 1)
-	g := stuckGroup()
-	d := NewDriver(mustPlan(t, plan), g, Config{}, g.clock())
+// stuckFight is a pack whose mob fights for ever at the same health.
+func stuckFight() *fakeGame {
+	g := newFake()
+	g.add(201, 1, Point{20, 0, 0})
+	g.dieIn = 100_000 * time.Second
+	return g
+}
+
+// Group: a stuck fight is recovered once (follow, pick again); the mob is still stuck, so the run fails at the plan's fail_s (the ceiling
+// holds with the recovery on). The run parameter wins over the plan's levels: with the recovery turned off it fails at the same time.
+func TestDriverWatchdogRecoversOrFailsAStuckFight(t *testing.T) {
+	plan := strings.Replace(restPlan, `"legs"`, `"watchdog":{"warn_s":50,"recover_s":100,"fail_s":300},"legs"`, 1)
+	g := stuckFight()
+	d := NewDriver(mustPlan(t, plan), g, Config{FightTimeout: 100_000 * time.Second}, g.clock())
 	err := d.Run(t.Context(), 0)
 	rep := d.Report()
-	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: rest gate leg 0") || !strings.Contains(rep.Error, " for 15") {
-		t.Fatalf("%v %q", err, rep.Error)
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 for 3") {
+		t.Fatalf("%v %q\n%s", err, rep.Error, notes(d))
 	}
-	if w := rep.Watchdog; w.WarnS != 50 || w.RecoverS != 0 || w.FailS != 150 || w.StallLevel != "fail" || w.Recoveries != 0 {
+	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 310 || g.count(".bot action follow") < 1 || !strings.Contains(notes(d), "told the party to follow and ended the fight to pick the target again") {
+		t.Fatalf("%+v\n%s", w, notes(d))
+	}
+
+	g = stuckFight()
+	d = NewDriver(mustPlan(t, plan), g, Config{FightTimeout: 100_000 * time.Second, Watchdog: WatchdogConfig{RecoverS: -1}}, g.clock())
+	err = d.Run(t.Context(), 0)
+	rep = d.Report()
+	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 for 3") {
+		t.Fatalf("%v %q\n%s", err, rep.Error, notes(d))
+	}
+	if w := rep.Watchdog; w.WarnS != 50 || w.RecoverS != 0 || w.FailS != 300 || w.StallLevel != "fail" || w.Recoveries != 0 {
 		t.Fatalf("%+v", w)
 	}
 
-	g = stuckGroup()
-	d = NewDriver(mustPlan(t, plan), g, Config{Watchdog: WatchdogConfig{FailS: 100}}, g.clock())
+	g = stuckFight()
+	d = NewDriver(mustPlan(t, plan), g, Config{FightTimeout: 100_000 * time.Second, Watchdog: WatchdogConfig{RecoverS: -1, FailS: 200}}, g.clock())
 	_ = d.Run(t.Context(), 0)
-	if rep := d.Report(); rep.Watchdog.FailS != 100 || !strings.Contains(rep.Error, " for 10") {
+	if rep := d.Report(); rep.Watchdog.FailS != 200 || !strings.Contains(rep.Error, " for 2") {
 		t.Fatalf("%+v %q", rep.Watchdog, rep.Error)
 	}
 }

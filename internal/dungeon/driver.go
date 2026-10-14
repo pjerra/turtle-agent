@@ -351,10 +351,9 @@ type Driver struct {
 	stopSampler func()
 
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
-	wd        *watchdog
-	wdEndRest flagOnce // end the rest gate
-	wdRepick  flagOnce // end the fight, to pick the target again
-	wdObject  flagOnce // give up the wait of the object step
+	wd       *watchdog
+	wdRepick flagOnce // end the fight, to pick the target again
+	wdObject flagOnce // give up the wait of the object step
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -469,6 +468,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		}
 		began := d.clk.Now()
 		var err error
+		d.wdObject.clear() // a request left by an earlier step is not this step's
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
@@ -1169,11 +1169,10 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
-	d.wdEndRest.clear()
-	defer d.wd.enter("rest gate", "", func(context.Context) (string, error) {
-		d.wdEndRest.set()
-		return "ended the rest gate (the party goes on as it is)", nil
-	})()
+	// The gate has limits of its own (the cap, the fight timeout, the whole-gate bound): the watchdog's clock waits for it.
+	defer d.wd.enter("rest gate", "", nil)()
+	gh := &gateHold{w: d.wd}
+	defer gh.set(false)
 	ordered, refusedSeen := false, false
 	held := false // the gate has waited for something: its first frame did not pass it
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
@@ -1190,6 +1189,7 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 			return fmt.Errorf("the rest gate has gone on for more than %.0f s (fights keep interrupting it): the party is not rested", limit.Seconds())
 		}
 		if att := d.attackers(); len(att) > 0 {
+			gh.set(false)
 			now := d.clk.Now()
 			if fightBegan.IsZero() {
 				fightBegan = now
@@ -1216,13 +1216,9 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 			continue
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
+		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
-		if d.wdEndRest.take() {
-			rec.g.Result = "gave_up"
-			d.rep.note(fmt.Sprintf("leg %d: rest gate ended by the watchdog after a stall (%s)", d.curLeg, st.why))
-			return nil
-		}
 		if len(st.dead) > 0 {
 			held = true
 		}

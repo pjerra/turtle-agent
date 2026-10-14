@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -156,11 +157,12 @@ type watchdog struct {
 	lim   wdLimits
 	hooks wdHooks
 
-	last  time.Time // the last progress
-	what  string
-	level int // the highest level fired in this stall
-	held  int // > 0: the run waits on something that has its own limit; the stall clock is paused
-	off   bool
+	last   time.Time // the last progress
+	what   string
+	level  int       // the highest level fired in this stall
+	held   int       // > 0: the run waits on something that has its own limit; the stall clock is paused
+	holdAt time.Time // when the clock was paused
+	off    bool
 	// recovering is set while a recovery runs: the orders it sends wait through the same ticks, which must not fire anything.
 	recovering bool
 	failed     error
@@ -174,7 +176,8 @@ type watchdog struct {
 	havePos   bool
 	anchor    Point
 	haveAnch  bool
-	lastAck   string
+	recentAck []string // the orders ACKed lately (wdRecentAcks), so that alternating orders are not progress either
+	degraded  bool     // the recovery has fired and nothing real has happened since: soft progress is ignored
 	fightOn   bool
 	fightKill int
 	fightHP   int
@@ -207,10 +210,30 @@ func (w *watchdog) progress(what string) {
 	w.progressLocked(what)
 }
 
+// wdRecentAcks is how many ACKed orders are remembered: an order among them, ACKed again, is not progress.
+const wdRecentAcks = 16
+
+// softProgress is progress that a stuck run can fake by repeating itself: a pull started or ended, a new order ACKed. After a recovery
+// has fired it does not count until something real happens (a kill, health lost, a step, movement, a gate or an object step done),
+// so that a recovery which re-pulls a mob that is stuck cannot keep the run alive for ever: the next interval without real progress goes
+// to the failure.
+func (w *watchdog) softProgress(what string) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.degraded {
+		return
+	}
+	w.progressLocked(what)
+}
+
 func (w *watchdog) progressLocked(what string) {
 	if w.failed != nil || w.off { // a failed or ended run stays at its level for the report
 		return
 	}
+	w.degraded = false
 	now := w.now()
 	if el := now.Sub(w.last); el > w.longest && w.held == 0 {
 		w.longest = el
@@ -225,17 +248,43 @@ func (w *watchdog) hold() (release func()) {
 		return func() {}
 	}
 	w.mu.Lock()
-	w.held++
+	if w.held++; w.held == 1 {
+		w.holdAt = w.now()
+	}
 	w.mu.Unlock()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			w.mu.Lock()
 			defer w.mu.Unlock()
+			// The time spent held is not counted; what was stalled before it still is (a recovery that re-pulls a stuck mob goes through
+			// a rest gate each time, and must not start the clock over).
 			if w.held--; w.held == 0 {
-				w.progressLocked("a wait with its own limit ended")
+				if el := w.now().Sub(w.holdAt); el > 0 {
+					w.last = w.last.Add(el)
+					if now := w.now(); w.last.After(now) {
+						w.last = now
+					}
+				}
 			}
 		})
+	}
+}
+
+// gateHold pauses the stall clock for a rest gate while the party is out of combat: a fight inside the gate is watched like any other.
+type gateHold struct {
+	w   *watchdog
+	rel func()
+}
+
+// set holds (on) or lets go (off); it does nothing when the state is the one it is in.
+func (h *gateHold) set(on bool) {
+	switch {
+	case on && h.rel == nil:
+		h.rel = h.w.hold()
+	case !on && h.rel != nil:
+		h.rel()
+		h.rel = nil
 	}
 }
 
@@ -288,11 +337,14 @@ func (w *watchdog) acked(key string) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if key != w.lastAck {
-		w.lastAck = key
-		if !w.recovering { // the recovery's own orders are not the run moving again
-			w.progressLocked("order acked: " + key)
-		}
+	if slices.Contains(w.recentAck, key) {
+		return
+	}
+	if w.recentAck = append(w.recentAck, key); len(w.recentAck) > wdRecentAcks {
+		w.recentAck = w.recentAck[1:]
+	}
+	if !w.recovering && !w.degraded { // the recovery's own orders are not the run moving again
+		w.progressLocked("order acked: " + key)
 	}
 }
 
@@ -431,6 +483,7 @@ func (w *watchdog) watch(ctx context.Context) error {
 				w.warnings++
 			case stallRecover:
 				w.recoveries++
+				w.degraded = true
 				for i := len(w.phases) - 1; i >= 0; i-- {
 					if w.phases[i].recover != nil {
 						f.recover, f.phase = w.phases[i].recover, w.phases[i].name

@@ -399,7 +399,6 @@ type RemoteDriver struct {
 
 	// The progress watchdog (watchdog.go) and the requests its recoveries leave for the loops they interrupt.
 	wd         *watchdog
-	wdEndRest  flagOnce // end the rest gate
 	wdRepick   flagOnce // end the fight, to pick the target again
 	wdObject   flagOnce // give up the carrier order's retries
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
@@ -570,6 +569,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		}
 		began := d.clk.Now()
 		var err error
+		d.wdObject.clear() // a request left by an earlier step is not this step's
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
@@ -1730,11 +1730,10 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
-	d.wdEndRest.clear()
-	defer d.wd.enter("rest gate", "", func(context.Context) (string, error) {
-		d.wdEndRest.set()
-		return "ended the rest gate (the party goes on as it is)", nil
-	})()
+	// The gate has limits of its own (the cap, the fight timeout, the whole-gate bound): the watchdog's clock waits for it.
+	defer d.wd.enter("rest gate", "", nil)()
+	gh := &gateHold{w: d.wd}
+	defer gh.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
 	var lastRest time.Time
@@ -1753,6 +1752,7 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 		}
 		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
 			now := d.clk.Now()
+			gh.set(false)
 			if fightBegan.IsZero() {
 				fightBegan = now
 			}
@@ -1770,13 +1770,9 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 			continue
 		}
 		fightBegan = time.Time{}
+		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
-		if d.wdEndRest.take() {
-			rec.g.Result = "gave_up"
-			d.rep.note(fmt.Sprintf("leg %d: rest gate ended by the watchdog after a stall (%s)", d.curLeg, st.why))
-			return nil
-		}
 		if len(st.dead) > 0 {
 			held = true
 			if err := d.reviveDead(ctx, "dead bots at a rest gate"); err != nil {

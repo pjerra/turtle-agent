@@ -287,13 +287,19 @@ func TestWatchdogProgressKinds(t *testing.T) {
 	if got := r.w.report(); got.StalledForS != 0 {
 		t.Fatalf("%+v", got)
 	}
+	r.adv(40)
+	r.w.acked("cmd move 1 2 3") // alternating orders are the same few orders again
+	r.w.acked("cmd move 4 5 6")
+	if got := r.w.report(); got.StalledForS != 40 {
+		t.Fatalf("alternating orders are no progress: %+v", got)
+	}
 
 	// A fight: the first look takes the state; a kill and less health are progress, the same health is not.
 	r.w.fightBegin()
 	r.w.fightSignal(0, 200)
 	r.adv(50)
 	r.w.fightSignal(0, 200)
-	if got := r.w.report(); got.StalledForS != 50 {
+	if got := r.w.report(); got.StalledForS != 90 {
 		t.Fatalf("%+v", got)
 	}
 	r.w.fightSignal(0, 190)
@@ -347,5 +353,54 @@ func TestWatchdogNilIsInert(t *testing.T) {
 	w.stop()
 	if w.watch(context.Background()) != nil || w.report() != nil {
 		t.Fatal("a nil watchdog does something")
+	}
+}
+
+// After the recovery has fired, what a stuck run can fake by repeating itself (a pull started, an order ACKed, a gate passed) is not
+// progress: only something real is, and then the stall is over.
+func TestWatchdogSoftProgressDoesNotCountAfterTheRecovery(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{WarnS: 10, RecoverS: 20, FailS: 60})
+	defer r.w.enter("pull", "boss", func(context.Context) (string, error) { return "followed", nil })()
+	r.adv(15)
+	r.w.softProgress("pull started: a") // before the recovery it is progress
+	if got := r.w.report(); got.StalledForS != 0 {
+		t.Fatalf("%+v", got)
+	}
+	r.adv(25)
+	r.watch() // recover fires
+	for i := 0; i < 3; i++ {
+		r.adv(10)
+		r.w.softProgress("pull started: boss")
+		r.w.acked("cmd pullback " + string(rune('a'+i)))
+		r.w.softProgress("rest gate finished")
+	}
+	if got := r.w.report(); got.StalledForS != 55 || got.StallLevel != "recover" {
+		t.Fatalf("soft progress after the recovery: %+v", got)
+	}
+	r.adv(35)
+	if err := r.watch(); !errors.Is(err, errStalled) {
+		t.Fatalf("fail_s is a ceiling: %v", err)
+	}
+
+	r = newWDRig(t, WatchdogConfig{WarnS: 10, RecoverS: 20, FailS: 60})
+	r.adv(25)
+	r.watch()
+	r.w.progress("a kill") // real progress ends the degraded state
+	r.adv(5)
+	r.w.softProgress("pull started: x")
+	if got := r.w.report(); got.StalledForS != 0 || got.LastProgress != "pull started: x" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Time held (a rest gate with limits of its own) is not counted, but the stall before it is: holding does not start the clock over.
+func TestWatchdogHoldKeepsTheStallBeforeIt(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	r.adv(100)
+	release := r.w.hold()
+	r.adv(500)
+	release()
+	if got := r.w.report(); got.StalledForS != 100 {
+		t.Fatalf("%+v", got)
 	}
 }

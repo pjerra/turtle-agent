@@ -292,8 +292,9 @@ func (d *Driver) tracedWalk(ctx context.Context, p Point) error {
 func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) (fightResult, error) {
 	began := d.clk.Now()
 	d.tr.Event("pull_start", map[string]any{"leg": d.curLeg, "target": t.Name, "entry": t.Entry, "guid": guidText(t.GUID), "x": t.X, "y": t.Y, "z": t.Z})
-	d.wd.progress("pull started: " + t.Name)
+	d.wd.softProgress("pull started: " + t.Name)
 	d.wd.fightBegin()
+	d.wdRepick.clear() // a request left by an earlier fight is not this fight's
 	leave := d.wd.enter("pull", t.Name, func(ctx context.Context) (string, error) {
 		d.wdRepick.set()
 		err := d.chat(ctx, ".bot action follow")
@@ -301,7 +302,7 @@ func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) 
 	})
 	res, err := d.fight(ctx, t, sp)
 	leave()
-	d.wd.progress("pull ended: " + outcomeName(res.out))
+	d.wd.softProgress("pull ended: " + outcomeName(res.out))
 	end := map[string]any{"leg": d.curLeg, "outcome": outcomeName(res.out), "kills": res.kills, "seconds": d.clk.Now().Sub(began).Seconds()}
 	if err != nil {
 		end["outcome"], end["error"] = "error", err.Error()
@@ -312,7 +313,7 @@ func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) 
 
 // traceRest is deferred at the top of a rest gate: it records the time the gate took.
 func (d *Driver) traceRest(began time.Time) {
-	d.wd.progress("rest gate finished")
+	d.wd.softProgress("rest gate finished")
 	d.tr.Event("rest", map[string]any{"leg": d.curLeg, "seconds": d.clk.Now().Sub(began).Seconds()})
 }
 
@@ -445,8 +446,9 @@ func (d *RemoteDriver) tracedWalk(ctx context.Context, p Point) error {
 func (d *RemoteDriver) tracedFight(ctx context.Context, t tbm.HostileRec, sp fightSpec) (fightResult, error) {
 	began := d.clk.Now()
 	d.tr.Event("pull_start", map[string]any{"leg": d.curLeg, "target": d.hostileName(t), "entry": t.Entry, "guid": guidText(t.GUID), "x": t.X, "y": t.Y, "z": t.Z})
-	d.wd.progress("pull started: " + d.hostileName(t))
+	d.wd.softProgress("pull started: " + d.hostileName(t))
 	d.wd.fightBegin()
+	d.wdRepick.clear() // a request left by an earlier fight is not this fight's
 	leave := d.wd.enter("pull", d.hostileName(t), func(ctx context.Context) (string, error) {
 		d.wdRepick.set()
 		_, err := d.order(ctx, "follow")
@@ -454,7 +456,7 @@ func (d *RemoteDriver) tracedFight(ctx context.Context, t tbm.HostileRec, sp fig
 	})
 	res, err := d.fight(ctx, t, sp)
 	leave()
-	d.wd.progress("pull ended: " + outcomeName(res.out))
+	d.wd.softProgress("pull ended: " + outcomeName(res.out))
 	end := map[string]any{"leg": d.curLeg, "outcome": outcomeName(res.out), "kills": res.kills, "seconds": d.clk.Now().Sub(began).Seconds()}
 	if err != nil {
 		end["outcome"], end["error"] = "error", err.Error()
@@ -464,7 +466,7 @@ func (d *RemoteDriver) tracedFight(ctx context.Context, t tbm.HostileRec, sp fig
 }
 
 func (d *RemoteDriver) traceRest(began time.Time) {
-	d.wd.progress("rest gate finished")
+	d.wd.softProgress("rest gate finished")
 	d.tr.Event("rest", map[string]any{"leg": d.curLeg, "seconds": d.clk.Now().Sub(began).Seconds()})
 }
 
