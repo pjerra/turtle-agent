@@ -242,7 +242,7 @@ type Frame struct {
 // Event is one thing that happened: Ev names it, D holds its fields, written flat beside ev. The server's events use a and b (guids),
 // s and s2 (text); the agent's use those where they fit and add fields of their own. A field named like an envelope field is
 // written with an x_ prefix. The agent's events: leg, step, leader, order, refusal, pull_start, pull_end, rest, walk_start, walk_end,
-// death, wipe, combat_on, combat_off, gm_shortcut, note, feed_stall, roster, stuck, unstuck, brain, brain_state, trace_limit.
+// death, wipe, combat_on, combat_off, gm_shortcut, note, feed_stall, roster, stuck, unstuck, brain, brain_state, unreachable, trace_limit.
 type Event struct {
 	Envelope
 	Ev string

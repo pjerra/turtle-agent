@@ -223,6 +223,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		where := fmt.Sprintf("%s at %.0f %.0f", d.hostileName(t), t.X, t.Y)
 		why := map[outcome]string{noEngage: "drew no fight", evaded: "evaded", refused: "was refused (" + res.why + ")", retarget: "was lost (" + res.why + ")"}[res.out]
+		if res.out == refused && res.unreachable {
+			// A living mob the party could not get at: its group is not cleared, and nothing else of it is counted either.
+			return fmt.Errorf("%s: %s at %.0f %.0f %.0f is unreachable for the tank: %s; the group is not cleared (the plan's position for it needs correcting)", label, d.hostileName(t), t.X, t.Y, t.Z, res.why)
+		}
 		cl.given = append(cl.given, hostilePoint(t)) // the bots saw the spot; the note below names the mob
 		switch {
 		case res.out == refused:
@@ -375,7 +379,8 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // sendPull sends the pull order for t and reads the answer. done is true when the pull is over with res (refused, lost); false when
 // the order went (or fell back to attack) and the fight is on.
 func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res fightResult, done bool, err error) {
-	busy := 0
+	busy, approaches := 0, 0
+	var tried []string
 	for try := 0; try < 3; try++ {
 		r, err := d.order(ctx, "pullback", tbm.GUIDArg(t.GUID))
 		if err != nil {
@@ -387,6 +392,23 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 		}
 		why := ref.Code + ": " + ref.Message
 		switch c := classify(ref); {
+		case ref.Code == "unreachable":
+			// The tank found no firing position: the mob is alive and the party has not got at it, so the group must not be counted
+			// cleared on it. Pull again from nearer, from other approach points, a bounded number of times.
+			d.noteUnreachable("pull", hostilePoint(t), d.hostileName(t)+": "+ref.Message)
+			if approaches >= len(unreachableStandoffs) {
+				return fightResult{out: refused, unreachable: true, why: fmt.Sprintf("%s (pulled %d times, from %s)", why, approaches+1, strings.Join(tried, ", "))}, true, nil
+			}
+			st := unreachableStandoffs[approaches]
+			approaches++
+			here, _ := d.leadPos()
+			tried = append(tried, fmt.Sprintf("%.0f %.0f %.0f", here.X, here.Y, here.Z))
+			d.rep.note(fmt.Sprintf("pull of %s: the tank could not reach a firing position (unreachable); walking the party to %.0f yd of it and pulling again (approach %d of %d)", d.hostileName(t), st, approaches, len(unreachableStandoffs)))
+			if err := d.approach(ctx, hostilePoint(t), st); err != nil {
+				return fightResult{}, true, err
+			}
+			try-- // an approach is not a failed pull
+			continue
 		case c == refUnreachable:
 			return fightResult{out: refused, why: why}, true, nil
 		case c == refDead || c == refNoTarget:
@@ -880,6 +902,18 @@ func (d *RemoteDriver) holdHere(ctx context.Context) {
 	if _, bad := refusedOf(r); !bad {
 		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
 	}
+}
+
+// unreachableStandoffs are the distances (yards from the mob) the party is walked to, one after the other, when the tank answers a pull
+// with "unreachable"; the pull is sent again from each. Run 2 gave up on such packs and counted them cleared with their mobs alive.
+var unreachableStandoffs = []float32{20, 8}
+
+// noteUnreachable logs an "unreachable" answer (a pull, a move) with the point it was about, for the plan to be corrected: in the
+// notes, the trace, and the report's counter.
+func (d *RemoteDriver) noteUnreachable(kind string, at Point, what string) {
+	d.remote(func(r *RemoteReport) { r.Unreachable++ })
+	d.tr.Event("unreachable", map[string]any{"leg": d.curLeg, "kind": kind, "x": at.X, "y": at.Y, "z": at.Z, "what": what})
+	d.rep.note(fmt.Sprintf("leg %d: unreachable %s to %.1f %.1f %.1f (%s)", d.curLeg, kind, at.X, at.Y, at.Z, what))
 }
 
 // maxTankBusyRounds bounds the waits of one pull for a tank that stays in combat.

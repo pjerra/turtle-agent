@@ -105,7 +105,8 @@ type Stepper struct {
 	stepWalks int        // walks Complete has seen in the current step
 	last      ActionKind // the kind of the action Next returned last
 	err       string
-	skipped   []string // what the team gate passed over since Skipped was last called
+	skipped   []string        // what the team gate passed over since Skipped was last called
+	teamSeen  map[string]bool // team-gated parts already noted as hostile in view (a note once per part)
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -226,7 +227,7 @@ func (s *Stepper) next() Action {
 				continue
 			}
 			g := l.PullGroups[s.idx]
-			if !s.teamOK(g.Team) {
+			if !s.teamOK(g.Team) && !s.hostileOverride(fmt.Sprintf("g%d/%d", s.leg, s.idx), g.Entries, g.Team, s.label("pull group %d of %d (%v)", s.idx+1, len(l.PullGroups), g.Entries)) {
 				s.skipped = append(s.skipped, s.label("pull group %d of %d (%v) is for team %s, the leader is %s: skipped", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team()))
 				s.idx++
 				continue
@@ -257,7 +258,7 @@ func (s *Stepper) next() Action {
 				s.ph, s.idx = phAfter, 0
 				continue
 			}
-			if !s.teamOK(l.Boss.Team) {
+			if !s.teamOK(l.Boss.Team) && !s.hostileOverride(fmt.Sprintf("b%d", s.leg), append([]uint32{l.Boss.Entry}, l.Boss.First...), l.Boss.Team, s.label("boss %d", l.Boss.Entry)) {
 				s.skipped = append(s.skipped, s.label("boss %d is for team %s, the leader is %s: skipped", l.Boss.Entry, l.Boss.Team, s.team()))
 				s.ph, s.idx = phAfter, 0
 				continue
@@ -390,6 +391,31 @@ func (s *Stepper) team() string {
 func (s *Stepper) teamOK(team string) bool {
 	t := s.team()
 	return team == "" || t == "" || t == team
+}
+
+// HostileWorld is the optional part of a World that says whether a unit of one of entries is hostile to the party: listed hostile in
+// the feed now (alive), or seen hostile earlier in the run. The team gate is data-driven with it: a part gated to the other team runs
+// anyway when its mobs turn out hostile (the Uldaman Lost Dwarves, "horde-only" in the plan, aggroed on the Alliance party of remote
+// run 2). A World without it keeps the plan's team gate as written.
+type HostileWorld interface {
+	HostileSeen(entries []uint32) bool
+}
+
+// hostileOverride says whether a part gated to another team is fought anyway because its mobs are hostile to the party, and notes it
+// once. key names the part; what is its label for the note.
+func (s *Stepper) hostileOverride(key string, entries []uint32, team, what string) bool {
+	hw, ok := s.w.(HostileWorld)
+	if !ok || !hw.HostileSeen(entries) {
+		return false
+	}
+	if s.teamSeen == nil {
+		s.teamSeen = map[string]bool{}
+	}
+	if !s.teamSeen[key] {
+		s.teamSeen[key] = true
+		s.skipped = append(s.skipped, fmt.Sprintf("%s is for team %s, the leader is %s, but its mobs are hostile to the party: fought", what, team, s.team()))
+	}
+	return true
 }
 
 // Skipped returns what the team gate passed over since the last call, one line each, for the report.

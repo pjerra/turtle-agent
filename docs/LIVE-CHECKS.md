@@ -650,7 +650,7 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
 
 1. **Team gate.** `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","healer":"<priest>"}` with an
    Alliance agent and Alliance bots: the notes say `team gate: alliance, from the agent's own race`, the Baelog boss and its First entries are
-   skipped (`skip_team`), and the run does not fail with `no living [6906]`. Then `"team":"horde"`: the boss step runs (expect the failure). If the
+   skipped (`skip_team`) while the Lost Dwarves are not in the feed, and the run does not fail with `no living [6906]`; when the last pack's pull aggroes them (they were hostile to the Alliance in remote run 2) the note says `its mobs are hostile to the party: fought` (`team_override`) and the boss step kills them. Then `"team":"horde"`: the boss step runs (expect the failure). If the
    agent and the bots are on different sides, check that `team` fixes it.
 2. **Kit check.** Watch `.bot maintenance <bot>` go out first, one per bot, and the answers (`Maintained ...`; with the switch off `disabled`).
    Then `.bot inv <bot>`: compare `remote.preflight.bots[]` with the real bags: drink counts (and whether the server's drink items are all in the
