@@ -289,7 +289,7 @@ func TestGeometry(t *testing.T) {
 	}
 	svg := g.SVG
 	for _, want := range []string{`class="route" data-leg="0"`, `class="direct" data-leg="0"`, `class="pull" data-leg="0" data-group="0"`, `r="10.0"`, `r="5.0"`, `r="25.0"`,
-		`class="mk boss"`, `boss 6001`, `class="mk obj use"`, `use 555`, `class="mk entrance"`, `data-leg="1" data-group="0"`} {
+		`class="mk boss"`, `boss 6001`, `class="mk obj use"`, `use 555`, `class="ic"`, `class="lab"`, `class="mk entrance"`, `data-leg="1" data-group="0"`} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("svg lacks %q", want)
 		}

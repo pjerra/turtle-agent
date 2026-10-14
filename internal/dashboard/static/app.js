@@ -246,6 +246,7 @@ function applyViewBox(rec) {
   const { pw, ph } = panelSize(rec);
   if (!rec.svg || !rec.v || pw < 20) return;
   rec.svg.setAttribute("viewBox", MV.viewBox(rec.v, pw, ph).map((n) => n.toFixed(3)).join(" "));
+  rec.svg.classList.toggle("zoomed", !!rec.fit && rec.v.scale >= rec.fit.scale * 2.5);
   const k = (MARKER_PX / rec.v.scale).toFixed(5);
   rec.svg.querySelectorAll(".mk").forEach((g) => { g.setAttribute("transform", "translate(" + g.dataset.x + " " + g.dataset.y + ") scale(" + k + ")"); });
 }

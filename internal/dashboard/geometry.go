@@ -79,7 +79,7 @@ func (b box) bounds() [4]float64 {
 // and the page scales them by the zoom, so the plate's width is an estimate from the character count.
 func label(text string, x, y float64, cls string) string {
 	n := float64(len([]rune(text)))
-	return fmt.Sprintf(`<rect class="lbg" x="%.1f" y="%.1f" width="%.1f" height="15" rx="3"/><text class="%s" x="%.1f" y="%.1f">%s</text>`,
+	return fmt.Sprintf(`<g class="lab"><rect class="lbg" x="%.1f" y="%.1f" width="%.1f" height="15" rx="3"/><text class="%s" x="%.1f" y="%.1f">%s</text></g>`,
 		x-3, y-11.5, n*6.6+6, cls, x, y, html.EscapeString(text))
 }
 
@@ -131,7 +131,7 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 		for _, p := range stepPoints(leg) {
 			x, y := Project(p.pt.X, p.pt.Y)
 			bb.add(x, y, 2)
-			fmt.Fprintf(&sb, `<g class="mk obj %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><rect x="-5" y="-5" width="10" height="10"/>%s</g>`,
+			fmt.Fprintf(&sb, `<g class="mk obj %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><rect class="ic" x="-4" y="-5" width="8" height="10" rx="1"/><circle class="knob" cx="1.5" cy="0" r="1"/>%s</g>`,
 				p.kind, i, x, y, label(p.label, 9, 4, "lt"))
 		}
 		name := leg.Name

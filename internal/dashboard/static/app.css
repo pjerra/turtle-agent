@@ -100,7 +100,12 @@ svg .pin text.num { fill: #000; text-anchor: middle; }
 svg .boss polygon { fill: #ff2fd6; stroke: #000; stroke-width: 2.5; stroke-linejoin: round; }
 svg .boss path { stroke: #000; stroke-width: 2.5; fill: none; }
 svg .leg.done .boss { opacity: .5; }
-svg .obj rect { fill: #fff; stroke: #000; stroke-width: 2; }
+svg .obj rect.ic { fill: #fff; stroke: #000; stroke-width: 1.5; }
+svg .obj circle.knob { fill: #000; }
+/* Labels of doors, objects and sections stay out of the way: shown on hover, or when zoomed in. Never style a bare "rect" of a marker,
+   the label plate is one too. */
+svg .obj .lab, svg .legname .lab { display: none; }
+svg.zoomed .obj .lab, svg.zoomed .legname .lab, svg .obj:hover .lab { display: inline; }
 svg .legname .lbg { fill: rgba(0, 0, 0, .55); } svg .legname text { fill: #d6dbe5; }
 svg .mob { stroke: #000; stroke-width: 1.5; }
 svg .mob.hostile { fill: #ff3b3b; } svg .mob.neutral { fill: #9aa3b2; } svg .mob.friendly { fill: #22c55e; }
