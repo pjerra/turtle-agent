@@ -32,6 +32,8 @@ import (
 // lead bot at once.
 
 const (
+	rezReach = 30.0 // yards: a dead bot's body this near a living caster is left to the caster's resurrection (rez_reach_yd)
+
 	rejoinTPDist  = 60.0 // yards from the lead bot beyond which a living bot is brought back (0: off)
 	rejoinGap     = 60 * time.Second
 	rejoinCalm    = 4 * time.Second  // the party must have been out of combat this long
