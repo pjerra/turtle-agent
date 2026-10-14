@@ -16,7 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
-const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--config-dir DIR]\n" +
+const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
 	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command"
 
 // expandHome turns a leading ~/ into the home folder.
@@ -39,6 +39,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	tests := fs.String("tests-dir", filepath.Join(home, "TortoiseBots-audit", "tests"), "the only folder whose files the page serves (run traces and reports)")
 	traces := fs.String("traces-dir", filepath.Join(home, "turtle-agent", "traces"), "where the agents write run traces (read for orders and the binary SHA, never served)")
 	plans := fs.String("plans-dir", filepath.Join(home, "turtle-agent", "dungeons"), "folder(s) with the dungeon plan files, comma separated")
+	embed := fs.String("embed-from", "", "extra origins (http://host:port, comma separated) that may show this page in a frame; loopback pages always may")
 	cfgDir := fs.String("config-dir", dashboard.DefaultConfigDir(), "folder with settings*.json and the rpc-<port>.token files")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -58,6 +59,16 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if _, err := dashboard.DiscoverAgents(expandHome(*cfgDir), *agents); err != nil {
 		fmt.Fprintln(stderr, "dashboard: --agents:", err)
 		return exitUsage
+	}
+	var embedFrom []string
+	for _, o := range strings.Split(*embed, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			if err := dashboard.CheckEmbedOrigin(o); err != nil {
+				fmt.Fprintln(stderr, "dashboard: --embed-from:", err)
+				return exitUsage
+			}
+			embedFrom = append(embedFrom, o)
+		}
 	}
 	var planDirs []string
 	for _, d := range strings.Split(*plans, ",") {
@@ -80,7 +91,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	defer stop()
 	go p.Run(pctx)
 	fmt.Fprintf(stdout, "turtle-agent dashboard %s on http://%s/ (read-only; agents: %s)\n", version, ln.Addr(), *agents)
-	err = rpc.Serve(ctx, ln, dashboard.Handler(p, testsDir))
+	err = rpc.Serve(ctx, ln, dashboard.Handler(p, testsDir, embedFrom...))
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(stderr, "dashboard:", err)
 		return 1

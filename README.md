@@ -87,7 +87,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--config-dir DIR]
+turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -2627,6 +2627,7 @@ turtle-agent dashboard --listen 127.0.0.1:8790 --agents 8765,8766 --tests-dir ~/
 | `--tests-dir` | `~/TortoiseBots-audit/tests` | the **only** folder whose files `/files/...` serves (traces, summaries, reports); no other path is reachable |
 | `--traces-dir` | `~/turtle-agent/traces` | where the agents write run traces: read for the last orders and the binary SHA, never served |
 | `--plans-dir` | `~/turtle-agent/dungeons` | plan files for the map (comma list); a plan file that changes (a live plan reload) is loaded again. A plan no folder has is drawn from the copy the binary carries (`dungeons/embed.go`), which can differ from the file a run was started with |
+| `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 
 **What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
@@ -2666,8 +2667,9 @@ is dropped at any depth, and a string that contains the agent's token is replace
 names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
 `--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
 refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is not a loopback name is
-refused (DNS rebinding), and the page may be framed only by a loopback page (the TortoiseBots observability dashboard's
-Commanders tab embeds it that way).
+refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
+dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
+example `--embed-from http://m910q:8095`, must be named).
 
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that

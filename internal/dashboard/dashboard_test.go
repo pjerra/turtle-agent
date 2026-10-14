@@ -741,3 +741,32 @@ func TestPlanCacheFallsBackToThePlansOfTheBuild(t *testing.T) {
 		t.Error("a path is not a plan name")
 	}
 }
+
+func TestFramingIsLimitedToLoopbackAndNamedOrigins(t *testing.T) {
+	root := t.TempDir()
+	p := NewPoller(Options{TestsDir: root, ConfigDir: t.TempDir()})
+	srv := httptest.NewServer(Handler(p, root, "http://m910q:8095"))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/")
+	must(t, err)
+	resp.Body.Close()
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, want := range []string{"frame-ancestors 'self' http://127.0.0.1:* http://localhost:* http://[::1]:* http://m910q:8095", "default-src 'self'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP %q lacks %q", csp, want)
+		}
+	}
+	if strings.Contains(csp, "frame-ancestors *") {
+		t.Errorf("anyone may frame: %q", csp)
+	}
+	for _, ok := range []string{"http://m910q:8095", "https://dash.example.org", "http://192.168.1.5:8095", "http://[::1]:8095/"} {
+		if err := CheckEmbedOrigin(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "*", "m910q:8095", "ftp://x", "http://", "http://a b", "http://x;script-src *", "http://x/path", "http://u:p@x", "http://x?q=1", "http://x,http://y", "'none'"} {
+		if err := CheckEmbedOrigin(bad); err == nil {
+			t.Errorf("%q must be refused: it goes into the CSP", bad)
+		}
+	}
+}

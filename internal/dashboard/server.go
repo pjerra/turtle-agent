@@ -2,10 +2,12 @@ package dashboard
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 
@@ -17,7 +19,7 @@ var staticFS embed.FS
 
 // Handler serves the page, the cached state and the files of the tests folder. Every route is GET or HEAD; nothing in it sends
 // anything to an agent.
-func Handler(p *Poller, testsDir string) http.Handler {
+func Handler(p *Poller, testsDir string, embedFrom ...string) http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	static := http.FileServer(http.FS(sub))
 	mux := http.NewServeMux()
@@ -44,7 +46,7 @@ func Handler(p *Poller, testsDir string) http.Handler {
 		serveTestFile(w, r, testsDir)
 	})
 	mux.Handle("/", static)
-	return guard(mux)
+	return guard(mux, FrameAncestors(embedFrom))
 }
 
 func writeJSON(w http.ResponseWriter, b []byte) {
@@ -53,9 +55,27 @@ func writeJSON(w http.ResponseWriter, b []byte) {
 	_, _ = w.Write(b)
 }
 
+// FrameAncestors is the CSP frame-ancestors list: this page, loopback pages (the TortoiseBots observability dashboard on the same
+// machine embeds it), and the extra origins the operator named with --embed-from. Origins are checked by CheckEmbedOrigin.
+func FrameAncestors(extra []string) string {
+	parts := []string{"'self'", "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"}
+	return strings.Join(append(parts, extra...), " ")
+}
+
+// CheckEmbedOrigin accepts an http or https origin (scheme, host, optional port; no path, query or credentials), the only
+// shape that is safe to put into a CSP source list.
+func CheckEmbedOrigin(o string) error {
+	u, err := url.Parse(o)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(o, " ;,'\"") {
+		return fmt.Errorf("%q is not an origin like http://host:port", o)
+	}
+	return nil
+}
+
 // guard refuses what a read-only local page has no use for: other methods, and requests whose Host is not a loopback name (a
 // page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1).
-func guard(next http.Handler) http.Handler {
+func guard(next http.Handler, ancestors string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -73,7 +93,7 @@ func guard(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors "+ancestors)
 		next.ServeHTTP(w, r)
 	})
 }
