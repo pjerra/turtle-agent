@@ -791,7 +791,7 @@ What the driver does for each action of the plan (the stepper decides which):
   tank for 3 s within 40 yd gets the tank: the leader targets it and says `.bot action pull 0` (the tank walks up and keeps it; the module briefly holds the other bots for the order, see the remote rule), then targets the party's
   mob again; 8 s apart for the same mob, 3 for the fight (`loose_add_orders`). The first attack order at a mob the tank holds waits until the tank has held it for 2 s (the brain
   has its own 2 s opening delay; the pull's `pullback` join delay of 5 s is the bots'). `report.tank_first`: `tank`, `tank_threat_share` (the mean share of the fighting mobs that
-  were on the tank: their targets, not threat), `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`. Absent without a tank in view. The fake game
+  were on the tank: their targets, not threat), `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `attack_resends`, `target_switches`. Absent without a tank in view. The fake game
   and the fake feed test each rule; nothing is seen live yet (`docs/LIVE-CHECKS.md`).
 - **refusals.** The driver reads what the bots answer to its orders (`TBM:ACTION_ERR|<command>|<code>|<message>` in the event log, and the
   whisper `<mob> is evading` / `is dead` of an attack order; that whisper is read from the module source, not yet seen in a capture) and keeps them in the report's `refusals[]` (`intent`, `code`, `message`,
@@ -1353,7 +1353,7 @@ top threat. Naming the `tank` is the reliable way.
 **Tank first (remote).** The party follows the tank's threat (after mod-playerbots' `ThreatStrategy`, `DpsTargetValue` and `TankTargetValue`; the behaviour only, no code):
 - *Target.* The attack order goes to the engaged mob where the tank's share of the top threat (`T` record: 100 when the tank tops the list, 0 when it is not among the top
   three) is largest; the tank's own target comes before the others, then the nearest. The party stays on the mob it fights while the tank holds at least 50 % of it, and below that
-  until another mob leads it by 25 points, so two mobs the tank holds alike do not flip it back and forth; it is sent at the next mob at once when the one before died (`target_switches` counts the times it left a
+  until another mob leads it by 25 points, so two mobs the tank holds alike do not flip it back and forth; the `cmd attack` for a mob goes **once**: it is sent again only when the mob changed, the module refused the order, or `assist_every` (10 s, at least 5 s) has passed and the tank is not holding the mob near it (`attack_resends` counts these, the first five are noted), because an attack order at the same mob every second after a pull made the tank drop it for "return to pull position" and back (Uldaman group B, tank wipes); it is sent at the next mob at once when the one before died (`target_switches` counts the times it left a
   mob that still lived).
 - *Opener.* A mob the party was not sent at yet waits until the tank has held it (top of its `T` record, the mob hitting it) for `OpenerDelay` (2 s, the existing threat gate
   extended; `threat_waits` counts it too), or until `ThreatWait` (6 s) has passed. The feed gives shares, not absolute threat, so the delay stands in for "the tank has N threat".

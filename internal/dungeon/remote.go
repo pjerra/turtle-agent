@@ -290,11 +290,13 @@ type RemoteReport struct {
 	LooseAddOrders    int     `json:"loose_add_orders"`
 	CCRespected       int     `json:"cc_respected"`
 	TargetSwitches    int     `json:"target_switches"`
-	RezWaits          int     `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
-	Rezzed            int     `json:"rezzed"`           // bots that got up during those waits
-	PackLooks         int     `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
-	PacksSeenEmpty    int     `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
-	Unreachable       int     `json:"unreachable"`      // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	// AttackResends are the attack orders sent again at the mob the party was already sent at (after AssistEvery, with the tank not holding it).
+	AttackResends  int `json:"attack_resends"`
+	RezWaits       int `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
+	Rezzed         int `json:"rezzed"`           // bots that got up during those waits
+	PackLooks      int `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
+	PacksSeenEmpty int `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
+	Unreachable    int `json:"unreachable"`      // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -1119,6 +1121,15 @@ func (d *RemoteDriver) memberByName(name string) (tbm.PartyRec, bool) {
 	return tbm.PartyRec{}, false
 }
 
+func (d *RemoteDriver) memberByGUID(g packet.GUID) (tbm.PartyRec, bool) {
+	for _, p := range d.fr.Party {
+		if p.GUID == g {
+			return p, true
+		}
+	}
+	return tbm.PartyRec{}, false
+}
+
 func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 	d.curLeg = i
 	name := d.plan.Legs[i].Name
@@ -1165,6 +1176,10 @@ func (d *RemoteDriver) order(ctx context.Context, verb string, args ...string) (
 	cmd := strings.Join(append([]string{"cmd", verb}, args...), " ")
 	if verb == "move" {
 		defer func() { d.lastMove = d.clk.Now() }()
+	}
+	switch verb {
+	case "pull", "pullback", "follow", "stay", "move", "rest", "revive":
+		d.tf.sentGUID = 0 // the bots were told something else: an attack order for the same mob is a new order (attackAllowed)
 	}
 	deadline := d.clk.Now().Add(d.opt.LeadWait)
 	for {
