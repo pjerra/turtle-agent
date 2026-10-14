@@ -63,8 +63,11 @@ func (s *Session) registerParty() {
 // Party returns a copy of the group; Members is never nil, so the RPC sends []. The server
 // sends SMSG_PARTY_MEMBER_STATS only to members out of range of each other
 // (Player::SendUpdateToOutOfRangeGroupMembers, Player.cpp:21101); a client reads a nearby
-// member's health from its unit fields. So a member the object store holds reports the
-// store's health, max health and level, and any other member keeps the last stats values.
+// member's health and power from its unit fields. So a member the object store holds reports the
+// store's health, max health, power type, power, max power and level, and any other member keeps the
+// last stats values. (Power used to keep the last stats value: live Uldaman run 4 read a priest at 29%
+// mana for 14 rest gates because no stats packet came after the first, while the unit fields showed
+// it drinking to full.)
 func (s *Session) Party() PartyInfo {
 	s.mu.Lock()
 	p := s.party
@@ -89,8 +92,20 @@ func (s *Session) Party() PartyInfo {
 		if u.Level != 0 {
 			m.Level = clamp16(u.Level)
 		}
+		if u.MaxPower != 0 && u.PowerType < 5 {
+			m.PowerType = u.PowerType
+			m.Power, m.MaxPower = fit16(u.Power, u.MaxPower)
+		}
 	}
 	return p
+}
+
+// fit16 fits a power and its maximum into the party stats' 16-bit width, keeping their ratio when the maximum is wider.
+func fit16(v, max uint32) (uint16, uint16) {
+	if max <= math.MaxUint16 {
+		return uint16(min(v, max)), uint16(max)
+	}
+	return uint16(uint64(min(v, max)) * math.MaxUint16 / uint64(max)), math.MaxUint16
 }
 
 // clamp16 fits a unit field into the party stats' 16-bit width.
