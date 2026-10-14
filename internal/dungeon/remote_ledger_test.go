@@ -61,6 +61,36 @@ func TestRemoteBossKilledInAWalkFight(t *testing.T) {
 	}
 }
 
+// A boss that dies in a fight the look walk ran into (the boss step found nothing in view and walked to the boss's position to look;
+// a pack aggroed there and the boss joined): the empty look afterwards is not "no living boss seen" (remote Uldaman hires-2, Revelosh).
+func TestRemoteBossKilledInTheLookWalkFight(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 30
+	g.addMob(777, Point{250, 0, 0})
+	g.killRate = 90 // the boss is last seen nearly dead
+	inner := g.onTick
+	g.onTick = func(g *fakeRemote) {
+		if g.lead().X > 160 {
+			for _, m := range g.mobs {
+				if !m.engaged {
+					m.pulled, m.pullAt, m.engaged = true, g.now, true
+				}
+			}
+		}
+		if inner != nil {
+			inner(g)
+		}
+	}
+	plan := remotePlan(Leg{Name: "b", To: Point{150, 0, 0}, Boss: &Boss{Entry: 777, Position: Point{250, 0, 0}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || g.mobsKilled != 1 {
+		t.Fatalf("%v killed %d %+v\n%s", err, g.mobsKilled, rep.Remote, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "[777] is dead") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
 // A boss that is never fought and then leaves the view is not counted dead.
 func TestRemoteBossThatLeavesViewUnfoughtIsNotDead(t *testing.T) {
 	g := newFakeRemote(t)
