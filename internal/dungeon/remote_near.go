@@ -104,9 +104,15 @@ func (d *RemoteDriver) agentDistance(f Follower) (dist float64, ok bool) {
 // keepNear brings the agent within keepNearFar of the lead bot if it can, and reports whether it moved it. Its error is the run's
 // (a binding lost, a wipe while it waited); a failed appear or walk is noted and is no error.
 func (d *RemoteDriver) keepNear(ctx context.Context) (moved bool, err error) {
+	return d.keepNearOpt(ctx, false)
+}
+
+// keepNearOpt is keepNear; force overrides the entry-targets switch-off (remote_entry.go: no object step needs the agent in view) for
+// the one thing that still does, the evidence of a boss killed before this run.
+func (d *RemoteDriver) keepNearOpt(ctx context.Context, force bool) (moved bool, err error) {
 	f, ok := d.g.(Follower)
-	if !ok || d.entry.only {
-		return false, nil // entry targets and cmd state: no step needs the agent in view (remote_entry.go)
+	if !ok || (d.entry.only && !force) {
+		return false, nil
 	}
 	d.look()
 	dist, ok := d.agentDistance(f)
@@ -512,9 +518,31 @@ func (d *RemoteDriver) nearForBoss(ctx context.Context, sp fightSpec) error {
 		return nil
 	}
 	d.near.tried[key] = true
-	moved, err := d.keepNear(ctx)
+	// With entry targets keep-near is off, but a boss killed before this driver ran (a resume) is in no kill record and no ledger, and the
+	// feed drops corpses fast: only the agent's view can show it dead. So the agent is still brought up for a boss, and only when nothing
+	// else is evidence for it (the appear is a counted GM assist, run_gm_assists). A read-only check by the module would need a `cmd state`
+	// for creature entries (follow-up in TortoiseBots).
+	force := false
+	if d.entry.only {
+		if d.bossEvidence(sp) {
+			return nil
+		}
+		force = true
+	}
+	moved, err := d.keepNearOpt(ctx, force)
 	for i := 0; err == nil && moved && i < 3 && !d.bossCorpseSeen(sp); i++ {
 		err = d.tick(ctx, d.cfg.Poll)
 	}
 	return err
+}
+
+// bossEvidence says whether this run already knows the boss dead without the agent's view: a kill at a position, the ledger, or a corpse
+// the agent happens to see.
+func (d *RemoteDriver) bossEvidence(sp fightSpec) bool {
+	for _, e := range sp.pick {
+		if len(d.killedAt[e]) > 0 {
+			return true
+		}
+	}
+	return d.ledgerDead(sp.pick) || d.bossCorpseSeen(sp)
 }

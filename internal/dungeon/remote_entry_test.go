@@ -469,3 +469,23 @@ func TestEntryTargetsFallbackUsesTheModulesGUID(t *testing.T) {
 		t.Fatalf("%v", hg.orders)
 	}
 }
+
+// A resumed run with entry targets: keep-near is off, but a boss killed before this driver started is in no kill record and no ledger, so
+// the agent is brought up once for the boss step and its view of the corpse is the evidence (one counted GM assist).
+func TestEntryTargetsResumedBossBringsTheAgentUpOnce(t *testing.T) {
+	g := entryChestGame(t, 3, true)
+	g.onAppear = func(n *nearGame) { n.units = []objects.Unit{corpseOf(777, Point{62, 3, 0})} }
+	plan := remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, Steps: []Step{entryChestStep()}, Boss: &Boss{Entry: 777, Position: Point{60, 0, 0}}})
+	rep, err := entryRun(t, g, plan)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if fmt.Sprint(g.appears) != "[Tanky]" || rep.Remote.RunGMAssists != 1 || !hasNote(rep, "its corpse is in the agent's view") || g.indexOf("cmd open entry:") < 0 {
+		t.Fatalf("appears %v %+v\n%s", g.appears, rep.Remote, notesOf(rep))
+	}
+	// No corpse in the agent's view even then: the boss is not counted dead.
+	g = entryChestGame(t, 3, true)
+	if _, err := entryRun(t, g, plan); err == nil || !strings.Contains(err.Error(), "no living [777]") || len(g.appears) != 1 {
+		t.Fatalf("%v appears %v", err, g.appears)
+	}
+}
