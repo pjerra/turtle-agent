@@ -26,7 +26,9 @@ import (
 //
 // The party waits where the lead bot holds; the carrier leaves the formation for the walk and rejoins it. The GUID of a game object is
 // the spawn's, which only the agent's own object store knows: the agent's character has to be within view of the object (not in the
-// group). Every order waits for its final answer (ACTION_PENDING, then ACK or ERR).
+// group). Every order waits for its final answer (ACTION_PENDING, then ACK or ERR). An order on an object is preceded by the approach
+// (remote_approach.go: the party stood at the object, the carrier near and still) and, when the carrier's order fails twice, the step can
+// be taken over by the agent's own character (remote_fallback.go).
 
 // OrderGame is the optional part of a RemoteGame that gives the per-bot player orders and sees game objects. A game without it fails
 // an object step as before.
@@ -72,6 +74,13 @@ type ObjectStepReport struct {
 	Result  string        `json:"result"` // running, done, skipped or failed
 	Note    string        `json:"note,omitempty"`
 	Error   string        `json:"error,omitempty"`
+	// Approach is how the party was brought to the object before the order ("still at 2.1 yd after 4.0 s"; remote_approach.go).
+	Approach string `json:"approach,omitempty"`
+	// CarrierResult is how the carrier's last object order was answered ("ack", an ERR code or "timeout"); FallbackUsed says whether the
+	// agent's own character took the step over (remote_fallback.go), Fallback is what it did.
+	CarrierResult string          `json:"carrier_result,omitempty"`
+	FallbackUsed  bool            `json:"fallback_used"`
+	Fallback      *FallbackReport `json:"fallback,omitempty"`
 }
 
 func cloneObjectSteps(in []ObjectStepReport) []ObjectStepReport {
@@ -83,6 +92,7 @@ func cloneObjectSteps(in []ObjectStepReport) []ObjectStepReport {
 		out[i] = s
 		out[i].Orders = slices.Clone(s.Orders)
 		out[i].Gained = slices.Clone(s.Gained)
+		out[i].Fallback = s.Fallback.clone()
 	}
 	return out
 }
@@ -622,13 +632,22 @@ func (d *RemoteDriver) stepLoot(ctx context.Context, a Action, carrier string, r
 			return "carries it already", nil
 		}
 	}
+	stayed, err := d.approachObject(ctx, rec, carrier, objectPoint(a), d.standOf(a))
+	if err != nil {
+		return "", err
+	}
+	defer d.resumeFollow(ctx, stayed)
 	var res tbm.OrderResult
-	err := d.withFFA(ctx, rec, func() error {
+	var failed bool
+	err = d.withFFA(ctx, rec, func() error {
 		var err error
-		res, err = d.carry(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
+		res, failed, err = d.carryOrFallback(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
 		return err
 	})
 	if err != nil {
+		if failed {
+			return "", d.fallbackLoot(ctx, a, carrier, rec, err)
+		}
 		return "", err
 	}
 	rec.loot(res.Loot)
@@ -655,11 +674,26 @@ func (d *RemoteDriver) stepOpen(ctx context.Context, a Action, carrier string, r
 			return "", err
 		}
 		if inv.Count(req.Entry) == 0 {
+			if d.agentHolds(req) && !d.laterNeeds(a, req.Entry) {
+				// The agent made (or kept) the key itself: it opens the object.
+				return "", d.fallbackOpen(ctx, a, carrier, rec, nil)
+			}
 			return "", fmt.Errorf("%s does not carry %s, which the object needs (.bot inv %s)", carrier, req, carrier)
 		}
 	}
-	res, err := d.carry(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
+	stayed, err := d.approachObject(ctx, rec, carrier, objectPoint(a), d.standOf(a))
 	if err != nil {
+		return "", err
+	}
+	defer d.resumeFollow(ctx, stayed)
+	res, failed, err := d.carryOrFallback(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
+	if err != nil {
+		if failed && a.Requires != nil && d.agentHolds(a.Requires) && !d.laterNeeds(a, a.Requires.Entry) {
+			return "", d.fallbackOpen(ctx, a, carrier, rec, err)
+		}
+		if failed {
+			err = fmt.Errorf("%w (the agent does not take this step over: it holds no %s, or a later step needs a bot to hold it)", err, a.Requires)
+		}
 		return "", err
 	}
 	rec.loot(res.Loot)
@@ -677,14 +711,24 @@ func (d *RemoteDriver) stepItem(ctx context.Context, a Action, carrier string, r
 		d.rep.note(fmt.Sprintf("%s: %s carries %s already; nothing to use", a.Label, carrier, a.Expect))
 		return "carries it already", nil
 	}
-	if inv.Count(use.Entry) == 0 {
-		return "", fmt.Errorf("%s does not carry %s to use (.bot inv %s)", carrier, use, carrier)
+	if inv.Count(use.Entry) == 0 || (a.Requires != nil && inv.Count(a.Requires.Entry) == 0) {
+		if d.agentHolds(use, a.Requires) {
+			// The agent holds both parts (it kept them): it combines them.
+			return "", d.fallbackCombine(ctx, a, carrier, rec, nil)
+		}
+		if inv.Count(use.Entry) == 0 {
+			return "", fmt.Errorf("%s does not carry %s to use (.bot inv %s)", carrier, use, carrier)
+		}
+		return "", fmt.Errorf("%s does not carry %s, which using %s consumes (.bot inv %s)", carrier, a.Requires, use, carrier)
 	}
-	if req := a.Requires; req != nil && inv.Count(req.Entry) == 0 {
-		return "", fmt.Errorf("%s does not carry %s, which using %s consumes (.bot inv %s)", carrier, req, use, carrier)
-	}
-	res, err := d.carry(ctx, rec, fmt.Sprintf("cmd use %d %s", use.Entry, carrier), nil)
+	res, failed, err := d.carryOrFallback(ctx, rec, fmt.Sprintf("cmd use %d %s", use.Entry, carrier), nil)
 	if err != nil {
+		if failed && d.agentHolds(use, a.Requires) {
+			return "", d.fallbackCombine(ctx, a, carrier, rec, err)
+		}
+		if failed {
+			err = fmt.Errorf("%w (the agent does not take this step over: its own bags do not hold %s%s)", err, use, andRequires(a.Requires))
+		}
 		return "", err
 	}
 	if res.Spell != 0 {
@@ -702,6 +746,13 @@ func (d *RemoteDriver) stepItem(ctx context.Context, a Action, carrier string, r
 	}
 	rec.gained(fmt.Sprintf("%d x1", a.Expect.Entry))
 	return "", nil
+}
+
+func andRequires(it *ItemRef) string {
+	if it == nil {
+		return ""
+	}
+	return " and " + it.String()
 }
 
 // ---- the boss ----
@@ -875,6 +926,11 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 		// A boss step that passed on a corpse seen in the agent's view must not pass here without a GUID to loot from: say what happened.
 		return "", fmt.Errorf("boss %d died out of sight (the bots did not see it die and no corpse of it is in the agent's view); its loot can't be reached: %s is not obtainable from it in this run", b.Entry, it)
 	}
+	stayed, err := d.approachObject(ctx, rec, carrier, &corpse.at, nil)
+	if err != nil {
+		return "", err
+	}
+	defer d.resumeFollow(ctx, stayed)
 	var res tbm.OrderResult
 	err = d.withFFA(ctx, rec, func() error {
 		var err error

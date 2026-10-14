@@ -735,6 +735,29 @@ objects** (in the instance, or at its edge with the objects loaded). Read the or
 8. **Agent out of view.** Run the leg with the agent in Ironforge: the step fails at once with `the agent must be within view of game object 123329`, with no order sent and the bots unbound.
 9. **Totals.** For a clean leg 0-2 run, `remote.object_steps` should list the chest, the Shaft, the combine and the Keystone, every order `ack`, seconds per step, `refused` empty.
 
+## Remote object steps: wait for a still carrier, and let the agent open and hand over when a bot cannot (issue #83, uldaman-remote-3)
+
+Tested with a fake commander and a fake agent only (`internal/dungeon/remote_fallback_test.go`); nothing below has run live. Evidence behind it: uldaman-remote-3 (the driver sent `cmd open`
+with the carrier ~20 yd from Baelog's Chest; even stationary, the bots' Opening cast was interrupted) and live-dungeon-4 (in group mode the agent opened the same chest first try with
+its own Opening cast). Needs the Baelog's Chest step of the Uldaman plan, five owned bots in the instance, the agent in view of the chest. A TortoiseBots fix for the open order may land
+in parallel: run the first check without it, to see the fallback work, and again with it, to see that the approach alone is enough.
+
+1. **Approach.** Run to the chest step. In the event log / trace: `cmd move` to the stand point (3 yd short of the chest), `cmd stay`, and only then `cmd lootmethod ffa`, `cmd open`. The step's
+   `approach` reads `<carrier> still N yd from the object after S s`; N is at most 5. Does the carrier stand still within a few seconds of the lead bot stopping, or does it keep drifting in
+   its formation (then `approach` says the order went out anyway after 20 s)? Is `cmd follow` after the step enough to make the party walk on with the lead bot?
+2. **Carrier open after the approach.** Does `cmd open` now succeed with the carrier within 5 yd and stationary (before any fallback)? If the Opening cast is still interrupted at once,
+   note the bots' own uncommanded casts (several bots at once) in the tbm log.
+3. **Fallback, GM agent.** Force the failure (a carrier with `cmd open` refused twice, e.g. an older module build, or `carrier` a bot with no Opening skill). Expected: two `open` orders in
+   `orders`, `fallback_used` true, the agent's own Opening cast (spell 6477, 5 s, standing still) in the event log, `.gm visible on` then the trade then `.gm visible off` in `setup_shortcuts`, `run_gm_assists`
+   up by those (and any `.appear`), the Medallion in `.bot inv <carrier>`, `fallback.trade.in_bags` true. Check that the bot actually accepts the trade (the trade RPC's `partner_accepted`) and that the
+   GM is invisible again afterwards (`.gm visible` state, mobs do not aggro it).
+4. **Fallback, player account.** The same with a non-GM agent: it walks to the chest, opens, walks to within 8 yd of the carrier, trades; no GM line anywhere.
+5. **No fallback in combat.** Start a fight (or leave a mob aggroed) while the carrier's orders fail: the run waits up to 60 s, then the step fails with `does not open the object in a fight`;
+   no `.gm visible on` is sent while the party is in combat.
+6. **Combine and Keystone.** Hold the Medallion and the Shaft in the agent's own bags (`.additem`) and refuse `cmd use` on the carrier: the agent uses the Medallion and trades the Staff.
+   With the Staff in the agent's bags and no bot holding it, the Keystone step opens with the agent's own use. With a later step that needs the Staff on a bot, it does not.
+7. **Report.** `remote.object_steps[]`: `carrier_result`, `fallback_used`, `fallback.trade` (`result`, `verified`, `in_bags`, `visible`), `approach`, seconds. The same in the trace (`object_approach`, `object_fallback`, `object_trade`).
+
 ## Remote Uldaman: enter as the bots' own group, wait out a busy tank, read back talents (issue #83, deploy-19i fixes 1, 4, 5)
 
 Tested with a fake commander and feed only (`internal/dungeon/remote_enter_test.go`, `cmd/turtle-agent/commander_methods_test.go`,
