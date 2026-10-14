@@ -86,6 +86,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return dashboardCmd(ctx, args[1:], stdout, stderr)
 	case "minimap-extract":
 		return minimapCmd(args[1:], stdout, stderr)
+	case "plan-export":
+		return planExportCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -109,5 +111,6 @@ func usage(w io.Writer) {
   turtle-agent rotation list | show [--level N] <name|file> | check <file>...
   turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]]
   turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR] [--list]
+  turtle-agent plan-export [--dir dungeons] [--allow-draft] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
   turtle-agent version`)
 }
