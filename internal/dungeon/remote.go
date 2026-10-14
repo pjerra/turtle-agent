@@ -91,7 +91,8 @@ type RemoteOptions struct {
 	// agent's own character open the object and hand the item over with a trade, "off" fails the step as the carrier's refusal says.
 	ObjectFallback string
 	// Enter says how the run gets a party that is not inside the plan's map in (remote_enter.go): "auto" (the default: `.tele name` when
-	// the account is a developer-level GM and the plan names a tele, else walk the lead bot into the portal), "gm", "walk", or "off"
+	// the account is a developer-level GM and the plan names a tele, else `cmd enter` at the portal when the plan has an entrance_trigger,
+	// else walk the lead bot into the portal), "gm", "cmd", "walk", or "off"
 	// (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
 	Enter            string
 	IgnoreEntryLimit bool
@@ -369,6 +370,7 @@ type RemoteDriver struct {
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
 	entryRecorded bool    // the instance the lead bot entered is in the ledger
+	enterCmd      bool    // the portal walk ends in `cmd enter` instead of a wait for the trigger
 	outside       *uint32 // the map a walk before the entry plans its paths on (nil: the plan's)
 	endsAtBind    int
 	stats0        tbm.ViewStats

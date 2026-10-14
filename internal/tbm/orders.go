@@ -21,11 +21,12 @@ import (
 const PendingPrefix = "TBM:ACTION_PENDING|"
 
 // Pending is a TBM:ACTION_PENDING|cmd <verb>|bot:<Name>|<budget seconds>|<object guid or 0> line: the order is accepted and runs; the
-// final ACK or ERR of the same intent and bot follows within the budget. An order for the whole party (`cmd ritual`) says `party` where
-// the bot's name would be: Bot is then empty.
+// final ACK or ERR of the same intent and bot follows within the budget. An order for the whole party (`cmd ritual`, `cmd enter`) says
+// `party` where the bot's name would be: Bot is then empty and Scope "party" (`cmd enter` carries the trigger id in GUID).
 type Pending struct {
 	Intent  string `json:"intent"`
 	Bot     string `json:"bot"`
+	Scope   string `json:"scope,omitempty"` // "party" for an order of the whole party
 	BudgetS int    `json:"budget_s"`
 	GUID    string `json:"guid"`
 }
@@ -49,7 +50,11 @@ func ParsePending(line string) (Pending, bool) {
 	if !party {
 		bot = f[1][4:]
 	}
-	return Pending{Intent: f[0], Bot: bot, BudgetS: n, GUID: f[3]}, true
+	p := Pending{Intent: f[0], Bot: bot, BudgetS: n, GUID: f[3]}
+	if party {
+		p.Scope = "party"
+	}
+	return p, true
 }
 
 // TargetPrefix starts the line that names the object an order by entry chose.
@@ -201,11 +206,13 @@ type OrderResult struct {
 	Loot   *Loot `json:"loot,omitempty"`
 	Opened bool  `json:"opened,omitempty"`
 	// Ritual is the ACK of `cmd ritual` (`party|<participants>|done`): the object turned active and the bots stayed through its cast.
-	Ritual       bool   `json:"ritual,omitempty"`
-	Participants int    `json:"participants,omitempty"`
-	Spell        uint32 `json:"spell,omitempty"`
-	Method       string `json:"method,omitempty"`
-	Threshold    string `json:"threshold,omitempty"`
+	Ritual       bool `json:"ritual,omitempty"`
+	Participants int  `json:"participants,omitempty"`
+	// Entered is the ACK of `cmd enter` (`party|<n>|entered`): the party went through the area trigger (the ACK's count is the bots that did).
+	Entered   bool   `json:"entered,omitempty"`
+	Spell     uint32 `json:"spell,omitempty"`
+	Method    string `json:"method,omitempty"`
+	Threshold string `json:"threshold,omitempty"`
 	// Target is the object an order by entry chose (the ACTION_TARGET line); nil for an order by GUID or one refused before the choice.
 	Target *Target `json:"target,omitempty"`
 	// State is the answer of `cmd state`.
@@ -245,6 +252,10 @@ func (r OrderResult) Describe() string {
 
 // DefaultPendingSlack is the time added to an order's PENDING budget before the wait gives up.
 const DefaultPendingSlack = 5 * time.Second
+
+// EnterPendingSlack is the slack of `cmd enter`: the module ends it with its own timeout ERR about 6 s after the budget, and that line
+// (not silence) is what the run wants to read.
+const EnterPendingSlack = 8 * time.Second
 
 // MaxPendingWait caps the wait that an ACTION_PENDING line can ask for: the budget is the server's word, and a pending order that
 // claims an hour must not hold a run for an hour (the run watchdog cannot see into a blocked order).
@@ -316,7 +327,11 @@ func (c *Commander) OrderWait(ctx context.Context, command string, wait time.Dur
 			}
 			if pd, ok := ParsePending(line); ok && strings.EqualFold(pd.Intent, res.Intent) && (res.Bot == "" || strings.EqualFold(pd.Bot, res.Bot)) {
 				res.Pending = &pd
-				deadline = time.Now().Add(pendingWait(pd.BudgetS, slack))
+				sl := slack
+				if strings.EqualFold(res.Intent, "cmd enter") {
+					sl = max(sl, EnterPendingSlack)
+				}
+				deadline = time.Now().Add(pendingWait(pd.BudgetS, sl))
 				continue
 			}
 			if a, ok := ParseAck(line); ok && strings.EqualFold(a.Intent, res.Intent) {
@@ -379,6 +394,8 @@ func interpretAck(r *OrderResult, a Ack) {
 		if strings.EqualFold(a.Executor, "done") {
 			r.Ritual, r.Participants = true, a.Count
 		}
+	case "enter":
+		r.Entered = strings.EqualFold(a.Executor, "entered")
 	case "lootmethod":
 		r.Method, r.Threshold, _ = strings.Cut(a.Executor, ":")
 	case "state":
@@ -409,4 +426,17 @@ func (c *Commander) Behavior(ctx context.Context, bot, key string, on bool) (Rep
 		wait = DefaultOrderWait
 	}
 	return ReadReply(ctx, log, since, "behavior "+key, wait), nil
+}
+
+var gotInRe = regexp.MustCompile(`\((\d+) of (\d+) got in\)`)
+
+// ParseGotIn reads the "(n of m got in)" a `cmd enter` ERR may end with: how many of the party's bots went through the trigger.
+func ParseGotIn(msg string) (got, of int, ok bool) {
+	m := gotInRe.FindStringSubmatch(msg)
+	if m == nil {
+		return 0, 0, false
+	}
+	got, _ = strconv.Atoi(m[1])
+	of, _ = strconv.Atoi(m[2])
+	return got, of, true
 }

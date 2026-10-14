@@ -18,8 +18,11 @@ import (
 //
 //	GM (an account of developer level, the plan names a game_tele): `.tele name <lead> <tele>`, then `cmd summon <bot>` for each other
 //	bot, SummonGap apart.
+//	cmd (any account, the plan names the portal and its entrance_trigger; needs TortoiseBots #939): `cmd move` legs to the portal, then
+//	`cmd enter <trigger>` takes the party through the area trigger (remote_cmdenter.go); the others are summoned if any stayed out.
 //	walk (any account, the plan names the portal): `cmd move` legs to the area trigger on the outer map; the bots that do not follow
-//	the lead in by themselves are summoned like the above.
+//	the lead in by themselves are summoned like the above. A bot never sends CMSG_AREATRIGGER itself, so this does not work on a
+//	module without `cmd enter`; it is what `cmd` falls back to there.
 //
 // After the entry every bot's feed map must be the plan's within EnterVerify, and the group is not touched again until the run ends:
 // no leave, invite or bind (groupLocked; the only group change left is the unbind that ends the run).
@@ -28,7 +31,7 @@ import (
 const (
 	EnterAuto = "auto" // the default: GM tele when the account is a developer and the plan names a tele, else the walk
 	EnterGM   = "gm"   // `.tele name`, no account probe
-	EnterWalk = "walk" // walk the lead bot into the portal
+	EnterWalk = "walk" // walk the lead bot into the portal (a bot does not take an area trigger by itself: see EnterCmd)
 	EnterOff  = "off"  // do not enter: a lead bot outside the plan's map fails the run
 )
 
@@ -66,6 +69,7 @@ type EnterReport struct {
 	AgentLeftGroup bool               `json:"agent_left_group"`        // the agent's character had to leave a group first
 	Tele           string             `json:"tele,omitempty"`          // the game_tele the lead bot was sent to
 	Summoned       []string           `json:"summoned,omitempty"`      // the bots summoned to the lead bot, in order
+	CmdEnter       *CmdEnterReport    `json:"cmd_enter,omitempty"`     // the `cmd enter` order (method cmd)
 	Resummoned     []string           `json:"resummoned,omitempty"`    // the bots still outside after EnterVerify, summoned once more
 	Arrived        map[string]float64 `json:"arrived,omitempty"`       // seconds after the phase began at which each bot was seen on the plan's map
 	Seconds        float64            `json:"seconds"`
@@ -148,6 +152,10 @@ func (d *RemoteDriver) enter(ctx context.Context) error {
 		if err := d.enterByTele(ctx, e, began); err != nil {
 			return err
 		}
+	case EnterCmd:
+		if err := d.enterByCmd(ctx, began); err != nil {
+			return err
+		}
 	default:
 		if err := d.enterByWalk(ctx, began); err != nil {
 			return err
@@ -215,6 +223,8 @@ func (d *RemoteDriver) entryMethod(ctx context.Context, e Enterer) (string, erro
 			return "", fmt.Errorf("enter walk: plan %s has no portal (the entrance's area trigger on the outer map)", p.Name)
 		}
 		return EnterWalk, nil
+	case EnterCmd:
+		return EnterCmd, d.cmdEnterPossible()
 	}
 	level, known, err := e.AccountLevel(ctx)
 	why := ""
@@ -239,8 +249,25 @@ func (d *RemoteDriver) entryMethod(ctx context.Context, e Enterer) (string, erro
 	if p.Portal == nil {
 		return "", fmt.Errorf("enter: no way in: %s, and plan %s has no portal to walk the bots to", why, p.Name)
 	}
-	d.enterNote(why + ": walking the lead bot into the portal")
+	if d.cmdEnterPossible() == nil {
+		d.enterNote(fmt.Sprintf("%s: walking the party to the portal and ordering it through area trigger %d (cmd enter)", why, p.EntranceTrigger))
+		return EnterCmd, nil
+	}
+	d.enterNote(why + ": walking the lead bot into the portal (a bot does not take an area trigger by itself: without cmd enter this is expected to fail)")
 	return EnterWalk, nil
+}
+
+// cmdEnterPossible says whether the plan and the game allow `cmd enter`: a portal to walk to, the area trigger's id, and the order game.
+func (d *RemoteDriver) cmdEnterPossible() error {
+	switch {
+	case d.plan.EntranceTrigger == 0:
+		return fmt.Errorf("enter cmd: plan %s has no entrance_trigger (the id of the entrance's area trigger)", d.plan.Name)
+	case d.plan.Portal == nil:
+		return fmt.Errorf("enter cmd: plan %s has no portal (the entrance's area trigger on the outer map)", d.plan.Name)
+	case !d.hasOrderGame():
+		return errors.New("enter cmd: this game cannot send player orders")
+	}
+	return nil
 }
 
 // checkEntryLimit refuses a 6th new instance within the hour when the ledger knows five, and warns about the limit otherwise.
@@ -400,9 +427,12 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 		}
 		here := partyPoint(l)
 		if dist3(here, pt.Point) <= float64(d.opt.MoveArrive) {
+			if d.enterCmd {
+				return d.cmdEnterAtDoor(ctx, began)
+			}
 			// At the portal: the trigger should take the lead bot in within a few seconds.
 			if err := d.waitLead(ctx, began, d.opt.EnterGrace); err != nil {
-				return fmt.Errorf("enter: the lead bot stood at the portal and did not enter (does a bot walking into the area trigger go in? the module may need `cmd enter`): %w", err)
+				return fmt.Errorf("enter: the lead bot stood at the portal and did not enter (a bot does not take an area trigger by itself: the module needs `cmd enter`, TortoiseBots #939): %w", err)
 			}
 			return nil
 		}
@@ -624,6 +654,11 @@ func (e *EnterReport) clone() *EnterReport {
 	c := *e
 	c.Summoned = slices.Clone(e.Summoned)
 	c.Resummoned = slices.Clone(e.Resummoned)
+	if e.CmdEnter != nil {
+		ce := *e.CmdEnter
+		ce.Answers = slices.Clone(e.CmdEnter.Answers)
+		c.CmdEnter = &ce
+	}
 	c.Arrived = cloneFloats(e.Arrived)
 	if e.AccountLevel != nil {
 		l := *e.AccountLevel
