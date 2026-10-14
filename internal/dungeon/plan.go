@@ -36,10 +36,41 @@ type Point struct {
 	Z float32 `json:"z"`
 }
 
+// The kinds of plan: a 5-man (or smaller) dungeon, run with a hired party, and a raid, run with a raid group.
+const (
+	KindDungeon = "dungeon"
+	KindRaid    = "raid"
+)
+
+// Plan status: how far a plan has been checked. The field is free text after one of these words, so a plan can say what is
+// missing ("draft (not mapped, not live-checked)"). Only a plan that is mapped or live-checked has had its route corrected from a
+// walk; a draft is a skeleton from the world database export (tools/dungeongen) and is not to be run before its mapping walk.
+const (
+	StatusDraft       = "draft"
+	StatusMapped      = "mapped"
+	StatusLiveChecked = "live-checked"
+
+	// DraftStatus is the status line tools/dungeongen writes.
+	DraftStatus = "draft (not mapped, not live-checked)"
+)
+
+// RaidSpec is a raid plan's group: how many players and, as a placeholder until a raid has been run, the roles they are split into.
+// Size is 10, 20 or 40 and Tanks + Healers + DPS must add up to it.
+type RaidSpec struct {
+	Size    int `json:"size"`
+	Tanks   int `json:"tanks"`
+	Healers int `json:"healers"`
+	DPS     int `json:"dps"`
+}
+
 // Plan is a loaded, validated dungeon plan.
 type Plan struct {
-	Version  int    `json:"version"`
-	Name     string `json:"name"`
+	Version int    `json:"version"`
+	Name    string `json:"name"`
+	// Kind is "dungeon" (the default when absent) or "raid".
+	Kind string `json:"kind,omitempty"`
+	// Status says how far the plan has been checked: draft, mapped or live-checked, then free text (see StatusDraft). Absent: not said.
+	Status   string `json:"status,omitempty"`
 	Map      uint32 `json:"map"`
 	Entrance Point  `json:"entrance"`
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
@@ -67,7 +98,9 @@ type Plan struct {
 	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
 	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
 	CCAlways []uint32 `json:"cc_always,omitempty"`
-	Notes    []string `json:"notes,omitempty"`
+	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
+	Raid  *RaidSpec `json:"raid,omitempty"`
+	Notes []string  `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	Legs     []Leg           `json:"legs"`
@@ -94,13 +127,17 @@ type Leg struct {
 	To   Point  `json:"to"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
-	// `cmd move x y z direct` (TortoiseBots), which walks every bot of the party in a line instead of on a path. See Waypoint.
+	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
+	// and take its line (TortoiseBots #948). See Waypoint.
 	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
 	Skip  []uint32 `json:"skip,omitempty"`
 	Steps []Step   `json:"steps,omitempty"`
 	Boss  *Boss    `json:"boss,omitempty"`
+	// NeedsWalk marks a To that is not on the navmesh and could not be snapped to it (no walkable floor within a few yards: a scripted
+	// area, a platform): the mapping walk has to find the real waypoint. The same flag on a pull group or the boss says the same of its position.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 	// AfterBoss are steps done once the boss is dead (or skipped for the leader's team): the chest by the camp that a hostile boss
 	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
 	AfterBoss []Step `json:"after_boss,omitempty"`
@@ -109,7 +146,7 @@ type Leg struct {
 	Notes []string  `json:"notes,omitempty"`
 }
 
-// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): every bot must be within DirectMaxDistance
+// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
 const (
 	DirectMaxDistance     = 25.0
@@ -168,6 +205,8 @@ type PullGroup struct {
 	// patrol_aggro of the pull, or pulls it alone first when it passes the party away from the pack, and counts it in the pack while
 	// it stands within patrol_aggro of the pull. Nil: no patrol comes by.
 	Patrol *Patrol `json:"patrol,omitempty"`
+	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
 
 // Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
@@ -204,6 +243,8 @@ type Boss struct {
 	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
 	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -329,6 +370,9 @@ type rawPoint struct {
 type rawPlan struct {
 	Version  *int              `json:"version"`
 	Name     string            `json:"name"`
+	Kind     string            `json:"kind"`
+	Status   string            `json:"status"`
+	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
 	Trigger  uint32            `json:"entrance_trigger"`
@@ -365,6 +409,7 @@ type rawLeg struct {
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	Rest       *RestSpec         `json:"rest"`
 	Notes      []string          `json:"notes"`
+	NeedsWalk  bool              `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -374,6 +419,7 @@ type rawPullGroup struct {
 	Radius    float32    `json:"radius"`
 	Team      string     `json:"team"`
 	Equiv     string     `json:"equiv"`
+	NeedsWalk bool       `json:"needs_walk"`
 	Patrol    *rawPatrol `json:"patrol"`
 }
 
@@ -392,6 +438,7 @@ type rawBoss struct {
 	LootItem *rawItem  `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
+	NeedsWalk      bool  `json:"needs_walk"`
 }
 
 type rawStep struct {
@@ -527,6 +574,7 @@ func Parse(name string, data []byte) (*Plan, error) {
 	} else {
 		p.Map = *rp.Map
 	}
+	c.kindStatus(p, &rp)
 	p.Entrance = c.point("entrance", rp.Entrance)
 	p.EntranceTrigger = rp.Trigger
 	if rp.Tele != "" && !teleName.MatchString(rp.Tele) {
@@ -545,13 +593,6 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
-	}
-	if len(rp.Hire) > 0 {
-		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
-			c.fail("hire_composition", "%v", err)
-		} else {
-			p.HireComposition = slices.Clone(rp.Hire)
-		}
 	}
 	if len(rp.CCPrio) > 0 {
 		p.CCPriority = slices.Clone(rp.CCPrio)
@@ -590,6 +631,54 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	return p, nil
 }
+
+// kindStatus checks and copies the kind, status, hire_composition and raid fields.
+func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
+	switch rp.Kind {
+	case "", KindDungeon, KindRaid:
+		p.Kind = rp.Kind
+	default:
+		c.fail("kind", "%q: use %q or %q", rp.Kind, KindDungeon, KindRaid)
+	}
+	if rp.Status != "" {
+		word, _, _ := strings.Cut(rp.Status, " ")
+		if !slices.Contains([]string{StatusDraft, StatusMapped, StatusLiveChecked}, word) {
+			c.fail("status", "%q: start with %s, %s or %s", rp.Status, StatusDraft, StatusMapped, StatusLiveChecked)
+		} else {
+			p.Status = rp.Status
+		}
+	}
+	if len(rp.Hire) > 0 {
+		if rp.Kind == KindRaid {
+			c.fail("hire_composition", "a raid plan has a raid block instead")
+		} else if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", strings.TrimPrefix(err.Error(), "prepare.hire.composition: "))
+		} else {
+			p.HireComposition = rp.Hire
+		}
+	}
+	switch {
+	case rp.Raid == nil && rp.Kind == KindRaid:
+		c.fail("raid", "required for a raid plan: {\"size\": 40, \"tanks\": .., \"healers\": .., \"dps\": ..}")
+	case rp.Raid != nil && rp.Kind != KindRaid:
+		c.fail("raid", "only a plan of kind %q has a raid block", KindRaid)
+	case rp.Raid != nil:
+		r := *rp.Raid
+		switch {
+		case !slices.Contains([]int{10, 20, 40}, r.Size):
+			c.fail("raid.size", "%d: use 10, 20 or 40", r.Size)
+		case r.Tanks < 1 || r.Healers < 1 || r.DPS < 1:
+			c.fail("raid", "needs at least one tank, one healer and one damage dealer")
+		case r.Tanks+r.Healers+r.DPS != r.Size:
+			c.fail("raid", "%d tanks + %d healers + %d dps is %d, the size is %d", r.Tanks, r.Healers, r.DPS, r.Tanks+r.Healers+r.DPS, r.Size)
+		default:
+			p.Raid = &r
+		}
+	}
+}
+
+// IsRaid says whether the plan is a raid plan.
+func (p *Plan) IsRaid() bool { return p.Kind == KindRaid }
 
 // strict decodes JSON that must hold exactly one value of v's shape and no unknown field.
 func strict(data []byte, v any) error {
@@ -642,7 +731,7 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk}
 	l.To = c.point(path+".to", r.To)
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
@@ -661,7 +750,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv, NeedsWalk: g.NeedsWalk}
 		c.team(gp+".team", g.Team)
 		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
 			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
@@ -709,7 +798,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
