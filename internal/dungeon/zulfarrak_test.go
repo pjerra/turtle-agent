@@ -75,9 +75,10 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	if fmt.Sprint(names) != "[antusul theka velratha]" || fmt.Sprint(bosses) != "[8127 7272 7795]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
-	// The hired party brings a mage for the big packs (owner decision 2026-10-14), and its CC goes on Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPrefer) != "[5650 5648]" {
-		t.Errorf("hire %v cc_prefer %v", p.HireComposition, p.CCPrefer)
+	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
+	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5650 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" {
+		t.Errorf("hire %v cc_priority %v cc_always %v", p.HireComposition, p.CCPriority, p.CCAlways)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
 	if p.EntranceTele != "" || p.OutsideTele != "farrak" || p.Portal == nil || p.Portal.Map != 1 || p.EntranceTrigger != 924 {

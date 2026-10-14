@@ -13,9 +13,10 @@ import (
 // for a level-46 tank even with the threat back-off (hires-2: two wipes of 7- and 10-mob pulls; Uldaman's smaller packs ran clean). A pack
 // is pulled as one (its mobs are linked), so it cannot be split; the cut is one member crowd-controlled before the pull: the cc bot (the
 // hired mage, RemoteOptions.CCBot) gets `cmd cc moon <guid> <bot>` and Polymorphs it, and the party leaves it alone (tankFirst.ccHeld)
-// until it is the last of the fight. The mark goes on a member of the plan's cc_prefer entries if one is there (the healers and casters),
+// until it is the last of the fight. The mark goes on a member of the plan's cc_priority entries if one is there (the healers and casters),
 // else on the member farthest from the pull target, and never on the pull target itself. A run with no cc bot notes the big pack and
-// pulls it as it is.
+// pulls it as it is. A pack with a member of the plan's cc_always entries (Zul'Farrak's Shadowhunter and its Hex) gets the CC whatever its
+// size, on that member.
 
 // BigPack is the size of a pack (living mobs the bots see within the group's radius of the pull target) that gets a CC before the pull.
 const BigPack = 5
@@ -35,10 +36,13 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 			pack = append(pack, h)
 		}
 	}
-	if len(pack) < d.tx.BigPack {
+	always := slices.ContainsFunc(pack, func(h tbm.HostileRec) bool { return h.GUID != t.GUID && slices.Contains(d.plan.CCAlways, h.Entry) })
+	if len(pack) < d.tx.BigPack && !always {
 		return nil
 	}
-	d.remote(func(r *RemoteReport) { r.BigPacks++ })
+	if len(pack) >= d.tx.BigPack {
+		d.remote(func(r *RemoteReport) { r.BigPacks++ })
+	}
 	for _, h := range pack {
 		if d.tf.ccHeld[h.GUID] || h.CrowdControlled() {
 			return nil // a CC rule (or an earlier try) already took one
@@ -53,7 +57,7 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 		d.rep.note(fmt.Sprintf("leg %d: the pack of %s has %d mobs; the cc bot %s is not with the party alive; pulled as it is", d.curLeg, d.hostileName(t), len(pack), bot))
 		return nil
 	}
-	pick, ok := d.ccPick(t, pack)
+	pick, ok := d.ccPick(t, pack, always)
 	if !ok {
 		return nil
 	}
@@ -73,20 +77,20 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 	return nil
 }
 
-// ccPick is the member of pack the big-pack CC takes: never the pull target; the plan's cc_prefer entries first (in their order), the
-// member farthest from the target among equals.
-func (d *RemoteDriver) ccPick(t tbm.HostileRec, pack []tbm.HostileRec) (tbm.HostileRec, bool) {
+// ccPick is the member of pack the CC takes: never the pull target; a cc_always member when there is one (always), then the plan's
+// cc_priority entries (in their order), the member farthest from the target among equals.
+func (d *RemoteDriver) ccPick(t tbm.HostileRec, pack []tbm.HostileRec, always bool) (tbm.HostileRec, bool) {
 	rank := func(h tbm.HostileRec) int {
-		if i := slices.Index(d.plan.CCPrefer, h.Entry); i >= 0 {
+		if i := slices.Index(d.plan.CCPriority, h.Entry); i >= 0 {
 			return i
 		}
-		return len(d.plan.CCPrefer)
+		return len(d.plan.CCPriority)
 	}
 	var best tbm.HostileRec
 	found := false
 	for _, h := range pack {
-		if h.GUID == t.GUID {
-			continue
+		if h.GUID == t.GUID || (always && !slices.Contains(d.plan.CCAlways, h.Entry)) {
+			continue // a pack below big_pack is CCed for its cc_always member only
 		}
 		if !found || rank(h) < rank(best) || (rank(h) == rank(best) && dist3(hostilePoint(h), hostilePoint(t)) > dist3(hostilePoint(best), hostilePoint(t))) {
 			best, found = h, true
