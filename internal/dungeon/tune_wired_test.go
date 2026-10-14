@@ -152,8 +152,8 @@ func TestTunedAheadPulls(t *testing.T) {
 	if rep, err, _ := run("", Point{60, 8, 0}); err != nil || rep.Remote.AheadPulls != 1 {
 		t.Fatalf("untuned: %v %+v", err, rep.Remote)
 	}
-	if rep, err, _ := run(`{"aggro_guard": 8}`, Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 0 {
-		t.Fatalf("a mob 20 yd off the way with aggro_guard 8: %v %+v", err, rep.Remote)
+	if rep, err, _ := run(`{"aggro_guard": 8, "gather_clear": 10}`, Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 0 {
+		t.Fatalf("a mob 20 yd off the way with aggro_guard 8 and gather_clear 10: %v %+v", err, rep.Remote)
 	}
 	if rep, err, _ := run("", Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 1 {
 		t.Fatalf("a mob 20 yd off the way, untuned: %v %+v", err, rep.Remote)
