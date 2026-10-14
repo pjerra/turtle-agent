@@ -1327,6 +1327,8 @@ func TestHireKeptBindingTakesWhoFromMemory(t *testing.T) {
 	rep, err = runRemote(t, g, g.plan, RemoteOptions{Prepare: hireSpec(), HireMemory: mem}, nil)
 	if err != nil || rep.State != "done" || g.count("logout") != 0 || len(g.hireLines) != 0 || len(rep.Ready.Reused) != 5 {
 		t.Fatalf("%v %s %v\n%s", err, rep.State, g.events, notesOf(rep))
+	}
+}
 
 // "They can have epic as long as it's for their level" (owner, 2026-10-14): an epic whose required level is at most the bot's and whose
 // item level is at most the bot's plus 5 is allowed; a higher required level or item level is out of band and still listed.
