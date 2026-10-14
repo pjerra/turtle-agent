@@ -179,6 +179,9 @@ func (d *Driver) awaitItem(ctx context.Context, it *ItemRef, what string) error 
 		if waited >= itemArriveMax {
 			return fmt.Errorf("%s, but %s is not in the leader's bags after %.0f s (see the loot_*, spell_fail and inventory_error events)", what, it, itemArriveMax.Seconds())
 		}
+		if d.wdObject.take() {
+			return fmt.Errorf("%s, but %s is not in the leader's bags: the watchdog gave up the wait after a stall", what, it)
+		}
 		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 			return err
 		}

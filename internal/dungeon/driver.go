@@ -153,6 +153,9 @@ type Config struct {
 	BrainName string
 	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
 	Trace tracerun.Config
+	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
+	// the default (120/240/420 s), a negative one turns that level off.
+	Watchdog WatchdogConfig
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -346,6 +349,12 @@ type Driver struct {
 
 	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	stopSampler func()
+
+	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
+	wd        *watchdog
+	wdEndRest flagOnce // end the rest gate
+	wdRepick  flagOnce // end the fight, to pick the target again
+	wdObject  flagOnce // give up the wait of the object step
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -355,6 +364,7 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	}
 	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}, buffedAt: map[packet.GUID]int{}, skipped: map[packet.GUID]string{}}
 	d.rep.init(plan, clk.Now)
+	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
 	d.rep.r.Brain = cfg.BrainName
@@ -377,6 +387,7 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 	}
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
+	d.wd.start()
 	err := d.run(ctx, fromLeg)
 	d.finish(err)
 	return err
@@ -386,6 +397,7 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 // that sees "done", "failed" or "stopped" finds dungeon_done or dungeon_failed in the event log, and a report that is still "running"
 // is a run whose end has not been announced.
 func (d *Driver) finish(err error) {
+	d.wd.stop()
 	leg := d.curLeg
 	var state, errText, kind, text string
 	switch {
@@ -425,6 +437,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		a := d.st.Next()
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
+		d.wd.setStep(a.Label)
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
@@ -445,13 +458,18 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 				waiting = [2]int{a.Leg, a.Step}
 				d.emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind)})
 			}
-			if err := d.sleep(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
+			// A plan's wait has its own timeout_s: the watchdog does not count it.
+			release := d.wd.hold()
+			err := d.sleep(ctx, min(d.cfg.WaitPoll, a.Remaining))
+			release()
+			if err != nil {
 				d.stepFailed(err)
 			}
 			continue
 		}
 		began := d.clk.Now()
 		var err error
+		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
 			err = d.tracedWalk(ctx, a.To)
@@ -468,6 +486,10 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		default:
 			err = fmt.Errorf("unknown action %q", a.Kind)
 		}
+		leave()
+		if wdObjectKind(a.Kind) {
+			d.wd.progress("object step result: " + a.Label)
+		}
 		data := map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds()}
 		if err != nil {
 			data["error"] = err.Error()
@@ -478,6 +500,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			continue
 		}
 		d.st.Complete()
+		d.wd.progress("step done: " + a.Label)
 	}
 }
 
@@ -739,7 +762,10 @@ func (d *Driver) sleep(ctx context.Context, dur time.Duration) error {
 		return err
 	}
 	d.drainRefusals()
-	return d.check(ctx)
+	if err := d.check(ctx); err != nil {
+		return err
+	}
+	return d.wd.watch(ctx)
 }
 
 // sleepHeld is sleep for a wait made under the brain's move lock: it only waits (and drains refusals), with no look at the party. A leader
@@ -750,7 +776,7 @@ func (d *Driver) sleepHeld(ctx context.Context, dur time.Duration) error {
 		return err
 	}
 	d.drainRefusals()
-	return nil
+	return d.wd.watch(ctx)
 }
 
 func (d *Driver) observeInit() {
@@ -1143,6 +1169,11 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
+	d.wdEndRest.clear()
+	defer d.wd.enter("rest gate", "", func(context.Context) (string, error) {
+		d.wdEndRest.set()
+		return "ended the rest gate (the party goes on as it is)", nil
+	})()
 	ordered, refusedSeen := false, false
 	held := false // the gate has waited for something: its first frame did not pass it
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
@@ -1187,6 +1218,11 @@ func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 		fightBegan, lastAssist = time.Time{}, time.Time{}
 		st := d.restState(rw)
 		rec.g.Short = st.short
+		if d.wdEndRest.take() {
+			rec.g.Result = "gave_up"
+			d.rep.note(fmt.Sprintf("leg %d: rest gate ended by the watchdog after a stall (%s)", d.curLeg, st.why))
+			return nil
+		}
 		if len(st.dead) > 0 {
 			held = true
 		}
@@ -1900,6 +1936,10 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		}
 		if fighting {
 			engaged, lastCombat = true, now
+		}
+		d.wd.fightSignal(len(killed), healthPct(fighters))
+		if d.wdRepick.take() {
+			return fightResult{out: retarget, kills: len(killed), why: "the watchdog ended a stalled fight"}, nil
 		}
 		switch {
 		case alive == 0:

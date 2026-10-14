@@ -24,7 +24,7 @@ const (
 // runEnded says whether err ends the run (a binding lost, a stalled feed, a wipe, the run's own context), as opposed to a failure of
 // one part that the caller can note and go on from.
 func runEnded(ctx context.Context, err error) bool {
-	return err != nil && (ctx.Err() != nil || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) || errors.Is(err, errWipe) ||
+	return err != nil && (ctx.Err() != nil || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) || errors.Is(err, errStalled) || errors.Is(err, errWipe) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 

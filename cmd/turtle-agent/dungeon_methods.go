@@ -145,6 +145,10 @@ type dungeonRunParams struct {
 	// header (the server build, the TortoiseBots SHA, a scenario name): at most 16 entries.
 	Trace     *bool             `json:"trace,omitempty"`
 	TraceMeta map[string]string `json:"trace_meta,omitempty"`
+	// Watchdog sets the progress watchdog's stall levels in seconds without progress (README "Run watchdog"): warn_s (a stall event and a
+	// note), recover_s (one recovery attempt suited to the phase), fail_s (the run stops with "stalled: ..."). Defaults 120/240/420; a zero
+	// field takes the plan's own or the default, a negative one turns that level off. It wins field by field over the plan's "watchdog".
+	Watchdog *dungeon.WatchdogConfig `json:"watchdog,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -170,6 +174,12 @@ type dungeonStatusResult struct {
 	Running bool            `json:"running"`
 	State   string          `json:"state"` // idle, running, done, failed or stopped
 	Report  *dungeon.Report `json:"report,omitempty"`
+	// The progress watchdog's view, lifted out of report.watchdog for a poller that wants to see at a glance whether a run hangs: when it
+	// last made progress, the seconds since then (0 while it waits on something with a limit of its own) and the stall level (none, warn,
+	// recover or fail).
+	LastProgressAt *time.Time `json:"last_progress_at,omitempty"`
+	StalledForS    float64    `json:"stalled_for_s"`
+	StallLevel     string     `json:"stall_level"`
 }
 
 // planName limits a plan name to what a file name in the plans folder can be.
@@ -260,6 +270,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, err
 	}
+	if err := watchdogParam(plan, p); err != nil {
+		return dungeonRunResult{}, err
+	}
 	tcfg, err := r.traceConfig(p)
 	if err != nil {
 		return dungeonRunResult{}, err
@@ -325,6 +338,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	cfg.Trace = tcfg
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
+	if p.Watchdog != nil {
+		cfg.Watchdog = *p.Watchdog
+	}
 	cfg.Resume = p.Resume != nil && *p.Resume
 	leaderGM := "probe"
 	switch {
@@ -398,13 +414,33 @@ func (r *dungeonRunner) status() dungeonStatusResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.drv == nil {
-		return dungeonStatusResult{State: "idle"}
+		return dungeonStatusResult{State: "idle", StallLevel: "none"}
 	}
 	// The run's goroutine is read first: it ends after the driver published the end of the run (and its event), so a goroutine seen
 	// gone means a final report. The report and whether it ended are one snapshot; a state that is not final is a run that goes on.
 	gone := !r.running()
 	rep, ended := r.drv.Status()
-	return dungeonStatusResult{Running: !gone || !ended, State: rep.State, Report: &rep}
+	res := dungeonStatusResult{Running: !gone || !ended, State: rep.State, Report: &rep, StallLevel: "none"}
+	if w := rep.Watchdog; w != nil {
+		at := w.LastProgressAt
+		res.LastProgressAt, res.StalledForS, res.StallLevel = &at, w.StalledForS, w.StallLevel
+	}
+	return res
+}
+
+// watchdogParam refuses a watchdog parameter that, on top of the plan's own, leaves the levels out of order (warn_s < recover_s < fail_s).
+func watchdogParam(plan *dungeon.Plan, p dungeonRunParams) error {
+	var c dungeon.WatchdogConfig
+	if plan.Watchdog != nil {
+		c = *plan.Watchdog
+	}
+	if p.Watchdog != nil {
+		c = c.Merge(*p.Watchdog)
+	}
+	if err := c.Validate(); err != nil {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+	}
+	return nil
 }
 
 // wait blocks until the run's goroutine has ended or d has passed.

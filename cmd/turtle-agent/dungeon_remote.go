@@ -100,6 +100,9 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	cfg.Trace = tcfg
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
 	cfg.Resume = p.Resume != nil && *p.Resume
+	if p.Watchdog != nil {
+		cfg.Watchdog = *p.Watchdog
+	}
 	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)

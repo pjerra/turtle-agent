@@ -830,3 +830,29 @@ Evidence: remote run 4 did the chest, the Shaft, the Staff combine and the Keyst
 2. **No walk past a pack.** With mobs near the way to the Seal (anywhere along it, seen by the bots or only by the agent) the agent stays put (`the agent stays where it is: ... stands near its way`) and the wait is unchecked.
 3. **Still carrier.** `object_steps[].approach` says `still N yd ... after S s`; the first `cmd open` of Baelog's Chest is no longer interrupted by a 1-2 yd move
    (`cast interrupted ... the bot moved`).
+
+## Run watchdog: a run never sits stuck (issues #73, #83)
+
+Evidence: the three live remote Uldaman runs of 2026-10-14 waited where nothing could move them on (the carrier's `cmd open` at Baelog's chest,
+rest gates of 34 % of the run, an unbound party left fighting). The watchdog is tested against the fake feed and the fake game only; nothing below
+has run live. Use short levels so that the checks do not take ten minutes: `"watchdog": {"warn_s": 30, "recover_s": 60, "fail_s": 120}`.
+
+1. **Quiet while it works.** A normal remote run (and a group run) to the first boss with the default levels: `dungeon_status.stall_level` is `none`
+   at every poll, `stalled_for_s` stays under ~60 (a rest gate, a long walk), and `report.watchdog.warnings` is 0. Check `longest_stall_s` against the
+   slowest gate in `rest_gates[]`: if a normal gate (the 60 s cap, a leg's `rest.max_s`) ever warns, the defaults are too tight for that plan.
+2. **A boss fight of many minutes.** The Revelosh or Ironaya fight: no `stall` events while the boss's health falls; `last_progress` reads `the fought
+   mobs lost health` or `kill`. A tank that holds a boss that is not being hurt (everyone dead but the healer) stalls for real.
+3. **Rest gate.** Make a caster out of drinks (`.bot maintenance` refused, or no drinks): the gate warns at `warn_s`, is ended at `recover_s`
+   (`rest_gates[].result` `gave_up`, the note `rest gate ended by the watchdog after a stall`) and the run goes on.
+4. **Walk.** Root the lead bot (or `.gm`-freeze it) mid-walk: the warn note names `walk <step>` and the last `cmd move`; at `recover_s` a `cmd move`
+   of at most 40 yd from the bot's position goes out (`orders.move` +1, the note `planned the walk again`). Does the bot move on that order?
+5. **Object step.** The chest at Baelog's: with the module's `in-combat` or `busy` refusals the retries are cancelled at `recover_s` and the step goes
+   through its retry/fallback (`object_steps[].fallback`); the note says `cancelled the carrier order's retries`. A carrier whose `cmd open` never answers
+   is bounded by the order's own wait (`DefaultOrderWait` plus the pending budget), not by the watchdog: report how long that was.
+6. **Silent feed.** `commander view off` by hand mid-run: after `FeedLost / 2` (22 s) one `commander view on` goes out by itself (`the feed has been
+   silent for ... s`); with `FeedLost` raised past `fail_s`, the recovery sends it at `recover_s`. Does the module resume the feed on the second `view on`?
+7. **Fail.** Kill the carrier or hold a bot with a fear so that nothing progresses: at `fail_s` the run ends `failed` with
+   `stalled: <phase> <step> for N s, last progress <what>`, the party in combat is fought for up to `EndFightWait` before `cmd stay` and the unbind
+   (`remote.end_fight`), and `dungeon_status` shows `stall_level` `fail`.
+8. **Pauses.** A leader's death in group mode with a corpse run of several minutes, and a plan's `wait_for` of 60 s: `stalled_for_s` is 0 while they
+   last and no `stall` event comes.

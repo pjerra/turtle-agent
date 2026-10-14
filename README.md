@@ -251,7 +251,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)) and `ignore_entry_limit` (try a 6th new instance within the hour) for it | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)) and `ignore_entry_limit` (try a 6th new instance within the hour) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -260,7 +260,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `pet` | | The player's pet, from `UNIT_FIELD_SUMMON` of the player and the pet's own unit row: `present` (false: no pet), `guid`, `entry`, `name`, `level`, `dead`, `health`, `max_health`, `power_type` (2 focus for a hunter's pet, 0 mana for a demon), `power`, `max_power`, `happiness` (the pet's POWER5, 0 to 1,000,000) and `happiness_state` (1 unhappy, 2 content, 3 happy; absent for a demon), `loyalty`, `in_combat`, `target` (what it attacks), `distance`, `moving`; and its action bar, from `SMSG_PET_SPELLS`: `bar` (the session has it), `react` (`passive`, `defensive`, `aggressive`), `command` (`stay`, `follow`), `enabled` (false while the bar is off, e.g. mounted), `spells[]` (`spell_id`, `name`, `slot` 3 to 6 or -1 off the bar, `autocast`, `passive`), `refused` (the reason of its last refused cast). See [Pets](#pets) |
 | `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
-| `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
+| `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
@@ -553,6 +553,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   enter phase reads two more optional keys: `entrance_tele` (the `game_tele` name that puts a player at the entrance inside, Uldaman
   `ulda`, game_tele 169; letters, digits and `_`) and `portal` (`{"map": 0, "x": .., "y": .., "z": ..}`, the centre of the entrance's area
   trigger on the outer map; Uldaman: areatrigger 286, radius 10). A plan without them can only be entered by hand.
+- `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
+  the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
 - A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
   [Dungeon runs](#dungeon-runs); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
@@ -833,9 +835,51 @@ them: they are there so that a report shows what a run was started with. A run w
 a player could have done.
 
 Limits of this driver: no CC marks, no loot orders beyond the `companions_loot` pair (the companions loot on their own), no stuck detection beyond
-the bounds above, and stealthed packs are walked through, not pulled. The code is
+the bounds above and the [run watchdog](#run-watchdog), and stealthed packs are walked through, not pulled. The code is
 tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
 `docs/LIVE-CHECKS.md`.
+
+### Run watchdog
+
+Issue #73, #83. A run must never sit stuck without making progress (the live Uldaman runs waited on a chest order, a rest gate and a
+silent feed for minutes). Both drivers (group and remote) feed one watchdog (`internal/dungeon/watchdog.go`) and ask it at every wait.
+
+**Progress** is any of: the step or leg index advanced; a pull started or ended; a kill, or the fought mobs lost health (so a long boss fight
+that wears the boss down never stalls); the lead bot (remote) or the leader (group) moved more than 5 yd; an order was ACKed, *if it is not the
+order that was ACKed last* (the same `cmd move` or `cmd rest` sent again and again does not keep a stuck run alive; remote orders only, a chat
+order has no ACK); a rest gate finished; an object step ended. A death's recovery (corpse runs, resurrection waits) and a plan's `wait_for`
+(its own `timeout_s`) pause the clock; it starts over when they end.
+
+**Levels**, seconds without progress, `watchdog {warn_s, recover_s, fail_s}` in the plan or in `dungeon_run` (defaults 120/240/420; a
+negative field turns that level off; `dungeon_run`'s field wins over the plan's; levels out of order are refused). Each fires once per stall;
+progress ends the stall and the levels can fire again.
+
+| Level | What happens |
+| --- | --- |
+| warn | a `stall` trace event and a report note: the time, the last progress, the phase and plan step the run waits on, the last order and its answer |
+| recover | one bounded recovery attempt, by phase (below); noted, and a `stall` event with `recovery` |
+| fail | the run stops cleanly: `error` is `stalled: <phase> <step> for N s, last progress <what>`, `state` is `failed`; the end-of-run fight handling and the unbind still run (the watchdog is off by then) |
+
+Recoveries. Remote: **walk** re-plans from the lead bot's position with a shorter leg (`cmd move` at most 40 yd on), **rest gate** ends the
+gate (`gave_up`, the party goes on as it is), **object step** cancels the carrier order's retries so that the step's retry or fallback takes
+over, **pull/fight** sends `cmd follow` and ends the fight so that the target is picked again, **feed silent** (no frame for `FeedStale`)
+sends `commander view on` again. The feed is also switched on again once, at half of `FeedLost` silence, before the run is failed for it.
+Group: **rest gate** ends the gate, **pull/fight** orders `follow` and picks again, an **object step** gives up its wait for the item; a
+group **walk** has nothing to cancel (each try plans again from where the leader stands). A phase with no recovery of its own uses the
+enclosing phase's; with none the stall is noted and the failure comes at `fail_s`.
+
+The watchdog is looked at from the drivers' own waits, never from a goroutine: a single game call that blocks is bounded by its own
+timeout and is judged at the next wait.
+
+**RPC.** `dungeon_status` has `last_progress_at`, `stalled_for_s` (0 while the clock is paused) and `stall_level`, and the same with the limits
+and totals in `report.watchdog`: `warn_s`/`recover_s`/`fail_s` (0: off), `last_progress_at`, `last_progress` (what it was), `stalled_for_s`,
+`stall_level`, `waiting`, `warnings`, `recoveries`, `longest_stall_s`. A poller needs only `stall_level`: `none` is a run that moves,
+`warn` and `recover` a run that is being looked after, `fail` a run that has been stopped.
+
+Tests: `internal/dungeon/watchdog_test.go` (the watchdog on a fake clock: each level fires once per stall, progress resets it, the recovery is
+attempted once, the failure text, the pause) and `watchdog_driver_test.go` (both drivers: a stuck rest gate ended and failed, a stalled pull
+recovered, a long fight that wears its mob down never stalls, a walk re-planned, a silent feed, the carrier's retries cancelled); the RPC
+fields in `cmd/turtle-agent/dungeon_methods_test.go`. Not verified live: see `docs/LIVE-CHECKS.md`, "Run watchdog".
 
 ## Run traces and checks
 
@@ -908,6 +952,7 @@ Events (`ev`; fields beside `ev`, a field named like an envelope field is writte
 | `refusal` | group mode: a bot's whisper or `TBM:ACTION_ERR` refusing an order: `intent`, `code`, `message` |
 | `pull_start`, `pull_end` | a pull: `target`, `entry`, `guid`, position; the end has `outcome` (`won`, `no_engage`, `evaded`, `refused`, `retarget`, `error`), `kills`, `seconds` |
 | `rest` | a rest gate ended: `seconds` waited, `leg` |
+| `stall` | the [run watchdog](#run-watchdog) fired: `level` (`warn`, `recover`, `fail`), `stalled_s`, `last_progress`, `waiting` (phase, step, last order), `phase`; a recovery has `recovery` (what it did) and `recovery_error`, a failure `error` |
 | `walk_start`, `walk_end` | a walk of the plan: target `x y z`; the end has `ok`, `error`, `seconds` |
 | `death`, `wipe` | a party member died (`a` its guid, `name`); the whole party was dead (a wipe, recovered or not) |
 | `combat_on`, `combat_off` | a member's combat state changed between two frames (`a`, `name`), as the server's |

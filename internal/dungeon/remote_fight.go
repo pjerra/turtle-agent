@@ -560,6 +560,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				return fightResult{}, err
 			}
 		}
+		d.wd.fightSignal(len(killed), hostilesPct(fightingMobs))
+		if d.wdRepick.take() {
+			return fightResult{out: retarget, kills: len(killed), dead: deadOf(), why: "the watchdog ended a stalled fight"}, nil
+		}
 		switch {
 		case alive == 0 && len(killed) > 0:
 			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
