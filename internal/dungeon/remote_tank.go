@@ -26,6 +26,14 @@ const (
 	maxAddOrders = 3
 	// stickShare is the tank's share on the mob the party fights below which the party may be sent at another mob.
 	stickShare = 50
+	// tankReachYd is how far (yards, horizontal) from a mob the tank may stand for an attack order at it: the module refuses a bot
+	// farther than its sight distance (60) from the target ("That bot did not accept the attack", now too-far).
+	tankReachYd = 60
+	// tankFarPause is how long loose-add orders to the tank stop after the module answered one too-far although the feed showed the tank
+	// near (the feed's positions can be a second old, or the module measures from elsewhere): a fixed pause, never a wait without end.
+	tankFarPause = 10 * time.Second
+	// tankAwayWait is the most a pull waits for a tank that is dead, released or away from the lead bot.
+	tankAwayWait = 90 * time.Second
 	// switchLead is how many points of share another mob must lead the one the party fights by, below stickShare, to be taken instead.
 	switchLead = 25
 	// tankSwitchHold is how long the tank is left on the loose add it was last sent at, while that add is alive and still off the tank,
@@ -51,6 +59,8 @@ type tankFirst struct {
 	sampledN   uint64                    // the frame the tank's share was last sampled at
 	shareSum   float64                   // the sum of the samples
 	shareCount int
+	farUntil   time.Time // loose-add orders to the tank wait until then (the module answered one too-far)
+	farNoted   bool      // the wait for a tank that is away is noted once per absence
 }
 
 func (t *tankFirst) init() {
@@ -196,6 +206,9 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 	hold := d.tf.lastAdd != 0 && now.Sub(d.tf.lastAddAt) < tankSwitchHold && slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool {
 		return h.GUID == d.tf.lastAdd && h.HPPct > 0 && h.Target != d.tank && d.tankShare(h) < 100
 	})
+	if now.Before(d.tf.farUntil) {
+		return nil
+	}
 	for _, h := range d.respectCC(mobs) {
 		if _, ok := d.engagedAt[h.GUID]; !ok {
 			d.engagedAt[h.GUID] = now
@@ -219,6 +232,17 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		if at, ok := d.tf.addAt[h.GUID]; (ok && now.Sub(at) < d.opt.AddCooldown) || d.tf.addN[h.GUID] >= d.tx.AddOrders {
 			continue
 		}
+		// Never an attack order at a tank that cannot take it (released, or far from the mob): the module refuses it, the order is
+		// wasted and the add stays loose (Zul'Farrak hires-3: the tank was at the graveyard, 433 yd off, and 11 orders were refused).
+		if why := d.tankFarFrom(tank, hostilePoint(h)); why != "" {
+			if !d.tf.farNoted {
+				d.tf.farNoted = true
+				d.remote(func(r *RemoteReport) { r.TankOrdersHeld++ })
+				d.rep.note(fmt.Sprintf("leg %d: no attack order at %s for the tank %s: %s; waiting for it to come back", d.curLeg, d.hostileName(h), tank.Name, why))
+			}
+			continue
+		}
+		d.tf.farNoted = false
 		d.tf.addAt[h.GUID] = now
 		d.tf.addN[h.GUID]++
 		d.tf.lastAdd, d.tf.lastAddAt = h.GUID, now
@@ -234,6 +258,11 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		}
 		if ref, bad := refusedOf(r); bad {
 			d.rep.note(fmt.Sprintf("the tank order at %s was refused: %s (%s)", d.hostileName(h), ref.Code, ref.Message))
+			if ref.Code == "too-far" {
+				// The tank is out of the module's reach of the mob: no more tank orders until the feed shows it back (or the pause ends).
+				d.tf.farUntil = now.Add(tankFarPause)
+				d.rep.note(fmt.Sprintf("leg %d: the module says the tank %s is too far from %s; tank orders are paused", d.curLeg, tank.Name, d.hostileName(h)))
+			}
 		}
 		// `cmd attack <guid> <bot>` must come back scoped to the bot. A module from before #928 ignores the name and sends the whole party
 		// at the add: no tank-first then, so the orders stop for the run.
@@ -268,5 +297,63 @@ func (d *RemoteDriver) noteFocus(g packet.GUID, mobs []tbm.HostileRec) {
 	d.tf.focus = g
 	if prev != 0 && prev != g && slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return h.GUID == prev }) {
 		d.remote(func(r *RemoteReport) { r.TargetSwitches++ })
+	}
+}
+
+// tankFarFrom says why the tank cannot take an attack order at p, or "" when it can: dead or released (a ghost shows dead), on another
+// map than the lead bot, or farther than tankReachYd from p.
+func (d *RemoteDriver) tankFarFrom(tank tbm.PartyRec, p Point) string {
+	if tank.Dead {
+		return "it is dead"
+	}
+	if l, ok := d.fr.LeadRec(); ok && tank.Map != l.Map {
+		return "it is on another map"
+	}
+	if dd := hdist(partyPoint(tank), p); dd > tankReachYd {
+		return fmt.Sprintf("it stands %.0f yd away", dd)
+	}
+	return ""
+}
+
+// leadPointOr is the lead bot's position, else the tank's own (a tank that is the lead bot is never "away" from it).
+func (d *RemoteDriver) leadPointOr(tank tbm.PartyRec) Point {
+	if l, ok := d.fr.LeadRec(); ok {
+		return partyPoint(l)
+	}
+	return partyPoint(tank)
+}
+
+// waitTankBack pauses a pull while the named tank is dead, released or far from the lead bot (a pull order would be refused too-far, and
+// walking the lead bot at the mob would only take it further from the tank). It waits for the rez or the tank's own run back, at most
+// tankAwayWait, and reports whether the tank is back. A fight ends it at once.
+func (d *RemoteDriver) waitTankBack(ctx context.Context, t tbm.HostileRec) (back bool, err error) {
+	if d.tank == 0 || d.tank == d.fr.Lead {
+		return true, nil
+	}
+	began := d.clk.Now()
+	noted := false
+	for {
+		m, ok := d.fr.Member(d.tank)
+		if !ok {
+			return true, nil
+		}
+		why := d.tankFarFrom(m, d.leadPointOr(m))
+		if why == "" {
+			return true, nil
+		}
+		if len(d.fr.EngagedHostiles()) > 0 {
+			return false, nil
+		}
+		if !noted {
+			noted = true
+			d.remote(func(r *RemoteReport) { r.TankAwayWaits++ })
+			d.rep.note(fmt.Sprintf("pull of %s paused: the tank %s is not with the party (%s); waiting up to %.0f s", d.hostileName(t), m.Name, why, tankAwayWait.Seconds()))
+		}
+		if d.clk.Now().Sub(began) >= tankAwayWait {
+			return false, nil
+		}
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return false, err
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -347,5 +348,87 @@ func TestRemoteLooseAddOrdersStopOnAPartyScopedAnswer(t *testing.T) {
 	}
 	if n != 1 || rep.Remote.LooseAddOrders != 1 || !strings.Contains(notesOf(rep), "no more loose-add orders this run") {
 		t.Fatalf("orders %d %+v\n%s", n, rep.Remote, notesOf(rep))
+	}
+}
+
+// The tank is never ordered at a mob while it is away from the fight (released and running back from the graveyard: Zul'Farrak hires-3,
+// 11 refused orders at a tank 433 yd off). The order waits for the tank to come back, then goes.
+func TestRemoteNoTankOrderWhileTheTankIsFarFromTheMob(t *testing.T) {
+	var awayFrom, backAt time.Time
+	g, a, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold = gMage
+		g.strictAttack = true
+		g.killRate = 2
+		g.onTick = func(g *fakeRemote) {
+			if !a.engaged {
+				return
+			}
+			if awayFrom.IsZero() {
+				awayFrom = g.now
+			}
+			if g.now.Sub(awayFrom) < 15*time.Second {
+				g.moveTo, g.lead().X, g.lead().Y = nil, -300, 0 // the tank is at the graveyard
+				return
+			}
+			if backAt.IsZero() {
+				backAt = g.now
+				g.lead().X, g.lead().Y = 120, 0
+			}
+		}
+	}, opts())
+	if rep.Remote.Refused["attack:too-far"] != 0 {
+		t.Fatalf("the module refused a tank order: %v\n%s", rep.Remote.Refused, notesOf(rep))
+	}
+	first := g.indexOf("cmd attack " + tbm.GUIDArg(a.guid) + " Tanky")
+	if first < 0 || backAt.IsZero() || g.orderAt[first].Before(backAt) {
+		t.Fatalf("first tank order at index %d (back at %v): %v", first, backAt, g.orders)
+	}
+	if rep.Remote.TankOrdersHeld != 1 || !strings.Contains(notesOf(rep), "waiting for it to come back") {
+		t.Fatalf("%+v\n%s", rep.Remote, notesOf(rep))
+	}
+}
+
+// A too-far answer to a tank order pauses the tank orders for a while (the feed showed the tank near; the module disagrees).
+func TestRemoteTankOrdersPauseAfterTooFar(t *testing.T) {
+	g, _, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold = gMage
+		g.ignorePull = true
+		g.killRate = 2
+		g.tankTooFar = 1
+	}, opts())
+	var at []time.Time
+	for i, o := range g.orders {
+		if strings.HasSuffix(o, " Tanky") && strings.HasPrefix(o, "cmd attack ") {
+			at = append(at, g.orderAt[i])
+		}
+	}
+	if len(at) < 2 || at[1].Sub(at[0]) < tankFarPause || rep.Remote.Refused["attack:too-far"] != 1 {
+		t.Fatalf("tank orders at %v: %+v\n%s", at, rep.Remote, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "tank orders are paused") {
+		t.Fatalf("no note:\n%s", notesOf(rep))
+	}
+}
+
+// A pull answered too-far while the (non-lead) tank is away from the party waits for the tank instead of walking the lead bot at the mob.
+func TestRemotePullWaitsForAwayTank(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{60, 0, 0})
+	g.cmdErr["pullback"] = []string{"too-far"}
+	healy := g.party[1]
+	healy.X = -200
+	g.lagUntil = map[packet.GUID]time.Time{healy.GUID: g.now.Add(20 * time.Second)}
+	o := opts()
+	o.Tank = "Healy"
+	plan := remotePlan(Leg{Name: "a", To: Point{10, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}}}})
+	rep, err := runRemote(t, g, plan, o, nil)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if rep.Remote.TankAwayWaits != 1 || !strings.Contains(notesOf(rep), "paused: the tank Healy is not with the party") {
+		t.Fatalf("%+v\n%s", rep.Remote, notesOf(rep))
+	}
+	if len(g.ordersOf("cmd pullback")) < 2 {
+		t.Fatalf("the pull was not sent again: %v", g.orders)
 	}
 }
