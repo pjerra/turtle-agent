@@ -1279,8 +1279,8 @@ func TestGearReadJudgesQualityShieldAndAmmo(t *testing.T) {
 		90015:                  {Found: true, Name: "Hammer", Quality: 2, ItemLevel: 36},
 		shieldEntries[0]:       {Found: true, Name: "Shield", Class: 4, SubClass: 6, Quality: 3, ItemLevel: 43},
 		bulletWeaponEntries[0]: {Found: true, Name: "Gun", Class: 2, SubClass: 3, Quality: 3, ItemLevel: 44}}}
-	best, ilvl, epics, unknown := g.summary()
-	if best != 4 || len(epics) != 1 || epics[0] != "Epic Chest" || unknown != 1 /* feet 90007 has no prototype */ {
+	best, ilvl, epics, unknown := g.summary(45)
+	if best != 4 || len(epics) != 1 || !strings.HasPrefix(epics[0], "Epic Chest") || unknown != 1 /* feet 90007 has no prototype */ {
 		t.Fatalf("%d %.1f %v %d", best, ilvl, epics, unknown)
 	}
 	if want := (40.0 + 60 + 44 + 36 + 43 + 44) / 6; ilvl < want-0.01 || ilvl > want+0.01 {
@@ -1327,5 +1327,45 @@ func TestHireKeptBindingTakesWhoFromMemory(t *testing.T) {
 	rep, err = runRemote(t, g, g.plan, RemoteOptions{Prepare: hireSpec(), HireMemory: mem}, nil)
 	if err != nil || rep.State != "done" || g.count("logout") != 0 || len(g.hireLines) != 0 || len(rep.Ready.Reused) != 5 {
 		t.Fatalf("%v %s %v\n%s", err, rep.State, g.events, notesOf(rep))
+	}
+}
+
+// "They can have epic as long as it's for their level" (owner, 2026-10-14): an epic whose required level is at most the bot's and whose
+// item level is at most the bot's plus 5 is allowed; a higher required level or item level is out of band and still listed.
+func TestSummaryAllowsEpicForTheLevel(t *testing.T) {
+	inv := tbm.ParseInventory([]string{"TBM:INV_BEGIN|X|0", "TBM:INV_EQ|0|90000|1|1", "TBM:INV_EQ|4|90004|1|1", "TBM:INV_EQ|6|90006|1|1", "TBM:INV_EQ|7|90007|1|1", "TBM:INV_END|X|10|16"})
+	g := &gearRead{inv: inv, info: map[uint32]ItemInfo{
+		90000: {Found: true, Name: "In band", Quality: 4, ItemLevel: 50, RequiredLevel: 45},
+		90004: {Found: true, Name: "Too high ilvl", Quality: 4, ItemLevel: 51, RequiredLevel: 45},
+		90006: {Found: true, Name: "Too high req", Quality: 4, ItemLevel: 46, RequiredLevel: 46},
+		90007: {Found: true, Name: "Blue", Quality: 3, ItemLevel: 40, RequiredLevel: 40}}}
+	best, _, epics, _ := g.summary(45)
+	if best != 4 || len(epics) != 2 || !strings.HasPrefix(epics[0], "Too high ilvl") || !strings.HasPrefix(epics[1], "Too high req") {
+		t.Fatalf("%d %v", best, epics)
+	}
+	if _, _, epics, _ = g.summary(0); len(epics) != 3 {
+		t.Fatalf("level unknown: every epic counts: %v", epics)
+	}
+}
+
+// The epic rule judges each bot against the level it actually has (its own read), not the level asked for: a server that lowers level=44 to the
+// commander's limit 42 must not let an epic for level 44 through.
+func TestHireEpicIsJudgedAgainstTheBotsOwnLevel(t *testing.T) {
+	run := func(agentLvl int) (Report, error) {
+		g := newHireFake(t)
+		g.agentLvl = agentLvl
+		g.epic["priest"] = true
+		g.autogearOff = true
+		g.items[uint32(91000+slotChest)] = ItemInfo{Found: true, Name: "Epic 4", Quality: 4, ItemLevel: 48, RequiredLevel: 44}
+		spec := hireSpec()
+		spec.Hire = &HireSpec{Level: 44, Composition: []string{"warrior", "priest"}}
+		return g.run(spec)
+	}
+	if rep, err := run(44); err != nil || rep.State != "done" {
+		t.Fatalf("an epic for the bot's level (44) was refused: %v %s", err, rep.State)
+	}
+	rep, err := run(42)
+	if !failed(rep, err, "Khaeworval", "epic Epic 4 (required level 44, item level 48)") || rep.Ready == nil || rep.Ready.Bots[1].Level != 42 {
+		t.Fatalf("an epic for level 44 passed on a bot of level 42: %v %s", err, rep.State)
 	}
 }
