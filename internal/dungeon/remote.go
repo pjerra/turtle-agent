@@ -377,7 +377,8 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
-	seenHostile   map[uint32]bool            // entries listed alive in the feed at some point of the run (the team gate's evidence)
+	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
+	killedGUID    map[packet.GUID]bool       // units a won pull killed
 
 	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	trSeen    uint64             // the feed frame count the trace last took
@@ -651,6 +652,9 @@ func (w remoteWorld) Team() string { return w.d.team }
 // HostileSeen makes the world a HostileWorld: the team gate fights a part gated to the other team when the feed lists its mobs hostile.
 func (w remoteWorld) HostileSeen(entries []uint32) bool { return w.d.hostileSeen(entries) }
 
+// TeamGateLook makes the world a TeamGateLook: a gated part is looked at before it is skipped.
+func (w remoteWorld) TeamGateLook() bool { return true }
+
 func (w remoteWorld) PartyNear(c Point, r float32) bool {
 	for _, m := range w.d.fr.Party {
 		if !m.Dead && dist3(partyPoint(m), c) <= float64(r) {
@@ -762,7 +766,10 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	}
 	if adopted {
 		if err := d.checkAdopted(); err != nil {
-			d.bound = false // not this run's binding: leave it as it is
+			d.bound = false // not this run's binding: leave it as it is, but the feed this run switched on is put back off
+			if _, verr := d.g.Command(ctx, "commander view off"); verr != nil {
+				d.rep.note("commander view off (the other group's binding): " + verr.Error())
+			}
 			d.remote(func(r *RemoteReport) { r.Bound = false })
 			return err
 		}

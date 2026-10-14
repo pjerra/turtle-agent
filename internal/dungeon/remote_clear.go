@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
@@ -49,6 +50,12 @@ func (d *RemoteDriver) noteKilled(res fightResult) {
 	}
 	for _, u := range res.dead {
 		d.killedAt[u.entry] = append(d.killedAt[u.entry], u.at)
+		if u.guid != 0 {
+			if d.killedGUID == nil {
+				d.killedGUID = map[packet.GUID]bool{}
+			}
+			d.killedGUID[u.guid] = true
+		}
 		d.noteCorpse(u)
 	}
 }
@@ -216,4 +223,51 @@ func dedupe(in []string) []string {
 		}
 	}
 	return out
+}
+
+// gatedLook is the look before a part gated to the other team is skipped (Action.TeamGate). The feed lists only the hostiles the bots
+// see, so a gated pack that is not listed may stand out of sight, hostile: the Lost Dwarves stand 3-4 yd from the chest the next step
+// opens. The part is skipped only on the evidence a pack needs to count as cleared (confirmGone: a living bot within ClearSeeRadius of
+// each position and a whole frame that lists none of its mobs, else the lead bot walks up to look, once per position); a mob of it
+// in view, or one that shows itself on the look, makes it a normal fight. skip is true when the step is over.
+func (d *RemoteDriver) gatedLook(ctx context.Context, a Action) (skip bool, err error) {
+	if a.TeamGate == "" {
+		return false, nil
+	}
+	var sp fightSpec
+	switch {
+	case a.Kind == ActPull:
+		sp = fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, radius: a.Radius, sneak: true, passed: map[packet.GUID]bool{}}
+	case a.Kind == ActKill && a.Boss != nil:
+		enc := append(slices.Clone(a.Boss.First), a.Boss.Entry)
+		sp = fightSpec{pick: enc, track: enc, skip: a.Skip, anchors: []Point{a.Boss.Position}, wide: true, passed: map[packet.GUID]bool{}}
+	default:
+		return false, nil
+	}
+	fight := func(why string) {
+		d.noteTeamGate(a, fmt.Sprintf("%s, but its mobs are hostile to the party (%s): fought", a.TeamGate, why))
+	}
+	if len(d.candidates(sp, sp.pick)) > 0 {
+		fight("in view")
+		return false, nil
+	}
+	cleared, why, err := d.confirmGone(ctx, sp, newClearing())
+	if err != nil {
+		return false, fmt.Errorf("%s: not skipping it blind, and it could not be looked at: %w", a.TeamGate, err)
+	}
+	if !cleared {
+		fight("seen on the look")
+		return false, nil
+	}
+	d.noteTeamGate(a, fmt.Sprintf("%s: skipped (looked: %s)", a.TeamGate, why))
+	return true, nil
+}
+
+func (d *RemoteDriver) noteTeamGate(a Action, text string) {
+	d.rep.note(text)
+	action := "skip_team"
+	if strings.HasSuffix(text, ": fought") {
+		action = "team_override"
+	}
+	d.emit(events.KindDungeonStep, text, map[string]any{"leg": a.Leg, "action": action, "ok": true, "mode": "remote"})
 }

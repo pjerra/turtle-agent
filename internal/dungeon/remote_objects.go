@@ -709,6 +709,9 @@ func (d *RemoteDriver) stepItem(ctx context.Context, a Action, carrier string, r
 // doBoss kills a boss. A boss with a loot_item, or with companions_loot false, also gets the carrier: the other bots' corpse looting is
 // off for the fight and the carrier takes the item from the corpse.
 func (d *RemoteDriver) doBoss(ctx context.Context, a Action) error {
+	if skip, err := d.gatedLook(ctx, a); skip || err != nil {
+		return err
+	}
 	b := a.Boss
 	og, ok := d.orderGame()
 	off := b.CompanionsLoot != nil && !*b.CompanionsLoot

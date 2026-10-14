@@ -18,6 +18,9 @@ import (
 // doPull pulls each member group of the action: `.bot cmd pullback <guid>` at the nearest member, the tank walks up and pulls it,
 // the fight ends when the pack is dead.
 func (d *RemoteDriver) doPull(ctx context.Context, a Action) error {
+	if skip, err := d.gatedLook(ctx, a); skip || err != nil {
+		return err
+	}
 	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{}}
 	// A group whose members in view are all stealthed cannot be pulled (the bots never attack what they cannot see); with none in
 	// view the plan's flag decides.
