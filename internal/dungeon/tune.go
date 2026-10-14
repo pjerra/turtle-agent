@@ -42,12 +42,14 @@ type tuneExtra struct {
 	MinMove        float32       // the shortest move the module carries out (a shorter one is sent as a step past)
 	PartyDownDead  int           // dead bots that stop the leg
 	RespawnSettle  time.Duration // pulltest: wait after `.respawn` for the pack to show
+	RejoinTPDist   float32       // a living bot this far from the lead bot (or on another map) is summoned to it by the commander (0: off; remote_rejoin.go)
+	RejoinGap      time.Duration // least time between two summons of the same bot
 }
 
 func defaultTuneExtra() tuneExtra {
 	return tuneExtra{LookStandoff: LookStandoff, LookArrive: lookArrive, AttackHoldYd: attackHoldYd, TankBusyRounds: maxTankBusyRounds, AddOrders: maxAddOrders,
 		FallbackTries: objectFallbackTries, GatherNear: GatherNear, GatherProgress: gatherProgress, AggroGuard: AggroGuard, AheadMaxDZ: aheadMaxDZ,
-		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PatrolAggro: PatrolAggro, PatrolWindow: patrolWindow, PatrolWait: patrolWait, PatrolPullYd: patrolPullYd, MinMove: MinMove, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
+		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PatrolAggro: PatrolAggro, PatrolWindow: patrolWindow, PatrolWait: patrolWait, PatrolPullYd: patrolPullYd, MinMove: MinMove, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle, RejoinTPDist: rejoinTPDist, RejoinGap: rejoinGap}
 }
 
 // tuneTarget is what a tunable reads and writes.
@@ -151,6 +153,9 @@ var tuneSpecs = []tuneSpec{
 	ints("max_ahead_pulls", "count", 1, 30, "pulls of hostiles near the way, at most, in one walk", func(t *tuneTarget) *int { return &t.x.MaxAheadPulls }),
 	yds("look_arrive", 1, 10, "how near its stand point the lead bot must get to look at a pack", func(t *tuneTarget) *float32 { return &t.x.LookArrive }),
 	ints("party_down_dead", "count", 1, 5, "dead bots that stop the leg", func(t *tuneTarget) *int { return &t.x.PartyDownDead }),
+	// Rejoin (remote_rejoin.go).
+	yds("rejoin_tp_dist", 0, 500, "a living bot farther than this from the lead bot, or on another map, is brought to it by the commander (cmd summon, GM account); 0 turns it off", func(t *tuneTarget) *float32 { return &t.x.RejoinTPDist }),
+	secs("rejoin_tp_gap_s", 10, 600, "least time between two summons of the same bot", func(t *tuneTarget) *time.Duration { return &t.x.RejoinGap }),
 	// The pull test (pulltest.go).
 	secs("respawn_settle_s", 1, 30, "pulltest: wait after .respawn for the pack to show", func(t *tuneTarget) *time.Duration { return &t.x.RespawnSettle }),
 }
