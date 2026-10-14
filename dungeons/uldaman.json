@@ -276,7 +276,7 @@
         }
       ],
       "notes": [
-        "Ironaya's room is a dead end. The way on goes back south through the Seal of Khaz'Mul (open since leg 2) and east through the cave at -205 265 to the west lip of the map 70 navmesh at -163.5 298.7 -52.5, 126 yd from Ironaya, and the leg walks it with the navmesh. Packs on it: a Shrike Bat (4861, wander 3) at -186 285 and, at the lip, the nest of ten Cleft Scorpids (7078, level 35-36, wander 1, sleeping) at -175 to -165 / 284 to 296, z -53: the route passes within 2.5 yd, so the nest is pulled. The live map walk of 2026-10-14 (~/TortoiseBots-audit/tests/uldaman-map/MAP.md) saw the same spawns at the same places.",
+        "Ironaya's room is a dead end. The way on goes back south through the Seal of Khaz'Mul (open since leg 2) and east through the cave at -205 265, 126 yd by the navmesh from Ironaya to the west lip of the mesh at -163.5 298.7 -52.5, where the Cleft Scorpid pit begins. The leg walks that with the navmesh and ends at the nest in the pit, the last thing before the hole in the mesh that leg 5 crosses. Packs on it: a Shrike Bat (4861, wander 3) at -186 285 and the nest of ten Cleft Scorpids (7078, level 35-36, wander 1, sleeping) at -175 to -165 / 284 to 296, z -53, which the route passes within 2.5 yd, so it is pulled. The live map walk of 2026-10-14 (~/TortoiseBots-audit/tests/uldaman-map/MAP.md) saw the same spawns at the same places.",
         "Nothing is pulled from Ironaya's room: the first group of the leg is the bat. Stonevault Cave Lurkers (4850, stealth) near -250 270 are 25+ yd west of the route and left alone."
       ]
     },
@@ -567,6 +567,14 @@
           "positions": [
             {"x": 37, "y": 331.8, "z": -43.1},
             {"x": 42.1, "y": 323.2, "z": -42.9}
+          ]
+        },
+        {
+          "entries": [4855, 4855, 4853],
+          "positions": [
+            {"x": 39.4, "y": 311, "z": -39.1},
+            {"x": 50, "y": 309.7, "z": -40.2},
+            {"x": 43.4, "y": 304.6, "z": -39.6}
           ]
         },
         {

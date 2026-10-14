@@ -655,7 +655,7 @@ has no doors, so `path_to` walks through a closed one: the door steps are checke
 `dungeons/uldaman.json` runs the whole dungeon, 14 legs, from the main entrance to the last boss. Legs 0-3 (the west wing) were run end to end by a remote run
 (run 5, 22.4 min); legs 4-13 were written from the world database (map 70 spawns, templates, EventAI, the C++ scripts of the core) and the map 70 navmesh, and compared with a live
 map walk of the whole route (a GM walker, nothing fought or used; `tests/uldaman-map/MAP.md` of the audit repo: same spawns at the same places, no SQL difference in the visited
-area). They have not been run as a party. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-13 2714 yd, 3534 yd in all (about 9 min of walking at 6.6 yd/s). The plan holds 62 pull
+area). They have not been run as a party. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-13 2714 yd, 3534 yd in all (about 9 min of walking at 6.6 yd/s). The plan holds 63 pull
 groups, 8 bosses and the four Stone Keepers; from the pace of run 5 (22.4 min for 18 groups and 3 bosses) legs 4-13 are a rough 50 to 80 min.
 
 | Leg | Name | Boss (entry) | What the leg does |

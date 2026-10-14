@@ -935,4 +935,4 @@ meets them:
    (all four stoned again) with the altar still active. Whether the dormant statues (faction 35 in the SQL, hostile in the unit rows) show up as hostiles in the TBM feed.
 5. **Archaedas** (leg 13): the stand point of the door is 39 yd from his spawn (he resets beyond 38); the altar side is 11 yd. Count the minions that wake (one per 10 s, six Guardians at 66 %,
    two Vault Warders at 33 %), the time to kill, and that the Vault door 124369 reads `active` after the kill.
-6. **The pace**: legs 4-13 are 2714 yd and 44 pull groups (144 mobs); the estimate is 50 to 80 min. Record `seconds` per leg and the watchdog stalls.
+6. **The pace**: legs 4-13 are 2714 yd and 45 pull groups (147 mobs); the estimate is 50 to 80 min. Record `seconds` per leg and the watchdog stalls.
