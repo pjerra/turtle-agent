@@ -694,8 +694,11 @@ the file hold the mechanics read from the data (EventAI rows, the Keepers' and A
   seen live**: whether the module's order wakes the Stone Keepers and Archaedas the way a player party does. **Group mode** (the agent plus its own companions) cannot take the step yet:
   a group run of the Uldaman plan stops at the first altar with "remote mode only".
 - **The navmesh has one hole**, at the Cleft Scorpid pit: the west part ends at -163.5 298.7 -52.5 and the east part begins at -158.4 283.7 -48.9, a continuous ramp of 15 yd
-  that the mesh does not link (a straight walk worked both ways in the live map walk). Leg 5's `to` is the east end; the walk follows the mesh to the lip and the last 16 yd are one
-  direct move. The plan format has no direct-walk waypoint; the hop relies on the driver sending `to` itself when it is within `MoveLeg`. `TestUldamanOnNavmesh` accepts that one hole.
+  that the mesh does not link (a straight walk worked both ways in the live map walk). **hires-1 (2026-10-14) settled it: `cmd move` across the hole is acked but the bots stop where the
+  mesh ends, on the pit floor at -161.1 284.5 -52.1**, which the 5 yd arrival counted as arrived for the old `to` (the ramp's east end) and the leg then fought 3 minutes without an engage.
+  Leg 5's `to` is now on the east plateau at -155.7 279.6 -46.8, out of arrival range of every place the west bots can reach, so a bot that does not cross stalls the walk. The crossing
+  itself still needs a way: a waypoint walked on the straight line from the lip (the plan format has none) or a patch of the map 70 mesh. `TestUldamanPlanPointsOnMesh` checks every plan point and
+  pullback anchor for navmesh floor (1 yd on the ground, 3 yd vertically) and a complete path from the one before, and pins the hole.
 - `walk_path` goes through closed doors, so a door step comes before the walk through it (legs 9 and 13). The Echomok Door (124370) is not on the route.
 
 ## Dungeon runs

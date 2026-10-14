@@ -350,7 +350,7 @@ func waypoints(l Leg) []Point {
 	return pts
 }
 
-// sentinelLeg is the index of the leg whose first waypoint, the east end of the ramp at -158.4 283.7, is across the one hole of the map 70
+// sentinelLeg is the index of the leg whose first waypoint, a point of the east plateau at -155.7 279.6 (the ramp's east end, -158.4 283.7, was too near the pit: see TestUldamanPlanPointsOnMesh), is across the one hole of the map 70
 // navmesh from the west lip at -163.5 298.7 where the leg before it ends (the scorpid pit).
 const sentinelLeg = 5
 
@@ -528,4 +528,111 @@ func TestPlanEntryFields(t *testing.T) {
 			t.Errorf("%s: %v", in, err)
 		}
 	}
+}
+
+// onMeshTolerance is how far (yards) a plan point may be from the navmesh floor under it: 3 vertically, 1 on the ground plane.
+const (
+	meshMaxDZ = 3.0
+	meshMaxDH = 1.0
+	// holeArriveMargin is the least 3D distance (yards) between the goal across the hole and the end of the partial path to it: the
+	// driver's MoveArrive (5) plus a margin for the bots' spread.
+	holeArriveMargin = 8.0
+)
+
+// planPoints lists every point of a leg the driver walks to or pulls from, with a label for the failure message: the leg's To, each
+// pull group's member positions (the pullback anchors), the step stand points, the boss and the after-boss stands.
+func planPoints(l Leg) (pts []Point, labels []string) {
+	add := func(label string, p Point) { pts, labels = append(pts, p), append(labels, label) }
+	add("to", l.To)
+	for gi, g := range l.PullGroups {
+		for pi, p := range g.Positions {
+			add(fmt.Sprintf("pull_groups[%d].positions[%d]", gi, pi), p)
+		}
+	}
+	for si, s := range l.Steps {
+		if s.UseObject != nil && s.UseObject.Stand != nil {
+			add(fmt.Sprintf("steps[%d].use_object.stand", si), *s.UseObject.Stand)
+		}
+		if s.Ritual != nil && s.Ritual.Stand != nil {
+			add(fmt.Sprintf("steps[%d].ritual.stand", si), *s.Ritual.Stand)
+		}
+	}
+	if l.Boss != nil {
+		add("boss.position", l.Boss.Position)
+	}
+	for si, s := range l.AfterBoss {
+		if lo := s.LootObject; lo != nil {
+			switch {
+			case lo.Stand != nil:
+				add(fmt.Sprintf("after_boss[%d].loot_object.stand", si), *lo.Stand)
+			case lo.Near != nil:
+				add(fmt.Sprintf("after_boss[%d].loot_object.near", si), *lo.Near)
+			}
+		}
+	}
+	return pts, labels
+}
+
+// Every point the Uldaman plan walks to or pulls from has navmesh floor under it (within meshMaxDZ yd vertically, meshMaxDH on the
+// ground), and each point is reachable from the one before it with a complete path_to, in the order the driver goes (legs in order, a
+// leg's points as planPoints lists them). The one exception is the known hole at the scorpid pit (see sentinelLeg), whose partial path must end out of arrival
+// range of the goal (the hires-1 run counted the pit floor as arrived). Checked against the hires-1 trace (2026-10-14): the 23 `unreachable` refusals were
+// `cmd move` orders to the lead bot's own position after a fight (the server cannot path to where it already stands), not plan points,
+// and all 23 of those spots are on this mesh. Runs where the map 70 mmaps are (see mmapsDir); needs the cgo build.
+func TestUldamanPlanPointsOnMesh(t *testing.T) {
+	dir := mmapsDir()
+	if dir == "" {
+		t.Skip("no map 70 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 070.mmap and the 070*.mmtile tiles")
+	}
+	p := loadUldaman(t)
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	prev := Point{X: p.Entrance.X, Y: p.Entrance.Y, Z: p.Entrance.Z}
+	prevLabel := "entrance"
+	checked := 0
+	for i, l := range p.Legs {
+		pts, labels := planPoints(l)
+		for j, w := range pts {
+			where := fmt.Sprintf("legs[%d] (%s) %s %v", i, l.Name, labels[j], w)
+			n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{w.X, w.Y, w.Z})
+			if errors.Is(err, navmesh.ErrNoEngine) {
+				t.Skip("built without cgo: no navmesh engine")
+			}
+			if err != nil {
+				t.Fatalf("%s: %v", where, err)
+			}
+			if !ok {
+				t.Errorf("%s is not on the navmesh (no walkable polygon within 4 yd)", where)
+			} else if dz, dh := math.Abs(float64(n[2]-w.Z)), math.Hypot(float64(n[0]-w.X), float64(n[1]-w.Y)); dz > meshMaxDZ || dh > meshMaxDH {
+				t.Errorf("%s: the nearest navmesh floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off on the ground", where, n[0], n[1], n[2], dz, dh)
+			}
+			path, err := pl.Plan(p.Map, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{w.X, w.Y, w.Z})
+			if err != nil {
+				t.Fatalf("%s: %v", where, err)
+			}
+			switch {
+			case path.Status == navmesh.Complete:
+			case i == sentinelLeg && j == 0:
+				// The hole: the walk from the pit goes partial and ends on the west side. hires-1 (12:41:02): `cmd move` to the old `to`, the
+				// east end of the ramp at -158.4 283.7, was acked and the bots stopped at the end of the partial path, the pit floor at
+				// -161.1 284.5 -52.1, 4.4 yd (3D) from it: inside the driver's 5 yd arrival, so the walk ended "ok" on the wrong side. `to`
+				// must stay out of arrival range of wherever the partial path ends, so that only a bot on the east side arrives.
+				if len(path.Points) == 0 {
+					t.Fatalf("%s: partial path with no points", where)
+				}
+				end := path.Points[len(path.Points)-1]
+				if d := math.Sqrt(math.Pow(float64(end[0]-w.X), 2) + math.Pow(float64(end[1]-w.Y), 2) + math.Pow(float64(end[2]-w.Z), 2)); d < holeArriveMargin {
+					t.Errorf("%s: the partial path from %s ends at %v, only %.1f yd from the goal: a bot stopping there would count as arrived (MoveArrive 5); move `to` further into the east part", where, prevLabel, end, d)
+				}
+			default:
+				t.Errorf("%s: path_to from %s %v is %s: %s", where, prevLabel, prev, path.Status, path.Reason)
+			}
+			prev, prevLabel = w, labels[j]
+			checked++
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d points checked", checked)
+	}
+	t.Logf("%d plan points on the map 70 navmesh in %s", checked, dir)
 }

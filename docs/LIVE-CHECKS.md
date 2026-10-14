@@ -932,8 +932,9 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
 map 70 navmesh, and were compared with the live map walk (`tests/uldaman-map/MAP.md` of the audit repo; nothing fought or used). What a first live run has to settle, in the order it
 meets them:
 
-1. **The hole at the scorpid pit** (leg 5, first walk): the lead bot's `cmd move` from the west lip (-163.5 298.7) to -158.4 283.7. Record the answer (`unreachable`, `off-mesh`, or the
-   bots walking it). The nest of ten Cleft Scorpids at the lip is pulled by leg 4 first.
+1. **The hole at the scorpid pit** (leg 5, first walk): hires-1 (2026-10-14) answered the old target (-158.4 283.7): `cmd move` acked, the bots stop at the end of the partial path (-161.1 284.5 -52.1,
+   the pit floor, 3.4 yd below the ramp end). Leg 5's `to` is now -155.7 279.6 -46.8; record whether the bots climb from the pit corner (-168.0 279.2) to it or the walk stalls ("gained no ground").
+   The nest of ten Cleft Scorpids at the lip is pulled by leg 4 first.
 2. **Doors that no script opens** (Hall of the Keepers 124368, Archaedas 141869; plain doors, lock 86): does `cmd open` open them for a bot with nothing in its bags, or does it answer with an
    error? Lock.dbc is not in the export.
 3. **The altars** (legs 10 and 13): the step needs the multi-bot ritual use that the driver does not have. The run should stop at the altar with the `fail_text` after 20 s. To go on, use the
