@@ -267,3 +267,60 @@ func TestOrderRitual(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestParsePendingOfTheParty(t *testing.T) {
+	p, ok := ParsePending("TBM:ACTION_PENDING|cmd enter|party|40|924")
+	if !ok || p.Intent != "cmd enter" || p.Scope != "party" || p.Bot != "" || p.BudgetS != 40 || p.GUID != "924" {
+		t.Fatalf("%v %+v", ok, p)
+	}
+}
+
+func TestParseGotIn(t *testing.T) {
+	for msg, want := range map[string][3]int{"Magey: teleport refused (2 of 3 got in)": {2, 3, 1}, "Healy: too far": {0, 0, 0}, "(0 of 5 got in)": {0, 5, 1}} {
+		g, o, ok := ParseGotIn(msg)
+		w := 0
+		if ok {
+			w = 1
+		}
+		if g != want[0] || o != want[1] || w != want[2] {
+			t.Errorf("%q: %d %d %v", msg, g, o, ok)
+		}
+	}
+}
+
+func TestCheckCommandAcceptsEnter(t *testing.T) {
+	for _, ok := range []string{"cmd enter 924", "cmd enter near"} {
+		if err := CheckCommand(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+}
+
+// cmd enter: the party's PENDING, then the final ACK later than Wait and than the usual slack (the budget plus EnterPendingSlack holds).
+func TestOrderEnterPendingThenAck(t *testing.T) {
+	l := newFakeLink()
+	l.reply = func(string) []string { return []string{"TBM:ACTION_PENDING|cmd enter|party|1|924"} }
+	c := fastCommander(l)
+	go func() {
+		time.Sleep(700 * time.Millisecond) // past Wait (150 ms) and past budget (1 s) minus nothing: the 8 s slack of enter keeps it open
+		sys(l, "TBM:ACTION_ACK|cmd enter|party|3|entered")
+	}()
+	r, err := c.Order(context.Background(), "cmd enter 924")
+	if err != nil || !r.OK || r.Pending == nil || r.Pending.Scope != "party" || !r.Entered || r.Ack == nil || r.Ack.Count != 3 {
+		t.Fatalf("%v %+v", err, r)
+	}
+}
+
+func TestOrderEnterErrAfterPending(t *testing.T) {
+	l := newFakeLink()
+	l.reply = func(string) []string {
+		return []string{"TBM:ACTION_PENDING|cmd enter|party|40|924", "TBM:ACTION_ERR|cmd enter|failed|Magey: refused (2 of 3 got in)"}
+	}
+	r, err := fastCommander(l).Order(context.Background(), "cmd enter 924")
+	if err != nil || r.OK || r.Code() != "failed" || r.Pending == nil {
+		t.Fatalf("%v %+v", err, r)
+	}
+	if got, of, ok := ParseGotIn(r.Err.Message); !ok || got != 2 || of != 3 {
+		t.Fatalf("%v", r.Err)
+	}
+}

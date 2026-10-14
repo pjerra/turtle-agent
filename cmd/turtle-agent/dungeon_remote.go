@@ -68,8 +68,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	if v := strings.ToLower(p.OnEnd); !slices.Contains([]string{"", dungeon.OnEndStay, dungeon.OnEndLogout, dungeon.OnEndNone}, v) {
 		return true, bad("on_end: %q is none of %q, %q, %q", p.OnEnd, dungeon.OnEndStay, dungeon.OnEndLogout, dungeon.OnEndNone)
 	}
-	if v := strings.ToLower(p.Enter); !slices.Contains([]string{"", dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterWalk, dungeon.EnterOff}, v) {
-		return true, bad("enter: %q is none of %q, %q, %q, %q", p.Enter, dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterWalk, dungeon.EnterOff)
+	if v := strings.ToLower(p.Enter); !slices.Contains([]string{"", dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterCmd, dungeon.EnterWalk, dungeon.EnterOff}, v) {
+		return true, bad("enter: %q is none of %q, %q, %q, %q, %q", p.Enter, dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterCmd, dungeon.EnterWalk, dungeon.EnterOff)
 	}
 	if p.Prepare != nil {
 		if err := p.Prepare.Validate(true); err != nil {
