@@ -560,7 +560,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
   in order. `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
-  (percentages 1-100; `max_s` 1-600 seconds), see **rest gate** under [Dungeon runs](#dungeon-runs).
+  (percentages 1-100; `max_s` 1-600 seconds; `walk_yd`, `walk_health`, `walk_healer_mana` and `walk_mana` set the walking rest, see **rest gate** under
+  [Dungeon runs](#dungeon-runs)).
 - A **step** is exactly one of `use_object`, `wait_for`, `loot_object` and `use_item`. `use_object` names a game object by `entry`, by `near` (a position;
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
   driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
@@ -767,7 +768,18 @@ What the driver does for each action of the plan (the stepper decides which):
   on without its heals, so that gate waits its 60 s out and the run goes on with the usual note) `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
   TortoiseBots, not to work around). After the cap the run goes on with a note if everyone has 50% health, else it fails. **Report:** `rest_seconds` (the run's total, and per leg),
   and `rest_gates[]`, one per gate: `leg`, `seconds` waited, `max_s`, `result` (`rested`, `stalled` = passed with non-drinkers, `gave_up` = the cap came with someone short, `failed`),
-  `short[]` (who was short when it ended, `Wishe mana 29%`), `drink_orders[]`, `drink_order_sent`, `drink_order_result` and `party_rest_refused`. A dead member is
+  `short[]` (who was short when it ended, `Wishe mana 29%`), `drink_orders[]`, `drink_order_sent`, `drink_order_result`, `party_rest_refused`,
+  `skipped` and `refills[]`. **Lighter gates (both modes):** a gate that finds everyone at the targets on its first frame costs no time (`skipped: true`, result `rested`);
+  the gate that opens a leg whose first step is a walk of 60 yd or more lets the party go when everyone is over the walking floors (health 70%, healer mana 40%, other
+  mana 25%) instead of holding: result `walking`, `skipped: true`, a note, and the party rests on the way; the gate before the first pull still waits for the targets.
+  A leg's `rest` overrides it: `walk_yd` (`-1`: always hold, 1-5000), `walk_health`, `walk_healer_mana`, `walk_mana`. The report totals them as `rest_gates_skipped` (of which
+  `rest_walk_passes` walking ones) and gives `rest_share` (percent of the run spent in rest gates, also in the `dungeon_done`/`dungeon_failed` summary, the trace's end counters
+  and the `trace-score` `rest_share` check, which still sums the `rest` events' seconds). **Refills (remote mode):** the preflight sends `.bot maintenance <bot>` once and the module
+  buys only 6-7 drinks a bot. At a gate where a mana user is short of mana, the driver sends `.bot maintenance <bot>` again, at most once per bot per leg, when its drink count
+  (`.bot inv`, read afresh once per bot per leg) is under 3 (`low-drinks`), its drink nudge fired (`nudge`), or the feed says its last action was a drink that failed for want
+  of one (`drink` `F` `no-item`: at once) or a drink that failed in two different frames within 10 s (`drink-failed`; TortoiseBots reports item-action failures as `drink,F,-`, with no reason), then reads `.bot inv` again and orders the party to rest anew. `remote.refills[]` has `bot`, `leg`, `why`, `before`, `after`
+  (drinks, `-1`: not read) and `maintenance`; each is a `refill` trace event and a note, and `refills` is in the summary. With maintenance off on the server (the preflight's
+  `disabled`) or a game that cannot send `.bot` lines, none is sent. A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
   naming `recover_wipe`; with `recover_wipe` the member gets a minute for a healer's resurrection, then `.bot action release` and
   `.bot action corpse run`, and the gate waits for it up to 12 min). **Before any of that, a leader whose brain can resurrect gets up to 120 s**
@@ -1087,7 +1099,7 @@ remote commander and `AiPlayerbot.RemoteCommander = 1` (off by default: the firs
 
 **Perception: `TBM:VIEW`.** While bound with the view on, the module sends a frame about once a second as system lines
 `TBM:VIEW|v1|<seq>|B|<lead>,<party>,<hostiles>,<threats>[,<truncated>]`, then `P` (party records: guid, name, health, power, position, map,
-target, spell, dead, state, last action), `H` (hostiles the bots fight or see: guid, entry, position, health %, target, flags `s` stealthed,
+target, spell, dead, state, last action and, with TB #924, that action's result letter and failure reason: `PartyRec.Result`/`Reason`, e.g. `drink` `F` `no-item`), `H` (hostiles the bots fight or see: guid, entry, position, health %, target, flags `s` stealthed,
 `e` evading, `c` crowd-controlled), `T` (threat: per hostile the top three `guid:pct`) and `E|<lines>`. `internal/tbm` assembles them by
 `seq`: a frame is published when its `B` and `E` are in, the line total matches `E` and the record counts match `B`; frames that lost lines are
 dropped when a newer one completes, a late frame behind the newest is dropped as stale, a `seq` that goes back by more than 3 is a new binding,

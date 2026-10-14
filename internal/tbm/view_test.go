@@ -324,3 +324,38 @@ func TestBeginTruncatedField(t *testing.T) {
 		t.Fatalf("%+v", a.Stats())
 	}
 }
+
+// TB #924: the party record's 19th and 20th fields are the result letter and the failure reason of the bot's last action; an older
+// module sends 18 fields and the two stay empty.
+func TestParsePartyRecResultAndReason(t *testing.T) {
+	base := "0x2A,Priesty,4000,5000,35,100,0,-8913.2,554.5,93.1,1.50,0,0,0,0,0,n,drink"
+	p, err := ParsePartyRec(base + ",F,no-item")
+	if err != nil || p.Action != "drink" || p.Result != "F" || p.Reason != "no-item" || !p.DrinkFailedNoItem() {
+		t.Fatalf("%v %+v", err, p)
+	}
+	p, err = ParsePartyRec(base + ",O,-")
+	if err != nil || p.Result != "O" || p.Reason != "" || p.DrinkFailedNoItem() {
+		t.Fatalf("%v %+v", err, p)
+	}
+	p, err = ParsePartyRec(base)
+	if err != nil || p.Result != "" || p.Reason != "" {
+		t.Fatalf("%v %+v", err, p)
+	}
+	// A failure of another action, or of a drink for another reason, is not "no drink in the bags".
+	if p, _ := ParsePartyRec("0x2A,Priesty,4000,5000,35,100,0,1,2,3,0,0,0,0,0,0,n,heal,F,no-item"); p.DrinkFailedNoItem() {
+		t.Fatalf("%+v", p)
+	}
+	if p, _ := ParsePartyRec(base + ",F,oom"); p.DrinkFailedNoItem() {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestDrinkFailedAnyReason(t *testing.T) {
+	base := "0x2A,Priesty,4000,5000,35,100,0,1,2,3,0,0,0,0,0,0,n,drink"
+	for tail, want := range map[string]bool{",F,-": true, ",F,no-item": true, ",F,oom": true, ",O,-": false, "": false} {
+		p, err := ParsePartyRec(base + tail)
+		if err != nil || p.DrinkFailed() != want {
+			t.Errorf("%q: %v %+v", tail, err, p)
+		}
+	}
+}

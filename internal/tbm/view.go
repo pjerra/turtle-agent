@@ -63,6 +63,11 @@ type PartyRec struct {
 	Dead      bool        `json:"dead"`
 	State     string      `json:"state"`            // c combat, n non-combat, d dead, r reaction
 	Action    string      `json:"action,omitempty"` // the last action its AI ran
+	// Result and Reason are the verdict on that action (TB #924, fields 19 and 20, absent from older modules): Result is one letter
+	// (O ok, F failed, I impossible, U useless, P prerequisites queued, V dropped), Reason why a failed cast check did not run
+	// (no-item, oom, range, los, cd, moving, casting, no-target). Empty when the module sent none.
+	Result string `json:"result,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // HPPct is the bot's health in percent (100 when the maximum is unknown).
@@ -73,6 +78,15 @@ func (p PartyRec) PowerPct() int { return pctOf(p.Power, p.MaxPower) }
 
 // UsesMana says whether the bot's power is mana and it has any.
 func (p PartyRec) UsesMana() bool { return p.PowerType == 0 && p.MaxPower > 0 }
+
+// DrinkFailed says the bot's last action was a drink that failed, for whatever reason (TortoiseBots reports a failed item action
+// as `drink,F,-`, with no reason).
+func (p PartyRec) DrinkFailed() bool { return strings.EqualFold(p.Action, "drink") && p.Result == "F" }
+
+// DrinkFailedNoItem says the bot's last action was a drink that failed for want of one in the bags.
+func (p PartyRec) DrinkFailedNoItem() bool {
+	return strings.EqualFold(p.Action, "drink") && p.Result == "F" && p.Reason == "no-item"
+}
 
 // InCombat says whether the bot's AI is in a combat or reaction state.
 func (p PartyRec) InCombat() bool { return !p.Dead && (p.State == "c" || p.State == "r") }
@@ -361,6 +375,12 @@ func ParsePartyRec(s string) (PartyRec, error) {
 	p.Dead = r.u32(15, "dead") != 0
 	if p.Action == "-" {
 		p.Action = ""
+	}
+	if len(f) > 18 && f[18] != "-" {
+		p.Result = f[18]
+	}
+	if len(f) > 19 && f[19] != "-" {
+		p.Reason = f[19]
 	}
 	if r.err != nil {
 		return PartyRec{}, r.err

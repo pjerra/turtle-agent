@@ -213,6 +213,8 @@ type RemoteReport struct {
 	LoggedOut []string `json:"logged_out,omitempty"`
 	// Preflight is the pre-run kit check (absent with preflight off).
 	Preflight *Preflight `json:"preflight,omitempty"`
+	// Refills are the `.bot maintenance` orders sent again at rest gates to casters who ran short of drinks (remote_rest.go).
+	Refills []Refill `json:"refills"`
 	// EndedByModule is the reason the module gave when it ended the binding itself (lead bot gone, party disbanded, a player joined).
 	EndedByModule string `json:"ended_by_module,omitempty"`
 	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
@@ -288,6 +290,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.Bots = slices.Clone(r.Bots)
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
+	c.Refills = slices.Clone(r.Refills)
 	c.Enter = r.Enter.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
 	c.Orders = cloneMap(r.Orders)
@@ -356,6 +359,7 @@ type RemoteDriver struct {
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
 	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
+	kit        restKit   // the bots' drink counts and refills (remote_rest.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
@@ -382,7 +386,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d.rep.init(plan, clk.Now)
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
-		Orders: map[string]int{}, Refused: map[string]int{}}
+		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}}
 	d.initTrace()
 	return d
 }
@@ -502,7 +506,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
-				if err := d.startLeg(ctx, a.Leg); err != nil {
+				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					if d.stepFailedRecover(ctx, err) {
 						continue
 					}
@@ -969,7 +973,7 @@ func (d *RemoteDriver) memberByName(name string) (tbm.PartyRec, bool) {
 	return tbm.PartyRec{}, false
 }
 
-func (d *RemoteDriver) startLeg(ctx context.Context, i int) error {
+func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 	d.curLeg = i
 	name := d.plan.Legs[i].Name
 	d.rep.update(func(r *Report) {
@@ -977,8 +981,8 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int) error {
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
 	// The gate at a leg's start waits for health and mana but not for the followers: they catch up on the walk, and the gate before a
-	// pull gathers them.
-	return d.restGate(ctx, false)
+	// pull gathers them. When a long walk comes first, the party may rest on the way (walkAhead).
+	return d.restGateWalk(ctx, false, d.walkAhead(next))
 }
 
 func (d *RemoteDriver) endLeg(result string) {
@@ -1592,13 +1596,22 @@ func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 // of combat: a fight is helped with attack orders, and the timeout counts from its end. A dead bot is revived with `.bot cmd revive`
 // (owner or GM) and the wait for it; with RecoverWipe off a revive that is refused fails the run, like a dead member without GM
 // shortcuts in group mode.
-func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
+func (d *RemoteDriver) restGate(ctx context.Context, gather bool) error {
+	return d.restGateWalk(ctx, gather, nil)
+}
+
+// restGateWalk is restGate with the walking-rest rule of the gate that opens a leg: when the party is not at the targets on the gate's
+// first frame but everyone is above walk's floors, the gate does not hold (Result "walking"); the party rests on the way and the
+// gate before the first pull waits for the targets. A gate that finds everyone at the targets on its first frame is counted as
+// skipped (it costs no time).
+func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walkRest) (err error) {
 	defer d.traceRest(d.clk.Now())
 	began := d.clk.Now()
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
 	ordered := false
+	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
 	var lastRest time.Time
 	calm := began
 	var fightBegan time.Time
@@ -1624,7 +1637,7 @@ func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
 			if err := d.assist(ctx, eng); err != nil {
 				return err
 			}
-			ordered, calm = false, now
+			ordered, calm, held = false, now, true
 			clear(rw.mana)
 			if err := d.tick(ctx, d.cfg.Poll); err != nil {
 				return err
@@ -1635,19 +1648,29 @@ func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
 		st := d.restState(rw)
 		rec.g.Short = st.short
 		if len(st.dead) > 0 {
+			held = true
 			if err := d.reviveDead(ctx, "dead bots at a rest gate"); err != nil {
 				return err
 			}
 			calm = d.clk.Now()
 			continue
 		}
+		if !st.ok && !held && walk != nil {
+			if fs := d.restState(newRestWatch(walk.floor)); fs.ok && len(fs.dead) == 0 {
+				rec.g.Result, rec.g.Skipped = "walking", true
+				d.rep.note(fmt.Sprintf("leg %d: rest gate passed for a walk of %.0f yd or more (%s): resting on the way", d.curLeg, walk.yd, st.why))
+				return nil
+			}
+		}
 		if st.ok {
+			rec.g.Skipped = !held
 			if len(st.stalled) > 0 {
 				rec.g.Result = "stalled"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
 			}
 			return nil
 		}
+		held = true
 		// The commander has no order for one bot (`.bot cmd rest` is the whole party's): a member whose mana does not rise at all gets
 		// the rest order once more, and a refused one is told apart in the record.
 		if fresh := slices.DeleteFunc(slices.Clone(st.nudge), func(m shortMana) bool { return rw.nudged[m.GUID] }); len(fresh) > 0 {
@@ -1682,6 +1705,14 @@ func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
 			if r.Kind == tbm.KindErr {
 				rec.g.PartyRestRefused = true
 			}
+		}
+		// A caster running out of drinks gets `.bot maintenance` again (remote_rest.go) and the party is told to rest anew.
+		refilled, err := d.refill(ctx, rw, rec)
+		if err != nil {
+			return err
+		}
+		if len(refilled) > 0 {
+			ordered = false
 		}
 		if err := d.tick(ctx, d.cfg.RestPoll); err != nil {
 			return err

@@ -95,11 +95,13 @@ func traceCounters(r Report) map[string]float64 {
 		refusals += x.Count
 	}
 	c["refusals"] = float64(refusals)
+	c["rest_gates_skipped"], c["rest_walk_passes"], c["rest_share"] = float64(r.RestGatesSkipped), float64(r.RestWalkPasses), r.RestShare
 	if rr := r.Remote; rr != nil {
 		c["orders_sent"], c["orders_refused"], c["orders_unanswered"] = float64(rr.OrdersSent), float64(rr.OrdersRefused), float64(rr.OrdersUnanswered)
 		c["frames_received"], c["frames_missed"], c["frames_stale"] = float64(rr.FramesReceived), float64(rr.FramesMissed), float64(rr.FramesStale)
 		c["feed_stalls"], c["move_stalls"], c["walk_aggros"] = float64(rr.FeedStalls), float64(rr.MoveStalls), float64(rr.WalkAggros)
 		c["threat_warnings"], c["threat_overrides"] = float64(rr.ThreatWarnings), float64(rr.ThreatOverrides)
+		c["refills"] = float64(len(rr.Refills))
 	}
 	return c
 }
