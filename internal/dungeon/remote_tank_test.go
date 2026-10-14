@@ -30,7 +30,9 @@ func aggroFight(t *testing.T, mod func(g *fakeRemote, a, b *rmob), o RemoteOptio
 			inner(g)
 		}
 	}
-	o.Tank = "Tanky"
+	if o.Tank == "" {
+		o.Tank = "Tanky"
+	}
 	plan := remotePlan(Leg{Name: "a", To: Point{300, 0, 0}})
 	rep, err := runRemote(t, g, plan, o, nil)
 	if err != nil {

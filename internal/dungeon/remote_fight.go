@@ -665,14 +665,15 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	return true, nil
 }
 
+// attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
+const attackHoldYd = 45
+
 // attackAllowed is the cadence of the attack order at one mob. After a pull the bots' own pull is running (the tank is walking to its
 // firing position, the others hold): an attack order for the same mob every second made the tank drop it for "return to pull position"
 // and back (Uldaman group B, tank wipes). So an order goes once per mob, and again only when the mob changed, the last order was refused
 // (sentGUID forgotten), or AssistEvery (at least 5 s) has passed with the tank still not holding the mob; the reason of a repeat is
-// noted. Every wait here is the clock's, so the repeat cannot be pushed out by anything the bots do (rule 3).
-// attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
-const attackHoldYd = 45
-
+// noted. Every wait here is the clock's, so the repeat cannot be pushed out by anything the bots do (rule 3). "The tank holds it" means
+// the named tank, or, before one is known, a tank-like bot (a healer on the mob is no tank); alive, and within attackHoldYd of the mob.
 func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 	if d.tf.sentGUID != h.GUID {
 		return true
@@ -682,9 +683,9 @@ func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 	if now.Sub(d.tf.sentAt) < wait {
 		return false
 	}
-	if holder, ok := d.fr.ThreatHolder(h.GUID); ok && d.fr.IsMember(holder) && (d.tank == 0 || holder == d.tank) {
-		// The tank has it: the order did its work, unless the tank is not at the mob (it follows the commander, or is running back).
-		if m, found := d.memberByGUID(holder); !found || dist3(partyPoint(m), hostilePoint(h)) <= attackHoldYd {
+	if holder, ok := d.fr.ThreatHolder(h.GUID); ok && d.fr.IsMember(holder) && ((d.tank == 0 && d.tankLike(holder)) || (d.tank != 0 && holder == d.tank)) {
+		// The tank has it: the order did its work, unless the tank is dead, or not at the mob (it follows the commander, or is running back).
+		if m, found := d.memberByGUID(holder); !found || (!m.Dead && dist3(partyPoint(m), hostilePoint(h)) <= attackHoldYd) {
 			return false
 		}
 	}

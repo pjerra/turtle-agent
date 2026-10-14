@@ -85,3 +85,73 @@ func TestRemoteAttackOrderRefusedIsSentAgain(t *testing.T) {
 		t.Fatalf("a refused order was not sent again at the same mob: %v", first)
 	}
 }
+
+// noTankFight is aggroFight without a named tank: the driver takes the first tank-like bot it sees holding a pulled mob.
+func noTankFight(t *testing.T, mod func(g *fakeRemote, a, b *rmob)) (*fakeRemote, *rmob, *rmob, Report) {
+	t.Helper()
+	g := newFakeRemote(t)
+	a := g.addMob(299, Point{130, 0, 0})
+	b := g.addMob(300, Point{130, 40, 0})
+	mod(g, a, b)
+	inner := g.onTick
+	g.onTick = func(g *fakeRemote) {
+		if g.lead().X > 90 {
+			for _, m := range g.mobs {
+				if !m.engaged {
+					m.pulled, m.pullAt, m.engaged = true, g.now, true
+				}
+			}
+		}
+		if inner != nil {
+			inner(g)
+		}
+	}
+	o := opts()
+	o.Tank = ""
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), o, nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	return g, a, b, rep
+}
+
+// Before any tank is known, a healer that happens to hold the mob is not "the tank holds it": the order is sent again after AssistEvery.
+func TestRemoteAttackResendWhenAHealerHoldsTheMobAndNoTankIsKnown(t *testing.T) {
+	g, _, _, rep := noTankFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold, b.hold = gHealer, gHealer // the healer (mana) holds both; the warrior (rage) holds nothing
+		g.ignorePull = true
+		g.killRate = 2
+	})
+	if rep.Remote.AttackResends < 1 {
+		t.Fatalf("no resend for a mob held by a healer: %v\n%s", g.orders, notesOf(rep))
+	}
+	for _, m := range g.mobs {
+		at := partyAttacks(g, tbm.GUIDArg(m.guid))
+		for i := 1; i < len(at); i++ {
+			if gap := at[i].Sub(at[i-1]); gap < 10*time.Second {
+				t.Fatalf("attack orders %v apart: %v", gap, at)
+			}
+		}
+	}
+}
+
+// A dead tank does not hold the mob either, whatever the feed's threat record still says.
+func TestRemoteAttackResendWhenTheTankIsDead(t *testing.T) {
+	g, _, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold = gMage // the named tank (below) holds it ...
+		g.ignorePull = true
+		g.killRate = 2
+		inner := g.onTick
+		g.onTick = func(g *fakeRemote) {
+			if a.engaged {
+				g.party[2].Dead, g.party[2].HP = true, 0 // ... and dies
+			}
+			if inner != nil {
+				inner(g)
+			}
+		}
+	}, func() RemoteOptions { o := opts(); o.Tank = "Magey"; return o }())
+	if rep.Remote.AttackResends < 1 {
+		t.Fatalf("no resend with a dead tank: %v\n%s", g.orders, notesOf(rep))
+	}
+}
