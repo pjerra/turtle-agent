@@ -359,3 +359,32 @@ func TestDrinkFailedAnyReason(t *testing.T) {
 		}
 	}
 }
+
+// TortoiseBots #943: reaction and kind follow the flags. An older module sends neither (the unit is taken as hostile); a letter this
+// reader does not know is kept, not an error.
+func TestParseHostileRecReactionAndKind(t *testing.T) {
+	old, err := ParseHostileRec(mobRec)
+	if err != nil || old.Reaction != "" || old.Kind != "" || !old.Hostile() || old.Bystander() {
+		t.Fatalf("old record: %v %+v", err, old)
+	}
+	cases := []struct {
+		rec                string
+		reaction, kind     string
+		hostile, bystander bool
+	}{
+		{mobRec + ",h,-", "h", "-", true, false},
+		{mobRec + ",n,-", "n", "-", false, false},
+		{mobRec + ",f,g", "f", "g", false, true},
+		{mobRec + ",h,k", "h", "k", true, true},
+		{mobRec + ",n,vu", "n", "vu", false, true},
+		{mobRec + ",-,-", "-", "-", true, false},
+		{mobRec + ",h", "h", "", true, false},
+		{mobRec + ",x,z", "x", "z", false, false},
+	}
+	for _, c := range cases {
+		h, err := ParseHostileRec(c.rec)
+		if err != nil || h.Reaction != c.reaction || h.Kind != c.kind || h.Hostile() != c.hostile || h.Bystander() != c.bystander || h.Entry != 3874 || h.Flags != "-" {
+			t.Errorf("%s: %v %+v", c.rec, err, h)
+		}
+	}
+}

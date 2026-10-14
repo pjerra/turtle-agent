@@ -109,7 +109,18 @@ type HostileRec struct {
 	Target packet.GUID `json:"target,omitempty"`
 	Spell  uint32      `json:"spell,omitempty"`
 	Flags  string      `json:"flags"` // s stealthed, e evading, c crowd-controlled, "-" none
+	// Reaction and Kind are the optional tenth and eleventh fields (TortoiseBots #943; empty from an older module, which lists only
+	// what it takes for hostile): Reaction is the unit's reaction to the party, h hostile, n neutral, f friendly, "-" unknown; Kind holds
+	// k critter, v civilian, g guard, u not attackable, or is "-".
+	Reaction string `json:"reaction,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 }
+
+// Hostile says whether the module reports the unit hostile to the party: reaction h, or no reaction known (an older module, or "-").
+func (h HostileRec) Hostile() bool { return h.Reaction == "" || h.Reaction == "h" || h.Reaction == "-" }
+
+// Bystander says whether the unit is a critter, a civilian, a guard or not attackable (Kind), the units a pull should leave alone.
+func (h HostileRec) Bystander() bool { return strings.ContainsAny(h.Kind, "kvgu") }
 
 // Stealthed says whether the unit is stealthed or invisible to the party at large (only a detecting bot lists it).
 func (h HostileRec) Stealthed() bool { return strings.Contains(h.Flags, "s") }
@@ -399,6 +410,14 @@ func ParseHostileRec(s string) (HostileRec, error) {
 		HPPct: r.pct(5, "hp%"), Target: r.guid(6, "target"), Spell: r.u32(7, "spell"), Flags: f[8]}
 	if r.err != nil {
 		return HostileRec{}, r.err
+	}
+	// TortoiseBots #943: reaction and kind follow the flags; an older module sends neither. Values are kept as sent (a letter this
+	// reader does not know is not an error: a newer module may add one), and only the known letters are acted on.
+	if len(f) > hostileFields {
+		h.Reaction = f[hostileFields]
+	}
+	if len(f) > hostileFields+1 {
+		h.Kind = f[hostileFields+1]
 	}
 	return h, nil
 }

@@ -44,6 +44,8 @@ type rmob struct {
 	inert bool
 	// aggroed: it came at the party because a bot walked within the fake's aggro range of it (not by a pull)
 	aggroed bool
+	// reaction and kind: the record's TortoiseBots #943 fields ("" leaves them out, as an older module does)
+	reaction, kind string
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -310,7 +312,7 @@ func (g *fakeRemote) publish() {
 		if dx, dy := float64(m.pos.X-g.lead().X), float64(m.pos.Y-g.lead().Y); g.sight > 0 && !m.engaged && sqrt(dx*dx+dy*dy) > g.sight {
 			continue
 		}
-		h := tbm.HostileRec{GUID: m.guid, Entry: m.entry, X: m.pos.X, Y: m.pos.Y, Z: m.pos.Z, HPPct: int(m.hp), Target: m.target, Flags: m.flags}
+		h := tbm.HostileRec{GUID: m.guid, Entry: m.entry, X: m.pos.X, Y: m.pos.Y, Z: m.pos.Z, HPPct: int(m.hp), Target: m.target, Flags: m.flags, Reaction: m.reaction, Kind: m.kind}
 		f.Hostiles = append(f.Hostiles, h)
 		if m.engaged {
 			top := []tbm.ThreatEntry{{GUID: m.target, Pct: 100}, {GUID: gHealer, Pct: 30}}

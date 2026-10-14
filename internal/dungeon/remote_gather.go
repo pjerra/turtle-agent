@@ -190,9 +190,8 @@ func distToSegment(p, a, b Point) float64 {
 // hostileAhead is the living hostile the bots see within AggroGuard yards of the hop from here to wp that is not fighting the party yet,
 // the nearest to the lead bot, and no more than aheadMaxDZ above or below the hop (another floor is not in the way). Players, stealthed,
 // evading and crowd-controlled units, any unit a step of the plan owns (planOwns), mobs the bots refused and those a pull on the way
-// passed over in this leg are left out. The feed carries no reaction or creature type, so a neutral unit or a critter the module lists
-// cannot be told apart here (a TortoiseBots follow-up: the view's hostile list includes neutral units); the plan's skip lists keep the
-// known ones out.
+// passed over in this leg are left out. Neutral units and critters the module lists are told apart by the record's reaction and kind (TortoiseBots #943): only reaction h (or none, from an older module) is pulled, and
+// never a critter, civilian, guard or unattackable unit.
 func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 	if d.stale() {
 		return tbm.HostileRec{}, false
@@ -204,6 +203,11 @@ func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 			continue
 		}
 		if _, refused := d.skipped[h.GUID]; refused || d.engagedWith(h) || d.planOwns(h) {
+			continue
+		}
+		// TortoiseBots #943: only a hostile is pulled, never a critter, civilian, guard or unattackable unit. engagedWith above already
+		// left out every unit fighting the party; a neutral that targets a bot is fighting it: the walk's fight branch takes it.
+		if !h.Hostile() || h.Bystander() {
 			continue
 		}
 		p := hostilePoint(h)
