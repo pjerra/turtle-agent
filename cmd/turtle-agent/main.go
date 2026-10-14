@@ -80,6 +80,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return traceScoreCmd(args[1:], stdout, stderr)
 	case "pulltest":
 		return pulltestCmd(args[1:], stdout, stderr)
+	case "rotation":
+		return rotationCmd(args[1:], stdout, stderr)
 	case "dashboard":
 		return dashboardCmd(ctx, args[1:], stdout, stderr)
 	case "minimap-extract":
@@ -104,6 +106,7 @@ func usage(w io.Writer) {
   turtle-agent tune-diff <trace.jsonl>
   turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
   turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
+  turtle-agent rotation list | show [--level N] <name|file> | check <file>...
   turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]]
   turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR] [--list]
   turtle-agent version`)

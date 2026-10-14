@@ -1,0 +1,190 @@
+{
+ "version": 1,
+ "name": "fury_warrior",
+ "class": "warrior",
+ "spec": "fury",
+ "replaces": [
+  "warrior_melee",
+  "warrior_fury"
+ ],
+ "notes": "The data twin of warrior_melee + warrior_fury: Berserker Stance from level 30 (Battle Stance before), Execute, Bloodthirst on cooldown, Whirlwind, Berserker Rage when feared, Intercept to close a gap in combat, Heroic Strike as the rage dump.",
+ "sources": [
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/GenericWarriorStrategy.cpp (rage dump, Battle Shout, Bloodrage, Execute, Hamstring)",
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/FuryWarriorStrategy.cpp"
+ ],
+ "priorities": [
+  {
+   "id": "charge",
+   "spell": "Charge",
+   "level": 4,
+   "target": "fight",
+   "band": "move",
+   "when": {
+    "in_combat": false,
+    "stance": [
+     "Battle Stance"
+    ],
+    "mob_distance_min": 8,
+    "mob_distance_max": 25,
+    "tank_holds": true
+   }
+  },
+  {
+   "id": "auto_attack",
+   "kind": "attack"
+  },
+  {
+   "id": "execute",
+   "spell": "Execute",
+   "level": 24,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "mob_hp_below": 20,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "berserker_rage",
+   "spell": "Berserker Rage",
+   "level": 32,
+   "target": "self",
+   "band": "emergency",
+   "when": {
+    "state": "any",
+    "feared": true,
+    "stance": [
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "intercept",
+   "spell": "Intercept",
+   "level": 30,
+   "target": "fight",
+   "band": "move",
+   "when": {
+    "in_combat": true,
+    "stance": [
+     "Berserker Stance"
+    ],
+    "mob_distance_min": 8,
+    "mob_distance_max": 25,
+    "tank_holds": true
+   }
+  },
+  {
+   "id": "bloodthirst",
+   "spell": "Bloodthirst",
+   "talent": true,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true
+   }
+  },
+  {
+   "id": "whirlwind",
+   "spell": "Whirlwind",
+   "level": 36,
+   "target": "fight",
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "mobs_in_reach_min": 1,
+    "stance": [
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "bloodrage",
+   "spell": "Bloodrage",
+   "level": 10,
+   "target": "self",
+   "when": {
+    "state": "combat",
+    "mob_distance_max": 12,
+    "power_below": 20,
+    "self_hp_above": 50,
+    "no_self_aura": [
+     "Bloodrage"
+    ]
+   }
+  },
+  {
+   "id": "hamstring",
+   "spell": "Hamstring",
+   "level": 8,
+   "target": "fight",
+   "when": {
+    "mob_fleeing": true,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "cleave",
+   "kind": "next_swing",
+   "spell": "Cleave",
+   "level": 20,
+   "target": "fight",
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49,
+    "mobs_in_reach_min": 2
+   }
+  },
+  {
+   "id": "heroic_strike",
+   "kind": "next_swing",
+   "spell": "Heroic Strike",
+   "level": 1,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49
+   }
+  },
+  {
+   "id": "stance_fury",
+   "kind": "stance",
+   "stances": [
+    "Berserker Stance",
+    "Battle Stance"
+   ]
+  },
+  {
+   "id": "battle_shout_rest",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "when": {
+    "state": "rest",
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  },
+  {
+   "id": "battle_shout",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "band": "low",
+   "when": {
+    "state": "any",
+    "in_combat": true,
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  }
+ ]
+}

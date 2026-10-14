@@ -15,6 +15,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/pjerra/turtle-agent/internal/tactics"
 )
 
 // Version is the plan format this package reads and writes.
@@ -178,6 +181,10 @@ type Boss struct {
 	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
 	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// Tactics is what a player does on this fight beyond the class rotation: kill an add first, interrupt a cast, dispel an aura, leave the
+	// place of a cast (internal/tactics). The bot brain acts on it for the agent's own character when the agent leads and plays (mode
+	// leader, README "Boss tactics"); a commander run carries it in the plan and does not use it (the bots are TortoiseBots').
+	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -355,6 +362,8 @@ type rawBoss struct {
 	LootItem *rawItem  `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
+	// Tactics is Boss.Tactics.
+	Tactics *tactics.Tactics `json:"tactics"`
 }
 
 type rawStep struct {
@@ -660,6 +669,14 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		for i, e := range l.Skip {
 			if e == b.Entry && e != 0 {
 				c.fail(fmt.Sprintf("%s.skip[%d]", path, i), "skips the boss (%d)", e)
+			}
+		}
+		if r.Boss.Tactics != nil {
+			if err := r.Boss.Tactics.Validate(spells.HasName); err != nil {
+				c.fail(bp+".tactics", "%v", err)
+			}
+			if !r.Boss.Tactics.Empty() {
+				b.Tactics = r.Boss.Tactics
 			}
 		}
 		l.Boss = &b

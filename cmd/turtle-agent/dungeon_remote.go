@@ -22,21 +22,25 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	bad := func(format string, a ...any) error {
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf(format, a...)}
 	}
-	switch strings.ToLower(p.Mode) {
-	case "", "group":
+	mode, _, merr := runMode(p.Mode)
+	if merr != nil {
+		return false, merr
+	}
+	switch mode {
+	case modeLeader:
 		if p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 {
-			return false, bad(`from_pull_group, start_here, have_items and pulltest go with mode "remote" (group mode has teleport)`)
+			return false, bad(`from_pull_group, start_here, have_items and pulltest go with mode "remote" (commander; leader and group mode have teleport)`)
 		}
 		if p.Tune != "" || p.LiveReload != nil {
-			return false, bad(`tune and live_reload go with mode "remote"`)
+			return false, bad(`tune and live_reload go with mode "remote" (commander)`)
 		}
 		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.KeepOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
-			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote"`)
+			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote" (commander)`)
+		}
+		if (p.Rotation != "" || p.Role != "") && p.Brain == "" && !strings.EqualFold(p.Mode, modeLeader) {
+			return false, bad(`rotation and role go with a brain (brain, or mode "leader", which picks the preset of the character's class)`)
 		}
 		return false, nil
-	case "remote":
-	default:
-		return false, bad(`mode must be "group" or "remote"`)
 	}
 	if p.Prepare != nil && p.Prepare.HiredParty() {
 		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" {
@@ -81,8 +85,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		return true, bad(`teleport is a GM command of group mode; a remote run enters the dungeon itself (enter)`)
 	case p.Buffs != nil:
 		return true, bad(`buffs are GM commands (.aura); remote mode sends none`)
-	case p.Brain != "":
-		return true, bad(`brain plays the agent's own character; in remote mode the bots fight`)
+	case p.Brain != "" || p.Rotation != "" || p.Role != "":
+		return true, bad(`brain, rotation and role play the agent's own character; in remote (commander) mode the bots fight`)
 	case p.GM != nil || p.GMLevel != nil:
 		return true, bad(`gm and gm_level do not apply: a remote run sends no GM command but the one .tele name of its enter phase, which it asks the server about (enter)`)
 	case p.WaitSickness:
@@ -155,7 +159,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		_ = drv.Run(ctx, from)
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", LeadBot: p.LeadBot}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}, nil
 }
 
 // keptHires is a copy of what the run that kept a binding read of its hires (nil when none was kept). The caller holds r.mu.

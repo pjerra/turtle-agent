@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/auth"
+	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/capture"
 	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -215,6 +216,14 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if err != nil {
 		fmt.Fprintln(stderr, "config:", err)
 		return exitUsage
+	}
+	if st.RotationsDir != "" {
+		names, err := brain.LoadRotationDir(st.RotationsDir)
+		if err != nil {
+			fmt.Fprintln(stderr, "rotations_dir:", err)
+			return exitUsage
+		}
+		fmt.Fprintf(stderr, "rotations: %d from %s\n", len(names), st.RotationsDir)
 	}
 	// With one argument the account is the settings file's only one, which keeps the name
 	// out of ps and shell history (ruling P10).

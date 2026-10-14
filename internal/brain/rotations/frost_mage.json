@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "frost_mage",
+  "class": "mage",
+  "spec": "frost",
+  "replaces": ["mage_frost"],
+  "notes": "The data twin of the Go strategy mage_frost: the same rotation as a file, so that it can be switched against an edited copy. Frost Nova on a mob in melee, Cone of Cold on two or more in front, Fire Blast on a mob in melee, Frostbolt as the filler.",
+  "sources": [
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/FrostMageStrategy.cpp (filler and cone)",
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/GenericMageStrategy.cpp (Frost Nova when the melee closes, Fire Blast)"
+  ],
+  "priorities": [
+    {"id": "frost_nova", "spell": "Frost Nova", "level": 10, "target": "self", "band": "high", "threat": "aoe",
+     "when": {"melee_mob": true, "no_mob_aura": ["Frost Nova"]}},
+    {"id": "cone_of_cold", "spell": "Cone of Cold", "level": 26, "target": "self", "harmful": true, "threat": "aoe",
+     "when": {"mobs_in_cone_min": 2}},
+    {"id": "fire_blast", "spell": "Fire Blast", "level": 6, "target": "melee_mob", "when": {"melee_mob": true}},
+    {"id": "frostbolt", "spell": "Frostbolt", "level": 4, "target": "fight"}
+  ]
+}

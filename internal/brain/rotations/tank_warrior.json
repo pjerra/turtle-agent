@@ -1,0 +1,210 @@
+{
+ "version": 1,
+ "name": "tank_warrior",
+ "class": "warrior",
+ "spec": "protection",
+ "replaces": [
+  "warrior_melee",
+  "warrior_tank"
+ ],
+ "notes": "The data twin of warrior_melee + warrior_tank in Defensive Stance: Sunder Armor to five stacks, Revenge after an avoided attack, Shield Block when hurt with a mob on the tank, Thunder Clap and Demoralizing Shout with two or more mobs, Heroic Strike and Cleave to dump rage. The taunt and the choice of mob are role_tank's.",
+ "sources": [
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/GenericWarriorStrategy.cpp (rage dump, Battle Shout, Bloodrage, Execute, Hamstring)",
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/TankWarriorStrategy.cpp"
+ ],
+ "priorities": [
+  {
+   "id": "charge",
+   "spell": "Charge",
+   "level": 4,
+   "target": "fight",
+   "band": "move",
+   "when": {
+    "in_combat": false,
+    "stance": [
+     "Battle Stance"
+    ],
+    "mob_distance_min": 8,
+    "mob_distance_max": 25,
+    "tank_holds": true
+   }
+  },
+  {
+   "id": "auto_attack",
+   "kind": "attack"
+  },
+  {
+   "id": "execute",
+   "spell": "Execute",
+   "level": 24,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "mob_hp_below": 20,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "revenge",
+   "spell": "Revenge",
+   "level": 14,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "after": "avoided",
+    "stance": [
+     "Defensive Stance"
+    ]
+   }
+  },
+  {
+   "id": "thunder_clap",
+   "spell": "Thunder Clap",
+   "level": 6,
+   "target": "self",
+   "harmful": true,
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "mobs_in_reach_min": 2,
+    "mobs_lacking_aura": "Thunder Clap",
+    "stance": [
+     "Battle Stance",
+     "Defensive Stance"
+    ]
+   }
+  },
+  {
+   "id": "sunder",
+   "spell": "Sunder Armor",
+   "level": 10,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "mob_stacks_below": {
+     "aura": "Sunder Armor",
+     "stacks": 5
+    }
+   }
+  },
+  {
+   "id": "demoralizing_shout",
+   "spell": "Demoralizing Shout",
+   "level": 14,
+   "target": "self",
+   "harmful": true,
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "mobs_in_reach_min": 2,
+    "mobs_lacking_aura": "Demoralizing Shout"
+   }
+  },
+  {
+   "id": "shield_block",
+   "spell": "Shield Block",
+   "level": 16,
+   "target": "self",
+   "when": {
+    "state": "combat",
+    "mob_on_me": true,
+    "mob_in_reach": true,
+    "self_hp_below": 90,
+    "stance": [
+     "Defensive Stance"
+    ],
+    "no_self_aura": [
+     "Shield Block"
+    ]
+   }
+  },
+  {
+   "id": "bloodrage",
+   "spell": "Bloodrage",
+   "level": 10,
+   "target": "self",
+   "when": {
+    "state": "combat",
+    "mob_distance_max": 12,
+    "power_below": 20,
+    "self_hp_above": 50,
+    "no_self_aura": [
+     "Bloodrage"
+    ]
+   }
+  },
+  {
+   "id": "hamstring",
+   "spell": "Hamstring",
+   "level": 8,
+   "target": "fight",
+   "when": {
+    "mob_fleeing": true,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "cleave",
+   "kind": "next_swing",
+   "spell": "Cleave",
+   "level": 20,
+   "target": "fight",
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49,
+    "mobs_in_reach_min": 2
+   }
+  },
+  {
+   "id": "heroic_strike",
+   "kind": "next_swing",
+   "spell": "Heroic Strike",
+   "level": 1,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49
+   }
+  },
+  {
+   "id": "stance_tank",
+   "kind": "stance",
+   "stances": [
+    "Defensive Stance"
+   ]
+  },
+  {
+   "id": "battle_shout_rest",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "when": {
+    "state": "rest",
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  },
+  {
+   "id": "battle_shout",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "band": "low",
+   "when": {
+    "state": "any",
+    "in_combat": true,
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  }
+ ]
+}

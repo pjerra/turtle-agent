@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	_ "embed"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ var (
 	names     map[uint32]string
 	mountOnce sync.Once
 	mounts    map[uint32]bool
+	byOnce    sync.Once
+	byName    map[string][]uint32
 )
 
 // Name is the spell's name, or "" for an id the table does not hold (a spell added to
@@ -33,6 +36,26 @@ func Name(id uint32) string {
 	once.Do(load)
 	return names[id]
 }
+
+// IDsByName lists the ids of the spells with that name (every rank, and any other spell that is called the same), lowest first; the
+// match ignores case. Empty for a name the table does not hold. A rotation or tactics file is checked against it.
+func IDsByName(name string) []uint32 {
+	once.Do(load)
+	byOnce.Do(func() {
+		byName = map[string][]uint32{}
+		for id, n := range names {
+			k := strings.ToLower(n)
+			byName[k] = append(byName[k], id)
+		}
+		for _, ids := range byName {
+			slices.Sort(ids)
+		}
+	})
+	return slices.Clone(byName[strings.ToLower(strings.TrimSpace(name))])
+}
+
+// HasName reports whether some spell is called name.
+func HasName(name string) bool { return len(IDsByName(name)) > 0 }
 
 // IsMount reports whether the spell applies SPELL_AURA_MOUNTED (78, SpellAuraDefines.h:216)
 // in one of its effects. A bridle teaches one of these spells; the agent casts only those.

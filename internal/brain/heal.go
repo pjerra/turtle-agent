@@ -597,7 +597,7 @@ func calcDispel(c *Ctx) DispelPlan {
 		hp, max := memberHealth(c, u)
 		seen, visible := false, false // the sight ray is asked for only when a dispellable aura is found
 		for _, a := range u.Auras {
-			if !a.Harmful || slices.ContainsFunc(noDispel, func(n string) bool { return strings.EqualFold(n, a.Name) }) {
+			if !a.Harmful || slices.ContainsFunc(noDispel, func(n string) bool { return strings.EqualFold(n, a.Name) }) || tacticNoDispel(c, a) {
 				continue
 			}
 			m, ok := spells.Lookup(a.SpellID)
@@ -622,7 +622,8 @@ func calcDispel(c *Ctx) DispelPlan {
 			if handled || spell == 0 {
 				continue
 			}
-			urgent := ccMechanics[m.Mechanic]
+			planned := tacticDispel(c, a) // the boss's plan names it: dispelled first, at any mana
+			urgent := ccMechanics[m.Mechanic] || planned
 			if !urgent && PowerPct(c) < 2*dispelManaMin {
 				continue
 			}
@@ -642,6 +643,9 @@ func calcDispel(c *Ctx) DispelPlan {
 			rank := 0
 			if urgent {
 				rank = 2
+			}
+			if planned {
+				rank = 3
 			}
 			if tank != nil && tank.GUID == u.GUID {
 				rank++
