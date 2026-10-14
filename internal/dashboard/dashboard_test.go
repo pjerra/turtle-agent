@@ -719,3 +719,25 @@ func TestTailerReadsALargeFileFromItsEnd(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 }
+
+func TestPlanCacheFallsBackToThePlansOfTheBuild(t *testing.T) {
+	c := newPlanCache([]string{t.TempDir()})
+	plan, geo, errText := c.get("uldaman")
+	if plan == nil || geo == nil || errText != "" {
+		t.Fatalf("builtin uldaman: %v", errText)
+	}
+	// a file in the plans folder wins over the build's copy and is read again when it changes
+	dir := t.TempDir()
+	c = newPlanCache([]string{dir})
+	tiny, _ := os.ReadFile("testdata/tiny.json")
+	must(t, os.WriteFile(filepath.Join(dir, "uldaman.json"), tiny, 0o644))
+	if plan, _, _ := c.get("uldaman"); plan == nil || plan.Map != 209 {
+		t.Fatalf("file must win: %+v", plan)
+	}
+	if _, _, errText := c.get("nope-nope"); errText == "" {
+		t.Error("an unknown plan must say so")
+	}
+	if _, _, errText := c.get("../etc/passwd"); errText == "" {
+		t.Error("a path is not a plan name")
+	}
+}

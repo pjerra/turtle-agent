@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pjerra/turtle-agent/dungeons"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
 
@@ -53,8 +54,7 @@ func (c *planCache) get(name string) (*dungeon.Plan, []byte, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if path == "" {
-		delete(c.m, name)
-		return nil, nil, "no plan file " + name + ".json in the plans folders"
+		return c.builtin(name)
 	}
 	if e := c.m[name]; e != nil && e.path == path && e.mod.Equal(st.ModTime()) && e.size == st.Size() {
 		return e.plan, e.geo, e.err
@@ -71,6 +71,28 @@ func (c *planCache) get(name string) (*dungeon.Plan, []byte, string) {
 		}
 	}
 	c.m[name] = e
+	return e.plan, e.geo, e.err
+}
+
+// builtin draws the plan file this build carries, for a plan no plans folder has.
+func (c *planCache) builtin(name string) (*dungeon.Plan, []byte, string) {
+	key := "builtin:" + name
+	if e := c.m[key]; e != nil {
+		return e.plan, e.geo, e.err
+	}
+	data, err := dungeons.FS.ReadFile(name + ".json")
+	if err != nil {
+		return nil, nil, "no plan file " + name + ".json in the plans folders or in this build"
+	}
+	e := &planEntry{}
+	if p, err := dungeon.Parse(name+".json", data); err != nil {
+		e.err = firstLine(err.Error())
+	} else if e.geo, err = json.Marshal(BuildGeometry(p)); err != nil {
+		e.err = err.Error()
+	} else {
+		e.plan = p
+	}
+	c.m[key] = e
 	return e.plan, e.geo, e.err
 }
 
