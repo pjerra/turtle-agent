@@ -1,0 +1,2 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+109	446	Sunken Temple - Entrance	35	0	-10162.7	-3998.65	-107.978	11	0	0	0	-315.903	100.197	-131.849

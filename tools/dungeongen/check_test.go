@@ -129,14 +129,14 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := filepath.Join("testdata", "uldaman")
-	if got := checkFile(plan, data, "alliance", "122", "", false); got != 0 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", false); got != 0 {
 		t.Fatalf("warnings without -strict: %d", got)
 	}
-	if got := checkFile(plan, data, "alliance", "122", "", true); got != 1 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", true); got != 1 {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", true); got != 0 {
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 0 {
 		t.Fatalf("the committed plan: %d", got)
 	}
 }

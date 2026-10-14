@@ -100,8 +100,11 @@ func (b *buffsParam) UnmarshalJSON(raw []byte) error {
 }
 
 type dungeonRunParams struct {
-	Name    string    `json:"name"`
-	FromLeg *legParam `json:"from_leg,omitempty"`
+	Name string `json:"name"`
+	// AllowDraft lets the run take a plan whose status is "draft": a skeleton from the world database that has not had its mapping walk
+	// (AUTO-IMPROVE step 0), so its waypoints and pull order are unchecked. Without it such a plan is refused.
+	AllowDraft bool      `json:"allow_draft,omitempty"`
+	FromLeg    *legParam `json:"from_leg,omitempty"`
 	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
 	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
@@ -307,6 +310,18 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	}, r
 }
 
+// planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
+// draft plan has had no mapping walk, so it runs only when the caller says allow_draft.
+func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
+	switch {
+	case plan.IsRaid():
+		return fmt.Sprintf("plan %s is a raid plan: dungeon_run leads a 5-man party and has no raid driver yet", plan.Name)
+	case strings.HasPrefix(plan.Status, dungeon.StatusDraft) && !allowDraft:
+		return fmt.Sprintf("plan %s is a draft (%s): its route is a skeleton from the world database that has not had its mapping walk; walk it first, or pass allow_draft to run it anyway", plan.Name, plan.Status)
+	}
+	return ""
+}
+
 func (r *dungeonRunner) running() bool {
 	if r.done == nil {
 		return false
@@ -327,6 +342,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	plan, err := dungeon.Load(planPath)
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
+	}
+	if msg := planRunRefusal(plan, p.AllowDraft); msg != "" {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: msg}
 	}
 	setup, err := cleanSetup(p.Setup)
 	if err != nil {

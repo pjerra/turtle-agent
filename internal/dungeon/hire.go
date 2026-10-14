@@ -398,6 +398,9 @@ func (e *prepEnv) hire(ctx context.Context) (string, error) {
 	if e.spec.Hire != nil {
 		spec = *e.spec.Hire
 	}
+	if len(spec.Composition) == 0 {
+		spec.Composition = e.plan.HireComposition // the plan's own party, if it names one
+	}
 	slots, err := spec.slots()
 	if err != nil {
 		return "", err

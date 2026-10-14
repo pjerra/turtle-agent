@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Export the creature and game object spawns and the entrances of one map from the Tortoise world database to the
-# three TSV files that dungeongen reads:   export.sh <map> <outdir>   (writes <outdir>/creatures.tsv, gameobjects.tsv and entrances.tsv)
+# three TSV files that dungeongen reads:   export.sh <map> <outdir>   (writes <outdir>/creatures.tsv, gameobjects.tsv, entrances.tsv and portals.tsv)
 #
 # The database is the one in the docker stack on the server host. SELECTs only: the session is opened with
 # SET SESSION TRANSACTION READ ONLY and every statement below is a SELECT. No credential is read, printed or stored here:
@@ -56,4 +56,14 @@ SELECT id, name, target_map, target_position_x, target_position_y, target_positi
 FROM areatrigger_teleport WHERE target_map = $map ORDER BY id;
 SQL
 } > "$out/entrances.tsv"
+# The areatriggers of the map's entrances with their own position on the outer map (areatrigger_template): the plan's portal.
+{
+  printf 'target_map\tid\tname\trequired_level\touter_map\tx\ty\tz\tradius\tbox_x\tbox_y\tbox_z\ttarget_x\ttarget_y\ttarget_z\n'
+  query <<SQL
+SELECT t.target_map, t.id, t.name, t.required_level, a.map_id, a.x, a.y, a.z, a.radius, a.box_x, a.box_y, a.box_z,
+       t.target_position_x, t.target_position_y, t.target_position_z
+FROM areatrigger_teleport t LEFT JOIN areatrigger_template a ON a.id = t.id
+WHERE t.target_map = $map ORDER BY t.id;
+SQL
+} > "$out/portals.tsv"
 wc -l "$out"/*.tsv
