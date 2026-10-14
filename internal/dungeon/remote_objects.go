@@ -475,7 +475,7 @@ func (d *RemoteDriver) carry(ctx context.Context, rec *objRec, command string, n
 		case code == "cancelled" && cancelled < objectCancelTries:
 			cancelled++
 			err = d.tick(ctx, d.cfg.Poll)
-		case code == "in-combat" && d.clk.Now().Before(combatUntil):
+		case code == "in-combat" && verb != "ritual" && d.clk.Now().Before(combatUntil): // a ritual is never re-sent blindly: stepRitual asks the altar first
 			err = d.tick(ctx, d.cfg.Poll*2)
 		case code == "lead-unavailable" && d.clk.Now().Before(leadUntil):
 			err = d.tick(ctx, d.cfg.Poll*2)

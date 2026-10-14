@@ -22,9 +22,9 @@ import (
 // The bots are the carrier first (it uses first), then the party's bots by how little they are needed elsewhere: DPS, then the healer, then
 // the tank, the lead bot last (the party follows it, so it should keep its place). The group does not change: no bot is invited or sent away.
 
-// ritualTries is how often the order is given when it ends `interrupted` (a participant moved or was hit): the module has let every bot go
-// and stopped their channel by then, so the object is not left half used. Any other refusal stands.
-const ritualTries = 2
+// ritualOrders is how many `cmd ritual` orders one step gives at most: the first, and one more after `interrupted` or after a fight that
+// kept the bots from starting it. A ritual is never sent again once the altar has turned active (see stepRitual).
+const ritualOrders = 3
 
 // ritualMember is one bot of the party as the roster sees it.
 type ritualMember struct {
@@ -98,16 +98,36 @@ func (d *RemoteDriver) ritualRoster() []ritualMember {
 	return out
 }
 
-// stepRitual is a ritual step: the approach holds the party by the object, then one `cmd ritual` order for all the bots.
+// ritualAltarActive asks the module (`cmd state`) whether the altar is active: its ritual spell has been cast, so the ritual has fired. An
+// answer that cannot be had is "not known", which is not "active".
+func (d *RemoteDriver) ritualAltarActive(ctx context.Context, a Action) (active bool, err error) {
+	og, _ := d.orderGame()
+	cmd := "cmd state " + tbm.EntryArg(a.Entry, pointArr(a.EntryAt))
+	res, err := og.Order(ctx, cmd)
+	d.remote(func(r *RemoteReport) { r.OrdersSent++; r.Orders["state"]++ })
+	if err != nil {
+		return false, err
+	}
+	return res.Kind == tbm.KindAck && res.State != nil && strings.EqualFold(res.State.State, "active"), nil
+}
+
+// stepRitual is a ritual step: the approach holds the party by the altar, then one `cmd ritual` order for all the bots. Its final ACK is the
+// result: when the bots are let go their own movement ends the helper channel and the core sends the altar back to ready, so the altar's
+// state afterwards proves nothing (a plan puts the next wait on what lasts: the door the Stone Keepers' death opens, the boss).
+//
+// A ritual that has fired is never ordered again: an `in-combat` or `interrupted` answer is only taken as a failure after `cmd state` says
+// the altar is not active; an active altar means the cast went out (the Stone Keepers or Archaedas wake into a fight) and the step is done.
+// Before it fired, `interrupted` and a fight that ended are ordered once more, at most ritualOrders orders in all.
 func (d *RemoteDriver) stepRitual(ctx context.Context, a Action, carrier tbm.PartyRec, rec *objRec) (string, error) {
 	if !d.entry.ok {
-		return "", fmt.Errorf("a ritual step orders `cmd ritual entry:%d@x,y,z <bots>`: this module does not take objects by entry, or does not know the order (TortoiseBots with cmd ritual is needed; the agent's own character cannot take the step over)", a.Entry)
+		return "", fmt.Errorf("a ritual step orders `cmd ritual entry:%d@x,y,z <bots>`: this module does not take objects by entry, or does not know the order (TortoiseBots with cmd ritual is needed; the agent's character cannot take the step over)", a.Entry)
 	}
 	stayed, err := d.approachObject(ctx, rec, carrier.Name, objectPoint(a), d.standOf(a))
 	if err != nil {
 		return "", err
 	}
 	defer d.resumeFollow(ctx, stayed)
+	interrupted := false
 	for try := 1; ; try++ {
 		names, err := PickRitualBots(d.ritualRoster(), carrier.Name, a.Participants)
 		if err != nil {
@@ -123,12 +143,44 @@ func (d *RemoteDriver) stepRitual(ctx context.Context, a Action, carrier tbm.Par
 			d.rep.note(fmt.Sprintf("%s: %d bots used the ritual together (%s)", a.Label, res.Participants, strings.Join(names, ", ")))
 			return "", nil
 		}
-		if res.Code() != "interrupted" || try >= ritualTries || runEnded(ctx, err) {
+		code := res.Code()
+		if (code != "in-combat" && code != "interrupted") || runEnded(ctx, err) {
 			return "", err
 		}
-		d.rep.note(fmt.Sprintf("%s: the ritual was interrupted (%s); the module let the bots go, trying once more", a.Label, res.Describe()))
-		if terr := d.tick(ctx, d.cfg.Poll*3); terr != nil {
-			return "", terr
+		// Did it fire before the answer? Then it is done, and never sent again.
+		active, serr := d.ritualAltarActive(ctx, a)
+		if serr != nil {
+			return "", serr
+		}
+		if active {
+			d.rep.note(fmt.Sprintf("%s: %s answered %s, but the altar is active: the ritual's cast went out; the step is done and the order is not sent again", a.Label, command, code))
+			return "", nil
+		}
+		if try >= ritualOrders || (code == "interrupted" && interrupted) {
+			return "", err
+		}
+		if code == "interrupted" {
+			interrupted = true
+			d.rep.note(fmt.Sprintf("%s: the ritual was interrupted (%s); the module let the bots go, trying once more", a.Label, res.Describe()))
+			if terr := d.tick(ctx, d.cfg.Poll*3); terr != nil {
+				return "", terr
+			}
+			continue
+		}
+		// In combat before the altar fired: wait for the fight to end (bounded), then order again.
+		d.rep.note(fmt.Sprintf("%s: a bot was in combat (%s); waiting for the fight to end before ordering the ritual again", a.Label, res.Describe()))
+		until := d.clk.Now().Add(objectCombatWait)
+		for {
+			d.look()
+			if !d.inCombat() {
+				break
+			}
+			if !d.clk.Now().Before(until) {
+				return "", err
+			}
+			if terr := d.tick(ctx, d.cfg.Poll*2); terr != nil {
+				return "", terr
+			}
 		}
 	}
 }

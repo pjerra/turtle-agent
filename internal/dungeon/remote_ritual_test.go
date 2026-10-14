@@ -20,10 +20,16 @@ var altarAt = Point{30, 0, 0}
 // ritualGame is an entryGame whose module also answers `cmd ritual entry:<id>@x,y,z <bot> <bot> ...` the way TortoiseBots does: ERR
 // not-found / too-far for the object, no-bot for a name that is not in the party, not-enough for fewer bots than the altar needs, busy for
 // an altar that is active already; otherwise the final `party|<n>|done` after the bots have walked and used it, with the altar then active.
+// ritualAnswer is a scripted answer; fired says the altar had turned active by then (the ritual spell went out).
+type ritualAnswer struct {
+	res   tbm.OrderResult
+	fired bool
+}
+
 type ritualGame struct {
 	*entryGame
 	need    int                 // participants the altar needs
-	script  []tbm.OrderResult   // answers given to the first ritual orders, in order
+	script  []ritualAnswer      // answers given to the first ritual orders, in order
 	rituals []string            // every ritual order
 	onDone  func(g *ritualGame) // after an order that succeeded
 }
@@ -45,11 +51,14 @@ func (g *ritualGame) Order(ctx context.Context, command string) (tbm.OrderResult
 	g.record(command)
 	g.rituals = append(g.rituals, command)
 	if len(g.script) > 0 {
-		r := g.script[0]
+		a := g.script[0]
 		g.script = g.script[1:]
-		r.Command = command
+		a.res.Command = command
+		if a.fired {
+			g.world[0].state = "active" // the ritual's cast went out and the answer is not "done": the altar stays active until the bots move
+		}
 		g.advance(8_000_000_000)
-		return r, nil
+		return a.res, nil
 	}
 	entry, pt, _ := entryFormOf(command)
 	o, code := g.find(entry, pt, false)
@@ -74,7 +83,9 @@ func (g *ritualGame) Order(ctx context.Context, command string) (tbm.OrderResult
 		return errOrder(command, "busy"), nil
 	}
 	g.advance(12_000_000_000) // the walk, three uses and the settle
-	o.state = "active"
+	// The module lets the bots go with its final answer: their own movement ends the helper channel, a participant leaves the active
+	// altar and the core sends it back to ready (GameObject::RemoveUniqueUse). So after `done` the altar reads ready.
+	o.state = "ready"
 	if g.onDone != nil {
 		g.onDone(g)
 	}
@@ -121,11 +132,10 @@ func ritualRun(t *testing.T, g *ritualGame, plan *Plan) (Report, error) {
 func ritualPlan(participants int) *Plan {
 	return remotePlan(Leg{Name: "altar", To: Point{20, 0, 0}, Steps: []Step{
 		{Ritual: &Ritual{Entry: goAltar, Position: altarAt, Participants: participants}},
-		{WaitFor: &WaitFor{GameObject: &ObjectState{ObjectRef: ObjectRef{Entry: goAltar, Near: &altarAt}, State: "active"}, TimeoutS: 20}},
 	}})
 }
 
-func TestRitualStepOrdersThreeBotsAndTheWaitChecksTheAltar(t *testing.T) {
+func TestRitualStepOrdersThreeBotsAndTheAckIsTheResult(t *testing.T) {
 	g := newRitualGame(t, 3)
 	rep, err := ritualRun(t, g, ritualPlan(3))
 	if err != nil {
@@ -141,9 +151,10 @@ func TestRitualStepOrdersThreeBotsAndTheWaitChecksTheAltar(t *testing.T) {
 	if g.indexOf("cmd stay") < 0 || g.indexOf("cmd stay") > ritual || follow < ritual {
 		t.Fatalf("stay before, follow after: %v", g.orders)
 	}
-	// The wait that follows asked the module for the altar's state and found it active.
-	if state < ritual {
-		t.Fatalf("the wait for the altar polled before the ritual: %v", g.orders)
+	// The ACK is the result: nothing asks for the altar's state afterwards (it reads ready again once the bots are let go: rule 6, the fake
+	// does the same), so no wait on it can fail the run.
+	if state > ritual || g.world[0].state != "ready" {
+		t.Fatalf("the altar was polled after the ritual (state at %d, ritual at %d): %v", state, ritual, g.orders)
 	}
 	if rep.State != "done" {
 		t.Fatalf("state %q\n%s", rep.State, notesOf(rep))
@@ -164,16 +175,17 @@ func TestRitualStepOrdersThreeBotsAndTheWaitChecksTheAltar(t *testing.T) {
 	}
 }
 
-// The ritual's ACK is the bots' part; the altar still has to be active for the wait. An altar that stays ready fails the run at the wait with
-// its fail_text, after the ritual's one order.
-func TestRitualStepThenWaitFailsWhenTheAltarStaysReady(t *testing.T) {
+// A plan whose next step waits for something that lasts (here a door the ritual's work opens, polled with cmd state) goes on after the ACK
+// although the altar itself reads ready again.
+func TestRitualStepThenAWaitOnWhatLastsGoesOn(t *testing.T) {
 	g := newRitualGame(t, 3)
-	g.onDone = func(g *ritualGame) { g.world[0].state = "ready" } // the module said done, the object did not turn
+	doorAt := Point{40, 0, 0}
+	g.world = append(g.world, &worldObj{guid: packet.GUID(0x1F1000000000BBB2), entry: 124367, at: doorAt, state: "ready"})
+	g.onDone = func(g *ritualGame) { g.world[1].state = "active" } // the Keepers died: the door opened
 	plan := ritualPlan(3)
-	plan.Legs[0].Steps[1].WaitFor.TimeoutS = 6
-	plan.Legs[0].Steps[1].WaitFor.FailText = "the ritual did not turn the altar"
+	plan.Legs[0].Steps = append(plan.Legs[0].Steps, Step{WaitFor: &WaitFor{GameObject: &ObjectState{ObjectRef: ObjectRef{Entry: 124367, Near: &doorAt}, State: "active"}, TimeoutS: 20}})
 	rep, err := ritualRun(t, g, plan)
-	if err == nil || !strings.Contains(err.Error(), "the ritual did not turn the altar") || len(g.rituals) != 1 {
+	if err != nil || rep.State != "done" || len(g.rituals) != 1 || g.world[0].state != "ready" {
 		t.Fatalf("%v %v\n%s", err, g.rituals, notesOf(rep))
 	}
 }
@@ -196,34 +208,65 @@ func TestRitualStepNotEnoughIsRefused(t *testing.T) {
 	}
 }
 
-// An interrupted ritual (a bot moved) is ordered once more; the module has let every bot go. Twice interrupted ends the step: the order is
-// never repeated without end.
+// An interrupted ritual (a bot moved) before the altar turned active is ordered once more; the module has let every bot go. Twice interrupted
+// ends the step: the order is never repeated without end.
 func TestRitualStepInterruptedIsTriedOnceMore(t *testing.T) {
 	g := newRitualGame(t, 3)
-	g.script = []tbm.OrderResult{errOrder("cmd ritual", "interrupted")}
+	g.script = []ritualAnswer{{res: errOrder("cmd ritual", "interrupted")}}
 	rep, err := ritualRun(t, g, ritualPlan(3))
 	if err != nil || len(g.rituals) != 2 || !hasNote(rep, "the ritual was interrupted") {
 		t.Fatalf("%v %v\n%s", err, g.rituals, notesOf(rep))
 	}
 	g = newRitualGame(t, 3)
-	g.script = []tbm.OrderResult{errOrder("cmd ritual", "interrupted"), errOrder("cmd ritual", "interrupted"), errOrder("cmd ritual", "interrupted")}
+	g.script = []ritualAnswer{{res: errOrder("cmd ritual", "interrupted")}, {res: errOrder("cmd ritual", "interrupted")}, {res: errOrder("cmd ritual", "interrupted")}}
 	rep, err = ritualRun(t, g, ritualPlan(3))
-	if err == nil || !strings.Contains(err.Error(), "interrupted") || len(g.rituals) != ritualTries {
+	if err == nil || !strings.Contains(err.Error(), "interrupted") || len(g.rituals) != 2 {
 		t.Fatalf("%v %v", err, g.rituals)
 	}
-	if rep.Remote.ObjectSteps[0].Result != "failed" || rep.Remote.Refused["ritual:interrupted"] != ritualTries {
+	if rep.Remote.ObjectSteps[0].Result != "failed" || rep.Remote.Refused["ritual:interrupted"] != 2 {
 		t.Fatalf("%+v", rep.Remote)
 	}
 }
 
-// A fight that ends is waited for (in-combat is answered at once), and an altar that is active already is `busy`: retried a few times, then the step ends.
-func TestRitualStepInCombatWaitsAndBusyEnds(t *testing.T) {
+// A ritual that has fired is never sent again: `in-combat` or `interrupted` after the altar turned active (the Keepers woke into a fight, a
+// bot moved after the cast went out) ends the step as done, with one order only, whatever the answer says.
+func TestRitualStepIsNeverSentAgainAfterItFired(t *testing.T) {
+	for _, code := range []string{"in-combat", "interrupted"} {
+		g := newRitualGame(t, 3)
+		g.script = []ritualAnswer{{res: errOrder("cmd ritual", code), fired: true}}
+		rep, err := ritualRun(t, g, ritualPlan(3))
+		if err != nil || len(g.rituals) != 1 || rep.State != "done" || !hasNote(rep, "the altar is active: the ritual's cast went out") {
+			t.Fatalf("%s: %v %v\n%s", code, err, g.rituals, notesOf(rep))
+		}
+		if s := rep.Remote.ObjectSteps[0]; s.Result != "done" {
+			t.Fatalf("%s: %+v", code, s)
+		}
+	}
+}
+
+// A fight before the altar fired: the order is refused, the fight is waited for (it is over at once here) and the order goes out again, at
+// most ritualOrders orders in all; each refusal first asks the altar.
+func TestRitualStepInCombatBeforeItFiredIsOrderedAgain(t *testing.T) {
 	g := newRitualGame(t, 3)
-	g.script = []tbm.OrderResult{errOrder("cmd ritual", "in-combat"), errOrder("cmd ritual", "in-combat")}
-	if _, err := ritualRun(t, g, ritualPlan(3)); err != nil || len(g.rituals) != 3 {
-		t.Fatalf("%v %v", err, g.rituals)
+	g.script = []ritualAnswer{{res: errOrder("cmd ritual", "in-combat")}, {res: errOrder("cmd ritual", "in-combat")}}
+	rep, err := ritualRun(t, g, ritualPlan(3))
+	if err != nil || len(g.rituals) != 3 || !hasNote(rep, "waiting for the fight to end") {
+		t.Fatalf("%v %v\n%s", err, g.rituals, notesOf(rep))
+	}
+	// The altar was asked between the orders (and the probe at the start).
+	if n := len(g.ordersOf("cmd state")); n < 3 {
+		t.Fatalf("%v", g.orders)
 	}
 	g = newRitualGame(t, 3)
+	g.script = []ritualAnswer{{res: errOrder("cmd ritual", "in-combat")}, {res: errOrder("cmd ritual", "in-combat")}, {res: errOrder("cmd ritual", "in-combat")}, {res: errOrder("cmd ritual", "in-combat")}}
+	if _, err := ritualRun(t, g, ritualPlan(3)); err == nil || !strings.Contains(err.Error(), "in-combat") || len(g.rituals) != ritualOrders {
+		t.Fatalf("%v %v", err, g.rituals)
+	}
+}
+
+// An altar that is active already when the order is given is `busy`: retried a few times by the order loop, then the step ends.
+func TestRitualStepBusyEnds(t *testing.T) {
+	g := newRitualGame(t, 3)
 	g.world[0].state = "active"
 	_, err := ritualRun(t, g, ritualPlan(3))
 	if err == nil || !strings.Contains(err.Error(), "busy") || len(g.rituals) != 1+objectBusyTries {
