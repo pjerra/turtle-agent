@@ -136,6 +136,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 			b.Maintenance = d.maintain(ctx, bl, m.Name)
 			if b.Maintenance == "disabled" {
 				maintenanceOn = false
+				d.kit.off = true // the rest gates do not try it again
 				pf.Warnings = append(pf.Warnings, "maintenance is off on the server (AiPlayerbot.OwnedBotMaintenanceEnabled = 0): drinks and ammo are as the bots have them")
 			} else if b.Maintenance != "maintained" {
 				pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: maintenance: %s", m.Name, b.Maintenance))
@@ -245,6 +246,7 @@ func (d *RemoteDriver) checkKit(ctx context.Context, bl BotLiner, pf *Preflight,
 	// Drinks for whoever uses mana: the named healer needs more.
 	if m.UsesMana() {
 		b.Drinks = invCount(inv, drinkSet)
+		d.kit.set(m.Name, b.Drinks, -1)
 		need := preflightDrinksCaster
 		if b.Role == "healer" {
 			need = preflightDrinksHealer

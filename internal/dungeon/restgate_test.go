@@ -275,3 +275,28 @@ func TestRemoteRestGateTargetsAndNudge(t *testing.T) {
 		t.Fatalf("%+v", rep.RestGates[0])
 	}
 }
+
+// Group mode: a gate that finds everyone at the targets is counted as skipped; the gate that opens a leg with a long walk first lets a
+// party above the walking floors (healer mana 40%) rest on the way, and the gate before the pull holds as before.
+func TestRestGateSkipsAndWalkingRest(t *testing.T) {
+	g := restFake()
+	d := runRest(t, g, restPlan, Config{})
+	rep := d.Report()
+	if len(rep.RestGates) != 2 || rep.RestGatesSkipped != 2 || !rep.RestGates[0].Skipped || rep.RestWalkPasses != 0 {
+		t.Fatalf("%+v", rep.RestGates)
+	}
+
+	const walkPlan = `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":100,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":120,"y":0,"z":0}]}]}]}`
+	g = restFake()
+	g.healOnRest = true
+	g.party[1].Power = 180 // the healer at 45%: under the target (50), over the walking floor (40)
+	d = runRest(t, g, walkPlan, Config{})
+	rep = d.Report()
+	if rep.RestGates[0].Result != "walking" || !rep.RestGates[0].Skipped || rep.RestGates[0].Seconds > 1 || rep.RestWalkPasses != 1 {
+		t.Fatalf("%+v", rep.RestGates)
+	}
+	if rep.RestGates[1].Skipped && rep.RestGates[1].Result == "walking" {
+		t.Fatalf("the pull gate let go too: %+v", rep.RestGates[1])
+	}
+}

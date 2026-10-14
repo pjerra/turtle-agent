@@ -87,6 +87,13 @@ type RestSpec struct {
 	HealerMana int `json:"healer_mana,omitempty"` // percent, 1-100
 	Mana       int `json:"mana,omitempty"`        // percent, 1-100
 	MaxS       int `json:"max_s,omitempty"`       // seconds, 1-MaxTimeoutS
+	// WalkYd is the walk length (yards) from which the gate at the leg's start lets the party rest while it walks instead of holding
+	// (the pull gates that follow still wait): 0 keeps the driver's 60, -1 makes the gate always hold. WalkHealth, WalkHealerMana and
+	// WalkMana are the floors everyone must be above for that (defaults 70, 40, 25; percent, 1-100).
+	WalkYd         int `json:"walk_yd,omitempty"`
+	WalkHealth     int `json:"walk_health,omitempty"`
+	WalkHealerMana int `json:"walk_healer_mana,omitempty"`
+	WalkMana       int `json:"walk_mana,omitempty"`
 }
 
 // PullGroup is one pack: the entries it holds and where its members stand (one position each, or fewer when they
@@ -535,13 +542,16 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		for _, f := range []struct {
 			name string
 			v    int
-		}{{"health", rs.Health}, {"healer_mana", rs.HealerMana}, {"mana", rs.Mana}} {
+		}{{"health", rs.Health}, {"healer_mana", rs.HealerMana}, {"mana", rs.Mana}, {"walk_health", rs.WalkHealth}, {"walk_healer_mana", rs.WalkHealerMana}, {"walk_mana", rs.WalkMana}} {
 			if f.v < 0 || f.v > 100 {
 				c.fail(path+".rest."+f.name, "%d is outside 1-100 percent (omit it for the default)", f.v)
 			}
 		}
 		if rs.MaxS < 0 || rs.MaxS > MaxTimeoutS {
 			c.fail(path+".rest.max_s", "%d s is outside 1-%d (omit it for the default)", rs.MaxS, MaxTimeoutS)
+		}
+		if rs.WalkYd < -1 || rs.WalkYd > 5000 {
+			c.fail(path+".rest.walk_yd", "%d yd is outside 1-5000 (-1 turns walking rests off, omit it for the default)", rs.WalkYd)
 		}
 		v := *rs
 		l.Rest = &v

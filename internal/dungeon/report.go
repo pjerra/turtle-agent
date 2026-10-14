@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"math"
 	"sync"
 	"time"
 
@@ -49,6 +50,11 @@ type Report struct {
 	// and whether a drink order went out.
 	RestSeconds float64    `json:"rest_seconds"`
 	RestGates   []RestGate `json:"rest_gates"`
+	// RestGatesSkipped counts the gates that cost nothing (RestGate.Skipped), RestWalkPasses those among them that passed because a long
+	// walk followed. RestShare is RestSeconds as a percent of the run's seconds (the trace's rest_share check measures the same).
+	RestGatesSkipped int     `json:"rest_gates_skipped"`
+	RestWalkPasses   int     `json:"rest_walk_passes"`
+	RestShare        float64 `json:"rest_share"`
 	// Resumed says what a run started inside a leg skipped (see Resumed); absent when it started at the leg's beginning.
 	Resumed *Resumed `json:"resumed,omitempty"`
 	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
@@ -133,6 +139,7 @@ func (p *reporter) end(state, errText string, t time.Time) {
 func endReport(r *Report, state, errText string, t time.Time) {
 	r.State, r.Error, r.Ended, r.Current = state, errText, &t, ""
 	r.Seconds = t.Sub(r.Started).Seconds()
+	r.setRestShare()
 }
 
 // snapshotEnded is snapshot and whether the run has ended, read together under the lock: a state that is not final
@@ -189,7 +196,15 @@ func (p *reporter) snapshot() Report {
 			r.Legs[n-1].Seconds = now.Sub(r.Legs[n-1].Started).Seconds()
 		}
 	}
+	r.setRestShare()
 	return r
+}
+
+// setRestShare puts the rest gates' share of the run's seconds, in percent with one decimal, in RestShare.
+func (r *Report) setRestShare() {
+	if r.Seconds > 0 {
+		r.RestShare = math.Round(r.RestSeconds/r.Seconds*1000) / 10
+	}
 }
 
 // summary is the report's totals for the dungeon_done and dungeon_failed events.
@@ -200,7 +215,7 @@ func summaryOf(r Report) map[string]any {
 	m["run_id"] = r.RunID
 	if r.Remote != nil {
 		m["remote"], m["lead_bot"], m["frames_received"] = true, r.Remote.LeadBot, r.Remote.FramesReceived
-		m["orders_sent"], m["orders_refused"] = r.Remote.OrdersSent, r.Remote.OrdersRefused
+		m["orders_sent"], m["orders_refused"], m["refills"] = r.Remote.OrdersSent, r.Remote.OrdersRefused, len(r.Remote.Refills)
 	}
 	return m
 }
@@ -208,5 +223,6 @@ func summaryOf(r Report) map[string]any {
 func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
-		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds}
+		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
+		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}
 }

@@ -177,22 +177,31 @@ type Config struct {
 	// the bot named by RemoteOptions.Healer has it, and without one every caster does.
 	RestHealerManaPct int
 	// DrinkNudge is how long a member short of mana may show no rise at all before it gets one drink order of its own.
-	DrinkNudge    time.Duration
-	RestMinHealth int           // after RestTimeout the run goes on only if everyone has at least this health
-	GatherRadius  float32       // yards: rested also asks every living member to be this close
-	WaitPoll      time.Duration // time between two looks at a wait step
-	Poll          time.Duration // time between two looks at a fight
-	ArriveTimeout time.Duration // the party's walk to the leader after a teleport
-	ManaStall     time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
-	ManaStallPct  int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
-	HealerManaMin int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
-	ReviveWait    time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
-	AggroQuiet    time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
-	AmbushPause   time.Duration // how long the party stands at each position of a stealthed pack
-	WalkWatch     time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
-	BuffGap       time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait  time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
-	BuffMaxDist   float32       // yards: a companion farther than this from the leader is not selected for a buff
+	DrinkNudge time.Duration
+	// RestWalkYd is how far (yards) the walk that follows a leg's start gate must be for the gate to let the party rest while it walks
+	// instead of holding (0: 60; negative: the gate always holds); the RestWalk*Pct floors are what everyone must have for that
+	// (a leg's rest.walk_* overrides them). RefillBelow is the drink count under which a short caster gets `.bot maintenance` again
+	// at a rest gate (remote mode; 0: 3; negative: no refills).
+	RestWalkYd            float32
+	RestWalkHealthPct     int
+	RestWalkHealerManaPct int
+	RestWalkManaPct       int
+	RefillBelow           int
+	RestMinHealth         int           // after RestTimeout the run goes on only if everyone has at least this health
+	GatherRadius          float32       // yards: rested also asks every living member to be this close
+	WaitPoll              time.Duration // time between two looks at a wait step
+	Poll                  time.Duration // time between two looks at a fight
+	ArriveTimeout         time.Duration // the party's walk to the leader after a teleport
+	ManaStall             time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct          int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin         int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait            time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet            time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause           time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch             time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap               time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait          time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist           float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
 	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
@@ -214,6 +223,7 @@ func DefaultConfig() Config {
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
+		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
@@ -260,6 +270,15 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestManaPct, d.RestManaPct)
 	fillInt(&c.RestHealerManaPct, d.RestHealerManaPct)
 	fill(&c.DrinkNudge, d.DrinkNudge)
+	if c.RestWalkYd == 0 {
+		c.RestWalkYd = d.RestWalkYd
+	}
+	if c.RefillBelow == 0 {
+		c.RefillBelow = d.RefillBelow
+	}
+	fillInt(&c.RestWalkHealthPct, d.RestWalkHealthPct)
+	fillInt(&c.RestWalkHealerManaPct, d.RestWalkHealerManaPct)
+	fillInt(&c.RestWalkManaPct, d.RestWalkManaPct)
 	fillInt(&c.RestMinHealth, d.RestMinHealth)
 	fillF(&c.GatherRadius, d.GatherRadius)
 	fill(&c.WaitPoll, d.WaitPoll)
@@ -409,7 +428,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
-				if err := d.startLeg(ctx, a.Leg); err != nil {
+				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					d.st.Fail(err.Error())
 					d.countWipe(err)
 					continue
@@ -667,7 +686,7 @@ func (d *Driver) shortcut(kind string, leg int, detail string) {
 }
 
 // startLeg opens a leg's report and event, and waits for the party to be rested.
-func (d *Driver) startLeg(ctx context.Context, i int) error {
+func (d *Driver) startLeg(ctx context.Context, i int, next Action) error {
 	d.curLeg = i
 	name := d.plan.Legs[i].Name
 	d.rep.update(func(r *Report) {
@@ -677,7 +696,11 @@ func (d *Driver) startLeg(ctx context.Context, i int) error {
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
-	return d.restGate(ctx)
+	var walk *walkRest
+	if w, ok := walkRestFor(d.cfg, d.plan, i); ok && next.Kind == ActWalk && dist3(d.g.Position(), next.To) >= float64(w.yd) {
+		walk = &w
+	}
+	return d.restGateWalk(ctx, walk)
 }
 
 // endLeg closes the current leg's report with result and sends its event; it does nothing when no leg is open.
@@ -1104,7 +1127,12 @@ func (d *Driver) use(ctx context.Context, a Action) error {
 // judged. A caster whose mana has not risen ManaStallPct of its maximum for ManaStall (it does not drink) is let
 // pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
-func (d *Driver) restGate(ctx context.Context) (err error) {
+func (d *Driver) restGate(ctx context.Context) error { return d.restGateWalk(ctx, nil) }
+
+// restGateWalk is restGate with the walking-rest rule of the gate that opens a leg (see RemoteDriver.restGateWalk): a party that is
+// not at the targets on the first frame but above walk's floors is let go, and the gate that follows the next fight holds again. A
+// gate that finds everyone at the targets on its first frame is counted as skipped.
+func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
 	defer d.traceRest(d.clk.Now())
 	if b := d.cfg.Brain; b != nil {
 		d.brainOn()
@@ -1116,6 +1144,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
 	ordered, refusedSeen := false, false
+	held := false // the gate has waited for something: its first frame did not pass it
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
@@ -1148,7 +1177,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 					}
 				}
 			}
-			ordered, calm = false, now
+			ordered, calm, held = false, now, true
 			clear(rw.mana)
 			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 				return err
@@ -1158,6 +1187,9 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 		fightBegan, lastAssist = time.Time{}, time.Time{}
 		st := d.restState(rw)
 		rec.g.Short = st.short
+		if len(st.dead) > 0 {
+			held = true
+		}
 		if len(st.dead) == 0 {
 			rez = rezWatch{}
 		} else if d.brainRezWaiting(&rez) {
@@ -1214,13 +1246,22 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 				calm = d.clk.Now()
 			}
 		}
+		if !st.ok && !held && walk != nil {
+			if fs := d.restState(newRestWatch(walk.floor)); fs.ok && len(fs.dead) == 0 {
+				rec.g.Result, rec.g.Skipped = "walking", true
+				d.rep.note(fmt.Sprintf("leg %d: rest gate passed for a walk of %.0f yd or more (%s): resting on the way", d.curLeg, walk.yd, st.why))
+				return nil
+			}
+		}
 		if st.ok {
+			rec.g.Skipped = !held
 			if len(st.stalled) > 0 {
 				rec.g.Result = "stalled"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
 			}
 			return nil
 		}
+		held = true
 		// The party rest order was refused (TB #916: "No scoped bot accepted the mature action"): the bots are asked one by one.
 		if ordered && !refusedSeen && d.restRefused() {
 			refusedSeen, rec.g.PartyRestRefused = true, true

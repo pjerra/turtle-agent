@@ -775,3 +775,19 @@ Checks:
 6. **Talents read-back.** `preflight.bots[].talents` per bot ("0/5/31" for a protection warrior). Does the bot's answer to `.bot command <bot> talents`
    reach the agent (a whisper from the bot, which `Lines` reads for `command <bot> ...` lines; otherwise `no answer`)? Reset a bot (`.bot command <bot> talents
    reset`) and run again: `no talent points spent (0/0/0)` is a warning; with `preflight: "strict"` the run fails before the bind's first order.
+
+## Remote runs: refill drinks and skip needless rest gates (issue #83, rest share)
+
+Evidence: the first remote Uldaman run spent 36 % of its time in rest gates (target 20 % or less), with 6-7 drinks a bot and a gate after every group. The
+code is tested against the fake feed only; nothing below has run live. It needs the TortoiseBots build with the #924 party-record fields for check 3.
+
+1. **Refill.** A caster that starts a leg with few drinks (check `remote.preflight.bots[].drinks`): at the first gate where it is short of mana, does the
+   server answer `.bot maintenance <bot>` mid-dungeon (it may refuse outside a town, or in combat; the reply lands in `refills[].maintenance`)? Do the drinks
+   rise (`refills[].before`/`after`)? Does the bot sit and drink after the next `cmd rest`? One refill per bot per leg, never in a loop.
+2. **Lighter gates.** Count `rest_gates_skipped` against the gates in `rest_gates[]` after a clean run, and read `rest_share` in the `dungeon_done` summary
+   and in `trace-score`: they should agree with the `rest` events' seconds. A `walking` gate at a leg start: do the bots drink on the walk (the walk's `cmd move`
+   makes them stand up, so little mana comes back), and does the gate before the first pull wait the short rest it still needs? If the pull gates then take
+   as long as the old gate did, the walking rest saved nothing; lower `walk_health`/`walk_healer_mana` or turn it off with `walk_yd: -1`.
+3. **Drink pacing.** In a frame (`bot_view` / the trace) a caster with no drinks left shows action `drink`, result `F`, reason `no-item`: the refill must come
+   within one poll (3 s), not after the 15 s nudge. If the module names the action differently (not `drink`), the trigger never fires; report the name.
+4. **Share target.** Repeat the remote Uldaman run: rest share at or under 20 % of the run, and no healer that went into a pull under 40 % mana.
