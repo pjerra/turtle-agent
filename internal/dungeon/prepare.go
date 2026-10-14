@@ -51,10 +51,10 @@ const (
 	MaxOnlineWait     = 180 * time.Second
 	prepareRosterWait = 6 * time.Second // one `.bot roster` or `.bot add` answer
 	prepareLeaveWait  = 3 * time.Second // a bot's answer to `command <bot> leave`
-	// prepareLeaveSettle is the wait after the leave commands: the module forwards them to the bots, which act on them a moment later.
-	prepareLeaveSettle = 2 * time.Second
-	// groupUnbindSettle is the first wait between selecting the lead bot and sending `.instance groupunbind all`.
-	groupUnbindSettle = 400 * time.Millisecond
+	// prepareRosterGroupWait is how long the roster is polled for the bots to show ungrouped after the leave commands.
+	prepareRosterGroupWait = 10 * time.Second
+	// bindReadbackWait is how long the bound party is read back until it matches the named one (a bot mid-teleport or loading shows late).
+	bindReadbackWait  = 10 * time.Second
 	prepareFreshWait  = 25 * time.Second
 	preparePoll       = 2 * time.Second
 	maxPrepareGMSetup = 4
@@ -170,8 +170,10 @@ type Preparer interface {
 	// GroupUnbind selects the player with the GUID and sends `.instance groupunbind all`, as one operation, and reads the reply the
 	// sender gets: "Group unbound. Disbanding." (every in-world member of the player's group is unbound and the group disbanded) or
 	// "<name> is not in a group." It works from account level 3.
-	// settle is how long the selection is given to land before the line goes out (the core queues the two packets apart).
-	GroupUnbind(ctx context.Context, who string, guid packet.GUID, settle time.Duration) (GroupUnbindResult, error)
+	// The line acts on the SELECTED player, and a wrong one is another player's group: the implementation selects the GUID, waits until the
+	// server shows that selection (an error when it does not, with nothing sent), and classifies the reply: a "not in a group" naming the
+	// agent is GroupWrongTarget, one naming a third player GroupThirdPlayer.
+	GroupUnbind(ctx context.Context, who string, guid packet.GUID) (GroupUnbindResult, error)
 }
 
 // GroupUnbindResult is what the sender's reply to `.instance groupunbind all` said.
@@ -184,6 +186,9 @@ const (
 	// GroupWrongTarget: "<name> is not in a group." named somebody else than the player that was selected: the selection did not reach
 	// the server before the line (the core queues the two packets apart), so the line ran on the sender.
 	GroupWrongTarget GroupUnbindResult = "wrong-target"
+	// GroupThirdPlayer: "<name> is not in a group." named a player that is neither the lead bot nor the agent: the line ran on somebody
+	// else. Nothing is sent again.
+	GroupThirdPlayer GroupUnbindResult = "third-player"
 )
 
 // prepEnv is what the prepare step needs of the run around it: its clock, its notes and its shortcut book.
@@ -516,7 +521,37 @@ func (e *prepEnv) leaveGroups(ctx context.Context, bots []string) error {
 		}
 		e.rep.LeftGroup = append(e.rep.LeftGroup, n)
 	}
-	return e.sleep(ctx, prepareLeaveSettle)
+	return e.waitUngrouped(ctx, bots)
+}
+
+// waitUngrouped waits, within prepareRosterGroupWait, until `.bot roster` shows none of the bots grouped: only then is a bind safe from a
+// late `leave`. A bot still grouped at the end is a warning (the bind's own check catches a bot that went missing from the group).
+func (e *prepEnv) waitUngrouped(ctx context.Context, bots []string) error {
+	deadline := e.now().Add(prepareRosterGroupWait)
+	for {
+		if err := e.readRoster(ctx); err != nil {
+			e.rep.Warnings = append(e.rep.Warnings, "roster after the leave commands: "+err.Error())
+			return nil
+		}
+		var grouped []string
+		for _, n := range bots {
+			if r, ok := e.rowOf(n); ok && r.Grouped {
+				grouped = append(grouped, n)
+			}
+		}
+		if len(grouped) == 0 {
+			return nil
+		}
+		if !e.now().Before(deadline) {
+			w := fmt.Sprintf("%s still grouped %.0f s after `leave`", strings.Join(grouped, ", "), prepareRosterGroupWait.Seconds())
+			e.rep.Warnings = append(e.rep.Warnings, w)
+			e.note("prepare fresh: warning: " + w)
+			return nil
+		}
+		if err := e.sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
 }
 
 // groupReset is fresh below account level 4, where `.instance unbind` acts on the sender and only `.instance groupunbind all` reaches a
@@ -535,39 +570,58 @@ func (e *prepEnv) groupReset(ctx context.Context, guids map[string]packet.GUID) 
 	if err := e.bindBots(ctx, "before the group unbind"); err != nil {
 		return err
 	}
-	// A reply that names another player than the lead bot means the selection had not landed when the line ran (the core queues the two
-	// packets apart, and ran it on the agent). The line is sent again with twice the settle, at most three times in all; each send is a
-	// GM line of the setup.
+	// The implementation sends the line only once the server shows the lead bot as the agent's selection. A reply that names the AGENT
+	// means the line still ran on the sender: it is sent again, at most three times in all (each send is a GM line of the setup). A reply
+	// that names any third player stops the step at once, and nothing is sent again.
 	var res GroupUnbindResult
-	settle := groupUnbindSettle
 	for try := 0; try < 3; try++ {
 		var err error
-		if res, err = e.g.GroupUnbind(ctx, lead, guids[lead], settle); err != nil {
+		if res, err = e.g.GroupUnbind(ctx, lead, guids[lead]); err != nil {
 			return fmt.Errorf(".instance groupunbind all on %s: %w", lead, err)
 		}
 		e.gmLine(".instance groupunbind all on " + lead + " (prepare fresh)")
 		if res != GroupWrongTarget {
 			break
 		}
-		e.note(fmt.Sprintf("prepare fresh: .instance groupunbind all on %s ran on somebody else (the selection had not landed); sending it again", lead))
-		settle *= 2
+		e.note(fmt.Sprintf("prepare fresh: .instance groupunbind all on %s ran on the agent itself; selecting %s again and sending it again", lead, lead))
 	}
 	switch res {
 	case GroupUnbound:
-		e.bound = false // the group is disbanded: the binding ended with it
-		// Every in-world member of the group was unbound and the group is gone. The reply does not name the members; the bind that came
-		// before was checked to hold exactly the named bots.
+		// The reply does not say whose group it was. The lead bot's group is the one just bound, so disbanding it ends the binding: the
+		// module says so on the next `commander status`. A binding that still stands means the line disbanded somebody else's group.
+		if err := e.bindingEnded(ctx); err != nil {
+			return err
+		}
+		e.bound = false
 		e.rep.GroupUnbound = append(e.rep.GroupUnbound, lead)
 		e.note(fmt.Sprintf("prepare fresh: .instance groupunbind all on %s: \"Group unbound. Disbanding.\" (the group held %s)", lead, strings.Join(e.bots, ", ")))
 	case GroupNotGroups:
 		e.rep.NotGrouped = append(e.rep.NotGrouped, lead)
 		return fmt.Errorf(".instance groupunbind all on %s: \"is not in a group\" right after the bind formed its group: the binds of the bots are not cleared", lead)
 	case GroupWrongTarget:
-		return fmt.Errorf(".instance groupunbind all on %s: the reply named another player, so the selection of %s did not land and the line ran on the agent itself: the binds of the bots are not cleared", lead, lead)
+		return fmt.Errorf(".instance groupunbind all on %s: the reply named the agent itself in all three tries, so the selection of %s did not take: the binds of the bots are not cleared", lead, lead)
+	case GroupThirdPlayer:
+		return fmt.Errorf("the unbind hit another target: the reply to .instance groupunbind all named a player who is neither %s nor the agent, so the line ran on somebody else's selection and may have unbound and disbanded that player's group. Stopping; nothing was sent again", lead)
 	default:
 		return fmt.Errorf(".instance groupunbind all on %s: no reply (\"Group unbound. Disbanding.\" or \"is not in a group\" expected): the unbind is not confirmed", lead)
 	}
 	return e.bindBots(ctx, "after the group unbind")
+}
+
+// bindingEnded checks that the binding is gone after a "Group unbound. Disbanding." reply: `commander status` answers not-bound. Anything
+// else stops the run, because the reply carries no name and the line may have disbanded another group.
+func (e *prepEnv) bindingEnded(ctx context.Context) error {
+	r, err := e.command(ctx, "commander status")
+	if err != nil {
+		return fmt.Errorf("commander status after the group unbind: %w", err)
+	}
+	switch {
+	case r.Kind == tbm.KindErr && r.Err != nil && r.Err.Code == "not-bound":
+		return nil
+	case r.Kind == tbm.KindAck:
+		return fmt.Errorf("the unbind hit another target: \"Group unbound. Disbanding.\" came, but commander status still shows %s's group bound, so the line disbanded a group that is not the bots'. Stopping", e.bots[0])
+	}
+	return fmt.Errorf("the unbind is not confirmed: \"Group unbound. Disbanding.\" came, but commander status gave no not-bound answer (%s), so it is not known whose group was disbanded. Stopping", r.Kind)
 }
 
 // bindBots binds the lead and the bots of the run and checks the bound group holds exactly them (`commander status`: lead, count and
@@ -609,11 +663,21 @@ func (e *prepEnv) bindBots(ctx context.Context, when string) error {
 		if err := e.sleep(ctx, e.bindSettle()); err != nil {
 			return err
 		}
-		st, err := readBoundParty(ctx, e.command)
-		if err != nil {
-			return err
+		// Read the party back until it matches, within bindReadbackWait: a bot that is loading or teleporting joins a moment late.
+		var st boundParty
+		var missing, extra, why []string
+		for polled := time.Duration(0); ; polled += time.Second {
+			if st, err = readBoundParty(ctx, e.command); err != nil {
+				return err
+			}
+			missing, extra, why = partyProblems(lead, e.bots, st, nil, false)
+			if (len(missing) == 0 && len(extra) == 0) || polled >= bindReadbackWait {
+				break
+			}
+			if err := e.sleep(ctx, time.Second); err != nil {
+				return err
+			}
 		}
-		missing, extra, why := partyProblems(lead, e.bots, st, nil, false)
 		if len(missing) == 0 && len(extra) == 0 {
 			e.note(fmt.Sprintf("prepare fresh: commander bind %s: %s with %d bots, exactly as named (commander status)", when, lead, len(others)))
 			return nil

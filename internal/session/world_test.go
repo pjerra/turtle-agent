@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -266,5 +267,27 @@ func TestUnitStateAndLookup(t *testing.T) {
 	if _, err := h.s.Unit(0, ""); err == nil {
 		t.Fatal("neither guid nor name")
 	}
+	h.logout()
+}
+
+// ServerSelection is the target field of the player's own object: it follows the server's updates, not what the session sent.
+func TestServerSelectionFollowsTheServersUpdates(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	if _, ok := h.s.ServerSelection(); ok {
+		t.Fatal("a selection before the player's own object is known")
+	}
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{
+		objects.UnitHealth: 900, objects.UnitMaxHealth: 1000, objects.UnitTarget: 0x2A, objects.UnitTarget + 1: 0}))
+	waitFor(t, func() bool { g, ok := h.s.ServerSelection(); return ok && g == 0x2A })
+	// The session selecting another unit changes what it believes, not what the server shows, until the server's update comes.
+	if _, err := h.s.Target(context.Background(), 0x99, ""); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := h.s.ServerSelection(); g != 0x2A || h.s.Status().Target != 0x99 {
+		t.Fatalf("server %v client %v", g, h.s.Status().Target)
+	}
+	h.send(opcode.SMSGUpdateObject, valuesUpdate(me.GUID, map[uint16]uint32{objects.UnitTarget: 0x99, objects.UnitTarget + 1: 0}))
+	waitFor(t, func() bool { g, _ := h.s.ServerSelection(); return g == 0x99 })
 	h.logout()
 }

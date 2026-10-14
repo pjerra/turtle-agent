@@ -118,6 +118,7 @@ type fakeRemote struct {
 	// names them; leaveOnBind lists the bots that drop out right after a bind (once, or after every bind when stubborn); joinErr[name] is
 	// the code the bind refuses to invite that bot with.
 	left        map[string]bool
+	lateJoin    map[string]time.Time // a bot in left joins the group (is loaded, arrives) at that time
 	leaveOnBind []string
 	stubborn    bool
 	joinErr     map[string]string
@@ -152,6 +153,12 @@ func (g *fakeRemote) addMob(entry uint32, at Point) *rmob {
 
 func (g *fakeRemote) advance(d time.Duration) {
 	g.now = g.now.Add(d)
+	for n, at := range g.lateJoin {
+		if !g.now.Before(at) {
+			delete(g.left, n)
+			delete(g.lateJoin, n)
+		}
+	}
 	sec := d.Seconds()
 	if g.pendingMove != nil && !g.now.Before(g.pendingAt) {
 		g.moveTo, g.pendingMove = g.pendingMove, nil
@@ -364,6 +371,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 	case "commander status":
 		if g.status != nil {
 			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: g.status, Lines: []string{}}, nil
+		}
+		if !g.bound {
+			return errReply(intent, "not-bound"), nil
 		}
 		r := ack(intent)
 		var names []string

@@ -914,8 +914,8 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
    `.instance groupunbind all` / `commander bind` lines in that order, `prepare.group_unbound` = the lead bot (the reply `Group unbound.
    Disbanding.` was seen), no `prepare.not_grouped`, no warning, and the notes `commander bind ...: Lcwarra with 4 bots, exactly as named`.
    **Run 6b showed the old step failing here:** the reply to the group unbind read `Glacienne is not in a group.` (the agent's name, not
-   Lcwarra's): the selection packet had not been handled when the chat line ran. The step now waits 0.4 s after the selection; read the reply once
-   to see it names the lead bot. Also check, with `.instance bind list` as a developer on a bot, that its binds are gone. At level 4 the per-bot
+   Lcwarra's): the selection packet had not been handled when the chat line ran. The step now sends the line only once the server shows the lead bot as the agent's selection (3 s, else it fails with nothing sent), and
+   accepts `Group unbound.` only if `commander status` then says `not-bound`; read the reply once to see it names the lead bot. Also check, with `.instance bind list` as a developer on a bot, that its binds are gone. At level 4 the per-bot
    `.instance unbind all` is sent instead (`prepare.unbound`, its reply goes to the bot: not confirmed).
 3b. The whole party enters (run 6b: the run failed 30 s after the entry with `Lchunter (not in the feed) not on map 70`): after the bind the
    notes say `bound party checked: Lcwarra with 4 bots, as named`. To see the repair, take one bot out of the group between the prepare and the

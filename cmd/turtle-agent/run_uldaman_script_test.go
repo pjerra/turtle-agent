@@ -82,3 +82,23 @@ func TestGroupUnbindSubject(t *testing.T) {
 		}
 	}
 }
+
+// A "not in a group" reply is told by whose it is: the lead's, the agent's (resend), or a third player's (stop).
+func TestClassifyGroupUnbind(t *testing.T) {
+	for _, c := range []struct {
+		res           dungeon.GroupUnbindResult
+		subject, want string
+	}{
+		{dungeon.GroupNotGroups, "Lcwarra", string(dungeon.GroupNotGroups)},
+		{dungeon.GroupNotGroups, "Glacienne", string(dungeon.GroupWrongTarget)},
+		{dungeon.GroupNotGroups, "glacienne", string(dungeon.GroupWrongTarget)},
+		{dungeon.GroupNotGroups, "Somebody", string(dungeon.GroupThirdPlayer)},
+		{dungeon.GroupNotGroups, "", string(dungeon.GroupNotGroups)},
+		{dungeon.GroupUnbound, "", string(dungeon.GroupUnbound)},
+		{dungeon.GroupNoAnswer, "", string(dungeon.GroupNoAnswer)},
+	} {
+		if got := classifyGroupUnbind(c.res, c.subject, "Lcwarra", "Glacienne"); string(got) != c.want {
+			t.Errorf("%v %q: %q, want %q", c.res, c.subject, got, c.want)
+		}
+	}
+}

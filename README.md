@@ -1328,7 +1328,7 @@ homebind about a minute later (deploy-19i: the bots were ejected twice that way)
 the first step in, and the agent stays **outside and ungrouped**. When a bot of the first frame is not on the plan's map (and `enter` is not
 `off`), the run does, after the bind and the first frame:
 
-0. **Checks the bound party** (a run that names `bots`): after a 3 s settle it reads `commander status` (lead, bot count, and the listing line
+0. **Checks the bound party** (a run that names `bots`): after a 3 s settle it reads, and re-reads every second for up to 10 s until it matches, `commander status` (lead, bot count, and the listing line
    `You command X's group: ...`) and the feed's party and compares them with the named lead bot and bots, **exactly**. A bot that dropped out
    after the bind (run 6b: the hunter was in the bind's ACK and listing, and gone one second later; an earlier `.bot command <bot> leave` is only
    forwarded and can land after the bind) is invited again by one `commander unbind` + `commander bind`; a bot still missing after that, a
@@ -1382,15 +1382,13 @@ part before the bind in one go, then the kit check and the enter phase run as be
    instance is refused here, before anything moves; `ignore_entry_limit` goes on); `.tele name <bot> <outside_tele>` for each bot and for the agent
    (a bot is not unbound from the map it stands on), then the step waits (at most 25 s) until the agent is off the plan's map and has every bot in view;
    then, **from account level 4**, `.bot command <bot> leave` for each bot (a group keeps its own instance bind; the module only forwards the
-   command, so the step waits 2 s for the bots to act on it) and `.instance unbind all` **for each bot by name**: the step selects that bot's
-   GUID (from the roster), gives the selection 0.4 s to land, and sends the line as one operation of the session, so it never runs on whatever the
+   command, so the step reads `.bot roster` until the bots show ungrouped, 10 s at most, a warning after that) and `.instance unbind all` **for each bot by name**: the step selects that bot's
+   GUID (from the roster), waits until the server shows that selection (the target field of the agent's own object; 3 s, else nothing is sent), and sends the line as one operation of the session, so it never runs on whatever the
    agent had selected (its reply goes to the unbound player, so it is reported as *sent*, `unbound[]`). **Below level 4** the core
    (`HandleInstanceUnbindCommand`) unbinds the *sender* whatever is selected, which would clear the agent and no bot; there the order is
    `commander bind` (the bots-only group with the lead; `commander status` must list exactly the lead and the bots, else one unbind + bind
    invites the missing one, else the step fails naming it), then `.instance groupunbind all` with the lead bot selected (every in-world member of
-   its group is unbound and the group is disbanded), the sender's reply read (`Group unbound. Disbanding.`: `group_unbound[]`, confirmed;
-   `<name> is not in a group.` naming the lead, or no reply, fails the step; a reply naming *another* player means the selection did not land and
-   the core ran the line on the agent: the line is sent again with a longer settle, up to three times, and then fails), then `commander bind` again
+   its group is unbound and the group is disbanded; the line is sent only once the server shows the lead bot as the agent's selection), the sender's reply read (`Group unbound. Disbanding.`, which names nobody, is accepted only if `commander status` then answers `not-bound`: disbanding the bound group ends the binding, else the run stops with "the unbind hit another target"; `<name> is not in a group.` naming the lead, or no reply, fails the step; a reply naming the *agent* means the line ran on the sender and is sent again, three sends at most, each a counted GM line; a reply naming any *third* player stops the step at once and nothing is sent again), then `commander bind` again
    (the group was disbanded), checked the same way. No `leave` goes out on this path unless the bind refuses a bot as `member-grouped`/`bot-bound`
    (it is in some other group): then the bots are told to leave, given 2 s, and the bind is made again. The binding stays for the run's own bind
    to reuse (`already-bound`, the same lead and count: "reusing the binding"); a step that fails after it unbinds. Last, `.instance unbind all` for the agent itself. **Needs the plan's `outside_tele`.**

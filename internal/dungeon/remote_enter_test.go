@@ -386,6 +386,18 @@ func TestRemoteEnterBindsAgainForABotThatLeftTheGroup(t *testing.T) {
 	}
 }
 
+// A bot that is loading or teleporting joins the group a few seconds after the bind: the party is read back until it matches, so it is not
+// a failure and no second bind goes out.
+func TestRemoteEnterWaitsForABotThatJoinsLate(t *testing.T) {
+	g := newEnterFake(t)
+	g.leaveOnBind = []string{"Magey"}
+	g.lateJoin = map[string]time.Time{"Magey": g.now.Add(7 * time.Second)}
+	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err != nil || rep.State != "done" || g.count("bind") != 1 || g.unbinds != 1 {
+		t.Fatalf("%v %s binds %d unbinds %d\n%s", err, rep.State, g.count("bind"), g.unbinds, notesOf(rep))
+	}
+}
+
 // A bot that is still out after the second bind fails the run before anything is teleported or summoned, and the failure names it.
 func TestRemoteEnterNeverEntersWithAPartialParty(t *testing.T) {
 	g := newEnterFake(t)

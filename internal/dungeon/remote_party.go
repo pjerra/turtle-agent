@@ -120,9 +120,19 @@ func (d *RemoteDriver) ensureWholeParty(ctx context.Context) error {
 		if err := d.settleBind(ctx); err != nil {
 			return err
 		}
-		missing, extra, why, err := d.readParty(ctx, wanted)
-		if err != nil {
-			return err
+		// Read it back until it matches, within bindReadbackWait: a bot that is loading or teleporting joins a moment late.
+		var missing, extra, why []string
+		for polled := time.Duration(0); ; polled += d.cfg.Poll {
+			var err error
+			if missing, extra, why, err = d.readParty(ctx, wanted); err != nil {
+				return err
+			}
+			if (len(missing) == 0 && len(extra) == 0) || polled >= bindReadbackWait {
+				break
+			}
+			if err := d.tick(ctx, d.cfg.Poll); err != nil {
+				return err
+			}
 		}
 		if len(missing) == 0 && len(extra) == 0 {
 			d.rep.note(fmt.Sprintf("bound party checked: %s with %d bots, as named (commander status and the feed)", d.opt.Lead, len(d.opt.Bots)))
