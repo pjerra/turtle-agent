@@ -55,14 +55,16 @@ func zfTSV(t *testing.T, name string) []map[string]string {
 
 func TestZulfarrakPlansLoad(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 3 {
+	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 7 {
 		t.Fatalf("%+v", p)
 	}
 	var names []string
 	var bosses []uint32
 	for _, l := range p.Legs {
 		names = append(names, l.Name)
-		bosses = append(bosses, l.Boss.Entry)
+		if l.Boss != nil {
+			bosses = append(bosses, l.Boss.Entry)
+		}
 		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
 			t.Errorf("the first-run plan has no steps: %s", l.Name)
 		}
@@ -72,8 +74,29 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul theka velratha]" || fmt.Sprint(bosses) != "[8127 7272 7795]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul theka velratha]" || fmt.Sprint(bosses) != "[8127 7272 7795]" {
 		t.Fatalf("%v %v", names, bosses)
+	}
+	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): direct hops, and the
+	// Shadowhunters' patrol on the two groups by its loop.
+	var direct, patrols int
+	for _, l := range p.Legs[:5] {
+		for _, w := range l.Via {
+			if w.Direct {
+				direct++
+			}
+		}
+		for _, g := range l.PullGroups {
+			if g.Patrol != nil {
+				patrols++
+				if len(g.Patrol.Path) != 45 || g.Patrol.PeriodS != 126 || fmt.Sprint(g.Patrol.Entries) != "[7246]" {
+					t.Errorf("%+v", g.Patrol)
+				}
+			}
+		}
+	}
+	if direct != 9 || patrols != 2 {
+		t.Errorf("direct hops %d, patrols %d", direct, patrols)
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
