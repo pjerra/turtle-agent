@@ -530,3 +530,51 @@ func TestRemoteRezWaitCountsTheBotsRaised(t *testing.T) {
 		t.Fatalf("%v %+v %v", err, rep.Remote, g.orders)
 	}
 }
+
+// G3 at the engage level: positions A and B of one group, B out of the bots' sight from A. The pull at A ends won; the fight tracked
+// only A's mob, so the driver must not stop there: it walks to B and pulls the pack that stands there.
+func TestRemoteWonPullAtAWalksToB(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 30
+	a, b := Point{300, 0, 0}, Point{300, 120, 0}
+	g.addMob(299, a)
+	g.addMob(299, b)
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{a, b}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if g.mobsKilled != 2 || len(g.ordersOf("cmd pullback")) != 2 {
+		t.Fatalf("B's pack was left: killed %d, orders %v\n%s", g.mobsKilled, g.orders, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "2 kills; nothing more of [299]") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// The same with B empty: after the won pull at A the lead bot walks to B, sees nothing there and the group is done (no endless loop, no
+// failure).
+func TestRemoteWonPullAtAConfirmsEmptyB(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 30
+	a, b := Point{300, 0, 0}, Point{300, 120, 0}
+	g.addMob(299, a)
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{a, b}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if g.mobsKilled != 1 || len(g.ordersOf("cmd pullback")) != 1 || rep.Remote.PacksSeenEmpty != 1 {
+		t.Fatalf("killed %d, orders %v, %+v\n%s", g.mobsKilled, g.orders, rep.Remote, notesOf(rep))
+	}
+	near := 1e9
+	for _, p := range g.trace {
+		near = min(near, dist3(p, b))
+	}
+	if near > ClearSeeRadius {
+		t.Fatalf("the lead bot got no nearer than %.0f yd to B", near)
+	}
+	if !strings.Contains(notesOf(rep), "1 kills; nothing more of [299] at its positions: killed earlier in this run; the lead bot stood there and saw none") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}

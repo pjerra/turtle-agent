@@ -160,6 +160,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			if !cleared {
 				continue // a hostile of the group showed itself on the way: pick it
 			}
+			if kills > 0 {
+				d.rep.note(fmt.Sprintf("%s: %d kills; nothing more of %v at its positions: %s", label, kills, sp.pick, why))
+				return nil
+			}
 			if sp.required {
 				return fmt.Errorf("%s: no living %v seen by the bots (%s)", label, sp.pick, why)
 			}
@@ -184,7 +188,11 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			d.noteKilled(sp, t)
 		}
 		if res.out == won {
-			return nil
+			// The fight tracked only the pulled mob and what joined it: the group's other positions, out of the bots' sight, are not
+			// known to be clear (G3). Pick again: what is left in view is pulled, else confirmGone clears this position by its kill
+			// (noteKilled) and walks to the others. A won pull has kills, so attempt does not grow; the loops cap bounds a group that
+			// keeps showing mobs (and leftOver then counts it cleared with its kills).
+			continue
 		}
 		if res.out == retarget && retargets < maxRetargets {
 			retargets++
