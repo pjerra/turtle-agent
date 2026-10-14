@@ -113,9 +113,10 @@ func mapMmaps(m uint32) string {
 	return ""
 }
 
-// The draft plans' points against the navmesh of their map, where the machine has it. A draft is an unmapped skeleton, so the numbers are
-// logged and not asserted; a mapped or live-checked plan must have every point on the mesh (uldaman and zulfarrak have their own, stricter tests).
-// The maps without navmesh files are listed, so a run says what it did not check.
+// Every plan's walk points against the navmesh of their map, where the machine has it: each must have mesh floor under it (meshMaxDZ up or down,
+// meshMaxDH sideways; a pull position, a creature's own, gets 4 and 2.5). A point the generator could not snap to the mesh (tools/dungeongen
+// snaps.json) carries needs_walk and is left out here, and counted in the log. The maps without navmesh files are listed, so a run says what
+// it did not check.
 func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(plansDir, "*.json"))
 	var missing []string
@@ -138,10 +139,15 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 			continue
 		}
 		pl := navmesh.NewPlanner(dir)
-		on, total := 0, 0
+		on, total, walk := 0, 0, 0
 		for i, l := range p.Legs {
 			pts, labels, _ := planPoints(l)
+			flagged := needsWalkPoints(l)
 			for j, w := range pts {
+				if flagged[w] {
+					walk++
+					continue
+				}
 				n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{w.X, w.Y, w.Z})
 				if errors.Is(err, navmesh.ErrNoEngine) {
 					pl.Close()
@@ -158,14 +164,14 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 				}
 				if ok && math.Abs(float64(n[2]-w.Z)) <= maxDZ && math.Hypot(float64(n[0]-w.X), float64(n[1]-w.Y)) <= maxDH {
 					on++
-				} else if !strings.HasPrefix(p.Status, StatusDraft) {
-					t.Errorf("%s legs[%d] (%s) %s %v is not on the navmesh", p.Name, i, l.Name, labels[j], w)
+				} else {
+					t.Errorf("%s legs[%d] (%s) %s %v is not on the navmesh: run `go run ./tools/dungeongen -spec tools/dungeongen/plans.json -snap-update ~/tb-ci` and regenerate, or mark it needs_walk", p.Name, i, l.Name, labels[j], w)
 				}
 			}
 		}
 		pl.Close()
 		checkedAny = true
-		t.Logf("%s (%s): %d of %d points on the map %d navmesh in %s", p.Name, p.Status, on, total, p.Map, dir)
+		t.Logf("%s (%s): %d of %d points on the map %d navmesh in %s (%d more marked needs_walk)", p.Name, p.Status, on, total, p.Map, dir, walk)
 	}
 	if len(missing) > 0 {
 		t.Logf("no navmesh files for maps %s (copy <map>.mmap and <map>*.mmtile from m910q's ~/tortoise-wow-server/data/mmaps to ~/tb-ci/mmaps-turtle<map>)", strings.Join(missing, ", "))
@@ -173,6 +179,25 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 	if !checkedAny {
 		t.Skip("no draft plan's map has navmesh files here")
 	}
+}
+
+// needsWalkPoints are the points of a leg marked needs_walk: its To, a flagged pull group's positions, a flagged boss's position.
+func needsWalkPoints(l Leg) map[Point]bool {
+	m := map[Point]bool{}
+	if l.NeedsWalk {
+		m[l.To] = true
+	}
+	for _, g := range l.PullGroups {
+		if g.NeedsWalk {
+			for _, q := range g.Positions {
+				m[q] = true
+			}
+		}
+	}
+	if l.Boss != nil && l.Boss.NeedsWalk {
+		m[l.Boss.Position] = true
+	}
+	return m
 }
 
 // A plan's own party is the hire step's default; the prepare block still wins.

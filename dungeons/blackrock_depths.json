@@ -1438,19 +1438,22 @@
           "entries": [8911],
           "positions": [
             {"x": 849.381, "y": -243.453, "z": -115.923}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 851.683, "y": -281.675, "z": -116.122}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 886.74, "y": -327.905, "z": -116.12}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8896, 8897, 8895, 8913, 8896, 8913],
@@ -1500,7 +1503,8 @@
           "entries": [8911],
           "positions": [
             {"x": 932.497, "y": -250.361, "z": -116.329}
-          ]
+          ],
+          "needs_walk": true
         }
       ],
       "skip": [8923, 9025, 9041, 9042],
@@ -1610,25 +1614,29 @@
           "entries": [8911],
           "positions": [
             {"x": 926.193, "y": -352.366, "z": -116.112}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 941.022, "y": -310.532, "z": -116.235}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 1022.1, "y": -303.398, "z": -116.355}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 1118.19, "y": -358.505, "z": -120.342}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911, 8911, 8911],
@@ -1659,7 +1667,8 @@
           "entries": [8911],
           "positions": [
             {"x": 983.66, "y": -278.923, "z": -116.411}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911, 8911],
@@ -1678,13 +1687,15 @@
           "entries": [8911],
           "positions": [
             {"x": 1067.93, "y": -264.695, "z": -116.356}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 1139.25, "y": -241.24, "z": -116.368}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [8908],
@@ -1762,7 +1773,8 @@
       "boss": {
         "entry": 9156,
         "position": {"x": 1009.75, "y": -239.017, "z": -61.3038}
-      }
+      },
+      "needs_walk": true
     },
     {
       "name": "magmus",

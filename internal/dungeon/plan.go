@@ -129,6 +129,9 @@ type Leg struct {
 	Skip  []uint32 `json:"skip,omitempty"`
 	Steps []Step   `json:"steps,omitempty"`
 	Boss  *Boss    `json:"boss,omitempty"`
+	// NeedsWalk marks a To that is not on the navmesh and could not be snapped to it (no walkable floor within a few yards: a scripted
+	// area, a platform): the mapping walk has to find the real waypoint. The same flag on a pull group or the boss says the same of its position.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 	// AfterBoss are steps done once the boss is dead (or skipped for the leader's team): the chest by the camp that a hostile boss
 	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
 	AfterBoss []Step `json:"after_boss,omitempty"`
@@ -192,6 +195,8 @@ type PullGroup struct {
 	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
 	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
 	Equiv string `json:"equiv,omitempty"`
+	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
 
 // MaxEquivLen is the longest Equiv label.
@@ -214,6 +219,8 @@ type Boss struct {
 	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
 	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -376,6 +383,7 @@ type rawLeg struct {
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	Rest       *RestSpec         `json:"rest"`
 	Notes      []string          `json:"notes"`
+	NeedsWalk  bool              `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -385,6 +393,7 @@ type rawPullGroup struct {
 	Radius    float32    `json:"radius"`
 	Team      string     `json:"team"`
 	Equiv     string     `json:"equiv"`
+	NeedsWalk bool       `json:"needs_walk"`
 }
 
 type rawBoss struct {
@@ -395,6 +404,7 @@ type rawBoss struct {
 	LootItem *rawItem  `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
+	NeedsWalk      bool  `json:"needs_walk"`
 }
 
 type rawStep struct {
@@ -681,7 +691,7 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk}
 	l.To = c.point(path+".to", r.To)
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
@@ -700,7 +710,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv, NeedsWalk: g.NeedsWalk}
 		c.team(gp+".team", g.Team)
 		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
 			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
@@ -733,7 +743,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {

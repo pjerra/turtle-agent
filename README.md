@@ -578,7 +578,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   that error (nothing is sent in its place). The agent's own companions walk a direct waypoint as a plain one.
 - A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
-  [Dungeon runs](#dungeon-runs); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
+  [Dungeon runs](#dungeon-runs); `needs_walk` (set by tools/dungeongen on a pull group, a leg or a boss whose position has no navmesh floor within reach; the mapping walk replaces it); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
   a member of the group, for packs of one entry that stand closer together than that); run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,

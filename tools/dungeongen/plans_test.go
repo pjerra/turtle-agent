@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 )
 
 const (
@@ -158,8 +160,8 @@ func TestPlansTableIsCurrent(t *testing.T) {
 		t.Error("docs/PLANS.md is out of date: regenerate it with `go run ./tools/dungeongen -spec tools/dungeongen/plans.json -table docs/PLANS.md`")
 	}
 	for _, m := range sf.VMMaps {
-		if m != 70 && m != 209 {
-			t.Errorf("vm_mmaps names map %d: only 70 and 209 were copied to the VM (update this test when more are)", m)
+		if !slices.Contains(instanceMaps, m) && m != 1 {
+			t.Errorf("vm_mmaps names map %d: not an instance map (or map 1)", m)
 		}
 	}
 }
@@ -254,3 +256,32 @@ func TestGenerateSpecSynthetic(t *testing.T) {
 
 func itoa(n int) string     { return strconv.Itoa(n) }
 func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+
+// ApplySnaps moves a listed point wherever it stands (to, pull positions, boss), marks the ones with no floor, and leaves the rest.
+func TestApplySnaps(t *testing.T) {
+	pt := func(x float32) dungeon.Point { return dungeon.Point{X: x, Y: 1, Z: 2} }
+	to := pt(10)
+	p := &dungeon.Plan{Legs: []dungeon.Leg{{To: pt(1), PullGroups: []dungeon.PullGroup{{Positions: []dungeon.Point{pt(1), pt(2)}}, {Positions: []dungeon.Point{pt(3)}}}, Boss: &dungeon.Boss{Position: pt(4)}}}}
+	moved, marked := ApplySnaps(p, []Snap{{From: pt(1), To: &to}, {From: pt(3), NeedsWalk: true}, {From: pt(4), NeedsWalk: true}})
+	l := p.Legs[0]
+	if moved != 2 || marked != 2 || l.To != to || l.PullGroups[0].Positions[0] != to || l.PullGroups[0].Positions[1] != pt(2) {
+		t.Fatalf("%d %d %+v", moved, marked, l)
+	}
+	if l.NeedsWalk || l.PullGroups[0].NeedsWalk || !l.PullGroups[1].NeedsWalk || !l.Boss.NeedsWalk || l.PullGroups[1].Positions[0] != pt(3) {
+		t.Fatalf("%+v", l)
+	}
+}
+
+// closestInPoly: a point inside stays, one outside goes to the nearest edge point moved a little inside, either winding.
+func TestClosestInPoly(t *testing.T) {
+	sq := []navmesh.Vec3{{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0}}
+	for _, vs := range [][]navmesh.Vec3{sq, {sq[3], sq[2], sq[1], sq[0]}} {
+		if x, y, d := closestInPoly(vs, 5, 5); x != 5 || y != 5 || d != 0 {
+			t.Errorf("inside: %v %v %v", x, y, d)
+		}
+		x, y, d := closestInPoly(vs, 13, 5)
+		if d != 3 || x < 9.5 || x >= 10 || y < 4.9 || y > 5.1 {
+			t.Errorf("outside: %v %v %v", x, y, d)
+		}
+	}
+}

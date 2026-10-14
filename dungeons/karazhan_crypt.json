@@ -586,7 +586,8 @@
           "entries": [91922],
           "positions": [
             {"x": -11168.1, "y": -1652.65, "z": 23.6941}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [91925],
@@ -1059,14 +1060,16 @@
           "positions": [
             {"x": -11186.1, "y": -1565.9, "z": -2.40692}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11191.4, "y": -1543.67, "z": -5.62395}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         }
       ],
       "boss": {
@@ -1185,35 +1188,40 @@
           "positions": [
             {"x": -11235.7, "y": -1531.59, "z": -5.83211}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11251.7, "y": -1541.55, "z": -13.377}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11246, "y": -1525.62, "z": -26.1725}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11256.3, "y": -1521.67, "z": -36.8567}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11237.8, "y": -1554.05, "z": -41.2229}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
@@ -1227,28 +1235,32 @@
           "positions": [
             {"x": -11213.7, "y": -1549.59, "z": -23.6425}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11208.5, "y": -1535.94, "z": -28.5044}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11199.5, "y": -1526.2, "z": -33.6321}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91932],
           "positions": [
             {"x": -11210.4, "y": -1541.23, "z": -4.93433}
           ],
-          "ambush": true
+          "ambush": true,
+          "needs_walk": true
         },
         {
           "entries": [91924, 91926, 91924],

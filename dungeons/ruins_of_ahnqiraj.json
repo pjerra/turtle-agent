@@ -603,7 +603,8 @@
           "entries": [15505],
           "positions": [
             {"x": -8851.93, "y": 1991.67, "z": 13.75}
-          ]
+          ],
+          "needs_walk": true
         },
         {
           "entries": [15505],
