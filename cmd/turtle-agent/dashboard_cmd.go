@@ -16,7 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
-const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
+const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
 	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command"
 
 // expandHome turns a leading ~/ into the home folder.
@@ -35,6 +35,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "127.0.0.1:8790", "address to serve the page on (loopback unless you say otherwise)")
+	allowHosts := fs.String("allow-host", "", "host names or IP addresses, comma separated, the page accepts in its Host header besides loopback (the name you open it by, such as a Tailscale MagicDNS name); the --listen IP is always accepted")
 	agents := fs.String("agents", "auto", `agents to watch: "auto" (the rpc field of the settings files) or a comma list of RPC ports or addresses`)
 	tests := fs.String("tests-dir", filepath.Join(home, "TortoiseBots-audit", "tests"), "the only folder whose files the page serves (run traces and reports)")
 	traces := fs.String("traces-dir", filepath.Join(home, "turtle-agent", "traces"), "where the agents write run traces (read for orders and the binary SHA, never served)")
@@ -55,6 +56,11 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	if !netutil.IsLoopback(host) {
 		fmt.Fprintf(stderr, "dashboard: warning: %s is not loopback; anyone who can reach it sees the runs and the files under --tests-dir\n", *listen)
+	}
+	allow, err := dashboard.AllowedHosts(host, *allowHosts)
+	if err != nil {
+		fmt.Fprintln(stderr, "dashboard: --allow-host:", err)
+		return exitUsage
 	}
 	if _, err := dashboard.DiscoverAgents(expandHome(*cfgDir), *agents); err != nil {
 		fmt.Fprintln(stderr, "dashboard: --agents:", err)
@@ -91,7 +97,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	defer stop()
 	go p.Run(pctx)
 	fmt.Fprintf(stdout, "turtle-agent dashboard %s on http://%s/ (read-only; agents: %s)\n", version, ln.Addr(), *agents)
-	err = rpc.Serve(ctx, ln, dashboard.Handler(p, testsDir, embedFrom...))
+	err = rpc.Serve(ctx, ln, dashboard.Handler(p, testsDir, allow, embedFrom...))
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(stderr, "dashboard:", err)
 		return 1

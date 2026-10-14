@@ -384,7 +384,7 @@ func TestFilesHandlerServesOnlyTheTestsFolder(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(root, "run1", "REPORT.md"), []byte("# hello"), 0o644))
 	must(t, os.WriteFile(filepath.Join(base, "secret.txt"), []byte("TOPSECRET"), 0o644))
 	must(t, os.Symlink(filepath.Join(base, "secret.txt"), filepath.Join(root, "run1", "ln.txt")))
-	srv := httptest.NewServer(Handler(NewPoller(Options{TestsDir: root, ConfigDir: t.TempDir(), Agents: "auto"}), root))
+	srv := httptest.NewServer(Handler(NewPoller(Options{TestsDir: root, ConfigDir: t.TempDir(), Agents: "auto"}), root, nil))
 	defer srv.Close()
 	get := func(path string) (int, string) {
 		resp, err := http.Get(srv.URL + path)
@@ -431,6 +431,60 @@ func TestFilesHandlerServesOnlyTheTestsFolder(t *testing.T) {
 	}
 	if code, _ := get("/api/plan/..%2f..%2fetc"); code == 200 {
 		t.Error("plan name traversal")
+	}
+}
+
+// --allow-host names pass the guard in the Host header besides loopback; any other host is still 403, and the page stays read-only.
+func TestAllowedHostNamesPassTheGuard(t *testing.T) {
+	root := t.TempDir()
+	p := NewPoller(Options{TestsDir: root, ConfigDir: t.TempDir(), Agents: "auto"})
+	allow, err := AllowedHosts("100.86.248.75", "m910q.tail1234.ts.net, [fd7a:115c:a1e0::53]")
+	must(t, err)
+	srv := httptest.NewServer(Handler(p, root, allow))
+	defer srv.Close()
+	plain := httptest.NewServer(Handler(p, root, nil))
+	defer plain.Close()
+	status := func(s *httptest.Server, method, host string) int {
+		req, err := http.NewRequest(method, s.URL+"/api/state", nil)
+		must(t, err)
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		must(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, h := range []string{"127.0.0.1:8790", "localhost:8790", "100.86.248.75", "100.86.248.75:8790", "m910q.tail1234.ts.net:8790", "M910Q.Tail1234.TS.NET.", "[fd7a:115c:a1e0::53]:8790"} {
+		if code := status(srv, "GET", h); code != http.StatusOK {
+			t.Errorf("Host %q: %d, want 200", h, code)
+		}
+	}
+	for _, h := range []string{"100.86.248.76", "100.86.248.75.evil.example.com", "evil.example.com", "m910q.tail1234.ts.net.evil.example.com", "m910q.tail1234", "fd7a:115c:a1e0::54", "0.0.0.0"} {
+		if code := status(srv, "GET", h); code != http.StatusForbidden {
+			t.Errorf("Host %q: %d, want 403", h, code)
+		}
+	}
+	if code := status(plain, "GET", "100.86.248.75:8790"); code != http.StatusForbidden {
+		t.Errorf("without --allow-host: %d, want 403", code)
+	}
+	if code := status(srv, "POST", "100.86.248.75:8790"); code != http.StatusMethodNotAllowed {
+		t.Errorf("POST by an allowed host: %d, want 405", code)
+	}
+}
+
+func TestAllowedHostsList(t *testing.T) {
+	got, err := AllowedHosts("100.86.248.75", "m910q.tail1234.ts.net, [fd7a:115c:a1e0::53],")
+	if err != nil || !reflect.DeepEqual(got, []string{"m910q.tail1234.ts.net", "fd7a:115c:a1e0::53", "100.86.248.75"}) {
+		t.Fatalf("list: %q %v", got, err)
+	}
+	for listen, want := range map[string]int{"127.0.0.1": 0, "localhost": 0, "0.0.0.0": 0, "::": 0, "m910q": 0, "100.86.248.75": 1} {
+		if got, err := AllowedHosts(listen, ""); err != nil || len(got) != want {
+			t.Errorf("listen %q: %q %v, want %d names", listen, got, err, want)
+		}
+	}
+	for _, bad := range []string{"*.tail1234.ts.net", "m910q:8790", "http://m910q", "m910q/x", "m910q.tail1234.ts.net evil", "0.0.0.0", "::", "[::]", "-m910q", "m910q..ts.net", "m_910q", "[fd7a::1", "[]"} {
+		if _, err := AllowedHosts("127.0.0.1", bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }
 
@@ -745,7 +799,7 @@ func TestPlanCacheFallsBackToThePlansOfTheBuild(t *testing.T) {
 func TestFramingIsLimitedToLoopbackAndNamedOrigins(t *testing.T) {
 	root := t.TempDir()
 	p := NewPoller(Options{TestsDir: root, ConfigDir: t.TempDir()})
-	srv := httptest.NewServer(Handler(p, root, "http://m910q:8095"))
+	srv := httptest.NewServer(Handler(p, root, nil, "http://m910q:8095"))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/")
 	must(t, err)

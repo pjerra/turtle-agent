@@ -87,7 +87,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -2620,17 +2620,24 @@ is embedded in the binary (no CDN, no build step).
 ```
 turtle-agent dashboard                                  # http://127.0.0.1:8790/, every agent found in the settings files
 turtle-agent dashboard --listen 127.0.0.1:8790 --agents 8765,8766 --tests-dir ~/TortoiseBots-audit/tests
+turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tailnet>.ts.net   # over Tailscale, see below
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--listen` | `127.0.0.1:8790` | where the page is served; a non-loopback address prints a warning |
+| `--listen` | `127.0.0.1:8790` | where the page is served; a non-loopback address prints a warning, and a specific IP is accepted as `Host` by itself |
+| `--allow-host` | none | host names or IP addresses (comma separated) the page accepts in its `Host` header besides loopback: exact names only (no wildcard, port or path). Any other `Host` gets 403 (see below) |
 | `--agents` | `auto` | `auto`: the `rpc` field of `settings*.json` in `--config-dir`; or a comma list of RPC ports/addresses (loopback only); `auto,8770` adds one. The list is read again every 10 s, so an agent started later appears |
 | `--tests-dir` | `~/TortoiseBots-audit/tests` | the **only** folder whose files `/files/...` serves (traces, summaries, reports); no other path is reachable |
 | `--traces-dir` | `~/turtle-agent/traces` | where the agents write run traces: read for the last orders and the binary SHA, never served |
 | `--plans-dir` | `~/turtle-agent/dungeons` | plan files for the map (comma list); a plan file that changes (a live plan reload) is loaded again. A plan no folder has is drawn from the copy the binary carries (`dungeons/embed.go`), which can differ from the file a run was started with |
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
+
+**Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
+`http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
+`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
+and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
 
 **What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
@@ -2668,8 +2675,8 @@ served (the state, the raw panel) is scrubbed: any JSON member whose name matche
 is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
 names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
 `--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
-refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is not a loopback name is
-refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
+refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is neither a loopback name nor one named with
+`--allow-host` (or the `--listen` IP) is refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
 dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
 example `--embed-from http://m910q:8095`, must be named).
 
