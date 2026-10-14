@@ -189,6 +189,7 @@ type ItemInfo struct {
 	Quality       int // 3 is rare (blue), 4 epic
 	InventoryType int
 	ItemLevel     int
+	RequiredLevel int
 }
 
 // HireGame is what the hire step needs of the game beyond a Preparer.

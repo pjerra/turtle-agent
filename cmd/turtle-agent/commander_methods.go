@@ -580,7 +580,7 @@ func (g remoteGame) ItemInfos(ctx context.Context, entries []uint32, wait time.D
 	m, err := g.c.cur().ItemInfos(ctx, entries, wait)
 	out := make(map[uint32]dungeon.ItemInfo, len(m))
 	for e, it := range m {
-		out[e] = dungeon.ItemInfo{Found: it.Found, Name: it.Name, Class: int(it.Class), SubClass: int(it.SubClass), Quality: int(it.Quality), InventoryType: int(it.InventoryType), ItemLevel: int(it.ItemLevel)}
+		out[e] = dungeon.ItemInfo{Found: it.Found, Name: it.Name, Class: int(it.Class), SubClass: int(it.SubClass), Quality: int(it.Quality), InventoryType: int(it.InventoryType), ItemLevel: int(it.ItemLevel), RequiredLevel: int(it.RequiredLevel)}
 	}
 	return out, err
 }

@@ -130,9 +130,18 @@ func (g *gearRead) wornSlots() []int {
 	return out
 }
 
-// summary is the best quality worn, the average item level (shirt and tabard left out), the epic items, and how many worn items the
-// server did not describe.
-func (g *gearRead) summary() (best int, ilvl float64, epics []string, unknown int) {
+// epicAllowance is how far above the bot's level an epic's item level may be: "they can have epic as long as it's for their level"
+// (owner, 2026-10-14). An epic is for the level when its required level is at most the bot's and its item level at most the bot's plus this.
+const epicAllowance = 5
+
+// epicForLevel says whether an epic item suits a bot of the level: required level <= level and item level <= level + epicAllowance.
+func epicForLevel(it ItemInfo, level int) bool {
+	return it.RequiredLevel <= level && it.ItemLevel <= level+epicAllowance
+}
+
+// summary is the best quality worn, the average item level (shirt and tabard left out), the epic items that are not for the bot's level
+// (level 0: every epic), and how many worn items the server did not describe. An epic for the level (epicForLevel) is not listed.
+func (g *gearRead) summary(level int) (best int, ilvl float64, epics []string, unknown int) {
 	best = -1
 	sum, n := 0, 0
 	for _, s := range g.wornSlots() {
@@ -142,8 +151,8 @@ func (g *gearRead) summary() (best int, ilvl float64, epics []string, unknown in
 			continue
 		}
 		best = max(best, it.Quality)
-		if it.Quality >= 4 {
-			epics = append(epics, it.Name)
+		if it.Quality >= 4 && (level <= 0 || !epicForLevel(it, level)) {
+			epics = append(epics, fmt.Sprintf("%s (required level %d, item level %d)", it.Name, it.RequiredLevel, it.ItemLevel))
 		}
 		if s != slotShirt && s != slotTabrd {
 			sum += it.ItemLevel
@@ -261,7 +270,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 		return
 	}
 	class, role := b.slot.Class, b.slot.Role
-	_, _, epics, _ := g.summary()
+	_, _, epics, _ := g.summary(f.level)
 	var gear []string
 	for _, e := range epics {
 		gear = append(gear, "epic "+e)
@@ -279,7 +288,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 				b.fail("inventory after autogear: %v", err)
 				return
 			}
-			_, _, epics, _ = g.summary()
+			_, _, epics, _ = g.summary(f.level)
 			var left []string
 			for _, e := range epics {
 				left = append(left, "epic "+e)
@@ -328,7 +337,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 		has := g.hasShield()
 		b.rb.Shield = &has
 	}
-	best2, ilvl, epics2, unknown := g.summary()
+	best2, ilvl, epics2, unknown := g.summary(f.level)
 	b.rb.ItemLevel = float64(int(ilvl*10+0.5)) / 10
 	if best2 >= 0 {
 		b.rb.Quality = qualityName(best2)

@@ -1278,8 +1278,8 @@ func TestGearReadJudgesQualityShieldAndAmmo(t *testing.T) {
 		90015:                  {Found: true, Name: "Hammer", Quality: 2, ItemLevel: 36},
 		shieldEntries[0]:       {Found: true, Name: "Shield", Class: 4, SubClass: 6, Quality: 3, ItemLevel: 43},
 		bulletWeaponEntries[0]: {Found: true, Name: "Gun", Class: 2, SubClass: 3, Quality: 3, ItemLevel: 44}}}
-	best, ilvl, epics, unknown := g.summary()
-	if best != 4 || len(epics) != 1 || epics[0] != "Epic Chest" || unknown != 1 /* feet 90007 has no prototype */ {
+	best, ilvl, epics, unknown := g.summary(45)
+	if best != 4 || len(epics) != 1 || !strings.HasPrefix(epics[0], "Epic Chest") || unknown != 1 /* feet 90007 has no prototype */ {
 		t.Fatalf("%d %.1f %v %d", best, ilvl, epics, unknown)
 	}
 	if want := (40.0 + 60 + 44 + 36 + 43 + 44) / 6; ilvl < want-0.01 || ilvl > want+0.01 {
@@ -1302,5 +1302,23 @@ func TestGearReadJudgesQualityShieldAndAmmo(t *testing.T) {
 	drinks, ammo, short := g.supplies("hunter", "dps")
 	if drinks != 20 || ammo != "bullets 50" || len(short) != 1 || short[0] != "50 bullets, 100 wanted" {
 		t.Fatalf("%d %q %v", drinks, ammo, short)
+	}
+}
+
+// "They can have epic as long as it's for their level" (owner, 2026-10-14): an epic whose required level is at most the bot's and whose
+// item level is at most the bot's plus 5 is allowed; a higher required level or item level is out of band and still listed.
+func TestSummaryAllowsEpicForTheLevel(t *testing.T) {
+	inv := tbm.ParseInventory([]string{"TBM:INV_BEGIN|X|0", "TBM:INV_EQ|0|90000|1|1", "TBM:INV_EQ|4|90004|1|1", "TBM:INV_EQ|6|90006|1|1", "TBM:INV_EQ|7|90007|1|1", "TBM:INV_END|X|10|16"})
+	g := &gearRead{inv: inv, info: map[uint32]ItemInfo{
+		90000: {Found: true, Name: "In band", Quality: 4, ItemLevel: 50, RequiredLevel: 45},
+		90004: {Found: true, Name: "Too high ilvl", Quality: 4, ItemLevel: 51, RequiredLevel: 45},
+		90006: {Found: true, Name: "Too high req", Quality: 4, ItemLevel: 46, RequiredLevel: 46},
+		90007: {Found: true, Name: "Blue", Quality: 3, ItemLevel: 40, RequiredLevel: 40}}}
+	best, _, epics, _ := g.summary(45)
+	if best != 4 || len(epics) != 2 || !strings.HasPrefix(epics[0], "Too high ilvl") || !strings.HasPrefix(epics[1], "Too high req") {
+		t.Fatalf("%d %v", best, epics)
+	}
+	if _, _, epics, _ = g.summary(0); len(epics) != 3 {
+		t.Fatalf("level unknown: every epic counts: %v", epics)
 	}
 }
