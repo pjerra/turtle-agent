@@ -1190,6 +1190,17 @@ it has to be on the dungeon's map, in the instance, with the object loaded: a ch
 step fails before any order with `the agent must be within view of game object <entry> near <x y z>`. An agent that is out of the instance cannot
 do the leg's object steps; run them from a character that stands in or beside the instance, or use group mode for those legs.
 
+**Bringing the agent into view of each object step** (remote mode, with a game that can move the agent). Before any step that needs an object's GUID
+from the agent's store (`use_object`, `loot_object`, a `wait_for` on a game object) the driver first brings the agent toward the lead bot as above, then,
+when the step's own object (its `near`, else its `stand`) is still not in the store, looks for it for up to 12 s: after 4 s (at once when the agent did not move
+for the lead bot) the agent walks to 20 yd short of the object's position (`walk_path`, counted in `agent_walks`, 40 s ceiling, out of combat, never when a
+hostile the bots see stands near its way). The lead bot can stand more than the view range from a door or chest of the step (uldaman-remote-4: the Seal, 41 yd). If the
+object stays out of view, a `use_object`/`loot_object` step fails with `... within view of game object <entry> near <x y z>, the agent stands <n> yd from it, after
+looking for it 12 s ...`. A `wait_for` on a game object goes on instead, after the usual 10 s, **unchecked**: the feed carries no game-object state, so the
+wait is passed as a last resort with a note that says where the agent stood, and the party's next walk through that place is the check (a door still closed fails that
+walk, not this wait). Before this, a wait that held in the same step of the Stepper as the next leg's walk was wrongly failed as an object step out of view;
+only the actions of an object step count now. The approach to an object also waits for **three** feed frames within 0.3 yd (was two within 0.5) before `cmd open`.
+
 The report's `remote.carrier` and `remote.object_steps[]` give, per step: the carrier, the orders sent with their replies (`command`, `result` `ack` or
 the ERR code or `timeout`, the final line, whether it reported `pending`, the seconds), the items gained, the seconds of the whole step and `result`
 (`done`, `skipped` or `failed`), plus `approach`, `carrier_result`, `fallback_used` and `fallback` (below). `orders` and `refused` count the orders by verb as for the others.

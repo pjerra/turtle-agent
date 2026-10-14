@@ -234,7 +234,7 @@ func (d *RemoteDriver) agentReach(ctx context.Context, what string, target Point
 				to = *stand
 			}
 			d.rep.note(fmt.Sprintf("agent fallback: the agent is %.1f yd from %s; walking to %.1f %.1f %.1f", dist, what, to.X, to.Y, to.Z))
-			if _, err := d.agentWalk(ctx, f, to); err != nil {
+			if _, err := d.agentWalk(ctx, f, to, 0); err != nil {
 				return err
 			}
 		default:
