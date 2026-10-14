@@ -96,8 +96,8 @@ type dungeonRunParams struct {
 	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
 	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
 	RecoverWipe bool `json:"recover_wipe,omitempty"`
-	// Resume false starts at the first point of from_leg even when the party already stands further along the leg's route. By default the
-	// run skips what the leader has passed: the walk to the leg's first point and the pull groups behind it whose pack is gone.
+	// Resume true skips what the leader has already passed when it stands further along from_leg's route than its first point: the walk to
+	// the leg's first point and the pull groups behind it that a party member stands near and sees empty. Off by default (not yet checked live).
 	Resume *bool `json:"resume,omitempty"`
 	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
 	WaitSickness bool `json:"wait_sickness,omitempty"`
@@ -277,7 +277,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	cfg := dungeon.DefaultConfig()
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
-	cfg.NoResume = p.Resume != nil && !*p.Resume
+	cfg.Resume = p.Resume != nil && *p.Resume
 	leaderGM := "probe"
 	switch {
 	case p.GM == nil:

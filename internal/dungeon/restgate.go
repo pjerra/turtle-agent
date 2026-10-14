@@ -182,7 +182,7 @@ func replyText(r tbm.Reply) string {
 
 // resume skips what the leader has already passed (see Stepper.ResumeAt), unless the run was asked not to.
 func (d *Driver) resume() {
-	if d.cfg.NoResume {
+	if !d.cfg.Resume {
 		return
 	}
 	if r, ok := d.st.ResumeAt(); ok {

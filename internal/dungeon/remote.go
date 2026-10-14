@@ -352,7 +352,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		return err
 	}
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
-	if !d.cfg.NoResume {
+	if d.cfg.Resume {
 		if r, ok := d.st.ResumeAt(); ok {
 			d.rep.update(func(rp *Report) { rp.Resumed = &r })
 			d.rep.note(r.String())
@@ -493,6 +493,15 @@ func (w remoteWorld) GameObjects() []objects.GameObject {
 	w.d.objectTouched = true // only the object steps and game-object waits ask
 	return nil
 }
+func (w remoteWorld) PartyNear(c Point, r float32) bool {
+	for _, m := range w.d.fr.Party {
+		if !m.Dead && dist3(partyPoint(m), c) <= float64(r) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w remoteWorld) HostilesWithin(c Point, r float32) int {
 	n := 0
 	for _, h := range w.d.fr.Hostiles {

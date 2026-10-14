@@ -8,8 +8,13 @@ import (
 // Resume: a run started with the party already inside a leg (a restart halfway through it) must not run back to the leg's first
 // waypoint. The leg's route is the straight lines from where the leg starts (the entrance, or the end of the leg before) through
 // its `to`, the first position of each pull group, and the boss. When the leader stands close to that route, everything it has
-// already passed is skipped: the walk to `to`, and the pull groups behind it whose pack is gone. A pack that is behind but still
-// alive is pulled (the run is then at the start of the groups list).
+// already passed is skipped: the walk to `to`, and the pull groups behind it that are surely gone. A group counts as gone only when
+// a party member stands within ResumeSeeRadius of its positions and no hostile is listed there: the feed and the unit list hold only
+// what someone sees (about 60 yd, and a frame may be cut short), so a pack out of everyone's sight proves nothing. Any other group
+// is pulled (an empty pull passes quickly); the groups from the first unsure one on are all kept.
+
+// ResumeSeeRadius is how near a party member must stand to a pull group's positions for an empty view of them to be believed.
+const ResumeSeeRadius = 40
 
 // ResumeMaxOff is how far (yards) from the leg's route the leader may stand for the run to take it for inside the leg.
 const ResumeMaxOff = 80.0
@@ -87,12 +92,14 @@ func (s *Stepper) ResumeAt() (r Resumed, ok bool) {
 		if radius <= 0 {
 			radius = 25
 		}
-		alive := 0
+		pw, known := s.w.(PartyWorld)
+		seen, alive := false, 0
 		for _, p := range g.Positions {
 			alive += s.w.HostilesWithin(p, radius)
+			seen = seen || (known && pw.PartyNear(p, ResumeSeeRadius))
 		}
-		if alive > 0 {
-			break // a pack the party passed but did not kill: it is still to be pulled
+		if alive > 0 || !seen {
+			break // a pack the party passed but did not kill, or one nobody has looked at: it is still to be pulled
 		}
 		idx++
 	}

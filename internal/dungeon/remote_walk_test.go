@@ -89,7 +89,7 @@ func TestRemoteGatherOnlyBeforePulls(t *testing.T) {
 // After a fight the lead bot's stay spot is where it stands, so "return to stay position" does not walk it back to the last move point.
 func TestRemoteHoldsWhereTheFightEnded(t *testing.T) {
 	g := newFakeRemote(t)
-	g.returnToStay = true
+	g.returnToStay, g.returnDelay = true, 6*time.Second // the module walks the bot back some seconds after the fight; the hold comes before
 	m := g.addMob(299, Point{100, 0, 0})
 	// The lead bot is carried 15 yd forward while it fights.
 	g.onTick = func(g *fakeRemote) {
@@ -112,23 +112,23 @@ func TestRemoteHoldsWhereTheFightEnded(t *testing.T) {
 	}
 }
 
-// A run started inside a leg does not walk back to the leg's first point: the walk to `to` and the pull groups behind the lead bot
-// are skipped (resume), unless resume is off.
+// A run started inside a leg does not walk back to the leg's first point when resume is on: the walk to `to` is skipped. It is off
+// by default.
 func TestRemoteResume(t *testing.T) {
 	plan := remotePlan(Leg{Name: "a", To: Point{100, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{150, 0, 0}}}}},
 		Leg{Name: "b", To: Point{300, 0, 0}})
-	start := func(noResume bool) (*fakeRemote, Report) {
+	start := func(resume bool) (*fakeRemote, Report) {
 		g := newFakeRemote(t)
 		for _, p := range g.party {
 			p.X = 120
 		}
-		rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.NoResume = noResume })
+		rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.Resume = resume })
 		if err != nil {
 			t.Fatalf("%v %v", err, rep.Notes)
 		}
 		return g, rep
 	}
-	g, rep := start(false)
+	g, rep := start(true)
 	if rep.Resumed == nil || !rep.Resumed.SkippedWalk || rep.Resumed.SkippedGroups != 0 || !strings.Contains(strings.Join(rep.Notes, "|"), "resumed leg 0") {
 		t.Fatalf("%+v %v", rep.Resumed, rep.Notes)
 	}
@@ -137,52 +137,129 @@ func TestRemoteResume(t *testing.T) {
 			t.Fatalf("the lead bot was sent back: %v", g.moveOrderDest)
 		}
 	}
-	g, rep = start(true)
+	g, rep = start(false)
 	if rep.Resumed != nil || len(g.moveOrderDest) == 0 || g.moveOrderDest[0].X != 100 {
-		t.Fatalf("resume off: %+v %v", rep.Resumed, g.moveOrderDest)
+		t.Fatalf("resume off (the default): %+v %v", rep.Resumed, g.moveOrderDest)
 	}
 }
 
-// The stepper's own rules: what is behind the leader is skipped, a pack that is behind but alive is not, a leader before the leg's
-// first point or far from its route resumes nothing.
+// resumeWorld is a fakeWorld that also says whether the party stands near a point.
+type resumeWorld struct {
+	fakeWorld
+	near func(Point) bool
+}
+
+func (w *resumeWorld) PartyNear(c Point, r float32) bool { return w.near(c) }
+
+// The stepper's own rules: what is behind the leader is skipped, a pack that is behind but alive is not, a pack nobody has looked at
+// (no party member near its positions, so an empty view proves nothing) is not, a leader before the leg's first point or far from
+// its route resumes nothing.
 func TestStepperResumeAt(t *testing.T) {
 	plan := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
 	 {"to":{"x":100,"y":0,"z":0},"pull_groups":[
 	   {"entries":[1],"positions":[{"x":150,"y":0,"z":0}]},
 	   {"entries":[2],"positions":[{"x":200,"y":0,"z":0}]},
 	   {"entries":[3],"positions":[{"x":250,"y":0,"z":0}]}]}]}`)
-	at := func(x, y float32, hostiles int) (Resumed, bool, *Stepper) {
-		w := &fakeWorld{pos: Point{x, y, 0}, hostiles: hostiles}
+	// The party stands at x and sees the packs within 40 yd of it.
+	at := func(x, y float32, hostiles int, sees bool) (Resumed, bool, *Stepper) {
+		w := &resumeWorld{fakeWorld: fakeWorld{pos: Point{x, y, 0}, hostiles: hostiles}}
+		w.near = func(c Point) bool { return sees && dist3(Point{x, y, 0}, c) <= ResumeSeeRadius }
 		s := NewStepperAt(plan, w, nil, 0)
 		r, ok := s.ResumeAt()
 		return r, ok, s
 	}
-	if _, ok, _ := at(50, 0, 0); ok { // before `to`
+	if _, ok, _ := at(50, 0, 0, true); ok { // before `to`
 		t.Fatal("resumed before the leg's first point")
 	}
-	if _, ok, _ := at(0, 500, 0); ok { // nowhere near
+	if _, ok, _ := at(0, 500, 0, true); ok { // nowhere near
 		t.Fatal("resumed far from the route")
 	}
-	r, ok, s := at(120, 0, 0) // between `to` and group 1
+	r, ok, s := at(120, 0, 0, true) // between `to` and group 1
 	if !ok || !r.SkippedWalk || r.SkippedGroups != 0 {
 		t.Fatalf("%+v %v", r, ok)
 	}
 	if a := s.Next(); a.Kind != ActPull || a.Entries[0] != 1 {
 		t.Fatalf("%+v", a)
 	}
-	r, ok, s = at(210, 0, 0) // past groups 1 and 2, whose packs are gone
-	if !ok || r.SkippedGroups != 2 {
-		t.Fatalf("%+v", r)
-	}
-	if a := s.Next(); a.Kind != ActPull || a.Entries[0] != 3 {
-		t.Fatalf("%+v", a)
-	}
-	r, ok, s = at(210, 0, 2) // the same, but hostiles stand at the groups behind: they are still to be pulled
+	// Past group 2 (at 200), standing at 210: group 2 is within 40 yd and empty, so it is skipped; group 1 (at 150) is 60 yd away,
+	// nobody looked at it, so it is kept, and with it everything after it.
+	r, ok, s = at(210, 0, 0, true)
 	if !ok || r.SkippedGroups != 0 {
 		t.Fatalf("%+v", r)
 	}
 	if a := s.Next(); a.Kind != ActPull || a.Entries[0] != 1 {
 		t.Fatalf("%+v", a)
+	}
+	// Standing at 170 (past group 1 at 150, 20 yd from it, in sight): group 1 is empty and skipped; group 2 is ahead.
+	r, ok, s = at(170, 0, 0, true)
+	if !ok || r.SkippedGroups != 1 {
+		t.Fatalf("%+v", r)
+	}
+	if a := s.Next(); a.Kind != ActPull || a.Entries[0] != 2 {
+		t.Fatalf("%+v", a)
+	}
+	// The same spot with hostiles listed at the groups: the pack behind is alive and is pulled.
+	r, ok, s = at(170, 0, 2, true)
+	if !ok || r.SkippedGroups != 0 {
+		t.Fatalf("%+v", r)
+	}
+	// A pack the feed cannot see: nobody stands near it (the party view reaches nothing), the list is empty, and it is not skipped.
+	r, ok, s = at(170, 0, 0, false)
+	if !ok || r.SkippedGroups != 0 {
+		t.Fatalf("a pack nobody looked at was skipped: %+v", r)
+	}
+	if a := s.Next(); a.Kind != ActPull || a.Entries[0] != 1 {
+		t.Fatalf("%+v", a)
+	}
+	// A World that cannot tell where the party is (no PartyWorld) skips no group either.
+	w := &fakeWorld{pos: Point{170, 0, 0}}
+	s = NewStepperAt(plan, w, nil, 0)
+	if r, ok := s.ResumeAt(); !ok || r.SkippedGroups != 0 {
+		t.Fatalf("%+v %v", r, ok)
+	}
+}
+
+// The "stay here" move after a fight waits for the loot wait and for the adds: a move sent earlier would reset the lead bot's
+// movement while loose adds hit the party. Here an add joins as the first mob dies; the hold comes after the add is dead, and not
+// before PostFight has passed.
+func TestRemoteHoldWaitsForTheAdds(t *testing.T) {
+	g := newFakeRemote(t)
+	g.killRate = 50
+	g.addMob(299, Point{30, 0, 0})
+	spawned := false
+	g.onTick = func(g *fakeRemote) {
+		if g.mobsKilled == 1 && !spawned {
+			spawned = true
+			m := g.addMob(300, Point{20, 0, 0})
+			m.pulled, m.pullAt, m.engaged, m.target = true, g.now, true, gTank
+		}
+	}
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || len(g.killTimes) != 2 || rep.Remote.FightHolds != 1 {
+		t.Fatalf("%v kills %v %+v", err, g.killTimes, rep.Remote)
+	}
+	hold := g.moveOrderAt[len(g.moveOrderAt)-1]
+	if hold.Before(g.killTimes[1]) {
+		t.Fatalf("the hold went out at %v, before the add died at %v", hold, g.killTimes[1])
+	}
+	if hold.Sub(g.killTimes[0]) < 2*time.Second {
+		t.Fatalf("the hold went out %v after the first kill, inside the loot wait", hold.Sub(g.killTimes[0]))
+	}
+	// No hold while something still hits the party: the adds never die here, so the wait ends at AddsWait and no move goes out.
+	g = newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	spawned = false
+	g.onTick = func(g *fakeRemote) {
+		if g.mobsKilled == 1 && !spawned {
+			spawned = true
+			m := g.addMob(300, Point{20, 0, 0})
+			m.pulled, m.pullAt, m.engaged, m.target, m.hp = true, g.now, true, gTank, 1e9
+		}
+	}
+	rep, err = runRemote(t, g, plan, opts(), func(c *Config) { c.FightTimeout = 30 * time.Second })
+	if rep.Remote != nil && rep.Remote.FightHolds != 0 {
+		t.Fatalf("a hold went out with an add still fighting: %v %+v", err, rep.Remote)
 	}
 }
 

@@ -129,7 +129,7 @@ func RealClock() Clock {
 // Config holds the Driver's limits. A zero field takes the default of DefaultConfig.
 type Config struct {
 	// Options of the run, not limits (set by the caller).
-	NoResume  bool // start at the leg's first point even when the party stands further along it (see Resumed)
+	Resume    bool // when the party stands further along the leg than its first point, skip what it has passed (see Resumed); off by default until a live check
 	Teleport  bool // GM-teleport to the start of the first leg and bring the party along (flagged in the report)
 	Shortcuts bool // allow the GM revive of a dead party member at a rest gate (flagged in the report)
 	// GM says how the Driver learns whether the leader's account is a GM. Without one the driver sends no GM command: no
@@ -774,6 +774,19 @@ type stepWorld struct{ d *Driver }
 
 func (w stepWorld) Position() Point                   { return w.d.g.Position() }
 func (w stepWorld) GameObjects() []objects.GameObject { return w.d.g.GameObjects() }
+func (w stepWorld) PartyNear(c Point, r float32) bool {
+	if dist3(w.d.g.Position(), c) <= float64(r) {
+		return true
+	}
+	in := w.d.party
+	for _, u := range w.d.g.Units() {
+		if u.Type == "player" && in[u.GUID] && dist3(Point{u.X, u.Y, u.Z}, c) <= float64(r) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w stepWorld) HostilesWithin(c Point, r float32) int {
 	n := 0
 	for _, u := range w.d.g.Units() {
