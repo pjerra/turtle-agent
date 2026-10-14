@@ -304,6 +304,11 @@ type RemoteReport struct {
 	// Carrier is the bot that did (or will do) the object steps; ObjectSteps is what each did (remote_objects.go).
 	Carrier     string             `json:"carrier,omitempty"`
 	ObjectSteps []ObjectStepReport `json:"object_steps,omitempty"`
+	// EntryTargets says whether the object steps name their objects by entry and wait on `cmd state` ("on"), or the module did not answer
+	// that probe ("off: <why>", the GUID path and the keep-near of old); empty when the plan has no object step to probe with
+	// (remote_entry.go). StatePolls counts the `cmd state` orders of game-object waits.
+	EntryTargets string `json:"entry_targets,omitempty"`
+	StatePolls   int    `json:"state_polls,omitempty"`
 }
 
 func (r *RemoteReport) clone() *RemoteReport {
@@ -391,6 +396,7 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	entry         entryState                 // object steps by entry and game-object waits on cmd state (remote_entry.go)
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
 
@@ -680,6 +686,17 @@ func (w remoteWorld) Position() Point {
 	p, _ := w.d.leadPos()
 	return p
 }
+
+// EntryTargets implements EntryWorld: the module takes objects by entry and answers cmd state (remote_entry.go). Only the object steps
+// and game-object waits ask, so it counts as touching the objects.
+func (w remoteWorld) EntryTargets() bool {
+	if !w.d.entry.ok {
+		return false
+	}
+	w.d.objectTouched = true
+	return true
+}
+
 func (w remoteWorld) GameObjects() []objects.GameObject {
 	w.d.objectTouched = true // only the object steps and game-object waits ask
 	return w.d.objectsInView()
@@ -846,6 +863,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 		}
 	}
 	d.lootOnAtStart(ctx)
+	d.probeEntryTargets(ctx, fromLeg)
 	return d.preflight(ctx)
 }
 

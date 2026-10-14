@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // The per-bot player orders of the remote commander (docs/guides/player-controls.md section 1a of TortoiseBots, "Player orders"):
-// `.bot cmd loot <guid> <bot> [itemId]`, `cmd open <guid> <bot>`, `cmd use <itemId> <bot> [target-guid]` and `cmd lootmethod`. They
+// `.bot cmd loot <guid> <bot> [itemId]`, `cmd open <guid> <bot>`, `cmd use <itemId> <bot> [target-guid]` and `cmd lootmethod`, plus the read-only `cmd state <guid|entry:<id>[@x,y,z]>`; loot, open and use also take `entry:<id>[@x,y,z]` for a GUID. They
 // are asynchronous: a refusal is one ERR line; an accepted order that has to walk answers TBM:ACTION_PENDING first and its final ACK
 // or ERR later. Order sends one and waits for the final line.
 
@@ -43,6 +44,88 @@ func ParsePending(line string) (Pending, bool) {
 		return Pending{}, false
 	}
 	return Pending{Intent: f[0], Bot: f[1][4:], BudgetS: n, GUID: f[3]}, true
+}
+
+// TargetPrefix starts the line that names the object an order by entry chose.
+const TargetPrefix = "TBM:ACTION_TARGET|"
+
+// Target is a TBM:ACTION_TARGET|cmd <verb>|bot:<Name>|<guid decimal>|<entry> line: the object that an `entry:<id>[@x,y,z]` order picked
+// (after the range checks, before ACTION_PENDING and the final answer), so the client can log it and use the GUID later.
+type Target struct {
+	Intent string      `json:"intent"`
+	Bot    string      `json:"bot"`
+	GUID   packet.GUID `json:"guid"`
+	Entry  uint32      `json:"entry"`
+}
+
+// ParseTarget reads an ACTION_TARGET line: four fields after the prefix, a bot: scope, and a decimal GUID and entry.
+func ParseTarget(line string) (Target, bool) {
+	rest, ok := strings.CutPrefix(line, TargetPrefix)
+	if !ok {
+		return Target{}, false
+	}
+	f := strings.Split(rest, "|")
+	if len(f) != 4 || strings.TrimSpace(f[0]) == "" || !strings.HasPrefix(f[1], "bot:") || len(f[1]) == 4 {
+		return Target{}, false
+	}
+	g, err := strconv.ParseUint(f[2], 10, 64)
+	if err != nil {
+		return Target{}, false
+	}
+	e, err := strconv.ParseUint(f[3], 10, 32)
+	if err != nil {
+		return Target{}, false
+	}
+	return Target{Intent: f[0], Bot: f[1][4:], GUID: packet.GUID(g), Entry: uint32(e)}, true
+}
+
+// GOState is what `cmd state` answers: guid:<dec>,entry:<n>,type:<n>,state:<active|ready|alternative>,loot:<...>,flags:<...>.
+type GOState struct {
+	GUID  packet.GUID `json:"guid"`
+	Entry uint32      `json:"entry"`
+	Type  uint32      `json:"type"`
+	State string      `json:"state"` // active (a door open, a lever pulled), ready (at rest) or alternative
+	Loot  string      `json:"loot,omitempty"`
+	Flags string      `json:"flags,omitempty"`
+}
+
+// ParseGOState reads the payload of a `cmd state` ACK. ok is false without a numeric guid and entry and a state.
+func ParseGOState(payload string) (GOState, bool) {
+	var s GOState
+	var haveGUID, haveEntry bool
+	for _, part := range strings.Split(strings.TrimSpace(payload), ",") {
+		k, v, found := strings.Cut(part, ":")
+		if !found {
+			return GOState{}, false
+		}
+		switch strings.ToLower(k) {
+		case "guid":
+			n, err := strconv.ParseUint(v, 10, 64)
+			if err != nil {
+				return GOState{}, false
+			}
+			s.GUID, haveGUID = packet.GUID(n), true
+		case "entry":
+			n, err := strconv.ParseUint(v, 10, 32)
+			if err != nil {
+				return GOState{}, false
+			}
+			s.Entry, haveEntry = uint32(n), true
+		case "type":
+			n, err := strconv.ParseUint(v, 10, 32)
+			if err != nil {
+				return GOState{}, false
+			}
+			s.Type = uint32(n)
+		case "state":
+			s.State = strings.ToLower(v)
+		case "loot":
+			s.Loot = v
+		case "flags":
+			s.Flags = v
+		}
+	}
+	return s, haveGUID && haveEntry && s.State != ""
 }
 
 // ItemCount is one entry of a loot payload: an item and how many came.
@@ -114,6 +197,10 @@ type OrderResult struct {
 	Spell     uint32 `json:"spell,omitempty"`
 	Method    string `json:"method,omitempty"`
 	Threshold string `json:"threshold,omitempty"`
+	// Target is the object an order by entry chose (the ACTION_TARGET line); nil for an order by GUID or one refused before the choice.
+	Target *Target `json:"target,omitempty"`
+	// State is the answer of `cmd state`.
+	State *GOState `json:"state,omitempty"`
 	// Waited is how long the order took, in real time.
 	Waited time.Duration `json:"waited_ns"`
 	// Final is the ACK or ERR line that ended the order ("" on a timeout).
@@ -214,6 +301,10 @@ func (c *Commander) OrderWait(ctx context.Context, command string, wait time.Dur
 			if len(res.Lines) < 60 {
 				res.Lines = append(res.Lines, line)
 			}
+			if tg, ok := ParseTarget(line); ok && strings.EqualFold(tg.Intent, res.Intent) && (res.Bot == "" || strings.EqualFold(tg.Bot, res.Bot)) {
+				res.Target = &tg
+				continue
+			}
 			if pd, ok := ParsePending(line); ok && strings.EqualFold(pd.Intent, res.Intent) && (res.Bot == "" || strings.EqualFold(pd.Bot, res.Bot)) {
 				res.Pending = &pd
 				deadline = time.Now().Add(pendingWait(pd.BudgetS, slack))
@@ -277,6 +368,10 @@ func interpretAck(r *OrderResult, a Ack) {
 		}
 	case "lootmethod":
 		r.Method, r.Threshold, _ = strings.Cut(a.Executor, ":")
+	case "state":
+		if st, ok := ParseGOState(a.Executor); ok {
+			r.State = &st
+		}
 	}
 }
 

@@ -831,6 +831,22 @@ Evidence: remote run 4 did the chest, the Shaft, the Staff combine and the Keyst
 3. **Still carrier.** `object_steps[].approach` says `still N yd ... after S s`; the first `cmd open` of Baelog's Chest is no longer interrupted by a 1-2 yd move
    (`cast interrupted ... the bot moved`).
 
+## Remote runs: target objects by entry and wait on cmd state (issue #83)
+
+Needs a server with TortoiseBots #933 (`cmd state`, `entry:<id>[@x,y,z]`). The code is tested against a fake commander only; nothing below has run live.
+The point: a clean Uldaman leg 0-2 run where the agent's character stays at the entrance (never `.appear`ed, never walking after the party).
+
+1. **Probe.** Start a remote run with the agent far from the party. The notes say `entry targets: the module answers cmd state entry:...` and `remote.entry_targets` is `on`. Against an older module
+   (no #933) it reads `off: ... was refused: invalid ...` and the run behaves as before (`.appear`/walks, GUIDs).
+2. **Baelog's chest by entry.** `remote.object_steps[0].orders` holds `cmd open entry:123329@-356.00,112.80,-43.20 <carrier>` and the step has `target_guid` (the module's ACTION_TARGET); the chest opens and the
+   Medallion is in the carrier's bags. Is the GUID the one `gameobjects` shows when the agent stands there? Does the ACTION_TARGET line arrive before PENDING?
+3. **Keystone and the Seal.** `cmd open entry:124371@... <carrier>` opens the Keystone; the Seal wait then polls `cmd state entry:124372@-234.60,294.80,-47.60` every 2 s (`remote.state_polls`): `state:ready` until
+   the Seal opens (about 27 s later), then the note `cmd state says ... is active`. Is the Seal `not-found` at any point (too far from the carrier, unloaded grid)? What does `cmd state` say for it before the Keystone?
+4. **Revelosh's corpse.** `cmd loot entry:6910@x,y,z <carrier> 7741` (the place Revelosh died) takes the Shaft with the agent nowhere near; the note about the corpse in the agent's view never appears.
+5. **No assists.** `remote.run_gm_assists` 0, `agent_walks` 0, no `.appear` in `setup_shortcuts`, for the whole run. Does a boss step still pass without the agent seeing the corpse?
+6. **Refusals.** A point more than `ReactDistance` from the carrier answers `too-far` before any search: the party is walked nearer once and the order retried. An entry with nothing spawned answers `not-found`
+   and the step fails naming the entry and the point.
+
 ## Run watchdog: a run never sits stuck (issues #73, #83)
 
 Evidence: the three live remote Uldaman runs of 2026-10-14 waited where nothing could move them on (the carrier's `cmd open` at Baelog's chest,

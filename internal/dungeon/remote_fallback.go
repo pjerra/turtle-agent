@@ -365,10 +365,13 @@ func (d *RemoteDriver) fallbackLoot(ctx context.Context, a Action, carrier strin
 				return err
 			}
 		}
+		guid, err := d.agentGUID(ctx, a, rec)
+		if err != nil {
+			return err
+		}
 		var got Looted
-		var err error
 		for try := 0; try < 2; try++ {
-			if got, err = h.LootObject(ctx, a.GUID); err == nil {
+			if got, err = h.LootObject(ctx, guid); err == nil {
 				break
 			}
 			if ctx.Err() != nil {
@@ -379,7 +382,7 @@ func (d *RemoteDriver) fallbackLoot(ctx context.Context, a Action, carrier strin
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("the agent's own Opening cast at game object %s: %w", a.GUID, err)
+			return fmt.Errorf("the agent's own Opening cast at game object %s: %w", guid, err)
 		}
 		d.rep.note(fmt.Sprintf("%s: the agent took %s", rec.label(), describeLooted(got)))
 		var hand []ItemCount
@@ -424,9 +427,12 @@ func (d *RemoteDriver) fallbackOpen(ctx context.Context, a Action, carrier strin
 				return err
 			}
 		}
-		var err error
+		guid, err := d.agentGUID(ctx, a, rec)
+		if err != nil {
+			return err
+		}
 		for try := 0; try < 2; try++ {
-			if err = h.UseObject(ctx, a.GUID); err == nil {
+			if err = h.UseObject(ctx, guid); err == nil {
 				break
 			}
 			if ctx.Err() != nil {
@@ -437,7 +443,7 @@ func (d *RemoteDriver) fallbackOpen(ctx context.Context, a Action, carrier strin
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("the agent's own use of game object %s: %w", a.GUID, err)
+			return fmt.Errorf("the agent's own use of game object %s: %w", guid, err)
 		}
 		return d.tick(ctx, d.cfg.UseSettle)
 	})

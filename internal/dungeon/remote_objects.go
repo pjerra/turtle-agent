@@ -60,6 +60,8 @@ type ObjectOrder struct {
 	Reply   string  `json:"reply"`  // the final line, or what was waited for
 	Pending bool    `json:"pending,omitempty"`
 	Seconds float64 `json:"seconds"`
+	// Target is the object an order by entry chose, from the module's ACTION_TARGET line ("0x1F10... entry 124371").
+	Target string `json:"target,omitempty"`
 }
 
 // ObjectStepReport is what the carrier did for one object step.
@@ -69,11 +71,13 @@ type ObjectStepReport struct {
 	Kind    string        `json:"kind"` // loot_object, use_object, use_item or boss loot_item
 	Carrier string        `json:"carrier"`
 	Orders  []ObjectOrder `json:"orders"`
-	Gained  []string      `json:"gained"` // "7740 x1": what the loot payloads and the bags showed
-	Seconds float64       `json:"seconds"`
-	Result  string        `json:"result"` // running, done, skipped or failed
-	Note    string        `json:"note,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	// TargetGUID is the GUID the module chose for the step's last order by entry (ACTION_TARGET), in the form `cmd` takes it.
+	TargetGUID string   `json:"target_guid,omitempty"`
+	Gained     []string `json:"gained"` // "7740 x1": what the loot payloads and the bags showed
+	Seconds    float64  `json:"seconds"`
+	Result     string   `json:"result"` // running, done, skipped or failed
+	Note       string   `json:"note,omitempty"`
+	Error      string   `json:"error,omitempty"`
 	// Approach is how the party was brought to the object before the order ("still at 2.1 yd after 4.0 s"; remote_approach.go).
 	Approach string `json:"approach,omitempty"`
 	// CarrierResult is how the carrier's last object order was answered ("ack", an ERR code or "timeout"); FallbackUsed says whether the
@@ -158,7 +162,7 @@ func (d *RemoteDriver) objectStepsNote(n, fromLeg int) string {
 	if _, ok := d.orderGame(); !ok {
 		return fmt.Sprintf("remote mode: the plan has %d object steps (use_object, loot_object, use_item, game-object waits) from leg %d on; each fails the run when reached, because this game cannot give the carrier bot orders", n, fromLeg)
 	}
-	return fmt.Sprintf("remote mode: the plan has %d object steps from leg %d on; the carrier bot does them (cmd open|loot|use), and the agent's own character must be within view of every game object they name", n, fromLeg)
+	return fmt.Sprintf("remote mode: the plan has %d object steps from leg %d on; the carrier bot does them (cmd open|loot|use); a module that takes objects by entry (probed at the start of the run) needs no agent in view, any other needs the agent's own character within view of every game object they name", n, fromLeg)
 }
 
 // stepOf is the plan step an action belongs to.
@@ -185,6 +189,9 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 	}
 	switch a.Kind {
 	case ActWalk, ActFailed:
+		if st := d.stepOf(a); a.Kind == ActFailed && d.entry.ok && st != nil && st.WaitFor != nil && st.WaitFor.GameObject != nil && st.WaitFor.GameObject.Entry != 0 {
+			return d.stateWaitError(a), true // a wait on cmd state that timed out: the Stepper's text and the module's last answer
+		}
 		// The Stepper found no such object in the agent's view and wanted to walk the party (or gave up): the agent cannot see it. (The
 		// agent is brought up before the step is looked at, see nearBeforeObjectStep.) Only an action of an object step says so: a wait
 		// that held in this very Next (the Seal seen active) is followed by the next leg's plain walk, which asked for the objects too
@@ -199,6 +206,10 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 			return nil, false
 		}
 		ref := &st.WaitFor.GameObject.ObjectRef
+		if d.entry.ok && ref.Entry != 0 {
+			d.waitOnState(ctx, a, st.WaitFor.GameObject)
+			return nil, true
+		}
 		if _, seen := d.st.find(ref); seen {
 			return nil, false // its state is in the agent's view: the usual wait
 		}
@@ -286,10 +297,13 @@ func (d *RemoteDriver) carrierBot() (tbm.PartyRec, error) {
 // ---- the step report ----
 
 type objRec struct {
-	d   *RemoteDriver
-	idx int
-	at  time.Time
+	d      *RemoteDriver
+	idx    int
+	at     time.Time
+	target packet.GUID // the object the module chose for the step's last order by entry (ACTION_TARGET)
 }
+
+func (o *objRec) targetGUID() packet.GUID { return o.target }
 
 func (d *RemoteDriver) newObjRec(leg int, label, kind, carrier string) *objRec {
 	var idx int
@@ -317,7 +331,16 @@ func (o *objRec) order(res tbm.OrderResult, began time.Time) {
 	if oo.Reply == "" {
 		oo.Reply = res.Describe()
 	}
-	o.update(func(s *ObjectStepReport) { s.Orders = append(s.Orders, oo) })
+	if t := res.Target; t != nil {
+		o.target = t.GUID
+		oo.Target = fmt.Sprintf("%s entry %d", tbm.GUIDArg(t.GUID), t.Entry)
+	}
+	o.update(func(s *ObjectStepReport) {
+		s.Orders = append(s.Orders, oo)
+		if res.Target != nil {
+			s.TargetGUID = tbm.GUIDArg(res.Target.GUID)
+		}
+	})
 }
 
 func (o *objRec) gained(items ...string) {
@@ -380,9 +403,10 @@ var orderHints = map[string]string{
 	"no-bot":         "the carrier is not in the commanded party",
 	"unavailable":    "the carrier is dead or left the party",
 	"invalid-target": "no such corpse or object on the carrier's map",
+	"not-found":      "no object of that entry is within the bots' reach of the point",
 	"unreachable":    "the carrier found no way to it",
 	"timeout":        "the walk took longer than its budget",
-	"too-far":        "the object is more than 150 yd from the carrier and the party could not be brought nearer",
+	"too-far":        "the object is farther than ReactDistance (150 yd by default) from the carrier and the party could not be brought nearer",
 	"in-combat":      "a fight did not end",
 	"busy":           "the carrier stayed busy with another order",
 	"cancelled":      "another order took the carrier over",
@@ -409,6 +433,11 @@ func (d *RemoteDriver) carry(ctx context.Context, rec *objRec, command string, n
 	og, _ := d.orderGame()
 	verb := strings.Fields(command)[1]
 	busy, cancelled, far := 0, 0, 0
+	_, _, byEntry := entryFormOf(command)
+	farTries := objectFarTries
+	if byEntry {
+		farTries = 1 // by entry the server says too-far before any search: the party is walked nearer in legs once, then the order is retried
+	}
 	combatUntil := d.clk.Now().Add(objectCombatWait)
 	leadUntil := d.clk.Now().Add(d.opt.LeadWait)
 	for {
@@ -445,10 +474,12 @@ func (d *RemoteDriver) carry(ctx context.Context, rec *objRec, command string, n
 			err = d.tick(ctx, d.cfg.Poll*2)
 		case code == "lead-unavailable" && d.clk.Now().Before(leadUntil):
 			err = d.tick(ctx, d.cfg.Poll*2)
-		case code == "too-far" && near != nil && far < objectFarTries:
+		case code == "too-far" && near != nil && far < farTries:
 			far++
 			d.rep.note(fmt.Sprintf("%s: the object is out of the carrier's reach; walking the party toward it", command))
 			err = d.doWalk(ctx, *near)
+		case byEntry && code == "not-found":
+			return res, entryNotFound(command, res)
 		default:
 			return res, orderError(res)
 		}
@@ -588,7 +619,7 @@ func (d *RemoteDriver) waitRejoin(ctx context.Context, carrier string) error {
 
 func objectPoint(a Action) *Point {
 	if a.Object == nil {
-		return nil
+		return a.EntryAt // an object named by entry that the agent does not see: the plan's point
 	}
 	return &Point{a.Object.X, a.Object.Y, a.Object.Z}
 }
@@ -666,7 +697,7 @@ func (d *RemoteDriver) stepLoot(ctx context.Context, a Action, carrier string, r
 	var failed bool
 	err = d.withFFA(ctx, rec, func() error {
 		var err error
-		res, failed, err = d.carryOrFallback(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
+		res, failed, err = d.carryObject(ctx, rec, a, func(arg string) string { return "cmd open " + arg + " " + carrier })
 		return err
 	})
 	if err != nil {
@@ -711,7 +742,7 @@ func (d *RemoteDriver) stepOpen(ctx context.Context, a Action, carrier string, r
 		return "", err
 	}
 	defer d.resumeFollow(ctx, stayed)
-	res, failed, err := d.carryOrFallback(ctx, rec, "cmd open "+tbm.GUIDArg(a.GUID)+" "+carrier, objectPoint(a))
+	res, failed, err := d.carryObject(ctx, rec, a, func(arg string) string { return "cmd open " + arg + " " + carrier })
 	if err != nil {
 		if failed && a.Requires != nil && d.agentHolds(a.Requires) && !d.laterNeeds(a, a.Requires.Entry) {
 			return "", d.fallbackOpen(ctx, a, carrier, rec, err)
@@ -947,9 +978,13 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 		return "carries the product already", nil
 	}
 	corpse, ok := d.corpseOf(b.Entry, &b.Position)
-	if !ok {
+	byEntry := d.entry.ok
+	if !ok && !byEntry {
 		// A boss step that passed on a corpse seen in the agent's view must not pass here without a GUID to loot from: say what happened.
 		return "", fmt.Errorf("boss %d died out of sight (the bots did not see it die and no corpse of it is in the agent's view); its loot can't be reached: %s is not obtainable from it in this run", b.Entry, it)
+	}
+	if !ok {
+		corpse = corpseRef{at: b.Position} // by entry the server finds the corpse around the boss's place; the GUID, if there is one, is the retry
 	}
 	stayed, err := d.approachObject(ctx, rec, carrier, &corpse.at, nil)
 	if err != nil {
@@ -958,8 +993,17 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 	defer d.resumeFollow(ctx, stayed)
 	var res tbm.OrderResult
 	err = d.withFFA(ctx, rec, func() error {
+		build := func(arg string) string { return fmt.Sprintf("cmd loot %s %s %d", arg, carrier, it.Entry) }
 		var err error
-		res, err = d.carry(ctx, rec, fmt.Sprintf("cmd loot %s %s %d", tbm.GUIDArg(corpse.guid), carrier, it.Entry), &corpse.at)
+		if !byEntry {
+			res, err = d.carry(ctx, rec, build(tbm.GUIDArg(corpse.guid)), &corpse.at)
+			return err
+		}
+		res, err = d.carry(ctx, rec, build(tbm.EntryArg(b.Entry, pointArr(&corpse.at))), &corpse.at)
+		if err != nil && corpse.guid != 0 && res.Code() == "not-found" && !runEnded(ctx, err) {
+			d.rep.note(fmt.Sprintf("%s: nothing by entry %d; trying the GUID %s of the corpse", rec.label(), b.Entry, tbm.GUIDArg(corpse.guid)))
+			res, err = d.carry(ctx, rec, build(tbm.GUIDArg(corpse.guid)), &corpse.at)
+		}
 		return err
 	})
 	if err != nil {
