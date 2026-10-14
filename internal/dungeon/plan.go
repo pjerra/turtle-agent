@@ -92,6 +92,11 @@ type Plan struct {
 	// HireComposition is the party the plan wants hired, "class:role" each (see HireSpec.Composition): the prepare step takes it when its own
 	// hire block gives none. Dungeon plans only.
 	HireComposition []string `json:"hire_composition,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
@@ -349,6 +354,7 @@ type rawPlan struct {
 	Kind     string            `json:"kind"`
 	Status   string            `json:"status"`
 	Hire     []string          `json:"hire_composition"`
+	Fleers   []uint32          `json:"fleers"`
 	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
@@ -608,6 +614,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
 		if rp.Kind == KindRaid {
 			c.fail("hire_composition", "a raid plan has a raid block instead")

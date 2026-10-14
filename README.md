@@ -562,7 +562,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 ```
 
 - `kind` (`"dungeon"`, the default, or `"raid"`), `status` (`draft`, `mapped` or `live-checked`, then free text: how far the plan has been checked), `hire_composition`
-  (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none) and `raid`
+  (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none), `fleers`
+  (creature entries that run at low health, EventAI "flee at 15 % HP"; remote mode kills them before they are out of reach and waits for one that got away, see *Runners* under tank first) and `raid`
   (`{"size": 40, "tanks": 4, "healers": 10, "dps": 26}`, required for a raid plan, size 10, 20 or 40, the roles a placeholder). A **draft** is the skeleton `tools/dungeongen` writes from the world export
   (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk) and refuses every raid plan (no raid driver yet).
   Every dungeon and raid of the server has a draft or better; see [docs/PLANS.md](docs/PLANS.md) for the table (level band, status, mmaps, the events, rituals, gossip and keys each needs).
@@ -1407,6 +1408,16 @@ top threat. Naming the `tank` is the reliable way.
   was accepted for is spared, while it carries the flag or no bot is fighting it: it is not attacked, not picked as the pull target while another candidate is, and not sent the tank
   at, unless every engaged mob is like that (the last one is fought). The mob the party fights and the tank's own target are never spared. Each spared mob is counted once in
   `cc_respected`. Crowd control the bots start by themselves, and the moon mark, cannot be seen: the feed has neither.
+- *Runners and bodies* (remote_flee.go; Uldaman A run 6, 2026-10-14). A mob the party fights that is at `flee_pct` (20) of its health or less and moves away from the party
+  (1.5 yd further from the nearest living bot than in the frame before), or that the plan lists in `fleers` and the feed shows with the `c` flag at up to 15 points more health,
+  is a *runner*. While it is in view and within 35 yd the damage dealers are ordered at it (`cmd attack <guid> <bot>`, the tank and the healer keep their work; the whole party
+  when the tank is unknown or the module takes no bot name), every 2 s, up to 6 times (`flee_orders`). A runner that leaves the feed alive (two frames) is not a kill: not in the
+  fight, not in the kill ledger (`goneMeansDead`), so the pull does not count it dead. It is a *fled* mob (`fled`), unless it was nearly dead (a few percent, or no more than it was
+  losing in 1.5 s) with a damage dealer ordered at it and a bot in spell range, or a bot within 10 yd: that is a kill. Every pull (`engage`) first waits where the party stands for the fled
+  mobs that were last seen within `flee_near_yd` (40) of the lead bot, at most `flee_wait_s` (30) from the moment each was lost and 90 s in all: whatever engages in the meantime
+  (the runner back at low health, its friends) is fought there with the usual tank-first rules; the waits are `flee_waits` and `flee_wait_s` in the report. The same
+  gate is the dead bots' rule: a dead bot is left to a living caster's resurrection (`rez_wait_s`) only when no live hostile (not a critter, guard or civilian) stands within
+  `revive_safe_yd` (30) of the bodies; else the wait is skipped, the note says so, and the bots are released with `cmd revive` (they run back from the graveyard; `unsafe_rez_skips`).
 - *Counters* (`report.remote`): `tank_threat_share` (the mean over the frames of a fight of the tank's share on the fighting mobs that have a `T` record, in percent; the
   deploy-19h run had it at 15-25 with the tank leading), `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`.
 
@@ -1604,7 +1615,7 @@ slot, pets in the agent's view while the hires stand around it, and whether a ke
 answer`, ...), `ended_by_module`, `gm_commands`, `run_gm_assists`, `agent_walks`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
 (since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
 in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `tank_busy_waits`, `cc_orders`,
-`revives`, `rez_waits`, `rezzed`, `pack_looks`, `packs_seen_empty`, `gathers`, `gather_wait_s`, `gather_timeouts`, `gather_gave_up`, `ahead_pulls`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`), unless it stands within 3 yd of the point of its last `cmd move` (its stay spot is already here, and the server cannot path to where a bot stands: it was refused `unreachable` about 23 times in a Uldaman run): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
+`revives`, `rez_waits`, `rezzed`, `unsafe_rez_skips`, `fled`, `flee_orders`, `flee_waits`, `flee_wait_s`, `pack_looks`, `packs_seen_empty`, `gathers`, `gather_wait_s`, `gather_timeouts`, `gather_gave_up`, `ahead_pulls`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`), unless it stands within 3 yd of the point of its last `cmd move` (its stay spot is already here, and the server cannot path to where a bot stands: it was refused `unreachable` about 23 times in a Uldaman run): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
 `remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
 
 **Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not; `healer` names the bot that gets the healer mana target),
@@ -1749,6 +1760,10 @@ with `ok: false`, once for that version of the file. A file that goes away chang
 | `add_cooldown_s` | s | 2 to 60 | 8 | least time between two tank orders at the same loose add |
 | `tank_busy_wait_s` | s | 2 to 60 | 10 | one wait of a pull the module refused as tank-busy |
 | `rez_wait_s` | s | 5 to 120 | 30 | how long a dead bot waits for a resurrection before it is released |
+| `revive_safe_yd` | yd | 10 to 80 | 30 | a dead bot is raised in place only when no live hostile stands this near the bodies; else it is released and runs back |
+| `flee_pct` | pct | 5 to 50 | 20 | a fought mob at or below this health that moves away from the party is a runner: it is killed first |
+| `flee_wait_s` | s | 5 to 120 | 30 | how long a pull waits for a runner that got away to come back |
+| `flee_near_yd` | yd | 10 to 80 | 40 | a runner last seen within this of the lead bot is waited for before the next pull |
 | `rest_health_pct` | pct | 30 to 100 | 90 | rested: every member's health at least this |
 | `rest_mana_pct` | pct | 10 to 100 | 35 | rested: every other mana user's mana at least this |
 | `rest_healer_mana_pct` | pct | 10 to 100 | 50 | rested: every healer's mana at least this |

@@ -35,12 +35,17 @@ type tuneExtra struct {
 	MaxAheadPulls  int           // careful walk: pulls of hostiles near the way in one walk
 	PartyDownDead  int           // dead bots that stop the leg
 	RespawnSettle  time.Duration // pulltest: wait after `.respawn` for the pack to show
+	FleePct        int           // a fought mob at or below this health, moving away from the party, is a runner (remote_flee.go)
+	FleeWait       time.Duration // how long a pull waits for a runner that got away to come back
+	FleeNearYd     float32       // a runner last seen within this of the lead bot is waited for
+	ReviveSafeYd   float32       // a dead bot is raised in place only when no live hostile stands this near the bodies (remote_flee.go)
 }
 
 func defaultTuneExtra() tuneExtra {
 	return tuneExtra{LookStandoff: LookStandoff, LookArrive: lookArrive, AttackHoldYd: attackHoldYd, TankBusyRounds: maxTankBusyRounds, AddOrders: maxAddOrders,
 		FallbackTries: objectFallbackTries, GatherNear: GatherNear, GatherProgress: gatherProgress, AggroGuard: AggroGuard, AheadMaxDZ: aheadMaxDZ,
-		MaxAheadPulls: maxAheadPulls, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
+		MaxAheadPulls: maxAheadPulls, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle,
+		FleePct: fleePct, FleeWait: fleeWait, FleeNearYd: fleeNearYd, ReviveSafeYd: reviveSafeYd}
 }
 
 // tuneTarget is what a tunable reads and writes.
@@ -116,6 +121,10 @@ var tuneSpecs = []tuneSpec{
 	secs("add_cooldown_s", 2, 60, "least time between two tank orders at the same loose add", func(t *tuneTarget) *time.Duration { return &t.opt.AddCooldown }),
 	secs("tank_busy_wait_s", 2, 60, "one wait of a pull the module refused as tank-busy", func(t *tuneTarget) *time.Duration { return &t.opt.TankBusyWait }),
 	secs("rez_wait_s", 5, 120, "how long a dead bot waits for a resurrection before it is released", func(t *tuneTarget) *time.Duration { return &t.opt.RezWait }),
+	yds("revive_safe_yd", 10, 80, "a dead bot is raised in place only when no live hostile stands this near the bodies; else it is released and runs back", func(t *tuneTarget) *float32 { return &t.x.ReviveSafeYd }),
+	ints("flee_pct", "pct", 5, 50, "a fought mob at or below this health that moves away from the party is a runner: it is killed first", func(t *tuneTarget) *int { return &t.x.FleePct }),
+	secs("flee_wait_s", 5, 120, "how long a pull waits for a runner that got away to come back", func(t *tuneTarget) *time.Duration { return &t.x.FleeWait }),
+	yds("flee_near_yd", 10, 80, "a runner last seen within this of the lead bot is waited for before the next pull", func(t *tuneTarget) *float32 { return &t.x.FleeNearYd }),
 	// Rest gates.
 	ints("rest_health_pct", "pct", 30, 100, "rested: every member's health at least this", func(t *tuneTarget) *int { return &t.cfg.RestHealthPct }),
 	ints("rest_mana_pct", "pct", 10, 100, "rested: every other mana user's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestManaPct }),
