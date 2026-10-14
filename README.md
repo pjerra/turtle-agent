@@ -1328,19 +1328,28 @@ homebind about a minute later (deploy-19i: the bots were ejected twice that way)
 the first step in, and the agent stays **outside and ungrouped**. When a bot of the first frame is not on the plan's map (and `enter` is not
 `off`), the run does, after the bind and the first frame:
 
+0. **Checks the bound party** (a run that names `bots`): after a 3 s settle it reads, and re-reads every second for up to 10 s until it matches, `commander status` (lead, bot count, and the listing line
+   `You command X's group: ...`) and the feed's party and compares them with the named lead bot and bots, **exactly**. A bot that dropped out
+   after the bind (run 6b: the hunter was in the bind's ACK and listing, and gone one second later; an earlier `.bot command <bot> leave` is only
+   forwarded and can land after the bind) is invited again by one `commander unbind` + `commander bind`; a bot still missing after that, a
+   refusal of the second bind (`hired`, `no-bot`, `member-grouped`, `bot-bound`, ...), or a group that holds a bot the run did not name, fails the
+   run **before** anything is teleported or summoned, naming the bot and the reason. The run never enters with a partial party. Not done when
+   `enter` is `off` or the party is already inside (the group is not changed in the dungeon), nor for a run that names no `bots`.
 1. The agent's character leaves its group if it is still in one (a bind that keeps the bots-plus-commander party, TortoiseBots #929, removes
    the agent itself; the bound bots do not leave with their master). It is refused when the agent stands on the plan's map.
 2. It picks the way in. `auto` asks the server for the account level once (`.account`): a developer-level account (3; `.tele name` needs it)
    with an `entrance_tele` in the plan teleports the lead bot, anyone else with a `portal` walks it. `gm` and `walk` force one.
    - **gm:** `.tele name <lead bot> <entrance_tele>`, a wait of up to 30 s for the lead bot to show on the plan's map (it goes into *its group's*
-     instance, and the first entry binds the instance to that group; the agent never enters), then `cmd summon <bot>` for each other bot,
-     6 s apart.
+     instance, and the first entry binds the instance to that group; the agent never enters), then `cmd summon <bot>` for each other **named**
+     bot that is not on the plan's map, 6 s apart, **by name**: a bot the feed does not list (it left the group, or the feed dropped it) is
+     summoned too (the module answers `no-bot` for a bot outside the group, and the run fails saying so).
    - **walk:** `cmd move` legs along the navmesh to the portal on the outer map (the lead bot's area trigger takes it in; the followers get
      8 s to come in by themselves), then `cmd summon` for those still outside. *Not verified live:* whether a bot that walks into the trigger
      goes in (a lead bot that stands in the portal and does not enter fails the run saying so; a `cmd enter` order in the module, built
      on its area-trigger action, would be the answer)..
-3. Every bot's feed map must be the plan's within 30 s of the entry, else the run fails naming the bots that are not (the group is **not**
-   changed to fix it).
+3. Every bot's feed map must be the plan's within 30 s of the entry. A bot still outside then is summoned once more, by name, and waited for
+   another 30 s (`remote.enter.resummoned[]`); one that is still outside fails the run naming it (the group is **not** changed to fix it). So the
+   phase has a ceiling of two waits.
 4. From the first entry order on, the group is left alone: no leave, invite or bind until the run ends (the unbind is the only thing left).
 
 **Instance limit.** The core refuses a 6th *new* instance per account per hour (`MAX_INSTANCE_PER_ACCOUNT_PER_HOUR`, the player sees
@@ -1351,7 +1360,7 @@ file next to the settings file (`instance-entries-<hash>.json`, unix times only)
 leaves the list; `ignore_entry_limit` tries anyway (after a server restart, say). Entries made outside this agent (by hand, a game client)
 are not in the file.
 
-`remote.enter`: `method` (`gm` or `walk`), `account_level`, `agent_left_group`, `tele`, `summoned[]`, `arrived` (seconds from the phase's start,
+`remote.enter`: `method` (`gm` or `walk`), `account_level`, `agent_left_group`, `tele`, `summoned[]`, `resummoned[]`, `arrived` (seconds from the phase's start,
 per bot), `seconds`, and the entry numbers above. A party already inside the plan's map has no `enter`; `from_leg` works as in a group run.
 
 ### Prepare: one step before the bind
@@ -1372,13 +1381,17 @@ part before the bind in one go, then the kit check and the enter phase run as be
    does not answer for, is refused with a message before anything is sent). In this order: the account's hourly entry ledger is checked (the 6th new
    instance is refused here, before anything moves; `ignore_entry_limit` goes on); `.tele name <bot> <outside_tele>` for each bot and for the agent
    (a bot is not unbound from the map it stands on), then the step waits (at most 25 s) until the agent is off the plan's map and has every bot in view;
-   then, **from account level 4**, `.bot command <bot> leave` for each bot (a group keeps its own instance bind) and `.instance unbind all` **for each
-   bot by name**: the step selects that bot's GUID (from the roster) and sends the line as one operation of the session, so it never runs on whatever the
+   then, **from account level 4**, `.bot command <bot> leave` for each bot (a group keeps its own instance bind; the module only forwards the
+   command, so the step reads `.bot roster` until the bots show ungrouped, 10 s at most, a warning after that) and `.instance unbind all` **for each bot by name**: the step selects that bot's
+   GUID (from the roster), waits until the server shows that selection (the target field of the agent's own object; 3 s, else nothing is sent), and sends the line as one operation of the session, so it never runs on whatever the
    agent had selected (its reply goes to the unbound player, so it is reported as *sent*, `unbound[]`). **Below level 4** the core
-   (`HandleInstanceUnbindCommand`) unbinds the *sender* whatever is selected, which would clear the agent and no bot; there the step sends
-   `.instance groupunbind all` with the lead bot selected instead (from level 3: every in-world member of its group is unbound and the group is
-   disbanded) and reads the sender's reply, `Group unbound. Disbanding.` (`group_unbound[]`, confirmed) or `<name> is not in a group.` (`not_grouped[]`
-   and a warning: nothing was unbound for it, the bots still get `leave`); no reply fails the run. Last, `.instance unbind all` for the agent itself. **Needs the plan's `outside_tele`.**
+   (`HandleInstanceUnbindCommand`) unbinds the *sender* whatever is selected, which would clear the agent and no bot; there the order is
+   `commander bind` (the bots-only group with the lead; `commander status` must list exactly the lead and the bots, else one unbind + bind
+   invites the missing one, else the step fails naming it), then `.instance groupunbind all` with the lead bot selected (every in-world member of
+   its group is unbound and the group is disbanded; the line is sent only once the server shows the lead bot as the agent's selection), the sender's reply read (`Group unbound. Disbanding.`, which names nobody, is accepted only if `commander status` then answers `not-bound`: disbanding the bound group ends the binding, else the run stops with "the unbind hit another target"; `<name> is not in a group.` naming the lead, or no reply, fails the step; a reply naming the *agent* means the line ran on the sender and is sent again, three sends at most, each a counted GM line; a reply naming any *third* player stops the step at once and nothing is sent again), then `commander bind` again
+   (the group was disbanded), checked the same way. No `leave` goes out on this path unless the bind refuses a bot as `member-grouped`/`bot-bound`
+   (it is in some other group): then the bots are told to leave, the roster is read until they show ungrouped, and the bind is made again. The binding stays for the run's own bind
+   to reuse (`already-bound`, the same lead and count: "reusing the binding"); a step that fails after it unbinds. Last, `.instance unbind all` for the agent itself. **Needs the plan's `outside_tele`.**
    `fresh` always resets: the agent cannot read from outside whether the old instance is cleared.
 3. **`gm_setup`:** `.gm visible off` / `.gm visible on` lines (a leading dot and any spacing or case are fine) and nothing else: any other text is refused when the run is
    started. It needs account level 2.

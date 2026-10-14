@@ -22,13 +22,21 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 	d.rep.setCurrent("prepare")
 	env := &prepEnv{g: pg, plan: d.plan, spec: d.opt.Prepare, bots: append([]string{d.opt.Lead}, d.opt.Bots...), remote: true,
 		now: d.clk.Now, sleep: d.clk.Sleep, note: d.rep.note, shortcut: d.prepShortcut,
-		progress: func(s string) { d.rep.setCurrent(s); d.wd.progress(s) }}
+		progress: func(s string) { d.rep.setCurrent(s); d.wd.progress(s) }, command: d.g.Command, settle: d.opt.BindSettle}
 	if d.opt.Prepare.Fresh && !d.opt.IgnoreEntryLimit {
 		env.entryOK = d.freshEntryOK
 	}
 	rep, err := runPrepare(ctx, env)
 	d.rep.update(func(r *Report) { r.Prepare = rep.clone() })
 	if err != nil {
+		if env.bound {
+			// The step bound the party and then failed: the binding is not this run's yet, so nothing else would end it.
+			uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.opt.UnbindWait+5*time.Second)
+			defer cancel()
+			if _, uerr := d.g.Command(uctx, "commander unbind"); uerr != nil {
+				d.rep.note("prepare: commander unbind after a failed step: " + uerr.Error())
+			}
+		}
 		return err
 	}
 	d.wd.progress("prepare done")

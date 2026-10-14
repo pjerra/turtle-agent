@@ -66,6 +66,7 @@ type EnterReport struct {
 	AgentLeftGroup bool               `json:"agent_left_group"`        // the agent's character had to leave a group first
 	Tele           string             `json:"tele,omitempty"`          // the game_tele the lead bot was sent to
 	Summoned       []string           `json:"summoned,omitempty"`      // the bots summoned to the lead bot, in order
+	Resummoned     []string           `json:"resummoned,omitempty"`    // the bots still outside after EnterVerify, summoned once more
 	Arrived        map[string]float64 `json:"arrived,omitempty"`       // seconds after the phase began at which each bot was seen on the plan's map
 	Seconds        float64            `json:"seconds"`
 	// Entries is the instances this run entered (1); EntriesLastHour the account's entries in the last hour with it (-1: not tracked);
@@ -486,17 +487,37 @@ func (d *RemoteDriver) waitPortalLeg(ctx context.Context, wp Point, arrive float
 	}
 }
 
-// summonRest summons every bot that is not on the plan's map to the lead bot, one at a time, SummonGap apart (a summon takes about
+// namedBots are the bots of the run besides the lead bot: the ones the run names, or, when it names none, the feed's party.
+func (d *RemoteDriver) namedBots() []string {
+	if len(d.opt.Bots) > 0 {
+		return slices.Clone(d.opt.Bots)
+	}
+	var out []string
+	for _, m := range d.fr.Party {
+		if !strings.EqualFold(m.Name, d.opt.Lead) {
+			out = append(out, m.Name)
+		}
+	}
+	return out
+}
+
+// strayBots are the named bots that are not on the plan's map in the newest frame, whether the feed lists them or not.
+func (d *RemoteDriver) strayBots() []string {
+	var out []string
+	for _, n := range d.namedBots() {
+		if m, ok := d.memberByName(n); !ok || m.Map != d.plan.Map {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// summonRest summons every named bot that is not on the plan's map to the lead bot, BY NAME (a bot the feed no longer lists is summoned
+// too: in run 6b the hunter was missing from the feed and was never summoned), one at a time, SummonGap apart (a summon takes about
 // 3 s, and the core counts an entry per bot that arrives).
 func (d *RemoteDriver) summonRest(ctx context.Context, began time.Time) error {
 	d.look()
-	var todo []string
-	for _, m := range d.fr.Party {
-		if m.Map != d.plan.Map && !strings.EqualFold(m.Name, d.opt.Lead) {
-			todo = append(todo, m.Name)
-		}
-	}
-	for i, name := range todo {
+	for i, name := range d.strayBots() {
 		if i > 0 {
 			if err := d.tick(ctx, d.opt.SummonGap); err != nil {
 				return err
@@ -541,24 +562,57 @@ func (d *RemoteDriver) summon(ctx context.Context, name string) error {
 	return fmt.Errorf("enter: cmd summon %s was refused (%s)", name, last)
 }
 
-// verifyInside waits up to EnterVerify for every bot to be on the plan's map and fails, naming the ones that are not.
+// verifyInside waits up to EnterVerify for every bot to be on the plan's map. A bot still outside then is summoned once more, by name
+// (the first summon may have been refused as busy, or swallowed by a teleport), and waited for another EnterVerify; one that is still
+// outside fails the run, naming it. So the phase has a ceiling of two waits, whatever the bots do.
 func (d *RemoteDriver) verifyInside(ctx context.Context, began time.Time) error {
+	off, err := d.waitInside(ctx, began)
+	if err != nil || len(off) == 0 {
+		return err
+	}
+	again := d.strayBots()
+	if len(again) == 0 {
+		// Nobody a summon can fetch (the lead bot itself, or a member the run did not name): a second wait would change nothing.
+		return fmt.Errorf("enter: %s not on map %d %.0f s after the entry (the plan needs the whole party inside; the group is not changed to fix it)", strings.Join(off, ", "), d.plan.Map, d.opt.EnterVerify.Seconds())
+	}
+	d.enterNote(fmt.Sprintf("%s not on map %d %.0f s after the entry: summoning once more", strings.Join(off, ", "), d.plan.Map, d.opt.EnterVerify.Seconds()))
+	for i, name := range again {
+		if i > 0 {
+			if err := d.tick(ctx, d.opt.SummonGap); err != nil {
+				return err
+			}
+		}
+		if err := d.summon(ctx, name); err != nil {
+			return fmt.Errorf("%w (after %s was still outside %.0f s after the first summon)", err, name, d.opt.EnterVerify.Seconds())
+		}
+		d.enterReport(func(r *EnterReport) { r.Resummoned = append(r.Resummoned, name) })
+	}
+	off, err = d.waitInside(ctx, began)
+	if err != nil || len(off) == 0 {
+		return err
+	}
+	return fmt.Errorf("enter: %s not on map %d %.0f s after the entry and %.0f s after a second summon (the plan needs the whole party inside; the group is not changed to fix it)",
+		strings.Join(off, ", "), d.plan.Map, 2*d.opt.EnterVerify.Seconds(), d.opt.EnterVerify.Seconds())
+}
+
+// waitInside waits up to EnterVerify for every bot to be on the plan's map. It returns the bots that are not when the time is up.
+func (d *RemoteDriver) waitInside(ctx context.Context, began time.Time) ([]string, error) {
 	deadline := d.clk.Now().Add(d.opt.EnterVerify)
 	for {
 		d.look()
 		d.noteArrivals(began)
 		off := d.offMap(true)
 		if len(off) == 0 && d.haveFr {
-			return nil
+			return nil, nil
 		}
 		if err := d.endedByModule(); err != nil {
-			return err
+			return nil, err
 		}
 		if !d.clk.Now().Before(deadline) {
-			return fmt.Errorf("enter: %s not on map %d %.0f s after the entry (the plan needs the whole party inside; the group is not changed to fix it)", strings.Join(off, ", "), d.plan.Map, d.opt.EnterVerify.Seconds())
+			return off, nil
 		}
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return err
+			return nil, err
 		}
 	}
 }
@@ -569,6 +623,7 @@ func (e *EnterReport) clone() *EnterReport {
 	}
 	c := *e
 	c.Summoned = slices.Clone(e.Summoned)
+	c.Resummoned = slices.Clone(e.Resummoned)
 	c.Arrived = cloneFloats(e.Arrived)
 	if e.AccountLevel != nil {
 		l := *e.AccountLevel

@@ -113,6 +113,15 @@ type fakeRemote struct {
 	memberMap   map[packet.GUID]uint32
 	busyFor     time.Duration
 	combatUntil time.Time
+
+	// The bound party (remote_party.go): bots in left are out of the group (the feed and `commander status` do not list them) until a bind
+	// names them; leaveOnBind lists the bots that drop out right after a bind (once, or after every bind when stubborn); joinErr[name] is
+	// the code the bind refuses to invite that bot with.
+	left        map[string]bool
+	lateJoin    map[string]time.Time // a bot in left joins the group (is loaded, arrives) at that time
+	leaveOnBind []string
+	stubborn    bool
+	joinErr     map[string]string
 }
 
 func newFakeRemote(t *testing.T) *fakeRemote {
@@ -144,6 +153,12 @@ func (g *fakeRemote) addMob(entry uint32, at Point) *rmob {
 
 func (g *fakeRemote) advance(d time.Duration) {
 	g.now = g.now.Add(d)
+	for n, at := range g.lateJoin {
+		if !g.now.Before(at) {
+			delete(g.left, n)
+			delete(g.lateJoin, n)
+		}
+	}
 	sec := d.Seconds()
 	if g.pendingMove != nil && !g.now.Before(g.pendingAt) {
 		g.moveTo, g.pendingMove = g.pendingMove, nil
@@ -257,6 +272,9 @@ func (g *fakeRemote) publish() {
 	g.n++
 	f := tbm.ViewFrame{Version: "v1", Seq: g.n, Lead: g.lead().GUID, Party: []tbm.PartyRec{}, Hostiles: []tbm.HostileRec{}, Threats: []tbm.ThreatRec{}, At: g.now}
 	for _, p := range g.party {
+		if g.left[p.Name] {
+			continue
+		}
 		c := *p
 		c.Map = g.mapID
 		if m, ok := g.memberMap[p.GUID]; ok {
@@ -324,15 +342,49 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		if g.bindErr != "" {
 			return errReply(intent, g.bindErr), nil
 		}
+		if g.bound {
+			return errReply(intent, "already-bound"), nil
+		}
+		for _, n := range f[3:] {
+			if code := g.joinErr[n]; code != "" && g.left[n] {
+				return errReply(intent, code), nil
+			}
+		}
+		for _, n := range f[3:] {
+			delete(g.left, n)
+		}
 		g.bound = true
-		return ack(intent), nil
+		r := ack(intent)
+		r.Ack.Count = len(g.party) // the ACK counts the party as it was bound; a bot may leave a moment later
+		for _, n := range g.leaveOnBind {
+			if g.left == nil {
+				g.left = map[string]bool{}
+			}
+			g.left[n] = true
+		}
+		if !g.stubborn {
+			g.leaveOnBind = nil
+		}
+		return r, nil
 	case "commander view":
 		return ack(intent), nil
 	case "commander status":
 		if g.status != nil {
 			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: g.status, Lines: []string{}}, nil
 		}
-		return ack(intent), nil
+		if !g.bound {
+			return errReply(intent, "not-bound"), nil
+		}
+		r := ack(intent)
+		var names []string
+		for _, p := range g.party {
+			if !g.left[p.Name] {
+				names = append(names, p.Name)
+			}
+		}
+		r.Ack.Count = len(names)
+		r.Lines = []string{fmt.Sprintf("You command %s's group: %s.", g.lead().Name, strings.Join(names, ", "))}
+		return r, nil
 	case "commander unbind":
 		g.unbinds++
 		if !g.bound {

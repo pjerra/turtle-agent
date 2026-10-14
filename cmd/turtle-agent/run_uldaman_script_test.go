@@ -66,3 +66,39 @@ func TestGroupUnbindReply(t *testing.T) {
 		}
 	}
 }
+
+// The player a "not in a group" reply names tells whether the selection landed: run 6b answered "Glacienne is not in a group" for a
+// selected Lcwarra, because the core had run the line before the selection packet.
+func TestGroupUnbindSubject(t *testing.T) {
+	for text, want := range map[string]string{
+		"|cffffffff|Hplayer:Glacienne|h[Glacienne]|h|r is not in a group.": "Glacienne",
+		"|Hplayer:Lcwarra|h[Lcwarra]|h is not in a group.":                 "Lcwarra",
+		"Lcwarra is not in a group.":                                       "Lcwarra",
+		"Group unbound. Disbanding.":                                       "",
+		"":                                                                 "",
+	} {
+		if got := groupUnbindSubject(text); got != want {
+			t.Errorf("%q: %q, want %q", text, got, want)
+		}
+	}
+}
+
+// A "not in a group" reply is told by whose it is: the lead's, the agent's (resend), or a third player's (stop).
+func TestClassifyGroupUnbind(t *testing.T) {
+	for _, c := range []struct {
+		res           dungeon.GroupUnbindResult
+		subject, want string
+	}{
+		{dungeon.GroupNotGroups, "Lcwarra", string(dungeon.GroupNotGroups)},
+		{dungeon.GroupNotGroups, "Glacienne", string(dungeon.GroupWrongTarget)},
+		{dungeon.GroupNotGroups, "glacienne", string(dungeon.GroupWrongTarget)},
+		{dungeon.GroupNotGroups, "Somebody", string(dungeon.GroupThirdPlayer)},
+		{dungeon.GroupNotGroups, "", string(dungeon.GroupNotGroups)},
+		{dungeon.GroupUnbound, "", string(dungeon.GroupUnbound)},
+		{dungeon.GroupNoAnswer, "", string(dungeon.GroupNoAnswer)},
+	} {
+		if got := classifyGroupUnbind(c.res, c.subject, "Lcwarra", "Glacienne"); string(got) != c.want {
+			t.Errorf("%v %q: %q, want %q", c.res, c.subject, got, c.want)
+		}
+	}
+}

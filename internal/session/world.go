@@ -44,6 +44,20 @@ func (s *Session) selfPos() (x, y, z, o float32) {
 	return s.pos[0], s.pos[1], s.pos[2], s.pos[3]
 }
 
+// ServerSelection is the unit the SERVER says the player has selected: the target field of the player's own object (UNIT_FIELD_TARGET, a
+// public field the core sends back in an update after it handled CMSG_SET_SELECTION), not what the session sent. ok is false while the
+// player's own object is not known. Status().Target is the client's belief; a GM line that acts on the selection should wait for this.
+func (s *Session) ServerSelection() (g packet.GUID, ok bool) {
+	s.mu.Lock()
+	self := s.self.GUID
+	s.mu.Unlock()
+	u, found := s.store.Get(self, 0, 0, 0)
+	if !found {
+		return 0, false
+	}
+	return u.Target, true
+}
+
 // Units snapshots the units around the player (not the player itself), nearest first,
 // with names and party membership filled in. Ruling P7: the store is asked without a
 // limit, so the name filter sees past the nearest 100; the caller's limit (0: 100) comes last.
