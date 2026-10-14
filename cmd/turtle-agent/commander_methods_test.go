@@ -184,7 +184,7 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
 		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},
 		{`{"name":"rig","start_here":true}`, `go with mode "remote"`},
-		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, `go with mode "remote"`},
+		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, "scores the character: it needs a brain"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
 		{`{"name":"rig","have_items":[7733]}`, `go with mode "remote"`},

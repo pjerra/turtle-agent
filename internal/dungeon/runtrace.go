@@ -296,7 +296,12 @@ func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) 
 		err := d.chat(ctx, ".bot action follow")
 		return "told the party to follow and ended the fight to pick the target again", err
 	})
+	if d.fightFirst.IsZero() {
+		d.fightFirst = began
+	}
 	res, err := d.fight(ctx, t, sp)
+	d.fightKills += res.kills
+	d.fightLast = d.clk.Now()
 	leave()
 	d.wd.softProgress("pull ended: " + outcomeName(res.out))
 	end := map[string]any{"leg": d.curLeg, "outcome": outcomeName(res.out), "kills": res.kills, "seconds": d.clk.Now().Sub(began).Seconds()}

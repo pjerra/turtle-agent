@@ -10,6 +10,9 @@
 #                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
 #                  --brain names one; the party is the one the character is in: none of the commander's options go with it, only --from-leg).
 #                  observe: a TortoiseBots run leader clears the dungeon and the agent watches; refused until TortoiseBots has phase P3.
+#                  With --pulltest, leader mode runs the pull test on the character (README "Pull test in leader mode"): the party stands at the pack, the
+#                  character plays with the brain, and the result scores it (dps, casts failed by reason, idle in combat...). A/B two rotations:
+#                  run it twice with --rotation A and --rotation B (3 or more tries each), then `turtle-agent pulltest --compare a.json b.json`.
 #   --brain P      leader mode: the brain preset that plays the character (frost_mage, arms_warrior, ...; default: by the character's class and --role)
 #   --rotation R   leader mode: a rotation file that takes the place of the preset's class rotation (README "Rotations as data"; `turtle-agent
 #                  rotation list`); the report names it with its file's digest, so two arms of an A/B test are told apart
@@ -110,8 +113,8 @@ name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
 if [ "$MODE" = commander ]; then
   [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in commander mode the bots fight)"
 else
-  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] ||
-    die "leader mode takes only --from-leg of the start options: --hire, --rehire, --level, --pulltest, --pull-group, --start-here, --have-items, --no-fresh and COMPOSITION are commander options"
+  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] ||
+    die "leader mode takes only --from-leg and --pulltest of the start options: --hire, --rehire, --level, --pull-group, --start-here, --have-items, --no-fresh and COMPOSITION are commander options"
 fi
 
 # --- the party: names are letters only (the agent checks too); they go into the JSON below as they are
@@ -168,7 +171,8 @@ fi
 sha_label=${SHA8:-unknown}
 params() {
   if [ "$MODE" = leader ]; then
-    printf '{"name":"uldaman","mode":"leader","from_leg":%s,' "$FROM_LEG"
+    printf '{"name":"uldaman","mode":"leader",'
+    if [ -n "$pulltest_json" ]; then printf '%s' "$pulltest_json"; else printf '"from_leg":%s,' "$FROM_LEG"; fi
     [ -z "$BRAIN" ] || printf '"brain":"%s",' "$BRAIN"
     [ -z "$ROTATION" ] || printf '"rotation":"%s",' "$ROTATION"
     [ -z "$ROLE" ] || printf '"role":"%s",' "$ROLE"
