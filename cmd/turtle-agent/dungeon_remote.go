@@ -10,6 +10,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // botName is what a character name can be (1.12 names are letters; the commander command takes them as words).
@@ -88,11 +89,12 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 }
 
 // startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.
-func (r *dungeonRunner) startRemote(p dungeonRunParams, plan *dungeon.Plan, setup []string, from int, names []string) (dungeonRunResult, error) {
+func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, plan *dungeon.Plan, setup []string, from int, names []string) (dungeonRunResult, error) {
 	if r.remote == nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the remote commander is not available"}
 	}
 	cfg := dungeon.DefaultConfig()
+	cfg.Trace = tcfg
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
 	cfg.Resume = p.Resume != nil && *p.Resume
 	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}

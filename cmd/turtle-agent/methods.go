@@ -121,6 +121,8 @@ type methodOptions struct {
 	AddonDir string
 	// DungeonsDir holds the plans dungeon_run reads (settings dungeons_dir); empty means "dungeons".
 	DungeonsDir string
+	// TracesDir is where run traces go (settings traces_dir); empty means "traces".
+	TracesDir string
 	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
 	Planner *navmesh.Planner
 	// AccountProbeWindow is how long a dungeon run waits for the server's answer to its ".account" probe; 0 means 2 s. The
@@ -249,9 +251,10 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerDeathMethods(srv, cur)
 	registerPetMethods(srv, cur)
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
-	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur)
+	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur, opts.TracesDir)
 	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner, opts.EntryLedgerPath, opts.AccountProbeWindow)
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
+	dungeonRun.tracesDir = opts.TracesDir
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
 		stopMap()

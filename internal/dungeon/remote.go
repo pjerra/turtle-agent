@@ -15,6 +15,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // Remote-leader mode (issue #83). The agent leads a bot group it is not in, through the TortoiseBots remote commander
@@ -355,6 +356,11 @@ type RemoteDriver struct {
 	obj           objState           // the object steps' carrier, corpses and step reports (remote_objects.go)
 	team          string             // the party's team for the team gate ("" when unknown: everything runs)
 	killedAt      map[uint32][]Point // where mobs of an entry were killed in this run (evidence that a pack is gone)
+
+	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
+	trSeen    uint64             // the feed frame count the trace last took
+	trRoster  bool
+	trStalled bool
 }
 
 // NewRemoteDriver prepares a run of plan in remote mode. A zero clock is the wall clock.
@@ -370,6 +376,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
 		Orders: map[string]int{}, Refused: map[string]int{}}
+	d.initTrace()
 	return d
 }
 
@@ -410,6 +417,7 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	d.rep.start(fromLeg)
+	d.traceBegin(fromLeg)
 	err := d.runRecovering(ctx, fromLeg)
 	d.finish(err)
 	return err
@@ -445,7 +453,8 @@ func (d *RemoteDriver) finish(err error) {
 	if err != nil {
 		data["error"], data["leg"] = errText, leg
 	}
-	d.g.Emit(kind, text, data)
+	d.emit(kind, text, data)
+	d.traceEnd(state, errText, at)
 	d.rep.end(state, errText, at)
 }
 
@@ -498,7 +507,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		case ActWait:
 			if waiting != [2]int{a.Leg, a.Step} {
 				waiting = [2]int{a.Leg, a.Step}
-				d.g.Emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "mode": "remote"})
+				d.emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "mode": "remote"})
 			}
 			if err := d.tick(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
 				d.stepFailedRecover(ctx, err)
@@ -509,7 +518,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		var err error
 		switch a.Kind {
 		case ActWalk:
-			err = d.doWalk(ctx, a.To)
+			err = d.tracedWalk(ctx, a.To)
 		case ActPull:
 			err = d.doPull(ctx, a)
 		case ActKill:
@@ -523,7 +532,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if err != nil {
 			data["error"] = err.Error()
 		}
-		d.g.Emit(events.KindDungeonStep, a.Label, data)
+		d.emit(events.KindDungeonStep, a.Label, data)
 		if err != nil {
 			d.stepFailedRecover(ctx, err)
 			continue
@@ -575,6 +584,7 @@ func objectStepKind(st Step) string {
 func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
 		d.rep.update(func(r *Report) { r.Wipes++ })
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
 		d.rep.note(err.Error())
 		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
 			d.wipeRecover++
@@ -669,7 +679,7 @@ func (d *RemoteDriver) resolveTeam() {
 func (d *RemoteDriver) noteSkipped() {
 	for _, text := range d.st.Skipped() {
 		d.rep.note(text)
-		d.g.Emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true, "mode": "remote"})
+		d.emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true, "mode": "remote"})
 	}
 }
 
@@ -854,6 +864,7 @@ func (d *RemoteDriver) setStats0(s tbm.ViewStats) {
 
 // look reads the feed. It never waits.
 func (d *RemoteDriver) look() {
+	defer d.traceLook()
 	fr, n, ok := d.g.Frame()
 	if !ok {
 		return
@@ -927,6 +938,7 @@ func (d *RemoteDriver) countDeaths() bool {
 					r.Legs[n-1].Deaths++
 				}
 			})
+			d.tr.Event("death", map[string]any{"name": p.Name, "a": guidText(p.GUID), "leg": d.curLeg})
 		}
 		d.prevDead[p.GUID] = p.Dead
 	}
@@ -948,7 +960,7 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int) error {
 	d.rep.update(func(r *Report) {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
 	// The gate at a leg's start waits for health and mana but not for the followers: they catch up on the walk, and the gate before a
 	// pull gathers them.
 	return d.restGate(ctx, false)
@@ -968,7 +980,7 @@ func (d *RemoteDriver) endLeg(result string) {
 			l = *x
 		}
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
 		"leg": i, "name": l.Name, "phase": "end", "result": result, "seconds": l.Seconds, "deaths": l.Deaths,
 		"pulls": l.Pulls, "pull_retries": l.PullRetries, "rest_seconds": l.RestSeconds, "mode": "remote"})
 }
@@ -991,10 +1003,12 @@ func (d *RemoteDriver) order(ctx context.Context, verb string, args ...string) (
 	}
 	deadline := d.clk.Now().Add(d.opt.LeadWait)
 	for {
+		sentAt := d.clk.Now()
 		r, err := d.g.Command(ctx, cmd)
 		if err != nil {
 			return r, fmt.Errorf("cmd %s: %w", verb, err)
 		}
+		d.traceOrder(verb, cmd, r, d.clk.Now().Sub(sentAt).Milliseconds())
 		d.remote(func(rr *RemoteReport) {
 			rr.OrdersSent++
 			rr.Orders[verb]++
@@ -1564,6 +1578,7 @@ func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 // (owner or GM) and the wait for it; with RecoverWipe off a revive that is refused fails the run, like a dead member without GM
 // shortcuts in group mode.
 func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
+	defer d.traceRest(d.clk.Now())
 	began := d.clk.Now()
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)

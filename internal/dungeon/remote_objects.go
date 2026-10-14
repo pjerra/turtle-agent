@@ -587,7 +587,7 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	}
 	if err != nil {
 		rec.finish("failed", err, note)
-		d.g.Emit(events.KindDungeonStep, a.Label+": "+err.Error(), map[string]any{"leg": a.Leg, "carrier": c.Name, "ok": false, "mode": "remote"})
+		d.emit(events.KindDungeonStep, a.Label+": "+err.Error(), map[string]any{"leg": a.Leg, "carrier": c.Name, "ok": false, "mode": "remote"})
 		return fmt.Errorf("%s: %w", a.Label, err)
 	}
 	result := "done"

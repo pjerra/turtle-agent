@@ -10,6 +10,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/pjerra/turtle-agent/internal/trace"
 )
 
 // ErrRunning is returned by Start while a brain runs.
@@ -39,6 +40,7 @@ type Status struct {
 	Last       []Decision `json:"last_decisions"`
 	Holds      []HoldInfo `json:"holds"`
 	Error      string     `json:"error,omitempty"`
+	RunID      string     `json:"run_id,omitempty"` // the session's run id (the last one's when the brain has stopped)
 }
 
 // Controller starts, stops and reports the one brain the agent runs, ticking it on its own goroutine so that it
@@ -88,6 +90,9 @@ func (c *Controller) Start(p Params) (Status, error) {
 	if c.running() {
 		return Status{}, ErrRunning
 	}
+	if p.RunID == "" {
+		p.RunID = trace.NewRunID(c.cfg.Now())
+	}
 	b, err := New(c.g, c.cfg, p)
 	if err != nil {
 		return Status{}, err
@@ -98,12 +103,12 @@ func (c *Controller) Start(p Params) (Status, error) {
 	done := make(chan struct{})
 	c.b, c.cancel, c.done = b, cancel, done
 	c.rest.Store(false)
-	c.g.Emit(events.Event{Kind: events.KindBrainState, Text: "started", Data: map[string]any{"state": "started", "strategies": b.Strategies(), "role": b.p.Role}})
+	c.g.Emit(events.Event{Kind: events.KindBrainState, Text: "started", Data: map[string]any{"state": "started", "strategies": b.Strategies(), "role": b.p.Role, "run_id": b.p.RunID}})
 	go func() {
 		defer close(done)
 		defer cancel()
 		c.loop(ctx, b)
-		c.g.Emit(events.Event{Kind: events.KindBrainState, Text: "stopped", Data: map[string]any{"state": "stopped", "strategies": b.Strategies(), "role": b.p.Role}})
+		c.g.Emit(events.Event{Kind: events.KindBrainState, Text: "stopped", Data: map[string]any{"state": "stopped", "strategies": b.Strategies(), "role": b.p.Role, "run_id": b.p.RunID}})
 	}()
 	return c.statusLocked(), nil
 }
@@ -164,7 +169,7 @@ func (c *Controller) statusLocked() Status {
 	m := b.mem
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := Status{Running: c.running(), Strategies: b.Strategies(), Role: b.p.Role, Tank: b.p.Tank, RestGate: b.p.RestGate, NoMove: b.p.NoMove, MoveHeld: c.lock.Held(),
+	st := Status{RunID: b.p.RunID, Running: c.running(), Strategies: b.Strategies(), Role: b.p.Role, Tank: b.p.Tank, RestGate: b.p.RestGate, NoMove: b.p.NoMove, MoveHeld: c.lock.Held(),
 		RestOK: !b.p.RestGate || c.rest.Load(), Ticks: m.ticks, Actions: m.acted, Idle: m.idle, Error: m.lastErr,
 		Last: make([]Decision, 0, len(m.recent)), Holds: []HoldInfo{}}
 	for _, d := range m.recent {

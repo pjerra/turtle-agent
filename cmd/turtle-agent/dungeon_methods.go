@@ -134,6 +134,14 @@ type dungeonRunParams struct {
 	// "gm", "walk", or "off" (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
 	Enter            string `json:"enter,omitempty"`
 	IgnoreEntryLimit bool   `json:"ignore_entry_limit,omitempty"`
+	// RunID names the run (letters, digits, . _ -; at most 64). Empty: the agent makes one (r-<utc yyyymmddThhmmss>-<4 hex>). It is
+	// in the report, in every dungeon event, in the trace's header and file name; a caller that sets it can stamp the same id on
+	// the server side (README "Run traces and checks").
+	RunID string `json:"run_id,omitempty"`
+	// Trace false turns the run's trace file off (on by default); the run id stays. TraceMeta is free text copied into the trace's
+	// header (the server build, the TortoiseBots SHA, a scenario name): at most 16 entries.
+	Trace     *bool             `json:"trace,omitempty"`
+	TraceMeta map[string]string `json:"trace_meta,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -150,6 +158,9 @@ type dungeonRunResult struct {
 	// Mode is "group" or "remote"; LeadBot is the remote run's lead bot.
 	Mode    string `json:"mode"`
 	LeadBot string `json:"lead_bot,omitempty"`
+	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
+	RunID     string `json:"run_id"`
+	TraceFile string `json:"trace_file,omitempty"`
 }
 
 type dungeonStatusResult struct {
@@ -172,6 +183,8 @@ type dungeonRunner struct {
 	probeWindow time.Duration
 	// remote is the commander service remote mode runs on; nil in tests that do not build it.
 	remote *commanderService
+	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
+	tracesDir string
 
 	mu     sync.Mutex
 	drv    dungeon.Runner
@@ -189,7 +202,14 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	root, cancel := context.WithCancel(context.Background())
 	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow, remote: remote}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
-		return r.run(p)
+		res, err := r.run(p)
+		if err == nil {
+			r.mu.Lock()
+			rep := r.drv.Report()
+			r.mu.Unlock()
+			res.RunID, res.TraceFile = rep.RunID, rep.TraceFile
+		}
+		return res, err
 	}))
 	srv.Register("dungeon_status", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.status(), nil
@@ -237,6 +257,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, err
 	}
+	tcfg, err := r.traceConfig(p)
+	if err != nil {
+		return dungeonRunResult{}, err
+	}
 	if p.GMLevel != nil && !remote {
 		switch {
 		case p.GM == nil || !*p.GM:
@@ -261,7 +285,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		if _, _, err := brain.Resolve([]string{p.Brain}); err != nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "brain: " + err.Error()}
 		}
-		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}}
+		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}, runID: tcfg.RunID}
 	}
 	from := 0
 	if l := p.FromLeg; l != nil {
@@ -292,9 +316,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
 	}
 	if remote {
-		return r.startRemote(p, plan, setup, from, names)
+		return r.startRemote(p, tcfg, plan, setup, from, names)
 	}
 	cfg := dungeon.DefaultConfig()
+	cfg.Trace = tcfg
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
 	cfg.Resume = p.Resume != nil && *p.Resume

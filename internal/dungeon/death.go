@@ -102,7 +102,7 @@ func (d *Driver) leaderEvent(phase string, extra map[string]any) {
 	for k, v := range extra {
 		data[k] = v
 	}
-	d.g.Emit(events.KindDungeonLeader, "leader "+phase, data)
+	d.emit(events.KindDungeonLeader, "leader "+phase, data)
 }
 
 // check looks at the party after a wait: deaths are counted, a dead leader is brought back, and a wipe ends the run (or is
@@ -224,7 +224,7 @@ func (d *Driver) bringBack(ctx context.Context, orders func(context.Context) err
 
 // afterBack gathers the party round the leader and rests, the way a leg starts.
 func (d *Driver) afterBack(ctx context.Context) error {
-	if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+	if err := d.chat(ctx, ".bot action follow"); err != nil {
 		return err
 	}
 	return d.restGate(ctx)
@@ -589,7 +589,7 @@ func (m *memberOrders) send(ctx context.Context) error {
 	}
 	if !m.released {
 		m.released = true
-		return d.g.Chat(ctx, "party", ".bot action release")
+		return d.chat(ctx, ".bot action release")
 	}
 	dead := false
 	for _, mb := range d.g.Party() {
@@ -599,7 +599,7 @@ func (m *memberOrders) send(ctx context.Context) error {
 	}
 	if dead && (m.lastRun.IsZero() && now.Sub(m.began) >= m.startAfter+5*time.Second || !m.lastRun.IsZero() && now.Sub(m.lastRun) >= 30*time.Second) {
 		m.lastRun = now
-		return d.g.Chat(ctx, "party", ".bot action corpse run")
+		return d.chat(ctx, ".bot action corpse run")
 	}
 	return nil
 }

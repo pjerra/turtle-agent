@@ -12,6 +12,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/spellstate"
+	"github.com/pjerra/turtle-agent/internal/trace"
 )
 
 type brainStartParams struct {
@@ -19,14 +20,20 @@ type brainStartParams struct {
 	Role       string   `json:"role,omitempty"`
 	Tank       string   `json:"tank,omitempty"`
 	NoMove     bool     `json:"no_move,omitempty"`
+	// RunID names the session (see dungeon_run's run_id); empty: generated. Trace false writes no trace file; TraceMeta is free text for
+	// the trace's header.
+	RunID     string            `json:"run_id,omitempty"`
+	Trace     *bool             `json:"trace,omitempty"`
+	TraceMeta map[string]string `json:"trace_meta,omitempty"`
 }
 
 // registerBrainMethods wires brain_start, brain_stop and brain_status to the session cur returns at each call. The
 // brain is off until brain_start (or dungeon_run's brain option) turns it on. The returned controller is for the
 // dungeon runner; the returned func stops the brain and must be called before the process ends.
-func registerBrainMethods(srv *rpc.Server, cur func() *session.Session) (*brain.Controller, *brainLease, func()) {
+func registerBrainMethods(srv *rpc.Server, cur func() *session.Session, tracesDir string) (*brain.Controller, *brainLease, func()) {
 	root, cancel := context.WithCancel(context.Background())
-	ctl := brain.NewController(root, &sessionBrainGame{cur: cur}, brain.Config{})
+	bt := &brainTrace{dir: tracesDir}
+	ctl := brain.NewController(root, &sessionBrainGame{cur: cur, trace: bt}, brain.Config{})
 	lease := &brainLease{}
 	srv.Register("brain_start", rpc.Typed(func(ctx context.Context, p brainStartParams) (brain.Status, error) {
 		if st := cur().Status().State; st != session.StatusInWorld {
@@ -35,7 +42,18 @@ func registerBrainMethods(srv *rpc.Server, cur func() *session.Session) (*brain.
 		if err := lease.check("brain_start"); err != nil {
 			return brain.Status{}, err
 		}
-		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank, NoMove: p.NoMove})
+		if p.RunID != "" && !trace.ValidRunID(p.RunID) {
+			return brain.Status{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "run_id must be letters, digits, dot, underscore or dash, at most 64 characters"}
+		}
+		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank, NoMove: p.NoMove, RunID: p.RunID})
+		if err == nil {
+			sess := cur().Status()
+			bt.begin(st.RunID, p, sess.Character, uint64(sess.GUID), st)
+			// A brain that stopped before the recorder existed has no "stopped" event left to end it.
+			if now := ctl.Status(); !now.Running || now.RunID != st.RunID {
+				bt.finish(st.RunID)
+			}
+		}
 		return st, brainErr(err)
 	}))
 	srv.Register("brain_stop", rpc.Typed(func(ctx context.Context, _ empty) (brain.Status, error) {
@@ -101,6 +119,7 @@ func brainErr(err error) error {
 type driverBrain struct {
 	ctl        *brain.Controller
 	strategies []string
+	runID      string // the dungeon run's id: the brain's events and decisions join the run's trace
 
 	started bool
 }
@@ -113,7 +132,7 @@ func (b *driverBrain) Start() error {
 		return errors.New("a brain was started by hand: the run leaves it alone")
 	}
 	// Movement is on: the brain positions the leader in fights, and the driver holds the move lock (HoldMove) around every walk it sends.
-	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true}); err != nil {
+	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true, RunID: b.runID}); err != nil {
 		return err
 	}
 	b.started = true
@@ -147,6 +166,7 @@ func (b *driverBrain) Rest(on bool) {
 type sessionBrainGame struct {
 	cur   func() *session.Session
 	melee meleeWatch
+	trace *brainTrace // copies the brain's events into the session's trace; nil in tests that build the game bare
 }
 
 func (g *sessionBrainGame) Self() (objects.Unit, bool) {
@@ -224,7 +244,12 @@ func (g *sessionBrainGame) UseItem(ctx context.Context, entry uint32) error {
 	return err
 }
 
-func (g *sessionBrainGame) Emit(e events.Event) { g.cur().Log().Append(e) }
+func (g *sessionBrainGame) Emit(e events.Event) {
+	g.cur().Log().Append(e)
+	if g.trace != nil {
+		g.trace.event(e)
+	}
+}
 
 // Pet is the brain's view of the player's pet (brain.PetGame): the session's pet state, false without a pet.
 func (g *sessionBrainGame) Pet() (brain.PetState, bool) {

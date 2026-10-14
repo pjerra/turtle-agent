@@ -200,7 +200,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 				l.PullRetries++
 			}
 		})
-		res, err := d.fight(ctx, t, sp)
+		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
 			return err
 		}
