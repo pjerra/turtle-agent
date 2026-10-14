@@ -141,7 +141,8 @@ func TestRemoteWaitsForAPatrolToPass(t *testing.T) {
 func TestRemotePatrolWaitIsBounded(t *testing.T) {
 	g := newFakeRemote(t)
 	g.addMob(299, Point{60, 0, 0})
-	g.addMob(301, Point{90, 0, 0}) // on its path, 30 yd from the pack: it never moves
+	p := g.addMob(301, Point{90, 0, 0}) // on its path, 30 yd from the pack: it walks to and fro there and never away
+	g.onTick = walker(p, 85, 95, 2, -1)
 	pat := &Patrol{Entries: []uint32{301}, Path: []Point{{300, 0, 0}, {80, 0, 0}}, PeriodS: 88}
 	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}, Patrol: pat}}})
 	rep, err := runRemoteTx(t, g, plan, opts(), func(d *RemoteDriver) { d.tx.PatrolWait = 20 * time.Second })
@@ -265,5 +266,21 @@ func TestPathAheadWrapsTheRound(t *testing.T) {
 	pts := pathAhead(path, seg, along, 10)
 	if last := pts[len(pts)-1]; last.X > 6 { // 2 yd to the end, then back towards 0
 		t.Fatalf("%v", pts)
+	}
+}
+
+// A unit of the patrol's entries that stands still on the path is no patrol: it is waited for only until it has stood patrolStaticAfter.
+func TestRemoteStaticMobOnThePatrolPathIsNoPatrol(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{60, 0, 0})
+	g.addMob(301, Point{90, 0, 0})
+	pat := &Patrol{Entries: []uint32{301}, Path: []Point{{300, 0, 0}, {80, 0, 0}}, PeriodS: 88}
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}, Patrol: pat}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	if r := rep.Remote; r.PatrolTimeouts != 0 || r.PatrolWaitS > patrolStaticAfter.Seconds()+2 {
+		t.Fatalf("%+v", r)
 	}
 }

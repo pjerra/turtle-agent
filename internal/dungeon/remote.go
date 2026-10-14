@@ -465,9 +465,10 @@ type RemoteDriver struct {
 	waitNoted  map[packet.GUID]bool
 	warned     map[string]bool
 	ccDone     map[packet.GUID]bool
-	ccOrdered  map[packet.GUID]time.Time // when a big-pack CC order went out for a mob (remote_cc.go)
-	rccLast    time.Time                 // the last reactive CC order (remote_patrol.go)
-	rccN       map[packet.GUID]int       // reactive CC orders per mob
+	ccOrdered  map[packet.GUID]time.Time  // when a big-pack CC order went out for a mob (remote_cc.go)
+	rccLast    time.Time                  // the last reactive CC order (remote_patrol.go)
+	rccN       map[packet.GUID]int        // reactive CC orders per mob
+	patrolSeen map[packet.GUID]*patrolObs // units of patrol entries seen on a patrol path (remote_patrol.go)
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)

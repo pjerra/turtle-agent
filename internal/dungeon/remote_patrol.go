@@ -44,6 +44,9 @@ const (
 	maxCCPerMob = 3
 	// ccLowHP is the health (percent) below which a mob is not worth a CC: it is about to die.
 	ccLowHP = 30
+	// patrolStaticAfter is how long a unit of a patrol's entries on its path must have been seen standing still (within 3 yd) to be
+	// taken for a mob that stands there (ZF: a static Shadowhunter stands on the patrol's loop at 1662 930), not a member of the patrol.
+	patrolStaticAfter = 6 * time.Second
 	// MinMove is the shortest move the module carries out (ZF-1 run 4: a move of 5.2 yd was ignored five times and failed the walk).
 	MinMove = 6
 )
@@ -108,8 +111,20 @@ func pathAhead(path []Point, seg int, along, dist float64) []Point {
 	return out
 }
 
-// patrolMembers are the living hostiles of p's entries the bots see on or near its path, not fighting the party yet.
+// patrolObs is what the driver has seen of one unit of a patrol's entries: where it was first seen, when, and whether it has moved since.
+type patrolObs struct {
+	at    Point
+	since time.Time
+	moved bool
+}
+
+// patrolMembers are the living hostiles of p's entries the bots see on or near its path, not fighting the party yet, that walk: a unit
+// seen standing in one spot for patrolStaticAfter is a mob that stands on the path, not a member.
 func (d *RemoteDriver) patrolMembers(p *Patrol) []tbm.HostileRec {
+	if d.patrolSeen == nil {
+		d.patrolSeen = map[packet.GUID]*patrolObs{}
+	}
+	now := d.clk.Now()
 	var out []tbm.HostileRec
 	for _, h := range d.fr.Hostiles {
 		if h.Entry == 0 || h.HPPct <= 0 || !slices.Contains(p.Entries, h.Entry) || !h.Hostile() || h.Bystander() || h.Evading() || d.engagedWith(h) {
@@ -118,9 +133,21 @@ func (d *RemoteDriver) patrolMembers(p *Patrol) []tbm.HostileRec {
 		if _, refused := d.skipped[h.GUID]; refused {
 			continue
 		}
-		if _, _, off := onPath(p.Path, hostilePoint(h)); off <= patrolCorridor {
-			out = append(out, h)
+		if _, _, off := onPath(p.Path, hostilePoint(h)); off > patrolCorridor {
+			continue
 		}
+		o := d.patrolSeen[h.GUID]
+		if o == nil {
+			o = &patrolObs{at: hostilePoint(h), since: now}
+			d.patrolSeen[h.GUID] = o
+		}
+		if !o.moved && dist3(o.at, hostilePoint(h)) > 3 {
+			o.moved = true
+		}
+		if !o.moved && now.Sub(o.since) >= patrolStaticAfter {
+			continue
+		}
+		out = append(out, h)
 	}
 	return out
 }
