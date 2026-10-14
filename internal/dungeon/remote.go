@@ -72,12 +72,18 @@ type RemoteOptions struct {
 	Healer string
 	CC     []CCRule
 
-	FeedWait      time.Duration // the first frame after the bind
-	FeedStale     time.Duration // without a new frame this long the feed is "stalled": the loops wait instead of deciding
-	FeedLost      time.Duration // without a new frame this long the run fails
-	MoveLeg       float32       // yards: the longest single `move` (the server takes 150)
-	MoveArrive    float32       // yards from the point at which the lead bot has arrived
-	MoveStall     time.Duration // a lead bot that gained no ground in this long gets the move again
+	FeedWait   time.Duration // the first frame after the bind
+	FeedStale  time.Duration // without a new frame this long the feed is "stalled": the loops wait instead of deciding
+	FeedLost   time.Duration // without a new frame this long the run fails
+	MoveLeg    float32       // yards: the longest single `move` (the server takes 150)
+	MoveArrive float32       // yards from the point at which the lead bot has arrived
+	MoveStall  time.Duration // a lead bot that gained no ground in this long gets the move again
+	// LookAhead is how near (yards) the lead bot must be to its current waypoint for the next `cmd move` to go out, so that it never
+	// comes to a stop between waypoints; LookAheadETA does the same by time (distance / the bot's speed). Negative LookAhead turns the
+	// look-ahead off (each waypoint is waited for). MoveGap is the least time between two `cmd move` orders.
+	LookAhead     float32
+	LookAheadETA  time.Duration
+	MoveGap       time.Duration
 	MoveRetries   int           // stalls and refusals of one walk before it fails
 	LeadWait      time.Duration // how long an order waits out lead-unavailable (the lead bot between maps, dead, on a taxi)
 	ThreatWait    time.Duration // longest wait for the tank to hold a mob's threat before the party is sent in anyway
@@ -88,7 +94,7 @@ type RemoteOptions struct {
 // DefaultRemoteOptions are the limits of a live run.
 func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
-		MoveLeg: 120, MoveArrive: 5, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
+		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
 		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, UnbindWait: 8 * time.Second}
 }
 
@@ -106,6 +112,11 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 	fill(&o.LeadWait, d.LeadWait)
 	fill(&o.ThreatWait, d.ThreatWait)
 	fill(&o.UnbindWait, d.UnbindWait)
+	fill(&o.LookAheadETA, d.LookAheadETA)
+	fill(&o.MoveGap, d.MoveGap)
+	if o.LookAhead == 0 {
+		o.LookAhead = d.LookAhead
+	}
 	if o.MoveLeg <= 0 {
 		o.MoveLeg = d.MoveLeg
 	}
@@ -152,15 +163,23 @@ type RemoteReport struct {
 	Refused          map[string]int `json:"refused"` // by "<verb>:<code>"
 
 	// Decisions made from the feed.
-	MoveStalls       int `json:"move_stalls"`        // moves sent again because the lead bot gained no ground
-	WalkAggros       int `json:"walk_aggros"`        // fights that interrupted a walk
-	ThreatHolds      int `json:"threat_holds"`       // mobs the party was sent at once the tank held their threat
-	ThreatWaits      int `json:"threat_waits"`       // mobs the party was held back from until the tank held their threat
-	ThreatOverrides  int `json:"threat_overrides"`   // mobs the party was sent at after ThreatWait without the tank holding them
-	ThreatWarnings   int `json:"threat_warnings"`    // bots that came within ThreatWarnPct of the tank's threat on a mob
-	PullFallbacks    int `json:"pull_fallbacks"`     // pulls done as an attack order because the module found no tank
-	CCOrders         int `json:"cc_orders"`          // crowd-control orders
-	Revives          int `json:"revives"`            // `.bot cmd revive` orders
+	MoveStalls      int `json:"move_stalls"`      // moves sent again because the lead bot gained no ground
+	WalkAggros      int `json:"walk_aggros"`      // fights that interrupted a walk
+	ThreatHolds     int `json:"threat_holds"`     // mobs the party was sent at once the tank held their threat
+	ThreatWaits     int `json:"threat_waits"`     // mobs the party was held back from until the tank held their threat
+	ThreatOverrides int `json:"threat_overrides"` // mobs the party was sent at after ThreatWait without the tank holding them
+	ThreatWarnings  int `json:"threat_warnings"`  // bots that came within ThreatWarnPct of the tank's threat on a mob
+	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
+	CCOrders        int `json:"cc_orders"`        // crowd-control orders
+	Revives         int `json:"revives"`          // `.bot cmd revive` orders
+	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
+	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
+	// one, and FightHolds the "stay here" moves sent when a fight ended.
+	WalkStops      int     `json:"walk_stops"`
+	WalkStoppedS   float64 `json:"walk_stopped_s"`
+	LookAheadMoves int     `json:"look_ahead_moves"`
+	FightHolds     int     `json:"fight_holds"`
+
 	ObjectStepsAhead int `json:"object_steps_ahead"` // use_object, loot_object, use_item and game-object waits the plan has from the first leg on: they fail the run
 }
 
@@ -230,6 +249,7 @@ type RemoteDriver struct {
 	ccDone     map[packet.GUID]bool
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
+	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 }
@@ -332,6 +352,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		return err
 	}
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
+	if !d.cfg.NoResume {
+		if r, ok := d.st.ResumeAt(); ok {
+			d.rep.update(func(rp *Report) { rp.Resumed = &r })
+			d.rep.note(r.String())
+		}
+	}
 	waiting := [2]int{-1, -1}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -748,7 +774,9 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
-	return d.restGate(ctx)
+	// The gate at a leg's start waits for health and mana but not for the followers: they catch up on the walk, and the gate before a
+	// pull gathers them.
+	return d.restGate(ctx, false)
 }
 
 func (d *RemoteDriver) endLeg(result string) {
@@ -783,6 +811,9 @@ func (d *RemoteDriver) legStat(f func(*LegReport)) {
 // judge (an ERR is not an error here).
 func (d *RemoteDriver) order(ctx context.Context, verb string, args ...string) (tbm.Reply, error) {
 	cmd := strings.Join(append([]string{"cmd", verb}, args...), " ")
+	if verb == "move" {
+		defer func() { d.lastMove = d.clk.Now() }()
+	}
 	deadline := d.clk.Now().Add(d.opt.LeadWait)
 	for {
 		r, err := d.g.Command(ctx, cmd)
@@ -929,6 +960,7 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 	refusals, stalls, aggros := 0, 0, 0
 	leg := d.opt.MoveLeg
 	var last string
+	var meter walkMeter
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -956,9 +988,13 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 			if err := d.walkAggro(ctx); err != nil {
 				return err
 			}
+			meter = walkMeter{} // the fight is not a stop of the walk
 			continue
 		}
 		wp := d.waypoint(ctx, here, p, leg)
+		if err := d.moveGap(ctx); err != nil {
+			return err
+		}
 		r, err := d.order(ctx, "move", moveArgs(wp)...)
 		if err != nil {
 			return err
@@ -980,11 +1016,15 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 		if wp != p {
 			arrive = max(arrive, 8)
 		}
-		res, err := d.waitArrival(ctx, wp, arrive)
+		ahead := wp != p && d.opt.LookAhead > 0
+		res, err := d.waitArrival(ctx, wp, arrive, ahead, &meter)
 		if err != nil {
 			return err
 		}
 		switch res {
+		case nearAt:
+			// The lead bot is about to reach the waypoint: the next order goes out from here, while it is still running.
+			d.remote(func(r *RemoteReport) { r.LookAheadMoves++ })
 		case arrivedAt:
 			if wp == p {
 				return nil
@@ -1007,11 +1047,80 @@ const (
 	arrivedAt arrival = iota
 	stalledAt
 	fightAt
+	nearAt // with look-ahead: close enough to the waypoint for the next order
 )
 
+// walkSpeed is the speed (yd/s) a lead bot is taken to run at until the feed has shown it.
+const walkSpeed = 6.6
+
+// walkMeter watches the lead bot during a walk: how fast it runs, and the times it stood still after it had started (a stop in the
+// middle of the walk), for the report.
+type walkMeter struct {
+	prev    Point
+	prevAt  time.Time
+	have    bool
+	moved   bool    // the bot has been seen moving in this walk
+	stopped bool    // the last look found it standing: one stop, however long
+	speed   float64 // yd/s, as of the last look that found it moving
+}
+
+// look takes the bot's position at now.
+func (m *walkMeter) look(d *RemoteDriver, here Point, now time.Time) {
+	if !m.have {
+		m.prev, m.prevAt, m.have = here, now, true
+		return
+	}
+	dt := now.Sub(m.prevAt).Seconds()
+	if dt <= 0 {
+		return
+	}
+	v := dist3(here, m.prev) / dt
+	m.prev, m.prevAt = here, now
+	if v > 0.5 {
+		m.moved, m.stopped = true, false
+		m.speed = min(max(v, 3), 12)
+		return
+	}
+	if !m.moved {
+		return
+	}
+	d.remote(func(r *RemoteReport) {
+		r.WalkStoppedS += dt
+		if !m.stopped {
+			r.WalkStops++
+		}
+	})
+	m.stopped = true
+}
+
+// near says whether the bot at here is close enough to wp for the next order: within LookAhead yards or LookAheadETA of running.
+func (m *walkMeter) near(d *RemoteDriver, here, wp Point) bool {
+	dist := dist3(here, wp)
+	if dist <= float64(d.opt.LookAhead) {
+		return true
+	}
+	v := m.speed
+	if v <= 0 {
+		v = walkSpeed
+	}
+	return dist/v <= d.opt.LookAheadETA.Seconds()
+}
+
+// moveGap keeps two `cmd move` orders MoveGap apart.
+func (d *RemoteDriver) moveGap(ctx context.Context) error {
+	if d.lastMove.IsZero() {
+		return nil
+	}
+	if left := d.opt.MoveGap - d.clk.Now().Sub(d.lastMove); left > 0 {
+		return d.tick(ctx, left)
+	}
+	return nil
+}
+
 // waitArrival waits for the lead bot to come within arrive yards of wp. It ends early when the party is in a fight, when the
-// lead bot gained no ground in MoveStall, or at the leg's timeout (reported as a stall).
-func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32) (arrival, error) {
+// lead bot gained no ground in MoveStall, or at the leg's timeout (reported as a stall). With ahead it also ends as soon as the bot
+// is near wp (nearAt), so that the caller can send the next order before the bot stops.
+func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32, ahead bool, meter *walkMeter) (arrival, error) {
 	start, _ := d.leadPos()
 	began := d.clk.Now()
 	limit := moveTimeout(dist3(start, wp))
@@ -1022,11 +1131,17 @@ func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32
 		}
 		now := d.clk.Now()
 		here, ok := d.leadPos()
+		if ok && !d.stalled {
+			meter.look(d, here, now)
+		}
 		if ok && dist3(here, wp) <= float64(arrive) {
 			return arrivedAt, nil
 		}
 		if len(d.fr.EngagedHostiles()) > 0 && d.fr.PartyInCombat() {
 			return fightAt, nil
+		}
+		if ahead && ok && !d.stalled && meter.near(d, here, wp) {
+			return nearAt, nil
 		}
 		if d.stalled {
 			winAt = now // a quiet feed proves nothing about the lead bot
@@ -1152,7 +1267,7 @@ func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 			r.ok = false
 			low = append(low, fmt.Sprintf("%s health %d%%", m.Name, h))
 		}
-		if haveLead && m.GUID != d.fr.Lead && dist3(partyPoint(m), lead) > float64(d.cfg.GatherRadius) {
+		if rw.gather && haveLead && m.GUID != d.fr.Lead && dist3(partyPoint(m), lead) > float64(d.cfg.GatherRadius) {
 			r.ok = false
 			low = append(low, fmt.Sprintf("%s not near the lead bot", m.Name))
 		}
@@ -1187,7 +1302,7 @@ func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 // of combat: a fight is helped with attack orders, and the timeout counts from its end. A dead bot is revived with `.bot cmd revive`
 // (owner or GM) and the wait for it; with RecoverWipe off a revive that is refused fails the run, like a dead member without GM
 // shortcuts in group mode.
-func (d *RemoteDriver) restGate(ctx context.Context) (err error) {
+func (d *RemoteDriver) restGate(ctx context.Context, gather bool) (err error) {
 	began := d.clk.Now()
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
@@ -1197,6 +1312,7 @@ func (d *RemoteDriver) restGate(ctx context.Context) (err error) {
 	calm := began
 	var fightBegan time.Time
 	rw := newRestWatch(tgt)
+	rw.gather = gather
 	limit := tgt.max + 2*d.cfg.FightTimeout
 	d.look()
 	for {

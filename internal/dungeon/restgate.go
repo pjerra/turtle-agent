@@ -56,6 +56,7 @@ type restWatch struct {
 	mana   map[packet.GUID]manaWatch
 	nudged map[packet.GUID]bool
 	tgt    restTarget
+	gather bool // remote mode: the followers must be near the lead bot too (a gate before a pull), not only rested
 }
 
 func newRestWatch(tgt restTarget) *restWatch {
@@ -177,4 +178,15 @@ func replyText(r tbm.Reply) string {
 		return r.Kind
 	}
 	return r.Kind + ": " + r.Line
+}
+
+// resume skips what the leader has already passed (see Stepper.ResumeAt), unless the run was asked not to.
+func (d *Driver) resume() {
+	if d.cfg.NoResume {
+		return
+	}
+	if r, ok := d.st.ResumeAt(); ok {
+		d.rep.update(func(rp *Report) { rp.Resumed = &r })
+		d.rep.note(r.String())
+	}
 }

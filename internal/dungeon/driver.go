@@ -129,6 +129,7 @@ func RealClock() Clock {
 // Config holds the Driver's limits. A zero field takes the default of DefaultConfig.
 type Config struct {
 	// Options of the run, not limits (set by the caller).
+	NoResume  bool // start at the leg's first point even when the party stands further along it (see Resumed)
 	Teleport  bool // GM-teleport to the start of the first leg and bring the party along (flagged in the report)
 	Shortcuts bool // allow the GM revive of a dead party member at a rest gate (flagged in the report)
 	// GM says how the Driver learns whether the leader's account is a GM. Without one the driver sends no GM command: no
@@ -386,6 +387,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		return err
 	}
 	d.st = NewStepperAt(d.plan, stepWorld{d}, d.clk.Now, fromLeg)
+	d.resume()
 	waiting := [2]int{-1, -1} // the leg and step a wait event was sent for
 	for {
 		if err := ctx.Err(); err != nil {
