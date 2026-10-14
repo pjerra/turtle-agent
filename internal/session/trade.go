@@ -60,7 +60,7 @@ type tradeState struct {
 	theirAccept bool   // status accepted came since the last back_to_trade
 	backs       uint64 // counts back_to_trade
 	theirs      *game.TradeView
-	incoming    packet.GUID // who last started a trade with us (status begin); the agent does not answer it
+	incoming    packet.GUID // who started a trade with us (status begin) that the agent declined; cleared by the core's closing status
 	wakes       notifier
 }
 
@@ -76,9 +76,19 @@ func (s *Session) onTradeStatus(body []byte) error {
 	}
 	t := &s.trade
 	src := t.partner
+	declined := false
 	switch m.Status {
 	case game.TradeBegin:
-		t.incoming, src = m.Other, m.Other
+		// The core opens the trade on both sides (HandleInitiateTradeOpcode), and a player who has one open cannot start
+		// another. The agent takes no part in a trade the other side starts, so it declines like a client that closes the dialog.
+		src = m.Other
+		if !t.active {
+			t.incoming = m.Other
+			if err := s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade()); err != nil {
+				return err
+			}
+			declined = true
+		}
 	case game.TradeOpenWindow:
 		t.open = true
 	case game.TradeAccept:
@@ -87,9 +97,12 @@ func (s *Session) onTradeStatus(body []byte) error {
 		t.backs++
 		t.theirAccept = false
 	default:
-		t.ended, t.status, t.open = true, m.Status, false
+		t.ended, t.status, t.open, t.incoming = true, m.Status, false, 0
 	}
 	d := map[string]any{"status": m.Status.Name(), "code": uint32(m.Status)}
+	if declined {
+		d["declined"] = true
+	}
 	if t.theirs != nil && (m.Status == game.TradeAccept || m.Status == game.TradeComplete) {
 		d["their_gold"], d["their_items"] = t.theirs.Gold, t.theirs.Items
 	}
@@ -341,6 +354,18 @@ func (s *Session) Trade(ctx context.Context, req TradeRequest) (TradeResult, err
 		req.Wait = tradeDoneWait
 	}
 	res := TradeResult{Gave: []TradeGave{}, Received: []game.TradeItem{}}
+	// A trade the other side started and the agent declined may still be closing on the core, which would drop our
+	// request: cancel it again and wait for the core's closing status before starting.
+	if v, err := s.do(ctx, func() (any, error) {
+		if s.trade.active || s.trade.incoming == 0 {
+			return false, nil
+		}
+		return true, s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade())
+	}); err != nil {
+		return res, err
+	} else if v.(bool) {
+		_ = s.tradeWait(ctx, tradeCancelWait, func() bool { return s.trade.incoming == 0 })
+	}
 	var before uint32
 	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
@@ -568,8 +593,13 @@ func (s *Session) splitStack(ctx context.Context, st *tradeStep) error {
 		if !ok || src.GUID != st.Src.GUID || src.Count != st.Src.Count {
 			return nil, fmt.Errorf("the stack of item %d moved before it could be split", st.Src.Entry)
 		}
-		if _, taken := s.store.ItemAt(self, st.Dst[0], st.Dst[1]); taken {
-			return nil, fmt.Errorf("bag %d slot %d is no longer free for the split", st.Dst[0], st.Dst[1])
+		// The slot is chosen now: the one planned if it is still empty, else the first empty one.
+		free := s.store.FreeSlots(self)
+		if len(free) == 0 {
+			return nil, fmt.Errorf("no free bag slot left to split %d of item %d into", st.Count, st.Src.Entry)
+		}
+		if !slices.Contains(free, st.Dst) {
+			st.Dst = free[0]
 		}
 		return nil, s.conn.WritePacket(opcode.CMSGSplitItem, game.BuildSplitItem(st.Src.Bag, st.Src.Slot, st.Dst[0], st.Dst[1], uint8(st.Count)))
 	})
@@ -603,7 +633,7 @@ func (s *Session) verifyTrade(ctx context.Context, r *TradeResult, steps []trade
 				return false
 			}
 		}
-		return gold == 0 || s.store.Field(self, objects.PlayerCoinage) <= before-gold
+		return gold == 0 || s.store.Field(self, objects.PlayerCoinage) <= before-gold+r.ReceivedGold
 	})
 	if !r.Verified && r.Detail == "" {
 		r.Detail = "completed, but the bags or the purse did not show the change within " + wait.String()

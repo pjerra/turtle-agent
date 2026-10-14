@@ -403,19 +403,84 @@ func tradeRigPlayer(h *harness, g packet.GUID, name string, dist float32) packet
 	return g
 }
 
-func TestTradeParseErrorAndBeginFromAnotherPlayer(t *testing.T) {
+func TestTradeParseError(t *testing.T) {
 	h := tradeRig(t, 3)
-	// Someone else starts a trade with the agent: logged, not answered.
+	h.send(opcode.SMSGTradeStatus, []byte{1, 0}) // a short body is a parse error, not a crash
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindParseError)) == 1 })
+}
+
+// A trade the other side starts is open on the core for both players, and a player with one open cannot start another:
+// the agent declines it with CMSG_CANCEL_TRADE, and a trade of its own gets through afterwards.
+func TestTradeDeclinesAnIncomingTrade(t *testing.T) {
+	h := tradeRig(t, 3)
 	h.send(opcode.SMSGTradeStatus, gametest.TradeStatus(game.TradeBegin, botGUID))
+	h.expect(opcode.CMSGCancelTrade)
 	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindTradeStatus)) == 1 })
 	e := ofKind(h.s.Log(), events.KindTradeStatus)[0]
-	if e.Data["status"] != "begin" || e.SourceGUID != botGUID || !strings.Contains(e.Text, "Gorm") {
+	if e.Data["status"] != "begin" || e.Data["declined"] != true || e.SourceGUID != botGUID || !strings.Contains(e.Text, "Gorm") {
 		t.Fatalf("%+v", e)
 	}
-	if p, err := h.srv.Expect(opcode.CMSGBeginTrade, 100*time.Millisecond); err == nil {
+	if p, err := h.srv.Expect(opcode.CMSGBeginTrade, 50*time.Millisecond); err == nil {
 		t.Fatalf("answered % X", p.Body)
 	}
-	// A short body is a parse error, not a crash.
-	h.send(opcode.SMSGTradeStatus, []byte{1, 0})
-	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindParseError)) == 1 })
+	// The core's cancel reply has not come yet when our own trade starts: Trade cancels again, waits for the reply,
+	// and only then initiates; the reply is not mistaken for the end of the new trade.
+	done := startTrade(h, TradeRequest{Name: "Gorm", Gold: 10})
+	h.expect(opcode.CMSGCancelTrade)
+	if p, err := h.srv.Expect(opcode.CMSGInitiateTrade, 50*time.Millisecond); err == nil {
+		t.Fatalf("initiated before the old trade closed: % X", p.Body)
+	}
+	h.tradeStatus(game.TradeCancelled)
+	h.expect(opcode.CMSGInitiateTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	h.expect(opcode.CMSGSetTradeGold)
+	h.expect(opcode.CMSGAcceptTrade)
+	h.tradeStatus(game.TradeComplete)
+	if o := <-done; o.err != nil || o.res.Result != "completed" {
+		t.Fatalf("%+v %v", o.res, o.err)
+	}
+	// With nothing pending, a begin while our own trade runs is only logged.
+	done = startTrade(h, TradeRequest{Name: "Gorm", Gold: 10, OpenWait: 100 * time.Millisecond})
+	h.expect(opcode.CMSGInitiateTrade)
+	h.send(opcode.SMSGTradeStatus, gametest.TradeStatus(game.TradeBegin, botGUID))
+	go func() { h.expect(opcode.CMSGCancelTrade); h.tradeStatus(game.TradeCancelled) }()
+	if o := <-done; o.res.Result != "timeout" {
+		t.Fatalf("%+v %v", o.res, o.err)
+	}
+}
+
+// The purse check behind verified allows for gold the other side put in the window.
+func TestTradeVerifiedCountsGoldReceived(t *testing.T) {
+	h := tradeRig(t, 3)
+	done := startTrade(h, TradeRequest{Name: "Gorm", Gold: 100})
+	h.expect(opcode.CMSGInitiateTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	h.expect(opcode.CMSGSetTradeGold)
+	h.expect(opcode.CMSGAcceptTrade)
+	h.send(opcode.SMSGTradeStatusExtended, gametest.TradeExtended(true, 30))
+	h.tradeStatus(game.TradeAccept)
+	h.send(opcode.SMSGUpdateObject, selfValues(map[uint16]uint32{objects.PlayerCoinage: 430})) // 500 - 100 + 30
+	h.tradeStatus(game.TradeComplete)
+	if o := <-done; o.err != nil || !o.res.Verified || o.res.ReceivedGold != 30 {
+		t.Fatalf("%+v %v", o.res, o.err)
+	}
+}
+
+// The split goes to a slot that is free when it is sent, not the one the plan saw.
+func TestTradeSplitPicksTheSlotAtSplitTime(t *testing.T) {
+	h := tradeRig(t, 3)
+	done := startTrade(h, TradeRequest{Name: "Gorm", Items: []TradeItemReq{{waterEntry, 5}}})
+	h.expect(opcode.CMSGInitiateTrade)
+	// Something lands in slot 23, the planned destination, before the window opens.
+	replaceSlot(h, 23, packet.GUID(0x4000000000000030), 2589, 1)
+	waitFor(t, func() bool { _, ok := h.s.store.ItemAt(me.GUID, 255, 23); return ok })
+	h.tradeStatus(game.TradeOpenWindow)
+	if p := h.expect(opcode.CMSGSplitItem); string(p.Body) != string(game.BuildSplitItem(255, 30, 255, 24, 5)) {
+		t.Fatalf("split % X", p.Body)
+	}
+	replaceSlot(h, 24, splitGUID, waterEntry, 5)
+	h.expect(opcode.CMSGSetTradeItem)
+	h.expect(opcode.CMSGAcceptTrade)
+	h.tradeStatus(game.TradeCancelled)
+	<-done
 }

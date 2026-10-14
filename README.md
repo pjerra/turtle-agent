@@ -442,14 +442,15 @@ panels, the loot window and the forced run speed are tested against bytes from t
 `trade` hands items and gold to another player, as a player at the trade window would: `CMSG_INITIATE_TRADE`, then the other
 player's client answers with `CMSG_BEGIN_TRADE` and the window opens (`SMSG_TRADE_STATUS` open), `CMSG_SET_TRADE_ITEM` and `CMSG_SET_TRADE_GOLD`
 fill it, `CMSG_ACCEPT_TRADE` accepts, and the trade completes when the other side accepts too. The agent does not take part in a
-trade the other side starts (`trade_status` `begin` is logged and not answered), and it does not take items: `received` only reports
+trade the other side starts: `trade_status` `begin` is logged (`data.declined`) and answered with `CMSG_CANCEL_TRADE`, because the core opens the trade on both sides and a player with one open cannot start another. It does not take items: `received` only reports
 what the other side put in the window, which the accept takes along.
+An idle agent therefore declines every incoming trade, a bot's included: a TortoiseBots bot starts one on the `trade` whisper (`TradeAction.cpp:47-49`), from its RPG sub-actions and from the `.bot` trade command. Accepting gifts from party members or owned bots would be a follow-up, off by default.
 
 - **Range.** The other player must be in view and within 10 yd (the core allows 11.11, `TRADE_DISTANCE`, at the start and again when it
   completes the trade); farther is an error before anything is sent, naming the distance. Walk up with `walk_to` first. A dead player,
   yourself, a creature, too much gold, an item the bags lack, and more than six stacks (the window has six slots) are errors before anything is sent too.
 - **Counts.** The window takes whole stacks: `CMSG_SET_TRADE_ITEM` has no count. A request is met by one stack of exactly that count; else by
-  splitting the count off the smallest stack that has more (`CMSG_SPLIT_ITEM` into the first free slot of the backpack or a bag, once the
+  splitting the count off the smallest stack that has more (`CMSG_SPLIT_ITEM` into a free slot of the backpack or a bag, chosen when the split is sent, once the
   window is open); else by whole stacks, the largest first, and the last piece the same way. Two entries for one item add up. A split stack that
   stays behind when the trade fails is not merged back.
 - **Timing.** The core refuses an accept less than a second after the last change to the window (`back_to_trade`; the delay counts whole seconds).
@@ -457,7 +458,7 @@ what the other side put in the window, which the accept takes along.
   the window causes it too). Nothing is cancelled while the other side is still deciding: a trade that times out, or ends in a refusal, is
   closed with `CMSG_CANCEL_TRADE` so nobody is left in a window.
 - **Result.** `completed` also says `verified`: the bags no longer hold the items and the purse is down by the gold, seen in the update
-  fields after the status (false with a `detail` when they do not show within 2.2 s). A failure carries the last status in `data.status`.
+  fields after the status (the purse allows for gold the other side put in; false with a `detail` when the change does not show within 2.2 s). A failure carries the last status in `data.status`.
   Every `SMSG_TRADE_STATUS` is a `trade_status` event: `data.status` (`begin`, `open`, `accepted`, `back_to_trade`, `complete`, `cancelled`,
   `too_far`, `busy`, `no_target`, `ignored`, ...) and `data.code`, the other player as `source`; `accepted` and `complete` add `data.their_items` and `data.their_gold`.
 - **TortoiseBots bots.** `TradeStatusAction` (`ai/playerbot/strategy/actions/TradeStatusAction.cpp`) opens the window for the bot's master and
