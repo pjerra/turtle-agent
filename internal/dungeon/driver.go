@@ -165,25 +165,30 @@ type Config struct {
 	BossTimeout    time.Duration // one boss fight
 	PostFight      time.Duration // wait after the last pack member died (loot, last hits)
 	AddsWait       time.Duration // longest wait for loose hostile units to be dealt with after a fight
-	RestTimeout    time.Duration // longest rest gate
+	RestTimeout    time.Duration // longest rest gate (a leg's rest.max_s overrides it)
 	RestPoll       time.Duration
-	RestHealthPct  int // rested: every party member's health at least this, mana at least RestManaPct
-	RestManaPct    int
-	RestMinHealth  int           // after RestTimeout the run goes on only if everyone has at least this health
-	GatherRadius   float32       // yards: rested also asks every living member to be this close
-	WaitPoll       time.Duration // time between two looks at a wait step
-	Poll           time.Duration // time between two looks at a fight
-	ArriveTimeout  time.Duration // the party's walk to the leader after a teleport
-	ManaStall      time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
-	ManaStallPct   int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
-	HealerManaMin  int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
-	ReviveWait     time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
-	AggroQuiet     time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
-	AmbushPause    time.Duration // how long the party stands at each position of a stealthed pack
-	WalkWatch      time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
-	BuffGap        time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait   time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
-	BuffMaxDist    float32       // yards: a companion farther than this from the leader is not selected for a buff
+	RestHealthPct  int // rested: every party member's health at least this, every healer's mana at least RestHealerManaPct, every other mana user's at least RestManaPct
+	RestManaPct    int // the mana target of a member that is not a healer (a leg's rest.mana overrides it)
+	// RestHealerManaPct is the healer's mana target (a leg's rest.healer_mana overrides it). In remote mode the feed carries no class:
+	// the bot named by RemoteOptions.Healer has it, and without one every caster does.
+	RestHealerManaPct int
+	// DrinkNudge is how long a member short of mana may show no rise at all before it gets one drink order of its own.
+	DrinkNudge    time.Duration
+	RestMinHealth int           // after RestTimeout the run goes on only if everyone has at least this health
+	GatherRadius  float32       // yards: rested also asks every living member to be this close
+	WaitPoll      time.Duration // time between two looks at a wait step
+	Poll          time.Duration // time between two looks at a fight
+	ArriveTimeout time.Duration // the party's walk to the leader after a teleport
+	ManaStall     time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct  int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait    time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet    time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause   time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch     time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap       time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait  time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist   float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
 	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
@@ -204,7 +209,7 @@ func DefaultConfig() Config {
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
-		RestTimeout: 150 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 75, RestMinHealth: 50, GatherRadius: 40,
+		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
@@ -249,6 +254,8 @@ func (c Config) withDefaults() Config {
 	fill(&c.RestPoll, d.RestPoll)
 	fillInt(&c.RestHealthPct, d.RestHealthPct)
 	fillInt(&c.RestManaPct, d.RestManaPct)
+	fillInt(&c.RestHealerManaPct, d.RestHealerManaPct)
+	fill(&c.DrinkNudge, d.DrinkNudge)
 	fillInt(&c.RestMinHealth, d.RestMinHealth)
 	fillF(&c.GatherRadius, d.GatherRadius)
 	fill(&c.WaitPoll, d.WaitPoll)
@@ -1065,28 +1072,26 @@ func (d *Driver) use(ctx context.Context, a Action) error {
 // judged. A caster whose mana has not risen ManaStallPct of its maximum for ManaStall (it does not drink) is let
 // pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
-func (d *Driver) restGate(ctx context.Context) error {
+func (d *Driver) restGate(ctx context.Context) (err error) {
 	if b := d.cfg.Brain; b != nil {
 		d.brainOn()
 		b.Rest(true)
 		defer b.Rest(false)
 	}
 	began := d.clk.Now()
-	defer func() {
-		if s := d.clk.Now().Sub(began).Seconds(); s > 0 {
-			d.legStat(func(l *LegReport) { l.RestSeconds += s })
-		}
-	}()
-	ordered := false
+	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
+	rec := newGateRec(max(d.curLeg, 0), tgt, began)
+	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
+	ordered, refusedSeen := false, false
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
 	rebuff := map[packet.GUID]bool{} // revived members still to get their buffs back
 	var rez rezWatch                 // the wait for the leader's brain to resurrect the dead members
-	mana := map[packet.GUID]manaWatch{}
+	rw := newRestWatch(tgt)
 	// Whatever resets the other clocks (an attacker that flickers across the 60 yd line, a mob that evades but keeps
 	// its combat flag), the gate as a whole is bounded.
-	limit := d.cfg.RestTimeout + 2*d.cfg.FightTimeout
+	limit := tgt.max + 2*d.cfg.FightTimeout
 	for {
 		if el := d.clk.Now().Sub(began); el > limit {
 			return fmt.Errorf("the rest gate has gone on for more than %.0f s (fights keep interrupting it): the party is not rested", limit.Seconds())
@@ -1108,14 +1113,15 @@ func (d *Driver) restGate(ctx context.Context) error {
 				}
 			}
 			ordered, calm = false, now
-			clear(mana)
+			clear(rw.mana)
 			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 				return err
 			}
 			continue
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
-		st := d.restState(mana)
+		st := d.restState(rw)
+		rec.g.Short = st.short
 		if len(st.dead) == 0 {
 			rez = rezWatch{}
 		} else if d.brainRezWaiting(&rez) {
@@ -1174,19 +1180,40 @@ func (d *Driver) restGate(ctx context.Context) error {
 		}
 		if st.ok {
 			if len(st.stalled) > 0 {
+				rec.g.Result = "stalled"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
 			}
 			return nil
 		}
-		if d.clk.Now().Sub(calm) > d.cfg.RestTimeout {
+		// The party rest order was refused (TB #916: "No scoped bot accepted the mature action"): the bots are asked one by one.
+		if ordered && !refusedSeen && d.restRefused() {
+			refusedSeen, rec.g.PartyRestRefused = true, true
+			if err := d.orderEach(ctx, rw, rec, st, "the party rest order was refused"); err != nil {
+				return err
+			}
+		}
+		for _, m := range st.nudge {
+			if rw.nudged[m.GUID] {
+				continue
+			}
+			rw.nudged[m.GUID] = true
+			rec.nudged(m.Name)
+			if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+				return err
+			}
+			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent %q", d.curLeg, m.Name, m.Pct, d.cfg.DrinkNudge.Seconds(), drinkOrder(m.Name, "drink")))
+		}
+		if d.clk.Now().Sub(calm) > tgt.max {
 			if st.minHealth >= d.cfg.RestMinHealth {
-				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, d.cfg.RestTimeout.Seconds(), st.why, st.minHealth))
+				rec.g.Result = "gave_up"
+				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
 				return nil
 			}
-			return fmt.Errorf("the party is not rested after %.0f s: %s", d.cfg.RestTimeout.Seconds(), st.why)
+			return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
 		}
 		if !ordered {
 			ordered = true
+			d.restRefused() // an old refusal is not an answer to this order
 			if err := d.g.Chat(ctx, "party", ".bot action rest"); err != nil {
 				return err
 			}
@@ -1221,27 +1248,35 @@ func (d *Driver) waitRevived(ctx context.Context, g packet.GUID) error {
 // The party list carries no class; the unit rows of the members in view do.
 var HealerClasses = map[uint8]bool{2: true, 5: true, 7: true, 11: true}
 
-// manaWatch is the window a rest gate keeps for a caster below the mana threshold: its mana when the window began.
+// manaWatch is the window a rest gate keeps for a caster below its mana target: its mana when the window began (power, since: the
+// ManaStall rule), and the highest mana seen with when it was reached (base, baseAt: the DrinkNudge rule).
 type manaWatch struct {
-	power uint32
-	since time.Time
+	power  uint32
+	since  time.Time
+	base   uint32
+	baseAt time.Time
 }
 
 type restReport struct {
 	ok        bool
-	why       string // what is missing, for the report
-	minHealth int    // lowest health percent among the living online members and the leader
+	why       string   // what is missing, for the report
+	short     []string // the same as a list ("Name mana 29%"), for the gate record
+	minHealth int      // lowest health percent among the living online members and the leader
 	dead      []Member
-	stalled   []string // casters let pass because their mana does not rise ("Name 49%")
+	stalled   []string    // casters let pass because their mana does not rise ("Name 49%")
+	shortMana []shortMana // members below their mana target and not let pass
+	shortHP   []string    // names of members below the health target
+	nudge     []shortMana // members whose mana has not risen at all in DrinkNudge and who have had no drink order yet
 }
 
-// restState looks at the party. mana holds a window per caster below the mana threshold: when it has run for ManaStall
+// restState looks at the party. rw holds a window per caster below its mana target: when it has run for ManaStall
 // and the caster gained less than ManaStallPct of its maximum, the caster does not hold the gate (it is not drinking);
-// else the window starts again.
-func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
+// else the window starts again. A healer is held to the healer target, anyone else to the other one.
+func (d *Driver) restState(rw *restWatch) restReport {
 	r := restReport{ok: true, minHealth: 100}
 	var low []string
 	now := d.clk.Now()
+	tgt := rw.tgt
 	classes := map[packet.GUID]uint8{}
 	for _, u := range d.g.Units() {
 		if u.Type == "player" && u.Class != 0 {
@@ -1257,7 +1292,7 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 	if s := d.g.Self(); s.MaxHealth > 0 {
 		h := pct(s.Health, s.MaxHealth)
 		r.minHealth = min(r.minHealth, h)
-		if h < d.cfg.RestHealthPct {
+		if h < tgt.health {
 			r.ok = false
 			low = append(low, fmt.Sprintf("leader %d%%", h))
 		}
@@ -1273,36 +1308,31 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 		}
 		h := pct(m.Health, m.MaxHealth)
 		r.minHealth = min(r.minHealth, h)
-		if h < d.cfg.RestHealthPct {
+		if h < tgt.health {
 			r.ok = false
 			low = append(low, fmt.Sprintf("%s health %d%%", m.Name, h))
+			r.shortHP = append(r.shortHP, m.Name)
 		}
 		if m.PowerType == 0 && m.MaxPower > 0 {
+			healer := HealerClasses[classes[m.GUID]]
 			p := pct(m.Power, m.MaxPower)
-			if p >= d.cfg.RestManaPct {
-				delete(mana, m.GUID)
+			if p >= tgt.manaNeed(healer) {
+				delete(rw.mana, m.GUID)
 				continue
 			}
-			w, ok := mana[m.GUID]
-			if !ok {
-				w = manaWatch{power: m.Power, since: now}
-				mana[m.GUID] = w
+			w, nudge := rw.look(d.cfg, now, m.GUID, m.Power)
+			sm := shortMana{GUID: m.GUID, Name: m.Name, Pct: p}
+			if nudge {
+				r.nudge = append(r.nudge, sm)
 			}
-			stalled := false
 			// A healer that low is waited for like before: the party would go on without its heals.
-			healerLow := HealerClasses[classes[m.GUID]] && p < d.cfg.HealerManaMin
-			if now.Sub(w.since) >= d.cfg.ManaStall && !healerLow {
-				if int(m.Power)-int(w.power) >= int(m.MaxPower)*d.cfg.ManaStallPct/100 {
-					mana[m.GUID] = manaWatch{power: m.Power, since: now}
-				} else {
-					stalled = true
-				}
-			}
-			if stalled {
+			healerLow := healer && p < d.cfg.HealerManaMin
+			if !healerLow && rw.stalled(d.cfg, now, m.GUID, w, m.Power, m.MaxPower) {
 				r.stalled = append(r.stalled, fmt.Sprintf("%s not drinking (mana %d%%)", m.Name, p))
 			} else {
 				r.ok = false
-				low = append(low, fmt.Sprintf("%s mana %d%%", m.Name, p))
+				low = append(low, sm.String())
+				r.shortMana = append(r.shortMana, sm)
 			}
 		}
 	}
@@ -1311,8 +1341,44 @@ func (d *Driver) restState(mana map[packet.GUID]manaWatch) restReport {
 		low = append(low, fmt.Sprintf("not near the leader: %v", far))
 	}
 	low = append(low, r.stalled...)
+	r.short = low
 	r.why = fmt.Sprint(low)
 	return r
+}
+
+// restRefused says whether TortoiseBots refused a rest order since the last look, and forgets those refusals.
+func (d *Driver) restRefused() bool {
+	found := false
+	d.pendingRef = slices.DeleteFunc(d.pendingRef, func(r Refusal) bool {
+		if r.Intent == "rest" || r.Intent == "drink" || r.Intent == "eat" {
+			found = true
+			return true
+		}
+		return false
+	})
+	return found
+}
+
+// orderEach sends the members that are short a drink (mana) or eat (health) order of their own, one each per gate.
+func (d *Driver) orderEach(ctx context.Context, rw *restWatch, rec *gateRec, st restReport, why string) error {
+	for _, m := range st.shortMana {
+		if rw.nudged[m.GUID] {
+			continue
+		}
+		rw.nudged[m.GUID] = true
+		rec.nudged(m.Name)
+		if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+			return err
+		}
+		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q (%s mana %d%%)", d.curLeg, why, drinkOrder(m.Name, "drink"), m.Name, m.Pct))
+	}
+	for _, name := range st.shortHP {
+		if err := d.g.Chat(ctx, "party", drinkOrder(name, "eat")); err != nil {
+			return err
+		}
+		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q", d.curLeg, why, drinkOrder(name, "eat")))
+	}
+	return nil
 }
 
 // doPull pulls each member group of the action: the leader targets the nearest member and the tank walks up and

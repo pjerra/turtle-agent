@@ -43,6 +43,10 @@ type Report struct {
 	Brain string      `json:"brain,omitempty"`
 	Legs  []LegReport `json:"legs"`
 	Notes []string    `json:"notes"`
+	// RestSeconds is the time the run spent in rest gates in all; RestGates lists each gate: the seconds it waited, who was short
+	// and whether a drink order went out.
+	RestSeconds float64    `json:"rest_seconds"`
+	RestGates   []RestGate `json:"rest_gates"`
 	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
 	// intent, code and message, with how often each came in the leg.
 	Refusals []RefusalReport `json:"refusals"`
@@ -96,7 +100,7 @@ type reporter struct {
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
 	p.now = now
-	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Buffs: []Buff{}, Legs: []LegReport{}, Notes: []string{}, Refusals: []RefusalReport{}}
+	p.r = Report{Plan: plan.Name, Map: plan.Map, State: "idle", Deaths: []Death{}, Shortcuts: []Shortcut{}, SetupShortcuts: []string{}, Buffs: []Buff{}, Legs: []LegReport{}, Notes: []string{}, Refusals: []RefusalReport{}, RestGates: []RestGate{}}
 }
 
 func (p *reporter) start(fromLeg int) {
@@ -152,6 +156,7 @@ func (p *reporter) snapshot() Report {
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)
 	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
+	r.RestGates = append([]RestGate{}, p.r.RestGates...)
 	r.Remote = p.r.Remote.clone()
 	if r.State == "running" {
 		now := p.now()
@@ -178,5 +183,5 @@ func summaryOf(r Report) map[string]any {
 func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
-		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead}
+		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds}
 }

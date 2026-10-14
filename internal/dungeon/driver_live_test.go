@@ -187,20 +187,20 @@ func TestRestGateGivesUpOnAFightThatNeverEnds(t *testing.T) {
 func TestRestGatePassesACasterWhoDoesNotDrink(t *testing.T) {
 	g := newFake()
 	g.add(201, 1, Point{20, 0, 0})
-	g.party[1].Power = 200 // 50% of 400, below the 75% threshold, and flat
+	g.party[1].Power = 160 // 40% of 400, below the healer's 50% target, and flat
 	d := NewDriver(mustPlan(t, restPlan), g, Config{}, g.clock())
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v\n%+v", err, d.Report())
 	}
 	rs := d.Report().Legs[0].RestSeconds // two gates (leg start and the pull): 30 s each, not 150
-	if rs < 60 || rs > 80 || !strings.Contains(notes(d), "rest gate passed with Heal not drinking (mana 50%); mana did not rise in 30 s") || strings.Contains(notes(d), "gave up") {
+	if rs < 60 || rs > 80 || !strings.Contains(notes(d), "rest gate passed with Heal not drinking (mana 40%); mana did not rise in 30 s") || strings.Contains(notes(d), "gave up") {
 		t.Fatalf("rest %.0f s notes %s", rs, notes(d))
 	}
 
 	// A trickle of regeneration (2.5% in 30 s) is not drinking either.
 	g = newFake()
 	g.add(201, 1, Point{20, 0, 0})
-	g.party[1].Power = 200
+	g.party[1].Power = 160
 	g.onTick = func(g *fakeGame) {
 		if g.resting {
 			g.party[1].Power++
@@ -217,13 +217,13 @@ func TestRestGatePassesACasterWhoDoesNotDrink(t *testing.T) {
 	// The tolerance is for mana only: a hurt member still holds the gate to its timeout, and the note names both.
 	g = newFake()
 	g.add(201, 1, Point{20, 0, 0})
-	g.party[1].Power = 200
+	g.party[1].Power = 160
 	g.party[0].Health = 700
 	d = NewDriver(mustPlan(t, restPlan), g, Config{RestTimeout: 60 * time.Second}, g.clock())
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v", err)
 	}
-	if n := notes(d); !strings.Contains(n, "rest gate gave up after 60 s ([Tank health 77% Heal not drinking (mana 50%)])") {
+	if n := notes(d); !strings.Contains(n, "rest gate gave up after 60 s ([Tank health 77% Heal not drinking (mana 40%)])") {
 		t.Fatalf("%s", n)
 	}
 }

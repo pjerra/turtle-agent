@@ -22,8 +22,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch strings.ToLower(p.Mode) {
 	case "", "group":
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || len(p.CC) > 0 {
-			return false, bad(`lead_bot, bots, tank and cc go with mode "remote"`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 {
+			return false, bad(`lead_bot, bots, tank, healer and cc go with mode "remote"`)
 		}
 		return false, nil
 	case "remote":
@@ -45,6 +45,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	if p.Tank != "" && !botName.MatchString(p.Tank) {
 		return true, bad("tank: %q is not a bot name", p.Tank)
+	}
+	if p.Healer != "" && !botName.MatchString(p.Healer) {
+		return true, bad("healer: %q is not a bot name", p.Healer)
 	}
 	for _, c := range p.CC {
 		if c.Entry == 0 || !slices.Contains(tbm.CCMarks, strings.ToLower(c.Mark)) || (c.Bot != "" && !botName.MatchString(c.Bot)) {
@@ -73,7 +76,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, plan *dungeon.Plan, setu
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
-	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank}
+	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)
