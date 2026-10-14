@@ -64,6 +64,7 @@ type hireFake struct {
 	silentList  bool                // the bot never answers `spells <filter>`
 	unreachable map[string]bool     // bots that answer no whisper (teleporting, offline in the grace)
 	noTalents   map[string]bool     // bots that answer `who` and `spells` but not `talents`
+	whoSilent   map[string]bool     // bots that answer everything but `who` (the hires of a kept binding)
 	noPet       bool
 	itemSilent  bool
 	hireReply   string
@@ -292,7 +293,7 @@ func (g *hireFake) reply(command string) (reply []string, handled bool) {
 		}
 	case f[0] == "command" && len(f) == 3 && f[2] == "who":
 		g.log("who %s", f[1])
-		if h := g.byName(f[1]); h != nil && !g.unreachable[h.name] {
+		if h := g.byName(f[1]); h != nil && !g.unreachable[h.name] && !g.whoSilent[h.name] {
 			// WhoAction::QuerySpec with its colour codes: "<spec> (a/b/c) <class> (<level> lvl), <gear score> GS (<quality counts>)".
 			reply = []string{fmt.Sprintf("Forwarded command for %s: who; action success is not guaranteed.", h.name),
 				fmt.Sprintf("|h|cffffffffspec (|h|cff00ff00%d|h|cffffffff/%d|h|cffffffff/|h|cff00ff00%d|h|cffffffff)|r %s (|h|cff00ff00%d|h|cffffffff lvl), |h|cff00ff00812|h|cffffffff GS (|h|cff8080ff5|h|cffffffff), playing with Glacienne",
@@ -1302,5 +1303,29 @@ func TestGearReadJudgesQualityShieldAndAmmo(t *testing.T) {
 	drinks, ammo, short := g.supplies("hunter", "dps")
 	if drinks != 20 || ammo != "bullets 50" || len(short) != 1 || short[0] != "50 bullets, 100 wanted" {
 		t.Fatalf("%d %q %v", drinks, ammo, short)
+	}
+}
+
+// A hire of a kept binding does not answer `who`: the class and level a run that kept the binding read are used for the bots still bound.
+func TestHireKeptBindingTakesWhoFromMemory(t *testing.T) {
+	g := newHireFake(t)
+	g.whoSilent = map[string]bool{}
+	mem := map[string]tbm.Who{}
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+		h := g.preHire(c[0], c[1], 43)
+		g.whoSilent[h.name] = true
+		mem[strings.ToLower(h.name)] = tbm.Who{Class: h.class, Level: h.level, Trees: h.trees}
+	}
+	g.nextName, g.raid = 5, true
+	g.preBind()
+	// without the memory the silent hires stop the step; with it they are placed, kept and not asked
+	rep, err := g.run(hireSpec())
+	if !failed(rep, err, "to `who`") {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	g.events, g.hireLines = nil, nil
+	rep, err = runRemote(t, g, g.plan, RemoteOptions{Prepare: hireSpec(), HireMemory: mem}, nil)
+	if err != nil || rep.State != "done" || g.count("logout") != 0 || len(g.hireLines) != 0 || len(rep.Ready.Reused) != 5 {
+		t.Fatalf("%v %s %v\n%s", err, rep.State, g.events, notesOf(rep))
 	}
 }

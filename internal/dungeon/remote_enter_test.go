@@ -703,22 +703,22 @@ func TestRemotePreflightTalentsNoAnswerAndMarkup(t *testing.T) {
 	}
 }
 
-// A failed run keeps the binding (default): the unbind would return the hires to the commander's raid and a resume's bind would make a
-// new group and a new instance (ZF-2). UnbindOnFail turns that off.
+// KeepOnFail: a failed run keeps the binding, so that a resume's bind finds the same group and instance (ZF-2: the unbind returned the
+// hires to the commander's raid and the next bind made a new group). Off (the default), the failed run unbinds like any other end.
 func TestRemoteFailedRunKeepsTheBinding(t *testing.T) {
 	for _, c := range []struct {
-		unbindOnFail bool
-		unbinds      int
-	}{{false, 0}, {true, 1}} {
+		keep    bool
+		unbinds int
+	}{{false, 1}, {true, 0}} {
 		g := newEnterFake(t)
 		g.stuck["Magey"] = true
 		o := opts()
-		o.UnbindOnFail = c.unbindOnFail
+		o.KeepOnFail = c.keep
 		rep, err := g.run(o)
 		if err == nil || rep.State != "failed" || g.unbinds != c.unbinds {
-			t.Fatalf("unbind_on_fail %v: %v state %s unbinds %d, want %d", c.unbindOnFail, err, rep.State, g.unbinds, c.unbinds)
+			t.Fatalf("keep_on_fail %v: %v state %s unbinds %d, want %d", c.keep, err, rep.State, g.unbinds, c.unbinds)
 		}
-		if !c.unbindOnFail && (rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept")) {
+		if c.keep && (rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept")) {
 			t.Fatalf("report %+v", rep.Remote)
 		}
 	}

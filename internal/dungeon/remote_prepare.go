@@ -20,7 +20,7 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 		return errors.New("prepare: this game cannot log bots in, teleport or send GM lines")
 	}
 	d.rep.setCurrent("prepare")
-	env := &prepEnv{g: pg, plan: d.plan, spec: d.opt.Prepare, bots: append([]string{d.opt.Lead}, d.opt.Bots...), remote: true,
+	env := &prepEnv{g: pg, plan: d.plan, spec: d.opt.Prepare, bots: append([]string{d.opt.Lead}, d.opt.Bots...), remote: true, memory: d.opt.HireMemory,
 		now: d.clk.Now, sleep: d.clk.Sleep, note: d.rep.note, shortcut: d.prepShortcut,
 		progress: func(s string) { d.rep.setCurrent(s); d.wd.progress(s) }, command: d.g.Command, settle: d.opt.BindSettle}
 	if d.opt.Prepare.Fresh && !d.opt.IgnoreEntryLimit {

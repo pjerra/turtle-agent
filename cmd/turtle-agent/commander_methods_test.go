@@ -396,7 +396,7 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off","unbind_on_fail":true}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
@@ -418,6 +418,47 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 	rep := st["report"].(map[string]any)
 	if st["state"] != "failed" || !strings.Contains(rep["error"].(string), "map 70") || rep["remote"].(map[string]any)["unbound"] != true {
 		t.Fatalf("%v", st)
+	}
+}
+
+// keep_on_fail: a failed run keeps its binding (no `commander unbind`), and dungeon_stop with no run going lets it go.
+func TestDungeonRunRemoteKeepOnFailKeepsTheBindingUntilStop(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"version":1,"name":"rem","map":70,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"here","to":{"x":5,"y":5,"z":5},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "rem.json"), []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off","keep_on_fail":true}`))
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
+	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
+	r.system("TBM:ACTION_ACK|commander view|party|2|on")
+	r.system(viewFrame(1, false)...) // the lead bot is on map 0, the plan needs 70
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|1|Tanky")
+	var st map[string]any
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st = resultOf(t, r.call("dungeon_status", `{}`))
+		if st["state"] == "failed" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	rem := st["report"].(map[string]any)["remote"].(map[string]any)
+	if st["state"] != "failed" || rem["unbound"] == true || !strings.HasPrefix(rem["unbind_via"].(string), "kept") {
+		t.Fatalf("%v", st)
+	}
+	done := make(chan map[string]any, 1)
+	go func() { done <- r.call("dungeon_stop", `{}`) }()
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
+	r.system("TBM:ACTION_ACK|commander unbind|party|2|0")
+	select {
+	case out := <-done:
+		resultOf(t, out)
+	case <-time.After(5 * time.Second):
+		t.Fatal("dungeon_stop did not return")
 	}
 }
 
@@ -493,7 +534,7 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0,"unbind_on_fail":true}`))
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0}`))
 	if start["from_leg"] != float64(0) || start["from_pull_group"] != float64(0) {
 		t.Fatalf("%v", start)
 	}
