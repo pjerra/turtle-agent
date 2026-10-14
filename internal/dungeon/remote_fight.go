@@ -163,6 +163,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		if err := d.requireLiving(); err != nil {
 			return err
 		}
+		// A mob that ran off at low health in an earlier fight comes back with friends: no pull while it may (remote_flee.go).
+		if err := d.waitFled(ctx, label); err != nil {
+			return err
+		}
 		t, ok, err := d.pickTarget(ctx, sp)
 		if err != nil {
 			return err
@@ -559,6 +563,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	lastN := d.n
 	sawEvade := false
+	fledHere := 0 // tracked mobs that ran off alive
 	deadOf := func() []deadAt {
 		var out []deadAt
 		for g := range killed {
@@ -598,7 +603,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
 					// The pulled mob and its group's entries: gone after fighting is dead. A joiner of another entry (a boss) is dead only
 					// when it was nearly dead with a bot by (the ledger's rule): one chased out of view alive is no kill.
-					if fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])) {
+					switch {
+					case d.wasFled(g) || (fought[g] && d.isRunning(g)):
+						fledHere++ // it ran off alive (remote_flee.go): no kill, and the next pull waits for it
+					case fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])):
 						killed[g] = true
 					}
 					delete(tracked, g)
@@ -647,6 +655,12 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		case alive == 0 && len(killed) > 0:
 			d.ptKilled()
 			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
+		case alive == 0 && fledHere > 0:
+			// What stayed is dead and the rest ran off: the pull is won as far as the party got; the runners are waited for before the next one.
+			if len(killed) > 0 {
+				d.ptKilled()
+			}
+			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
 		case alive == 0 && sawEvade:
 			return fightResult{out: evaded}, nil
 		case alive == 0:
@@ -674,7 +688,7 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
 		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
-		if !fresh && !d.focusGone(mobs) {
+		if _, runner := d.runnerIn(mobs); !fresh && !d.focusGone(mobs) && !runner {
 			return nil
 		}
 	}
@@ -687,7 +701,8 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) {
+	_, runner := d.runnerIn(mobs)
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -712,6 +727,10 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 		return false, nil
 	}
 	d.tf.init()
+	// A mob running off at low health is killed before it is out of reach: the party is sent at it ahead of the threat order.
+	if taken, err := d.focusRunner(ctx, mobs); taken || err != nil {
+		return taken, err
+	}
 	cands := d.respectCC(mobs)
 	sorted := d.rankByTank(cands)
 	var pick *tbm.HostileRec

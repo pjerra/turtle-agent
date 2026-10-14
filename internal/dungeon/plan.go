@@ -98,6 +98,11 @@ type Plan struct {
 	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
 	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
 	CCAlways []uint32 `json:"cc_always,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
@@ -372,6 +377,7 @@ type rawPlan struct {
 	Name     string            `json:"name"`
 	Kind     string            `json:"kind"`
 	Status   string            `json:"status"`
+	Fleers   []uint32          `json:"fleers"`
 	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
@@ -648,6 +654,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
 		if rp.Kind == KindRaid {
 			c.fail("hire_composition", "a raid plan has a raid block instead")
