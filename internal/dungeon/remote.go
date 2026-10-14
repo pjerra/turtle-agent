@@ -1350,14 +1350,25 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 	last := began
 	var calm time.Duration
 	noted := false
-	deadAtStart := len(d.deadMembers())
+	seenDead := map[packet.GUID]bool{} // every bot seen dead during the wait, including ones that fell meanwhile
+	defer func() {
+		raised := 0
+		for g := range seenDead {
+			if m, ok := d.fr.Member(g); ok && !m.Dead {
+				raised++
+			}
+		}
+		if raised > 0 {
+			d.remote(func(r *RemoteReport) { r.Rezzed += raised })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots were raised within %.0f s of waiting", max(d.curLeg, 0), raised, d.clk.Now().Sub(began).Seconds()))
+		}
+	}()
 	for {
 		dead := d.deadMembers()
+		for _, m := range dead {
+			seenDead[m.GUID] = true
+		}
 		if len(dead) == 0 {
-			if noted {
-				d.remote(func(r *RemoteReport) { r.Rezzed += deadAtStart })
-				d.rep.note(fmt.Sprintf("leg %d: %d dead bots were raised in %.0f s, nobody was released", max(d.curLeg, 0), deadAtStart, d.clk.Now().Sub(began).Seconds()))
-			}
 			return nil
 		}
 		now := d.clk.Now()

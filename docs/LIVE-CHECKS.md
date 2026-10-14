@@ -639,7 +639,10 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
 3. **Unseen packs.** Walk leg 0 and read the notes: every `nothing of [...] in view; walking to its position` line should be followed by either a
    pull of that group or `counted as cleared: ...`. Count `pack_looks`, `packs_seen_empty`, `walk_aggros`: deploy-19h skipped 10 of 10 groups and met
    2 packs on the walk to the boss. Check that the lead bot really gets within 25 yd of a pack (a pack behind a wall, up a ledge) and whether the
-   `could not get a view of the pack` failure shows up on a real position.
+   `could not get a view of the pack` failure shows up on a real position. Uldaman's ledge packs (a position up on a ledge the navmesh path does not
+   bring the lead bot within 25 yd of) are the expected case: an unreachable position fails the step on purpose, because passing it would count an
+   unseen pack as dead. Note which positions fail; the plan may need a closer `to` or a different pull for them. A kill clears only its own position of a
+   multi-position group: the lead bot still walks to the others.
 4. **Rez wait.** Let a DPS bot die with the priest alive and out of combat: no `cmd revive` should go out; the priest should raise it within the
    30 s (`rez_waits` 1, `rezzed` 1, the note `were raised`). Then kill the priest too (or stun it in combat): the wait ends at once and `cmd revive`
    goes out. Check the module's priest actually casts Resurrection on a body that has not released, and how long it takes.

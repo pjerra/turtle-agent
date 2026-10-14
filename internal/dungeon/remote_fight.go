@@ -153,7 +153,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 				return d.leftOver(label, sp, kills, gaveUp)
 			}
 			// Nothing of the group in view: it counts as gone only with evidence, else the lead bot walks to its positions to look.
-			cleared, why, err := d.confirmGone(ctx, sp, kills, looked)
+			cleared, why, err := d.confirmGone(ctx, sp, looked)
 			if err != nil {
 				return err
 			}

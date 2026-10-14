@@ -469,3 +469,64 @@ func TestRemoteEndLogsTheBotsOut(t *testing.T) {
 		t.Fatalf("%s", notesOf(rep))
 	}
 }
+
+// G3: a kill clears only the position it happened at. Positions A and B of one group, B round a corner: A is marked killed, so the lead
+// bot does not walk there, but it does walk to B and finds the pack that stands there.
+func TestRemoteKillAtOnePositionDoesNotClearTheOther(t *testing.T) {
+	g := newFakeRemote(t)
+	g.sight = 30
+	a, b := Point{300, 0, 0}, Point{300, 120, 0}
+	g.addMob(299, b)
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299, 299}, Positions: []Point{a, b}}}})
+	cfg := DefaultConfig()
+	d := NewRemoteDriver(plan, g, cfg, opts(), g.clock())
+	ctx := context.Background()
+	if err := d.begin(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	d.curLeg = 0
+	sp := fightSpec{pick: []uint32{299}, track: []uint32{299}, anchors: []Point{a, b}}
+	d.noteKilled(sp, tbm.HostileRec{Entry: 299, X: a.X, Y: a.Y, Z: a.Z}) // the pack at A died
+	cleared, why, err := d.confirmGone(ctx, sp, map[int]bool{})
+	if err != nil || cleared {
+		t.Fatalf("a kill at A cleared B: cleared %v (%s) %v", cleared, why, err)
+	}
+	if rep := d.Report(); rep.Remote.PackLooks != 1 {
+		t.Fatalf("looks %d: %v", rep.Remote.PackLooks, rep.Notes)
+	}
+	if l := g.lead(); dist3(Point{l.X, l.Y, l.Z}, b) > 30 || dist3(Point{l.X, l.Y, l.Z}, a) < 100 {
+		t.Fatalf("the lead bot stands at %.0f %.0f: it should have gone to B, not A", l.X, l.Y)
+	}
+	// B's mob really is there, now in view; once it is gone and B is looked at, the group is cleared.
+	g.mobs = nil
+	if cleared, why, err = d.confirmGone(ctx, sp, map[int]bool{}); err != nil || !cleared {
+		t.Fatalf("%v %s %v", cleared, why, err)
+	}
+}
+
+// G8: Rezzed counts the bots actually raised, also when another one falls during the wait.
+func TestRemoteRezWaitCountsTheBotsRaised(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.party[2].Dead, g.party[2].HP, g.party[2].State = true, 0, "d"
+	start := g.now
+	g.onTick = func(g *fakeRemote) {
+		el := g.now.Sub(start)
+		if el > 6*time.Second && el < 8*time.Second { // the tank falls while the healer is at it
+			g.party[0].Dead, g.party[0].HP, g.party[0].State = true, 0, "d"
+		}
+		if el > 12*time.Second { // both are raised
+			for _, p := range g.party[:3] {
+				if p.Dead {
+					p.Dead, p.HP, p.State = false, p.MaxHP/2, "n"
+				}
+			}
+		}
+	}
+	o := opts()
+	o.Healer = "Healy"
+	rep, err := runRemote(t, g, plan1(), o, nil)
+	if err != nil || rep.Remote.Rezzed != 2 || len(g.ordersOf("cmd revive")) != 0 {
+		t.Fatalf("%v %+v %v", err, rep.Remote, g.orders)
+	}
+}

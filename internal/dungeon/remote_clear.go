@@ -55,13 +55,11 @@ func (d *RemoteDriver) anchorGone(sp fightSpec, i int) (bool, string) {
 	return false, ""
 }
 
-// confirmGone decides whether a group that is not in view is gone. kills are the kills of this pull. looked remembers the positions the
+// confirmGone decides whether a group that is not in view is gone, position by position (a kill marks only the spot it happened at via
+// noteKilled: the group's other positions, round a corner, are still looked at). looked remembers the positions the
 // lead bot has stood at and seen empty. It reports false (and no error) when a hostile of the group showed itself during the look: the
 // caller pulls it. It fails when a position cannot be looked at (the lead bot does not get within ClearSeeRadius of it).
-func (d *RemoteDriver) confirmGone(ctx context.Context, sp fightSpec, kills int, looked map[int]bool) (cleared bool, why string, err error) {
-	if kills > 0 {
-		return true, "its mobs were killed", nil
-	}
+func (d *RemoteDriver) confirmGone(ctx context.Context, sp fightSpec, looked map[int]bool) (cleared bool, why string, err error) {
 	if len(sp.anchors) == 0 {
 		return true, "the plan gives no positions to look at", nil
 	}
