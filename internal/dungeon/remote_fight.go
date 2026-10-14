@@ -164,6 +164,9 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			// A boss that died, in its own pull or in a First add's that it joined, is not in the feed any more (the feed lists no
 			// corpses for long): the kill this run (or its corpse in view) is the evidence, as the group driver's deadInView.
 			if sp.required {
+				if err := d.nearForBoss(ctx, sp); err != nil {
+					return err
+				}
 				if dead, why := d.bossDead(sp); dead {
 					d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
 					return nil

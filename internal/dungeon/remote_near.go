@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
+
+	"github.com/pjerra/turtle-agent/internal/objects"
 )
 
 // Keeping the agent near the party (remote mode). The object steps need the agent's own character in view of the chest, the corpse
@@ -242,4 +244,54 @@ func (d *RemoteDriver) objectStepNext() ([2]int, bool) {
 		return [2]int{leg, idx}, true
 	}
 	return [2]int{}, false
+}
+
+// UnitSource is the optional part of a RemoteGame that lists the units in the agent's own view (its object store). A boss killed
+// before this driver started (a resumed run) is in no ledger and no frame, but its corpse is in the store of an agent standing near it.
+type UnitSource interface {
+	Units() []objects.Unit
+}
+
+// bossCorpseSeen says whether the agent's own view holds a corpse of one of the entries (health 0 or the dead flag) in the boss's area:
+// within the larger of the group radius and 80 yd of a position of the step, or anywhere when the step has none.
+func (d *RemoteDriver) bossCorpseSeen(sp fightSpec) bool {
+	us, ok := d.g.(UnitSource)
+	if !ok {
+		return false
+	}
+	for _, u := range us.Units() {
+		if u.Type != "creature" || !slices.Contains(sp.pick, u.Entry) || u.PosAgeMS < 0 || !(u.Dead || (u.MaxHealth > 0 && u.Health == 0)) {
+			continue
+		}
+		if len(sp.anchors) == 0 {
+			return true
+		}
+		for _, a := range sp.anchors {
+			if dist3(Point{u.X, u.Y, u.Z}, a) <= max(float64(d.groupRadius(sp)), 80) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// nearForBoss brings the agent up before a boss step is judged (once per leg and boss), so that a corpse the feed does not list is in its
+// view; it waits a few looks for the object store to take the new surroundings in.
+func (d *RemoteDriver) nearForBoss(ctx context.Context, sp fightSpec) error {
+	if _, ok := d.g.(UnitSource); !ok {
+		return nil
+	}
+	if d.near.tried == nil {
+		d.near.tried = map[[2]int]bool{}
+	}
+	key := [2]int{d.curLeg, -1000 - int(sp.pick[0])}
+	if d.near.tried[key] {
+		return nil
+	}
+	d.near.tried[key] = true
+	moved, err := d.keepNear(ctx)
+	for i := 0; err == nil && moved && i < 3 && !d.bossCorpseSeen(sp); i++ {
+		err = d.tick(ctx, d.cfg.Poll)
+	}
+	return err
 }

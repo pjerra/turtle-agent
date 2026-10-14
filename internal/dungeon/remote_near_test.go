@@ -30,6 +30,7 @@ type nearGame struct {
 	onAppear  func(g *nearGame)
 	blockWalk bool        // WalkSelf waits for its context to end (a long walk)
 	walking   atomic.Bool // a walk is under way
+	units     []objects.Unit
 }
 
 func newNearGame(t *testing.T, level int) *nearGame {
@@ -172,5 +173,43 @@ func TestObjectStepBringsTheAgentUp(t *testing.T) {
 	}
 	if len(g.appears) != 2 || g.indexOf("cmd open") < 0 || rep.Remote.AgentAppears != 1 {
 		t.Fatalf("appears %v %v %+v", g.appears, g.orders, rep.Remote)
+	}
+}
+
+func (n *nearGame) Units() []objects.Unit { return n.units }
+
+func corpseOf(entry uint32, at Point) objects.Unit {
+	return objects.Unit{GUID: 0xF130000309000099, Type: "creature", Entry: entry, X: at.X, Y: at.Y, Z: at.Z, PosAgeMS: 100, MaxHealth: 5000, Dead: true}
+}
+
+func nearBossPlan() *Plan {
+	return remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, Boss: &Boss{Entry: 777, Position: Point{60, 0, 0}}})
+}
+
+// A resumed run: the boss died before this driver started, so no ledger and no frame knows it. Its corpse is in the agent's own store,
+// which the keep-near before the boss step brought up to the party.
+func TestResumedBossCorpseInTheAgentsStorePassesTheBossStep(t *testing.T) {
+	g := newNearGame(t, 3)
+	g.appearErr = []error{errors.New("not now")} // the walk's appear fails; the boss step's own keep-near works
+	g.onAppear = func(n *nearGame) { n.units = []objects.Unit{corpseOf(777, Point{62, 3, 0})} }
+	rep, err := nearRun(t, g, nearBossPlan())
+	if err != nil || len(g.appears) != 2 || !strings.Contains(notesOf(rep), "its corpse is in the agent's view") {
+		t.Fatalf("%v appears %v\n%s", err, g.appears, notesOf(rep))
+	}
+}
+
+func TestBossStepWithoutACorpseOrLedgerStillFails(t *testing.T) {
+	// No corpse at all.
+	g := newNearGame(t, 3)
+	if _, err := nearRun(t, g, nearBossPlan()); err == nil || !strings.Contains(err.Error(), "no living [777]") {
+		t.Fatalf("%v", err)
+	}
+	// A corpse of another entry, a living unit, and a corpse far from the boss's area do not count.
+	g = newNearGame(t, 3)
+	alive := corpseOf(777, Point{60, 0, 0})
+	alive.Dead, alive.Health = false, 5000
+	g.units = []objects.Unit{corpseOf(778, Point{60, 0, 0}), alive, corpseOf(777, Point{900, 900, 0})}
+	if _, err := nearRun(t, g, nearBossPlan()); err == nil || !strings.Contains(err.Error(), "no living [777]") {
+		t.Fatalf("%v", err)
 	}
 }

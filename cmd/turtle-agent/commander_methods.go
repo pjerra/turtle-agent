@@ -308,3 +308,6 @@ func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.Wal
 	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
 	return dungeon.WalkResult{Result: r.Result, Reason: r.Reason, DistLeft: r.DistLeft}, err
 }
+
+// Units implements dungeon.UnitSource: the units in the agent's own view (a boss corpse the feed does not list).
+func (g remoteGame) Units() []objects.Unit { return g.c.cur().Units(objects.Filter{Limit: 5000}) }

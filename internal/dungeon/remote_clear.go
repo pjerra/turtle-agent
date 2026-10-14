@@ -66,6 +66,10 @@ func (d *RemoteDriver) bossDead(sp fightSpec) (bool, string) {
 	if d.ledgerDead(sp.pick) {
 		return true, "killed in this run, in another fight (seen fighting, then dead or gone from two whole frames)"
 	}
+	// Or its corpse stands in the agent's own view (a boss killed before this driver ran: a resume).
+	if d.bossCorpseSeen(sp) {
+		return true, "its corpse is in the agent's view"
+	}
 	for _, h := range d.fr.Hostiles {
 		if h.Entry == 0 || h.HPPct > 0 || !slices.Contains(sp.pick, h.Entry) {
 			continue
