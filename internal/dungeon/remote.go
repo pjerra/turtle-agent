@@ -73,6 +73,9 @@ type RemoteOptions struct {
 	// Healer names the bot the healer mana target applies to (the feed carries no class). Empty: every caster is held to the healer target.
 	Healer string
 	CC     []CCRule
+	// CCBot names the bot that takes the big-pack CC mark (remote_cc.go: a pack of BigPack or more gets one member Polymorphed before the
+	// pull). A hired party sets it to its mage; empty: no big-pack CC.
+	CCBot string
 	// Team is the party's team for the team gate (Boss.Team, PullGroup.Team): "alliance" or "horde". Empty: the game's (the agent's own
 	// race, as the feed carries none), which is right when the bots share the agent's account faction.
 	Team string
@@ -316,6 +319,8 @@ type RemoteReport struct {
 	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
 	TankBusyWaits   int `json:"tank_busy_waits"`  // pulls the module refused as tank-busy that waited for the tank, then pulled again
 	CCOrders        int `json:"cc_orders"`        // crowd-control orders
+	BigPacks        int `json:"big_packs"`        // pulls of a pack of big_pack or more mobs
+	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
 	// Tank first (README "Tank first"): TankThreatShare is the mean share of the top threat the tank held on the mobs of the fight, in
 	// percent (100: top of every list, 0: not among the top three), over TankThreatSamples frames of fighting; LooseAddOrders are the

@@ -90,8 +90,14 @@ type Plan struct {
 	// middle of it as its level. Empty: the plan gives none.
 	LevelBand []int `json:"level_band,omitempty"`
 	// HireComposition is the party the plan wants hired, "class:role" each (see HireSpec.Composition): the prepare step takes it when its own
-	// hire block gives none. Dungeon plans only.
+	// hire block gives none (empty: DefaultHireComposition). Zul'Farrak hires a mage for the Polymorph of its big packs. Dungeon plans only.
 	HireComposition []string `json:"hire_composition,omitempty"`
+	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPriority []uint32 `json:"cc_priority,omitempty"`
+	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
+	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
+	CCAlways []uint32 `json:"cc_always,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
@@ -350,6 +356,9 @@ type rawPlan struct {
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Band     []int             `json:"level_band"`
+	Hire     []string          `json:"hire_composition"`
+	CCPrio   []uint32          `json:"cc_priority"`
+	CCAlways []uint32          `json:"cc_always"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
@@ -549,6 +558,19 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if len(rp.Hire) > 0 {
+		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", err)
+		} else {
+			p.HireComposition = slices.Clone(rp.Hire)
+		}
+	}
+	if len(rp.CCPrio) > 0 {
+		p.CCPriority = slices.Clone(rp.CCPrio)
+	}
+	if len(rp.CCAlways) > 0 {
+		p.CCAlways = slices.Clone(rp.CCAlways)
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {

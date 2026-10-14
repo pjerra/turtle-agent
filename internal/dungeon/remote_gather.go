@@ -31,6 +31,9 @@ const (
 	GatherNear = 12
 	// AggroGuard is how near (yards) to the next hop a hostile the bots see must stand to be pulled before the hop.
 	AggroGuard = 22
+	// GatherClear is how far (yards) the end of a hop, where the party stops and gathers, stays from a hostile no step of the current leg
+	// owns: one nearer is pulled first (ZF hires-2 run 6: the party gathered 15 yd from a room of ten mobs of a later leg and wiped).
+	GatherClear = 30
 	// LookStandoff is how far short (yards) of a group's position the lead bot stops to look for it.
 	LookStandoff = ClearSeeRadius - 4
 	// lookArrive is how near the look's stand point the lead bot must get (the default 5 yd could leave it outside ClearSeeRadius).
@@ -187,7 +190,8 @@ func distToSegment(p, a, b Point) float64 {
 	return dist3(p, lerp(a, b, t))
 }
 
-// hostileAhead is the living hostile the bots see within AggroGuard yards of the hop from here to wp that is not fighting the party yet,
+// hostileAhead is the living hostile the bots see within AggroGuard yards of the hop from here to wp, or within GatherClear yards of the hop's
+// end (where the party will gather), that is not fighting the party yet,
 // the nearest to the lead bot, and no more than aheadMaxDZ above or below the hop (another floor is not in the way). Players, stealthed,
 // evading and crowd-controlled units, any unit a step of the plan owns (planOwns), mobs the bots refused and those a pull on the way
 // passed over in this leg are left out. Neutral units and critters the module lists are told apart by the record's reaction and kind (TortoiseBots #943): only reaction h (or none, from an older module) is pulled, and
@@ -211,7 +215,7 @@ func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 			continue
 		}
 		p := hostilePoint(h)
-		if distToSegment(p, here, wp) > float64(d.tx.AggroGuard) || p.Z < min(here.Z, wp.Z)-d.tx.AheadMaxDZ || p.Z > max(here.Z, wp.Z)+d.tx.AheadMaxDZ {
+		if (distToSegment(p, here, wp) > float64(d.tx.AggroGuard) && dist3(p, wp) > float64(d.tx.GatherClear)) || p.Z < min(here.Z, wp.Z)-d.tx.AheadMaxDZ || p.Z > max(here.Z, wp.Z)+d.tx.AheadMaxDZ {
 			continue
 		}
 		if dd := dist3(p, here); dd < bestD {
@@ -221,14 +225,15 @@ func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 	return best, bestD < math.MaxFloat64
 }
 
-// planOwns says whether h is one a step of the plan pulls or leaves alone, in any leg: a boss or a First add of any leg (by entry,
+// planOwns says whether h is one a step of the plan pulls or leaves alone: a boss or a First add of any leg (by entry,
 // wherever it stands), an entry any leg skips (the dormant Stone Keepers and Vault statues of Uldaman's last legs, 3-15 yd from the walks
-// of legs 10 and 12), or a unit with an entry of any leg's pull group standing within that group's radius of its positions. Those are
+// of legs 10 and 12), or a unit with an entry of a pull group of the current or an earlier leg (of any leg for a team-gated group) standing within
+// that group's radius of its positions. Those are
 // pulled in the plan's order by their steps, each from a gathered party (a team-gated one, or a statue before its ritual, may not be
 // pulled at all); the walk pulls only what the plan does not place there: a patrol away from its group, a pack the plan does not list.
 func (d *RemoteDriver) planOwns(h tbm.HostileRec) bool {
 	at := hostilePoint(h)
-	for _, l := range d.plan.Legs {
+	for li, l := range d.plan.Legs {
 		if b := l.Boss; b != nil && (h.Entry == b.Entry || slices.Contains(b.First, h.Entry)) {
 			return true
 		}
@@ -236,6 +241,12 @@ func (d *RemoteDriver) planOwns(h tbm.HostileRec) bool {
 			return true
 		}
 		for _, g := range l.PullGroups {
+			// A pack of a later leg in this leg's way is pulled like a pack the plan does not list: the party would otherwise stop
+			// and gather beside it (ZF hires-2 run 6: the walk of leg 0 went through Velratha's packs of leg 2 and wiped). An earlier
+			// leg's pack (done, or skipped by from_leg and left alive on purpose) and a team-gated pack stay the plan's.
+			if li > d.curLeg && d.curLeg >= 0 && g.Team == "" {
+				continue
+			}
 			if !slices.Contains(g.Entries, h.Entry) {
 				continue
 			}

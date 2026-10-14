@@ -13,6 +13,15 @@
     "z": 10
   },
   "level_band": [44, 48],
+  "hire_composition": [
+    "warrior:tank",
+    "priest:healer",
+    "mage:dps",
+    "hunter:dps",
+    "warlock:dps"
+  ],
+  "cc_priority": [7246, 5650, 5648],
+  "cc_always": [7246],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. FIRST-RUN ROUTE: three legs, Antu'sul, Theka the Martyr, Hydromancer Velratha, 1470 yd of navmesh path from the entrance (checked by TestZulfarrakOnNavmesh). Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
     "Left out of this plan because the driver cannot do them yet (all listed in dungeons/zulfarrak-extra.json or here): (1) Witch Doctor Zum'rah (7271): faction 35 (friendly) until the area trigger 962 (at_zumrah, centre 1909.3 1015.1 11.5, radius 10) fires, and a trigger is only taken from a client packet; the TortoiseBots bots send CMSG_AREATRIGGER only when their master does, and the remote agent stays outside. dungeongen -check -strict would also flag a faction 35 boss. Needs an area_trigger step the agent takes while standing in the instance, or a bot-side order. (2) The stairs event (Sergeant Bly's crew in the cages at the top of the pyramid stairs, three waves of Sandfury trolls, wave 3 summons Nekrum Gutchewer 7796 and Shadowpriest Sezz'ziz 7275: they have NO spawn row, the instance script summons them) and (3) Chief Ukorz Sandscalp + Ruuzlu: Ukorz sits behind the End Door (146084), which only Weegli Blastfuse (7607) opens, through his gossip menu after the stairs event; the driver has no gossip/talk step, and a wait inside a step does not fight the waves. (4) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (5) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here.",

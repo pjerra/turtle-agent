@@ -340,7 +340,10 @@ func (d *RemoteDriver) pickTarget(ctx context.Context, sp fightSpec) (tbm.Hostil
 	for look := 1; look <= looks; look++ {
 		if cs := d.candidates(sp, sp.pick); len(cs) > 0 {
 			cs = preferVisibleHostile(cs)
-			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool { _, cc := d.ccRule(h.Entry); return cc || d.ccd(h) }); len(rest) > 0 {
+			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool {
+				_, cc := d.ccRule(h.Entry)
+				return cc || d.ccd(h) || slices.Contains(d.plan.CCAlways, h.Entry)
+			}); len(rest) > 0 {
 				cs = rest
 			}
 			if c := cs[0]; distToLead(d, hostilePoint(c)) <= float64(d.cfg.PullRange) || look == looks {
@@ -500,6 +503,9 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 // fight pulls t and follows the fight in the feed until the pack is dead, evaded, never came, or the limit passed.
 func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec) (fightResult, error) {
 	if err := d.ccFor(ctx, t, sp); err != nil {
+		return fightResult{}, err
+	}
+	if err := d.bigPackCC(ctx, t, sp); err != nil {
 		return fightResult{}, err
 	}
 	if res, done, err := d.sendPull(ctx, t); err != nil || done {
