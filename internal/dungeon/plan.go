@@ -412,8 +412,8 @@ type rawBoss struct {
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
 	// Tactics is Boss.Tactics.
-	Tactics *tactics.Tactics `json:"tactics"`
-	NeedsWalk      bool  `json:"needs_walk"`
+	Tactics   *tactics.Tactics `json:"tactics"`
+	NeedsWalk bool             `json:"needs_walk"`
 }
 
 type rawStep struct {
