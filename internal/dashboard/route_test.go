@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLegStopsOrder(t *testing.T) {
@@ -78,6 +79,48 @@ func TestTrailCap(t *testing.T) {
 	tr.Add("r2", 1, 1)
 	if len(tr.Points()) != 1 {
 		t.Errorf("a new run starts a new trail, got %d", len(tr.Points()))
+	}
+}
+
+// Each point keeps the second the lead was last seen there, in step with the points, through merging, thinning and a new run.
+func TestTrailTimes(t *testing.T) {
+	var tr Trail
+	t0 := time.Unix(1_800_000_000, 0)
+	tr.AddAt("r", 0, 0, t0)
+	tr.AddAt("r", 1, 0, t0.Add(time.Second)) // closer than the step: ignored
+	tr.AddAt("r", 10, 0, t0.Add(5*time.Second))
+	tr.AddAt("r", 20, 0, t0.Add(9*time.Second)) // on the line through its neighbours: merged, newer time
+	tr.AddAt("r", 20, 30, t0.Add(20*time.Second))
+	pts, ts := tr.Points(), tr.Times()
+	if len(pts) != len(ts) || len(pts) != 3 {
+		t.Fatalf("points %v times %v", pts, ts)
+	}
+	if ts[0] != t0.Unix() || ts[1] != t0.Add(9*time.Second).Unix() || ts[2] != t0.Add(20*time.Second).Unix() || pts[1] != [2]float64{20, 0} {
+		t.Fatalf("points %v times %v", pts, ts)
+	}
+	for i := 0; i < 6000; i++ {
+		y := 0.0
+		if i%2 == 1 {
+			y = 40
+		}
+		tr.AddAt("big", float64(i)*5, y, t0.Add(time.Duration(i)*time.Second))
+	}
+	pts, ts = tr.Points(), tr.Times()
+	if len(pts) != len(ts) || len(pts) > TrailCap {
+		t.Fatalf("after thinning: %d points, %d times", len(pts), len(ts))
+	}
+	for i := 1; i < len(ts); i++ {
+		if ts[i] <= ts[i-1] {
+			t.Fatalf("times run forward: %d then %d", ts[i-1], ts[i])
+		}
+	}
+	tr.AddAt("next", 1, 1, t0)
+	if len(tr.Times()) != 1 {
+		t.Errorf("a new run starts new times: %v", tr.Times())
+	}
+	var empty Trail
+	if empty.Times() != nil {
+		t.Error("no points, no times")
 	}
 }
 

@@ -93,3 +93,6 @@ func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
 		t.Error("the door icon rect must be styled by its own class")
 	}
 }
+
+// TestMapLayers: the layer defaults, the one global saved choice, availability and the geometry of the newer layers.
+func TestMapLayers(t *testing.T) { runCheck(t, "layers_check.js", "layers.js") }

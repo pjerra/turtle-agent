@@ -167,6 +167,7 @@ func (p *Poller) trackTrail(id string, c *Card) {
 		}
 	}
 	c.Trail = t.Points()
+	c.TrailT = t.Times()
 }
 
 func (p *Poller) client(a Agent) *Client {

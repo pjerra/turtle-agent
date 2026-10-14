@@ -2711,9 +2711,18 @@ font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fig
 explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
 them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
 
-**What is drawn.** The **Layers** button opens a panel of checkboxes (remembered per map in the browser): the game map picture (with the dim
-slider), planned route, walked path, next-stop arrow, pull-group circles, hostile and neutral mobs, cleared groups, bosses, doors and objects,
-bot dots and names, commander, section labels and step numbers (off by default, like neutral mobs). The planned route runs through every
+**What is drawn.** The **Layers** button opens a panel of checkboxes. The choice is **one setting for all maps and all cards**, saved once in the
+browser (`localStorage` key `maplayers.v2`; a change on one card shows on every card at once, and **Reset layers** returns to the defaults).
+The list is in `internal/dashboard/static/layers.js`; adding a layer there (plus its drawing in `app.js`) puts it in every card's panel and on
+every map. A layer whose data the card's map does not have is greyed out with the reason beside it (its saved choice is kept).
+Shown by default, as before layers could be chosen: the game map picture (with the dim slider), planned route, pull-group circles, cleared
+groups, bosses, doors and objects, section labels, walked path, next-stop arrow, bot dots and names, commander, hostile mobs. Off by default:
+neutral and friendly mobs, step numbers, and the newer layers: **grid**, **distance scale bar**, **critters** (their own kind; they used to
+count as neutral), **threat lines** (each mob to the unit it targets, from the feed's `target` guid), **bot target lines**, **the lead's heading
+arrow** (the feed has no facing, so it is the direction of the lead's last movement; it needs a walk of 4 yd within 20 s), **healer range**
+(a 40 yd ring around each living healer), **aggro range** (a 20 yd ring around the pull targets: the hostile mobs of the pack being pulled,
+else the ones fighting), **the line from the commander to the lead**, **times on the walked path** (the clock time the lead was last seen at
+a point, kept with the points) and **zone and sub-zone names** (greyed out: dungeon maps have no zone outlines in this dashboard). The planned route runs through every
 leg's waypoints, pull groups and boss in plan order: done legs dimmed, the current one bright and thick, the ones to come dashed, with the
 leg's name where it starts and the step number on hover. The walked path is the lead bot's position at each poll, kept in memory per agent
 (thinned, at most 1500 points, reset when a new run starts) and drawn fading with age. The arrow points from the party to the next stop of the
