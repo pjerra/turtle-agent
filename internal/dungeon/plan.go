@@ -57,8 +57,14 @@ type Plan struct {
 	Portal *Portal `json:"portal,omitempty"`
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
-	LevelBand []int    `json:"level_band,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	LevelBand []int `json:"level_band,omitempty"`
+	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
+	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
+	HireComposition []string `json:"hire_composition,omitempty"`
+	// CCPrefer lists, best first, the entries the big-pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPrefer []uint32 `json:"cc_prefer,omitempty"`
+	Notes    []string `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	Legs     []Leg           `json:"legs"`
@@ -309,6 +315,8 @@ type rawPlan struct {
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Band     []int             `json:"level_band"`
+	Hire     []string          `json:"hire_composition"`
+	CCPrefer []uint32          `json:"cc_prefer"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
@@ -507,6 +515,16 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if len(rp.Hire) > 0 {
+		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", err)
+		} else {
+			p.HireComposition = slices.Clone(rp.Hire)
+		}
+	}
+	if len(rp.CCPrefer) > 0 {
+		p.CCPrefer = slices.Clone(rp.CCPrefer)
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {

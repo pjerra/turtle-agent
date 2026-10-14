@@ -33,6 +33,8 @@ type tuneExtra struct {
 	AggroGuard     float32       // careful walk: a hostile this near the next hop is pulled before it
 	AheadMaxDZ     float32       // careful walk: how far above or below the hop a hostile may stand to be pulled
 	MaxAheadPulls  int           // careful walk: pulls of hostiles near the way in one walk
+	GatherClear    float32       // careful walk: a hop's end (a gather spot) stays this far from a hostile no step of this leg owns
+	BigPack        int           // a pack of this many mobs gets one member crowd-controlled before the pull (remote_cc.go)
 	PartyDownDead  int           // dead bots that stop the leg
 	RespawnSettle  time.Duration // pulltest: wait after `.respawn` for the pack to show
 }
@@ -40,7 +42,7 @@ type tuneExtra struct {
 func defaultTuneExtra() tuneExtra {
 	return tuneExtra{LookStandoff: LookStandoff, LookArrive: lookArrive, AttackHoldYd: attackHoldYd, TankBusyRounds: maxTankBusyRounds, AddOrders: maxAddOrders,
 		FallbackTries: objectFallbackTries, GatherNear: GatherNear, GatherProgress: gatherProgress, AggroGuard: AggroGuard, AheadMaxDZ: aheadMaxDZ,
-		MaxAheadPulls: maxAheadPulls, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
+		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
 }
 
 // tuneTarget is what a tunable reads and writes.
@@ -134,6 +136,8 @@ var tuneSpecs = []tuneSpec{
 	yds("gather_progress", 0.5, 10, "how much nearer a bot must have come during a gather's whole wait to be waited for again", func(t *tuneTarget) *float32 { return &t.x.GatherProgress }),
 	yds("aggro_guard", 8, 40, "a hostile this near the next hop is pulled before the hop", func(t *tuneTarget) *float32 { return &t.x.AggroGuard }),
 	yds("ahead_max_dz", 2, 30, "how far above or below the hop a hostile may stand to be pulled before it", func(t *tuneTarget) *float32 { return &t.x.AheadMaxDZ }),
+	yds("gather_clear", 10, 60, "a hop's end (where the party gathers) stays this far from a hostile no step of this leg owns", func(t *tuneTarget) *float32 { return &t.x.GatherClear }),
+	ints("big_pack", "count", 3, 20, "a pack of this many mobs gets one member crowd-controlled by the cc bot before the pull", func(t *tuneTarget) *int { return &t.x.BigPack }),
 	ints("max_ahead_pulls", "count", 1, 30, "pulls of hostiles near the way, at most, in one walk", func(t *tuneTarget) *int { return &t.x.MaxAheadPulls }),
 	yds("look_arrive", 1, 10, "how near its stand point the lead bot must get to look at a pack", func(t *tuneTarget) *float32 { return &t.x.LookArrive }),
 	ints("party_down_dead", "count", 1, 5, "dead bots that stop the leg", func(t *tuneTarget) *int { return &t.x.PartyDownDead }),

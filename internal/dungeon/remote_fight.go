@@ -502,6 +502,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	if err := d.ccFor(ctx, t, sp); err != nil {
 		return fightResult{}, err
 	}
+	if err := d.bigPackCC(ctx, t, sp); err != nil {
+		return fightResult{}, err
+	}
 	if res, done, err := d.sendPull(ctx, t); err != nil || done {
 		return res, err
 	}
