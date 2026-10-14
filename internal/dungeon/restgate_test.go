@@ -70,11 +70,11 @@ func TestRestGateCapsAtSixtySecondsAndNudges(t *testing.T) {
 	}
 	for _, gate := range rep.RestGates {
 		if gate.Result != "gave_up" || gate.Seconds < 60 || gate.Seconds > 66 || gate.MaxS != 60 || !slices.Equal(gate.Short, []string{"Heal mana 29%"}) ||
-			!gate.DrinkOrderSent || !slices.Equal(gate.DrinkOrders, []string{"Heal"}) {
+			!gate.DrinkOrderSent || gate.DrinkOrderResult != "sent (unverified)" || !slices.Equal(gate.DrinkOrders, []string{"Heal"}) {
 			t.Fatalf("%+v", gate)
 		}
 	}
-	if n := g.count(".bot command Heal drink"); n != 2 { // one per gate
+	if n := g.count(".bot command Heal u drink"); n != 2 { // one per gate
 		t.Fatalf("drink orders %d: %q", n, g.chats)
 	}
 	if rep.RestSeconds < 120 || rep.RestSeconds > 132 || rep.RestSeconds != rep.Legs[0].RestSeconds {
@@ -91,7 +91,7 @@ func TestRestGateNudgeWaitsForNoRise(t *testing.T) {
 	g.party[1].Power = 116
 	var at time.Time
 	g.onChat = func(g *fakeGame, text string) {
-		if text == ".bot command Heal drink" && at.IsZero() {
+		if text == ".bot command Heal u drink" && at.IsZero() {
 			at = g.now
 		}
 	}
@@ -106,7 +106,7 @@ func TestRestGateNudgeWaitsForNoRise(t *testing.T) {
 	g.healOnRest = true
 	g.party[1].Power = 100
 	d := runRest(t, g, restPlan, Config{})
-	if n := g.count(".bot command Heal drink"); n != 0 {
+	if n := g.count(".bot command Heal u drink"); n != 0 {
 		t.Fatalf("a member who drinks got %d orders", n)
 	}
 	for _, gate := range d.Report().RestGates {
@@ -120,7 +120,7 @@ func TestRestGateNudgeWaitsForNoRise(t *testing.T) {
 	g.party[1].Power = 116
 	start, at = g.now, time.Time{}
 	g.onChat = func(g *fakeGame, text string) {
-		if text == ".bot command Heal drink" && at.IsZero() {
+		if text == ".bot command Heal u drink" && at.IsZero() {
 			at = g.now
 		}
 	}
@@ -150,7 +150,7 @@ func TestRestGateFallsBackWhenTheRestOrderIsRefused(t *testing.T) {
 	prev := g.onChat
 	g.onChat = func(g *fakeGame, text string) {
 		prev(g, text)
-		if text == ".bot command Heal drink" && at.IsZero() {
+		if text == ".bot command Heal u drink" && at.IsZero() {
 			at = g.now
 		}
 	}
@@ -158,11 +158,11 @@ func TestRestGateFallsBackWhenTheRestOrderIsRefused(t *testing.T) {
 	if at.IsZero() || at.Sub(start) > 10*time.Second {
 		t.Fatalf("order at %v", at.Sub(start))
 	}
-	if g.count(".bot command Tank eat") == 0 {
+	if g.count(".bot command Tank u food") == 0 {
 		t.Fatalf("%q", g.chats)
 	}
 	gate := d.Report().RestGates[0]
-	if !gate.PartyRestRefused || !gate.DrinkOrderSent || countOf(g.chats, ".bot command Heal drink") != 2 { // once per gate
+	if !gate.PartyRestRefused || !gate.DrinkOrderSent || countOf(g.chats, ".bot command Heal u drink") != 2 { // once per gate
 		t.Fatalf("%+v %q", gate, g.chats)
 	}
 }

@@ -111,9 +111,12 @@ type RestGate struct {
 	Short []string `json:"short,omitempty"`
 	// DrinkOrders names the members a drink order was sent to (one each), DrinkOrderSent says whether there was any, and
 	// PartyRestRefused whether TortoiseBots refused the party rest order (so the orders went to the bots one by one).
-	DrinkOrders      []string `json:"drink_orders,omitempty"`
-	DrinkOrderSent   bool     `json:"drink_order_sent"`
-	PartyRestRefused bool     `json:"party_rest_refused,omitempty"`
+	DrinkOrders    []string `json:"drink_orders,omitempty"`
+	DrinkOrderSent bool     `json:"drink_order_sent"`
+	// DrinkOrderResult is "sent (unverified)" when any order went out: the driver does not read the bot's reply and no live run has
+	// shown yet that the bot drinks on it. Absent when none was sent.
+	DrinkOrderResult string `json:"drink_order_result,omitempty"`
+	PartyRestRefused bool   `json:"party_rest_refused,omitempty"`
 }
 
 // maxRestGates bounds the report's gate list.
@@ -130,7 +133,7 @@ func newGateRec(leg int, tgt restTarget, now time.Time) *gateRec {
 }
 
 func (r *gateRec) nudged(name string) {
-	r.g.DrinkOrderSent = true
+	r.g.DrinkOrderSent, r.g.DrinkOrderResult = true, "sent (unverified)"
 	if !slices.Contains(r.g.DrinkOrders, name) {
 		r.g.DrinkOrders = append(r.g.DrinkOrders, name)
 	}
@@ -157,9 +160,16 @@ func (r *gateRec) finish(rep *reporter, now time.Time, err error) {
 	})
 }
 
-// drinkOrder is the per-bot order that makes one bot drink or eat: `.bot command <Name> drink` (player-controls, "Mature AI
-// Command Delegation").
-func drinkOrder(name, what string) string { return ".bot command " + name + " " + what }
+// drinkOrder is the per-bot order that makes one bot drink ("drink") or eat ("eat"): `.bot command <Name> u drink` or `u food`.
+// The bare words are no chat command of the module (ParseChatCommand has no "drink" or "eat" trigger, so the bot would ignore
+// them); `u <item>` is the owner-or-GM use command, and the item text resolves through FindFoodVisitor (PlayerbotAI.cpp, the
+// "drink" and "food" item queries). Whether the bot then sits and drinks is unverified until a live check.
+func drinkOrder(name, what string) string {
+	if what == "eat" {
+		what = "food"
+	}
+	return ".bot command " + name + " u " + what
+}
 
 // replyText is a reply in a few words for a note: its kind and the line that settled it.
 func replyText(r tbm.Reply) string {

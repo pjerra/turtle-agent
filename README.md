@@ -703,16 +703,16 @@ What the driver does for each action of the plan (the stepper decides which):
   (a paladin, priest, shaman or druid by the `class` of its unit row) at least 50% mana and every other mana user at least 35% (mana only for mana users),
   and is within 40 yd of the leader, for up to 60 s. These are targets, not "full": a leg's `rest` in the plan overrides them and the cap
   (`health`, `healer_mana`, `mana`, `max_s`). **Drink nudge:** a member short of its mana target whose mana has not risen at all for 15 s (it is
-  not drinking) gets one order of its own, `.bot command <Name> drink` (as party chat, like the other orders), once per gate; and when TortoiseBots refuses the party
+  not drinking) gets one order of its own, `.bot command <Name> u drink` (the owner-or-GM `u <item>` command with the item text `drink`; the bare word `drink` is no chat command of the module and would be ignored; sent as party chat, like the other orders), once per gate, reported as `drink_order_result: "sent (unverified)"` until a live run shows the bot drinks on it; and when TortoiseBots refuses the party
   `rest` order (`rest`/`failed` "No scoped bot accepted the mature action", TB #916) the members that are short get that order at once (`drink` for
-  mana, `eat` for health) instead of waiting. The reply is not read: a refusal of the order comes back as a TBM:ACTION_ERR and is listed in `refusals[]`.
+  mana, `u food` for health) instead of waiting. The reply is not read: a refusal of the order comes back as a TBM:ACTION_ERR and is listed in `refusals[]`.
   A caster below its mana target whose mana has not
   risen by 5% of its maximum for 30 s (it is not drinking) no longer holds the gate once everything else is rested: the gate passes
   and notes (not for a healer below 30% mana: the party would go
   on without its heals, so that gate waits its 60 s out and the run goes on with the usual note) `rest gate passed with Wishe not drinking (mana 49%); mana did not rise in 30 s` (a companion behaviour to report to
   TortoiseBots, not to work around). After the cap the run goes on with a note if everyone has 50% health, else it fails. **Report:** `rest_seconds` (the run's total, and per leg),
   and `rest_gates[]`, one per gate: `leg`, `seconds` waited, `max_s`, `result` (`rested`, `stalled` = passed with non-drinkers, `gave_up` = the cap came with someone short, `failed`),
-  `short[]` (who was short when it ended, `Wishe mana 29%`), `drink_orders[]`, `drink_order_sent` and `party_rest_refused`. A dead member is
+  `short[]` (who was short when it ended, `Wishe mana 29%`), `drink_orders[]`, `drink_order_sent`, `drink_order_result` and `party_rest_refused`. A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
   naming `recover_wipe`; with `recover_wipe` the member gets a minute for a healer's resurrection, then `.bot action release` and
   `.bot action corpse run`, and the gate waits for it up to 12 min). **Before any of that, a leader whose brain can resurrect gets up to 120 s**
