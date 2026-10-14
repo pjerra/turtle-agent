@@ -422,6 +422,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		} else {
 			d.tf.init()
 			d.tf.ccHeld[h.GUID] = true // the party leaves it to the CC bot (tank-first rules)
+			d.ccOrdered[h.GUID] = d.clk.Now()
 		}
 	}
 	return nil

@@ -167,9 +167,17 @@ func TestUldamanFullPlan(t *testing.T) {
 			t.Errorf("%s: no ritual step of 3 with a stand point for altar %d: %+v", name, altar, l.Steps)
 		}
 	}
-	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
-	if f := leg("sentinel").Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+	// The Sentinel's room: the Relic Hunter camp (five Hunters and a Geologist, the two ledge Hunters among them 23-24 yd from the Sentinel)
+	// is one pack that a pull wakes together with the Sentinel (hires-3 wipe): one pull group of six, so that the big-pack CC counts it all,
+	// and no boss.first, the camp is cleared before the boss.
+	sen := leg("sentinel")
+	if f := sen.Boss.First; len(f) != 0 {
 		t.Errorf("sentinel first %v", f)
+	}
+	if n := len(sen.PullGroups); n != 4 {
+		t.Errorf("sentinel has %d pull groups, want 4 (bat, scorpids, basilisk, the camp)", n)
+	} else if camp := sen.PullGroups[n-1]; fmt.Sprint(camp.Entries) != "[4847 4847 4847 4847 4847 7030]" || len(camp.Positions) != 6 {
+		t.Errorf("sentinel camp: %+v", camp)
 	}
 	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
 	a := leg("archaedas")

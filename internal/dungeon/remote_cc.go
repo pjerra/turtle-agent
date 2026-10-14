@@ -3,8 +3,10 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -27,15 +29,7 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 		return nil
 	}
 	d.tf.init()
-	var pack []tbm.HostileRec
-	for _, h := range d.fr.Hostiles {
-		if h.Entry == 0 || h.HPPct <= 0 || !h.Hostile() || h.Bystander() || h.Evading() || d.engagedWith(h) {
-			continue
-		}
-		if dist3(hostilePoint(h), hostilePoint(t)) <= float64(d.groupRadius(sp)) {
-			pack = append(pack, h)
-		}
-	}
+	pack := d.packOf(t, float64(d.groupRadius(sp)))
 	always := slices.ContainsFunc(pack, func(h tbm.HostileRec) bool { return h.GUID != t.GUID && slices.Contains(d.plan.CCAlways, h.Entry) })
 	if len(pack) < d.tx.BigPack && !always {
 		return nil
@@ -44,8 +38,8 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 		d.remote(func(r *RemoteReport) { r.BigPacks++ })
 	}
 	for _, h := range pack {
-		if d.tf.ccHeld[h.GUID] || h.CrowdControlled() {
-			return nil // a CC rule (or an earlier try) already took one
+		if d.ccStillOn(h) {
+			return nil // a CC rule (or an earlier try) already took one, and it holds
 		}
 	}
 	bot := strings.TrimSpace(d.opt.CCBot)
@@ -63,6 +57,7 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 	}
 	d.ccDone[pick.GUID] = true
 	d.remote(func(r *RemoteReport) { r.CCOrders++ })
+	d.ccOrdered[pick.GUID] = d.clk.Now()
 	r, err := d.order(ctx, "cc", "moon", tbm.GUIDArg(pick.GUID), bot)
 	if err != nil {
 		return err
@@ -75,6 +70,40 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 	d.remote(func(r *RemoteReport) { r.BigPackCC++ })
 	d.rep.note(fmt.Sprintf("leg %d: the pack of %s has %d mobs; %s takes %s with its CC before the pull", d.curLeg, d.hostileName(t), len(pack), bot, d.hostileName(pick)))
 	return nil
+}
+
+// packOf is t and the living hostiles the bots see that would come with it: within radius yards of t and no more than AheadMaxDZ above
+// or below it (another floor does not join), not fighting the party yet, not evading, and no bystander (critter, civilian, guard,
+// unattackable). Every pull counts its pack this way, the plan's group pulls and the walk's pulls on the way (pullAhead) alike.
+func (d *RemoteDriver) packOf(t tbm.HostileRec, radius float64) []tbm.HostileRec {
+	var pack []tbm.HostileRec
+	for _, h := range d.fr.Hostiles {
+		if h.Entry == 0 || h.HPPct <= 0 || !h.Hostile() || h.Bystander() || h.Evading() || d.engagedWith(h) {
+			continue
+		}
+		if math.Abs(float64(h.Z-t.Z)) > float64(d.tx.AheadMaxDZ) {
+			continue
+		}
+		if dist3(hostilePoint(h), hostilePoint(t)) <= radius {
+			pack = append(pack, h)
+		}
+	}
+	return pack
+}
+
+// ccFresh is how long (a cast and its aura) an accepted CC order counts as holding before the feed shows the mob crowd-controlled.
+const ccFresh = 4 * time.Second
+
+// ccStillOn says whether h is held by a CC right now: the feed shows it crowd-controlled, or an order for it was accepted a moment
+// ago. A mob the earlier pull of its pack left asleep long ago is not: Polymorph lapses in 20 to 50 s, and a pack re-pulled after its
+// first mob died (Uldaman hires-3, group 4: the sheep from the first pull had run out when the second pull woke six mobs) needs its
+// CC again. The party's own "leave it alone" mark (tankFirst.ccHeld) is not evidence that the CC is still on.
+func (d *RemoteDriver) ccStillOn(h tbm.HostileRec) bool {
+	if h.CrowdControlled() {
+		return true
+	}
+	at, ok := d.ccOrdered[h.GUID]
+	return ok && d.clk.Now().Sub(at) < ccFresh
 }
 
 // ccPick is the member of pack the CC takes: never the pull target; a cc_always member when there is one (always), then the plan's
