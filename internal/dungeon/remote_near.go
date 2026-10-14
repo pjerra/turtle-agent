@@ -122,24 +122,28 @@ func (d *RemoteDriver) keepNear(ctx context.Context) (moved bool, err error) {
 			}
 			return false, nil
 		}
-		return d.appear(ctx, f, dist)
+		return d.appear(ctx, f, d.opt.Lead, dist)
 	}
 	return d.walkBehind(ctx, f, dist)
 }
 
-func (d *RemoteDriver) appear(ctx context.Context, f Follower, dist float64) (bool, error) {
-	if err := f.Appear(ctx, d.opt.Lead); err != nil {
-		d.rep.note(fmt.Sprintf("keep near: .appear %s failed: %v", d.opt.Lead, err))
+func (d *RemoteDriver) appear(ctx context.Context, f Follower, player string, dist float64) (bool, error) {
+	if err := f.Appear(ctx, player); err != nil {
+		d.rep.note(fmt.Sprintf("keep near: .appear %s failed: %v", player, err))
 		return false, nil
 	}
-	cmd := ".appear " + d.opt.Lead
+	cmd := ".appear " + player
 	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
 	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
 	where := "on another map"
 	if !math.IsInf(dist, 1) {
 		where = fmt.Sprintf("%.0f yd behind", dist)
 	}
-	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent was %s the lead bot; %s a GM assist during the run (run_gm_assists; not counted in gm_commands)", d.curLeg, where, cmd))
+	who := "the lead bot"
+	if !strings.EqualFold(player, d.opt.Lead) {
+		who = player
+	}
+	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent was %s %s; %s a GM assist during the run (run_gm_assists; not counted in gm_commands)", d.curLeg, where, who, cmd))
 	return true, d.tick(ctx, d.cfg.Poll) // the object store takes the new surroundings in over the next updates
 }
 
@@ -178,6 +182,12 @@ func (d *RemoteDriver) walkBehind(ctx context.Context, f Follower, dist float64)
 	}
 	d.remote(func(r *RemoteReport) { r.AgentWalks++ })
 	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent is %.0f yd behind the lead bot; walking to %.0f %.0f %.0f", d.curLeg, dist, stand.X, stand.Y, stand.Z))
+	return d.agentWalk(ctx, f, stand)
+}
+
+// agentWalk walks the agent's character to stand and keeps the run going meanwhile; a fight stops the walk. It reports whether the walk
+// ended well; the error is the run's.
+func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point) (bool, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type result struct {

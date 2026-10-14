@@ -87,6 +87,9 @@ type RemoteOptions struct {
 	Carrier string
 	// LootRestore is the loot method put back after a free-for-all loot ("group" by default; the module cannot be asked for the old one).
 	LootRestore string
+	// ObjectFallback is what an object step does when the carrier's order fails twice (remote_fallback.go): "agent" (the default) lets the
+	// agent's own character open the object and hand the item over with a trade, "off" fails the step as the carrier's refusal says.
+	ObjectFallback string
 	// Enter says how the run gets a party that is not inside the plan's map in (remote_enter.go): "auto" (the default: `.tele name` when
 	// the account is a developer-level GM and the plan names a tele, else walk the lead bot into the portal), "gm", "walk", or "off"
 	// (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
@@ -130,6 +133,12 @@ type RemoteOptions struct {
 	EndFightWait time.Duration
 }
 
+// Values of RemoteOptions.ObjectFallback.
+const (
+	ObjectFallbackAgent = "agent"
+	ObjectFallbackOff   = "off"
+)
+
 // Values of RemoteOptions.OnEnd.
 const (
 	OnEndStay   = "stay"
@@ -148,6 +157,9 @@ func DefaultRemoteOptions() RemoteOptions {
 func (o RemoteOptions) withDefaults() RemoteOptions {
 	d := DefaultRemoteOptions()
 	o.Team, o.Preflight, o.OnEnd, o.Enter = strings.ToLower(o.Team), strings.ToLower(o.Preflight), strings.ToLower(o.OnEnd), strings.ToLower(o.Enter)
+	if o.ObjectFallback = strings.ToLower(strings.TrimSpace(o.ObjectFallback)); o.ObjectFallback == "" {
+		o.ObjectFallback = ObjectFallbackAgent
+	}
 	if o.Enter == "" {
 		o.Enter = EnterAuto
 	}

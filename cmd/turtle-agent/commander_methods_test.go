@@ -169,6 +169,8 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","carrier":"Magey"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","carrier":"Ma gey"}`, "carrier:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","loot_restore":"ffa"}`, "loot_restore:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","object_fallback":"maybe"}`, "object_fallback:"},
+		{`{"name":"rig","object_fallback":"agent"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
