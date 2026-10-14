@@ -11,7 +11,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/session"
 )
 
-const observePlanJSON = `{"version":1,"name":"rem","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"here","to":{"x":5,"y":5,"z":5}},{"name":"there","to":{"x":9,"y":5,"z":5}}]}`
+const observePlanJSON = `{"version":1,"name":"rem","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"here","to":{"x":5,"y":5,"z":5},"boss":{"entry":99,"position":{"x":6,"y":5,"z":5}}},{"name":"there","to":{"x":9,"y":5,"z":5},"boss":{"entry":98,"position":{"x":10,"y":5,"z":5}}}]}`
 
 func observeRig(t *testing.T) *agentRig {
 	t.Helper()
