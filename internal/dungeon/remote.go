@@ -1494,8 +1494,8 @@ func errDirectUnsupported(p Point, ref Refusal) error {
 }
 
 // walk is doWalk, or with direct set a direct step to p: one `cmd move ... direct` (no legs, no planning), repeated when the module
-// answers too-far (a follower is still catching up with the lead bot, whose position the step is checked from for every bot) and
-// waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground and no-los a bot that cannot see it (the step would cut through a wall).
+// answers too-far (the lead bot is out of the step's limits, or a follower has no way to the lead bot's spot yet: TortoiseBots #948) and
+// waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground and no-los the lead bot not seeing it (the step would cut through a wall).
 // A direct step is never split into the careful walk's hops (it bridges a gap the navmesh does not); the party still gathers before it
 // and a hostile near its line is still pulled first.
 func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
