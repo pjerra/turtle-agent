@@ -138,6 +138,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		sp.passed = map[packet.GUID]bool{}
 	}
 	kills, retargets := 0, 0
+	looked := map[int]bool{} // anchors the lead bot stood at and saw empty
 	var gaveUp []passedOver
 	for attempt, loops := 1, 0; attempt <= d.cfg.PullAttempts && loops < 4*d.cfg.PullAttempts+12; loops++ {
 		if err := d.restGate(ctx, true); err != nil {
@@ -151,10 +152,18 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			if len(gaveUp) > 0 {
 				return d.leftOver(label, sp, kills, gaveUp)
 			}
-			if sp.required {
-				return fmt.Errorf("%s: no living %v seen by the bots", label, sp.pick)
+			// Nothing of the group in view: it counts as gone only with evidence, else the lead bot walks to its positions to look.
+			cleared, why, err := d.confirmGone(ctx, sp, kills, looked)
+			if err != nil {
+				return err
 			}
-			d.rep.note(fmt.Sprintf("%s: no living %v seen by the bots; taken as already dead", label, sp.pick))
+			if !cleared {
+				continue // a hostile of the group showed itself on the way: pick it
+			}
+			if sp.required {
+				return fmt.Errorf("%s: no living %v seen by the bots (%s)", label, sp.pick, why)
+			}
+			d.rep.note(fmt.Sprintf("%s: no living %v seen by the bots; counted as cleared: %s", label, sp.pick, why))
 			return nil
 		}
 		if sp.sneak && t.Stealthed() {
@@ -171,6 +180,9 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			return err
 		}
 		kills += res.kills
+		if res.kills > 0 {
+			d.noteKilled(sp, t)
+		}
 		if res.out == won {
 			return nil
 		}

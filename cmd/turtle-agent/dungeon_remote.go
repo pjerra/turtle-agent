@@ -22,8 +22,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch strings.ToLower(p.Mode) {
 	case "", "group":
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 {
-			return false, bad(`lead_bot, bots, tank, healer and cc go with mode "remote"`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" {
+			return false, bad(`lead_bot, bots, tank, healer, cc, team, preflight and on_end go with mode "remote"`)
 		}
 		return false, nil
 	case "remote":
@@ -48,6 +48,15 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	if p.Healer != "" && !botName.MatchString(p.Healer) {
 		return true, bad("healer: %q is not a bot name", p.Healer)
+	}
+	if t := strings.ToLower(p.Team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
+		return true, bad("team: %q is neither %q nor %q", p.Team, dungeon.TeamAlliance, dungeon.TeamHorde)
+	}
+	if v := strings.ToLower(p.Preflight); !slices.Contains([]string{"", dungeon.PreflightWarn, dungeon.PreflightStrict, dungeon.PreflightOff}, v) {
+		return true, bad("preflight: %q is none of %q, %q, %q", p.Preflight, dungeon.PreflightWarn, dungeon.PreflightStrict, dungeon.PreflightOff)
+	}
+	if v := strings.ToLower(p.OnEnd); !slices.Contains([]string{"", dungeon.OnEndStay, dungeon.OnEndLogout, dungeon.OnEndNone}, v) {
+		return true, bad("on_end: %q is none of %q, %q, %q", p.OnEnd, dungeon.OnEndStay, dungeon.OnEndLogout, dungeon.OnEndNone)
 	}
 	for _, c := range p.CC {
 		if c.Entry == 0 || !slices.Contains(tbm.CCMarks, strings.ToLower(c.Mark)) || (c.Bot != "" && !botName.MatchString(c.Bot)) {
@@ -77,7 +86,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, plan *dungeon.Plan, setu
 	cfg := dungeon.DefaultConfig()
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
 	cfg.Resume = p.Resume != nil && *p.Resume
-	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer}
+	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)

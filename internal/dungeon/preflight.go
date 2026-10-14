@@ -1,0 +1,336 @@
+package dungeon
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/tbm"
+)
+
+// The pre-run kit check of a remote run (issue #83, remote Uldaman gap G4). Owned bots start with no drinks and no ammo: the run sends
+// `.bot maintenance <bot>` for each bound bot (TortoiseBots refreshes consumables, reagents, ammo and repairs, when
+// AiPlayerbot.OwnedBotMaintenanceEnabled = 1) and then reads `.bot inv <bot>` to see what the bags hold: drinks for the casters,
+// ammo for the shot of a hunter's ranged weapon, a shield on the tank. The result is the report's `preflight`; what is missing is a
+// warning, and fails the run only with RemoteOptions.Preflight "strict".
+
+// Values of RemoteOptions.Preflight.
+const (
+	PreflightWarn   = "warn"   // the default: check, report, go on
+	PreflightStrict = "strict" // a warning fails the run before the first step
+	PreflightOff    = "off"    // send nothing
+)
+
+// What the check wants in the bags.
+const (
+	preflightDrinksHealer = 20  // drinks for the named healer
+	preflightDrinksCaster = 10  // drinks for any other bot that uses mana
+	preflightAmmo         = 100 // shots of the kind the ranged weapon takes
+)
+
+// BotLiner is the optional part of a RemoteGame that sends a plain `.bot` line (maintenance, inv, logout: not a commander order) and
+// returns the lines the server answered with. done says which line ends the reply; settled is false when none did in time.
+type BotLiner interface {
+	BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) (lines []string, settled bool, err error)
+}
+
+// PreflightBot is one bot's part of the check.
+type PreflightBot struct {
+	Name string `json:"name"`
+	// Maintenance is what `.bot maintenance` came to: "maintained", "disabled" (AiPlayerbot.OwnedBotMaintenanceEnabled is 0),
+	// "refused: ...", "no answer", or "not sent" (after a "disabled").
+	Maintenance string `json:"maintenance"`
+	Role        string `json:"role,omitempty"`   // "tank", "healer" or "" (the roles the run names)
+	Drinks      int    `json:"drinks,omitempty"` // drinks the bags hold (known entries)
+	Ammo        string `json:"ammo,omitempty"`   // a ranged weapon's shot: "arrows 200", "bullets 0", ...
+	Shield      *bool  `json:"shield,omitempty"` // checked for the tank only
+	Inventory   string `json:"inventory,omitempty"`
+}
+
+// Preflight is the result of the kit check.
+type Preflight struct {
+	Mode     string         `json:"mode"` // warn or strict
+	Bots     []PreflightBot `json:"bots"`
+	Warnings []string       `json:"warnings"`
+	OK       bool           `json:"ok"`
+}
+
+func (p *Preflight) clone() *Preflight {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	c.Bots = append([]PreflightBot(nil), p.Bots...)
+	c.Warnings = append([]string(nil), p.Warnings...)
+	return &c
+}
+
+var (
+	drinkSet        = entrySet(drinkEntries)
+	arrowSet        = entrySet(arrowEntries)
+	bulletSet       = entrySet(bulletEntries)
+	shieldSet       = entrySet(shieldEntries)
+	arrowWeaponSet  = entrySet(arrowWeaponEntries)
+	bulletWeaponSet = entrySet(bulletWeaponEntries)
+)
+
+func entrySet(l []uint32) map[uint32]bool {
+	m := make(map[uint32]bool, len(l))
+	for _, e := range l {
+		m[e] = true
+	}
+	return m
+}
+
+// countOf sums the bot's items that are in set.
+func invCount(inv tbm.Inventory, set map[uint32]bool) int {
+	n := 0
+	for e, c := range inv.Counts {
+		if set[e] {
+			n += c
+		}
+	}
+	return n
+}
+
+// maintenanceVerdict reads one reply line of `.bot maintenance <bot>`; done is true for a line that ends the reply.
+func maintenanceVerdict(line string) (verdict string, done bool) {
+	l := strings.TrimSpace(line)
+	low := strings.ToLower(l)
+	switch {
+	case strings.HasPrefix(low, "maintained "):
+		return "maintained", true
+	case strings.Contains(low, "maintenance is disabled"):
+		return "disabled", true
+	case strings.Contains(low, "pool bot"):
+		return "refused: pool bot", true
+	case strings.Contains(low, "must be alive"):
+		return "refused: the bot is dead", true
+	case strings.HasPrefix(low, "usage:"):
+		return "refused: not an online bot of this account", true
+	}
+	return "", false
+}
+
+// preflight runs the kit check against the bots of the first frame. A game that cannot send bot lines skips it with a note.
+func (d *RemoteDriver) preflight(ctx context.Context) error {
+	mode := d.opt.Preflight
+	if mode == PreflightOff {
+		return nil
+	}
+	bl, ok := d.g.(BotLiner)
+	if !ok {
+		d.rep.note("preflight: skipped, this game cannot send .bot maintenance or .bot inv")
+		return nil
+	}
+	pf := &Preflight{Mode: mode, OK: true}
+	maintenanceOn := true
+	for _, m := range d.fr.Party {
+		b := PreflightBot{Name: m.Name, Maintenance: "not sent"}
+		if maintenanceOn {
+			b.Maintenance = d.maintain(ctx, bl, m.Name)
+			if b.Maintenance == "disabled" {
+				maintenanceOn = false
+				pf.Warnings = append(pf.Warnings, "maintenance is off on the server (AiPlayerbot.OwnedBotMaintenanceEnabled = 0): drinks and ammo are as the bots have them")
+			} else if b.Maintenance != "maintained" {
+				pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: maintenance: %s", m.Name, b.Maintenance))
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pf.Bots = append(pf.Bots, b)
+	}
+	for i, m := range d.fr.Party {
+		d.checkKit(ctx, bl, pf, &pf.Bots[i], m)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	pf.OK = len(pf.Warnings) == 0
+	d.remote(func(r *RemoteReport) { r.Preflight = pf.clone() })
+	text := "preflight: ok"
+	if !pf.OK {
+		text = "preflight: " + strings.Join(pf.Warnings, "; ")
+	}
+	d.rep.note(text)
+	d.g.Emit(events.KindDungeonStep, text, map[string]any{"action": "preflight", "ok": pf.OK, "warnings": pf.Warnings, "mode": "remote"})
+	if !pf.OK && mode == PreflightStrict {
+		return fmt.Errorf("preflight (strict): %s", strings.Join(pf.Warnings, "; "))
+	}
+	return nil
+}
+
+// maintain sends `.bot maintenance name` and reads the verdict.
+func (d *RemoteDriver) maintain(ctx context.Context, bl BotLiner, name string) string {
+	verdict := ""
+	lines, settled, err := bl.BotLines(ctx, "maintenance "+name, 6*time.Second, func(line string) bool {
+		v, done := maintenanceVerdict(line)
+		if done {
+			verdict = v
+		}
+		return done
+	})
+	switch {
+	case err != nil:
+		return "error: " + err.Error()
+	case !settled:
+		if len(lines) > 0 {
+			return "no answer (" + lines[len(lines)-1] + ")"
+		}
+		return "no answer"
+	}
+	return verdict
+}
+
+// checkKit reads the bot's bags and judges them for its role.
+func (d *RemoteDriver) checkKit(ctx context.Context, bl BotLiner, pf *Preflight, b *PreflightBot, m tbm.PartyRec) {
+	lines, settled, err := bl.BotLines(ctx, "inv "+m.Name, 8*time.Second, func(line string) bool {
+		return strings.HasPrefix(line, "TBM:INV_END|") || strings.HasPrefix(line, "TBM:ACTION_ERR|inv|")
+	})
+	inv := tbm.ParseInventory(lines)
+	switch {
+	case err != nil:
+		b.Inventory = "error: " + err.Error()
+	case inv.Err != nil:
+		b.Inventory = "refused: " + inv.Err.Code
+	case !settled || !inv.Complete:
+		b.Inventory = "no answer"
+	default:
+		b.Inventory = "read"
+	}
+	if b.Inventory != "read" {
+		pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: inventory: %s", m.Name, b.Inventory))
+		return
+	}
+	named := func(n string) bool { return n != "" && strings.EqualFold(n, m.Name) }
+	switch {
+	case named(d.opt.Tank):
+		b.Role = "tank"
+	case named(d.opt.Healer):
+		b.Role = "healer"
+	}
+	// Drinks for whoever uses mana: the named healer needs more.
+	if m.UsesMana() {
+		b.Drinks = invCount(inv, drinkSet)
+		need := preflightDrinksCaster
+		if b.Role == "healer" {
+			need = preflightDrinksHealer
+		}
+		if b.Drinks < need {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: %d drinks in the bags, %d wanted", m.Name, b.Drinks, need))
+		}
+	}
+	// Ammo for the shot of the ranged weapon it wears.
+	if w, ok := inv.Equipped[tbm.SlotRanged]; ok {
+		shot, set, have := "", map[uint32]bool(nil), 0
+		switch {
+		case arrowWeaponSet[w]:
+			shot, set = "arrows", arrowSet
+		case bulletWeaponSet[w]:
+			shot, set = "bullets", bulletSet
+		}
+		if set != nil {
+			have = invCount(inv, set)
+			b.Ammo = fmt.Sprintf("%s %d", shot, have)
+			if have < preflightAmmo {
+				otherSet := bulletSet
+				if shot == "bullets" {
+					otherSet = arrowSet
+				}
+				other := invCount(inv, otherSet)
+				switch {
+				case have == 0 && other > 0:
+					pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: its ranged weapon takes %s and the bags hold the other kind (%d)", m.Name, shot, other))
+				case have == 0:
+					pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: its ranged weapon takes %s and the bags hold none", m.Name, shot))
+				default:
+					pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: %d %s, %d wanted", m.Name, have, shot, preflightAmmo))
+				}
+			}
+		}
+	}
+	// A shield on the tank.
+	if b.Role == "tank" {
+		has := shieldSet[inv.Equipped[tbm.SlotOffHand]]
+		b.Shield = &has
+		if !has {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: the tank wears no shield", m.Name))
+		}
+	}
+}
+
+// endStay parks the bots before the binding ends: `cmd stay`, so that they do not follow the far-away agent once the commander lets go.
+// It runs with its own context (the run's may be cancelled) and records the answer.
+func (d *RemoteDriver) endStay(ctx context.Context) {
+	r, err := d.g.Command(ctx, "cmd stay")
+	via := ""
+	switch {
+	case err != nil:
+		via = "error: " + err.Error()
+	case r.Kind == tbm.KindAck:
+		via = "ack"
+	case r.Kind == tbm.KindErr && r.Err != nil:
+		via = "refused: " + r.Err.Code
+	default:
+		via = "no answer"
+	}
+	d.remote(func(rr *RemoteReport) {
+		rr.OrdersSent++
+		rr.Orders["stay"]++
+		rr.EndStay = via
+	})
+	d.rep.note("end of run: cmd stay: " + via)
+}
+
+// endLogout logs the bots out (`.bot logout name`) after the binding has ended, and records which went.
+func (d *RemoteDriver) endLogout(ctx context.Context) {
+	bl, ok := d.g.(BotLiner)
+	if !ok {
+		d.rep.note("end of run: on_end logout skipped, this game cannot send .bot logout")
+		return
+	}
+	var gone []string
+	for _, name := range d.partyNames() {
+		var verdict string
+		_, settled, err := bl.BotLines(ctx, "logout "+name, 4*time.Second, func(line string) bool {
+			low := strings.ToLower(line)
+			switch {
+			case strings.Contains(low, "logout requested") || strings.Contains(low, "hire ended"):
+				verdict = "ok"
+			case strings.Contains(low, "could not be logged out") || strings.Contains(low, "not found") || strings.HasPrefix(low, "usage:") ||
+				strings.Contains(low, "may only control") || strings.Contains(low, "has no ai"):
+				verdict = "refused: " + line
+			default:
+				return false
+			}
+			return true
+		})
+		switch {
+		case err != nil:
+			d.rep.note(fmt.Sprintf("end of run: logout %s: %v", name, err))
+		case !settled:
+			d.rep.note(fmt.Sprintf("end of run: logout %s: no answer", name))
+		case verdict == "ok":
+			gone = append(gone, name)
+		default:
+			d.rep.note(fmt.Sprintf("end of run: logout %s: %s", name, verdict))
+		}
+	}
+	d.remote(func(rr *RemoteReport) { rr.LoggedOut = gone })
+	d.rep.note(fmt.Sprintf("end of run: logged out %v", gone))
+}
+
+// partyNames are the bots of the run: the party of the newest frame, else the names the run was given.
+func (d *RemoteDriver) partyNames() []string {
+	var out []string
+	for _, p := range d.fr.Party {
+		out = append(out, p.Name)
+	}
+	if len(out) == 0 {
+		out = append([]string{d.opt.Lead}, d.opt.Bots...)
+	}
+	return out
+}

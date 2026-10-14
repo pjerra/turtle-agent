@@ -622,6 +622,31 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
    mob that was seen fighting and is absent for two frames as dead), and in a dense room (more than 24 hostiles) whether the fight is ever
    called early: check `frames_truncated` and that no pull ends `won` with 0 kills.
 
+## Remote Uldaman: friendly bosses, unseen packs, rez wait, kit check, end of run (issue #83)
+
+Tested with the fake feed and the fake game only (`internal/dungeon/remote_gaps_test.go`); nothing below has run live. Needs a TortoiseBots build
+with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBotMaintenanceEnabled = 1` for step 2.
+
+1. **Team gate.** `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","healer":"<priest>"}` with an
+   Alliance agent and Alliance bots: the notes say `team gate: alliance, from the agent's own race`, the Baelog boss and its First entries are
+   skipped (`skip_team`), and the run does not fail with `no living [6906]`. Then `"team":"horde"`: the boss step runs (expect the failure). If the
+   agent and the bots are on different sides, check that `team` fixes it.
+2. **Kit check.** Watch `.bot maintenance <bot>` go out first, one per bot, and the answers (`Maintained ...`; with the switch off `disabled`).
+   Then `.bot inv <bot>`: compare `remote.preflight.bots[]` with the real bags: drink counts (and whether the server's drink items are all in the
+   table: a drink the table lacks reads as 0), a hunter's ammo against its weapon (TB #921 gun and bullets), the tank's shield. Try `"preflight":"strict"`
+   with a bot that has no drinks: the run must fail before the first `cmd`. Check the plain `.bot` lines do not trip the anticheat or the chat throttle
+   (five bots, ten lines).
+3. **Unseen packs.** Walk leg 0 and read the notes: every `nothing of [...] in view; walking to its position` line should be followed by either a
+   pull of that group or `counted as cleared: ...`. Count `pack_looks`, `packs_seen_empty`, `walk_aggros`: deploy-19h skipped 10 of 10 groups and met
+   2 packs on the walk to the boss. Check that the lead bot really gets within 25 yd of a pack (a pack behind a wall, up a ledge) and whether the
+   `could not get a view of the pack` failure shows up on a real position.
+4. **Rez wait.** Let a DPS bot die with the priest alive and out of combat: no `cmd revive` should go out; the priest should raise it within the
+   30 s (`rez_waits` 1, `rezzed` 1, the note `were raised`). Then kill the priest too (or stun it in combat): the wait ends at once and `cmd revive`
+   goes out. Check the module's priest actually casts Resurrection on a body that has not released, and how long it takes.
+5. **End of run.** After `done`, `failed` and `dungeon_stop`: `remote.end_stay` is `ack` and the bots stay where they stood after the unbind, also
+   with the agent far away (move it and see they do not follow). `on_end: "logout"`: the bots log out after the unbind (`logged_out`); check the
+   module accepts `.bot logout` for a bot it was commanding a moment ago, and what happens to the party.
+
 ## Trade (issue #80)
 
 `trade` is tested against the core's `TradeHandler.cpp` layouts and a scripted server only; nothing below has run live. Needs a bot that

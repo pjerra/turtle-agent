@@ -114,6 +114,16 @@ type dungeonRunParams struct {
 	Healer string `json:"healer,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
+	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the
+	// account's faction). Baelog, Eric and Olaf are friendly to the Alliance and never show in the bots' feed: without the team, the run
+	// would wait for a boss it cannot see.
+	Team string `json:"team,omitempty"`
+	// Preflight is the kit check before the first step (remote mode): "warn" (the default: `.bot maintenance` and `.bot inv` for each bot,
+	// what is missing is reported as preflight), "strict" (a warning fails the run) or "off".
+	Preflight string `json:"preflight,omitempty"`
+	// OnEnd is what happens to the bots at the end of a remote run: "stay" (the default: `cmd stay` before the unbind), "logout" (stay,
+	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
+	OnEnd string `json:"on_end,omitempty"`
 }
 
 type dungeonRunResult struct {

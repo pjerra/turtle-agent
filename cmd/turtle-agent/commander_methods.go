@@ -194,6 +194,14 @@ func (g remoteGame) ResetView()                           { g.c.feed.Reset() }
 func (g remoteGame) BindingEnds() []tbm.BindingEnd        { return g.c.feed.Ends() }
 func (g remoteGame) ViewStats() tbm.ViewStats             { return g.c.feed.Stats() }
 
+// Team is the agent's own side (dungeon.TeamSource): the feed carries no race, and the owned bots share the account's faction.
+func (g remoteGame) Team() string { return g.c.cur().Team() }
+
+// BotLines implements dungeon.BotLiner: a plain `.bot maintenance|inv|logout <bot>` and the lines it was answered with.
+func (g remoteGame) BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) ([]string, bool, error) {
+	return g.c.cmdr.Lines(ctx, command, wait, done)
+}
+
 func (g remoteGame) Emit(kind, text string, data map[string]any) {
 	g.c.cur().Log().Append(events.Event{Kind: kind, Text: text, Data: data})
 }
