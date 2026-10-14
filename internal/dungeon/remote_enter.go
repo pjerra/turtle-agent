@@ -411,6 +411,9 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 		if err := d.check(); err != nil {
 			return err
 		}
+		if d.enterCmd && !d.clk.Now().Before(d.enterCmdEnd) {
+			return fmt.Errorf("enter: the walk to the door and cmd enter %d did not get the party in within %.0f s", d.plan.EntranceTrigger, cmdEnterMax.Seconds())
+		}
 		d.noteArrivals(began)
 		l, ok := d.fr.LeadRec()
 		if !ok {

@@ -1400,9 +1400,8 @@ the first step in, and the agent stays **outside and ungrouped**. When a bot of 
      `.bot cmd enter <entrance_trigger>`. The module answers `TBM:ACTION_PENDING|cmd enter|party|<budget s>|<trigger>` and one final line:
      `TBM:ACTION_ACK|cmd enter|party|<n>|entered` (the party is inside; the run waits for the lead bot on the plan's map) or
      `TBM:ACTION_ERR|cmd enter|<code>|<Bot>: <msg> [(n of m got in)]`. The wait for the final line is the budget plus 8 s (the module ends the
-     order with its own `timeout` about 6 s after the budget), at most 90 s. Retries are bounded: `busy` 3, `cancelled` 2, `too-far` 2 (a wait for the
-     party in between), `in-combat` for 45 s; the whole phase fails after 4 minutes. A partial entry (`n of m got in` with the lead bot inside)
-     goes on to the summons. `not-found`, `requirement`, `instance-limit`, `unreachable`, `unavailable`, `denied`, `no-bot`, `failed` and `timeout`
+     order with its own `timeout` about 6 s after the budget), at most 130 s (its worst case is 60 + 30 + 30 s and 6 s). Retries are bounded: `busy` 3, `cancelled` 2, `too-far` 2 (a wait for the
+     party in between), `in-combat` for 45 s; the whole phase fails after 4 minutes. The ceiling counts from the start of the walk. Before any retry, an answer with the lead bot already on the plan's map (or `n of m got in`, n above 0) goes on to the summons and `cmd enter` is not sent again. `not-found`, `requirement`, `instance-limit`, `unreachable`, `unavailable`, `denied`, `no-bot`, `failed` and `timeout`
      fail the run with the cause. A module without the order (no `ACTION_PENDING` and no answer, or an unknown-verb refusal) leaves the walk
      behaviour: the lead bot gets 8 s to be taken in, then the run fails saying it needs `cmd enter` (`remote.enter.cmd_enter.fallback`).
      The agent's own character does not enter: alone it would be given an instance of its own, not the bots' group's.

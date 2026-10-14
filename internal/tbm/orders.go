@@ -261,9 +261,17 @@ const EnterPendingSlack = 8 * time.Second
 // claims an hour must not hold a run for an hour (the run watchdog cannot see into a blocked order).
 const MaxPendingWait = 90 * time.Second
 
+// EnterMaxPendingWait is the cap for `cmd enter`: the module's worst case is 60 s of walking to the trigger, 30 s of waiting for the
+// others and 30 s for the teleports, then its own timeout ERR 6 s later (126 s), which is the line the run wants to read; 130 s leaves a margin.
+const EnterMaxPendingWait = 130 * time.Second
+
 // pendingWait is how long to wait for the final answer of an order that reported a budget of budgetS seconds.
 func pendingWait(budgetS int, slack time.Duration) time.Duration {
-	return min(time.Duration(max(budgetS, 0))*time.Second+slack, MaxPendingWait)
+	return pendingWaitCap(budgetS, slack, MaxPendingWait)
+}
+
+func pendingWaitCap(budgetS int, slack, limit time.Duration) time.Duration {
+	return min(time.Duration(max(budgetS, 0))*time.Second+slack, limit)
 }
 
 // orderBot is the bot an order names: loot <guid> <bot>, open <guid> <bot>, use <item> <bot>.
@@ -327,11 +335,11 @@ func (c *Commander) OrderWait(ctx context.Context, command string, wait time.Dur
 			}
 			if pd, ok := ParsePending(line); ok && strings.EqualFold(pd.Intent, res.Intent) && (res.Bot == "" || strings.EqualFold(pd.Bot, res.Bot)) {
 				res.Pending = &pd
-				sl := slack
+				sl, limit := slack, MaxPendingWait
 				if strings.EqualFold(res.Intent, "cmd enter") {
-					sl = max(sl, EnterPendingSlack)
+					sl, limit = max(sl, EnterPendingSlack), EnterMaxPendingWait
 				}
-				deadline = time.Now().Add(pendingWait(pd.BudgetS, sl))
+				deadline = time.Now().Add(pendingWaitCap(pd.BudgetS, sl, limit))
 				continue
 			}
 			if a, ok := ParseAck(line); ok && strings.EqualFold(a.Intent, res.Intent) {

@@ -20,7 +20,7 @@ import (
 //	                                                                unavailable unreachable timeout cancelled denied no-bot
 //
 // The module ends the order itself with a timeout ERR about 6 s after the budget, so the wait for the final line is bounded by what the
-// module says (tbm.MaxPendingWait at the most). The driver walks the lead bot to the portal as for the walk (the others follow it), waits
+// module says (tbm.EnterMaxPendingWait, 130 s, at the most: its own worst case is 60 s to the trigger, 30 s for the others, 30 s for the teleports and 6 s to its timeout ERR). The driver walks the lead bot to the portal as for the walk (the others follow it), waits
 // a moment for them, and sends the order; every retry has its own count, and the whole phase a ceiling (rule 3). A module without the
 // verb (no ACTION_PENDING, or an unknown-verb refusal) leaves the walk behaviour: the lead bot stands in the portal and the run fails
 // saying why.
@@ -90,6 +90,7 @@ func (d *RemoteDriver) enterByCmd(ctx context.Context, began time.Time) error {
 	d.enterReport(func(r *EnterReport) { r.CmdEnter = &CmdEnterReport{Trigger: trig} })
 	d.enterNote(fmt.Sprintf("walking the lead bot to the door at %.1f %.1f %.1f on map %d, then cmd enter %d", pt.X, pt.Y, pt.Z, pt.Map, trig))
 	d.enterCmd = true
+	d.enterCmdEnd = d.clk.Now().Add(cmdEnterMax) // the ceiling counts from here: the walk to the door is part of it
 	defer func() { d.enterCmd = false }()
 	return d.walkToPortal(ctx, pt, began)
 }
@@ -129,7 +130,7 @@ func (d *RemoteDriver) cmdEnterAtDoor(ctx context.Context, began time.Time) erro
 	if err := d.gatherAtDoor(ctx); err != nil {
 		return err
 	}
-	phaseEnd := d.clk.Now().Add(cmdEnterMax)
+	phaseEnd := d.enterCmdEnd
 	busy, cancelled, far := 0, 0, 0
 	combatUntil := d.clk.Now().Add(cmdEnterCombatWait)
 	for {
@@ -170,6 +171,11 @@ func (d *RemoteDriver) cmdEnterAtDoor(ctx context.Context, began time.Time) erro
 			return nil
 		case code == "not-bound" || code == "disabled":
 			return fmt.Errorf("%w: %s answered %s", errBindingLost, res.Intent, code)
+		case d.partyThrough(ctx, began, res):
+			// Part of the party is through (the lead bot is on the plan's map, or the refusal says some got in): whatever the code, a second
+			// order would go to a party that is half inside (not-found, too-far) and fail the run. The others are summoned.
+			d.enterNote(fmt.Sprintf("cmd enter answered %s with the lead bot inside: not sent again, the rest are summoned", orderWords(res)))
+			return nil
 		case code == "busy" && busy < cmdEnterBusyTries:
 			busy++
 			err = d.tick(ctx, d.cfg.Poll*3)
@@ -192,13 +198,6 @@ func (d *RemoteDriver) cmdEnterAtDoor(ctx context.Context, began time.Time) erro
 			}
 			return fmt.Errorf("enter: cmd enter %d reported running (budget %d s) and gave no final answer", trig, res.Pending.BudgetS)
 		case res.Err != nil:
-			if got, of, ok := tbm.ParseGotIn(res.Err.Message); ok && got > 0 {
-				// Part of the party went through: the group is locked, the others are summoned to the lead bot if it is inside.
-				if lerr := d.waitLead(ctx, began, d.opt.EnterGrace); lerr == nil {
-					d.enterNote(fmt.Sprintf("cmd enter: %d of %d got in (%s: %s); the rest are summoned", got, of, res.Err.Code, res.Err.Message))
-					return nil
-				}
-			}
 			return d.cmdEnterError(res)
 		default:
 			return fmt.Errorf("enter: %s: no ACK (%s)", command, res.Describe())
@@ -252,4 +251,31 @@ func (d *RemoteDriver) cmdEnterFallback(ctx context.Context, began time.Time, re
 		return fmt.Errorf("enter: the lead bot stood at the portal and did not enter, and the module has no `cmd enter` order (%s; needs TortoiseBots #939): %w", why, err)
 	}
 	return nil
+}
+
+// partyThrough says whether an answer other than an ACK finds the party at least partly through the trigger: the lead bot is on the plan's
+// map in the newest frame, or the refusal says "(n of m got in)" with n above 0 and the lead bot shows up inside within EnterGrace. The
+// check comes before any retry, so that a cancelled or busy answer of a party that went in is not followed by a second order.
+func (d *RemoteDriver) partyThrough(ctx context.Context, began time.Time, res tbm.OrderResult) bool {
+	if res.Kind == tbm.KindAck {
+		return false
+	}
+	d.look()
+	d.noteArrivals(began)
+	if d.leadInside() {
+		return true
+	}
+	if res.Err != nil {
+		if got, _, ok := tbm.ParseGotIn(res.Err.Message); ok && got > 0 {
+			return d.waitLead(ctx, began, d.opt.EnterGrace) == nil
+		}
+	}
+	return false
+}
+
+func orderWords(res tbm.OrderResult) string {
+	if res.Err != nil {
+		return res.Err.Code + " (" + res.Err.Message + ")"
+	}
+	return res.Describe()
 }

@@ -369,9 +369,10 @@ type RemoteDriver struct {
 	unbinding bool
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
-	entryRecorded bool    // the instance the lead bot entered is in the ledger
-	enterCmd      bool    // the portal walk ends in `cmd enter` instead of a wait for the trigger
-	outside       *uint32 // the map a walk before the entry plans its paths on (nil: the plan's)
+	entryRecorded bool      // the instance the lead bot entered is in the ledger
+	enterCmd      bool      // the portal walk ends in `cmd enter` instead of a wait for the trigger
+	enterCmdEnd   time.Time // the ceiling of the cmd enter phase, walk included
+	outside       *uint32   // the map a walk before the entry plans its paths on (nil: the plan's)
 	endsAtBind    int
 	stats0        tbm.ViewStats
 	statsMu       sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it

@@ -231,3 +231,40 @@ func TestRemoteEnterAutoKeepsTheGMTeleAndWalksWithoutATrigger(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// "cancelled (1 of 3 got in)" with the lead bot already on the plan's map: no second order (it would answer not-found or too-far to a
+// party that is half inside and fail the run); the rest are summoned.
+func TestRemoteEnterCmdCancelledWithTheLeadInsideIsNotSentAgain(t *testing.T) {
+	g := newEnterOrders(t, enterErr("cancelled", "Magey: cancelled (1 of 3 got in)"), enterErr("not-found", "no trigger"))
+	g.onEnterErr = func() { g.pending[g.lead().GUID] = g.now.Add(time.Second) }
+	rep, err := g.run(RemoteOptions{})
+	if err != nil || rep.State != "done" || len(g.sent) != 1 {
+		t.Fatalf("%v sent %v\n%s", err, g.sent, notesOf(rep))
+	}
+	if strings.Join(rep.Remote.Enter.Summoned, ",") != "Healy,Magey" || !strings.Contains(notesOf(rep), "not sent again") {
+		t.Fatalf("summoned %v\n%s", rep.Remote.Enter.Summoned, notesOf(rep))
+	}
+	// The same for busy, and for an answer with no count at all once the lead bot shows inside.
+	for _, code := range []string{"busy", "too-far"} {
+		g = newEnterOrders(t, enterErr(code, "Healy: x"), enterErr("not-found", "no trigger"))
+		g.onEnterErr = func() { g.pending[g.lead().GUID] = g.now.Add(time.Millisecond) }
+		g.script[0].Err.Message = "Healy: x"
+		if rep, err := g.run(RemoteOptions{}); err != nil || rep.State != "done" || len(g.sent) != 1 {
+			t.Fatalf("%s: %v sent %v", code, err, g.sent)
+		}
+	}
+}
+
+// The 4-minute ceiling counts from the start of the walk to the door.
+func TestRemoteEnterCmdCeilingIncludesTheWalk(t *testing.T) {
+	g := newEnterOrders(t, enterAck(3))
+	g.plan.Portal = &Portal{Map: 0, Point: Point{3000, 0, 0}} // 300 s of walking at the fake's 10 yd/s
+	start := g.now
+	_, err := g.run(RemoteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "did not get the party in within 240 s") || len(g.sent) != 0 {
+		t.Fatalf("%v sent %v", err, g.sent)
+	}
+	if span := g.now.Sub(start); span > 6*time.Minute {
+		t.Fatalf("the phase took %v", span)
+	}
+}
