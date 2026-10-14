@@ -1262,7 +1262,7 @@ With entry targets on:
   `not-found` is "not there yet", `too-far` is noted; the step's own `timeout_s` ends the polling with "waited N s for ..." plus `last cmd state answer: ...`. The watchdog does not count the wait.
   A `cmd state` refused as `invalid` in the middle of the run turns entry targets off from then on.
 - **Keep-near is off** when every object step of the plan has an entry (no `.appear`, no walk behind the party before object steps and boss steps; `run_gm_assists` is 0, `agent_walks` 0 for them). A boss
-  step is then judged from the bots' frames and the ledger alone (a corpse in the agent's store is no longer fetched as extra evidence). With a step that names no entry (a position only) it stays on, with a note.
+  step still brings the agent up once (`.appear` or a walk, a counted `run_gm_assists`), but only when this run has no evidence the boss died (no kill, no ledger entry, no corpse in the agent's view): a boss killed before the run (a resume) can be shown dead only by the agent's view. A read-only check would need a `cmd state` for creature entries (follow-up in TortoiseBots). With a step that names no entry (a position only) it stays on, with a note.
 
 Fake commander only; not verified live (see `docs/LIVE-CHECKS.md`).
 
