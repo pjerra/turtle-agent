@@ -621,3 +621,21 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
    mob that is not yet in the lead bot's range answers `too-far`, and whether a hostile that dies is dropped from `H` at once (the fight counts a
    mob that was seen fighting and is absent for two frames as dead), and in a dense room (more than 24 hostiles) whether the fight is ever
    called early: check `frames_truncated` and that no pull ends `won` with 0 kills.
+
+## Trade (issue #80)
+
+`trade` is tested against the core's `TradeHandler.cpp` layouts and a scripted server only; nothing below has run live. Needs a bot that
+is in the agent's group (or owned by it) and standing within 10 yd, and a TortoiseBots build with `TradeStatusAction` (any current one).
+
+1. **Whole stack.** Pick a stack the leader carries (a mage leader can conjure water first) and give the whole stack: `trade {"to":"<bot>","items":[{"item":<water>,"count":<stack>}]}`.
+   Expect `completed`, `verified` true, `gave` with `split` absent, a `trade_status` run `open`, `back_to_trade`, `accepted`, `complete`, and the bot's
+   inventory (`.bot` `items` or its whisper list) showing the water. Note how long it took (the 1.1 s settle is the floor) and whether the bot's whispers ("=== Inventory ===") appear in `chat_log`.
+2. **Split.** The same with a smaller count than the stack: the stack is split into a free slot first (`inventory` shows the odd stack until the
+   trade completes), `gave[0].split` is true, and the rest stays. Check `back_to_trade` is not mistaken for a refusal (it should be one per change, then the accept).
+3. **Gold and items together**, then **gold only**, to a bot of each kind: one the agent owns, one in the party that is a random-pool bot. Record which accept and which time out
+   (the README predicts that a random-pool bot refuses gold with no item and items it has no use for).
+4. **Range.** Stand 15 yd away: the error names the distance, no packet is sent. At 10 to 11 yd the call is accepted by the agent; note whether the core completes it
+   (`too_far` status on the accept would mean the bot moved).
+5. **Refusals.** A soulbound item: expect `cancelled` (the core refuses `CMSG_SET_TRADE_ITEM` with a cancel). A bot that is not in the group: expect the window not to open, `timeout` after `open_wait_ms` and a cancel sent.
+6. **Mage bot.** A mage bot may fill its side with conjured food and water (`AutoShareConjured`, default on): check `received` lists them and that the accept takes them without a second round of `back_to_trade` that runs the agent out of its four accepts.
+7. **Anticheat and idle.** A SEC_PLAYER leader: trade packets are not movement, but grep the anticheat log for the run anyway.

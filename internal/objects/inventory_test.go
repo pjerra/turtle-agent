@@ -99,6 +99,29 @@ func TestItemAtBackpackAndBags(t *testing.T) {
 	}
 }
 
+func TestFreeSlots(t *testing.T) {
+	const (
+		me         = packet.GUID(0x2A)
+		bag, stone = packet.GUID(0x4000000000000002), packet.GUID(0x4000000000000006)
+		sword      = packet.GUID(0x4000000000000003)
+	)
+	s := NewStore()
+	if got := s.FreeSlots(me); got != nil {
+		t.Fatalf("unknown player: %v", got)
+	}
+	bagBlock := itemCreate(bag, TypeContainer, 4500, 1)
+	bagBlock.Values[ContainerNumSlots] = 3
+	bagBlock.Values[ContainerSlot1+2*1], bagBlock.Values[ContainerSlot1+2*1+1] = uint32(stone&0xFFFFFFFF), uint32(stone>>32)
+	s.Apply([]Block{bagBlock, itemCreate(stone, TypeItem, 6948, 1), itemCreate(sword, TypeItem, 2589, 1),
+		createBlock(me, TypePlayer, 0, 0, invSlot(invSlot(map[uint16]uint32{}, 19, bag), 24, sword))})
+	got := s.FreeSlots(me)
+	// 16 backpack slots less slot 24, then bag 19's slots 0 and 2 (slot 1 holds the stone).
+	if len(got) != 15+2 || got[0] != [2]uint8{BackpackBag, 23} || got[1] != [2]uint8{BackpackBag, 25} ||
+		got[15] != [2]uint8{19, 0} || got[16] != [2]uint8{19, 2} {
+		t.Fatalf("%v", got)
+	}
+}
+
 // An imbued weapon shows its temporary enchantment (ITEM_FIELD_ENCHANTMENT slot 1, the id word) on the item row.
 func TestItemAtReadsTheTemporaryEnchantment(t *testing.T) {
 	const (

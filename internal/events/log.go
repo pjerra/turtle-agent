@@ -112,6 +112,10 @@ const (
 	KindBotViewFrame = "bot_view_frame"
 	KindBrainState   = "brain_state" // the brain started or stopped: data.state, strategies, role
 
+	// KindTradeStatus is SMSG_TRADE_STATUS: a step of a trade window (README "Trading"). data.status names it (begin, open, accepted,
+	// back_to_trade, complete, cancelled, too_far, busy, ...) and data.code is the TradeStatus number; the other player is the source.
+	KindTradeStatus = "trade_status"
+
 	// The player's pet (README "Pets", issue #80 step 4d). The pet's guid is source.
 	KindPetSummoned  = "pet_summoned"  // UNIT_FIELD_SUMMON of the player names a pet: data.entry, data.dead; target the owner
 	KindPetDied      = "pet_died"      // the pet's health reached 0 (a hunter's pet stays as a corpse until revived; a demon is gone in 15 s)

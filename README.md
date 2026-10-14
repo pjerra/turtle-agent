@@ -242,6 +242,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `disband` | | Leader only: removes every other member, which ends the group. `leave_group` only takes the player out and the group lives on |
 | `loot_method` | `method` (`free_for_all`, `round_robin`, `master_loot`, `group_loot`, `need_before_greed`), `master` or `master_name` (master_loot: the master looter; the player when neither), `threshold` (item quality 1-5; 0 keeps the group's) | Leader only (`CMSG_LOOT_METHOD`, GroupHandler.cpp:372-403). Returns once the group list shows the new rules |
 | `party` | | `in_group`, `raid`, `leader`, `assistant` and `subgroup` (the player's own), `members[]` with health, power (`power_type`, `power`, `max_power`), online state, `assistant` and `subgroup` (health, power and level of a member in view come from its unit fields: the server sends party member stats only to members out of range, so a member in view would otherwise keep its first reading; a member out of view keeps the last stats values), `marks` (raid icon name to guid), `loot_method`, `loot_master` and `loot_threshold` (the group's loot rules from the group list) |
+| `trade` | `to` (a player's name in view, or a guid as `0x...`), `items` (`[{"item": entry, "count": n}]`, count 1 when omitted), `gold` (copper), `wait_ms` (the other side's accept, default 12000), `open_wait_ms` (the window opening, default 8000) | Hands items and gold to a player within 10 yd and returns `result` (`completed`), `partner`, `partner_name`, `gave[]`, `gold`, `received[]` and `received_gold` (what the other side put in), `partner_accepted`, `verified`. A trade that does not complete is an error whose `data` is the same object with `result` `timeout`, `cancelled`, `too_far`, `busy`, `ignored`, ...; see [Trading](#trading) |
 | `units` | `within` (yards, 3D; `near` is its older name), `entry`, `hostile`, `name`, `limit` | nearby units, nearest first: guid, name, level, health, dead, hostile, in_party, `x`/`y`/`z`/`o`, `pos_age_ms`, `moving`, `distance` (3D) and `distance_2d` from the player (see [Unit positions](#unit-positions)), `in_combat`, `target`, `stand_state`, `auras[]`, `casting` (see [Unit state](#unit-state)); `hostile` means an attackable-looking creature (no NPC flags, not player-controlled), not a faction check: it counts neutral critters and never an enemy-faction player |
 | `unit` | `guid` or `name` (prefers living units; the player's own name or guid gives the player, at the `status` position) | one unit, as a `units` row; an error when none is in view |
 | `target` | `guid` or `name` (prefers living units) | |
@@ -319,7 +320,7 @@ auras, deaths, kills, party changes, raid icons (`raid_mark`), the pet (`pet_sum
 `loot_all_passed`, tied together by `data.roll_id`), refused equips and item uses (`inventory_error`), NPC dealings (vendor, trainer and quest events, see
 [Vendors, trainers and quests](#vendors-trainers-and-quests)), corpse loot (`loot_open`,
 `loot_taken`, `loot_money`, `loot_money_share`, `loot_error`, `loot_closed`), the player's own mount and stand state (`mount`,
-`mount_result`, `stand_state`) and session state. Cursors are exclusive; `dropped` says older events were evicted.
+`mount_result`, `stand_state`), trade windows (`trade_status`, see [Trading](#trading)) and session state. Cursors are exclusive; `dropped` says older events were evicted.
 A chat or system line whose colour codes were stripped keeps the original in `data.raw` (protocol lines such as
 `TBM:ROSTER|…|removing` lose `|r` otherwise).
 
@@ -435,6 +436,39 @@ that run (turtle-agent#64), which read the use as having no cast; the use is a 4
 above is not run live yet, so mount by `spell_id` until it is. The packets of the trainer list, the quest
 panels, the loot window and the forced run speed are tested against bytes from that run
 (`internal/game/realpackets_live_test.go`).
+
+## Trading
+
+`trade` hands items and gold to another player, as a player at the trade window would: `CMSG_INITIATE_TRADE`, then the other
+player's client answers with `CMSG_BEGIN_TRADE` and the window opens (`SMSG_TRADE_STATUS` open), `CMSG_SET_TRADE_ITEM` and `CMSG_SET_TRADE_GOLD`
+fill it, `CMSG_ACCEPT_TRADE` accepts, and the trade completes when the other side accepts too. The agent does not take part in a
+trade the other side starts (`trade_status` `begin` is logged and not answered), and it does not take items: `received` only reports
+what the other side put in the window, which the accept takes along.
+
+- **Range.** The other player must be in view and within 10 yd (the core allows 11.11, `TRADE_DISTANCE`, at the start and again when it
+  completes the trade); farther is an error before anything is sent, naming the distance. Walk up with `walk_to` first. A dead player,
+  yourself, a creature, too much gold, an item the bags lack, and more than six stacks (the window has six slots) are errors before anything is sent too.
+- **Counts.** The window takes whole stacks: `CMSG_SET_TRADE_ITEM` has no count. A request is met by one stack of exactly that count; else by
+  splitting the count off the smallest stack that has more (`CMSG_SPLIT_ITEM` into the first free slot of the backpack or a bag, once the
+  window is open); else by whole stacks, the largest first, and the last piece the same way. Two entries for one item add up. A split stack that
+  stays behind when the trade fails is not merged back.
+- **Timing.** The core refuses an accept less than a second after the last change to the window (`back_to_trade`; the delay counts whole seconds).
+  The agent waits 1.1 s after filling the window, accepts, and accepts again when `back_to_trade` comes (up to four times; the other side changing
+  the window causes it too). Nothing is cancelled while the other side is still deciding: a trade that times out, or ends in a refusal, is
+  closed with `CMSG_CANCEL_TRADE` so nobody is left in a window.
+- **Result.** `completed` also says `verified`: the bags no longer hold the items and the purse is down by the gold, seen in the update
+  fields after the status (false with a `detail` when they do not show within 2.2 s). A failure carries the last status in `data.status`.
+  Every `SMSG_TRADE_STATUS` is a `trade_status` event: `data.status` (`begin`, `open`, `accepted`, `back_to_trade`, `complete`, `cancelled`,
+  `too_far`, `busy`, `no_target`, `ignored`, ...) and `data.code`, the other player as `source`; `accepted` and `complete` add `data.their_items` and `data.their_gold`.
+- **TortoiseBots bots.** `TradeStatusAction` (`ai/playerbot/strategy/actions/TradeStatusAction.cpp`) opens the window for the bot's master and
+  for members of its group (otherwise it cancels), whispers its inventory ("=== Inventory ===") and accepts when the agent accepts. A bot
+  that is not a random-pool bot takes a gift at once. A random-pool bot goes through its buy check: an item it has no use for
+  ("I don't need this"), or gold with no item to price, makes it not accept, and the agent times out. A mage bot may add conjured food and
+  water to the window (`AutoShareConjured`); they show in `received` and the accept takes them. The bot says why it refuses in a whisper:
+  read `chat_log`.
+
+Not verified live: see [docs/LIVE-CHECKS.md](docs/LIVE-CHECKS.md), "Trade". The packet bodies are checked against the core's `TradeHandler.cpp` and
+fixtures built from it; the dungeon driver has no `give` step yet.
 
 ## Game objects
 
