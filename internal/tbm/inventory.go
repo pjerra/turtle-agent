@@ -112,8 +112,9 @@ func ParseInventory(lines []string) Inventory {
 }
 
 // botLineVerbs are the plain `.bot` commands Lines may send (they are not commander orders) with one bot name: the pre-run kit refresh
-// and check, the logout at the end of a run, and the login of the prepare step (`add`, the owner's own character).
-var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": true, "add": true}
+// and check, the logout at the end of a run, the login of the prepare step (`add`, the owner's own character), and `summon` (a start past
+// leg 0 brings the lead bot to the commander).
+var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": true, "add": true, "summon": true}
 
 // botNameRe is what a bot's name can be (1.12 names are letters).
 var botNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
@@ -165,7 +166,7 @@ func CheckBotLine(command string) error {
 		return nil
 	}
 	if len(f) != 2 || !botLineVerbs[strings.ToLower(f[0])] {
-		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, command <bot name> talents|leave|spells <filter>, autogear <bot name> blue, or hire <class> <role> [level=<n>]", command)
+		return fmt.Errorf("%q: Lines sends maintenance, inv, logout, add or summon with one bot name, roster, command <bot name> talents|leave|spells <filter>, autogear <bot name> blue, or hire <class> <role> [level=<n>]", command)
 	}
 	if !botNameRe.MatchString(f[1]) {
 		return fmt.Errorf("%q: %q is not a bot name", command, f[1])
