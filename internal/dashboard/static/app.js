@@ -394,7 +394,12 @@ function attachControls(rec, svg) {
     if (ptrs.size === 1) dragBy(rec, cur.x - prev.x, cur.y - prev.y);
     else if (ptrs.size === 2 && rec.v) {
       const other = [...ptrs].find(([id]) => id !== e.pointerId)[1], { pw, ph } = panelSize(rec);
-      if (rec.following) { rec.paused = true; rec.following = false; updateFollowUi(rec); }
+      if (rec.following) {
+        // Only a drag pauses the following: a pinch zooms around the party, which stays in the middle.
+        zoomAround(rec, MV.pinchFactor(prev, other, cur, other), pw / 2, ph / 2);
+        ptrs.set(e.pointerId, cur);
+        return;
+      }
       rec.goal = null; rec.mode = "free";
       rec.v = MV.pinch(rec.v, prev, other, cur, other, pw, ph, rec.fit.scale);
       applyViewBox(rec);
