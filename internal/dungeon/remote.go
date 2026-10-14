@@ -1373,7 +1373,7 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 }
 
 // directMoveOrder is the order a direct step sends: `cmd move x y z direct` (TortoiseBots), a straight-line walk for a gap the navmesh
-// does not bridge. Short steps only; the module checks the limits and the ground and refuses with too-far or no-ground.
+// does not bridge. Short steps only; the module checks the limits and the ground and refuses with too-far, no-ground or no-los.
 func directMoveArgs(p Point) []string { return append(moveArgs(p), "direct") }
 
 // errDirectUnsupported is a direct step on a server that does not know the flag: it answers `invalid` (the usage line), as it does to
@@ -1384,7 +1384,7 @@ func errDirectUnsupported(p Point, ref Refusal) error {
 
 // walk is doWalk, or with direct set a direct step to p: one `cmd move ... direct` (no legs, no planning), repeated when the module
 // answers too-far (a follower is still catching up with the lead bot, whose position the step is checked from for every bot) and
-// waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground.
+// waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground and no-los a bot that cannot see it (the step would cut through a wall).
 func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) {
 		if direct {
@@ -1445,7 +1445,7 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 				if ref.Code == "invalid" {
 					return errDirectUnsupported(p, ref)
 				}
-				if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries || ref.Code == "no-ground" {
+				if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries || ref.Code == "no-ground" || ref.Code == "no-los" {
 					return fmt.Errorf("direct step to %.1f %.1f %.1f: the lead bot was refused (%s)", p.X, p.Y, p.Z, last)
 				}
 				if err := d.tick(ctx, d.cfg.WalkRetryDelay); err != nil {

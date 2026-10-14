@@ -152,14 +152,16 @@ func TestRemoteDirectStepFailsClearly(t *testing.T) {
 		t.Fatalf("the point was ordered %d times: %v", n, g.ordersOf("cmd move"))
 	}
 
-	g = newFakeRemote(t)
-	g.directErrs = []string{"no-ground"}
-	_, err = runRemote(t, g, viaRemotePlan(), opts(), nil)
-	if err == nil || !strings.Contains(err.Error(), "no-ground") {
-		t.Fatalf("%v", err)
-	}
-	if n := len(g.ordersOf("cmd move 55.00 0.00 4.00")); n != 1 {
-		t.Fatalf("a no-ground refusal was retried: %v", g.ordersOf("cmd move"))
+	for _, code := range []string{"no-ground", "no-los"} {
+		g = newFakeRemote(t)
+		g.directErrs = []string{code}
+		_, err = runRemote(t, g, viaRemotePlan(), opts(), nil)
+		if err == nil || !strings.Contains(err.Error(), code) {
+			t.Fatalf("%s: %v", code, err)
+		}
+		if n := len(g.ordersOf("cmd move 55.00 0.00 4.00")); n != 1 {
+			t.Fatalf("a %s refusal was retried: %v", code, g.ordersOf("cmd move"))
+		}
 	}
 }
 

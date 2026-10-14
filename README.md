@@ -562,7 +562,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `via` (optional, per leg) lists waypoints walked in order before `to`: `{"x":..,"y":..,"z":..}` is a plain walk on the navmesh; with `"direct": true` the step is a straight line, for a gap the
   navmesh does not bridge (Uldaman's scorpid-pit ramp). The remote driver sends it as `.bot cmd move x y z direct` (TortoiseBots #942: every bot walks the line; each must be within 25 yd
   across and 8 yd up or down of the point, and the point needs ground within 3 yd of its height). The loader refuses a direct step without a via point before it (where the party gathers) or longer than
-  those limits. If the module answers `too-far` (a follower still catching up) the step is sent again; `no-ground` fails the leg; `invalid` means a server without the flag and fails the leg with
+  those limits. If the module answers `too-far` (a follower still catching up) the step is sent again; `no-ground` (no floor under the point) and `no-los` (a bot cannot see the point: the step would cut through a wall) fail the leg at once; `invalid` means a server without the flag and fails the leg with
   that error (nothing is sent in its place). The agent's own companions walk a direct waypoint as a plain one.
 - A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
