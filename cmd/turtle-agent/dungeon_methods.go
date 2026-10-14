@@ -265,9 +265,12 @@ type dungeonRunner struct {
 	drv dungeon.Runner
 	// kept is the hires of a binding the last run kept (keep_on_fail): dungeon_stop unbinds it, the next run's prepare takes their class
 	// and level from it (a bound hire does not answer `who`).
-	kept   map[string]tbm.Who
-	cancel context.CancelFunc
-	done   chan struct{}
+	kept map[string]tbm.Who
+	// classes is the class of every hire any run of this process has read (name, lower case): a hire's class never changes, so it is
+	// kept whatever became of the binding, and a later run that names its party finds its mage here (RemoteOptions.ClassMemory).
+	classes map[string]string
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
@@ -629,6 +632,16 @@ func (r *dungeonRunner) pause() (dungeonStatusResult, error) {
 func (r *dungeonRunner) keptFrom(rep dungeon.Report) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rep.Ready != nil {
+		for _, b := range rep.Ready.Bots {
+			if b.Class != "" {
+				if r.classes == nil {
+					r.classes = map[string]string{}
+				}
+				r.classes[strings.ToLower(b.Name)] = strings.ToLower(b.Class)
+			}
+		}
+	}
 	r.kept = nil
 	if rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept") {
 		return

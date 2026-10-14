@@ -94,6 +94,9 @@ type RemoteOptions struct {
 	// points): a bound hire does not answer `who`, so the prepare step takes its class and level from here for the bots that are still
 	// in the standing binding.
 	HireMemory map[string]tbm.Who
+	// ClassMemory is the class (lower case) of every hire the agent has read in any earlier run, kept whether or not that run kept its
+	// binding (a class never changes): the cc bot of a run that names its party is the mage found here (remote_cc.go).
+	ClassMemory map[string]string
 	// Carrier names the bot that does the object steps (loot_object, a boss's loot_item, use_item, use_object): it walks to the chest or
 	// corpse, loots, opens and uses items on `cmd open|loot|use` orders (remote_objects.go). Empty: the first living bot that is neither
 	// the lead bot, the tank nor the healer.
@@ -486,6 +489,7 @@ type RemoteDriver struct {
 	patrolWalkedAt map[*Patrol]time.Time
 	// wantParty is how many bots the party has when the run starts (the lead bot and the named bots; the feed's party when none are
 	// named); shortSince is when the feed first showed fewer, partyShort whether the stop has been said (remote_party.go).
+	ccLookAt   time.Time // the last look for the party's mage (ensureCCBot)
 	wantParty  int
 	shortSince time.Time
 	shortSaid  bool
