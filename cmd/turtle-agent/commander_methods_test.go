@@ -203,7 +203,10 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|2|on")
 	r.system(viewFrame(1, false)...)
-	// The pre-run kit check: maintenance, then the bags (plain `.bot` lines, answered by system messages).
+	// The run turns corpse looting on for the bound bots first (a run that ended in a crash may have left it off), then the pre-run kit
+	// check: maintenance, then the bags (plain `.bot` lines, answered by system messages).
+	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
+	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot maintenance Tanky"))
 	r.system("Maintained Tanky (consumables, reagents, ammo, repair).")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot inv Tanky"))

@@ -41,6 +41,7 @@ type fakeCarrier struct {
 	loseLoot  bool                    // the chest opens but gives nothing
 	recipe    func(bot string) string // after a `use`: what happened to the bags ("" nothing)
 	invErr    bool
+	cut       map[string]bool
 }
 
 func newFakeCarrier(t *testing.T) *fakeCarrier {
@@ -91,6 +92,10 @@ func (g *fakeCarrier) Order(ctx context.Context, command string) (tbm.OrderResul
 	g.orderAt = append(g.orderAt, g.now)
 	f := strings.Fields(command)
 	verb := f[1]
+	if g.cut[verb] { // the run is cancelled while this order waits: no answer comes and Order returns the context's error
+		g.cut[verb] = false
+		return tbm.OrderResult{Command: command, Intent: "cmd " + verb, Kind: tbm.KindTimeout, Lines: []string{}}, context.Canceled
+	}
 	if q := g.script[verb]; len(q) > 0 {
 		g.script[verb] = q[1:]
 		r := q[0]
@@ -142,6 +147,12 @@ func (g *fakeCarrier) Order(ctx context.Context, command string) (tbm.OrderResul
 
 func (g *fakeCarrier) Behavior(ctx context.Context, bot, key string, on bool) (tbm.Reply, error) {
 	g.behaviors = append(g.behaviors, fmt.Sprintf("%s %s %v", bot, key, on))
+	state := "off"
+	if on {
+		state = "on"
+	}
+	g.orders = append(g.orders, ".bot behavior "+bot+" "+key+" "+state)
+	g.orderAt = append(g.orderAt, g.now)
 	a := tbm.Ack{Intent: "behavior " + key, Scope: "bot:" + bot, Count: 1, Executor: "off"}
 	return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}, nil
 }
@@ -617,8 +628,9 @@ func TestCarrierLootsTheBossItem(t *testing.T) {
 	if ffa < 0 || loot < ffa || back < loot || use < back {
 		t.Fatalf("want %q in %v", want, g.orders)
 	}
-	// companions_loot false: the others' looting is off for the fight and back on after the loot; the carrier's is left alone.
-	if fmt.Sprint(g.behaviors) != "[Tanky loot false Healy loot false Tanky loot true Healy loot true]" {
+	// The run's start turns looting on for all three. companions_loot false: the others' looting is off for the fight and back on after
+	// the loot; the carrier's is left alone.
+	if fmt.Sprint(g.behaviors) != "[Tanky loot true Healy loot true Magey loot true Tanky loot false Healy loot false Tanky loot true Healy loot true]" {
 		t.Fatalf("%v", g.behaviors)
 	}
 	if g.bag("Magey")[itStaff] != 1 {
@@ -642,7 +654,7 @@ func TestCarrierBossItemFailures(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "refused: failed") || !strings.Contains(err.Error(), "companions_loot") || g.indexOf("cmd lootmethod group") < 0 {
 		t.Fatalf("%v %v", err, g.orders)
 	}
-	if len(g.behaviors) != 4 { // looting is turned back on after a failure too
+	if len(g.behaviors) != 7 { // 3 at the start of the run, then 2 off and 2 back on, the last after a failure too
 		t.Fatalf("%v", g.behaviors)
 	}
 	// A carrier that already took it from the corpse (looting on) has nothing to fetch.
@@ -652,7 +664,7 @@ func TestCarrierBossItemFailures(t *testing.T) {
 	g.bag("Magey")[itMedallion] = 1
 	g.recipe = combineRecipe(g)
 	rep, err := runCarrier(t, g, bossPlan(false), objOpts())
-	if err != nil || g.indexOf("cmd loot") >= 0 || len(g.behaviors) != 0 {
+	if err != nil || g.indexOf("cmd loot") >= 0 || len(g.behaviors) != 3 { // only the start of the run turns looting on
 		t.Fatalf("%v %v %v", err, g.orders, g.behaviors)
 	}
 	if rep.Remote.ObjectSteps[0].Result != "skipped" {
@@ -696,6 +708,88 @@ func TestCarrierRejoinSendsFollow(t *testing.T) {
 	rep, err := runCarrier(t, g, plan, objOpts())
 	if err != nil || g.indexOf("cmd follow") < 0 || rep.Remote.ObjectSteps[0].Result != "done" {
 		t.Fatalf("%v %v", err, g.orders)
+	}
+}
+
+// An ffa order that is never answered, or whose wait a cancel cuts short, may still have changed the loot method: it goes back anyway.
+func TestCarrierLootMethodGoesBackWhateverTheFFAAnswer(t *testing.T) {
+	plan := remotePlan(Leg{Name: "c", To: Point{20, 0, 0}, Steps: []Step{lootChestStep()}})
+	g := carrierGame(t)
+	g.script["lootmethod"] = []tbm.OrderResult{timeoutOrder("cmd lootmethod ffa")}
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err == nil || !strings.Contains(err.Error(), "could not set free-for-all loot") || g.indexOf("cmd open") >= 0 {
+		t.Fatalf("%v %v", err, g.orders)
+	}
+	if fmt.Sprint(g.methods) != "[group]" || rep.Remote.Orders["lootmethod"] != 2 || rep.Remote.OrdersUnanswered != 1 {
+		t.Fatalf("%v %+v", g.methods, rep.Remote)
+	}
+	g = carrierGame(t)
+	g.cut = map[string]bool{"lootmethod": true}
+	if _, err := runCarrier(t, g, plan, objOpts()); err == nil || !strings.Contains(err.Error(), "cmd lootmethod ffa: context canceled") || fmt.Sprint(g.methods) != "[group]" {
+		t.Fatalf("%v %v", err, g.methods)
+	}
+}
+
+// A run turns looting on for every bound bot before its first order: a run that ended in a crash may have left it off for them.
+func TestCarrierTurnsLootingOnAtTheRunStart(t *testing.T) {
+	g := carrierGame(t)
+	plan := remotePlan(Leg{Name: "c", To: Point{20, 0, 0}, Steps: []Step{lootChestStep()}})
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	start := []string{"commander bind Tanky Healy Magey", "commander view on", ".bot behavior Tanky loot on", ".bot behavior Healy loot on", ".bot behavior Magey loot on"}
+	if len(g.orders) < len(start) || fmt.Sprint(g.orders[:len(start)]) != fmt.Sprint(start) {
+		t.Fatalf("%v", g.orders)
+	}
+	noted := false
+	for _, n := range rep.Notes {
+		noted = noted || strings.Contains(n, "corpse looting turned on for [Tanky Healy Magey] at the start of the run")
+	}
+	if !noted {
+		t.Fatalf("%v", rep.Notes)
+	}
+}
+
+// The Seal is not in the agent's view, so its wait runs out the settle time. The party dies 7 s into that wait and a wipe recovery brings
+// the step back to the same wait: the wait must run its settle time again, not be skipped at once. A wait that is the run's first step
+// is waited for too.
+func TestCarrierSealSettleStartsAgainAfterAWipe(t *testing.T) {
+	g := carrierGame(t)
+	g.gobjs = nil
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}}, Leg{Name: "s", To: Point{20, 0, 0}, Steps: keystoneStep()[1:]})
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait, cfg.RecoverWipe = 2*time.Second, 4*time.Second, true
+	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
+	wiped := false
+	var revived time.Time
+	g.onTick = func(g *fakeRemote) {
+		if !wiped && !d.obj.waitAt.IsZero() && g.now.Sub(d.obj.waitAt) >= 7*time.Second {
+			wiped = true
+			for _, p := range g.party {
+				p.Dead, p.HP = true, 0
+			}
+		}
+		if revived.IsZero() && len(g.revived) > 0 {
+			revived = g.now
+		}
+	}
+	err := d.Run(context.Background(), 0)
+	rep, ended := d.Status()
+	if !ended || err != nil || !wiped || revived.IsZero() || rep.Wipes != 1 {
+		t.Fatalf("%v wiped %v revived %v %v", err, wiped, revived, rep.Notes)
+	}
+	// Nothing advances the clock once the Seal is taken as changed and the run ends, so the clock at the end is when the settle ran out.
+	if g.now.Sub(revived) < objectWaitSettle {
+		t.Fatalf("the Seal was skipped %v after the recovery: %v", g.now.Sub(revived), rep.Notes)
+	}
+	// The same wait as the very first step of a run (leg 0, step 0) runs its settle time too.
+	g = carrierGame(t)
+	g.gobjs = nil
+	start := g.now
+	rep, err = runCarrier(t, g, remotePlan(Leg{Name: "s", To: Point{0, 0, 0}, Steps: keystoneStep()[1:]}), objOpts())
+	if err != nil || g.now.Sub(start) < objectWaitSettle {
+		t.Fatalf("%v %v %v", err, g.now.Sub(start), rep.Notes)
 	}
 }
 

@@ -1012,7 +1012,7 @@ after 10 s if it is not).
 A refusal that cannot help ends the step with the code and what it usually means (`no-item`, `locked`, `denied`, `unavailable`, `invalid-target`,
 `unreachable`, `timeout`, `failed`). `busy` is sent again (4 times), `cancelled` too (twice), `in-combat` waits for the fight to end (60 s), `too-far`
 (the object is more than 150 yd from the carrier) walks the lead bot toward the object (stand point or object position) and sends the order again (twice),
-`lead-unavailable` waits as any order does. The loot method is put back even when the step fails.
+`lead-unavailable` waits as any order does. The loot method is put back even when the step fails, and when its `cmd lootmethod ffa` order was refused, timed out or cut short by a cancel (the order may have changed the method anyway). Every remote run starts by turning corpse looting on for each bound bot (`.bot behavior <bot> loot on`), since a run that ended in a crash may have left a boss's `loot off` in place; the report notes it. Not verified live yet.
 
 **The agent must be within view of the object.** The GUID of a game object is its spawn's, and the bots have no listing of them: it comes from the agent's
 own object store (`gameobjects`). So an object step needs the agent's character to be near enough to **see** the object (it need not be in the group, but
