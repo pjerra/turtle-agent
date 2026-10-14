@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
@@ -26,13 +28,92 @@ type GeoPoint struct {
 	Direct bool    `json:"direct,omitempty"`
 }
 
+// GeoWaypoint is one stop of a leg's planned route, in the order the plan visits them: the leg's start, its via points, the first
+// position of each pull group, the boss, and the leg's end. N counts them from the start (0).
+type GeoWaypoint struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Kind   string  `json:"kind"` // start, via, pull, boss, end
+	Label  string  `json:"label"`
+	N      int     `json:"n"`
+	Group  int     `json:"group"` // the pull group's index in its leg, for a pull stop
+	Direct bool    `json:"direct,omitempty"`
+}
+
 // GeoLeg is the summary of one leg the page needs.
 type GeoLeg struct {
-	Index  int        `json:"index"`
-	Name   string     `json:"name"`
-	Groups int        `json:"groups"`
-	Boss   uint32     `json:"boss,omitempty"`
-	Path   []GeoPoint `json:"path"`
+	Index  int           `json:"index"`
+	Name   string        `json:"name"`
+	Label  string        `json:"label"` // the name in words: "Sentinel room"
+	Groups int           `json:"groups"`
+	Boss   uint32        `json:"boss,omitempty"`
+	Path   []GeoPoint    `json:"path"`
+	Stops  []GeoWaypoint `json:"stops"`
+}
+
+// legLabel is a leg's name in words ("sentinel_room" -> "Sentinel room"), "Section N" for a leg without one.
+func legLabel(name string, i int) string {
+	n := strings.TrimSpace(strings.NewReplacer("_", " ", "-", " ").Replace(name))
+	if n == "" {
+		return fmt.Sprintf("Section %d", i+1)
+	}
+	r := []rune(n)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
+
+// packLabel names a pull group by the creatures in it: "pack 2: Relic Hunter, Geologist".
+func packLabel(k int, pg dungeon.PullGroup, names map[string]string) string {
+	var seen []string
+	for _, e := range pg.Entries {
+		n := names[strconv.FormatUint(uint64(e), 10)]
+		if n == "" {
+			n = fmt.Sprintf("creature %d", e)
+		}
+		dup := false
+		for _, o := range seen {
+			dup = dup || o == n
+		}
+		if !dup {
+			seen = append(seen, n)
+		}
+	}
+	if len(seen) > 3 {
+		seen = seen[:3]
+	}
+	return fmt.Sprintf("pack %d: %s", k+1, strings.Join(seen, ", "))
+}
+
+// LegStops is the planned route of leg i from (startX, startY): the via points, the first position of every pull group, the boss, and
+// the leg's end, in the order the plan lists them.
+func LegStops(leg dungeon.Leg, i int, startX, startY float64, names map[string]string) []GeoWaypoint {
+	label := legLabel(leg.Name, i)
+	out := []GeoWaypoint{{X: startX, Y: startY, Kind: "start", Label: "start of " + label}}
+	add := func(x, y float64, kind, text string, direct bool) {
+		out = append(out, GeoWaypoint{X: x, Y: y, Kind: kind, Label: text, N: len(out), Direct: direct})
+	}
+	for _, w := range leg.Via {
+		x, y := Project(w.X, w.Y)
+		add(x, y, "via", "waypoint", w.Direct)
+	}
+	for k, pg := range leg.PullGroups {
+		if len(pg.Positions) > 0 {
+			x, y := Project(pg.Positions[0].X, pg.Positions[0].Y)
+			add(x, y, "pull", packLabel(k, pg, names), false)
+			out[len(out)-1].Group = k
+		}
+	}
+	if b := leg.Boss; b != nil {
+		x, y := Project(b.Position.X, b.Position.Y)
+		text := fmt.Sprintf("boss %d", b.Entry)
+		if n := names[strconv.FormatUint(uint64(b.Entry), 10)]; n != "" {
+			text = "boss " + n
+		}
+		add(x, y, "boss", text, false)
+	}
+	x, y := Project(leg.To.X, leg.To.Y)
+	add(x, y, "end", "end of "+label, false)
+	return out
 }
 
 // Geometry is a plan ready to draw: the static SVG layer and the box it fits in.
@@ -89,22 +170,36 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 	g := Geometry{Plan: plan.Name, Map: plan.Map}
 	var bb box
 	var sb strings.Builder
+	names := EntryNames(plan)
 	prevX, prevY := Project(plan.Entrance.X, plan.Entrance.Y)
 	bb.add(prevX, prevY, 0)
 	fmt.Fprintf(&sb, `<g class="mk entrance" data-x="%.1f" data-y="%.1f"><circle r="7"/>%s</g>`, prevX, prevY, label("entrance", 11, -9, "lt"))
 	for i, leg := range plan.Legs {
-		gl := GeoLeg{Index: i, Name: leg.Name, Groups: len(leg.PullGroups)}
-		gl.Path = append(gl.Path, GeoPoint{X: prevX, Y: prevY})
-		for _, w := range leg.Via {
-			x, y := Project(w.X, w.Y)
-			gl.Path = append(gl.Path, GeoPoint{X: x, Y: y, Direct: w.Direct})
-			bb.add(x, y, 0)
+		gl := GeoLeg{Index: i, Name: leg.Name, Label: legLabel(leg.Name, i), Groups: len(leg.PullGroups)}
+		gl.Stops = LegStops(leg, i, prevX, prevY, names)
+		for _, st := range gl.Stops {
+			bb.add(st.X, st.Y, 0)
 		}
-		toX, toY := Project(leg.To.X, leg.To.Y)
-		gl.Path = append(gl.Path, GeoPoint{X: toX, Y: toY})
-		bb.add(toX, toY, 0)
+		for _, st := range gl.Stops {
+			// a stop on the same spot as the one before is the same point on the line (a boss at the leg's end)
+			if n := len(gl.Path); n > 0 && math.Hypot(gl.Path[n-1].X-st.X, gl.Path[n-1].Y-st.Y) < 0.5 {
+				continue
+			}
+			gl.Path = append(gl.Path, GeoPoint{X: st.X, Y: st.Y, Direct: st.Direct && st.Kind == "via"})
+		}
+		last := gl.Stops[len(gl.Stops)-1]
+		toX, toY := last.X, last.Y
 		fmt.Fprintf(&sb, `<g class="leg" data-leg="%d">`, i)
 		writeRoute(&sb, i, gl.Path)
+		for _, st := range gl.Stops {
+			if st.Kind != "start" {
+				fmt.Fprintf(&sb, `<g class="mk stepn" data-leg="%d" data-x="%.1f" data-y="%.1f">%s</g>`, i, st.X, st.Y, label(strconv.Itoa(st.N), 10, -8, "lt"))
+			}
+			if st.Kind == "via" || st.Kind == "end" {
+				fmt.Fprintf(&sb, `<g class="mk wp %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><circle r="3.5"/><title>%s</title></g>`,
+					st.Kind, i, st.X, st.Y, html.EscapeString(fmt.Sprintf("%s, step %d of %d: %s", gl.Label, st.N, len(gl.Stops)-1, st.Label)))
+			}
+		}
 		for k, pg := range leg.PullGroups {
 			r := groupRadius(pg)
 			cls := "pull"
@@ -118,7 +213,8 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 			}
 			if len(pg.Positions) > 0 {
 				x, y := Project(pg.Positions[0].X, pg.Positions[0].Y)
-				fmt.Fprintf(&sb, `<g class="mk pin" data-leg="%d" data-group="%d" data-x="%.1f" data-y="%.1f"><circle r="9"/><text class="num" y="4">%d</text></g>`, i, k, x, y, k+1)
+				fmt.Fprintf(&sb, `<g class="mk pin" data-leg="%d" data-group="%d" data-x="%.1f" data-y="%.1f"><circle r="9"/><text class="num" y="4">%d</text><title>%s</title></g>`, i, k, x, y, k+1,
+					html.EscapeString(fmt.Sprintf("%s, step %d of %d: %s", gl.Label, stopOf(gl.Stops, k), len(gl.Stops)-1, packLabel(k, pg, names))))
 			}
 		}
 		if b := leg.Boss; b != nil {
@@ -126,7 +222,7 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 			bb.add(x, y, 6)
 			gl.Boss = b.Entry
 			fmt.Fprintf(&sb, `<g class="mk boss" data-leg="%d" data-x="%.1f" data-y="%.1f"><polygon points="0,-14 14,0 0,14 -14,0"/><path d="M-5,-4 L5,4 M5,-4 L-5,4"/>%s</g>`,
-				i, x, y, label(fmt.Sprintf("boss %d", b.Entry), 18, 5, "lt"))
+				i, x, y, label(stopLabel(gl.Stops, "boss", fmt.Sprintf("boss %d", b.Entry)), 18, 5, "lt"))
 		}
 		for _, p := range stepPoints(leg) {
 			x, y := Project(p.pt.X, p.pt.Y)
@@ -134,17 +230,13 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 			fmt.Fprintf(&sb, `<g class="mk obj %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><rect class="ic" x="-4" y="-5" width="8" height="10" rx="1"/><circle class="knob" cx="1.5" cy="0" r="1"/>%s</g>`,
 				p.kind, i, x, y, label(p.label, 9, 4, "lt"))
 		}
-		name := leg.Name
-		if name == "" {
-			name = fmt.Sprintf("leg %d", i)
-		}
-		fmt.Fprintf(&sb, `<g class="mk legname" data-x="%.1f" data-y="%.1f">%s</g></g>`, toX, toY, label(fmt.Sprintf("%d %s", i, name), 8, 20, "lt"))
+		fmt.Fprintf(&sb, `<g class="mk legname" data-x="%.1f" data-y="%.1f">%s</g></g>`, prevX, prevY, label(gl.Label, 9, 22, "lt"))
 		prevX, prevY = toX, toY
 		g.Legs = append(g.Legs, gl)
 	}
 	g.ViewBox = fit(bb)
 	g.Bounds = bb.bounds()
-	g.Names = EntryNames(plan)
+	g.Names = names
 	g.SVG = sb.String()
 	return g
 }
@@ -263,4 +355,24 @@ func containsU32(s []uint32, v uint32) bool {
 		}
 	}
 	return false
+}
+
+// stopOf is the step number of the stop of pull group k.
+func stopOf(stops []GeoWaypoint, k int) int {
+	for _, s := range stops {
+		if s.Kind == "pull" && s.Group == k {
+			return s.N
+		}
+	}
+	return 0
+}
+
+// stopLabel is the label of the first stop of a kind, or fallback.
+func stopLabel(stops []GeoWaypoint, kind, fallback string) string {
+	for _, s := range stops {
+		if s.Kind == kind {
+			return s.Label
+		}
+	}
+	return fallback
 }

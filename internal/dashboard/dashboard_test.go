@@ -294,7 +294,7 @@ func TestGeometry(t *testing.T) {
 			t.Errorf("svg lacks %q", want)
 		}
 	}
-	if strings.Contains(svg, "<b>") || !strings.Contains(svg, "two &lt;b&gt;") {
+	if strings.Contains(svg, "<b>") || !strings.Contains(svg, "Two &lt;b&gt;") {
 		t.Errorf("a leg name must be escaped in the svg: %s", svg)
 	}
 	// the direct step is its own dashed line, so leg 0 has a plain route (entrance, via) and a direct line to the second via point

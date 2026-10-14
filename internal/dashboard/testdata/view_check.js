@@ -66,4 +66,26 @@ let cur = { cx: 0, cy: 0, scale: 1 }, goal = { cx: 100, cy: 50, scale: 4 }, n = 
 do { r = V.ease(cur, goal); cur = r.view; n++; } while (!r.done && n < 200);
 assert.ok(r.done && n < 60, "ease took " + n);
 assert.deepStrictEqual(cur, goal);
+// the trail fades with age: the oldest chunk is the faintest, the newest is solid, chunks join end to end, and a long trail is capped
+const line = Array.from({ length: 101 }, (_, i) => [i, 0]);
+let segs = V.trailSegments(line, 10);
+assert.strictEqual(segs.length, 10);
+close(segs[0].alpha, 0.25); close(segs[9].alpha, 1);
+for (let i = 1; i < segs.length; i++) { assert.ok(segs[i].alpha > segs[i - 1].alpha); assert.deepStrictEqual(segs[i].points[0], segs[i - 1].points[segs[i - 1].points.length - 1]); }
+assert.strictEqual(segs.reduce((n, g) => n + g.points.length - 1, 0), 100);
+assert.strictEqual(V.trailSegments(line, 24).length <= 24, true);
+assert.strictEqual(V.trailSegments([[0, 0]], 5).length, 0);
+assert.strictEqual(V.trailSegments([[0, 0], [5, 5]], 5)[0].alpha, 1);
+
+// the next target: the stop after the last one the party came near
+const stops = [{ x: 0, y: 0, label: "start" }, { x: 100, y: 0, label: "a" }, { x: 200, y: 0, label: "b" }, { x: 300, y: 0, label: "c" }];
+let nt = V.nextTarget(stops, [[0, 0], [60, 0]], { x: 60, y: 0 });
+assert.strictEqual(nt.index, 1); close(nt.dist, 40);
+nt = V.nextTarget(stops, [[0, 0], [100, 0], [190, 0]], { x: 190, y: 0 }); // near b: the next is c
+assert.strictEqual(nt.stop.label, "c"); close(nt.dist, 110);
+nt = V.nextTarget(stops, [[0, 0], [250, 0]], { x: 250, y: 0 }); // skipped a, passed b: c
+assert.strictEqual(nt.stop.label, "c");
+assert.strictEqual(V.nextTarget(stops, [[300, 0]], { x: 300, y: 0 }), null); // at the leg's end
+assert.strictEqual(V.nextTarget(stops, [], null), null);
+assert.strictEqual(V.nextTarget([stops[0]], [], { x: 0, y: 0 }), null);
 console.log("ok");

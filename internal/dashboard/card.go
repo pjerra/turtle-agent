@@ -64,10 +64,11 @@ type Card struct {
 	SHA         string `json:"sha,omitempty"`
 	Links       []Link `json:"links"`
 
-	Feed      Feed      `json:"feed"`
-	Bots      []BotView `json:"bots"`
-	Mobs      []MobView `json:"mobs"`
-	Commander *Dot      `json:"commander,omitempty"` // the agent's own character, when it stands on the plan's map
+	Feed      Feed         `json:"feed"`
+	Bots      []BotView    `json:"bots"`
+	Mobs      []MobView    `json:"mobs"`
+	Commander *Dot         `json:"commander,omitempty"` // the agent's own character, when it stands on the plan's map
+	Trail     [][2]float64 `json:"trail,omitempty"`     // where the lead bot has been this run ([x, y] in the drawing's plane), oldest first
 }
 
 // Link is a file of the run the page links to, served from --tests-dir.
@@ -684,4 +685,23 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// LeadPosition is where the party's lead stands in the drawing's plane: the lead bot, else the first bot with a position, else
+// the commander.
+func (c Card) LeadPosition() (x, y float64, ok bool) {
+	for _, b := range c.Bots {
+		if b.Lead && b.Known {
+			return b.X, b.Y, true
+		}
+	}
+	for _, b := range c.Bots {
+		if b.Known {
+			return b.X, b.Y, true
+		}
+	}
+	if c.Commander != nil {
+		return c.Commander.X, c.Commander.Y, true
+	}
+	return 0, 0, false
 }

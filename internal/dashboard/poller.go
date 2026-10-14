@@ -34,6 +34,7 @@ type Poller struct {
 	raw     map[string][]byte
 	clients map[string]*Client
 	alive   map[string]bool // agents that have answered since the start
+	trails  map[string]*Trail
 	agents  []Agent
 	lastDis time.Time
 }
@@ -55,7 +56,7 @@ func NewPoller(o Options) *Poller {
 	if o.Agents == "" {
 		o.Agents = "auto"
 	}
-	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}}
+	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}}
 	p.state = []byte(`{"agents":[],"offline":[]}`)
 	return p
 }
@@ -116,6 +117,7 @@ func (p *Poller) Tick(ctx context.Context) {
 		c := res[i].card
 		if c.Online {
 			p.alive[a.ID] = true
+			p.trackTrail(a.ID, &c)
 		}
 		switch {
 		case c.Online:
@@ -145,6 +147,26 @@ func (p *Poller) Tick(ctx context.Context) {
 	p.mu.Lock()
 	p.state, p.raw = body, raws
 	p.mu.Unlock()
+}
+
+// trackTrail adds the lead's position to the agent's trail while a run goes and puts the trail on the card; an ended run keeps its trail
+// on show until the next one starts. The caller holds p.mu.
+func (p *Poller) trackTrail(id string, c *Card) {
+	t := p.trails[id]
+	if t == nil {
+		t = &Trail{}
+		p.trails[id] = t
+	}
+	if c.Run.State == "running" {
+		if x, y, ok := c.LeadPosition(); ok {
+			run := c.Label.RunID
+			if run == "" {
+				run = c.Label.Plan
+			}
+			t.Add(run, x, y)
+		}
+	}
+	c.Trail = t.Points()
 }
 
 func (p *Poller) client(a Agent) *Client {
