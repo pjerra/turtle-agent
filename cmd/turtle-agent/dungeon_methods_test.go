@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
@@ -256,5 +257,33 @@ func TestDungeonStatusShowsTheWatchdog(t *testing.T) {
 		if st["stall_level"] != "none" || st["last_progress_at"] != w["last_progress_at"] || st["stalled_for_s"] != w["stalled_for_s"] {
 			t.Fatalf("%s: the status mirrors the report's watchdog: %v", c.params, st)
 		}
+	}
+}
+
+// A draft plan (unmapped skeleton) and a raid plan are not run by dungeon_run: the draft needs allow_draft, the raid plan has no driver.
+func TestPlanRunRefusal(t *testing.T) {
+	load := func(status, kind, extra string) *dungeon.Plan {
+		doc := `{"version":1,"name":"p","map":1,` + status + kind + `"entrance":{"x":0,"y":0,"z":0},` + extra + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+		p, err := dungeon.Parse("p.json", []byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	draft := load(`"status":"draft (not mapped, not live-checked)",`, "", "")
+	if m := planRunRefusal(draft, false); !strings.Contains(m, "is a draft") || !strings.Contains(m, "allow_draft") {
+		t.Errorf("a draft without allow_draft: %q", m)
+	}
+	if m := planRunRefusal(draft, true); m != "" {
+		t.Errorf("a draft with allow_draft: %q", m)
+	}
+	for _, status := range []string{``, `"status":"mapped",`, `"status":"live-checked",`} {
+		if m := planRunRefusal(load(status, "", ""), false); m != "" {
+			t.Errorf("%q: %q", status, m)
+		}
+	}
+	raid := load(`"status":"live-checked",`, `"kind":"raid",`, `"raid":{"size":10,"tanks":2,"healers":3,"dps":5},`)
+	if m := planRunRefusal(raid, true); !strings.Contains(m, "raid plan") {
+		t.Errorf("a raid plan: %q", m)
 	}
 }
