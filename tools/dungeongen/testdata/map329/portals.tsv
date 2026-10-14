@@ -1,0 +1,4 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+329	2214	Stratholme - Back Entrance	45	0	3237.46	-4060.6	112.01	0	10	10	10	3590.87	-3643.22	138.491
+329	2216	Stratholme - Right Entrance	45	0	3392.46	-3396.77	143.073	0	22.83	8.083	34.69	3392.92	-3395.03	143.135
+329	2217	Stratholme - Left Entrance	45	0	3392.56	-3361.78	142.802	0	27.94	7.083	35.19	3392.84	-3364.44	142.965

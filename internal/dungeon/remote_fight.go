@@ -430,7 +430,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // sendPull sends the pull order for t and reads the answer. done is true when the pull is over with res (refused, lost); false when
 // the order went (or fell back to attack) and the fight is on.
 func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res fightResult, done bool, err error) {
-	busy, approaches := 0, 0
+	busy, approaches, tooFarWaited := 0, 0, 0
 	var tried []string
 	for try := 0; try < 3; try++ {
 		r, err := d.order(ctx, "pullback", tbm.GUIDArg(t.GUID))
@@ -465,6 +465,19 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 		case c == refDead || c == refNoTarget:
 			return fightResult{out: retarget, why: why}, true, nil
 		case ref.Code == "too-far":
+			// The tank (when it is not the lead bot) may be the one that is far: walking the lead bot at the mob takes it further.
+			if back, err := d.waitTankBack(ctx, t); err != nil {
+				return fightResult{}, true, err
+			} else if !back {
+				if len(d.fr.EngagedHostiles()) > 0 {
+					return fightResult{}, false, nil // a fight began meanwhile
+				}
+				return fightResult{out: refused, why: why + " (the tank did not come back to the party)"}, true, nil
+			} else if m, ok := d.fr.Member(d.tank); ok && d.tank != 0 && d.tank != d.fr.Lead && d.tankFarFrom(m, d.leadPointOr(m)) == "" && tooFarWaited == 0 {
+				tooFarWaited++
+				try-- // the tank was the cause and is back: a wait is not a failed pull
+				continue
+			}
 			if err := d.approach(ctx, hostilePoint(t), 20); err != nil {
 				return fightResult{}, true, err
 			}

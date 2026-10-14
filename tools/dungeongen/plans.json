@@ -1,0 +1,1364 @@
+{
+ "vm_mmaps": [
+  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
+  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+ ],
+ "plans": [
+  {
+   "name": "ragefire_chasm",
+   "title": "Ragefire Chasm",
+   "map": 389,
+   "kind": "dungeon",
+   "data": "map389",
+   "trigger": 2230,
+   "bosses": [
+    11517,
+    11520,
+    11518,
+    11519
+   ],
+   "entrance_tele": "rfc",
+   "outside_tele": "RagefireChasm",
+   "notes": [
+    "Boss order is the usual one (Oggleflint, Taragaman, Jergosh, Bazzalan); the map has no instance script in the core."
+   ]
+  },
+  {
+   "name": "wailing_caverns",
+   "title": "Wailing Caverns",
+   "map": 43,
+   "kind": "dungeon",
+   "data": "map43",
+   "trigger": 228,
+   "bosses": [
+    3671,
+    3669,
+    3653,
+    3670,
+    3674,
+    3673,
+    5775
+   ],
+   "entrance_tele": "wc",
+   "outside_tele": "WailingCaverns",
+   "special": [
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (escort, ritual waves) summons him",
+    "the Awakening of Naralex gossip with the Disciple (3678)"
+   ],
+   "notes": [
+    "Turtle adds Vangros (61965) and Zandara Windhoof (61968), rank-1 named mobs in no leg as bosses; they are pulled as packs."
+   ]
+  },
+  {
+   "name": "deadmines",
+   "title": "The Deadmines",
+   "map": 36,
+   "kind": "dungeon",
+   "data": "map36",
+   "trigger": 78,
+   "bosses": [
+    644,
+    642,
+    1763,
+    61963,
+    646,
+    647,
+    639
+   ],
+   "entrance_tele": "deadmines",
+   "special": [
+    "Iron Clad Door: Defias Cannon (GO) fired with the door lever (go_door_lever_dm, gunpowder event) to reach the ship",
+    "Sneed (643) has no spawn row: he appears when Sneed's Shredder (642) dies",
+    "Mr. Smite's phase doors and chest (GO_SMITE_CHEST)"
+   ],
+   "notes": [
+    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement; Jared Voss (61961) and Cookie (645) are named mobs, not legs."
+   ]
+  },
+  {
+   "name": "shadowfang_keep",
+   "title": "Shadowfang Keep",
+   "map": 33,
+   "kind": "dungeon",
+   "data": "map33",
+   "trigger": 145,
+   "bosses": [
+    3914,
+    3886,
+    3887,
+    4278,
+    4279,
+    4274,
+    3927,
+    4275
+   ],
+   "entrance_tele": "sfk",
+   "outside_tele": "ShadowFangKeep",
+   "special": [
+    "courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
+    "Arugal's summoning focus (GO_ARUGAL_FOCUS)"
+   ],
+   "notes": [
+    "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."
+   ]
+  },
+  {
+   "name": "blackfathom_deeps",
+   "title": "Blackfathom Deeps",
+   "map": 48,
+   "kind": "dungeon",
+   "data": "map48",
+   "trigger": 257,
+   "bosses": [
+    4887,
+    4831,
+    6243,
+    62530,
+    4830,
+    4832,
+    4829
+   ],
+   "entrance_tele": "bfd",
+   "outside_tele": "BlackfathomDeeps",
+   "special": [
+    "shrine event: light the four shrines (GO_SHRINE_1-4) while Twilight Lord Kelris' waves come, which opens the main door to Aku'mai",
+    "Baron Aquanis (12876) has no spawn row: summoned at the Fathom Stone (GO_FATHOM_STONE) by a player, optional",
+    "portal door (GO_PORTAL_DOOR)"
+   ]
+  },
+  {
+   "name": "stormwind_stockade",
+   "title": "The Stockade",
+   "map": 34,
+   "kind": "dungeon",
+   "data": "map34",
+   "trigger": 101,
+   "bosses": [
+    1696,
+    1663,
+    1666,
+    1717,
+    1716
+   ],
+   "notes": [
+    "No instance script in the core; the map is small and linear. No inside teleport row of its own."
+   ]
+  },
+  {
+   "name": "gnomeregan",
+   "title": "Gnomeregan",
+   "map": 90,
+   "kind": "dungeon",
+   "data": "map90",
+   "trigger": 324,
+   "bosses": [
+    7079,
+    6235,
+    6229,
+    6228,
+    7800
+   ],
+   "entrance_tele": "gnome",
+   "outside_tele": "Gnomeregan",
+   "special": [
+    "the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg",
+    "Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in",
+    "Grubbis (7361) has no spawn row"
+   ],
+   "notes": [
+    "The Back Entrance (trigger 523) puts the party deep inside; this plan starts at the front."
+   ]
+  },
+  {
+   "name": "razorfen_kraul",
+   "title": "Razorfen Kraul",
+   "map": 47,
+   "kind": "dungeon",
+   "data": "map47",
+   "trigger": 244,
+   "bosses": [
+    6168,
+    4424,
+    4428,
+    4420,
+    62503,
+    4422,
+    4421
+   ],
+   "entrance_tele": "rfk",
+   "outside_tele": "RazorfenKraul",
+   "special": [
+    "Agathelos' Ward (GO_AGATHELOS_WARD) is opened by the keep script before Agathelos the Raging",
+    "Willix the Importer escort (optional)"
+   ]
+  },
+  {
+   "name": "scarlet_graveyard",
+   "title": "Scarlet Monastery: Graveyard",
+   "map": 189,
+   "kind": "dungeon",
+   "data": "map189",
+   "trigger": 45,
+   "bosses": [
+    3983,
+    14693,
+    4543
+   ],
+   "bbox": [
+    [
+     1600,
+     950,
+     2000,
+     1500
+    ]
+   ],
+   "entrance_tele": "smgy",
+   "outside_tele": "ScarletMonastery",
+   "notes": [
+    "One of four wings of map 189; the packs are the ones inside the wing's box."
+   ]
+  },
+  {
+   "name": "scarlet_library",
+   "title": "Scarlet Monastery: Library",
+   "map": 189,
+   "kind": "dungeon",
+   "data": "map189",
+   "trigger": 614,
+   "bosses": [
+    3974,
+    6487
+   ],
+   "bbox": [
+    [
+     100,
+     -500,
+     420,
+     -100
+    ]
+   ],
+   "entrance_tele": "smlib",
+   "outside_tele": "ScarletMonastery",
+   "special": [
+    "Houndmaster Loksey's hounds (SPELL_SUMMONSCARLETHOUND)"
+   ],
+   "notes": [
+    "One of four wings of map 189."
+   ]
+  },
+  {
+   "name": "scarlet_armory",
+   "title": "Scarlet Monastery: Armory",
+   "map": 189,
+   "kind": "dungeon",
+   "data": "map189",
+   "trigger": 612,
+   "bosses": [
+    61982,
+    3975
+   ],
+   "bbox": [
+    [
+     1550,
+     -520,
+     2050,
+     -250
+    ]
+   ],
+   "entrance_tele": "smarmory",
+   "outside_tele": "ScarletMonastery",
+   "special": [
+    "Herod's door (GO_HEROD_DOOR) opens through the armory script"
+   ],
+   "notes": [
+    "One of four wings of map 189; Armory Quartermaster Daghelm (61982) is Turtle's addition."
+   ]
+  },
+  {
+   "name": "scarlet_cathedral",
+   "title": "Scarlet Monastery: Cathedral",
+   "map": 189,
+   "kind": "dungeon",
+   "data": "map189",
+   "trigger": 610,
+   "bosses": [
+    4542,
+    3976,
+    3977
+   ],
+   "bbox": [
+    [
+     700,
+     1100,
+     1350,
+     1600
+    ]
+   ],
+   "entrance_tele": "smcath",
+   "outside_tele": "ScarletMonastery",
+   "special": [
+    "chapel door (GO_CHAPPEL_DOOR) before Mograine and Whitemane",
+    "Mograine and Whitemane are one event: Whitemane resurrects Mograine"
+   ],
+   "notes": [
+    "One of four wings of map 189."
+   ]
+  },
+  {
+   "name": "razorfen_downs",
+   "title": "Razorfen Downs",
+   "map": 129,
+   "kind": "dungeon",
+   "data": "map129",
+   "trigger": 442,
+   "bosses": [
+    7357,
+    8567,
+    62679,
+    7358
+   ],
+   "entrance_tele": "rfd",
+   "outside_tele": "RazorfenDowns",
+   "special": [
+    "Tuten'kash (7355) has no spawn row: the Gong (GO_GONG) summons him",
+    "Belnistrasz idol-room ritual (GO_BELNISTRASZ_BRAZIER, GO_IDOL_*_FIRE) summons Plaguemaw the Rotting; escort quest, optional"
+   ]
+  },
+  {
+   "name": "uldaman",
+   "title": "Uldaman",
+   "map": 70,
+   "kind": "dungeon",
+   "handwritten": true,
+   "special": [
+    "Keystone (needs the Staff of Prehistoria, made from the Gni'kiv Medallion and the Shaft of Tsol) opens the Seal of Khaz'Mul for Ironaya",
+    "Altar of the Keepers and Altar of Archaedas: ritual of three bots"
+   ]
+  },
+  {
+   "name": "zulfarrak",
+   "title": "Zul'Farrak",
+   "map": 209,
+   "kind": "dungeon",
+   "handwritten": true,
+   "special": [
+    "Zum'rah: area trigger 962 makes him hostile",
+    "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz",
+    "Weegli's gossip opens the End Door for Ukorz and Ruuzlu",
+    "Gahz'rilla: Gong with the Mallet of Zul'Farrak (9240), optional (see dungeons/zulfarrak-extra.json)"
+   ]
+  },
+  {
+   "name": "maraudon_orange",
+   "title": "Maraudon: Orange",
+   "map": 349,
+   "kind": "dungeon",
+   "data": "map349",
+   "trigger": 3133,
+   "bosses": [
+    13282,
+    12258,
+    12203,
+    13601,
+    13596,
+    12201
+   ],
+   "bbox": [
+    [
+     900,
+     -700,
+     1300,
+     100
+    ],
+    [
+     -100,
+     -450,
+     650,
+     250
+    ]
+   ],
+   "entrance_tele": "maraorange",
+   "outside_tele": "MaraudonOrange",
+   "special": [
+    "Celebras the Cursed's Scepter of Celebras event is optional and not on this route",
+    "Princess Theradras: the party enters her cave by the inner passage (join of the orange and purple routes unverified)"
+   ],
+   "notes": [
+    "The orange route and the purple route (maraudon_purple) share the inner bosses; the draft lists them in both."
+   ]
+  },
+  {
+   "name": "maraudon_purple",
+   "title": "Maraudon: Purple",
+   "map": 349,
+   "kind": "dungeon",
+   "data": "map349",
+   "trigger": 3134,
+   "bosses": [
+    12236,
+    12225,
+    12203,
+    13601,
+    13596,
+    12201
+   ],
+   "bbox": [
+    [
+     600,
+     -750,
+     900,
+     200
+    ],
+    [
+     -100,
+     -450,
+     650,
+     250
+    ]
+   ],
+   "entrance_tele": "marapurple",
+   "outside_tele": "MaraudonPurple",
+   "special": [
+    "Celebras the Cursed's Scepter of Celebras event is optional",
+    "Vylestem vines (GO_VYLESTEM_VINE, GO_HEALED_CELEBRIAN_VINE) round Celebras' room"
+   ],
+   "notes": [
+    "Shares the inner bosses with maraudon_orange."
+   ]
+  },
+  {
+   "name": "sunken_temple",
+   "title": "The Temple of Atal'Hakkar",
+   "map": 109,
+   "kind": "dungeon",
+   "data": "map109",
+   "trigger": 446,
+   "bosses": [
+    8580,
+    5720,
+    5721,
+    {
+     "entry": 5710,
+     "first": [
+      5711
+     ]
+    },
+    {
+     "entry": 5719,
+     "first": [
+      5722
+     ]
+    },
+    5709
+   ],
+   "entrance_tele": "st",
+   "special": [
+    "six Atal'ai statues (GO_ATALAI_STATUE_1-6) lit in order summon Atal'alarion; the six troll mini-bosses (5712-5717) are the statues' guards",
+    "four Eternal Flames (GO_ETERNAL_FLAME_1-4) summon the Avatar of Hakkar (8443, no spawn row)",
+    "Jammal'an's barrier (GO_JAMMALAN_BARRIER) and the Hakkar doors (GO_HAKKAR_DOOR_1-2)",
+    "Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar"
+   ]
+  },
+  {
+   "name": "blackrock_depths",
+   "title": "Blackrock Depths",
+   "map": 230,
+   "kind": "dungeon",
+   "data": "map230",
+   "trigger": 1466,
+   "bosses": [
+    9018,
+    9319,
+    9016,
+    9033,
+    8983,
+    9017,
+    9056,
+    9156,
+    9938,
+    9019
+   ],
+   "entrance_tele": "brd",
+   "outside_tele": "BlackrockDepths",
+   "special": [
+    "Ring of Law arena event (GO_ARENA1-4, GO_ARENA_SPOILS) after Gerstahn",
+    "Tomb of the Seven: gossip with Doomrel (GO_TOMB_ENTER/EXIT, dwarf runes GO_DWARF_RUNE_A01-G01), seven fights",
+    "Shadowforge Key (item 11000) for the Shadowforge gate and the Dark Keeper vaults (GO_SHADOW_LOCK, GO_SHADOW_MECHANISM)",
+    "jail doors and Marshal Windsor escort (optional), Plugger Spazzring keg trap (GO_BAR_KEG_TRAP), golem rooms (GO_GOLEM_ROOM_N/S), throne room door (GO_THRONE_ROOM)"
+   ],
+   "notes": [
+    "Princess Moira (8929) shares the Emperor's throne room and is friendly (npc_flags questgiver): no leg."
+   ]
+  },
+  {
+   "name": "lower_blackrock_spire",
+   "title": "Lower Blackrock Spire",
+   "map": 229,
+   "kind": "dungeon",
+   "data": "map229",
+   "trigger": 1468,
+   "bosses": [
+    9196,
+    9236,
+    9237,
+    10596,
+    9736,
+    10220,
+    9568
+   ],
+   "bbox": [
+    [
+     -260,
+     -640,
+     30,
+     -190
+    ],
+    [
+     30,
+     -260,
+     100,
+     -190
+    ]
+   ],
+   "entrance_tele": "lbrs",
+   "outside_tele": "BlackrockSpire",
+   "special": [
+    "Urok Doomhowl is summoned with the Challenge to Urok (GO_CHALLENGE_UROK) at the ogre room",
+    "Halycon and Gizrul the Slavener (summoned)",
+    "the Doors (GO_DOORS) and the Rookery eggs (GO_ROOKERY_EGG)"
+   ],
+   "notes": [
+    "LBRS and UBRS share map 229; this plan is the lower half (a box on x). Mor Grayhoof (16080) shares War Master Voone's spot and is not a leg. UBRS is the raid plan upper_blackrock_spire."
+   ]
+  },
+  {
+   "name": "dire_maul_east",
+   "title": "Dire Maul: East",
+   "map": 429,
+   "kind": "dungeon",
+   "data": "map429",
+   "trigger": 3184,
+   "bosses": [
+    11490,
+    13280,
+    14327,
+    11492
+   ],
+   "bbox": [
+    [
+     -400,
+     -1000,
+     300,
+     100
+    ]
+   ],
+   "entrance_tele": "dmeast",
+   "outside_tele": "DireMaulEast",
+   "special": [
+    "Pusillin's chase (npc_pusillin, gossip) for the Crescent Key",
+    "five crystal events (GO_CRISTAL_1-5_EVENT) and the Alzzin door (GO_DOOR_ALZZIN_IN)",
+    "Pusillin (14354) is friendly until the chase"
+   ],
+   "notes": [
+    "One of three wings of map 429. The East wing has four entrances (3183-3185); 3184 is the usual one."
+   ]
+  },
+  {
+   "name": "dire_maul_west",
+   "title": "Dire Maul: West",
+   "map": 429,
+   "kind": "dungeon",
+   "data": "map429",
+   "trigger": 3186,
+   "bosses": [
+    11489,
+    11488,
+    11487,
+    11496,
+    11486
+   ],
+   "bbox": [
+    [
+     -300,
+     100,
+     300,
+     1000
+    ]
+   ],
+   "entrance_tele": "dmwest",
+   "outside_tele": "DireMaulWest",
+   "special": [
+    "Immol'thar behind a force field (GO_FORCE_FIELD) and the pylons; Tortheldrin's crumble wall (GO_CRUMBLE_WALL)",
+    "Ferra (14308) shares Illyanna's spot; Revanchion (14690) is Turtle's",
+    "Dreadsteed ritual (dreadsteed_ritual.cpp) is a class quest, not part of the clear"
+   ],
+   "notes": [
+    "One of three wings of map 429."
+   ]
+  },
+  {
+   "name": "dire_maul_north",
+   "title": "Dire Maul: North",
+   "map": 429,
+   "kind": "dungeon",
+   "data": "map429",
+   "trigger": 3189,
+   "bosses": [
+    14326,
+    14323,
+    14321,
+    14325,
+    {
+     "entry": 11501,
+     "first": [
+      14324
+     ]
+    }
+   ],
+   "bbox": [
+    [
+     300,
+     -100,
+     1000,
+     800
+    ]
+   ],
+   "entrance_tele": "dmnorth",
+   "outside_tele": "DireMaulNorth",
+   "scripted": [
+    14326,
+    14323,
+    14321,
+    14325,
+    14324
+   ],
+   "special": [
+    "Gordok Courtyard Key and Gordok Inner Door Key (ITEM_GORDOK_COURTYARD_KEY, ITEM_GORDOK_INNER_DOOR_KEY)",
+    "the Gordok guards and Captain Kromcrush carry npc_flags (gossip): they are the tribute event's mobs, hostile only after the event or the quest; King Gordok can be befriended (tribute) instead of killed",
+    "Stomper Kreeg (14322, vendor) is not a leg"
+   ],
+   "notes": [
+    "One of three wings of map 429. Cho'Rush the Observer (14324) fights with King Gordok."
+   ]
+  },
+  {
+   "name": "stratholme_live",
+   "title": "Stratholme: Live side",
+   "map": 329,
+   "kind": "dungeon",
+   "data": "map329",
+   "trigger": 2216,
+   "bosses": [
+    10811,
+    10812,
+    10997
+   ],
+   "route": true,
+   "bbox": [
+    [
+     3300,
+     -3400,
+     3750,
+     -2800
+    ]
+   ],
+   "entrance_tele": "strat",
+   "outside_tele": "Stratholme",
+   "special": [
+    "Service entrance and the Slaughter Square gate (GO_SERVICE_ENTRANCE, GO_SLAUGHTER_SQUARE_GATE), the Ziggurat gates (GO_ZIGGURAT1-5)",
+    "Postmaster Malown's summon (SPELL_SUMMON_POSTMASTER) and Timmy the Cruel",
+    "Ysida Harmon's cage (GO_CAGE_YSIDA) starts the 45-minute Baron run for Rivendare's death",
+    "Order of the Silver Hand bosses (Jarien 16101, Sothos 16102, Turtle) are script-driven"
+   ],
+   "notes": [
+    "Live side of map 329 (left entrance 2217 is equivalent); Baron Rivendare is in stratholme_undead."
+   ]
+  },
+  {
+   "name": "stratholme_undead",
+   "title": "Stratholme: Undead side",
+   "map": 329,
+   "kind": "dungeon",
+   "data": "map329",
+   "trigger": 2214,
+   "bosses": [
+    10435,
+    10437,
+    10438,
+    10436,
+    10440
+   ],
+   "bbox": [
+    [
+     3550,
+     -3900,
+     4200,
+     -3250
+    ]
+   ],
+   "special": [
+    "Ramstein the Gorger (10439) has no spawn row: summoned by the Gauntlet/ziggurat script",
+    "Ziggurat gates (GO_ZIGGURAT1-5) and trap gates (GO_PORT_TRAP_GATE_1-4); Baron Rivendare needs the Slaughter House gates open",
+    "Skull the Mad rare and Hearthsinger Forresten (rare) are skipped"
+   ],
+   "notes": [
+    "Back entrance (2214) of map 329; the live side is stratholme_live."
+   ]
+  },
+  {
+   "name": "scholomance",
+   "title": "Scholomance",
+   "map": 289,
+   "kind": "dungeon",
+   "data": "map289",
+   "trigger": 2567,
+   "bosses": [
+    10505,
+    11261,
+    10901,
+    10507,
+    10504,
+    10502,
+    10503,
+    11622,
+    {
+     "entry": 10432,
+     "first": [
+      10433
+     ]
+    },
+    10508
+   ],
+   "outside_tele": "Scholomance",
+   "scripted": [
+    10505,
+    11261,
+    10432,
+    10433
+   ],
+   "special": [
+    "Viewing Room Key (GO_VIEWING_ROOM_DOOR) and the boss gates (GO_GATE_MALICIA, GO_GATE_THEOLEN, GO_GATE_POLKELT, GO_GATE_RAVENIAN, GO_GATE_ILLUCIA, GO_GATE_BAROV, GO_GATE_GANDLING); the gates open as the Barovs fall",
+    "Kirtonos the Herald is summoned at the brazier (GO_BRAZIER_KIRTONOS, GO_GATE_KIRTONOS), optional",
+    "Darkmaster Gandling (1853) has no spawn row: he appears after the Barov wing",
+    "Dawn's Gambit (GO_DAWN_S_GAMBIT) for Vectus and Marduk Blackpool; Doctor Theolen Krastinov carries npc_flags (questgiver) until the fight"
+   ],
+   "notes": [
+    "Skeleton Key / lockpicking for the entrance chests is not modelled."
+   ]
+  },
+  {
+   "name": "frostmane_hollow",
+   "title": "Frostmane Hollow",
+   "map": 822,
+   "kind": "dungeon",
+   "data": "map822",
+   "trigger": 5662,
+   "bosses": [
+    63129,
+    63131,
+    63133,
+    63130
+   ],
+   "route": true,
+   "last": 63130,
+   "special": [
+    "Frostmane ritual (SPELL_FROSTMANE_RITUAL) at Hailar the Frigid"
+   ],
+   "notes": [
+    "Turtle custom, no inside teleport matches the entrance; Handler Oboka (63132) is a named mob, not a leg."
+   ]
+  },
+  {
+   "name": "windhorn_canyon",
+   "title": "Windhorn Canyon",
+   "map": 820,
+   "kind": "dungeon",
+   "data": "map820",
+   "trigger": 5611,
+   "bosses": [
+    62778,
+    62779,
+    62780,
+    62781,
+    62782,
+    62783,
+    62784
+   ],
+   "route": true,
+   "special": [
+    "Champion Rotag (62785) is summoned (SPELL_SUMMON_ROTAG) by Bonespeaker Narlgom's event"
+   ],
+   "notes": [
+    "Turtle custom; which boss is the last is not known from the data, the order is a nearest-neighbour walk."
+   ]
+  },
+  {
+   "name": "crescent_grove",
+   "title": "Crescent Grove",
+   "map": 802,
+   "kind": "dungeon",
+   "data": "map802",
+   "trigger": 5004,
+   "bosses": [
+    92107,
+    92109,
+    92108,
+    92111,
+    92110
+   ],
+   "entrance_tele": "crescentgrove",
+   "scripted": [
+    92109
+   ],
+   "special": [
+    "Keeper Ranathos carries npc_flags (questgiver): a gossip or dialogue starts his fight"
+   ],
+   "notes": [
+    "Turtle custom (Twisted Branch Grove / Ashenvale grove). Boss order is the order of the boss ids, which matches the layout from the entrance outward."
+   ]
+  },
+  {
+   "name": "dragonmaw_retreat",
+   "title": "Dragonmaw Retreat",
+   "map": 816,
+   "kind": "dungeon",
+   "data": "map816",
+   "trigger": 5343,
+   "bosses": [
+    62056,
+    62057,
+    62069,
+    62072,
+    62037
+   ],
+   "route": true,
+   "last": 62037,
+   "outside_tele": "DragonmawRetreat",
+   "notes": [
+    "Turtle custom with a front (5343) and a back entrance (5346); the draft starts at the front. Bogpaw Truthsay and Gowlfang stand together; the other named mobs (Slagfist Destroyer 62068, Overlord Blackheart 62070, Garlok Flamekeeper 62071, Elder Hollowblood 62038, Web Master Torkon 62067, Cavernweb Broodmother 62066) are packs here, some may be bosses."
+   ]
+  },
+  {
+   "name": "stormwrought_ruins",
+   "title": "Stormwrought Ruins",
+   "map": 818,
+   "kind": "dungeon",
+   "data": "map818",
+   "trigger": 5347,
+   "bosses": [
+    62547,
+    62548,
+    62552,
+    62549,
+    62551,
+    62550,
+    62664,
+    62661,
+    62665,
+    62652,
+    62671
+   ],
+   "route": true,
+   "special": [
+    "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",
+    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)"
+   ],
+   "notes": [
+    "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front."
+   ]
+  },
+  {
+   "name": "gilneas_city",
+   "title": "Gilneas City",
+   "map": 815,
+   "kind": "dungeon",
+   "data": "map815",
+   "trigger": 5014,
+   "bosses": [
+    61419,
+    61420,
+    61421,
+    61422,
+    61423,
+    {
+     "entry": 61264,
+     "first": [
+      61263
+     ]
+    },
+    61418
+   ],
+   "entrance_tele": "gilneascity",
+   "special": [
+    "Harlow family chest (GO_HARLOW_FAMILY_CHEST) after the Regent-Lord and Regent-Lady",
+    "Genn Greymane (61418) is script-driven (genn_greymane): his role (final fight or event) is unverified"
+   ],
+   "notes": [
+    "Turtle custom. Order follows the layout from the entrance northward."
+   ]
+  },
+  {
+   "name": "hateforge_quarry",
+   "title": "Hateforge Quarry",
+   "map": 808,
+   "kind": "dungeon",
+   "data": "map808",
+   "trigger": 5009,
+   "bosses": [
+    60735,
+    60736,
+    60829,
+    60734,
+    60737
+   ],
+   "route": true,
+   "entrance_tele": "hateforgeinstance",
+   "notes": [
+    "Turtle custom. 'Broody' (60715) shares Engineer Figgles' spot and is not a leg."
+   ]
+  },
+  {
+   "name": "karazhan_crypt",
+   "title": "Karazhan Crypt",
+   "map": 800,
+   "kind": "dungeon",
+   "data": "map800",
+   "trigger": 5008,
+   "bosses": [
+    91920,
+    91917,
+    91929,
+    91916,
+    91919,
+    92935
+   ],
+   "route": true,
+   "entrance_tele": "instancedkarazhancrypt",
+   "outside_tele": "karazhancrypt",
+   "special": [
+    "door events (GO_STATE_ACTIVE doors in instance_karazhan_crypt.cpp, four GO hooks)"
+   ],
+   "notes": [
+    "Turtle custom 5-man at level 60-62."
+   ]
+  },
+  {
+   "name": "stormwind_vault",
+   "title": "Stormwind Vault",
+   "map": 35,
+   "kind": "dungeon",
+   "data": "map35",
+   "trigger": 107,
+   "bosses": [
+    80851,
+    80852,
+    80850,
+    80854,
+    80853,
+    93107
+   ],
+   "route": true,
+   "entrance_tele": "stormwindvaultinstanced",
+   "outside_tele": "stormwindvault",
+   "scripted": [
+    80852
+   ],
+   "special": [
+    "vault door and rat doors (GO_VAULT_DOOR, GO_RAT_DOOR_ONE/TWO)",
+    "Tham'Grarr carries npc_flags (gossip): his fight is started by gossip"
+   ],
+   "notes": [
+    "Turtle custom 5-man at level 60-62 (Stormwind Vault, outside entrance 107 in Stormwind; 5002 and 5003 are other outside entrances)."
+   ]
+  },
+  {
+   "name": "black_morass",
+   "title": "Black Morass",
+   "map": 269,
+   "kind": "dungeon",
+   "data": "map269",
+   "trigger": 1632,
+   "bosses": [
+    65113,
+    65116,
+    65125,
+    50105
+   ],
+   "route": true,
+   "entrance_tele": "TheBlackMorassInstance",
+   "scripted": [
+    50105
+   ],
+   "special": [
+    "wave/portal event: Time Anomalies (50106, 49 spawns) and the Black Morass portals; Chronar, Epochronos, Antnormi are timed events (npc_antnormi, boss_epochronos, boss_chronar), Medivh (faction 35) closes it"
+   ],
+   "notes": [
+    "Turtle custom (Caverns of Time, map 269). The data leaves open whether this is a 5-man; hired party is the 5-man default."
+   ]
+  },
+  {
+   "name": "onyxias_lair",
+   "title": "Onyxia's Lair",
+   "map": 249,
+   "kind": "raid",
+   "data": "map249",
+   "trigger": 2848,
+   "bosses": [
+    10184
+   ],
+   "size": 40,
+   "entrance_tele": "onyxia",
+   "special": [
+    "lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+   ]
+  },
+  {
+   "name": "molten_core",
+   "title": "Molten Core",
+   "map": 409,
+   "kind": "raid",
+   "data": "map409",
+   "trigger": 2886,
+   "bosses": [
+    12118,
+    11982,
+    12259,
+    12057,
+    12264,
+    12056,
+    12098,
+    11988,
+    {
+     "entry": 65020,
+     "first": [
+      65021
+     ]
+    },
+    57642,
+    52145
+   ],
+   "size": 40,
+   "entrance_tele": "mc",
+   "outside_tele": "MoltenCore",
+   "special": [
+    "Majordomo Executus (12018) and Ragnaros (11502) have no spawn row: Majordomo appears after the bosses, Ragnaros is summoned (SPELL_SUMMON_RAGNAROS) by talking to Majordomo",
+    "the rune douse of the Core Hounds and lava bursts (GO_LAVA_BURST)"
+   ],
+   "notes": [
+    "Incindis (52145), Sorcerer-Thane Thaurissan (57642) and the Twin Golems (65020, 65021) are Turtle's additions; their place in the order is a guess."
+   ]
+  },
+  {
+   "name": "blackwing_lair",
+   "title": "Blackwing Lair",
+   "map": 469,
+   "kind": "raid",
+   "data": "map469",
+   "trigger": 3726,
+   "bosses": [
+    12435,
+    13020,
+    12017,
+    11983,
+    14601,
+    11981,
+    14020,
+    10162
+   ],
+   "size": 40,
+   "outside_tele": "BlackwingLair",
+   "scripted": [
+    13020
+   ],
+   "special": [
+    "Razorgore's Orb of Domination (GO_ORBE_DOMINATION) and eggs (GO_OEUF_RAZ); Vaelastrasz carries npc_flags (gossip) to start his fight",
+    "Chromaggus' side lever (GO_LEVER_CHROMAGGUS_SIDE) and doors; suppression devices (GO_SUPPRESSION_ENGINE)",
+    "Nefarian (11583) has no spawn row: Lord Victor Nefarius (10162) summons him; Onyxia Scale Cloak attunement (class check, not a step)"
+   ]
+  },
+  {
+   "name": "zul_gurub",
+   "title": "Zul'Gurub",
+   "map": 309,
+   "kind": "raid",
+   "data": "map309",
+   "trigger": 3928,
+   "bosses": [
+    14517,
+    14507,
+    14510,
+    14599,
+    11382,
+    15114,
+    11380,
+    14834
+   ],
+   "size": 20,
+   "entrance_tele": "zg",
+   "special": [
+    "Arlokk (14515), Hazza'rah, Renataki, Gri'lek, Wushoolay (Edge of Madness) have no spawn rows; Arlokk is called at the gong (GO_ARLOKK_GONG, GO_ARLOKK_FORCE_FIELD)",
+    "Hakkar's eggs (GO_EGG) and the Mandokir/Jin'do ghost sequence"
+   ]
+  },
+  {
+   "name": "ruins_of_ahnqiraj",
+   "title": "Ruins of Ahn'Qiraj",
+   "map": 509,
+   "kind": "raid",
+   "data": "map509",
+   "trigger": 4008,
+   "bosses": [
+    15348,
+    15341,
+    15340,
+    15370,
+    15369,
+    15339
+   ],
+   "size": 20,
+   "entrance_tele": "aq20",
+   "special": [
+    "General Rajaxx's waves (Captain Qeez and the Andorov escort)",
+    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL)"
+   ],
+   "notes": [
+    "Captain Tuubid (15392) is Turtle's addition and not a leg."
+   ]
+  },
+  {
+   "name": "temple_of_ahnqiraj",
+   "title": "Temple of Ahn'Qiraj",
+   "map": 531,
+   "kind": "raid",
+   "data": "map531",
+   "trigger": 4010,
+   "bosses": [
+    15263,
+    {
+     "entry": 15544,
+     "first": [
+      15511,
+      15543
+     ]
+    },
+    15516,
+    15510,
+    15299,
+    15509,
+    {
+     "entry": 15276,
+     "first": [
+      15275
+     ]
+    },
+    15727
+   ],
+   "size": 40,
+   "entrance_tele": "aq40",
+   "special": [
+    "Ouro (15517) has no spawn row: summoned from the mound (SPELL_SUMMON_OURO)",
+    "Skeram's gate (GO_SKERAM_GATE), the twin emperors' doors (GO_TWINS_ENTER_DOOR, GO_TWINS_EXIT_DOOR)",
+    "C'Thun's eye and grasp (GO_GRASP_OF_CTHUN)"
+   ],
+   "notes": [
+    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a mob; none is a leg."
+   ]
+  },
+  {
+   "name": "naxxramas",
+   "title": "Naxxramas",
+   "map": 533,
+   "kind": "raid",
+   "data": "map533",
+   "trigger": 4055,
+   "bosses": [
+    15956,
+    15953,
+    15952,
+    15954,
+    15936,
+    16011,
+    16061,
+    16060,
+    {
+     "entry": 16064,
+     "first": [
+      16065,
+      16063,
+      16062
+     ]
+    },
+    16028,
+    15931,
+    15932,
+    15928,
+    15989,
+    15990
+   ],
+   "size": 40,
+   "entrance_tele": "nax",
+   "special": [
+    "each quarter's eye-boss ramp and portal (GO_ARAC_*, GO_PLAG_*, GO_MILI_*, GO_CONS_*), Gothik's gates (GO_MILI_GOTH_*), the four horsemen door (GO_MILI_HORSEMEN_DOOR)",
+    "Thaddius' tesla coils (GO_CONS_NOX_TESLA_FEUGEN/STALAGG); Kel'Thuzad's windows and door (GO_KT_WINDOW_1-4, GO_KELTHUZAD_DOOR)",
+    "Sapphiron's icy room"
+   ]
+  },
+  {
+   "name": "upper_blackrock_spire",
+   "title": "Upper Blackrock Spire",
+   "map": 229,
+   "kind": "raid",
+   "data": "map229",
+   "entrance": [
+    138.726,
+    -318.182,
+    70.9562
+   ],
+   "bosses": [
+    9816,
+    10429,
+    10430,
+    16042,
+    10363
+   ],
+   "last": 10363,
+   "bbox": [
+    [
+     30,
+     -640,
+     260,
+     -190
+    ]
+   ],
+   "size": 10,
+   "entrance_tele": "ubrs",
+   "special": [
+    "Seal of Ascension (item 12344), the vanilla key to the upper spire door (unverified for Turtle)",
+    "Pyroguard Emberseer: the seven runes (GO_EMBERSEER_RUNE01-07) and his cage (GO_EMBERSEER_IN/OUT); Solakar Flamewreath and the Rookery eggs (GO_ROOKERY_EGG)",
+    "Gyth (10339) has no spawn row: summoned in Rend's arena (GO_GYTH_ENTRY/COMBAT/EXIT_DOOR); Rend Blackhand is then fought",
+    "Drakkisath's door and the Father Flame (GO_FATHER_FLAME)"
+   ],
+   "notes": [
+    "Upper half of map 229 (a box on x). The party enters by teleport inside: the instance has one entrance trigger (1468) which leads to LBRS. Lord Valthalak (16042) is Turtle's addition."
+   ]
+  },
+  {
+   "name": "lower_karazhan_halls",
+   "title": "Lower Karazhan Halls",
+   "map": 532,
+   "kind": "raid",
+   "data": "map532",
+   "trigger": 5018,
+   "bosses": [
+    61223,
+    61224,
+    61221,
+    61225
+   ],
+   "route": true,
+   "last": 61225,
+   "size": 10,
+   "entrance_tele": "karazhaninstance",
+   "outside_tele": "Karazhan",
+   "scripted": [
+    61225
+   ],
+   "special": [
+    "Moroes carries npc_flags (gossip) and is fought after a dialogue",
+    "Blackwald II (script boss_blackwald_ii) has no export row of the rank-3 kind: his entry is unverified"
+   ]
+  },
+  {
+   "name": "upper_karazhan_halls",
+   "title": "Upper Karazhan Halls",
+   "map": 814,
+   "kind": "raid",
+   "data": "map814",
+   "entrance": [
+    -11048.2,
+    -1985.84,
+    101.574
+   ],
+   "bosses": [
+    61939,
+    61951,
+    61958,
+    {
+     "entry": 59967,
+     "first": [
+      59971,
+      59970,
+      59968
+     ]
+    },
+    61946,
+    59981,
+    59961,
+    59991
+   ],
+   "size": 40,
+   "entrance_tele": "karaforty",
+   "special": [
+    "the Kings Council is the chess event (npc_kara_king/bishop/rook/knight), Echo of Medivh is the chess board",
+    "Anomalus, Keeper Gnarlmoon and Ley-Watcher Incantagos are script-driven; Sanv Tas'dal, Rupturan and Kruul stand in an Outland-like part of the map (tele karaoutland)"
+   ],
+   "notes": [
+    "No entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921). The boss order is a guess."
+   ]
+  },
+  {
+   "name": "emerald_sanctum",
+   "title": "Emerald Sanctum",
+   "map": 807,
+   "kind": "raid",
+   "data": "map807",
+   "trigger": 5017,
+   "bosses": [
+    60747,
+    60748
+   ],
+   "size": 40,
+   "entrance_tele": "sanctumraid",
+   "outside_tele": "EmeraldSanctuary",
+   "scripted": [
+    60748
+   ],
+   "special": [
+    "Erennius (patrol) is fought before Solnius; Solnius carries npc_flags (gossip) and is awakened by dialogue",
+    "Errenius' chest (GO_ERRENIUS_CHEST), the portal (GO_PORTAL)"
+   ],
+   "notes": [
+    "Only two bosses are in the data (Erennius 60747, Solnius 60748)."
+   ]
+  },
+  {
+   "name": "timbermaw_hold",
+   "title": "Timbermaw Hold",
+   "map": 819,
+   "kind": "raid",
+   "data": "map819",
+   "trigger": 5613,
+   "bosses": [
+    62935,
+    62941,
+    62938,
+    2139,
+    62946,
+    {
+     "entry": 62936,
+     "first": [
+      62937
+     ]
+    }
+   ],
+   "route": true,
+   "size": 20,
+   "scripted": [
+    62938
+   ],
+   "notes": [
+    "Turtle custom, no instance script in the core. The 20-man size and the boss list are guesses from the data (six bosses with 500k-700k health, comparable to Zul'Gurub); Archdruid Kronn carries npc_flags (gossip)."
+   ]
+  }
+ ]
+}

@@ -1,0 +1,3 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+43	228	Wailing Caverns - Entrance	10	1	-753.596	-2212.78	21.5403	13	0	0	0	-158.441	131.601	-74.2552
+43	5337	Grim Batol - Entrance	61	0	-3696.12	-3359.85	267.14	6	0	0	0	-158.441	131.601	-74.2552
