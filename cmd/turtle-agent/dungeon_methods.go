@@ -146,7 +146,8 @@ type dungeonRunParams struct {
 	// commander, README "Remote leader"; the old name "remote" still works; it takes lead_bot, and optionally bots, tank and cc; its only
 	// GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level), "leader" (the agent's character
 	// is in the group, leads it and plays: the bot brain is on, with the preset of the character's class when brain is omitted) or "observe"
-	// (a TortoiseBots run leader clears the dungeon and the agent watches: not built yet, refused). Omitted: "group", the leader's older
+	// (a TortoiseBots run leader clears the dungeon and the agent watches: the prepare, bind and enter of "commander", then `.bot run start`
+	// and no order after it; README "Observe mode"). Omitted: "group", the leader's older
 	// form without the brain (the old name "group" still works and is the default).
 	Mode string `json:"mode,omitempty"`
 	// Rotation names a rotation file (README "Rotations as data") that takes the place of the class rotation of the brain's preset: a
@@ -213,6 +214,21 @@ type dungeonRunParams struct {
 	// tunables file again at leg and pull-group starts (tune_set still works).
 	Tune       string `json:"tune,omitempty"`
 	LiveReload *bool  `json:"live_reload,omitempty"`
+	// Observe tunes mode "observe" (README "Observe mode"); all of it is optional.
+	Observe *observeParam `json:"observe,omitempty"`
+}
+
+// observeParam are the choices of an observed run, in seconds (0: the default).
+type observeParam struct {
+	// Plan is the plan's name on the server (ai_dungeon_plan.plan); omitted: the plan file's name.
+	Plan string `json:"plan,omitempty"`
+	// PollS is how often `.bot run status` is asked besides the lines the run leader pushes (15 s).
+	PollS float64 `json:"poll_s,omitempty"`
+	// MaxRunS is the ceiling of the whole run (3 h); StallS how long a running run may show the same status (10 min); PausedWaitS how
+	// long a paused run waits for a resume before the watch stops it (10 min). Past a ceiling the run is stopped and the run fails.
+	MaxRunS     float64 `json:"max_run_s,omitempty"`
+	StallS      float64 `json:"stall_s,omitempty"`
+	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -303,6 +319,16 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	srv.Register("dungeon_stop", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.stop(), nil
 	}))
+	// The observed run's controls (mode observe): pause, resume and skip go to the run leader on the server; dungeon_stop stops it.
+	for _, verb := range []string{"pause", "resume", "skip"} {
+		verb := verb
+		srv.Register("dungeon_"+verb, rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
+			if err := r.runControl(verb); err != nil {
+				return dungeonStatusResult{}, err
+			}
+			return r.status(), nil
+		}))
+	}
 	registerTuneMethods(srv, r)
 	return func() {
 		cancel()
@@ -320,6 +346,23 @@ func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
 		return fmt.Sprintf("plan %s is a draft (%s): its route is a skeleton from the world database that has not had its mapping walk; walk it first, or pass allow_draft to run it anyway", plan.Name, plan.Status)
 	}
 	return ""
+}
+
+// runControl sends pause, resume or skip to the run leader of an observed run; the watch sends it on its next look.
+func (r *dungeonRunner) runControl(verb string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.running() {
+		return &rpc.Error{Code: rpc.CodeGame, Message: "no dungeon run is going"}
+	}
+	c, ok := r.drv.(interface{ RunControl(string) error })
+	if !ok {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server pauses and resumes); stop it with dungeon_stop"}
+	}
+	if err := c.RunControl(verb); err != nil {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+	}
+	return nil
 }
 
 func (r *dungeonRunner) running() bool {

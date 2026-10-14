@@ -13,15 +13,13 @@ import (
 //
 //	commander  the agent leads a bot group from outside it through the TortoiseBots remote commander (the old "remote").
 //	leader     the agent's character is in the group, leads it and plays: the bot brain is on (the old "group" with a brain).
-//	observe    a TortoiseBots run leader clears the dungeon and the agent watches and scores it: needs TortoiseBots' phase P3.
+//	observe    a TortoiseBots run leader (`.bot run`) clears the dungeon and the agent watches and scores it: after the commander mode's
+//	           prepare, bind and enter it sends `.bot run start <plan>` and only reads the TBM:RUN status (dungeon/observe.go).
 const (
 	modeCommander = "commander"
 	modeLeader    = "leader"
 	modeObserve   = "observe"
 )
-
-// observeRefusal is what observe mode answers until the TortoiseBots run leader (phase P3) exists.
-const observeRefusal = `mode "observe" needs the TortoiseBots run leader (phase P3 of the dungeon-modes design): a party of bots that clears the dungeon by itself, with the agent watching. It does not exist yet: use "commander" (the agent leads bots from outside) or "leader" (the agent's character leads and plays)`
 
 // runMode names the mode of the params: "remote"/"commander" and "group"/"leader" are the same two modes; an empty mode is the older group
 // mode (the brain is optional there, it is not in leader mode). observe is its own.
@@ -36,7 +34,7 @@ func runMode(mode string) (canonical string, explicit bool, err error) {
 	case "remote", modeCommander:
 		return modeCommander, true, nil
 	case modeObserve:
-		return modeObserve, true, &rpc.Error{Code: rpc.CodeInvalidParams, Message: observeRefusal}
+		return modeObserve, true, nil
 	}
 	return "", false, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `mode must be "commander", "observe" or "leader" ("remote" and "group" are the older names of commander and leader)`}
 }

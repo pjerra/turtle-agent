@@ -117,6 +117,9 @@ type RemoteOptions struct {
 	HaveItems []uint32
 	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
 	Pulltest *PulltestSpec
+	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
+	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
+	Observe *ObserveSpec
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -358,6 +361,9 @@ type RemoteReport struct {
 	EntryTargets string `json:"entry_targets,omitempty"`
 	StatePolls   int    `json:"state_polls,omitempty"`
 
+	// Observe is the run leader watch of an observed run (observe.go); absent in a driven run.
+	Observe *ObserveReport `json:"observe,omitempty"`
+
 	// Live tuning (tune.go, remote_tune.go): the tunables changed during the run and the reloads of the plan file, each with when, old
 	// and new. `turtle-agent tune-diff <trace>` turns them into a patch for the tunables file and the plan file.
 	TuneChanges []TuneChange `json:"tune_changes"`
@@ -376,6 +382,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.TuneChanges = slices.Clone(r.TuneChanges)
 	c.PlanReloads = slices.Clone(r.PlanReloads)
 	c.Enter = r.Enter.clone()
+	c.Observe = r.Observe.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
@@ -476,6 +483,8 @@ type RemoteDriver struct {
 	wdObject   flagOnce // give up the carrier order's retries
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
+	obs *observeState // the run leader watch of an observed run (observe.go); nil otherwise
+
 	tx   tuneExtra // the thresholds that were constants (tune.go)
 	live liveTune  // live tuning: the tunables file, the plan file and tune_set (remote_tune.go)
 }
@@ -494,7 +503,11 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d.rep.init(plan, clk.Now)
 	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
-	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
+	mode := "remote"
+	if opt.Observe != nil {
+		mode = "observe"
+	}
+	d.rep.r.Remote = &RemoteReport{Mode: mode, LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
 		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
 	d.initTrace()
 	return d
@@ -590,6 +603,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
 	setupAt := d.clk.Now()
+	if d.observing() {
+		// A server without the run leader (or without the plan) is refused before a single bot is hired.
+		if err = d.probeRunLeader(ctx); err != nil {
+			return err
+		}
+	}
 	err = d.begin(ctx, fromLeg)
 	setupS := d.clk.Now().Sub(setupAt).Seconds()
 	d.rep.update(func(r *Report) {
@@ -602,6 +621,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		return err
 	}
 	d.resolveTeam()
+	if d.observing() {
+		return d.observe(ctx)
+	}
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
 	if g := d.startGroup(); g >= 0 {
 		d.st = NewStepperAtGroup(d.plan, remoteWorld{d}, d.clk.Now, fromLeg, g)

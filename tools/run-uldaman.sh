@@ -9,7 +9,8 @@
 #   --mode M       the run mode (README "Run modes"; or MODE=). commander (the default): the agent leads a bot group from outside it, everything
 #                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
 #                  --brain names one; the party is the one the character is in: none of the commander's options go with it, only --from-leg).
-#                  observe: a TortoiseBots run leader clears the dungeon and the agent watches; refused until TortoiseBots has phase P3.
+#                  observe: a TortoiseBots run leader (`.bot run`) clears the dungeon and the agent watches (README "Observe mode"): the commander
+#                  options below (--hire, --no-fresh, LEAD/BOTS) prepare the party, but no start option and no TANK/HEALER go with it.
 #   --brain P      leader mode: the brain preset that plays the character (frost_mage, arms_warrior, ...; default: by the character's class and --role)
 #   --rotation R   leader mode: a rotation file that takes the place of the preset's class rotation (README "Rotations as data"; `turtle-agent
 #                  rotation list`); the report names it with its file's digest, so two arms of an A/B test are told apart
@@ -100,15 +101,17 @@ die() { say "ERROR: $*" >&2; exit 1; }
 case $MODE in
   commander|remote) MODE=commander ;;
   leader|group) MODE=leader ;;
-  observe) die "mode observe needs the TortoiseBots run leader (phase P3 of the dungeon-modes design): it does not exist yet. Use --mode commander or --mode leader" ;;
+  observe) ;;
   *) die "--mode is commander, observe or leader" ;;
 esac
 name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
 [ -z "$BRAIN" ] || name_word "$BRAIN" || die "--brain: a preset name (a-z, 0-9, _)"
 [ -z "$ROTATION" ] || name_word "$ROTATION" || die "--rotation: a rotation name (a-z, 0-9, _)"
 [ -z "$ROLE" ] || case $ROLE in dps|tank|healer) ;; *) die "--role is dps, tank or healer" ;; esac
-if [ "$MODE" = commander ]; then
-  [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in commander mode the bots fight)"
+if [ "$MODE" != leader ]; then
+  [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in $MODE mode the bots fight)"
+  [ "$MODE" != observe ] || { [ "$FROM_LEG" = 0 ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ]; } ||
+    die "observe mode starts at the plan's first step: --from-leg, --pull-group, --start-here, --have-items and --pulltest are commander options"
 else
   [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] ||
     die "leader mode takes only --from-leg of the start options: --hire, --rehire, --level, --pulltest, --pull-group, --start-here, --have-items, --no-fresh and COMPOSITION are commander options"
@@ -157,7 +160,9 @@ bots_json="[${bots_json%,}]"
 
 # The start of the run: the pull test names its own, else from_leg with the optional pull group and start_here.
 start_json="\"from_leg\":$FROM_LEG,"
-if [ -n "$pulltest_json" ]; then
+if [ "$MODE" = observe ]; then
+  start_json=""
+elif [ -n "$pulltest_json" ]; then
   start_json=$pulltest_json
 else
   [ -z "$PULL_GROUP" ] || start_json+="\"from_pull_group\":$PULL_GROUP,"
@@ -181,12 +186,16 @@ params() {
     [ "$REHIRE" = 0 ] || { hire+="${sep}\"rehire\":true"; sep=","; }
     [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
     [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
-    printf '{"name":"uldaman","mode":"commander",%s' "$start_json"
+    printf '{"name":"uldaman","mode":"%s",%s' "$MODE" "$start_json"
     printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
     printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
     return
   fi
-  printf '{"name":"uldaman","mode":"commander","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
+  if [ "$MODE" = observe ]; then
+    printf '{"name":"uldaman","mode":"observe","lead_bot":"%s","bots":%s,' "$LEAD" "$bots_json"
+  else
+    printf '{"name":"uldaman","mode":"commander","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
+  fi
   printf '"prepare":{"online":true,"fresh":%s,"gm_setup":["gm visible off"]},' "$FRESH"
   printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s"}}' "$sha_label"
 }

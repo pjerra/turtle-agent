@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -25,6 +26,11 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	mode, _, merr := runMode(p.Mode)
 	if merr != nil {
 		return false, merr
+	}
+	if mode == modeObserve {
+		if err := checkObserve(p, bad); err != nil {
+			return true, err
+		}
 	}
 	switch mode {
 	case modeLeader:
@@ -95,6 +101,43 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	return true, nil
 }
 
+// checkObserve refuses what has no meaning in observe mode: the run leader on the server does the walking, the pulling and the object
+// steps, and the agent sends it no order, so the options that steer those (or start inside the plan) are refused instead of ignored.
+func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
+	switch {
+	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
+		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
+	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe:
+		return bad(`cc, carrier, loot_restore, object_fallback, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
+	case p.Tune != "" || p.LiveReload != nil:
+		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
+	}
+	if o := p.Observe; o != nil {
+		if o.Plan != "" && !planName.MatchString(o.Plan) {
+			return bad("observe.plan: %q is not a plan name (a-z, 0-9, _ and -)", o.Plan)
+		}
+		for _, v := range []struct {
+			name string
+			s    float64
+		}{{"poll_s", o.PollS}, {"max_run_s", o.MaxRunS}, {"stall_s", o.StallS}, {"paused_wait_s", o.PausedWaitS}} {
+			if v.s < 0 || v.s > 24*3600 {
+				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
+			}
+		}
+	}
+	return nil
+}
+
+// observeSpec is the dungeon.ObserveSpec of the run's observe parameters.
+func observeSpec(o *observeParam) *dungeon.ObserveSpec {
+	spec := &dungeon.ObserveSpec{}
+	if o != nil {
+		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS)
+	}
+	return spec
+}
+
 // checkNamedParty checks the lead bot, the other bots, the tank and the healer of a run that names its party.
 func checkNamedParty(p dungeonRunParams, bad func(string, ...any) error) error {
 	if !botName.MatchString(p.LeadBot) {
@@ -131,7 +174,11 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
-	opt := dungeon.RemoteOptions{PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	var observe *dungeon.ObserveSpec
+	if mode, _, _ := runMode(p.Mode); mode == modeObserve {
+		observe = observeSpec(p.Observe)
+	}
+	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}
@@ -159,7 +206,11 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		_ = drv.Run(ctx, from)
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}, nil
+	res := dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}
+	if observe != nil {
+		res.Mode, res.RunMode = modeObserve, modeObserve
+	}
+	return res, nil
 }
 
 // keptHires is a copy of what the run that kept a binding read of its hires (nil when none was kept). The caller holds r.mu.
