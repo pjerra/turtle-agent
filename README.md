@@ -18,6 +18,12 @@ and the rules for agents in [AGENTS.md](AGENTS.md).
 > Use it only on servers you run or are allowed to test on. It has no Warden emulation (see [What the server sees](#what-the-server-sees)) and does no rendering or
 > inventory management beyond listing the bags, using and equipping items, taking corpse loot, and buying and selling.
 
+## Branches and CI
+
+Work goes feature branch -> `dev` -> `main`. Open PRs against **`dev`**; `main` only takes `dev` after the owner's review.
+The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, and a cgo build) must be green to merge into
+either branch. The navmesh tests skip without mmaps.
+
 ## Quick start
 
 Requirements: Go 1.27.1 or newer (see `go.mod`), a C++17 compiler for cgo (g++ or clang; it builds the navmesh
