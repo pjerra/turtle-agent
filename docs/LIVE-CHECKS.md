@@ -917,3 +917,20 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
 4. `fresh` with the hourly ledger full (5 entries): the run fails at the start with `the account entered 5 new instances`, nothing teleported.
 5. A player (non-GM) account with `fresh`: the run fails with `fresh needs a GM account`-style text before anything is sent.
 6. `gm_setup`: `setup_shortcuts` has `gm visible off` once, and the keep-near `.appear` assists still work (they read it).
+
+## Uldaman legs 4-12: Sentinel to Archaedas (#73, #83; written from the world data, not run)
+
+`dungeons/uldaman.json` goes on past Ironaya to Archaedas (README, "The Uldaman plan"). Everything in legs 4-12 comes from the world database of tortoise-wow 5d79486, its C++
+scripts and the map 70 navmesh; no agent has walked it. What a first live run has to settle, in the order it meets them:
+
+1. **The hole north of Ironaya's room** (leg 4, first walk): `cmd move` from the room (-235.7 309.6) to the Back Entrance corridor (-212.9 382.4). The mesh has no polygon for
+   about 45 yd between them. Record the answer (`unreachable`, `off-mesh`, or the bots walking it) and where the lead bot stood.
+2. **Three doors that no script opens** (Echomok 124370, Hall of the Keepers 124368, Archaedas 141869; plain doors, lock 86): does `cmd open` open them for a bot with nothing in
+   its bags, or does it answer with an error? Lock.dbc is not in the export.
+3. **The altars** (legs 9 and 12): the step needs the multi-bot ritual use that the driver does not have. Until then use the altar by hand (three bots of the group, one `.bot cmd open
+   entry:130511@104.8,272.5,-26.5 <bot>` each, standing still) and let the run take over at the next leg; check the altar reads `active` (`cmd state`) and the first Stone Keeper wakes.
+4. **The Stone Keepers** (leg 10): the wake order, whether the group of four is pulled as each wakes, the wait for the door 124367 (`active` within the 600 s), and whether a wipe
+   resets them (all four stoned again) with the altar still active.
+5. **Archaedas** (leg 12): the stand point of the door is 39 yd from his spawn (he resets beyond 38); the altar side is 11 yd. Count the minions that wake (one per 10 s, six
+   Guardians at 66 %, two Vault Warders at 33 %), the time to kill, and that the Vault door 124369 reads `active` after the kill.
+6. **The pace**: legs 4-12 are 2347 yd and 38 pull groups (119 mobs); the estimate is 45 to 70 min. Record `seconds` per leg and the watchdog stalls.

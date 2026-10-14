@@ -529,7 +529,8 @@ leaving range is not reported either.
 
 A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
 opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
-that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one.
+that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one (all of Uldaman, see
+[The Uldaman plan](#the-uldaman-plan)).
 
 ```json
 {
@@ -633,19 +634,54 @@ factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`; a p
 bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
 `tools/dungeongen/testdata/uldaman` is the export the Uldaman plan was written from.
 
-`go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122` lints a plan against
+`go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
 the export (`creatures.tsv`) and prints a warning for each boss, `boss.first` entry or pack member that has `npc_flags` (a quest giver, vendor or trainer is no
 mob) or a faction named friendly to the leader's team; what is gated to the other team is not looked at, and the flags of a part gated to a team are not repeated.
 dungeongen cannot tell friend from foe by itself: that is in `FactionTemplate.dbc`, which the export does not carry, so only 35 and the factions of
 `-friendly-factions` count as friendly, and a faction that creatures with `npc_flags` also use is noted as possibly friendly. Faction 122, for one, is
 the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile to the Horde but the data of the users of 122 (Bael'dun soldiers are Horde kill targets).
-`-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
+`-awakened` names creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so a plan that fights them is not warned about as if it
+asked the party to kill a friend: Uldaman's Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, woken by the Altar of Archaedas); their `npc_flags` are
+still looked at. `-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
 in the plan is a spawn in the export. The navmesh test needs the map 70 files (`070.mmap` and the three `070*.mmtile`) in
 `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle070` or `~/tortoise-wow-server/data/mmaps`, and a cgo build; it skips otherwise. The navmesh
 has no doors, so `path_to` walks through a closed one: the door steps are checked in the game, not by that test.
+
+### The Uldaman plan
+
+`dungeons/uldaman.json` runs the whole dungeon, 13 legs, from the main entrance to the last boss. Legs 0-3 (the west wing) were run end to end by a remote run
+(run 5, 22.4 min); legs 4-12 were written from the world database (map 70 spawns, templates, EventAI, the C++ scripts of the core) and the map 70 navmesh, and have not been
+run. Walk lengths on the navmesh: legs 0-3 819 yd, legs 4-12 2347 yd, 3167 yd in all (about 8 min of walking at 6.6 yd/s). The plan holds 56 pull groups, 8 bosses and the four Stone Keepers; from the pace of run 5 (22.4 min for 18 groups and 3 bosses)
+legs 4-12 are a rough 45 to 70 min.
+
+| Leg | Name | Boss (entry) | What the leg does |
+| --- | --- | --- | --- |
+| 0 | `baelog` | Baelog (6906), with Eric (6907) and Olaf (6908) first | the west rooms, Baelog's Chest (Gni'kiv Medallion); the Horde fights Baelog |
+| 1 | `revelosh` | Revelosh (6910) | the Shaft of Tsol, combined with the Medallion into the Staff of Prehistoria |
+| 2 | `keystone` | none | the Keystone (needs the Staff), the Seal of Khaz'Mul |
+| 3 | `ironaya` | Ironaya (7228) | |
+| 4 | `sentinel` | Obsidian Sentinel (7023) | crosses the navmesh hole north of Ironaya's room to the Back Entrance corridor, opens the Echomok Door (124370) |
+| 5 | `ancient_stone_keeper` | Ancient Stone Keeper (7206) | the central hall: Shadowforge, Earthen guards |
+| 6 | `galgann` | Galgann Firehammer (7291), Geologists (7030 x2) first | the scorpid nest, Shadowforge groups, the Galgann room |
+| 7 | `grimlok` | Grimlok (4854), his Brawler, Geomancer and Basilisk first | the Stonevault corridor |
+| 8 | `keepers_door` | none | the Stonevault rooms down to the Hall of the Keepers, opens its door (124368) |
+| 9 | `keepers_altar` | none | the three Earthen squads of the hall, then the Altar of the Keepers (130511) |
+| 10 | `keepers` | none | the four Stone Keepers (4857), woken one after the other; waits for the Temple Door 124367 (600 s) |
+| 11 | `descent` | none | the ramp down to the Vault level, the squads on it |
+| 12 | `archaedas` | Archaedas (2748) | the door 141869, the Altar of Archaedas (133234), the fight, the Vault door 124369 |
+
+The legs follow the navmesh route, not the order of the TortoiseBots guide (which lists the Altar of the Keepers before the Ancient Stone Keeper): the Hall of the Keepers lies past
+Grimlok and the Ancient Stone Keeper is a dead-end side room of the central hall. The notes of each leg in the file hold the mechanics read from the data (EventAI rows, the
+Keepers' and Archaedas' scripts, the ritual of the altars, the doors). The two points a run needs the driver for are open:
+
+- **Both altars are summoning rituals of three participants** (`gameobject_template` type 18, `data0` 3). The plan's `use_object` step is one carrier using the object;
+  the ritual needs three different bots of the group, standing still at the altar, to use it. The step cannot finish until the driver can order `cmd open entry:<id>@x,y,z <bot>`
+  for three bots in turn (legs 9 and 12).
+- **The navmesh has a hole of about 45 yd** between Ironaya's room and the Back Entrance corridor (leg 4's first walk): the walk goes over it on the straight line, and whether
+  the server accepts that move (`off-mesh`, `unreachable`) is not tried. `TestUldamanOnNavmesh` accepts that one hole.
 
 ## Dungeon runs
 

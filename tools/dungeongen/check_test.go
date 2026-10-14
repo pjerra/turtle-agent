@@ -70,11 +70,19 @@ func TestCheckUldamanPlanIsClean(t *testing.T) {
 	}
 	// Faction 122 is the Ironforge dwarves': friendly to the Alliance, not to the Horde.
 	for team, friendly := range map[string]map[int]bool{"alliance": {122: true}, "horde": nil} {
-		if ws := Check(p, uldamanCreatures(t), CheckOptions{Team: team, Friendly: friendly}); len(ws) != 0 {
+		if ws := Check(p, uldamanCreatures(t), CheckOptions{Team: team, Friendly: friendly, Awakened: uldamanAwakened}); len(ws) != 0 {
 			t.Errorf("%s: %q", team, ws)
 		}
 	}
+	// The Stone Keepers and Archaedas spawn friendly (faction 35) and the altars' scripts wake them: without -awakened they are warned about.
+	ws := Check(p, uldamanCreatures(t), CheckOptions{Team: "alliance", Friendly: map[int]bool{122: true}})
+	if len(ws) != 2 || !strings.Contains(ws[0], "Stone Keeper (4857)") || !strings.Contains(ws[1], "Archaedas (2748)") || !strings.Contains(ws[1], "faction 35 is friendly") {
+		t.Errorf("%q", ws)
+	}
 }
+
+// The two Uldaman entries that spawn friendly and are woken by the altars' scripts (instance_uldaman.cpp, boss_archaedas.cpp).
+var uldamanAwakened = map[uint32]bool{4857: true, 2748: true}
 
 // A faction used by NPCs with npc_flags is noted as possibly friendly when the caller does not say; a mob's own faction alone is not.
 func TestCheckNotesNPCFactions(t *testing.T) {
@@ -121,14 +129,14 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := filepath.Join("testdata", "uldaman")
-	if got := checkFile(plan, data, "alliance", "122", false); got != 0 {
+	if got := checkFile(plan, data, "alliance", "122", "", false); got != 0 {
 		t.Fatalf("warnings without -strict: %d", got)
 	}
-	if got := checkFile(plan, data, "alliance", "122", true); got != 1 {
+	if got := checkFile(plan, data, "alliance", "122", "", true); got != 1 {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
-	if got := checkFile(clean, data, "alliance", "122", true); got != 0 {
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", true); got != 0 {
 		t.Fatalf("the committed plan: %d", got)
 	}
 }
