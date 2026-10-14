@@ -115,6 +115,9 @@ type objState struct {
 	corpses map[uint32]corpseRef
 	waitKey [2]int
 	waitAt  time.Time
+	// unchecked is the game object a wait passed without seeing it ("game object 124372 near ..."); the next walk's failure names it, and
+	// the next walk that succeeds clears it.
+	unchecked string
 }
 
 // noteCorpse keeps the GUID of a unit a won pull killed: a boss's loot order names it.
@@ -208,6 +211,7 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 			// The feed (party and hostiles) carries no game-object state, so the wait cannot be checked another way. The step is passed
 			// as a last resort: if the object did not change, the party's next walk past its position fails, and the run says so then.
 			d.rep.note(fmt.Sprintf("%s: the agent cannot see %s%s, so its state is not checked; taken as %s after the order that opens it: the party's next walk through it is the check (a closed door fails that walk)", a.Label, describeRef(ref), d.agentFarText(st.WaitFor.GameObject.Near), st.WaitFor.GameObject.State))
+			d.obj.unchecked = describeRef(ref)
 			d.st.SkipStep()
 			return nil, true
 		}

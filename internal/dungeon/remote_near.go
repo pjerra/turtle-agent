@@ -23,9 +23,11 @@ import (
 // listed in setup_shortcuts, and gm_commands stays what the enter phase made it (so "0 GM commands" has to read run_gm_assists too). The agent's presence is no part of the run's result.
 
 const (
-	keepNearFar   = 40.0 // yards from the lead bot beyond which the agent is brought up
-	keepNearStand = 30.0 // yards short of the lead bot a walking agent stops at
-	keepNearSafe  = 25.0 // a hostile within this of the stand point (or a corner of the way) keeps a walking agent where it is
+	keepNearFar   = 40.0             // yards from the lead bot beyond which the agent is brought up
+	keepNearStand = 30.0             // yards short of the lead bot a walking agent stops at
+	keepNearSafe  = 25.0             // a hostile within this of the stand point (or of the way, sampled every wayStep) keeps a walking agent where it is
+	wayStep       = 10.0             // yards between the points of a way that are checked against the hostiles
+	keepNearWalk  = 60 * time.Second // ceiling of the walk behind the party
 )
 
 // Follower is the optional part of a RemoteGame that moves the agent's own character after the party.
@@ -173,17 +175,57 @@ func (d *RemoteDriver) walkBehind(ctx context.Context, f Follower, dist float64)
 	}
 	d.remote(func(r *RemoteReport) { r.AgentWalks++ })
 	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent is %.0f yd behind the lead bot; walking to %.0f %.0f %.0f", d.curLeg, dist, stand.X, stand.Y, stand.Z))
-	return d.agentWalk(ctx, f, stand, 0)
+	return d.agentWalk(ctx, f, stand, keepNearWalk)
 }
 
-// agentWayClear says whether no living hostile the bots see stands within keepNearSafe of the path's corners or its end point; a walking
-// agent stays out of pulls. The first hostile that blocks it is noted once.
+// agentWayClear says whether no living hostile stands within keepNearSafe of the way: the path sampled about every wayStep yards along
+// every segment (a mob in the middle of a long straight is no corner) plus the stand point. The hostiles are those the bots see
+// (the feed) and those in the agent's own store (UnitSource): the feed lists only what the bots see, and the agent walks where they do not.
+// A walking agent stays out of pulls; the first hostile that blocks it is noted once.
 func (d *RemoteDriver) agentWayClear(path []Point, stand Point) bool {
-	for _, p := range append(slices.Clone(path), stand) {
-		for _, h := range d.fr.Hostiles {
-			if h.Entry != 0 && h.HPPct > 0 && dist3(hostilePoint(h), p) <= keepNearSafe {
-				if d.near.once(h.GUID.String()) {
-					d.rep.note(fmt.Sprintf("keep near: the agent stays where it is: %s stands near its way", d.hostileName(h)))
+	type foe struct {
+		at   Point
+		name string
+		key  string
+	}
+	var foes []foe
+	for _, h := range d.fr.Hostiles {
+		if h.Entry != 0 && h.HPPct > 0 {
+			foes = append(foes, foe{hostilePoint(h), d.hostileName(h), h.GUID.String()})
+		}
+	}
+	if us, ok := d.g.(UnitSource); ok {
+		for _, u := range us.Units() {
+			if u.Type == "creature" && u.Hostile && !u.Dead && u.PosAgeMS >= 0 && (u.MaxHealth == 0 || u.Health > 0) {
+				name := u.Name
+				if name == "" {
+					name = fmt.Sprintf("creature %d", u.Entry)
+				}
+				foes = append(foes, foe{Point{u.X, u.Y, u.Z}, name + " (in the agent's view)", u.GUID.String()})
+			}
+		}
+	}
+	if len(foes) == 0 {
+		return true
+	}
+	pts := []Point{stand}
+	for i := 0; i < len(path); i++ {
+		pts = append(pts, path[i])
+		if i == 0 {
+			continue
+		}
+		a, b := path[i-1], path[i]
+		n := int(dist3(a, b) / wayStep)
+		for k := 1; k <= n; k++ {
+			t := float32(k) / float32(n+1)
+			pts = append(pts, Point{a.X + (b.X-a.X)*t, a.Y + (b.Y-a.Y)*t, a.Z + (b.Z-a.Z)*t})
+		}
+	}
+	for _, p := range pts {
+		for _, h := range foes {
+			if dist3(h.at, p) <= keepNearSafe {
+				if d.near.once(h.key) {
+					d.rep.note(fmt.Sprintf("keep near: the agent stays where it is: %s stands near its way", h.name))
 				}
 				return false
 			}
@@ -197,16 +239,19 @@ func (d *RemoteDriver) agentWayClear(path []Point, stand Point) bool {
 func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, limit time.Duration) (bool, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	began := d.clk.Now()
 	type result struct {
 		r   WalkResult
 		err error
 	}
 	done := make(chan result, 1)
+	started := make(chan struct{})
 	go func() {
+		close(started)
 		r, err := f.WalkSelf(wctx, stand)
 		done <- result{r, err}
 	}()
+	<-started
+	began := d.clk.Now() // the walk's time counts from here
 	for {
 		select {
 		case res := <-done:

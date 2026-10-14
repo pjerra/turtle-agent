@@ -351,3 +351,66 @@ func TestAgentDoesNotWalkTowardAnObjectPastAHostile(t *testing.T) {
 		t.Fatalf("%v walks %v\n%s", err, g.walks, notesOf(rep))
 	}
 }
+
+// The way to the object is checked all along, not at its corners: a mob in the middle of a long straight (the corridor 0..160 yd) is
+// 2 yd from the line. Hostiles of the agent's own store count too, not only the feed's.
+func TestAgentDoesNotWalkPastAMobInTheMiddleOfALongWay(t *testing.T) {
+	far := Point{20, 160, 0}
+	chestFar := Step{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: goChest, Near: &far}}}
+	plan := func() *Plan { return remotePlan(Leg{Name: "c", To: Point{20, 0, 0}, Steps: []Step{chestFar}}) }
+	for _, level := range []int{3, 0} {
+		// In the bots' feed.
+		g := newNearGame(t, level)
+		g.addMob(299, Point{22, 80, 0})
+		rep, err := nearRun(t, g, plan())
+		if err == nil || strings.Contains(notesOf(rep), "walks to 2") || !strings.Contains(notesOf(rep), "the agent stays where it is") {
+			t.Fatalf("level %d feed: %v walks %v\n%s", level, err, g.walks, notesOf(rep))
+		}
+		for _, w := range g.walks {
+			if w.Y > 30 {
+				t.Fatalf("level %d feed: walked to %v", level, w)
+			}
+		}
+		// Only in the agent's store.
+		g = newNearGame(t, level)
+		g.units = []objects.Unit{{GUID: 0xF130000309000077, Type: "creature", Entry: 299, Name: "Stonevault Ambusher", X: 22, Y: 80, PosAgeMS: 100, Health: 900, MaxHealth: 900, Hostile: true}}
+		rep, err = nearRun(t, g, plan())
+		if err == nil || !strings.Contains(notesOf(rep), "Stonevault Ambusher (in the agent's view) stands near its way") {
+			t.Fatalf("level %d store: %v walks %v\n%s", level, err, g.walks, notesOf(rep))
+		}
+		for _, w := range g.walks {
+			if w.Y > 30 {
+				t.Fatalf("level %d store: walked to %v", level, w)
+			}
+		}
+		// A dead one, a friendly one and a player do not block.
+		g = newNearGame(t, level)
+		g.units = []objects.Unit{
+			{GUID: 0xF130000309000078, Type: "creature", Entry: 299, X: 22, Y: 80, PosAgeMS: 100, Dead: true, Hostile: true},
+			{GUID: 0xF130000309000079, Type: "creature", Entry: 300, X: 22, Y: 90, PosAgeMS: 100, Health: 9, MaxHealth: 9},
+			{GUID: 0xF13000030900007A, Type: "player", X: 22, Y: 100, PosAgeMS: 100, Health: 9, MaxHealth: 9, Hostile: true},
+		}
+		if _, err := nearRun(t, g, plan()); err == nil || len(g.walks) == 0 || g.walks[len(g.walks)-1].Y < 130 {
+			t.Fatalf("level %d harmless units: %v walks %v", level, err, g.walks)
+		}
+	}
+}
+
+// A wait passed unchecked: when the party's next walk fails, the error names the object.
+func TestWalkFailureNamesTheWaitPassedUnchecked(t *testing.T) {
+	g := nearKeystoneGame(t, 3) // the Seal never shows
+	g.fakeRemote.onTick = func(f *fakeRemote) {
+		if len(g.ordersOf("cmd open")) > 0 {
+			f.ignoreMoves = 100 // the door stayed shut
+		}
+	}
+	_, err := nearRun(t, g, remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: sealStep()}, Leg{Name: "i", To: Point{20, 20, 0}}))
+	if err == nil || !strings.Contains(err.Error(), "gained no ground") || !strings.Contains(err.Error(), "the earlier wait for game object 124372 near 20 60 0 passed unchecked") {
+		t.Fatalf("%v", err)
+	}
+	// A walk that works clears it: no wait, no mention.
+	g = nearKeystoneGame(t, 3)
+	if _, err := nearRun(t, g, remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: sealStep()}, Leg{Name: "i", To: Point{20, 20, 0}})); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -827,6 +827,6 @@ Evidence: remote run 4 did the chest, the Shaft, the Staff combine and the Keyst
    `... is in the agent's view after N s` (the wait is then really checked, expect the Seal `active` ~27 s after the Keystone), or the wait goes on unchecked with
    `cannot see game object 124372 near ... (the agent stands N yd from it)`. In both cases the run goes on to Ironaya's leg; `agent_walks` counts the walk,
    `gm_commands` and `run_gm_assists` are unchanged by it. How far from the Seal does the server first send it to the agent (the real view range)?
-2. **No walk past a pack.** With mobs near the way to the Seal the agent stays put (`the agent stays where it is: ... stands near its way`) and the wait is unchecked.
+2. **No walk past a pack.** With mobs near the way to the Seal (anywhere along it, seen by the bots or only by the agent) the agent stays put (`the agent stays where it is: ... stands near its way`) and the wait is unchecked.
 3. **Still carrier.** `object_steps[].approach` says `still N yd ... after S s`; the first `cmd open` of Baelog's Chest is no longer interrupted by a 1-2 yd move
    (`cast interrupted ... the bot moved`).

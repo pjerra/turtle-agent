@@ -558,7 +558,10 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		switch a.Kind {
 		case ActWalk:
 			if err = d.tracedWalk(ctx, a.To); err == nil {
+				d.obj.unchecked = ""     // the party walked on: whatever a wait passed unchecked let it through
 				_, err = d.keepNear(ctx) // the leg's walk is over: bring the agent up
+			} else if d.obj.unchecked != "" {
+				err = fmt.Errorf("%w; the earlier wait for %s passed unchecked (the agent could not see it): a door that stayed closed would fail this walk", err, d.obj.unchecked)
 			}
 		case ActPull:
 			err = d.doPull(ctx, a)
