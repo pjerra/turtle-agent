@@ -64,14 +64,17 @@
         if (/loot/.test(text)) return "Looting";
         if (/wait/.test(text)) return "Waiting";
         return "Doing a plan step";
+      case "leader": return r.leader && r.leader.state === "paused" ? "Run leader paused" : "Run leader";
       case "starting": return "Starting";
       default: return "Running";
     }
   }
 
-  // "Sentinel room · pack 4 of 5 · fighting Stone Steward"
+  // "Sentinel room · pack 4 of 5 · fighting Stone Steward"; an observed run: "Run leader: Sentinel · pull 7/41 · pulling"
   function stateLine(c, names) {
     const r = c.run, parts = [];
+    // An observed run: the run leader on the server does the clearing and says what it does (TBM:RUN); the card shows that.
+    if (r.leader && r.state === "running") return r.leader.text;
     if (r.state === "running" || r.leg >= 0) { const s = section(r); if (s) parts.push(s); }
     if (r.state === "running" && r.group > 0) parts.push("pack " + r.group + (r.groups ? " of " + r.groups : ""));
     let doing = phaseWord(c);
