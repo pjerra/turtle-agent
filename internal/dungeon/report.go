@@ -75,6 +75,10 @@ type Report struct {
 	// Watchdog is the progress watchdog's view (README "Run watchdog"): when the run last made progress, for how long it has not, and the
 	// stall level.
 	Watchdog *WatchdogReport `json:"watchdog,omitempty"`
+	// Prepare is the prepare block's steps with their seconds (remote mode; absent when the run had none). SetupS is the whole setup: the
+	// seconds from the start of the run to its first step (prepare, bind, enter phase and preflight together).
+	Prepare *PrepareReport `json:"prepare,omitempty"`
+	SetupS  float64        `json:"setup_s"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -190,6 +194,7 @@ func (p *reporter) snapshot() Report {
 	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
 	r.RestGates = append([]RestGate{}, p.r.RestGates...)
 	r.Remote = p.r.Remote.clone()
+	r.Prepare = p.r.Prepare.clone()
 	if p.r.TankFirst != nil {
 		tf := *p.r.TankFirst
 		r.TankFirst = &tf

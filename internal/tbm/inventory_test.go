@@ -42,14 +42,15 @@ func TestParseInventory(t *testing.T) {
 }
 
 func TestCheckBotLine(t *testing.T) {
-	for _, ok := range []string{"maintenance Tanky", "inv Healy", ".bot logout Magey", "INV Healy", "command Tanky talents", ".bot command Tanky talents", "COMMAND Healy talents"} {
+	for _, ok := range []string{"maintenance Tanky", "inv Healy", ".bot logout Magey", "INV Healy", "command Tanky talents", ".bot command Tanky talents", "COMMAND Healy talents",
+		"roster", ".bot roster", "add Tanky", ".bot add Tanky", "command Tanky leave", ".bot command Healy leave"} {
 		if err := CheckBotLine(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "inv", "maintenance", "maintenance Tanky Healy", "autogear Tanky", "inv Tank;y", "logout Tanky\n.gm on", "inv 1234", "gm on",
 		// the talents read-back is the only `.bot command` line: nothing else may follow the word, and no other command goes through
-		"command Tanky", "command Tanky talents reset", "command Tanky talents auto", "command Tanky talents 05-31", "command Tanky reset", "command Tanky talents shift 1", "command Tank;y talents", "command 12 talents", "command Tanky Talents", "command Tanky\n.gm on talents"} {
+		"command Tanky", "command Tanky talents reset", "command Tanky talents auto", "command Tanky talents 05-31", "command Tanky reset", "command Tanky talents shift 1", "command Tank;y talents", "command 12 talents", "command Tanky Talents", "command Tanky\n.gm on talents", "roster all", "add", "add Tanky Healy", "add 12", "add Tank;y", "command Tanky Leave", "command Tanky leave now", "command Tanky leave\n.gm on"} {
 		if err := CheckBotLine(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

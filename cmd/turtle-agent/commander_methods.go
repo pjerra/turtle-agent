@@ -14,6 +14,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -281,6 +282,41 @@ func (g remoteGame) TeleName(ctx context.Context, player, location string) error
 		return fmt.Errorf("tele name: %q %q is not a bot name and a game_tele name", player, location)
 	}
 	return g.c.cur().GM(ctx, ".tele name "+player+" "+location)
+}
+
+// The prepare step (dungeon.Preparer): the agent's own character and the three GM lines it may send beyond .tele name. Each takes the
+// text from this file, not from the caller: a name and a GUID are all that vary.
+
+// AgentName and AgentGUID are the agent's own character.
+func (g remoteGame) AgentName() string      { return g.c.cur().Status().Character }
+func (g remoteGame) AgentGUID() packet.GUID { return g.c.cur().Status().GUID }
+
+// Sees says whether the agent's own object store lists the named player.
+func (g remoteGame) Sees(name string) bool {
+	for _, u := range g.c.cur().Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" && strings.EqualFold(u.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// GMVisible sends ".gm visible on" or ".gm visible off".
+func (g remoteGame) GMVisible(ctx context.Context, on bool) error {
+	if on {
+		return g.c.cur().GM(ctx, ".gm visible on")
+	}
+	return g.c.cur().GM(ctx, ".gm visible off")
+}
+
+// UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
+// runs it on the selected player (from account level 4; below it on the sender), so the target is chosen by GUID and never left to
+// whatever the agent had selected.
+func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet.GUID) error {
+	if !botName.MatchString(who) || guid == 0 {
+		return fmt.Errorf("instance unbind: %q (%v) is not a character name and a GUID", who, guid)
+	}
+	return g.c.cur().GMOn(ctx, guid, ".instance unbind all")
 }
 
 // Recent and Record implement dungeon.EntryLedger over the account's ledger file.

@@ -857,3 +857,46 @@ has run live. Use short levels so that the checks do not take ten minutes: `"wat
    (`remote.end_fight`), and `dungeon_status` shows `stall_level` `fail`.
 8. **Pauses.** A leader's death in group mode with a corpse run of several minutes, and a plan's `wait_for` of 60 s: `stalled_for_s` is 0 while they
    last and no `stall` event comes.
+
+## Remote Uldaman in one command (issue #83, owner request 2026-10-14: setup took 11 minutes)
+
+A tester's setup for a remote Uldaman run was about 11 minutes: the agent rebuilt each run, deploys, and about 30 one-by-one calls (`.bot add` x5,
+`.bot maintenance` x5, talents, `.instance unbind all` per bot, the bind, a tele, summons x4). Goal: 1-2 minutes when nothing needs deploying.
+
+**The command.** `tools/run-uldaman.sh` (bash; needs `curl` and `jq` or `python3`; read the header for the environment it takes):
+
+```sh
+tools/run-uldaman.sh                  # fresh instance, leg 0
+tools/run-uldaman.sh --no-fresh --from-leg 2   # go on in the instance the bots are in
+tools/run-uldaman.sh --relogin        # log the agent out and in again with the binary of the newest origin/main
+```
+
+1. **Binary.** `git fetch`, then `~/turtle-agent/bin/turtle-agent-<sha8>` for origin/main's short SHA. It is used if it exists; if not, the script builds
+   origin/main on the test VM (`vmtest.sh <temporary worktree> 'make build'`) and copies the result there. Nothing is built on the laptop, and a run
+   after a merge that did not touch the agent still needs only the one build per SHA.
+2. **Login.** Only if `status` on the settings file's RPC port (`rpc`, read from the settings with `jq -r .rpc`, or `python3`) does not say `in_world`.
+   An agent that is logged in keeps the binary it started with (`--relogin` to change that); the agent stays online after the run so the next one skips
+   this. The settings file is read only for `rpc` and `rpc_token`; the token goes to `curl` on stdin, and nothing secret is printed.
+3. **Run.** `dungeon_run` for Uldaman with `prepare` (`online` + `fresh` + `gm_setup: ["gm visible off"]`, see README "Prepare: one step before
+   the bind"), the party of the remote runs (`Lcwarra` tank and lead, `Lcpriest` healer, `Lchunter`, `Lcrogue`, `Lcwarlock`; `LEAD`, `BOTS`, `TANK`, `HEALER` change it).
+4. **Poll** `dungeon_status` every 30 s and print `state`, the watchdog's phase, the step and `stalled_for_s`; after `MAX_MIN` (90) minutes
+   `dungeon_stop`.
+5. **End.** Prints `setup_s`, `report.prepare` (the seconds of each step), `preflight_s` and `enter_s`, then runs `turtle-agent trace-score` on the
+   run's trace (exit 11 when a check fails; the script exits with it). Expect the `gm_shortcuts` check to fail: the prepare step's GM lines are setup shortcuts by design.
+
+**Checks to run live (none has been run; the prepare step is tested against the fake game only):**
+
+1. Time it: `report.setup_s` of a run with every bot online and the binary built should be 1-2 minutes. The parts: `prepare.steps[]`, `remote.enter.seconds`
+   (the tele, 4 summons 6 s apart: about 35 s), `remote.preflight.seconds`. If `setup_s` is still long, the largest of those is the next thing to cut
+   (the summon gap is the module's: a `cmd summon` takes ~3 s, the core counts an entry per bot).
+2. `online` after a mangosd restart (bots offline): the five `.bot add` lines are answered `queued for login`, the roster shows all `online` within
+   `online_wait_s`, the bind finds the party. Read the reply text of `.bot add` once: the step matches `queued for login`, `already online`, `not found`,
+   `may only control`, `owned by another`, `Failed to add`.
+3. `fresh` with the bots **inside** the old instance: the five teleports to `uldaman` (map 0) land them at the outside entrance, `Sees` finds them
+   from the agent within 25 s, the bots leave their group, and the instance is a new one (groups 1-10 alive again, not "seen empty"). If the old
+   instance comes back, the unbind did not reach the bots: this account is level 3 and the core runs `.instance unbind` on the *selected* player from
+   level 4 only (`prepare.warnings` says so). Then try the core's `.instance groupunbind all` on a selected bot (it unbinds the whole group, which it
+   then disbands; it works from level 3) and report it: it is not in the whitelist yet.
+4. `fresh` with the hourly ledger full (5 entries): the run fails at the start with `the account entered 5 new instances`, nothing teleported.
+5. A player (non-GM) account with `fresh`: the run fails with `fresh needs a GM account`-style text before anything is sent.
+6. `gm_setup`: `setup_shortcuts` has `gm visible off` once, and the keep-near `.appear` assists still work (they read it).

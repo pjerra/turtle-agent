@@ -292,6 +292,82 @@ func TestDungeonRunRemoteEntersByTele(t *testing.T) {
 	}
 }
 
+// The prepare block over the session: the roster is read, the offline bot is logged in with `.bot add`, the roster is read again, the
+// account is probed, `.gm visible off` goes out, and only then the bind. Every line is the one the whitelist allows; the report has the
+// steps with their seconds, the GM line is a setup shortcut and the run's own gm_commands stays 0.
+func TestDungeonRunRemotePrepareOverTheSession(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"version":1,"name":"rem","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"here","to":{"x":5,"y":5,"z":5},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10}}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "rem.json"), []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","prepare":{"online":true,"gm_setup":[".gm visible off"]}}`))
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|offline|0|-", "TBM:ROSTER_END")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot add Tanky"))
+	r.system("Bot Tanky queued for login; it will follow Glacienne after entering the world.")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|0|Uldaman", "TBM:ROSTER_END")
+	r.expectBody(opcode.CMSGMessagechat, say(".account"))
+	r.system("Your account level is: 3")
+	r.expectBody(opcode.CMSGMessagechat, say(".gm visible off"))
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
+	r.system("TBM:ACTION_ACK|commander bind|party|1|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
+	r.system("TBM:ACTION_ACK|commander view|party|1|on")
+	r.system(viewFrame(1, false)...)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
+	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|1|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
+	r.system("TBM:ACTION_ACK|commander unbind|party|1|0")
+	var st map[string]any
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		st = resultOf(t, r.call("dungeon_status", `{}`))
+		if st["state"] == "done" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if st["state"] != "done" {
+		t.Fatalf("%v", st)
+	}
+	rep := st["report"].(map[string]any)
+	pr, _ := rep["prepare"].(map[string]any)
+	steps, _ := pr["steps"].([]any)
+	if len(steps) != 2 || steps[0].(map[string]any)["name"] != "online" || steps[1].(map[string]any)["name"] != "gm_setup" || pr["gm_commands"].(float64) != 1 {
+		t.Fatalf("prepare: %v", pr)
+	}
+	if _, ok := rep["setup_s"].(float64); !ok || rep["remote"].(map[string]any)["gm_commands"].(float64) != 0 {
+		t.Fatalf("setup_s / gm_commands: %v %v", rep["setup_s"], rep["remote"])
+	}
+	if sc, _ := rep["setup_shortcuts"].([]any); len(sc) != 1 || sc[0] != "gm visible off" {
+		t.Fatalf("setup_shortcuts: %v", rep["setup_shortcuts"])
+	}
+}
+
+// What a prepare block may hold is checked when the run starts, before anything is sent.
+func TestDungeonRunPrepareRefusals(t *testing.T) {
+	r := dungeonRig(t)
+	for _, c := range []struct{ params, want string }{
+		{`{"name":"rig","prepare":{"online":true}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"group","prepare":{}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm on"]}}`, "not allowed"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["instance unbind all"]}}`, "not allowed"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm visible off","gm visible on","gm visible off","gm visible on","gm visible off"]}}`, "at most"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"online":true,"online_wait_s":999}}`, "online_wait_s"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"fresh":true,"unbind":"all"}}`, "unbind"},
+	} {
+		out := r.call("dungeon_run", c.params)
+		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
+			t.Errorf("%s: %v", c.params, out["error"])
+		}
+	}
+}
+
 // A run that fails still unbinds.
 func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 	dir := t.TempDir()

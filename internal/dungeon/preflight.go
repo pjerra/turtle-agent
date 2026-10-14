@@ -58,6 +58,7 @@ type Preflight struct {
 	Bots     []PreflightBot `json:"bots"`
 	Warnings []string       `json:"warnings"`
 	OK       bool           `json:"ok"`
+	Seconds  float64        `json:"seconds"` // what the check took
 }
 
 func (p *Preflight) clone() *Preflight {
@@ -128,6 +129,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		d.rep.note("preflight: skipped, this game cannot send .bot maintenance or .bot inv")
 		return nil
 	}
+	began := d.clk.Now()
 	pf := &Preflight{Mode: mode, OK: true}
 	maintenanceOn := true
 	for _, m := range d.fr.Party {
@@ -155,6 +157,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		}
 	}
 	pf.OK = len(pf.Warnings) == 0
+	pf.Seconds = d.clk.Now().Sub(began).Seconds()
 	d.remote(func(r *RemoteReport) { r.Preflight = pf.clone() })
 	text := "preflight: ok"
 	if !pf.OK {
