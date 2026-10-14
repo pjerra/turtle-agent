@@ -18,8 +18,8 @@ import (
 var staticFS embed.FS
 
 // Handler serves the page, the cached state and the files of the tests folder. Every route is GET or HEAD; nothing in it sends
-// anything to an agent.
-func Handler(p *Poller, testsDir string, embedFrom ...string) http.Handler {
+// anything to an agent. allowHosts are the Host names the guard accepts besides the loopback names (see AllowedHosts).
+func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...string) http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	static := http.FileServer(http.FS(sub))
 	mux := http.NewServeMux()
@@ -46,7 +46,7 @@ func Handler(p *Poller, testsDir string, embedFrom ...string) http.Handler {
 		serveTestFile(w, r, testsDir)
 	})
 	mux.Handle("/", static)
-	return guard(mux, FrameAncestors(embedFrom))
+	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts))
 }
 
 func writeJSON(w http.ResponseWriter, b []byte) {
@@ -73,9 +73,79 @@ func CheckEmbedOrigin(o string) error {
 	return nil
 }
 
-// guard refuses what a read-only local page has no use for: other methods, and requests whose Host is not a loopback name (a
-// page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1).
-func guard(next http.Handler, ancestors string) http.Handler {
+// AllowedHosts is what the guard accepts in a Host header besides the loopback names: the names of list (the --allow-host value:
+// host names or IP addresses, comma separated) and, when listenHost is a specific non-loopback IP, that IP, so that a page served
+// on a tailnet address opens by it. A name is exact (no wildcard, port, scheme or path); 0.0.0.0 and :: name no host a browser
+// can reach, so they are refused.
+func AllowedHosts(listenHost, list string) ([]string, error) {
+	var out []string
+	for _, h := range strings.Split(list, ",") {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+			h = h[1 : len(h)-1] // an IPv6 literal, as a Host header writes it
+		}
+		if ip := net.ParseIP(h); ip != nil {
+			if ip.IsUnspecified() {
+				return nil, fmt.Errorf("%q is not an address a browser can name", h)
+			}
+		} else if !validHostName(h) {
+			return nil, fmt.Errorf("%q is not a host name or IP address (no port, scheme, path or wildcard)", h)
+		}
+		out = append(out, h)
+	}
+	if ip := net.ParseIP(listenHost); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		out = append(out, listenHost)
+	}
+	return out, nil
+}
+
+// validHostName reports whether h is a DNS name of letters, digits and hyphens (labels of 1 to 63 characters, no leading or
+// trailing hyphen), with an optional trailing dot.
+func validHostName(h string) bool {
+	h = strings.TrimSuffix(h, ".")
+	if h == "" || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// hostKey is a Host name as the guard compares it: an IP address in its canonical form, a name in lower case without a
+// trailing dot.
+func hostKey(h string) string {
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(strings.ToLower(h), ".")
+}
+
+// hostSet is the set of the allowed names, by hostKey.
+func hostSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, h := range names {
+		if k := hostKey(h); k != "" {
+			set[k] = true
+		}
+	}
+	return set
+}
+
+// guard refuses what a read-only local page has no use for: other methods, and requests whose Host is neither a loopback name
+// nor one of allowed (a page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1: its Host is the name).
+func guard(next http.Handler, ancestors string, allowed map[string]bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -86,8 +156,9 @@ func guard(next http.Handler, ancestors string) http.Handler {
 		if err != nil {
 			host = r.Host
 		}
-		if !netutil.IsLoopback(strings.Trim(host, "[]")) {
-			http.Error(w, "loopback host names only", http.StatusForbidden)
+		host = strings.Trim(host, "[]")
+		if !netutil.IsLoopback(host) && !allowed[hostKey(host)] {
+			http.Error(w, "loopback host names only (or a name given with --allow-host)", http.StatusForbidden)
 			return
 		}
 		h := w.Header()
