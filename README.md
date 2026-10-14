@@ -2696,6 +2696,15 @@ font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fig
 explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
 them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
 
+**What is drawn.** The **Layers** button opens a panel of checkboxes (remembered per map in the browser): the game map picture (with the dim
+slider), planned route, walked path, next-stop arrow, pull-group circles, hostile and neutral mobs, cleared groups, bosses, doors and objects,
+bot dots and names, commander, section labels and step numbers (off by default, like neutral mobs). The planned route runs through every
+leg's waypoints, pull groups and boss in plan order: done legs dimmed, the current one bright and thick, the ones to come dashed, with the
+leg's name where it starts and the step number on hover. The walked path is the lead bot's position at each poll, kept in memory per agent
+(thinned, at most 1500 points, reset when a new run starts) and drawn fading with age. The arrow points from the party to the next stop of the
+current leg ("-> pack 2: Relic Hunter, 34 yd"). When several groups run on the same map each has its own colour and a chip to show or hide its
+path and dots. A door or object is a small door symbol; its name shows on hover or when zoomed in.
+
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
 answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.

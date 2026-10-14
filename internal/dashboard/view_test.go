@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -74,5 +75,21 @@ func TestEntryNames(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("entry %s: %q, want %q", k, got[k], v)
 		}
+	}
+}
+
+// The label plate of a marker is a <rect> too: a rule that styles every rect under a marker paints it as a big box (a white box
+// beside every door). Only the icon (rect.ic) may be styled.
+func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
+	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`svg\s+\.(obj|boss|entrance|pin|legname|mk)[^{,]*\srect\s*[{,]`)
+	if m := re.Find(css); m != nil {
+		t.Errorf("css styles every rect under a marker: %q", m)
+	}
+	if !strings.Contains(string(css), "rect.ic") {
+		t.Error("the door icon rect must be styled by its own class")
 	}
 }

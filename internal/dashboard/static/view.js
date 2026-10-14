@@ -74,6 +74,40 @@
     return done ? { view: { cx: goal.cx, cy: goal.cy, scale: goal.scale }, done: true } : { view: n, done: false };
   }
 
-  const api = { union, fit, viewBox, toWorld, toPanel, clampScale, zoomAt, panBy, pinch, centroid, followScale, ease, MIN_REL, MAX_REL };
+  // The trail as chunks that fade with age: up to maxSeg polylines (a chunk shares its end point with the next one), alpha from
+  // minAlpha for the oldest to 1 for the newest. pts is [[x, y], ...] oldest first.
+  function trailSegments(pts, maxSeg, minAlpha) {
+    const out = [];
+    if (!pts || pts.length < 2) return out;
+    const lo = minAlpha == null ? 0.25 : minAlpha, n = pts.length - 1;
+    const per = Math.ceil(n / Math.max(1, maxSeg || 24)), count = Math.ceil(n / per);
+    for (let i = 0, k = 0; i < n; i += per, k++) {
+      out.push({ points: pts.slice(i, Math.min(pts.length, i + per + 1)), alpha: count === 1 ? 1 : lo + (1 - lo) * (k / (count - 1)) });
+    }
+    return out;
+  }
+
+  // The next stop of a leg's planned route. stops are the leg's {x, y, ...} in plan order (the first is the leg's start), trail the
+  // walked path [[x, y], ...] and lead the party's {x, y}. A stop is reached when the trail or the lead came within radius of it; the
+  // next one is the stop after the last one reached. Returns {index, stop, dist} (dist in yards), or null at the end of the leg.
+  function nextTarget(stops, trail, lead, radius) {
+    if (!stops || stops.length < 2 || !lead) return null;
+    const r = radius == null ? 14 : radius;
+    // the trail is simplified (a straight walk is two points), so the distance is to its segments
+    const segDist = (st, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((st.x - a[0]) * dx + (st.y - a[1]) * dy) / l2));
+      return Math.hypot(st.x - (a[0] + t * dx), st.y - (a[1] + t * dy));
+    };
+    const tr = trail || [];
+    const near = (st) => Math.hypot(st.x - lead.x, st.y - lead.y) <= r || tr.some((p, i) => (i === 0 ? Math.hypot(st.x - p[0], st.y - p[1]) : segDist(st, tr[i - 1], p)) <= r);
+    let reached = 0;
+    for (let i = 1; i < stops.length; i++) if (near(stops[i])) reached = i;
+    if (reached + 1 >= stops.length) return null;
+    const st = stops[reached + 1];
+    return { index: reached + 1, stop: st, dist: Math.hypot(st.x - lead.x, st.y - lead.y) };
+  }
+
+  const api = { trailSegments, nextTarget, union, fit, viewBox, toWorld, toPanel, clampScale, zoomAt, panBy, pinch, centroid, followScale, ease, MIN_REL, MAX_REL };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MapView = api;
 })(typeof self !== "undefined" ? self : this);

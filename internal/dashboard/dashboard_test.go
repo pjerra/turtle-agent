@@ -289,12 +289,12 @@ func TestGeometry(t *testing.T) {
 	}
 	svg := g.SVG
 	for _, want := range []string{`class="route" data-leg="0"`, `class="direct" data-leg="0"`, `class="pull" data-leg="0" data-group="0"`, `r="10.0"`, `r="5.0"`, `r="25.0"`,
-		`class="mk boss"`, `boss 6001`, `class="mk obj use"`, `use 555`, `class="mk entrance"`, `data-leg="1" data-group="0"`} {
+		`class="mk boss"`, `boss 6001`, `class="mk obj use"`, `use 555`, `class="ic"`, `class="lab"`, `class="mk entrance"`, `data-leg="1" data-group="0"`} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("svg lacks %q", want)
 		}
 	}
-	if strings.Contains(svg, "<b>") || !strings.Contains(svg, "two &lt;b&gt;") {
+	if strings.Contains(svg, "<b>") || !strings.Contains(svg, "Two &lt;b&gt;") {
 		t.Errorf("a leg name must be escaped in the svg: %s", svg)
 	}
 	// the direct step is its own dashed line, so leg 0 has a plain route (entrance, via) and a direct line to the second via point

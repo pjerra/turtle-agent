@@ -48,7 +48,6 @@ footer { padding: 8px 16px 20px; font-size: 12px; }
 .mb.chip { background: #ffd400; border-color: #000; color: #000; font-size: 12px; }
 .mb[hidden] { display: none; }
 .dimlbl { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.dimlbl input { width: 110px; }
 .stage { position: relative; height: 72vh; min-height: 420px; max-height: 960px; background: #0b0e13; touch-action: none; user-select: none; }
 .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 .stage svg:active { cursor: grabbing; }
@@ -100,7 +99,12 @@ svg .pin text.num { fill: #000; text-anchor: middle; }
 svg .boss polygon { fill: #ff2fd6; stroke: #000; stroke-width: 2.5; stroke-linejoin: round; }
 svg .boss path { stroke: #000; stroke-width: 2.5; fill: none; }
 svg .leg.done .boss { opacity: .5; }
-svg .obj rect { fill: #fff; stroke: #000; stroke-width: 2; }
+svg .obj rect.ic { fill: #fff; stroke: #000; stroke-width: 1.5; }
+svg .obj circle.knob { fill: #000; }
+/* Labels of doors and objects stay out of the way: shown on hover, or when zoomed in. Never style a bare "rect" of a marker,
+   the label plate is one too. */
+svg .obj .lab { display: none; }
+svg.zoomed .obj .lab, svg .obj:hover .lab { display: inline; }
 svg .legname .lbg { fill: rgba(0, 0, 0, .55); } svg .legname text { fill: #d6dbe5; }
 svg .mob { stroke: #000; stroke-width: 1.5; }
 svg .mob.hostile { fill: #ff3b3b; } svg .mob.neutral { fill: #9aa3b2; } svg .mob.friendly { fill: #22c55e; }
@@ -119,3 +123,48 @@ svg g.dead text { text-decoration: line-through; }
 .legend i.sq { width: 11px; height: 11px; }
 .legend i.line { width: 20px; height: 5px; border-radius: 3px; }
 .legend select { font-size: 11px; margin-left: auto; }
+/* planned route: done legs dimmed, the current one bright and thick, the ones to come dashed */
+svg .leg:not(.done):not(.current) .route, svg .leg:not(.done):not(.current) .halo:not(.dhalo) { stroke-dasharray: 11 8; stroke-linecap: butt; }
+svg .wp circle { fill: #00e5ff; stroke: #000; stroke-width: 1.5; }
+svg .leg.done .wp, svg .leg.done .legname { opacity: .45; }
+svg .legname .lbg { fill: rgba(0, 0, 0, .78); }
+/* the path walked and the next stop */
+svg .trail, svg .trail-halo { fill: none; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+svg .trail { stroke-width: 2.5; } svg .trail-halo { stroke: #000; stroke-width: 5; }
+svg .next, svg .next-halo { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+svg .next { stroke: #fff; stroke-width: 2; stroke-dasharray: 6 5; } svg .next-halo { stroke: #000; stroke-width: 5; opacity: .8; }
+svg polygon.arrow { fill: #fff; stroke: #000; stroke-width: 1.5; stroke-linejoin: round; }
+svg .nextlbl .lbg { fill: rgba(0, 0, 0, .85); stroke: #fff; stroke-width: 1; }
+svg circle.other { stroke: #000; stroke-width: 1.5; }
+.groups { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-left: 6px; }
+.mb.grp { height: 26px; font-size: 12px; opacity: .55; } .mb.grp.on { opacity: 1; }
+.mb .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; border: 1.5px solid #000; vertical-align: -1px; }
+.legend i.dash { width: 20px; height: 0; border-top: 4px dashed var(--c); background: none; border-radius: 0; }
+.legend i.trail { width: 22px; height: 4px; border: 0; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--c)); }
+.legend i.arrow { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 12px; border-color: transparent transparent transparent #fff; background: none; }
+/* layers: the panel and the classes it sets on the svg */
+.layers { position: static; }
+.layers > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
+.layers > summary::-webkit-details-marker { display: none; }
+.layers[open] > summary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(260px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .35); display: grid; gap: 2px; }
+.lrow { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 13px; cursor: pointer; }
+.lrow input { width: 18px; height: 18px; }
+.lpanel .dimlbl { padding-top: 6px; border-top: 1px solid var(--line); margin-top: 4px; }
+.lpanel .dimlbl input { width: 100%; }
+svg.hide-bg image.bg { display: none; }
+svg.hide-route .route, svg.hide-route .direct, svg.hide-route .halo, svg.hide-route .wp { display: none; }
+svg.hide-trail .trail, svg.hide-trail .trail-halo { display: none; }
+svg.hide-next .next, svg.hide-next .next-halo, svg.hide-next g.arrow, svg.hide-next .nl { display: none; }
+svg.hide-packs .pull, svg.hide-packs .pin { display: none; }
+svg.hide-hostile .m.hostile { display: none; }
+svg.hide-neutral .m.neutral, svg.hide-neutral .m.friendly { display: none; }
+svg.hide-cleared .m.cleared, svg.hide-cleared .pull.cleared, svg.hide-cleared .pin.cleared, svg.hide-cleared .leg.done .pull, svg.hide-cleared .leg.done .pin { display: none; }
+svg.hide-bosses .boss { display: none; }
+svg.hide-doors .obj { display: none; }
+svg.hide-bots .b, svg.hide-bots .o { display: none; }
+svg.hide-botnames .botname { display: none; }
+svg.hide-commander .c { display: none; }
+svg.hide-sections .legname { display: none; }
+svg.hide-steps .stepn { display: none; }
