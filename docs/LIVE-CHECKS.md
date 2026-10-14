@@ -916,8 +916,7 @@ the hires come at the commander's level, accepted only inside the plan's band).
 
 Checks to run live for it: (1) `hire_s` and `setup_s` of a cold start (five new hires) and of a run that keeps its hires, against the 2 minute goal;
 (2) the notes `hired X (class:role, level n)` and, on a build without #940, the `level_note`; (3) `ready.bots[].fixed` (what `autogear` and `maintenance`
-had to do) and `quality` `rare` on all five; (4) the spell questions: a bot's whisper to `.bot command <bot> spells taunt` is `[Taunt]`, and a bot
-without the spell stays silent (the step treats silence as "not confirmed"); (5) the commander out of the group after the bind (`party` shows no
+had to do) and `quality` `rare` on all five; (4) the spell and who questions: a hire's whisper to `.bot command <bot> spells taunt` is `=== Spells ===` then `[Taunt]` on its own line, `.bot command <bot> who` gives `<spec> (a/b/c) <class> (<n> lvl)`; a hire that is not answering is named, never dismissed; (5) the commander out of the group after the bind (`party` shows no
 group) and the run's own bind reusing the binding; (6) a second run with `--hire` and no `--rehire` keeps all five (`ready.reused`).
 
 **Checks to run live (none has been run; the prepare step is tested against the fake game only):**

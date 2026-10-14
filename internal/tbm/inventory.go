@@ -146,7 +146,7 @@ func CheckBotLine(command string) error {
 			return fmt.Errorf("%q: %q is not a bot name", command, f[1])
 		}
 		switch {
-		case len(f) == 3 && (f[2] == "talents" || f[2] == "leave"):
+		case len(f) == 3 && (f[2] == "talents" || f[2] == "leave" || f[2] == "who"):
 			return nil
 		case f[2] == "spells" && len(f) >= 4 && len(f) <= 7 && spellFilterRe.MatchString(strings.Join(f[3:], " ")):
 			return nil
@@ -216,14 +216,7 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 	for {
 		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
 		for _, e := range p.Events {
-			var line string
-			var ok bool
-			if e.Kind == events.KindWhisper || e.Kind == events.KindChat {
-				// Only the named bot's own words count (not a whisper inform of ours, not another player's chat).
-				line, ok = e.Text, from != "" && strings.EqualFold(e.Source, from) && e.Text != "" && e.Data["type"] != "whisper_inform"
-			} else {
-				line, ok = LineOf(e)
-			}
+			line, ok := replyLine(e, from)
 			if !ok || strings.HasPrefix(line, ViewPrefix) {
 				continue
 			}
@@ -245,6 +238,112 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 			return lines, false, nil
 		}
 	}
+}
+
+// replyLine is the text of an event that can be part of a reply: a system or addon line, or (with from set) the named bot's own words. Only
+// the named bot's chat counts, not a whisper inform of ours and not another player's chat.
+func replyLine(e events.Event, from string) (string, bool) {
+	if e.Kind == events.KindWhisper || e.Kind == events.KindChat {
+		return e.Text, from != "" && strings.EqualFold(e.Source, from) && e.Text != "" && e.Data["type"] != "whisper_inform"
+	}
+	return LineOf(e)
+}
+
+// MaxBurst bounds how long Burst keeps reading after a reply began, however fast the lines keep coming.
+const MaxBurst = 3 * time.Second
+
+// Burst sends ".bot <command>" for a command whose answer is a run of lines that has no last-line marker (a bot's `spells <filter>`: a
+// header, then one spell per line). It waits up to wait for a line that begin accepts; the reply then goes on while lines keep coming,
+// and ends when none came for quiet (at most MaxBurst after it began). The lines from the first one on are returned, began says whether
+// the reply started at all. One command is in flight at a time, like Lines.
+func (c *Commander) Burst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) (lines []string, began bool, err error) {
+	command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot "))
+	if err := CheckBotLine(command); err != nil {
+		return nil, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	log := c.link.Log()
+	since := log.Last()
+	if err := c.link.Say(ctx, Chat(command)); err != nil {
+		return nil, false, err
+	}
+	if wait <= 0 {
+		wait = DefaultOrderWait
+	}
+	if quiet <= 0 {
+		quiet = 300 * time.Millisecond
+	}
+	lines = []string{}
+	cursor := since
+	from := replyFrom(command)
+	kinds := []string{events.KindSystem, events.KindAddon}
+	if from != "" {
+		kinds = append(kinds, events.KindWhisper, events.KindChat)
+	}
+	deadline := time.Now().Add(wait)
+	var limit time.Time
+	for {
+		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
+		for _, e := range p.Events {
+			line, ok := replyLine(e, from)
+			if !ok || strings.HasPrefix(line, ViewPrefix) {
+				continue
+			}
+			if !began {
+				if !begin(line) {
+					continue
+				}
+				began, limit = true, time.Now().Add(MaxBurst)
+			}
+			if len(lines) < maxLines {
+				lines = append(lines, line)
+			}
+			deadline = time.Now().Add(quiet)
+			if deadline.After(limit) {
+				deadline = limit
+			}
+		}
+		cursor = p.Next
+		if p.More {
+			continue
+		}
+		wctx, cancel := context.WithDeadline(ctx, deadline)
+		werr := log.Wait(wctx, cursor)
+		cancel()
+		if werr != nil {
+			if err := ctx.Err(); err != nil {
+				return lines, began, err
+			}
+			return lines, began, nil
+		}
+	}
+}
+
+// Who is what a bot answered to `.bot command <bot> who`: "protection (0/0/36) warrior (43 lvl), 1021 GS (5/2), (Area), playing with X".
+type Who struct {
+	Class string // lower case, as the module names it
+	Level int
+	Trees [3]int
+}
+
+var whoRe = regexp.MustCompile(`(?i)\((\d+)/(\d+)/(\d+)\)\s+([a-z]+)\s+\((\d+) lvl\)`)
+
+// ParseWho reads the bot's `who` answer out of its reply lines; ok is false when none of them is one.
+func ParseWho(lines []string) (w Who, ok bool) {
+	for _, l := range lines {
+		m := whoRe.FindStringSubmatch(markup.ReplaceAllString(l, ""))
+		if m == nil {
+			continue
+		}
+		for i := range w.Trees {
+			w.Trees[i], _ = strconv.Atoi(m[i+1])
+		}
+		w.Class = strings.ToLower(m[4])
+		w.Level, _ = strconv.Atoi(m[5])
+		return w, true
+	}
+	return Who{}, false
 }
 
 // Talents is what a bot answered to `.bot command <bot> talents`: "My current talent spec is: Protection (0/5/31) Link: ...".

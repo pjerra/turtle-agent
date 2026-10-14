@@ -1500,9 +1500,16 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
 **What the step does,** in order, all with the commander's own `.bot` commands (no GM line):
 
 1. **Current hires.** The members of the commander's group and of the bound group that `.bot roster` does not list are its hires (a hire is a pool
-   character, not one of the account's). An owned bot in the commander's group fails the step (it is not a hire and would be bound with them).
-   `commander unbind` ends an old binding that is not the wanted party; unwanted hires are ended with `.bot logout <name>` (a hire told to `leave` is
-   deleted, so the step never sends it `leave`, not even when the bind refuses a bot as `member-grouped`).
+   character, not one of the account's). An owned bot in the commander's own group fails the step (it is not a hire and would be bound with them); an
+   owned bot in an old bound group is left as it is. What each hire is comes from the bot's **own answer** to `.bot command <bot> who` (class, level and
+   talent points, e.g. `protection (0/0/36) warrior (43 lvl)`), not from the agent's view, so a bound hire inside an instance is recognised.
+   `commander unbind` ends an old binding that is not the wanted party. **A hire is deleted by `.bot logout`, so it is dismissed only when its own answer
+   shows it is the wrong version of an empty slot** (same class, another level or a build for another role), or when the caller said `rehire`. A hire that does
+   not answer `who` (offline, teleporting, in its logout grace) and a hire with no empty slot of its kind (surplus) are never dismissed: the step stops and
+   names them. The step never sends a hire `leave` (that deletes it too), not even when the bind refuses a bot as `member-grouped`.
+   **Hires left outside the group and the binding still count against `AiPlayerbot.HireMaxBotsPerPlayer`** (and the agent cannot list the ones that
+   are neither in the group nor in the bound group): when a hire is refused with "maximum number of companions", `--rehire` / `hire.rehire` dismisses the
+   commander's current hires on purpose; one that is out of reach still has to be dismissed from its own account or by the grace running out.
 2. **Hire.** `.bot hire <class> <role> level=<n>` for each missing slot, in composition order. The level goes only when it differs from the commander's own.
    A reply "Convert to a raid" (the 5th hire) is answered with `convert_raid` and one more try. A server without TB #940 either refuses `level=` (the
    reply is read: `Bad level`, `Unclear number`, `Give only one level`) or ignores it (the answer carries no `Level n.`): the step then hires at the
@@ -1518,11 +1525,12 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
      level worn (shirt and tabard left out), `quality` the best worn. An item the server does not describe is a warning;
    - *supplies:* the drinks (a healer 20, any other mana user 10) and 100 shots of the kind the ranged weapon takes (as the preflight judges them);
      a shortage, and every kept hire, gets `.bot maintenance <bot>` and is read again; a shortage after it fails (`ready.bots[].fixed` has the numbers);
-   - *key spells* from the bot's own list (`.bot command <bot> spells <filter>` is answered by a whisper `[Name] [Name]`): warrior Battle Stance, and
-     for the tank Defensive Stance, Taunt, Sunder Armor and Shield Block; priest Resurrection, for the healer Renew and Dispel Magic; hunter Tame Beast, Call
-     Pet, Mend Pet; warlock Summon Imp or Voidwalker; mage Polymorph; paladin Redemption; shaman Ancestral Spirit (each from its level). A missing spell
-     fails: **the step learns nothing** (`.learn` is a GM command on a character that is not the commander's). A bot that answers no question at all
-     leaves a warning (the list could not be read);
+   - *key spells* from the bot's own list (`.bot command <bot> spells <filter>` is answered by a whisper burst: `=== Spells ===`, then **one spell per
+     line**, `[Name]` links, also when nothing matches; the step reads the whole burst, ending it 0.4 s after the last line, 3 s at most): warrior
+     Battle Stance, and for the tank Defensive Stance, Taunt, Sunder Armor and Shield Block; priest Resurrection, for the healer Renew and Dispel Magic;
+     hunter Tame Beast, Call Pet, Mend Pet; warlock Summon Imp or Voidwalker; mage Polymorph; paladin Redemption; shaman Ancestral Spirit (each from its
+     level). A missing spell fails ("lacks X"): **the step learns nothing** (`.learn` is a GM command on a character that is not the commander's). A
+     question that gets no header within 3 s fails the bot as "no answer from <bot>", not as a missing spell;
    - *talents:* `command <bot> talents` must show points spent and a build whose role is the slot's (warrior protection tank; priest discipline or holy
      healer; paladin holy healer, protection tank; and so on). A feral druid cannot be told as bear or cat: a warning;
    - *pet:* a hunter's or warlock's pet is out in the agent's view within 10 s (a bot the agent cannot see is a warning).
@@ -1543,7 +1551,7 @@ step leaves the block in the report with the bots checked so far. `remote.lead_b
 known-good number per role and level to compare with.
 
 `tools/run-uldaman.sh --hire [--rehire] [--level N]` runs it for Uldaman. **Not verified live** (tested against a fake server only): the exact text of the
-hire reply on a build with TB #940, that `.bot command <bot> spells <filter>` is answered by one whisper per question, the item prototypes for every
+hire reply on a build with TB #940, that `.bot command <bot> who` and `spells <filter>` are answered in the formats above when forwarded as a whisper to a hire, the item prototypes for every
 slot, pets in the agent's view while the hires stand around it, and whether a kept hire's talents read back as the premade.
 
 **GM.** The only GM command the remote run itself sends is that one `.tele name` (`remote.gm_commands` is 1 then, else 0): no `.revive`, `.aura` or

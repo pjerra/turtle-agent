@@ -2,6 +2,7 @@ package tbm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +141,88 @@ func TestLinesReadsTheBotsWhisperForCommand(t *testing.T) {
 	l.sayHook = func(string) { say(events.KindWhisper, "Tanky", "TBM:INV_END|Tanky|1|2", nil) }
 	if _, settled, _ := c.Lines(context.Background(), "inv Tanky", 50*time.Millisecond, func(s string) bool { return true }); settled {
 		t.Fatal("a whisper answered an inv line")
+	}
+}
+
+func TestCheckBotLineWho(t *testing.T) {
+	for _, ok := range []string{"command Tanky who", ".bot command Healy who"} {
+		if err := CheckBotLine(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"command Tanky who is", "command Tanky Who", "command Tank;y who"} {
+		if err := CheckBotLine(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestParseWho(t *testing.T) {
+	// WhoAction::QuerySpec with the module's colour codes, as the bot whispers it.
+	raw := "|h|cffffffffprotection (|h|cff00ff000|h|cffffffff/0|h|cffffffff/|h|cff00ff0036|h|cffffffff)|r warrior (|h|cff00ff0043|h|cffffffff lvl), |h|cff00ff00812|h|cffffffff GS (|h|cff8080ff5|h|cffffffff), (|cffb04040Uldaman|r), playing with Glacienne"
+	w, ok := ParseWho([]string{"Forwarded command for Zamoraela: who; action success is not guaranteed.", raw})
+	if !ok || w.Class != "warrior" || w.Level != 43 || w.Trees != [3]int{0, 0, 36} {
+		t.Fatalf("%+v %v", w, ok)
+	}
+	w, ok = ParseWho([]string{"affliction (36/0/0) Warlock (45 lvl), 900 GS (3/2)"})
+	if !ok || w.Class != "warlock" || w.Level != 45 || w.Trees[0] != 36 {
+		t.Fatalf("%+v %v", w, ok)
+	}
+	if _, ok := ParseWho([]string{"My current talent spec is: protection (0/0/36)", ""}); ok {
+		t.Fatal("a talents line is no who line")
+	}
+}
+
+// Burst reads a reply that has no last line: from the first line begin accepts, while lines keep coming.
+func TestBurstReadsTheWholeRunOfLines(t *testing.T) {
+	l := newFakeLink()
+	c := NewCommander(l)
+	whisper := func(text string) {
+		l.log.Append(events.Event{Kind: events.KindWhisper, Source: "Tanky", Text: text, Data: map[string]any{"type": "whisper"}})
+	}
+	l.sayHook = func(text string) {
+		if text != ".bot command Tanky spells stance" {
+			return
+		}
+		l.log.Append(events.Event{Kind: events.KindSystem, Text: "Forwarded command for Tanky: spells stance; action success is not guaranteed."})
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			whisper("=== Spells ===")
+			for _, s := range []string{"[Battle Stance]", "[Defensive Stance]", "[Berserker Stance]"} {
+				time.Sleep(60 * time.Millisecond)
+				whisper(s)
+			}
+		}()
+	}
+	lines, began, err := c.Burst(context.Background(), "command Tanky spells stance", time.Second, 200*time.Millisecond, func(s string) bool { return strings.Contains(s, "=== Spells ===") })
+	if err != nil || !began || strings.Join(lines, "|") != "=== Spells ===|[Battle Stance]|[Defensive Stance]|[Berserker Stance]" {
+		t.Fatalf("%v %v %v", lines, began, err)
+	}
+	// Another player's chat and our own inform are not the reply.
+	l.log.Append(events.Event{Kind: events.KindChat, Source: "Other", Text: "=== Spells ==="})
+	// No header within the wait: not began, no error, and it did not wait for ever.
+	at := time.Now()
+	lines, began, err = c.Burst(context.Background(), "command Tanky spells taunt", 80*time.Millisecond, 50*time.Millisecond, func(s string) bool { return strings.Contains(s, "=== Spells ===") })
+	if err != nil || began || len(lines) != 0 || time.Since(at) > time.Second {
+		t.Fatalf("%v %v %v %v", lines, began, err, time.Since(at))
+	}
+	// A reply that never stops is cut at MaxBurst.
+	l.sayHook = func(text string) {
+		go func() {
+			for i := 0; i < 100; i++ {
+				time.Sleep(50 * time.Millisecond)
+				whisper(fmt.Sprintf("line %d", i))
+			}
+		}()
+	}
+	at = time.Now()
+	lines, began, err = c.Burst(context.Background(), "command Tanky spells all", time.Second, 500*time.Millisecond, func(string) bool { return true })
+	if err != nil || !began || len(lines) == 0 || time.Since(at) > MaxBurst+time.Second {
+		t.Fatalf("%d lines %v %v %v", len(lines), began, err, time.Since(at))
+	}
+	// Not a bot line: refused, nothing sent.
+	n := len(l.sent)
+	if _, _, err := c.Burst(context.Background(), "command Tanky reset", time.Second, time.Second, func(string) bool { return true }); err == nil || len(l.sent) != n {
+		t.Fatalf("%v", err)
 	}
 }

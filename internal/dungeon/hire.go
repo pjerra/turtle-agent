@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // The hired party of the prepare step (prepare.party "hire"; owner rule 2026-10-14: every commander group is five HIRED bots at the
@@ -59,7 +60,8 @@ const (
 	hireStepCeiling  = 240 * time.Second
 	hireBotLineWait  = 6 * time.Second // maintenance, autogear, talents
 	hireInvWait      = 8 * time.Second
-	hireSpellWait    = 3 * time.Second // one `spells <filter>` answer
+	hireSpellWait    = 3 * time.Second        // the first line of one `spells <filter>` answer
+	hireSpellQuiet   = 400 * time.Millisecond // its burst of lines ends when none came for this long
 	hireItemWait     = 3 * time.Second
 	hirePetWait      = 10 * time.Second
 	hireOutOfGroup   = 10 * time.Second // the commander leaves the group after a bind
@@ -201,6 +203,9 @@ type HireGame interface {
 	Player(name string) (HireMember, bool)
 	// PetOf says whether the player has a pet out (a hunter's or warlock's), by its name.
 	PetOf(guid packet.GUID) (string, bool)
+	// BotBurst sends a plain `.bot` line whose answer is a run of lines (tbm.Commander.Burst): from the first line begin accepts until the
+	// lines stop coming for quiet.
+	BotBurst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) (lines []string, began bool, err error)
 	// ConvertRaid turns the commander's party into a raid.
 	ConvertRaid(ctx context.Context) error
 	// ItemInfos asks the server for the prototypes (those it answers within wait are returned).
@@ -365,6 +370,7 @@ type hireFlow struct {
 	bots    []*hireBot
 	dropped []string
 	problem []string
+	who     map[string]tbm.Who // the bots' own `who` answers
 }
 
 func (f *hireFlow) over() error {
@@ -432,17 +438,21 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 1. Keep what matches, dismiss the rest.
+	// 1. Keep what matches. A hire is dismissed (its character is deleted) only when the bot's own answer shows it is not what the slot
+	// wants, or when the caller said rehire; one that does not answer, or that has no slot, stops the step.
 	var keep map[int]*heldHire
 	var drop []*heldHire
 	if f.spec.Rehire {
 		drop = held
 	} else {
-		keep, drop = f.match(ctx, held)
-	}
-	keptNames := map[string]bool{}
-	for _, h := range keep {
-		keptNames[strings.ToLower(h.name)] = true
+		var extras []*heldHire
+		if keep, drop, extras = f.match(held); len(extras) > 0 {
+			var why []string
+			for _, h := range extras {
+				why = append(why, h.name+" ("+h.reason+")")
+			}
+			return "", fmt.Errorf("the commander's hires %s are not dismissed: %s. Nothing is deleted without a read mismatch; rehire dismisses every current hire on purpose (hires outside the group and the binding still count against the hire cap)", strings.Join(slices.Sorted(slices.Values(namesOf(extras))), ", "), strings.Join(why, "; "))
+		}
 	}
 	standing := f.bindingStands(bound, keep, drop)
 	if bound.Answered && !standing {
@@ -518,10 +528,12 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 // ---- the commander's current hires ----
 
 type heldHire struct {
-	name   string
-	class  string
-	level  int
-	member HireMember
+	name     string
+	class    string
+	level    int
+	trees    [3]int
+	answered bool
+	reason   string // why a hire without a slot stays: filled in by match
 }
 
 // currentHires are the commander's hires now: the members of its group and of the bound group that the roster does not list (a hire is a
@@ -556,16 +568,63 @@ func (f *hireFlow) currentHires(ctx context.Context) ([]*heldHire, error) {
 			}
 			continue
 		}
-		h := &heldHire{name: n}
-		if m, ok := f.hg.Player(n); ok {
-			h.member, h.class, h.level = m, m.Class, m.Level
-		}
-		out = append(out, h)
+		out = append(out, &heldHire{name: n})
 	}
 	if len(owned) > 0 {
 		return nil, fmt.Errorf("the commander's group holds %s, an owned bot of the account (not a hire): it takes a place of the hired party and would be bound with it; take it out of the group first", strings.Join(owned, ", "))
 	}
+	if f.spec.Rehire {
+		return out, nil // dismissed on purpose, whatever they are
+	}
+	// What each hire is comes from the bot's own `who` answer, not from the agent's view: a bound hire inside an instance is not in it.
+	var silent []string
+	for _, h := range out {
+		w, why := f.readWho(ctx, h.name)
+		if why != "" {
+			silent = append(silent, fmt.Sprintf("%s (%s)", h.name, why))
+			continue
+		}
+		h.class, h.level, h.trees, h.answered = w.Class, w.Level, w.Trees, true
+	}
+	if len(silent) > 0 {
+		return nil, fmt.Errorf("no answer from the commander's hire %s to `who` (offline, teleporting or in its logout grace?): it is not dismissed, and the step cannot place it. Try again when it is back, or end it on purpose with rehire", strings.Join(silent, ", "))
+	}
 	return out, nil
+}
+
+// readWho asks the bot who it is (`command <bot> who`): class, level and the points in each tree. why says what went wrong when it could
+// not be read. The answer is kept for the step.
+func (f *hireFlow) readWho(ctx context.Context, name string) (tbm.Who, string) {
+	if w, ok := f.who[strings.ToLower(name)]; ok {
+		return w, ""
+	}
+	var got tbm.Who
+	_, settled, err := f.e.g.BotLines(ctx, "command "+name+" who", hireBotLineWait, func(line string) bool {
+		w, ok := tbm.ParseWho([]string{line})
+		if ok {
+			got = w
+		}
+		return ok
+	})
+	switch {
+	case err != nil:
+		return got, err.Error()
+	case !settled:
+		return got, "no answer in " + hireBotLineWait.String()
+	}
+	if f.who == nil {
+		f.who = map[string]tbm.Who{}
+	}
+	f.who[strings.ToLower(name)] = got
+	return got, ""
+}
+
+func namesOf(hs []*heldHire) []string {
+	var out []string
+	for _, h := range hs {
+		out = append(out, h.name)
+	}
+	return out
 }
 
 func sortedValues(m map[string]string) []string {
@@ -577,48 +636,55 @@ func sortedValues(m map[string]string) []string {
 	return out
 }
 
-// match gives each slot a hire of the same class and level whose talents suit the role; the rest are to be dismissed.
-func (f *hireFlow) match(ctx context.Context, held []*heldHire) (map[int]*heldHire, []*heldHire) {
-	keep := map[int]*heldHire{}
+// match gives each slot a hire of the same class and level whose build gives the role. A leftover hire is dismissed only when it is
+// read to be the wrong version of a slot that is still empty (the same class, another level or a build for another role); any other
+// leftover (no empty slot of its class, a build that cannot be told) is returned as an extra and stops the step: nothing is deleted
+// for being surplus or unclear.
+func (f *hireFlow) match(held []*heldHire) (keep map[int]*heldHire, drop, extras []*heldHire) {
+	keep = map[int]*heldHire{}
 	used := map[*heldHire]bool{}
 	for i, s := range f.slots {
 		for _, h := range held {
-			if used[h] || h.class != s.Class || h.level != f.level || h.member.Dead || !h.member.Online {
+			if !used[h] && h.class == s.Class && h.level == f.level && talentRole(h.class, h.trees) == s.Role {
+				keep[i], used[h] = h, true
+				break
+			}
+		}
+	}
+	claimed := map[int]bool{}
+	for _, h := range held {
+		if used[h] {
+			continue
+		}
+		role := talentRole(h.class, h.trees)
+		replaced := false
+		for i, s := range f.slots {
+			if keep[i] != nil || claimed[i] || s.Class != h.class {
 				continue
 			}
-			if ok, why := f.roleMatches(ctx, h, s); !ok {
-				f.note("%s is a level %d %s but %s: not kept for %s", h.name, h.level, h.class, why, s.Role)
+			switch {
+			case h.level != f.level:
+				h.reason = fmt.Sprintf("level %d, the party is level %d", h.level, f.level)
+			case role != "" && role != "feral" && role != s.Role:
+				h.reason = fmt.Sprintf("a %s build, the slot is %s", role, s.Role)
+			default:
 				continue
 			}
-			keep[i], used[h] = h, true
+			claimed[i], replaced = true, true
+			f.note("%s is a level %d %s: %s; replaced", h.name, h.level, h.class, h.reason)
 			break
 		}
-	}
-	var drop []*heldHire
-	for _, h := range held {
-		if !used[h] {
+		switch {
+		case replaced:
 			drop = append(drop, h)
+		case h.reason == "":
+			h.reason = fmt.Sprintf("level %d %s with no empty slot of its kind or a build that cannot be told", h.level, h.class)
+			extras = append(extras, h)
+		default:
+			extras = append(extras, h)
 		}
 	}
-	return keep, drop
-}
-
-// roleMatches reads the hire's talents and compares the build's role with the slot's; why says what is wrong when it does not.
-func (f *hireFlow) roleMatches(ctx context.Context, h *heldHire, s hireSlot) (ok bool, why string) {
-	t, why := f.readTalents(ctx, h.name)
-	if why != "" {
-		return false, "its talents could not be read (" + why + ")"
-	}
-	switch role := talentRole(s.Class, t.Trees); {
-	case role == "":
-		return false, "it has no talent points spent"
-	case role == "feral":
-		return false, "a feral druid cannot be told as bear or cat from its talents"
-	case role == s.Role:
-		return true, ""
-	default:
-		return false, "its build is for " + role
-	}
+	return keep, drop, extras
 }
 
 // talentRole is the role the dominant tree gives (1.12 tree order): "", tank, healer, dps or feral (bear or cat).
@@ -796,7 +862,11 @@ func (f *hireFlow) hireOne(ctx context.Context, s hireSlot) (string, error) {
 			f.note("%s", f.rdy.LevelNote)
 			continue
 		}
-		return "", fmt.Errorf(".bot %s refused: %s", line, got.Refusal)
+		hint := ""
+		if got.Code == "cap" {
+			hint = " (hires left outside the group and the binding still count against the cap; rehire dismisses the commander's hires on purpose)"
+		}
+		return "", fmt.Errorf(".bot %s refused: %s%s", line, got.Refusal, hint)
 	}
 	return "", fmt.Errorf(".bot hire %s %s: still refused after the retries", s.Class, s.Role)
 }

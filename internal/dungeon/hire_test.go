@@ -35,6 +35,7 @@ type fhire struct {
 	spells            map[string]bool // lower-case names
 	pet               bool
 	inView            bool
+	hidden            bool // out of the agent's view and group list (a bound hire inside an instance)
 }
 
 type hireFake struct {
@@ -61,6 +62,8 @@ type hireFake struct {
 	noShield    map[string]bool
 	lack        map[string][]string // class -> spells the bots of the class do not know
 	silentList  bool                // the bot never answers `spells <filter>`
+	unreachable map[string]bool     // bots that answer no whisper (teleporting, offline in the grace)
+	noTalents   map[string]bool     // bots that answer `who` and `spells` but not `talents`
 	noPet       bool
 	itemSilent  bool
 	hireReply   string
@@ -78,7 +81,7 @@ func newHireFake(t *testing.T) *hireFake {
 	e.agentMap = outsideMap
 	g := &hireFake{enterFake: e, agentLvl: 45, maxHires: 5, arriveIn: 3 * time.Second, noSupplies: true,
 		names: []string{"Zamoraela", "Khaeworval", "Corkhas", "Gredel", "Zisorlo", "Alrunmel", "Thundrik", "Sevaria", "Brannoch", "Ilyandra", "Morgrim", "Tessaly", "Varkull"},
-		epic:  map[string]bool{}, noShield: map[string]bool{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}}
+		epic:  map[string]bool{}, unreachable: map[string]bool{}, noTalents: map[string]bool{}, noShield: map[string]bool{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}}
 	for s := 0; s < 19; s++ {
 		g.items[uint32(90000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Blue %d", s), Quality: hQuality, ItemLevel: 40 + s%5}
 		g.items[uint32(91000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Epic %d", s), Quality: 4, ItemLevel: 60}
@@ -183,8 +186,34 @@ func (g *hireFake) restock(h *fhire) {
 }
 
 func (g *hireFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
+	reply, handled := g.reply(command)
+	if !handled {
+		return nil, false, nil
+	}
+	var got []string
+	for _, l := range reply {
+		got = append(got, l)
+		if done(l) {
+			return got, true, nil
+		}
+	}
+	return got, false, nil
+}
+
+// BotBurst models tbm.Commander.Burst: the reply's lines from the first one begin accepts; began is false when none does.
+func (g *hireFake) BotBurst(_ context.Context, command string, _, _ time.Duration, begin func(string) bool) ([]string, bool, error) {
+	reply, _ := g.reply(command)
+	for i, l := range reply {
+		if begin(l) {
+			return reply[i:], true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// reply is what the server and the bots say to a `.bot` line, in order; handled is false for a line the fake does not know.
+func (g *hireFake) reply(command string) (reply []string, handled bool) {
 	f := strings.Fields(command)
-	var reply []string
 	switch {
 	case command == "roster":
 		g.log("roster")
@@ -257,42 +286,40 @@ func (g *hireFake) BotLines(_ context.Context, command string, _ time.Duration, 
 		reply = append(reply, fmt.Sprintf("TBM:INV_END|%s|%d|16", h.name, 16-len(h.bag)))
 	case f[0] == "command" && len(f) == 3 && f[2] == "talents":
 		g.log("talents %s", f[1])
-		if h := g.byName(f[1]); h != nil {
+		if h := g.byName(f[1]); h != nil && !g.unreachable[h.name] && !g.noTalents[h.name] {
 			reply = []string{fmt.Sprintf("Forwarded command for %s: talents; action success is not guaranteed.", h.name),
 				fmt.Sprintf("My current talent spec is: |hspec (%d|h/%d|h/|h%d|h) Link: 0-0-1", h.trees[0], h.trees[1], h.trees[2])}
+		}
+	case f[0] == "command" && len(f) == 3 && f[2] == "who":
+		g.log("who %s", f[1])
+		if h := g.byName(f[1]); h != nil && !g.unreachable[h.name] {
+			// WhoAction::QuerySpec with its colour codes: "<spec> (a/b/c) <class> (<level> lvl), <gear score> GS (<quality counts>)".
+			reply = []string{fmt.Sprintf("Forwarded command for %s: who; action success is not guaranteed.", h.name),
+				fmt.Sprintf("|h|cffffffffspec (|h|cff00ff00%d|h|cffffffff/%d|h|cffffffff/|h|cff00ff00%d|h|cffffffff)|r %s (|h|cff00ff00%d|h|cffffffff lvl), |h|cff00ff00812|h|cffffffff GS (|h|cff8080ff5|h|cffffffff), playing with Glacienne",
+					h.trees[0], h.trees[1], h.trees[2], h.class, h.level)}
 		}
 	case f[0] == "command" && len(f) >= 4 && f[2] == "spells":
 		filter := strings.ToLower(strings.Join(f[3:], " "))
 		g.log("spells %s %s", f[1], filter)
 		h := g.byName(f[1])
-		if h == nil || g.silentList {
+		if h == nil || g.silentList || g.unreachable[h.name] {
 			break
 		}
-		reply = []string{fmt.Sprintf("Forwarded command for %s: spells %s; action success is not guaranteed.", h.name, filter)}
-		var hit []string
-		for _, s := range hireSpells[h.class] {
-			if h.spells[strings.ToLower(s)] && strings.Contains(strings.ToLower(s), filter) {
-				hit = append(hit, "["+s+"]")
+		// ListSpellsAction::Execute: the header (also when nothing matches), then ONE spell per line, each a spell link.
+		reply = []string{fmt.Sprintf("Forwarded command for %s: spells %s; action success is not guaranteed.", h.name, filter), "=== Spells ==="}
+		for i, sp := range hireSpells[h.class] {
+			if h.spells[strings.ToLower(sp)] && strings.Contains(strings.ToLower(sp), filter) {
+				reply = append(reply, fmt.Sprintf("|cffffffff|Hspell:%d|h[%s]|h|r", 100+i, sp))
 			}
-		}
-		if len(hit) > 0 {
-			reply = append(reply, strings.Join(hit, " "))
 		}
 	case f[0] == "command" && len(f) == 3 && f[2] == "leave":
 		g.log("leave %s", f[1])
 		reply = []string{"ok"}
 	default:
 		g.log("line %s", command)
-		return nil, false, nil
+		return nil, false
 	}
-	var got []string
-	for _, l := range reply {
-		got = append(got, l)
-		if done(l) {
-			return got, true, nil
-		}
-	}
-	return got, false, nil
+	return reply, true
 }
 
 func sortedEntries(m map[uint32]int) []uint32 {
@@ -471,7 +498,7 @@ func (g *hireFake) Members() []HireMember {
 		out = append(out, HireMember{Name: g.alts[0], GUID: 0x777, Level: 40, InGroup: true, Online: true, MaxHP: 1000})
 	}
 	for _, h := range g.hires {
-		if g.inGroup(h) {
+		if g.inGroup(h) && !h.hidden {
 			out = append(out, g.member(h, true))
 		}
 	}
@@ -484,7 +511,7 @@ func (g *hireFake) Player(name string) (HireMember, bool) {
 			return m, true
 		}
 	}
-	if h := g.byName(name); h != nil && g.arrived(h) {
+	if h := g.byName(name); h != nil && g.arrived(h) && !h.hidden {
 		return g.member(h, false), true
 	}
 	return HireMember{}, false
@@ -769,17 +796,14 @@ func TestHireKeepsTheHiresThatMatchAndTheStandingBinding(t *testing.T) {
 	}
 }
 
-func TestHireKeepsTheMatchingOnesAndReplacesTheRest(t *testing.T) {
+func TestHireKeepsTheMatchingOnesAndReplacesTheWrongOnes(t *testing.T) {
 	g := newHireFake(t)
-	g.preHire("warrior", "tank", 43)
+	g.preHire("warrior", "dps", 43) // an arms warrior: no tank
 	g.preHire("priest", "healer", 43)
 	g.preHire("hunter", "dps", 43)
-	g.preHire("rogue", "dps", 41)   // wrong level
-	g.preHire("warlock", "dps", 43) // fine
-	g.preHire("mage", "dps", 43)    // not wanted: an extra
-	g.preHire("warrior", "dps", 43) // a warrior with an arms build is no tank
-	g.nextName = 7
-	g.maxHires = 7
+	g.preHire("rogue", "dps", 41) // the wrong level
+	g.preHire("warlock", "dps", 43)
+	g.nextName = 5
 	g.raid = true
 	g.preBind()
 	rep, err := g.run(hireSpec())
@@ -787,12 +811,91 @@ func TestHireKeepsTheMatchingOnesAndReplacesTheRest(t *testing.T) {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
 	r := rep.Ready
-	// The tank slot goes to the protection warrior (the first), the other warrior is dismissed with the level 41 rogue and the extra mage.
-	if strings.Join(r.Reused, ",") != "Zamoraela,Khaeworval,Corkhas,Zisorlo" || len(r.Dismissed) != 3 || len(r.Hired) != 1 || g.hireLines[0] != "hire rogue dps level=43" {
+	if strings.Join(r.Reused, ",") != "Khaeworval,Corkhas,Zisorlo" || strings.Join(slices.Sorted(slices.Values(r.Dismissed)), ",") != "Gredel,Zamoraela" || len(r.Hired) != 2 || g.hireLines[0] != "hire warrior tank level=43" || g.hireLines[1] != "hire rogue dps level=43" {
 		t.Fatalf("%+v %v", r, g.hireLines)
 	}
 	if g.idxOf("cunbind") < 0 || g.idxOf("cunbind") > g.idxOf("logout") || g.idxOf("cbind") < g.idxOf("hire rogue") {
 		t.Fatalf("a changed party is unbound, then rebound: %v", g.events)
+	}
+}
+
+// A hire that has no empty slot of its kind is surplus, not wrong: nothing is deleted for it, the step stops and names it.
+func TestHireExtraHireIsNeverDismissed(t *testing.T) {
+	g := newHireFake(t)
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}, {"mage", "dps"}} {
+		g.preHire(c[0], c[1], 43)
+	}
+	g.nextName, g.maxHires, g.raid = 6, 6, true
+	g.preBind()
+	rep, err := g.run(hireSpec())
+	if !failed(rep, err, "Alrunmel", "not dismissed", "rehire") || g.count("logout") != 0 || g.count("cunbind") != 0 || len(g.hireLines) != 0 {
+		t.Fatalf("%v %s %v", err, rep.State, g.events)
+	}
+}
+
+// Bound hires inside an instance are not in the agent's view: the module's own `who` answer says what they are, they are kept, and the
+// binding stands.
+func TestHireBoundHiresOutOfViewAreKept(t *testing.T) {
+	g := newHireFake(t)
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+		g.preHire(c[0], c[1], 43).hidden = true
+	}
+	g.nextName, g.raid = 5, true
+	g.preBind()
+	rep, err := g.run(hireSpec())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if len(g.hireLines) != 0 || g.count("logout") != 0 || len(rep.Ready.Reused) != 5 || len(rep.Ready.Dismissed) != 0 {
+		t.Fatalf("hires out of view were touched: %v %+v", g.events, rep.Ready)
+	}
+	if w := rep.Ready.Bots[0].Warnings; len(w) == 0 || !strings.Contains(w[0], "not in the agent's group or view") {
+		t.Fatalf("%+v", rep.Ready.Bots[0])
+	}
+	if g.count("who ") != 5 {
+		t.Fatalf("one who per hire: %v", g.events)
+	}
+}
+
+// A hire that does not answer (teleporting, offline in its logout grace) is not placed and not dismissed: the step stops and names it.
+func TestHireHireThatDoesNotAnswerIsKept(t *testing.T) {
+	g := newHireFake(t)
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+		g.preHire(c[0], c[1], 43)
+	}
+	g.nextName, g.raid = 5, true
+	g.preBind()
+	g.unreachable["Corkhas"] = true
+	rep, err := g.run(hireSpec())
+	if !failed(rep, err, "no answer from the commander's hire Corkhas", "not dismissed") || g.count("logout") != 0 || g.count("cunbind") != 0 || len(g.hireLines) != 0 {
+		t.Fatalf("%v %s %v", err, rep.State, g.events)
+	}
+	// rehire is the caller's word: those hires go whatever they answer, and none is asked who it is.
+	g.unreachable["Corkhas"] = false
+	g.unreachable["Gredel"] = true
+	spec := hireSpec()
+	spec.Hire = &HireSpec{Rehire: true}
+	g.events, g.hireLines = nil, nil
+	rep, err = g.run(spec)
+	if err != nil || rep.State != "done" || g.count("logout") != 5 || g.count("who ") != 0 {
+		t.Fatalf("%v %s %v", err, rep.State, g.events)
+	}
+}
+
+// A talents whisper that times out is a failed check of that bot, never a reason to delete it.
+func TestHireTimedOutTalentsReadKeepsTheHire(t *testing.T) {
+	g := newHireFake(t)
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}} {
+		g.preHire(c[0], c[1], 43)
+	}
+	g.nextName, g.raid = 2, true
+	g.preBind()
+	g.noTalents["Khaeworval"] = true
+	spec := hireSpec()
+	spec.Hire = &HireSpec{Composition: []string{"warrior", "priest"}}
+	rep, err := g.run(spec)
+	if !failed(rep, err, "Khaeworval", "talents: no answer") || g.count("logout") != 0 || len(g.hireLines) != 0 || len(rep.Ready.Dismissed) != 0 {
+		t.Fatalf("%v %s %v", err, rep.State, g.events)
 	}
 }
 
@@ -886,15 +989,33 @@ func TestHireMissingSpellFailsAndTheStepLearnsNothing(t *testing.T) {
 	}
 }
 
-func TestHireSpellListThatNeverAnswersIsAWarning(t *testing.T) {
+// A bot that never answers `spells <filter>` is "no answer", not a bot that lacks the spell.
+func TestHireSpellQuestionThatIsNotAnsweredFailsAsNoAnswer(t *testing.T) {
 	g := newHireFake(t)
 	g.silentList = true
+	rep, err := g.run(hireSpec())
+	if !failed(rep, err, "Zamoraela", "no answer from Zamoraela to `spells stance`") || strings.Contains(err.Error(), "lacks") {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+}
+
+// The real bot sends the header and then ONE spell per line (ListSpellsAction.cpp): a family with two spells (stance, pet) is read whole.
+func TestHireSpellFamilyWithTwoSpellsIsReadFromAllItsLines(t *testing.T) {
+	g := newHireFake(t)
 	rep, err := g.run(hireSpec())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
-	if w := rep.Ready.Bots[0].Warnings; len(w) == 0 || !strings.Contains(w[0], "spell list could not be read") {
-		t.Fatalf("%+v", rep.Ready.Bots[0])
+	tank, hunter := rep.Ready.Bots[0], rep.Ready.Bots[2]
+	if !slices.Contains(tank.Spells, "Battle Stance") || !slices.Contains(tank.Spells, "Defensive Stance") || !slices.Contains(hunter.Spells, "Call Pet") || !slices.Contains(hunter.Spells, "Mend Pet") {
+		t.Fatalf("%+v %+v", tank, hunter)
+	}
+	// A family of which the bot lacks one spell: the other is seen, the missing one is named.
+	g = newHireFake(t)
+	g.lack["hunter"] = []string{"Mend Pet"}
+	rep, err = g.run(hireSpec())
+	if !failed(rep, err, "Corkhas", "lacks Mend Pet") || strings.Contains(err.Error(), "Call Pet,") {
+		t.Fatalf("%v %s", err, rep.State)
 	}
 }
 

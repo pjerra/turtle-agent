@@ -26,9 +26,18 @@ func (f *hireFlow) checkBot(ctx context.Context, b *hireBot) {
 		b.rb.Source = "reused"
 	}
 	m, ok := f.member(b)
-	if !ok {
-		b.fail("not in the agent's group or view")
-		return
+	if !ok || m.Level == 0 || m.Class == "" {
+		// Not in the agent's group or view (a bound hire inside an instance, one still teleporting): what the bot says of itself decides.
+		w, why := f.readWho(ctx, b.name)
+		if why != "" {
+			b.fail("no answer from %s to `who` (%s) and the agent does not see it: its level and class are not known", b.name, why)
+			return
+		}
+		m.Name, m.Online = b.name, true
+		m.Level, m.Class = w.Level, w.Class
+		if !ok {
+			b.warn("not in the agent's group or view: level and class are from its own `who` answer; its health and pet are not checked")
+		}
 	}
 	b.rb.Level, b.rb.MaxHP = m.Level, m.MaxHP
 	switch {
@@ -431,40 +440,38 @@ func spellsIn(text string, want []spellReq) (found, missing []string) {
 	return found, missing
 }
 
-// checkSpells asks the bot's own spell list (`command <bot> spells <filter>`, answered by a whisper) for each key spell family. A bot
-// that answered no question at all is a warning (the list could not be read); one that answered some and lacks a spell fails.
+// spellsHeader is the first line of the bot's answer to `spells`: "=== Spells ===", then one spell per line, then "N more..." past 50
+// (ListSpellsAction.cpp Execute). The header comes even when nothing matches the filter, so a header with no spell is an answer.
+const spellsHeader = "=== Spells ==="
+
+// checkSpells asks the bot's own spell list (`command <bot> spells <filter>`) for each key spell family and reads the whole burst of lines.
+// A question the bot never answered (no header) fails the bot as "no answer", not as a missing spell; one it answered without the spell
+// fails as lacking it.
 func (f *hireFlow) checkSpells(ctx context.Context, b *hireBot, m HireMember) {
-	checks := keySpells(b.slot.Class, b.slot.Role, m.Level)
-	answered := 0
-	var lacking []string
-	for _, c := range checks {
-		var text []string
-		_, settled, err := f.e.g.BotLines(ctx, "command "+b.name+" spells "+c.filter, hireSpellWait, func(l string) bool {
-			if strings.HasPrefix(l, "Forwarded command") || strings.HasPrefix(l, "TBM:") {
-				return false
-			}
-			text = append(text, l)
-			return strings.Contains(l, "[")
+	var lacking, silent []string
+	for _, c := range keySpells(b.slot.Class, b.slot.Role, m.Level) {
+		lines, began, err := f.hg.BotBurst(ctx, "command "+b.name+" spells "+c.filter, hireSpellWait, hireSpellQuiet, func(l string) bool {
+			return strings.Contains(l, spellsHeader)
 		})
 		if err != nil {
-			b.warn("spells %s: %v", c.filter, err)
+			b.fail("spells %s: %v", c.filter, err)
+			return
+		}
+		if !began {
+			silent = append(silent, c.filter)
 			continue
 		}
-		if settled {
-			answered++
-		}
-		found, missing := spellsIn(strings.Join(text, " "), c.want)
+		found, missing := spellsIn(strings.Join(lines, "\n"), c.want)
 		b.rb.Spells = append(b.rb.Spells, found...)
 		if c.any && len(found) > 0 {
 			continue
 		}
 		lacking = append(lacking, missing...)
 	}
-	switch {
-	case len(lacking) == 0:
-	case answered == 0:
-		b.warn("the bot's spell list could not be read (no answer to `spells <filter>`): %s not confirmed", strings.Join(lacking, ", "))
-	default:
+	if len(silent) > 0 {
+		b.fail("no answer from %s to `spells %s` within %.0f s: its key spells are not confirmed", b.name, strings.Join(silent, "`, `spells "), hireSpellWait.Seconds())
+	}
+	if len(lacking) > 0 {
 		b.fail("lacks %s (its own spell list does not show them; the step learns nothing, .learn is a GM command)", strings.Join(lacking, ", "))
 	}
 }

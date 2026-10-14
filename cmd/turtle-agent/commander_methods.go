@@ -533,6 +533,11 @@ func (g remoteGame) PetOf(guid packet.GUID) (string, bool) {
 	return u.Name, true
 }
 
+// BotBurst implements dungeon.HireGame: a plain `.bot` line whose answer is a run of lines (a bot's spell list).
+func (g remoteGame) BotBurst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) ([]string, bool, error) {
+	return g.c.cmdr.Burst(ctx, command, wait, quiet, begin)
+}
+
 // ConvertRaid turns the agent's party into a raid.
 func (g remoteGame) ConvertRaid(ctx context.Context) error { return g.c.cur().ConvertRaid(ctx) }
 
