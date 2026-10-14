@@ -95,6 +95,8 @@ type RemoteOptions struct {
 	// (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
 	Enter            string
 	IgnoreEntryLimit bool
+	// Prepare is the optional prepare block (prepare.go): log the bots in, a fresh instance, GM setup lines. It runs before the bind.
+	Prepare PrepareSpec
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -504,7 +506,11 @@ func (d *RemoteDriver) finish(err error) {
 
 func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	defer d.unbind() // every way out: done, failed, stopped, a panic
-	if err := d.begin(ctx, fromLeg); err != nil {
+	setupAt := d.clk.Now()
+	err = d.begin(ctx, fromLeg)
+	setupS := d.clk.Now().Sub(setupAt).Seconds()
+	d.rep.update(func(r *Report) { r.SetupS = setupS })
+	if err != nil {
 		return err
 	}
 	d.resolveTeam()
@@ -760,6 +766,9 @@ func (d *RemoteDriver) noteSkipped() {
 func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if strings.TrimSpace(d.opt.Lead) == "" {
 		return errors.New("remote mode needs a lead_bot")
+	}
+	if err := d.prepare(ctx); err != nil {
+		return err
 	}
 	d.countObjectSteps(fromLeg)
 	d.g.ResetView()

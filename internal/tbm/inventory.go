@@ -110,26 +110,29 @@ func ParseInventory(lines []string) Inventory {
 	return v
 }
 
-// botLineVerbs are the plain `.bot` commands Lines may send (they are not commander orders): the pre-run kit refresh and check,
-// and the logout at the end of a run.
-var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": true}
+// botLineVerbs are the plain `.bot` commands Lines may send (they are not commander orders) with one bot name: the pre-run kit refresh
+// and check, the logout at the end of a run, and the login of the prepare step (`add`, the owner's own character).
+var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": true, "add": true}
 
 // botNameRe is what a bot's name can be (1.12 names are letters).
 var botNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
 
-// CheckBotLine refuses a line that is not "<maintenance|inv|logout> <bot name>" or "command <bot name> talents". The talents
-// read-back is the only `.bot command` the agent sends here: any other word after it (reset, auto, a build link) would change
-// the bot's talents.
+// CheckBotLine refuses a line that is not "<maintenance|inv|logout|add> <bot name>", "roster", "command <bot name> talents" or
+// "command <bot name> leave". The talents read-back and the leave (the prepare step takes a bot out of its old group) are the only
+// `.bot command` lines the agent sends here: any other word after it (reset, auto, a build link) would change the bot's talents.
 func CheckBotLine(command string) error {
 	f := strings.Fields(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot ")))
-	if len(f) == 3 && strings.EqualFold(f[0], "command") && f[2] == "talents" {
+	if len(f) == 1 && strings.EqualFold(f[0], "roster") {
+		return nil
+	}
+	if len(f) == 3 && strings.EqualFold(f[0], "command") && (f[2] == "talents" || f[2] == "leave") {
 		if !botNameRe.MatchString(f[1]) {
 			return fmt.Errorf("%q: %q is not a bot name", command, f[1])
 		}
 		return nil
 	}
 	if len(f) != 2 || !botLineVerbs[strings.ToLower(f[0])] {
-		return fmt.Errorf("%q: Lines sends maintenance, inv or logout with one bot name, or command <bot name> talents", command)
+		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, or command <bot name> talents|leave", command)
 	}
 	if !botNameRe.MatchString(f[1]) {
 		return fmt.Errorf("%q: %q is not a bot name", command, f[1])

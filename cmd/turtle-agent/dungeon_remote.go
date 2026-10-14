@@ -23,8 +23,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch strings.ToLower(p.Mode) {
 	case "", "group":
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit {
-			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, enter and ignore_entry_limit go with mode "remote"`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
+			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, enter, ignore_entry_limit and prepare go with mode "remote"`)
 		}
 		return false, nil
 	case "remote":
@@ -71,6 +71,11 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	if v := strings.ToLower(p.Enter); !slices.Contains([]string{"", dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterWalk, dungeon.EnterOff}, v) {
 		return true, bad("enter: %q is none of %q, %q, %q, %q", p.Enter, dungeon.EnterAuto, dungeon.EnterGM, dungeon.EnterWalk, dungeon.EnterOff)
 	}
+	if p.Prepare != nil {
+		if err := p.Prepare.Validate(true); err != nil {
+			return true, bad("%v", err)
+		}
+	}
 	for _, c := range p.CC {
 		if c.Entry == 0 || !slices.Contains(tbm.CCMarks, strings.ToLower(c.Mark)) || (c.Bot != "" && !botName.MatchString(c.Bot)) {
 			return true, bad("cc: each rule needs an entry, a mark (%s) and optionally a bot name", strings.Join(tbm.CCMarks, ", "))
@@ -104,6 +109,9 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		cfg.Watchdog = *p.Watchdog
 	}
 	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	if p.Prepare != nil {
+		opt.Prepare = *p.Prepare
+	}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)

@@ -48,6 +48,9 @@ type Plan struct {
 	// EntranceTele is the name of the game_tele row that puts a player at the entrance inside the dungeon (Uldaman "ulda", game_tele
 	// 169): a remote run's enter phase sends `.tele name <lead bot> <name>` with it when the account is a developer-level GM.
 	EntranceTele string `json:"entrance_tele,omitempty"`
+	// OutsideTele is the game_tele row that puts a player at the entrance OUTSIDE, on the outer map (Uldaman "uldaman"): the prepare step
+	// of a remote run (`fresh`) brings the bots and the agent out of an old instance with it before it unbinds them.
+	OutsideTele string `json:"outside_tele,omitempty"`
 	// Portal is the entrance portal on the outer map (the area trigger of EntranceTrigger): where a remote run's enter phase walks the
 	// lead bot when it has no GM rights.
 	Portal *Portal  `json:"portal,omitempty"`
@@ -239,6 +242,7 @@ type rawPlan struct {
 	Entrance *rawPoint         `json:"entrance"`
 	Trigger  uint32            `json:"entrance_trigger"`
 	Tele     string            `json:"entrance_tele"`
+	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
@@ -392,6 +396,11 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("entrance_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Tele)
 	} else {
 		p.EntranceTele = rp.Tele
+	}
+	if rp.Outside != "" && !teleName.MatchString(rp.Outside) {
+		c.fail("outside_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Outside)
+	} else {
+		p.OutsideTele = rp.Outside
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {

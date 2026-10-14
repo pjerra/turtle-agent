@@ -5,6 +5,7 @@
   "entrance": {"x": -228.9, "y": 46.1, "z": -46},
   "entrance_trigger": 286,
   "entrance_tele": "ulda",
+  "outside_tele": "uldaman",
   "portal": {
     "map": 0,
     "x": -6053.73,
