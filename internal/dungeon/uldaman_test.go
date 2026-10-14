@@ -372,8 +372,17 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 }
 
 // sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
-// (where the leg before it ends, the scorpid pit) and a direct step from there to a point of the east plateau at -155.7 279.6.
+// (where the leg before it ends, the scorpid pit), a direct step under the rock overhang to -162.8 294.8 (in the hole) and a direct step
+// up the ramp to -158.4 283.7, the first point of the east mesh.
 const sentinelLeg = 5
+
+// holeFloor are plan points inside the navmesh hole at the scorpid pit, between two direct steps: no mesh floor stands in for the
+// server's ground check there, so it was checked on the live map 70 vmap with the core's own VMapManager2::getHeight and
+// isInLineOfSight (lostool on the test VM, ~/tb-ci/vmaps70, 2026-10-14): floor -51.25 and 3.1 yd clear above it, in sight (2 yd up,
+// both ways) of the lip and of the ramp top from every floor point within 1 yd of them. A hole point must be followed by a direct step.
+var holeFloor = map[Point]string{
+	{X: -162.8, Y: 294.8, Z: -51.2}: "under the high side of the rock overhang south of the pit lip",
+}
 
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
@@ -627,7 +636,9 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", where, err)
 			}
-			if !ok {
+			if _, hole := holeFloor[w]; hole && direct[j] {
+				// inside the hole: its floor is checked on the vmap (holeFloor)
+			} else if !ok {
 				t.Errorf("%s is not on the navmesh (no walkable polygon within 4 yd)", where)
 			} else if dz, dh := math.Abs(float64(n[2]-w.Z)), math.Hypot(float64(n[0]-w.X), float64(n[1]-w.Y)); dz > meshMaxDZ || dh > meshMaxDH {
 				t.Errorf("%s: the nearest navmesh floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off on the ground", where, n[0], n[1], n[2], dz, dh)
@@ -658,7 +669,7 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 	t.Logf("%d plan points on the map 70 navmesh in %s", checked, dir)
 }
 
-// The plan crosses the scorpid pit's navmesh hole with one direct step (`cmd move ... direct`), and a direct step is short: within the
+// The plan crosses the scorpid pit's navmesh hole with two direct steps (`cmd move ... direct`), and a direct step is short: within the
 // limits TortoiseBots enforces (25 yd across, 8 up or down) of the via point before it, which is where the party gathers. Without the
 // navmesh files only the lengths are checked; with them, both ends have navmesh floor (the server's own check is the map height within
 // 3 yd, which the mesh floor stands in for here). The east end is also the leg's `to`, so the walk to `to` after the step is no walk.
@@ -696,7 +707,13 @@ func TestUldamanDirectSteps(t *testing.T) {
 			if pl == nil {
 				continue
 			}
+			if _, hole := holeFloor[w.Point]; hole && (j == len(l.Via)-1 || !l.Via[j+1].Direct) {
+				t.Errorf("legs[%d] via[%d] %v: a point inside the navmesh hole must be followed by a direct step", i, j, w.Point)
+			}
 			for label, at := range map[string]Point{"start": from, "end": w.Point} {
+				if _, hole := holeFloor[at]; hole {
+					continue // inside the hole: its floor is checked on the vmap (holeFloor)
+				}
 				n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{at.X, at.Y, at.Z})
 				if errors.Is(err, navmesh.ErrNoEngine) {
 					t.Skip("built without cgo: no navmesh engine")
@@ -711,7 +728,12 @@ func TestUldamanDirectSteps(t *testing.T) {
 		}
 	}
 	if found != 2 {
-		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (the ramp base, then the plateau: no follower is more than 25 yd from either point)", found)
+		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (under the overhang, then up the ramp to the east mesh)", found)
+	}
+	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || !v[1].Direct || !v[2].Direct {
+		t.Fatalf("legs[%d] via %v: want the lip, then the two direct steps", sentinelLeg, v)
+	} else if _, hole := holeFloor[v[1].Point]; !hole {
+		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked point under the overhang (holeFloor)", sentinelLeg, v[1].Point)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)

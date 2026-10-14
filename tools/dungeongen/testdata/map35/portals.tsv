@@ -1,0 +1,4 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+35	107	Stormwind Vault - Entrance	58	0	-8667.56	623.563	85.4054	7	0	0	0	-0.91	40.57	-24.23
+35	5002	Stormwind Vault - Entrance (outside)	58	0	-8674.59	633.4	97	3	0	0	0	-0.91	40.57	-24.23
+35	5003	Stormwind Vault - Entrance (mirror lake)	58	0	-9362.37	537.774	48.6679	3	0	0	0	-0.91	40.57	-24.23
