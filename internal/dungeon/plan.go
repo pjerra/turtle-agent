@@ -354,7 +354,6 @@ type rawPlan struct {
 	Name     string            `json:"name"`
 	Kind     string            `json:"kind"`
 	Status   string            `json:"status"`
-	Hire     []string          `json:"hire_composition"`
 	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
@@ -568,13 +567,6 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
-	}
-	if len(rp.Hire) > 0 {
-		if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
-			c.fail("hire_composition", "%v", err)
-		} else {
-			p.HireComposition = slices.Clone(rp.Hire)
-		}
 	}
 	if len(rp.CCPrio) > 0 {
 		p.CCPriority = slices.Clone(rp.CCPrio)
