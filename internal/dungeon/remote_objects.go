@@ -115,6 +115,9 @@ type objState struct {
 	corpses map[uint32]corpseRef
 	waitKey [2]int
 	waitAt  time.Time
+	// unchecked is the game object a wait passed without seeing it ("game object 124372 near ..."); the next walk's failure names it, and
+	// the next walk that succeeds clears it.
+	unchecked string
 }
 
 // noteCorpse keeps the GUID of a unit a won pull killed: a boss's loot order names it.
@@ -183,7 +186,12 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 	switch a.Kind {
 	case ActWalk, ActFailed:
 		// The Stepper found no such object in the agent's view and wanted to walk the party (or gave up): the agent cannot see it. (The
-		// agent is brought up before the step is looked at, see nearBeforeObjectStep.)
+		// agent is brought up before the step is looked at, see nearBeforeObjectStep.) Only an action of an object step says so: a wait
+		// that held in this very Next (the Seal seen active) is followed by the next leg's plain walk, which asked for the objects too
+		// (uldaman-remote-4 ended on exactly that).
+		if st := d.stepOf(a); st == nil || objectStepKind(*st) == "" {
+			return nil, false
+		}
 		return d.objectViewError(a), true
 	case ActWait:
 		st := d.stepOf(a)
@@ -200,7 +208,10 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 		}
 		left := objectWaitSettle - d.clk.Now().Sub(d.obj.waitAt)
 		if left <= 0 {
-			d.rep.note(fmt.Sprintf("%s: the agent cannot see %s, so its state is not checked; taken as %s after the order that opens it", a.Label, describeRef(ref), st.WaitFor.GameObject.State))
+			// The feed (party and hostiles) carries no game-object state, so the wait cannot be checked another way. The step is passed
+			// as a last resort: if the object did not change, the party's next walk past its position fails, and the run says so then.
+			d.rep.note(fmt.Sprintf("%s: the agent cannot see %s%s, so its state is not checked; taken as %s after the order that opens it: the party's next walk through it is the check (a closed door fails that walk)", a.Label, describeRef(ref), d.agentFarText(st.WaitFor.GameObject.Near), st.WaitFor.GameObject.State))
+			d.obj.unchecked = describeRef(ref)
 			d.st.SkipStep()
 			return nil, true
 		}
@@ -214,19 +225,17 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 
 // objectViewError is the failure of an object step whose game object the agent's character does not see.
 func (d *RemoteDriver) objectViewError(a Action) error {
-	what := "the game object"
+	what, far := "the game object", ""
 	if st := d.stepOf(a); st != nil {
-		switch {
-		case st.UseObject != nil:
-			what = describeRef(&st.UseObject.ObjectRef)
-		case st.LootObject != nil:
-			what = describeRef(&st.LootObject.ObjectRef)
-		case st.WaitFor != nil && st.WaitFor.GameObject != nil:
-			what = describeRef(&st.WaitFor.GameObject.ObjectRef)
+		if ref, at := objectViewOf(st); ref != nil {
+			what, far = describeRef(ref), d.agentFarText(at)
+			if far != "" {
+				far = ", " + strings.Trim(strings.TrimSpace(far), "()") + fmt.Sprintf(", after looking for it %.0f s and moving toward it where it was safe", objectViewWait.Seconds())
+			}
 		}
 	}
-	return fmt.Errorf("%s: the agent must be within view of %s: only the agent's own object store knows the spawn GUID the carrier's order needs, and it has none "+
-		"(remote mode needs the agent's character in view of object steps, not in the group)", a.Label, what)
+	return fmt.Errorf("%s: the agent must be within view of %s%s: only the agent's own object store knows the spawn GUID the carrier's order needs, and it has none "+
+		"(remote mode needs the agent's character in view of object steps, not in the group)", a.Label, what, far)
 }
 
 // ---- the carrier ----

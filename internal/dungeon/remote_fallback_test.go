@@ -490,6 +490,31 @@ func TestApproachWaitsForAStillCarrier(t *testing.T) {
 	}
 }
 
+// Three frames at the same place (0.3 yd), not two: a carrier that keeps hopping 1.8 yd after the stay order is waited for until it has been
+// still for three frames (uldaman-remote-4: the first `cmd open` was interrupted after the carrier moved 1.8 yd).
+func TestApproachNeedsThreeStillFrames(t *testing.T) {
+	g := carrierGame(t)
+	var lastMove time.Time
+	ticks := 0
+	g.onTick = func(f *fakeRemote) {
+		if f.indexOf("cmd stay") >= 0 && f.indexOf("cmd open") < 0 {
+			ticks++
+			if ticks%2 == 1 && ticks <= 7 { // a hop every other frame, then still
+				f.party[2].X += 1.8
+				lastMove = f.now
+			}
+		}
+	}
+	rep, err := runCarrier(t, g, chestPlan(), objOpts())
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	open := g.indexOf("cmd open")
+	if lastMove.IsZero() || g.orderAt[open].Sub(lastMove) < 2*DefaultConfig().Poll {
+		t.Fatalf("the order went %v after the last move: %v", g.orderAt[open].Sub(lastMove), g.orders)
+	}
+}
+
 // A carrier that never settles gets the order after the wait, and a note says so.
 func TestApproachGivesUpOnACarrierThatNeverStops(t *testing.T) {
 	g := carrierGame(t)

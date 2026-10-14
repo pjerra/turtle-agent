@@ -817,3 +817,16 @@ code is tested against the fake feed only; nothing below has run live. It needs 
    within 10 s: `refills[].why` is `no-item` or `drink-failed`. No promise about the delay: it is one to two gate polls (3 s each), plus the `.bot inv` read. If the
    module names the action differently (not `drink`), neither fires and the low-drinks and nudge triggers remain; report the name.
 4. **Share target.** Repeat the remote Uldaman run: rest share at or under 20 % of the run, and no healer that went into a pull under 40 % mana.
+
+## Remote runs: bring the agent into view of every object step (issue #83, uldaman-remote-4)
+
+Evidence: remote run 4 did the chest, the Shaft, the Staff combine and the Keystone, then failed at the Seal of Khaz'Mul wait (object 124372, 41 yd from the party) with
+"the agent must be within view". The code is tested against the fake feed only; nothing below has run live.
+
+1. **Seal wait.** Repeat the Keystone leg with the agent beside the lead bot. In the notes: either `keep near: ... walks to ...` toward the Seal and
+   `... is in the agent's view after N s` (the wait is then really checked, expect the Seal `active` ~27 s after the Keystone), or the wait goes on unchecked with
+   `cannot see game object 124372 near ... (the agent stands N yd from it)`. In both cases the run goes on to Ironaya's leg; `agent_walks` counts the walk,
+   `gm_commands` and `run_gm_assists` are unchanged by it. How far from the Seal does the server first send it to the agent (the real view range)?
+2. **No walk past a pack.** With mobs near the way to the Seal (anywhere along it, seen by the bots or only by the agent) the agent stays put (`the agent stays where it is: ... stands near its way`) and the wait is unchecked.
+3. **Still carrier.** `object_steps[].approach` says `still N yd ... after S s`; the first `cmd open` of Baelog's Chest is no longer interrupted by a 1-2 yd move
+   (`cast interrupted ... the bot moved`).

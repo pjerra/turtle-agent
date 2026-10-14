@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 )
@@ -22,9 +23,11 @@ import (
 // listed in setup_shortcuts, and gm_commands stays what the enter phase made it (so "0 GM commands" has to read run_gm_assists too). The agent's presence is no part of the run's result.
 
 const (
-	keepNearFar   = 40.0 // yards from the lead bot beyond which the agent is brought up
-	keepNearStand = 30.0 // yards short of the lead bot a walking agent stops at
-	keepNearSafe  = 25.0 // a hostile within this of the stand point (or a corner of the way) keeps a walking agent where it is
+	keepNearFar   = 40.0             // yards from the lead bot beyond which the agent is brought up
+	keepNearStand = 30.0             // yards short of the lead bot a walking agent stops at
+	keepNearSafe  = 25.0             // a hostile within this of the stand point (or of the way, sampled every wayStep) keeps a walking agent where it is
+	wayStep       = 10.0             // yards between the points of a way that are checked against the hostiles
+	keepNearWalk  = 60 * time.Second // ceiling of the walk behind the party
 )
 
 // Follower is the optional part of a RemoteGame that moves the agent's own character after the party.
@@ -167,27 +170,73 @@ func (d *RemoteDriver) walkBehind(ctx context.Context, f Follower, dist float64)
 		}
 	}
 	stand, ok := StandoffPoint(path, keepNearStand)
-	if !ok {
+	if !ok || !d.agentWayClear(path, stand) {
 		return false, nil
-	}
-	for _, p := range append(slices.Clone(path), stand) {
-		for _, h := range d.fr.Hostiles {
-			if h.Entry != 0 && h.HPPct > 0 && dist3(hostilePoint(h), p) <= keepNearSafe {
-				if d.near.once(h.GUID.String()) {
-					d.rep.note(fmt.Sprintf("keep near: the agent stays where it is: %s stands near its way", d.hostileName(h)))
-				}
-				return false, nil
-			}
-		}
 	}
 	d.remote(func(r *RemoteReport) { r.AgentWalks++ })
 	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent is %.0f yd behind the lead bot; walking to %.0f %.0f %.0f", d.curLeg, dist, stand.X, stand.Y, stand.Z))
-	return d.agentWalk(ctx, f, stand)
+	return d.agentWalk(ctx, f, stand, keepNearWalk)
 }
 
-// agentWalk walks the agent's character to stand and keeps the run going meanwhile; a fight stops the walk. It reports whether the walk
-// ended well; the error is the run's.
-func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point) (bool, error) {
+// agentWayClear says whether no living hostile stands within keepNearSafe of the way: the path sampled about every wayStep yards along
+// every segment (a mob in the middle of a long straight is no corner) plus the stand point. The hostiles are those the bots see
+// (the feed) and those in the agent's own store (UnitSource): the feed lists only what the bots see, and the agent walks where they do not.
+// A walking agent stays out of pulls; the first hostile that blocks it is noted once.
+func (d *RemoteDriver) agentWayClear(path []Point, stand Point) bool {
+	type foe struct {
+		at   Point
+		name string
+		key  string
+	}
+	var foes []foe
+	for _, h := range d.fr.Hostiles {
+		if h.Entry != 0 && h.HPPct > 0 {
+			foes = append(foes, foe{hostilePoint(h), d.hostileName(h), h.GUID.String()})
+		}
+	}
+	if us, ok := d.g.(UnitSource); ok {
+		for _, u := range us.Units() {
+			if u.Type == "creature" && u.Hostile && !u.Dead && u.PosAgeMS >= 0 && (u.MaxHealth == 0 || u.Health > 0) {
+				name := u.Name
+				if name == "" {
+					name = fmt.Sprintf("creature %d", u.Entry)
+				}
+				foes = append(foes, foe{Point{u.X, u.Y, u.Z}, name + " (in the agent's view)", u.GUID.String()})
+			}
+		}
+	}
+	if len(foes) == 0 {
+		return true
+	}
+	pts := []Point{stand}
+	for i := 0; i < len(path); i++ {
+		pts = append(pts, path[i])
+		if i == 0 {
+			continue
+		}
+		a, b := path[i-1], path[i]
+		n := int(dist3(a, b) / wayStep)
+		for k := 1; k <= n; k++ {
+			t := float32(k) / float32(n+1)
+			pts = append(pts, Point{a.X + (b.X-a.X)*t, a.Y + (b.Y-a.Y)*t, a.Z + (b.Z-a.Z)*t})
+		}
+	}
+	for _, p := range pts {
+		for _, h := range foes {
+			if dist3(h.at, p) <= keepNearSafe {
+				if d.near.once(h.key) {
+					d.rep.note(fmt.Sprintf("keep near: the agent stays where it is: %s stands near its way", h.name))
+				}
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// agentWalk walks the agent's character to stand and keeps the run going meanwhile; a fight stops the walk, and so does limit (when it
+// is not 0). It reports whether the walk ended well; the error is the run's.
+func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, limit time.Duration) (bool, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type result struct {
@@ -195,10 +244,14 @@ func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point) (
 		err error
 	}
 	done := make(chan result, 1)
+	started := make(chan struct{})
 	go func() {
+		close(started)
 		r, err := f.WalkSelf(wctx, stand)
 		done <- result{r, err}
 	}()
+	<-started
+	began := d.clk.Now() // the walk's time counts from here
 	for {
 		select {
 		case res := <-done:
@@ -219,6 +272,12 @@ func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point) (
 			d.rep.note("keep near: a fight began: the agent stopped walking")
 			return false, nil
 		}
+		if limit > 0 && d.clk.Now().Sub(began) >= limit {
+			cancel()
+			<-done
+			d.rep.note(fmt.Sprintf("keep near: the agent's walk took longer than %.0f s: stopped", limit.Seconds()))
+			return false, nil
+		}
 	}
 }
 
@@ -228,7 +287,9 @@ func (d *RemoteDriver) inCombat() bool {
 }
 
 // nearBeforeObjectStep is keepNear when the Stepper is about to look at an object step (a chest, a door, an item to use, a game-object
-// wait): the Stepper fails a step whose object the agent does not see, so the agent has to be up before Next. Once per step.
+// wait): the Stepper fails a step whose object the agent does not see, so the agent has to be up before Next. Once per step. The agent
+// is first brought toward the lead bot (keepNear), and when the step's own object is still not in its store, toward the object
+// (viewObject): the lead bot can stand more than the view range from the door or chest of the step.
 func (d *RemoteDriver) nearBeforeObjectStep(ctx context.Context) error {
 	key, ok := d.objectStepNext()
 	if !ok {
@@ -241,7 +302,139 @@ func (d *RemoteDriver) nearBeforeObjectStep(ctx context.Context) error {
 		return nil
 	}
 	d.near.tried[key] = true
-	_, err := d.keepNear(ctx)
+	moved, err := d.keepNear(ctx)
+	if err != nil {
+		return err
+	}
+	return d.viewObject(ctx, key, moved)
+}
+
+// The agent brought into view of an object step's game object. Only its own object store knows the spawn GUID the carrier's order
+// names, and the store holds what the server sent for the agent's position (uldaman-remote-4: the lead bot stood 41 yd from the Seal
+// the next step waited for). The server's view range is not read anywhere, so the object is simply looked for.
+const (
+	objectViewWait    = 12 * time.Second // the object is looked for this long, from the start and again after the walk (the store takes new surroundings in over a few updates)
+	objectViewSettle  = 4 * time.Second  // ... before the agent is walked toward it (after a move toward the lead bot: this long to see)
+	objectViewStand   = 20.0             // yards short of the object a walking agent stops at
+	objectViewWalkMax = 40 * time.Second // ceiling of that walk
+)
+
+// objectViewOf is the game object an object step needs the agent to see and where it stands (nil without a position in the plan); the
+// ref is nil for a step that needs none (an item to use).
+func objectViewOf(st *Step) (*ObjectRef, *Point) {
+	var ref *ObjectRef
+	var stand *Point
+	switch {
+	case st == nil:
+		return nil, nil
+	case st.UseObject != nil:
+		ref, stand = &st.UseObject.ObjectRef, st.UseObject.Stand
+	case st.LootObject != nil:
+		ref, stand = &st.LootObject.ObjectRef, st.LootObject.Stand
+	case st.WaitFor != nil && st.WaitFor.GameObject != nil:
+		ref = &st.WaitFor.GameObject.ObjectRef
+	default:
+		return nil, nil
+	}
+	if ref.Near != nil {
+		return ref, ref.Near
+	}
+	return ref, stand
+}
+
+// stepByKey is the step objectStepNext's key names.
+func (d *RemoteDriver) stepByKey(key [2]int) *Step {
+	if key[0] < 0 || key[0] >= len(d.plan.Legs) {
+		return nil
+	}
+	l := d.plan.Legs[key[0]]
+	if key[1] < 0 {
+		if i := -1 - key[1]; i < len(l.AfterBoss) {
+			return &l.AfterBoss[i]
+		}
+		return nil
+	}
+	if key[1] < len(l.Steps) {
+		return &l.Steps[key[1]]
+	}
+	return nil
+}
+
+// viewObject looks for the step's game object in the agent's store, and moves the agent toward it when it is not there: a short wait
+// (when keepNear just moved the agent), then the agent walks to objectViewStand yards short of the object (out of combat, never past a
+// hostile the bots see), then a wait again; the look ends objectViewWait after the start, or after the walk when there was one. It gives up quietly: the Stepper then fails the step
+// naming how far the agent stood (objectViewError), or a game-object wait goes on as unchecked. The error is the run's.
+func (d *RemoteDriver) viewObject(ctx context.Context, key [2]int, moved bool) error {
+	f, ok := d.g.(Follower)
+	ref, at := objectViewOf(d.stepByKey(key))
+	if !ok || ref == nil || d.objectSeen(ref) {
+		return nil
+	}
+	began := d.clk.Now()
+	until := began.Add(objectViewWait) // the walk's own time does not count: the store gets objectViewWait after it
+	walked := false
+	for {
+		if d.objectSeen(ref) {
+			d.rep.note(fmt.Sprintf("leg %d: keep near: %s is in the agent's view after %.0f s", d.curLeg, describeRef(ref), d.clk.Now().Sub(began).Seconds()))
+			return nil
+		}
+		if !d.clk.Now().Before(until) {
+			d.rep.note(fmt.Sprintf("leg %d: keep near: %s is not in the agent's view after %.0f s%s", d.curLeg, describeRef(ref), objectViewWait.Seconds(), d.agentFarText(at)))
+			return nil
+		}
+		if !walked && at != nil && (!moved || d.clk.Now().Sub(began) >= objectViewSettle) && !d.inCombat() {
+			walked = true
+			if err := d.walkToObject(ctx, f, *at, ref); err != nil {
+				return err
+			}
+			until = d.clk.Now().Add(objectViewWait)
+			continue
+		}
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+	}
+}
+
+// objectSeen says whether the agent's store holds the object the way the Stepper finds it.
+func (d *RemoteDriver) objectSeen(ref *ObjectRef) bool {
+	_, ok := d.st.find(ref)
+	return ok
+}
+
+// agentFarText is ", the agent stands N yd from it" for the object's position; empty when either is unknown.
+func (d *RemoteDriver) agentFarText(at *Point) string {
+	f, ok := d.g.(Follower)
+	if !ok || at == nil {
+		return ""
+	}
+	here, _, ok := f.AgentPlace()
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(" (the agent stands %.0f yd from it)", dist3(here, *at))
+}
+
+// walkToObject walks the agent's character to objectViewStand yards short of the object's position, unless it is that close already
+// or a hostile stands near its way. The walk is counted in agent_walks and ends after objectViewWalkMax.
+func (d *RemoteDriver) walkToObject(ctx context.Context, f Follower, at Point, ref *ObjectRef) error {
+	here, m, ok := f.AgentPlace()
+	if l, _ := d.fr.LeadRec(); !ok || m != l.Map || dist3(here, at) <= objectViewStand+5 {
+		return nil // another map, or already close: walking does not bring it in
+	}
+	path := []Point{here, at}
+	if pl, ok := d.g.(PathPlanner); ok {
+		if pts, err := pl.PlanPath(ctx, d.plan.Map, here, at); err == nil && len(pts) >= 2 {
+			path = pts
+		}
+	}
+	stand, ok := StandoffPoint(path, objectViewStand)
+	if !ok || !d.agentWayClear(path, stand) {
+		return nil
+	}
+	d.remote(func(r *RemoteReport) { r.AgentWalks++ })
+	d.rep.note(fmt.Sprintf("leg %d: keep near: %s is not in the agent's view; the agent is %.0f yd from it and walks to %.0f %.0f %.0f", d.curLeg, describeRef(ref), dist3(here, at), stand.X, stand.Y, stand.Z))
+	_, err := d.agentWalk(ctx, f, stand, objectViewWalkMax)
 	return err
 }
 

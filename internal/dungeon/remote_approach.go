@@ -11,13 +11,13 @@ import (
 // Uldaman runs sent `cmd open` with the carrier ~20 yd from Baelog's Chest, and the order failed 4 s later; even standing next to it a
 // bot's own Opening cast was interrupted when the order arrived on top of a walk. So before an object order the party is walked to the
 // object's stand point (the step's `stand`, else a point objectStandoff yards short of the object on the lead bot's path), told to
-// stay, and the order goes to the carrier only when the carrier is near the object and has stood still for two frames of the feed. The
-// order's own walk stays as the fallback: a carrier that never settles gets the order after objectApproachWait, with a note.
+// stay, and the order goes to the carrier only when the carrier is near the object and has stood still for three frames of the feed (within 0.3 yd:
+// in uldaman-remote-4 an order sent after two frames was interrupted by a 1.8 yd move). The order's own walk stays as the fallback: a carrier that never settles gets the order after objectApproachWait, with a note.
 const (
 	objectStandoff     = 3.0              // yards short of the object at which the lead bot is stood (no `stand` in the plan)
 	objectNear         = 5.0              // yards from the object within which the carrier must be
-	objectStillFrames  = 2                // frames in a row at the same position that make the carrier "not moving"
-	objectStillEps     = 0.5              // yards of difference that still count as the same position
+	objectStillFrames  = 3                // frames in a row at the same position that make the carrier "not moving"
+	objectStillEps     = 0.3              // yards of difference that still count as the same position
 	objectApproachWait = 20 * time.Second // the carrier gets this long to settle, then the order goes out anyway
 )
 
