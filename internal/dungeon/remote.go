@@ -359,12 +359,12 @@ type RemoteReport struct {
 	AheadPulls     int     `json:"ahead_pulls"`
 	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
 	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
-	// ran out, and the bots brought with `cmd follow` / `cmd summon <bot>` (bot commands, not GM ones).
+	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
 	DirectGathers        int     `json:"direct_gathers"`
 	DirectGatherWaitS    float64 `json:"direct_gather_wait_s"`
 	DirectGatherTimeouts int     `json:"direct_gather_timeouts"`
-	DirectGatherFollows  int     `json:"direct_gather_follows"`
-	DirectGatherSummons  int     `json:"direct_gather_summons"`
+	DirectGatherMoves    int     `json:"direct_gather_moves"`
+	DirectGatherStays    int     `json:"direct_gather_stays"`
 	// Tank orders and pulls held back while the tank is dead, released or far from the mob / the lead bot (remote_tank.go).
 	TankOrdersHeld int `json:"tank_orders_held"`
 	TankAwayWaits  int `json:"tank_away_waits"`

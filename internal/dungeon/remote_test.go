@@ -84,6 +84,8 @@ type fakeRemote struct {
 	strictDirect bool
 	farOnce      string
 	summoned     []string // bots `cmd summon` fetched to the lead bot
+	// moveFetches: a plain `cmd move` brings the lagging bots (lagUntil) to the point, as the module's party move does.
+	moveFetches bool
 	// strictAttack: a bot-scoped `cmd attack <guid> <bot>` is refused too-far while that bot stands more than 60 yd from the mob (the
 	// module\'s sight distance); tankTooFar makes the next n such orders too-far whatever the feed shows.
 	strictAttack bool
@@ -485,6 +487,14 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		y, _ := strconv.ParseFloat(f[3], 32)
 		z, _ := strconv.ParseFloat(f[4], 32)
 		l := g.lead()
+		if g.moveFetches && len(f) == 5 {
+			for _, p := range g.party[1:] {
+				if _, lag := g.lagUntil[p.GUID]; lag {
+					p.X, p.Y, p.Z = float32(x), float32(y), float32(z)
+					delete(g.lagUntil, p.GUID)
+				}
+			}
+		}
 		if dx, dy := x-float64(l.X), y-float64(l.Y); sqrt(dx*dx+dy*dy) > 150 {
 			return errReply(intent, "too-far"), nil
 		}
