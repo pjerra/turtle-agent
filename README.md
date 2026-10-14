@@ -530,7 +530,7 @@ leaving range is not reported either.
 A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
 opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
 that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one (all of Uldaman, see
-[The Uldaman plan](#the-uldaman-plan)).
+[The Uldaman plan](#the-uldaman-plan)). `dungeons/zulfarrak.json` (Zul'Farrak, map 209) is the second: three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), written from the world database export in `tools/dungeongen/testdata/zulfarrak`; it has no `entrance_tele` (the game has no teleport inside the instance), so a remote run enters by the `portal`. What the driver cannot do yet is in `dungeons/zulfarrak-extra.json`, which is a record and not for running: the Gong (needs the Mallet), the stairs event with Nekrum and Sezz'ziz, and Ukorz and Ruuzlu behind the End Door (Weegli's gossip). Witch Doctor Zum'rah is faction 35 until an area trigger fires and is in neither file. Their notes say which positions are checked only against the export and the navmesh (`TestZulfarrakOnNavmesh`; map 209 mmaps in `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle209` or `~/tortoise-wow-server/data/mmaps`).
 
 ```json
 {
