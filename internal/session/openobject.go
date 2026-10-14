@@ -188,10 +188,13 @@ func (s *Session) takeAll(ctx context.Context, w *LootWindow, wait time.Duration
 	for _, slot := range append(append([]int{}, r.Left...), r.Skipped...) {
 		out.Left = append(out.Left, bySlot[slot])
 	}
-	if cur, _ := s.LootWindow(ctx); cur != nil && cur.GUID == w.GUID {
-		if err := s.CloseLoot(ctx, wait); err != nil {
-			return out, err
-		}
+	if s.afterTake != nil {
+		s.afterTake()
+	}
+	// The window closes by itself once empty (closeIfEmpty released it already, and the server's answer may be on its way or
+	// in): release it only if it is still open and not released, and count a window the server closed meanwhile as closed.
+	if err := s.closeLoot(ctx, w.GUID, false, wait); err != nil {
+		return out, err
 	}
 	return out, nil
 }

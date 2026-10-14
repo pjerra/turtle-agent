@@ -189,18 +189,19 @@ func (op *logoutOp) finish(outcome LogoutOutcome, err error) {
 }
 
 type Session struct {
-	conn     *worldconn.Conn
-	opts     Options
-	log      *events.Log
-	store    *objects.Store
-	logger   io.Writer
-	redact   redactor
-	handlers map[uint16]handler
-	reqs     chan request
-	done     chan struct{}
-	ready    chan struct{}
-	start    time.Time
-	clockFn  func() time.Time // nil: the wall clock; a replay sets the time of the record it handles
+	conn      *worldconn.Conn
+	opts      Options
+	log       *events.Log
+	store     *objects.Store
+	logger    io.Writer
+	redact    redactor
+	handlers  map[uint16]handler
+	reqs      chan request
+	done      chan struct{}
+	ready     chan struct{}
+	start     time.Time
+	clockFn   func() time.Time // nil: the wall clock; a replay sets the time of the record it handles
+	afterTake func()           // tests only: runs in takeAll between the take and the close
 
 	mu        sync.Mutex // guards these fields for readers outside the loop
 	state     Status
