@@ -340,6 +340,7 @@ func (d *RemoteDriver) locatePatrol(ctx context.Context, p *Patrol, st *patrolSt
 		d.rep.note(fmt.Sprintf("leg %d: the patrol (entries %v) did not come into view in %.0f s; pulling %s without it counted", d.curLeg, p.Entries, limit.Seconds(), d.hostileName(t)))
 		return false, nil
 	}
+	d.wd.progress("looking for the patrol") // a bounded look: the watchdog's clock starts again (ZF-1 run 6: a stall warning after 120 s)
 	if err := d.tick(ctx, d.cfg.Poll); err != nil {
 		return false, err
 	}

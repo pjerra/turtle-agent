@@ -291,7 +291,20 @@
             "period_s": 126,
             "source": "creature_movement of spawn 155626 (Sandfury Shadowhunter, movement type 2, 45 points, 316 yd at 2.5 yd/s); its creature_groups members are the Shadowhunter 44170 and the rare Zerillis 10082 (skipped). Live: the pair (0xAC8A, 0x25FEA) walked 1684 920 -\u003e 1668 917 on the map walk and joined the pull of 1680 871 at 1651 911 (zf1-hires-3 run 4)."
           }
-        },
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
+        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
+        "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it).",
+        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+      ]
+    },
+    {
+      "name": "antusul_c",
+      "to": {"x": 1633, "y": 868, "z": 10.5},
+      "pull_groups": [
         {
           "entries": [5649, 5648, 5649],
           "positions": [
@@ -370,10 +383,7 @@
       ],
       "skip": [7269, 10080, 10082],
       "notes": [
-        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
-        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
-        "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it).",
-        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+        "zf1-run6 (2026-10-15 00:17): the walk from group 5 (1642 902) to group 6 (1680.8 871.5) went by the shortest navmesh line past the camp of four Shadowcasters at 1661 901 (22 yd), pulled it, the Shadowhunters joined and two bots died. This leg starts with the hop to 1633 868 (group 4 of the previous leg stood there), so the party reaches the pack along y 868-871, 30 yd south of the camp. Groups 6 to 8 of the old leg `antusul`; the Shadowhunters' patrol is on group 6 (and group 5 of the leg before)."
       ]
     },
     {
@@ -499,13 +509,6 @@
           "radius": 30
         },
         {
-          "entries": [7246],
-          "positions": [
-            {"x": 1591, "y": 1047.7, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
           "entries": [5650, 7246, 7246, 8095, 5649],
           "positions": [
             {"x": 1576.2, "y": 1079.1, "z": 9},
@@ -536,13 +539,6 @@
             {"x": 1644.2, "y": 1107.4, "z": 9}
           ],
           "radius": 15
-        },
-        {
-          "entries": [7246],
-          "positions": [
-            {"x": 1626.5, "y": 1136, "z": 8.9}
-          ],
-          "radius": 30
         },
         {
           "entries": [5649, 5649, 5649],
@@ -578,6 +574,7 @@
         "position": {"x": 1650.4, "y": 1161.4, "z": 9.9}
       },
       "notes": [
+        "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) must not be used (no Mallet); Gahz'rilla's pit is at 1664.7 1187.7 -2.9, off the navmesh.",
         "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152)."
       ]
