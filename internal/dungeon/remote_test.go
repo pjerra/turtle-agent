@@ -89,6 +89,10 @@ type fakeRemote struct {
 	ignorePull  bool // a bot-scoped `cmd attack` at an engaged mob changes nothing (the tank does not take it)
 	orderAt     []time.Time
 	sight       float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
+	// followTo, when set, is where `cmd follow` runs the lead bot (to the commander), and a pull or an attack 20 s or more after it runs
+	// it back to the mob, as the module does; nil: `cmd follow` moves nobody.
+	followTo *Point
+	followAt time.Time
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -373,6 +377,7 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			return ack(intent), nil
 		}
 		m.pulled, m.pullAt = true, g.now
+		g.runToMob(m)
 		if intent == "cmd pull" && m.engaged && !g.ignorePull {
 			m.hold = 0 // the tank takes the mob
 		}
@@ -397,6 +402,13 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			return r, nil
 		}
 		m.attacked = true
+		g.runToMob(m)
+		return ack(intent), nil
+	case "cmd follow":
+		if g.followTo != nil {
+			to := *g.followTo
+			g.moveTo, g.pendingMove, g.followAt = &to, nil, g.now
+		}
 		return ack(intent), nil
 	case "cmd rest":
 		g.resting = true
@@ -411,6 +423,14 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		return ack(intent), nil
 	}
 	return ack(intent), nil
+}
+
+// runToMob runs the lead bot back to a mob it pulls or attacks, when followTo is set and the follow is 20 s old.
+func (g *fakeRemote) runToMob(m *rmob) {
+	if g.followTo != nil && g.now.Sub(g.followAt) >= 20*time.Second {
+		to := m.pos
+		g.moveTo, g.pendingMove = &to, nil
+	}
 }
 
 func (g *fakeRemote) mobByArg(a string) *rmob {

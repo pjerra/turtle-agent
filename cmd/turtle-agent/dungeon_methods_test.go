@@ -57,6 +57,9 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":"rig","buffs":[0]}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[22888,{}]}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[22888,22888,22888,22888,22888,"world","world",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}`, "at most 20"},
+		{`{"name":"rig","watchdog":{"warn_s":300}}`, "recover_s (240) must be above warn_s (300)"},
+		{`{"name":"rig","watchdog":{"fail_s":100}}`, "fail_s (100) must be above recover_s (240)"},
+		{`{"name":"rig","watchdog":{"stall_s":100}}`, "stall_s"},
 		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-400 characters"},
 		{`{"name":"rig","setup":["` + strings.Repeat("x", 401) + `"]}`, "setup[0]: needs 1-400 characters"},
 	} {
@@ -221,5 +224,37 @@ func TestSessionGameTeamAndUseItem(t *testing.T) {
 	r.expectBody(opcode.CMSGUseItem, game.BuildUseItem(255, 23, 0))
 	if err := g.UseItem(context.Background(), 1); err == nil {
 		t.Fatal("an item that is not carried")
+	}
+}
+
+// dungeon_status shows the progress watchdog at a glance: the last progress, the seconds since, the stall level, and the limits in effect
+// (the defaults, or the run parameter's).
+func TestDungeonStatusShowsTheWatchdog(t *testing.T) {
+	r := dungeonRig(t)
+	if res := r.call("dungeon_status", "{}")["result"].(map[string]any); res["stall_level"] != "none" || res["stalled_for_s"] != float64(0) || res["last_progress_at"] != nil {
+		t.Fatalf("idle: %v", res)
+	}
+	for _, c := range []struct {
+		params string
+		limits [3]float64
+	}{
+		{`{"name":"rig"}`, [3]float64{120, 240, 420}},
+		{`{"name":"rig","watchdog":{"warn_s":30,"recover_s":60,"fail_s":90}}`, [3]float64{30, 60, 90}},
+		{`{"name":"rig","watchdog":{"recover_s":-1}}`, [3]float64{120, 0, 420}},
+	} {
+		if out := r.call("dungeon_run", c.params); out["error"] != nil {
+			t.Fatalf("%s: %v", c.params, out)
+		}
+		st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+			ds := m["result"].(map[string]any)
+			return ds["state"] == "failed" && ds["running"] == false
+		})["result"].(map[string]any)
+		w, _ := st["report"].(map[string]any)["watchdog"].(map[string]any)
+		if w == nil || [3]float64{w["warn_s"].(float64), w["recover_s"].(float64), w["fail_s"].(float64)} != c.limits || w["stall_level"] != "none" || w["last_progress"] == "" {
+			t.Fatalf("%s: %v", c.params, st["report"])
+		}
+		if st["stall_level"] != "none" || st["last_progress_at"] != w["last_progress_at"] || st["stalled_for_s"] != w["stalled_for_s"] {
+			t.Fatalf("%s: the status mirrors the report's watchdog: %v", c.params, st)
+		}
 	}
 }

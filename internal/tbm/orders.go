@@ -150,6 +150,15 @@ func (r OrderResult) Describe() string {
 // DefaultPendingSlack is the time added to an order's PENDING budget before the wait gives up.
 const DefaultPendingSlack = 5 * time.Second
 
+// MaxPendingWait caps the wait that an ACTION_PENDING line can ask for: the budget is the server's word, and a pending order that
+// claims an hour must not hold a run for an hour (the run watchdog cannot see into a blocked order).
+const MaxPendingWait = 90 * time.Second
+
+// pendingWait is how long to wait for the final answer of an order that reported a budget of budgetS seconds.
+func pendingWait(budgetS int, slack time.Duration) time.Duration {
+	return min(time.Duration(max(budgetS, 0))*time.Second+slack, MaxPendingWait)
+}
+
 // orderBot is the bot an order names: loot <guid> <bot>, open <guid> <bot>, use <item> <bot>.
 func orderBot(command string) string {
 	f := strings.Fields(command)
@@ -207,7 +216,7 @@ func (c *Commander) OrderWait(ctx context.Context, command string, wait time.Dur
 			}
 			if pd, ok := ParsePending(line); ok && strings.EqualFold(pd.Intent, res.Intent) && (res.Bot == "" || strings.EqualFold(pd.Bot, res.Bot)) {
 				res.Pending = &pd
-				deadline = time.Now().Add(time.Duration(pd.BudgetS)*time.Second + slack)
+				deadline = time.Now().Add(pendingWait(pd.BudgetS, slack))
 				continue
 			}
 			if a, ok := ParseAck(line); ok && strings.EqualFold(a.Intent, res.Intent) {

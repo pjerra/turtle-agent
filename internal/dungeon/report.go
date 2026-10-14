@@ -72,6 +72,9 @@ type Report struct {
 	Trace *tracerun.Info `json:"trace,omitempty"`
 	// TraceFile is the trace's path while the run goes (empty when tracing is off or the file could not be made).
 	TraceFile string `json:"trace_file,omitempty"`
+	// Watchdog is the progress watchdog's view (README "Run watchdog"): when the run last made progress, for how long it has not, and the
+	// stall level.
+	Watchdog *WatchdogReport `json:"watchdog,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -117,6 +120,8 @@ type reporter struct {
 	now func() time.Time
 	// onNote, when set, sees each note (the trace copies them as events).
 	onNote func(string)
+	// wd, when set, is the run's watchdog; each snapshot carries its state as of now.
+	wd *watchdog
 }
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
@@ -197,6 +202,7 @@ func (p *reporter) snapshot() Report {
 		}
 	}
 	r.setRestShare()
+	r.Watchdog = p.wd.report()
 	return r
 }
 

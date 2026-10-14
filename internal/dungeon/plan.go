@@ -52,7 +52,9 @@ type Plan struct {
 	// lead bot when it has no GM rights.
 	Portal *Portal  `json:"portal,omitempty"`
 	Notes  []string `json:"notes,omitempty"`
-	Legs   []Leg    `json:"legs"`
+	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
+	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
+	Legs     []Leg           `json:"legs"`
 }
 
 // Portal is a point of the outer map: the centre of the entrance's area trigger.
@@ -239,6 +241,7 @@ type rawPlan struct {
 	Tele     string            `json:"entrance_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Notes    []string          `json:"notes"`
+	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
 }
 
@@ -395,6 +398,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 			c.fail("portal.map", "required (the outer map id)")
 		} else {
 			p.Portal = &Portal{Map: *rp.Portal.Map, Point: c.point("portal", &rawPoint{rp.Portal.X, rp.Portal.Y, rp.Portal.Z})}
+		}
+	}
+	if rp.Watchdog != nil {
+		if err := rp.Watchdog.Validate(); err != nil {
+			c.fail("watchdog", "%v", err)
+		} else {
+			p.Watchdog = rp.Watchdog
 		}
 	}
 	if len(rp.Legs) == 0 {

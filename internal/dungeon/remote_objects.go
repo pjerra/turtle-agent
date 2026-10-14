@@ -355,6 +355,10 @@ func (o *objRec) finish(result string, err error, note string) {
 // ---- orders ----
 
 func (d *RemoteDriver) countOrder(verb string, res tbm.OrderResult) {
+	d.wd.ordered(res.Command + " -> " + res.Describe())
+	if res.Kind == tbm.KindAck {
+		d.wd.acked(res.Command)
+	}
 	d.remote(func(rr *RemoteReport) {
 		rr.OrdersSent++
 		rr.Orders[verb]++
@@ -423,6 +427,9 @@ func (d *RemoteDriver) carry(ctx context.Context, rec *objRec, command string, n
 		}
 		if res.Err != nil {
 			d.recordRefusal(Refusal{Intent: res.Intent, Code: res.Err.Code, Message: res.Err.Message})
+		}
+		if d.wdObject.take() { // the watchdog cancelled the retries: the refusal stands, and the step's retry or fallback takes over
+			return res, orderError(res)
 		}
 		code := res.Code()
 		switch {
@@ -591,6 +598,15 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	if _, ok := d.orderGame(); !ok {
 		return d.objectStepError(a)
 	}
+	d.wdObject.clear()
+	leave := d.wd.enter("object step", a.Label, func(context.Context) (string, error) {
+		d.wdObject.set()
+		return "cancelled the carrier order's retries: the step retries it once, then takes the fallback", nil
+	})
+	defer func() {
+		leave()
+		d.wd.progress("object step result: " + a.Label)
+	}()
 	if _, err := d.keepNear(ctx); err != nil {
 		return err
 	}

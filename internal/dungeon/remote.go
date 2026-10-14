@@ -396,6 +396,12 @@ type RemoteDriver struct {
 	trSeen    uint64             // the feed frame count the trace last took
 	trRoster  bool
 	trStalled bool
+
+	// The progress watchdog (watchdog.go) and the requests its recoveries leave for the loops they interrupt.
+	wd         *watchdog
+	wdRepick   flagOnce // end the fight, to pick the target again
+	wdObject   flagOnce // give up the carrier order's retries
+	viewResent bool     // `commander view on` went out again since the feed was last heard from
 }
 
 // NewRemoteDriver prepares a run of plan in remote mode. A zero clock is the wall clock.
@@ -408,6 +414,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
 		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
 	d.rep.init(plan, clk.Now)
+	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
 		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}}
@@ -453,6 +460,7 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	}
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
+	d.wd.start()
 	err := d.runRecovering(ctx, fromLeg)
 	d.finish(err)
 	return err
@@ -471,6 +479,7 @@ func (d *RemoteDriver) runRecovering(ctx context.Context, fromLeg int) (err erro
 }
 
 func (d *RemoteDriver) finish(err error) {
+	d.wd.stop()
 	leg := d.curLeg
 	var state, errText, kind, text string
 	switch {
@@ -519,6 +528,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		a := d.st.Next()
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
+		d.wd.setStep(a.Label)
 		if d.objectTouched {
 			if err, handled := d.objectLook(ctx, a); handled {
 				if err != nil {
@@ -548,13 +558,19 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 				waiting = [2]int{a.Leg, a.Step}
 				d.emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "mode": "remote"})
 			}
-			if err := d.tick(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
+			// A plan's wait has its own timeout_s: the watchdog does not count it.
+			release := d.wd.hold()
+			err := d.tick(ctx, min(d.cfg.WaitPoll, a.Remaining))
+			release()
+			if err != nil {
 				d.stepFailedRecover(ctx, err)
 			}
 			continue
 		}
 		began := d.clk.Now()
 		var err error
+		d.wdObject.clear() // a request left by an earlier step is not this step's
+		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
 			if err = d.tracedWalk(ctx, a.To); err == nil {
@@ -572,6 +588,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		default:
 			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
 		}
+		leave()
 		data := map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds(), "mode": "remote"}
 		if err != nil {
 			data["error"] = err.Error()
@@ -582,6 +599,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			continue
 		}
 		d.st.Complete()
+		d.wd.progress("step done: " + a.Label)
 	}
 }
 
@@ -925,6 +943,7 @@ func (d *RemoteDriver) waitFirstFrame(ctx context.Context) error {
 
 // unbind ends the binding: always, with its own context, so that a stopped run unbinds too.
 func (d *RemoteDriver) unbind() {
+	d.wd.stop() // the closing fight handling and the unbind wait through the same ticks: the watchdog has had its say
 	if !d.bound {
 		return
 	}
@@ -981,7 +1000,7 @@ func (d *RemoteDriver) look() {
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
 		}
-		d.nAt, d.stalled = d.clk.Now(), false
+		d.nAt, d.stalled, d.viewResent = d.clk.Now(), false, false
 	} else if d.clk.Now().Sub(d.nAt) > d.opt.FeedStale {
 		d.stalled = true
 	}
@@ -1005,7 +1024,11 @@ func (d *RemoteDriver) tick(ctx context.Context, dur time.Duration) error {
 	if err := d.clk.Sleep(ctx, dur); err != nil {
 		return err
 	}
-	return d.check()
+	if err := d.check(); err != nil {
+		return err
+	}
+	d.resendViewIfSilent(ctx)
+	return d.wd.watch(ctx)
 }
 
 func (d *RemoteDriver) check() error {
@@ -1116,6 +1139,10 @@ func (d *RemoteDriver) order(ctx context.Context, verb string, args ...string) (
 			return r, fmt.Errorf("cmd %s: %w", verb, err)
 		}
 		d.traceOrder(verb, cmd, r, d.clk.Now().Sub(sentAt).Milliseconds())
+		d.wd.ordered(cmd + " -> " + replyText(r))
+		if r.Kind == tbm.KindAck {
+			d.wd.acked(cmd)
+		}
 		d.remote(func(rr *RemoteReport) {
 			rr.OrdersSent++
 			rr.Orders[verb]++
@@ -1257,6 +1284,7 @@ func moveTimeout(dist float64) time.Duration {
 // from the feed. A pack that aggroes on the way is fought (walkAggro) and the walk goes on; a lead bot that gains no ground in
 // MoveStall is told again; a refused move is tried again with a shorter leg. WalkAttempts bounds the refusals of one walk.
 func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
+	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) { return d.wdReplanWalk(ctx, p) })()
 	refusals, stalls, aggros := 0, 0, 0
 	leg := d.opt.MoveLeg
 	var last string
@@ -1472,6 +1500,7 @@ func (d *RemoteDriver) ensureAlive(ctx context.Context) error {
 // reviveDead sends a revive order for every dead bot (the lead bot first) and waits for them to show alive. A member that stays
 // dead after two orders fails the run.
 func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
+	defer d.wd.hold()() // the waits and the corpse runs have limits of their own
 	if err := d.waitForRez(ctx, why); err != nil {
 		return err
 	}
@@ -1701,6 +1730,12 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
+	// The gate has limits of its own (the cap, the fight timeout, the whole-gate bound): the watchdog's clock waits for it.
+	defer d.wd.enter("rest gate", "", nil)()
+	gh := &gateHold{w: d.wd}
+	defer gh.set(false)
+	ft := &fightToggle{w: d.wd, detail: "at a rest gate"} // a fight in the gate is watched by its mobs' health
+	defer ft.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
 	var lastRest time.Time
@@ -1719,6 +1754,9 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 		}
 		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
 			now := d.clk.Now()
+			gh.set(false)
+			ft.set(true)
+			d.wd.mobHealth(hostilesHP(eng))
 			if fightBegan.IsZero() {
 				fightBegan = now
 			}
@@ -1736,6 +1774,8 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 			continue
 		}
 		fightBegan = time.Time{}
+		ft.set(false)
+		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
 		if len(st.dead) > 0 {
