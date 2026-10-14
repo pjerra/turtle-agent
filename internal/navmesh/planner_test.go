@@ -487,3 +487,66 @@ func TestMissingMapFileIsDataMissing(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// stackedFloors is a floor at z 0 (x, y 0..40) with an unconnected ledge over its middle (x, y 15..25) at height ledge.
+func stackedFloors(ledge float32) []navfixture.Poly {
+	return []navfixture.Poly{navfixture.Square(0, 0, 40, 40, 0), navfixture.Square(15, 15, 25, 25, ledge)}
+}
+
+// A walker on the floor under a ledge 4 yd above plans from the floor, and a goal on the floor under the ledge ends on the floor: the
+// plan's first point is never the ledge over the walker's head (Uldaman's Keystone room, hires-1 2026-10-14: the look walk was
+// planned from the ledge and the server refused it as unreachable).
+func TestStartAndGoalSnapToTheFloorUnderALedge(t *testing.T) {
+	p := planner(t, stackedFloors(4.1))
+	path, err := p.Plan(fixtureMap, Vec3{20, 20, -0.3}, Vec3{35, 20, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status != Complete || len(path.Points) < 2 || math.Abs(float64(path.Points[0][2])) > 0.1 {
+		t.Fatalf("from under the ledge: %+v", path)
+	}
+	path, err = p.Plan(fixtureMap, Vec3{35, 35, 0}, Vec3{20, 20, 0.3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end := path.Points[len(path.Points)-1]; path.Status != Complete || math.Abs(float64(end[2])) > 0.1 {
+		t.Fatalf("to under the ledge: %+v", path)
+	}
+}
+
+// A point 1.9 yd over the floor (standing on a crate, a stair the mesh does not have) with a ledge 1.3 yd over it takes the floor, the
+// polygon at or below its feet, not the nearer one above; Detour's own nearest-polygon pick took the ledge.
+func TestStartPrefersTheFloorBelowOverALedgeAbove(t *testing.T) {
+	p := planner(t, stackedFloors(3.2))
+	path, err := p.Plan(fixtureMap, Vec3{20, 20, 1.9}, Vec3{35, 20, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status != Complete || len(path.Points) < 2 || math.Abs(float64(path.Points[0][2])) > 0.1 {
+		t.Fatalf("%+v", path)
+	}
+}
+
+// A walker standing on the ledge plans on the ledge.
+func TestStartOnTheLedgeStaysOnTheLedge(t *testing.T) {
+	p := planner(t, stackedFloors(4.1))
+	path, err := p.Plan(fixtureMap, Vec3{18, 20, 4.2}, Vec3{22, 20, 4.2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status != Complete || math.Abs(float64(path.Points[0][2])-4.1) > 0.1 {
+		t.Fatalf("%+v", path)
+	}
+}
+
+// A polygon more than 2 yd over the point is over its head: it is no floor for it (the server's rule allowed 3).
+func TestNoSnapUpToAPolygonOverTheHead(t *testing.T) {
+	p := planner(t, []navfixture.Poly{navfixture.Square(0, 0, 10, 10, 0), navfixture.Square(20, 20, 30, 30, 2.5)})
+	path, err := p.Plan(fixtureMap, Vec3{25, 25, 0}, Vec3{22, 22, 2.5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status != NoPath {
+		t.Fatalf("%+v", path)
+	}
+}

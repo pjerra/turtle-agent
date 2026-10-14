@@ -2,10 +2,11 @@
 
 // navdetour.cpp - a small C API over the core's Detour (vendored in detour/, zlib) for the
 // cgo engine. The calls mirror the server's PathFinder (src/game/Maps/PathFinder.cpp):
-// FindWalkPoly's extents and its "not above the point" rule, findPath, then findStraightPath.
+// FindWalkPoly's extents with a floor-first choice of polygon (see findWalkPoly), findPath, then findStraightPath.
 // Unlike the server, both run between the floor points findNearestPoly found, not the asked
 // start and end (see nd_find_path). Ported from wow-play-harness native/navdetour.cpp, without its
 // wall margin: a headless client has no collision to catch on corners.
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -40,17 +41,61 @@ dtQueryFilter makeFilter(unsigned short include, unsigned short exclude) {
     return f;
 }
 
-// PathInfo::FindWalkPoly: extents 5 yd round, 10 yd of height, and never a point more than
-// 3 yd above the asked one.
+// PathInfo::FindWalkPoly's extents (5 yd round, 10 yd of height) with a stricter choice of polygon. Detour's findNearestPoly
+// takes the nearest polygon in any direction, so on stacked floors (a pit under a ledge) a point a few yards under the ledge could snap
+// up onto it, and the walk was then planned from, and sent to, the wrong floor. A walker stands on the floor at its feet or below:
+// the polygon chosen is the one closest in height among those at the point's height (up to WALK_STEP above, for slopes, detail error and
+// noise) and down to WALK_NEAR below it, then one within WALK_HEAD above (a step up), then, below WALK_NEAR, the nearest of the
+// floors further down. A polygon over the point's head (more than WALK_HEAD above) is never taken; the server's own rule allowed 3 yd.
+const float WALK_STEP = 1.0f;  // above the point, still "at its feet" (a mesh surface up to a yard over a point is the ground it stands on)
+const float WALK_NEAR = 2.0f;  // below the point, still "its floor"
+const float WALK_HEAD = 2.0f;  // above the point, the most a polygon may be over it
+
 dtPolyRef findWalkPoly(Nav* n, const float* p, const dtQueryFilter& f, float* closest, float* dist) {
     const float ext[3] = {5.0f, 10.0f, 5.0f};
-    dtPolyRef ref = 0;
-    if (dtStatusFailed(n->query->findNearestPoly(p, ext, &f, &ref, closest)) || !ref)
+    const int MAX_CAND = 256;
+    dtPolyRef refs[MAX_CAND];
+    int nrefs = 0;
+    if (dtStatusFailed(n->query->queryPolygons(p, ext, &f, refs, &nrefs, MAX_CAND)) || nrefs == 0)
         return 0;
-    if (closest[1] > p[1] + 3.0f)
+    // Tiers, best first: at the feet or just below, a step up within the head, far below.
+    dtPolyRef best = 0;
+    int bestTier = 4;
+    float bestD = 0;
+    for (int i = 0; i < nrefs; ++i) {
+        float c[3];
+        bool over = false;
+        if (dtStatusFailed(n->query->closestPointOnPoly(refs[i], p, c, &over)))
+            continue;
+        float dy = c[1] - p[1];
+        int tier;
+        if (dy > WALK_HEAD)
+            continue;  // over its head
+        else if (dy <= WALK_STEP && dy >= -WALK_NEAR)
+            tier = 0;
+        else if (dy > WALK_STEP)
+            tier = 1;
+        else
+            tier = 2;
+        // Detour's own score: a point directly over a polygon within the climb height of it counts as on it.
+        float d = dtVdistSqr(c, p);
+        const dtMeshTile* tile = nullptr;
+        const dtPoly* poly = nullptr;
+        if (over && dtStatusSucceed(n->mesh->getTileAndPolyByRef(refs[i], &tile, &poly))) {
+            d = std::fabs(dy) - tile->header->walkableClimb;
+            d = d > 0 ? d * d : 0;
+        }
+        if (tier < bestTier || (tier == bestTier && d < bestD)) {
+            best = refs[i];
+            bestTier = tier;
+            bestD = d;
+            dtVcopy(closest, c);
+        }
+    }
+    if (!best)
         return 0;
     *dist = dtVdist(closest, p);
-    return ref;
+    return best;
 }
 // The bytes dtNavMesh::addTile reads for a tile with this header (DetourNavMesh.cpp
 // addTile's layout), so a header that claims more than the file holds is refused before

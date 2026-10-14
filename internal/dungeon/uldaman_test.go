@@ -731,3 +731,33 @@ func TestUldamanDirectSteps(t *testing.T) {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
 	}
 }
+
+// The look walk at the Keystone room's pit floor (hires-1, 2026-10-14: the lead bot at -223.9 207.2 -49.3, the pack 21 yd off at
+// -243 215 -47) is planned from the floor under the bot, not from a ledge over it: the standoff point is a floor point within 2 yd of the
+// bot's height, so the server does not refuse it as unreachable. Runs where the map 70 mmaps are (see mmapsDir); needs the cgo build.
+func TestUldamanKeystoneLookStartsOnTheBotsFloor(t *testing.T) {
+	dir := mmapsDir()
+	if dir == "" {
+		t.Skip("no map 70 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 070.mmap and the 070*.mmtile tiles")
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	bot, pack := navmesh.Vec3{-223.9, 207.2, -49.3}, navmesh.Vec3{-243, 215, -47}
+	path, err := pl.Plan(70, bot, pack)
+	if errors.Is(err, navmesh.ErrNoEngine) {
+		t.Skip("built without cgo: no navmesh engine")
+	}
+	if err != nil || path.Status != navmesh.Complete || len(path.Points) < 2 {
+		t.Fatalf("%+v %v", path, err)
+	}
+	if dz := path.Points[0][2] - bot[2]; dz > 2 {
+		t.Errorf("the path starts at z %.1f, %.1f yd over the bot", path.Points[0][2], dz)
+	}
+	pts := make([]Point, len(path.Points))
+	for i, v := range path.Points {
+		pts[i] = Point{X: v[0], Y: v[1], Z: v[2]}
+	}
+	if s, ok := StandoffPoint(pts, 10); !ok || s.Z-bot[2] > 2 {
+		t.Errorf("the standoff point %v is over the bot's head (ok=%v)", s, ok)
+	}
+}
