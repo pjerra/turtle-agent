@@ -275,3 +275,36 @@ func TestRemoteDirectStepIsNotHopped(t *testing.T) {
 		t.Fatalf("the plain walk to the lip was not hopped: %v", g.ordersOf("cmd move"))
 	}
 }
+
+// TortoiseBots #943: a walk pulls only hostile units. A neutral mob and a critter by the route are left alone; a neutral that comes at
+// the party (it targets the tank) is fought all the same.
+func TestRemoteWalkPullsOnlyHostiles(t *testing.T) {
+	g := newFakeRemote(t)
+	neutral := g.addMob(77, Point{50, 8, 0})
+	neutral.reaction, neutral.kind = "n", "-"
+	critter := g.addMob(78, Point{70, -6, 0})
+	critter.reaction, critter.kind = "h", "k"
+	hostile := g.addMob(79, Point{100, 6, 0})
+	hostile.reaction, hostile.kind = "h", "-"
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "first", To: Point{120, 0, 0}}), opts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	for _, m := range []*rmob{neutral, critter} {
+		if g.indexOf("cmd pullback "+tbm.GUIDArg(m.guid)) >= 0 {
+			t.Fatalf("pulled %d (%s,%s): %v", m.entry, m.reaction, m.kind, g.orders)
+		}
+	}
+	if g.indexOf("cmd pullback "+tbm.GUIDArg(hostile.guid)) < 0 || rep.Remote.AheadPulls != 1 {
+		t.Fatalf("the hostile was not pulled: ahead %d %v", rep.Remote.AheadPulls, g.orders)
+	}
+
+	g = newFakeRemote(t)
+	angry := g.addMob(77, Point{50, 8, 0})
+	angry.reaction, angry.kind = "n", "-"
+	g.aggro = 15 // it comes at the party when the walk passes
+	rep, err = runRemote(t, g, remotePlan(Leg{Name: "first", To: Point{120, 0, 0}}), opts(), nil)
+	if err != nil || rep.State != "done" || g.mobsKilled != 1 || rep.Remote.WalkAggros != 1 {
+		t.Fatalf("a neutral attacking the party was not fought: %v killed %d walk aggros %d\n%s", err, g.mobsKilled, rep.Remote.WalkAggros, notesOf(rep))
+	}
+}
