@@ -63,7 +63,7 @@ const (
 	hireSpellWait    = 3 * time.Second        // the first line of one `spells <filter>` answer
 	hireSpellQuiet   = 400 * time.Millisecond // its burst of lines ends when none came for this long
 	hireItemWait     = 3 * time.Second
-	hirePetWait      = 10 * time.Second
+	hirePetWait      = 40 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short)
 	hireOutOfGroup   = 10 * time.Second // the commander leaves the group after a bind
 	maxHireComposite = 5
 )
