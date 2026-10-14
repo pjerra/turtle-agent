@@ -85,7 +85,8 @@ type Leg struct {
 	To   Point  `json:"to"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
-	// `cmd move x y z direct` (TortoiseBots), which walks every bot of the party in a line instead of on a path. See Waypoint.
+	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
+	// and take its line (TortoiseBots #948). See Waypoint.
 	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
@@ -100,7 +101,7 @@ type Leg struct {
 	Notes []string  `json:"notes,omitempty"`
 }
 
-// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): every bot must be within DirectMaxDistance
+// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
 const (
 	DirectMaxDistance     = 25.0
