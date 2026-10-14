@@ -57,6 +57,7 @@ const (
 	ActUse    ActionKind = "use_object"  // use game object GUID (it is within UseRange)
 	ActLoot   ActionKind = "loot_object" // open and loot game object GUID (it is within UseRange)
 	ActItem   ActionKind = "use_item"    // use the item Item from the bags
+	ActRitual ActionKind = "ritual"      // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
 	ActKill   ActionKind = "kill_boss"   // kill Boss, First entries before it
 	ActWait   ActionKind = "wait"        // nothing to do yet: look again with Next
 	ActDone   ActionKind = "done"        // the plan is finished
@@ -81,13 +82,14 @@ type Action struct {
 	GUID      packet.GUID         // use (0 when the agent does not see the object: an entry-form action, see Entry)
 	// Entry and EntryAt are set when the World names objects by entry (EntryWorld): the order says `entry:<Entry>@EntryAt` and the server
 	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
-	Entry     uint32
-	EntryAt   *Point
-	Requires  *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
-	Item      *ItemRef      // use_item: the item to use
-	Expect    *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
-	Remaining time.Duration // wait: time left before the plan fails
-	Err       string        // failed
+	Entry        uint32
+	EntryAt      *Point
+	Participants int           // ritual: the number of bots that use the object
+	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
+	Item         *ItemRef      // use_item: the item to use
+	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
+	Remaining    time.Duration // wait: time left before the plan fails
+	Err          string        // failed
 	// TeamGate is set on a pull or kill of a part gated to the other team that a World with TeamGateLook runs only after a look: the
 	// driver looks at the part's positions and skips it only if none of its mobs is there (or hostile). It reads like the skip note,
 	// "pull group 1 of 1 ([1]) is for team horde, the leader is alliance".
@@ -168,7 +170,7 @@ func (s *Stepper) Complete() {
 	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse, ActLoot, ActItem:
+		case ActUse, ActLoot, ActItem, ActRitual:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
@@ -327,6 +329,12 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		u := st.UseItem
 		base.Kind, base.Item, base.Requires, base.Expect = ActItem, &ItemRef{Entry: u.Entry, Name: u.Name}, u.RequiresItem, u.ExpectItem
 		base.Label = s.label("step %d: use item %s", s.idx, base.Item)
+		return base, false
+	case st.Ritual != nil:
+		r := st.Ritual
+		at := r.Position
+		base.Kind, base.Entry, base.EntryAt, base.Participants = ActRitual, r.Entry, &at, r.Participants
+		base.Label = s.label("step %d: ritual at game object %d with %d participants", s.idx, r.Entry, r.Participants)
 		return base, false
 	case st.UseObject != nil || st.LootObject != nil:
 		ref, stand := objectOf(st)

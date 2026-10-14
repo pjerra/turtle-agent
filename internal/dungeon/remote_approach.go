@@ -38,6 +38,8 @@ func (d *RemoteDriver) standOf(a Action) *Point {
 		return st.LootObject.Stand
 	case st.UseObject != nil:
 		return st.UseObject.Stand
+	case st.Ritual != nil:
+		return st.Ritual.Stand
 	}
 	return nil
 }

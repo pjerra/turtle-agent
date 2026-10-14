@@ -595,7 +595,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doPull(ctx, a)
 		case ActKill:
 			err = d.doBoss(ctx, a)
-		case ActLoot, ActUse, ActItem:
+		case ActLoot, ActUse, ActItem, ActRitual:
 			err = d.doObjectStep(ctx, a)
 		default:
 			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
@@ -647,6 +647,8 @@ func objectStepKind(st Step) string {
 		return "loot_object"
 	case st.UseItem != nil:
 		return "use_item"
+	case st.Ritual != nil:
+		return "ritual"
 	case st.WaitFor != nil && st.WaitFor.GameObject != nil:
 		return "wait_for game_object"
 	}

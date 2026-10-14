@@ -73,6 +73,9 @@ func (d *RemoteDriver) scanEntrySteps(fromLeg int) entryPlanScan {
 				offer(&st.UseObject.ObjectRef, st.UseObject.Stand)
 			case st.LootObject != nil:
 				offer(&st.LootObject.ObjectRef, st.LootObject.Stand)
+			case st.Ritual != nil:
+				at := st.Ritual.Position
+				offer(&ObjectRef{Entry: st.Ritual.Entry, Near: &at}, st.Ritual.Stand)
 			case st.WaitFor != nil && st.WaitFor.GameObject != nil:
 				offer(&st.WaitFor.GameObject.ObjectRef, nil)
 			}

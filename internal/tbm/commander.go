@@ -20,7 +20,7 @@ import (
 // Intents of the commander commands (the first two words of the command).
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
-	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "loot", "open", "use", "lootmethod", "state"}
+	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "loot", "open", "use", "ritual", "lootmethod", "state"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.

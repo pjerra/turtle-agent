@@ -152,6 +152,27 @@ type Step struct {
 	WaitFor    *WaitFor    `json:"wait_for,omitempty"`
 	LootObject *LootObject `json:"loot_object,omitempty"`
 	UseItem    *UseItem    `json:"use_item,omitempty"`
+	Ritual     *Ritual     `json:"ritual,omitempty"`
+}
+
+// Limits of a ritual step's party.
+const (
+	MinRitualParticipants = 2 // a ritual of one player is a use_object
+	MaxRitualParticipants = 5 // the party
+)
+
+// Ritual has several bots use a summoning ritual object together (game object type 18; Uldaman's Altar of the Keepers and Altar of
+// Archaedas need three different players). Remote runs only: the driver orders `cmd ritual entry:<Entry>@<Position> <carrier> <bot> <bot>`
+// (TortoiseBots), which walks the bots to the object, has them use it in turn and keeps them still until the object is active and the
+// ritual has run; the step ends with the final answer. A wait_for the object to be active (or whatever the ritual opens) belongs after it.
+// In the file, Position is [x, y, z] or {"x":..,"y":..,"z":..}.
+type Ritual struct {
+	Entry        uint32 `json:"entry"`
+	Position     Point  `json:"position"`
+	Participants int    `json:"participants"`
+	// Stand is where the party is held while the bots walk in (like UseObject.Stand); without it the driver stands the lead bot a few
+	// yards short of Position.
+	Stand *Point `json:"stand,omitempty"`
 }
 
 // ObjectRef picks a game object: by entry, by position, or both (the nearest object of that entry to Near).
@@ -293,6 +314,32 @@ type rawStep struct {
 	WaitFor    *rawWait    `json:"wait_for"`
 	LootObject *rawLoot    `json:"loot_object"`
 	UseItem    *rawUseItem `json:"use_item"`
+	Ritual     *rawRitual  `json:"ritual"`
+}
+
+type rawRitual struct {
+	Entry        uint32    `json:"entry"`
+	Position     *rawPos   `json:"position"`
+	Participants *int      `json:"participants"`
+	Stand        *rawPoint `json:"stand"`
+}
+
+// rawPos is a point written as [x, y, z] or as {"x":..,"y":..,"z":..}.
+type rawPos struct{ rawPoint }
+
+func (p *rawPos) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '[' {
+		var a []*float32
+		if err := json.Unmarshal(t, &a); err != nil {
+			return err
+		}
+		if len(a) != 3 || a[0] == nil || a[1] == nil || a[2] == nil {
+			return errors.New("a position array is [x, y, z]: three numbers")
+		}
+		p.X, p.Y, p.Z = a[0], a[1], a[2]
+		return nil
+	}
+	return strict(b, &p.rawPoint)
 }
 
 type rawLoot struct {
@@ -629,16 +676,16 @@ func (c *checker) item(path string, r *rawItem) *ItemRef {
 func (c *checker) step(path string, r *rawStep) Step {
 	var s Step
 	n := 0
-	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil} {
+	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil} {
 		if set {
 			n++
 		}
 	}
 	switch {
 	case n > 1:
-		c.fail(path, "has more than one of use_object, wait_for, loot_object and use_item: one step does one thing")
+		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item and ritual: one step does one thing")
 	case n == 0:
-		c.fail(path, "needs use_object, wait_for, loot_object or use_item")
+		c.fail(path, "needs use_object, wait_for, loot_object, use_item or ritual")
 	case r.UseObject != nil:
 		u := &UseObject{ObjectRef: c.ref(path+".use_object", &r.UseObject.rawRef)}
 		if r.UseObject.Stand != nil {
@@ -663,10 +710,37 @@ func (c *checker) step(path string, r *rawStep) Step {
 		u.RequiresItem = c.item(path+".use_item.requires_item", r.UseItem.RequiresItem)
 		u.ExpectItem = c.item(path+".use_item.expect_item", r.UseItem.ExpectItem)
 		s.UseItem = u
+	case r.Ritual != nil:
+		s.Ritual = c.ritual(path+".ritual", r.Ritual)
 	default:
 		s.WaitFor = c.wait(path+".wait_for", r.WaitFor)
 	}
 	return s
+}
+
+func (c *checker) ritual(path string, r *rawRitual) *Ritual {
+	out := &Ritual{Entry: r.Entry}
+	if r.Entry == 0 {
+		c.fail(path+".entry", "required (the entry of the summoning ritual object)")
+	}
+	if r.Position == nil {
+		c.fail(path+".position", "required ([x, y, z]: the server finds the object by its entry near this point)")
+	} else {
+		out.Position = c.point(path+".position", &r.Position.rawPoint)
+	}
+	switch {
+	case r.Participants == nil:
+		c.fail(path+".participants", "required (the bots that use the object: %d-%d; the object's own number is in its template)", MinRitualParticipants, MaxRitualParticipants)
+	case *r.Participants < MinRitualParticipants || *r.Participants > MaxRitualParticipants:
+		c.fail(path+".participants", "%d is outside %d-%d", *r.Participants, MinRitualParticipants, MaxRitualParticipants)
+	default:
+		out.Participants = *r.Participants
+	}
+	if r.Stand != nil {
+		p := c.point(path+".stand", r.Stand)
+		out.Stand = &p
+	}
+	return out
 }
 
 func (c *checker) wait(path string, r *rawWait) *WaitFor {

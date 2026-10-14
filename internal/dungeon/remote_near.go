@@ -337,6 +337,9 @@ func objectViewOf(st *Step) (*ObjectRef, *Point) {
 		ref, stand = &st.UseObject.ObjectRef, st.UseObject.Stand
 	case st.LootObject != nil:
 		ref, stand = &st.LootObject.ObjectRef, st.LootObject.Stand
+	case st.Ritual != nil:
+		at := st.Ritual.Position
+		ref, stand = &ObjectRef{Entry: st.Ritual.Entry, Near: &at}, st.Ritual.Stand
 	case st.WaitFor != nil && st.WaitFor.GameObject != nil:
 		ref = &st.WaitFor.GameObject.ObjectRef
 	default:

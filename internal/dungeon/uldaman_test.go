@@ -136,7 +136,7 @@ func TestUldamanFullPlan(t *testing.T) {
 		t.Fatalf("no leg %q", name)
 		return Leg{}
 	}
-	for name, want := range map[string]string{"sentinel": "[]", "keepers_door": "[124368]", "keepers_altar": "[130511]", "archaedas": "[141869 133234]"} {
+	for name, want := range map[string]string{"sentinel": "[]", "keepers_door": "[124368]", "keepers_altar": "[]", "archaedas": "[141869]"} {
 		if got := fmt.Sprint(use(leg(name))); got != want {
 			t.Errorf("%s: use_object steps %s, want %s", name, got, want)
 		}
@@ -150,20 +150,21 @@ func TestUldamanFullPlan(t *testing.T) {
 	if len(k.PullGroups) != 1 || fmt.Sprint(k.PullGroups[0].Entries) != "[4857 4857 4857 4857]" {
 		t.Errorf("keepers: %+v", k.PullGroups)
 	}
-	// The altar steps are followed by a short wait for the altar to be active, with the reason in fail_text: one carrier cannot fire a ritual of three
-	// participants, and the run must stop there with that message, not 600 s later at the next leg's door.
+	// The altars are rituals of three: a ritual step (three bots in turn, remote runs) followed by a short wait for the altar to be active, so a
+	// run that stops at the altar says so and not 600 s later at the next leg's door.
 	for name, altar := range map[string]uint32{"keepers_altar": 130511, "archaedas": 133234} {
 		l := leg(name)
 		var found bool
 		for i, st := range l.Steps {
-			if st.UseObject != nil && st.UseObject.Entry == altar {
+			if r := st.Ritual; r != nil && r.Entry == altar {
 				w := l.Steps[i+1].WaitFor
-				found = w != nil && w.GameObject != nil && w.GameObject.Entry == altar && w.GameObject.State == "active" && w.TimeoutS == 20 &&
-					strings.Contains(w.FailText, "three participants")
+				found = r.Participants == 3 && r.Stand != nil && dist3(r.Position, *r.Stand) < 6 &&
+					w != nil && w.GameObject != nil && w.GameObject.Entry == altar && w.GameObject.State == "active" && w.TimeoutS == 20 &&
+					strings.Contains(w.FailText, "cmd ritual")
 			}
 		}
 		if !found {
-			t.Errorf("%s: no 20 s wait with a fail_text after the use of altar %d: %+v", name, altar, l.Steps)
+			t.Errorf("%s: no ritual step of 3 for altar %d followed by a 20 s wait with a fail_text: %+v", name, altar, l.Steps)
 		}
 	}
 	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
@@ -293,6 +294,9 @@ func objRef(s Step) *ObjectRef {
 		return &s.LootObject.ObjectRef
 	case s.WaitFor != nil && s.WaitFor.GameObject != nil:
 		return &s.WaitFor.GameObject.ObjectRef
+	case s.Ritual != nil:
+		at := s.Ritual.Position
+		return &ObjectRef{Entry: s.Ritual.Entry, Near: &at}
 	}
 	return nil
 }
@@ -325,6 +329,9 @@ func waypoints(l Leg) []Point {
 	for _, s := range l.Steps {
 		if s.UseObject != nil && s.UseObject.Stand != nil {
 			pts = append(pts, *s.UseObject.Stand)
+		}
+		if s.Ritual != nil && s.Ritual.Stand != nil {
+			pts = append(pts, *s.Ritual.Stand)
 		}
 	}
 	if l.Boss != nil {
