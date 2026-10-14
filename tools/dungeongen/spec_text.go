@@ -20,11 +20,16 @@ Status: ` + "`draft`" + ` (not mapped, not live-checked), ` + "`mapped`" + ` (th
 this table is read from it.
 
 **mmaps.** The navmesh tests (path_to, the waypoint and pack checks) run only where the machine has the map's ` + "`<map>.mmap`" + ` and ` + "`<map>*.mmtile`" + ` files
-(` + "`$TURTLE_AGENT_MMAPS`" + `, ` + "`~/tb-ci/mmaps-turtle<map>`" + ` or ` + "`~/tortoise-wow-server/data/mmaps`" + `). The test VM (yulon-ubuntu2) holds maps 1 (Kalimdor, the outer map of the
-portals of Zul'Farrak and most Kalimdor dungeons), 70 and 209. Every other instance map is on m910q in ` + "`~/tortoise-wow-server/data/mmaps`" + ` (all 40 maps of the list, about 0.5 GB
-of tiles, 2.5 GB with the continents); to get them onto the VM, copy that folder read-only, the instance maps one folder each as was done for 209:
-` + "`rsync -a m910q:tortoise-wow-server/data/mmaps/<map>.mmap m910q:tortoise-wow-server/data/mmaps/<map>*.mmtile ~/tb-ci/mmaps-turtle<map>/`" + ` (the VM disk has about 4 GB free).
+(` + "`$TURTLE_AGENT_MMAPS`" + `, ` + "`~/tb-ci/mmaps-turtle<map>`" + ` or ` + "`~/tortoise-wow-server/data/mmaps`" + `). The test VM (yulon-ubuntu2) holds all 40 instance maps and map 1 (Kalimdor, the outer map of the
+portals of Zul'Farrak and most Kalimdor dungeons), one folder each; the source is m910q's ` + "`~/tortoise-wow-server/data/mmaps`" + ` (about 0.5 GB of tiles, 2.5 GB with the continents).
+To add a map: ` + "`rsync -a m910q:tortoise-wow-server/data/mmaps/<map>.mmap m910q:tortoise-wow-server/data/mmaps/<map>*.mmtile ~/tb-ci/mmaps-turtle<map>/`" + `.
 The outer maps 0 (Eastern Kingdoms) and 1 are needed only for the portal point checks.
+
+**Points on the navmesh.** A spawn may stand where the mesh has no floor (over lava or water, on a ledge, in the air). ` + "`tools/dungeongen/snaps.json`" + ` moves such a point of a draft to the nearest
+walkable floor on the same level (within 5 yd sideways and 3 yd up or down, the floor at or below the point first) and the generator applies it; rebuild it from the mesh with
+` + "`go run ./tools/dungeongen -spec tools/dungeongen/plans.json -snap-update ~/tb-ci`" + ` (needs the mmaps folders). A point with no such floor keeps its spawn position and carries ` + "`needs_walk`" + `
+(on the leg for its ` + "`to`" + `, on the pull group, on the boss); the mapping walk has to find the real waypoint, and the navmesh sweep (TestPlansOnNavmeshWhereTheMachineHasIt) skips exactly those. Pull
+positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to the side is left as it is.
 `
 
 const tableTail = `

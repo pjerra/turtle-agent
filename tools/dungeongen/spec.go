@@ -25,6 +25,8 @@ type SpecFile struct {
 	// VMMaps lists the maps whose navmesh files the test VM holds (the table's mmaps column).
 	VMMaps []uint32   `json:"vm_mmaps"`
 	Plans  []PlanSpec `json:"plans"`
+	// Snaps is snaps.json next to the spec (see snap.go); not part of plans.json.
+	Snaps Snaps `json:"-"`
 }
 
 // PlanSpec is one plan.
@@ -129,6 +131,9 @@ func LoadSpec(path string) (*SpecFile, error) {
 			return nil, fmt.Errorf("%s: data and bosses are required", at)
 		}
 		seen[ps.Name] = true
+	}
+	if sf.Snaps, err = loadSnaps(filepath.Join(filepath.Dir(path), "snaps.json")); err != nil {
+		return nil, err
 	}
 	return &sf, nil
 }
@@ -362,6 +367,7 @@ func GenerateAll(sf *SpecFile, dataRoot, outDir string) ([]string, error) {
 		if err != nil {
 			return written, fmt.Errorf("%s: %w", ps.Name, err)
 		}
+		ApplySnaps(p, sf.Snaps[ps.Name])
 		b, err := dungeon.Marshal(p)
 		if err != nil {
 			return written, fmt.Errorf("%s: %w", ps.Name, err)
@@ -376,8 +382,17 @@ func GenerateAll(sf *SpecFile, dataRoot, outDir string) ([]string, error) {
 }
 
 // runSpec is the -spec command.
-func runSpec(specPath, dataRoot, outDir, table, plansDir string) int {
+func runSpec(specPath, dataRoot, outDir, table, plansDir, snapRoot string) int {
 	sf, err := LoadSpec(specPath)
+	if err == nil && snapRoot != "" {
+		var sn Snaps
+		var report []string
+		if sn, report, err = UpdateSnaps(sf, dataRoot, snapRoot); err == nil {
+			fmt.Println(strings.Join(report, "\n"))
+			sf.Snaps = sn
+			err = sn.write(filepath.Join(filepath.Dir(specPath), "snaps.json"))
+		}
+	}
 	if err == nil && outDir != "" {
 		var files []string
 		files, err = GenerateAll(sf, dataRoot, outDir)
@@ -458,6 +473,45 @@ func Table(sf *SpecFile, plansDir string) ([]byte, error) {
 			b.WriteString(r.text)
 		}
 	}
+	if err := needsWalkSection(&b, sf, plansDir); err != nil {
+		return nil, err
+	}
 	b.WriteString(tableTail)
 	return b.Bytes(), nil
+}
+
+// needsWalkSection lists the plans with points the mesh has no floor for (needs_walk): how many of each kind.
+func needsWalkSection(b *bytes.Buffer, sf *SpecFile, plansDir string) error {
+	var lines []string
+	for _, ps := range sf.Plans {
+		p, err := dungeon.Load(filepath.Join(plansDir, ps.Name+".json"))
+		if err != nil {
+			return err
+		}
+		to, groups, bosses := 0, 0, 0
+		for _, l := range p.Legs {
+			if l.NeedsWalk {
+				to++
+			}
+			for _, g := range l.PullGroups {
+				if g.NeedsWalk {
+					groups++
+				}
+			}
+			if l.Boss != nil && l.Boss.NeedsWalk {
+				bosses++
+			}
+		}
+		if to+groups+bosses > 0 {
+			lines = append(lines, fmt.Sprintf("| `%s` | %d | %d | %d |\n", ps.Name, groups, bosses, to))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	b.WriteString("\n## Points that need a walk\n\nPoints with no navmesh floor within reach (see mmaps above); each is marked `needs_walk` in its plan.\n\n| Plan | Pull groups | Bosses | Leg ends |\n| --- | --- | --- | --- |\n")
+	for _, l := range lines {
+		b.WriteString(l)
+	}
+	return nil
 }

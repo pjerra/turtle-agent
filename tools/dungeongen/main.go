@@ -95,9 +95,10 @@ func main() {
 	plansDir := flag.String("plans-dir", "dungeons", "with -spec -table: the folder the plan files are read from")
 	scripted := flag.String("scripted", "", "with -check: comma separated creature entries that are NPCs (npc_flags, faction 35) until a script or dialogue makes them hostile; no warning for them")
 	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
+	snapRoot := flag.String("snap-update", "", "with -spec: rebuild snaps.json from the navmesh folders <dir>/mmaps-turtle<map> (points off the mesh move to the nearest floor, or get needs_walk), then generate as asked")
 	flag.Parse()
 	if *spec != "" {
-		os.Exit(runSpec(*spec, *dataRoot, *outDir, *table, *plansDir))
+		os.Exit(runSpec(*spec, *dataRoot, *outDir, *table, *plansDir, *snapRoot))
 	}
 	if *format != "" {
 		os.Exit(formatFile(*format, *out))
