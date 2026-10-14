@@ -81,7 +81,11 @@ type fakeRemote struct {
 	// from the lead bot. farOnce makes the next direct move lose that bot (it falls 10 yd behind and sticks) and answers it too-far.
 	strictDirect bool
 	farOnce      string
-	summoned     []string            // bots `cmd summon` fetched to the lead bot
+	summoned     []string // bots `cmd summon` fetched to the lead bot
+	// strictAttack: a bot-scoped `cmd attack <guid> <bot>` is refused too-far while that bot stands more than 60 yd from the mob (the
+	// module\'s sight distance); tankTooFar makes the next n such orders too-far whatever the feed shows.
+	strictAttack bool
+	tankTooFar   int
 	noDirect     bool                // the module does not know the direct flag: a move with it is refused as invalid
 	cmdErr       map[string][]string // verb -> codes the next such orders are refused with
 	holdDelay    time.Duration       // the mob goes on the tank this long after the pull; negative: the mage keeps it
@@ -513,6 +517,19 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			return errReply(intent, "dead-target"), nil
 		}
 		if len(f) > 3 {
+			if g.tankTooFar > 0 {
+				g.tankTooFar--
+				return tooFarReply(intent, f[3], "the mob"), nil
+			}
+			if g.strictAttack {
+				for _, p := range g.party {
+					if strings.EqualFold(p.Name, f[3]) {
+						if dx, dy := float64(p.X-m.pos.X), float64(p.Y-m.pos.Y); sqrt(dx*dx+dy*dy) > 60 {
+							return tooFarReply(intent, p.Name, "the mob"), nil
+						}
+					}
+				}
+			}
 			// bot-scoped (#928): only that bot goes; the tank takes the mob, the party does not join
 			if m.engaged && !g.ignorePull && strings.EqualFold(f[3], g.party[0].Name) {
 				m.hold = 0

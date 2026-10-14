@@ -346,7 +346,10 @@ type RemoteReport struct {
 	DirectGatherTimeouts int     `json:"direct_gather_timeouts"`
 	DirectGatherFollows  int     `json:"direct_gather_follows"`
 	DirectGatherSummons  int     `json:"direct_gather_summons"`
-	Unreachable          int     `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	// Tank orders and pulls held back while the tank is dead, released or far from the mob / the lead bot (remote_tank.go).
+	TankOrdersHeld int `json:"tank_orders_held"`
+	TankAwayWaits  int `json:"tank_away_waits"`
+	Unreachable    int `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
