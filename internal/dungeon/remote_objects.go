@@ -999,7 +999,7 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 	}
 	defer d.resumeFollow(ctx, stayed)
 	var res tbm.OrderResult
-	err = d.withFFA(ctx, rec, func() error {
+	attempt := func() error {
 		build := func(arg string) string { return fmt.Sprintf("cmd loot %s %s %d", arg, carrier, it.Entry) }
 		var err error
 		if !byEntry {
@@ -1012,7 +1012,19 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 			res, err = d.carry(ctx, rec, build(tbm.GUIDArg(corpse.guid)), &corpse.at)
 		}
 		return err
-	})
+	}
+	err = d.withFFA(ctx, rec, attempt)
+	if err != nil && res.Code() == "timeout" && !runEnded(ctx, err) {
+		// No result came back in time (live, uldaman hires-2: the carrier was drinking after the fight when the order came). The
+		// loot may have happened all the same, or the bot may have been too busy to start: look in its bags, and send the order once more.
+		d.rep.note(fmt.Sprintf("%s: the loot order timed out; checking the bags of %s and sending it once more", rec.label(), carrier))
+		if inv, ierr := d.carrierInv(ctx, carrier); ierr == nil && inv.Count(it.Entry) > 0 {
+			rec.gained(fmt.Sprintf("%d x1", it.Entry))
+			return "", nil
+		}
+		res = tbm.OrderResult{}
+		err = d.withFFA(ctx, rec, attempt)
+	}
 	if err != nil {
 		if res.Code() == "invalid-target" {
 			if corpse.ageMS > staleCorpseMS {
