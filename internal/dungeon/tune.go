@@ -133,6 +133,7 @@ var tuneSpecs = []tuneSpec{
 	ints("rest_walk_health_pct", "pct", 10, 100, "health floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealthPct }),
 	ints("rest_walk_healer_mana_pct", "pct", 5, 100, "healer mana floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealerManaPct }),
 	ints("rest_walk_mana_pct", "pct", 5, 100, "mana floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkManaPct }),
+	ints("maintenance_every_legs", "count", 0, 20, "`.bot maintenance` for the whole party at the start of every Nth leg and after a recovered wipe (0: never)", func(t *tuneTarget) *int { return &t.cfg.MaintenanceEveryLegs }),
 	yds("gather_radius", 8, 80, "the rest gate before a pull also wants every living bot this near the lead bot", func(t *tuneTarget) *float32 { return &t.cfg.GatherRadius }),
 	// The careful walk (remote_gather.go: gather before a hop or a pull, pull what stands near the way) and the look at a pack.
 	yds("careful_hop", 5, 60, "the longest single move of a walk inside the dungeon", func(t *tuneTarget) *float32 { return &t.opt.CarefulHop }),

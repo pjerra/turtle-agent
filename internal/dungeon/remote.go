@@ -280,6 +280,12 @@ type RemoteReport struct {
 	Preflight *Preflight `json:"preflight,omitempty"`
 	// Refills are the `.bot maintenance` orders sent again at rest gates to casters who ran short of drinks (remote_rest.go).
 	Refills []Refill `json:"refills"`
+	// MaintenanceRuns are the automatic `.bot maintenance` rounds of the whole party during the run (every maintenance_every_legs legs and
+	// after a recovered wipe; remote_maint.go; the preflight's is not counted). MaintenanceSkips counts the rounds not done, by reason:
+	// "combat" (a leg's slot that never found a calm moment, or a round cut short by a fight), "disabled" (maintenance is off on the
+	// server) and "no bot lines" (the game cannot send them).
+	MaintenanceRuns  int            `json:"maintenance_runs"`
+	MaintenanceSkips map[string]int `json:"maintenance_skips"`
 	// EndedByModule is the reason the module gave when it ended the binding itself (lead bot gone, party disbanded, a player joined).
 	EndedByModule string `json:"ended_by_module,omitempty"`
 	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
@@ -402,6 +408,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
 	c.Refills = slices.Clone(r.Refills)
+	c.MaintenanceSkips = cloneMap(r.MaintenanceSkips)
 	c.TuneChanges = slices.Clone(r.TuneChanges)
 	c.PlanReloads = slices.Clone(r.PlanReloads)
 	c.Enter = r.Enter.clone()
@@ -484,8 +491,9 @@ type RemoteDriver struct {
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
 	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo bool
-	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
-	kit        restKit   // the bots' drink counts and refills (remote_rest.go)
+	tf         tankFirst  // the tank-first state of the fights (remote_tank.go)
+	kit        restKit    // the bots' drink counts and refills (remote_rest.go)
+	maint      maintState // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
@@ -528,7 +536,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
-		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
+		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, MaintenanceSkips: map[string]int{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
 	d.initTrace()
 	return d
 }
@@ -797,7 +805,8 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
 			d.wipeRecover++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
-				d.obj.waitAt = time.Time{} // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
+				_ = d.maintWipeRecovered(ctx) // once the party is calm; a context error ends the run at the next look
+				d.obj.waitAt = time.Time{}    // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
 				return true
 			} else {
 				d.st.Fail("wipe: " + rerr.Error())
@@ -1307,6 +1316,10 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
+	// Every few legs the bots get `.bot maintenance` again (remote_maint.go), before the gate so that the gate sees the full bags.
+	if err := d.maintLegStart(ctx, i); err != nil {
+		return err
+	}
 	// The gate at a leg's start waits for health and mana but not for the followers: they catch up on the walk, and the gate before a
 	// pull gathers them. When a long walk comes first, the party may rest on the way (walkAhead).
 	return d.restGateWalk(ctx, false, d.walkAhead(next))
@@ -1317,6 +1330,7 @@ func (d *RemoteDriver) endLeg(result string) {
 	if i < 0 {
 		return
 	}
+	d.maintLegEnd()
 	d.curLeg = -1
 	var l LegReport
 	d.rep.update(func(r *Report) {
@@ -2087,11 +2101,19 @@ func (d *RemoteDriver) restGate(ctx context.Context, gather bool) error {
 	return d.restGateWalk(ctx, gather, nil)
 }
 
+// restGateWalk is the gate below followed by the automatic maintenance that may be due: a gate that passed is a calm moment.
+func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walkRest) error {
+	if err := d.restGateRun(ctx, gather, walk); err != nil {
+		return err
+	}
+	return d.maintainIfDue(ctx)
+}
+
 // restGateWalk is restGate with the walking-rest rule of the gate that opens a leg: when the party is not at the targets on the gate's
 // first frame but everyone is above walk's floors, the gate does not hold (Result "walking"); the party rests on the way and the
 // gate before the first pull waits for the targets. A gate that finds everyone at the targets on its first frame is counted as
 // skipped (it costs no time).
-func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walkRest) (err error) {
+func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkRest) (err error) {
 	defer d.traceRest(d.clk.Now())
 	began := d.clk.Now()
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
