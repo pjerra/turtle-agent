@@ -18,6 +18,12 @@ and the rules for agents in [AGENTS.md](AGENTS.md).
 > Use it only on servers you run or are allowed to test on. It has no Warden emulation (see [What the server sees](#what-the-server-sees)) and does no rendering or
 > inventory management beyond listing the bags, using and equipping items, taking corpse loot, and buying and selling.
 
+## Branches and CI
+
+Work goes feature branch -> `dev` -> `main`. Open PRs against **`dev`**; `main` only takes `dev` after the owner's review.
+The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, and a cgo build) must be green to merge into
+either branch. The navmesh tests skip without mmaps.
+
 ## Quick start
 
 Requirements: Go 1.27.1 or newer (see `go.mod`), a C++17 compiler for cgo (g++ or clang; it builds the navmesh
@@ -87,6 +93,8 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
+turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -253,7 +261,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (remote mode: `{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `allow_draft` (run a plan whose status is `draft`; refused without it, see [Dungeon plans](#dungeon-plans)), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (remote mode: `{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -553,6 +561,11 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 }
 ```
 
+- `kind` (`"dungeon"`, the default, or `"raid"`), `status` (`draft`, `mapped` or `live-checked`, then free text: how far the plan has been checked), `hire_composition`
+  (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none) and `raid`
+  (`{"size": 40, "tanks": 4, "healers": 10, "dps": 26}`, required for a raid plan, size 10, 20 or 40, the roles a placeholder). A **draft** is the skeleton `tools/dungeongen` writes from the world export
+  (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk) and refuses every raid plan (no raid driver yet).
+  Every dungeon and raid of the server has a draft or better; see [docs/PLANS.md](docs/PLANS.md) for the table (level band, status, mmaps, the events, rituals, gossip and keys each needs).
 - `version` is 1 (a file of another version is refused), `map` the instance map id, `entrance` where the party stands after the
   portal. `notes` (plan and leg) are free text for people.
 - `entrance_trigger` (the id of the entrance's area trigger, Uldaman 286) is what a ghost's corpse run sends at the portal. A remote run's
@@ -574,11 +587,11 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `via` (optional, per leg) lists waypoints walked in order before `to`: `{"x":..,"y":..,"z":..}` is a plain walk on the navmesh; with `"direct": true` the step is a straight line, for a gap the
   navmesh does not bridge (Uldaman's scorpid-pit ramp). The remote driver sends it as `.bot cmd move x y z direct` (TortoiseBots #942: every bot walks the line; each must be within 25 yd
   across and 8 yd up or down of the point, and the point needs ground within 3 yd of its height). The loader refuses a direct step without a via point before it (where the party gathers) or longer than
-  those limits. If the module answers `too-far` (a follower still catching up) the step is sent again; `no-ground` (no floor under the point) and `no-los` (a bot cannot see the point: the step would cut through a wall) fail the leg at once; `invalid` means a server without the flag and fails the leg with
+  those limits. **The party is gathered on the lead bot before every send of a direct step and again once the lead bot has arrived** (TortoiseBots #948 takes the step only with every follower within 5 yd of the lead bot's spot, 1 yd up or down, in its sight, or a navmesh path of at most 40 yd to it; Uldaman hires-2 run 10 was refused `too-far: Hega is not with ...` one second after the first step): every living bot within 5 yd of the lead bot (horizontally; the module takes a straight join within 5 yd) and 1.5 yd above or below it (`cmd follow` holds the bots 5-7 yd back, so the old 3 yd bar always failed); nothing is sent for the first 3 s, then one `cmd move <the lead bot's x y z>` (the party walks to the lead bot's spot; sent once more at 9 s for a bot still apart), and once the party stands there a `cmd stay` holds it on the spot. **`cmd summon` is never sent for a gather**: it set the bots' follow to the commander, who stood outside the instance, and 15 s later the whole party was ejected to Northshire (Uldaman hires-3, run 1). The wait ends at 25 s whatever happens (a note names who was still away, `direct_gather_timeouts`, and the same step does not wait again). Counters: `direct_gathers`, `direct_gather_wait_s`, `direct_gather_timeouts`, `direct_gather_moves`, `direct_gather_stays`. If the module answers `too-far` naming a bot (`<Bot> is not with <Lead> ...`: it fell behind after the gather) the party is moved to the lead bot's spot at once (again after 2 s) and the step is sent once more; other `too-far` answers (a follower still catching up) send the step again; `no-ground` (no floor under the point) and `no-los` (a bot cannot see the point: the step would cut through a wall) fail the leg at once; `invalid` means a server without the flag and fails the leg with
   that error (nothing is sent in its place). The agent's own companions walk a direct waypoint as a plain one.
 - A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
-  [Dungeon runs](#dungeon-runs); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
+  [Dungeon runs](#dungeon-runs); `needs_walk` (set by tools/dungeongen on a pull group, a leg or a boss whose position has no navmesh floor within reach; the mapping walk replaces it); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
   a member of the group, for packs of one entry that stand closer together than that; `patrol` (optional,
   `{"entries": [..], "path": [{"x":..,"y":..,"z":..}, ..], "period_s": .., "source": ".."}`) is a patrol that walks by the group: its members' entries,
   its waypoints in walking order (at least two; it goes on from the last to the first, as the core's waypoint movement does: take them from
@@ -664,6 +677,16 @@ per boss, packs of spawns within `-cluster` yards or in one `creature_groups` gr
 factions, NPCs with `npc_flags` and rares are not packs, rares go to `skip`; a pack whose members all spawn with a stealth aura gets `"ambush": true`). It is repeatable: the same files and flags give the same
 bytes. `go run ./tools/dungeongen -format dungeons/uldaman.json` checks a plan and prints it in the form the files are kept in.
 `tools/dungeongen/testdata/uldaman` is the export the Uldaman plan was written from.
+
+`go run ./tools/dungeongen -spec tools/dungeongen/plans.json -out-dir dungeons -table docs/PLANS.md` writes the **draft plan of every dungeon and raid** the spec lists (46 plans) and the table of
+[docs/PLANS.md](docs/PLANS.md). The spec says per plan: the map, the entrance trigger (its target is the plan's `entrance`, its position on the outer map the `portal`, both from `portals.tsv`/`entrances.tsv` of the export), the
+bosses in the usual clear order (`route` instead orders them by a nearest-neighbour walk from the entrance, `last` stays last; a boss written `{"entry": E, "first": [..]}` has those entries killed first and they
+are no pack), `bbox` boxes for a map that holds several wings (Scarlet Monastery, Dire Maul, Maraudon, Stratholme, Blackrock Spire: packs outside the boxes are left out), the level `band` (default: the packs'
+median level - 2 up to their 90th percentile), `size` of a raid, the hired party, the teleports (`entrance_tele` and `outside_tele` are only written when the `game_tele` row lies within 80 yd of the entrance), `scripted` bosses (NPCs with
+`npc_flags` or faction 35 until a script or a dialogue makes them hostile: no `-check` warning) and `special`, what the instance needs besides killing (events, rituals, gossip, keys), which goes into the plan's notes as
+`Needs: ...` and into the table. Exports are `tools/dungeongen/testdata/map<id>` (`export.sh <map> <dir>` writes the four files, `portals.tsv` from `areatrigger_template`); `uldaman` and `zulfarrak` are
+hand-written and live-checked and are not regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
+navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how many plan points are on the mesh for every map whose `<map>.mmap` and tiles are present and lists the maps that are not.
 
 `go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
 the export (`creatures.tsv`) and prints a warning for each boss, `boss.first` entry or pack member that has `npc_flags` (a quest giver, vendor or trainer is no
@@ -1392,8 +1415,8 @@ top threat. Naming the `tank` is the reliable way.
 - *Loose adds.* A mob that has been hitting a bot that is not the tank for 3 s (and whose list the tank does not top) gets `.bot cmd attack <guid> <tank>` (TortoiseBots #928: with a
   bot name only that bot of the party goes, so the tank alone is sent at the add). It was `.bot cmd pull <guid> 0`, which the module refuses `tank-busy` while the tank is in
   combat, which is exactly when an add is loose (the first remote Uldaman run: 19 refusals, 11 threat overrides); `cmd pull` stays for opening pulls. The 3 s count starts at the
-  look that first showed the mob on that bot. At most one order per look, `AddCooldown` (8 s) apart for the same mob, 3 for the fight (`loose_add_orders`). A refusal is noted and
-  counted in `refused` (`attack:<code>`); it does not end the fight.
+  look that first showed the mob on that bot. At most one order per look, `AddCooldown` (8 s) apart for the same mob, 3 for the fight (`loose_add_orders`). The tank stays on the add it was last sent at for 5 s (`tankSwitchHold`) while that add is alive and still off the tank before it is sent at another one: with several loose adds it was otherwise sent at a different mob every second, walked between them and never landed a Taunt (ZF hires-2 run 3b). A mob that hits the healer (the named one, or any mana user when none is named) breaks the hold and gets its order at once. A refusal is noted and
+  counted in `refused` (`attack:<code>`); it does not end the fight. **No tank order goes to a tank that cannot take it**: one that is dead or released (a ghost shows dead), on another map, or more than 60 yd (horizontal; the module's sight distance) from the mob is not ordered; the order waits for the rez or the tank's run back (`tank_orders_held`, one note per absence). Seen in Zul'Farrak hires-3: the tank released and stood 433 yd off at the graveyard, and 11 orders were refused "That bot did not accept the attack". A `too-far` answer to a tank order pauses the tank orders for 10 s. A pull answered `too-far` while the named tank (not the lead bot) is dead, released or away from the lead bot waits for it, at most 90 s (`tank_away_waits`), before the lead bot is walked at the mob; after that wait the pull is refused and the group is not counted cleared.
 - *Crowd control.* The feed's `c` flag is stunned, confused, fleeing or rooted (`UNIT_STAT_*`): it cannot tell a sheep from a stunned or rooted mob. So only a mob a `cc` order
   was accepted for is spared, while it carries the flag or no bot is fighting it: it is not attacked, not picked as the pull target while another candidate is, and not sent the tank
   at, unless every engaged mob is like that (the last one is fought). The mob the party fights and the tank's own target are never spared. Each spared mob is counted once in
@@ -1595,7 +1618,7 @@ slot, pets in the agent's view while the hires stand around it, and whether a ke
 answer`, ...), `ended_by_module`, `gm_commands`, `run_gm_assists`, `agent_walks`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
 (since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
 in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `tank_busy_waits`, `cc_orders`,
-`revives`, `rez_waits`, `rezzed`, `pack_looks`, `packs_seen_empty`, `gathers`, `gather_wait_s`, `gather_timeouts`, `gather_gave_up`, `ahead_pulls`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`), unless it stands within 3 yd of the point of its last `cmd move` (its stay spot is already here, and the server cannot path to where a bot stands: it was refused `unreachable` about 23 times in a Uldaman run): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
+`revives`, `rez_waits`, `rezzed`, `pack_looks`, `packs_seen_empty`, `gathers`, `gather_wait_s`, `gather_timeouts`, `gather_gave_up`, `direct_gathers`, `direct_gather_wait_s`, `direct_gather_timeouts`, `direct_gather_moves`, `direct_gather_stays`, `tank_orders_held`, `tank_away_waits`, `ahead_pulls`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`), unless it stands within 3 yd of the point of its last `cmd move` (its stay spot is already here, and the server cannot path to where a bot stands: it was refused `unreachable` about 23 times in a Uldaman run): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
 `remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
 
 **Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not; `healer` names the bot that gets the healer mana target),
@@ -2629,6 +2652,151 @@ except through the movement packets it sent; and there are no textures or models
 (a door closed in the game still shows as open floor). Two full-run samples of the first live Uldaman run
 (`docs/LIVE-CHECKS.md`) are in the audit repository, not here: captures are not committed.
 
+## Live dashboard
+
+`turtle-agent dashboard` serves one web page on the laptop that shows every running commander live: where its party is on
+the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
+**read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
+`log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
+is embedded in the binary (no CDN, no build step).
+
+```
+turtle-agent dashboard                                  # http://127.0.0.1:8790/, every agent found in the settings files
+turtle-agent dashboard --listen 127.0.0.1:8790 --agents 8765,8766 --tests-dir ~/TortoiseBots-audit/tests
+turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tailnet>.ts.net   # over Tailscale, see below
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--listen` | `127.0.0.1:8790` | where the page is served; a non-loopback address prints a warning, and a specific IP is accepted as `Host` by itself |
+| `--allow-host` | none | host names or IP addresses (comma separated) the page accepts in its `Host` header besides loopback: exact names only (no wildcard, port or path). Any other `Host` gets 403 (see below) |
+| `--agents` | `auto` | `auto`: the `rpc` field of `settings*.json` in `--config-dir`; or a comma list of RPC ports/addresses (loopback only); `auto,8770` adds one. The list is read again every 10 s, so an agent started later appears |
+| `--tests-dir` | `~/TortoiseBots-audit/tests` | the **only** folder whose files `/files/...` serves (traces, summaries, reports); no other path is reachable |
+| `--traces-dir` | `~/turtle-agent/traces` | where the agents write run traces: read for the last orders and the binary SHA, never served |
+| `--plans-dir` | `~/turtle-agent/dungeons` | plan files for the map (comma list); a plan file that changes (a live plan reload) is loaded again. A plan no folder has is drawn from the copy the binary carries (`dungeons/embed.go`), which can differ from the file a run was started with |
+| `--minimap-dir` | `~/turtle-agent-minimaps` | the map images `minimap-extract` wrote; the map draws over the image of its map id when the folder has one (see Minimaps below) |
+| `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
+| `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
+
+**Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
+`http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
+`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
+and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
+
+**What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
+decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
+agent gets the four calls in parallel with a 2 s bound; the answer is built into a card and cached as JSON, so a page
+request does no work. The trace of the run (the path in `dungeon_status`'s `report.trace_file`) is followed from the byte it
+was last read to, so a poll costs the new lines only.
+
+**The page.** A card per commander (a grid, or tabs with the Grid/Tabs switch; the choice is remembered in the browser):
+
+- Header: character and level, the group label (the plan and the capture folder of the run), the state (phase, leg and name,
+  `pull group k of n`; the phase is the first word of what the watchdog says the run waits on: prepare, enter, walk, pull,
+  boss, rest, step, ...), minutes in, and the stall timer: the time since the run last made progress, yellow from 2 min,
+  red from 5 min (the stale-run rule).
+- Numbers: deaths, wipes, party downs, threat overrides, rest share and gates, gathers, walk stops, pulls, GM commands and
+  GM assists, agent walks, orders sent and refused, and the binary SHA (from the trace header).
+- The party table: name, class and role (from the hire block, else the trace's party record), HP %, power % (the power type
+  is in the tooltip), yards to the tank, and the target, from the module's `bot_view` frame.
+- The last 10 orders with the module's answer (ACK or ERR with code and message), the last error, the last refused order, and
+  the on-the-spot changes (`tune_change`, `plan_reload`, and the tunables whose value is not the base).
+- The map: an SVG drawn from the plan file for the plan's map: the route of each leg (via points; `direct` steps dashed), pull
+  groups as circles of their radius with the group number, bosses, doors and objects the steps use, the entrance. North is
+  up, west is left, one unit is one yard, and the view fits the plan. With `--minimap-dir` the real in-game map of the run's
+  map id is drawn under it (a picker in the legend row appears when the folder has several images of that map: the other source,
+  or another floor). The current leg's route is bold; legs done and groups
+  already pulled are dimmed. On it: the bots (tank gold, healer green, dead grey), the commander (violet, only when its
+  character stands on the plan's map), and the creatures of the feed (hostile red, neutral grey, friendly green; a ring marks
+  one in a fight; dimmed when its pull group is behind the run). Hovering a dot names it with HP, target and pull group.
+- Debug (a fold-out): the raw last `status`, `dungeon_status` and `tune_list` replies, and links to the run's trace, its
+  summary and the capture folder's `REPORT.md` under `--tests-dir`.
+
+A mob's kind comes from the module's reaction field (`h` hostile, `n` neutral, `f` friendly; critters, civilians and guards
+count as neutral). Its pull group is found by matching its entry and position against the plan's groups (within the
+group's radius, the current leg first); the module does not say which pack a creature belongs to.
+
+**What never leaves the server.** Cards are built from a list of fields, not from the raw replies. On top of that, everything
+served (the state, the raw panel) is scrubbed: any JSON member whose name matches `pass|token|account|secret|credential|auth|login|cookie|session_key|srp`
+is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
+names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
+`--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
+refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is neither a loopback name nor one named with
+`--allow-host` (or the `--listen` IP) is refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
+dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
+example `--embed-from http://m910q:8095`, must be named).
+
+**Reading and moving the map.** Each card opens on the whole map picture and the whole plan, fitted to a large panel. The mouse wheel
+zooms around the cursor, a drag pans, two fingers pinch and pan on a phone, a double click zooms in, and the `+`, `-` and `Fit`
+buttons do the same; the view is remembered per map in the browser. **Follow party** (on by default while a run is live) eases the view
+to the middle of the party at every update and keeps the zoom (first the party plus about 60 yards around it); dragging the map pauses it
+(a yellow "Following paused, click to resume" chip) and the toggle resumes it. A click on a bot's name in the party table centres the map
+on it. **Dim map** darkens the game picture under the drawing (0-80 %). The drawing's colours are fixed and bright with dark outlines
+(route cyan, current leg thicker, tank blue, healer green, damage orange, commander purple, hostile red, neutral grey, packs dashed yellow,
+bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page is read-only and loads no outside script or
+font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
+explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
+them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
+
+**What is drawn.** The **Layers** button opens a panel of checkboxes. The choice is **one setting for all maps and all cards**, saved once in the
+browser (`localStorage` key `maplayers.v2`; a change on one card shows on every card at once, and **Reset layers** returns to the defaults).
+The list is in `internal/dashboard/static/layers.js`; adding a layer there (plus its drawing in `app.js`) puts it in every card's panel and on
+every map. A layer whose data the card's map does not have is greyed out with the reason beside it (its saved choice is kept).
+Shown by default, as before layers could be chosen: the game map picture (with the dim slider), planned route, pull-group circles, cleared
+groups, bosses, doors and objects, section labels, walked path, next-stop arrow, bot dots and names, commander, hostile mobs. Off by default:
+neutral and friendly mobs, step numbers, and the newer layers: **grid**, **distance scale bar**, **critters** (their own kind; they used to
+count as neutral), **threat lines** (each mob to the unit it targets, from the feed's `target` guid), **bot target lines**, **the lead's heading
+arrow** (the feed has no facing, so it is the direction of the lead's last movement; it needs a walk of 4 yd within 20 s), **healer range**
+(a 40 yd ring around each living healer), **aggro range** (a 20 yd ring around the pull targets: the hostile mobs of the pack being pulled,
+else the ones fighting), **the line from the commander to the lead**, **times on the walked path** (the clock time the lead was last seen at
+a point, kept with the points) and **zone and sub-zone names** (greyed out: dungeon maps have no zone outlines in this dashboard). The planned route runs through every
+leg's waypoints, pull groups and boss in plan order: done legs dimmed, the current one bright and thick, the ones to come dashed, with the
+leg's name where it starts and the step number on hover. The walked path is the lead bot's position at each poll, kept in memory per agent
+(thinned, at most 1500 points, reset when a new run starts) and drawn fading with age. The arrow points from the party to the next stop of the
+current leg ("-> pack 2: Relic Hunter, 34 yd"). When several groups run on the same map each has its own colour and a chip to show or hide its
+path and dots. A door or object is a small door symbol; its name shows on hover or when zoomed in.
+
+**Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
+is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
+answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.
+
+## Minimaps
+
+The dashboard can draw the run over the real in-game map. The pictures come out of **your own game client** and stay on your
+disk: `turtle-agent minimap-extract` reads the client's MPQ archives (read only; a pure-Go reader, no StormLib) and writes
+`<map id>.png` and `<map id>.json` into a folder; nothing extracted is ever committed (the default folder
+`~/turtle-agent-minimaps` is outside the repository, and `/minimaps/` is in `.gitignore` for a folder inside it). Run it yourself:
+
+```
+turtle-agent minimap-extract --client "/path/to/WoW/Data" --out ~/turtle-agent-minimaps --maps all-instances
+turtle-agent minimap-extract --client .../Data --out ~/turtle-agent-minimaps --maps 70,209 --mmaps ~/turtle-agent-mmaps
+turtle-agent minimap-extract --client .../Data --list          # what each dungeon and raid would get, nothing written
+turtle-agent dashboard --minimap-dir ~/turtle-agent-minimaps
+```
+
+`--client` is the client's `Data` folder. The archives are read in the client's load order (`dbc`, `fonts`, `interface`, `misc`,
+`model`, `sound`, `speech`, `terrain`, `texture`, `wmo`, `base`, `backup`, `patch`, then `patch-2` ... `patch-9`, a later one
+overriding an earlier one), so a map a patch adds or changes, such as Turtle WoW's own dungeons, comes out as the client shows it.
+`--maps` is a comma list of map ids or `all-instances`: every `Map.dbc` row whose instance type is dungeon (party) or raid. A map
+can have up to three images, written as `<id>.<source>.png` + `.json`; the first source that exists in `--prefer` (default
+`worldmap,minimap,navmesh`) is also copied to `<id>.png` + `<id>.json`, which is the one the dashboard draws:
+
+| Source | What it is | Where it comes from |
+| --- | --- | --- |
+| `worldmap` | the map picture the client shows for the dungeon (the 4 x 3 tiles of `Interface\WorldMap\<area>`, cut to 1002 x 668); a dungeon with several floors gives `<id>.worldmap-2f.png`, ... too | `WorldMapArea.dbc` rows of the map: the picture's edges in world coordinates |
+| `minimap` | the terrain minimap tiles (256 px per 533.33 yd ADT tile) stitched into one image | `Textures\Minimap\md5translate.trs` and `Map.dbc`; a tile `map<A>_<B>.blp` is column A (from world y), row B (from world x). Indoor dungeons (WMOs) have none, or only the terrain around them |
+| `navmesh` | a height-shaded top-down render of the server's navmesh (transparent background, 2 px per yard) | `--mmaps`: the `.mmtile` files of the map, parsed in Go (no cgo) |
+
+The JSON beside each image: `map`, `name`, `source`, `width`, `height` (pixels), `px_per_yard`, and the world coordinates of
+its edges `north` and `south` (world x of the top and bottom edge), `west` and `east` (world y of the left and right edge).
+The image is north up and west left, as the in-game map is: pixel column `c` is world `y = west - c / px_per_yard`, pixel row
+`r` is world `x = north - r / px_per_yard`. The dashboard draws it at `(-west, -north)`, `west - east` yards wide and
+`north - south` yards tall in the plane its plan drawing uses (`x -> -y`, `y -> -x`). The test pins this against the Uldaman
+plan: the entrance, Ironaya and Archaedas land on their rooms of the client's Uldaman map.
+
+The output table lists, for every map, its type, the main image, its size and the other images. Archives it cannot read (a
+compression method used for audio only) are an error; a map no source has an image for is listed as `none`.
+
 ## Navmesh walking
 
 `walk_to` walks in a straight line and knows nothing of walls. `walk_path` plans on the navmesh the server's own
@@ -2879,8 +3047,9 @@ you set).
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |
 | `internal/mapview` | map images: the run from frames, events and reports, floors by height, the SVG and HTML renderers (see [Map images](#map-images)) |
 | `internal/capture` | packet capture files and the secret scan |
+| `internal/dashboard` | the live dashboard (see [Live dashboard](#live-dashboard)): agent discovery, the read-only poller, the card model, the plan drawing, the secrets filter, the embedded page |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `trace-score`, `pulltest`) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `dashboard`, `trace-score`, `pulltest`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures
