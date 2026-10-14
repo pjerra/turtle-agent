@@ -143,6 +143,8 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","bots":["A","B","C","D","E"]}`, "at most 4"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","bots":["Healy","healy"]}`, "listed twice"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","tank":"x;y"}`, "tank:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","healer":"x;y"}`, "healer:"},
+		{`{"name":"rig","healer":"Healy"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},

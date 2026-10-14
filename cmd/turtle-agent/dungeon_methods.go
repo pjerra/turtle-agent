@@ -107,6 +107,8 @@ type dungeonRunParams struct {
 	Bots    []string `json:"bots,omitempty"`
 	// Tank names the bot that holds threat (remote mode); empty: the bot that holds the first pulled mob.
 	Tank string `json:"tank,omitempty"`
+	// Healer names the bot that gets the healer mana target at the rest gates (remote mode); empty: every caster does.
+	Healer string `json:"healer,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 }

@@ -201,6 +201,48 @@ func TestPartyOverlaysVisibleMembers(t *testing.T) {
 	h.logout()
 }
 
+// Mana comes from the unit fields too: the stats packet is the only other source and the server stops sending it to a member
+// in range (live Uldaman run 4: a priest read 29% mana for 14 rest gates while it drank to full). The stats stop here after the
+// first packet; the unit fields change twice and the party list follows.
+func TestPartyPowerFollowsTheUnitFields(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGGroupList, gametest.GroupList(me.GUID, gorm))
+	mask := game.GroupUpdateStatus | game.GroupUpdateCurHP | game.GroupUpdateMaxHP | game.GroupUpdatePowerType | game.GroupUpdateCurPower | game.GroupUpdateMaxPower
+	h.send(opcode.SMSGPartyMemberStats, packet.NewWriter().PackedGUID(0x30).U32(mask).U8(game.MemberOnline).U16(500).U16(600).U8(0).U16(1060).U16(3534).Bytes())
+	waitFor(t, func() bool {
+		m := h.s.Party().Members
+		return len(m) == 1 && m[0].Power == 1060 && m[0].MaxPower == 3534
+	})
+	// The member comes into view: mana 1060 then, after a drink, 3534; max health 600 as before. No further stats packet.
+	vals := func(power uint32) map[uint16]uint32 {
+		return map[uint16]uint32{objects.UnitHealth: 500, objects.UnitMaxHealth: 600, objects.UnitBytes0: 5 << 8, objects.UnitPower1: power, objects.UnitMaxPower1: 3534}
+	}
+	h.send(opcode.SMSGUpdateObject, unitCreate(0x30, objects.TypePlayer, me.X+3, me.Y, me.Z, vals(1500)))
+	waitFor(t, func() bool { return h.s.Party().Members[0].Power == 1500 })
+	h.send(opcode.SMSGUpdateObject, valuesUpdate(0x30, map[uint16]uint32{objects.UnitPower1: 3534}))
+	waitFor(t, func() bool { return h.s.Party().Members[0].Power == 3534 })
+	if m := h.s.Party().Members[0]; m.MaxPower != 3534 || m.PowerType != 0 {
+		t.Fatalf("%+v", m)
+	}
+	// Out of sight again: the last stats values.
+	h.send(opcode.SMSGDestroyObject, packet.NewWriter().GUID(0x30).Bytes())
+	waitFor(t, func() bool { return h.s.Party().Members[0].Power == 1060 })
+	h.logout()
+}
+
+func TestFit16(t *testing.T) {
+	if p, m := fit16(3534, 3534); p != 3534 || m != 3534 {
+		t.Fatal(p, m)
+	}
+	if p, m := fit16(100000, 200000); p != 32767 || m != 65535 {
+		t.Fatal(p, m)
+	}
+	if p, _ := fit16(900, 600); p != 600 {
+		t.Fatal(p)
+	}
+}
+
 // The Party flag is decided when the event is emitted, not when its name wait ends: a
 // member who leaves inside the wait still flags the event.
 func TestPartyFlagIsFixedAtEmit(t *testing.T) {

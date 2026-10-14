@@ -60,8 +60,20 @@ type Leg struct {
 	Boss  *Boss    `json:"boss,omitempty"`
 	// AfterBoss are steps done once the boss is dead (or skipped for the leader's team): the chest by the camp that a hostile boss
 	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
-	AfterBoss []Step   `json:"after_boss,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	AfterBoss []Step `json:"after_boss,omitempty"`
+	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
+	Rest  *RestSpec `json:"rest,omitempty"`
+	Notes []string  `json:"notes,omitempty"`
+}
+
+// RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
+// max_s 60). A gate passes once every living member has at least Health percent health, every healer at least HealerMana percent
+// mana and every other mana user at least Mana percent; after MaxS seconds it goes on regardless (health floor permitting).
+type RestSpec struct {
+	Health     int `json:"health,omitempty"`      // percent, 1-100
+	HealerMana int `json:"healer_mana,omitempty"` // percent, 1-100
+	Mana       int `json:"mana,omitempty"`        // percent, 1-100
+	MaxS       int `json:"max_s,omitempty"`       // seconds, 1-MaxTimeoutS
 }
 
 // PullGroup is one pack: the entries it holds and where its members stand (one position each, or fewer when they
@@ -216,6 +228,7 @@ type rawLeg struct {
 	Steps      []json.RawMessage `json:"steps"`
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
+	Rest       *RestSpec         `json:"rest"`
 	Notes      []string          `json:"notes"`
 }
 
@@ -482,6 +495,21 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			continue
 		}
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
+	}
+	if rs := r.Rest; rs != nil {
+		for _, f := range []struct {
+			name string
+			v    int
+		}{{"health", rs.Health}, {"healer_mana", rs.HealerMana}, {"mana", rs.Mana}} {
+			if f.v < 0 || f.v > 100 {
+				c.fail(path+".rest."+f.name, "%d is outside 1-100 percent (omit it for the default)", f.v)
+			}
+		}
+		if rs.MaxS < 0 || rs.MaxS > MaxTimeoutS {
+			c.fail(path+".rest.max_s", "%d s is outside 1-%d (omit it for the default)", rs.MaxS, MaxTimeoutS)
+		}
+		v := *rs
+		l.Rest = &v
 	}
 	if len(l.PullGroups) == 0 && len(l.Steps) == 0 && len(l.AfterBoss) == 0 && l.Boss == nil {
 		c.fail(path, "has no pull_groups, steps, boss or after_boss: it would only walk to \"to\"; fold it into the next leg or add one")

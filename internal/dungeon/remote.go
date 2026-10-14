@@ -68,7 +68,9 @@ type RemoteOptions struct {
 	Bots []string // the other bots to bind with it; empty: the lead bot's party as it is
 	// Tank names the bot that holds threat. Empty: the bot that holds the first pulled mob's threat is taken for it.
 	Tank string
-	CC   []CCRule
+	// Healer names the bot the healer mana target applies to (the feed carries no class). Empty: every caster is held to the healer target.
+	Healer string
+	CC     []CCRule
 
 	FeedWait      time.Duration // the first frame after the bind
 	FeedStale     time.Duration // without a new frame this long the feed is "stalled": the loops wait instead of deciding
@@ -1121,18 +1123,22 @@ func (d *RemoteDriver) recoverWipe(ctx context.Context) error {
 type remoteRest struct {
 	ok        bool
 	why       string
+	short     []string
 	minHealth int
 	dead      []tbm.PartyRec
 	stalled   []string
+	nudge     []shortMana // members whose mana has not risen at all in DrinkNudge and have had no order of their own yet
 }
 
 // restState looks at the party in the newest frame, like Driver.restState: health and mana at the thresholds and everyone
 // near the lead bot. A caster whose mana did not rise ManaStallPct in ManaStall (it does not drink) is let pass, unless it is
-// below HealerManaMin (the feed carries no class, so every caster that low is waited for).
-func (d *RemoteDriver) restState(mana map[packet.GUID]manaWatch) remoteRest {
+// below HealerManaMin (the feed carries no class, so every caster that low is waited for). The healer is the bot RemoteOptions.Healer
+// names, held to the healer mana target; without one every caster is.
+func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 	r := remoteRest{ok: true, minHealth: 100}
 	var low []string
 	now := d.clk.Now()
+	tgt := rw.tgt
 	lead, haveLead := d.leadPos()
 	for _, m := range d.fr.Party {
 		if m.Dead {
@@ -1142,7 +1148,7 @@ func (d *RemoteDriver) restState(mana map[packet.GUID]manaWatch) remoteRest {
 		}
 		h := m.HPPct()
 		r.minHealth = min(r.minHealth, h)
-		if h < d.cfg.RestHealthPct {
+		if h < tgt.health {
 			r.ok = false
 			low = append(low, fmt.Sprintf("%s health %d%%", m.Name, h))
 		}
@@ -1154,31 +1160,25 @@ func (d *RemoteDriver) restState(mana map[packet.GUID]manaWatch) remoteRest {
 			continue
 		}
 		p := m.PowerPct()
-		if p >= d.cfg.RestManaPct {
-			delete(mana, m.GUID)
+		healer := d.opt.Healer == "" || strings.EqualFold(d.opt.Healer, m.Name)
+		if p >= tgt.manaNeed(healer) {
+			delete(rw.mana, m.GUID)
 			continue
 		}
-		w, ok := mana[m.GUID]
-		if !ok {
-			w = manaWatch{power: m.Power, since: now}
-			mana[m.GUID] = w
+		w, nudge := rw.look(d.cfg, now, m.GUID, m.Power)
+		sm := shortMana{GUID: m.GUID, Name: m.Name, Pct: p}
+		if nudge {
+			r.nudge = append(r.nudge, sm)
 		}
-		stalled := false
-		if now.Sub(w.since) >= d.cfg.ManaStall && p >= d.cfg.HealerManaMin {
-			if int(m.Power)-int(w.power) >= int(m.MaxPower)*d.cfg.ManaStallPct/100 {
-				mana[m.GUID] = manaWatch{power: m.Power, since: now}
-			} else {
-				stalled = true
-			}
-		}
-		if stalled {
+		if p >= d.cfg.HealerManaMin && rw.stalled(d.cfg, now, m.GUID, w, m.Power, m.MaxPower) {
 			r.stalled = append(r.stalled, fmt.Sprintf("%s not drinking (mana %d%%)", m.Name, p))
 		} else {
 			r.ok = false
-			low = append(low, fmt.Sprintf("%s mana %d%%", m.Name, p))
+			low = append(low, sm.String())
 		}
 	}
 	low = append(low, r.stalled...)
+	r.short = low
 	r.why = fmt.Sprint(low)
 	return r
 }
@@ -1187,19 +1187,17 @@ func (d *RemoteDriver) restState(mana map[packet.GUID]manaWatch) remoteRest {
 // of combat: a fight is helped with attack orders, and the timeout counts from its end. A dead bot is revived with `.bot cmd revive`
 // (owner or GM) and the wait for it; with RecoverWipe off a revive that is refused fails the run, like a dead member without GM
 // shortcuts in group mode.
-func (d *RemoteDriver) restGate(ctx context.Context) error {
+func (d *RemoteDriver) restGate(ctx context.Context) (err error) {
 	began := d.clk.Now()
-	defer func() {
-		if s := d.clk.Now().Sub(began).Seconds(); s > 0 {
-			d.legStat(func(l *LegReport) { l.RestSeconds += s })
-		}
-	}()
+	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
+	rec := newGateRec(max(d.curLeg, 0), tgt, began)
+	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
 	ordered := false
 	var lastRest time.Time
 	calm := began
 	var fightBegan time.Time
-	mana := map[packet.GUID]manaWatch{}
-	limit := d.cfg.RestTimeout + 2*d.cfg.FightTimeout
+	rw := newRestWatch(tgt)
+	limit := tgt.max + 2*d.cfg.FightTimeout
 	d.look()
 	for {
 		if el := d.clk.Now().Sub(began); el > limit {
@@ -1220,14 +1218,15 @@ func (d *RemoteDriver) restGate(ctx context.Context) error {
 				return err
 			}
 			ordered, calm = false, now
-			clear(mana)
+			clear(rw.mana)
 			if err := d.tick(ctx, d.cfg.Poll); err != nil {
 				return err
 			}
 			continue
 		}
 		fightBegan = time.Time{}
-		st := d.restState(mana)
+		st := d.restState(rw)
+		rec.g.Short = st.short
 		if len(st.dead) > 0 {
 			if err := d.reviveDead(ctx, "dead bots at a rest gate"); err != nil {
 				return err
@@ -1237,21 +1236,44 @@ func (d *RemoteDriver) restGate(ctx context.Context) error {
 		}
 		if st.ok {
 			if len(st.stalled) > 0 {
+				rec.g.Result = "stalled"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
 			}
 			return nil
 		}
-		if d.clk.Now().Sub(calm) > d.cfg.RestTimeout {
+		// The commander has no order for one bot (`.bot cmd rest` is the whole party's): a member whose mana does not rise at all gets
+		// the rest order once more, and a refused one is told apart in the record.
+		if fresh := slices.DeleteFunc(slices.Clone(st.nudge), func(m shortMana) bool { return rw.nudged[m.GUID] }); len(fresh) > 0 {
+			for _, m := range fresh {
+				rw.nudged[m.GUID] = true
+				rec.nudged(m.Name)
+			}
+			ordered, lastRest = true, d.clk.Now()
+			r, err := d.order(ctx, "rest")
+			if err != nil {
+				return err
+			}
+			if r.Kind == tbm.KindErr {
+				rec.g.PartyRestRefused = true
+			}
+			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent cmd rest again (%s)", d.curLeg, fresh[0].Name, fresh[0].Pct, d.cfg.DrinkNudge.Seconds(), replyText(r)))
+		}
+		if d.clk.Now().Sub(calm) > tgt.max {
 			if st.minHealth >= d.cfg.RestMinHealth {
-				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, d.cfg.RestTimeout.Seconds(), st.why, st.minHealth))
+				rec.g.Result = "gave_up"
+				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
 				return nil
 			}
-			return fmt.Errorf("the party is not rested after %.0f s: %s", d.cfg.RestTimeout.Seconds(), st.why)
+			return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
 		}
 		if !ordered || d.clk.Now().Sub(lastRest) > 45*time.Second {
 			ordered, lastRest = true, d.clk.Now()
-			if _, err := d.order(ctx, "rest"); err != nil {
+			r, err := d.order(ctx, "rest")
+			if err != nil {
 				return err
+			}
+			if r.Kind == tbm.KindErr {
+				rec.g.PartyRestRefused = true
 			}
 		}
 		if err := d.tick(ctx, d.cfg.RestPoll); err != nil {
