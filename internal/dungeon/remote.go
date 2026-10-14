@@ -88,14 +88,19 @@ type RemoteOptions struct {
 	LeadWait      time.Duration // how long an order waits out lead-unavailable (the lead bot between maps, dead, on a taxi)
 	ThreatWait    time.Duration // longest wait for the tank to hold a mob's threat before the party is sent in anyway
 	ThreatWarnPct int           // a bot that is not the tank at this share of the top threat is a warning
-	UnbindWait    time.Duration // the unbind at the end of the run
+	// OpenerDelay is how long the tank must have held a mob (top of its T record, the mob hitting it) before the party is first sent
+	// at it: the tank's lead needs a moment to build. Negative: no delay. AddCooldown is the least time between two tank orders at
+	// the same loose add (a mob hitting a bot that is not the tank).
+	OpenerDelay time.Duration
+	AddCooldown time.Duration
+	UnbindWait  time.Duration // the unbind at the end of the run
 }
 
 // DefaultRemoteOptions are the limits of a live run.
 func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
 		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
-		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, UnbindWait: 8 * time.Second}
+		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second}
 }
 
 func (o RemoteOptions) withDefaults() RemoteOptions {
@@ -111,6 +116,10 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 	fill(&o.MoveStall, d.MoveStall)
 	fill(&o.LeadWait, d.LeadWait)
 	fill(&o.ThreatWait, d.ThreatWait)
+	fill(&o.AddCooldown, d.AddCooldown)
+	if o.OpenerDelay == 0 {
+		o.OpenerDelay = d.OpenerDelay
+	}
 	fill(&o.UnbindWait, d.UnbindWait)
 	fill(&o.LookAheadETA, d.LookAheadETA)
 	fill(&o.MoveGap, d.MoveGap)
@@ -172,6 +181,15 @@ type RemoteReport struct {
 	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
 	CCOrders        int `json:"cc_orders"`        // crowd-control orders
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
+	// Tank first (README "Tank first"): TankThreatShare is the mean share of the top threat the tank held on the mobs of the fight, in
+	// percent (100: top of every list, 0: not among the top three), over TankThreatSamples frames of fighting; LooseAddOrders are the
+	// tank orders at a mob that hit a bot that was not the tank; CCRespected the crowd-controlled mobs the party was not sent at
+	// (counted once per mob); TargetSwitches the times the party was sent at another mob while the one before still lived.
+	TankThreatShare   float64 `json:"tank_threat_share"`
+	TankThreatSamples int     `json:"tank_threat_samples"`
+	LooseAddOrders    int     `json:"loose_add_orders"`
+	CCRespected       int     `json:"cc_respected"`
+	TargetSwitches    int     `json:"target_switches"`
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -250,6 +268,7 @@ type RemoteDriver struct {
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
+	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 }

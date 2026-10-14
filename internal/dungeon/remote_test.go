@@ -35,6 +35,11 @@ type rmob struct {
 	pullAt   time.Time
 	attacked bool
 	flags    string
+	// the tank-first tests: hold keeps the mob on that bot (until a `cmd pull` at it sends the tank), noTarget leaves it with no
+	// target (a sheep), tankPct is the tank's share in the T record while the mob is on another bot (0: not listed).
+	hold     packet.GUID
+	noTarget bool
+	tankPct  int
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -77,6 +82,8 @@ type fakeRemote struct {
 	truncating  bool // frames are marked truncated and list no hostile
 	panicOn     string
 	vanish      bool // after a pullback the mob leaves the world without a fight
+	ignorePull  bool // a `cmd pull` at an engaged mob changes nothing (the tank does not take it)
+	orderAt     []time.Time
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -154,6 +161,12 @@ func (g *fakeRemote) advance(d time.Duration) {
 			m.target = gTank
 			if g.holdDelay < 0 || g.now.Sub(m.pullAt) < g.holdDelay {
 				m.target = gMage
+			}
+			if m.hold != 0 {
+				m.target = m.hold
+			}
+			if m.noTarget {
+				m.target = 0
 			}
 			anyEngaged = true
 			if m.attacked {
@@ -234,7 +247,13 @@ func (g *fakeRemote) publish() {
 		h := tbm.HostileRec{GUID: m.guid, Entry: m.entry, X: m.pos.X, Y: m.pos.Y, Z: m.pos.Z, HPPct: int(m.hp), Target: m.target, Flags: m.flags}
 		f.Hostiles = append(f.Hostiles, h)
 		if m.engaged {
-			f.Threats = append(f.Threats, tbm.ThreatRec{Hostile: m.guid, Top: []tbm.ThreatEntry{{GUID: m.target, Pct: 100}, {GUID: gHealer, Pct: 30}}})
+			top := []tbm.ThreatEntry{{GUID: m.target, Pct: 100}, {GUID: gHealer, Pct: 30}}
+			if m.noTarget {
+				top = []tbm.ThreatEntry{{GUID: gMage, Pct: 100}}
+			} else if m.target != gTank && m.tankPct > 0 {
+				top = []tbm.ThreatEntry{{GUID: m.target, Pct: 100}, {GUID: gTank, Pct: m.tankPct}}
+			}
+			f.Threats = append(f.Threats, tbm.ThreatRec{Hostile: m.guid, Top: top})
 		}
 	}
 	if g.hide > 0 {
@@ -262,6 +281,7 @@ func errReply(intent, code string) tbm.Reply {
 
 func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	g.orders = append(g.orders, command)
+	g.orderAt = append(g.orderAt, g.now)
 	if g.panicOn != "" && strings.HasPrefix(command, g.panicOn) {
 		g.panicOn = ""
 		panic("boom")
@@ -322,6 +342,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			return errReply(intent, "invalid-target"), nil
 		}
 		m.pulled, m.pullAt = true, g.now
+		if intent == "cmd pull" && m.engaged && !g.ignorePull {
+			m.hold = 0 // the tank takes the mob
+		}
 		if g.vanish {
 			g.mobs = nil
 		}

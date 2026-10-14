@@ -64,9 +64,11 @@ type fakeGame struct {
 	pathErr            error
 	partyInViewNearMax float32 // distance the party members show at, 0: not in view
 
-	partyClass  map[packet.GUID]uint8 // class ids the members' unit rows show (the healer is a priest)
-	reviveDelay time.Duration         // a GM revive shows in the party list this long after (negative: never)
-	revAt       map[string]time.Time  // revives under way, by member name
+	partyClass  map[packet.GUID]uint8       // class ids the members' unit rows show (the healer is a priest)
+	partyTarget map[packet.GUID]packet.GUID // the targets the members' unit rows show
+	marks       map[string]packet.GUID      // the group's raid icons (MarkSource)
+	reviveDelay time.Duration               // a GM revive shows in the party list this long after (negative: never)
+	revAt       map[string]time.Time        // revives under way, by member name
 	onWalk      func(g *fakeGame, to Point)
 	// walkHook replaces WalkPath (it may block until ctx ends, as a long walk does). It must not touch the units: the
 	// driver's combat watch reads them from another goroutine meanwhile; aggro is the way to start a fight there.
@@ -195,7 +197,7 @@ func (g *fakeGame) Units() []objects.Unit {
 			if g.hidden[m.GUID] {
 				continue
 			}
-			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID],
+			out = append(out, objects.Unit{GUID: m.GUID, Type: "player", Name: m.Name, Distance: g.partyInViewNearMax, Class: g.partyClass[m.GUID], Target: g.partyTarget[m.GUID],
 				Auras: append([]objects.Aura(nil), g.auras[m.GUID]...)})
 		}
 	}
@@ -251,6 +253,9 @@ func (g *fakeGame) Target(ctx context.Context, guid packet.GUID) error {
 	return nil
 }
 
+// RaidMarks implements MarkSource.
+func (g *fakeGame) RaidMarks() map[string]packet.GUID { return g.marks }
+
 func (g *fakeGame) Chat(ctx context.Context, channel, text string) error {
 	g.chats = append(g.chats, text)
 	switch text {
@@ -293,7 +298,7 @@ func (g *fakeGame) pull() {
 		if !u.Dead && !stealthedFake(u) && dist3(Point{u.X, u.Y, u.Z}, Point{t.X, t.Y, t.Z}) <= 25 {
 			u.InCombat, u.Health = true, 50
 			u.dieAt = g.now.Add(g.dieIn + time.Duration(n)*2*time.Second)
-			u.Target = leader
+			u.Target = tank // a pulled mob goes to the tank
 			n++
 		}
 	}

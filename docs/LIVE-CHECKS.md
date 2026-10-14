@@ -639,3 +639,24 @@ is in the agent's group (or owned by it) and standing within 10 yd, and a Tortoi
 5. **Refusals.** A soulbound item: expect `cancelled` (the core refuses `CMSG_SET_TRADE_ITEM` with a cancel). A bot that is not in the group: expect the window not to open, `timeout` after `open_wait_ms` and a cancel sent.
 6. **Mage bot.** A mage bot may fill its side with conjured food and water (`AutoShareConjured`, default on): check `received` lists them and that the accept takes them without a second round of `back_to_trade` that runs the agent out of its four accepts.
 7. **Anticheat and idle.** A SEC_PLAYER leader: trade packets are not movement, but grep the anticheat log for the run anyway.
+
+## Tank first: the party follows the tank's threat (issues #83, #80)
+
+Built and tested against the fake game and the fake feed only; none of it has run live. The 2026-10-14 deploy-19h run (`~/TortoiseBots-audit/tests/deploy-19h/REPORT.md`) had the
+lead-bot tank at 15-25 % of the top threat while the rogue led: compare `report.remote.tank_threat_share` with that. Needs the 19h+ build and `RemoteCommander = 1`.
+
+1. **Remote, target.** A five-bot party (protection warrior named `tank`, healer, rogue, hunter, warlock) in a dungeon with a pack of three or more: `dungeon_run ... "mode":"remote"`. Read `orders`
+   (`attack` guids against the feed's `T` records, `bot_view`): the guid of each `attack` is the mob where the tank has the largest share, not the nearest. `tank_threat_share` over the fight
+   (expected well above 25), `threat_waits` (+1 per mob for the 2 s opener), `target_switches` (small; it should not rise every 10 s).
+2. **Remote, loose add.** Pull a pack, then let a second pack aggro on the healer or the warlock (or `.bot` move it): `loose_add_orders` rises and the order is `cmd pull <guid> 0`. Record the
+   module's answer: ACK or ERR (`no-tank`, `unreachable`, `too-far`), whether the tank walks to the add and keeps it (its `Target` in `bot_view` flips to the add, the add's `T` top becomes the tank), how long
+   `pull ... 0` holds the other bots ("stay" + "wait for attack" with a 0 s window, expected released at once for a mob in combat) and whether it resets the lead bot's stay spot, and whether the tank's pull ends with a "return to anchor" walk. If `pull` is refused or disturbs the fight, say which and the part to
+   change (it is the commander's only tank order; a bot-scoped `cmd attack <guid> <bot>` would be better, issue for TortoiseBots).
+3. **Remote, crowd control.** `cc: [{"entry":<mage-sheep entry>,"mark":"moon","bot":"<mage>"}]` on a pack with a sheepable mob: the sheep (feed flag `c` in `H`) is never in an `attack` order until it is
+   the last mob (`cc_respected` 1); confirm the flag is `c` on a polymorphed mob and that it clears when it breaks. A stunned or rooted mob also shows `c` (the flag is `UNIT_STAT_STUNNED|CONFUSED|FLEEING|ROOT`): the party must not drop a stunned mob the tank is hitting
+   (only mobs a `cc` order was accepted for are spared).
+4. **Remote, opener.** The first `attack` at a freshly pulled mob comes about 2 s after its `T` top is the tank (`orders` times in the event log), not at the pull.
+5. **Group mode, target.** `dungeon_run` as the leader with a tank, a mage and a healer: in a pack of three, the `target` the leader sets before each `.bot action attack` is the mob the tank
+   targets (check the tank's `target` in `units`), not the nearest. `report.tank_first.tank` names the tank; `tank_threat_share` is the share of mobs on it.
+6. **Group mode, loose add and CC.** Let a mob run at the healer: `loose_add_orders` 1, the chat shows `.bot action pull 0` right after the leader targeted the mob, and the tank goes for it. Polymorph one mob (`.bot action cc moon`) and set the moon icon: the leader never targets it for the attack order until it is the last (`cc_respected`).
+   Check `unit.auras` of a sheep shows the Polymorph name/mechanic the rule matches (Sap, Shackle Undead, Hibernate, Banish, Freezing Trap Effect too).

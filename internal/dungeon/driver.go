@@ -310,6 +310,7 @@ type Driver struct {
 	// no later pick or pull group looks at them again. The value says why, for the report.
 	skipped    map[packet.GUID]string
 	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
+	tg         groupTank // the tank-first state of the fights (driver_tank.go)
 
 	gm             bool   // the leader's account is taken for a GM, level above 0 (decided in begin)
 	level          int    // its account level: probed, asserted (gm_level, else developer) or 0
@@ -1021,10 +1022,13 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 		att := d.attackers()
 		if len(att) > 0 {
 			lastSeen = now
-			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
-				lastAssist = now
-				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.order(ctx, "attack"); err != nil {
+			if err := d.tankFirstGroup(ctx, att); err != nil {
+				return err
+			}
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(att) {
+				if t, ok := d.pickAssist(att); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, att); err != nil {
 						return err
 					}
 				}
@@ -1119,10 +1123,13 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			if now.Sub(fightBegan) > d.cfg.FightTimeout {
 				return fmt.Errorf("the party is still in combat after %.0f s at a rest gate", d.cfg.FightTimeout.Seconds())
 			}
-			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
-				lastAssist = now
-				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.order(ctx, "attack"); err != nil {
+			if err := d.tankFirstGroup(ctx, att); err != nil {
+				return err
+			}
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(att) {
+				if t, ok := d.pickAssist(att); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, att); err != nil {
 						return err
 					}
 				}
@@ -1778,6 +1785,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 	lastCombat, lastAssist := began, began
 	killed := map[packet.GUID]bool{} // members seen dead: the pull's progress
 	assistRefusals := 0
+	d.tg.looseSent, d.tg.focus = nil, 0 // the fight's first attack order comes at AssistEvery, after the pull's own join delay
 	for {
 		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 			return fightResult{}, err
@@ -1787,6 +1795,8 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		// a target that died or was never selected is picked again; a refused assist order is sent again at once.
 		for _, r := range d.takeRefusals() {
 			switch c := classify(r); {
+			case pullIntent(r) && d.tg.takeLooseAnswer(now):
+				// the answer to a tank order at a loose add, not to this fight's pull
 			case pullIntent(r) && c == refUnreachable:
 				return fightResult{out: refused, kills: len(killed), why: r.Code + ": " + r.Message}, nil
 			case pullIntent(r) && (c == refDead || c == refNoTarget):
@@ -1809,7 +1819,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 			}
 		}
 		alive, fighting := 0, false
-		var nearest *objects.Unit
+		var fighters []objects.Unit
 		for g := range tracked {
 			u, ok := byGUID[g]
 			if !ok { // out of view: gone
@@ -1826,10 +1836,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 			alive++
 			if u.InCombat || u.Health < u.MaxHealth {
 				fighting = true
-				if nearest == nil || u.Distance < nearest.Distance {
-					c := u
-					nearest = &c
-				}
+				fighters = append(fighters, u)
 			}
 		}
 		if fighting {
@@ -1845,11 +1852,17 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		case now.Sub(began) > sp.limit:
 			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
 		}
-		if engaged && nearest != nil && now.Sub(lastAssist) >= d.cfg.AssistEvery {
-			lastAssist = now
-			if err := d.g.Target(ctx, nearest.GUID); err == nil {
-				if err := d.order(ctx, "attack"); err != nil {
-					return fightResult{}, err
+		if engaged && len(fighters) > 0 {
+			if err := d.tankFirstGroup(ctx, fighters); err != nil {
+				return fightResult{}, err
+			}
+			// The leader targets the mob the tank holds best, not the nearest; a dead mob is replaced at once.
+			if now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(fighters) {
+				if t, ok := d.pickAssist(fighters); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, fighters); err != nil {
+						return fightResult{}, err
+					}
 				}
 			}
 		}
