@@ -236,3 +236,89 @@ func TestOpenObjectTriesTheOtherOpeningSpells(t *testing.T) {
 	}
 	h.noPacket(opcode.CMSGCastSpell)
 }
+
+// The server's release response can arrive between the last take and the close that follows: the window then counts as closed, no
+// second release goes out, and the loot that was taken is not reported as a failure. LootObject and LootCorpse share takeAll.
+func TestLootReleaseResponseBeforeTheCloseIsNotAnError(t *testing.T) {
+	ctx := context.Background()
+	for _, name := range []string{"object", "corpse"} {
+		t.Run(name, func(t *testing.T) {
+			h := start(t, Options{})
+			h.enterWorld()
+			guid, kind, openOp := chestGUID, uint8(game.LootPickpocket), opcode.CMSGCastSpell
+			if name == "corpse" {
+				guid, kind, openOp = wolfGUID, game.LootCorpse, opcode.CMSGLoot
+				wolfNearby(h)
+			} else {
+				chestNearby(h, 3)
+			}
+			// Between the take and the close: the emptied window was released, and the server's answer comes in right here.
+			h.s.afterTake = func() {
+				if _, err := h.srv.Expect(opcode.CMSGLootRelease, 2*time.Second); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := h.srv.Send(opcode.SMSGLootReleaseResponse, gametest.LootRelease(guid)); err != nil {
+					t.Error(err)
+					return
+				}
+				waitFor(t, func() bool { w, _ := h.s.LootWindow(ctx); return w == nil })
+			}
+			type res struct {
+				r   LootedObject
+				err error
+			}
+			done := make(chan res, 1)
+			go func() {
+				var r LootedObject
+				var err error
+				if name == "corpse" {
+					r, err = h.s.LootCorpse(ctx, guid, 2*time.Second)
+				} else {
+					r, err = h.s.LootObject(ctx, guid, 0, 2*time.Second, 2*time.Second)
+				}
+				done <- res{r, err}
+			}()
+			h.expect(openOp)
+			h.send(opcode.SMSGLootResponse, gametest.LootResponse(guid, kind, 0,
+				gametest.LootSlot{Slot: 0, Item: 7740, Count: 1, Display: 7366, SlotType: game.LootSlotAllow}))
+			if p := h.expect(opcode.CMSGAutostoreLootItem); string(p.Body) != string(game.BuildAutoStoreLootItem(0)) {
+				t.Fatalf("take % X", p.Body)
+			}
+			h.send(opcode.SMSGLootRemoved, gametest.LootRemoved(0))
+			r := <-done
+			if r.err != nil || len(r.r.Taken) != 1 || r.r.Taken[0].Item != 7740 || len(r.r.Left) != 0 {
+				t.Fatalf("%+v %v", r.r, r.err)
+			}
+			h.noPacket(opcode.CMSGLootRelease) // the one release was consumed in the hook
+		})
+	}
+}
+
+// With the response still to come, takeAll waits for it instead of releasing the emptied window a second time.
+func TestLootWaitsForTheReleaseResponseWithoutReleasingTwice(t *testing.T) {
+	ctx := context.Background()
+	h := lootRig(t)
+	type res struct {
+		r   LootedObject
+		err error
+	}
+	done := make(chan res, 1)
+	go func() { r, err := h.s.LootCorpse(ctx, wolfGUID, 2*time.Second); done <- res{r, err} }()
+	h.expect(opcode.CMSGLoot)
+	h.send(opcode.SMSGLootResponse, gametest.LootResponse(wolfGUID, game.LootCorpse, 0,
+		gametest.LootSlot{Slot: 0, Item: 2589, Count: 1, SlotType: game.LootSlotAllow}))
+	h.expect(opcode.CMSGAutostoreLootItem)
+	h.send(opcode.SMSGLootRemoved, gametest.LootRemoved(0))
+	h.expect(opcode.CMSGLootRelease)
+	select {
+	case r := <-done:
+		t.Fatalf("returned before the server confirmed the close: %+v %v", r.r, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	h.send(opcode.SMSGLootReleaseResponse, gametest.LootRelease(wolfGUID))
+	if r := <-done; r.err != nil || len(r.r.Taken) != 1 {
+		t.Fatalf("%+v %v", r.r, r.err)
+	}
+	h.noPacket(opcode.CMSGLootRelease)
+}
