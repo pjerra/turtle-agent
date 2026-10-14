@@ -678,8 +678,12 @@ func TestUldamanDirectSteps(t *testing.T) {
 			if !DirectStepOK(from, w.Point) {
 				t.Errorf("legs[%d] via[%d]: %.1f yd across and %.1f up or down from %v: over the limits %g and %g", i, j, hdist(from, w.Point), math.Abs(float64(w.Z-from.Z)), from, DirectMaxDistance, DirectMaxVertical)
 			}
-			if j != len(l.Via)-1 || w.Point != l.To {
-				t.Errorf("legs[%d] via[%d]: the direct step should be the last via point and end on the leg's `to`", i, j)
+			// The direct steps are the last via points, in a row, and the last one ends on the leg's `to`.
+			if j == len(l.Via)-1 && w.Point != l.To {
+				t.Errorf("legs[%d] via[%d]: the last direct step should end on the leg's `to`", i, j)
+			}
+			if j < len(l.Via)-1 && !l.Via[j+1].Direct {
+				t.Errorf("legs[%d] via[%d]: a direct step should be followed only by direct steps", i, j)
 			}
 			if pl == nil {
 				continue
@@ -698,8 +702,8 @@ func TestUldamanDirectSteps(t *testing.T) {
 			}
 		}
 	}
-	if found != 1 {
-		t.Fatalf("the plan has %d direct steps, want the one across the scorpid pit's hole", found)
+	if found != 2 {
+		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (the ramp base, then the plateau: no follower is more than 25 yd from either point)", found)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
