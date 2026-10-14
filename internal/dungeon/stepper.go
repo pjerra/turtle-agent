@@ -145,6 +145,16 @@ func NewStepperAt(p *Plan, w World, now func() time.Time, leg int) *Stepper {
 	return s
 }
 
+// NewStepperAtGroup starts inside leg: at its pull group `group` (0 <= group < len(PullGroups)), with the walk to the leg's To and the
+// pull groups before `group` skipped. The caller has brought the party to the group's gather spot and reports what was skipped.
+func NewStepperAtGroup(p *Plan, w World, now func() time.Time, leg, group int) *Stepper {
+	s := NewStepperAt(p, w, now, leg)
+	if leg >= 0 && leg < len(p.Legs) && group >= 0 && group < len(p.Legs[leg].PullGroups) {
+		s.ph, s.idx = phPulls, group
+	}
+	return s
+}
+
 func (s *Stepper) enterLeg(i int) {
 	s.leg, s.idx, s.since = i, 0, time.Time{}
 	s.stepAt, s.stepWalks = time.Time{}, 0

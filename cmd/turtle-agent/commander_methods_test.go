@@ -181,6 +181,26 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "brain plays the agent's own character"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","gm":true}`, "no GM command"},
+		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
+		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},
+		{`{"name":"rig","start_here":true}`, `go with mode "remote"`},
+		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
+		{`{"name":"rig","have_items":[7733]}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","have_items":[0]}`, "have_items"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","have_items":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}`, "have_items"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":0,"start_here":true}`, "exclude each other"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":0,"resume":true}`, "exclude each other"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"pull_group":0}}`, "needs leg"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0}}`, "needs leg"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"nowhere","pull_group":0}}`, "pulltest.leg: the plan has legs"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "names its own start"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":-1}}`, "use 1-10"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"reset":"fast"}}`, "pulltest.reset"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"second","pull_group":4}}`, "has 1 pull groups"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -461,5 +481,51 @@ func TestViewLinesStayOutOfTheEventLog(t *testing.T) {
 	}
 	if out := r.call("bot_view", `{"log_every":-1}`); errCode(out) != rpc.CodeInvalidParams {
 		t.Fatalf("%v", out)
+	}
+}
+
+// A run that starts inside the dungeon (from_pull_group) needs a GM commander: with a player's account it fails after reading the account
+// level and before any GM line, and still ends the binding. The result of dungeon_run names the pull group.
+func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
+	dir := t.TempDir()
+	plan := `{"version":1,"name":"rem","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"packs","to":{"x":5,"y":5,"z":5},"pull_groups":[{"entries":[299],"positions":[{"x":300,"y":5,"z":5}]}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "rem.json"), []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0}`))
+	if start["from_leg"] != float64(0) || start["from_pull_group"] != float64(0) {
+		t.Fatalf("%v", start)
+	}
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
+	r.system("TBM:ACTION_ACK|commander bind|party|1|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
+	r.system("TBM:ACTION_ACK|commander view|party|1|on")
+	r.system(viewFrame(1, false)...)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
+	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
+	r.expectBody(opcode.CMSGMessagechat, say(".account"))
+	r.system("Your account level is: 0")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
+	r.system("TBM:ACTION_ACK|cmd stay|party|1|Tanky")
+	r.expectBody(opcode.CMSGMessagechat, say(".bot commander unbind"))
+	r.system("TBM:ACTION_ACK|commander unbind|party|1|0")
+	var st map[string]any
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		st = resultOf(t, r.call("dungeon_status", `{}`))
+		if st["state"] == "failed" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	rep, _ := st["report"].(map[string]any)
+	if st["state"] != "failed" || !strings.Contains(rep["error"].(string), "needs a GM commander") {
+		t.Fatalf("%v", st)
+	}
+	rem := rep["remote"].(map[string]any)
+	sr, _ := rep["start"].(map[string]any)
+	if rem["gm_commands"].(float64) != 0 || rem["unbound"] != true || sr == nil || sr["kind"] != "pull_gather" || sr["pull_group"] != float64(0) || len(sr["gm_commands"].([]any)) != 0 {
+		t.Fatalf("remote %v start %v", rem, sr)
 	}
 }

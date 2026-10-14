@@ -285,3 +285,35 @@ func TestGMOnSelectsAndSendsAtomically(t *testing.T) {
 		t.Error("GMOn without a unit accepted")
 	}
 }
+
+// ClearTarget sends the selection of nothing, as a client does when the target is dropped, and the session no longer believes in one.
+func TestClearTargetSendsAZeroSelection(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{})
+	h.enterWorld()
+	if _, err := h.s.Target(ctx, 0x99, ""); err != nil {
+		t.Fatal(err)
+	}
+	if h.s.Status().Target == 0 {
+		t.Fatal("no target to clear")
+	}
+	if err := h.s.ClearTarget(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var last []byte
+	for {
+		p, err := h.srv.Next(time.Second)
+		if err != nil {
+			break
+		}
+		if p.Op == opcode.CMSGSetSelection {
+			last = p.Body
+		}
+	}
+	if last == nil || packet.NewReader(last).GUID() != 0 {
+		t.Fatalf("last selection % X", last)
+	}
+	if h.s.Status().Target != 0 {
+		t.Fatalf("target %v", h.s.Status().Target)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,34 @@ func (l *legParam) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// pulltestParam is dungeon_run's pulltest: the leg (an index or a name), the pull group in it, the tries (default 3, at most 10) and how a pack
+// is brought back between tries ("auto", "equivalent", "respawn" or "none").
+type pulltestParam struct {
+	Leg       *legParam `json:"leg"`
+	PullGroup *int      `json:"pull_group"`
+	Tries     int       `json:"tries,omitempty"`
+	Reset     string    `json:"reset,omitempty"`
+}
+
+// legIndex resolves a leg given as an index or a name; -1 when the plan has no such leg. nil is leg 0.
+func legIndex(plan *dungeon.Plan, l *legParam) int {
+	if l == nil {
+		return 0
+	}
+	if l.name == "" {
+		if l.index < 0 || l.index >= len(plan.Legs) {
+			return -1
+		}
+		return l.index
+	}
+	for i, leg := range plan.Legs {
+		if leg.Name == l.name {
+			return i
+		}
+	}
+	return -1
+}
+
 // buffsParam is the buffs parameter: a preset name ("world"), a spell id, or a list mixing both.
 type buffsParam struct {
 	presets []string
@@ -70,10 +99,18 @@ func (b *buffsParam) UnmarshalJSON(raw []byte) error {
 }
 
 type dungeonRunParams struct {
-	Name        string    `json:"name"`
-	FromLeg     *legParam `json:"from_leg,omitempty"`
-	Teleport    bool      `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
-	NoShortcuts bool      `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	Name    string    `json:"name"`
+	FromLeg *legParam `json:"from_leg,omitempty"`
+	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
+	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
+	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
+	FromPullGroup *int `json:"from_pull_group,omitempty"`
+	StartHere     bool `json:"start_here,omitempty"`
+	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
+	HaveItems   []uint32       `json:"have_items,omitempty"`
+	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
+	Teleport    bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
+	NoShortcuts bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`
@@ -158,13 +195,15 @@ type dungeonRunParams struct {
 }
 
 type dungeonRunResult struct {
-	Started bool     `json:"started"`
-	Plan    string   `json:"plan"`
-	Map     uint32   `json:"map"`
-	FromLeg int      `json:"from_leg"`
-	Legs    []string `json:"legs"`
-	Buffs   []string `json:"buffs"`           // the spells the run will put on the companions (GM), empty for none
-	Brain   string   `json:"brain,omitempty"` // the strategies that play the leader, empty for none
+	Started bool   `json:"started"`
+	Plan    string `json:"plan"`
+	Map     uint32 `json:"map"`
+	FromLeg int    `json:"from_leg"`
+	// FromPullGroup is the pull group the run starts at (from_pull_group, or the pulltest's).
+	FromPullGroup *int     `json:"from_pull_group,omitempty"`
+	Legs          []string `json:"legs"`
+	Buffs         []string `json:"buffs"`           // the spells the run will put on the companions (GM), empty for none
+	Brain         string   `json:"brain,omitempty"` // the strategies that play the leader, empty for none
 	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
 	// server at the start; the report's leader_gm has the answer).
 	LeaderGM string `json:"leader_gm"`
@@ -309,16 +348,13 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		}
 		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}, runID: tcfg.RunID}
 	}
-	from := 0
-	if l := p.FromLeg; l != nil {
-		from = l.index
-		if l.name != "" {
-			from = -1
-			for i, leg := range plan.Legs {
-				if leg.Name == l.name {
-					from = i
-				}
-			}
+	from := legIndex(plan, p.FromLeg)
+	if pt := p.Pulltest; pt != nil && remote {
+		if pt.Leg == nil || pt.PullGroup == nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest needs leg (a number or a name) and pull_group"}
+		}
+		if from = legIndex(plan, pt.Leg); from < 0 {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("pulltest.leg: the plan has legs %v", legNames(plan))}
 		}
 	}
 	names := make([]string, len(plan.Legs))
@@ -327,6 +363,11 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	if from < 0 || from >= len(plan.Legs) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", names, len(plan.Legs)-1)}
+	}
+	if remote {
+		if err := checkStartParams(p, plan, from); err != nil {
+			return dungeonRunResult{}, err
+		}
 	}
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
@@ -392,6 +433,48 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		buffNames = append(buffNames, b.String())
 	}
 	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group"}, nil
+}
+
+func legNames(plan *dungeon.Plan) []string {
+	names := make([]string, len(plan.Legs))
+	for i, l := range plan.Legs {
+		names[i] = l.Name
+	}
+	return names
+}
+
+// checkStartParams checks from_pull_group, start_here and pulltest against the plan and against each other (remote mode).
+func checkStartParams(p dungeonRunParams, plan *dungeon.Plan, from int) error {
+	bad := func(format string, a ...any) error {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf(format, a...)}
+	}
+	resume := p.Resume != nil && *p.Resume
+	if len(p.HaveItems) > 20 || slices.Contains(p.HaveItems, 0) {
+		return bad("have_items: at most 20 item entries, none 0")
+	}
+	if g := p.FromPullGroup; g != nil {
+		if n := len(plan.Legs[from].PullGroups); *g < 0 || *g >= n {
+			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *g, from, plan.Legs[from].Name, n, n-1)
+		}
+		if p.StartHere {
+			return bad("from_pull_group and start_here exclude each other: start_here does not move the party")
+		}
+		if resume {
+			return bad("from_pull_group and resume exclude each other: both say where the run starts in the leg")
+		}
+	}
+	if pt := p.Pulltest; pt != nil {
+		if p.FromLeg != nil || p.FromPullGroup != nil || p.StartHere || resume {
+			return bad("pulltest names its own start (leg and pull_group): leave from_leg, from_pull_group, start_here and resume out")
+		}
+		if pt.Tries < 0 {
+			return bad("pulltest.tries %d: use 1-%d", pt.Tries, dungeon.MaxPulltestTries)
+		}
+		if err := (dungeon.PulltestSpec{Leg: from, PullGroup: *pt.PullGroup, Tries: pt.Tries, Reset: pt.Reset}).Validate(plan); err != nil {
+			return bad("%v", err)
+		}
+	}
+	return nil
 }
 
 // Bounds on the setup list, so a report cannot be filled with a novel.

@@ -48,6 +48,9 @@ func (d *RemoteDriver) noteKilled(res fightResult) {
 	if res.out != won {
 		return
 	}
+	if d.pts != nil {
+		d.pts.kills += len(res.dead)
+	}
 	for _, u := range res.dead {
 		d.killedAt[u.entry] = append(d.killedAt[u.entry], u.at)
 		if u.guid != 0 {

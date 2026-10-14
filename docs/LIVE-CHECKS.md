@@ -979,3 +979,33 @@ Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull 
 6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
 7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
 8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
+
+## Start anywhere and the pull test (`from_leg`, `from_pull_group`, `dungeon_run.pulltest`)
+
+Built and tested against the fake commander only; no live run was made. Use a hired party (or a named one) inside a **partly cleared** instance, a GM
+commander at developer level (`.respawn` needs it) and `gm visible off`. What the first live use has to settle, in the order it meets them:
+
+1. **Entering the lead bot's instance** (`start.gm_commands[0]`): the commander is outside; `.appear <lead bot>` must put it in the lead bot's instance (not a new one of its own),
+   and the account's entries in the last hour must not grow (`instance-entries-*.json`). If it opens its own instance the following `.go xyz` and the summons land in the wrong place.
+2. **`.go xyz <x> <y> <z> <map>` inside the instance**: the commander lands at the start point within 20 yd (the run fails with "not at the start point after .go xyz" otherwise) and settles on the
+   floor (`status` z against the plan's z; the run does not trust the plan's z for a gather spot that came from a navmesh path).
+3. **`.bot summon <lead bot>` of a bound lead bot** (a player command, the only way to bring the lead bot without a GM line aimed at it): the answer line
+   (`Summoning Tanky to a safe position near you (3s)...`), whether the bot lands within 12 yd of the commander in 3-6 s, and whether the binding survives it (`remote.ended_by_module`
+   stays empty, the feed does not stall). After the arrival the module puts the bot on `follow` (its master is the commander): check the first `cmd move` of the run still moves it, and that it
+   does not wander after the commander before that: the run sends `cmd move <landed point>` at once and watches 4 s (`start` notes "the lead bot holds at ..."); if it still walks after the commander
+   the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
+4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
+5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
+   start `skipped (from_leg)`, and that nothing of them was pulled or walked. A pack of those legs that is still alive near the start point (a fresh instance) will aggro: write down which.
+6. **Gather spots** (`from_pull_group`): 55 yd short of the pack on the navmesh path from the leg's `to`. Check on Uldaman that the spot is on the mesh, out of sight of other packs, not in a
+   pit (`start.warning`), and that the first pull from it needs no more than one approach (`pack_looks`, the walk after the rest gate).
+7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
+   selection field going to 0 before the `.respawn` chat line). Record what comes back within 80 yd of the commander in the instance: the killed pack (same GUIDs, full health), other
+   corpses, game objects (chests, doors that were opened). The visibility distance of an instance map decides how far it reaches; the run refuses to send it when the commander is farther than 80 yd from the pack.
+   Also check what `.respawn` brought back that it should not (a boss the party killed, looted chests, other corpses): the run refuses it when a plan boss is within 250 yd and not seen alive; see whether that is too strict on Uldaman.
+8. **Respawned mobs and the driver's memory**: the second try of a respawned pack must show `threat_overrides` 0 when the tank holds the mob, and the same `time_to_kill_s` order of magnitude as the
+   first; a try that ends `no_pack` means the respawn did not bring the pack (or the bots could not see it from the gather spot): look at `pack_looks` and the feed.
+9. **The numbers a try holds**: `off_tank_s` and `adds` against `bot_view` and the trace's threat records for one try read by hand; `healer_min_mana_pct` against the healer's mana in the frames;
+   `rest_s` against `rest_gates[]`. Then run the same pull twice with an unchanged build and see what the spread is: that is the noise `--compare` has to beat.
+10. **Equivalent packs** (`equiv` in a plan): none of the shipped plans marks any yet. Mark a pair of Uldaman packs of the same mobs on similar ground and check that the walk between them does
+    not aggro a third pack (`walk_aggros`, `adds`).

@@ -78,7 +78,7 @@ func guidText(g packet.GUID) string {
 
 // traceCounters are the run's totals for the end record and the summary.
 func traceCounters(r Report) map[string]float64 {
-	c := map[string]float64{"seconds": r.Seconds, "legs": float64(len(r.Legs)), "deaths": float64(len(r.Deaths)), "wipes": float64(r.Wipes),
+	c := map[string]float64{"seconds": r.Seconds, "legs": float64(r.runLegs()), "deaths": float64(len(r.Deaths)), "wipes": float64(r.Wipes),
 		"gm_shortcuts": float64(len(r.Shortcuts)), "setup_shortcuts": float64(len(r.SetupShortcuts)), "leader_deaths": float64(r.LeaderDeaths),
 		"resurrections": float64(r.Resurrections), "corpse_runs": float64(r.CorpseRuns), "seconds_dead": r.SecondsDead}
 	var pulls, retries, aggros int
@@ -338,6 +338,12 @@ func (d *RemoteDriver) traceBegin(fromLeg int) {
 	opts := map[string]any{"recover_wipe": d.cfg.RecoverWipe, "lead_bot": d.opt.Lead, "bots": slices.Clone(d.opt.Bots), "cc_rules": len(d.opt.CC)}
 	if len(d.cfg.Setup) > 0 {
 		opts["setup"] = slices.Clone(d.cfg.Setup)
+	}
+	if g := d.startGroup(); g >= 0 {
+		opts["from_pull_group"] = g
+	}
+	if pt := d.opt.Pulltest; pt != nil {
+		opts["pulltest"] = map[string]any{"leg": pt.Leg, "pull_group": pt.PullGroup, "tries": pt.Tries, "reset": pt.Reset}
 	}
 	// The feed has facing and the bot's target but no movement flag or class, and it has threat lists.
 	caps := []string{trace.CapFacing, trace.CapThreat, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
