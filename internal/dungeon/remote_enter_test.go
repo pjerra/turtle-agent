@@ -171,7 +171,7 @@ func (g *enterFake) noGroupChangeAfter(marker string) {
 func TestRemoteEnterByGMTele(t *testing.T) {
 	g := newEnterFake(t)
 	g.inGroup = true // the agent starts in a group: it leaves it once, before the entry
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
@@ -217,7 +217,7 @@ func TestRemoteEnterByGMTele(t *testing.T) {
 func TestRemoteEnterBindTakesTheAgentOutOfItsParty(t *testing.T) {
 	g := newEnterFake(t)
 	g.inGroup, g.bindLeaves = true, true // a kept party: the bind removes the commander itself
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || g.idx("leave") >= 0 || rep.Remote.Enter.AgentLeftGroup {
 		t.Fatalf("%v %v %+v", err, g.log, rep.Remote.Enter)
 	}
@@ -228,7 +228,7 @@ func TestRemoteEnterByWalkingIntoThePortal(t *testing.T) {
 	g.level, g.known = 0, true // a player's account: no .tele
 	g.plan.Portal = &Portal{Map: 0, Point: Point{300, 0, 0}}
 	g.portal = &Point{300, 0, 0}
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
@@ -252,7 +252,7 @@ func TestRemoteEnterByWalkingIntoThePortal(t *testing.T) {
 func TestRemoteEnterWalkNeedsAPortal(t *testing.T) {
 	g := newEnterFake(t)
 	g.level = 0
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "no way in") || !strings.Contains(err.Error(), "has no portal") || g.idx("tele") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
 	}
@@ -261,7 +261,7 @@ func TestRemoteEnterWalkNeedsAPortal(t *testing.T) {
 	g.known = false
 	g.plan.Portal = &Portal{Map: 0, Point: Point{40, 0, 0}}
 	g.portal = &Point{40, 0, 0}
-	if rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}}); err != nil || rep.Remote.Enter.Method != EnterWalk || g.idx("tele") >= 0 {
+	if rep, err := g.run(opts()); err != nil || rep.Remote.Enter.Method != EnterWalk || g.idx("tele") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
 	}
 }
@@ -271,7 +271,7 @@ func TestRemoteEnterAGMWithoutATeleWalks(t *testing.T) {
 	g.plan.EntranceTele = ""
 	g.plan.Portal = &Portal{Map: 0, Point: Point{40, 0, 0}}
 	g.portal = &Point{40, 0, 0}
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.Remote.Enter.Method != EnterWalk || !strings.Contains(notesOf(rep), "has no entrance_tele") {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
@@ -280,7 +280,7 @@ func TestRemoteEnterAGMWithoutATeleWalks(t *testing.T) {
 func TestRemoteEnterFailsClearlyForABotOnTheWrongMap(t *testing.T) {
 	g := newEnterFake(t)
 	g.stuck["Magey"] = true // the summon does not bring it
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "Magey (map 0) not on map 70") || strings.Contains(err.Error(), "Healy") || rep.State != "failed" {
 		t.Fatalf("%v", err)
 	}
@@ -305,7 +305,7 @@ func TestRemoteEnterFailsClearlyForABotOnTheWrongMap(t *testing.T) {
 func TestRemoteEnterSummonsAgainABotThatStayedOutside(t *testing.T) {
 	g := newEnterFake(t)
 	g.swallow["Magey"] = 1
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
@@ -320,7 +320,7 @@ func TestRemoteEnterSummonsAgainABotThatStayedOutside(t *testing.T) {
 func TestRemoteEnterSummonsANamedBotTheFeedNoLongerLists(t *testing.T) {
 	g := newEnterFake(t)
 	g.dropOnTele, g.rejoinOnSummon = "Magey", true
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
@@ -330,7 +330,7 @@ func TestRemoteEnterSummonsANamedBotTheFeedNoLongerLists(t *testing.T) {
 	// Without a module that takes the bot back, the summon is refused and the run fails naming the bot, not "not in the feed" 30 s later.
 	g = newEnterFake(t)
 	g.dropOnTele = "Magey"
-	_, err = g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err = g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "cmd summon Magey was refused") || !strings.Contains(err.Error(), "no-bot") {
 		t.Fatalf("%v", err)
 	}
@@ -351,7 +351,7 @@ func (g *enterFake) count(prefix string) int {
 func TestRemoteEnterBindsAgainForABotThatLeftTheGroup(t *testing.T) {
 	g := newEnterFake(t)
 	g.leaveOnBind = []string{"Magey"}
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
@@ -392,7 +392,7 @@ func TestRemoteEnterWaitsForABotThatJoinsLate(t *testing.T) {
 	g := newEnterFake(t)
 	g.leaveOnBind = []string{"Magey"}
 	g.lateJoin = map[string]time.Time{"Magey": g.now.Add(7 * time.Second)}
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || rep.State != "done" || g.count("bind") != 1 || g.unbinds != 1 {
 		t.Fatalf("%v %s binds %d unbinds %d\n%s", err, rep.State, g.count("bind"), g.unbinds, notesOf(rep))
 	}
@@ -402,7 +402,7 @@ func TestRemoteEnterWaitsForABotThatJoinsLate(t *testing.T) {
 func TestRemoteEnterNeverEntersWithAPartialParty(t *testing.T) {
 	g := newEnterFake(t)
 	g.leaveOnBind, g.stubborn = []string{"Magey"}, true
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "Magey") || !strings.Contains(err.Error(), "partial party") {
 		t.Fatalf("%v %s", err, rep.State)
 	}
@@ -419,7 +419,7 @@ func TestRemoteEnterNamesTheReasonABotCannotBeInvited(t *testing.T) {
 	g := newEnterFake(t)
 	g.leaveOnBind = []string{"Magey"}
 	g.joinErr = map[string]string{"Magey": "hired"}
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "hired") || !strings.Contains(err.Error(), "Magey") || g.idx("tele") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
 	}
@@ -437,7 +437,7 @@ func TestRemoteEnterRefusesAnUnnamedBotInTheGroup(t *testing.T) {
 func TestRemoteEnterFailsWhenTheLeadBotNeverArrives(t *testing.T) {
 	g := newEnterFake(t)
 	g.teleFails = true
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "still on map 0") || !strings.Contains(err.Error(), "TRANSFER_ABORT_TOO_MANY_INSTANCES") || g.idx("summon") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
 	}
@@ -450,14 +450,14 @@ func TestRemoteEnterSummonsOnlyWhoIsOutside(t *testing.T) {
 	g := newEnterFake(t)
 	g.mapID = insideMap // the party is inside ...
 	g.memberMap[gMage] = 0
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}}) // ... but the mage
+	rep, err := g.run(opts()) // ... but the mage
 	if err != nil || g.idx("tele") >= 0 || strings.Join(rep.Remote.Enter.Summoned, ",") != "Magey" {
 		t.Fatalf("%v %v %+v", err, g.log, rep.Remote.Enter)
 	}
 	// A party that is all inside has no enter phase at all.
 	g = newEnterFake(t)
 	g.mapID = insideMap
-	rep, err = g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err = g.run(opts())
 	if err != nil || rep.Remote.Enter != nil || g.idx("tele") >= 0 || g.idx("probe") >= 0 || g.idx("summon") >= 0 || g.idx("record") >= 0 {
 		t.Fatalf("%v %v %+v", err, g.log, rep.Remote.Enter)
 	}
@@ -466,7 +466,7 @@ func TestRemoteEnterSummonsOnlyWhoIsOutside(t *testing.T) {
 func TestRemoteEnterKeepsTheAgentOutside(t *testing.T) {
 	g := newEnterFake(t)
 	g.agentMap = insideMap
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "must stay outside") || g.idx("tele") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
 	}
@@ -493,14 +493,14 @@ func TestRemoteEnterRefusesASixthInstanceInTheHour(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		g.ledger = append(g.ledger, g.now.Add(-time.Duration(i*10)*time.Minute))
 	}
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "5 new instances in the last hour") || !strings.Contains(err.Error(), "limit 5") || g.idx("tele") >= 0 || g.unbinds != 1 {
 		t.Fatalf("%v %v", err, g.log)
 	}
 	// An entry older than the hour does not count; four recent ones leave room, and the entry is added.
 	g = newEnterFake(t)
 	g.ledger = []time.Time{g.now.Add(-90 * time.Minute), g.now.Add(-50 * time.Minute), g.now.Add(-40 * time.Minute), g.now.Add(-30 * time.Minute), g.now.Add(-20 * time.Minute)}
-	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	rep, err := g.run(opts())
 	if err != nil || len(g.ledger) != 6 || rep.Remote.Enter.EntriesLastHour != 5 {
 		t.Fatalf("%v ledger %d %+v", err, len(g.ledger), rep.Remote.Enter)
 	}
@@ -537,7 +537,7 @@ func TestRemoteEnterWalkThatDoesNotEnterFails(t *testing.T) {
 	g := newEnterFake(t)
 	g.level = 0
 	g.plan.Portal = &Portal{Map: 0, Point: Point{60, 0, 0}} // g.portal stays nil: nothing happens at the portal
-	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "stood at the portal and did not enter") {
 		t.Fatalf("%v", err)
 	}
@@ -699,6 +699,27 @@ func TestRemotePreflightTalentsNoAnswerAndMarkup(t *testing.T) {
 	for _, l := range g.sent("command") {
 		if !strings.HasSuffix(l, " talents") {
 			t.Fatalf("%q", l)
+		}
+	}
+}
+
+// KeepOnFail: a failed run keeps the binding, so that a resume's bind finds the same group and instance (ZF-2: the unbind returned the
+// hires to the commander's raid and the next bind made a new group). Off (the default), the failed run unbinds like any other end.
+func TestRemoteFailedRunKeepsTheBinding(t *testing.T) {
+	for _, c := range []struct {
+		keep    bool
+		unbinds int
+	}{{false, 1}, {true, 0}} {
+		g := newEnterFake(t)
+		g.stuck["Magey"] = true
+		o := opts()
+		o.KeepOnFail = c.keep
+		rep, err := g.run(o)
+		if err == nil || rep.State != "failed" || g.unbinds != c.unbinds {
+			t.Fatalf("keep_on_fail %v: %v state %s unbinds %d, want %d", c.keep, err, rep.State, g.unbinds, c.unbinds)
+		}
+		if c.keep && (rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept")) {
+			t.Fatalf("report %+v", rep.Remote)
 		}
 	}
 }

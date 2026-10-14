@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -225,5 +226,36 @@ func TestLedgerDoesNotKillALiveBoss(t *testing.T) {
 	frameWith(d, near, false)
 	if !d.ledgerDead(pick) {
 		t.Fatal("nearly dead, a bot by, two frames: dead")
+	}
+}
+
+// A pack the pulls passed over that walked up by itself and died in an untracked fight counts as killed (ZF-2); a mob that is not
+// known dead, or one the bots refused, does not.
+func TestPassedDeadInLedger(t *testing.T) {
+	d := &RemoteDriver{ledger: map[packet.GUID]*ledgerMob{1: {dead: true}, 2: {dead: true}, 3: {}}}
+	pass := func(gs ...packet.GUID) fightSpec {
+		sp := fightSpec{passed: map[packet.GUID]bool{}}
+		for _, g := range gs {
+			sp.passed[g] = true
+		}
+		return sp
+	}
+	two := []passedOver{{text: "a"}, {text: "b"}}
+	for _, c := range []struct {
+		name string
+		sp   fightSpec
+		gave []passedOver
+		want int
+	}{
+		{"both dead", pass(1, 2), two, 2},
+		{"one alive in the ledger", pass(1, 3), two, 0},
+		{"one never fought", pass(1, 9), two, 0},
+		{"one refused", pass(1, 2), []passedOver{{text: "a"}, {text: "b", refused: true}}, 0},
+		{"nothing passed", pass(), two, 0},
+		{"passed and given up disagree", pass(1), two, 0},
+	} {
+		if got := d.passedDeadInLedger(c.sp, c.gave); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
 	}
 }

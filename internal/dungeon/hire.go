@@ -578,7 +578,19 @@ func (f *hireFlow) currentHires(ctx context.Context) ([]*heldHire, error) {
 	}
 	// What each hire is comes from the bot's own `who` answer, not from the agent's view: a bound hire inside an instance is not in it.
 	var silent []string
+	inBound := map[string]bool{}
+	for _, n := range bp.Names {
+		inBound[strings.ToLower(n)] = true
+	}
 	for _, h := range out {
+		// A hire of a kept binding does not answer `who`: what the run that left it read is used for the bots still in it.
+		if w, ok := e.memory[strings.ToLower(h.name)]; ok && inBound[strings.ToLower(h.name)] {
+			if f.who == nil {
+				f.who = map[string]tbm.Who{}
+			}
+			f.who[strings.ToLower(h.name)] = w
+			f.note("%s: a bound hire of a kept binding does not answer who; taken as level %d %s from the run that left it", h.name, w.Level, w.Class)
+		}
 		w, why := f.readWho(ctx, h.name)
 		if why != "" {
 			silent = append(silent, fmt.Sprintf("%s (%s)", h.name, why))

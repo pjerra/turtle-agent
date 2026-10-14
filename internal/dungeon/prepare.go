@@ -222,6 +222,8 @@ type prepEnv struct {
 	plan *Plan
 	spec PrepareSpec
 	bots []string // the characters of the run, lead first
+	// memory is what an earlier run read of the hires of a kept binding (RemoteOptions.HireMemory).
+	memory map[string]tbm.Who
 	// remote: the run is in remote mode (the only mode that prepares).
 	remote bool
 	now    func() time.Time

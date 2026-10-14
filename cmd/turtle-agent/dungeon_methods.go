@@ -20,6 +20,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // legParam is a leg of a plan given as its index or its name.
@@ -169,6 +170,9 @@ type dungeonRunParams struct {
 	// OnEnd is what happens to the bots at the end of a remote run: "stay" (the default: `cmd stay` before the unbind), "logout" (stay,
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
+	// KeepOnFail (remote mode): a FAILED run keeps its binding and the party in its instance, so that a resume re-enters the same
+	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding.
+	KeepOnFail bool `json:"keep_on_fail,omitempty"`
 	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
 	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
 	// "gm", "walk", or "off" (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
@@ -251,8 +255,11 @@ type dungeonRunner struct {
 	// tunePath is the login's --tune: the tunables file of runs that name none.
 	tunePath string
 
-	mu     sync.Mutex
-	drv    dungeon.Runner
+	mu  sync.Mutex
+	drv dungeon.Runner
+	// kept is the hires of a binding the last run kept (keep_on_fail): dungeon_stop unbinds it, the next run's prepare takes their class
+	// and level from it (a bound hire does not answer `who`).
+	kept   map[string]tbm.Who
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -567,7 +574,44 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 		cancel()
 		r.wait(10 * time.Second)
 	}
+	r.unbindKept()
 	return r.status()
+}
+
+// keptFrom notes the hires of the binding a finished run kept (keep_on_fail), from its report; nothing when it unbound.
+func (r *dungeonRunner) keptFrom(rep dungeon.Report) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kept = nil
+	if rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept") {
+		return
+	}
+	r.kept = map[string]tbm.Who{}
+	if rep.Ready == nil {
+		return
+	}
+	for _, b := range rep.Ready.Bots {
+		w := tbm.Who{Class: b.Class, Level: b.Level}
+		fmt.Sscanf(b.Talents, "%d/%d/%d", &w.Trees[0], &w.Trees[1], &w.Trees[2])
+		r.kept[strings.ToLower(b.Name)] = w
+	}
+}
+
+// unbindKept ends a binding the last run kept, when no run is going: `dungeon_stop` is how a kept binding is let go.
+func (r *dungeonRunner) unbindKept() {
+	r.mu.Lock()
+	kept, running := r.kept, r.running()
+	r.mu.Unlock()
+	if kept == nil || running || r.remote == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.root, 15*time.Second)
+	defer cancel()
+	if _, err := (remoteGame{r.remote}).Command(ctx, "commander unbind"); err == nil {
+		r.mu.Lock()
+		r.kept = nil
+		r.mu.Unlock()
+	}
 }
 
 // sessionGame is the dungeon driver's Game over the agent's session. It asks cur at each call, so a reconnect that

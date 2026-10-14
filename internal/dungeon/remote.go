@@ -82,6 +82,14 @@ type RemoteOptions struct {
 	// OnEnd is what the run does with the bots at its end: "stay" (the default: `cmd stay` before the unbind, so that they do not follow the
 	// agent), "logout" (stay, unbind, then `.bot logout` for each) or "none".
 	OnEnd string
+	// KeepOnFail keeps the binding of a FAILED run (the bots are stood still, no `commander unbind`), so that the next run re-enters the
+	// same instance instead of making a new one. Off by default: the group never stays bound after a run (driver rule 4); a finished
+	// or stopped run always unbinds, and dungeon_stop with no run going unbinds a kept binding.
+	KeepOnFail bool
+	// HireMemory is what an earlier run of this agent read of the hires of a kept binding (name, lower case, to class, level, talent
+	// points): a bound hire does not answer `who`, so the prepare step takes its class and level from here for the bots that are still
+	// in the standing binding.
+	HireMemory map[string]tbm.Who
 	// Carrier names the bot that does the object steps (loot_object, a boss's loot_item, use_item, use_object): it walks to the chest or
 	// corpse, loots, opens and uses items on `cmd open|loot|use` orders (remote_objects.go). Empty: the first living bot that is neither
 	// the lead bot, the tank nor the healer.
@@ -576,7 +584,8 @@ func (d *RemoteDriver) finish(err error) {
 }
 
 func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
-	defer d.unbind() // every way out: done, failed, stopped, a panic
+	// Every way out: done, failed, stopped, a panic. Only a failed run with KeepOnFail keeps its binding (unbind).
+	defer func() { d.unbind(err != nil && !ctxDone(err) && d.opt.KeepOnFail) }()
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
@@ -1065,8 +1074,11 @@ func (d *RemoteDriver) waitFirstFrame(ctx context.Context) error {
 	}
 }
 
-// unbind ends the binding: always, with its own context, so that a stopped run unbinds too.
-func (d *RemoteDriver) unbind() {
+// unbind ends the binding with its own context, so that a stopped run unbinds too. keep is a run that FAILED (not stopped, not done):
+// the bots are stood still, but the binding stays, so that the next run's bind finds the same group and re-enters the same instance
+// (an unbind returns the hires to the commander's raid, and the bind after it makes a new group, so a new instance: ZF-2 lost its
+// half-cleared instance that way and the 5 new instances an hour of the account with it). on_end logout still unbinds.
+func (d *RemoteDriver) unbind(keep bool) {
 	d.wd.stop() // the closing fight handling and the unbind wait through the same ticks: the watchdog has had its say
 	if !d.bound {
 		return
@@ -1078,6 +1090,13 @@ func (d *RemoteDriver) unbind() {
 	if d.opt.OnEnd != OnEndNone {
 		// Once the commander lets go the bots follow their master, the agent, wherever it is: stand them still first.
 		d.endStay(ctx)
+	}
+	if keep && d.opt.OnEnd != OnEndLogout {
+		d.remote(func(rr *RemoteReport) {
+			rr.UnbindVia = "kept (the run failed; a resume reuses the group and its instance)"
+		})
+		d.rep.note("commander unbind: not sent, the run failed; the binding is kept so that a resume re-enters the same instance (dungeon_stop or a finished run unbinds)")
+		return
 	}
 	r, err := d.g.Command(ctx, "commander unbind")
 	via := ""
