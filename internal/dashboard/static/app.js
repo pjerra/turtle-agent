@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText; // view.js (zoom and pan math) and text.js (plain wording)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -16,11 +16,10 @@ try { const d = parseInt(localStorage.getItem("mapdim"), 10); if (d >= 0 && d <=
 const GROUP_COLORS = ["#ff6ec7", "#7dd3fc", "#a3e635", "#f0abfc", "#fdba74", "#5eead4"]; // a trail and dots colour per group (per agent)
 let hiddenGroups = new Set();
 try { hiddenGroups = new Set(JSON.parse(localStorage.getItem("grouphide") || "[]")); } catch (e) { /* ignore */ }
-// What can be drawn on a map: [key, label, on by default]. Each layer is a class "hide-<key>" on the svg that the stylesheet uses.
-const LAYERS = [["bg", "Game map picture", true], ["route", "Planned route", true], ["trail", "Walked path", true], ["next", "Next-stop arrow", true],
-  ["packs", "Pull-group circles", true], ["hostile", "Hostile mobs", true], ["neutral", "Neutral and friendly mobs", false], ["cleared", "Cleared (dimmed) groups", true],
-  ["bosses", "Bosses", true], ["doors", "Doors and objects", true], ["bots", "Bot dots", true], ["botnames", "Bot names", true], ["commander", "Commander", true],
-  ["sections", "Section labels", true], ["steps", "Step numbers", false]];
+// What can be drawn on a map is listed in layers.js. The choice is one setting for every map and every card, saved once; a layer is a class
+// "hide-<key>" on the svg when it is off (the stylesheet), and greyed out in a card's panel when that card's map has no data for it.
+let layerState = ML.defaults();
+try { layerState = ML.load(window.localStorage); } catch (e) { /* storage may be blocked */ }
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 const namesOf = (c) => { const g = plans.get(c.label.plan); return g && g.names ? g.names : {}; };
 
@@ -47,7 +46,7 @@ function bar(pct, cls) {
 
 function makeCard(c) {
   const parts = {}, rec = { geo: null, card: c, svg: null, layerName: null, layerApplied: null, pick: null,
-    v: null, goal: null, fit: null, mode: "fit", followOn: followPref, paused: false, following: false, followScale: null, raf: 0, geoName: null, viewLoaded: null, layers: Object.fromEntries(LAYERS.map(([k, , d]) => [k, d])) };
+    v: null, goal: null, fit: null, mode: "fit", followOn: followPref, paused: false, following: false, followScale: null, raf: 0, geoName: null, viewLoaded: null, avail: null };
   parts.head = h("div", { class: "chead" });
   parts.stage = h("div", { class: "stage" });
   parts.map = h("div", { class: "map" });
@@ -64,17 +63,24 @@ function makeCard(c) {
   parts.dim.addEventListener("input", () => { dim = +parts.dim.value; store("mapdim", String(dim)); for (const r of cards.values()) { r.parts.dim.value = String(dim); applyDim(r); } });
   parts.boxes = {};
   const dimRow = h("label", { class: "dimlbl" }, "Dim the picture ", parts.dim);
-  parts.layersBox = h("details", { class: "layers" }, h("summary", { class: "mb", title: "Choose what is drawn on the map", text: "Layers" }),
-    h("div", { class: "lpanel" }, ...LAYERS.map(([key, text]) => {
-      const cb = h("input", { type: "checkbox" });
-      cb.checked = rec.layers[key];
-      cb.addEventListener("change", () => { rec.layers[key] = cb.checked; saveLayers(rec); applyLayers(rec); });
-      parts.boxes[key] = cb;
-      return h("label", { class: "lrow" }, cb, " " + text);
-    }), dimRow));
+  const lbody = [];
+  for (const group of ML.groups()) {
+    lbody.push(h("div", { class: "lgroup" }, group));
+    for (const d of ML.DEFS.filter((x) => x.group === group)) {
+      const cb = h("input", { type: "checkbox" }), why = h("em", { class: "why" });
+      cb.addEventListener("change", () => { layerState = ML.set(layerState, d.key, cb.checked); ML.save(window.localStorage, layerState); syncLayers(); });
+      parts.boxes[d.key] = { cb, why, row: null };
+      parts.boxes[d.key].row = h("label", { class: "lrow" }, cb, h("span", { text: " " + d.label }), why);
+      lbody.push(parts.boxes[d.key].row);
+    }
+  }
+  const resetBtn = btn("Reset layers", "Back to the layers shown by default", () => { layerState = ML.defaults(); ML.save(window.localStorage, layerState); syncLayers(); });
+  parts.layersBox = h("details", { class: "layers" }, h("summary", { class: "mb", title: "Choose what is drawn on the map (one choice for all maps)", text: "Layers" }),
+    h("div", { class: "lpanel" }, h("p", { class: "lnote", text: "One choice for all maps. A greyed layer has no data on this map now." }), ...lbody, dimRow, resetBtn));
   parts.groups = h("span", { class: "groups", title: "Show or hide the walked path and the dots of each group on this map" });
   parts.bar = h("div", { class: "mapbar" }, parts.bIn, parts.bOut, parts.bFit, parts.bFollow, parts.chip, parts.groups, h("span", { class: "spacer" }), parts.layersBox);
-  parts.map.append(parts.bar, parts.stage);
+  parts.scale = h("div", { class: "scalebar", hidden: true }, h("i"), h("span"));
+  parts.map.append(parts.bar, parts.stage, parts.scale);
   const swatches = [["dot", "#2f80ff", "tank"], ["dot", "#22c55e", "healer"], ["dot", "#ff9f1c", "damage"], ["dot", "#c084fc", "commander"], ["dot", "#ff3b3b", "hostile creature"],
     ["dot", "#9aa3b2", "neutral"], ["ring", "#ffd400", "pack to pull"], ["dia", "#ff2fd6", "boss"], ["sq", "#ffffff", "door or object"], ["line", "#00e5ff", "planned route"], ["dash", "#00e5ff", "route still to do"],
     ["trail", "#ff6ec7", "path walked (fades with age)"], ["arrow", "#ffffff", "next stop"]];
@@ -90,6 +96,7 @@ function makeCard(c) {
   rec.el = el; rec.parts = parts;
   if (window.ResizeObserver) new ResizeObserver(() => { if (rec.svg && computeView(rec)) applyViewBox(rec); }).observe(parts.stage);
   updateFollowUi(rec);
+  paintLayerUi(rec);
   return rec;
 }
 
@@ -268,18 +275,51 @@ function applyViewBox(rec) {
   rec.svg.setAttribute("viewBox", MV.viewBox(rec.v, pw, ph).map((n) => n.toFixed(3)).join(" "));
   rec.svg.classList.toggle("zoomed", !!rec.fit && rec.v.scale >= rec.fit.scale * 2.5);
   const k = (MARKER_PX / rec.v.scale).toFixed(5);
-  rec.svg.querySelectorAll(".mk").forEach((g) => { g.setAttribute("transform", "translate(" + g.dataset.x + " " + g.dataset.y + ") scale(" + k + ")"); });
+  rec.svg.querySelectorAll(".mk").forEach((g) => { g.setAttribute("transform", "translate(" + g.dataset.x + " " + g.dataset.y + ") scale(" + k + ")" + (g.dataset.hd ? " rotate(" + g.dataset.hd + ")" : "")); });
+  drawGrid(rec, pw, ph);
+  drawScale(rec);
 }
 
-function saveLayers(rec) { if (rec.geo) store("maplayers:" + rec.geo.map, JSON.stringify(rec.layers)); }
-function loadLayers(rec) {
-  try {
-    const o = JSON.parse(localStorage.getItem("maplayers:" + rec.geo.map) || "null");
-    if (o && typeof o === "object") for (const [k] of LAYERS) if (typeof o[k] === "boolean") rec.layers[k] = o[k];
-  } catch (e) { /* defaults */ }
-  for (const [k] of LAYERS) rec.parts.boxes[k].checked = rec.layers[k];
+// The grid layer: lines about 80 px apart across the view, rebuilt as the view moves (only while the layer is on).
+function drawGrid(rec, pw, ph) {
+  const g = rec.svg.querySelector("g.gridg");
+  if (!g) return;
+  if (!layerState.grid) { if (g.firstChild) g.replaceChildren(); g.dataset.k = ""; return; }
+  const box = MV.viewBox(rec.v, pw, ph), step = ML.gridStep(rec.v.scale), gl = ML.gridLines(box, step);
+  const key = [step, gl.xs[0], gl.xs.length, gl.ys[0], gl.ys.length].join("|");
+  if (g.dataset.k === key) return;
+  g.dataset.k = key;
+  const lines = [];
+  for (const x of gl.xs) lines.push(s("line", { class: "gridl", x1: x, y1: box[1], x2: x, y2: box[1] + box[3] }));
+  for (const y of gl.ys) lines.push(s("line", { class: "gridl", x1: box[0], y1: y, x2: box[0] + box[2], y2: y }));
+  g.replaceChildren(...lines);
 }
-function applyLayers(rec) { if (rec.svg) for (const [k] of LAYERS) rec.svg.classList.toggle("hide-" + k, !rec.layers[k]); }
+
+// The distance scale bar (a piece of the card, not of the svg): the longest round number of yards under 110 px.
+function drawScale(rec) {
+  const sc = rec.parts.scale;
+  sc.hidden = !layerState.scale || !rec.v;
+  if (sc.hidden) return;
+  const sb = ML.scaleBar(rec.v.scale, 110);
+  sc.firstChild.style.width = sb.px.toFixed(0) + "px";
+  sc.lastChild.textContent = sb.yd >= 1000 ? sb.yd / 1000 + " km" : sb.yd + " yd";
+}
+
+// The svg classes of the layers that are off, for one card.
+function applyLayers(rec) { if (rec.svg) for (const d of ML.DEFS) rec.svg.classList.toggle("hide-" + d.key, !layerState[d.key]); }
+
+// Every card shows the same choice: tick the boxes, grey out what the card's map has no data for, set the classes and redraw the scale bar and grid.
+function paintLayerUi(rec) {
+  for (const d of ML.DEFS) {
+    const b = rec.parts.boxes[d.key], a = rec.avail ? rec.avail[d.key] : { ok: true, why: "" };
+    b.cb.checked = !!layerState[d.key];
+    b.cb.disabled = !a.ok;
+    b.row.classList.toggle("off", !a.ok);
+    b.row.title = a.ok ? "" : "Greyed out: " + a.why;
+    b.why.textContent = a.ok ? "" : a.why;
+  }
+}
+function syncLayers() { for (const rec of cards.values()) { paintLayerUi(rec); applyLayers(rec); if (rec.svg) applyViewBox(rec); } }
 
 function applyDim(rec) { if (rec.svg) rec.svg.style.setProperty("--bright", String(1 - dim / 100)); }
 
@@ -372,10 +412,10 @@ function ensureSvg(rec, geo) {
   const svg = s("svg", { preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": "map of the run: route, packs, bosses and the party" });
   const stat = s("g", { class: "static" });
   stat.innerHTML = geo.svg; // built by the server from the plan file, text escaped
-  svg.append(stat, s("g", { class: "dyn" }));
+  svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "dyn" }));
   rec.parts.stage.replaceChildren(svg);
   rec.svg = svg; rec.geoName = geo.plan; rec.layerApplied = null; rec.geo = geo;
-  if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); loadLayers(rec); }
+  if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); }
   applyLayers(rec);
   attachControls(rec, svg);
   applyDim(rec);
@@ -482,6 +522,32 @@ function renderMap(c, rec) {
     mid.append(plate("\u2192 " + nt.stop.label + ", " + Math.round(nt.dist) + " yd", 6, -6, "nextlbl"));
     kids.push(mid);
   }
+  // the newer layers (off by default, hidden by their hide-<key> class): ranges, target lines, the lead's heading, times on the walked path
+  const nowS = Date.parse(last && last.time) / 1000 || Date.now() / 1000;
+  const healers = c.bots.filter((b) => b.known && b.alive && b.role === "healer");
+  for (const b of healers) kids.push(s("circle", { class: "range heal", cx: b.x, cy: b.y, r: ML.HEAL_RANGE_YD }, null));
+  const pulls = ML.pullTargets(c.mobs, run);
+  for (const mob of pulls) kids.push(s("circle", { class: "range aggro", cx: mob.x, cy: mob.y, r: ML.AGGRO_YD }, null));
+  const threat = ML.threatLines(c.mobs, c.bots), botLines = ML.botTargetLines(c.bots, c.mobs);
+  for (const l of threat) kids.push(s("line", { class: "tline", x1: l.from.x, y1: l.from.y, x2: l.to.x, y2: l.to.y }));
+  for (const l of botLines) kids.push(s("line", { class: "btline", x1: l.from.x, y1: l.from.y, x2: l.to.x, y2: l.to.y }));
+  const leadPos = c.bots.find((b) => b.lead && b.known) || null;
+  if (c.commander && leadPos) kids.push(s("line", { class: "cmdline", x1: c.commander.x, y1: c.commander.y, x2: leadPos.x, y2: leadPos.y }));
+  const hd = ML.heading(c.trail || [], c.trail_t, nowS);
+  if (hd && lead) {
+    const g = at(lead.x, lead.y, "hd");
+    g.dataset.hd = (Math.atan2(hd.y, hd.x) * 180 / Math.PI).toFixed(1);
+    const poly = s("polygon", { class: "heading", points: "34,0 14,-8 14,8" });
+    poly.append(s("title", {}, "the lead is heading this way (from its movement)"));
+    g.append(poly);
+    kids.push(g);
+  }
+  const stamps = ML.trailStamps(c.trail || [], c.trail_t, rec.v ? rec.v.scale : 1, 80, 8);
+  for (const st of stamps) {
+    const g = at(st.x, st.y, "ts");
+    g.append(s("circle", { class: "tsdot", r: 3 }), plate(new Date(st.t * 1000).toLocaleTimeString(), 6, -6, "tslbl"));
+    kids.push(g);
+  }
   for (const mob of c.mobs) {
     const g = at(mob.x, mob.y, "m " + mob.kind + (mob.cleared ? " cleared" : "") + (mob.boss ? " boss" : ""));
     const dot = s("circle", { r: mob.kind === "hostile" ? 6.5 : 5, class: "mob " + mob.kind + (mob.cleared ? " cleared" : "") + (mob.engaged ? " engaged" : "") + (mob.boss ? " boss" : "") });
@@ -508,6 +574,14 @@ function renderMap(c, rec) {
     kids.push(g);
   }
   dyn.replaceChildren(...kids);
+  const has = (sel) => !!svg.querySelector(sel), kind = (...ks) => c.mobs.some((m) => ks.includes(m.kind));
+  rec.avail = ML.availability({
+    picture: !!rec.pick, route: has(".route, .direct"), packs: has(".pull, .pin"), cleared: c.mobs.some((m) => m.cleared) || has(".pull.cleared, .pin.cleared, .leg.done"),
+    bosses: has(".boss"), doors: has(".obj"), sections: has(".legname"), steps: has(".stepn"), trail: (c.trail || []).length >= 2, trailtime: stamps.length > 0, heading: !!(hd && lead),
+    next: !!nt, bots: c.bots.some((b) => b.known), botTargets: botLines.length > 0, healer: healers.length > 0, commander: !!c.commander, cmdline: !!(c.commander && leadPos),
+    hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,
+  });
+  paintLayerUi(rec);
   applyViewBox(rec);
   const note = !c.bots.some((b) => b.known) ? (c.feed.have ? "No bot is inside this map." : "Waiting for the bots' position feed.") : "";
   let n = m.querySelector(":scope > .nomap");
