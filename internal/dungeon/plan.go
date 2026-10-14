@@ -70,8 +70,12 @@ type Portal struct {
 // Leg is one stretch of the dungeon. The driver walks to To, clears PullGroups in order, runs Steps in order, then
 // walks to the Boss and kills it. Every part is optional but a leg must hold at least one of them.
 type Leg struct {
-	Name       string      `json:"name,omitempty"`
-	To         Point       `json:"to"`
+	Name string `json:"name,omitempty"`
+	To   Point  `json:"to"`
+	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
+	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
+	// `cmd move x y z direct` (TortoiseBots), which walks every bot of the party in a line instead of on a path. See Waypoint.
+	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
 	Skip  []uint32 `json:"skip,omitempty"`
@@ -83,6 +87,24 @@ type Leg struct {
 	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+}
+
+// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): every bot must be within DirectMaxDistance
+// yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
+const (
+	DirectMaxDistance     = 25.0
+	DirectMaxVertical     = 8.0
+	DirectGroundTolerance = 3.0
+)
+
+// Waypoint is a point of a leg's Via. Direct makes the step to it a straight line (`cmd move ... direct`) instead of a navmesh
+// path: only for a short step (see the limits above) over ground the navmesh lacks, such as Uldaman's scorpid-pit ramp. A direct
+// waypoint must be preceded by a Via point within the limits, so the party is gathered where the step starts. Only the remote
+// driver can take such a step; the agent's own companions walk it as a plain waypoint. In the file:
+// {"x": -155.7, "y": 279.6, "z": -46.8, "direct": true}.
+type Waypoint struct {
+	Point
+	Direct bool `json:"direct,omitempty"`
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -279,9 +301,15 @@ type rawPortal struct {
 	X, Y, Z *float32
 }
 
+type rawWaypoint struct {
+	X, Y, Z *float32
+	Direct  bool `json:"direct"`
+}
+
 type rawLeg struct {
 	Name       string            `json:"name"`
 	To         *rawPoint         `json:"to"`
+	Via        []rawWaypoint     `json:"via"`
 	PullGroups []rawPullGroup    `json:"pull_groups"`
 	Skip       []uint32          `json:"skip"`
 	Steps      []json.RawMessage `json:"steps"`
@@ -539,6 +567,21 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 func (c *checker) leg(path string, r *rawLeg) Leg {
 	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes}
 	l.To = c.point(path+".to", r.To)
+	for i, w := range r.Via {
+		wp := fmt.Sprintf("%s.via[%d]", path, i)
+		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct})
+		if !w.Direct {
+			continue
+		}
+		if i == 0 {
+			c.fail(wp, "a direct step needs a via point before it, where the party gathers")
+			continue
+		}
+		if prev := l.Via[i-1].Point; !DirectStepOK(prev, pt) {
+			c.fail(wp, "the direct step from via[%d] is %.1f yd across and %.1f yd up or down; the limits are %g and %g", i-1, hdist(prev, pt), math.Abs(float64(pt.Z-prev.Z)), DirectMaxDistance, DirectMaxVertical)
+		}
+	}
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
 		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team}
