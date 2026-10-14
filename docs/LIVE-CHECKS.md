@@ -900,6 +900,26 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
 5. **End.** Prints `setup_s`, `report.prepare` (the seconds of each step), `preflight_s` and `enter_s`, then runs `turtle-agent trace-score` on the
    run's trace (exit 11 when a check fails; the script exits with it). Expect the `gm_shortcuts` check to fail: the prepare step's GM lines are setup shortcuts by design.
 
+**On five hired bots (owner rule 2026-10-14: every commander group is hired, at the instance's level, the commander outside it).**
+
+```sh
+tools/run-uldaman.sh --hire              # keep the matching hires, hire the rest, check, bind
+tools/run-uldaman.sh --hire --rehire     # dismiss the current hires first: a clean instance
+tools/run-uldaman.sh --hire --level 44   # default: the middle of the plan's level_band (43)
+```
+
+The agent hires a warrior tank, a priest healer and a hunter, a rogue and a warlock, checks each of them (README "Hired party") and binds them; the script
+prints a `ready:` line (level, `ok`, `hire_s`, `setup_s`, who was hired and kept) and the run's report has the whole `ready` block. The commander needs
+the hire rights of a player of that level (`AiPlayerbot.HireMaxBotsPerPlayer` 5, `HireAnywhere` 1 away from a recruiter), a TortoiseBots with #935 (the
+bind of own hires; the step says so when the server refuses it, or leaves the commander in the group) and, for the level, #940 (`level=<n>`; without it
+the hires come at the commander's level, accepted only inside the plan's band).
+
+Checks to run live for it: (1) `hire_s` and `setup_s` of a cold start (five new hires) and of a run that keeps its hires, against the 2 minute goal;
+(2) the notes `hired X (class:role, level n)` and, on a build without #940, the `level_note`; (3) `ready.bots[].fixed` (what `autogear` and `maintenance`
+had to do) and `quality` `rare` on all five; (4) the spell questions: a bot's whisper to `.bot command <bot> spells taunt` is `[Taunt]`, and a bot
+without the spell stays silent (the step treats silence as "not confirmed"); (5) the commander out of the group after the bind (`party` shows no
+group) and the run's own bind reusing the binding; (6) a second run with `--hire` and no `--rehire` keeps all five (`ready.reused`).
+
 **Checks to run live (none has been run; the prepare step is tested against the fake game only):**
 
 1. Time it: `report.setup_s` of a run with every bot online and the binary built should be 1-2 minutes. The parts: `prepare.steps[]`, `remote.enter.seconds`

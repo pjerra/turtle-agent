@@ -473,3 +473,75 @@ func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.Wal
 
 // Units implements dungeon.UnitSource: the units in the agent's own view (a boss corpse the feed does not list).
 func (g remoteGame) Units() []objects.Unit { return g.c.cur().Units(objects.Filter{Limit: 5000}) }
+
+// The hire step of the prepare block (dungeon.HireGame): the agent's own group, the players in its view, their pets and the item
+// prototypes of what they wear.
+
+// classNames maps a unit's class id (UNIT_FIELD_BYTES_0, 1.12) to the name the hire command takes.
+var classNames = map[uint8]string{1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest", 7: "shaman", 8: "mage", 9: "warlock", 11: "druid"}
+
+func (g remoteGame) AgentLevel() int { return int(g.c.cur().Status().Level) }
+
+// Members are the other members of the agent's group; the class comes from the object store when the player is in view.
+func (g remoteGame) Members() []dungeon.HireMember {
+	s := g.c.cur()
+	party := s.Party()
+	units := map[packet.GUID]objects.Unit{}
+	for _, u := range s.Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" {
+			units[u.GUID] = u
+		}
+	}
+	var out []dungeon.HireMember
+	for _, m := range party.Members {
+		hm := dungeon.HireMember{Name: m.Name, GUID: m.GUID, Level: int(m.Level), InGroup: true, Online: m.Online, Dead: m.Dead, MaxHP: uint32(m.MaxHealth)}
+		if u, ok := units[m.GUID]; ok {
+			hm.Class = classNames[u.Class]
+			if u.Level != 0 {
+				hm.Level = int(u.Level)
+			}
+		}
+		out = append(out, hm)
+	}
+	return out
+}
+
+// Player looks a player up by name: the group first, then the players in view.
+func (g remoteGame) Player(name string) (dungeon.HireMember, bool) {
+	for _, m := range g.Members() {
+		if strings.EqualFold(m.Name, name) {
+			return m, true
+		}
+	}
+	for _, u := range g.c.cur().Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" && strings.EqualFold(u.Name, name) {
+			return dungeon.HireMember{Name: u.Name, GUID: u.GUID, Level: int(u.Level), Class: classNames[u.Class], Online: true, Dead: u.Dead, MaxHP: u.MaxHealth}, true
+		}
+	}
+	return dungeon.HireMember{}, false
+}
+
+// PetOf is the name of the pet the player has out in the agent's view.
+func (g remoteGame) PetOf(guid packet.GUID) (string, bool) {
+	u, ok := g.c.cur().PetOfPlayer(guid)
+	if !ok {
+		return "", false
+	}
+	if u.Name == "" {
+		return "pet", true
+	}
+	return u.Name, true
+}
+
+// ConvertRaid turns the agent's party into a raid.
+func (g remoteGame) ConvertRaid(ctx context.Context) error { return g.c.cur().ConvertRaid(ctx) }
+
+// ItemInfos asks the server for the item prototypes.
+func (g remoteGame) ItemInfos(ctx context.Context, entries []uint32, wait time.Duration) (map[uint32]dungeon.ItemInfo, error) {
+	m, err := g.c.cur().ItemInfos(ctx, entries, wait)
+	out := make(map[uint32]dungeon.ItemInfo, len(m))
+	for e, it := range m {
+		out[e] = dungeon.ItemInfo{Found: it.Found, Name: it.Name, Class: int(it.Class), SubClass: int(it.SubClass), Quality: int(it.Quality), InventoryType: int(it.InventoryType), ItemLevel: int(it.ItemLevel)}
+	}
+	return out, err
+}

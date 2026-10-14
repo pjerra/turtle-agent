@@ -523,7 +523,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	setupAt := d.clk.Now()
 	err = d.begin(ctx, fromLeg)
 	setupS := d.clk.Now().Sub(setupAt).Seconds()
-	d.rep.update(func(r *Report) { r.SetupS = setupS })
+	d.rep.update(func(r *Report) {
+		r.SetupS = setupS
+		if r.Ready != nil {
+			r.Ready.SetupS = setupS
+		}
+	})
 	if err != nil {
 		return err
 	}
@@ -791,11 +796,14 @@ func (d *RemoteDriver) noteSkipped() {
 
 // begin binds the party, switches the feed on, waits for the first frame and checks the lead bot is where the plan starts.
 func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
-	if strings.TrimSpace(d.opt.Lead) == "" {
+	if strings.TrimSpace(d.opt.Lead) == "" && !d.opt.Prepare.HiredParty() {
 		return errors.New("remote mode needs a lead_bot")
 	}
 	if err := d.prepare(ctx); err != nil {
 		return err
+	}
+	if strings.TrimSpace(d.opt.Lead) == "" {
+		return errors.New("the prepare step named no lead bot")
 	}
 	d.countObjectSteps(fromLeg)
 	d.g.ResetView()
@@ -928,7 +936,7 @@ func describeBindErr(e *tbm.Err) string {
 		"disabled":         "AiPlayerbot.RemoteCommander is off on the server (needs a TortoiseBots build with the remote commander and the switch on)",
 		"already-bound":    "this account already commands a party: unbind it first",
 		"no-bot":           "not an online bot this account controls",
-		"hired":            "a hired companion cannot be bound",
+		"hired":            "another player's hired companion cannot be bound (your own can, from TortoiseBots #935: an older build refuses them too)",
 		"group-raid":       "the lead bot is in a raid",
 		"group-has-player": "a player is in the lead bot's party",
 		"group-bound":      "another commander holds that party",

@@ -43,14 +43,21 @@ func TestParseInventory(t *testing.T) {
 
 func TestCheckBotLine(t *testing.T) {
 	for _, ok := range []string{"maintenance Tanky", "inv Healy", ".bot logout Magey", "INV Healy", "command Tanky talents", ".bot command Tanky talents", "COMMAND Healy talents",
-		"roster", ".bot roster", "add Tanky", ".bot add Tanky", "command Tanky leave", ".bot command Healy leave"} {
+		"roster", ".bot roster", "add Tanky", ".bot add Tanky", "command Tanky leave", ".bot command Healy leave",
+		"hire warrior tank", "hire priest healer level=43", "HIRE Hunter DPS level=45", ".bot hire mage dps", "autogear Tanky blue", ".bot autogear Healy BLUE",
+		"command Tanky spells taunt", "command Healy spells power word: shield", "command Magey spells hunter's mark"} {
 		if err := CheckBotLine(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "inv", "maintenance", "maintenance Tanky Healy", "autogear Tanky", "inv Tank;y", "logout Tanky\n.gm on", "inv 1234", "gm on",
 		// the talents read-back is the only `.bot command` line: nothing else may follow the word, and no other command goes through
-		"command Tanky", "command Tanky talents reset", "command Tanky talents auto", "command Tanky talents 05-31", "command Tanky reset", "command Tanky talents shift 1", "command Tank;y talents", "command 12 talents", "command Tanky Talents", "command Tanky\n.gm on talents", "roster all", "add", "add Tanky Healy", "add 12", "add Tank;y", "command Tanky Leave", "command Tanky leave now", "command Tanky leave\n.gm on"} {
+		"command Tanky", "command Tanky talents reset", "command Tanky talents auto", "command Tanky talents 05-31", "command Tanky reset", "command Tanky talents shift 1", "command Tank;y talents", "command 12 talents", "command Tanky Talents", "command Tanky\n.gm on talents", "roster all", "add", "add Tanky Healy", "add 12", "add Tank;y", "command Tanky Leave", "command Tanky leave now", "command Tanky leave\n.gm on",
+		// the hire flow: a class, a role and a level, and nothing else (no race, gender or gear tier); autogear takes blue only; spells a plain filter
+		"hire", "hire warrior", "hire warrior tank orc", "hire warrior tank level=", "hire warrior tank level=100", "hire warrior tank level=4x", "hire warrior tank t3", "hire monk dps",
+		"hire mage frost", "hire warrior tank level=43 level=44", "autogear Tanky purple", "autogear Tanky", "autogear Tanky blue now", "autogear Tank;y blue", "autogear 12 blue",
+		"command Tanky spells", "command Tanky spells x", "command Tanky spells taunt;.gm on", "command Tanky spells taunt\n.gm on", "command Tanky spells a b c d e f", "command Tanky spells 123",
+		"hire warrior tank\n.gm on", "inv\nTanky"} {
 		if err := CheckBotLine(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

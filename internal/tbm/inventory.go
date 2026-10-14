@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 )
@@ -117,22 +118,54 @@ var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": t
 // botNameRe is what a bot's name can be (1.12 names are letters).
 var botNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
 
-// CheckBotLine refuses a line that is not "<maintenance|inv|logout|add> <bot name>", "roster", "command <bot name> talents" or
-// "command <bot name> leave". The talents read-back and the leave (the prepare step takes a bot out of its old group) are the only
-// `.bot command` lines the agent sends here: any other word after it (reset, auto, a build link) would change the bot's talents.
+// The lines of the hire flow (prepare party "hire"): `hire <class> <role> [level=<n>]`, `autogear <bot> blue` and `command <bot> spells
+// <filter>`. Each is checked word by word, so that no other hire option (a race, a gear tier, a gender), no other autogear quality and no
+// other forwarded command goes out with them.
+var (
+	hireClasses = map[string]bool{"warrior": true, "paladin": true, "hunter": true, "rogue": true, "priest": true, "shaman": true, "mage": true, "warlock": true, "druid": true}
+	hireRoles   = map[string]bool{"tank": true, "healer": true, "dps": true}
+	hireLevelRe = regexp.MustCompile(`^level=([0-9]{1,2})$`)
+	// spellFilterRe is what a spell-list filter can be: letters, spaces, an apostrophe and a colon ("Power Word: Shield").
+	spellFilterRe = regexp.MustCompile(`^[A-Za-z][A-Za-z' :]{1,30}$`)
+)
+
+// CheckBotLine refuses a line that is not "<maintenance|inv|logout|add> <bot name>", "roster", "command <bot name> talents|leave",
+// "command <bot name> spells <filter>", "autogear <bot name> blue" or "hire <class> <tank|healer|dps> [level=<n>]". The talents read-back
+// and the leave (the prepare step takes a bot out of its old group) are the only `.bot command` lines of a bot's own state the agent sends
+// here besides the spell-list read-back: any other word after it (reset, auto, a build link) would change the bot's talents.
 func CheckBotLine(command string) error {
+	if strings.IndexFunc(command, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%q: a control character in a bot line", command)
+	}
 	f := strings.Fields(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot ")))
 	if len(f) == 1 && strings.EqualFold(f[0], "roster") {
 		return nil
 	}
-	if len(f) == 3 && strings.EqualFold(f[0], "command") && (f[2] == "talents" || f[2] == "leave") {
+	if len(f) >= 3 && strings.EqualFold(f[0], "command") {
 		if !botNameRe.MatchString(f[1]) {
 			return fmt.Errorf("%q: %q is not a bot name", command, f[1])
+		}
+		switch {
+		case len(f) == 3 && (f[2] == "talents" || f[2] == "leave"):
+			return nil
+		case f[2] == "spells" && len(f) >= 4 && len(f) <= 7 && spellFilterRe.MatchString(strings.Join(f[3:], " ")):
+			return nil
+		}
+	}
+	if len(f) >= 3 && len(f) <= 4 && strings.EqualFold(f[0], "hire") {
+		if !hireClasses[strings.ToLower(f[1])] || !hireRoles[strings.ToLower(f[2])] || (len(f) == 4 && !hireLevelRe.MatchString(strings.ToLower(f[3]))) {
+			return fmt.Errorf("%q: hire takes <class> <tank|healer|dps> and optionally level=<n>", command)
+		}
+		return nil
+	}
+	if len(f) == 3 && strings.EqualFold(f[0], "autogear") {
+		if !botNameRe.MatchString(f[1]) || !strings.EqualFold(f[2], "blue") {
+			return fmt.Errorf("%q: autogear takes a bot name and blue", command)
 		}
 		return nil
 	}
 	if len(f) != 2 || !botLineVerbs[strings.ToLower(f[0])] {
-		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, or command <bot name> talents|leave", command)
+		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, command <bot name> talents|leave|spells <filter>, autogear <bot name> blue, or hire <class> <role> [level=<n>]", command)
 	}
 	if !botNameRe.MatchString(f[1]) {
 		return fmt.Errorf("%q: %q is not a bot name", command, f[1])
