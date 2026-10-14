@@ -35,7 +35,7 @@ type rmob struct {
 	pullAt   time.Time
 	attacked bool
 	flags    string
-	// the tank-first tests: hold keeps the mob on that bot (until a `cmd pull` at it sends the tank), noTarget leaves it with no
+	// the tank-first tests: hold keeps the mob on that bot (until a `cmd attack <guid> <tank>` at it sends the tank), noTarget leaves it with no
 	// target (a sheep), tankPct is the tank's share in the T record while the mob is on another bot (0: not listed).
 	hold     packet.GUID
 	noTarget bool
@@ -84,7 +84,7 @@ type fakeRemote struct {
 	truncating  bool // frames are marked truncated and list no hostile
 	panicOn     string
 	vanish      bool // after a pullback the mob leaves the world without a fight
-	ignorePull  bool // a `cmd pull` at an engaged mob changes nothing (the tank does not take it)
+	ignorePull  bool // a bot-scoped `cmd attack` at an engaged mob changes nothing (the tank does not take it)
 	orderAt     []time.Time
 	sight       float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
 
@@ -377,6 +377,13 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		m := g.mobByArg(f[2])
 		if m == nil {
 			return errReply(intent, "dead-target"), nil
+		}
+		if len(f) > 3 {
+			// bot-scoped (#928): only that bot goes; the tank takes the mob, the party does not join
+			if m.engaged && !g.ignorePull && strings.EqualFold(f[3], g.party[0].Name) {
+				m.hold = 0
+			}
+			return ack(intent), nil
 		}
 		m.attacked = true
 		return ack(intent), nil

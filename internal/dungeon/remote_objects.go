@@ -165,7 +165,8 @@ func (d *RemoteDriver) objectLook(ctx context.Context, a Action) (err error, han
 	}
 	switch a.Kind {
 	case ActWalk, ActFailed:
-		// The Stepper found no such object in the agent's view and wanted to walk the party (or gave up): the agent cannot see it.
+		// The Stepper found no such object in the agent's view and wanted to walk the party (or gave up): the agent cannot see it. (The
+		// agent is brought up before the step is looked at, see nearBeforeObjectStep.)
 		return d.objectViewError(a), true
 	case ActWait:
 		st := d.stepOf(a)
@@ -563,6 +564,9 @@ func objectPoint(a Action) *Point {
 func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	if _, ok := d.orderGame(); !ok {
 		return d.objectStepError(a)
+	}
+	if _, err := d.keepNear(ctx); err != nil {
+		return err
 	}
 	c, err := d.carrierBot()
 	if err != nil {

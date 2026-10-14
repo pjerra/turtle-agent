@@ -433,6 +433,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		return res, err
 	}
 	began := d.clk.Now()
+	limit := sp.limit
 	tracked := map[packet.GUID]bool{t.GUID: true}
 	last := map[packet.GUID]tbm.HostileRec{t.GUID: t} // each tracked mob as the feed last showed it: where a kill happened
 	for _, h := range d.candidates(sp, sp.track) {
@@ -471,8 +472,12 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		}
 		now := d.clk.Now()
 		for _, h := range d.fr.Hostiles {
-			// A member of the encounter that joins is part of it.
-			if h.HPPct > 0 && d.engagedWith(h) && slices.Contains(sp.track, h.Entry) && !slices.Contains(sp.skip, h.Entry) {
+			// Anything that joins the fight is part of it, the step's own entries or not: a boss that comes into a group's fight and
+			// dies there is that fight's kill (a unit of another entry used to be left untracked, and its death went unrecorded).
+			if h.HPPct > 0 && h.Entry != 0 && d.engagedWith(h) && !slices.Contains(sp.skip, h.Entry) {
+				if !tracked[h.GUID] && !slices.Contains(sp.track, h.Entry) {
+					limit = max(limit, d.cfg.BossTimeout) // a boss's fight can be longer than a pack's
+				}
 				tracked[h.GUID], last[h.GUID] = true, h
 			}
 		}
@@ -537,8 +542,8 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			return fightResult{out: noEngage, kills: len(killed), dead: deadOf()}, nil
 		case engaged && now.Sub(lastCombat) > d.cfg.EvadeGrace:
 			return fightResult{out: evaded, kills: len(killed), dead: deadOf()}, nil
-		case now.Sub(began) > sp.limit:
-			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
+		case now.Sub(began) > limit:
+			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, limit.Seconds())
 		}
 		if engaged && len(fightingMobs) > 0 {
 			if err := d.assistEvery(ctx, fightingMobs, &lastAssist); err != nil {

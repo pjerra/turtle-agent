@@ -166,18 +166,17 @@ func (d *RemoteDriver) tankFirstTick(ctx context.Context, mobs []tbm.HostileRec)
 }
 
 // tankAtLooseAdds sends the tank at a mob that has been hitting a bot that is not the tank for looseGrace (counted from the look
-// that first showed it on that bot). The commander has no order for one bot: `cmd attack` takes only a GUID and sends every bot. So it
-// is `.bot cmd pull <guid> 0`, the module's pull: the tank walks up to the mob and keeps it. The order is not free: it briefly holds
-// the other bots ("stay" and "wait for attack" at the lead bot's position, with a 0 s window, released at once for a mob already in
-// combat), re-stamps the combat start and relaxes the tank's stay spot.
-// TODO: switch to `cmd attack <guid> <bot>` when TortoiseBots feat/commander-player-orders lands (an order for one bot).
+// that first showed it on that bot). The order is `.bot cmd attack <guid> <tank>` (TortoiseBots #928: with a bot name only that bot of the
+// party goes). It is not `cmd pull`: that was refused `tank-busy` whenever the tank was already meleeing another mob, which is exactly
+// when a loose add needs it (the first remote Uldaman run: 19 refusals). `cmd pull` stays for opening pulls (sendPull).
 // At most one order per look; AddCooldown apart for the same mob, maxAddOrders for the fight.
 func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRec) error {
 	d.tf.init()
 	if d.tank == 0 {
 		return nil
 	}
-	if m, ok := d.fr.Member(d.tank); !ok || m.Dead {
+	tank, ok := d.fr.Member(d.tank)
+	if !ok || tank.Dead || tank.Name == "" {
 		return nil
 	}
 	now := d.clk.Now()
@@ -209,7 +208,7 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 			who = m.Name
 		}
 		d.rep.note(fmt.Sprintf("leg %d: %s is on %s, not the tank; the tank is sent at it", d.curLeg, d.hostileName(h), who))
-		r, err := d.order(ctx, "pull", tbm.GUIDArg(h.GUID), "0")
+		r, err := d.order(ctx, "attack", tbm.GUIDArg(h.GUID), tank.Name)
 		if err != nil {
 			return err
 		}
