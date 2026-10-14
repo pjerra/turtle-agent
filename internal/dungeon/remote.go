@@ -1521,6 +1521,9 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 	return d.walkTo(ctx, p, direct, d.opt.MoveArrive)
 }
 
+// directArrive is how close (yd) the lead bot must be to a direct step's point for the step to count as done, or as not needed.
+const directArrive = 1.5
+
 func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveAt float32) error {
 	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) {
 		if direct {
@@ -1529,6 +1532,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		}
 		return d.wdReplanWalk(ctx, p)
 	})()
+	if direct {
+		// A direct step is short on purpose (the plan's 4 yd hop under the overhang): the usual 5 yd "arrived" would count it as done
+		// without sending it (live, uldaman hires-2 17:20: the lip was 3.97 yd from the first hop, so only the 12 yd hop was sent and
+		// the module refused it no-los).
+		arriveAt = min(arriveAt, directArrive)
+	}
 	refusals, stalls, aggros, aheads := 0, 0, 0, 0
 	leg := d.opt.MoveLeg
 	var last string
