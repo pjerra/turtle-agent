@@ -76,6 +76,10 @@ type Action struct {
 	Expect    *ItemRef            // loot_object, use_item: the item that must be in the bags afterwards
 	Remaining time.Duration       // wait: time left before the plan fails
 	Err       string              // failed
+	// TeamGate is set on a pull or kill of a part gated to the other team that a World with TeamGateLook runs only after a look: the
+	// driver looks at the part's positions and skips it only if none of its mobs is there (or hostile). It reads like the skip note,
+	// "pull group 1 of 1 ([1]) is for team horde, the leader is alliance".
+	TeamGate string
 }
 
 type phase int
@@ -227,12 +231,17 @@ func (s *Stepper) next() Action {
 				continue
 			}
 			g := l.PullGroups[s.idx]
+			gate := ""
 			if !s.teamOK(g.Team) && !s.hostileOverride(fmt.Sprintf("g%d/%d", s.leg, s.idx), g.Entries, g.Team, s.label("pull group %d of %d (%v)", s.idx+1, len(l.PullGroups), g.Entries)) {
-				s.skipped = append(s.skipped, s.label("pull group %d of %d (%v) is for team %s, the leader is %s: skipped", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team()))
-				s.idx++
-				continue
+				note := s.label("pull group %d of %d (%v) is for team %s, the leader is %s", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team())
+				if !s.looksFirst() {
+					s.skipped = append(s.skipped, note+": skipped")
+					s.idx++
+					continue
+				}
+				gate = note
 			}
-			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
+			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip, TeamGate: gate,
 				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
 		case phSteps, phAfter:
 			steps := l.Steps
@@ -258,12 +267,17 @@ func (s *Stepper) next() Action {
 				s.ph, s.idx = phAfter, 0
 				continue
 			}
+			gate := ""
 			if !s.teamOK(l.Boss.Team) && !s.hostileOverride(fmt.Sprintf("b%d", s.leg), append([]uint32{l.Boss.Entry}, l.Boss.First...), l.Boss.Team, s.label("boss %d", l.Boss.Entry)) {
-				s.skipped = append(s.skipped, s.label("boss %d is for team %s, the leader is %s: skipped", l.Boss.Entry, l.Boss.Team, s.team()))
-				s.ph, s.idx = phAfter, 0
-				continue
+				note := s.label("boss %d is for team %s, the leader is %s", l.Boss.Entry, l.Boss.Team, s.team())
+				if !s.looksFirst() {
+					s.skipped = append(s.skipped, note+": skipped")
+					s.ph, s.idx = phAfter, 0
+					continue
+				}
+				gate = note
 			}
-			return Action{Kind: ActKill, Leg: s.leg, Step: -1, Boss: l.Boss, Skip: l.Skip, Label: s.label("kill boss %d", l.Boss.Entry)}
+			return Action{Kind: ActKill, Leg: s.leg, Step: -1, Boss: l.Boss, Skip: l.Skip, TeamGate: gate, Label: s.label("kill boss %d", l.Boss.Entry)}
 		}
 	}
 }
@@ -399,6 +413,18 @@ func (s *Stepper) teamOK(team string) bool {
 // run 2). A World without it keeps the plan's team gate as written.
 type HostileWorld interface {
 	HostileSeen(entries []uint32) bool
+}
+
+// TeamGateLook is the optional part of a World that wants the team gate to look before it skips: a part gated to the other team whose
+// mobs were never listed hostile is returned as an action with Action.TeamGate set, and the driver walks to its positions to look
+// (the feed lists only what the bots see, so "not in the feed" is not "not there"). A World without it skips such a part at once.
+type TeamGateLook interface {
+	TeamGateLook() bool
+}
+
+func (s *Stepper) looksFirst() bool {
+	tl, ok := s.w.(TeamGateLook)
+	return ok && tl.TeamGateLook()
 }
 
 // hostileOverride says whether a part gated to another team is fought anyway because its mobs are hostile to the party, and notes it

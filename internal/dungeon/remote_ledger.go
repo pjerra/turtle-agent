@@ -37,9 +37,9 @@ func (d *RemoteDriver) noteLedger() {
 		seen[h.GUID] = true
 		if h.HPPct > 0 {
 			if d.seenHostile == nil {
-				d.seenHostile = map[uint32]bool{}
+				d.seenHostile = map[packet.GUID]uint32{}
 			}
-			d.seenHostile[h.Entry] = true
+			d.seenHostile[h.GUID] = h.Entry
 		}
 		m := d.ledger[h.GUID]
 		fighting := h.HPPct > 0 && (d.engagedWith(h) || h.HPPct < 100)
@@ -118,23 +118,25 @@ func (d *RemoteDriver) ledgerDead(entries []uint32) bool {
 	return false
 }
 
-// hostileSeen says whether the party has met a unit of one of entries as a hostile: one is listed alive in the feed now, or an entry was
-// listed alive earlier in the run and is not known dead since (killed in a won pull, or dead in the kill ledger). The feed lists only
-// what is hostile to the party, so this is the data behind the team gate (HostileWorld): a boss gated to the other team that shows up
-// here is fought. A mob that was never listed (friendly, or never in sight) is not "seen hostile".
+// hostileSeen says whether the party has met a unit of one of entries as a hostile: one is listed alive in the feed now, or a unit
+// (by GUID: an entry may have several spawns) was listed alive earlier in the run and is not known dead since (killed in a won pull, or
+// dead in the kill ledger). The feed lists only what is hostile to the party, so this is the data behind the team gate (HostileWorld):
+// a part gated to the other team that shows up here is fought. A mob that was never listed (friendly, or never in sight) is not "seen
+// hostile"; the driver looks for it before the gate skips the part (gatedLook).
 func (d *RemoteDriver) hostileSeen(entries []uint32) bool {
-	for _, e := range entries {
-		if e == 0 {
-			continue
-		}
-		for _, h := range d.fr.Hostiles {
-			if h.Entry == e && h.HPPct > 0 {
-				return true
-			}
-		}
-		if d.seenHostile[e] && len(d.killedAt[e]) == 0 && !d.ledgerDead([]uint32{e}) {
+	for _, h := range d.fr.Hostiles {
+		if h.HPPct > 0 && h.Entry != 0 && slices.Contains(entries, h.Entry) {
 			return true
 		}
+	}
+	for g, e := range d.seenHostile {
+		if !slices.Contains(entries, e) || d.killedGUID[g] {
+			continue
+		}
+		if m := d.ledger[g]; m != nil && m.dead {
+			continue
+		}
+		return true
 	}
 	return false
 }

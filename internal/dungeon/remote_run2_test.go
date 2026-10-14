@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 	"strings"
 	"testing"
@@ -338,5 +339,122 @@ func TestRemoteRefusesAnotherBinding(t *testing.T) {
 		if g.unbinds != 0 || !g.bound || rep.Remote.Bound || len(g.ordersOf("cmd")) != 0 {
 			t.Fatalf("%s: the other binding was touched: unbinds %d bound %v %v", name, g.unbinds, g.bound, g.orders)
 		}
+	}
+}
+
+// ---- the look before a team-gated part is skipped ----
+
+// A gated boss that stands out of the bots' sight, hostile, is not skipped for not being in the feed: the lead bot walks up to look, the
+// dwarves show themselves, and they are fought.
+func TestRemoteTeamGateLooksBeforeSkippingAnOutOfViewHostile(t *testing.T) {
+	plan := remotePlan(Leg{Name: "baelog", To: Point{20, 0, 0}, Boss: &Boss{Entry: 6906, Position: Point{200, 0, 0}, Team: TeamHorde}})
+	o := opts()
+	o.Team = "alliance"
+	g := newFakeRemote(t)
+	g.addMob(6906, Point{200, 0, 0})
+	g.sight = 50
+	rep, err := runRemote(t, g, plan, o, nil)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	notes := notesOf(rep)
+	if g.mobsKilled != 1 || !strings.Contains(notes, "hostile to the party (seen on the look): fought") || strings.Contains(notes, "alliance: skipped") {
+		t.Fatalf("killed %d\n%s", g.mobsKilled, notes)
+	}
+	// the same for a gated pull group
+	plan = remotePlan(Leg{Name: "p", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{200, 0, 0}}, Team: TeamHorde}}})
+	g = newFakeRemote(t)
+	g.addMob(1, Point{200, 0, 0})
+	g.sight = 50
+	rep, err = runRemote(t, g, plan, o, nil)
+	if err != nil || g.mobsKilled != 1 || !strings.Contains(notesOf(rep), "fought") {
+		t.Fatalf("%v killed %d\n%s", err, g.mobsKilled, notesOf(rep))
+	}
+}
+
+// With nothing there, the gated part is skipped only after the look: the lead bot went to its position and saw none.
+func TestRemoteTeamGateSkipsAfterTheLook(t *testing.T) {
+	plan := remotePlan(Leg{Name: "baelog", To: Point{20, 0, 0}, Boss: &Boss{Entry: 6906, Position: Point{200, 0, 0}, Team: TeamHorde}})
+	o := opts()
+	o.Team = "alliance"
+	g := newFakeRemote(t)
+	rep, err := runRemote(t, g, plan, o, nil)
+	if err != nil || len(g.ordersOf("cmd pullback")) != 0 {
+		t.Fatalf("%v %v", err, g.orders)
+	}
+	if !strings.Contains(notesOf(rep), "boss 6906 is for team horde, the leader is alliance: skipped (looked:") || g.lead().X < 170 {
+		t.Fatalf("lead at %v\n%s", g.lead().X, notesOf(rep))
+	}
+}
+
+// "Seen alive and not killed" is per unit: one of two spawns of an entry killed does not clear the other.
+func TestHostileSeenIsPerGUID(t *testing.T) {
+	d := NewRemoteDriver(remotePlan(), newFakeRemote(t), DefaultConfig(), opts(), RealClock())
+	a, b := packet.GUID(0xF130000000000001), packet.GUID(0xF130000000000002)
+	d.seenHostile = map[packet.GUID]uint32{a: 6907, b: 6907}
+	if !d.hostileSeen([]uint32{6907}) || d.hostileSeen([]uint32{6908}) {
+		t.Fatal("seen units not counted")
+	}
+	d.killedGUID = map[packet.GUID]bool{a: true}
+	if !d.hostileSeen([]uint32{6907}) {
+		t.Fatal("one spawn killed cleared the other")
+	}
+	d.ledger = map[packet.GUID]*ledgerMob{b: {dead: true}}
+	if d.hostileSeen([]uint32{6907}) {
+		t.Fatal("both dead still counted")
+	}
+}
+
+// A binding that turns out not to be the run's has the view that the run switched on put back off; one refused on status never got it on.
+func TestRemoteMismatchTurnsTheViewBackOff(t *testing.T) {
+	plan := remotePlan(Leg{Name: "a", To: Point{30, 0, 0}})
+	g := newFakeRemote(t)
+	g.bindErr, g.bound = "already-bound", true
+	o := opts()
+	o.Bots = []string{"Healy", "Priesty"}
+	if _, err := runRemote(t, g, plan, o, nil); err == nil {
+		t.Fatal("run went on")
+	}
+	if on, off := g.ordersOf("commander view on"), g.ordersOf("commander view off"); len(on) != 1 || len(off) != 1 || g.indexOf("commander view off") < g.indexOf("commander view on") {
+		t.Fatalf("%v", g.orders)
+	}
+	g = newFakeRemote(t)
+	g.bindErr, g.bound = "already-bound", true
+	g.status = &tbm.Ack{Intent: "commander status", Scope: "party", Count: 3, Executor: "Someone"}
+	if _, err := runRemote(t, g, plan, opts(), nil); err == nil || len(g.ordersOf("commander view")) != 0 {
+		t.Fatalf("%v %v", err, g.orders)
+	}
+}
+
+// The party wipes while the end of a run fights on: the fight loop gives up on the wipe, and the stay and the unbind still go.
+func TestRemoteEndFightWipe(t *testing.T) {
+	g := newFakeRemote(t)
+	plan := remotePlan(Leg{Name: "far", To: Point{400, 0, 0}})
+	ctx, cancel := context.WithCancel(context.Background())
+	started, ticks := false, 0
+	g.killRate = 0
+	g.onTick = func(g *fakeRemote) {
+		if !started && g.lead().X > 100 {
+			started = true
+			m := g.addMob(299, Point{g.lead().X + 5, 0, 0})
+			m.pulled, m.engaged, m.pullAt = true, true, g.now.Add(-5*time.Second)
+			cancel()
+			return
+		}
+		if started {
+			if ticks++; ticks == 3 {
+				for _, p := range g.party {
+					p.Dead, p.HP, p.State = true, 0, "d"
+				}
+			}
+		}
+	}
+	rep, _ := runRemoteCtx(t, ctx, g, plan, opts())
+	n := len(g.orders)
+	if g.orders[n-1] != "commander unbind" || g.orders[n-2] != "cmd stay" || g.unbinds != 1 {
+		t.Fatalf("%v", g.orders[max(0, n-4):])
+	}
+	if !strings.HasPrefix(rep.Remote.EndFight, "interrupted") || !strings.Contains(rep.Remote.EndFight, "dead") {
+		t.Fatalf("end fight %q", rep.Remote.EndFight)
 	}
 }
