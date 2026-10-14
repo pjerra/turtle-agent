@@ -239,6 +239,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerSocialMethods(srv, cur)
 	registerGroupMethods(srv, cur)
 	registerItemMethods(srv, cur)
+	registerTradeMethods(srv, cur)
 	registerGameObjectMethods(srv, cur)
 	registerNPCMethods(srv, cur)
 	registerSpellMethods(srv, cur)
@@ -294,6 +295,7 @@ func readEvents(ctx context.Context, log *events.Log, q events.Query, waitMS int
 func rpcErr(err error) error {
 	var le *session.LogoutError
 	var te *session.TaughtError
+	var tf *session.TradeFailed
 	switch {
 	case err == nil:
 		return nil
@@ -317,6 +319,9 @@ func rpcErr(err error) error {
 			data = map[string]any{"learned_spell": te.Spell}
 		}
 		return &rpc.Error{Code: rpc.CodeGame, Message: err.Error(), Data: data}
+	case errors.As(err, &tf):
+		// A trade that did not complete: the result (how far it got, what the other side had) rides along.
+		return &rpc.Error{Code: rpc.CodeGame, Message: err.Error(), Data: tf.Result}
 	case errors.As(err, &le):
 		return &rpc.Error{Code: rpc.CodeGame, Message: err.Error(), Data: map[string]any{"reason": le.Reason}}
 	default:

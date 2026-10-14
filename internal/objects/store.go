@@ -740,6 +740,35 @@ func (s *Store) ItemAt(player packet.GUID, bag, slot uint8) (Item, bool) {
 	return Item{}, false
 }
 
+// FreeSlots lists the empty slots of the backpack and then of the four bags, as bag and slot in the form
+// ItemAt takes. A bag whose create block has not arrived is not listed.
+func (s *Store) FreeSlots(player packet.GUID) [][2]uint8 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.objs[player]
+	if !ok {
+		return nil
+	}
+	var out [][2]uint8
+	for slot := BackpackFirst; slot < BackpackEnd; slot++ {
+		if guidAt(p.values, PlayerInvSlotHead+2*uint16(slot)) == 0 {
+			out = append(out, [2]uint8{BackpackBag, slot})
+		}
+	}
+	for bag := BagFirst; bag < BagEnd; bag++ {
+		c, ok := s.objs[guidAt(p.values, PlayerInvSlotHead+2*uint16(bag))]
+		if !ok {
+			continue
+		}
+		for slot := uint32(0); slot < c.values[ContainerNumSlots] && slot < maxBagSlots; slot++ {
+			if guidAt(c.values, ContainerSlot1+2*uint16(slot)) == 0 {
+				out = append(out, [2]uint8{bag, uint8(slot)})
+			}
+		}
+	}
+	return out
+}
+
 // item describes the item g at bag/slot; the caller holds s.mu.
 func (s *Store) item(bag, slot uint8, g packet.GUID) (Item, bool) {
 	if g == 0 {

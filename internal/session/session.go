@@ -105,7 +105,10 @@ type Options struct {
 	NamesWait time.Duration
 	// MarkWait bounds how long mark waits for the server's MSG_RAID_TARGET_UPDATE echo; 0: 2 s.
 	MarkWait time.Duration
-	Store    *objects.Store // nil: a new store
+	// TradeSettle is how long Trade waits after its last change to the window before it accepts; 0: 1.1 s, which clears
+	// the core's one-second scam-prevention delay. Shorter is for tests against a scripted server.
+	TradeSettle time.Duration
+	Store       *objects.Store // nil: a new store
 	// Redact lists account names the server may echo back, as in a .pinfo reply, and
 	// RedactAnywhere passwords. They are replaced with "<redacted>" in event text, names
 	// and string data (ASCII case-insensitive; account names on whole words only, so a
@@ -255,6 +258,8 @@ type Session struct {
 	// locks itself, so RPC calls read it directly.
 	spellState *spellstate.State
 
+	trade tradeState // the player's trade window (trade.go)
+
 	pet petTracker // the player's pet: its action bar and what was announced of it (pet.go)
 }
 
@@ -282,6 +287,9 @@ func New(conn *worldconn.Conn, opts Options) *Session {
 	}
 	if opts.MarkWait == 0 {
 		opts.MarkWait = 2 * time.Second
+	}
+	if opts.TradeSettle == 0 {
+		opts.TradeSettle = tradeSettle
 	}
 	if opts.Store == nil {
 		opts.Store = objects.NewStore()
@@ -325,6 +333,7 @@ func (s *Session) register() {
 	s.registerSpells()
 	s.registerDeath()
 	s.registerPet()
+	s.registerTrade()
 }
 
 func (s *Session) registerCore() {
