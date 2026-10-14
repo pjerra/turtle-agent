@@ -593,6 +593,28 @@ Run again with a level 40 character of each class that has its spells (`.learn a
 5. **Warlock.** `affliction_warlock` with the natural mana pool (and once with `.modify mana`): Summon Voidwalker (100% of the base mana) is not refused with `no_power`; `unit` shows `base_mana`.
 6. **Missing mmaps.** Remove map 001 from `mmaps_dir` and fight in Kalimdor: `melee_reposition` reports the missing `001.mmap` once, then not for 5 min. `mmaps_dir` must hold every map you play on.
 
+## Run traces and checks (issue #73, data-collection step 1)
+
+The trace writer, the recorder and the ten checks run only against the fake game, the fake feed and hand-made traces (README "Run traces
+and checks"). Nothing below has run live. Use the agent slot only, `trace_meta` to note the build, and keep the traces: they are the data.
+
+1. **A short group run.** `dungeon_run {"name":"uldaman","gm":false,"run_id":"live-1","trace_meta":{"tb_sha":"<sha>","build":"<n>"}}` with a
+   hired party, for two legs. The result has `run_id` and `trace_file`; `<traces_dir>/live-1.jsonl` grows while it goes (`tail -f`) with a frame about every
+   second. Check a frame against `units` and `party`: positions, `cb`, `tg`, `mv`, the members' power. When the run ends, `dungeon_status.report.trace`
+   has `verdict`, `failed[]` and ten `checks[]`; `live-1.summary.json` says the same. Read the file size per minute: is 32 MiB (the limit) hours away?
+2. **`stale_party` on the real party list.** In a long fight (a boss), does a caster's `pw` in the frames stop changing while the others' move? If
+   the check fails, compare with the bot's real mana (`.bot` status or the TBM roster) to tell stale party data from a bot that really did nothing.
+3. **Facing.** Is `fa` in group frames the members' real angle off their target (compare one melee member to what the client shows)? Does the `facing` check have
+   melee-range frames (members in view, target a hostile in view) to be anything but n/a? In a remote run, is the feed's `O` the bot's facing in radians (0 east)?
+4. **Stuck.** Walk a leg that has a known snag. Do the `stuck` events name the right member and place? Does a follower that is simply waiting for the lead
+   (inside 10 yd) stay quiet? Does the lead stopping for a use_object (not a walk) stay quiet?
+5. **Remote run.** The same with `mode: "remote"` (see "Remote leader"): frames have `via: "feed"` with `thr` threat lists; `order` events have `reply` and `ms`;
+   `threat_off_tank`, `feed_stalls` and `order_refusals` have values instead of n/a. A feed stall: stop the module's view (`commander view off`) for 15 s in the
+   middle of a run and see `feed_stall` and a `feed_stalls` fail.
+6. **Re-scoring.** `turtle-agent trace-score --set rest_share=30 <the trace>` prints the verdicts again from the file alone; exit code 11 on a fail.
+7. **Brain session.** `brain_start {"strategies":["frost_mage"],"run_id":"live-brain"}`, fight, `brain_stop`: `brain_status.run_id`, `data.run_id` on the
+   `brain_*` events and a `live-brain.jsonl` with `brain` events. With `dungeon_run ... "brain":"frost_mage"` the brain's decisions land in the run's trace.
+
 ## Remote leader (issue #83)
 
 Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B` truncated field of #901 when that is in) and

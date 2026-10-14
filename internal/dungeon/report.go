@@ -3,6 +3,8 @@ package dungeon
 import (
 	"sync"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // Report is what a run did, kept while it goes and complete at the end. dungeon_status returns it as JSON.
@@ -58,6 +60,12 @@ type Report struct {
 	// TankFirst is the counters of the tank-first rules in a group run (README "Tank first"); a remote run has them in Remote. Absent
 	// until the first fight with a tank in view.
 	TankFirst *TankFirstReport `json:"tank_first,omitempty"`
+	// RunID names the run: it is in every dungeon event (data.run_id) and in the trace file's header.
+	RunID string `json:"run_id"`
+	// Trace says where the run's trace went and how it scored (README "Run traces and checks"); set when the run ends.
+	Trace *tracerun.Info `json:"trace,omitempty"`
+	// TraceFile is the trace's path while the run goes (empty when tracing is off or the file could not be made).
+	TraceFile string `json:"trace_file,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -101,6 +109,8 @@ type reporter struct {
 	mu  sync.Mutex
 	r   Report
 	now func() time.Time
+	// onNote, when set, sees each note (the trace copies them as events).
+	onNote func(string)
 }
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
@@ -141,7 +151,12 @@ func (p *reporter) summaryEnded(state, errText string, t time.Time) map[string]a
 
 func (p *reporter) setCurrent(label string) { p.update(func(r *Report) { r.Current = label }) }
 
-func (p *reporter) note(s string) { p.update(func(r *Report) { r.Notes = append(r.Notes, s) }) }
+func (p *reporter) note(s string) {
+	p.update(func(r *Report) { r.Notes = append(r.Notes, s) })
+	if p.onNote != nil {
+		p.onNote(s)
+	}
+}
 
 func (p *reporter) update(f func(*Report)) {
 	p.mu.Lock()
@@ -182,6 +197,7 @@ func (p *reporter) summary() map[string]any { return summaryOf(p.snapshot()) }
 
 func summaryOf(r Report) map[string]any {
 	m := summaryBase(r)
+	m["run_id"] = r.RunID
 	if r.Remote != nil {
 		m["remote"], m["lead_bot"], m["frames_received"] = true, r.Remote.LeadBot, r.Remote.FramesReceived
 		m["orders_sent"], m["orders_refused"] = r.Remote.OrdersSent, r.Remote.OrdersRefused

@@ -160,7 +160,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		text = "preflight: " + strings.Join(pf.Warnings, "; ")
 	}
 	d.rep.note(text)
-	d.g.Emit(events.KindDungeonStep, text, map[string]any{"action": "preflight", "ok": pf.OK, "warnings": pf.Warnings, "mode": "remote"})
+	d.emit(events.KindDungeonStep, text, map[string]any{"action": "preflight", "ok": pf.OK, "warnings": pf.Warnings, "mode": "remote"})
 	if !pf.OK && mode == PreflightStrict {
 		return fmt.Errorf("preflight (strict): %s", strings.Join(pf.Warnings, "; "))
 	}

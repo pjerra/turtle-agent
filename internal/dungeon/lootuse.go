@@ -156,7 +156,7 @@ func (d *Driver) objectActor(what string) (ObjectActor, error) {
 func (d *Driver) noteSkipped() {
 	for _, text := range d.st.Skipped() {
 		d.rep.note(text)
-		d.g.Emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true})
+		d.emit(events.KindDungeonStep, text, map[string]any{"action": "skip_team", "ok": true})
 	}
 }
 

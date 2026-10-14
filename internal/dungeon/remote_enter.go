@@ -103,7 +103,7 @@ func (d *RemoteDriver) needsEntry() bool { return len(d.offMap(false)) > 0 }
 // enterNote records a step of the enter phase as a note and a dungeon_step event.
 func (d *RemoteDriver) enterNote(text string) {
 	d.rep.note("enter: " + text)
-	d.g.Emit(events.KindDungeonStep, "enter: "+text, map[string]any{"action": "enter", "ok": true, "mode": "remote"})
+	d.emit(events.KindDungeonStep, "enter: "+text, map[string]any{"action": "enter", "ok": true, "mode": "remote"})
 }
 
 func (d *RemoteDriver) enterReport(f func(*EnterReport)) {

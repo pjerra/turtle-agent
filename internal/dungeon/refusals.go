@@ -104,6 +104,7 @@ func (d *Driver) takeRefusals() []Refusal {
 }
 
 func (d *Driver) recordRefusal(r Refusal) {
+	d.tr.Event("refusal", map[string]any{"intent": r.Intent, "code": r.Code, "message": r.Message, "leg": d.curLeg})
 	d.rep.update(func(rep *Report) {
 		for i := range rep.Refusals {
 			x := &rep.Refusals[i]

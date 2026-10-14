@@ -12,6 +12,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // Game is what the Driver does to the game and what it reads of it. The agent implements it over a session
@@ -150,6 +151,8 @@ type Config struct {
 	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
 	Brain     Brain
 	BrainName string
+	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
+	Trace tracerun.Config
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -321,6 +324,9 @@ type Driver struct {
 	recoveries     int    // how often the leader came back; a walk does not count the interruption as a failed try
 	leaderDeaths   int
 	wipeRecoveries int
+
+	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
+	stopSampler func()
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -333,6 +339,7 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
 	d.rep.r.Brain = cfg.BrainName
+	d.initTrace()
 	return d
 }
 
@@ -350,6 +357,7 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	d.rep.start(fromLeg)
+	d.traceBegin(fromLeg)
 	err := d.run(ctx, fromLeg)
 	d.finish(err)
 	return err
@@ -375,7 +383,8 @@ func (d *Driver) finish(err error) {
 	if err != nil {
 		data["error"], data["leg"] = errText, leg
 	}
-	d.g.Emit(kind, text, data)
+	d.emit(kind, text, data)
+	d.traceEnd(state, errText, at)
 	d.rep.end(state, errText, at)
 }
 
@@ -415,7 +424,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		case ActWait:
 			if waiting != [2]int{a.Leg, a.Step} {
 				waiting = [2]int{a.Leg, a.Step}
-				d.g.Emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind)})
+				d.emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind)})
 			}
 			if err := d.sleep(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
 				d.stepFailed(err)
@@ -426,7 +435,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		var err error
 		switch a.Kind {
 		case ActWalk:
-			err = d.doWalk(ctx, a.To)
+			err = d.tracedWalk(ctx, a.To)
 		case ActUse:
 			err = d.doUse(ctx, a)
 		case ActPull:
@@ -444,7 +453,7 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		if err != nil {
 			data["error"] = err.Error()
 		}
-		d.g.Emit(events.KindDungeonStep, a.Label, data)
+		d.emit(events.KindDungeonStep, a.Label, data)
 		if err != nil {
 			d.stepFailed(err)
 			continue
@@ -466,6 +475,7 @@ func (d *Driver) stepFailed(err error) {
 func (d *Driver) countWipe(err error) {
 	if errors.Is(err, errWipe) {
 		d.rep.update(func(r *Report) { r.Wipes++ })
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
 		d.rep.note(err.Error())
 	}
 }
@@ -625,7 +635,7 @@ func (d *Driver) gather(ctx context.Context) error {
 			return fmt.Errorf("the party did not reach the leader in %.0f s: %v", d.cfg.ArriveTimeout.Seconds(), missing)
 		}
 	}
-	return d.g.Chat(ctx, "party", ".bot action follow")
+	return d.chat(ctx, ".bot action follow")
 }
 
 // notNear names the living online members who are not in view within GatherRadius of the leader.
@@ -653,6 +663,7 @@ func (d *Driver) shortcut(kind string, leg int, detail string) {
 	d.rep.update(func(r *Report) {
 		r.Shortcuts = append(r.Shortcuts, Shortcut{Kind: kind, Leg: leg, Detail: detail, At: d.clk.Now()})
 	})
+	d.tr.Event("gm_shortcut", map[string]any{"kind": kind, "leg": leg, "detail": detail})
 }
 
 // startLeg opens a leg's report and event, and waits for the party to be rested.
@@ -662,7 +673,7 @@ func (d *Driver) startLeg(ctx context.Context, i int) error {
 	d.rep.update(func(r *Report) {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
@@ -685,7 +696,7 @@ func (d *Driver) endLeg(result string) {
 			l = *x
 		}
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
 		"leg": i, "name": l.Name, "phase": "end", "result": result, "seconds": l.Seconds, "deaths": l.Deaths,
 		"pulls": l.Pulls, "pull_retries": l.PullRetries, "rest_seconds": l.RestSeconds})
 }
@@ -740,6 +751,7 @@ func (d *Driver) observe() error {
 
 // countDeaths counts each death once (leader or member) and reports whether every online member is dead.
 func (d *Driver) countDeaths() (wholePartyDead bool) {
+	d.traceSample()
 	if !d.seen {
 		d.observeInit()
 	}
@@ -752,6 +764,7 @@ func (d *Driver) countDeaths() (wholePartyDead bool) {
 					r.Legs[n-1].Deaths++
 				}
 			})
+			d.tr.Event("death", map[string]any{"name": name, "a": guidText(g), "leg": d.curLeg})
 		}
 		d.prevDea[g] = dead
 	}
@@ -1048,7 +1061,7 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 // order says ".bot action <intent>" in party chat and remembers the intent: a bot's whisper refusing it carries none.
 func (d *Driver) order(ctx context.Context, intent string) error {
 	d.lastOrder = intent
-	return d.g.Chat(ctx, "party", ".bot action "+intent)
+	return d.chat(ctx, ".bot action "+intent)
 }
 
 // doUse uses the object under the move lock, the settle wait included: a brain step must not carry the leader out of the object's reach
@@ -1092,6 +1105,7 @@ func (d *Driver) use(ctx context.Context, a Action) error {
 // pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
 func (d *Driver) restGate(ctx context.Context) (err error) {
+	defer d.traceRest(d.clk.Now())
 	if b := d.cfg.Brain; b != nil {
 		d.brainOn()
 		b.Rest(true)
@@ -1220,7 +1234,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			}
 			rw.nudged[m.GUID] = true
 			rec.nudged(m.Name)
-			if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+			if err := d.chat(ctx, drinkOrder(m.Name, "drink")); err != nil {
 				return err
 			}
 			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent %q", d.curLeg, m.Name, m.Pct, d.cfg.DrinkNudge.Seconds(), drinkOrder(m.Name, "drink")))
@@ -1236,7 +1250,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 		if !ordered {
 			ordered = true
 			d.restRefused() // an old refusal is not an answer to this order
-			if err := d.g.Chat(ctx, "party", ".bot action rest"); err != nil {
+			if err := d.chat(ctx, ".bot action rest"); err != nil {
 				return err
 			}
 		}
@@ -1389,13 +1403,13 @@ func (d *Driver) orderEach(ctx context.Context, rw *restWatch, rec *gateRec, st 
 		}
 		rw.nudged[m.GUID] = true
 		rec.nudged(m.Name)
-		if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+		if err := d.chat(ctx, drinkOrder(m.Name, "drink")); err != nil {
 			return err
 		}
 		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q (%s mana %d%%)", d.curLeg, why, drinkOrder(m.Name, "drink"), m.Name, m.Pct))
 	}
 	for _, name := range st.shortHP {
-		if err := d.g.Chat(ctx, "party", drinkOrder(name, "eat")); err != nil {
+		if err := d.chat(ctx, drinkOrder(name, "eat")); err != nil {
 			return err
 		}
 		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q", d.curLeg, why, drinkOrder(name, "eat")))
@@ -1433,7 +1447,7 @@ func (d *Driver) sneakPast(ctx context.Context, label string, sp fightSpec) erro
 		return err
 	}
 	d.legStat(func(l *LegReport) { l.Ambushes++ })
-	if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+	if err := d.chat(ctx, ".bot action follow"); err != nil {
 		return err
 	}
 	fights := 0
@@ -1575,7 +1589,7 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 				l.PullRetries++
 			}
 		})
-		res, err := d.fight(ctx, t, sp)
+		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
 			return err
 		}
@@ -1610,7 +1624,7 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			attempt++
 		}
 		d.rep.note(fmt.Sprintf("%s: pull of %s %s", label, t.Name, why))
-		if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+		if err := d.chat(ctx, ".bot action follow"); err != nil {
 			return err
 		}
 		if err := d.sleep(ctx, d.cfg.Poll*3); err != nil {

@@ -51,7 +51,7 @@ copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmes
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
 the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `dungeons_dir` is the folder
-`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)).
+`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)).
 
 Log a character in and keep it online with the RPC server running:
 
@@ -86,6 +86,7 @@ turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
+turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent version
 ```
 
@@ -101,6 +102,7 @@ turtle-agent version
 | 8 | the server kept refusing the logout |
 | 9 | `fleet`: a child exited non-zero (the others kept running unless `--stop-on-failure`), or not every character reached the world in time |
 | 10 | a logout did not complete (`lost` or `timeout`); in a fleet, the other characters keep running |
+| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)) |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -261,6 +263,8 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report` |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
+| `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
@@ -820,6 +824,129 @@ Limits of this driver: no CC marks, no loot orders beyond the `companions_loot` 
 the bounds above, and stealthed packs are walked through, not pulled. The code is
 tested against a fake game and clock (`internal/dungeon/driver_test.go`) and the agent's RPC rig; the first live run is listed in
 `docs/LIVE-CHECKS.md`.
+
+## Run traces and checks
+
+Issue #73, data-collection step 1. Every `dungeon_run` (group and remote) and every brain session has a **run id**, and a dungeon
+run writes a **trace**: a JSONL file with what the agent saw and did, which a pure scorer turns into pass / fail / n/a verdicts. The aim is to
+score many runs and compare pass rates per build, instead of watching one run and guessing. The format is shared with the TortoiseBots
+side (a server recorder is the next step, and a TortoiseBots dashboard reads the summary files), so the two producers' files join on the
+run id. The ideas (one trace schema, oracles that are pure functions of the trace, re-scoring old traces) are those of mod-dungeon-clear's
+Pull Lab; no code or data of it is used.
+
+**Run id.** `r-<utc yyyymmddThhmmss>-<4 hex>`, e.g. `r-20261014T093012-a1b2`, made by the agent, or the caller's own `run_id` (letters,
+digits, `.`, `_`, `-`, at most 64, starting with a letter or digit; it names the file, so nothing else is allowed). It is in the
+`dungeon_run` and `brain_start` results, in the report (`run_id`), in the data of every `dungeon_*` and brain event (`data.run_id`), and
+in the trace's header and file name. A caller that sets `run_id` can stamp the same id on the server side later; nothing is sent to the
+server yet. `trace_meta` (up to 16 `key: text` pairs, e.g. `{"tb_sha": "...", "build": "19h", "scenario": "uldaman-1"}`) is copied
+into the header: the agent cannot know the server's build itself.
+
+**Where.** `<traces_dir>/<run_id>.jsonl` and `<traces_dir>/<run_id>.summary.json`. `traces_dir` is a settings key (a leading `~/` is the home
+folder); without it `$TURTLE_AGENT_TRACES_DIR`, else `traces` under the working directory. On by default for `dungeon_run` and `brain_start`;
+`"trace": false` writes no file (the run id stays). A trace that cannot be opened (the file exists, the folder is not writable) never
+stops the run: the report's `trace.error` says why. The folder keeps the newest 200 traces of generated ids (older ones and their
+summaries are deleted when a new one opens; ids you chose yourself are never deleted). The report has `trace_file` while the run goes and, once it
+ended, `trace`: `path`, `summary`, `frames`, `events`, `bytes`, `truncated`, `verdict` (`fail` if any check failed, `pass`, `na`), `failed[]` and
+`checks[]`.
+
+**Size.** One frame about every second (a feed that runs a little faster is not halved; past half the size limit one in three is
+taken). At 32 MiB the frames stop, with a `trace_limit` event in the file; events go on for a quarter more, then stop (`trace_limit`
+again); the end record and the checks are always written. `end.dropped` counts what was left out, and `truncated` is in the summary.
+
+### Schema `bt-trace` v1
+
+The format is the one TortoiseBots' server recorder writes (`docs/guides/run-trace.md` there): one scorer and one dashboard read both
+producers' files, and the two files of a run join on the run id. Every line is a flat JSON object that starts with the same five fields:
+`v` (1), `k` (the kind), `run` (the run id), `src` (`agent` here, `server` there) and `t` (milliseconds since the run started). GUIDs
+are strings, `0x` and lower-case hex without padding (`0x2a`). A reader ignores kinds, fields and events it does not know, and refuses
+a file whose `v` is higher than it reads. Adding a field or an event name does not change `v`; changing the meaning of one does.
+
+| `k` | Written | Fields (besides the five) |
+| --- | --- | --- |
+| `header` | once, first | as the server's: `schema` (`bt-trace`), `scope` (`party`), `scope_name` (the lead), `requester` (the agent's character, group runs), `start_unix`, `interval_ms`, `max_bytes`, `map`, `instance` (0), `caps`. The agent's own: `agent_version`, `agent_sha`, `source` (`dungeon_run`, `brain`), `mode` (`group`, `remote`), `plan`, `from_leg`, `start` (RFC 3339), `lead`, `tank`, `brain`, `options` (`teleport`, `shortcuts`, `recover_wipe`, `setup[]`, `buffs[]`, ...), `meta` |
+| `party` | per member, when first seen | `g`, `name`, `class`, `role` (`tank`/`heal`/`dps`; only where known), `level`, and the agent's `lead` |
+| `mobs` | per hostile, the first time it is in a frame (at most 1024) | `g`, `entry`, `name`, `level` (group runs) |
+| `frame` | about 1 Hz | `bots[]`, `mobs[]`; the agent's `via` (`session`: its object store and party list, `feed`: a TBM:VIEW frame), `seq` (the feed's), `cut` |
+| `event` | as it happens | `ev` and flat fields: the server's `a`/`b` (guids), `s`/`s2` (text) where they fit, the agent's own besides, see below |
+| `end` | once | `reason` (`done`, `failed`, `stopped`), `error`, `seconds`, `ended`, `counters{}` |
+| `oracle` | after the end, one per check | `id`, `name`, `verdict`, `count`, `first_ms`, `detail`, and the agent's `value`, `threshold`, `unit`, `evidence[]` (the server keeps its verdicts in the summary only) |
+
+`caps` says what the producer records, so that a scorer answers `na` instead of passing what it cannot see. The server's:
+`facing`, `moving`, `interrupts`, `in_fire`. The agent lists `facing` (bots have `fa`), `moving` (bots have `mv`; group runs only: the
+feed has no movement flag), `threat` (mobs have `thr`; remote runs only), `orders`, `walks` and `partylist` (hp and power come from the party
+list). A group run has no `threat`; a remote run has no `moving`; neither has `interrupts` or `in_fire`.
+
+Frame bots (`bots[]`, keyed by `g`; the name is in the party record): `al` alive, `cb` in combat, `st` engine state (`c` combat, `n` non-combat,
+`d` dead, `r` reaction), `hp`/`mhp`, `pw`/`mpw` power and its maximum, `pt` power type (0 mana, 1 rage, 2 focus, 3 energy), `x` `y` `z`, `mv` a
+movement is active, and when set `tg` target, `fa` facing (degrees 0-180 between where the bot faces and the direction to its hostile target in view), `cs` the
+spell it casts (feed), `act` its last action (feed), plus the agent's `np` (position unknown: x, y, z are 0) and `lead`. Frame mobs (`mobs[]`):
+`g`, `hp` percent, `x` `y` `z`, `cb`, and when set `tg`, `cs`, `ev` evading, `cc` crowd-controlled, `thr` the top of the threat list as
+`[guid, percent of the top]` pairs (feed only). A group run's mobs are the hostile units in combat or within 60 yd (at most 40), without
+threat; a remote run copies the feed's party, hostiles and threat records. `end.counters` has the writer's `frames`, `events`, `party`,
+`mobs`, `records`, `bytes`, `dropped` (with `dropped_frames`, `dropped_events`) and `truncated`, as the server's does, and the run's
+totals (`deaths`, `wipes`, `gm_shortcuts`, `pulls`, `rest_seconds`, `refusals`, and for remote runs `orders_sent`, `orders_refused`,
+`frames_received`, `frames_missed`, `feed_stalls`, ...).
+
+Events (`ev`; fields beside `ev`, a field named like an envelope field is written with an `x_` prefix):
+
+| `ev` | Meaning |
+| --- | --- |
+| `leg`, `step`, `leader` | the `dungeon_leg`, `dungeon_step` and `dungeon_leader` events of the run, with their data and `text` |
+| `order` | an order sent: group `via: "chat"`, `intent` (`pullback`, `attack`, `rest`, `follow`, `command`, ...), `text`; remote `via: "cmd"`, `verb`, `text`, `reply` (`ack`, `err`, `timeout`), `code`, `message`, `ms` (the answer's latency) |
+| `refusal` | group mode: a bot's whisper or `TBM:ACTION_ERR` refusing an order: `intent`, `code`, `message` |
+| `pull_start`, `pull_end` | a pull: `target`, `entry`, `guid`, position; the end has `outcome` (`won`, `no_engage`, `evaded`, `refused`, `retarget`, `error`), `kills`, `seconds` |
+| `rest` | a rest gate ended: `seconds` waited, `leg` |
+| `walk_start`, `walk_end` | a walk of the plan: target `x y z`; the end has `ok`, `error`, `seconds` |
+| `death`, `wipe` | a party member died (`a` its guid, `name`); the whole party was dead (a wipe, recovered or not) |
+| `combat_on`, `combat_off` | a member's combat state changed between two frames (`a`, `name`), as the server's |
+| `gm_shortcut` | a GM command taken instead of playing: `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `detail` |
+| `stuck`, `unstuck` | a member that should be moving stood still for 5 s, with its position (`a`, `name`, `x y z`, `seconds`, `lead`, `dist_lead`); it moved again or stopped being expected to move (`seconds` is the total) |
+| `feed_stall` | remote: no new feed frame for the stale limit |
+| `roster` | remote: the party names in the first feed frame |
+| `note` | the report's notes, as they are made |
+| `brain`, `brain_state` | the leader's brain: a decision (`action`, `trigger`, `result`, `spell_id`, `target`, `via`, `error`), and its start and stop |
+| `trace_limit` | the size limit was reached (`dropping`: `frames` or `events`) |
+
+A group run takes hp and power from the agent's own party list (so a list that has stopped updating shows up as stale data, see the check)
+and positions, facing, targets, combat and movement from the object store, for members in view. A brain session started by hand writes a
+thin trace (header, a party record, brain decisions, end); a brain a dungeon run started adds its events to the run's trace. In a remote run the
+party records have no class or level (the feed does not carry them) and `role` is only `tank` where `tank` was given.
+
+Summary file `<run_id>.summary.json`: the server's shape, so a dashboard lists both. Written when the run starts (`status: "running"`) and again,
+whole and atomically, when it ends and is scored: `v`, `schema`, `run`, `src`, `status` (`running`, `complete`), `end_reason`, `scope`,
+`scope_name`, `requester`, `trace_file`, `start_unix`, `end_unix`, `duration_ms`, `interval_ms`, `map`, `instance`, `counters{}`, `oracles[]`
+(each check: `id`, `name`, `verdict`, `count`, `first_ms`, `detail`, and the agent's `value`, `threshold`, `unit`, `evidence[]`), `verdict`
+(`fail` if any check failed, `pass`, `na`), `scored_unix`, `scorer`, `trace_complete`, `bad_lines`. The agent adds `agent_version`, `agent_sha`, `source`,
+`mode`, `plan`, `result`, `error`, `party[]`, `meta{}`, `failed[]` (ids), `bytes` and `truncated`. The report's `trace` has the same verdict and checks.
+
+### Checks
+
+`turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...` reads trace files and prints each check's verdict with
+its measured value and the threshold; `--json` prints one object per trace; `--summary` also writes `<run_id>.summary.json` beside the
+trace; `--set rest_share=30` changes a threshold. Exit code 11 when any check failed. The scorer reads nothing but the file, so a trace
+can be scored again after a threshold or a check changes. A dungeon run scores its own trace when it ends and appends the `oracle` records.
+
+Each check has an `id`, a `name`, a `verdict` (`pass`, `fail`, or `na` when the trace lacks what it needs), the `count` of times it
+happened, `first_ms`, a `detail` sentence, the measured `value` against the `threshold` (with `unit`) and the `evidence` times. The ids
+`threat_off_tank`, `deaths`, `facing` and `stuck` are the server scorer's (`tools/trace_score.py`), with the agent's reading of them;
+the others look at what only the agent sees (orders, rest gates, walks, the feed).
+
+| `id` | Fails when | Threshold (default) | n/a when |
+| --- | --- | --- | --- |
+| `rest_share` | the rest gates took more than this share of the run | 40 % | the run is shorter than 60 s |
+| `stale_party` | a mana user's power did not change for this long while someone else's health or power did (the party data stopped updating); full mana and dead members are ignored | 60 s | no frames with a mana user |
+| `walk_stops` | the lead stood still (at least 1.5 s) in the middle of a walk of the plan more often than this per 100 yd walked; the last 3 s of a walk are arriving | 4 stops / 100 yd | under 100 yd walked |
+| `threat_off_tank` | a party member other than the tank held the top threat of a living mob during a pull for longer than this; the tank is `header.tank`, else the `tank` role, else whoever holds the top threat most often | 4 s | no threat data (group runs have none) |
+| `deaths` | any death or wipe | 0 | never |
+| `order_refusals` | more than this share of the orders was refused (`err` replies and `refusal` events) | 20 % | fewer than 3 orders |
+| `feed_stalls` | the longest gap between two feed frames is over this | 10 s | no feed frames (group runs) |
+| `gm_shortcuts` | the honest-run flag: the run used any GM shortcut or was set up with `setup` commands, so a player could not have done it | 0 | never |
+| `stuck` | a member that should be moving (the lead in a walk of the plan, or a member more than 10 yd from the lead in one; alive and out of combat) did not move 1 yd for this long; the detail lists where, for a per-dungeon stuck-spot map | 5 s, any stall | no walk of the plan, or no frames |
+| `facing` | a bot in combat stands (no movement) within 6 yd of its hostile target for longer than this while its `fa` is over 90 degrees (the server rule, without its casting case: the agent does not see casts) | 2 s | the header lacks the `facing` capability, or no frame has a bot in melee range of its target |
+
+Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
+group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
+rate costs on a long run.
 
 ## Unit positions
 
@@ -2181,13 +2308,14 @@ you set).
 | `internal/navmesh` | tile loading and path planning over the core's Detour (cgo); `navfixture` builds synthetic tiles |
 | `internal/events` | ordered event log with cursors |
 | `internal/dungeon`, `dungeons/`, `tools/dungeongen` | dungeon plans and runs: the JSON format, loader, stepper and the driver (`dungeon_run`), the plan files, and the skeleton generator over world database exports (see [Dungeon plans](#dungeon-plans), [Dungeon runs](#dungeon-runs)) |
+| `internal/trace`, `internal/tracecheck`, `internal/tracerun` | run traces: the `bt-trace` format, writer, reader and summary files; the pure checks that score a trace; the recorder a run writes with (see [Run traces and checks](#run-traces-and-checks)) |
 | `internal/tbm` | the TortoiseBots addon (TBM) protocol: handshake commands, the `TBM:` reply lines, the generated button table, the transport rule and reply matching (`tools/tbmbuttongen` writes the table) |
 | `tools/tbmlines`, `tools/tbmcontract` | extract `TBM:` lines from an events file; replay them through the real TBM addon (Lua) |
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |
 | `internal/mapview` | map images: the run from frames, events and reports, floors by height, the SVG and HTML renderers (see [Map images](#map-images)) |
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `trace-score`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures

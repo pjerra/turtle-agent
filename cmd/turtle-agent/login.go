@@ -364,7 +364,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TracesDir: st.TracesDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()
