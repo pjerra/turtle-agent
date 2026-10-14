@@ -122,7 +122,7 @@ func (d *RemoteDriver) carryOrFallback(ctx context.Context, rec *objRec, command
 	_, canFall := d.agentHands()
 	tries := 1
 	if canFall {
-		tries = objectFallbackTries
+		tries = d.tx.FallbackTries
 	}
 	for try := 1; try <= tries; try++ {
 		res, err = d.carry(ctx, rec, command, near)

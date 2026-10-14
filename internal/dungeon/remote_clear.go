@@ -169,9 +169,9 @@ func (d *RemoteDriver) confirmGone(ctx context.Context, sp fightSpec, cl *cleari
 			continue
 		}
 		d.remote(func(r *RemoteReport) { r.PackLooks++ })
-		d.rep.note(fmt.Sprintf("leg %d: nothing of %v in view; walking to %.0f yd of its position %.0f %.0f %.0f to look", d.curLeg, sp.pick, float64(LookStandoff), at.X, at.Y, at.Z))
-		// The look stops out of the pack's aggro range (remote_gather.go): 15 yd short of it (ZF-1) pulled the pack and two more.
-		if err := d.approachArrive(ctx, at, LookStandoff, lookArrive); err != nil {
+		d.rep.note(fmt.Sprintf("leg %d: nothing of %v in view; walking to %.0f yd of its position %.0f %.0f %.0f to look", d.curLeg, sp.pick, float64(d.tx.LookStandoff), at.X, at.Y, at.Z))
+		// The look stops out of the pack's aggro range (remote_gather.go, LookStandoff): 15 yd short of it (ZF-1) pulled the pack and two more.
+		if err := d.approachArrive(ctx, at, d.tx.LookStandoff, d.tx.LookArrive); err != nil {
 			return false, "", err
 		}
 		found, seen, err := d.lookAt(ctx, sp, i)

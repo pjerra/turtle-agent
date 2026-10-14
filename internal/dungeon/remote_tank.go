@@ -201,7 +201,7 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		if d.tankShare(h) >= 100 { // the tank tops its list: the mob is about to turn
 			continue
 		}
-		if at, ok := d.tf.addAt[h.GUID]; (ok && now.Sub(at) < d.opt.AddCooldown) || d.tf.addN[h.GUID] >= maxAddOrders {
+		if at, ok := d.tf.addAt[h.GUID]; (ok && now.Sub(at) < d.opt.AddCooldown) || d.tf.addN[h.GUID] >= d.tx.AddOrders {
 			continue
 		}
 		d.tf.addAt[h.GUID] = now

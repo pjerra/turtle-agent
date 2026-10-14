@@ -192,6 +192,11 @@ type dungeonRunParams struct {
 	// note), recover_s (one recovery attempt suited to the phase), fail_s (the run stops with "stalled: ..."). Defaults 120/240/420; a zero
 	// field takes the plan's own or the default, a negative one turns that level off. It wins field by field over the plan's "watchdog".
 	Watchdog *dungeon.WatchdogConfig `json:"watchdog,omitempty"`
+	// Tune is the tunables file of a remote run (README "Live tuning"); empty: the login's --tune, else <plan>.tune.json beside the plan
+	// file, which may be absent. A named file must exist at the start. LiveReload false stops the run from reading the plan file and the
+	// tunables file again at leg and pull-group starts (tune_set still works).
+	Tune       string `json:"tune,omitempty"`
+	LiveReload *bool  `json:"live_reload,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -243,6 +248,8 @@ type dungeonRunner struct {
 	remote *commanderService
 	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
 	tracesDir string
+	// tunePath is the login's --tune: the tunables file of runs that name none.
+	tunePath string
 
 	mu     sync.Mutex
 	drv    dungeon.Runner
@@ -275,6 +282,7 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	srv.Register("dungeon_stop", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.stop(), nil
 	}))
+	registerTuneMethods(srv, r)
 	return func() {
 		cancel()
 		r.wait(10 * time.Second)
@@ -297,7 +305,8 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
-	plan, err := dungeon.Load(filepath.Join(r.dir, p.Name+".json"))
+	planPath := filepath.Join(r.dir, p.Name+".json")
+	plan, err := dungeon.Load(planPath)
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
 	}
@@ -379,7 +388,11 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
 	}
 	if remote {
-		return r.startRemote(p, tcfg, plan, setup, from, names)
+		tunePath, err := r.tuneFile(p, planPath)
+		if err != nil {
+			return dungeonRunResult{}, err
+		}
+		return r.startRemote(p, tcfg, plan, planPath, tunePath, setup, from, names)
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg

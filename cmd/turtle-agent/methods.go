@@ -121,6 +121,8 @@ type methodOptions struct {
 	AddonDir string
 	// DungeonsDir holds the plans dungeon_run reads (settings dungeons_dir); empty means "dungeons".
 	DungeonsDir string
+	// TunePath is the login's --tune: the tunables file of dungeon runs that name none (empty: <plan>.tune.json beside the plan).
+	TunePath string
 	// TracesDir is where run traces go (settings traces_dir); empty means "traces".
 	TracesDir string
 	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
@@ -255,6 +257,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner, opts.EntryLedgerPath, opts.AccountProbeWindow)
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	dungeonRun.tracesDir = opts.TracesDir
+	dungeonRun.tunePath = opts.TunePath
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
 		stopMap()

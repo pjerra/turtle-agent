@@ -165,6 +165,9 @@ func (s *Stepper) enterLeg(i int) {
 	s.ph = phWalk
 }
 
+// RestartLeg begins the current leg again from its first point: for a leg whose plan was reloaded before anything of it was done.
+func (s *Stepper) RestartLeg() { s.enterLeg(s.leg) }
+
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
 	return s.leg, [...]string{"walk", "pull_groups", "steps", "boss", "after_boss", "done", "failed"}[s.ph], s.idx

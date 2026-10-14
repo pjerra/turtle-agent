@@ -132,7 +132,7 @@ func (d *RemoteDriver) gather(ctx context.Context, why string) error {
 		if len(d.fr.EngagedHostiles()) > 0 {
 			return nil
 		}
-		away := d.awayFromLead(GatherNear)
+		away := d.awayFromLead(float64(d.tx.GatherNear))
 		for _, b := range away {
 			if _, ok := first[b.guid]; !ok {
 				first[b.guid] = b.dist
@@ -153,19 +153,19 @@ func (d *RemoteDriver) gather(ctx context.Context, why string) error {
 				r.GatherWaitS += el.Seconds()
 				r.GatherTimeouts++
 			})
-			d.rep.note(fmt.Sprintf("leg %d: the party did not gather within %.0f yd of the lead bot in %.0f s before %s (%s); going on", d.curLeg, float64(GatherNear), d.opt.GatherWait.Seconds(), why, awayText(away)))
+			d.rep.note(fmt.Sprintf("leg %d: the party did not gather within %.0f yd of the lead bot in %.0f s before %s (%s); going on", d.curLeg, float64(d.tx.GatherNear), d.opt.GatherWait.Seconds(), why, awayText(away)))
 			// A bot that got no closer in the whole wait is not coming (it cannot path, or it is stuck): the leg's gathers stop waiting
 			// for it until it is back by itself.
 			var stuck []string
 			for _, b := range away {
-				if b.dist >= first[b.guid]-gatherProgress {
+				if b.dist >= first[b.guid]-float64(d.tx.GatherProgress) {
 					d.gatherIgnored()[b.guid] = true
 					stuck = append(stuck, b.name)
 				}
 			}
 			if len(stuck) > 0 {
 				d.remote(func(r *RemoteReport) { r.GatherGaveUp += len(stuck) })
-				d.rep.note(fmt.Sprintf("leg %d: %s came no closer in %.0f s; the gathers of this leg do not wait for it again until it is back within %.0f yd", d.curLeg, strings.Join(stuck, ", "), d.opt.GatherWait.Seconds(), float64(GatherNear)))
+				d.rep.note(fmt.Sprintf("leg %d: %s came no closer in %.0f s; the gathers of this leg do not wait for it again until it is back within %.0f yd", d.curLeg, strings.Join(stuck, ", "), d.opt.GatherWait.Seconds(), float64(d.tx.GatherNear)))
 			}
 			return nil
 		}
@@ -211,7 +211,7 @@ func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 			continue
 		}
 		p := hostilePoint(h)
-		if distToSegment(p, here, wp) > AggroGuard || p.Z < min(here.Z, wp.Z)-aheadMaxDZ || p.Z > max(here.Z, wp.Z)+aheadMaxDZ {
+		if distToSegment(p, here, wp) > float64(d.tx.AggroGuard) || p.Z < min(here.Z, wp.Z)-d.tx.AheadMaxDZ || p.Z > max(here.Z, wp.Z)+d.tx.AheadMaxDZ {
 			continue
 		}
 		if dd := dist3(p, here); dd < bestD {
@@ -265,7 +265,7 @@ func (d *RemoteDriver) pullAhead(ctx context.Context, h tbm.HostileRec) error {
 	d.aheadPulling = true
 	defer func() { d.aheadPulling = false }()
 	d.remote(func(r *RemoteReport) { r.AheadPulls++ })
-	d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %d yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, AggroGuard))
+	d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
 	if err := d.gather(ctx, "a pull on the way"); err != nil {
 		return err
 	}

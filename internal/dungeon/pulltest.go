@@ -205,6 +205,7 @@ func (d *RemoteDriver) runPulltest(ctx context.Context) (err error) {
 	publish()
 	d.rep.note(fmt.Sprintf("pulltest: leg %d%s pull group %d %v, %d tries, reset %s", spec.Leg, nameSuffix(leg.Name), spec.PullGroup, pg.Entries, spec.Tries, spec.Reset))
 	first := d.ptAction(spec.Leg, spec.PullGroup, 1)
+	d.applyTunables(liveBoundary{leg: spec.Leg, kind: boundaryLeg}) // live tuning (remote_tune.go): the tunables file, not the plan (the plan is the test)
 	if err := d.startLeg(ctx, spec.Leg, first); err != nil {
 		return err
 	}
@@ -212,6 +213,10 @@ func (d *RemoteDriver) runPulltest(ctx context.Context) (err error) {
 	used := map[int]bool{spec.PullGroup: true}
 	cur := spec.PullGroup
 	for try := 1; try <= spec.Tries; try++ {
+		if try > 1 {
+			// A change of the tunables between two tries is in the report and the trace (tune_change); an A/B test keeps them still.
+			d.applyTunables(liveBoundary{leg: spec.Leg, kind: boundaryPull, group: cur})
+		}
 		how := "first spawn"
 		if try > 1 {
 			next, h, stop, err := d.ptReset(ctx, spec, pr, cur, used)
@@ -427,7 +432,7 @@ func (d *RemoteDriver) ptReset(ctx context.Context, spec PulltestSpec, pr *Pullt
 	d.tr.Event("gm_shortcut", map[string]any{"kind": "assist", "detail": line})
 	pr.GMCommands = append(pr.GMCommands, line)
 	d.rep.note("pulltest: .respawn sent by the commander for the next try (a GM assist during the run: run_gm_assists)")
-	deadline := d.clk.Now().Add(respawnSettle)
+	deadline := d.clk.Now().Add(d.tx.RespawnSettle)
 	for d.clk.Now().Before(deadline) {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
 			return 0, "", "", err

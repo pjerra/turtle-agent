@@ -171,6 +171,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	rpcAddr := fs.String("rpc", "", "JSON-RPC listen address (default: the settings file's rpc)")
 	reconnects := fs.Int("reconnect", 0, "after an unplanned disconnect, log in again up to N times (0: off)")
 	createSpec := fs.String("create", "", "create the character at login when the account lacks it: race,class[,gender] (numbers)")
+	tuneFile := fs.String("tune", "", "tunables file of remote dungeon runs that name none (default: <plan>.tune.json beside the plan; README \"Live tuning\")")
 	budgetAddr := fs.String("login-budget", "", "loopback address of the fleet's shared login budget (set by `fleet`; its token is in the environment)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -364,7 +365,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TracesDir: st.TracesDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()
