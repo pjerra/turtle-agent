@@ -82,6 +82,12 @@ type Report struct {
 	// Ready is the hired party's ready block (prepare party "hire", hire.go): per bot the class, level, item level and quality, what a `.bot`
 	// command fixed and what was seen, and the seconds the hire step and the whole setup took. Absent for named bots.
 	Ready *ReadyReport `json:"ready,omitempty"`
+	// Start is how a run that began inside the dungeon got there (from_leg past the first, from_pull_group; start.go): the start point, the
+	// GM lines, what was skipped. Absent for a run from the first leg's start.
+	Start *StartReport `json:"start,omitempty"`
+	// Pulltest is the pull-test scenario's result (dungeon_run pulltest; pulltest.go): per try the time to kill, deaths, threat overrides, adds,
+	// healer mana and rest, and the summary. Absent for a plan run.
+	Pulltest *PulltestReport `json:"pulltest,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -94,9 +100,11 @@ type LegReport struct {
 	Deaths      int       `json:"deaths"`
 	Pulls       int       `json:"pulls"`        // fights started, retries included
 	PullRetries int       `json:"pull_retries"` // pulls that drew no fight or evaded, and were tried again
-	RestSeconds float64   `json:"rest_seconds"` // time in the rest gates
-	WalkAggros  int       `json:"walk_aggros"`  // packs that aggroed during a walk and were fought there (each also counts in pulls)
-	Ambushes    int       `json:"ambushes"`     // stealthed pull groups walked through instead of pulled
+	// Skipped says what of the leg the run did not do on purpose (from_pull_group); the legs before from_leg have Result "skipped (from_leg)".
+	Skipped     string  `json:"skipped,omitempty"`
+	RestSeconds float64 `json:"rest_seconds"` // time in the rest gates
+	WalkAggros  int     `json:"walk_aggros"`  // packs that aggroed during a walk and were fought there (each also counts in pulls)
+	Ambushes    int     `json:"ambushes"`     // stealthed pull groups walked through instead of pulled
 	// The leader's deaths in this leg: how many, how it came back, and the time it was dead.
 	LeaderDeaths  int     `json:"leader_deaths"`
 	Resurrections int     `json:"resurrections"`
@@ -199,6 +207,8 @@ func (p *reporter) snapshot() Report {
 	r.Remote = p.r.Remote.clone()
 	r.Prepare = p.r.Prepare.clone()
 	r.Ready = p.r.Ready.clone()
+	r.Start = p.r.Start.clone()
+	r.Pulltest = p.r.Pulltest.clone()
 	if p.r.TankFirst != nil {
 		tf := *p.r.TankFirst
 		r.TankFirst = &tf

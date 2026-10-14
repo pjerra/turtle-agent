@@ -460,6 +460,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	if res, done, err := d.sendPull(ctx, t); err != nil || done {
 		return res, err
 	}
+	d.ptPulled()
 	began := d.clk.Now()
 	limit := sp.limit
 	tracked := map[packet.GUID]bool{t.GUID: true}
@@ -566,6 +567,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		}
 		switch {
 		case alive == 0 && len(killed) > 0:
+			d.ptKilled()
 			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
 		case alive == 0 && sawEvade:
 			return fightResult{out: evaded}, nil

@@ -2,7 +2,8 @@
 # Run the remote Uldaman dungeon with one command: the agent binary of origin/main's SHA (built once on the test VM), the login (only
 # if the agent is not logged in already), dungeon_run with the prepare block, a poll every 30 s, and trace-score at the end.
 #
-#   tools/run-uldaman.sh [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N] [--logout] [--print-params]
+#   tools/run-uldaman.sh [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
+#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--logout] [--print-params]
 #
 #   --hire         the owner's rule: the party is five HIRED bots at the plan's level, the commander outside the group (prepare.party "hire",
 #                  README "Hired party"). The agent hires a warrior tank, a priest healer and three damage dealers (hunter, rogue, warlock),
@@ -13,7 +14,14 @@
 #   --level N      with --hire: the hires' level (default: the middle of the plan's level band, 43 for Uldaman)
 #   --relogin      log the agent out and in again with this SHA's binary (an agent that is logged in keeps the binary it started with)
 #   --no-fresh     do not reset the instance (prepare.fresh false): a run that goes on in the instance the bots are in
-#   --from-leg N   start at leg N (default 0)
+#   --from-leg N   start at leg N (default 0). Past leg 0 the commander (a GM) is moved to the leg's start with `.appear <lead bot>` and `.go xyz`, the
+#                  lead bot is brought with `.bot summon`, the others with `cmd summon`; the legs before are reported "skipped (from_leg)", never cleared
+#                  (README "Start anywhere and the pull test"). The two GM lines count in gm_commands and setup_shortcuts.
+#   --pull-group M start inside leg N at pull group M: the party is gathered at a safe spot short of that pack (the leg is --from-leg, default 0)
+#   --start-here   with --from-leg: no move, the run starts where the lead bot stands (the old behaviour)
+#   --pulltest LEG:GROUP[:TRIES[:RESET]]
+#                  the pull-test scenario instead of the dungeon: pull that one pack TRIES times (default 3; RESET auto, equivalent, respawn or none, default
+#                  auto), score each try, print the table and save pulltest.json in OUT; compare two with `turtle-agent pulltest --compare a.json b.json`
 #   --logout       log the agent out after the run (default: it stays online, so the next run needs no login)
 #   --print-params print the dungeon_run params and exit (nothing is sent, no login, no build)
 #
@@ -45,7 +53,7 @@ MAX_MIN=${MAX_MIN:-90}
 POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
-FRESH=true FROM_LEG=0 RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
+FRESH=true FROM_LEG=0 PULL_GROUP= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
 COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
@@ -56,6 +64,9 @@ while [ $# -gt 0 ]; do
     --rehire) REHIRE=1 ;;
     --level) shift; LEVEL=${1:?--level needs a number} ;;
     --from-leg) shift; FROM_LEG=${1:?--from-leg needs a number} ;;
+    --pull-group) shift; PULL_GROUP=${1:?--pull-group needs a number} ;;
+    --start-here) START_HERE=1 ;;
+    --pulltest) shift; PULLTEST=${1:?--pulltest needs LEG:GROUP[:TRIES[:RESET]]} ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
     -h|--help) sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
@@ -71,6 +82,22 @@ die() { say "ERROR: $*" >&2; exit 1; }
 name_ok() { [[ $1 =~ ^[A-Za-z]{2,12}$ ]]; }
 for n in "$LEAD" "$TANK" "$HEALER" "$CHARACTER"; do name_ok "$n" || die "not a character name: $n"; done
 [[ $FROM_LEG =~ ^[0-9]+$ ]] || die "--from-leg needs a number"
+[ -z "$PULL_GROUP" ] || [[ $PULL_GROUP =~ ^[0-9]+$ ]] || die "--pull-group needs a number"
+[ -z "$PULL_GROUP" ] || [ "$START_HERE" = 0 ] || die "--pull-group and --start-here exclude each other"
+[ "$START_HERE" = 0 ] || [ "$FROM_LEG" != 0 ] || die "--start-here goes with --from-leg N (N above 0)"
+pulltest_json=""
+if [ -n "$PULLTEST" ]; then
+  [ "$FROM_LEG" = 0 ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] || die "--pulltest names its own start: leave --from-leg, --pull-group and --start-here out"
+  IFS=: read -r PT_LEG PT_GROUP PT_TRIES PT_RESET <<<"$PULLTEST"
+  [[ $PT_LEG =~ ^[0-9]+$ ]] || die "--pulltest: the leg must be a number (LEG:GROUP[:TRIES[:RESET]])"
+  [[ ${PT_GROUP:-} =~ ^[0-9]+$ ]] || die "--pulltest: the pull group must be a number (LEG:GROUP[:TRIES[:RESET]])"
+  [ -z "${PT_TRIES:-}" ] || { [[ $PT_TRIES =~ ^[0-9]+$ ]] && [ "$PT_TRIES" -ge 1 ] && [ "$PT_TRIES" -le 10 ]; } || die "--pulltest: tries is 1 to 10"
+  case ${PT_RESET:-auto} in auto|equivalent|respawn|none) ;; *) die "--pulltest: reset is auto, equivalent, respawn or none" ;; esac
+  pulltest_json="\"pulltest\":{\"leg\":$PT_LEG,\"pull_group\":$PT_GROUP"
+  [ -z "${PT_TRIES:-}" ] || pulltest_json+=",\"tries\":$PT_TRIES"
+  [ -z "${PT_RESET:-}" ] || pulltest_json+=",\"reset\":\"$PT_RESET\""
+  pulltest_json+="},"
+fi
 [[ $MAX_MIN =~ ^[0-9]+$ ]] || die "MAX_MIN needs a number"
 [ "$HIRE" = 1 ] || { [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ]; } || die "--rehire and --level go with --hire"
 [ -z "$LEVEL" ] || { [[ $LEVEL =~ ^[0-9]{1,2}$ ]] && [ "$LEVEL" -ge 1 ] && [ "$LEVEL" -le 60 ]; } || die "--level needs a number from 1 to 60"
@@ -91,6 +118,15 @@ for b in "${BOT_LIST[@]}"; do
 done
 bots_json="[${bots_json%,}]"
 
+# The start of the run: the pull test names its own, else from_leg with the optional pull group and start_here.
+start_json="\"from_leg\":$FROM_LEG,"
+if [ -n "$pulltest_json" ]; then
+  start_json=$pulltest_json
+else
+  [ -z "$PULL_GROUP" ] || start_json+="\"from_pull_group\":$PULL_GROUP,"
+  [ "$START_HERE" = 0 ] || start_json+="\"start_here\":true,"
+fi
+
 sha_label=${SHA8:-unknown}
 params() {
   if [ "$HIRE" = 1 ]; then
@@ -99,12 +135,12 @@ params() {
     [ "$REHIRE" = 0 ] || { hire+="${sep}\"rehire\":true"; sep=","; }
     [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
     [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
-    printf '{"name":"uldaman","mode":"remote","from_leg":%s,' "$FROM_LEG"
+    printf '{"name":"uldaman","mode":"remote",%s' "$start_json"
     printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
     printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
     return
   fi
-  printf '{"name":"uldaman","mode":"remote","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s","from_leg":%s,' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$FROM_LEG"
+  printf '{"name":"uldaman","mode":"remote","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
   printf '"prepare":{"online":true,"fresh":%s,"gm_setup":["gm visible off"]},' "$FRESH"
   printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s"}}' "$sha_label"
 }
@@ -229,6 +265,24 @@ if [ "$HIRE" = 1 ]; then
   say "ready: party=$(field result.report.ready.party <<<"$ST") level=$(field result.report.ready.level <<<"$ST") ok=$(field result.report.ready.ready <<<"$ST") hire_s=$(field result.report.ready.seconds <<<"$ST") setup_s=$(field result.report.ready.setup_s <<<"$ST") hired=$(field result.report.ready.hired <<<"$ST") reused=$(field result.report.ready.reused <<<"$ST") note=$(field result.report.ready.level_note <<<"$ST")"
 fi
 say "preflight_s=$(field result.report.remote.preflight.seconds <<<"$ST") enter_s=$(field result.report.remote.enter.seconds <<<"$ST") run_s=$(field result.report.seconds <<<"$ST")"
+if [ "$(field result.report.start.kind <<<"$ST")" != "" ]; then
+  say "start: kind=$(field result.report.start.kind <<<"$ST") method=$(field result.report.start.method <<<"$ST") start_s=$(field result.report.start.seconds <<<"$ST") gm_lines=$(field result.report.start.gm_commands <<<"$ST") skipped=$(field result.report.start.skipped <<<"$ST")"
+fi
+if [ -n "$PULLTEST" ]; then
+  # The scenario's result: saved for `turtle-agent pulltest --compare`, printed as a table. A scenario run is not a dungeon run, so no trace-score.
+  PT_OUT=${OUT:-/tmp/run-uldaman-$(date +%Y%m%dT%H%M%S)}
+  mkdir -p "$PT_OUT"
+  field result.report.pulltest <<<"$ST" >"$PT_OUT/pulltest.json"
+  if [ -s "$PT_OUT/pulltest.json" ]; then
+    "$BIN" pulltest "$PT_OUT/pulltest.json" || true
+    say "pulltest result: $PT_OUT/pulltest.json (compare: $BIN pulltest --compare a.json b.json)"
+  else
+    say "no pulltest result in the report"
+  fi
+  if [ "$LOGOUT" = 1 ]; then rpc logout '{}' 60 >/dev/null 2>&1 || true; say "agent logged out"; fi
+  [ "$STATE" = done ] || exit 1
+  exit 0
+fi
 TRACE=${TRACE:-$(field result.report.trace_file <<<"$ST")}
 SCORE=0
 if [ -n "$TRACE" ]; then

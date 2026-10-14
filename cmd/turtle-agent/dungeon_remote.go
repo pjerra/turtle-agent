@@ -23,6 +23,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch strings.ToLower(p.Mode) {
 	case "", "group":
+		if p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil {
+			return false, bad(`from_pull_group, start_here and pulltest go with mode "remote" (group mode has teleport)`)
+		}
 		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
 			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, enter, ignore_entry_limit and prepare go with mode "remote"`)
 		}
@@ -120,9 +123,19 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
-	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{StartHere: p.StartHere, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
+	}
+	if p.FromPullGroup != nil {
+		g := *p.FromPullGroup
+		opt.FromPullGroup = &g
+	}
+	if pt := p.Pulltest; pt != nil && pt.PullGroup != nil {
+		g := *pt.PullGroup
+		opt.FromPullGroup = &g
+		spec := dungeon.PulltestSpec{Leg: from, PullGroup: g, Tries: pt.Tries, Reset: pt.Reset}.Normalized()
+		opt.Pulltest = &spec
 	}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)
@@ -137,5 +150,5 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		defer cancel()
 		_ = drv.Run(ctx, from) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", LeadBot: p.LeadBot}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", LeadBot: p.LeadBot}, nil
 }

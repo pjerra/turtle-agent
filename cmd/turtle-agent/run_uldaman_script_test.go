@@ -196,3 +196,77 @@ func TestClassNamesAreHireClasses(t *testing.T) {
 		t.Errorf("%v", classNames)
 	}
 }
+
+// --from-leg N --pull-group M, --start-here and --pulltest build params the agent accepts, including the checks of the start options; the
+// combinations the script refuses never reach the agent.
+func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	plan, err := dungeon.Load("../../dungeons/uldaman.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args      []string
+		fromLeg   int
+		pullGroup int // -1: none
+		startHere bool
+		pulltest  string
+	}{
+		{[]string{"--from-leg", "3", "--print-params"}, 3, -1, false, ""},
+		{[]string{"--from-leg", "1", "--pull-group", "0", "--print-params"}, 1, 0, false, ""},
+		{[]string{"--from-leg", "4", "--start-here", "--print-params"}, 4, -1, true, ""},
+		{[]string{"--hire", "--from-leg", "1", "--pull-group", "1", "--print-params"}, 1, 1, false, ""},
+		{[]string{"--pulltest", "1:0", "--print-params"}, 1, 0, false, "1:0:0:"},
+		{[]string{"--pulltest", "1:1:5:respawn", "--hire", "--print-params"}, 1, 1, false, "1:1:5:respawn"},
+	} {
+		out, err := exec.Command(bash, append([]string{"../../tools/run-uldaman.sh"}, c.args...)...).Output()
+		if err != nil {
+			t.Fatalf("%v: %v", c.args, err)
+		}
+		var p dungeonRunParams
+		dec := json.NewDecoder(bytes.NewReader(out))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil {
+			t.Fatalf("%v: %s: %v", c.args, out, err)
+		}
+		if remote, err := checkMode(p); !remote || err != nil {
+			t.Fatalf("%v: checkMode %v %v", c.args, remote, err)
+		}
+		if c.pulltest == "" {
+			if p.Pulltest != nil || p.FromLeg == nil || p.FromLeg.index != c.fromLeg || p.StartHere != c.startHere || (p.FromPullGroup == nil) != (c.pullGroup < 0) || (p.FromPullGroup != nil && *p.FromPullGroup != c.pullGroup) {
+				t.Errorf("%v: %+v", c.args, p)
+			}
+			if err := checkStartParams(p, plan, c.fromLeg); err != nil {
+				t.Errorf("%v: %v", c.args, err)
+			}
+			continue
+		}
+		if p.FromLeg != nil || p.FromPullGroup != nil || p.Pulltest == nil || p.Pulltest.Leg.index != c.fromLeg || *p.Pulltest.PullGroup != c.pullGroup {
+			t.Errorf("%v: %+v", c.args, p)
+		}
+		if err := checkStartParams(p, plan, c.fromLeg); err != nil {
+			t.Errorf("%v: %v", c.args, err)
+		}
+		if strings.HasSuffix(c.pulltest, "respawn") && (p.Pulltest.Tries != 5 || p.Pulltest.Reset != "respawn") {
+			t.Errorf("%v: %+v", c.args, p.Pulltest)
+		}
+	}
+	for _, args := range [][]string{
+		{"--pull-group", "x", "--print-params"},
+		{"--from-leg", "2", "--pull-group", "1", "--start-here", "--print-params"},
+		{"--start-here", "--print-params"},
+		{"--pulltest", "2", "--print-params"},
+		{"--pulltest", "1:x", "--print-params"},
+		{"--pulltest", "1:0:11", "--print-params"},
+		{"--pulltest", "1:0:3:fast", "--print-params"},
+		{"--pulltest", "1:0", "--from-leg", "2", "--print-params"},
+		{"--pulltest", "1:0", "--pull-group", "1", "--print-params"},
+	} {
+		if err := exec.Command(bash, append([]string{"../../tools/run-uldaman.sh"}, args...)...).Run(); err == nil {
+			t.Errorf("%v was accepted", args)
+		}
+	}
+}

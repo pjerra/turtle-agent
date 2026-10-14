@@ -339,6 +339,12 @@ func (d *RemoteDriver) traceBegin(fromLeg int) {
 	if len(d.cfg.Setup) > 0 {
 		opts["setup"] = slices.Clone(d.cfg.Setup)
 	}
+	if g := d.startGroup(); g >= 0 {
+		opts["from_pull_group"] = g
+	}
+	if pt := d.opt.Pulltest; pt != nil {
+		opts["pulltest"] = map[string]any{"leg": pt.Leg, "pull_group": pt.PullGroup, "tries": pt.Tries, "reset": pt.Reset}
+	}
 	// The feed has facing and the bot's target but no movement flag or class, and it has threat lists.
 	caps := []string{trace.CapFacing, trace.CapThreat, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
 	d.tr.Begin(trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: d.opt.Tank, Options: opts, Caps: caps})

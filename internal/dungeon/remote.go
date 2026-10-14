@@ -99,6 +99,14 @@ type RemoteOptions struct {
 	IgnoreEntryLimit bool
 	// Prepare is the optional prepare block (prepare.go): log the bots in, a fresh instance, GM setup lines. It runs before the bind.
 	Prepare PrepareSpec
+	// FromPullGroup starts the run inside from_leg, at that pull group (start.go): the commander gets the party to the group's gather
+	// spot, the legs before the leg and the leg's earlier pull groups are reported skipped. StartHere keeps the old from_leg: no
+	// move, the run starts where the lead bot stands. StartWait is the ceiling of each wait of the start phase (0: 30 s).
+	FromPullGroup *int
+	StartHere     bool
+	StartWait     time.Duration
+	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
+	Pulltest *PulltestSpec
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -197,6 +205,7 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 	if o.EndFightWait == 0 {
 		o.EndFightWait = DefaultEndFightWait
 	}
+	fill(&o.StartWait, 30*time.Second)
 	fill(&o.EnterVerify, d.EnterVerify)
 	fill(&o.EnterGrace, d.EnterGrace)
 	fill(&o.SummonGap, d.SummonGap)
@@ -411,6 +420,7 @@ type RemoteDriver struct {
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
 
+	pts       *ptSampler         // the pull-test try being scored (pulltest.go); nil outside one
 	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	trSeen    uint64             // the feed frame count the trace last took
 	trRoster  bool
@@ -477,6 +487,9 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
+	if err := d.checkStart(fromLeg); err != nil {
+		return err
+	}
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
 	d.wd.start()
@@ -537,6 +550,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	}
 	d.resolveTeam()
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
+	if g := d.startGroup(); g >= 0 {
+		d.st = NewStepperAtGroup(d.plan, remoteWorld{d}, d.clk.Now, fromLeg, g)
+	}
+	if d.opt.Pulltest != nil {
+		return d.runPulltest(ctx)
+	}
 	if d.cfg.Resume {
 		if r, ok := d.st.ResumeAt(); ok {
 			d.rep.update(func(rp *Report) { rp.Resumed = &r })
@@ -876,9 +895,6 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 		return errors.New("the first frame has an empty party")
 	}
 	d.observeInit()
-	if fromLeg > 0 {
-		d.rep.note(fmt.Sprintf("from_leg %d: the run starts where the lead bot stands and assumes the legs before it are cleared", fromLeg))
-	}
 	if d.opt.Tank != "" {
 		if m, ok := d.memberByName(d.opt.Tank); ok {
 			d.tank = m.GUID
@@ -888,7 +904,10 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	}
 	d.lootOnAtStart(ctx)
 	d.probeEntryTargets(ctx, fromLeg)
-	return d.preflight(ctx)
+	if err := d.preflight(ctx); err != nil {
+		return err
+	}
+	return d.startAnywhere(ctx, fromLeg)
 }
 
 // adoptBinding answers a bind refused as already-bound: the binding the account holds is reused when it is this run's own (the same lead
@@ -1048,6 +1067,7 @@ func (d *RemoteDriver) look() {
 	if !d.haveFr || n != d.n {
 		d.fr, d.n, d.haveFr = fr, n, true
 		d.noteLedger()
+		d.ptObserve()
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
 		}

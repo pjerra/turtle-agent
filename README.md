@@ -87,6 +87,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
+turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
 ```
 
@@ -251,7 +252,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (remote mode: `{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -566,7 +567,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   that error (nothing is sent in its place). The agent's own companions walk a direct waypoint as a plain one.
 - A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
-  [Dungeon runs](#dungeon-runs); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
+  [Dungeon runs](#dungeon-runs); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
   a member of the group, for packs of one entry that stand closer together than that); run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
@@ -891,7 +892,7 @@ without finishing (`data.error`: `wipe`, `stopped`, or the failed step); `dungeo
 
 The report (`dungeon_status.report`): `plan`, `map`, `state`, `from_leg`, `started`, `ended`, `seconds`, `current` (the action in
 progress), `error`, `wipes`, `leader_gm`, `gm_caps` (`visible`, `teleport`, `revive`, `buffs`), `account_level`, `leader_deaths`, `resurrections` (accepted), `corpse_runs`, `seconds_dead` (per leg too), `deaths[]` (`name`, `leg`, `at`), `legs[]` (`leg`, `name`, `seconds`, `result`, `deaths`, `pulls`,
-`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`, `leader_deaths`, `resurrections`, `corpse_runs`, `seconds_dead`), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
+`pull_retries`, `rest_seconds`, `walk_aggros`, `ambushes`, `leader_deaths`, `resurrections`, `corpse_runs`, `seconds_dead`; a leg before `from_leg` has `result` `"skipped (from_leg)"`), `start` and `pulltest` (remote mode: [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `notes[]`, `refusals[]` (see **refusals**), `gm_shortcuts[]`: every GM action the run took instead of
 playing it, with `kind` (`teleport_to_entrance`, `teleport_to_leg_start`, `revive`, `buff`), `leg`, `detail` and `at`, `buffs[]` (the spells asked for, `id` and `name`), and
 `setup_shortcuts[]`: the setup the caller did by hand, as `dungeon_run`'s `setup` parameter listed it (`"setup": ["go entrance",
 "levelup -15", "tbm summon all"]`; at most 40 entries of up to 400 characters; empty when none were given). Nothing checks or sends
@@ -1434,7 +1435,8 @@ leaves the list; `ignore_entry_limit` tries anyway (after a server restart, say)
 are not in the file.
 
 `remote.enter`: `method` (`gm`, `cmd` or `walk`), `cmd_enter` (`trigger`, `orders`, `answers[]`, `entered`, `fallback`, `seconds`), `account_level`, `agent_left_group`, `tele`, `summoned[]`, `resummoned[]`, `arrived` (seconds from the phase's start,
-per bot), `seconds`, and the entry numbers above. A party already inside the plan's map has no `enter`; `from_leg` works as in a group run.
+per bot), `seconds`, and the entry numbers above. A party already inside the plan's map has no `enter`. `from_leg` past the first leg and `from_pull_group` now bring the party to the start
+by the commander's own GM move: see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test).
 
 ### Prepare: one step before the bind
 
@@ -1577,6 +1579,74 @@ in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_agg
 no loot or dead flag for hostiles (a hostile seen fighting that leaves the feed for two frames is counted dead), and the bots see only what they see: a pack
 nobody has in sight is not counted dead: the lead bot walks up to its positions and looks (see the pull group row). A feed that goes quiet for 6 s makes the fight loops wait
 (`feed_stalls`); one quiet for 45 s fails the run.
+
+### Start anywhere and the pull test
+
+Both are remote mode, owner-approved 2026-10-14 to make a combat fix testable in minutes instead of a 40-minute run. They are for an instance
+whose earlier part is already dealt with (a run that was stopped, a GM-cleared instance, a pull that is being tuned); nothing before the
+start is done or checked.
+
+**`from_leg` and `from_pull_group`.** The party is brought to the start point by the commander's own GM move, then the run goes on from there
+with the ordinary per-leg logic (the rest gate at the leg's start, walks, pulls, object steps):
+
+1. `.appear <lead bot>` when the agent's character is not on the plan's map near the lead bot (a GM enters the lead bot's instance that way; a
+   `.go xyz` into the map from outside would open an instance of the agent's own);
+2. `.go xyz <x> <y> <z> <map>` (the agent's own character; `session.Teleport`, which waits for the teleport and lands the agent on the navmesh);
+3. `.bot summon <lead bot>`, a player command of the commander's account: `cmd summon` fetches a bot to the **lead bot**, so the lead bot has to
+   come first;
+4. `cmd summon <bot>` for every other living bot that is not with the lead bot, and a wait until all stand together.
+
+The two GM lines are the only GM commands; neither is aimed at another player. They count in `remote.gm_commands` and are listed in
+`setup_shortcuts` as `... (GM start point)` and in `start.gm_commands`. A party that is at the start point already (the lead bot within 20 yd,
+the others within 25 yd of it) sends nothing (`start.method` `already there`). The account must be a GM (`.go xyz` is observer level): with a
+player's account the run fails before it sends anything, naming the level. Every wait has a ceiling (30 s each: the commander's arrival, three
+`.bot summon` tries of a third of it each, two rounds of `cmd summon`).
+
+- **The start point of a leg** is where the leg before it ended (its boss's position, else its `to`; the entrance for leg 0), as in the group
+  driver's `teleport`.
+- **The start point of a pull group** is its *gather spot*: 55 yd short of the group's first position on the navmesh path from the leg's `to`,
+  moved back along the path (70, then 85 yd) until no other pack or boss of the plan is within 30 yd of it; `start.warning` says when none was.
+  The run then starts at that pull group (the leg's walk and the earlier groups of the leg are skipped).
+- **What is skipped is reported as skipped, never as cleared** (driver rule 1): `report.legs[]` lists every leg before `from_leg` with `result`
+  `"skipped (from_leg)"`; `start.skipped[]` has the texts, including `pull groups 0-N skipped (from_pull_group)`. The report's `start` has the
+  start point, its kind (`entrance`, `leg_start`, `pull_gather`), the map, the GM lines, whether the lead bot was summoned, the bots `cmd summon`
+  fetched and the seconds. A start past something the plan needs (a key, a door opened by an earlier step) fails at the step that needs it.
+- `start_here: true` keeps the old `from_leg`: no move, the run starts where the lead bot stands (legs before it still reported skipped).
+  `from_pull_group` does not combine with `start_here` or `resume`.
+- `tools/run-uldaman.sh --from-leg N [--pull-group M]`; the same with any plan over the RPC.
+
+**The pull test.** `dungeon_run` with `pulltest: {"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` (`leg` a number or a name; `tries`
+default 3, at most 10; it names its own start, so `from_leg`, `from_pull_group`, `start_here` and `resume` stay out) starts at that pull group as
+above and runs only that one pull, `tries` times: gather (the rest gate) -> `cmd pullback` -> the fight -> the rest gate that precedes the next
+pull. Between tries the pack is brought back (`reset`):
+
+| `reset` | What happens |
+| :--- | :--- |
+| `auto` (default) | an equivalent pack first, then `.respawn`; when neither is possible the scenario says `one try per spawn: <why>` and stops with the tries it has |
+| `equivalent` | the next pack of the leg that has the same `equiv` label as the tested one (a `pull_groups[]` field of the plan, up to 40 characters) and was not tried yet; the party walks to its gather spot |
+| `respawn` | the party walks back to the gather spot, then the commander sends its own `.respawn` (developer level; Commands.cpp `HandleRespawnCommand`: with nothing selected, it respawns the creatures and game objects within the map's visibility distance of the commander; the agent clears its selection first and waits for the server to show it cleared). A GM assist during the run: `remote.run_gm_assists`, `setup_shortcuts` (`.respawn (GM assist during the run: pulltest reset)`) and `pulltest.gm_commands`. The commander must be within 80 yd of the pack (it is: it stands at the gather spot) |
+| `none` | one try |
+
+A try is scored only when something was killed: a reset that brings nothing back ends the scenario with the try marked `no_pack` and not
+scored. A wipe ends it too (the run fails with the wipe; the try is kept as `wipe`). A creature that respawns keeps its GUID, so the driver's
+per-GUID memory (engagement times, openers, give-ups, kills) is cleared before each new try. The report's `pulltest` (and, for a traced run,
+`<trace folder>/<run id>.pulltest.json`) has per try:
+
+`try`, `pull_group`, `reset` (`first spawn`, `equivalent pack`, `respawn`), `outcome` (`killed`, `no_pack`, `wipe`, `failed`), `kills`,
+`time_to_kill_s` (the pull order to the last kill), `seconds` (the whole try), `deaths` (+ `death_names`), `threat_overrides` (mobs the party was
+sent at without the tank holding them), `off_tank_s` (mob-seconds the engaged mobs spent on a bot that was not the tank, crowd-controlled mobs
+excluded) with `off_tank_mobs` and `max_off_tank_s`, `adds` (engaged mobs that were not of the pack: not of its entries, or first seen away from
+its positions) with `add_entries`, `healer_min_mana_pct` (the `healer` bot, else every mana user; -1 when not measured) and `rest_s`; and a
+`summary`: `tries` (scored), `killed`, means of time to kill / off-tank / rest over the killed tries, sums of deaths / overrides / adds, the
+lowest healer mana.
+
+`turtle-agent pulltest <result.json>` prints a result as a compact table; `turtle-agent pulltest --compare a.json b.json` prints b against a
+(each summary number, the change, better or worse) and warns when the two are not the same pull or have fewer than 3 scored tries (the A/B rule
+of the auto-improve loop: the same pull, the same party, 3+ tries each). A result file may also be a saved `dungeon_status` answer.
+`tools/run-uldaman.sh --pulltest LEG:GROUP[:TRIES[:RESET]]` runs one and saves `pulltest.json` in its output folder.
+
+Not verified live (see docs/LIVE-CHECKS.md "Start anywhere and the pull test"): `.appear`/`.go xyz` into the lead bot's instance, `.bot summon`
+of a bound lead bot, `.respawn` in an instance and the visibility distance it reaches.
 
 ## Death and the corpse run
 
@@ -2659,7 +2729,7 @@ you set).
 | `internal/mapview` | map images: the run from frames, events and reports, floors by height, the SVG and HTML renderers (see [Map images](#map-images)) |
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `trace-score`) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `trace-score`, `pulltest`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures

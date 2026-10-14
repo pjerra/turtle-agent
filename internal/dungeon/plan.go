@@ -152,7 +152,13 @@ type PullGroup struct {
 	Radius float32 `json:"radius,omitempty"`
 	// Team limits the group to a leader of that team ("alliance" or "horde"); the driver skips it for the other (see Team).
 	Team string `json:"team,omitempty"`
+	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
+	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
+	Equiv string `json:"equiv,omitempty"`
 }
+
+// MaxEquivLen is the longest Equiv label.
+const MaxEquivLen = 40
 
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
 // that heals it, the first of a group of brothers); the boss entry is killed last and the leg is done when it dies.
@@ -337,6 +343,7 @@ type rawPullGroup struct {
 	Ambush    bool       `json:"ambush"`
 	Radius    float32    `json:"radius"`
 	Team      string     `json:"team"`
+	Equiv     string     `json:"equiv"`
 }
 
 type rawBoss struct {
@@ -603,8 +610,11 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv}
 		c.team(gp+".team", g.Team)
+		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
+			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
+		}
 		if g.Radius < 0 || g.Radius > 60 {
 			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
 		}

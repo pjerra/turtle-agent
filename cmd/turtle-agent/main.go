@@ -76,6 +76,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return statsCmd(args[1:], stdout, stderr)
 	case "trace-score":
 		return traceScoreCmd(args[1:], stdout, stderr)
+	case "pulltest":
+		return pulltestCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -94,5 +96,6 @@ func usage(w io.Writer) {
   turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE] [--plan FILE] [--out run.svg] [--html] [--force] [--mmaps DIR] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--floors auto|off|z,z]
   turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
   turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
+  turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
   turtle-agent version`)
 }

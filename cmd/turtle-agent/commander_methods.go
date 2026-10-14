@@ -465,6 +465,40 @@ func (g remoteGame) Appear(ctx context.Context, player string) error {
 	return g.c.cur().GM(ctx, ".appear "+player)
 }
 
+// GoXYZ sends ".go xyz x y z map" for the agent's own character (dungeon.StartHands) and waits for its teleport. The numbers are formatted
+// here; nothing the caller wrote goes into the line.
+func (g remoteGame) GoXYZ(ctx context.Context, mapID uint32, at dungeon.Point) error {
+	return g.c.cur().Teleport(ctx, at.X, at.Y, at.Z, int(mapID))
+}
+
+// Respawn sends the commander's own ".respawn" with nothing selected (dungeon.Respawner): the core respawns the creatures and game objects
+// around the commander. The selection is cleared first and the server is waited for to show it cleared, else the line would act on that
+// one unit alone (or fail on a player).
+func (g remoteGame) Respawn(ctx context.Context) error {
+	s := g.c.cur()
+	if err := s.ClearTarget(ctx); err != nil {
+		return err
+	}
+	timer := time.NewTimer(gmSelectConfirmWait)
+	defer timer.Stop()
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if sel, ok := s.ServerSelection(); ok && sel == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			sel, _ := s.ServerSelection()
+			return fmt.Errorf("the server did not show the selection cleared within %s (it shows %v): not sending .respawn", gmSelectConfirmWait, sel)
+		case <-tick.C:
+		}
+	}
+	return s.GM(ctx, ".respawn")
+}
+
 // WalkSelf is walk_path for the agent's character.
 func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.WalkResult, error) {
 	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
