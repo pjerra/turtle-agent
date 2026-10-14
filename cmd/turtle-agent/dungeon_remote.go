@@ -76,6 +76,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, plan *dungeon.Plan, setu
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
+	cfg.Resume = p.Resume != nil && *p.Resume
 	opt := dungeon.RemoteOptions{Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer}
 	for _, c := range p.CC {
 		c.Mark = strings.ToLower(c.Mark)

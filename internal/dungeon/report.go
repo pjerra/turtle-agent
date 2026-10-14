@@ -47,6 +47,8 @@ type Report struct {
 	// and whether a drink order went out.
 	RestSeconds float64    `json:"rest_seconds"`
 	RestGates   []RestGate `json:"rest_gates"`
+	// Resumed says what a run started inside a leg skipped (see Resumed); absent when it started at the leg's beginning.
+	Resumed *Resumed `json:"resumed,omitempty"`
 	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
 	// intent, code and message, with how often each came in the leg.
 	Refusals []RefusalReport `json:"refusals"`

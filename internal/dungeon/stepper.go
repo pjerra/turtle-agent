@@ -19,6 +19,13 @@ type World interface {
 	HostilesWithin(center Point, radius float32) int
 }
 
+// PartyWorld is the optional part of a World that knows where the party stands: ResumeAt skips a pull group only when a member
+// stands near it (and sees it empty), because a World lists only the hostiles that someone sees.
+type PartyWorld interface {
+	// PartyNear says whether the leader or a party member stands within radius yards of center.
+	PartyNear(center Point, radius float32) bool
+}
+
 // Distances the Stepper works with, in yards.
 const (
 	ArriveRadius = 3.0 // a Walk is skipped when the player already stands this close

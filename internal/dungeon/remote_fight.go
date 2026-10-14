@@ -140,7 +140,7 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 	kills, retargets := 0, 0
 	var gaveUp []passedOver
 	for attempt, loops := 1, 0; attempt <= d.cfg.PullAttempts && loops < 4*d.cfg.PullAttempts+12; loops++ {
-		if err := d.restGate(ctx); err != nil {
+		if err := d.restGate(ctx, true); err != nil {
 			return err
 		}
 		t, ok, err := d.pickTarget(ctx, sp)
@@ -654,6 +654,18 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 
 // afterFight gives the bots a moment to loot, then deals with loose hostiles still hitting the party (adds).
 func (d *RemoteDriver) afterFight(ctx context.Context) error {
+	if err := d.afterFightWait(ctx); err != nil {
+		return err
+	}
+	// The stay spot is set once the fight is over for good: the loot wait is past and nothing is hitting the party. A move sent earlier
+	// would reset the lead bot's movement (and the followers' formation) in the middle of the loot or an add's fight.
+	if len(d.fr.EngagedHostiles()) == 0 {
+		d.holdHere(ctx)
+	}
+	return nil
+}
+
+func (d *RemoteDriver) afterFightWait(ctx context.Context) error {
 	if err := d.tick(ctx, d.cfg.PostFight); err != nil {
 		return err
 	}
@@ -682,7 +694,7 @@ func (d *RemoteDriver) afterFight(ctx context.Context) error {
 // sneakPast is the pull of a stealthed group: nothing can be pulled, so the lead bot is walked through the group's positions (the
 // followers come along) with a pause of AmbushPause at each, and what shows itself is fought.
 func (d *RemoteDriver) sneakPast(ctx context.Context, label string, sp fightSpec) error {
-	if err := d.restGate(ctx); err != nil {
+	if err := d.restGate(ctx, true); err != nil {
 		return err
 	}
 	d.legStat(func(l *LegReport) { l.Ambushes++ })
@@ -727,4 +739,25 @@ func (d *RemoteDriver) sneakPast(ctx context.Context, label string, sp fightSpec
 		d.rep.note(fmt.Sprintf("%s: stealthed group %v passed with no fight; counted as cleared", label, sp.pick))
 	}
 	return nil
+}
+
+// holdHere makes the lead bot's "stay" spot the place it stands, once a fight is over (see afterFight). `cmd move` sets that spot to its point
+// (BotCommands.cpp, CommanderMove), and after a fight the bot's "return to stay position" walks it back to the last point it was sent
+// to: the party would run back, rest there, and run forward again. A move to its own position costs nothing and ends that. A refusal
+// (the module may not take a move to where the bot already stands) is counted by order() and otherwise ignored.
+func (d *RemoteDriver) holdHere(ctx context.Context) {
+	here, ok := d.leadPos()
+	if !ok || d.stale() {
+		return
+	}
+	if d.moveGap(ctx) != nil {
+		return
+	}
+	r, err := d.order(ctx, "move", moveArgs(here)...)
+	if err != nil {
+		return
+	}
+	if _, bad := refusedOf(r); !bad {
+		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
+	}
 }

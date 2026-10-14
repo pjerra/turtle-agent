@@ -77,6 +77,20 @@ type fakeRemote struct {
 	truncating  bool // frames are marked truncated and list no hostile
 	panicOn     string
 	vanish      bool // after a pullback the mob leaves the world without a fight
+
+	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
+	pendingMove   *Point
+	pendingAt     time.Time
+	stay          *Point        // the point of the last move: the lead bot's stay spot
+	returnToStay  bool          // after a fight the lead bot walks back to its stay spot, like the module's "return to stay position"
+	returnDelay   time.Duration // ... this long after the fight ended
+	returnAt      time.Time
+	wasEngaged    bool
+	trace         []Point // the lead bot's position after each advance
+	moveOrderPos  []Point // the lead bot's position when each `cmd move` was sent
+	moveOrderDest []Point // and the point it was sent to
+	moveOrderAt   []time.Time
+	killTimes     []time.Time // when each mob died
 }
 
 func newFakeRemote(t *testing.T) *fakeRemote {
@@ -109,6 +123,9 @@ func (g *fakeRemote) addMob(entry uint32, at Point) *rmob {
 func (g *fakeRemote) advance(d time.Duration) {
 	g.now = g.now.Add(d)
 	sec := d.Seconds()
+	if g.pendingMove != nil && !g.now.Before(g.pendingAt) {
+		g.moveTo, g.pendingMove = g.pendingMove, nil
+	}
 	// the lead bot walks
 	if g.moveTo != nil {
 		l := g.lead()
@@ -147,6 +164,7 @@ func (g *fakeRemote) advance(d time.Duration) {
 			live = append(live, m)
 		} else {
 			g.mobsKilled++
+			g.killTimes = append(g.killTimes, g.now)
 		}
 	}
 	g.mobs = live
@@ -167,6 +185,17 @@ func (g *fakeRemote) advance(d time.Duration) {
 	if !anyEngaged && g.allRested() {
 		g.resting = false
 	}
+	if g.wasEngaged && !anyEngaged && g.returnToStay {
+		g.returnAt = g.now.Add(g.returnDelay)
+	}
+	if !g.returnAt.IsZero() && !g.now.Before(g.returnAt) {
+		g.returnAt = time.Time{}
+		if g.stay != nil && g.moveTo == nil && g.pendingMove == nil {
+			g.moveTo = &Point{g.stay.X, g.stay.Y, g.stay.Z}
+		}
+	}
+	g.wasEngaged = anyEngaged
+	g.trace = append(g.trace, Point{g.lead().X, g.lead().Y, g.lead().Z})
 	if g.onTick != nil {
 		g.onTick(g)
 	}
@@ -272,11 +301,20 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		if dx, dy := x-float64(l.X), y-float64(l.Y); sqrt(dx*dx+dy*dy) > 150 {
 			return errReply(intent, "too-far"), nil
 		}
+		g.moveOrderPos = append(g.moveOrderPos, Point{l.X, l.Y, l.Z})
+		g.moveOrderDest = append(g.moveOrderDest, Point{float32(x), float32(y), float32(z)})
+		g.moveOrderAt = append(g.moveOrderAt, g.now)
 		if g.ignoreMoves > 0 {
 			g.ignoreMoves--
 			return ack(intent), nil
 		}
-		g.moveTo = &Point{float32(x), float32(y), float32(z)}
+		to := &Point{float32(x), float32(y), float32(z)}
+		g.stay = to
+		if g.moveDelay > 0 {
+			g.pendingMove, g.pendingAt = to, g.now.Add(g.moveDelay)
+			return ack(intent), nil
+		}
+		g.moveTo = to
 		return ack(intent), nil
 	case "cmd pullback", "cmd pull":
 		m := g.mobByArg(f[2])
