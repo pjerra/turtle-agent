@@ -14,14 +14,15 @@ import (
 func TestRemoteBossKilledInAnotherGroupsFight(t *testing.T) {
 	g := newFakeRemote(t)
 	grp := g.addMob(299, Point{60, 0, 0})
-	boss := g.addMob(777, Point{80, 0, 0})
+	boss := g.addMob(777, Point{40, 0, 0})
+	g.killRate = 90 // the boss is last seen nearly dead
 	g.onTick = func(g *fakeRemote) {
 		if grp.pulled && !boss.pulled {
 			boss.pulled, boss.pullAt = true, g.now // the boss joins the pack's fight
 		}
 	}
 	plan := remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}}},
-		Boss: &Boss{Entry: 777, Position: Point{80, 0, 0}}})
+		Boss: &Boss{Entry: 777, Position: Point{40, 0, 0}}})
 	rep, err := runRemote(t, g, plan, opts(), nil)
 	if err != nil || g.mobsKilled != 2 || len(g.ordersOf("cmd pullback")) != 1 {
 		t.Fatalf("%v killed %d orders %v\n%s", err, g.mobsKilled, g.orders, notesOf(rep))
@@ -36,6 +37,7 @@ func TestRemoteBossKilledInAnotherGroupsFight(t *testing.T) {
 func TestRemoteBossKilledInAWalkFight(t *testing.T) {
 	g := newFakeRemote(t)
 	g.addMob(777, Point{130, 0, 0})
+	g.killRate = 90 // the boss is last seen nearly dead
 	inner := g.onTick
 	g.onTick = func(g *fakeRemote) {
 		if g.lead().X > 90 {
@@ -85,12 +87,16 @@ func ledgerDriver(t *testing.T) *RemoteDriver {
 
 // frameOf puts a frame in the driver as look() does.
 func frameOf(d *RemoteDriver, truncated bool, hs ...tbm.HostileRec) {
-	d.fr = tbm.ViewFrame{Party: []tbm.PartyRec{{GUID: gTank}}, Hostiles: hs, Truncated: truncated}
+	frameWith(d, []tbm.PartyRec{{GUID: gTank}}, truncated, hs...)
+}
+
+func frameWith(d *RemoteDriver, party []tbm.PartyRec, truncated bool, hs ...tbm.HostileRec) {
+	d.fr = tbm.ViewFrame{Party: party, Hostiles: hs, Truncated: truncated}
 	d.noteLedger()
 }
 
 func TestLedgerNeedsTwoWholeFramesAndAFight(t *testing.T) {
-	boss := tbm.HostileRec{GUID: 0x77, Entry: 777, HPPct: 40, Target: gTank, Flags: "-"}
+	boss := tbm.HostileRec{GUID: 0x77, Entry: 777, HPPct: 15, Target: gTank, Flags: "-"}
 	pick := []uint32{777}
 
 	d := ledgerDriver(t)
@@ -139,5 +145,55 @@ func TestLedgerNeedsTwoWholeFramesAndAFight(t *testing.T) {
 	frameOf(d, false, dead)
 	if !d.ledgerDead(pick) || d.ledgerDead([]uint32{778}) {
 		t.Fatal("listed dead after the fight: dead, and only for its entry")
+	}
+}
+
+// A live boss must not be counted dead for leaving the feed.
+func TestLedgerDoesNotKillALiveBoss(t *testing.T) {
+	pick := []uint32{777}
+	boss := tbm.HostileRec{GUID: 0x77, Entry: 777, HPPct: 15, Target: gTank, Flags: "-", X: 50}
+	near := []tbm.PartyRec{{GUID: gTank, X: 50}}
+	far := []tbm.PartyRec{{GUID: gTank, X: 200}} // the bots were chased out of range
+
+	// Chased out of view: the only bot is 150 yd from where the boss was last seen.
+	d := ledgerDriver(t)
+	frameWith(d, near, false, boss)
+	for i := 0; i < 4; i++ {
+		frameWith(d, far, false)
+	}
+	if d.ledgerDead(pick) {
+		t.Fatal("a boss no bot was near was counted dead")
+	}
+
+	// A healthy boss that goes out of view with a bot beside it is not dead either.
+	d = ledgerDriver(t)
+	healthy := boss
+	healthy.HPPct = 60
+	frameWith(d, near, false, healthy)
+	frameWith(d, near, false)
+	frameWith(d, near, false)
+	if d.ledgerDead(pick) {
+		t.Fatal("a boss at 60% was counted dead for leaving the feed")
+	}
+
+	// A wipe: one absence before it and one after are not two in a row.
+	d = ledgerDriver(t)
+	frameWith(d, near, false, boss)
+	frameWith(d, near, false)
+	frameWith(d, []tbm.PartyRec{{GUID: gTank, X: 50, Dead: true}}, false)
+	frameWith(d, near, false)
+	if d.ledgerDead(pick) {
+		t.Fatal("the absence counts survived a wipe")
+	}
+	d.ledgerClearAbsences() // what a recovered wipe does
+	frameWith(d, near, false)
+	if d.ledgerDead(pick) {
+		t.Fatal("one absence after the clear")
+	}
+
+	// The same boss, a bot by it and two whole frames: dead.
+	frameWith(d, near, false)
+	if !d.ledgerDead(pick) {
+		t.Fatal("nearly dead, a bot by, two frames: dead")
 	}
 }

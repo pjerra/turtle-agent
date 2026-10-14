@@ -18,19 +18,20 @@ import (
 // nearGame is a fakeCarrier whose game is also a Follower: the agent's character stands at agent.
 type nearGame struct {
 	*fakeCarrier
-	agent     Point
-	agentMap  uint32
-	level     int
-	known     bool
-	appears   []string
-	appearErr []error // errors the next appears answer with
-	walks     []Point
-	walkErr   error
-	probes    int
-	onAppear  func(g *nearGame)
-	blockWalk bool        // WalkSelf waits for its context to end (a long walk)
-	walking   atomic.Bool // a walk is under way
-	units     []objects.Unit
+	agent        Point
+	agentMap     uint32
+	level        int
+	known        bool
+	appears      []string
+	appearErr    []error // errors the next appears answer with
+	walks        []Point
+	walkErr      error
+	probes       int
+	onAppear     func(g *nearGame)
+	blockWalk    bool        // WalkSelf waits for its context to end (a long walk)
+	walking      atomic.Bool // a walk is under way
+	units        []objects.Unit
+	noVisibleOff bool // the setup does not list `gm visible off`
 }
 
 func newNearGame(t *testing.T, level int) *nearGame {
@@ -79,6 +80,9 @@ func nearRun(t *testing.T, g *nearGame, plan *Plan) (Report, error) {
 	g.agent = Point{-300, 0, 0} // far behind the party's start
 	cfg := DefaultConfig()
 	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	if !g.noVisibleOff {
+		cfg.Setup = []string{"gm visible off"} // what the caller ran before the run
+	}
 	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
 	err := d.Run(context.Background(), 0)
 	rep, ended := d.Status()
@@ -99,10 +103,10 @@ func TestAgentAppearsAtTheLeadAfterTheLegsWalk(t *testing.T) {
 		t.Fatalf("appears %v walks %v probes %d", g.appears, g.walks, g.probes)
 	}
 	r := rep.Remote
-	if r.AgentAppears != 1 || r.GMCommands != 0 || fmt.Sprint(rep.SetupShortcuts) != "[.appear Tanky]" {
+	if r.RunGMAssists != 1 || r.GMCommands != 0 || fmt.Sprint(rep.SetupShortcuts) != "[gm visible off .appear Tanky (GM assist during the run)]" {
 		t.Fatalf("%+v setup %v", r, rep.SetupShortcuts)
 	}
-	if !strings.Contains(notesOf(rep), "a setup shortcut, not a run GM command") {
+	if !strings.Contains(notesOf(rep), "a GM assist during the run (run_gm_assists; not counted in gm_commands)") {
 		t.Fatalf("%s", notesOf(rep))
 	}
 }
@@ -113,7 +117,7 @@ func TestAgentThatIsNotAGMWalksBehindTheParty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v %v", err, rep.Notes)
 	}
-	if len(g.appears) != 0 || len(g.walks) != 1 || len(rep.SetupShortcuts) != 0 {
+	if len(g.appears) != 0 || len(g.walks) != 1 || fmt.Sprint(rep.SetupShortcuts) != "[gm visible off]" {
 		t.Fatalf("appears %v walks %v setup %v", g.appears, g.walks, rep.SetupShortcuts)
 	}
 	// 30 yd short of the lead bot, on the line from the agent.
@@ -171,7 +175,7 @@ func TestObjectStepBringsTheAgentUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
-	if len(g.appears) != 2 || g.indexOf("cmd open") < 0 || rep.Remote.AgentAppears != 1 {
+	if len(g.appears) != 2 || g.indexOf("cmd open") < 0 || rep.Remote.RunGMAssists != 1 {
 		t.Fatalf("appears %v %v %+v", g.appears, g.orders, rep.Remote)
 	}
 }
@@ -211,5 +215,47 @@ func TestBossStepWithoutACorpseOrLedgerStillFails(t *testing.T) {
 	g.units = []objects.Unit{corpseOf(778, Point{60, 0, 0}), alive, corpseOf(777, Point{900, 900, 0})}
 	if _, err := nearRun(t, g, nearBossPlan()); err == nil || !strings.Contains(err.Error(), "no living [777]") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestNoAppearWithoutGMVisibleOffInTheSetup(t *testing.T) {
+	g := newNearGame(t, 3)
+	g.noVisibleOff = true
+	rep, err := nearRun(t, g, remotePlan(Leg{Name: "a", To: Point{200, 0, 0}}))
+	if err != nil || len(g.appears) != 0 || rep.Remote.RunGMAssists != 0 || !strings.Contains(notesOf(rep), `does not list "gm visible off"`) {
+		t.Fatalf("%v appears %v\n%s", err, g.appears, notesOf(rep))
+	}
+	// The setup spelled with a dot and capitals still counts.
+	g = newNearGame(t, 3)
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{1, 0, 0}}), g, Config{Setup: []string{" .GM  Visible Off "}}.withDefaults(), opts(), g.clock())
+	if !d.setupHas("gm visible off") {
+		t.Fatal("not read")
+	}
+}
+
+func TestNoAppearInACombat(t *testing.T) {
+	g := newNearGame(t, 3)
+	g.onTick = func(f *fakeRemote) {
+		if f.lead().X >= 200 && f.combatUntil.IsZero() {
+			f.combatUntil = f.now.Add(3 * time.Second) // a fight as the party arrives
+			f.party[0].State = "c"
+		}
+	}
+	rep, err := nearRun(t, g, remotePlan(Leg{Name: "a", To: Point{200, 0, 0}}))
+	if err != nil || len(g.appears) != 0 || rep.Remote.RunGMAssists != 0 {
+		t.Fatalf("%v appears %v\n%s", err, g.appears, notesOf(rep))
+	}
+}
+
+// A step without positions takes no corpse as proof.
+func TestBossCorpseNeedsTheStepsPositions(t *testing.T) {
+	g := newNearGame(t, 3)
+	g.units = []objects.Unit{corpseOf(777, Point{60, 0, 0})}
+	d := NewRemoteDriver(nearBossPlan(), g, DefaultConfig(), opts(), g.clock())
+	if d.bossCorpseSeen(fightSpec{pick: []uint32{777}}) {
+		t.Fatal("a corpse counted for a step with no positions")
+	}
+	if !d.bossCorpseSeen(fightSpec{pick: []uint32{777}, anchors: []Point{{60, 0, 0}}}) {
+		t.Fatal("the corpse at the boss position did not count")
 	}
 }

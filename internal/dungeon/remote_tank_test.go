@@ -278,3 +278,22 @@ func TestRemoteLooseGraceCountsFromTheMoveOffTheTank(t *testing.T) {
 		t.Fatalf("the tank was sent %v after the mob left it", d)
 	}
 }
+
+// A module that ignores the bot name answers party-scoped: the loose-add orders stop for the run.
+func TestRemoteLooseAddOrdersStopOnAPartyScopedAnswer(t *testing.T) {
+	g, _, _, rep := aggroFight(t, func(g *fakeRemote, a, b *rmob) {
+		a.hold = gMage
+		g.ignorePull = true
+		g.killRate = 2
+		g.oldModule = true
+	}, opts())
+	n := 0
+	for _, o := range g.ordersOf("cmd attack ") {
+		if strings.HasSuffix(o, " Tanky") {
+			n++
+		}
+	}
+	if n != 1 || rep.Remote.LooseAddOrders != 1 || !strings.Contains(notesOf(rep), "no more loose-add orders this run") {
+		t.Fatalf("orders %d %+v\n%s", n, rep.Remote, notesOf(rep))
+	}
+}

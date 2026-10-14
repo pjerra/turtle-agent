@@ -495,7 +495,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 					absent[g]++
 				}
 				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
-					if fought[g] {
+					// The pulled mob and its group's entries: gone after fighting is dead. A joiner of another entry (a boss) is dead only
+					// when it was nearly dead with a bot by (the ledger's rule): one chased out of view alive is no kill.
+					if fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])) {
 						killed[g] = true
 					}
 					delete(tracked, g)

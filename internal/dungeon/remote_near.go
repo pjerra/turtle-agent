@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 )
@@ -17,8 +18,8 @@ import (
 //	not a GM: the agent walks its own character (walk_path) to a point keepNearStand yards short of the lead bot, only out of combat and
 //	never towards a hostile the bots see near that point.
 //
-// It runs after each leg's walk and before each object step. Every `.appear` is a setup shortcut in the report (setup_shortcuts, with a
-// note), not a run GM command: gm_commands stays what the enter phase made it. The agent's presence is no part of the run's result.
+// It runs after each leg's walk and before each object step. Every `.appear` is a GM assist during the run: it is counted in run_gm_assists, noted, and
+// listed in setup_shortcuts, and gm_commands stays what the enter phase made it (so "0 GM commands" has to read run_gm_assists too). The agent's presence is no part of the run's result.
 
 const (
 	keepNearFar   = 40.0 // yards from the lead bot beyond which the agent is brought up
@@ -64,12 +65,23 @@ func (d *RemoteDriver) agentGM(ctx context.Context, f Follower) bool {
 		level, known, err := f.AccountLevel(ctx)
 		d.near.gm = err == nil && known && capsFor(level).Teleport
 		if d.near.gm {
-			d.rep.note(fmt.Sprintf("keep near: the agent's account level is %d: it follows the party with .appear (setup shortcuts, not run GM commands)", level))
+			d.rep.note(fmt.Sprintf("keep near: the agent's account level is %d: it follows the party with .appear: GM assists during the run, counted in run_gm_assists and not in gm_commands", level))
 		} else {
 			d.rep.note("keep near: the agent is not a GM (or its level is unknown): it walks its own character behind the party, out of combat")
 		}
 	}
 	return d.near.gm
+}
+
+// setupHas says whether the caller's setup list (the GM commands it ran before the run) holds the command, ignoring case, a leading
+// dot and extra spaces.
+func (d *RemoteDriver) setupHas(cmd string) bool {
+	for _, c := range d.cfg.Setup {
+		if strings.Join(strings.Fields(strings.ToLower(strings.TrimPrefix(strings.TrimSpace(c), "."))), " ") == cmd {
+			return true
+		}
+	}
+	return false
 }
 
 // agentDistance is how far the agent stands from the lead bot (+Inf on another map); ok is false when either is unknown.
@@ -99,6 +111,17 @@ func (d *RemoteDriver) keepNear(ctx context.Context) (moved bool, err error) {
 		return false, nil
 	}
 	if d.agentGM(ctx, f) {
+		// A GM assist during the run: never in a fight (the agent would land in it), and only for a GM made invisible by the setup, so
+		// that the mobs do not take the arriving agent for a target.
+		if d.inCombat() {
+			return false, nil
+		}
+		if !d.setupHas("gm visible off") {
+			if d.near.once("visible") {
+				d.rep.note(`keep near: no .appear: the setup does not list "gm visible off" (pass it in dungeon_run setup after running it), so a GM agent arriving could be seen by the mobs`)
+			}
+			return false, nil
+		}
 		return d.appear(ctx, f, dist)
 	}
 	return d.walkBehind(ctx, f, dist)
@@ -110,13 +133,13 @@ func (d *RemoteDriver) appear(ctx context.Context, f Follower, dist float64) (bo
 		return false, nil
 	}
 	cmd := ".appear " + d.opt.Lead
-	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd) })
-	d.remote(func(r *RemoteReport) { r.AgentAppears++ })
+	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
+	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
 	where := "on another map"
 	if !math.IsInf(dist, 1) {
 		where = fmt.Sprintf("%.0f yd behind", dist)
 	}
-	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent was %s the lead bot; %s (a setup shortcut, not a run GM command)", d.curLeg, where, cmd))
+	d.rep.note(fmt.Sprintf("leg %d: keep near: the agent was %s the lead bot; %s a GM assist during the run (run_gm_assists; not counted in gm_commands)", d.curLeg, where, cmd))
 	return true, d.tick(ctx, d.cfg.Poll) // the object store takes the new surroundings in over the next updates
 }
 
@@ -253,18 +276,15 @@ type UnitSource interface {
 }
 
 // bossCorpseSeen says whether the agent's own view holds a corpse of one of the entries (health 0 or the dead flag) in the boss's area:
-// within the larger of the group radius and 80 yd of a position of the step, or anywhere when the step has none.
+// within the larger of the group radius and 80 yd of a position of the step. A step without positions accepts none.
 func (d *RemoteDriver) bossCorpseSeen(sp fightSpec) bool {
 	us, ok := d.g.(UnitSource)
-	if !ok {
-		return false
+	if !ok || len(sp.anchors) == 0 {
+		return false // a corpse proves nothing about a boss without the area it stood in
 	}
 	for _, u := range us.Units() {
 		if u.Type != "creature" || !slices.Contains(sp.pick, u.Entry) || u.PosAgeMS < 0 || !(u.Dead || (u.MaxHealth > 0 && u.Health == 0)) {
 			continue
-		}
-		if len(sp.anchors) == 0 {
-			return true
 		}
 		for _, a := range sp.anchors {
 			if dist3(Point{u.X, u.Y, u.Z}, a) <= max(float64(d.groupRadius(sp)), 80) {

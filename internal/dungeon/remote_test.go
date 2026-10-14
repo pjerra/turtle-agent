@@ -84,6 +84,7 @@ type fakeRemote struct {
 	truncating  bool // frames are marked truncated and list no hostile
 	panicOn     string
 	vanish      bool // after a pullback the mob leaves the world without a fight
+	oldModule   bool // a bot-scoped `cmd attack` is answered party-scoped (the module ignores the bot name)
 	ignorePull  bool // a bot-scoped `cmd attack` at an engaged mob changes nothing (the tank does not take it)
 	orderAt     []time.Time
 	sight       float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
@@ -383,7 +384,11 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			if m.engaged && !g.ignorePull && strings.EqualFold(f[3], g.party[0].Name) {
 				m.hold = 0
 			}
-			return ack(intent), nil
+			r := ack(intent)
+			if !g.oldModule {
+				r.Ack.Scope = "bot:" + f[3]
+			}
+			return r, nil
 		}
 		m.attacked = true
 		return ack(intent), nil

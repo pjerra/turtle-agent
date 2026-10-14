@@ -218,9 +218,10 @@ type RemoteReport struct {
 	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
 	// other (no revive, aura or visibility).
 	GMCommands int `json:"gm_commands"`
-	// AgentAppears is the `.appear <lead bot>` the agent used to follow the party (a GM account), AgentWalks the walks of its own character
-	// behind the party (any other account). The `.appear` lines are in setup_shortcuts, not counted in gm_commands (remote_near.go).
-	AgentAppears int `json:"agent_appears"`
+	// RunGMAssists is the GM `.appear <lead bot>` lines sent DURING the run to keep the agent's character near the party (a GM account;
+	// remote_near.go). They are GM assists, not part of the party's play: gm_commands does not count them, so a target of "0 GM commands"
+	// has to read this counter too. AgentWalks is the walks of the agent's own character behind the party (any other account).
+	RunGMAssists int `json:"run_gm_assists"`
 	AgentWalks   int `json:"agent_walks"`
 	// Enter is the enter phase (absent when the party was already inside the plan's map).
 	Enter *EnterReport `json:"enter,omitempty"`
@@ -595,6 +596,7 @@ func objectStepKind(st Step) string {
 // It reports whether the run goes on.
 func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
+		d.ledgerClearAbsences()
 		d.rep.update(func(r *Report) { r.Wipes++ })
 		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
 		d.rep.note(err.Error())

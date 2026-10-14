@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
@@ -31,6 +32,7 @@ const (
 
 // tankFirst is the driver's state for the rules; its maps are made on first use.
 type tankFirst struct {
+	looseOff   bool                      // the module answered a loose-add order party-scoped (it ignores the bot name): no more of them
 	focus      packet.GUID               // the mob the party was last sent at
 	heldAt     map[packet.GUID]time.Time // when the tank was first seen holding a mob (the opener delay counts from here)
 	ccHeld     map[packet.GUID]bool      // mobs a cc order was accepted for
@@ -172,7 +174,7 @@ func (d *RemoteDriver) tankFirstTick(ctx context.Context, mobs []tbm.HostileRec)
 // At most one order per look; AddCooldown apart for the same mob, maxAddOrders for the fight.
 func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRec) error {
 	d.tf.init()
-	if d.tank == 0 {
+	if d.tank == 0 || d.tf.looseOff {
 		return nil
 	}
 	tank, ok := d.fr.Member(d.tank)
@@ -214,6 +216,12 @@ func (d *RemoteDriver) tankAtLooseAdds(ctx context.Context, mobs []tbm.HostileRe
 		}
 		if ref, bad := refusedOf(r); bad {
 			d.rep.note(fmt.Sprintf("the tank order at %s was refused: %s (%s)", d.hostileName(h), ref.Code, ref.Message))
+		}
+		// `cmd attack <guid> <bot>` must come back scoped to the bot. A module from before #928 ignores the name and sends the whole party
+		// at the add: no tank-first then, so the orders stop for the run.
+		if r.Ack != nil && !strings.EqualFold(r.Ack.Scope, "bot:"+tank.Name) {
+			d.tf.looseOff = true
+			d.rep.note(fmt.Sprintf("the tank order at %s was answered with scope %q, not bot:%s: this module does not take a bot name on cmd attack (TortoiseBots #928); no more loose-add orders this run", d.hostileName(h), r.Ack.Scope, tank.Name))
 		}
 		return nil
 	}

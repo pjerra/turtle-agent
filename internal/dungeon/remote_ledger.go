@@ -13,9 +13,9 @@ import (
 // Uldaman run 1, Revelosh dying inside a 4852 pull that ended "evaded").
 //
 // A mob enters the ledger when the feed shows it fighting the party (engaged, or hurt). It is dead when the feed lists it at 0 health,
-// or when it is absent from two whole frames in a row (never counting a frame the module cut short) after being seen fighting and
-// not walking home. A mob seen alive again is alive again. The ledger answers "is this boss dead" (bossDead). It does not clear
-// positions: the per-position evidence stays killedAt, which only a won pull fills (#115).
+// or when it is absent from two whole frames in a row (never counting a frame the module cut short) after being seen fighting, nearly
+// dead (at most ledgerDyingPct), with a living bot near where it stood (ledgerSeeRadius), and not walking home. A wipe clears the counts.
+// A mob seen alive again is alive again. The ledger answers "is this boss dead" (bossDead). It does not clear positions: the per-position evidence stays killedAt, which only a won pull fills (#115).
 
 // ledgerMob is one hostile the ledger follows.
 type ledgerMob struct {
@@ -53,13 +53,52 @@ func (d *RemoteDriver) noteLedger() {
 	if d.fr.Truncated {
 		return // records were dropped to fit: an absence says nothing
 	}
+	if d.fr.AllDead() {
+		d.ledgerClearAbsences() // a wipe: nobody was there to see anything
+		return
+	}
 	for g, m := range d.ledger {
 		if seen[g] || m.dead {
 			continue
 		}
-		if m.absent++; m.absent >= 2 && !m.last.Evading() {
+		// An absence counts only where the bots would have seen the mob: a living bot stands near its last position. A bot chased out
+		// of range, or a party that fled, says nothing about a boss it left alive.
+		if !d.botNear(hostilePoint(m.last), ledgerSeeRadius) {
+			m.absent = 0
+			continue
+		}
+		// ... and only a mob that was nearly dead when it went: a healthy one that leaves view has not died.
+		if m.absent++; m.absent >= 2 && d.goneMeansDead(m.last) {
 			m.dead = true
 		}
+	}
+}
+
+const (
+	ledgerSeeRadius = 25 // yards: a living bot this near a mob's last position would have seen it die
+	ledgerDyingPct  = 20 // the health a mob had when last seen, at most, to be counted dead for being gone from the feed
+)
+
+// goneMeansDead says whether a mob last seen as h, now out of the feed for two whole frames, is taken as dead: nearly dead, not walking
+// home, with a living bot near where it stood.
+func (d *RemoteDriver) goneMeansDead(h tbm.HostileRec) bool {
+	return h.HPPct <= ledgerDyingPct && !h.Evading() && d.botNear(hostilePoint(h), ledgerSeeRadius)
+}
+
+// botNear says whether a living bot of the newest frame stands within r of p.
+func (d *RemoteDriver) botNear(p Point, r float64) bool {
+	for _, m := range d.fr.Party {
+		if !m.Dead && dist3(partyPoint(m), p) <= r {
+			return true
+		}
+	}
+	return false
+}
+
+// ledgerClearAbsences forgets the absences counted so far (a wipe).
+func (d *RemoteDriver) ledgerClearAbsences() {
+	for _, m := range d.ledger {
+		m.absent = 0
 	}
 }
 
