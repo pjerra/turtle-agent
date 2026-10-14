@@ -16,8 +16,10 @@ import (
 // recovery attempt suited to the phase the run is in, after fail_s it fails the run with the reason.
 //
 // Progress is any of: the step or leg index advanced, a pull started or ended, a kill (or the fought mobs lost health), the lead or the
-// leader moved more than wdMoveYards, a new order was ACKed, a rest gate finished, an object step ended. The clock is the driver's, so
-// the tests move it by hand. The watchdog is looked at from the drivers' own waits (the group driver's sleep, the remote driver's
+// leader got more than wdMoveYards farther from where the stall began than it had been (net displacement: a bot that runs to and fro is
+// not progress), a new order was ACKed, a rest gate finished, an object step ended. Movement in a fight, and anything a stuck run can
+// fake by repeating itself after the recovery has fired, is soft (softProgress). The clock is the driver's, so the tests move it by
+// hand. The watchdog is looked at from the drivers' own waits (the group driver's sleep, the remote driver's
 // tick), never from a goroutine: a single game call that blocks is bounded by its own timeout and is judged at the next wait.
 
 // Default limits of the watchdog, in seconds (WatchdogConfig).
@@ -28,7 +30,8 @@ const (
 	maxWatchdogS            = 24 * 3600
 )
 
-// wdMoveYards is how far the lead (or the leader) must move from where it was last counted for that to be progress.
+// wdMoveYards is how much farther from the stall's start point than ever before in the stall the lead (or the leader) must get for
+// that to be progress.
 const wdMoveYards = 5.0
 
 // WatchdogConfig sets the three stall levels, in seconds without progress. A zero field is the default (120/240/420); a negative field
@@ -172,10 +175,16 @@ type watchdog struct {
 	step   string // the plan step the run is on (the Stepper's action label)
 	order  string // the last order and its answer, for the note
 
-	pos       wdPos
-	havePos   bool
-	anchor    Point
-	haveAnch  bool
+	pos     wdPos
+	havePos bool
+	// The movement reference: lead is the lead's position at the last look; ref is where it stood when the stall began (the last
+	// progress other than movement), and far the displacement from ref the last counted move (or any uncounted look) reached. Only a
+	// look more than wdMoveYards beyond far counts, so a bot going to and fro between two points keeps nothing alive.
+	lead      Point
+	haveLead  bool
+	ref       Point
+	haveRef   bool
+	far       float64
 	recentAck []string // the orders ACKed lately (wdRecentAcks), so that alternating orders are not progress either
 	degraded  bool     // the recovery has fired and nothing real has happened since: soft progress is ignored
 	fightOn   bool
@@ -229,7 +238,17 @@ func (w *watchdog) softProgress(what string) {
 	w.progressLocked(what)
 }
 
+// progressLocked ends the stall; the movement reference starts over at where the lead stands now.
 func (w *watchdog) progressLocked(what string) {
+	if w.failed != nil || w.off {
+		return
+	}
+	w.ref, w.haveRef, w.far = w.lead, w.haveLead, 0
+	w.clockLocked(what)
+}
+
+// clockLocked starts the stall clock over: the run made progress, and the levels can fire again for the next stall.
+func (w *watchdog) clockLocked(what string) {
 	if w.failed != nil || w.off { // a failed or ended run stays at its level for the report
 		return
 	}
@@ -378,6 +397,36 @@ func (w *watchdog) fightSignal(kills, hp int) {
 	w.fightKill, w.fightHP = kills, hp
 }
 
+// inPhaseLocked says whether a phase of that name is open (innermost or not).
+func (w *watchdog) inPhaseLocked(name string) bool {
+	return slices.ContainsFunc(w.phases, func(p wdPhase) bool { return p.name == name })
+}
+
+// movedLocked takes the lead's position at a look. Movement is progress only as net displacement: more than wdMoveYards farther from
+// the stall's start point than any counted look before (to and fro is nothing). In a fight it is soft progress: the pull's own recovery
+// (`cmd follow`) runs the tank away and the re-pull runs it back, and a fight is judged by kills and health. After the recovery has
+// fired it counts only in a walk (the walk's recovery plans it again, and the walk getting on is what that recovery is for); anywhere
+// else only a kill, lost health, a step or an object step result is real then.
+func (w *watchdog) movedLocked(lead Point) {
+	w.lead, w.haveLead = lead, true
+	if !w.haveRef {
+		w.ref, w.haveRef, w.far = lead, true, 0
+		return
+	}
+	d := dist3(w.ref, lead)
+	if d <= w.far+wdMoveYards {
+		return
+	}
+	fight := w.inPhaseLocked("pull")
+	walk := len(w.phases) > 0 && w.phases[len(w.phases)-1].name == "walk"
+	if w.degraded && (fight || !walk) {
+		w.far = max(w.far, d) // the run must get beyond where it already was before movement counts again
+		return
+	}
+	w.far = d
+	w.clockLocked("the lead moved")
+}
+
 // waitingLocked names what the run waits on: the phase and the plan step, then what the phase works on and the last order.
 func (w *watchdog) waitingLocked() (phase, step, text string) {
 	phase, step = "run", w.step
@@ -461,12 +510,7 @@ func (w *watchdog) watch(ctx context.Context) error {
 			w.progressLocked(fmt.Sprintf("step advanced to leg %d %s %d", pos.leg, pos.phase, pos.idx))
 		}
 		w.pos, w.havePos = pos, true
-		if !w.haveAnch {
-			w.anchor, w.haveAnch = lead, true
-		} else if dist3(w.anchor, lead) > wdMoveYards {
-			w.anchor = lead
-			w.progressLocked("the lead moved")
-		}
+		w.movedLocked(lead)
 	}
 	var fires []wdFire
 	if w.held == 0 {

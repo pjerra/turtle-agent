@@ -845,13 +845,16 @@ Issue #73, #83. A run must never sit stuck without making progress (the live Uld
 silent feed for minutes). Both drivers (group and remote) feed one watchdog (`internal/dungeon/watchdog.go`) and ask it at every wait.
 
 **Progress** is any of: the step or leg index advanced; a pull started or ended; a kill, or the fought mobs lost health (so a long boss fight
-that wears the boss down never stalls); the lead bot (remote) or the leader (group) moved more than 5 yd; an order was ACKed, *if it is not one of the last 16
+that wears the boss down never stalls); the lead bot (remote) or the leader (group) got more than 5 yd farther from where the stall began than it had been (net displacement: a
+bot running to and fro between two points keeps nothing alive; a steady walk counts every 5 yd; in a pull it counts only until the
+recovery); an order was ACKed, *if it is not one of the last 16
 orders ACKed* (the same `cmd move` or `cmd rest`, or two orders alternating, sent again and again does not keep a stuck run alive; remote
 orders only, a chat order has no ACK); a rest gate finished; an object step ended. A death's recovery (corpse runs, resurrection waits), a
 plan's `wait_for` (its own `timeout_s`) and a rest gate while the party is out of combat (its own cap) pause the clock: the time held is not
 counted, the stall before it is. **After the recovery has fired**, what a stuck run can fake by repeating itself (a pull started or ended,
-an order ACKed, a rest gate passed) is not progress any more; only a kill, lost health, a step, movement or an object step is. So a recovery
-that re-pulls a boss that stays stuck at full health cannot keep the run alive: `fail_s` is a ceiling, and the next interval without real
+an order ACKed, a rest gate passed, and movement outside a walk) is not progress any more; only a kill, lost health, a step, an object step
+or a walk getting on is. So a recovery that re-pulls a boss that stays stuck at full health, running the tank to the commander (`cmd
+follow`) and back, cannot keep the run alive: `fail_s` is a ceiling, and the next interval without real
 progress goes to the failure.
 
 **Levels**, seconds without progress, `watchdog {warn_s, recover_s, fail_s}` in the plan or in `dungeon_run` (defaults 120/240/420; a

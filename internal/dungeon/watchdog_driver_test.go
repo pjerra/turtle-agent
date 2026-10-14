@@ -68,12 +68,14 @@ func TestRemoteWatchdogLongProgressingFightNeverStalls(t *testing.T) {
 	}
 }
 
-// Remote: a boss stuck in combat at full health. The pull is recovered once (cmd follow, pick again); the re-pull, the rest gate it goes
-// through and the orders it ACKs are not progress, so the next interval without real progress goes to the failure: fail_s is a ceiling.
+// Remote: a boss stuck in combat at full health. The pull is recovered once (cmd follow, pick again); the run of the tank to the
+// commander and back to the boss, the re-pull, the rest gate it goes through and the orders it ACKs are not progress, so the next
+// interval without real progress goes to the failure: fail_s is a ceiling.
 func TestRemoteWatchdogFailsAPullThatRecoveryDoesNotFix(t *testing.T) {
 	g := newFakeRemote(t)
 	g.addMob(299, Point{30, 5, 0})
 	g.killRate = 0
+	g.followTo = &Point{-30, 0, 0} // 60 yd from the boss: the tank runs there on cmd follow and back on the re-pull
 	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 5, 0}}}}})
 	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.FightTimeout = 3000 * time.Second; c.BossTimeout = 3000 * time.Second })
 	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "leg 0 (a): pull group 1 of 1 for 4") {
@@ -84,6 +86,24 @@ func TestRemoteWatchdogFailsAPullThatRecoveryDoesNotFix(t *testing.T) {
 	}
 	if n := len(g.ordersOf("cmd follow")); n < 1 {
 		t.Fatalf("the recovery sent cmd follow: %v", g.orders)
+	}
+	// The fake did run the tank away and back: the lead went near the commander after the follow, then near the boss again.
+	away, back := -1, -1
+	for i, p := range g.trace {
+		if away < 0 && dist3(p, *g.followTo) < 5 {
+			away = i
+		} else if away >= 0 && dist3(p, Point{30, 5, 0}) < 10 {
+			back = i
+			break
+		}
+	}
+	if away < 0 || back < 0 {
+		t.Fatalf("the tank did not run to the commander and back: away %d back %d", away, back)
+	}
+	// fail_s from the pull's start plus the 90 s the closing fight may keep the binding, not a cycle of recover_s per re-pull (before the
+	// fix: 783 s and two recoveries).
+	if rep.Seconds > 530 {
+		t.Fatalf("the run took %.0f s: fail_s is not a ceiling\n%s", rep.Seconds, notesOf(rep))
 	}
 	if g.unbinds != 1 {
 		t.Fatalf("unbinds %d", g.unbinds)

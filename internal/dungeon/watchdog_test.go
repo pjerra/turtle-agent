@@ -404,3 +404,83 @@ func TestWatchdogHoldKeepsTheStallBeforeIt(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Movement is progress only as net displacement from where the stall began: a bot that runs to and fro between two points 10 yd apart
+// fails at fail_s, a steady walk (3 yd/s, looked at every second) never stalls.
+func TestWatchdogMovementIsNetDisplacement(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("walk", "to x", nil)()
+	r.ok, r.pos, r.lead = true, wdPos{0, "walk", 0}, Point{0, 0, 0}
+	r.watch()
+	var err error
+	for i := 1; i <= 50 && err == nil; i++ {
+		r.adv(10)
+		r.lead = Point{float32(10 * (i % 2)), 0, 0}
+		err = r.watch()
+	}
+	if !errors.Is(err, errStalled) || r.now.Sub(time.Unix(2_000_000, 0)) > 430*time.Second {
+		t.Fatalf("to and fro: %v after %v", err, r.now.Sub(time.Unix(2_000_000, 0)))
+	}
+
+	r = newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("walk", "to y", nil)()
+	r.ok, r.pos, r.lead = true, wdPos{0, "walk", 0}, Point{0, 0, 0}
+	r.watch()
+	for i := 1; i <= 1000; i++ {
+		r.adv(1)
+		r.lead = Point{float32(3 * i), 0, 0}
+		if err := r.watch(); err != nil {
+			t.Fatalf("a steady walk stalled at %d s: %v", i, err)
+		}
+	}
+	if w := r.w.report(); w.Warnings != 0 || w.LongestStall > 3 {
+		t.Fatalf("%+v", w)
+	}
+
+	// A step resets the start point: the walk back the way the bot came is progress on the next step.
+	r.pos.idx++
+	r.watch()
+	r.adv(10)
+	r.lead = Point{2990, 0, 0}
+	r.watch()
+	if got := r.w.report(); got.LastProgress != "the lead moved" || got.StalledForS != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// In a pull, after the recovery, the tank running to the commander (cmd follow) and back to the boss is no progress: the stall fails
+// at fail_s. In a walk the recovery plans again, and the walk getting on afterwards is progress.
+func TestWatchdogMovementAfterTheRecovery(t *testing.T) {
+	r := newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("pull", "boss", func(context.Context) (string, error) { return "followed", nil })()
+	r.ok, r.pos, r.lead = true, wdPos{0, "pull_groups", 0}, Point{0, 0, 0}
+	r.watch()
+	r.adv(240)
+	r.watch() // warn and recover
+	var err error
+	for i := 0; i < 30 && err == nil; i++ {
+		r.adv(10)
+		r.lead = Point{float32(60 * ((i/3 + 1) % 2)), 0, 0} // 60 yd away and back, again and again
+		err = r.watch()
+	}
+	if !errors.Is(err, errStalled) || r.w.report().Recoveries != 1 || r.now.Sub(time.Unix(2_000_000, 0)) > 430*time.Second {
+		t.Fatalf("a pull's movement after the recovery: %v %+v", err, r.w.report())
+	}
+
+	r = newWDRig(t, WatchdogConfig{})
+	defer r.w.enter("walk", "to x", func(context.Context) (string, error) { return "planned again", nil })()
+	r.ok, r.pos, r.lead = true, wdPos{0, "walk", 0}, Point{0, 0, 0}
+	r.watch()
+	r.adv(240)
+	r.watch()
+	for i := 1; i <= 300; i++ {
+		r.adv(1)
+		r.lead = Point{float32(3 * i), 0, 0}
+		if err := r.watch(); err != nil {
+			t.Fatalf("a walk going on after its recovery stalled: %v", err)
+		}
+	}
+	if got := r.w.report(); got.StallLevel != "none" || got.Recoveries != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
