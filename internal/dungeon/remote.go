@@ -344,7 +344,8 @@ type RemoteReport struct {
 	GatherTimeouts int     `json:"gather_timeouts"`
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
-	Unreachable    int     `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
+	Unreachable    int     `json:"unreachable"`     // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -451,6 +452,7 @@ type RemoteDriver struct {
 	waitNoted  map[packet.GUID]bool
 	warned     map[string]bool
 	ccDone     map[packet.GUID]bool
+	ccOrdered  map[packet.GUID]time.Time // when a big-pack CC order went out for a mob (remote_cc.go)
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
@@ -493,7 +495,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d := &RemoteDriver{plan: plan, g: g, cfg: cfg.withDefaults(), opt: opt.withDefaults(), clk: clk, curLeg: -1,
 		prevDead: map[packet.GUID]bool{}, revived: map[packet.GUID]int{}, lastRevive: map[packet.GUID]time.Time{},
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
-		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
+		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, ccOrdered: map[packet.GUID]time.Time{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
 	d.tx = defaultTuneExtra()
 	d.initLive()
 	d.rep.init(plan, clk.Now)
