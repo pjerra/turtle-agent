@@ -186,6 +186,20 @@ func TestStepperWaitTimesOutAndFails(t *testing.T) {
 	}
 }
 
+// A wait's fail_text is added to its failure, so a run that stops there says why.
+func TestStepperWaitFailTextIsInTheFailure(t *testing.T) {
+	w := &fakeWorld{pos: Point{49, 0, 0}, hostiles: 1}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	  {"name":"b","to":{"x":50,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":10,"fail_text":"needs three participants"}}]}]}`)
+	s := NewStepper(p, w, clk.now)
+	s.Next()
+	clk.t = clk.t.Add(11 * time.Second)
+	if a := s.Next(); a.Kind != ActFailed || a.Err != "leg 0 (b): step 0: waited 10 s for no hostiles within 30 yd: needs three participants" {
+		t.Fatalf("%+v", a)
+	}
+}
+
 func TestStepperFailures(t *testing.T) {
 	// An object that is not in view and has no place to look for it ends the plan; the driver can fail it as well.
 	w := &fakeWorld{}

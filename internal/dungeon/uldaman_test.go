@@ -32,9 +32,11 @@ func loadUldaman(t *testing.T) *Plan {
 
 func TestUldamanPlanLoads(t *testing.T) {
 	p := loadUldaman(t)
-	if p.Map != 70 || p.Name != "uldaman" || len(p.Legs) != 4 {
+	if p.Map != 70 || p.Name != "uldaman" || len(p.Legs) != 14 {
 		t.Fatalf("%+v", p)
 	}
+	legs := p.Legs
+	p.Legs = p.Legs[:4] // legs 0-3 (Baelog to Ironaya) are asserted below as they were; TestUldamanFullPlan holds the rest
 	var names []string
 	var bosses []uint32
 	for _, l := range p.Legs {
@@ -82,6 +84,7 @@ func TestUldamanPlanLoads(t *testing.T) {
 	if p.EntranceTele != "ulda" || p.Portal == nil || p.Portal.Map != 0 || p.EntranceTrigger != 286 {
 		t.Errorf("tele %q portal %+v trigger %d", p.EntranceTele, p.Portal, p.EntranceTrigger)
 	}
+	p.Legs = legs
 	// The file is kept in the form Marshal writes, so regenerating it shows only real changes.
 	raw, err := os.ReadFile(uldamanPlan)
 	if err != nil {
@@ -93,6 +96,106 @@ func TestUldamanPlanLoads(t *testing.T) {
 	}
 	if !bytes.Equal(raw, out) {
 		t.Error("dungeons/uldaman.json is not in Marshal's form: run `go run ./tools/dungeongen -format dungeons/uldaman.json`")
+	}
+}
+
+// The legs after Ironaya (issue #73, #83): the Obsidian Sentinel behind the Echomok Door, the Ancient Stone Keeper, Galgann Firehammer,
+// Grimlok, the Altar of the Keepers with its four Stone Keepers, and Archaedas behind the Altar of Archaedas. The altars are
+// summoning rituals (game object type 18) of three participants in the world database.
+func TestUldamanFullPlan(t *testing.T) {
+	p := loadUldaman(t)
+	var names []string
+	var bosses []uint32
+	for _, l := range p.Legs[4:] {
+		names = append(names, l.Name)
+		var b uint32
+		if l.Boss != nil {
+			b = l.Boss.Entry
+		}
+		bosses = append(bosses, b)
+	}
+	if fmt.Sprint(names) != "[scorpid_cave sentinel ancient_stone_keeper galgann grimlok keepers_door keepers_altar keepers descent archaedas]" ||
+		fmt.Sprint(bosses) != "[0 7023 7206 7291 4854 0 0 0 0 2748]" {
+		t.Fatalf("%v %v", names, bosses)
+	}
+	// The doors a player clicks (lock 86, no script) and the ones the instance script opens, each in the leg that needs it.
+	use := func(l Leg) (out []uint32) {
+		for _, s := range l.Steps {
+			if s.UseObject != nil {
+				out = append(out, s.UseObject.Entry)
+			}
+		}
+		return
+	}
+	leg := func(name string) Leg {
+		for _, l := range p.Legs {
+			if l.Name == name {
+				return l
+			}
+		}
+		t.Fatalf("no leg %q", name)
+		return Leg{}
+	}
+	for name, want := range map[string]string{"sentinel": "[]", "keepers_door": "[124368]", "keepers_altar": "[130511]", "archaedas": "[141869 133234]"} {
+		if got := fmt.Sprint(use(leg(name))); got != want {
+			t.Errorf("%s: use_object steps %s, want %s", name, got, want)
+		}
+	}
+	// The Stone Keepers wake one after the other and the door 124367 opens when the fourth is dead: that wait is the leg's ceiling.
+	k := leg("keepers")
+	if len(k.Steps) != 1 || k.Steps[0].WaitFor == nil || k.Steps[0].WaitFor.GameObject == nil || k.Steps[0].WaitFor.GameObject.Entry != 124367 ||
+		k.Steps[0].WaitFor.GameObject.State != "active" || k.Steps[0].WaitFor.TimeoutS != MaxTimeoutS {
+		t.Errorf("keepers: %+v", k.Steps)
+	}
+	if len(k.PullGroups) != 1 || fmt.Sprint(k.PullGroups[0].Entries) != "[4857 4857 4857 4857]" {
+		t.Errorf("keepers: %+v", k.PullGroups)
+	}
+	// The altar steps are followed by a short wait for the altar to be active, with the reason in fail_text: one carrier cannot fire a ritual of three
+	// participants, and the run must stop there with that message, not 600 s later at the next leg's door.
+	for name, altar := range map[string]uint32{"keepers_altar": 130511, "archaedas": 133234} {
+		l := leg(name)
+		var found bool
+		for i, st := range l.Steps {
+			if st.UseObject != nil && st.UseObject.Entry == altar {
+				w := l.Steps[i+1].WaitFor
+				found = w != nil && w.GameObject != nil && w.GameObject.Entry == altar && w.GameObject.State == "active" && w.TimeoutS == 20 &&
+					strings.Contains(w.FailText, "three participants")
+			}
+		}
+		if !found {
+			t.Errorf("%s: no 20 s wait with a fail_text after the use of altar %d: %+v", name, altar, l.Steps)
+		}
+	}
+	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
+	if f := leg("sentinel").Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+		t.Errorf("sentinel first %v", f)
+	}
+	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
+	a := leg("archaedas")
+	if fmt.Sprint(a.Skip) != "[7076 7077 7309 10120]" || len(a.AfterBoss) != 1 || a.AfterBoss[0].WaitFor == nil || a.AfterBoss[0].WaitFor.GameObject.Entry != 124369 {
+		t.Errorf("archaedas: skip %v after_boss %+v", a.Skip, a.AfterBoss)
+	}
+	// Grimlok and Galgann come with their groups (creature_groups of the world database).
+	if f := leg("grimlok").Boss.First; fmt.Sprint(f) != "[4855 4853 4863]" {
+		t.Errorf("grimlok first %v", f)
+	}
+	if f := leg("galgann").Boss.First; fmt.Sprint(f) != "[7030 7030]" {
+		t.Errorf("galgann first %v", f)
+	}
+	// Both altars are summoning rituals in the export (type 18); the doors are type 0.
+	types := map[string]string{}
+	for _, m := range tsv(t, "gameobjects.tsv") {
+		types[m["entry"]] = m["type"]
+	}
+	for _, e := range []string{"130511", "133234"} {
+		if types[e] != "18" {
+			t.Errorf("game object %s is type %q, want 18 (summoning ritual)", e, types[e])
+		}
+	}
+	for _, e := range []string{"124370", "124368", "124367", "141869", "124369"} {
+		if types[e] != "0" {
+			t.Errorf("game object %s is type %q, want 0 (door)", e, types[e])
+		}
 	}
 }
 
@@ -240,6 +343,10 @@ func waypoints(l Leg) []Point {
 	return pts
 }
 
+// sentinelLeg is the index of the leg whose first waypoint, the east end of the ramp at -158.4 283.7, is across the one hole of the map 70
+// navmesh from the west lip at -163.5 298.7 where the leg before it ends (the scorpid pit).
+const sentinelLeg = 5
+
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
 func TestUldamanOnNavmesh(t *testing.T) {
@@ -261,6 +368,22 @@ func TestUldamanOnNavmesh(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("legs[%d] waypoint %d: %v", i, j, err)
+			}
+			if i == sentinelLeg && j == 0 && path.Status != navmesh.Complete {
+				// The one known hole of the map 70 navmesh (found by path_to, confirmed by the live map walk of 2026-10-14): the west part ends
+				// at the lip of the Cleft Scorpid pit, the east part begins about 4 yd (horizontally; 15 yd along the ramp) from the nearest
+				// reachable point. The walk crosses it with one direct move, which this test cannot check; the waypoints after it are checked
+				// from the leg's own start. A mesh that closes the hole makes this branch dead; delete it then.
+				if len(path.Points) == 0 {
+					t.Fatalf("legs[%d] waypoint 0: partial path with no points", i)
+				}
+				end := path.Points[len(path.Points)-1]
+				if gap := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); gap > 20 {
+					t.Errorf("legs[%d] waypoint 0: the navmesh hole is %.0f yd wide, the plan assumes at most about 16", i, gap)
+				}
+				from = to
+				checked++
+				continue
 			}
 			if path.Status != navmesh.Complete {
 				t.Errorf("legs[%d] (%s) waypoint %d %v from %v: %s %s", i, l.Name, j, w, from, path.Status, path.Reason)

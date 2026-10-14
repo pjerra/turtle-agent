@@ -83,13 +83,14 @@ func main() {
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
 	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
+	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
 	format := flag.String("format", "", "plan file to validate and print in canonical form (to -out, default standard output); no generation")
 	flag.Parse()
 	if *format != "" {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly, *strict))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *strict))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -171,7 +172,7 @@ func parseFactions(s string) (map[int]bool, error) {
 
 // checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
 // an export that cannot be read, 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
-func checkFile(path, dir, team, friendly string, strict bool) int {
+func checkFile(path, dir, team, friendly, awakened string, strict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -194,7 +195,15 @@ func checkFile(path, dir, team, friendly string, strict bool) int {
 	if err != nil {
 		return fail(err)
 	}
-	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm})
+	aw, err := parseEntries(awakened)
+	if err != nil {
+		return fail(err)
+	}
+	am := map[uint32]bool{}
+	for _, e := range aw {
+		am[e] = true
+	}
+	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am})
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}

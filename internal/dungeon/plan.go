@@ -26,6 +26,7 @@ const (
 	MaxTimeoutS        = 600
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
+	MaxFailText        = 400 // characters of a wait's fail_text
 )
 
 // Point is a position in the map's coordinates.
@@ -213,6 +214,9 @@ type WaitFor struct {
 	GameObject   *ObjectState  `json:"gameobject,omitempty"`
 	HostilesGone *HostilesGone `json:"hostiles_gone,omitempty"`
 	TimeoutS     int           `json:"timeout_s,omitempty"`
+	// FailText is added to the failure when the wait times out: the reason a person should read (Uldaman's altar waits say that the
+	// ritual needs three participants).
+	FailText string `json:"fail_text,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
@@ -325,6 +329,7 @@ type rawWait struct {
 	GameObject   *rawObjState `json:"gameobject"`
 	HostilesGone *rawHostiles `json:"hostiles_gone"`
 	TimeoutS     *int         `json:"timeout_s"`
+	FailText     string       `json:"fail_text"`
 }
 
 type rawObjState struct {
@@ -666,6 +671,11 @@ func (c *checker) step(path string, r *rawStep) Step {
 
 func (c *checker) wait(path string, r *rawWait) *WaitFor {
 	w := &WaitFor{TimeoutS: DefaultTimeoutS}
+	if len(r.FailText) > MaxFailText || strings.ContainsAny(r.FailText, "\r\n\t") {
+		c.fail(path+".fail_text", "is longer than %d characters or has a line break", MaxFailText)
+	} else {
+		w.FailText = r.FailText
+	}
 	if r.TimeoutS != nil {
 		if *r.TimeoutS <= 0 || *r.TimeoutS > MaxTimeoutS {
 			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, MaxTimeoutS)

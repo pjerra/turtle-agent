@@ -37,6 +37,11 @@ type CheckOptions struct {
 	// relation of a faction is in FactionTemplate.dbc (a faction template's friend and enemy masks and groups), which the world
 	// database export does not carry. 35 (friendly to all) is always in it.
 	Friendly map[int]bool
+	// Awakened lists creature entries that spawn friendly (faction 35, "stoned") and that the encounter's script turns hostile when it
+	// starts: Uldaman's four Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, by the Altar of
+	// Archaedas). The export carries only the spawn faction, so without this a plan that fights them is warned about as if it asked the
+	// party to kill a friend. Their npc_flags (none) are still looked at.
+	Awakened map[uint32]bool
 }
 
 // Check lints a plan against the creature export (creatures.tsv): a boss or pack member that is no mob, or that is friendly to the leader's
@@ -44,7 +49,7 @@ type CheckOptions struct {
 // questgivers). It returns one warning per entry.
 //
 // What it can and cannot know. npc_flags other than 0 mark an NPC (questgiver, vendor, trainer, gossip) that a plan does not fight:
-// that is certain (unless the part is gated to a team: then the author meant that team to fight it). A faction is friendly only when it is in Friendly or is 35; for any other faction the check says nothing about the
+// that is certain (unless the part is gated to a team: then the author meant that team to fight it). A faction is friendly only when it is in Friendly or is 35 (and the entry is not in Awakened); for any other faction the check says nothing about the
 // leader's team, but notes when the faction is shared with creatures that carry npc_flags (a questgiver's faction is usually friendly
 // to some team). Hostility toward the other team cannot be told at all without FactionTemplate.dbc.
 func Check(p *dungeon.Plan, cs []creature, o CheckOptions) []string {
@@ -79,7 +84,9 @@ func Check(p *dungeon.Plan, cs []creature, o CheckOptions) []string {
 		if c.NPCFlags != 0 && gate == "" {
 			why = append(why, fmt.Sprintf("npc_flags %s: it is an NPC, not a mob", describeFlags(c.NPCFlags)))
 		}
-		if friendly(c.Faction) {
+		if o.Awakened[entry] && c.NPCFlags == 0 {
+			// spawns friendly, hostile once the script wakes it: nothing to say about its faction
+		} else if friendly(c.Faction) {
 			why = append(why, fmt.Sprintf("faction %d is friendly to the %s", c.Faction, teamOrLeader(o.Team)))
 		} else if names := npcFaction[c.Faction]; c.NPCFlags == 0 && len(names) > 0 {
 			why = append(why, fmt.Sprintf("faction %d is also used by NPCs with npc_flags (%s): it may be friendly to a team (unknown without FactionTemplate.dbc)", c.Faction, firstNames(names, 3)))
