@@ -251,7 +251,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -555,6 +555,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `ulda`, game_tele 169; letters, digits and `_`) and `portal` (`{"map": 0, "x": .., "y": .., "z": ..}`, the centre of the entrance's area
   trigger on the outer map; Uldaman: areatrigger 286, radius 10). `outside_tele` (a `game_tele` name; Uldaman `uldaman`, the entrance on the outer map, map 0) is what the
   `prepare.fresh` step teleports the bots and the agent to before it unbinds them. A plan without them can only be entered by hand.
+- `level_band` (optional, `[low, high]`, 1 to 60; Uldaman `[41, 45]`, Zul'Farrak `[44, 48]`) is the levels the dungeon is meant for: the
+  [hired party](#hired-party-prepare-party-hire) takes the middle of it as its level and accepts no other level than the band's.
 - `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
   the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
 - A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
@@ -1470,6 +1472,87 @@ Report: `report.prepare` = `steps[]` (`name`, `seconds`, `detail`), `seconds`, `
 enter phase and kit check; `remote.preflight.seconds` and `remote.enter.seconds` are the last two). Nothing in the block waits longer than its
 own ceiling (`online_wait_s`, 25 s for the teleports, 6 s per `.bot` line). `tools/run-uldaman.sh` runs all of this for Uldaman; see
 [docs/LIVE-CHECKS.md](docs/LIVE-CHECKS.md) "Remote Uldaman in one command".
+
+### Hired party (prepare party "hire")
+
+The owner's rule (2026-10-14): every commander group is **five hired bots at the instance's level, the commander outside the group** (TortoiseBots
+#935: `commander bind` accepts the commander's own hires and the commander ends outside the bound party). The hand-made alt party (`Lc*`) is the
+`online` + `fresh` path above; this is the other one, and it needs no character to exist before the run:
+
+```json
+{"name": "uldaman", "mode": "remote", "prepare": {"party": "hire", "hire": {"composition": ["warrior:tank", "priest:healer", "hunter", "rogue", "warlock"], "level": 43, "rehire": false}, "gm_setup": ["gm visible off"]}}
+```
+
+`lead_bot`, `bots`, `tank` and `healer` stay out of the call (the step names them: the lead bot is the hired tank); `online` and `fresh` do not go
+with it (a new hire has no saved instance and is online). `hire` is optional and every key of it too:
+
+- **`composition`:** `"class"` or `"class:role"` each (role `tank`, `healer` or `dps`; a warrior is the tank and a priest the healer unless said otherwise, and
+  paladin, shaman and druid need a role). Two to five bots, exactly one tank and one healer. Default: `warrior:tank`, `priest:healer` and three damage
+  dealers, the first three of hunter, rogue, warlock, mage.
+- **`level`:** default the middle of the plan's `level_band` (43 for Uldaman); a plan without a band needs `level`.
+- **`rehire`:** end the old binding and dismiss every current hire first. Without it the step **keeps** the hires that match (same class and level, a
+  build that gives the role: read with `command <bot> talents`) and the standing binding, if it already is the wanted party, to save the hire time;
+  the rest are dismissed and replaced. A kept hire keeps its saved instances: `rehire` is how a run gets a clean instance. A hire the agent cannot see
+  (no class in its view) does not match.
+- **`no_fix`:** report what is wrong and fail, instead of `.bot autogear` and `.bot maintenance`.
+- **`wait_s`:** the longest wait for a hire to show in the group (default 30, at most 120).
+
+**What the step does,** in order, all with the commander's own `.bot` commands (no GM line):
+
+1. **Current hires.** The members of the commander's group and of the bound group that `.bot roster` does not list are its hires (a hire is a pool
+   character, not one of the account's). An owned bot in the commander's own group fails the step (it is not a hire and would be bound with them); an
+   owned bot in an old bound group is left as it is. What each hire is comes from the bot's **own answer** to `.bot command <bot> who` (class, level and
+   talent points, e.g. `protection (0/0/36) warrior (43 lvl)`), not from the agent's view, so a bound hire inside an instance is recognised.
+   `commander unbind` ends an old binding that is not the wanted party. **A hire is deleted by `.bot logout`, so it is dismissed only when its own answer
+   shows it is the wrong version of an empty slot** (same class, another level or a build for another role), or when the caller said `rehire`. A hire that does
+   not answer `who` (offline, teleporting, in its logout grace) and a hire with no empty slot of its kind (surplus) are never dismissed: the step stops and
+   names them. The step never sends a hire `leave` (that deletes it too), not even when the bind refuses a bot as `member-grouped`.
+   **Hires left outside the group and the binding still count against `AiPlayerbot.HireMaxBotsPerPlayer`** (and the agent cannot list the ones that
+   are neither in the group nor in the bound group): when a hire is refused with "maximum number of companions", `--rehire` / `hire.rehire` dismisses the
+   commander's current hires on purpose; one that is out of reach still has to be dismissed from its own account or by the grace running out.
+2. **Hire.** `.bot hire <class> <role> level=<n>` for each missing slot, in composition order. The level goes only when it differs from the commander's own.
+   A reply "Convert to a raid" (the 5th hire) is answered with `convert_raid` and one more try. A server without TB #940 either refuses `level=` (the
+   reply is read: `Bad level`, `Unclear number`, `Give only one level`) or ignores it (the answer carries no `Level n.`): the step then hires at the
+   commander's level and **accepts that only inside the plan's level band**; a server that lowers the level to the commander's limit says so and is
+   treated the same. Any other refusal (`recruiter`, `cannot afford`, `maximum number`, `party is full` after the conversion) fails the step with the
+   server's words.
+3. **Wait** (at most `wait_s`) for each hire to show in the commander's group with a level and health.
+4. **Ready check, per bot** (the standard of `TEST-BRIEF.md`; every problem is collected and the step fails once, naming the bots):
+   - *level and class* as hired; not dead;
+   - *gear:* the worn items are asked for with `CMSG_ITEM_QUERY_SINGLE` (what a client does for a tooltip; cached, the agent is a GM so the core answers
+     for any item). No epic (quality 4), head, chest, legs, feet and main hand filled, a shield on a warrior or paladin tank (an armor of the shield
+     subclass), a ranged weapon on a hunter. Else `.bot autogear <bot> blue` once, then read again; still wrong fails. `ilvl` is the average item
+     level worn (shirt and tabard left out), `quality` the best worn. An item the server does not describe is a warning;
+   - *supplies:* the drinks (a healer 20, any other mana user 10) and 100 shots of the kind the ranged weapon takes (as the preflight judges them);
+     a shortage, and every kept hire, gets `.bot maintenance <bot>` and is read again; a shortage after it fails (`ready.bots[].fixed` has the numbers);
+   - *key spells* from the bot's own list (`.bot command <bot> spells <filter>` is answered by a whisper burst: `=== Spells ===`, then **one spell per
+     line**, `[Name]` links, also when nothing matches; the step reads the whole burst, ending it 0.4 s after the last line, 3 s at most): warrior
+     Battle Stance, and for the tank Defensive Stance, Taunt, Sunder Armor and Shield Block; priest Resurrection, for the healer Renew and Dispel Magic;
+     hunter Tame Beast, Call Pet, Mend Pet; warlock Summon Imp or Voidwalker; mage Polymorph; paladin Redemption; shaman Ancestral Spirit (each from its
+     level). A missing spell fails ("lacks X"): **the step learns nothing** (`.learn` is a GM command on a character that is not the commander's). A
+     question that gets no header within 3 s fails the bot as "no answer from <bot>", not as a missing spell;
+   - *talents:* `command <bot> talents` must show points spent and a build whose role is the slot's (warrior protection tank; priest discipline or holy
+     healer; paladin holy healer, protection tank; and so on). A feral druid cannot be told as bear or cat: a warning;
+   - *pet:* a hunter's or warlock's pet is out in the agent's view within 10 s (a bot the agent cannot see is a warning).
+5. **Bind** `commander bind <tank> <others>` (the shared bind code of `fresh`, checked with `commander status`), then wait (10 s) for the commander to be
+   out of every group; still in one means a server before #935 and fails. The run's own bind then finds the binding (`already-bound`, the same lead
+   and count) and reuses it. The hires stay in the commander's raid afterwards (`unbind` returns them), so a later run finds them.
+
+Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 10 s for the pet, 12 s for dismissals, 240 s for the
+whole step); no loop is extended by a retry (a hire line is sent at most three times: the raid conversion and the level fallback are one try each).
+
+**Report.** `report.ready`: `party` (`hire`), `level`, `level_note` (why the level differs from the asked one, when it does), `hired[]`, `reused[]`,
+`dismissed[]`, `seconds` (the hire step), `setup_s` (the whole setup of the run, the same as `report.setup_s`), `ready`, `warnings[]` and `bots[]`: `name`,
+`class`, `role`, `level`, `source` (`hired` or `reused`), `max_hp`, `ilvl`, `quality` (`rare` is blue), `talents`, `drinks`, `ammo`, `shield`, `pet`,
+`spells[]` (the key spells seen), `fixed[]` (what `autogear` and `maintenance` changed, with the numbers), `warnings[]`, `problems[]`, `ready`. A failed
+step leaves the block in the report with the bots checked so far. `remote.lead_bot`, `bots` and `tank` carry the hired names, and the trace has a
+`hired_party` event (its header was written before the hires existed, so its `lead`/`tank` are empty). `report.prepare.gm_commands` is 0 and
+`setup_shortcuts` has no entry from this step: hiring, `autogear` and `maintenance` are player commands. `max_hp` is recorded, not judged: there is no
+known-good number per role and level to compare with.
+
+`tools/run-uldaman.sh --hire [--rehire] [--level N]` runs it for Uldaman. **Not verified live** (tested against a fake server only): the exact text of the
+hire reply on a build with TB #940, that `.bot command <bot> who` and `spells <filter>` are answered in the formats above when forwarded as a whisper to a hire, the item prototypes for every
+slot, pets in the agent's view while the hires stand around it, and whether a kept hire's talents read back as the premade.
 
 **GM.** The only GM command the remote run itself sends is that one `.tele name` (`remote.gm_commands` is 1 then, else 0): no `.revive`, `.aura` or
 `.gm visible`. The optional `prepare` block sends more, all booked as setup shortcuts (above). `teleport`, `buffs`, `brain`, `gm`, `gm_level` and `wait_sickness` are refused with `mode: "remote"`, `leader_gm` is `false` and

@@ -234,6 +234,7 @@ type Session struct {
 	createSent      bool // CMSG_CHAR_CREATE sent once (Options.Create)
 	loginRetryAt    time.Time
 	names           *nameCache
+	itemInfo        itemCache // item prototypes by entry (iteminfo.go)
 	walk            *walkState
 	runSpeed        float32
 	rooted          bool
@@ -327,6 +328,7 @@ func (s *Session) register() {
 	s.registerRaid()
 	s.registerLoot()
 	s.registerItems()
+	s.registerItemInfo()
 	s.registerLootWindow()
 	s.registerUseItem()
 	s.registerSocial()

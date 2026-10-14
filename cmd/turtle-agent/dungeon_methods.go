@@ -140,6 +140,8 @@ type dungeonRunParams struct {
 	// Prepare is the setup before the bind (remote mode; README "Remote leader", "Prepare"): online (`.bot add` for the bots the roster
 	// shows offline), fresh (a new instance: the bots and the agent teleported out, the bots out of their group, `.instance unbind all` per
 	// bot by name and for the agent; a GM) and gm_setup (`.gm visible off|on` and nothing else). The report's prepare has each step's seconds.
+	// {"party": "hire"} instead hires the party (README "Hired party"): five hired bots at the plan's level, checked and bound with the
+	// commander outside the group; lead_bot, bots, tank and healer are then left out, the step names them. The report's ready block has the bots.
 	Prepare *dungeon.PrepareSpec `json:"prepare,omitempty"`
 	// RunID names the run (letters, digits, . _ -; at most 64). Empty: the agent makes one (r-<utc yyyymmddThhmmss>-<4 hex>). It is
 	// in the report, in every dungeon event, in the trace's header and file name; a caller that sets it can stamp the same id on

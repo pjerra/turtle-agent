@@ -79,6 +79,9 @@ type Report struct {
 	// seconds from the start of the run to its first step (prepare, bind, enter phase and preflight together).
 	Prepare *PrepareReport `json:"prepare,omitempty"`
 	SetupS  float64        `json:"setup_s"`
+	// Ready is the hired party's ready block (prepare party "hire", hire.go): per bot the class, level, item level and quality, what a `.bot`
+	// command fixed and what was seen, and the seconds the hire step and the whole setup took. Absent for named bots.
+	Ready *ReadyReport `json:"ready,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -195,6 +198,7 @@ func (p *reporter) snapshot() Report {
 	r.RestGates = append([]RestGate{}, p.r.RestGates...)
 	r.Remote = p.r.Remote.clone()
 	r.Prepare = p.r.Prepare.clone()
+	r.Ready = p.r.Ready.clone()
 	if p.r.TankFirst != nil {
 		tf := *p.r.TankFirst
 		r.TankFirst = &tf

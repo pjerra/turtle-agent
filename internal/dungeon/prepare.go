@@ -28,6 +28,8 @@ import (
 //	          lead bot selected (every member is unbound, the group disbanded; the reply is checked), and they are bound again, checked
 //	          again. The binding stays for the run's own bind to reuse. The agent unbinds itself last.
 //	gm_setup: `.gm visible off|on` lines, and nothing else.
+//	party:    "hire" (hire.go): the party is five hired bots at the instance's level instead of the named bots. Hire, check, bind; sends no
+//	          GM line. The run takes the lead bot, tank and healer from it (lead_bot, bots, tank and healer stay empty).
 //
 // The preflight (maintenance, inventory, talents) and the enter phase then run as before, back to back. Every GM line the step sends is
 // a setup shortcut of the run (setup_shortcuts, and a gm_shortcut event of kind "setup" in the trace), never hidden in gm_commands.
@@ -40,10 +42,16 @@ type PrepareSpec struct {
 	GMSetup []string `json:"gm_setup,omitempty"`
 	// OnlineWaitS is the longest wait for the bots to show online after `.bot add`, in seconds (default 45, at most 180).
 	OnlineWaitS int `json:"online_wait_s,omitempty"`
+	// Party is "" (the run's named bots) or "hire" (hire.go): the commander hires its party, checks it and binds it. Hire tunes it.
+	Party string    `json:"party,omitempty"`
+	Hire  *HireSpec `json:"hire,omitempty"`
 }
 
 // Active says whether the block asks for anything.
-func (s PrepareSpec) Active() bool { return s.Online || s.Fresh || len(s.GMSetup) > 0 }
+func (s PrepareSpec) Active() bool { return s.Online || s.Fresh || len(s.GMSetup) > 0 || s.Party != "" }
+
+// HiredParty says whether the party is hired (the run's bot names come from the prepare step).
+func (s PrepareSpec) HiredParty() bool { return strings.EqualFold(s.Party, PartyHire) }
 
 // Defaults of the prepare step.
 const (
@@ -75,6 +83,20 @@ func (s PrepareSpec) Validate(remote bool) error {
 	}
 	if s.OnlineWaitS < 0 || s.OnlineWaitS > int(MaxOnlineWait/time.Second) {
 		return fmt.Errorf("prepare.online_wait_s must be 0 to %d", int(MaxOnlineWait/time.Second))
+	}
+	switch {
+	case s.Party == "":
+		if s.Hire != nil {
+			return errors.New(`prepare.hire goes with prepare.party "hire"`)
+		}
+	case !s.HiredParty():
+		return fmt.Errorf(`prepare.party: %q is not "hire" (leave it out for the run's named bots)`, s.Party)
+	case s.Online || s.Fresh:
+		return errors.New(`prepare.party "hire" brings its own bots: online and fresh do not apply (new hires have no saved instance and are online; rehire gives a clean one)`)
+	default:
+		if err := s.Hire.Validate(); err != nil {
+			return err
+		}
 	}
 	if len(s.GMSetup) > maxPrepareGMSetup {
 		return fmt.Errorf("prepare.gm_setup: at most %d lines", maxPrepareGMSetup)
@@ -128,6 +150,8 @@ type PrepareReport struct {
 	// GMCommands counts the GM lines the step sent (tele, unbind, gm visible): setup shortcuts, not part of the run's own gm_commands.
 	GMCommands int      `json:"gm_commands"`
 	Warnings   []string `json:"warnings,omitempty"`
+	// Ready is the hire step's ready block (the run's report carries it as `ready`).
+	Ready *ReadyReport `json:"-"`
 }
 
 func (p *PrepareReport) clone() *PrepareReport {
@@ -145,6 +169,7 @@ func (p *PrepareReport) clone() *PrepareReport {
 	c.NotGrouped = slices.Clone(p.NotGrouped)
 	c.GMSetup = slices.Clone(p.GMSetup)
 	c.Warnings = slices.Clone(p.Warnings)
+	c.Ready = p.Ready.clone()
 	return &c
 }
 
@@ -211,6 +236,8 @@ type prepEnv struct {
 	// command sends a commander command (`commander bind|unbind|status`) and returns its reply. Level 3 needs it: the group unbind is
 	// preceded and followed by a bind.
 	command func(ctx context.Context, line string) (tbm.Reply, error)
+	// hired is set by the hire step: the party it bound.
+	hired *HiredParty
 	// bound is set when the step left a binding standing (the run's own bind then reuses it); settle is the wait after a bind or a
 	// `leave` before it is checked (0: DefaultBindSettle).
 	bound  bool
@@ -256,6 +283,7 @@ func runPrepare(ctx context.Context, e *prepEnv) (*PrepareReport, error) {
 		run  func(context.Context) (string, error)
 	}
 	for _, s := range []step{
+		{"hire", e.spec.HiredParty(), e.hire},
 		{"online", e.spec.Online, e.online},
 		{"fresh", e.spec.Fresh, e.fresh},
 		{"gm_setup", len(e.spec.GMSetup) > 0, e.gmSetup},
@@ -643,11 +671,12 @@ func (e *prepEnv) bindBots(ctx context.Context, when string) error {
 			if r.Err != nil {
 				code = r.Err.Code
 			}
-			if retried || (code != "already-bound" && code != "member-grouped" && code != "bot-bound") {
+			// A hire told to `leave` its party is dismissed (its character is deleted): for hires only an old binding is fixed here.
+			if retried || (code != "already-bound" && code != "member-grouped" && code != "bot-bound") || (e.spec.HiredParty() && code != "already-bound") {
 				return fmt.Errorf("commander bind %s refused: %s", when, describeBindErr(r.Err))
 			}
 			retried = true
-			e.note(fmt.Sprintf("prepare fresh: commander bind %s refused (%s): fixing it and binding again", when, code))
+			e.note(fmt.Sprintf("%s: commander bind %s refused (%s): fixing it and binding again", e.tag(), when, code))
 			if code == "already-bound" {
 				if err := e.unbindCommander(ctx); err != nil {
 					return err
@@ -679,7 +708,7 @@ func (e *prepEnv) bindBots(ctx context.Context, when string) error {
 			}
 		}
 		if len(missing) == 0 && len(extra) == 0 {
-			e.note(fmt.Sprintf("prepare fresh: commander bind %s: %s with %d bots, exactly as named (commander status)", when, lead, len(others)))
+			e.note(fmt.Sprintf("%s: commander bind %s: %s with %d bots, exactly as named (commander status)", e.tag(), when, lead, len(others)))
 			return nil
 		}
 		if len(extra) > 0 {
@@ -689,7 +718,7 @@ func (e *prepEnv) bindBots(ctx context.Context, when string) error {
 			return fmt.Errorf("commander bind %s: %s not in the bound group after binding again (%s; the bind ACKed %d bots)", when, strings.Join(missing, ", "), strings.Join(why, "; "), r.Ack.Count)
 		}
 		rebound = true
-		e.note(fmt.Sprintf("prepare fresh: commander bind %s: %s; unbinding and binding again to invite %s", when, strings.Join(why, "; "), strings.Join(missing, ", ")))
+		e.note(fmt.Sprintf("%s: commander bind %s: %s; unbinding and binding again to invite %s", e.tag(), when, strings.Join(why, "; "), strings.Join(missing, ", ")))
 		if err := e.unbindCommander(ctx); err != nil {
 			return err
 		}
@@ -707,6 +736,14 @@ func (e *prepEnv) unbindCommander(ctx context.Context) error {
 	}
 	e.bound = false
 	return nil
+}
+
+// tag names the step in the notes of the shared bind code.
+func (e *prepEnv) tag() string {
+	if e.spec.HiredParty() {
+		return "prepare hire"
+	}
+	return "prepare fresh"
 }
 
 func (e *prepEnv) bindSettle() time.Duration {

@@ -54,11 +54,22 @@ type Plan struct {
 	OutsideTele string `json:"outside_tele,omitempty"`
 	// Portal is the entrance portal on the outer map (the area trigger of EntranceTrigger): where a remote run's enter phase walks the
 	// lead bot when it has no GM rights.
-	Portal *Portal  `json:"portal,omitempty"`
-	Notes  []string `json:"notes,omitempty"`
+	Portal *Portal `json:"portal,omitempty"`
+	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
+	// middle of it as its level. Empty: the plan gives none.
+	LevelBand []int    `json:"level_band,omitempty"`
+	Notes     []string `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	Legs     []Leg           `json:"legs"`
+}
+
+// Band is the plan's level band, low and high; 0, 0 when it gives none.
+func (p *Plan) Band() (lo, hi int) {
+	if len(p.LevelBand) != 2 {
+		return 0, 0
+	}
+	return p.LevelBand[0], p.LevelBand[1]
 }
 
 // Portal is a point of the outer map: the centre of the entrance's area trigger.
@@ -269,6 +280,7 @@ type rawPlan struct {
 	Tele     string            `json:"entrance_tele"`
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
+	Band     []int             `json:"level_band"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
@@ -453,6 +465,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("outside_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Outside)
 	} else {
 		p.OutsideTele = rp.Outside
+	}
+	switch {
+	case len(rp.Band) == 0:
+	case len(rp.Band) != 2 || rp.Band[0] < 1 || rp.Band[1] > 60 || rp.Band[0] > rp.Band[1]:
+		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
+	default:
+		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {

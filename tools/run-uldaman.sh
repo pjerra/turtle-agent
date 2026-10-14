@@ -2,8 +2,15 @@
 # Run the remote Uldaman dungeon with one command: the agent binary of origin/main's SHA (built once on the test VM), the login (only
 # if the agent is not logged in already), dungeon_run with the prepare block, a poll every 30 s, and trace-score at the end.
 #
-#   tools/run-uldaman.sh [--relogin] [--no-fresh] [--from-leg N] [--logout] [--print-params]
+#   tools/run-uldaman.sh [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N] [--logout] [--print-params]
 #
+#   --hire         the owner's rule: the party is five HIRED bots at the plan's level, the commander outside the group (prepare.party "hire",
+#                  README "Hired party"). The agent hires a warrior tank, a priest healer and three damage dealers (hunter, rogue, warlock),
+#                  checks each (level, gear not epic, key spells, talents, supplies, pets), fixes what `.bot autogear` and `.bot maintenance`
+#                  can, binds them, and writes the `ready` block of the report. LEAD, BOTS, TANK, HEALER do not apply; --no-fresh is ignored
+#                  (new hires have no saved instance; kept ones keep theirs, so --rehire for a clean instance).
+#   --rehire       with --hire: end the old binding and dismiss the commander's current hires first (default: keep the ones that match)
+#   --level N      with --hire: the hires' level (default: the middle of the plan's level band, 43 for Uldaman)
 #   --relogin      log the agent out and in again with this SHA's binary (an agent that is logged in keeps the binary it started with)
 #   --no-fresh     do not reset the instance (prepare.fresh false): a run that goes on in the instance the bots are in
 #   --from-leg N   start at leg N (default 0)
@@ -18,6 +25,7 @@
 #   LEAD, BOTS, TANK, HEALER   the party (default Lcwarra; Lcpriest,Lchunter,Lcrogue,Lcwarlock; Lcwarra; Lcpriest)
 #   MAX_MIN           give up and dungeon_stop after this many minutes (default 90); POLL_S the seconds between two dungeon_status polls (default 30)
 #   NO_FETCH=1        do not `git fetch` before reading origin/main
+#   COMPOSITION      with --hire: the party as a comma list of class[:role] (default warrior:tank,priest:healer,hunter,rogue,warlock)
 #   OUT               a folder for the agent's log and capture (default /tmp/run-uldaman-<time>)
 #   VMTEST            the vmtest.sh that builds on the VM (default ~/TortoiseBots-audit/tools/vmtest.sh); VMTEST_HOST is its host
 #
@@ -37,16 +45,20 @@ MAX_MIN=${MAX_MIN:-90}
 POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
-FRESH=true FROM_LEG=0 RELOGIN=0 LOGOUT=0 PRINT=0
+FRESH=true FROM_LEG=0 RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
+COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
   case $1 in
     --relogin) RELOGIN=1 ;;
     --no-fresh) FRESH=false ;;
+    --hire) HIRE=1 ;;
+    --rehire) REHIRE=1 ;;
+    --level) shift; LEVEL=${1:?--level needs a number} ;;
     --from-leg) shift; FROM_LEG=${1:?--from-leg needs a number} ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
     *) echo "unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -60,6 +72,17 @@ name_ok() { [[ $1 =~ ^[A-Za-z]{2,12}$ ]]; }
 for n in "$LEAD" "$TANK" "$HEALER" "$CHARACTER"; do name_ok "$n" || die "not a character name: $n"; done
 [[ $FROM_LEG =~ ^[0-9]+$ ]] || die "--from-leg needs a number"
 [[ $MAX_MIN =~ ^[0-9]+$ ]] || die "MAX_MIN needs a number"
+[ "$HIRE" = 1 ] || { [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ]; } || die "--rehire and --level go with --hire"
+[ -z "$LEVEL" ] || { [[ $LEVEL =~ ^[0-9]{1,2}$ ]] && [ "$LEVEL" -ge 1 ] && [ "$LEVEL" -le 60 ]; } || die "--level needs a number from 1 to 60"
+comp_json=""
+if [ -n "$COMPOSITION" ]; then
+  IFS=, read -r -a COMP_LIST <<<"$COMPOSITION"
+  for c in "${COMP_LIST[@]}"; do
+    [[ $c =~ ^[a-z]+(:[a-z]+)?$ ]] || die "COMPOSITION: $c is not class or class:role (lower case)"
+    comp_json+="\"$c\","
+  done
+  comp_json="[${comp_json%,}]"
+fi
 IFS=, read -r -a BOT_LIST <<<"$BOTS"
 bots_json=""
 for b in "${BOT_LIST[@]}"; do
@@ -70,6 +93,17 @@ bots_json="[${bots_json%,}]"
 
 sha_label=${SHA8:-unknown}
 params() {
+  if [ "$HIRE" = 1 ]; then
+    # The hired party names itself: no lead_bot, bots, tank or healer. fresh and online do not go with it.
+    local hire="" sep=""
+    [ "$REHIRE" = 0 ] || { hire+="${sep}\"rehire\":true"; sep=","; }
+    [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
+    [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
+    printf '{"name":"uldaman","mode":"remote","from_leg":%s,' "$FROM_LEG"
+    printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
+    printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
+    return
+  fi
   printf '{"name":"uldaman","mode":"remote","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s","from_leg":%s,' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$FROM_LEG"
   printf '"prepare":{"online":true,"fresh":%s,"gm_setup":["gm visible off"]},' "$FRESH"
   printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s"}}' "$sha_label"
@@ -191,6 +225,9 @@ done
 # --- the result
 say "result: state=$STATE error=$(field result.report.error <<<"$ST")"
 say "setup_s=$(field result.report.setup_s <<<"$ST") prepare=$(field result.report.prepare <<<"$ST")"
+if [ "$HIRE" = 1 ]; then
+  say "ready: party=$(field result.report.ready.party <<<"$ST") level=$(field result.report.ready.level <<<"$ST") ok=$(field result.report.ready.ready <<<"$ST") hire_s=$(field result.report.ready.seconds <<<"$ST") setup_s=$(field result.report.ready.setup_s <<<"$ST") hired=$(field result.report.ready.hired <<<"$ST") reused=$(field result.report.ready.reused <<<"$ST") note=$(field result.report.ready.level_note <<<"$ST")"
+fi
 say "preflight_s=$(field result.report.remote.preflight.seconds <<<"$ST") enter_s=$(field result.report.remote.enter.seconds <<<"$ST") run_s=$(field result.report.seconds <<<"$ST")"
 TRACE=${TRACE:-$(field result.report.trace_file <<<"$ST")}
 SCORE=0

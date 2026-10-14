@@ -31,24 +31,12 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	default:
 		return false, bad(`mode must be "group" or "remote"`)
 	}
-	if !botName.MatchString(p.LeadBot) {
-		return true, bad(`mode "remote" needs lead_bot: the name of the bot that walks (letters only)`)
-	}
-	if len(p.Bots) > 4 {
-		return true, bad("bots: at most 4 besides the lead bot (a party holds five)")
-	}
-	seen := map[string]bool{strings.ToLower(p.LeadBot): true}
-	for _, b := range p.Bots {
-		if !botName.MatchString(b) || seen[strings.ToLower(b)] {
-			return true, bad("bots: %q is not a bot name, or is listed twice", b)
+	if p.Prepare != nil && p.Prepare.HiredParty() {
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" {
+			return true, bad(`prepare.party "hire" names its own bots: leave lead_bot, bots, tank and healer out (the lead bot is the hired tank)`)
 		}
-		seen[strings.ToLower(b)] = true
-	}
-	if p.Tank != "" && !botName.MatchString(p.Tank) {
-		return true, bad("tank: %q is not a bot name", p.Tank)
-	}
-	if p.Healer != "" && !botName.MatchString(p.Healer) {
-		return true, bad("healer: %q is not a bot name", p.Healer)
+	} else if err := checkNamedParty(p, bad); err != nil {
+		return true, err
 	}
 	if p.Carrier != "" && !botName.MatchString(p.Carrier) {
 		return true, bad("carrier: %q is not a bot name", p.Carrier)
@@ -94,6 +82,30 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		return true, bad(`wait_sickness is for the agent's own corpse run; it does not apply in remote mode`)
 	}
 	return true, nil
+}
+
+// checkNamedParty checks the lead bot, the other bots, the tank and the healer of a run that names its party.
+func checkNamedParty(p dungeonRunParams, bad func(string, ...any) error) error {
+	if !botName.MatchString(p.LeadBot) {
+		return bad(`mode "remote" needs lead_bot: the name of the bot that walks (letters only)`)
+	}
+	if len(p.Bots) > 4 {
+		return bad("bots: at most 4 besides the lead bot (a party holds five)")
+	}
+	seen := map[string]bool{strings.ToLower(p.LeadBot): true}
+	for _, b := range p.Bots {
+		if !botName.MatchString(b) || seen[strings.ToLower(b)] {
+			return bad("bots: %q is not a bot name, or is listed twice", b)
+		}
+		seen[strings.ToLower(b)] = true
+	}
+	if p.Tank != "" && !botName.MatchString(p.Tank) {
+		return bad("tank: %q is not a bot name", p.Tank)
+	}
+	if p.Healer != "" && !botName.MatchString(p.Healer) {
+		return bad("healer: %q is not a bot name", p.Healer)
+	}
+	return nil
 }
 
 // startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.

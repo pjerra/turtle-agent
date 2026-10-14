@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 )
@@ -117,22 +118,54 @@ var botLineVerbs = map[string]bool{"maintenance": true, "inv": true, "logout": t
 // botNameRe is what a bot's name can be (1.12 names are letters).
 var botNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
 
-// CheckBotLine refuses a line that is not "<maintenance|inv|logout|add> <bot name>", "roster", "command <bot name> talents" or
-// "command <bot name> leave". The talents read-back and the leave (the prepare step takes a bot out of its old group) are the only
-// `.bot command` lines the agent sends here: any other word after it (reset, auto, a build link) would change the bot's talents.
+// The lines of the hire flow (prepare party "hire"): `hire <class> <role> [level=<n>]`, `autogear <bot> blue` and `command <bot> spells
+// <filter>`. Each is checked word by word, so that no other hire option (a race, a gear tier, a gender), no other autogear quality and no
+// other forwarded command goes out with them.
+var (
+	hireClasses = map[string]bool{"warrior": true, "paladin": true, "hunter": true, "rogue": true, "priest": true, "shaman": true, "mage": true, "warlock": true, "druid": true}
+	hireRoles   = map[string]bool{"tank": true, "healer": true, "dps": true}
+	hireLevelRe = regexp.MustCompile(`^level=([0-9]{1,2})$`)
+	// spellFilterRe is what a spell-list filter can be: letters, spaces, an apostrophe and a colon ("Power Word: Shield").
+	spellFilterRe = regexp.MustCompile(`^[A-Za-z][A-Za-z' :]{1,30}$`)
+)
+
+// CheckBotLine refuses a line that is not "<maintenance|inv|logout|add> <bot name>", "roster", "command <bot name> talents|leave",
+// "command <bot name> spells <filter>", "autogear <bot name> blue" or "hire <class> <tank|healer|dps> [level=<n>]". The talents read-back
+// and the leave (the prepare step takes a bot out of its old group) are the only `.bot command` lines of a bot's own state the agent sends
+// here besides the spell-list read-back: any other word after it (reset, auto, a build link) would change the bot's talents.
 func CheckBotLine(command string) error {
+	if strings.IndexFunc(command, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%q: a control character in a bot line", command)
+	}
 	f := strings.Fields(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot ")))
 	if len(f) == 1 && strings.EqualFold(f[0], "roster") {
 		return nil
 	}
-	if len(f) == 3 && strings.EqualFold(f[0], "command") && (f[2] == "talents" || f[2] == "leave") {
+	if len(f) >= 3 && strings.EqualFold(f[0], "command") {
 		if !botNameRe.MatchString(f[1]) {
 			return fmt.Errorf("%q: %q is not a bot name", command, f[1])
+		}
+		switch {
+		case len(f) == 3 && (f[2] == "talents" || f[2] == "leave" || f[2] == "who"):
+			return nil
+		case f[2] == "spells" && len(f) >= 4 && len(f) <= 7 && spellFilterRe.MatchString(strings.Join(f[3:], " ")):
+			return nil
+		}
+	}
+	if len(f) >= 3 && len(f) <= 4 && strings.EqualFold(f[0], "hire") {
+		if !hireClasses[strings.ToLower(f[1])] || !hireRoles[strings.ToLower(f[2])] || (len(f) == 4 && !hireLevelRe.MatchString(strings.ToLower(f[3]))) {
+			return fmt.Errorf("%q: hire takes <class> <tank|healer|dps> and optionally level=<n>", command)
+		}
+		return nil
+	}
+	if len(f) == 3 && strings.EqualFold(f[0], "autogear") {
+		if !botNameRe.MatchString(f[1]) || !strings.EqualFold(f[2], "blue") {
+			return fmt.Errorf("%q: autogear takes a bot name and blue", command)
 		}
 		return nil
 	}
 	if len(f) != 2 || !botLineVerbs[strings.ToLower(f[0])] {
-		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, or command <bot name> talents|leave", command)
+		return fmt.Errorf("%q: Lines sends maintenance, inv, logout or add with one bot name, roster, command <bot name> talents|leave|spells <filter>, autogear <bot name> blue, or hire <class> <role> [level=<n>]", command)
 	}
 	if !botNameRe.MatchString(f[1]) {
 		return fmt.Errorf("%q: %q is not a bot name", command, f[1])
@@ -183,14 +216,7 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 	for {
 		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
 		for _, e := range p.Events {
-			var line string
-			var ok bool
-			if e.Kind == events.KindWhisper || e.Kind == events.KindChat {
-				// Only the named bot's own words count (not a whisper inform of ours, not another player's chat).
-				line, ok = e.Text, from != "" && strings.EqualFold(e.Source, from) && e.Text != "" && e.Data["type"] != "whisper_inform"
-			} else {
-				line, ok = LineOf(e)
-			}
+			line, ok := replyLine(e, from)
 			if !ok || strings.HasPrefix(line, ViewPrefix) {
 				continue
 			}
@@ -212,6 +238,112 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 			return lines, false, nil
 		}
 	}
+}
+
+// replyLine is the text of an event that can be part of a reply: a system or addon line, or (with from set) the named bot's own words. Only
+// the named bot's chat counts, not a whisper inform of ours and not another player's chat.
+func replyLine(e events.Event, from string) (string, bool) {
+	if e.Kind == events.KindWhisper || e.Kind == events.KindChat {
+		return e.Text, from != "" && strings.EqualFold(e.Source, from) && e.Text != "" && e.Data["type"] != "whisper_inform"
+	}
+	return LineOf(e)
+}
+
+// MaxBurst bounds how long Burst keeps reading after a reply began, however fast the lines keep coming.
+const MaxBurst = 3 * time.Second
+
+// Burst sends ".bot <command>" for a command whose answer is a run of lines that has no last-line marker (a bot's `spells <filter>`: a
+// header, then one spell per line). It waits up to wait for a line that begin accepts; the reply then goes on while lines keep coming,
+// and ends when none came for quiet (at most MaxBurst after it began). The lines from the first one on are returned, began says whether
+// the reply started at all. One command is in flight at a time, like Lines.
+func (c *Commander) Burst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) (lines []string, began bool, err error) {
+	command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot "))
+	if err := CheckBotLine(command); err != nil {
+		return nil, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	log := c.link.Log()
+	since := log.Last()
+	if err := c.link.Say(ctx, Chat(command)); err != nil {
+		return nil, false, err
+	}
+	if wait <= 0 {
+		wait = DefaultOrderWait
+	}
+	if quiet <= 0 {
+		quiet = 300 * time.Millisecond
+	}
+	lines = []string{}
+	cursor := since
+	from := replyFrom(command)
+	kinds := []string{events.KindSystem, events.KindAddon}
+	if from != "" {
+		kinds = append(kinds, events.KindWhisper, events.KindChat)
+	}
+	deadline := time.Now().Add(wait)
+	var limit time.Time
+	for {
+		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
+		for _, e := range p.Events {
+			line, ok := replyLine(e, from)
+			if !ok || strings.HasPrefix(line, ViewPrefix) {
+				continue
+			}
+			if !began {
+				if !begin(line) {
+					continue
+				}
+				began, limit = true, time.Now().Add(MaxBurst)
+			}
+			if len(lines) < maxLines {
+				lines = append(lines, line)
+			}
+			deadline = time.Now().Add(quiet)
+			if deadline.After(limit) {
+				deadline = limit
+			}
+		}
+		cursor = p.Next
+		if p.More {
+			continue
+		}
+		wctx, cancel := context.WithDeadline(ctx, deadline)
+		werr := log.Wait(wctx, cursor)
+		cancel()
+		if werr != nil {
+			if err := ctx.Err(); err != nil {
+				return lines, began, err
+			}
+			return lines, began, nil
+		}
+	}
+}
+
+// Who is what a bot answered to `.bot command <bot> who`: "protection (0/0/36) warrior (43 lvl), 1021 GS (5/2), (Area), playing with X".
+type Who struct {
+	Class string // lower case, as the module names it
+	Level int
+	Trees [3]int
+}
+
+var whoRe = regexp.MustCompile(`(?i)\((\d+)/(\d+)/(\d+)\)\s+([a-z]+)\s+\((\d+) lvl\)`)
+
+// ParseWho reads the bot's `who` answer out of its reply lines; ok is false when none of them is one.
+func ParseWho(lines []string) (w Who, ok bool) {
+	for _, l := range lines {
+		m := whoRe.FindStringSubmatch(markup.ReplaceAllString(l, ""))
+		if m == nil {
+			continue
+		}
+		for i := range w.Trees {
+			w.Trees[i], _ = strconv.Atoi(m[i+1])
+		}
+		w.Class = strings.ToLower(m[4])
+		w.Level, _ = strconv.Atoi(m[5])
+		return w, true
+	}
+	return Who{}, false
 }
 
 // Talents is what a bot answered to `.bot command <bot> talents`: "My current talent spec is: Protection (0/5/31) Link: ...".

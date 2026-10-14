@@ -27,7 +27,7 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 		env.entryOK = d.freshEntryOK
 	}
 	rep, err := runPrepare(ctx, env)
-	d.rep.update(func(r *Report) { r.Prepare = rep.clone() })
+	d.rep.update(func(r *Report) { r.Prepare = rep.clone(); r.Ready = rep.Ready.clone() })
 	if err != nil {
 		if env.bound {
 			// The step bound the party and then failed: the binding is not this run's yet, so nothing else would end it.
@@ -39,8 +39,19 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 		}
 		return err
 	}
+	if env.hired != nil {
+		d.adoptHired(env.hired)
+	}
 	d.wd.progress("prepare done")
 	return nil
+}
+
+// adoptHired takes the lead bot, the other bots, the tank and the healer from the hire step: the run was started without names.
+func (d *RemoteDriver) adoptHired(h *HiredParty) {
+	d.opt.Lead, d.opt.Bots, d.opt.Tank, d.opt.Healer = h.Lead, slices.Clone(h.Bots), h.Tank, h.Healer
+	d.remote(func(r *RemoteReport) { r.LeadBot, r.Bots, r.Tank = h.Lead, slices.Clone(h.Bots), h.Tank })
+	d.rep.note(fmt.Sprintf("hired party: lead bot %s%s, tank %s, healer %s", h.Lead, botsSuffix(h.Bots), h.Tank, h.Healer))
+	d.tr.Event("hired_party", map[string]any{"lead_bot": h.Lead, "bots": slices.Clone(h.Bots), "tank": h.Tank, "healer": h.Healer})
 }
 
 // freshEntryOK refuses a fresh run when the account's ledger already holds the hour's limit of new instances: it is the same check the
