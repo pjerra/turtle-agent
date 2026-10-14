@@ -270,7 +270,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 		return
 	}
 	class, role := b.slot.Class, b.slot.Role
-	_, _, epics, _ := g.summary(f.level)
+	_, _, epics, _ := g.summary(b.rb.Level)
 	var gear []string
 	for _, e := range epics {
 		gear = append(gear, "epic "+e)
@@ -288,7 +288,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 				b.fail("inventory after autogear: %v", err)
 				return
 			}
-			_, _, epics, _ = g.summary(f.level)
+			_, _, epics, _ = g.summary(b.rb.Level)
 			var left []string
 			for _, e := range epics {
 				left = append(left, "epic "+e)
@@ -337,7 +337,7 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 		has := g.hasShield()
 		b.rb.Shield = &has
 	}
-	best2, ilvl, epics2, unknown := g.summary(f.level)
+	best2, ilvl, epics2, unknown := g.summary(b.rb.Level)
 	b.rb.ItemLevel = float64(int(ilvl*10+0.5)) / 10
 	if best2 >= 0 {
 		b.rb.Quality = qualityName(best2)

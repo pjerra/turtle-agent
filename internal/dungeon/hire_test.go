@@ -1345,3 +1345,25 @@ func TestSummaryAllowsEpicForTheLevel(t *testing.T) {
 		t.Fatalf("level unknown: every epic counts: %v", epics)
 	}
 }
+
+// The epic rule judges each bot against the level it actually has (its own read), not the level asked for: a server that lowers level=44 to the
+// commander's limit 42 must not let an epic for level 44 through.
+func TestHireEpicIsJudgedAgainstTheBotsOwnLevel(t *testing.T) {
+	run := func(agentLvl int) (Report, error) {
+		g := newHireFake(t)
+		g.agentLvl = agentLvl
+		g.epic["priest"] = true
+		g.autogearOff = true
+		g.items[uint32(91000+slotChest)] = ItemInfo{Found: true, Name: "Epic 4", Quality: 4, ItemLevel: 48, RequiredLevel: 44}
+		spec := hireSpec()
+		spec.Hire = &HireSpec{Level: 44, Composition: []string{"warrior", "priest"}}
+		return g.run(spec)
+	}
+	if rep, err := run(44); err != nil || rep.State != "done" {
+		t.Fatalf("an epic for the bot's level (44) was refused: %v %s", err, rep.State)
+	}
+	rep, err := run(42)
+	if !failed(rep, err, "Khaeworval", "epic Epic 4 (required level 44, item level 48)") || rep.Ready == nil || rep.Ready.Bots[1].Level != 42 {
+		t.Fatalf("an epic for level 44 passed on a bot of level 42: %v %s", err, rep.State)
+	}
+}
