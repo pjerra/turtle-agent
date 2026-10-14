@@ -319,6 +319,55 @@ func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet
 	return g.c.cur().GMOn(ctx, guid, ".instance unbind all")
 }
 
+// GroupUnbind selects the player with the GUID and sends ".instance groupunbind all" as one operation (GMOn), then reads the reply the
+// sender gets: "Group unbound. Disbanding." or "<name> is not in a group." (Commands.cpp, HandleInstanceGroupUnbindCommand).
+func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUID) (dungeon.GroupUnbindResult, error) {
+	if !botName.MatchString(who) || guid == 0 {
+		return "", fmt.Errorf("instance groupunbind: %q (%v) is not a character name and a GUID", who, guid)
+	}
+	log := g.c.cur().Log()
+	since := log.Last()
+	if err := g.c.cur().GMOn(ctx, guid, ".instance groupunbind all"); err != nil {
+		return "", err
+	}
+	wctx, cancel := context.WithTimeout(ctx, groupUnbindWait)
+	defer cancel()
+	cursor := since
+	for {
+		p := log.Read(events.Query{Since: cursor, Kinds: []string{events.KindSystem}, Limit: events.MaxLimit})
+		for _, e := range p.Events {
+			if r := groupUnbindReply(e.Text); r != "" {
+				return r, nil
+			}
+		}
+		cursor = p.Next
+		if p.More {
+			continue
+		}
+		if log.Wait(wctx, cursor) != nil {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			return dungeon.GroupNoAnswer, nil
+		}
+	}
+}
+
+// groupUnbindWait is how long the reply to the group unbind is awaited.
+const groupUnbindWait = 4 * time.Second
+
+// groupUnbindReply classifies a system line as the answer to ".instance groupunbind all" ("" for any other line).
+func groupUnbindReply(text string) dungeon.GroupUnbindResult {
+	low := strings.ToLower(text)
+	switch {
+	case strings.Contains(low, "group unbound"):
+		return dungeon.GroupUnbound
+	case strings.Contains(low, "is not in a group"):
+		return dungeon.GroupNotGroups
+	}
+	return ""
+}
+
 // Recent and Record implement dungeon.EntryLedger over the account's ledger file.
 func (g remoteGame) Recent(now time.Time) []time.Time { return g.c.ledger.Recent(now) }
 func (g remoteGame) Record(now time.Time) error       { return g.c.ledger.Record(now) }

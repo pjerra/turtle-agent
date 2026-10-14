@@ -32,6 +32,10 @@ type prepFake struct {
 	addReply   string // overrides the answer to `.bot add`
 	events     []string
 	freezeTele bool // teleports change no map
+	// The instance state the core keeps: who has a stale bind, and who is in which group (0: none).
+	binds         map[string]bool
+	group         map[string]int
+	noGroupAnswer bool // the sender gets no reply to the group unbind
 }
 
 func newPrepFake(t *testing.T, states map[string]string) *prepFake {
@@ -45,6 +49,11 @@ func newPrepFake(t *testing.T, states map[string]string) *prepFake {
 		g.bots[n].state = s
 	}
 	e.agentMap = outsideMap
+	// Every character starts with a stale bind to the old instance; the bots are one group.
+	g.binds, g.group = map[string]bool{prepAgent: true}, map[string]int{}
+	for n := range g.bots {
+		g.binds[n], g.group[n] = true, 1
+	}
 	return g
 }
 
@@ -107,6 +116,7 @@ func (g *prepFake) BotLines(_ context.Context, command string, _ time.Duration, 
 		}
 	case f[0] == "command" && len(f) == 3 && f[2] == "leave":
 		g.log("leave %s", f[1])
+		g.group[f[1]] = 0
 		reply = []string{"ok"}
 	default:
 		g.log("line %s", command)
@@ -163,9 +173,35 @@ func (g *prepFake) GMVisible(_ context.Context, on bool) error {
 	}
 	return nil
 }
+
+// UnbindInstances models HandleInstanceUnbindCommand: the selected player is unbound only from account level 4; below it the SENDER is.
 func (g *prepFake) UnbindInstances(_ context.Context, who string, guid packet.GUID) error {
 	g.log("unbind %s %d", who, uint32(guid))
+	if g.level >= AdministratorLevel {
+		g.binds[who] = false
+	} else {
+		g.binds[prepAgent] = false
+	}
 	return nil
+}
+
+// GroupUnbind models HandleInstanceGroupUnbindCommand: every member of the selected player's group is unbound and the group disbanded,
+// whatever the sender's level (it needs a developer); a player in no group gets "is not in a group".
+func (g *prepFake) GroupUnbind(_ context.Context, who string, guid packet.GUID) (GroupUnbindResult, error) {
+	g.log("groupunbind %s %d", who, uint32(guid))
+	if g.noGroupAnswer {
+		return GroupNoAnswer, nil
+	}
+	id := g.group[who]
+	if id == 0 {
+		return GroupNotGroups, nil
+	}
+	for n, gid := range g.group {
+		if gid == id {
+			g.binds[n], g.group[n] = false, 0
+		}
+	}
+	return GroupUnbound, nil
 }
 
 // inside puts every bot and the agent in the old instance, as a finished run leaves them.
@@ -252,6 +288,7 @@ func TestPrepareOnlineReadsTheRefusal(t *testing.T) {
 func TestPrepareFreshResetsEachBotByName(t *testing.T) {
 	g := newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online", "Magey": "online"})
 	g.inside()
+	g.level = 4 // from this level the core unbinds the selected player
 	rep, err := g.run(PrepareSpec{Fresh: true, GMSetup: []string{".GM  visible OFF"}})
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
@@ -287,9 +324,13 @@ func TestPrepareFreshResetsEachBotByName(t *testing.T) {
 			t.Errorf("setup_shortcuts lacks %q: %v", want, rep.SetupShortcuts)
 		}
 	}
-	// A level 3 account unbinds the sender whatever it selects: the step says so.
-	if !strings.Contains(strings.Join(p.Warnings, " "), "SELECTED player only from level 4") {
-		t.Fatalf("no level warning: %v", p.Warnings)
+	if len(p.Warnings) != 0 || len(p.GroupUnbound) != 0 || g.count("groupunbind") != 0 {
+		t.Fatalf("level 4: %+v %v", p, g.events)
+	}
+	for n, has := range g.binds {
+		if has {
+			t.Errorf("%s still has its bind", n)
+		}
 	}
 	// The bind and the enter phase come after the whole step.
 	if g.indexOf("commander bind") < 0 || rep.Remote.Enter == nil || rep.Remote.Enter.Tele != "ulda" {
@@ -300,12 +341,76 @@ func TestPrepareFreshResetsEachBotByName(t *testing.T) {
 	}
 }
 
-func TestPrepareFreshAtAdministratorLevelHasNoWarning(t *testing.T) {
+// Below account level 4 the core unbinds the sender whatever is selected: the step sends `.instance groupunbind all` with the lead bot
+// selected instead, reads the confirmation, and reports only that. No per-bot unbind goes out (it would clear the agent five times).
+func TestPrepareFreshAtLevel3UsesTheGroupUnbind(t *testing.T) {
 	g := newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online", "Magey": "online"})
-	g.level = 4
+	g.inside()
+	g.level = 3
 	rep, err := g.run(PrepareSpec{Fresh: true})
-	if err != nil || len(rep.Prepare.Warnings) != 0 {
-		t.Fatalf("%v %+v", err, rep.Prepare)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	want := []string{"roster", "tele Tanky uld", "tele Healy uld", "tele Magey uld", "tele Glacienne uld",
+		fmt.Sprintf("groupunbind Tanky %d", uint32(gTank)), fmt.Sprintf("unbind Glacienne %d", uint32(prepAgentID))}
+	if got := g.events[:len(want)]; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("events\n%v\nwant\n%v", got, want)
+	}
+	if g.count("unbind Tanky") != 0 || g.count("unbind Healy") != 0 || g.count("unbind Magey") != 0 || g.count("leave ") != 0 {
+		t.Fatalf("a per-bot unbind or a leave went out: %v", g.events)
+	}
+	p := rep.Prepare
+	if strings.Join(p.GroupUnbound, ",") != "Tanky" || strings.Join(p.Unbound, ",") != "Glacienne" || len(p.NotGrouped) != 0 || len(p.Warnings) != 0 {
+		t.Fatalf("%+v", p)
+	}
+	// What the fake core did: every bot and the agent are unbound, nobody is grouped any more.
+	for n, has := range g.binds {
+		if has {
+			t.Errorf("%s still has its bind", n)
+		}
+	}
+	for n, id := range g.group {
+		if id != 0 {
+			t.Errorf("%s is still grouped", n)
+		}
+	}
+	if p.GMCommands != 6 || len(rep.SetupShortcuts) != 6 {
+		t.Fatalf("gm %d setup %v", p.GMCommands, rep.SetupShortcuts)
+	}
+	if g.indexOf("commander bind") < 0 {
+		t.Fatalf("no bind: %v", g.orders)
+	}
+}
+
+// A lead bot in no group: the group unbind did nothing for it, so the report says so (a warning, nothing under group_unbound) and the
+// bots still leave whatever group they are in.
+func TestPrepareFreshAtLevel3WithTheLeadUngrouped(t *testing.T) {
+	g := newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online", "Magey": "online"})
+	g.level = 3
+	g.group["Tanky"] = 0
+	rep, err := g.run(PrepareSpec{Fresh: true})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	p := rep.Prepare
+	if len(p.GroupUnbound) != 0 || strings.Join(p.NotGrouped, ",") != "Tanky" || len(p.Warnings) != 1 || !strings.Contains(p.Warnings[0], "no group") {
+		t.Fatalf("%+v", p)
+	}
+	if g.count("leave ") != 3 || g.group["Healy"] != 0 || !g.binds["Tanky"] {
+		t.Fatalf("%v %v", g.events, g.binds)
+	}
+}
+
+// No reply to the group unbound: the step does not claim it, and fails before the agent's own unbind and before the bind.
+func TestPrepareFreshAtLevel3NeedsTheConfirmation(t *testing.T) {
+	g := newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online", "Magey": "online"})
+	g.level, g.noGroupAnswer = 3, true
+	rep, err := g.run(PrepareSpec{Fresh: true})
+	if err == nil || !strings.Contains(err.Error(), "not confirmed") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if len(rep.Prepare.GroupUnbound) != 0 || len(rep.Prepare.Unbound) != 0 || g.count("unbind ") != 0 || g.indexOf("commander bind") >= 0 {
+		t.Fatalf("%+v %v", rep.Prepare, g.events)
 	}
 }
 
@@ -323,7 +428,7 @@ func TestPrepareFreshRefusesAPlayerAccount(t *testing.T) {
 			if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "fresh") {
 				t.Fatalf("%v %s", err, rep.State)
 			}
-			if g.count("tele ") != 0 || g.count("unbind ") != 0 || g.count("leave ") != 0 || g.indexOf("commander bind") >= 0 || len(rep.SetupShortcuts) != 0 {
+			if g.count("tele ") != 0 || g.count("unbind ") != 0 || g.count("groupunbind ") != 0 || g.count("leave ") != 0 || g.indexOf("commander bind") >= 0 || len(rep.SetupShortcuts) != 0 {
 				t.Fatalf("something was sent: %v %v", g.events, g.orders)
 			}
 		})
@@ -349,7 +454,7 @@ func TestPrepareFreshChecksTheEntryLedgerFirst(t *testing.T) {
 		g.ledger = append(g.ledger, g.now.Add(-time.Duration(10+i)*time.Minute))
 	}
 	o := RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}, Tank: "Tanky", Preflight: PreflightOff, IgnoreEntryLimit: true, Prepare: PrepareSpec{Fresh: true}}
-	if rep, err := runRemote(t, g, g.plan, o, nil); err != nil || rep.State != "done" || g.count("unbind ") != 4 {
+	if rep, err := runRemote(t, g, g.plan, o, nil); err != nil || rep.State != "done" || g.count("unbind ") != 1 || g.count("groupunbind ") != 1 {
 		t.Fatalf("%v %s %v", err, rep.State, g.events)
 	}
 }
@@ -369,7 +474,7 @@ func TestPrepareFreshNeedsThePlansOutsideTeleAndOnlineBots(t *testing.T) {
 	// online + fresh together: the bot is logged in first, then reset.
 	g = newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online"})
 	rep, err := g.run(PrepareSpec{Online: true, Fresh: true})
-	if err != nil || rep.State != "done" || g.idxOf("add Magey") > g.idxOf("tele Tanky") || g.count("unbind ") != 4 {
+	if err != nil || rep.State != "done" || g.idxOf("add Magey") > g.idxOf("tele Tanky") || g.count("groupunbind ") != 1 {
 		t.Fatalf("%v %s %v", err, rep.State, g.events)
 	}
 	if len(rep.Prepare.Steps) != 2 || rep.Prepare.Steps[0].Name != "online" || rep.Prepare.Steps[1].Name != "fresh" {
@@ -386,7 +491,7 @@ func TestPrepareFreshUnbindsOnlyAfterEveryoneIsOutside(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not outside") {
 		t.Fatalf("%v", err)
 	}
-	if g.count("unbind ") != 0 || g.count("leave ") != 0 {
+	if g.count("unbind ") != 0 || g.count("groupunbind ") != 0 || g.count("leave ") != 0 {
 		t.Fatalf("unbound while the bots were still inside (the core skips the map a player stands on): %v", g.events)
 	}
 	if took := g.now.Sub(began); took > 40*time.Second {

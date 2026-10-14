@@ -1346,13 +1346,14 @@ part before the bind in one go, then the kit check and the enter phase run as be
    does not answer for, is refused with a message before anything is sent). In this order: the account's hourly entry ledger is checked (the 6th new
    instance is refused here, before anything moves; `ignore_entry_limit` goes on); `.tele name <bot> <outside_tele>` for each bot and for the agent
    (a bot is not unbound from the map it stands on), then the step waits (at most 25 s) until the agent is off the plan's map and has every bot in view;
-   `.bot command <bot> leave` for each bot (a group keeps its own instance bind, and the bind would otherwise keep the old group); then
-   `.instance unbind all` **for each bot by name**: the step selects that bot's GUID (from the roster) and sends the line as one operation of the
-   session, so it never runs on whatever the agent had selected; and once for the agent itself. The reply of `.instance unbind` goes to the unbound
-   player, so the step reports the lines as *sent*, not confirmed. **Needs the plan's `outside_tele`.** `fresh` always resets: the agent cannot read from outside whether the old instance is cleared.
-   *Account level:* the core (`HandleInstanceUnbindCommand`) unbinds the *selected* player only from level 4; below it the line unbinds the sender
-   itself. At level 3 (a developer) the step warns about this in `prepare.warnings` and in the notes: the bots' own binds are probably not cleared
-   (not verified live).
+   then, **from account level 4**, `.bot command <bot> leave` for each bot (a group keeps its own instance bind) and `.instance unbind all` **for each
+   bot by name**: the step selects that bot's GUID (from the roster) and sends the line as one operation of the session, so it never runs on whatever the
+   agent had selected (its reply goes to the unbound player, so it is reported as *sent*, `unbound[]`). **Below level 4** the core
+   (`HandleInstanceUnbindCommand`) unbinds the *sender* whatever is selected, which would clear the agent and no bot; there the step sends
+   `.instance groupunbind all` with the lead bot selected instead (from level 3: every in-world member of its group is unbound and the group is
+   disbanded) and reads the sender's reply, `Group unbound. Disbanding.` (`group_unbound[]`, confirmed) or `<name> is not in a group.` (`not_grouped[]`
+   and a warning: nothing was unbound for it, the bots still get `leave`); no reply fails the run. Last, `.instance unbind all` for the agent itself. **Needs the plan's `outside_tele`.**
+   `fresh` always resets: the agent cannot read from outside whether the old instance is cleared.
 3. **`gm_setup`:** `.gm visible off` / `.gm visible on` lines (a leading dot and any spacing or case are fine) and nothing else: any other text is refused when the run is
    started. It needs account level 2.
 
@@ -1362,7 +1363,7 @@ Every GM line the step sends is a **setup shortcut**: it is in `setup_shortcuts`
 enter phase's one `.tele name`).
 
 Report: `report.prepare` = `steps[]` (`name`, `seconds`, `detail`), `seconds`, `already_online[]`, `added[]`, `teleported_out[]`, `left_group[]`,
-`unbound[]`, `gm_setup[]`, `gm_commands`, `warnings[]`. `report.setup_s` is the whole setup: the seconds from the start of the run to its first step (prepare, bind,
+`unbound[]`, `group_unbound[]`, `not_grouped[]`, `gm_setup[]`, `gm_commands`, `warnings[]`. `report.setup_s` is the whole setup: the seconds from the start of the run to its first step (prepare, bind,
 enter phase and kit check; `remote.preflight.seconds` and `remote.enter.seconds` are the last two). Nothing in the block waits longer than its
 own ceiling (`online_wait_s`, 25 s for the teleports, 6 s per `.bot` line). `tools/run-uldaman.sh` runs all of this for Uldaman; see
 [docs/LIVE-CHECKS.md](docs/LIVE-CHECKS.md) "Remote Uldaman in one command".

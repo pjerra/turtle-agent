@@ -171,9 +171,14 @@ RUN_ID=$(field result.run_id <<<"$RESP")
 TRACE=$(field result.trace_file <<<"$RESP")
 say "run $RUN_ID started (trace $TRACE)"
 
-LAST=""
 while :; do
   sleep "$POLL_S"
+  if [ $(( ($(date +%s) - START) / 60 )) -ge "$MAX_MIN" ]; then
+    say "the run took $MAX_MIN minutes: dungeon_stop"
+    ST=$(rpc dungeon_stop '{}' 60 2>/dev/null) || ST=""
+    STATE=$(field result.state <<<"$ST")
+    break
+  fi
   ST=$(rpc dungeon_status '{}' 20 2>/dev/null) || { say "dungeon_status: no answer"; continue; }
   STATE=$(field result.state <<<"$ST")
   PHASE=$(field result.report.watchdog.waiting <<<"$ST")
@@ -181,12 +186,6 @@ while :; do
   STALL=$(field result.stalled_for_s <<<"$ST")
   say "state=${STATE:-?} phase=${PHASE:--} step=${STEP:--} stalled_for_s=${STALL:-0}"
   case $STATE in done|failed|stopped) break ;; esac
-  if [ $(( ($(date +%s) - START) / 60 )) -ge "$MAX_MIN" ]; then
-    say "the run took $MAX_MIN minutes: dungeon_stop"
-    ST=$(rpc dungeon_stop '{}' 60) || true
-    STATE=$(field result.state <<<"$ST")
-    break
-  fi
 done
 
 # --- the result

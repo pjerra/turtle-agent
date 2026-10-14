@@ -19,10 +19,13 @@ import (
 //
 //	online:   `.bot add <Name>` for each named bot the roster does not show online (the agent must be their owner or a GM), then the
 //	          roster is read until every one is online, within online_wait_s.
-//	fresh:    (remote mode, GM) a new instance instead of the old one. The bots and the agent are teleported to the plan's outside_tele (a
-//	          bot cannot be unbound from the map it stands on), the bots leave their old group (a group keeps its own bind), and
-//	          `.instance unbind all` goes out for each bot BY NAME (it selects that bot's GUID and sends the line as one operation, never a
-//	          bare line on whatever the agent has selected) and for the agent itself. The account's hourly entry ledger is checked first.
+//	fresh:    (remote mode, GM) a new instance instead of the old one. The account's hourly entry ledger is checked first. The bots and
+//	          the agent are teleported to the plan's outside_tele (a bot cannot be unbound from the map it stands on). Then, from account
+//	          level 4: the bots leave their old group (a group keeps its own bind) and `.instance unbind all` goes out for each bot BY
+//	          NAME (it selects that bot's GUID and sends the line as one operation, never a bare line on whatever the agent has
+//	          selected). Below level 4 the core unbinds the sender instead of the selection, so `.instance groupunbind all` goes out with
+//	          the lead bot selected (every member of its group is unbound, the group disbanded) and its reply is checked. The agent
+//	          unbinds itself last.
 //	gm_setup: `.gm visible off|on` lines, and nothing else.
 //
 // The preflight (maintenance, inventory, talents) and the enter phase then run as before, back to back. Every GM line the step sends is
@@ -110,8 +113,13 @@ type PrepareReport struct {
 	// player, so it is sent, not confirmed).
 	TeleportedOut []string `json:"teleported_out,omitempty"`
 	LeftGroup     []string `json:"left_group,omitempty"`
-	Unbound       []string `json:"unbound,omitempty"`
-	GMSetup       []string `json:"gm_setup,omitempty"`
+	// Unbound: `.instance unbind all` was sent with that player selected (account level 4 and up for the bots; the agent unbinds itself).
+	// GroupUnbound: the reply confirmed `.instance groupunbind all` on that bot: its whole group was unbound and disbanded (level 3).
+	// NotGrouped: the reply said the bot is in no group, so that command did nothing for it.
+	Unbound      []string `json:"unbound,omitempty"`
+	GroupUnbound []string `json:"group_unbound,omitempty"`
+	NotGrouped   []string `json:"not_grouped,omitempty"`
+	GMSetup      []string `json:"gm_setup,omitempty"`
 	// GMCommands counts the GM lines the step sent (tele, unbind, gm visible): setup shortcuts, not part of the run's own gm_commands.
 	GMCommands int      `json:"gm_commands"`
 	Warnings   []string `json:"warnings,omitempty"`
@@ -128,6 +136,8 @@ func (p *PrepareReport) clone() *PrepareReport {
 	c.TeleportedOut = slices.Clone(p.TeleportedOut)
 	c.LeftGroup = slices.Clone(p.LeftGroup)
 	c.Unbound = slices.Clone(p.Unbound)
+	c.GroupUnbound = slices.Clone(p.GroupUnbound)
+	c.NotGrouped = slices.Clone(p.NotGrouped)
 	c.GMSetup = slices.Clone(p.GMSetup)
 	c.Warnings = slices.Clone(p.Warnings)
 	return &c
@@ -150,8 +160,22 @@ type Preparer interface {
 	// GMVisible sends `.gm visible on|off`.
 	GMVisible(ctx context.Context, on bool) error
 	// UnbindInstances selects the player with the GUID and sends `.instance unbind all`, as one operation. who is the name, for errors.
+	// The core runs it on the selected player only from account level 4; below, on the sender. Its reply goes to the unbound player.
 	UnbindInstances(ctx context.Context, who string, guid packet.GUID) error
+	// GroupUnbind selects the player with the GUID and sends `.instance groupunbind all`, as one operation, and reads the reply the
+	// sender gets: "Group unbound. Disbanding." (every in-world member of the player's group is unbound and the group disbanded) or
+	// "<name> is not in a group." It works from account level 3.
+	GroupUnbind(ctx context.Context, who string, guid packet.GUID) (GroupUnbindResult, error)
 }
+
+// GroupUnbindResult is what the sender's reply to `.instance groupunbind all` said.
+type GroupUnbindResult string
+
+const (
+	GroupUnbound   GroupUnbindResult = "unbound"     // "Group unbound. Disbanding."
+	GroupNotGroups GroupUnbindResult = "not-grouped" // "<name> is not in a group."
+	GroupNoAnswer  GroupUnbindResult = "no-answer"   // neither came in time
+)
 
 // prepEnv is what the prepare step needs of the run around it: its clock, its notes and its shortcut book.
 type prepEnv struct {
@@ -400,11 +424,6 @@ func (e *prepEnv) fresh(ctx context.Context) (string, error) {
 			return "", err
 		}
 	}
-	if level < AdministratorLevel {
-		w := fmt.Sprintf("account level %d: the core runs .instance unbind on the SELECTED player only from level %d (it unbinds the sender's own character below), so the bots' own binds are probably not cleared by this step; bots that left their group go back to their old instance while it persists", level, AdministratorLevel)
-		e.rep.Warnings = append(e.rep.Warnings, w)
-		e.note("prepare fresh: warning: " + w)
-	}
 	// The bots must be online (a tele needs them in the world) and the roster has their GUIDs.
 	if len(e.rows) == 0 || !e.spec.Online {
 		if err := e.readRoster(ctx); err != nil {
@@ -437,31 +456,65 @@ func (e *prepEnv) fresh(ctx context.Context) (string, error) {
 	if err := e.waitOutside(ctx); err != nil {
 		return "", err
 	}
-	// 2. Out of the old group: a group keeps its own bind, and `commander bind` would keep the group.
-	for _, n := range e.bots {
-		_, settled, err := e.g.BotLines(ctx, "command "+n+" leave", prepareLeaveWait, func(string) bool { return true })
+	// 2. The bots' binds and group. From account level 4 `.instance unbind all` runs on the selected bot, so each bot is unbound by name
+	// and leaves its group. Below it the core unbinds the SENDER whatever is selected (Commands.cpp, HandleInstanceUnbindCommand), which
+	// would clear the agent five times and no bot: there `.instance groupunbind all` goes out with the lead bot selected (it unbinds
+	// every in-world member of its group, disbands the group, and tells the sender so). Only a confirmed reply is reported.
+	if level >= AdministratorLevel {
+		e.leaveGroups(ctx, e.bots)
+		for _, n := range e.bots {
+			if err := e.g.UnbindInstances(ctx, n, guids[n]); err != nil {
+				return "", fmt.Errorf(".instance unbind all on %s: %w", n, err)
+			}
+			e.gmLine(".instance unbind all on " + n + " (prepare fresh)")
+			e.rep.Unbound = append(e.rep.Unbound, n)
+		}
+	} else {
+		lead := e.bots[0]
+		res, err := e.g.GroupUnbind(ctx, lead, guids[lead])
 		if err != nil {
-			return "", fmt.Errorf("command %s leave: %w", n, err)
+			return "", fmt.Errorf(".instance groupunbind all on %s: %w", lead, err)
 		}
-		if !settled {
-			e.note("prepare fresh: " + n + " did not answer `leave` (it may have been in no group)")
+		e.gmLine(".instance groupunbind all on " + lead + " (prepare fresh)")
+		switch res {
+		case GroupUnbound:
+			// The group is gone: the bots that were its members are unbound and in no group. The reply does not name them.
+			e.rep.GroupUnbound = append(e.rep.GroupUnbound, lead)
+		case GroupNotGroups:
+			e.rep.NotGrouped = append(e.rep.NotGrouped, lead)
+			w := fmt.Sprintf("%s is in no group, so .instance groupunbind (the only unbind that reaches a bot below account level %d) did nothing: its own instance binds, and any other bot's, are not cleared", lead, AdministratorLevel)
+			e.rep.Warnings = append(e.rep.Warnings, w)
+			e.note("prepare fresh: warning: " + w)
+			// Bots in a group of their own still leave it.
+			e.leaveGroups(ctx, e.bots)
+		default:
+			return "", fmt.Errorf(".instance groupunbind all on %s: no reply (\"Group unbound. Disbanding.\" or \"is not in a group\" expected): the unbind is not confirmed", lead)
 		}
-		e.rep.LeftGroup = append(e.rep.LeftGroup, n)
-	}
-	// 3. Unbound, each by name: the line goes with the player's GUID selected, in one operation.
-	for _, n := range e.bots {
-		if err := e.g.UnbindInstances(ctx, n, guids[n]); err != nil {
-			return "", fmt.Errorf(".instance unbind all on %s: %w", n, err)
-		}
-		e.gmLine(".instance unbind all on " + n + " (prepare fresh)")
-		e.rep.Unbound = append(e.rep.Unbound, n)
 	}
 	if err := e.g.UnbindInstances(ctx, agent, e.g.AgentGUID()); err != nil {
 		return "", fmt.Errorf(".instance unbind all on %s: %w", agent, err)
 	}
 	e.gmLine(".instance unbind all on " + agent + " (prepare fresh)")
 	e.rep.Unbound = append(e.rep.Unbound, agent)
-	return fmt.Sprintf("%d bots and the agent teleported to %s, left their group, unbound (sent: the replies go to the unbound players)", len(e.bots), p.OutsideTele), nil
+	unbound := fmt.Sprintf("%s unbound", strings.Join(e.rep.Unbound, ", "))
+	if len(e.rep.GroupUnbound) > 0 {
+		unbound = fmt.Sprintf("the group of %s unbound and disbanded (confirmed by the reply), %s", strings.Join(e.rep.GroupUnbound, ", "), unbound)
+	}
+	return fmt.Sprintf("%d bots and the agent teleported to %s; %s", len(e.bots), p.OutsideTele, unbound), nil
+}
+
+// leaveGroups sends `command <bot> leave` for each bot (a bot in no group is harmless).
+func (e *prepEnv) leaveGroups(ctx context.Context, bots []string) {
+	for _, n := range bots {
+		_, settled, err := e.g.BotLines(ctx, "command "+n+" leave", prepareLeaveWait, func(string) bool { return true })
+		switch {
+		case err != nil:
+			e.rep.Warnings = append(e.rep.Warnings, "command "+n+" leave: "+err.Error())
+		case !settled:
+			e.note("prepare fresh: " + n + " did not answer `leave` (it may have been in no group)")
+		}
+		e.rep.LeftGroup = append(e.rep.LeftGroup, n)
+	}
 }
 
 // waitOutside waits, within freshWait, for the agent to stand outside the plan's map and to have every bot in view: the teleports put

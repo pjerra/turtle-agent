@@ -893,10 +893,11 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
    `online_wait_s`, the bind finds the party. Read the reply text of `.bot add` once: the step matches `queued for login`, `already online`, `not found`,
    `may only control`, `owned by another`, `Failed to add`.
 3. `fresh` with the bots **inside** the old instance: the five teleports to `uldaman` (map 0) land them at the outside entrance, `Sees` finds them
-   from the agent within 25 s, the bots leave their group, and the instance is a new one (groups 1-10 alive again, not "seen empty"). If the old
-   instance comes back, the unbind did not reach the bots: this account is level 3 and the core runs `.instance unbind` on the *selected* player from
-   level 4 only (`prepare.warnings` says so). Then try the core's `.instance groupunbind all` on a selected bot (it unbinds the whole group, which it
-   then disbands; it works from level 3) and report it: it is not in the whitelist yet.
+   from the agent within 25 s, and the instance is a new one (groups 1-10 alive again, not "seen empty"). The test account is level 3, so the step sends
+   `.instance groupunbind all` with the lead bot selected: look for `prepare.group_unbound` = the lead bot (the reply `Group unbound. Disbanding.` was
+   seen) and the bots in no group afterwards. Read the bind afterwards if you can: `.instance unbind` of a bot's own binds is not reached below level 4,
+   so a bot that was in no group keeps its own bind (`prepare.not_grouped`, with a warning). At level 4 the per-bot `.instance unbind all` is sent instead
+   (`prepare.unbound`, its reply goes to the bot: not confirmed).
 4. `fresh` with the hourly ledger full (5 entries): the run fails at the start with `the account entered 5 new instances`, nothing teleported.
 5. A player (non-GM) account with `fresh`: the run fails with `fresh needs a GM account`-style text before anything is sent.
 6. `gm_setup`: `setup_shortcuts` has `gm visible off` once, and the keep-near `.appear` assists still work (they read it).

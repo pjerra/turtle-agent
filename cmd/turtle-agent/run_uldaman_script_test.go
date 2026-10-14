@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
 
 // tools/run-uldaman.sh builds its dungeon_run params by hand: they must be what the agent accepts (no unknown key, a mode, a prepare
@@ -44,6 +46,23 @@ func TestRunUldamanScriptParamsAreWhatDungeonRunTakes(t *testing.T) {
 		}
 		if p.FromLeg == nil || p.FromLeg.index != c.from {
 			t.Errorf("from_leg %+v", p.FromLeg)
+		}
+	}
+}
+
+// The two replies of ".instance groupunbind all" (Commands.cpp, HandleInstanceGroupUnbindCommand; mangos_string 117) are told apart,
+// whatever else the server says meanwhile.
+func TestGroupUnbindReply(t *testing.T) {
+	for text, want := range map[string]dungeon.GroupUnbindResult{
+		"Group unbound. Disbanding.":                       dungeon.GroupUnbound,
+		"|Hplayer:Lcwarra|h[Lcwarra]|h is not in a group.": dungeon.GroupNotGroups,
+		"Lcwarra is not in a group.":                       dungeon.GroupNotGroups,
+		"instances unbound: 1":                             "",
+		"You are in combat.":                               "",
+		"":                                                 "",
+	} {
+		if got := groupUnbindReply(text); got != want {
+			t.Errorf("%q: %q, want %q", text, got, want)
 		}
 	}
 }
