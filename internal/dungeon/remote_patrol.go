@@ -411,6 +411,7 @@ func (d *RemoteDriver) reactiveCC(ctx context.Context, pulled packet.GUID, mobs 
 	if d.tx.BigPack <= 0 || len(mobs) < 2 {
 		return nil
 	}
+	d.ensureCCBot()
 	bot := strings.TrimSpace(d.opt.CCBot)
 	if bot == "" {
 		return nil

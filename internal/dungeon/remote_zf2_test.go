@@ -61,7 +61,7 @@ func TestRemoteNoCCBotTakesTheMageOfTheRoster(t *testing.T) {
 	if cc < 0 || cc > pb || !strings.HasSuffix(g.orders[cc], " Magey") {
 		t.Fatalf("cc %d pullback %d %v", cc, pb, g.orders)
 	}
-	if r := rep.Remote; r.BigPackCC != 1 || !strings.Contains(notesOf(rep), "Magey, the mage of the party, takes the big-pack and reactive CC") {
+	if r := rep.Remote; r.BigPackCC != 1 || !strings.Contains(notesOf(rep), "Magey, the mage of the party (the roster), takes the big-pack and reactive CC") {
 		t.Fatalf("%+v %s", r, notesOf(rep))
 	}
 }
@@ -217,6 +217,37 @@ func TestRemotePausedRunKeepsTheBinding(t *testing.T) {
 		}
 		if !pause && g.unbinds != 1 {
 			t.Fatalf("stopped: unbinds %d", g.unbinds)
+		}
+	}
+}
+
+// ZF-2 run 4: `.bot roster` lists none of the bound hires (ROSTER_BEGIN|0) and the failed prepare run left no hire memory, so seven resumes
+// had no cc bot. The class the agent learned of the hires in any earlier run (ClassMemory) names the mage.
+func TestRemoteNoCCBotTakesTheMageOfTheClassMemoryWhenTheRosterIsEmpty(t *testing.T) {
+	g := &botFake{fakeRemote: newFakeRemote(t), replies: map[string][]string{"roster": {"TBM:ROSTER_BEGIN|0", "TBM:ROSTER_END"}}}
+	plan := bigPackPlan(g.fakeRemote, 5)
+	o := opts()
+	o.ClassMemory = map[string]string{"tanky": "warrior", "healy": "priest", "magey": "mage"}
+	rep, err := runRemote(t, g, plan, o, nil)
+	if err != nil || rep.Remote.BigPackCC != 1 || !strings.HasSuffix(g.orders[g.indexOf("cmd cc")], " Magey") {
+		t.Fatalf("%v %v %+v\n%s", err, g.orders, rep.Remote, notesOf(rep))
+	}
+}
+
+// With no memory and no roster at all, the spells the bots cast name the mage: the first big pack after it has cast gets its CC. The
+// run starts without one (noted), and the cc bot is taken at the pack once the feed's last action of a bot is a mage spell.
+func TestRemoteNoCCBotTakesTheMageFromItsSpells(t *testing.T) {
+	g := newFakeRemote(t)
+	g.party[2].Action = "frostbolt"
+	plan := bigPackPlan(g, 5)
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || rep.Remote.BigPackCC != 1 || !strings.HasSuffix(g.orders[g.indexOf("cmd cc")], " Magey") {
+		t.Fatalf("%v %v %+v\n%s", err, g.orders, rep.Remote, notesOf(rep))
+	}
+	// A hunter's arcane shot and a priest's prayer are no mage spells; a 16-character cut of a mage spell is.
+	for a, want := range map[string]bool{"arcane shot": false, "prayer of healin": false, "shadowburn": false, "scorch": true, "Frostbolt": true, "arcane explosion": true, "arcane explosio": true, "": false} {
+		if isMageAction(a) != want {
+			t.Errorf("isMageAction(%q) = %v", a, !want)
 		}
 	}
 }
