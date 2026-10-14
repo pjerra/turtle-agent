@@ -46,6 +46,8 @@ type rmob struct {
 	aggroed bool
 	// reaction and kind: the record's TortoiseBots #943 fields ("" leaves them out, as an older module does)
 	reaction, kind string
+	// ccUntil: a `cmd cc` at it holds it (flag c, no target) until then (fakeRemote.ccLasts)
+	ccUntil time.Time
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -114,6 +116,10 @@ type fakeRemote struct {
 	// > 0 makes a mob that is not fighting yet come at the party when a living bot gets within that many yards of it (a walk into it).
 	lagUntil map[packet.GUID]time.Time
 	aggro    float64
+	// minMove > 0: a `cmd move` to a point nearer the lead bot than this is acknowledged and does nothing, as the module does with a move
+	// under about 6 yd. ccLasts > 0: a `cmd cc` puts the mob in crowd control (flag c, no target) for that long.
+	minMove float64
+	ccLasts time.Duration
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -221,6 +227,9 @@ func (g *fakeRemote) advance(d time.Duration) {
 	live := g.mobs[:0]
 	anyEngaged := false
 	for _, m := range g.mobs {
+		if !m.ccUntil.IsZero() && !g.now.Before(m.ccUntil) {
+			m.ccUntil, m.flags, m.noTarget = time.Time{}, "-", false // the sheep runs out
+		}
 		if m.pulled && !m.engaged && g.now.Sub(m.pullAt) >= g.engageDelay {
 			m.engaged = true
 		}
@@ -489,6 +498,10 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		if dx, dy := x-float64(l.X), y-float64(l.Y); sqrt(dx*dx+dy*dy) > 150 {
 			return errReply(intent, "too-far"), nil
 		}
+		if dx, dy := x-float64(l.X), y-float64(l.Y); g.minMove > 0 && sqrt(dx*dx+dy*dy) < g.minMove {
+			g.moveOrderDest = append(g.moveOrderDest, Point{float32(x), float32(y), float32(z)})
+			return ack(intent), nil // too short: the module does not move
+		}
 		g.moveOrderPos = append(g.moveOrderPos, Point{l.X, l.Y, l.Z})
 		g.moveOrderDest = append(g.moveOrderDest, Point{float32(x), float32(y), float32(z)})
 		g.moveOrderAt = append(g.moveOrderAt, g.now)
@@ -552,6 +565,14 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		}
 		m.attacked = true
 		g.runToMob(m)
+		return ack(intent), nil
+	case "cmd cc":
+		if len(f) < 4 {
+			return ack(intent), nil
+		}
+		if m := g.mobByArg(f[3]); m != nil && g.ccLasts > 0 {
+			m.ccUntil, m.flags, m.noTarget = g.now.Add(g.ccLasts), "c", true
+		}
 		return ack(intent), nil
 	case "cmd follow":
 		if g.followTo != nil {

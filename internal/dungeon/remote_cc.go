@@ -29,7 +29,8 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 		return nil
 	}
 	d.tf.init()
-	pack := d.packOf(t, float64(d.groupRadius(sp)))
+	// A patrol member within patrol_aggro of the target walks into the fight: it counts (remote_patrol.go).
+	pack := d.withPatrols(d.packOf(t, float64(d.groupRadius(sp))), hostilePoint(t))
 	always := slices.ContainsFunc(pack, func(h tbm.HostileRec) bool { return h.GUID != t.GUID && slices.Contains(d.plan.CCAlways, h.Entry) })
 	if len(pack) < d.tx.BigPack && !always {
 		return nil
