@@ -433,8 +433,8 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 		case ref.Code == "tank-busy":
 			// The only tank is in combat (it cannot start a pull while it fights): wait for the fight to end or the mob to come, then
 			// pull again. Never an attack order in its place: the party would go in with no tank holding the mob.
-			if busy++; busy > maxTankBusyRounds {
-				return fightResult{out: noEngage, why: fmt.Sprintf("tank-busy: the tank was still fighting after %d waits of %.0f s", maxTankBusyRounds, d.opt.TankBusyWait.Seconds())}, true, nil
+			if busy++; busy > d.tx.TankBusyRounds {
+				return fightResult{out: noEngage, why: fmt.Sprintf("tank-busy: the tank was still fighting after %d waits of %.0f s", d.tx.TankBusyRounds, d.opt.TankBusyWait.Seconds())}, true, nil
 			}
 			engaged, err := d.waitTankFree(ctx, t)
 			if err != nil {
@@ -696,7 +696,7 @@ func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 	}
 	if holder, ok := d.fr.ThreatHolder(h.GUID); ok && d.fr.IsMember(holder) && ((d.tank == 0 && d.tankLike(holder)) || (d.tank != 0 && holder == d.tank)) {
 		// The tank has it: the order did its work, unless the tank is dead, or not at the mob (it follows the commander, or is running back).
-		if m, found := d.memberByGUID(holder); !found || (!m.Dead && dist3(partyPoint(m), hostilePoint(h)) <= attackHoldYd) {
+		if m, found := d.memberByGUID(holder); !found || (!m.Dead && dist3(partyPoint(m), hostilePoint(h)) <= float64(d.tx.AttackHoldYd)) {
 			return false
 		}
 	}

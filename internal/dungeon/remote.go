@@ -148,6 +148,11 @@ type RemoteOptions struct {
 	OpenerDelay time.Duration
 	AddCooldown time.Duration
 	UnbindWait  time.Duration // the unbind at the end of the run
+	// PlanPath is the plan file the run was loaded from, TunePath the tunables file (default: <plan>.tune.json beside it; absent is fine). At
+	// each leg start and pull-group start the driver reads both again when they changed (remote_tune.go, README "Live tuning"). NoReload
+	// turns the two reloads off; `tune_set` still works. Empty PlanPath: no plan reload and no default tunables file.
+	PlanPath, TunePath string
+	NoReload           bool
 	// EndFightWait is how long the end of a run (done, failed or stopped) keeps the binding and the fight logic going while the party is
 	// still in combat, before the stay and the unbind (remote_end.go). 0: DefaultEndFightWait; negative: unbind at once.
 	EndFightWait time.Duration
@@ -344,6 +349,11 @@ type RemoteReport struct {
 	// (remote_entry.go). StatePolls counts the `cmd state` orders of game-object waits.
 	EntryTargets string `json:"entry_targets,omitempty"`
 	StatePolls   int    `json:"state_polls,omitempty"`
+
+	// Live tuning (tune.go, remote_tune.go): the tunables changed during the run and the reloads of the plan file, each with when, old
+	// and new. `turtle-agent tune-diff <trace>` turns them into a patch for the tunables file and the plan file.
+	TuneChanges []TuneChange `json:"tune_changes"`
+	PlanReloads []PlanReload `json:"plan_reloads"`
 }
 
 func (r *RemoteReport) clone() *RemoteReport {
@@ -355,6 +365,8 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
 	c.Refills = slices.Clone(r.Refills)
+	c.TuneChanges = slices.Clone(r.TuneChanges)
+	c.PlanReloads = slices.Clone(r.PlanReloads)
 	c.Enter = r.Enter.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
 	c.Orders = cloneMap(r.Orders)
@@ -455,6 +467,9 @@ type RemoteDriver struct {
 	wdRepick   flagOnce // end the fight, to pick the target again
 	wdObject   flagOnce // give up the carrier order's retries
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
+
+	tx   tuneExtra // the thresholds that were constants (tune.go)
+	live liveTune  // live tuning: the tunables file, the plan file and tune_set (remote_tune.go)
 }
 
 // NewRemoteDriver prepares a run of plan in remote mode. A zero clock is the wall clock.
@@ -466,11 +481,13 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 		prevDead: map[packet.GUID]bool{}, revived: map[packet.GUID]int{}, lastRevive: map[packet.GUID]time.Time{},
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
 		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
+	d.tx = defaultTuneExtra()
+	d.initLive()
 	d.rep.init(plan, clk.Now)
 	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
-		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}}
+		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
 	d.initTrace()
 	return d
 }
@@ -596,7 +613,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			continue
 		}
 		d.objectTouched = false
-		a := d.st.Next()
+		a := d.liveStep(d.st.Next()) // a leg start or a pull-group start: the tunables and the plan are read again (remote_tune.go)
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		d.wd.setStep(a.Label)
@@ -617,6 +634,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 					}
 					continue
 				}
+			}
+			if a.Kind == ActPull {
+				a = d.liveStep(a) // the leg's start gate took a while: the first group is a pull-group start as well
 			}
 		}
 		switch a.Kind {
@@ -1166,7 +1186,7 @@ func (d *RemoteDriver) partyDown() (dead, all int) {
 	}
 	all = len(d.fr.Party)
 	dead = len(d.deadMembers())
-	if dead < partyDownDead {
+	if dead < d.tx.PartyDownDead {
 		d.downSaid = false
 		return 0, all
 	}
@@ -1533,8 +1553,8 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		}
 		if careful {
 			if h, ok := d.hostileAhead(here, wp); ok {
-				if aheads++; aheads > maxAheadPulls {
-					return fmt.Errorf("walk to %.1f %.1f %.1f: %d hostiles near the way were pulled and still more stand there", p.X, p.Y, p.Z, maxAheadPulls)
+				if aheads++; aheads > d.tx.MaxAheadPulls {
+					return fmt.Errorf("walk to %.1f %.1f %.1f: %d hostiles near the way were pulled and still more stand there", p.X, p.Y, p.Z, d.tx.MaxAheadPulls)
 				}
 				if err := d.pullAhead(ctx, h); err != nil {
 					return err

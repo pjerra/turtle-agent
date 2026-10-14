@@ -80,12 +80,13 @@ recorded a normal logout each time it was checked.
 ## CLI
 
 ```
-turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [<account>] <character>
+turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [--tune FILE] [<account>] <character>
 turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait DURATION] [--reconnect N] [--stop-on-failure]
 turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
+turtle-agent tune-diff <trace.jsonl>
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -263,6 +264,9 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
+| `dungeon_run` (live tuning) | `tune` (remote mode: the tunables file; default the login's `--tune`, else `<plan>.tune.json` beside the plan file, which may be absent; a named file must exist), `live_reload` (`false`: the run does not read the plan file and the tunables file again) | the report's `remote.tune_changes[]` and `remote.plan_reloads[]`; see [Live tuning](#live-tuning) |
+| `tune_set` | `key` (a tunable, see [Live tuning](#live-tuning)), `value` (a number, or `"default"` to put the key back) | `key`, `old` (the value now), `new`, `applies`. Refused at once as invalid params when the key is unknown, the value is outside its limits or a whole number is wanted, or it breaks a rule between two values; else taken, with the same `tune_change` event as a file's change, at the run's next leg start or pull-group start. Errors when no remote run goes |
+| `tune_list` | | `tunables[]`: `key`, `unit`, `min`, `max`, `default`, `base` (what the run was made with), `value` (now), `source` (`base`, `file`, `rpc`), `queued` (a `tune_set` waiting for the boundary), `doc` |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
 | `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
@@ -1571,7 +1575,7 @@ slot, pets in the agent's view while the hires stand around it, and whether a ke
 `gm_shortcuts` is empty. The kit check's `.bot command <bot> talents` is a bot command (the owner's), not a GM command.
 **Keeping the agent near** (only when the module does not take objects by entry, see [Targets by entry](#targets-by-entry-the-agent-need-not-be-in-view): with entry targets none of this runs and `run_gm_assists` stays 0). The bots walk and the agent's own character does not, but the object steps (and the carrier's `cmd open|loot` orders) need it in view of the chest, the corpse or the door. So, in remote mode only, after each leg's walk and before an object step the driver looks at how far the agent stands from the lead bot (the agent's position against the feed's) and, over 40 yd (or on another map): a **GM** account (the `.account` level reaches the teleport level, 1) sends `.appear <lead bot>`, but never during a fight, and only when the caller's `setup` lists `gm visible off` (run it first and pass it, so the mobs cannot take the arriving agent for a target; otherwise the run notes it and does not `.appear`); any other account walks its own character (`walk_path`) to a point 30 yd short of the lead bot, only out of combat, never when a hostile the bots see stands within 25 yd of the way or the stand point, and it stops at once when a fight begins or after 60 s. **Each `.appear` is a GM assist during the run**, not part of the party's play: it is counted in `run_gm_assists`, noted, and listed in `setup_shortcuts` as `.appear <lead bot> (GM assist during the run)`. `gm_commands` does not count it (it stays the enter phase's), so a "0 GM commands" target has to read `run_gm_assists` too. `agent_walks` counts the walks. A failed `.appear` or walk is noted and does not fail the run. An object step is tried once per step, and so is a boss step (before its kill is judged). Not verified live (run 1 needed `.appear` by hand once; Glacienne stayed ~110 yd behind).
 
-**Report.** `dungeon_status.report.remote`: `mode`, `lead_bot`, `bots`, `tank`, `bound`, `unbound`, `unbind_via` (`ack`, `already unbound`, `no
+**Report.** `dungeon_status.report.remote`: `tune_changes` and `plan_reloads` (see [Live tuning](#live-tuning)), `mode`, `lead_bot`, `bots`, `tank`, `bound`, `unbound`, `unbind_via` (`ack`, `already unbound`, `no
 answer`, ...), `ended_by_module`, `gm_commands`, `run_gm_assists`, `agent_walks`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
 (since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
 in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `tank_busy_waits`, `cc_orders`,
@@ -1659,6 +1663,117 @@ of the auto-improve loop: the same pull, the same party, 3+ tries each). A resul
 
 Not verified live (see docs/LIVE-CHECKS.md "Start anywhere and the pull test"): `.appear`/`.go xyz` into the lead bot's instance, `.bot summon`
 of a bound lead bot, `.respawn` in an instance and the visibility distance it reaches.
+
+### Live tuning
+
+Fixes on the spot during a live run, without a restart: the remote driver's thresholds are named, bounded **tunables**, the plan file and a
+tunables file are read again as the run goes, and every change is a trace event, so a fix made at the keyboard becomes a PR afterwards.
+
+**Where.** The driver looks at the files and at the `tune_set` requests at two places only: **before a leg starts** and **before a pull group
+starts** (also the first group of a leg, after the leg's start gate). What it finds applies to the next step; nothing changes in the middle of
+a walk, a fight or a wait. A file is read when its modification time or size changed. `live_reload: false` (a `dungeon_run` parameter) turns
+the two file reloads off; `tune_set` still works.
+
+**The tunables file.** JSON, one object of key to number, `<plan>.tune.json` beside the plan file (`dungeons/zulfarrak.tune.json`), or the file named
+by `dungeon_run`'s `tune` or the login's `--tune FILE`. It is optional; a file named by `tune` must exist at the start. Keys that start with `_` are
+comments. A key left out has the value the run was made with, so taking a key out of the file puts it back.
+
+```json
+{"_why": "the second pack patrols", "pull_standoff": 30, "pull_range": 40, "gather_radius": 25, "rest_health_pct": 95, "assist_every_s": 6}
+```
+
+Every value is checked against hard limits (rule 3 of the driver rules: no tunable can make a wait unbounded; the longest, `boss_timeout_s`, is
+30 minutes, and the watchdog's levels are not tunables). One bad value, an unknown key, a number that must be whole, a file that is not JSON or a
+broken rule between two values (`pull_standoff` at most `pull_range`, `rest_min_health_pct` at most `rest_health_pct`, `move_arrive` and
+`look_ahead` at most `move_leg`) refuses the whole file: the old values stay, the reason is in the report's notes and in a `tune_change` event
+with `ok: false`, once for that version of the file. A file that goes away changes nothing.
+
+**Order of precedence.** `tune_set` over the file over what the run was made with. A `tune_set` stays until `tune_set key "default"`.
+
+| Key | Unit | Limits | Default | What |
+| :-- | :-- | :-- | :-- | :-- |
+| `move_leg` | yd | 10 to 150 | 120 | longest single move of a walk (the server takes 150) |
+| `move_arrive` | yd | 1 to 15 | 5 | how near a point the lead bot has arrived |
+| `look_ahead` | yd | 2 to 40 | 10 | how near its waypoint the lead bot must be for the next move to go out |
+| `look_ahead_eta_s` | s | 0.5 to 10 | 2 | the look-ahead by time |
+| `move_gap_s` | s | 0.2 to 10 | 1 | least time between two move orders |
+| `move_stall_s` | s | 3 to 60 | 10 | a lead bot that gained no ground this long gets the move again |
+| `move_retries` | count | 1 to 10 | 4 | stalls and refusals of one walk before it fails |
+| `walk_attempts` | count | 1 to 8 | 3 | refusals of one walk (on top of move_retries) before it fails |
+| `lead_wait_s` | s | 5 to 120 | 30 | how long an order waits out lead-unavailable |
+| `pull_range` | yd | 10 to 80 | 45 | a target farther than this from the lead bot is approached first |
+| `pull_standoff` | yd | 5 to 70 | 38 | how far from the target the lead bot stops when it approaches (at most pull_range) |
+| `pack_radius` | yd | 5 to 60 | 25 | how far from a pull position a pack member may stand (a group's radius wins) |
+| `pull_attempts` | count | 1 to 6 | 3 | failed pulls of one group before the run fails |
+| `engage_timeout_s` | s | 5 to 90 | 25 | a pull that draws no fight in this long has failed |
+| `evade_grace_s` | s | 3 to 60 | 12 | a fight with nobody in combat this long is over |
+| `assist_every_s` | s | 3 to 60 | 10 | how often the party is re-ordered onto the nearest mob |
+| `aggro_quiet_s` | s | 1 to 15 | 3 | a fight on a walk is over when nothing has hit the party this long |
+| `post_fight_s` | s | 1 to 30 | 4 | wait after the last pack member died |
+| `adds_wait_s` | s | 1 to 90 | 15 | longest wait for loose hostiles after a fight |
+| `fight_timeout_s` | s | 30 to 900 | 300 | one pull group |
+| `boss_timeout_s` | s | 60 to 1800 | 600 | one boss fight |
+| `look_standoff` | yd | 5 to 24 | 21 | how far short of a pack's position the lead bot stops to look for it (under the 25 yd of the clear evidence) |
+| `attack_hold_yd` | yd | 10 to 80 | 45 | how near the mob the tank must be for its threat to count as holding it |
+| `tank_busy_rounds` | count | 1 to 6 | 3 | waits of one pull for a tank that stays in combat |
+| `add_orders` | count | 1 to 6 | 3 | tank orders at one loose mob |
+| `fallback_tries` | count | 1 to 4 | 2 | tries of the carrier's order before the agent takes an object step over |
+| `threat_wait_s` | s | 1 to 30 | 6 | longest wait for the tank to hold a mob's threat |
+| `opener_delay_s` | s | 0 to 15 | 2 | how long the tank must have held a mob before the party is sent at it |
+| `add_cooldown_s` | s | 2 to 60 | 8 | least time between two tank orders at the same loose add |
+| `tank_busy_wait_s` | s | 2 to 60 | 10 | one wait of a pull the module refused as tank-busy |
+| `rez_wait_s` | s | 5 to 120 | 30 | how long a dead bot waits for a resurrection before it is released |
+| `rest_health_pct` | pct | 30 to 100 | 90 | rested: every member's health at least this |
+| `rest_mana_pct` | pct | 10 to 100 | 35 | rested: every other mana user's mana at least this |
+| `rest_healer_mana_pct` | pct | 10 to 100 | 50 | rested: every healer's mana at least this |
+| `rest_timeout_s` | s | 5 to 300 | 60 | longest rest gate |
+| `rest_min_health_pct` | pct | 1 to 100 | 50 | after the timeout the run goes on only with this health (at most rest_health_pct) |
+| `rest_walk_yd` | yd | 10 to 500 | 60 | the walk length from which the start gate lets the party rest while it walks |
+| `rest_walk_health_pct` | pct | 10 to 100 | 70 | health floor for resting on a walk |
+| `rest_walk_healer_mana_pct` | pct | 5 to 100 | 40 | healer mana floor for resting on a walk |
+| `rest_walk_mana_pct` | pct | 5 to 100 | 25 | mana floor for resting on a walk |
+| `gather_radius` | yd | 8 to 80 | 40 | the rest gate before a pull also wants every living bot this near the lead bot |
+| `careful_hop` | yd | 5 to 60 | 25 | the longest single move of a walk inside the dungeon |
+| `gather_wait_s` | s | 1 to 60 | 12 | how long the party is waited for to gather before a hop or a pull |
+| `gather_near` | yd | 4 to 40 | 12 | every living bot within this of the lead bot counts as gathered |
+| `gather_progress` | yd | 0.5 to 10 | 2 | how much nearer a bot must have come during a gather's whole wait to be waited for again |
+| `aggro_guard` | yd | 8 to 40 | 22 | a hostile this near the next hop is pulled before the hop |
+| `ahead_max_dz` | yd | 2 to 30 | 8 | how far above or below the hop a hostile may stand to be pulled before it |
+| `max_ahead_pulls` | count | 1 to 30 | 12 | pulls of hostiles near the way, at most, in one walk |
+| `look_arrive` | yd | 1 to 10 | 3 | how near its stand point the lead bot must get to look at a pack |
+| `party_down_dead` | count | 1 to 5 | 3 | dead bots that stop the leg |
+| `respawn_settle_s` | s | 1 to 30 | 6 | pulltest: wait after .respawn for the pack to show |
+
+Not tunable on purpose: the evidence radii of the clear and boss rules (25 yd, 20 %, two whole frames: rules 1 and 2 of the driver rules;
+`look_standoff` stays under that 25 yd), the watchdog levels, the party, and what only runs once before the first leg (the start phase of
+`from_pull_group` / `start_here`: its gather spots and waits, and the `.respawn` reach of the pull test, a server limit). A pull test reads the
+tunables file before its first try and before each later try (the plan is the test, so it is not reloaded); a change between two tries is in
+the report, but an A/B comparison should keep them still.
+
+**`tune_set`.** `{"key": "pull_range", "value": 40}` (RPC `tune_set`; `"default"` puts the key back, `tune_list` shows the keys with limits, the
+value now and a queued request). It is checked at once with the same limits as the file and answers `old`, `new` and where it applies; it is
+taken at the next leg start or pull-group start like a file's change, with the same events. For one-off changes from the run worker.
+
+**The plan file.** At the same two places the plan file the run was loaded from is read again when it changed. It must parse as a plan and keep
+the run's name, map and number of legs, else the old plan stays (report note, `plan_reload` event with `ok: false`, once per version). What a
+reload takes: at a **leg start** the whole of that leg and of the legs after it (points, `via`, pull groups, `radius`, steps, boss, `rest`, `skip`,
+notes), the leg then begins again from its first point on the new plan; at a **pull-group start** the current leg's groups from the one about
+to start, its `skip`, steps, boss, `after_boss`, `rest` and notes, and the legs after it. What it never takes (rule 1): legs already done, the
+groups of the current leg that are cleared, the current leg's `to` and `via` once walked, the plan's header (entrance, tele, watchdog).
+Groups of a leg are matched by position in the list, so edit only the groups from the current one on. The ignored paths are listed in the
+`plan_reload` record's `ignored`, so a change that was not taken is not a surprise.
+
+**Events and the report.** Each change is a trace event `tune_change` (`key`, `old`, `new`, `source` = `file`, `rpc` or `reset`, `at`, `leg`,
+`boundary` = `leg_start` or `pull_group_start`) and a line in `remote.tune_changes[]`; each reload is a `plan_reload` event (`ok`,
+`file`, `at`, `leg`, `boundary`, `ops` as JSON patch operations with the old value, `ignored`, or `error`) and a line in `remote.plan_reloads[]`.
+Both also leave a note. A refused file is a `tune_change` or `plan_reload` event with `ok: false`.
+
+**`turtle-agent tune-diff <trace.jsonl>`** turns the events of a run into JSON patches (RFC 6902) for the files: `tune_patch` has one operation per
+key whose value at the end of the run is not the one it began with (`add` sets it, `remove` puts the key back to the run's own), `plan_patch` has the
+reloads' operations in order (apply them to the plan file as it was when the run began), `refused` lists the files and requests the run turned
+down. A live fix is then a PR: apply the patches, commit.
+
+*Not verified live:* this was tested against the fake game and the session rig only; a run on the server has not been done with it.
 
 ## Death and the corpse run
 
