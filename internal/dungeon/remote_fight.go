@@ -649,11 +649,51 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	if pick == nil {
 		return false, nil
 	}
-	if _, err := d.order(ctx, "attack", tbm.GUIDArg(pick.GUID)); err != nil {
+	if !d.attackAllowed(*pick) {
+		return false, nil
+	}
+	r, err := d.order(ctx, "attack", tbm.GUIDArg(pick.GUID))
+	if err != nil {
 		return false, err
+	}
+	if _, bad := refusedOf(r); bad {
+		d.tf.sentGUID = 0 // refused: the next look may send it again
+	} else {
+		d.tf.sentGUID, d.tf.sentAt = pick.GUID, d.clk.Now()
 	}
 	d.noteFocus(pick.GUID, cands)
 	return true, nil
+}
+
+// attackAllowed is the cadence of the attack order at one mob. After a pull the bots' own pull is running (the tank is walking to its
+// firing position, the others hold): an attack order for the same mob every second made the tank drop it for "return to pull position"
+// and back (Uldaman group B, tank wipes). So an order goes once per mob, and again only when the mob changed, the last order was refused
+// (sentGUID forgotten), or AssistEvery (at least 5 s) has passed with the tank still not holding the mob; the reason of a repeat is
+// noted. Every wait here is the clock's, so the repeat cannot be pushed out by anything the bots do (rule 3).
+// attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
+const attackHoldYd = 45
+
+func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
+	if d.tf.sentGUID != h.GUID {
+		return true
+	}
+	wait := max(d.cfg.AssistEvery, 5*time.Second)
+	now := d.clk.Now()
+	if now.Sub(d.tf.sentAt) < wait {
+		return false
+	}
+	if holder, ok := d.fr.ThreatHolder(h.GUID); ok && d.fr.IsMember(holder) && (d.tank == 0 || holder == d.tank) {
+		// The tank has it: the order did its work, unless the tank is not at the mob (it follows the commander, or is running back).
+		if m, found := d.memberByGUID(holder); !found || dist3(partyPoint(m), hostilePoint(h)) <= attackHoldYd {
+			return false
+		}
+	}
+	n := 0
+	d.remote(func(r *RemoteReport) { r.AttackResends++; n = r.AttackResends })
+	if n <= 5 {
+		d.rep.note(fmt.Sprintf("leg %d: attack order for %s sent again %.0f s after the first: the tank still does not hold it", d.curLeg, d.hostileName(h), now.Sub(d.tf.sentAt).Seconds()))
+	}
+	return true
 }
 
 // threatAllows is the threat gate of the first attack order at a mob: the party is sent in when the tank holds the mob (the top of

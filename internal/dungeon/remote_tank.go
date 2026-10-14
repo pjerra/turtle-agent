@@ -34,6 +34,8 @@ const (
 type tankFirst struct {
 	looseOff   bool                      // the module answered a loose-add order party-scoped (it ignores the bot name): no more of them
 	focus      packet.GUID               // the mob the party was last sent at
+	sentGUID   packet.GUID               // the mob of the last attack order the module accepted
+	sentAt     time.Time                 // ... and when it went (an order answered with a refusal is forgotten, so that it can go again)
 	heldAt     map[packet.GUID]time.Time // when the tank was first seen holding a mob (the opener delay counts from here)
 	ccHeld     map[packet.GUID]bool      // mobs a cc order was accepted for
 	ccNoted    map[packet.GUID]bool      // crowd-controlled mobs already counted in cc_respected
