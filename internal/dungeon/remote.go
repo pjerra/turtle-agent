@@ -118,6 +118,10 @@ type RemoteOptions struct {
 	MoveLeg    float32       // yards: the longest single `move` (the server takes 150)
 	MoveArrive float32       // yards from the point at which the lead bot has arrived
 	MoveStall  time.Duration // a lead bot that gained no ground in this long gets the move again
+	// CarefulHop is the longest single `move` of a walk inside the dungeon (remote_gather.go): before each hop the party gathers and a
+	// hostile near the hop is pulled. GatherWait bounds the wait for the party to gather (negative: no wait).
+	CarefulHop float32
+	GatherWait time.Duration
 	// LookAhead is how near (yards) the lead bot must be to its current waypoint for the next `cmd move` to go out, so that it never
 	// comes to a stop between waypoints; LookAheadETA does the same by time (distance / the bot's speed). Negative LookAhead turns the
 	// look-ahead off (each waypoint is waited for). MoveGap is the least time between two `cmd move` orders.
@@ -155,7 +159,7 @@ const (
 // DefaultRemoteOptions are the limits of a live run.
 func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
-		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
+		MoveLeg: 120, CarefulHop: 25, GatherWait: 12 * time.Second, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
 		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second, RezWait: 30 * time.Second,
 		EnterVerify: 30 * time.Second, EnterGrace: 8 * time.Second, SummonGap: 6 * time.Second, BindSettle: DefaultBindSettle, TankBusyWait: 10 * time.Second}
 }
@@ -212,6 +216,12 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 	}
 	if o.MoveArrive <= 0 {
 		o.MoveArrive = d.MoveArrive
+	}
+	if o.CarefulHop <= 0 {
+		o.CarefulHop = d.CarefulHop
+	}
+	if o.GatherWait == 0 {
+		o.GatherWait = d.GatherWait
 	}
 	if o.MoveRetries <= 0 {
 		o.MoveRetries = d.MoveRetries
@@ -298,7 +308,14 @@ type RemoteReport struct {
 	Rezzed         int `json:"rezzed"`           // bots that got up during those waits
 	PackLooks      int `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
 	PacksSeenEmpty int `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
-	Unreachable    int `json:"unreachable"`      // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	// The careful walk (remote_gather.go): waits for the party to gather on the lead bot before a pull or a hop, their seconds, the waits
+	// that ran out with a bot still away, and the hostiles near a hop that were pulled before it.
+	Gathers        int     `json:"gathers"`
+	GatherWaitS    float64 `json:"gather_wait_s"`
+	GatherTimeouts int     `json:"gather_timeouts"`
+	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
+	AheadPulls     int     `json:"ahead_pulls"`
+	Unreachable    int     `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -376,15 +393,20 @@ type RemoteDriver struct {
 	enterCmd      bool      // the portal walk ends in `cmd enter` instead of a wait for the trigger
 	enterCmdEnd   time.Time // the ceiling of the cmd enter phase, walk included
 	outside       *uint32   // the map a walk before the entry plans its paths on (nil: the plan's)
-	endsAtBind    int
-	stats0        tbm.ViewStats
-	statsMu       sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
-	prevDead      map[packet.GUID]bool
-	deadSeen      bool
-	revived       map[packet.GUID]int
-	lastRevive    map[packet.GUID]time.Time
-	wipeRecover   int
-	recoveries    int
+	aheadPulling  bool      // a pull of a hostile near a walk's next hop is going on (remote_gather.go)
+	downSaid      bool      // partyDown has stopped the leg for this round of deaths
+	gatherSt      gatherState
+	// aheadPassedLeg: hostiles a pull on the way passed over (no fight, evaded, refused), with the leg it happened in
+	aheadPassedLeg map[packet.GUID]int
+	endsAtBind     int
+	stats0         tbm.ViewStats
+	statsMu        sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
+	prevDead       map[packet.GUID]bool
+	deadSeen       bool
+	revived        map[packet.GUID]int
+	lastRevive     map[packet.GUID]time.Time
+	wipeRecover    int
+	recoveries     int
 
 	tank       packet.GUID
 	engagedAt  map[packet.GUID]time.Time // when a mob was first seen fighting the party
@@ -676,8 +698,15 @@ func objectStepKind(st Step) string {
 func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
 		d.ledgerClearAbsences()
-		d.rep.update(func(r *Report) { r.Wipes++ })
-		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
+		down := errors.Is(err, errPartyDown)
+		d.rep.update(func(r *Report) {
+			if down {
+				r.PartyDowns++
+			} else {
+				r.Wipes++
+			}
+		})
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down})
 		d.rep.note(err.Error())
 		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
 			d.wipeRecover++
@@ -1093,7 +1122,37 @@ func (d *RemoteDriver) check() error {
 	if d.countDeaths() {
 		return fmt.Errorf("%w: the whole party is dead", errWipe)
 	}
+	if n, all := d.partyDown(); n > 0 {
+		return fmt.Errorf("%w: %w: %d of %d bots are dead", errWipe, errPartyDown, n, all)
+	}
 	return nil
+}
+
+// partyDown reports, once, that three bots or more are dead inside the dungeon: the leg stops there as at a wipe (ZF-1: after
+// four deaths the driver walked the lone tank back into the pack and it died too). With RecoverWipe the dead are revived and the step
+// goes on with the whole party; without, the run ends. It is said once until fewer than three are dead, so that what follows the stop
+// (the revive, the end's fight) is not stopped again.
+// errPartyDown marks a wipe that is a stop at three dead bots, not the whole party (Report.PartyDowns, not Wipes).
+var errPartyDown = errors.New("party down")
+
+// partyDownDead is how many dead bots stop the leg (the owner, ZF-1: "on a wipe or 3 dead stop the leg").
+const partyDownDead = 3
+
+func (d *RemoteDriver) partyDown() (dead, all int) {
+	if d.curLeg < 0 || !d.haveFr {
+		return 0, 0
+	}
+	all = len(d.fr.Party)
+	dead = len(d.deadMembers())
+	if dead < partyDownDead {
+		d.downSaid = false
+		return 0, all
+	}
+	if d.downSaid {
+		return 0, all
+	}
+	d.downSaid = true
+	return dead, all
 }
 
 func (d *RemoteDriver) observeInit() {
@@ -1367,9 +1426,16 @@ func moveTimeout(dist float64) time.Duration {
 
 // doWalk sends the lead bot to p and waits for it to get there, in legs of at most MoveLeg yards. The lead bot's position comes
 // from the feed. A pack that aggroes on the way is fought (walkAggro) and the walk goes on; a lead bot that gains no ground in
-// MoveStall is told again; a refused move is tried again with a shorter leg. WalkAttempts bounds the refusals of one walk.
+// MoveStall is told again; a refused move is tried again with a shorter leg. WalkAttempts bounds the refusals of one walk. Inside the
+// dungeon the walk is careful (remote_gather.go): hops of at most CarefulHop yards, the party gathered before each, and a hostile near the
+// next hop pulled before it.
 func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 	return d.walk(ctx, p, false)
+}
+
+// walkArrive is doWalk with its own arrival distance.
+func (d *RemoteDriver) walkArrive(ctx context.Context, p Point, arriveAt float32) error {
+	return d.walkTo(ctx, p, false, arriveAt)
 }
 
 // directMoveOrder is the order a direct step sends: `cmd move x y z direct` (TortoiseBots), a straight-line walk for a gap the navmesh
@@ -1385,7 +1451,13 @@ func errDirectUnsupported(p Point, ref Refusal) error {
 // walk is doWalk, or with direct set a direct step to p: one `cmd move ... direct` (no legs, no planning), repeated when the module
 // answers too-far (a follower is still catching up with the lead bot, whose position the step is checked from for every bot) and
 // waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground and no-los a bot that cannot see it (the step would cut through a wall).
+// A direct step is never split into the careful walk's hops (it bridges a gap the navmesh does not); the party still gathers before it
+// and a hostile near its line is still pulled first.
 func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
+	return d.walkTo(ctx, p, direct, d.opt.MoveArrive)
+}
+
+func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveAt float32) error {
 	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) {
 		if direct {
 			// A plain move would plan the navmesh path again, which is the very thing a direct step goes around.
@@ -1393,7 +1465,7 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 		}
 		return d.wdReplanWalk(ctx, p)
 	})()
-	refusals, stalls, aggros := 0, 0, 0
+	refusals, stalls, aggros, aheads := 0, 0, 0, 0
 	leg := d.opt.MoveLeg
 	var last string
 	var meter walkMeter
@@ -1414,7 +1486,7 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 			}
 			continue
 		}
-		if dist3(here, p) <= float64(d.opt.MoveArrive) {
+		if dist3(here, p) <= float64(arriveAt) {
 			return nil
 		}
 		if d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 {
@@ -1427,10 +1499,30 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 			meter = walkMeter{} // the fight is not a stop of the walk
 			continue
 		}
-		wp := d.waypoint(ctx, here, p, leg)
+		careful := d.careful()
+		hop := leg
+		if careful {
+			hop = min(leg, d.opt.CarefulHop)
+		}
+		wp := d.waypoint(ctx, here, p, hop)
 		args := moveArgs(wp)
 		if direct {
-			wp, args = p, directMoveArgs(p)
+			wp, args = p, directMoveArgs(p) // one step, never hops
+		}
+		if careful {
+			if h, ok := d.hostileAhead(here, wp); ok {
+				if aheads++; aheads > maxAheadPulls {
+					return fmt.Errorf("walk to %.1f %.1f %.1f: %d hostiles near the way were pulled and still more stand there", p.X, p.Y, p.Z, maxAheadPulls)
+				}
+				if err := d.pullAhead(ctx, h); err != nil {
+					return err
+				}
+				meter = walkMeter{}
+				continue
+			}
+			if err := d.gather(ctx, "the next hop"); err != nil {
+				return err
+			}
 		}
 		if err := d.moveGap(ctx); err != nil {
 			return err
@@ -1467,7 +1559,7 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 			}
 			continue
 		}
-		arrive := d.opt.MoveArrive
+		arrive := arriveAt
 		if wp != p {
 			arrive = max(arrive, 8)
 		}
@@ -1806,8 +1898,16 @@ func (d *RemoteDriver) restState(rw *restWatch) remoteRest {
 			low = append(low, fmt.Sprintf("%s health %d%%", m.Name, h))
 		}
 		if rw.gather && haveLead && m.GUID != d.fr.Lead && dist3(partyPoint(m), lead) > float64(d.cfg.GatherRadius) {
-			r.ok = false
-			low = append(low, fmt.Sprintf("%s not near the lead bot", m.Name))
+			if d.gatherIgnored()[m.GUID] {
+				// A gather of this leg gave up on it (it came no closer in a whole wait): the rest gate does not wait 60 s for it either.
+				if !d.gatherSt.restNoted[m.GUID] {
+					d.gatherSt.restNoted[m.GUID] = true
+					d.rep.note(fmt.Sprintf("leg %d: rest gate: %s is not near the lead bot, but the gathers of this leg gave up on it; not waiting for it", d.curLeg, m.Name))
+				}
+			} else {
+				r.ok = false
+				low = append(low, fmt.Sprintf("%s not near the lead bot", m.Name))
+			}
 		}
 		if !m.UsesMana() {
 			continue

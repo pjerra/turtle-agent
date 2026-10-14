@@ -140,8 +140,8 @@ func TestAgentWithAnUnknownLevelIsNoGM(t *testing.T) {
 
 func TestWalkingAgentKeepsOutOfAPack(t *testing.T) {
 	g := newNearGame(t, 0)
-	g.addMob(299, Point{150, 10, 0}) // idle, on the agent's way and near the stand point
-	rep, err := nearRun(t, g, remotePlan(Leg{Name: "a", To: Point{200, 0, 0}}))
+	g.addMob(299, Point{150, 10, 0}) // idle, on the agent's way and near the stand point; the leg skips it (the walk does not pull it)
+	rep, err := nearRun(t, g, remotePlan(Leg{Name: "a", To: Point{200, 0, 0}, Skip: []uint32{299}}))
 	if err != nil || len(g.walks) != 0 || !strings.Contains(notesOf(rep), "the agent stays where it is") {
 		t.Fatalf("%v walks %v\n%s", err, g.walks, notesOf(rep))
 	}

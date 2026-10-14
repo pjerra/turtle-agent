@@ -31,6 +31,8 @@ type prepFake struct {
 	bots       map[string]*prepBot
 	loginDelay time.Duration
 	addReply   string // overrides the answer to `.bot add`
+	// unlisted bots are online but `.bot roster` does not list them (hired bots: the roster lists the account's own bots only)
+	unlisted   map[string]bool
 	events     []string
 	freezeTele bool // teleports change no map
 	// The instance state the core keeps: who has a stale bind, and who is in which group (0: none).
@@ -103,6 +105,9 @@ func (g *prepFake) BotLines(_ context.Context, command string, _ time.Duration, 
 		reply = append(reply, fmt.Sprintf("TBM:ROSTER_BEGIN|%d", len(g.bots)))
 		for _, p := range g.party {
 			b := g.bots[p.Name]
+			if g.unlisted[p.Name] {
+				continue
+			}
 			grouped := 0
 			if g.group[p.Name] != 0 {
 				grouped = 1
@@ -295,6 +300,27 @@ func TestPrepareOnlineAddsOnlyTheMissingBots(t *testing.T) {
 	}
 	if rep.Remote.GMCommands != 1 || len(rep.SetupShortcuts) != 0 {
 		t.Fatalf("online sends no GM line: gm %d setup %v", rep.Remote.GMCommands, rep.SetupShortcuts)
+	}
+}
+
+// ZF-1 (2026-10-14): five hired bots, online, that the roster never lists. `.bot add` answers "already online" for each; they are online
+// on the server's word, not waited for until online_wait_s runs out.
+func TestPrepareOnlineTakesHiredBotsTheRosterDoesNotList(t *testing.T) {
+	g := newPrepFake(t, map[string]string{"Tanky": "online", "Healy": "online", "Magey": "online"})
+	g.unlisted = map[string]bool{"Healy": true, "Magey": true}
+	began := g.now
+	rep, err := g.run(PrepareSpec{Online: true})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if got := rep.Prepare.AlreadyOnline; len(got) != 3 || len(rep.Prepare.Added) != 0 {
+		t.Fatalf("already online %v, added %v", got, rep.Prepare.Added)
+	}
+	if g.count("add ") != 2 || !strings.Contains(strings.Join(rep.Prepare.Warnings, "|"), "taken as online") {
+		t.Fatalf("adds %d, warnings %v", g.count("add "), rep.Prepare.Warnings)
+	}
+	if g.now.Sub(began) >= DefaultOnlineWait {
+		t.Fatalf("the step waited %v for bots the roster never lists", g.now.Sub(began))
 	}
 }
 

@@ -212,8 +212,8 @@ func TestRemoteResendsTheViewBeforeTheFeedIsLost(t *testing.T) {
 // Remote: a plan's wait_for has its own timeout_s and is not a stall: a 500 s wait past fail_s ends by its own timeout.
 func TestRemoteWatchdogDoesNotCountAPlanWait(t *testing.T) {
 	g := newFakeRemote(t)
-	g.addMob(299, Point{25, 0, 0}) // never pulled, never leaves
-	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, Steps: []Step{{WaitFor: &WaitFor{HostilesGone: &HostilesGone{Radius: 40}, TimeoutS: 500}}}})
+	g.addMob(299, Point{25, 0, 0}) // never pulled, never leaves (skipped: the walk does not pull it)
+	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, Skip: []uint32{299}, Steps: []Step{{WaitFor: &WaitFor{HostilesGone: &HostilesGone{Radius: 40}, TimeoutS: 500}}}})
 	rep, err := runRemote(t, g, plan, opts(), nil)
 	if err == nil || strings.Contains(err.Error(), "stalled") || rep.Seconds < 500 || rep.Watchdog.Warnings != 0 {
 		t.Fatalf("%v %.0f s %+v", err, rep.Seconds, rep.Watchdog)

@@ -12,6 +12,7 @@ func walkRun(t *testing.T, o RemoteOptions) (*fakeRemote, Report) {
 	g := newFakeRemote(t)
 	g.speed, g.moveDelay = 6.6, 2*time.Second
 	plan := remotePlan(Leg{Name: "a", To: Point{400, 0, 0}})
+	o.CarefulHop = 1000 // the legs of MoveLeg, not the careful walk's hops (remote_gather_test.go)
 	rep, err := runRemote(t, g, plan, o, func(c *Config) { c.Poll = 500 * time.Millisecond })
 	if err != nil {
 		t.Fatalf("%v\n%v", err, rep.Notes)
@@ -61,7 +62,9 @@ func TestRemoteWalkLookAheadRefusal(t *testing.T) {
 			g.moveErrs = []string{"unreachable"}
 		}
 	}
-	rep, err := runRemote(t, g, plan, opts(), nil)
+	o := opts()
+	o.CarefulHop = 1000 // the legs of MoveLeg, not the careful walk's hops
+	rep, err := runRemote(t, g, plan, o, nil)
 	if err != nil || rep.Remote.OrdersRefused != 1 || g.lead().X < 399 {
 		t.Fatalf("%v %+v at %v", err, rep.Remote, g.lead().X)
 	}

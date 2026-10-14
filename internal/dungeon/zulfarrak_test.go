@@ -290,3 +290,170 @@ func isPullPosition(l Leg, w Point) bool {
 	}
 	return false
 }
+
+// zulfarrakOutsideMmaps finds the navmesh files of map 1 (001.mmap and the Tanaris tiles round the portal).
+func zulfarrakOutsideMmaps() string {
+	home, _ := os.UserHomeDir()
+	for _, d := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "tb-ci", "mmaps-turtle001"), filepath.Join(home, "tortoise-wow-server", "data", "mmaps")} {
+		if d == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(d, "001.mmap")); err != nil {
+			continue
+		}
+		if tiles, _ := filepath.Glob(filepath.Join(d, "001*.mmtile")); len(tiles) > 0 {
+			return d
+		}
+	}
+	return ""
+}
+
+// The portal the lead bot is walked to has navmesh floor under it, as TestUldamanPlanPointsOnMesh asks of every Uldaman point. ZF-1 run 1
+// (2026-10-14): at z 15.1 (the area trigger's centre, 5 yd above the sand) `cmd move` was refused unreachable 8 times; the bots stood at
+// z 9.2-10.5 by the portal, and z 10.0 worked.
+func TestZulfarrakPortalOnMesh(t *testing.T) {
+	dir := zulfarrakOutsideMmaps()
+	if dir == "" {
+		t.Skip("no map 1 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 001.mmap and the Tanaris 001*.mmtile tiles")
+	}
+	p := loadPlan(t, zulfarrakPlan)
+	if p.Portal == nil {
+		t.Fatal("no portal")
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	w := p.Portal
+	n, ok, err := pl.Nearest(w.Map, navmesh.Vec3{w.X, w.Y, w.Z})
+	if errors.Is(err, navmesh.ErrNoEngine) {
+		t.Skip("built without cgo: no navmesh engine")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("the portal %v is not on the map %d navmesh (no walkable polygon within 4 yd)", *w, w.Map)
+	}
+	if dz, dh := math.Abs(float64(n[2]-w.Z)), math.Hypot(float64(n[0]-w.X), float64(n[1]-w.Y)); dz > meshMaxDZ || dh > meshMaxDH {
+		t.Errorf("the portal %v: the nearest navmesh floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off on the ground", *w, n[0], n[1], n[2], dz, dh)
+	}
+}
+
+// Every point of the Zul'Farrak plan has navmesh floor under it (TestUldamanPlanPointsOnMesh's rule), the points of a pack off the mesh
+// (on a ledge, TestZulfarrakOnNavmesh) within 4 yd vertically.
+func TestZulfarrakPlanPointsOnMesh(t *testing.T) {
+	dir := zulfarrakMmaps()
+	if dir == "" {
+		t.Skip("no map 209 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 209.mmap and the 209*.mmtile tiles")
+	}
+	p := loadPlan(t, zulfarrakPlan)
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	checked := 0
+	for i, l := range p.Legs {
+		pts, labels, _ := planPoints(l)
+		for j, w := range pts {
+			where := fmt.Sprintf("legs[%d] (%s) %s %v", i, l.Name, labels[j], w)
+			n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{w.X, w.Y, w.Z})
+			if errors.Is(err, navmesh.ErrNoEngine) {
+				t.Skip("built without cgo: no navmesh engine")
+			}
+			if err != nil {
+				t.Fatalf("%s: %v", where, err)
+			}
+			maxDZ, maxDH := meshMaxDZ, meshMaxDH
+			if isPullPosition(l, w) {
+				maxDZ, maxDH = 4, 2.5
+			}
+			if !ok {
+				t.Errorf("%s is not on the navmesh (no walkable polygon within 4 yd)", where)
+			} else if dz, dh := math.Abs(float64(n[2]-w.Z)), math.Hypot(float64(n[0]-w.X), float64(n[1]-w.Y)); dz > maxDZ || dh > maxDH {
+				t.Errorf("%s: the nearest navmesh floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off on the ground", where, n[0], n[1], n[2], dz, dh)
+			}
+			checked++
+		}
+	}
+	if checked < 25 {
+		t.Fatalf("only %d points checked", checked)
+	}
+	t.Logf("%d plan points on the map 209 navmesh", checked)
+}
+
+// No hostile spawn of the export stands near the route without being in the plan: every mob within routeAggro yd of the navmesh path the
+// lead bot walks (from the entrance through the waypoints of each leg, in order) is a pull group member or a boss of the plan, or is one
+// of the entries the leg skips. ZF-1 (2026-10-14) walked into the pack of spawn rows 38009-38011, 12 yd off the road and in no group.
+func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
+	dir := zulfarrakMmaps()
+	if dir == "" {
+		t.Skip("no map 209 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 209.mmap and the 209*.mmtile tiles")
+	}
+	const routeAggro = 20
+	p := loadPlan(t, zulfarrakPlan)
+	extra := loadPlan(t, zulfarrakExtra)
+	planned := func(entry uint32, at Point) bool {
+		for _, q := range []*Plan{p, extra} {
+			for _, l := range q.Legs {
+				for _, g := range l.PullGroups {
+					for k, pos := range g.Positions {
+						if g.Entries[k] == entry && dist3(pos, at) < 1 {
+							return true
+						}
+					}
+				}
+				if l.Boss != nil && l.Boss.Entry == entry {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	cs := zfTSV(t, "creatures.tsv")
+	from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
+	flagged := map[string]bool{}
+	for i, l := range p.Legs {
+		for _, w := range waypoints(l) {
+			to := [3]float32{w.X, w.Y, w.Z}
+			path, err := pl.Plan(p.Map, from, to)
+			if errors.Is(err, navmesh.ErrNoEngine) {
+				t.Skip("built without cgo: no navmesh engine")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(path.Points) > 0 {
+				e := path.Points[len(path.Points)-1]
+				from = [3]float32{e[0], e[1], e[2]}
+			}
+			for k := 1; k < len(path.Points); k++ {
+				a := Point{path.Points[k-1][0], path.Points[k-1][1], path.Points[k-1][2]}
+				b := Point{path.Points[k][0], path.Points[k][1], path.Points[k][2]}
+				for _, m := range cs {
+					if m["faction"] == "35" {
+						continue // friendly
+					}
+					e64, _ := strconv.ParseUint(m["entry"], 10, 32)
+					x, _ := strconv.ParseFloat(m["x"], 64)
+					y, _ := strconv.ParseFloat(m["y"], 64)
+					z, _ := strconv.ParseFloat(m["z"], 64)
+					at := Point{float32(x), float32(y), float32(z)}
+					entry := uint32(e64)
+					if flagged[m["guid"]] || slicesContains(l.Skip, entry) || distToSegment(at, a, b) > routeAggro || planned(entry, at) {
+						continue
+					}
+					flagged[m["guid"]] = true
+					t.Errorf("legs[%d] (%s): %s %d (spawn row %s) at %.1f %.1f %.1f stands within %d yd of the route and is in no pull group", i, l.Name, m["name"], entry, m["guid"], x, y, z, routeAggro)
+				}
+			}
+		}
+	}
+}
+
+func slicesContains(s []uint32, v uint32) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

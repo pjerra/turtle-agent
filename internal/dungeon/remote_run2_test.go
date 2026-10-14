@@ -289,7 +289,9 @@ func TestRemoteUnreachablePullFailsTheStep(t *testing.T) {
 func TestRemoteUnreachableMovesAreLogged(t *testing.T) {
 	g := newFakeRemote(t)
 	g.moveErrs = []string{"unreachable", "unreachable"}
-	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), opts(), nil)
+	o := opts()
+	o.CarefulHop = 1000 // one leg straight to the point, not the careful walk's hops
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), o, nil)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
