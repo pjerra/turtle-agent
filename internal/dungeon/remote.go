@@ -7,6 +7,7 @@ import (
 	"math"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -395,6 +396,8 @@ type RemoteDriver struct {
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
+	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
+	haveMoveTo bool
 	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
 	kit        restKit   // the bots' drink counts and refills (remote_rest.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
@@ -598,7 +601,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
-			if err = d.tracedWalk(ctx, a.To); err == nil {
+			if err = d.tracedWalkAs(ctx, a.To, a.Direct); err == nil {
 				d.obj.unchecked = ""     // the party walked on: whatever a wait passed unchecked let it through
 				_, err = d.keepNear(ctx) // the leg's walk is over: bring the agent up
 			} else if d.obj.unchecked != "" {
@@ -1218,6 +1221,11 @@ func (d *RemoteDriver) order(ctx context.Context, verb string, args ...string) (
 			}
 		})
 		if r.Kind != tbm.KindErr || r.Err == nil {
+			if verb == "move" && r.Kind == tbm.KindAck {
+				if at, ok := moveArgsPoint(args); ok {
+					d.moveTo, d.haveMoveTo = at, true
+				}
+			}
 			return r, nil
 		}
 		d.recordRefusal(Refusal{Intent: "cmd " + verb, Code: r.Err.Code, Message: r.Err.Message})
@@ -1265,6 +1273,22 @@ func refusedOf(r tbm.Reply) (Refusal, bool) {
 // moveArg formats the coordinates of a `.bot cmd move`.
 func moveArgs(p Point) []string {
 	return []string{tbm.CoordArg(p.X), tbm.CoordArg(p.Y), tbm.CoordArg(p.Z)}
+}
+
+// moveArgsPoint reads the point back out of the arguments of a `cmd move` (moveArgs, with or without the direct flag).
+func moveArgsPoint(args []string) (Point, bool) {
+	if len(args) < 3 {
+		return Point{}, false
+	}
+	var v [3]float32
+	for i := range v {
+		f, err := strconv.ParseFloat(args[i], 32)
+		if err != nil {
+			return Point{}, false
+		}
+		v[i] = float32(f)
+	}
+	return Point{v[0], v[1], v[2]}, true
 }
 
 // waypoint is the point to send the lead bot to on its way from `from` to `to`: `to` itself when within MoveLeg, else a point on
@@ -1345,7 +1369,30 @@ func moveTimeout(dist float64) time.Duration {
 // from the feed. A pack that aggroes on the way is fought (walkAggro) and the walk goes on; a lead bot that gains no ground in
 // MoveStall is told again; a refused move is tried again with a shorter leg. WalkAttempts bounds the refusals of one walk.
 func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
-	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) { return d.wdReplanWalk(ctx, p) })()
+	return d.walk(ctx, p, false)
+}
+
+// directMoveOrder is the order a direct step sends: `cmd move x y z direct` (TortoiseBots), a straight-line walk for a gap the navmesh
+// does not bridge. Short steps only; the module checks the limits and the ground and refuses with too-far or no-ground.
+func directMoveArgs(p Point) []string { return append(moveArgs(p), "direct") }
+
+// errDirectUnsupported is a direct step on a server that does not know the flag: it answers `invalid` (the usage line), as it does to
+// any `cmd move` it cannot read.
+func errDirectUnsupported(p Point, ref Refusal) error {
+	return fmt.Errorf("direct step to %.1f %.1f %.1f: the server refused `cmd move ... direct` (%s: %s); it needs a TortoiseBots with the direct flag (cmd move <x> <y> <z> direct)", p.X, p.Y, p.Z, ref.Code, ref.Message)
+}
+
+// walk is doWalk, or with direct set a direct step to p: one `cmd move ... direct` (no legs, no planning), repeated when the module
+// answers too-far (a follower is still catching up with the lead bot, whose position the step is checked from for every bot) and
+// waited for like a walk. A refusal of `invalid` is a server without the flag; no-ground is the plan's point being off the ground.
+func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
+	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) {
+		if direct {
+			// A plain move would plan the navmesh path again, which is the very thing a direct step goes around.
+			return "a direct step: no plain move sent (the walk sends the step again itself when the lead bot stalls)", nil
+		}
+		return d.wdReplanWalk(ctx, p)
+	})()
 	refusals, stalls, aggros := 0, 0, 0
 	leg := d.opt.MoveLeg
 	var last string
@@ -1381,15 +1428,31 @@ func (d *RemoteDriver) doWalk(ctx context.Context, p Point) error {
 			continue
 		}
 		wp := d.waypoint(ctx, here, p, leg)
+		args := moveArgs(wp)
+		if direct {
+			wp, args = p, directMoveArgs(p)
+		}
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
-		r, err := d.order(ctx, "move", moveArgs(wp)...)
+		r, err := d.order(ctx, "move", args...)
 		if err != nil {
 			return err
 		}
 		if ref, bad := refusedOf(r); bad {
 			last = ref.Code + ": " + ref.Message
+			if direct {
+				if ref.Code == "invalid" {
+					return errDirectUnsupported(p, ref)
+				}
+				if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries || ref.Code == "no-ground" {
+					return fmt.Errorf("direct step to %.1f %.1f %.1f: the lead bot was refused (%s)", p.X, p.Y, p.Z, last)
+				}
+				if err := d.tick(ctx, d.cfg.WalkRetryDelay); err != nil {
+					return err
+				}
+				continue
+			}
 			if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries {
 				return fmt.Errorf("walk to %.1f %.1f %.1f: the lead bot was refused %d times (%s)", p.X, p.Y, p.Z, refusals, last)
 			}

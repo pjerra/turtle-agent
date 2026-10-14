@@ -72,6 +72,7 @@ type Action struct {
 	Label string // for logs: "leg 2 (ironaya): use_object 124371"
 
 	To        Point               // walk target
+	Direct    bool                // walk: a straight-line step (`cmd move ... direct`), not a navmesh path (Waypoint.Direct)
 	Entries   []uint32            // pull: the group's entries
 	Positions []Point             // pull: where its members stand
 	Ambush    bool                // pull: the group is stealthed (PullGroup.Ambush)
@@ -117,7 +118,7 @@ type Stepper struct {
 
 	leg       int
 	ph        phase
-	idx       int        // pull group or step index
+	idx       int        // pull group or step index; in the walk phase, the next via waypoint (len(Via): the leg's To)
 	since     time.Time  // when the current wait started; zero when not waiting
 	stepAt    time.Time  // when the current step was first looked at; zero before
 	stepWalks int        // walks Complete has seen in the current step
@@ -164,6 +165,10 @@ func (s *Stepper) Position() (leg int, phase string, index int) {
 func (s *Stepper) Complete() {
 	switch s.ph {
 	case phWalk:
+		if s.idx < len(s.plan.Legs[s.leg].Via) {
+			s.idx++ // a via waypoint is done; the next one, or To, follows
+			break
+		}
 		s.ph, s.idx = phPulls, 0
 	case phPulls:
 		s.idx++
@@ -234,6 +239,19 @@ func (s *Stepper) next() Action {
 		l := &s.plan.Legs[s.leg]
 		switch s.ph {
 		case phWalk:
+			if s.idx < len(l.Via) {
+				w := l.Via[s.idx]
+				// A direct waypoint is always walked (the party stands short of it by design), unless it stands on it already.
+				if dist3(s.w.Position(), w.Point) <= ArriveRadius {
+					s.idx++
+					continue
+				}
+				kind := "walk"
+				if w.Direct {
+					kind = "direct step"
+				}
+				return Action{Kind: ActWalk, Leg: s.leg, Step: -1, To: w.Point, Direct: w.Direct, Label: s.label("%s to %.1f %.1f %.1f", kind, w.X, w.Y, w.Z)}
+			}
 			if dist3(s.w.Position(), l.To) <= ArriveRadius {
 				s.Complete()
 				continue
@@ -544,6 +562,16 @@ func (s *Stepper) find(r *ObjectRef) (objects.GameObject, bool) {
 		}
 	}
 	return best, found
+}
+
+// hdist is the horizontal distance between two points.
+func hdist(a, b Point) float64 {
+	return math.Hypot(float64(a.X-b.X), float64(a.Y-b.Y))
+}
+
+// DirectStepOK says whether a straight step from a to b is within the limits TortoiseBots allows for `cmd move ... direct`.
+func DirectStepOK(a, b Point) bool {
+	return hdist(a, b) <= DirectMaxDistance && math.Abs(float64(b.Z-a.Z)) <= DirectMaxVertical
 }
 
 func dist3(a, b Point) float64 {

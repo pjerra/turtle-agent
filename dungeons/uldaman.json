@@ -284,6 +284,15 @@
     {
       "name": "sentinel",
       "to": {"x": -155.7, "y": 279.6, "z": -46.8},
+      "via": [
+        {"x": -163.5, "y": 298.7, "z": -52.5},
+        {
+          "x": -155.7,
+          "y": 279.6,
+          "z": -46.8,
+          "direct": true
+        }
+      ],
       "pull_groups": [
         {
           "entries": [7022],
@@ -333,7 +342,7 @@
         "first": [4847, 4847]
       },
       "notes": [
-        "Starts across the one hole of the map 70 navmesh, found by `path_to` and confirmed by the live map walk (MAP.md): the west part (entrance, legs 0-4) ends at the scorpid pit's lip (-163.5 298.7 -52.5), the east part (the rest of the dungeon) begins at -158.4 283.7 -48.9, and between them is a continuous ramp of 15 yd that the mesh does not link (a straight walk over it worked both ways for a GM walker; `walk_path` alone returns partial). The leg's `to` is the east end: the walk goes along the mesh to the lip, and the last hop is a direct move of 16 yd (the driver sends `to` itself when it is within MoveLeg, without planning). The plan has no step for a direct walk and needs none for this. SETTLED by the hires-1 run (2026-10-14, 12:41): the module takes `cmd move -158.4 283.7 -48.9` (acked; the path is partial, not refused) but the bots stop where the mesh ends, on the pit floor at -161.1 284.5 -52.1, 3.4 yd below the ramp's east end and 4.4 yd from it in 3D, which the driver's 5 yd arrival (MoveArrive) counted as arrived; the walk ended ok in 3 s, the Venomlash Scorpid (7022) stood 14 yd away and 6 yd up, and three pullbacks ended no_engage. So the `to` is now a point 10+ yd from every place the mesh lets the west bots reach (the NW corner of the pit at -168.0 279.2 -51.1, or the pit floor at -161.1 284.5): the walk can only end by being on the east side, and a bot that does not cross stalls the walk ('gained no ground') in about a minute instead of fighting for three. The east mesh edge at -166.1 278.1 -48.9 is 1.2 yd (2.2 yd up) from that corner and the polygons between the pit and the east plateau are flagged steep (17), so the corner is the nearest approach for a goal on the plateau; whether bots climb it is open until the next live run. Still MISSING if they do not: a waypoint walked on the straight line from the lip (-163.5 298.7), the way the map walk went, or a mesh patch (a ramp polygon or an off-mesh link) in the map 70 tiles. TestUldamanPlanPointsOnMesh pins the hole: the partial path must end 8+ yd from `to`.",
+        "Starts across the one hole of the map 70 navmesh, found by `path_to` and confirmed by the live map walk (MAP.md): the west part (entrance, legs 0-4) ends at the scorpid pit's lip (-163.5 298.7 -52.5), the east part (the rest of the dungeon) begins at -158.4 283.7 -48.9, and between them is a continuous ramp of 15 yd that the mesh does not link (a straight walk over it worked both ways for a GM walker; `walk_path` alone returns partial). hires-1 (2026-10-14, 12:41) showed that `cmd move` (a server navmesh path) to the east side is acked but the bots stop on the pit floor at -161.1 284.5 -52.1. So the leg crosses with a `via` list: the lip (a plain walk along the mesh), then a direct step to the east plateau at -155.7 279.6 -46.8 (`direct`: the driver sends `cmd move -155.7 279.6 -46.8 direct`, TortoiseBots #942, a straight line for every bot; 20.6 yd across and 5.7 yd up, inside its limits of 25 and 8). A server without the flag fails the leg with that error. Needs the live check: that the bots climb the ramp and the whole party arrives; if the module answers too-far because a follower lags at the lip, the step is sent again. The test TestUldamanDirectSteps pins the step's length and the floor at both ends.",
         "East of the hole: the Venomlash Scorpid (7022, wander 5) at -153 275, the second nest of ten Cleft Scorpids (7078) at -145 to -133 / 258 to 277, which stands 11.7 yd off the route and is pulled all the same because of its size, the Jadespine Basilisk (4863, Crystalline Slumber) at -141 312.5, then the Relic Hunter camp: a Relic Hunter (4847) at -139.4 370.1, and the trio of two Relic Hunters and a Geologist (7030) at -143 to -137 / 386 to 394.",
         "Obsidian Sentinel (7023, level 42, 8255 hp, faction 54, EventAI) stands in a dead-end room at -163.8 388; the Echomok Door (124370, -185.4 389.6) is on its west side, between the room and the Back Entrance corridor, and is not on this route, so there is no door step (the earlier draft of this plan had one). The Sentinel re-casts Spell Reflection (9941, 'Obsidian Reflection') whenever the aura is missing (event type 27), so casters lose a spell now and then; at 80, 60, 40 and 20 % health it summons an Obsidian Shard (10061) and casts Splintered Obsidian (10072). The two Relic Hunters at -160.9 364 and -151.8 368.5 (ledge at z -34, one wanders 6 yd) stand 23-24 yd from it and would join its fight, so boss.first kills them before it."
       ]

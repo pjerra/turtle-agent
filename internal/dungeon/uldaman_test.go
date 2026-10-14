@@ -322,36 +322,49 @@ func mmapsDir() string {
 // waypoints lists the places a leg sends the player to, in the order the driver goes: the leg's To, each pack member
 // (the approach to the pull), the stand points of the steps, the boss.
 func waypoints(l Leg) []Point {
-	pts := []Point{l.To}
+	pts, _ := waypointsDirect(l)
+	return pts
+}
+
+// waypointsDirect is waypoints with a flag per point: true for a direct step (Leg.Via with Direct), which the navmesh does not link to
+// the point before it.
+func waypointsDirect(l Leg) (pts []Point, direct []bool) {
+	add := func(p Point, d bool) { pts, direct = append(pts, p), append(direct, d) }
+	for _, w := range l.Via {
+		add(w.Point, w.Direct)
+	}
+	add(l.To, false)
 	for _, g := range l.PullGroups {
-		pts = append(pts, g.Positions...)
+		for _, gp := range g.Positions {
+			add(gp, false)
+		}
 	}
 	for _, s := range l.Steps {
 		if s.UseObject != nil && s.UseObject.Stand != nil {
-			pts = append(pts, *s.UseObject.Stand)
+			add(*s.UseObject.Stand, false)
 		}
 		if s.Ritual != nil && s.Ritual.Stand != nil {
-			pts = append(pts, *s.Ritual.Stand)
+			add(*s.Ritual.Stand, false)
 		}
 	}
 	if l.Boss != nil {
-		pts = append(pts, l.Boss.Position)
+		add(l.Boss.Position, false)
 	}
 	for _, s := range l.AfterBoss { // the driver walks to a chest's own position unless the step says where to stand
 		if lo := s.LootObject; lo != nil {
 			switch {
 			case lo.Stand != nil:
-				pts = append(pts, *lo.Stand)
+				add(*lo.Stand, false)
 			case lo.Near != nil:
-				pts = append(pts, *lo.Near)
+				add(*lo.Near, false)
 			}
 		}
 	}
-	return pts
+	return pts, direct
 }
 
-// sentinelLeg is the index of the leg whose first waypoint, a point of the east plateau at -155.7 279.6 (the ramp's east end, -158.4 283.7, was too near the pit: see TestUldamanPlanPointsOnMesh), is across the one hole of the map 70
-// navmesh from the west lip at -163.5 298.7 where the leg before it ends (the scorpid pit).
+// sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
+// (where the leg before it ends, the scorpid pit) and a direct step from there to a point of the east plateau at -155.7 279.6.
 const sentinelLeg = 5
 
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
@@ -367,7 +380,8 @@ func TestUldamanOnNavmesh(t *testing.T) {
 	from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
 	checked := 0
 	for i, l := range p.Legs {
-		for j, w := range waypoints(l) {
+		pts, direct := waypointsDirect(l)
+		for j, w := range pts {
 			to := [3]float32{w.X, w.Y, w.Z}
 			path, err := pl.Plan(p.Map, from, to)
 			if errors.Is(err, navmesh.ErrNoEngine) {
@@ -376,17 +390,18 @@ func TestUldamanOnNavmesh(t *testing.T) {
 			if err != nil {
 				t.Fatalf("legs[%d] waypoint %d: %v", i, j, err)
 			}
-			if i == sentinelLeg && j == 0 && path.Status != navmesh.Complete {
-				// The one known hole of the map 70 navmesh (found by path_to, confirmed by the live map walk of 2026-10-14): the west part ends
-				// at the lip of the Cleft Scorpid pit, the east part begins about 4 yd (horizontally; 15 yd along the ramp) from the nearest
-				// reachable point. The walk crosses it with one direct move, which this test cannot check; the waypoints after it are checked
-				// from the leg's own start. A mesh that closes the hole makes this branch dead; delete it then.
-				if len(path.Points) == 0 {
-					t.Fatalf("legs[%d] waypoint 0: partial path with no points", i)
-				}
-				end := path.Points[len(path.Points)-1]
-				if gap := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); gap > 20 {
-					t.Errorf("legs[%d] waypoint 0: the navmesh hole is %.0f yd wide, the plan assumes at most about 16", i, gap)
+			if direct[j] {
+				// A direct step (the scorpid pit's ramp: the one known hole of the map 70 navmesh, found by path_to and confirmed by the live
+				// map walk of 2026-10-14) is the part of the walk the navmesh does not link; the path to it is partial or, with a mesh that
+				// closes the hole, complete. It needs navmesh floor at its end (TestUldamanPlanPointsOnMesh) and is short (TestUldamanDirectSteps).
+				if path.Status != navmesh.Complete {
+					if len(path.Points) == 0 {
+						t.Fatalf("legs[%d] waypoint %d: partial path with no points", i, j)
+					}
+					end := path.Points[len(path.Points)-1]
+					if gap := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); gap > 20 {
+						t.Errorf("legs[%d] waypoint %d: the navmesh hole is %.0f yd wide, the plan assumes at most about 16", i, j, gap)
+					}
 				}
 				from = to
 				checked++
@@ -534,15 +549,19 @@ func TestPlanEntryFields(t *testing.T) {
 const (
 	meshMaxDZ = 3.0
 	meshMaxDH = 1.0
-	// holeArriveMargin is the least 3D distance (yards) between the goal across the hole and the end of the partial path to it: the
-	// driver's MoveArrive (5) plus a margin for the bots' spread.
-	holeArriveMargin = 8.0
 )
 
 // planPoints lists every point of a leg the driver walks to or pulls from, with a label for the failure message: the leg's To, each
 // pull group's member positions (the pullback anchors), the step stand points, the boss and the after-boss stands.
-func planPoints(l Leg) (pts []Point, labels []string) {
-	add := func(label string, p Point) { pts, labels = append(pts, p), append(labels, label) }
+func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
+	add := func(label string, p Point) {
+		pts, labels = append(pts, p), append(labels, label)
+		direct = append(direct, false)
+	}
+	for vi, w := range l.Via {
+		add(fmt.Sprintf("via[%d]", vi), w.Point)
+		direct[len(direct)-1] = w.Direct
+	}
 	add("to", l.To)
 	for gi, g := range l.PullGroups {
 		for pi, p := range g.Positions {
@@ -570,13 +589,12 @@ func planPoints(l Leg) (pts []Point, labels []string) {
 			}
 		}
 	}
-	return pts, labels
+	return pts, labels, direct
 }
 
 // Every point the Uldaman plan walks to or pulls from has navmesh floor under it (within meshMaxDZ yd vertically, meshMaxDH on the
 // ground), and each point is reachable from the one before it with a complete path_to, in the order the driver goes (legs in order, a
-// leg's points as planPoints lists them). The one exception is the known hole at the scorpid pit (see sentinelLeg), whose partial path must end out of arrival
-// range of the goal (the hires-1 run counted the pit floor as arrived). Checked against the hires-1 trace (2026-10-14): the 23 `unreachable` refusals were
+// leg's points as planPoints lists them). The one exception is the direct step across the known hole at the scorpid pit (see sentinelLeg), which the navmesh does not link. Checked against the hires-1 trace (2026-10-14): the 23 `unreachable` refusals were
 // `cmd move` orders to the lead bot's own position after a fight (the server cannot path to where it already stands), not plan points,
 // and all 23 of those spots are on this mesh. Runs where the map 70 mmaps are (see mmapsDir); needs the cgo build.
 func TestUldamanPlanPointsOnMesh(t *testing.T) {
@@ -591,7 +609,7 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 	prevLabel := "entrance"
 	checked := 0
 	for i, l := range p.Legs {
-		pts, labels := planPoints(l)
+		pts, labels, direct := planPoints(l)
 		for j, w := range pts {
 			where := fmt.Sprintf("legs[%d] (%s) %s %v", i, l.Name, labels[j], w)
 			n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{w.X, w.Y, w.Z})
@@ -612,17 +630,12 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 			}
 			switch {
 			case path.Status == navmesh.Complete:
-			case i == sentinelLeg && j == 0:
-				// The hole: the walk from the pit goes partial and ends on the west side. hires-1 (12:41:02): `cmd move` to the old `to`, the
-				// east end of the ramp at -158.4 283.7, was acked and the bots stopped at the end of the partial path, the pit floor at
-				// -161.1 284.5 -52.1, 4.4 yd (3D) from it: inside the driver's 5 yd arrival, so the walk ended "ok" on the wrong side. `to`
-				// must stay out of arrival range of wherever the partial path ends, so that only a bot on the east side arrives.
+			case direct[j]:
+				// The hole: the walk from the pit lip goes partial and ends on the west side (hires-1, 12:41:02: the bots stopped on the pit
+				// floor at -161.1 284.5 -52.1, 4.4 yd from the old goal). The plan crosses it with a direct step (Leg.Via), which the
+				// navmesh does not link to the point before it; the end needs floor (checked above) and the step is short (TestUldamanDirectSteps).
 				if len(path.Points) == 0 {
 					t.Fatalf("%s: partial path with no points", where)
-				}
-				end := path.Points[len(path.Points)-1]
-				if d := math.Sqrt(math.Pow(float64(end[0]-w.X), 2) + math.Pow(float64(end[1]-w.Y), 2) + math.Pow(float64(end[2]-w.Z), 2)); d < holeArriveMargin {
-					t.Errorf("%s: the partial path from %s ends at %v, only %.1f yd from the goal: a bot stopping there would count as arrived (MoveArrive 5); move `to` further into the east part", where, prevLabel, end, d)
 				}
 			default:
 				t.Errorf("%s: path_to from %s %v is %s: %s", where, prevLabel, prev, path.Status, path.Reason)
@@ -635,4 +648,60 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 		t.Fatalf("only %d points checked", checked)
 	}
 	t.Logf("%d plan points on the map 70 navmesh in %s", checked, dir)
+}
+
+// The plan crosses the scorpid pit's navmesh hole with one direct step (`cmd move ... direct`), and a direct step is short: within the
+// limits TortoiseBots enforces (25 yd across, 8 up or down) of the via point before it, which is where the party gathers. Without the
+// navmesh files only the lengths are checked; with them, both ends have navmesh floor (the server's own check is the map height within
+// 3 yd, which the mesh floor stands in for here). The east end is also the leg's `to`, so the walk to `to` after the step is no walk.
+func TestUldamanDirectSteps(t *testing.T) {
+	p := loadUldaman(t)
+	var pl *navmesh.Planner
+	if dir := mmapsDir(); dir != "" {
+		pl = navmesh.NewPlanner(dir)
+		defer pl.Close()
+	}
+	found := 0
+	for i, l := range p.Legs {
+		for j, w := range l.Via {
+			if !w.Direct {
+				continue
+			}
+			found++
+			if i != sentinelLeg {
+				t.Errorf("legs[%d] (%s) via[%d]: only the scorpid pit's ramp needs a direct step", i, l.Name, j)
+			}
+			if j == 0 {
+				t.Fatalf("legs[%d] via[0] is direct: no via point before it", i)
+			}
+			from := l.Via[j-1].Point
+			if !DirectStepOK(from, w.Point) {
+				t.Errorf("legs[%d] via[%d]: %.1f yd across and %.1f up or down from %v: over the limits %g and %g", i, j, hdist(from, w.Point), math.Abs(float64(w.Z-from.Z)), from, DirectMaxDistance, DirectMaxVertical)
+			}
+			if j != len(l.Via)-1 || w.Point != l.To {
+				t.Errorf("legs[%d] via[%d]: the direct step should be the last via point and end on the leg's `to`", i, j)
+			}
+			if pl == nil {
+				continue
+			}
+			for label, at := range map[string]Point{"start": from, "end": w.Point} {
+				n, ok, err := pl.Nearest(p.Map, navmesh.Vec3{at.X, at.Y, at.Z})
+				if errors.Is(err, navmesh.ErrNoEngine) {
+					t.Skip("built without cgo: no navmesh engine")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if dz := math.Abs(float64(n[2] - at.Z)); !ok || dz > DirectGroundTolerance || math.Hypot(float64(n[0]-at.X), float64(n[1]-at.Y)) > meshMaxDH {
+					t.Errorf("legs[%d] via[%d] %s %v: no navmesh floor under it (nearest %v, found %v)", i, j, label, at, n, ok)
+				}
+			}
+		}
+	}
+	if found != 1 {
+		t.Fatalf("the plan has %d direct steps, want the one across the scorpid pit's hole", found)
+	}
+	if p.Legs[sentinelLeg].Name != "sentinel" {
+		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
+	}
 }

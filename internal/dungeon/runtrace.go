@@ -428,9 +428,18 @@ func (d *RemoteDriver) traceOrder(verb, cmd string, r tbm.Reply, ms int64) {
 }
 
 func (d *RemoteDriver) tracedWalk(ctx context.Context, p Point) error {
+	return d.tracedWalkAs(ctx, p, false)
+}
+
+// tracedWalkAs is tracedWalk, as a direct step (straight line, `cmd move ... direct`) when direct is set.
+func (d *RemoteDriver) tracedWalkAs(ctx context.Context, p Point, direct bool) error {
 	began := d.clk.Now()
-	d.tr.Event("walk_start", map[string]any{"leg": d.curLeg, "x": p.X, "y": p.Y, "z": p.Z})
-	err := d.doWalk(ctx, p)
+	start := map[string]any{"leg": d.curLeg, "x": p.X, "y": p.Y, "z": p.Z}
+	if direct {
+		start["direct"] = true
+	}
+	d.tr.Event("walk_start", start)
+	err := d.walk(ctx, p, direct)
 	end := map[string]any{"leg": d.curLeg, "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds()}
 	if err != nil {
 		end["error"] = err.Error()

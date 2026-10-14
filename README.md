@@ -559,7 +559,12 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   [hired party](#hired-party-prepare-party-hire) takes the middle of it as its level and accepts no other level than the band's.
 - `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
   the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
-- A **leg** is done in this order: walk to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
+- `via` (optional, per leg) lists waypoints walked in order before `to`: `{"x":..,"y":..,"z":..}` is a plain walk on the navmesh; with `"direct": true` the step is a straight line, for a gap the
+  navmesh does not bridge (Uldaman's scorpid-pit ramp). The remote driver sends it as `.bot cmd move x y z direct` (TortoiseBots #942: every bot walks the line; each must be within 25 yd
+  across and 8 yd up or down of the point, and the point needs ground within 3 yd of its height). The loader refuses a direct step without a via point before it (where the party gathers) or longer than
+  those limits. If the module answers `too-far` (a follower still catching up) the step is sent again; `no-ground` fails the leg; `invalid` means a server without the flag and fails the leg with
+  that error (nothing is sent in its place). The agent's own companions walk a direct waypoint as a plain one.
+- A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
   [Dungeon runs](#dungeon-runs); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
   a member of the group, for packs of one entry that stand closer together than that); run `steps` in order; walk to `boss.position` and kill the
@@ -698,9 +703,11 @@ the file hold the mechanics read from the data (EventAI rows, the Keepers' and A
 - **The navmesh has one hole**, at the Cleft Scorpid pit: the west part ends at -163.5 298.7 -52.5 and the east part begins at -158.4 283.7 -48.9, a continuous ramp of 15 yd
   that the mesh does not link (a straight walk worked both ways in the live map walk). **hires-1 (2026-10-14) settled it: `cmd move` across the hole is acked but the bots stop where the
   mesh ends, on the pit floor at -161.1 284.5 -52.1**, which the 5 yd arrival counted as arrived for the old `to` (the ramp's east end) and the leg then fought 3 minutes without an engage.
-  Leg 5's `to` is now on the east plateau at -155.7 279.6 -46.8, out of arrival range of every place the west bots can reach, so a bot that does not cross stalls the walk. The crossing
-  itself still needs a way: a waypoint walked on the straight line from the lip (the plan format has none) or a patch of the map 70 mesh. `TestUldamanPlanPointsOnMesh` checks every plan point and
-  pullback anchor for navmesh floor (1 yd on the ground, 3 yd vertically) and a complete path from the one before, and pins the hole.
+  Leg 5's `to` is on the east plateau at -155.7 279.6 -46.8, out of arrival range of every place the west bots can reach. The crossing is a **direct step** (`via`, below): the leg's
+  `via` list walks to the lip (-163.5 298.7 -52.5) on the mesh and then steps straight to the plateau with `cmd move -155.7 279.6 -46.8 direct` (TortoiseBots #942), 20.6 yd across and 5.7 yd up.
+  **Not yet seen live**: that the bots climb the ramp and the whole party arrives. `TestUldamanPlanPointsOnMesh` checks every plan point and pullback anchor for navmesh floor (1 yd on the
+  ground, 3 yd vertically) and a complete path from the one before (a direct step is exempt: the mesh does not link it), and `TestUldamanDirectSteps` pins that the one direct step is short and has
+  navmesh floor at both ends.
 - `walk_path` goes through closed doors, so a door step comes before the walk through it (legs 9 and 13). The Echomok Door (124370) is not on the route.
 
 ## Dungeon runs
@@ -1563,7 +1570,7 @@ slot, pets in the agent's view while the hires stand around it, and whether a ke
 answer`, ...), `ended_by_module`, `gm_commands`, `run_gm_assists`, `agent_walks`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
 (since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
 in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `tank_busy_waits`, `cc_orders`,
-`revives`, `rez_waits`, `rezzed`, `pack_looks`, `packs_seen_empty`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
+`revives`, `rez_waits`, `rezzed`, `pack_looks`, `packs_seen_empty`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`), `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`, `team`, `enter`, `preflight`, `end_stay`, `end_fight`, `unreachable`, `logged_out`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`), unless it stands within 3 yd of the point of its last `cmd move` (its stay spot is already here, and the server cannot path to where a bot stands: it was refused `unreachable` about 23 times in a Uldaman run): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
 `remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
 
 **Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not; `healer` names the bot that gets the healer mana target),

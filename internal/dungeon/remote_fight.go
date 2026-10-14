@@ -933,13 +933,23 @@ func (d *RemoteDriver) sneakPast(ctx context.Context, label string, sp fightSpec
 	return nil
 }
 
+// holdSpotYd is how near the lead bot must stand to the point of its last move for holdHere to find its stay spot already here.
+const holdSpotYd = 3.0
+
 // holdHere makes the lead bot's "stay" spot the place it stands, once a fight is over (see afterFight). `cmd move` sets that spot to its point
 // (BotCommands.cpp, CommanderMove), and after a fight the bot's "return to stay position" walks it back to the last point it was sent
 // to: the party would run back, rest there, and run forward again. A move to its own position costs nothing and ends that. A refusal
 // (the module may not take a move to where the bot already stands) is counted by order() and otherwise ignored.
+//
+// A lead bot that stands within holdSpotYd of the point of its last move already has its stay spot here (the module's return trigger
+// fires only beyond the follow range), and a move to where a bot stands is one the server cannot path (`unreachable`: about 23
+// refusals in a Uldaman run, hires-1 2026-10-14): none is sent then. (A run that has sent no move yet still sends it.)
 func (d *RemoteDriver) holdHere(ctx context.Context) {
 	here, ok := d.leadPos()
 	if !ok || d.stale() {
+		return
+	}
+	if d.haveMoveTo && dist3(here, d.moveTo) <= holdSpotYd {
 		return
 	}
 	if d.moveGap(ctx) != nil {

@@ -72,6 +72,8 @@ type fakeRemote struct {
 
 	ignoreMoves int                 // the next n moves do nothing (the bot is stuck)
 	moveErrs    []string            // codes the next moves are refused with
+	directErrs  []string            // codes the next direct moves (`cmd move x y z direct`) are refused with
+	noDirect    bool                // the module does not know the direct flag: a move with it is refused as invalid
 	cmdErr      map[string][]string // verb -> codes the next such orders are refused with
 	holdDelay   time.Duration       // the mob goes on the tank this long after the pull; negative: the mage keeps it
 	engageDelay time.Duration
@@ -393,6 +395,18 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		g.bound = false
 		return ack(intent), nil
 	case "cmd move":
+		if len(f) > 5 && f[5] == "direct" {
+			if g.noDirect {
+				return errReply(intent, "invalid"), nil
+			}
+			if len(g.directErrs) > 0 {
+				c := g.directErrs[0]
+				g.directErrs = g.directErrs[1:]
+				return errReply(intent, c), nil
+			}
+		} else if len(f) != 5 {
+			return errReply(intent, "invalid"), nil
+		}
 		if len(g.moveErrs) > 0 {
 			c := g.moveErrs[0]
 			g.moveErrs = g.moveErrs[1:]
