@@ -20,6 +20,8 @@ type Report struct {
 	Current string     `json:"current,omitempty"` // the action in progress
 	Error   string     `json:"error,omitempty"`
 	Wipes   int        `json:"wipes"`
+	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead (counted apart from Wipes).
+	PartyDowns int `json:"party_downs,omitempty"`
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`

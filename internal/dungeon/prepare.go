@@ -399,6 +399,9 @@ func (e *prepEnv) online(ctx context.Context) (string, error) {
 			todo = append(todo, n)
 		}
 	}
+	// A bot the server says is online but the roster does not list (a hired bot: `.bot roster` lists the account's own bots only, ZF-1
+	// 2026-10-14) is taken as online on the server's word; waiting for the roster would wait for nothing.
+	serverOnline := map[string]bool{}
 	for _, n := range todo {
 		var verdict string
 		_, settled, err := e.g.BotLines(ctx, "add "+n, prepareRosterWait, func(line string) bool {
@@ -416,6 +419,12 @@ func (e *prepEnv) online(ctx context.Context) (string, error) {
 		case strings.HasPrefix(verdict, "refused"):
 			return "", fmt.Errorf(".bot add %s %s (the agent must own the character or be a GM)", n, verdict)
 		case verdict == "already online":
+			if _, listed := e.rowOf(n); !listed {
+				serverOnline[n] = true
+				e.rep.AlreadyOnline = append(e.rep.AlreadyOnline, n)
+				e.rep.Warnings = append(e.rep.Warnings, ".bot add "+n+": the server says it is already online and the roster does not list it (a hired bot, or one of another owner): taken as online")
+				continue
+			}
 			e.rep.Warnings = append(e.rep.Warnings, ".bot add "+n+": the server says it is already online; waiting for the roster to show it")
 		}
 		e.rep.Added = append(e.rep.Added, n)
@@ -427,7 +436,7 @@ func (e *prepEnv) online(ctx context.Context) (string, error) {
 		}
 		var pending []string
 		for _, n := range e.bots {
-			if st := e.stateOf(n); st != "online" {
+			if st := e.stateOf(n); st != "online" && !serverOnline[n] {
 				pending = append(pending, n+" ("+st+")")
 			}
 		}

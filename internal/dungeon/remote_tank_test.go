@@ -16,6 +16,7 @@ func aggroFight(t *testing.T, mod func(g *fakeRemote, a, b *rmob), o RemoteOptio
 	g := newFakeRemote(t)
 	a := g.addMob(299, Point{130, 0, 0})
 	b := g.addMob(300, Point{130, 40, 0})
+	g.sight = 20 // out of the bots' sight until they aggro: a walk's pull of them ahead (remote_gather.go) would get in first
 	mod(g, a, b)
 	inner := g.onTick
 	g.onTick = func(g *fakeRemote) {

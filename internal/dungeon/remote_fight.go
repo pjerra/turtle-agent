@@ -200,6 +200,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		if sp.sneak && t.Stealthed() {
 			return d.sneakPast(ctx, label, sp)
 		}
+		// The party gathers on the lead bot before the pull (remote_gather.go): a bot left behind is not the one the pack finds first.
+		if err := d.gather(ctx, "the pull of "+d.hostileName(t)); err != nil {
+			return err
+		}
 		d.legStat(func(l *LegReport) {
 			l.Pulls++
 			if attempt > 1 {
@@ -325,6 +329,11 @@ func (d *RemoteDriver) pickTarget(ctx context.Context, sp fightSpec) (tbm.Hostil
 
 // approach walks the lead bot to a point standoff yards short of p along the navmesh path (the straight line without a planner).
 func (d *RemoteDriver) approach(ctx context.Context, p Point, standoff float32) error {
+	return d.approachArrive(ctx, p, standoff, d.opt.MoveArrive)
+}
+
+// approachArrive is approach with its own arrival distance.
+func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, arrive float32) error {
 	here, ok := d.leadPos()
 	if !ok {
 		return nil
@@ -346,10 +355,10 @@ func (d *RemoteDriver) approach(ctx context.Context, p Point, standoff float32) 
 		}
 		stand = lerp(here, p, (dist-float64(standoff))/dist)
 	}
-	if dist3(here, stand) <= float64(d.opt.MoveArrive) {
+	if dist3(here, stand) <= float64(arrive) {
 		return nil
 	}
-	return d.doWalk(ctx, stand)
+	return d.walkArrive(ctx, stand, arrive)
 }
 
 // ccFor puts the CC marks on the hostiles around the target that a rule names, before the pull.

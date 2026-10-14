@@ -9,7 +9,7 @@
     "map": 1,
     "x": -6773.49,
     "y": -2889.77,
-    "z": 15.1
+    "z": 10
   },
   "level_band": [44, 48],
   "notes": [
@@ -44,6 +44,15 @@
           "radius": 15
         },
         {
+          "entries": [5649, 5648, 5650],
+          "positions": [
+            {"x": 1319.6, "y": 836.9, "z": 9},
+            {"x": 1325.7, "y": 843.4, "z": 11.8},
+            {"x": 1327.7, "y": 838.2, "z": 9.2}
+          ],
+          "radius": 15
+        },
+        {
           "entries": [5649, 5649],
           "positions": [
             {"x": 1357.3, "y": 817.2, "z": 9},
@@ -57,7 +66,7 @@
             {"x": 1405, "y": 813.1, "z": 8.9},
             {"x": 1408, "y": 813, "z": 8.9}
           ],
-          "radius": 30
+          "radius": 60
         },
         {
           "entries": [5648, 5648, 5648],
@@ -122,10 +131,25 @@
           "radius": 15
         },
         {
-          "entries": [5649, 5648],
+          "entries": [5649, 5648, 5649],
           "positions": [
             {"x": 1680.8, "y": 871.5, "z": 9},
-            {"x": 1688.4, "y": 868.6, "z": 9}
+            {"x": 1688.4, "y": 868.6, "z": 9},
+            {"x": 1685.9, "y": 888.8, "z": 9}
+          ],
+          "radius": 20
+        },
+        {
+          "entries": [5649],
+          "positions": [
+            {"x": 1713.7, "y": 784.1, "z": 17.3}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [5650],
+          "positions": [
+            {"x": 1776.9, "y": 813.7, "z": 23.2}
           ],
           "radius": 15
         },
@@ -159,7 +183,8 @@
         "position": {"x": 1815.8, "y": 670.4, "z": 15}
       },
       "notes": [
-        "Fifteen pull groups on the road (patrolling ones with a 30 yd radius) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50."
+        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
+        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own."
       ]
     },
     {
@@ -199,6 +224,16 @@
           "radius": 15
         },
         {
+          "entries": [7246, 5648, 5648, 5649],
+          "positions": [
+            {"x": 1662.3, "y": 929.7, "z": 9.1},
+            {"x": 1661.9, "y": 938.5, "z": 9.2},
+            {"x": 1660.8, "y": 937.6, "z": 9.2},
+            {"x": 1656.8, "y": 943, "z": 9.1}
+          ],
+          "radius": 15
+        },
+        {
           "entries": [5648, 7247],
           "positions": [
             {"x": 1642.1, "y": 902.1, "z": 9.5},
@@ -214,6 +249,13 @@
             {"x": 1608.5, "y": 978.9, "z": 9}
           ],
           "radius": 15
+        },
+        {
+          "entries": [5648],
+          "positions": [
+            {"x": 1589.4, "y": 985.4, "z": 9.2}
+          ],
+          "radius": 30
         },
         {
           "entries": [5649],
@@ -269,10 +311,11 @@
           "radius": 30
         },
         {
-          "entries": [5649, 5649],
+          "entries": [5649, 5649, 5649],
           "positions": [
             {"x": 1648.2, "y": 1152.3, "z": 9},
-            {"x": 1667.3, "y": 1151.9, "z": 9}
+            {"x": 1667.3, "y": 1151.9, "z": 9},
+            {"x": 1632.5, "y": 1166.8, "z": 9.1}
           ],
           "radius": 30
         },
@@ -301,7 +344,8 @@
         "position": {"x": 1650.4, "y": 1161.4, "z": 9.9}
       },
       "notes": [
-        "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) must not be used (no Mallet); Gahz'rilla's pit is at 1664.7 1187.7 -2.9, off the navmesh."
+        "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) must not be used (no Mallet); Gahz'rilla's pit is at 1664.7 1187.7 -2.9, off the navmesh.",
+        "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152)."
       ]
     }
   ]

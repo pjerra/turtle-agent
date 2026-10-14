@@ -42,6 +42,8 @@ type rmob struct {
 	tankPct  int
 	// inert: a pull at it is acknowledged and does nothing (the mob never comes: no fight)
 	inert bool
+	// aggroed: it came at the party because a bot walked within the fake's aggro range of it (not by a pull)
+	aggroed bool
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -95,6 +97,10 @@ type fakeRemote struct {
 	// it back to the mob, as the module does; nil: `cmd follow` moves nobody.
 	followTo *Point
 	followAt time.Time
+	// the careful-walk tests (remote_gather_test.go): a bot in lagUntil stays where it stands, out of the formation, until that time; aggro
+	// > 0 makes a mob that is not fighting yet come at the party when a living bot gets within that many yards of it (a walk into it).
+	lagUntil map[packet.GUID]time.Time
+	aggro    float64
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -180,7 +186,23 @@ func (g *fakeRemote) advance(d time.Duration) {
 		}
 	}
 	for _, p := range g.party[1:] {
+		if until, ok := g.lagUntil[p.GUID]; ok && g.now.Before(until) {
+			continue
+		}
 		p.X, p.Y, p.Z = g.lead().X, g.lead().Y, g.lead().Z
+	}
+	if g.aggro > 0 {
+		for _, m := range g.mobs {
+			if m.pulled || m.engaged {
+				continue
+			}
+			for _, p := range g.party {
+				if dx, dy := float64(m.pos.X-p.X), float64(m.pos.Y-p.Y); !p.Dead && sqrt(dx*dx+dy*dy) <= g.aggro {
+					m.pulled, m.pullAt, m.aggroed = true, g.now.Add(-g.engageDelay), true
+					break
+				}
+			}
+		}
 	}
 	// the fight
 	live := g.mobs[:0]
@@ -641,7 +663,9 @@ func TestRemoteWalkReissuesAStalledMove(t *testing.T) {
 	g := newFakeRemote(t)
 	g.ignoreMoves = 1 // the first move does nothing
 	plan := remotePlan(Leg{Name: "a", To: Point{60, 0, 0}})
-	rep, err := runRemote(t, g, plan, opts(), nil)
+	o := opts()
+	o.CarefulHop = 1000 // one leg straight to the point, not the careful walk's hops
+	rep, err := runRemote(t, g, plan, o, nil)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
