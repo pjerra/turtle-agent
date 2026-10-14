@@ -909,11 +909,19 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
    `online_wait_s`, the bind finds the party. Read the reply text of `.bot add` once: the step matches `queued for login`, `already online`, `not found`,
    `may only control`, `owned by another`, `Failed to add`.
 3. `fresh` with the bots **inside** the old instance: the five teleports to `uldaman` (map 0) land them at the outside entrance, `Sees` finds them
-   from the agent within 25 s, and the instance is a new one (groups 1-10 alive again, not "seen empty"). The test account is level 3, so the step sends
-   `.instance groupunbind all` with the lead bot selected: look for `prepare.group_unbound` = the lead bot (the reply `Group unbound. Disbanding.` was
-   seen) and the bots in no group afterwards. Read the bind afterwards if you can: `.instance unbind` of a bot's own binds is not reached below level 4,
-   so a bot that was in no group keeps its own bind (`prepare.not_grouped`, with a warning). At level 4 the per-bot `.instance unbind all` is sent instead
-   (`prepare.unbound`, its reply goes to the bot: not confirmed).
+   from the agent within 25 s, and the instance is a new one (groups 1-10 alive again, not "seen empty"). The test account is level 3, so the step
+   binds the bots, sends `.instance groupunbind all` with the lead bot selected, and binds again: look for the three `commander bind` /
+   `.instance groupunbind all` / `commander bind` lines in that order, `prepare.group_unbound` = the lead bot (the reply `Group unbound.
+   Disbanding.` was seen), no `prepare.not_grouped`, no warning, and the notes `commander bind ...: Lcwarra with 4 bots, exactly as named`.
+   **Run 6b showed the old step failing here:** the reply to the group unbind read `Glacienne is not in a group.` (the agent's name, not
+   Lcwarra's): the selection packet had not been handled when the chat line ran. The step now waits 0.4 s after the selection; read the reply once
+   to see it names the lead bot. Also check, with `.instance bind list` as a developer on a bot, that its binds are gone. At level 4 the per-bot
+   `.instance unbind all` is sent instead (`prepare.unbound`, its reply goes to the bot: not confirmed).
+3b. The whole party enters (run 6b: the run failed 30 s after the entry with `Lchunter (not in the feed) not on map 70`): after the bind the
+   notes say `bound party checked: Lcwarra with 4 bots, as named`. To see the repair, take one bot out of the group between the prepare and the
+   bind (`.bot command Lchunter leave`): the notes say `Lchunter not in commander status's listing`, a `commander unbind` + `commander bind` follow,
+   and the run enters with five. A refused bot (set one `hired`) fails the run before the tele with the module's code in the message. A bot that
+   does not arrive 30 s after the entry is summoned once more (`remote.enter.resummoned`).
 4. `fresh` with the hourly ledger full (5 entries): the run fails at the start with `the account entered 5 new instances`, nothing teleported.
 5. A player (non-GM) account with `fresh`: the run fails with `fresh needs a GM account`-style text before anything is sent.
 6. `gm_setup`: `setup_shortcuts` has `gm visible off` once, and the keep-near `.appear` assists still work (they read it).

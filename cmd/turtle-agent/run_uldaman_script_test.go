@@ -66,3 +66,19 @@ func TestGroupUnbindReply(t *testing.T) {
 		}
 	}
 }
+
+// The player a "not in a group" reply names tells whether the selection landed: run 6b answered "Glacienne is not in a group" for a
+// selected Lcwarra, because the core had run the line before the selection packet.
+func TestGroupUnbindSubject(t *testing.T) {
+	for text, want := range map[string]string{
+		"|cffffffff|Hplayer:Glacienne|h[Glacienne]|h|r is not in a group.": "Glacienne",
+		"|Hplayer:Lcwarra|h[Lcwarra]|h is not in a group.":                 "Lcwarra",
+		"Lcwarra is not in a group.":                                       "Lcwarra",
+		"Group unbound. Disbanding.":                                       "",
+		"":                                                                 "",
+	} {
+		if got := groupUnbindSubject(text); got != want {
+			t.Errorf("%q: %q, want %q", text, got, want)
+		}
+	}
+}

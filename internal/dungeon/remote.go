@@ -104,6 +104,8 @@ type RemoteOptions struct {
 	EnterVerify time.Duration // after the entry every bot must be on the plan's map within this
 	EnterGrace  time.Duration // the followers' time to come in after the lead bot on a walk, before they are summoned
 	SummonGap   time.Duration // between two `cmd summon` orders
+	// BindSettle is how long a bind is given before the bound party is read back and compared with the named one (remote_party.go).
+	BindSettle time.Duration
 	// TankBusyWait is how long a pull the module refused as tank-busy (the only tank is in combat) waits for the tank to be free or the
 	// mob to be engaged, before the pull is sent again.
 	TankBusyWait time.Duration
@@ -153,7 +155,7 @@ func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
 		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
 		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second, RezWait: 30 * time.Second,
-		EnterVerify: 30 * time.Second, EnterGrace: 8 * time.Second, SummonGap: 6 * time.Second, TankBusyWait: 10 * time.Second}
+		EnterVerify: 30 * time.Second, EnterGrace: 8 * time.Second, SummonGap: 6 * time.Second, BindSettle: DefaultBindSettle, TankBusyWait: 10 * time.Second}
 }
 
 func (o RemoteOptions) withDefaults() RemoteOptions {
@@ -196,6 +198,7 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 	fill(&o.EnterVerify, d.EnterVerify)
 	fill(&o.EnterGrace, d.EnterGrace)
 	fill(&o.SummonGap, d.SummonGap)
+	fill(&o.BindSettle, d.BindSettle)
 	fill(&o.TankBusyWait, d.TankBusyWait)
 	fill(&o.LookAheadETA, d.LookAheadETA)
 	fill(&o.MoveGap, d.MoveGap)
@@ -791,8 +794,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	d.g.ResetView()
 	d.setStats0(d.g.ViewStats())
 	d.endsAtBind = len(d.g.BindingEnds())
-	args := append([]string{"commander", "bind", d.opt.Lead}, d.opt.Bots...)
-	r, err := d.g.Command(ctx, strings.Join(args, " "))
+	r, err := d.g.Command(ctx, bindCommand(d.opt.Lead, d.opt.Bots))
 	if err != nil {
 		return fmt.Errorf("commander bind: %w", err)
 	}
@@ -837,6 +839,10 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("the first frame does not list the lead bot %s (lead guid %s)", d.opt.Lead, d.fr.Lead)
 	}
 	if d.opt.Enter != EnterOff && d.needsEntry() {
+		// Nothing goes in before the whole named party is in the bound group: a bot left out is invited again, or the run fails here.
+		if err := d.ensureWholeParty(ctx); err != nil {
+			return err
+		}
 		if err := d.enter(ctx); err != nil {
 			return err
 		}

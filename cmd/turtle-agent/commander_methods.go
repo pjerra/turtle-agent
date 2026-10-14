@@ -309,27 +309,65 @@ func (g remoteGame) GMVisible(ctx context.Context, on bool) error {
 	return g.c.cur().GM(ctx, ".gm visible off")
 }
 
+// gmSelectSettle is how long a selection is given to land before the GM line that acts on it goes out. The core queues the two
+// packets apart (WorldSession::QueuePacket: CMSG_SET_SELECTION is PACKET_PROCESS_SPELLS, handled on the map thread, and a GM's chat line
+// is PACKET_PROCESS_WORLD): sent back to back, the line can run first, on the selection the player had before (none: itself). Run 6b
+// showed it: `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra.
+var gmSelectSettle = 400 * time.Millisecond
+
+// selectThenGM selects the unit, waits settle, and sends the GM line with the selection repeated in the same session step (GMOn).
+func (g remoteGame) selectThenGM(ctx context.Context, guid packet.GUID, line string, settle time.Duration) error {
+	if _, err := g.c.cur().Target(ctx, guid, ""); err != nil {
+		return err
+	}
+	if settle > 0 {
+		t := time.NewTimer(settle)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return g.c.cur().GMOn(ctx, guid, line)
+}
+
 // UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
 // runs it on the selected player (from account level 4; below it on the sender), so the target is chosen by GUID and never left to
-// whatever the agent had selected.
+// whatever the agent had selected. The selection is given gmSelectSettle to land first.
 func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet.GUID) error {
 	if !botName.MatchString(who) || guid == 0 {
 		return fmt.Errorf("instance unbind: %q (%v) is not a character name and a GUID", who, guid)
 	}
-	return g.c.cur().GMOn(ctx, guid, ".instance unbind all")
+	return g.selectThenGM(ctx, guid, ".instance unbind all", gmSelectSettle)
 }
 
-// GroupUnbind selects the player with the GUID and sends ".instance groupunbind all" as one operation (GMOn), then reads the reply the
-// sender gets: "Group unbound. Disbanding." or "<name> is not in a group." (Commands.cpp, HandleInstanceGroupUnbindCommand).
-func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUID) (dungeon.GroupUnbindResult, error) {
+// GroupUnbind selects the player with the GUID, waits settle for the selection to land, and sends ".instance groupunbind all" as one
+// operation (GMOn), then reads the reply the sender gets: "Group unbound. Disbanding." or "<name> is not in a group."
+// (Commands.cpp, HandleInstanceGroupUnbindCommand). A "not in a group" that names somebody else than who means the selection did not land
+// (the core ran the line on the sender): the answer is GroupWrongTarget, and the caller decides whether to send the line again.
+func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUID, settle time.Duration) (dungeon.GroupUnbindResult, error) {
 	if !botName.MatchString(who) || guid == 0 {
 		return "", fmt.Errorf("instance groupunbind: %q (%v) is not a character name and a GUID", who, guid)
 	}
 	log := g.c.cur().Log()
 	since := log.Last()
-	if err := g.c.cur().GMOn(ctx, guid, ".instance groupunbind all"); err != nil {
+	if err := g.selectThenGM(ctx, guid, ".instance groupunbind all", settle); err != nil {
 		return "", err
 	}
+	res, subject := g.awaitGroupUnbind(ctx, log, since)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if res == dungeon.GroupNotGroups && subject != "" && !strings.EqualFold(subject, who) {
+		return dungeon.GroupWrongTarget, nil
+	}
+	return res, nil
+}
+
+// awaitGroupUnbind reads the log after since for the answer to the group unbind: its result and, for "not in a group", whose name it
+// carries.
+func (g remoteGame) awaitGroupUnbind(ctx context.Context, log *events.Log, since uint64) (dungeon.GroupUnbindResult, string) {
 	wctx, cancel := context.WithTimeout(ctx, groupUnbindWait)
 	defer cancel()
 	cursor := since
@@ -337,7 +375,7 @@ func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUI
 		p := log.Read(events.Query{Since: cursor, Kinds: []string{events.KindSystem}, Limit: events.MaxLimit})
 		for _, e := range p.Events {
 			if r := groupUnbindReply(e.Text); r != "" {
-				return r, nil
+				return r, groupUnbindSubject(e.Text)
 			}
 		}
 		cursor = p.Next
@@ -345,16 +383,28 @@ func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUI
 			continue
 		}
 		if log.Wait(wctx, cursor) != nil {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			return dungeon.GroupNoAnswer, nil
+			return dungeon.GroupNoAnswer, ""
 		}
 	}
 }
 
 // groupUnbindWait is how long the reply to the group unbind is awaited.
 const groupUnbindWait = 4 * time.Second
+
+// playerLinkName finds the name in a chat player link ("|Hplayer:Name|h[Name]|h") or, without a link, the first word.
+var playerLinkName = regexp.MustCompile(`\[([A-Za-z]{2,12})\]|^\s*([A-Za-z]{2,12}) is not in a group`)
+
+// groupUnbindSubject is the player a "... is not in a group." line names ("" for any other line).
+func groupUnbindSubject(text string) string {
+	if groupUnbindReply(text) != dungeon.GroupNotGroups {
+		return ""
+	}
+	m := playerLinkName.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	return m[1] + m[2]
+}
 
 // groupUnbindReply classifies a system line as the answer to ".instance groupunbind all" ("" for any other line).
 func groupUnbindReply(text string) dungeon.GroupUnbindResult {

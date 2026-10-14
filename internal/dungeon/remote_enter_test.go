@@ -31,10 +31,15 @@ type enterFake struct {
 	teleFails  bool            // `.tele name` changes nothing
 	portal     *Point
 	ledger     []time.Time
+	// swallow[name] summons of that bot do nothing before one works; dropOnTele leaves the group when the lead bot is teleported (after
+	// the party was checked); rejoinOnSummon: a summon of a bot that is out of the group puts it back (else the module says no-bot).
+	swallow        map[string]int
+	dropOnTele     string
+	rejoinOnSummon bool
 }
 
 func newEnterFake(t *testing.T) *enterFake {
-	g := &enterFake{fakeRemote: newFakeRemote(t), pending: map[packet.GUID]time.Time{}, stuck: map[string]bool{}, known: true, level: 3}
+	g := &enterFake{fakeRemote: newFakeRemote(t), pending: map[packet.GUID]time.Time{}, stuck: map[string]bool{}, swallow: map[string]int{}, known: true, level: 3}
 	g.memberMap = map[packet.GUID]uint32{}
 	g.plan = remotePlan(Leg{Name: "a", To: Point{5, 0, 0}})
 	g.plan.Map, g.plan.EntranceTele = insideMap, "ulda"
@@ -77,7 +82,15 @@ func (g *enterFake) Command(ctx context.Context, command string) (tbm.Reply, err
 		}
 	case strings.HasPrefix(command, "cmd summon") && len(f) > 2:
 		g.log = append(g.log, "summon "+f[2])
-		if !g.stuck[f[2]] {
+		if g.left[f[2]] {
+			if !g.rejoinOnSummon {
+				return errReply("cmd summon", "no-bot"), nil
+			}
+			delete(g.left, f[2])
+		}
+		if g.swallow[f[2]] > 0 {
+			g.swallow[f[2]]--
+		} else if !g.stuck[f[2]] {
 			g.pending[g.guidOf(f[2])] = g.now.Add(3 * time.Second)
 		}
 	}
@@ -97,6 +110,13 @@ func (g *enterFake) AccountLevel(context.Context) (int, bool, error) {
 }
 func (g *enterFake) TeleName(_ context.Context, player, loc string) error {
 	g.log = append(g.log, "tele "+player+" "+loc)
+	if g.dropOnTele != "" && loc == g.plan.EntranceTele {
+		if g.left == nil {
+			g.left = map[string]bool{}
+		}
+		g.left[g.dropOnTele] = true
+		g.dropOnTele = ""
+	}
 	if !g.teleFails {
 		g.pending[g.guidOf(player)] = g.now.Add(2 * time.Second)
 	}
@@ -268,6 +288,137 @@ func TestRemoteEnterFailsClearlyForABotOnTheWrongMap(t *testing.T) {
 	g.noGroupChangeAfter("tele")
 	if g.unbinds != 1 || len(g.ordersOf("cmd pullback")) != 0 {
 		t.Fatalf("unbinds %d %v", g.unbinds, g.orders)
+	}
+	// A bot still outside after the wait is summoned once more, by name, and then the run fails: two summons, not an endless wait.
+	n := 0
+	for _, l := range g.log {
+		if l == "summon Magey" {
+			n++
+		}
+	}
+	if n != 2 || strings.Join(rep.Remote.Enter.Resummoned, ",") != "Magey" || !strings.Contains(err.Error(), "second summon") {
+		t.Fatalf("summons of Magey: %d, resummoned %v, %v", n, rep.Remote.Enter.Resummoned, err)
+	}
+}
+
+// A summon that does nothing the first time (the bot was busy, or a teleport swallowed it) is repeated once after the wait, and the run goes on.
+func TestRemoteEnterSummonsAgainABotThatStayedOutside(t *testing.T) {
+	g := newEnterFake(t)
+	g.swallow["Magey"] = 1
+	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if strings.Join(rep.Remote.Enter.Resummoned, ",") != "Magey" || len(rep.Remote.Enter.Arrived) != 3 {
+		t.Fatalf("%+v", rep.Remote.Enter)
+	}
+}
+
+// Run 6b: the hunter left the group after the bind, so the feed no longer listed it, and the enter phase, which summoned only the bots
+// of the feed, never summoned it. The party was checked and whole when the lead bot went in; the bot is named by the run, so it is
+// summoned by name.
+func TestRemoteEnterSummonsANamedBotTheFeedNoLongerLists(t *testing.T) {
+	g := newEnterFake(t)
+	g.dropOnTele, g.rejoinOnSummon = "Magey", true
+	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if g.idx("summon Magey") < 0 || strings.Join(rep.Remote.Enter.Summoned, ",") != "Healy,Magey" {
+		t.Fatalf("%v %+v", g.log, rep.Remote.Enter)
+	}
+	// Without a module that takes the bot back, the summon is refused and the run fails naming the bot, not "not in the feed" 30 s later.
+	g = newEnterFake(t)
+	g.dropOnTele = "Magey"
+	_, err = g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err == nil || !strings.Contains(err.Error(), "cmd summon Magey was refused") || !strings.Contains(err.Error(), "no-bot") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func (g *enterFake) count(prefix string) int {
+	n := 0
+	for _, l := range g.log {
+		if strings.HasPrefix(l, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// A bot the bind left out (it dropped out of the group right after the ACK) is invited again by one unbind and bind, and only then does
+// the lead bot go in: the entry happens with the whole party in the group.
+func TestRemoteEnterBindsAgainForABotThatLeftTheGroup(t *testing.T) {
+	g := newEnterFake(t)
+	g.leaveOnBind = []string{"Magey"}
+	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	var head []string
+	for _, l := range g.log {
+		if l == "tele Tanky ulda" {
+			break
+		}
+		head = append(head, l)
+	}
+	var cmds []string
+	for _, o := range g.orders {
+		if strings.HasPrefix(o, "commander bind") || o == "commander unbind" {
+			cmds = append(cmds, strings.Fields(o)[1])
+		}
+	}
+	if strings.Join(head, "|") != "bind|bind|probe" || strings.Join(cmds[:3], ",") != "bind,unbind,bind" {
+		t.Fatalf("before the entry %v, orders %v: want bind, unbind, bind, then the probe", head, g.orders)
+	}
+	if !strings.Contains(notesOf(rep), "not in commander status's listing") || !strings.Contains(notesOf(rep), "bound party checked") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+	if len(rep.Remote.Enter.Arrived) != 3 {
+		t.Fatalf("%+v", rep.Remote.Enter)
+	}
+	// After the entry the group is not touched: no bind, no leave.
+	i := g.idx("tele")
+	for _, l := range g.log[i:] {
+		if l == "leave" || l == "bind" {
+			t.Fatalf("the group changed after the entry: %v", g.log)
+		}
+	}
+}
+
+// A bot that is still out after the second bind fails the run before anything is teleported or summoned, and the failure names it.
+func TestRemoteEnterNeverEntersWithAPartialParty(t *testing.T) {
+	g := newEnterFake(t)
+	g.leaveOnBind, g.stubborn = []string{"Magey"}, true
+	rep, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "Magey") || !strings.Contains(err.Error(), "partial party") {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if g.idx("tele") >= 0 || g.idx("summon") >= 0 || g.idx("record") >= 0 || g.count("bind") != 2 {
+		t.Fatalf("something went in or a third bind went out: %v", g.log)
+	}
+	if g.unbinds != 2 { // the unbind before the second bind, and the run's own at its end
+		t.Fatalf("unbinds %d", g.unbinds)
+	}
+}
+
+// The second bind is refused (a hired companion cannot be bound, the bot is offline, ...): the failure carries the module's reason.
+func TestRemoteEnterNamesTheReasonABotCannotBeInvited(t *testing.T) {
+	g := newEnterFake(t)
+	g.leaveOnBind = []string{"Magey"}
+	g.joinErr = map[string]string{"Magey": "hired"}
+	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}})
+	if err == nil || !strings.Contains(err.Error(), "hired") || !strings.Contains(err.Error(), "Magey") || g.idx("tele") >= 0 {
+		t.Fatalf("%v %v", err, g.log)
+	}
+}
+
+// A bound group that holds a bot the run did not name is not changed to fit: the run fails before the entry.
+func TestRemoteEnterRefusesAnUnnamedBotInTheGroup(t *testing.T) {
+	g := newEnterFake(t)
+	_, err := g.run(RemoteOptions{Lead: "Tanky", Bots: []string{"Healy"}})
+	if err == nil || !strings.Contains(err.Error(), "Magey") || !strings.Contains(err.Error(), "did not name") || g.idx("tele") >= 0 {
+		t.Fatalf("%v %v", err, g.log)
 	}
 }
 
