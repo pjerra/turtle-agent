@@ -1,0 +1,5 @@
+{"version":1,"name":"tiny","map":209,"entrance":{"x":1000,"y":800,"z":9},
+ "legs":[{"name":"one","to":{"x":1100,"y":900,"z":9},
+   "via":[{"x":1010,"y":805,"z":9},{"x":1012,"y":810,"z":9,"direct":true}],
+   "pull_groups":[{"entries":[7001],"positions":[{"x":1002,"y":805,"z":9}],"radius":10},{"entries":[8001],"positions":[{"x":1010,"y":805,"z":9}],"radius":5}],
+   "boss":{"entry":6001,"position":{"x":1100,"y":900,"z":9}}}]}

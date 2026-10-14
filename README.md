@@ -87,6 +87,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
+turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -2608,6 +2609,74 @@ except through the movement packets it sent; and there are no textures or models
 (a door closed in the game still shows as open floor). Two full-run samples of the first live Uldaman run
 (`docs/LIVE-CHECKS.md`) are in the audit repository, not here: captures are not committed.
 
+## Live dashboard
+
+`turtle-agent dashboard` serves one web page on the laptop that shows every running commander live: where its party is on
+the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
+**read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
+`log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
+is embedded in the binary (no CDN, no build step).
+
+```
+turtle-agent dashboard                                  # http://127.0.0.1:8790/, every agent found in the settings files
+turtle-agent dashboard --listen 127.0.0.1:8790 --agents 8765,8766 --tests-dir ~/TortoiseBots-audit/tests
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--listen` | `127.0.0.1:8790` | where the page is served; a non-loopback address prints a warning |
+| `--agents` | `auto` | `auto`: the `rpc` field of `settings*.json` in `--config-dir`; or a comma list of RPC ports/addresses (loopback only); `auto,8770` adds one. The list is read again every 10 s, so an agent started later appears |
+| `--tests-dir` | `~/TortoiseBots-audit/tests` | the **only** folder whose files `/files/...` serves (traces, summaries, reports); no other path is reachable |
+| `--traces-dir` | `~/turtle-agent/traces` | where the agents write run traces: read for the last orders and the binary SHA, never served |
+| `--plans-dir` | `~/turtle-agent/dungeons` | plan files for the map (comma list); a plan file that changes (a live plan reload) is loaded again. A plan no folder has is drawn from the copy the binary carries (`dungeons/embed.go`), which can differ from the file a run was started with |
+| `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
+| `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
+
+**What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
+decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
+agent gets the four calls in parallel with a 2 s bound; the answer is built into a card and cached as JSON, so a page
+request does no work. The trace of the run (the path in `dungeon_status`'s `report.trace_file`) is followed from the byte it
+was last read to, so a poll costs the new lines only.
+
+**The page.** A card per commander (a grid, or tabs with the Grid/Tabs switch; the choice is remembered in the browser):
+
+- Header: character and level, the group label (the plan and the capture folder of the run), the state (phase, leg and name,
+  `pull group k of n`; the phase is the first word of what the watchdog says the run waits on: prepare, enter, walk, pull,
+  boss, rest, step, ...), minutes in, and the stall timer: the time since the run last made progress, yellow from 2 min,
+  red from 5 min (the stale-run rule).
+- Numbers: deaths, wipes, party downs, threat overrides, rest share and gates, gathers, walk stops, pulls, GM commands and
+  GM assists, agent walks, orders sent and refused, and the binary SHA (from the trace header).
+- The party table: name, class and role (from the hire block, else the trace's party record), HP %, power % (the power type
+  is in the tooltip), yards to the tank, and the target, from the module's `bot_view` frame.
+- The last 10 orders with the module's answer (ACK or ERR with code and message), the last error, the last refused order, and
+  the on-the-spot changes (`tune_change`, `plan_reload`, and the tunables whose value is not the base).
+- The map: an SVG drawn from the plan file for the plan's map: the route of each leg (via points; `direct` steps dashed), pull
+  groups as circles of their radius with the group number, bosses, doors and objects the steps use, the entrance. North is
+  up, west is left, one unit is one yard, and the view fits the plan. The current leg's route is bold; legs done and groups
+  already pulled are dimmed. On it: the bots (tank gold, healer green, dead grey), the commander (violet, only when its
+  character stands on the plan's map), and the creatures of the feed (hostile red, neutral grey, friendly green; a ring marks
+  one in a fight; dimmed when its pull group is behind the run). Hovering a dot names it with HP, target and pull group.
+- Debug (a fold-out): the raw last `status`, `dungeon_status` and `tune_list` replies, and links to the run's trace, its
+  summary and the capture folder's `REPORT.md` under `--tests-dir`.
+
+A mob's kind comes from the module's reaction field (`h` hostile, `n` neutral, `f` friendly; critters, civilians and guards
+count as neutral). Its pull group is found by matching its entry and position against the plan's groups (within the
+group's radius, the current leg first); the module does not say which pack a creature belongs to.
+
+**What never leaves the server.** Cards are built from a list of fields, not from the raw replies. On top of that, everything
+served (the state, the raw panel) is scrubbed: any JSON member whose name matches `pass|token|account|secret|credential|auth|login|cookie|session_key|srp`
+is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
+names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
+`--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
+refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is not a loopback name is
+refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
+dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
+example `--embed-from http://m910q:8095`, must be named).
+
+**Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
+is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
+answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.
+
 ## Navmesh walking
 
 `walk_to` walks in a straight line and knows nothing of walls. `walk_path` plans on the navmesh the server's own
@@ -2858,8 +2927,9 @@ you set).
 | `internal/addonhost` | the addon host: the lua5.1 sidecar that runs the real TBM addon on the 1.12 widget mock, and the events it gets |
 | `internal/mapview` | map images: the run from frames, events and reports, floors by height, the SVG and HTML renderers (see [Map images](#map-images)) |
 | `internal/capture` | packet capture files and the secret scan |
+| `internal/dashboard` | the live dashboard (see [Live dashboard](#live-dashboard)): agent discovery, the read-only poller, the card model, the plan drawing, the secrets filter, the embedded page |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `trace-score`, `pulltest`) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `dashboard`, `trace-score`, `pulltest`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures
