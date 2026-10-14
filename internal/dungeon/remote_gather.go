@@ -277,6 +277,14 @@ func (d *RemoteDriver) pullAhead(ctx context.Context, h tbm.HostileRec) error {
 	defer func() { d.aheadPulling = false }()
 	d.remote(func(r *RemoteReport) { r.AheadPulls++ })
 	d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
+	// What would come with h is counted as for a planned pull (packOf, the pack radius, h's floor): a pull of big_pack mobs or more, or
+	// of a pack with a cc_always member, is a big pull. It is gathered for like the rest, and fight() puts the pack CC on one member
+	// (bigPackCC: Polymorph by cc_priority) before the pullback to the gathered party; with no cc bot it is pulled as it is, noted.
+	pack := d.packOf(h, float64(d.cfg.PackRadius))
+	if d.tx.BigPack > 0 && (len(pack) >= d.tx.BigPack || slices.ContainsFunc(pack, func(o tbm.HostileRec) bool { return o.GUID != h.GUID && slices.Contains(d.plan.CCAlways, o.Entry) })) {
+		d.remote(func(r *RemoteReport) { r.AheadBigPulls++ })
+		d.rep.note(fmt.Sprintf("leg %d: the pull of %s on the way is a big pull (%d mobs within %.0f yd, big_pack %d): the party gathers first and the pack gets its CC before the pull", d.curLeg, d.hostileName(h), len(pack), float64(d.cfg.PackRadius), d.tx.BigPack))
+	}
 	if err := d.gather(ctx, "a pull on the way"); err != nil {
 		return err
 	}
