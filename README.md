@@ -711,8 +711,8 @@ What the driver does for each action of the plan (the stepper decides which):
   (an earlier walk aggro killed them: a corpse within the group's radius of a position says so, a corpse elsewhere does not, and with
   nothing of the group in view the party walks to the positions first) is "taken as already dead" and nobody is sent at the distant one (second live run: a Rockchewer 42 yd
   away that the tank could not reach). The leader says `.bot action pullback` in party chat: the tank pulls and
-  brings the mob back, the others join after 5 s. About every 10 s of fighting the leader targets the nearest fighting pack member
-  and says `.bot action attack`. The fight is won when every pack member in sight is dead; units of `skip` are never part of it.
+  brings the mob back, the others join after 5 s. About every 10 s of fighting (and at once when the mob it last sent the party at died) the leader targets
+  the pack member the tank holds best, not the nearest (**Tank first**, below), and says `.bot action attack`. The fight is won when every pack member in sight is dead; units of `skip` are never part of it.
   A pull that draws no fight in 25 s, or whose mobs stop fighting for 12 s (evade), is tried again (`.bot action follow` first), 3 pulls
   at most; a pull in which a member died is progress and does not use up a try (stationary mobs with no group link come one or two at a
   time: the six Stonevault Ambushers of the Uldaman Keystone room). A mob that drew no fight or evaded with nothing dying (a zero-kill `noEngage`/`evaded` pull) is passed over for
@@ -720,6 +720,16 @@ What the driver does for each action of the plan (the stepper decides which):
   Mobs the bots refused (below) are skipped by the whole run. When the tries are used up and the group made progress, it counts as cleared with a note (the leftovers
   aggro on the walks after); with no progress at all the run fails. Hostile units still hitting the party after the fight (adds) are
   fought too, for up to 15 s.
+- **tank first.** The leader targets what the party attacks, so the same rules as in remote mode apply to its choice (README "Tank first (remote)"), read from the units since
+  a 1.12 client has no threat list. The tank is the party member of class warrior, paladin or druid (in that order) whose target is a living hostile mob in combat, else the
+  first of them in view. A mob scores 2 when it hits the tank and 1 when the tank targets it; the mob the tank holds best is targeted first, the nearest after, and the mob
+  fought stays while it is on the tank. A mob that carries polymorph, sap, shackle, hibernate, banish, a freezing trap, turn undead, sleep or seduction (by the spell's mechanic
+  or its name), or the moon raid icon (from `MSG_RAID_TARGET_UPDATE`), is left alone unless it is the last (`cc_respected`). A mob that has hit a party member that is not the
+  tank for 3 s within 40 yd gets the tank: the leader targets it and says `.bot action pull 0` (the tank walks up and keeps it; the module briefly holds the other bots for the order, see the remote rule), then targets the party's
+  mob again; 8 s apart for the same mob, 3 for the fight (`loose_add_orders`). The first attack order at a mob the tank holds waits until the tank has held it for 2 s (the brain
+  has its own 2 s opening delay; the pull's `pullback` join delay of 5 s is the bots'). `report.tank_first`: `tank`, `tank_threat_share` (the mean share of the fighting mobs that
+  were on the tank: their targets, not threat), `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`. Absent without a tank in view. The fake game
+  and the fake feed test each rule; nothing is seen live yet (`docs/LIVE-CHECKS.md`).
 - **refusals.** The driver reads what the bots answer to its orders (`TBM:ACTION_ERR|<command>|<code>|<message>` in the event log, and the
   whisper `<mob> is evading` / `is dead` of an attack order; that whisper is read from the module source, not yet seen in a capture) and keeps them in the report's `refusals[]` (`intent`, `code`, `message`,
   `leg`, `count`, `first`). `pullback`/`pull` `unreachable` (the tank cannot start moving to a firing position) or an evading mob: the
@@ -974,7 +984,7 @@ as a group run, but everything comes from the feed and goes out as an order:
 | --- | --- |
 | walk | `.bot cmd move x y z` on the lead bot, in legs of at most 120 yd (the server takes 150; legs follow the navmesh path when the agent has one, else the straight line), then a wait for the lead bot's position in the feed to come within 5 yd of the last point. **Look-ahead:** while the lead bot runs towards a waypoint that is not the walk's end, the next `move` goes out as soon as it is within 10 yd of it, or about 2 s from it at its measured speed (6.6 yd/s until seen), at most one `move` a second, so it does not stop at every waypoint (`look_ahead_moves`; `walk_stops` and `walk_stopped_s` count the times it stood still in the middle of a walk and for how long). The final point and a pull still wait for arrival. A lead bot that gained no ground in 10 s gets the move again; a refused move (`too-far`, `off-mesh`, `unreachable`) is retried with a shorter leg; `lead-unavailable` is waited out for up to 30 s |
 | pull group / boss | the nearest hostile of the group's entries **as the bots see it** (not the agent's view), `.bot cmd pullback <guid>`; out of range, the lead bot is moved up to 38 yd first; `too-far` moves it closer and retries; `unreachable`/`evading` skips the mob; `no-tank` falls back to `.bot cmd attack` |
-| fight | the feed's hostiles, targets, health and threat; `.bot cmd attack <guid>` at the nearest engaged mob every 10 s. A mob is dead when its health reads 0, or when it was seen fighting (engaged or hurt) and is then absent from **two frames in a row**; an absence in a `truncated` frame counts for nothing. A pull whose mobs all leave the feed without ever being seen fighting is `drew no fight`, not a win. `evaded` when they walk home |
+| fight | the feed's hostiles, targets, health and threat; `.bot cmd attack <guid>` at the engaged mob the tank holds best every 10 s (**Tank first**, below). A mob is dead when its health reads 0, or when it was seen fighting (engaged or hurt) and is then absent from **two frames in a row**; an absence in a `truncated` frame counts for nothing. A pull whose mobs all leave the feed without ever being seen fighting is `drew no fight`, not a win. `evaded` when they walk home |
 | cc | `cc` option: `[{"entry":4863,"mark":"moon","bot":"Magey"}]` sends `.bot cmd cc <mark> <guid> [bot]` for mobs of that entry around the pull target, before the pull; such a mob is not picked as the pull target while another is there |
 | rest gate | party health and mana, and (before a pull or an ambush walk, not at a leg's start) everybody near the lead bot, from the feed, against the same targets and cap as a group gate (90% health, 50% healer mana, 35% other mana, 60 s; a leg's `rest` overrides them); `.bot cmd rest` (again every 45 s); the feed has no class, so the bot named by `healer` gets the healer mana target and, without one, every caster does. The commander has no order for a single bot: a member whose mana has not risen at all in 15 s gets one more `.bot cmd rest` (recorded in `rest_gates[]` as a drink order). A dead bot gets `.bot cmd revive <name>` (owner or GM; refused: the run fails) |
 | wipe / death | from the feed: every bot dead is a wipe; with `recover_wipe` a revive order for each and the step is tried again |
@@ -985,6 +995,26 @@ of the mob's `T` record is the tank and the mob is hitting it. The tank is `tank
 pulled mob (a rage user when the party has one). A mob that is not on the tank holds the party back for up to 6 s (`threat_waits`), then it goes in
 anyway (`threat_overrides`); `threat_holds` counts the mobs that were on the tank in time, `threat_warnings` the bots that came within 90 % of the
 top threat. Naming the `tank` is the reliable way.
+
+**Tank first (remote).** The party follows the tank's threat (after mod-playerbots' `ThreatStrategy`, `DpsTargetValue` and `TankTargetValue`; the behaviour only, no code):
+- *Target.* The attack order goes to the engaged mob where the tank's share of the top threat (`T` record: 100 when the tank tops the list, 0 when it is not among the top
+  three) is largest; the tank's own target comes before the others, then the nearest. The party stays on the mob it fights while the tank holds at least 50 % of it, and below that
+  until another mob leads it by 25 points, so two mobs the tank holds alike do not flip it back and forth; it is sent at the next mob at once when the one before died (`target_switches` counts the times it left a
+  mob that still lived).
+- *Opener.* A mob the party was not sent at yet waits until the tank has held it (top of its `T` record, the mob hitting it) for `OpenerDelay` (2 s, the existing threat gate
+  extended; `threat_waits` counts it too), or until `ThreatWait` (6 s) has passed. The feed gives shares, not absolute threat, so the delay stands in for "the tank has N threat".
+- *Loose adds.* A mob that has been hitting a bot that is not the tank for 3 s (and whose list the tank does not top) gets `.bot cmd pull <guid> 0`: the commander has no
+  order for one bot (`cmd attack` takes only a GUID and sends every bot), and the module's pull is the tank walking up to the mob and keeping it. It is not free: the pull
+  briefly holds the other bots ("stay" and "wait for attack" at the lead bot's position, with a 0 s join window, released at once for a mob already in combat), re-stamps the
+  combat start and relaxes the tank's stay spot. The 3 s count starts at the look that first showed the mob on that bot. (To do: `cmd attack <guid> <bot>` when TortoiseBots
+  `feat/commander-player-orders` lands.) At most one order per look, `AddCooldown` (8 s) apart for the same mob, 3 for the fight (`loose_add_orders`). A refusal is noted and counted in
+  `refused` (`pull:<code>`); it does not end the fight.
+- *Crowd control.* The feed's `c` flag is stunned, confused, fleeing or rooted (`UNIT_STAT_*`): it cannot tell a sheep from a stunned or rooted mob. So only a mob a `cc` order
+  was accepted for is spared, while it carries the flag or no bot is fighting it: it is not attacked, not picked as the pull target while another candidate is, and not sent the tank
+  at, unless every engaged mob is like that (the last one is fought). The mob the party fights and the tank's own target are never spared. Each spared mob is counted once in
+  `cc_respected`. Crowd control the bots start by themselves, and the moon mark, cannot be seen: the feed has neither.
+- *Counters* (`report.remote`): `tank_threat_share` (the mean over the frames of a fight of the tank's share on the fighting mobs that have a `T` record, in percent; the
+  deploy-19h run had it at 15-25 with the tank leading), `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`.
 
 **Always unbound.** The unbind (`commander unbind`) is deferred inside the run: done, failed, stopped (`dungeon_stop`) or a panic, it goes out with
 its own context before the report says the run ended. A panic in a remote run is recovered and reported as a failed run (`internal error: ...`,
@@ -1000,7 +1030,7 @@ The lead bot must be on the plan's map when the run starts (bring the group into
 answer`, ...), `ended_by_module`, `gm_commands`, `frames_received`/`frames_missed`/`frames_invalid`/`frames_stale`/`frames_truncated`/`last_seq`
 (since the bind), `feed_stalls`, `orders_sent`/`orders_refused`/`orders_unanswered`, `orders` (by verb), `refused` (by `verb:code`; the details are
 in the report's `refusals[]` with intent `cmd <verb>`), `move_stalls`, `walk_aggros`, the threat counters above, `pull_fallbacks`, `cc_orders`,
-`revives`, `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
+`revives`, the tank-first counters (`tank_threat_share`, `tank_threat_samples`, `loose_add_orders`, `cc_respected`, `target_switches`),, `walk_stops`, `walk_stopped_s`, `look_ahead_moves`, `fight_holds`, `object_steps_ahead`. Once a fight is over for good (the loot wait past and nothing hitting the party) the lead bot is sent a `move` to the place it stands (`fight_holds`): `cmd move` sets its stay spot (BotCommands.cpp CommanderMove), and the module's "return to stay position" would otherwise walk it back to the last point it was sent to before the rest gate and the next walk. It is not sent earlier, because it resets the bot's movement and the followers' formation; the bot may therefore walk back a little during the loot wait (to be seen live). The `dungeon_step`/`dungeon_leg` events carry `data.mode: "remote"`; `dungeon_done` and `dungeon_failed` add
 `remote`, `lead_bot`, `frames_received`, `orders_sent`, `orders_refused`.
 
 **Limits.** The feed has no names for mobs (entries only), no class for bots (so a caster below 30 % mana always holds a rest gate, healer or not; `healer` names the bot that gets the healer mana target),

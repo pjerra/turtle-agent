@@ -231,13 +231,14 @@ func (d *RemoteDriver) leftOver(label string, sp fightSpec, kills int, gaveUp []
 }
 
 // pickTarget finds the hostile to pull, walking the lead bot up to PullStandoff yards from it when it is out of PullRange (or from
-// the anchor when the bots see nothing of the group yet). A hostile with a CC rule is not picked while another candidate is.
+// the anchor when the bots see nothing of the group yet). A hostile with a CC rule, or one that is crowd-controlled, is not picked while
+// another candidate is.
 func (d *RemoteDriver) pickTarget(ctx context.Context, sp fightSpec) (tbm.HostileRec, bool, error) {
 	const looks = 3
 	for look := 1; look <= looks; look++ {
 		if cs := d.candidates(sp, sp.pick); len(cs) > 0 {
 			cs = preferVisibleHostile(cs)
-			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool { _, cc := d.ccRule(h.Entry); return cc }); len(rest) > 0 {
+			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool { _, cc := d.ccRule(h.Entry); return cc || d.ccd(h) }); len(rest) > 0 {
 				cs = rest
 			}
 			if c := cs[0]; distToLead(d, hostilePoint(c)) <= float64(d.cfg.PullRange) || look == looks {
@@ -308,6 +309,9 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		}
 		if ref, bad := refusedOf(r); bad {
 			d.rep.note(fmt.Sprintf("cc %s on %s was refused: %s (%s); it is fought like the rest", rule.Mark, d.hostileName(h), ref.Code, ref.Message))
+		} else {
+			d.tf.init()
+			d.tf.ccHeld[h.GUID] = true // the party leaves it to the CC bot (tank-first rules)
 		}
 	}
 	return nil
@@ -441,6 +445,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		if fighting {
 			engaged, lastCombat = true, now
 			d.watchThreat(fightingMobs)
+			if err := d.tankFirstTick(ctx, fightingMobs); err != nil {
+				return fightResult{}, err
+			}
 		}
 		switch {
 		case alive == 0 && len(killed) > 0:
@@ -469,9 +476,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, last *time.Time) error {
 	now := d.clk.Now()
 	if !last.IsZero() && now.Sub(*last) < d.cfg.AssistEvery {
-		// A mob not yet attacked is looked at every tick: the threat gate may open.
+		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
+		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
-		if !fresh {
+		if !fresh && !d.focusGone(mobs) {
 			return nil
 		}
 	}
@@ -484,7 +492,7 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) {
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -494,16 +502,23 @@ func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error 
 	return nil
 }
 
-// assistSend picks the nearest mob and sends `.bot cmd attack` at it. A mob the party was not sent at yet is gated by threat: the
-// order goes once the tank holds its threat, or ThreatWait after the mob first fought the party. It reports whether an order went.
+// focusGone says whether the mob the party was sent at is no longer among mobs (it died, or left the fight).
+func (d *RemoteDriver) focusGone(mobs []tbm.HostileRec) bool {
+	f := d.tf.focus
+	return f != 0 && !slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return h.GUID == f })
+}
+
+// assistSend picks the mob the tank holds best and sends `.bot cmd attack` at it (README "Tank first"): the crowd-controlled mobs are
+// left out unless they are all that is left, and the rest are taken by the tank's share of their threat, the tank's own target first,
+// the nearest after. A mob the party was not sent at yet is gated by threat: the order goes once the tank holds its threat (and has held
+// it OpenerDelay), or ThreatWait after the mob first fought the party. It reports whether an order went.
 func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (bool, error) {
 	if len(mobs) == 0 {
 		return false, nil
 	}
-	sorted := slices.Clone(mobs)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return distToLead(d, hostilePoint(sorted[i])) < distToLead(d, hostilePoint(sorted[j]))
-	})
+	d.tf.init()
+	cands := d.respectCC(mobs)
+	sorted := d.rankByTank(cands)
 	var pick *tbm.HostileRec
 	for i := range sorted {
 		h := sorted[i]
@@ -522,6 +537,7 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	if _, err := d.order(ctx, "attack", tbm.GUIDArg(pick.GUID)); err != nil {
 		return false, err
 	}
+	d.noteFocus(pick.GUID, cands)
 	return true, nil
 }
 
@@ -545,12 +561,27 @@ func (d *RemoteDriver) threatAllows(h tbm.HostileRec) bool {
 		if d.tank == 0 {
 			d.setTank(holder)
 		}
+		// The opener: the tank has held the mob for OpenerDelay before the party goes in, so its first hits have built a lead.
+		d.tf.init()
+		if _, ok := d.tf.heldAt[h.GUID]; !ok {
+			d.tf.heldAt[h.GUID] = now
+		}
+		if now.Sub(d.tf.heldAt[h.GUID]) < d.opt.OpenerDelay {
+			if !d.waitNoted[h.GUID] {
+				d.waitNoted[h.GUID] = true
+				d.remote(func(r *RemoteReport) { r.ThreatWaits++ })
+				d.rep.note(fmt.Sprintf("leg %d: the tank has just got %s; the party is held back %.0f s for the opener", d.curLeg, d.hostileName(h), d.opt.OpenerDelay.Seconds()))
+			}
+			return false
+		}
 		if !d.heldNoted[h.GUID] {
 			d.heldNoted[h.GUID] = true
 			d.remote(func(r *RemoteReport) { r.ThreatHolds++ })
 		}
 		return true
 	}
+	d.tf.init()
+	delete(d.tf.heldAt, h.GUID) // the tank lost it: the opener starts again when it has it back
 	if now.Sub(d.engagedAt[h.GUID]) < d.opt.ThreatWait {
 		if !d.waitNoted[h.GUID] {
 			d.waitNoted[h.GUID] = true
@@ -637,6 +668,9 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
 			lastSeen = now
 			d.watchThreat(eng)
+			if err := d.tankFirstTick(ctx, eng); err != nil {
+				return err
+			}
 			if err := d.assist(ctx, eng); err != nil {
 				return err
 			}

@@ -55,6 +55,9 @@ type Report struct {
 	// Remote is set for a run in remote mode (dungeon_run mode "remote"): the commander binding, the feed, the orders and the
 	// decisions taken from the feed. Absent in group mode.
 	Remote *RemoteReport `json:"remote,omitempty"`
+	// TankFirst is the counters of the tank-first rules in a group run (README "Tank first"); a remote run has them in Remote. Absent
+	// until the first fight with a tank in view.
+	TankFirst *TankFirstReport `json:"tank_first,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -160,6 +163,10 @@ func (p *reporter) snapshot() Report {
 	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
 	r.RestGates = append([]RestGate{}, p.r.RestGates...)
 	r.Remote = p.r.Remote.clone()
+	if p.r.TankFirst != nil {
+		tf := *p.r.TankFirst
+		r.TankFirst = &tf
+	}
 	if r.State == "running" {
 		now := p.now()
 		r.Seconds = now.Sub(r.Started).Seconds()
