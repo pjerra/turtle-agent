@@ -4,12 +4,20 @@
   "map": 70,
   "entrance": {"x": -228.9, "y": 46.1, "z": -46},
   "entrance_trigger": 286,
+  "entrance_tele": "ulda",
+  "portal": {
+    "map": 0,
+    "x": -6053.73,
+    "y": -2954.63,
+    "z": 213.686
+  },
   "notes": [
     "Uldaman (map 70) from the main entrance (areatrigger 286) to Ironaya, the first boss on the way in. Order of the legs follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859): Baelog, Revelosh, Ironaya.",
     "Honest (non-GM) run, Alliance leader: the Lost Dwarves are friendly, so the baelog leg pulls its packs and loots Baelog's Chest; revelosh kills Revelosh, loots the Shaft of Tsol and makes the Staff of Prehistoria; keystone opens the Keystone with it. A Horde leader also kills Baelog, Eric and Olaf (team: horde). Pass criteria: docs/LIVE-CHECKS.md.",
     "Baelog and Revelosh stand in side rooms: the navmesh route from the entrance to the Keystone leaves the Baelog branch at -250 135 and passes 23 yd from Revelosh. A run that wants the shortest way starts at the leg 'keystone'.",
     "Packs are the spawns of the world database within 8 yd of the route, grouped by tools/dungeongen (12 yd, creature groups). Doors are not on the navmesh: path_to walks through a closed door, so the door steps are not checked by it.",
     "Quests: none is needed for this plan. The Alliance chain around it is 'The Lost Dwarves' (2398, from Prospector Stormpike, 1356, in the Hall of Explorers, Ironforge; ends at Baelog in Uldaman) then 'The Hidden Chamber' (2240, from Baelog, 6906; read Baelog's Journal, explore the Chamber of Khaz'mul behind the Keystone door, report to Stormpike). Neither gates the Medallion (gameobject_loot_template 5066/7740, 100%, no condition) or the Shaft (creature_loot_template 6910/7741, 100%, no condition), world database of tortoise-wow 5d79486.",
+    "Remote run entry: entrance_tele is game_tele 169 (\"ulda\", map 70, next to the entrance); portal is the centre of areatrigger 286 on map 0 (areatrigger_template, radius 10), where a non-GM remote run walks the lead bot in. Both are for the enter phase only (docs/LIVE-CHECKS.md).",
     "Written by hand from the dungeongen skeleton (tools/dungeongen/testdata/uldaman); positions checked against the server's navmesh by internal/dungeon TestUldamanOnNavmesh."
   ],
   "legs": [

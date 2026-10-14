@@ -13,7 +13,8 @@ import (
 // The pre-run kit check of a remote run (issue #83, remote Uldaman gap G4). Owned bots start with no drinks and no ammo: the run sends
 // `.bot maintenance <bot>` for each bound bot (TortoiseBots refreshes consumables, reagents, ammo and repairs, when
 // AiPlayerbot.OwnedBotMaintenanceEnabled = 1) and then reads `.bot inv <bot>` to see what the bags hold: drinks for the casters,
-// ammo for the shot of a hunter's ranged weapon, a shield on the tank. The result is the report's `preflight`; what is missing is a
+// ammo for the shot of a hunter's ranged weapon, a shield on the tank. It also reads each bot's spent talent points (`.bot command <bot>
+// talents`): a reset 0/0/0 bot is a warning. The result is the report's `preflight`; what is missing is a
 // warning, and fails the run only with RemoteOptions.Preflight "strict".
 
 // Values of RemoteOptions.Preflight.
@@ -30,8 +31,8 @@ const (
 	preflightAmmo         = 100 // shots of the kind the ranged weapon takes
 )
 
-// BotLiner is the optional part of a RemoteGame that sends a plain `.bot` line (maintenance, inv, logout: not a commander order) and
-// returns the lines the server answered with. done says which line ends the reply; settled is false when none did in time.
+// BotLiner is the optional part of a RemoteGame that sends a plain `.bot` line (maintenance, inv, logout, `command <bot> talents`: not a
+// commander order) and returns the lines the server (or the bot) answered with. done says which line ends the reply; settled is false when none did in time.
 type BotLiner interface {
 	BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) (lines []string, settled bool, err error)
 }
@@ -46,7 +47,9 @@ type PreflightBot struct {
 	Drinks      int    `json:"drinks,omitempty"` // drinks the bags hold (known entries)
 	Ammo        string `json:"ammo,omitempty"`   // a ranged weapon's shot: "arrows 200", "bullets 0", ...
 	Shield      *bool  `json:"shield,omitempty"` // checked for the tank only
-	Inventory   string `json:"inventory,omitempty"`
+	// Talents is the points spent per tree from `.bot command <bot> talents` ("0/5/31"), or "no answer". Total 0 is a reset bot.
+	Talents   string `json:"talents,omitempty"`
+	Inventory string `json:"inventory,omitempty"`
 }
 
 // Preflight is the result of the kit check.
@@ -144,6 +147,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		pf.Bots = append(pf.Bots, b)
 	}
 	for i, m := range d.fr.Party {
+		d.checkTalents(ctx, bl, pf, &pf.Bots[i], m)
 		d.checkKit(ctx, bl, pf, &pf.Bots[i], m)
 		if err := ctx.Err(); err != nil {
 			return err
@@ -183,6 +187,32 @@ func (d *RemoteDriver) maintain(ctx context.Context, bl BotLiner, name string) s
 		return "no answer"
 	}
 	return verdict
+}
+
+// checkTalents reads the bot's spent talent points (`.bot command <bot> talents`, whose answer is the bot's whisper "My current talent
+// spec is: ... (a/b/c)") and flags a bot with none spent: a respec that was reset and never applied again leaves a 0/0/0 tank.
+func (d *RemoteDriver) checkTalents(ctx context.Context, bl BotLiner, pf *Preflight, b *PreflightBot, m tbm.PartyRec) {
+	var got tbm.Talents
+	_, settled, err := bl.BotLines(ctx, "command "+m.Name+" talents", 6*time.Second, func(line string) bool {
+		t, ok := tbm.ParseTalents([]string{line})
+		if ok {
+			got = t
+		}
+		return ok
+	})
+	switch {
+	case err != nil:
+		b.Talents = "error: " + err.Error()
+	case !settled:
+		b.Talents = "no answer"
+	default:
+		b.Talents = fmt.Sprintf("%d/%d/%d", got.Trees[0], got.Trees[1], got.Trees[2])
+		if got.Total == 0 {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: no talent points spent (%s): a reset spec?", m.Name, b.Talents))
+		}
+		return
+	}
+	pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: talents: %s", m.Name, b.Talents))
 }
 
 // checkKit reads the bot's bags and judges them for its role.

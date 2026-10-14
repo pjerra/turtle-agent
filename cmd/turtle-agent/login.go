@@ -134,6 +134,16 @@ func fingerprintPath(st config.Settings, account string) string {
 	return filepath.Join(st.FingerprintDir, "addon-fingerprint-"+hex.EncodeToString(sum[:6]))
 }
 
+// ledgerPath is the file of the instance entries of account's last hour, next to the settings file (named by a hash, like the
+// addon fingerprint, so the account name stays out of the folder listing); empty when the settings folder is not known.
+func ledgerPath(st config.Settings, account string) string {
+	if st.FingerprintDir == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.ToUpper(account)))
+	return filepath.Join(st.FingerprintDir, "instance-entries-"+hex.EncodeToString(sum[:6])+".json")
+}
+
 // addonOption makes the login present the same addon fingerprint every time: the one kept
 // in the account's file, or, on the first login, the one the server announces, which is then
 // saved there. A failed save is reported and costs only a new fingerprint next login.
@@ -354,7 +364,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, Planner: planner})
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()

@@ -103,7 +103,7 @@ type dungeonRunParams struct {
 	WaitSickness bool `json:"wait_sickness,omitempty"`
 	// Mode is "group" (the default: the agent's character leads the party it is in) or "remote": the agent leads a bot group
 	// from outside it through the TortoiseBots remote commander (README "Remote leader"). Remote mode takes lead_bot, and
-	// optionally bots, tank and cc; it sends no GM command and refuses teleport, buffs, brain, gm and gm_level.
+	// optionally bots, tank and cc; its only GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level.
 	Mode string `json:"mode,omitempty"`
 	// LeadBot is the bot that walks in remote mode; bots are the other bots to bind with it (empty: its party as it is).
 	LeadBot string   `json:"lead_bot,omitempty"`
@@ -129,6 +129,11 @@ type dungeonRunParams struct {
 	// OnEnd is what happens to the bots at the end of a remote run: "stay" (the default: `cmd stay` before the unbind), "logout" (stay,
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
+	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
+	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
+	// "gm", "walk", or "off" (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
+	Enter            string `json:"enter,omitempty"`
+	IgnoreEntryLimit bool   `json:"ignore_entry_limit,omitempty"`
 }
 
 type dungeonRunResult struct {

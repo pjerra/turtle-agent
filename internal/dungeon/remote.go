@@ -86,9 +86,21 @@ type RemoteOptions struct {
 	Carrier string
 	// LootRestore is the loot method put back after a free-for-all loot ("group" by default; the module cannot be asked for the old one).
 	LootRestore string
+	// Enter says how the run gets a party that is not inside the plan's map in (remote_enter.go): "auto" (the default: `.tele name` when
+	// the account is a developer-level GM and the plan names a tele, else walk the lead bot into the portal), "gm", "walk", or "off"
+	// (a party outside fails the run). IgnoreEntryLimit lets the run try a 6th new instance within the hour.
+	Enter            string
+	IgnoreEntryLimit bool
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
+
+	EnterVerify time.Duration // after the entry every bot must be on the plan's map within this
+	EnterGrace  time.Duration // the followers' time to come in after the lead bot on a walk, before they are summoned
+	SummonGap   time.Duration // between two `cmd summon` orders
+	// TankBusyWait is how long a pull the module refused as tank-busy (the only tank is in combat) waits for the tank to be free or the
+	// mob to be engaged, before the pull is sent again.
+	TankBusyWait time.Duration
 
 	FeedWait   time.Duration // the first frame after the bind
 	FeedStale  time.Duration // without a new frame this long the feed is "stalled": the loops wait instead of deciding
@@ -125,12 +137,16 @@ const (
 func DefaultRemoteOptions() RemoteOptions {
 	return RemoteOptions{FeedWait: 20 * time.Second, FeedStale: 6 * time.Second, FeedLost: 45 * time.Second,
 		MoveLeg: 120, MoveArrive: 5, LookAhead: 10, LookAheadETA: 2 * time.Second, MoveGap: time.Second, MoveStall: 10 * time.Second, MoveRetries: 4, LeadWait: 30 * time.Second,
-		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second, RezWait: 30 * time.Second}
+		ThreatWait: 6 * time.Second, ThreatWarnPct: 90, OpenerDelay: 2 * time.Second, AddCooldown: 8 * time.Second, UnbindWait: 8 * time.Second, RezWait: 30 * time.Second,
+		EnterVerify: 30 * time.Second, EnterGrace: 8 * time.Second, SummonGap: 6 * time.Second, TankBusyWait: 10 * time.Second}
 }
 
 func (o RemoteOptions) withDefaults() RemoteOptions {
 	d := DefaultRemoteOptions()
-	o.Team, o.Preflight, o.OnEnd = strings.ToLower(o.Team), strings.ToLower(o.Preflight), strings.ToLower(o.OnEnd)
+	o.Team, o.Preflight, o.OnEnd, o.Enter = strings.ToLower(o.Team), strings.ToLower(o.Preflight), strings.ToLower(o.OnEnd), strings.ToLower(o.Enter)
+	if o.Enter == "" {
+		o.Enter = EnterAuto
+	}
 	if o.Preflight == "" {
 		o.Preflight = PreflightWarn
 	}
@@ -156,6 +172,10 @@ func (o RemoteOptions) withDefaults() RemoteOptions {
 		o.OpenerDelay = d.OpenerDelay
 	}
 	fill(&o.UnbindWait, d.UnbindWait)
+	fill(&o.EnterVerify, d.EnterVerify)
+	fill(&o.EnterGrace, d.EnterGrace)
+	fill(&o.SummonGap, d.SummonGap)
+	fill(&o.TankBusyWait, d.TankBusyWait)
 	fill(&o.LookAheadETA, d.LookAheadETA)
 	fill(&o.MoveGap, d.MoveGap)
 	if o.LookAhead == 0 {
@@ -194,8 +214,11 @@ type RemoteReport struct {
 	Preflight *Preflight `json:"preflight,omitempty"`
 	// EndedByModule is the reason the module gave when it ended the binding itself (lead bot gone, party disbanded, a player joined).
 	EndedByModule string `json:"ended_by_module,omitempty"`
-	// GMCommands is always 0: the remote run sends no GM command (no teleport, revive or aura).
+	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
+	// other (no revive, aura or visibility).
 	GMCommands int `json:"gm_commands"`
+	// Enter is the enter phase (absent when the party was already inside the plan's map).
+	Enter *EnterReport `json:"enter,omitempty"`
 
 	// The feed during the run.
 	FramesReceived  uint64 `json:"frames_received"`
@@ -221,6 +244,7 @@ type RemoteReport struct {
 	ThreatOverrides int `json:"threat_overrides"` // mobs the party was sent at after ThreatWait without the tank holding them
 	ThreatWarnings  int `json:"threat_warnings"`  // bots that came within ThreatWarnPct of the tank's threat on a mob
 	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
+	TankBusyWaits   int `json:"tank_busy_waits"`  // pulls the module refused as tank-busy that waited for the tank, then pulled again
 	CCOrders        int `json:"cc_orders"`        // crowd-control orders
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
 	// Tank first (README "Tank first"): TankThreatShare is the mean share of the top threat the tank held on the mobs of the fight, in
@@ -258,6 +282,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.Bots = slices.Clone(r.Bots)
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
+	c.Enter = r.Enter.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
@@ -298,17 +323,21 @@ type RemoteDriver struct {
 	nAt     time.Time // when the driver saw n change
 	stalled bool
 
-	bound       bool
-	unbinding   bool
-	endsAtBind  int
-	stats0      tbm.ViewStats
-	statsMu     sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
-	prevDead    map[packet.GUID]bool
-	deadSeen    bool
-	revived     map[packet.GUID]int
-	lastRevive  map[packet.GUID]time.Time
-	wipeRecover int
-	recoveries  int
+	bound     bool
+	unbinding bool
+	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
+	groupLocked   bool
+	entryRecorded bool    // the instance the lead bot entered is in the ledger
+	outside       *uint32 // the map a walk before the entry plans its paths on (nil: the plan's)
+	endsAtBind    int
+	stats0        tbm.ViewStats
+	statsMu       sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
+	prevDead      map[packet.GUID]bool
+	deadSeen      bool
+	revived       map[packet.GUID]int
+	lastRevive    map[packet.GUID]time.Time
+	wipeRecover   int
+	recoveries    int
 
 	tank       packet.GUID
 	engagedAt  map[packet.GUID]time.Time // when a mob was first seen fighting the party
@@ -677,10 +706,18 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if err := d.waitFirstFrame(ctx); err != nil {
 		return err
 	}
-	if l, ok := d.fr.LeadRec(); !ok {
+	if _, ok := d.fr.LeadRec(); !ok {
 		return fmt.Errorf("the first frame does not list the lead bot %s (lead guid %s)", d.opt.Lead, d.fr.Lead)
+	}
+	if d.opt.Enter != EnterOff && d.needsEntry() {
+		if err := d.enter(ctx); err != nil {
+			return err
+		}
+	}
+	if l, ok := d.fr.LeadRec(); !ok {
+		return fmt.Errorf("the lead bot %s is not in the feed any more (lead guid %s)", d.opt.Lead, d.fr.Lead)
 	} else if d.plan.Map != l.Map {
-		return fmt.Errorf("the lead bot %s is on map %d and the plan needs map %d: bring the group into the dungeon first", l.Name, l.Map, d.plan.Map)
+		return fmt.Errorf("the lead bot %s is on map %d and the plan needs map %d: bring the group into the dungeon first (or let the run enter it: enter \"auto\")", l.Name, l.Map, d.plan.Map)
 	} else if !strings.EqualFold(l.Name, d.opt.Lead) {
 		d.rep.note(fmt.Sprintf("the feed's lead bot is %s, not %s", l.Name, d.opt.Lead))
 	}
@@ -727,6 +764,8 @@ func describeBindErr(e *tbm.Err) string {
 		"bot-bound":        "a bot is still in another commander's group",
 		"member-grouped":   "a named bot is in some other group",
 		"invite-failed":    "a named bot could not be invited",
+		"party-unnamed":    "the party holds a bot the bind did not name: name every bot in it (bots), or the bind would drop the party's instance bind",
+		"lead-bound":       "the lead bot holds a saved instance of a different instance than the group's",
 	}[e.Code]
 	if hint != "" {
 		return fmt.Sprintf("%s (%s): %s", e.Code, e.Message, hint)
@@ -1026,7 +1065,11 @@ func (d *RemoteDriver) waypoint(ctx context.Context, from, to Point, leg float32
 		return to
 	}
 	if pl, ok := d.g.(PathPlanner); ok {
-		if pts, err := pl.PlanPath(ctx, d.plan.Map, from, to); err == nil && len(pts) >= 2 {
+		mapID := d.plan.Map
+		if d.outside != nil {
+			mapID = *d.outside
+		}
+		if pts, err := pl.PlanPath(ctx, mapID, from, to); err == nil && len(pts) >= 2 {
 			if p, ok := alongPath(pts, from, leg); ok {
 				return p
 			}

@@ -712,3 +712,44 @@ objects** (in the instance, or at its edge with the objects loaded). Read the or
    A fight starting during the walk: `in-combat`, and the run waits it out and orders again. Send `cmd move` by hand during an order: `cancelled`, then the run sends it again.
 8. **Agent out of view.** Run the leg with the agent in Ironforge: the step fails at once with `the agent must be within view of game object 123329`, with no order sent and the bots unbound.
 9. **Totals.** For a clean leg 0-2 run, `remote.object_steps` should list the chest, the Shaft, the combine and the Keystone, every order `ack`, seconds per step, `refused` empty.
+
+## Remote Uldaman: enter as the bots' own group, wait out a busy tank, read back talents (issue #83, deploy-19i fixes 1, 4, 5)
+
+Tested with a fake commander and feed only (`internal/dungeon/remote_enter_test.go`, `cmd/turtle-agent/commander_methods_test.go`,
+`internal/tbm/inventory_test.go`); nothing below has run live. Needs a TortoiseBots build with #929 (the bind keeps a bots+commander party,
+bound bots do not leave when their master does, `tank-busy`), `RemoteCommander = 1`, `OwnedBotMaintenanceEnabled = 1`, five owned alts **outside
+the dungeon** and the agent's character outside it too.
+
+**The entry procedure that works** (deploy-19i `BLOCKERS.md`; the run does it by itself since this change):
+
+1. The agent is ungrouped and outside any instance, from the start. Never invite the bots into the agent's party, and never run `leave_group`
+   once bots are inside. (A run started with the agent grouped with the bots binds first, which takes the agent out; the bound bots stay.)
+2. Optional: a stale solo Uldaman bind on the lead bot is cleared with `.instance unbind` (a GM); the lead's solo binds are copied to the new group.
+3. `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...four others...],"tank":"<tank>","healer":"<priest>"}`: `commander bind`
+   forms (or keeps) the bots-only group **outside**; the first frame shows the bots on map 0, so the enter phase runs. With a developer account
+   (`.account` says 3 or more): `.tele name <tank> ulda`, then `cmd summon <bot>` for the others, 6 s apart. Otherwise: `cmd move` legs to the portal at
+   the Badlands entrance (areatrigger 286), then summons for those that did not come.
+4. Every bot's frame shows map 70 within 30 s; then leg 0. No group change after this point (check the server log for no `leave` or `invite` of the bots).
+
+**The hourly limit.** The core refuses a 6th *new* instance per **account** per hour (`TRANSFER_ABORT_TOO_MANY_INSTANCES`). Every attempt that
+gets as far as entering is one: a failed run that entered still counts. The agent keeps the last hour's entries next to its settings file and
+refuses the 6th (`ignore_entry_limit` after a mangosd restart, which clears the server's list). Whether the agent's GM entries also spend the bots'
+budget depends on whether they share the account (open in BLOCKERS); the agent does not enter, only the bots do.
+
+Checks:
+
+1. **GM entry.** A developer account. The report's `remote.enter` has `method: "gm"`, `account_level`, `tele: "ulda"`, `summoned` (4 bots), `arrived` (the
+   seconds each bot first showed on map 70; expect the lead within ~5 s and the others 3-4 s after their summon), `entries: 1`,
+   `entries_last_hour`, and `remote.gm_commands` is 1. Server log: the bots' account got exactly one new instance, no group `leave`/`invite` after the
+   tele, and no homebind 60-90 s later (the 19i failure). Does `.tele name` of a bot put it in its *group's* instance (not a fresh one)?
+2. **Walking entry.** A non-GM account (or `enter: "walk"`). Does the lead bot go in when it walks into the portal's trigger (`remote.enter.method`
+   `walk`; no `stood at the portal and did not enter` failure)? Do the followers come by themselves within the 8 s grace, or are they summoned?
+3. **Wrong map.** Make one bot stick (kill it in the open world before the run, or log it out): the run fails with `<bot> (map N) not on map 70`, the
+   group is untouched, the binding is ended.
+4. **The limit.** Enter five instances inside the hour: the run refuses with the time the oldest entry leaves the list and sends no `.tele`.
+5. **Busy tank.** Pull while the tank is meleeing an add: the first `cmd pullback` is refused `tank-busy` (`remote.refused` `pullback:tank-busy`), the
+   driver waits (`tank_busy_waits`, at most 10 s), then pulls again; no `cmd attack` stands in for it and `pull_fallbacks` stays 0. Does the module
+   answer `tank-busy` for a tank in combat, and `no-tank` only for a party with no tank?
+6. **Talents read-back.** `preflight.bots[].talents` per bot ("0/5/31" for a protection warrior). Does the bot's answer to `.bot command <bot> talents`
+   reach the agent (a whisper from the bot, which `Lines` reads for `command <bot> ...` lines; otherwise `no answer`)? Reset a bot (`.bot command <bot> talents
+   reset`) and run again: `no talent points spent (0/0/0)` is a warning; with `preflight: "strict"` the run fails before the bind's first order.

@@ -17,6 +17,8 @@ type fakeLink struct {
 	mu    sync.Mutex
 	sent  []string
 	reply func(text string) []string
+	// sayHook, when set, runs after each line sent: it appends whatever events the test wants.
+	sayHook func(text string)
 }
 
 func newFakeLink() *fakeLink { return &fakeLink{log: events.New(1000)} }
@@ -27,6 +29,9 @@ func (l *fakeLink) Say(ctx context.Context, text string) error {
 	l.mu.Lock()
 	l.sent = append(l.sent, text)
 	l.mu.Unlock()
+	if l.sayHook != nil {
+		l.sayHook(text)
+	}
 	if l.reply != nil {
 		for _, line := range l.reply(text) {
 			l.log.Append(events.Event{Kind: events.KindSystem, Text: line, Data: map[string]any{"raw": line}})
