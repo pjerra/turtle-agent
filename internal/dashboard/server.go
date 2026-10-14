@@ -42,6 +42,12 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 		}
 		writeJSON(w, geo)
 	})
+	mux.HandleFunc("/api/minimap/", func(w http.ResponseWriter, r *http.Request) {
+		serveMinimapLayers(w, r, p.opt.MinimapDir)
+	})
+	mux.HandleFunc("/minimap/", func(w http.ResponseWriter, r *http.Request) {
+		serveMinimapImage(w, r, p.opt.MinimapDir)
+	})
 	mux.HandleFunc("/files/", func(w http.ResponseWriter, r *http.Request) {
 		serveTestFile(w, r, testsDir)
 	})

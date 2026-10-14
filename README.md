@@ -87,7 +87,8 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
 turtle-agent version
@@ -2631,6 +2632,7 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 | `--tests-dir` | `~/TortoiseBots-audit/tests` | the **only** folder whose files `/files/...` serves (traces, summaries, reports); no other path is reachable |
 | `--traces-dir` | `~/turtle-agent/traces` | where the agents write run traces: read for the last orders and the binary SHA, never served |
 | `--plans-dir` | `~/turtle-agent/dungeons` | plan files for the map (comma list); a plan file that changes (a live plan reload) is loaded again. A plan no folder has is drawn from the copy the binary carries (`dungeons/embed.go`), which can differ from the file a run was started with |
+| `--minimap-dir` | `~/turtle-agent-minimaps` | the map images `minimap-extract` wrote; the map draws over the image of its map id when the folder has one (see Minimaps below) |
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 
@@ -2659,7 +2661,9 @@ was last read to, so a poll costs the new lines only.
   the on-the-spot changes (`tune_change`, `plan_reload`, and the tunables whose value is not the base).
 - The map: an SVG drawn from the plan file for the plan's map: the route of each leg (via points; `direct` steps dashed), pull
   groups as circles of their radius with the group number, bosses, doors and objects the steps use, the entrance. North is
-  up, west is left, one unit is one yard, and the view fits the plan. The current leg's route is bold; legs done and groups
+  up, west is left, one unit is one yard, and the view fits the plan. With `--minimap-dir` the real in-game map of the run's
+  map id is drawn under it (a picker in the legend row appears when the folder has several images of that map: the other source,
+  or another floor). The current leg's route is bold; legs done and groups
   already pulled are dimmed. On it: the bots (tank gold, healer green, dead grey), the commander (violet, only when its
   character stands on the plan's map), and the creatures of the feed (hostile red, neutral grey, friendly green; a ring marks
   one in a fight; dimmed when its pull group is behind the run). Hovering a dot names it with HP, target and pull group.
@@ -2683,6 +2687,43 @@ example `--embed-from http://m910q:8095`, must be named).
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
 answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.
+
+## Minimaps
+
+The dashboard can draw the run over the real in-game map. The pictures come out of **your own game client** and stay on your
+disk: `turtle-agent minimap-extract` reads the client's MPQ archives (read only; a pure-Go reader, no StormLib) and writes
+`<map id>.png` and `<map id>.json` into a folder; nothing extracted is ever committed (the default folder
+`~/turtle-agent-minimaps` is outside the repository, and `/minimaps/` is in `.gitignore` for a folder inside it). Run it yourself:
+
+```
+turtle-agent minimap-extract --client "/path/to/WoW/Data" --out ~/turtle-agent-minimaps --maps all-instances
+turtle-agent minimap-extract --client .../Data --out ~/turtle-agent-minimaps --maps 70,209 --mmaps ~/turtle-agent-mmaps
+turtle-agent minimap-extract --client .../Data --list          # what each dungeon and raid would get, nothing written
+turtle-agent dashboard --minimap-dir ~/turtle-agent-minimaps
+```
+
+`--client` is the client's `Data` folder. The archives are read in the client's load order (`dbc`, `fonts`, `interface`, `misc`,
+`model`, `sound`, `speech`, `terrain`, `texture`, `wmo`, `base`, `backup`, `patch`, then `patch-2` ... `patch-9`, a later one
+overriding an earlier one), so a map a patch adds or changes, such as Turtle WoW's own dungeons, comes out as the client shows it.
+`--maps` is a comma list of map ids or `all-instances`: every `Map.dbc` row whose instance type is dungeon (party) or raid. A map
+can have up to three images, written as `<id>.<source>.png` + `.json`; the first source that exists in `--prefer` (default
+`worldmap,minimap,navmesh`) is also copied to `<id>.png` + `<id>.json`, which is the one the dashboard draws:
+
+| Source | What it is | Where it comes from |
+| --- | --- | --- |
+| `worldmap` | the map picture the client shows for the dungeon (the 4 x 3 tiles of `Interface\WorldMap\<area>`, cut to 1002 x 668); a dungeon with several floors gives `<id>.worldmap-2f.png`, ... too | `WorldMapArea.dbc` rows of the map: the picture's edges in world coordinates |
+| `minimap` | the terrain minimap tiles (256 px per 533.33 yd ADT tile) stitched into one image | `Textures\Minimap\md5translate.trs` and `Map.dbc`; a tile `map<A>_<B>.blp` is column A (from world y), row B (from world x). Indoor dungeons (WMOs) have none, or only the terrain around them |
+| `navmesh` | a height-shaded top-down render of the server's navmesh (transparent background, 2 px per yard) | `--mmaps`: the `.mmtile` files of the map, parsed in Go (no cgo) |
+
+The JSON beside each image: `map`, `name`, `source`, `width`, `height` (pixels), `px_per_yard`, and the world coordinates of
+its edges `north` and `south` (world x of the top and bottom edge), `west` and `east` (world y of the left and right edge).
+The image is north up and west left, as the in-game map is: pixel column `c` is world `y = west - c / px_per_yard`, pixel row
+`r` is world `x = north - r / px_per_yard`. The dashboard draws it at `(-west, -north)`, `west - east` yards wide and
+`north - south` yards tall in the plane its plan drawing uses (`x -> -y`, `y -> -x`). The test pins this against the Uldaman
+plan: the entrance, Ironaya and Archaedas land on their rooms of the client's Uldaman map.
+
+The output table lists, for every map, its type, the main image, its size and the other images. Archives it cannot read (a
+compression method used for audio only) are an error; a map no source has an image for is listed as `none`.
 
 ## Navmesh walking
 
