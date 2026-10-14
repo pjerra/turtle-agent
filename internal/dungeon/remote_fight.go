@@ -184,6 +184,14 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			if !cleared {
 				continue // a hostile of the group showed itself on the way: pick it
 			}
+			// The look walk may itself have run into the boss: a pack aggroed on the way, the party fought, and the boss died in that
+			// fight (remote Uldaman hires-2, Revelosh at 1 % in the ledger). The ledger knows it; the empty look is then the corpse's absence.
+			if sp.required {
+				if dead, why := d.bossDead(sp); dead {
+					d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
+					return nil
+				}
+			}
 			if len(gaveUp) > 0 {
 				return d.leftOver(label, sp, kills, gaveUp, cl)
 			}
