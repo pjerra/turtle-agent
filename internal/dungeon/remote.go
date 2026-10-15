@@ -522,6 +522,7 @@ type RemoteDriver struct {
 	wipeRecoverLeg map[int]int // recovered wipes per leg
 	batch          *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
 	gb             gravesState
+	sweepWiped     bool // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
 	healerCapped   int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
 	bossFight      bool // a boss fight (doKill) is on
 	recoveries     int
@@ -924,7 +925,8 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		// failure of the boss step: it is recovered like any wipe (also with recover_wipe off: the boss is down) and the leg goes on, and the
 		// report counts it apart ("wipe after the kill").
 		after := d.legBossDead()
-		inBatch := d.batch != nil // a wipe in a grave batch (batchWiped clears it)
+		inBatch := d.batch != nil || d.sweepWiped // a wipe in a grave batch (batchWiped clears it) or in a leftover sweep
+		d.sweepWiped = false
 		d.rep.update(func(r *Report) {
 			switch {
 			case after:
@@ -951,7 +953,7 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 			// The leg's last recovery slot is kept for the boss: a wipe in the graves that would use it is not recovered. The party is dead and
 			// cannot go on to the boss without a recovery, so the run ends here; a run started again at this leg has a cap of its own, and the
 			// graves already opened are skipped (cmd state).
-			d.rep.note(fmt.Sprintf("wipe in the grave batches with %d of %d recovery slot(s) of the leg left: the last slot is kept for the boss, so this wipe is not recovered and the run stops here", d.recoverySlotsLeft(), d.cfg.MaxWipeRecoveries))
+			d.rep.note(fmt.Sprintf("wipe in the grave batches or a leftover sweep with %d of %d recovery slot(s) of the leg left: the last slot is kept for the boss, so this wipe is not recovered and the run stops here", d.recoverySlotsLeft(), d.cfg.MaxWipeRecoveries))
 			d.st.Fail("wipe in the graves: not recovered, the last recovery slot of the leg is kept for the boss")
 			return false
 		}

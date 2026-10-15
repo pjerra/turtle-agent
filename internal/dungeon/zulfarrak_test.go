@@ -550,7 +550,7 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 		t.Errorf("companions_loot must be false: only the carrier opens the graves")
 	}
 	n := len(l.Steps)
-	if n != 29 || l.Steps[n-1].AreaTrigger == nil {
+	if n != 32 || l.Steps[n-1].AreaTrigger == nil {
 		t.Fatalf("%d steps", n)
 	}
 	for i, s := range l.Steps[:n-1] {
@@ -576,9 +576,12 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 	}
 }
 
-// The grave steps (owner order 2026-10-15): every one is an entry 128403 spawn of the export (the graves Zum'rah's spell 10731 opens, each with
-// the linked trap that summons a Zombie and a Dead Hero), more than 30 yd from him, once each, with a stand within the use range; the three
-// graves nearer to him and the 9 graves of entry 128308 are not among them.
+// The grave steps (owner order 2026-10-15): every one is an entry 128403 spawn of the export (the only game object Zum'rah's spell 10731 uses:
+// spell_script_target; each grave has the linked trap that summons a Zombie and a Dead Hero), once each, with a stand within the use range; the
+// 9 graves of entry 128308 (the spell does not use them) are not among them. Owner: "the boss opens all the graveyards, and if not all are opened
+// before, they get pulled while they try to kill the boss. There can be 1 or 2 graveyards left but not more": at most two of the graves he can
+// awaken (entry 128403 within 100 yd of him) are left unopened when the area trigger fires; the plan opens all 31, the three nearer ones too
+// (he is friendly until the trigger).
 func TestZulfarrakGraveSteps(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	l := p.Legs[len(p.Legs)-1]
@@ -621,14 +624,8 @@ func TestZulfarrakGraveSteps(t *testing.T) {
 		if !match {
 			t.Errorf("%s: no grave of entry 128403 at %v", where, *lo.Near)
 		}
-		if d := hdist(*lo.Near, zumrah); d <= 30 {
-			t.Errorf("%s: the grave is %.1f yd from Zum'rah", where, d)
-		}
 		if d := dist3(*lo.Stand, *lo.Near); d > UseRange {
 			t.Errorf("%s: the stand is %.1f yd from the grave", where, d)
-		}
-		if hdist(*lo.Stand, zumrah) <= 30 {
-			t.Errorf("%s: the stand is within 30 yd of Zum'rah", where)
 		}
 		// The spawn guid is the export's gameobject.guid of that exact grave.
 		spawnOK := false
@@ -645,8 +642,27 @@ func TestZulfarrakGraveSteps(t *testing.T) {
 		}
 		seen[*lo.Near] = true
 	}
-	if total != 31 || far != 28 || len(seen) != far {
+	if total != 31 || far != 28 || len(seen) != total {
 		t.Errorf("%d graves of 128403 in the export, %d beyond 30 yd, %d steps", total, far, len(seen))
+	}
+	// The graves the boss can awaken and the plan leaves unopened before the trigger.
+	left := 0
+	for g, at := range all {
+		if hdist(at, zumrah) > 100 {
+			continue
+		}
+		opened := false
+		for _, s := range l.Steps {
+			if lo := s.LootObject; lo != nil && strconv.Itoa(int(lo.Spawn)) == g {
+				opened = true
+			}
+		}
+		if !opened {
+			left++
+		}
+	}
+	if left > 2 {
+		t.Errorf("%d summon-usable graves are left unopened before the trigger: at most 2 may be", left)
 	}
 }
 

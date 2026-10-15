@@ -351,7 +351,7 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
 		t.Fatalf("%s", got)
 	}
-	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "28 loot_object steps left out") {
+	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
