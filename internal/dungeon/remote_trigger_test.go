@@ -912,6 +912,18 @@ func TestGroupDriverRefusesALegWithCompanionsLootFalse(t *testing.T) {
 type reviveGame struct {
 	*nearGame
 	revives []string
+	summons []string
+}
+
+// SummonBot is the GM `.summon <bot>`: the bot lands on the agent's map.
+func (g *reviveGame) SummonBot(ctx context.Context, name string) error {
+	g.summons = append(g.summons, name)
+	for _, p := range g.party {
+		if p.Name == name {
+			delete(g.memberMap, p.GUID)
+		}
+	}
+	return nil
 }
 
 func (g *reviveGame) ReviveBot(ctx context.Context, name string) error {
@@ -1043,5 +1055,154 @@ func TestWipeBeforeTheBossKillIsStillAWipe(t *testing.T) {
 	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.RecoverWipe = false })
 	if err == nil || rep.State != "failed" || rep.Remote.WipesAfterKill != 0 {
 		t.Fatalf("%v %s %d", err, rep.State, rep.Remote.WipesAfterKill)
+	}
+}
+
+// The lead bot itself released outside the dungeon: after the GM revives the lead is summoned to the agent (in the instance) first and the
+// others to the lead (`cmd summon`), never the party out to a lead on map 1; every member ends on the plan's map. With the whole party
+// dead and released it is the same.
+func TestRecoveryBringsALeadOutsideTheDungeonInFirst(t *testing.T) {
+	for name, who := range map[string][]int{"lead and the healer": {0, 1}, "the whole party released": {0, 1, 2}} {
+		g := &reviveGame{nearGame: newNearGame(t, 3)}
+		g.agent = Point{5, 0, 0}
+		f := g.fakeRemote
+		f.reviveStuck = map[string]bool{}
+		died := false
+		f.onTick = func(fr *fakeRemote) {
+			if !died && fr.lead().X > 5 {
+				died = true
+				fr.memberMap = map[packet.GUID]uint32{}
+				for _, i := range who {
+					fr.party[i].Dead, fr.party[i].HP = true, 0
+					fr.reviveStuck[fr.party[i].Name] = true
+					fr.memberMap[fr.party[i].GUID] = 1
+				}
+			}
+		}
+		cfg := DefaultConfig()
+		cfg.Setup, cfg.RecoverWipe = []string{"gm visible off"}, true
+		d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), g, cfg, objOpts(), g.clock())
+		err := d.Run(context.Background(), 0)
+		rep, _ := d.Status()
+		if err != nil || rep.State != "done" {
+			t.Fatalf("%s: %v\n%s", name, err, notesOf(rep))
+		}
+		if fmt.Sprint(g.summons) != "[Tanky]" || len(g.memberMap) != 0 {
+			t.Fatalf("%s: summons %v member maps %v", name, g.summons, g.memberMap)
+		}
+		// The others came by `cmd summon <bot>`, all after the lead was in (GM .summon of the lead is no order of the commander).
+		for _, i := range who[1:] {
+			if g.indexOf("cmd summon "+g.party[i].Name) < 0 {
+				t.Errorf("%s: no cmd summon %s: %v", name, g.party[i].Name, g.orders)
+			}
+		}
+		if g.indexOf("cmd summon Tanky") >= 0 {
+			t.Errorf("%s: the lead bot was summoned by cmd summon: %v", name, g.orders)
+		}
+	}
+}
+
+// Without a GM account the ghost outside is left to run back only for a bounded time: then the recovery fails and says why.
+func TestRecoveryOfAGhostOutsideFailsAfterABoundedWaitWithoutAGM(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 0)}
+	g.agent = Point{5, 0, 0}
+	g.reviveStuck = map[string]bool{"Healy": true}
+	died := false
+	began := time.Time{}
+	g.onTick = func(fr *fakeRemote) {
+		if !died && fr.lead().X > 5 {
+			died, began = true, fr.now
+			fr.lead().Dead, fr.lead().HP = true, 0
+			fr.party[1].Dead, fr.party[1].HP = true, 0
+			fr.memberMap = map[packet.GUID]uint32{gHealer: 1}
+		}
+	}
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "Healy has been dead on map 1, outside the dungeon, for 120 s") || g.now.Sub(began) > 4*time.Minute {
+		t.Fatalf("%v after %v", err, g.now.Sub(began))
+	}
+}
+
+// ---- loot_object steps on exact spawns (the graves) ----
+
+func graveLeg(n int) (Leg, []*fakeGrave) {
+	var steps []Step
+	var gs []*fakeGrave
+	for i := 0; i < n; i++ {
+		at := Point{float32(30 + 10*i), 0, 0}
+		spawn := uint32(27000 + i)
+		guid := packet.GUID(uint64(packet.HighGameObject)<<48 | uint64(128403)<<24 | uint64(spawn))
+		stand := Point{at.X - 3, 0, 0}
+		steps = append(steps, Step{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: 128403, Near: &at, Range: 2, Spawn: spawn}, Stand: &stand}})
+		gs = append(gs, &fakeGrave{guid: guid, at: at, state: "ready"})
+	}
+	off := false
+	return Leg{Name: "graveyard", To: Point{20, 0, 0}, CompanionsLoot: &off, Steps: steps}, gs
+}
+
+func graveRun(t *testing.T, g *fakeCarrier, leg Leg, gs []*fakeGrave) (Report, error) {
+	t.Helper()
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	return runCarrier(t, g, remotePlan(leg), objOpts())
+}
+
+// An opened grave summons two hostiles that come at the party: the next `cmd open` waits until both are dead.
+func TestGraveStepsFightOutWhatEachGraveBringsBeforeTheNextOpen(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := graveLeg(3)
+	var killedAtOpen []int
+	g.onGrave = func(c *fakeCarrier, gv *fakeGrave) {
+		killedAtOpen = append(killedAtOpen, c.mobsKilled)
+		for i := 0; i < 2; i++ {
+			m := c.addMob(7286, Point{gv.at.X - 2, float32(i), 0})
+			m.pulled, m.pullAt = true, c.now
+		}
+	}
+	rep, err := graveRun(t, g, leg, gs)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	// Each open found everything the earlier graves brought dead already; the last grave's two mobs died before the run ended.
+	if fmt.Sprint(killedAtOpen) != "[0 2 4]" || g.mobsKilled != 6 {
+		t.Fatalf("killed at each open %v, in all %d\n%s", killedAtOpen, g.mobsKilled, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "fighting it out before the next step") {
+		t.Errorf("%s", notesOf(rep))
+	}
+}
+
+// A resumed run in the graveyard goes on at the first unopened grave: the opened ones (state active) and a despawned one are skipped with a
+// note, and only the others get an open order, by their exact GUID.
+func TestGraveStepsOfAResumedRunSkipOpenedGraves(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := graveLeg(5)
+	gs[0].state, gs[1].state = "active", "active" // an earlier run opened two
+	gs[2].gone = true                             // and one despawned
+	rep, err := graveRun(t, g, leg, gs)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	var opens []string
+	for _, o := range g.orders {
+		if strings.HasPrefix(o, "cmd open ") {
+			opens = append(opens, strings.Fields(o)[2])
+		}
+	}
+	want := []string{tbm.GUIDArg(gs[3].guid), tbm.GUIDArg(gs[4].guid)}
+	if fmt.Sprint(opens) != fmt.Sprint(want) {
+		t.Fatalf("opens %v, want %v\n%s", opens, want, notesOf(rep))
+	}
+	n := notesOf(rep)
+	if strings.Count(n, "is opened already (state active): skipped") != 2 || strings.Count(n, "is gone (opened and despawned, or not spawned): skipped") != 1 {
+		t.Errorf("%s", n)
+	}
+	for _, gv := range gs {
+		if !gv.gone && gv.state != "active" {
+			t.Errorf("grave %v still %s", gv.guid, gv.state)
+		}
 	}
 }

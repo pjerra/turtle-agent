@@ -74,3 +74,12 @@ func (g remoteGame) ReviveBot(ctx context.Context, name string) error {
 	}
 	return g.c.cur().GM(ctx, ".revive "+name)
 }
+
+// SummonBot sends the GM line ".summon <bot>" (dungeon.BotSummoner): one of the commander's bots, to the agent's own character. The name is
+// checked first; only a GM account's server accepts it.
+func (g remoteGame) SummonBot(ctx context.Context, name string) error {
+	if !botName.MatchString(name) {
+		return fmt.Errorf("summon: %q is not a bot name", name)
+	}
+	return g.c.cur().GM(ctx, ".summon "+name)
+}

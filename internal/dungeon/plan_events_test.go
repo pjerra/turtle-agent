@@ -275,3 +275,31 @@ func TestPlanCheckObjectStandWithinUseRange(t *testing.T) {
 		t.Fatalf("%q: %s", got, res.Summary())
 	}
 }
+
+// A kill_first entry is never crowd-controlled: the loader refuses one that is also in cc_priority or cc_always.
+func TestPlanRefusesAKillFirstEntryInTheCCLists(t *testing.T) {
+	const tmpl = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"cc_priority":%s,"cc_always":%s,"kill_first":[5650,7247],"legs":[{"to":{"x":0,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":5}}}]}]}`
+	for _, c := range [][2]string{{"[7246,7247]", "[]"}, {"[7246]", "[5650]"}} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, c[0], c[1]))); err == nil || !strings.Contains(err.Error(), "is also in cc_priority or cc_always") {
+			t.Errorf("%v: %v", c, err)
+		}
+	}
+	if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, "[7246]", "[7246]"))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A grave's spawn guid parses, keeps its form and needs its entry.
+func TestObjectSpawnGuidParses(t *testing.T) {
+	p := mustPlan(t, eventPlan(`{"loot_object":{"entry":128403,"spawn":27134,"near":{"x":1,"y":2,"z":3},"range":2}}`, ""))
+	if lo := p.Legs[0].Steps[0].LootObject; lo.Spawn != 27134 {
+		t.Fatalf("%+v", lo)
+	}
+	out, _ := Marshal(p)
+	if !strings.Contains(string(out), `"spawn": 27134`) {
+		t.Fatalf("%s", out)
+	}
+	if _, err := Parse("t.json", []byte(eventPlan(`{"loot_object":{"spawn":5,"near":{"x":1,"y":2,"z":3}}}`, ""))); err == nil || !strings.Contains(err.Error(), "loot_object.spawn: needs the entry as well") {
+		t.Fatalf("%v", err)
+	}
+}

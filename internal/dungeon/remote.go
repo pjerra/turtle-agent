@@ -543,6 +543,7 @@ type RemoteDriver struct {
 	moveTo       Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo   bool
 	tf           tankFirst                 // the tank-first state of the fights (remote_tank.go)
+	offSince     map[packet.GUID]time.Time // when a bot dead outside the dungeon was first left to run back (no GM account)
 	gmRevived    map[packet.GUID]int       // `.revive` lines sent for a bot dead outside the dungeon (reviveOffMap)
 	lastGMRevive map[packet.GUID]time.Time //
 	unitMem      map[*UnitWait]*unitMemory // what each "gone" unit wait has seen (remote_trigger.go)
@@ -2016,8 +2017,8 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 	for {
 		dead := d.deadMembers()
 		if len(dead) == 0 {
-			if len(d.gmRevived) > 0 {
-				return d.rejoinFar(ctx) // a bot revived outside the dungeon is summoned in (a no-op when nobody stands far)
+			if len(d.gmRevived) > 0 || len(d.offSince) > 0 || len(d.offMapMembers()) > 0 {
+				return d.bringPartyIn(ctx) // the lead into the instance first, the others to it; every member on the plan's map
 			}
 			return nil
 		}

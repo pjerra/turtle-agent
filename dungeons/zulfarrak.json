@@ -20,7 +20,7 @@
     "hunter:dps",
     "warlock:dps"
   ],
-  "cc_priority": [7246, 7247, 5648],
+  "cc_priority": [7246, 5648],
   "cc_always": [7246],
   "no_cc": [7276, 7286],
   "kill_first": [7785, 8179, 5650, 7247],
@@ -639,6 +639,7 @@
             "entry": 128403,
             "near": {"x": 1858.7, "y": 1053.75, "z": 8.9},
             "range": 2,
+            "spawn": 27134,
             "stand": {"x": 1858.7, "y": 1057.3, "z": 9.3}
           }
         },
@@ -647,6 +648,7 @@
             "entry": 128403,
             "near": {"x": 1862.12, "y": 1050.76, "z": 9.1},
             "range": 2,
+            "spawn": 27135,
             "stand": {"x": 1860.8, "y": 1054, "z": 9.6}
           }
         },
@@ -655,6 +657,7 @@
             "entry": 128403,
             "near": {"x": 1871.08, "y": 1046.76, "z": 9},
             "range": 2,
+            "spawn": 27138,
             "stand": {"x": 1868.6, "y": 1049.2, "z": 9.6}
           }
         },
@@ -663,6 +666,7 @@
             "entry": 128403,
             "near": {"x": 1875.85, "y": 1044.26, "z": 9.1},
             "range": 2,
+            "spawn": 27139,
             "stand": {"x": 1873.4, "y": 1046.7, "z": 9.5}
           }
         },
@@ -671,6 +675,7 @@
             "entry": 128403,
             "near": {"x": 1881.46, "y": 1041.43, "z": 8.9},
             "range": 2,
+            "spawn": 27137,
             "stand": {"x": 1879, "y": 1043.9, "z": 9.3}
           }
         },
@@ -679,6 +684,7 @@
             "entry": 128403,
             "near": {"x": 1881.99, "y": 1034.68, "z": 8.9},
             "range": 2,
+            "spawn": 27131,
             "stand": {"x": 1880.7, "y": 1037.9, "z": 9}
           }
         },
@@ -687,6 +693,7 @@
             "entry": 128403,
             "near": {"x": 1888.36, "y": 1037, "z": 8.9},
             "range": 2,
+            "spawn": 27130,
             "stand": {"x": 1884.9, "y": 1037, "z": 9}
           }
         },
@@ -695,6 +702,7 @@
             "entry": 128403,
             "near": {"x": 1867.74, "y": 1041.84, "z": 8.9},
             "range": 2,
+            "spawn": 27126,
             "stand": {"x": 1871, "y": 1040.5, "z": 9}
           }
         },
@@ -703,6 +711,7 @@
             "entry": 128403,
             "near": {"x": 1845.96, "y": 1047.25, "z": 8.9},
             "range": 2,
+            "spawn": 27133,
             "stand": {"x": 1849.2, "y": 1045.9, "z": 9}
           }
         },
@@ -711,6 +720,7 @@
             "entry": 128403,
             "near": {"x": 1841.08, "y": 1045.54, "z": 9.2},
             "range": 2,
+            "spawn": 27115,
             "stand": {"x": 1844.6, "y": 1045.5, "z": 9.1}
           }
         },
@@ -719,6 +729,7 @@
             "entry": 128403,
             "near": {"x": 1843.19, "y": 1041.16, "z": 8.9},
             "range": 2,
+            "spawn": 27118,
             "stand": {"x": 1844.5, "y": 1044.4, "z": 9.2}
           }
         },
@@ -727,6 +738,7 @@
             "entry": 128403,
             "near": {"x": 1839.18, "y": 1036.88, "z": 9.4},
             "range": 2,
+            "spawn": 27120,
             "stand": {"x": 1841.7, "y": 1039.4, "z": 9.5}
           }
         },
@@ -735,6 +747,7 @@
             "entry": 128403,
             "near": {"x": 1832.72, "y": 1032.39, "z": 9.5},
             "range": 2,
+            "spawn": 27114,
             "stand": {"x": 1835.2, "y": 1034.9, "z": 9.7}
           }
         },
@@ -743,6 +756,7 @@
             "entry": 128403,
             "near": {"x": 1841.82, "y": 1027.76, "z": 9.2},
             "range": 2,
+            "spawn": 27119,
             "stand": {"x": 1839.3, "y": 1030.2, "z": 9.3}
           }
         },
@@ -751,6 +765,7 @@
             "entry": 128403,
             "near": {"x": 1839.42, "y": 1023.49, "z": 9.6},
             "range": 2,
+            "spawn": 27102,
             "stand": {"x": 1839.4, "y": 1027, "z": 9.5}
           }
         },
@@ -759,6 +774,7 @@
             "entry": 128403,
             "near": {"x": 1845.54, "y": 1024.12, "z": 9.1},
             "range": 2,
+            "spawn": 27121,
             "stand": {"x": 1842.3, "y": 1025.5, "z": 9.5}
           }
         },
@@ -767,6 +783,7 @@
             "entry": 128403,
             "near": {"x": 1852.41, "y": 1024.78, "z": 8.9},
             "range": 2,
+            "spawn": 27117,
             "stand": {"x": 1848.9, "y": 1024.8, "z": 9.2}
           }
         },
@@ -775,6 +792,7 @@
             "entry": 128403,
             "near": {"x": 1861.12, "y": 1019.39, "z": 8.9},
             "range": 2,
+            "spawn": 27103,
             "stand": {"x": 1858.6, "y": 1021.9, "z": 8.9}
           }
         },
@@ -783,6 +801,7 @@
             "entry": 128403,
             "near": {"x": 1865.03, "y": 1012.49, "z": 8.9},
             "range": 2,
+            "spawn": 27105,
             "stand": {"x": 1862.6, "y": 1015, "z": 8.9}
           }
         },
@@ -791,6 +810,7 @@
             "entry": 128403,
             "near": {"x": 1866.24, "y": 1008.4, "z": 8.9},
             "range": 2,
+            "spawn": 27104,
             "stand": {"x": 1864.9, "y": 1011.6, "z": 8.9}
           }
         },
@@ -799,6 +819,7 @@
             "entry": 128403,
             "near": {"x": 1871.3, "y": 1008.32, "z": 8.9},
             "range": 2,
+            "spawn": 27113,
             "stand": {"x": 1868.1, "y": 1009.7, "z": 8.9}
           }
         },
@@ -807,6 +828,7 @@
             "entry": 128403,
             "near": {"x": 1871.86, "y": 994.26, "z": 8.9},
             "range": 2,
+            "spawn": 27111,
             "stand": {"x": 1873.2, "y": 997.5, "z": 8.9}
           }
         },
@@ -815,6 +837,7 @@
             "entry": 128403,
             "near": {"x": 1890.12, "y": 989.76, "z": 8.9},
             "range": 2,
+            "spawn": 27106,
             "stand": {"x": 1886.9, "y": 991.1, "z": 8.9}
           }
         },
@@ -823,6 +846,7 @@
             "entry": 128403,
             "near": {"x": 1894.39, "y": 977.01, "z": 8.9},
             "range": 2,
+            "spawn": 27108,
             "stand": {"x": 1893.1, "y": 980.2, "z": 9.2}
           }
         },
@@ -831,6 +855,7 @@
             "entry": 128403,
             "near": {"x": 1887.46, "y": 967.14, "z": 9},
             "range": 2,
+            "spawn": 27097,
             "stand": {"x": 1888.8, "y": 970.4, "z": 9.1}
           }
         },
@@ -839,6 +864,7 @@
             "entry": 128403,
             "near": {"x": 1882.7, "y": 971.83, "z": 8.9},
             "range": 2,
+            "spawn": 27100,
             "stand": {"x": 1885.9, "y": 970.5, "z": 9.1}
           }
         },
@@ -847,6 +873,7 @@
             "entry": 128403,
             "near": {"x": 1879.89, "y": 974.65, "z": 8.9},
             "range": 2,
+            "spawn": 27098,
             "stand": {"x": 1882.4, "y": 972.2, "z": 9.2}
           }
         },
@@ -855,6 +882,7 @@
             "entry": 128403,
             "near": {"x": 1876.44, "y": 972.21, "z": 9.9},
             "range": 2,
+            "spawn": 27099,
             "stand": {"x": 1879.9, "y": 972.2, "z": 9.6}
           }
         },
@@ -879,7 +907,7 @@
       },
       "companions_loot": false,
       "notes": [
-        "PR B (TortoiseBots #984). Witch Doctor Zum'rah (7271, spawn row 81524 at 1912.17 1016.11 11.6) is friendly (faction 35, flag IMMUNE_TO_PLAYER 0x100) until area trigger 962 (at_zumrah, centre 1909.27 1015.11 11.5, radius 10) fires, and a trigger is taken only from a client packet. The step is by auto: the lead bot walks to the stand (1903 1014 11.8, 6.4 yd from the centre, 9 yd from him and 6 yd from the Campfire 2061 at 1909.5 1016.1 that a stand on the centre would be in) and the module takes the trigger for it when AiPlayerbot.BotAreaTriggers lists 962 (TortoiseBots #1002); when `unit 7271 hostile` does not hold 5 s later the agent's own character does it (.appear to the lead bot, a walk into the zone, the packet, a walk back). Live 2026-10-15 (tests/zf-probe-events, zf-probe-zumrah): trigger 962 sent from 1909.3 1015.1 turns him from faction 35 to 37 and he yells; he keeps the flag until combat, but aggroes a bot at 27 yd within about 2 s on his own and the flag clears in combat, so the bots can fight him. In combat he summons Zombies (7286) and Dead Heroes (7276) and a Ward (7785): the plan's kill_first and summoned_kill_first name the ward 7785, which the remote driver takes as part of the fight only with encounter evidence (within 10 yd of a hostile that fights the party) and then sends the party at first; boss.tactics.kill_first [7785] is the same for a leader-mode brain. THE GRAVES (owner order 2026-10-15: open the graves and kill what comes out before the boss; core research, src/scripts/dungeons/zulfarrak/zulfarrak.cpp and sql/base): the graveyard (x 1832-1898, y 967-1054) holds 40 Shallow Graves, all chests (type 3, loot 8367, gold 18-129). 31 are entry 128403, each with a linked trap 128972 (a TRAP object of radius 0: only the chest's use fires it, walking past does nothing; its spell 10247 'Summon Zul'Farrak Zombies' summons one Zombie 7286 and one Dead Hero 7276 at the grave); 9 are entry 128308 (script go_shallow_grave: the first use summons a Zombie with 65 %, a Dead Hero with 10 %, nothing with 25 %, for 30 s). Zum'rah's in-fight 'Awaken Zul'Farrak Zombie' (spell 10731, EventAI 727103, every 18 s from 1-5 s into the fight) has effect ACTIVATE_OBJECT on a Shallow Grave of entry 128403 within 100 yd of him that is spawned and still unopened (conditions 122 AND 123: loot state ready); so each opened 128403 grave is one cast fewer, and the unopened ones are his adds (a Zombie and a Dead Hero each). Fixed spots: the 31 graves. The 28 of them more than 30 yd from him (1912.2 1016.1; the three nearer ones, 1887.9 1029.1, 1892.6 1006.4 and 1891.6 1023.1, are 22-28 yd away and left to him) are steps of this leg, in walking order from 1859 1058 (nearest neighbour; every stand is a navmesh point within 4 yd of its grave, reached by a complete path, TestZulfarrakGraveSteps), before the trigger: the carrier bot opens one (loot_object on that exact spawn, range 2 yd), the party kills the Zombie and the Dead Hero (pull gates and the rest gate between), the next. The 9 entry 128308 graves are not opened: Zum'rah's spell does not use them and they only spawn extra mobs. Looting stays off for every other bot (companions_loot false); only the carrier opens graves and only these. The earlier detour via 1854 1055 and 1860 1037 is gone: the stands lead along the graves, and the traps have radius 0. Unverified live: that the Opening spell on a grave fires its linked trap, and how many mobs one opening brings. The route from the courtyard goes by the pyramid's south-west side (1877 1131, 1858 1061), never within 12 yd of the End Door. The leg's first via is 1892.3 1198.4 in the courtyard's east: from the courtyard's west half (1822 1177, 1849 1185, 1832 1180) the shortest navmesh path to the graveyard goes over the pyramid's End Door ramp (1852 1159 z 15, 1863.5 1142.9 z 14, 9 yd from the shut door) and the live hop at 1847.1 1164 z 13.6 (an interpolated point 3.4 yd under the ramp floor) was unreachable six times; every start reaches 1892.3 1198.4 on a path at least 39 yd from the door, and from there the path to 1859 1058 keeps 25 yd from it."
+        "PR B (TortoiseBots #984). Witch Doctor Zum'rah (7271, spawn row 81524 at 1912.17 1016.11 11.6) is friendly (faction 35, flag IMMUNE_TO_PLAYER 0x100) until area trigger 962 (at_zumrah, centre 1909.27 1015.11 11.5, radius 10) fires, and a trigger is taken only from a client packet. The step is by auto: the lead bot walks to the stand (1903 1014 11.8, 6.4 yd from the centre, 9 yd from him and 6 yd from the Campfire 2061 at 1909.5 1016.1 that a stand on the centre would be in) and the module takes the trigger for it when AiPlayerbot.BotAreaTriggers lists 962 (TortoiseBots #1002); when `unit 7271 hostile` does not hold 5 s later the agent's own character does it (.appear to the lead bot, a walk into the zone, the packet, a walk back). Live 2026-10-15 (tests/zf-probe-events, zf-probe-zumrah): trigger 962 sent from 1909.3 1015.1 turns him from faction 35 to 37 and he yells; he keeps the flag until combat, but aggroes a bot at 27 yd within about 2 s on his own and the flag clears in combat, so the bots can fight him. In combat he summons Zombies (7286) and Dead Heroes (7276) and a Ward (7785): the plan's kill_first and summoned_kill_first name the ward 7785, which the remote driver takes as part of the fight only with encounter evidence (within 10 yd of a hostile that fights the party) and then sends the party at first; boss.tactics.kill_first [7785] is the same for a leader-mode brain. THE GRAVES (owner order 2026-10-15: open the graves and kill what comes out before the boss; core research, src/scripts/dungeons/zulfarrak/zulfarrak.cpp and sql/base): the graveyard (x 1832-1898, y 967-1054) holds 40 Shallow Graves, all chests (type 3, loot 8367, gold 18-129). 31 are entry 128403, each with a linked trap 128972 (a TRAP object of radius 0: only the chest's use fires it, walking past does nothing; its spell 10247 'Summon Zul'Farrak Zombies' summons one Zombie 7286 and one Dead Hero 7276 at the grave); 9 are entry 128308 (script go_shallow_grave: the first use summons a Zombie with 65 %, a Dead Hero with 10 %, nothing with 25 %, for 30 s). Zum'rah's in-fight 'Awaken Zul'Farrak Zombie' (spell 10731, EventAI 727103, every 18 s from 1-5 s into the fight) has effect ACTIVATE_OBJECT on a Shallow Grave of entry 128403 within 100 yd of him that is spawned and still unopened (conditions 122 AND 123: loot state ready); so each opened 128403 grave is one cast fewer, and the unopened ones are his adds (a Zombie and a Dead Hero each). Fixed spots: the 31 graves. The 28 of them more than 30 yd from him (1912.2 1016.1; the three nearer ones, 1887.9 1029.1, 1892.6 1006.4 and 1891.6 1023.1, are 22-28 yd away and left to him) are steps of this leg, in walking order from 1859 1058 (nearest neighbour; every stand is a navmesh point within 4 yd of its grave, reached by a complete path, TestZulfarrakGraveSteps), before the trigger: the carrier bot opens one (loot_object on that exact spawn: `spawn` is the export's gameobject.guid, the open goes by its GUID, range 2 yd), the party fights out what comes out (the driver fights the engaged hostiles until none has fought the party for the quiet time, then the loot wait; the rest gate runs only when a rest line is crossed, no fixed wait per grave) BEFORE the next grave's walk and open, then the next. A resumed run asks `cmd state \u003cguid\u003e` first and skips a grave that is opened already or gone, with a note, so it goes on at the first unopened one. The 9 entry 128308 graves are not opened: Zum'rah's spell does not use them and they only spawn extra mobs. Looting stays off for every other bot (companions_loot false); only the carrier opens graves and only these. The earlier detour via 1854 1055 and 1860 1037 is gone: the stands lead along the graves, and the traps have radius 0. Unverified live: that the Opening spell on a grave fires its linked trap, and how many mobs one opening brings. The route from the courtyard goes by the pyramid's south-west side (1877 1131, 1858 1061), never within 12 yd of the End Door. The leg's first via is 1892.3 1198.4 in the courtyard's east: from the courtyard's west half (1822 1177, 1849 1185, 1832 1180) the shortest navmesh path to the graveyard goes over the pyramid's End Door ramp (1852 1159 z 15, 1863.5 1142.9 z 14, 9 yd from the shut door) and the live hop at 1847.1 1164 z 13.6 (an interpolated point 3.4 yd under the ramp floor) was unreachable six times; every start reaches 1892.3 1198.4 on a path at least 39 yd from the door, and from there the path to 1859 1058 keeps 25 yd from it."
       ]
     }
   ]

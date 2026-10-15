@@ -43,8 +43,18 @@ type fakeCarrier struct {
 	recipe    func(bot string) string // after a `use`: what happened to the bags ("" nothing)
 	invErr    bool
 	cut       map[string]bool
-	noMute    map[string]bool // bots that refuse `behavior loot off`
-	noUnmute  map[string]int  // bots that refuse the next n `behavior loot on` orders after they were turned off (-1: all)
+	noMute    map[string]bool            // bots that refuse `behavior loot off`
+	graves    map[packet.GUID]*fakeGrave // exact spawns the module answers `cmd state <guid>` for and opens by GUID
+	onGrave   func(g *fakeCarrier, gv *fakeGrave)
+	noUnmute  map[string]int // bots that refuse the next n `behavior loot on` orders after they were turned off (-1: all)
+}
+
+// fakeGrave is a chest of an exact spawn: state "ready" until it is opened, "active" after; gone: despawned.
+type fakeGrave struct {
+	guid  packet.GUID
+	at    Point
+	state string
+	gone  bool
 }
 
 func newFakeCarrier(t *testing.T) *fakeCarrier {
@@ -114,9 +124,37 @@ func (g *fakeCarrier) Order(ctx context.Context, command string) (tbm.OrderResul
 		g.method = f[2]
 		g.methods = append(g.methods, f[2])
 		return okOrder(command, "x", f[2]+":2"), nil
+	case "state":
+		if g.graves == nil { // the module of the older tests knows no cmd state
+			return errOrder(command, "invalid"), nil
+		}
+		if strings.HasPrefix(f[2], "entry:") { // the probe at the start of a run: the module knows the verb
+			r := okOrder(command, "x", "state")
+			r.State = &tbm.GOState{State: "ready"}
+			return r, nil
+		}
+		id, _ := packet.ParseGUID(f[2])
+		gv := g.graves[id]
+		if gv == nil || gv.gone {
+			return errOrder(command, "not-found"), nil
+		}
+		r := okOrder(command, "x", "state")
+		r.State = &tbm.GOState{GUID: gv.guid, State: gv.state}
+		return r, nil
 	case "open":
 		bot := f[3]
 		g.advance(5 * time.Second)
+		if id, err := packet.ParseGUID(f[2]); err == nil && g.graves[id] != nil {
+			gv := g.graves[id]
+			if gv.gone || gv.state != "ready" {
+				return errOrder(command, "not-found"), nil
+			}
+			gv.state = "active"
+			if g.onGrave != nil {
+				g.onGrave(g, gv)
+			}
+			return okOrder(command, bot, "opened"), nil
+		}
 		if f[2] == tbm.GUIDArg(chestGUID) {
 			if g.loseLoot {
 				return okOrder(command, bot, "-"), nil

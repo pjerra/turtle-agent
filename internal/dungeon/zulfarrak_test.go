@@ -100,7 +100,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 7247 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
 		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
@@ -629,6 +629,16 @@ func TestZulfarrakGraveSteps(t *testing.T) {
 		}
 		if hdist(*lo.Stand, zumrah) <= 30 {
 			t.Errorf("%s: the stand is within 30 yd of Zum'rah", where)
+		}
+		// The spawn guid is the export's gameobject.guid of that exact grave.
+		spawnOK := false
+		for g, at := range all {
+			if dist3(at, *lo.Near) < 0.1 && g == strconv.Itoa(int(lo.Spawn)) {
+				spawnOK = true
+			}
+		}
+		if !spawnOK {
+			t.Errorf("%s: spawn %d is not the guid of the grave at %v", where, lo.Spawn, *lo.Near)
 		}
 		if seen[*lo.Near] {
 			t.Errorf("%s: grave %v twice", where, *lo.Near)

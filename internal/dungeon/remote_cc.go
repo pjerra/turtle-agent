@@ -223,7 +223,7 @@ func (d *RemoteDriver) ccStillOn(h tbm.HostileRec) bool {
 	return ok && d.clk.Now().Sub(at) < ccFresh
 }
 
-// ccAllowed says whether the pack and reactive CC may take h: never a boss of the plan (a boss is not sheeped: live, 8 orders at Velratha, none
+// ccAllowed says whether the pack and reactive CC may take h: never a boss of the plan (the bosses' own entries; a boss is not sheeped: live, 8 orders at Velratha, none
 // landed), an entry of the plan's kill_first (the healers and wards that are killed first, never sheeped: the Witch Doctor 5650 was sheeped ten
 // times against the plan), an entry of no_cc (undead: nine orders at Zombies and Dead Heroes, one cast), or a unit with a pet's GUID.
 func (d *RemoteDriver) ccAllowed(h tbm.HostileRec) bool {
@@ -237,7 +237,7 @@ func (d *RemoteDriver) ccAllowed(h tbm.HostileRec) bool {
 		return false
 	}
 	for _, l := range d.plan.Legs {
-		if b := l.Boss; b != nil && (b.Entry == h.Entry || slices.Contains(b.First, h.Entry)) {
+		if b := l.Boss; b != nil && b.Entry == h.Entry { // the bosses' own entries only: a boss's `first` add may stand in a pack that gets its CC (Uldaman's Grimlok and Galgann)
 			return false
 		}
 	}

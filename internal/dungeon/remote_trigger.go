@@ -525,6 +525,97 @@ type BotReviver interface {
 	ReviveBot(ctx context.Context, name string) error
 }
 
+// offMapWait is how long a bot dead outside the dungeon is left to run back through the entrance when no GM account can revive it there.
+const offMapWait = 120 * time.Second
+
+// BotSummoner is the optional part of a RemoteGame that brings one of the commander's bots to the agent with the GM command `.summon <bot>`:
+// the lead bot, when it stands outside the dungeon (bringPartyIn).
+type BotSummoner interface {
+	SummonBot(ctx context.Context, name string) error
+}
+
+// offMapMembers are the living members of the feed that stand on another map than the plan's.
+func (d *RemoteDriver) offMapMembers() []tbm.PartyRec {
+	var out []tbm.PartyRec
+	for _, m := range d.fr.Party {
+		if !m.Dead && m.Map != d.plan.Map {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// leadOutside says whether the lead bot is known to stand on another map than the plan's.
+func (d *RemoteDriver) leadOutside() bool {
+	l, ok := d.fr.LeadRec()
+	return ok && d.haveFr && l.Map != d.plan.Map
+}
+
+// bringPartyIn puts every living member of the party on the plan's map after a recovery. The lead bot first: when it stands outside the
+// dungeon (it was revived at a graveyard there) a GM account summons it to the agent, which stands in the instance (`.summon <lead>`); the
+// others are then summoned to the lead (`cmd summon`, the rejoin), never the party out to a lead outside. Without a GM account the bots
+// that are alive outside are given offMapWait to come in on their own. A member still outside at the end fails the recovery with the reason.
+func (d *RemoteDriver) bringPartyIn(ctx context.Context) error {
+	d.look()
+	if len(d.offMapMembers()) == 0 {
+		return nil
+	}
+	f, isF := d.g.(Follower)
+	gm := isF && d.agentGM(ctx, f)
+	if d.leadOutside() {
+		l, _ := d.fr.LeadRec()
+		sb, canSummon := d.g.(BotSummoner)
+		if !gm || !canSummon {
+			return d.waitPartyIn(ctx, fmt.Sprintf("the lead bot %s stands on map %d, outside the dungeon, and no GM account can summon it in", l.Name, l.Map))
+		}
+		if at, m, here := f.AgentPlace(); !here || m != d.plan.Map {
+			return fmt.Errorf("the lead bot %s stands on map %d, outside the dungeon, and the agent's own character is not in the instance (%v), so it cannot summon the lead in: the party cannot be brought back", l.Name, l.Map, at)
+		}
+		if err := sb.SummonBot(ctx, l.Name); err != nil {
+			return fmt.Errorf("the lead bot %s stands on map %d, outside the dungeon, and .summon %s failed: %w", l.Name, l.Map, l.Name, err)
+		}
+		cmd := ".summon " + l.Name
+		d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
+		d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
+		d.rep.note(fmt.Sprintf("recovery: the lead bot %s was on map %d, outside the dungeon: %s (a GM assist during the run); the others are summoned to it after", l.Name, l.Map, cmd))
+		until := d.clk.Now().Add(30 * time.Second)
+		for d.leadOutside() {
+			if !d.clk.Now().Before(until) {
+				return fmt.Errorf("the lead bot %s is still on map %d 30 s after .summon %s: the party cannot be brought back", l.Name, l.Map, l.Name)
+			}
+			if err := d.tick(ctx, d.cfg.Poll); err != nil {
+				return err
+			}
+		}
+	}
+	if err := d.rejoinFar(ctx); err != nil { // the others to the lead (a GM account; a no-op when nobody stands far)
+		return err
+	}
+	return d.waitPartyIn(ctx, "bots are alive outside the dungeon and could not be summoned in")
+}
+
+// waitPartyIn waits up to offMapWait for every living member to stand on the plan's map; what is left outside fails with why.
+func (d *RemoteDriver) waitPartyIn(ctx context.Context, why string) error {
+	until := d.clk.Now().Add(offMapWait)
+	for {
+		d.look()
+		off := d.offMapMembers()
+		if len(off) == 0 {
+			return nil
+		}
+		if !d.clk.Now().Before(until) {
+			var names []string
+			for _, m := range off {
+				names = append(names, fmt.Sprintf("%s (map %d)", m.Name, m.Map))
+			}
+			return fmt.Errorf("recovery: %s still outside the dungeon after %.0f s: %s", strings.Join(names, ", "), offMapWait.Seconds(), why)
+		}
+		if err := d.tick(ctx, d.cfg.Poll*3); err != nil {
+			return err
+		}
+	}
+}
+
 // maxGMRevives is how many `.revive` lines one bot gets before the run gives up on it.
 const maxGMRevives = 3
 
@@ -537,8 +628,17 @@ func (d *RemoteDriver) reviveOffMap(ctx context.Context, m tbm.PartyRec) (handle
 	f, ok := d.g.(Follower)
 	br, ok2 := d.g.(BotReviver)
 	if !ok || !ok2 || !d.agentGM(ctx, f) {
-		if d.rejoin.once("offmap-" + m.Name) {
-			d.rep.note(fmt.Sprintf("recovery: %s is dead on map %d, outside the dungeon, and `cmd revive` did not bring it back; no GM account to revive it there: it is left to run back through the entrance (until the recovery's time limit)", m.Name, m.Map))
+		if d.offSince == nil {
+			d.offSince = map[packet.GUID]time.Time{}
+		}
+		since, seen := d.offSince[m.GUID]
+		if !seen {
+			d.offSince[m.GUID] = d.clk.Now()
+			since = d.clk.Now()
+			d.rep.note(fmt.Sprintf("recovery: %s is dead on map %d, outside the dungeon, and `cmd revive` did not bring it back; no GM account to revive it there: it is left to run back through the entrance for up to %.0f s", m.Name, m.Map, offMapWait.Seconds()))
+		}
+		if d.clk.Now().Sub(since) > offMapWait {
+			return false, fmt.Errorf("%s has been dead on map %d, outside the dungeon, for %.0f s: `cmd revive` did not bring it back and there is no GM account to revive it there (run with a GM account, or bring it in by hand)", m.Name, m.Map, offMapWait.Seconds())
 		}
 		return true, nil
 	}
@@ -565,4 +665,63 @@ func (d *RemoteDriver) reviveOffMap(ctx context.Context, m tbm.PartyRec) (handle
 	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
 	d.rep.note(fmt.Sprintf("recovery: %s was dead on map %d, outside the dungeon: %s (a GM assist during the run); the rejoin summons it into the instance", m.Name, m.Map, cmd))
 	return true, nil
+}
+
+// ---- loot_object steps on exact spawns (the graves) ----
+
+// spawnOpened asks the module (`cmd state <guid>`) about the exact spawn a loot_object step names (ObjectRef.Spawn). skip says the step has
+// nothing to open: the object is gone (not-found: opened and despawned) or not at rest any more (its state is not "ready": opened or
+// looted); why says which. sure is false when the answer was inconclusive (too far from the bots, no answer, an older module): the step
+// goes on and looks again after the approach. A step with no spawn, or a run without entry targets, is never skipped.
+func (d *RemoteDriver) spawnOpened(ctx context.Context, a Action) (skip bool, why string, sure bool) {
+	og, ok := d.orderGame()
+	if !ok || a.SpawnGUID == 0 || !d.entry.ok {
+		return false, "", true
+	}
+	cmd := "cmd state " + tbm.GUIDArg(a.SpawnGUID)
+	res, err := og.Order(ctx, cmd)
+	d.remote(func(r *RemoteReport) { r.OrdersSent++; r.Orders["state"]++; r.StatePolls++ })
+	switch {
+	case err != nil:
+		return false, "", false
+	case res.Kind == tbm.KindAck && res.State != nil:
+		if st := strings.ToLower(res.State.State); st != "ready" {
+			return true, fmt.Sprintf("the object %s is opened already (state %s)", tbm.GUIDArg(a.SpawnGUID), st), true
+		}
+		return false, "", true
+	case res.Code() == "not-found":
+		return true, fmt.Sprintf("the object %s is gone (opened and despawned, or not spawned)", tbm.GUIDArg(a.SpawnGUID)), true
+	}
+	return false, "", false
+}
+
+// fightOutRounds bounds the loop of fightOut.
+const fightOutRounds = 6
+
+// fightOutSettle is how long fightOut waits after a chest was opened for what it summoned to show and come at the party.
+const fightOutSettle = 3 * time.Second
+
+// fightOut fights out what the party is in combat with (the mobs a grave summoned, a pack that came by): the engaged hostiles are fought
+// until none has fought the party for AggroQuiet, then the loot wait and the stay spot (afterFight), and the rest gate runs when a rest
+// line is crossed (no fixed wait per chest). It looks first after fightOutSettle, so that the mobs a chest has just summoned are in the feed.
+func (d *RemoteDriver) fightOut(ctx context.Context, label string) error {
+	if err := d.tick(ctx, fightOutSettle); err != nil {
+		return err
+	}
+	for round := 0; round < fightOutRounds; round++ {
+		d.look()
+		if !d.inCombat() && len(d.fr.EngagedHostiles()) == 0 {
+			break
+		}
+		if round == 0 {
+			d.rep.note(fmt.Sprintf("%s: the party is in a fight (what the chest brought): fighting it out before the next step", label))
+		}
+		if err := d.fightEngaged(ctx); err != nil {
+			return err
+		}
+		if err := d.afterFight(ctx); err != nil {
+			return err
+		}
+	}
+	return d.restGate(ctx, false)
 }

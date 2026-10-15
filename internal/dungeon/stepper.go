@@ -94,6 +94,7 @@ type Action struct {
 	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
 	Entry        uint32
 	EntryAt      *Point
+	SpawnGUID    packet.GUID   // use_object, loot_object: the exact spawn (ObjectRef.Spawn as a GUID); 0 when the plan gives none
 	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
@@ -390,6 +391,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		}
 		if ew, isEntry := s.w.(EntryWorld); isEntry && ref.Entry != 0 && ew.EntryTargets() {
 			base.Kind, base.Entry = kind, ref.Entry
+			if ref.Spawn != 0 {
+				base.SpawnGUID = packet.GUID(uint64(packet.HighGameObject)<<48 | uint64(ref.Entry)<<24 | uint64(ref.Spawn))
+			}
 			switch {
 			case ref.Near != nil:
 				base.EntryAt = ref.Near

@@ -362,6 +362,10 @@ type ObjectRef struct {
 	Entry uint32  `json:"entry,omitempty"`
 	Near  *Point  `json:"near,omitempty"`
 	Range float32 `json:"range,omitempty"` // yards around Near; DefaultObjectRange when 0
+	// Spawn is the object's spawn GUID in the world database (gameobject.guid): with Entry it names that exact object. A remote run asks
+	// `cmd state` for it before a loot_object step and skips one that is opened already or gone (a resumed run goes on at the first unopened
+	// grave), and opens it by GUID, so that a neighbour of the same entry is never opened in its place. 0: not given.
+	Spawn uint32 `json:"spawn,omitempty"`
 }
 
 // UseObject uses a game object (right-click). Stand is where to stand to do it; without it the driver walks next
@@ -652,6 +656,7 @@ type rawRef struct {
 	Entry uint32    `json:"entry"`
 	Near  *rawPoint `json:"near"`
 	Range *float32  `json:"range"`
+	Spawn uint32    `json:"spawn"`
 }
 
 type rawUse struct {
@@ -761,6 +766,11 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	if len(rp.CCAlways) > 0 {
 		p.CCAlways = slices.Clone(rp.CCAlways)
+	}
+	for _, e := range append(slices.Clone(rp.CCPrio), rp.CCAlways...) {
+		if slices.Contains(rp.KillFirst, e) {
+			c.fail("kill_first", "%d is also in cc_priority or cc_always: a kill_first entry is killed first and never crowd-controlled; take it out of the CC lists", e)
+		}
 	}
 	c.entries("no_cc", rp.NoCC, false)
 	if len(rp.NoCC) > 0 {
@@ -1065,7 +1075,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 }
 
 func (c *checker) ref(path string, r *rawRef) ObjectRef {
-	o := ObjectRef{Entry: r.Entry}
+	o := ObjectRef{Entry: r.Entry, Spawn: r.Spawn}
+	if r.Spawn != 0 && r.Entry == 0 {
+		c.fail(path+".spawn", "needs the entry as well (the spawn guid is of an object of that entry)")
+	}
 	if r.Near != nil {
 		p := c.point(path+".near", r.Near)
 		o.Near = &p
