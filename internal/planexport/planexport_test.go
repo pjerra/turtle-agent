@@ -1,7 +1,9 @@
 package planexport
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -267,11 +269,8 @@ func TestUldaman(t *testing.T) {
 // TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
 // ai_dungeon_plan), as comma lists like `entries`, in the column order of that migration, and they read back.
 func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
-	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := Build(p, Options{Source: "test"})
+	p := zulfarrakThroughZumrah(t)
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +279,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
 	}
 	sql := WriteSQL([]Rows{r})
-	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '5650,7247,7246,5648', '5650,7246', '8179,5650,7247', 'test', "
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,5648', '7246', '7785,8179,5650,7247', 'test', "
 	if !strings.Contains(sql, want) {
 		t.Fatalf("the migration lacks %q", want)
 	}
@@ -291,7 +290,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 	if err := Equal([]Rows{r}, back); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(back[0].Plan.KillFirst) != "[8179 5650 7247]" {
+	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247]" {
 		t.Fatalf("read back %+v", back[0].Plan)
 	}
 }
@@ -303,5 +302,228 @@ func TestPlanListTooLongIsRefused(t *testing.T) {
 	}
 	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "kill_first") {
 		t.Fatalf("a kill_first list over 255 characters must be refused: %v", err)
+	}
+}
+
+// An area_trigger step becomes a move to its stand point: a lead bot that walks into the zone takes the trigger itself when the module
+// lists it (TortoiseBots #1002). The agent's own character and unit waits have no run leader step, and are refused with the reason.
+func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
+	const trig = `{"area_trigger":{"id":962,"center":{"x":50,"y":0,"z":0},"radius":10,"stand":{"x":44,"y":0,"z":0},"by":"%s","expect":"unit 7271 hostile"}}`
+	plan := func(by string) *dungeon.Plan {
+		return parsePlan(t, `{"version":1,"name":"zf","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":20,"y":0,"z":0},"companions_loot":false,"steps":[`+
+			strings.Replace(trig, "%s", by, 1)+`],"boss":{"entry":7271,"position":{"x":52,"y":0,"z":0},"tactics":{"kill_first":[7785]}}}]}`)
+	}
+	for _, by := range []string{"auto", "bot"} {
+		r := buildDropLoot(t, plan(by))
+		if got := strings.Join(kinds(r, 0), " "); got != "move move boss" {
+			t.Fatalf("%s: %s", by, got)
+		}
+		m := r.Steps[1]
+		if m.X != 44 || m.Y != 0 || !strings.Contains(m.Comment, "area trigger 962: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)") || !strings.Contains(m.Comment, "unit 7271 hostile") {
+			t.Fatalf("%s: %+v", by, m)
+		}
+	}
+	if _, err := Build(plan("agent"), Options{Source: "test", DropCompanionsLoot: true}); err == nil || !strings.Contains(err.Error(), `area_trigger 962: by "agent" has no run leader step`) {
+		t.Fatalf("%v", err)
+	}
+	wait := parsePlan(t, `{"version":1,"name":"w","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":20,"y":0,"z":0},"steps":[{"wait_for":{"unit":{"entries":[7271],"state":"dead"}}}]}]}`)
+	if _, err := Build(wait, Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "wait_for.unit has no run leader step (unit 7271 dead)") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
+// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, l := range p.Legs {
+		if l.Name == "zumrah" {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatal("the plan has no zumrah leg")
+	return nil
+}
+
+// The whole shipped Zul'Farrak plan is exported up to the zumrah leg: the legs after it (the stairs event) use a unit wait and the gossip
+// step, which the run leader has no step for, so the export is cut before the first of them, with a note that names the leg and the step.
+func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole := buildWhole(t, zulfarrakThroughZumrah(t))
+	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	}
+	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "steps[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+		if !strings.Contains(res.Cut, want) {
+			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
+		}
+	}
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 11 (stairs)") {
+		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// buildWhole builds a plan that has to export whole.
+func buildWhole(t *testing.T, p *dungeon.Plan) Result {
+	t.Helper()
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
+	}
+	return res
+}
+
+// The cut: a step the run leader cannot do in a later leg ends the export before that leg (its rows, and the warnings it made, are gone); in
+// the first leg there is nothing to export, and the plan is refused.
+func TestCutBeforeTheFirstLegWithAStepTheRunLeaderCannotDo(t *testing.T) {
+	const walk = `{"name":"a","to":{"x":1,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":5,"y":0,"z":0}]}]}`
+	const talk = `{"name":"%s","to":{"x":10,"y":0,"z":0},"steps":[{"gossip":{"npc":7607,"near":{"x":12,"y":0,"z":0},"text":"blow","by":"tank"}}],"boss":{"entry":2,"position":{"x":14,"y":0,"z":0}}}`
+	plan := func(legs ...string) *dungeon.Plan {
+		return parsePlan(t, `{"version":1,"name":"cut","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[`+strings.Join(legs, ",")+`]}`)
+	}
+	res, err := Build(plan(walk, strings.Replace(talk, "%s", "b", 1), walk), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Legs) != 1 || res.Rows.Legs[0].Name != "a" || res.Cut == "" || !strings.Contains(res.Cut, "cut before leg 1 (b)") || !strings.Contains(res.Cut, "gossip (NPC 7607") || !strings.Contains(res.Cut, "1 after it") {
+		t.Fatalf("%d legs, cut %q", len(res.Rows.Legs), res.Cut)
+	}
+	for _, st := range res.Rows.Steps {
+		if st.Leg != 0 {
+			t.Errorf("a row of leg %d is left: %+v", st.Leg, st)
+		}
+	}
+	if _, err := Build(plan(strings.Replace(talk, "%s", "a", 1), walk), Options{Source: "test"}); err == nil || !errors.Is(err, ErrNoRunLeaderStep) || !strings.Contains(err.Error(), "leg 0 (a)") {
+		t.Fatalf("a first leg that cannot be exported: %v", err)
+	}
+}
+
+// The shipped Zul'Farrak plan, with the courtyard and Zum'rah legs, still exports: the area trigger is the walk into the zone.
+func TestZulfarrakWithZumrahExports(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
+	res, err := Build(p, Options{Source: "turtle-agent test dungeons/zulfarrak.json", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The optional gahzrilla leg is left out of the run leader's rows (its bots carry no Mallet), so the rows have one leg fewer and the later
+	// legs close up: the last leg is the plan's last, one number lower.
+	if len(res.Rows.Legs) != len(p.Legs)-1 {
+		t.Fatalf("%d rows legs for %d plan legs", len(res.Rows.Legs), len(p.Legs))
+	}
+	last := len(res.Rows.Legs) - 1
+	if p.Legs[len(p.Legs)-1].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
+		t.Fatalf("%s", p.Legs[len(p.Legs)-1].Name)
+	}
+	for _, l := range res.Rows.Legs {
+		if l.Name == "gahzrilla" {
+			t.Errorf("the optional leg is in the rows: %+v", l)
+		}
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Entry == 7273 || s.Entry == 141832 {
+			t.Errorf("a step of the optional leg is in the rows: %+v", s)
+		}
+	}
+	// via, to, the walk into the zone, the boss: the grave steps (the carrier bot's loot_object) are left out of a leg whose companions_loot is false.
+	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
+		t.Fatalf("%s", got)
+	}
+	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
+		t.Fatalf("warnings %v", res.Warnings)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
+		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+func buildDropLoot(t *testing.T, p *dungeon.Plan) Rows {
+	t.Helper()
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Rows
+}
+
+// A leg whose companions_loot is false cannot be exported: the run leader's rows cannot carry it, and its bots would loot the leg's chests.
+// DropCompanionsLoot says to export without it; the shipped Zul'Farrak plan has such a leg.
+func TestCompanionsLootFalseLegIsRefused(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"zf","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"grave","to":{"x":20,"y":0,"z":0},"companions_loot":false,"boss":{"entry":7271,"position":{"x":52,"y":0,"z":0}}}]}`)
+	_, err := Build(p, Options{Source: "test"})
+	if err == nil || !strings.Contains(err.Error(), "leg 0 (grave): companions_loot is false and the run leader's rows cannot carry it") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := Build(p, Options{Source: "test", DropCompanionsLoot: true}); err != nil {
+		t.Fatal(err)
+	}
+	z, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(z, Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "(zumrah): companions_loot is false") {
+		t.Fatalf("the shipped Zul'Farrak plan: %v", err)
+	}
+}
+
+// An optional leg (it needs an item no bot of the run leader carries) is left out of the rows with a warning, and the legs after it take its
+// numbers; every row's leg number is one of the legs written.
+func TestOptionalLegIsLeftOut(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"opt","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"boss":{"entry":1,"position":{"x":20,"y":0,"z":0}}},
+ {"name":"gong","to":{"x":30,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"requires_item":{"entry":9240,"name":"Mallet"}}}],"boss":{"entry":7273,"position":{"x":40,"y":0,"z":0}}},
+ {"name":"c","to":{"x":50,"y":0,"z":0},"boss":{"entry":3,"position":{"x":60,"y":0,"z":0}}}]}`)
+	res, err := Build(p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Legs) != 2 || res.Rows.Legs[0].Name != "a" || res.Rows.Legs[1].Name != "c" || res.Rows.Legs[1].Leg != 1 {
+		t.Fatalf("legs %+v", res.Rows.Legs)
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Leg > 1 || s.Entry == 7273 || s.Entry == 141832 {
+			t.Errorf("row %+v belongs to the optional leg or to a leg that is not written", s)
+		}
+	}
+	if got := strings.Join(kinds(res.Rows, 1), " "); got != "move boss" {
+		t.Errorf("leg 1: %s", got)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "leg 1 (gong): optional (needs Mallet (item 9240)") {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// A use_object whose item is used ON the object (via_item) has no row in the run leader's tables: the export is refused, naming the step.
+func TestViaItemUseObjectIsRefused(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"vi","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"gong","to":{"x":30,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"stand":{"x":32,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`)
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item") {
+		t.Fatalf("%v", err)
 	}
 }

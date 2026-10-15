@@ -124,10 +124,13 @@ type dungeonRunParams struct {
 	// with the failing points in the result's plan_check.
 	Force bool `json:"force,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
-	HaveItems   []uint32       `json:"have_items,omitempty"`
-	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
-	Teleport    bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
-	NoShortcuts bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	HaveItems []uint32 `json:"have_items,omitempty"`
+	// GiveItems puts items in bots' bags at the prepare step with the GM line `.additem <entry>` on each named bot (remote mode, GM account of
+	// level 3; README "Give items"): [{"bot": "lead" | "carrier" | <name>, "item": 9240}]. It is test setup, listed in setup_shortcuts.
+	GiveItems   []dungeon.GiveItem `json:"give_items,omitempty"`
+	Pulltest    *pulltestParam     `json:"pulltest,omitempty"`
+	Teleport    bool               `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
+	NoShortcuts bool               `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`
@@ -187,6 +190,12 @@ type dungeonRunParams struct {
 	// ObjectFallback is what an object step does when the carrier's order fails twice (remote mode): "agent" (the default) lets the
 	// agent's own character open the object and trade the item to the carrier, "off" fails the step.
 	ObjectFallback string `json:"object_fallback,omitempty"`
+	// GravesBatch is how many chests of a plan's batched loot_object steps (Zum'rah's graves) are opened back to back before the party fights
+	// what came out (remote mode): a fixed size, 1 to 20. GravesRamp instead starts at start (default 2) and adds step (default 1) after each
+	// batch without a wipe, up to max (0: no limit but the chests that lie together), and stops growing at the first wipe. Neither: the
+	// plan's own batches (3 to 6 chests). Each batch is noted as "graves-batch: ..." and listed in the report's remote.grave_batches.
+	GravesBatch int                 `json:"graves_batch,omitempty"`
+	GravesRamp  *dungeon.GravesRamp `json:"graves_ramp,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the

@@ -2,6 +2,8 @@ package dungeon
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -469,6 +471,65 @@ func TestRemoteEnterKeepsTheAgentOutside(t *testing.T) {
 	_, err := g.run(opts())
 	if err == nil || !strings.Contains(err.Error(), "must stay outside") || g.idx("tele") >= 0 {
 		t.Fatalf("%v %v", err, g.log)
+	}
+}
+
+// goFake is an enterFake whose agent can `.go xyz`.
+type goFake struct {
+	*enterFake
+	gos     []string
+	noMoves bool // the line is accepted and the agent stays
+}
+
+func (g *goFake) GoXYZ(_ context.Context, mapID uint32, at Point) error {
+	g.gos = append(g.gos, fmt.Sprintf("%d %.1f %.1f %.1f", mapID, at.X, at.Y, at.Z))
+	if !g.noMoves {
+		g.agentMap = mapID
+	}
+	return nil
+}
+func (g *goFake) run(o RemoteOptions) (Report, error) {
+	o.Tank = "Tanky"
+	return runRemote(g.t, g, g.plan, o, nil)
+}
+func (g *goFake) AgentPlace() (Point, uint32, bool)    { return Point{}, g.agentMap, true }
+func (g *goFake) Appear(context.Context, string) error { return nil }
+func (g *goFake) WalkSelf(context.Context, Point) (WalkResult, error) {
+	return WalkResult{Result: "arrived"}, nil
+}
+
+// A GM agent that an earlier run left inside the dungeon is moved out to the portal instead of the run refusing; any other account, a plan
+// without a portal, or a move that does not take still refuse, with the reason.
+func TestRemoteEnterMovesAGMAgentOutOfTheDungeon(t *testing.T) {
+	g := &goFake{enterFake: newEnterFake(t)}
+	g.agentMap = insideMap
+	g.plan.Portal = &Portal{Map: 1, Point: Point{-6773.5, -2889.8, 10}}
+	rep, err := g.run(opts())
+	if err != nil || fmt.Sprint(g.gos) != "[1 -6773.5 -2889.8 10.0]" || g.agentMap != 1 || !strings.Contains(notesOf(rep), "took it out to the portal") {
+		t.Fatalf("%v gos %v\n%s", err, g.gos, notesOf(rep))
+	}
+	if rep.Remote.GMCommands < 1 || !slices.Contains(rep.SetupShortcuts, ".go xyz -6773.50 -2889.80 10.00 1 (GM start point)") {
+		t.Errorf("%d %v", rep.Remote.GMCommands, rep.SetupShortcuts)
+	}
+	// Not a GM: refused, nothing sent.
+	g = &goFake{enterFake: newEnterFake(t)}
+	g.agentMap, g.level = insideMap, 0
+	g.plan.Portal = &Portal{Map: 1, Point: Point{1, 2, 3}}
+	if _, err := g.run(opts()); err == nil || !strings.Contains(err.Error(), "must stay outside") || !strings.Contains(err.Error(), "only a GM account") || len(g.gos) != 0 {
+		t.Fatalf("%v %v", err, g.gos)
+	}
+	// No portal in the plan.
+	g = &goFake{enterFake: newEnterFake(t)}
+	g.agentMap = insideMap
+	if _, err := g.run(opts()); err == nil || !strings.Contains(err.Error(), "has no portal to put it at") {
+		t.Fatalf("%v", err)
+	}
+	// The line is accepted and the agent does not move.
+	g = &goFake{enterFake: newEnterFake(t), noMoves: true}
+	g.agentMap = insideMap
+	g.plan.Portal = &Portal{Map: 1, Point: Point{1, 2, 3}}
+	if _, err := g.run(opts()); err == nil || !strings.Contains(err.Error(), "did not take the agent out of map 70") {
+		t.Fatalf("%v", err)
 	}
 }
 

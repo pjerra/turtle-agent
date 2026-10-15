@@ -123,6 +123,9 @@ func (d *RemoteDriver) rejoinFar(ctx context.Context) error {
 	if !d.haveFr || d.stale() || d.inCombat() || len(d.rejoinFarBots(yd)) == 0 {
 		return nil
 	}
+	if d.leadOutside() {
+		return nil // the party is never summoned out to a lead outside the dungeon: bringPartyIn puts the lead in first
+	}
 	f, ok := d.g.(Follower)
 	if !ok || !d.agentGM(ctx, f) {
 		if d.rejoin.once("nogm") {

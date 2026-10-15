@@ -174,6 +174,47 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 	return err
 }
 
+// ErrSelectionChanged is GMOnConfirmed's refusal: the selection is not the unit the caller confirmed (another request changed it, or the
+// server does not show it), so no line was sent.
+var ErrSelectionChanged = errors.New("gm: the selection is not the confirmed unit any more")
+
+// GMOnConfirmed sends the GM command text, and nothing else, as ONE operation of the session's owner goroutine, if the unit g is the selection the
+// caller confirmed: the session believes g is selected (no request selected another unit since) AND the server shows g as the player's selection
+// (ServerSelection). It sends no CMSG_SET_SELECTION of its own: the core handles a selection on the map thread and a GM chat line on the world
+// thread, so a selection sent right before the line would not be in force when the line runs, and the line would act on whatever the server showed
+// before. When the selection is no longer the confirmed one it returns ErrSelectionChanged with nothing sent, and the caller selects and confirms
+// again (see the commander's selectThenGM).
+func (s *Session) GMOnConfirmed(ctx context.Context, g packet.GUID, text string) error {
+	if g == 0 {
+		return errors.New("gm: no unit to select")
+	}
+	text, err := gmLine(text)
+	if err != nil {
+		return err
+	}
+	say, err := game.ChatTypeByName("say")
+	if err != nil {
+		return err
+	}
+	body, err := game.BuildMessageChat(say, "", text)
+	if err != nil {
+		return err
+	}
+	_, err = s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		believed := s.target
+		s.mu.Unlock()
+		if sel, ok := s.ServerSelection(); believed != g || !ok || sel != g {
+			return nil, ErrSelectionChanged
+		}
+		return nil, s.conn.WritePacket(opcode.CMSGMessagechat, body)
+	})
+	return err
+}
+
 // ClearTarget clears the selection, as a client does when the player drops the target (CMSG_SET_SELECTION with a zero GUID). A command that
 // acts on the selected unit when there is one and on the surroundings when there is none (".respawn", Commands.cpp HandleRespawnCommand)
 // needs it first, and the caller waits for ServerSelection to read zero before the line is sent: the core handles the selection on the map

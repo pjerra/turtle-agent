@@ -256,3 +256,19 @@ func TestFrameSummary(t *testing.T) {
 		t.Fatalf("%v", h)
 	}
 }
+
+// `cmd gossip <npc entry> <bot> <option>` (TortoiseBots #1012): the verb is known, and an option text is accepted only as words that are
+// commander arguments.
+func TestCheckCommandGossip(t *testing.T) {
+	for _, ok := range []string{"cmd gossip 7607 Magey 0", "cmd gossip 7604 Tanky blow the door", "cmd gossip 7604 Tanky Weegli,_blow-it"} {
+		if err := CheckCommand(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	if err := CheckCommand("cmd gossip 7604 Tanky Where's Bly?"); err == nil {
+		t.Error("an apostrophe was accepted in an argument")
+	}
+	if BadOrderWords("blow the door") != "" || BadOrderWords("Where's Bly?") == "" || BadOrderWords("  ") == "" {
+		t.Errorf("%q %q", BadOrderWords("Where's Bly?"), BadOrderWords("  "))
+	}
+}

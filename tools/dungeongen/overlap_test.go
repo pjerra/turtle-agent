@@ -16,9 +16,9 @@ import (
 // default radius, corrected by the mapping walk.
 //
 // uldaman and zulfarrak were cleared live with the default 25 yd radius and overlapping packs (the live checks are what settled them); their
-// groups are not touched by an offline lane. Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
+// groups are not touched by an offline lane (38 since the courtyard, Zum'rah and Gahz'rilla legs of #192 and #195 came in; was 29). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 144, "zulfarrak": 29}
+var packOverlapKnownFailing = map[string]int{"uldaman": 144, "zulfarrak": 38}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

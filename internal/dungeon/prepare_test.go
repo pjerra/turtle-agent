@@ -777,7 +777,7 @@ func TestPrepareNeedsAPreparerGame(t *testing.T) {
 	o := opts()
 	o.Prepare = PrepareSpec{Online: true}
 	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{5, 0, 0}}), o, nil)
-	if err == nil || !strings.Contains(err.Error(), "cannot log bots in") || rep.State != "failed" {
+	if err == nil || !strings.Contains(err.Error(), "Preparer (the prepare step") || rep.State != "failed" {
 		t.Fatalf("%v %s", err, rep.State)
 	}
 	g = newFakeRemote(t)
