@@ -54,7 +54,10 @@ type EditConfig struct {
 	Tokens *routeedit.Tokens
 	Nav    Nav
 	Mmaps  string // the navmesh folder Nav reads, recorded with every version
-	Now    func() time.Time
+	// AllowDefaultDir names settings files (by file name) with an rpc but no dungeons_dir that the operator vouches read a default plan folder
+	// elsewhere than the edits folder; every other such file stops the editor (SlotFolders).
+	AllowDefaultDir []string
+	Now             func() time.Time
 }
 
 // Editor serves /api/edit/*.
@@ -88,15 +91,13 @@ func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
 }
 
 func (e *Editor) checkFolders() error {
-	dirs, err := SlotDungeonDirs(e.p.opt.ConfigDir)
+	if a := strings.TrimSpace(e.p.opt.Agents); a != "auto" {
+		return errors.New("--edit needs --agents auto: an agent given by address has no settings file, so the folder its runs read is unknown")
+	}
+	dirs, err := SlotFolders(e.p.opt.ConfigDir, e.cfg.AllowDefaultDir)
 	if err != nil {
-		return fmt.Errorf("the slots' plan folders cannot be read, so the edits folder cannot be checked against them: %w", err)
+		return fmt.Errorf("the slots' plan folders cannot all be told, so the edits folder cannot be checked against them: %w", err)
 	}
-	e.p.mu.RLock()
-	for _, a := range e.p.known {
-		dirs = append(dirs, a.DungeonsDir)
-	}
-	e.p.mu.RUnlock()
 	return routeedit.CheckFolders(e.cfg.Store.Root(), e.cfg.Source, dirs)
 }
 
@@ -296,9 +297,9 @@ type EditRequest struct {
 	Ops        []routeedit.Op `json:"ops"`
 }
 
-// EditReply is the answer to an edit: the version written (checked, or a refused record) and why.
+// EditReply is the answer to an edit: the version written (checked, unchecked, or a refused record) and why.
 type EditReply struct {
-	Status  string                `json:"status"` // checked or refused
+	Status  string                `json:"status"` // checked, unchecked or refused
 	Version int                   `json:"version"`
 	Name    string                `json:"name"`
 	Message string                `json:"message,omitempty"`
@@ -387,11 +388,14 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 	}
 	code := http.StatusOK
 	var planJSON []byte
-	if check.Checked && check.OK {
-		meta.Status, reply.Status, planJSON = routeedit.StatusChecked, routeedit.StatusChecked, editedJSON
-	} else {
+	switch {
+	case !check.Checked || !check.Accepted:
 		meta.Status, reply.Status, reply.Message = routeedit.StatusRefused, routeedit.StatusRefused, check.Refusal()
 		code = http.StatusUnprocessableEntity
+	case check.OK:
+		meta.Status, reply.Status, planJSON = routeedit.StatusChecked, routeedit.StatusChecked, editedJSON
+	default: // no new issue, but the plan had issues of its own: kept, never "checked"
+		meta.Status, reply.Status, reply.Message, planJSON = routeedit.StatusUnchecked, routeedit.StatusUnchecked, check.Unchecked(), editedJSON
 	}
 	v, err := e.cfg.Store.Save(plan, meta, planJSON, diff)
 	if err != nil {

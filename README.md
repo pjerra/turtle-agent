@@ -3136,17 +3136,24 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dunge
 The request carries ops, never a plan (`{"base_sha256", "note", "ops": [{"leg", "kind": "move"|"insert"|"delete", "index", "x", "y"}]}`, game
 coordinates; index counts the leg's via points, then `to`). The server applies them to a copy of the base file it reads itself: only the
 position of a via point or of a leg's `to` changes, a plain via point is added or deleted; a `direct` or `check_skip` via point, pack
-positions, bosses, steps, and legs are locked. Each new point is put on the navmesh floor nearest its old height (a drag on a multi-level map
+positions, bosses, steps, and legs are locked (so is a `gm_cross` via point). Each new point is put on the navmesh floor nearest its old height (a drag on a multi-level map
 stays on its level; more than one floor in range is reported as `floor_picked`), must lie within 200 yd of the plan's own points, and the
 result must still load as a plan. Then `dungeon.CheckPlan` runs on the whole plan: an edit is refused (HTTP 422, with a refused record) when
-it makes a plan check issue the base plan did not have; the issues the plan already had are listed and do not block it.
+it makes a plan check issue the base plan did not have, or cannot be checked. A version is "checked" only when the edited plan has **no** plan check
+issue at all (exempt `check_skip` hops aside). An edit that adds none to a plan that has issues of its own is kept as "unchecked" (the plan file is
+kept, so work can go on from it) and is never picked by `latest`, `export` or `promote`.
 
 Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
 application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
-created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, `O_EXCL` and `O_NOFOLLOW`, never overwritten.
+created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, never overwritten, and every path step is made
+relative to a directory descriptor opened with `O_NOFOLLOW` (the edits folder once at start, each plan folder per call), so a folder swapped for a
+link cannot redirect a write (Linux; the store does not run elsewhere).
 The commander run reloads its plan file at every leg, so anything written into a running slot's `dungeons_dir` would be taken by that run
 unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-dir` is, contains or lies inside any slot's `dungeons_dir`
-(read from `settings*.json`), or when `--edit-source` lies inside one. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
+(read from `settings*.json`), or when `--edit-source` lies inside one. The guard fails closed: a settings file that cannot be read or decoded,
+a missing config folder, `--agents` other than `auto`, or a slot (a file with an `rpc`) whose plan folder cannot be told (no `dungeons_dir`, or a
+relative one: its runs read `dungeons/` under the agent's working folder) stops the editor and each edit, saying which file. A settings file whose
+default folder you know is elsewhere is named with `--edit-allow-default-dir settings-3.json`. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
 `/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
 `/vNNNN/diff`.
 

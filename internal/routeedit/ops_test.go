@@ -275,3 +275,19 @@ func TestChangeIsJSON(t *testing.T) {
 		t.Errorf("%s %v", b, err)
 	}
 }
+
+func TestGMCrossPointsAreLocked(t *testing.T) {
+	p, err := dungeon.Parse("g.json", []byte(`{"version":1,"name":"g","map":43,"entrance":{"x":0,"y":0,"z":5},"legs":[{"name":"one","to":{"x":300,"y":0,"z":5},
+	 "via":[{"x":20,"y":0,"z":5},{"x":120,"y":0,"z":5,"direct":true,"gm_cross":true}],"pull_groups":[{"entries":[1],"positions":[{"x":320,"y":0,"z":5}]}]}]}`))
+	if err != nil {
+		t.Skip("this build's plan loader does not take that plan: ", err)
+	}
+	for _, op := range []Op{{Leg: 0, Kind: KindMove, Index: 1, X: 121, Y: 0}, {Leg: 0, Kind: KindDelete, Index: 1}} {
+		if _, _, err := Apply(p, []Op{op}, flat); err == nil || !strings.Contains(err.Error(), "gm_cross") {
+			t.Errorf("%+v: %v", op, err)
+		}
+	}
+	if _, _, err := Apply(p, []Op{{Leg: 0, Kind: KindMove, Index: 0, X: 21, Y: 1}}, flat); err != nil {
+		t.Errorf("the plain point before it moves: %v", err)
+	}
+}

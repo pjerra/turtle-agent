@@ -190,3 +190,84 @@ func TestListLeavesOutACutOffRecord(t *testing.T) {
 		t.Errorf("%v %v", ms, err)
 	}
 }
+
+// A plan folder swapped for a link after the store is in use gets no write: the folder is opened without following links at the moment of use.
+func TestAPlanFolderSwappedForALinkGetsNoWrite(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	outside := t.TempDir()
+	if _, err := s.Save("p", &Meta{Status: StatusChecked}, []byte("{}"), "d"); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(s.Root(), "p.moved")
+	if err := os.Rename(filepath.Join(s.Root(), "p"), moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(s.Root(), "p")); err != nil {
+		t.Skip(err)
+	}
+	if _, err := s.Save("p", &Meta{}, []byte("{}"), "d"); err == nil {
+		t.Error("saved through the swapped folder")
+	}
+	if _, err := s.List("p"); err == nil {
+		t.Error("listed through the swapped folder")
+	}
+	if _, err := s.Meta("p", 1); err == nil {
+		t.Error("read through the swapped folder")
+	}
+	if got := names(t, outside); len(got) != 0 {
+		t.Errorf("wrote outside the store: %v", got)
+	}
+	if got := names(t, moved); len(got) != 3 {
+		t.Errorf("the moved folder was written to: %v", got)
+	}
+	// the same for a version file swapped for a link to a file elsewhere
+	target := filepath.Join(outside, "t")
+	os.WriteFile(target, []byte("keep"), 0o600)
+	d2 := filepath.Join(s.Root(), "q")
+	s.Save("q", &Meta{}, []byte("{}"), "d")
+	os.Remove(filepath.Join(d2, "v0001.diff"))
+	os.Symlink(target, filepath.Join(d2, "v0001.diff"))
+	if _, err := s.Diff("q", 1); err == nil {
+		t.Error("read a link as a version file")
+	}
+}
+
+// The edits folder itself replaced by a link after the store opened it: the store goes on writing into the folder it opened, not through the link.
+func TestTheRootSwappedForALinkIsNotFollowed(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "edits")
+	s, err := NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Rename(root, filepath.Join(base, "edits.moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, root); err != nil {
+		t.Skip(err)
+	}
+	if _, err := s.Save("p", &Meta{}, []byte("{}"), "d"); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(t, outside); len(got) != 0 {
+		t.Errorf("wrote through the link: %v", got)
+	}
+	if got := names(t, filepath.Join(base, "edits.moved", "p")); len(got) != 3 {
+		t.Errorf("not in the folder it opened: %v", got)
+	}
+}
+
+func TestLatestSkipsRefusedAndUnchecked(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	s.Save("p", &Meta{Status: StatusChecked}, []byte("{}"), "d")
+	s.Save("p", &Meta{Status: StatusUnchecked}, []byte("{}"), "d")
+	s.Save("p", &Meta{Status: StatusRefused}, nil, "d")
+	if v, _ := s.Latest("p"); v != 1 {
+		t.Errorf("latest %d, want 1: an unchecked or refused version is never the newest to use", v)
+	}
+	s.Save("p", &Meta{Status: StatusAccepted}, []byte("{}"), "d")
+	if v, _ := s.Latest("p"); v != 4 {
+		t.Errorf("latest %d, want the accepted one", v)
+	}
+}
