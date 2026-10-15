@@ -49,20 +49,20 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":""}`, "name must be a plan file name"},
 		{`{"name":"nowhere"}`, "dungeon plan: "},
 		{`{"name":"broken"}`, "name: required"},
-		{`{"name":"rig","force":true,"from_leg":2}`, "from_leg: the plan has legs [first second] (numbers 0-1)"},
-		{`{"name":"rig","force":true,"from_leg":"third"}`, "from_leg: the plan has legs"},
-		{`{"name":"rig","force":true,"from_leg":true}`, "from_leg must be a leg number"},
-		{`{"name":"rig","force":true,"colour":1}`, "colour"},
-		{`{"name":"rig","force":true,"buffs":"worldly"}`, `buffs: unknown preset "worldly" (presets: world)`},
-		{`{"name":"rig","force":true,"buffs":true}`, "buffs must be a preset name"},
-		{`{"name":"rig","force":true,"buffs":[0]}`, "buffs must be a preset name"},
-		{`{"name":"rig","force":true,"buffs":[22888,{}]}`, "buffs must be a preset name"},
-		{`{"name":"rig","force":true,"buffs":[22888,22888,22888,22888,22888,"world","world",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}`, "at most 20"},
-		{`{"name":"rig","force":true,"watchdog":{"warn_s":300}}`, "recover_s (240) must be above warn_s (300)"},
-		{`{"name":"rig","force":true,"watchdog":{"fail_s":100}}`, "fail_s (100) must be above recover_s (240)"},
-		{`{"name":"rig","force":true,"watchdog":{"stall_s":100}}`, "stall_s"},
-		{`{"name":"rig","force":true,"setup":["go entrance",""]}`, "setup[1]: needs 1-400 characters"},
-		{`{"name":"rig","force":true,"setup":["` + strings.Repeat("x", 401) + `"]}`, "setup[0]: needs 1-400 characters"},
+		{`{"name":"rig","from_leg":2}`, "from_leg: the plan has legs [first second] (numbers 0-1)"},
+		{`{"name":"rig","from_leg":"third"}`, "from_leg: the plan has legs"},
+		{`{"name":"rig","from_leg":true}`, "from_leg must be a leg number"},
+		{`{"name":"rig","colour":1}`, "colour"},
+		{`{"name":"rig","buffs":"worldly"}`, `buffs: unknown preset "worldly" (presets: world)`},
+		{`{"name":"rig","buffs":true}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[0]}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[22888,{}]}`, "buffs must be a preset name"},
+		{`{"name":"rig","buffs":[22888,22888,22888,22888,22888,"world","world",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]}`, "at most 20"},
+		{`{"name":"rig","watchdog":{"warn_s":300}}`, "recover_s (240) must be above warn_s (300)"},
+		{`{"name":"rig","watchdog":{"fail_s":100}}`, "fail_s (100) must be above recover_s (240)"},
+		{`{"name":"rig","watchdog":{"stall_s":100}}`, "stall_s"},
+		{`{"name":"rig","setup":["go entrance",""]}`, "setup[1]: needs 1-400 characters"},
+		{`{"name":"rig","setup":["` + strings.Repeat("x", 401) + `"]}`, "setup[0]: needs 1-400 characters"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
@@ -75,7 +75,7 @@ func TestDungeonRunRefusals(t *testing.T) {
 // A run starts in the background, ends in the report and the events, and a second one may follow.
 func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 	r := dungeonRig(t)
-	res := r.call("dungeon_run", `{"name":"rig","force":true,"from_leg":"second"}`)["result"].(map[string]any)
+	res := r.call("dungeon_run", `{"name":"rig","from_leg":"second"}`)["result"].(map[string]any)
 	if res["started"] != true || res["plan"] != "rig" || res["from_leg"] != float64(1) || res["map"] != float64(0) {
 		t.Fatalf("%v", res)
 	}
@@ -96,7 +96,7 @@ func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 		t.Fatalf("%v", evs)
 	}
 	// The finished run is replaced by the next.
-	if out := r.call("dungeon_run", `{"name":"rig","force":true,"teleport":true,"no_shortcuts":true}`); out["error"] != nil || out["result"].(map[string]any)["from_leg"] != float64(0) {
+	if out := r.call("dungeon_run", `{"name":"rig","teleport":true,"no_shortcuts":true}`); out["error"] != nil || out["result"].(map[string]any)["from_leg"] != float64(0) {
 		t.Fatalf("%v", out)
 	}
 }
@@ -105,7 +105,7 @@ func TestDungeonRunWithoutAPartyFailsInTheReport(t *testing.T) {
 // a final state is read only once its event is in the log (the driver emits it first).
 func TestDungeonStatusNeverRunsAheadOfItsEvent(t *testing.T) {
 	r := dungeonRig(t)
-	if out := r.call("dungeon_run", `{"name":"rig","force":true}`); out["error"] != nil {
+	if out := r.call("dungeon_run", `{"name":"rig"}`); out["error"] != nil {
 		t.Fatalf("%v", out)
 	}
 	final := map[string]bool{"done": true, "failed": true, "stopped": true}
@@ -136,7 +136,7 @@ func TestDungeonStatusNeverRunsAheadOfItsEvent(t *testing.T) {
 func TestDungeonStopEndsARun(t *testing.T) {
 	r := dungeonRig(t)
 	r.groupWith("Gorm") // a party, who is not in view: the first rest gate waits for him
-	if out := r.call("dungeon_run", `{"name":"rig","force":true}`); out["error"] != nil {
+	if out := r.call("dungeon_run", `{"name":"rig"}`); out["error"] != nil {
 		t.Fatalf("%v", out)
 	}
 	r.expect(opcode.CMSGMessagechat) // .gm visible on
@@ -147,7 +147,7 @@ func TestDungeonStopEndsARun(t *testing.T) {
 	if st["running"] != true || st["state"] != "running" {
 		t.Fatalf("%v", st)
 	}
-	if out := r.call("dungeon_run", `{"name":"rig","force":true}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "dungeon_stop it first") {
+	if out := r.call("dungeon_run", `{"name":"rig"}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "dungeon_stop it first") {
 		t.Fatalf("%v", out)
 	}
 	// dungeon_pause keeps a remote run's binding; a group-mode run has none, so it is refused and the run goes on.
@@ -171,7 +171,7 @@ func TestDungeonStopEndsARun(t *testing.T) {
 // The setup commands the caller names come back in the report, trimmed, whatever the run does.
 func TestDungeonRunReportsTheSetupShortcuts(t *testing.T) {
 	r := dungeonRig(t)
-	if res := r.call("dungeon_run", `{"name":"rig","force":true,"setup":[" go entrance ","levelup -15"]}`); res["error"] != nil {
+	if res := r.call("dungeon_run", `{"name":"rig","setup":[" go entrance ","levelup -15"]}`); res["error"] != nil {
 		t.Fatalf("%v", res)
 	}
 	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
@@ -181,7 +181,7 @@ func TestDungeonRunReportsTheSetupShortcuts(t *testing.T) {
 	}
 	// Without any, the field is an empty list, not null.
 	r = dungeonRig(t)
-	r.call("dungeon_run", `{"name":"rig","force":true}`)
+	r.call("dungeon_run", `{"name":"rig"}`)
 	st = r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["state"] == "failed" })["result"].(map[string]any)
 	if l, ok := st["report"].(map[string]any)["setup_shortcuts"].([]any); !ok || len(l) != 0 {
 		t.Fatalf("%v", st["report"])
@@ -195,12 +195,12 @@ func TestDungeonRunBuffsParameter(t *testing.T) {
 		n      int
 		first  string
 	}{
-		{`{"name":"rig","force":true}`, 0, ""},
-		{`{"name":"rig","force":true,"buffs":null}`, 0, ""},
-		{`{"name":"rig","force":true,"buffs":[]}`, 0, ""},
-		{`{"name":"rig","force":true,"buffs":"world"}`, 7, "Rallying Cry of the Dragonslayer (22888)"},
-		{`{"name":"rig","force":true,"buffs":["world",22888,1]}`, 8, "Rallying Cry of the Dragonslayer (22888)"},
-		{`{"name":"rig","force":true,"buffs":22888}`, 1, "Rallying Cry of the Dragonslayer (22888)"},
+		{`{"name":"rig"}`, 0, ""},
+		{`{"name":"rig","buffs":null}`, 0, ""},
+		{`{"name":"rig","buffs":[]}`, 0, ""},
+		{`{"name":"rig","buffs":"world"}`, 7, "Rallying Cry of the Dragonslayer (22888)"},
+		{`{"name":"rig","buffs":["world",22888,1]}`, 8, "Rallying Cry of the Dragonslayer (22888)"},
+		{`{"name":"rig","buffs":22888}`, 1, "Rallying Cry of the Dragonslayer (22888)"},
 	} {
 		r := dungeonRig(t)
 		res := r.call("dungeon_run", c.params)["result"].(map[string]any)
@@ -246,9 +246,9 @@ func TestDungeonStatusShowsTheWatchdog(t *testing.T) {
 		params string
 		limits [3]float64
 	}{
-		{`{"name":"rig","force":true}`, [3]float64{120, 240, 420}},
-		{`{"name":"rig","force":true,"watchdog":{"warn_s":30,"recover_s":60,"fail_s":90}}`, [3]float64{30, 60, 90}},
-		{`{"name":"rig","force":true,"watchdog":{"recover_s":-1}}`, [3]float64{120, 0, 420}},
+		{`{"name":"rig"}`, [3]float64{120, 240, 420}},
+		{`{"name":"rig","watchdog":{"warn_s":30,"recover_s":60,"fail_s":90}}`, [3]float64{30, 60, 90}},
+		{`{"name":"rig","watchdog":{"recover_s":-1}}`, [3]float64{120, 0, 420}},
 	} {
 		if out := r.call("dungeon_run", c.params); out["error"] != nil {
 			t.Fatalf("%s: %v", c.params, out)

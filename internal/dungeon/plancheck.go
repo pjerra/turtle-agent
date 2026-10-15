@@ -69,7 +69,7 @@ type PlanIssue struct {
 	From   Point  `json:"from"`
 	Reason string `json:"reason"`
 	Detail string `json:"detail,omitempty"`
-	// Team is the team a pull group or boss is gated to ("horde"); the run's own team skips the other's, a check without a team lists both.
+	// Team is the team a pull group or boss is gated to ("horde"). The other team's run still walks to look at it (gatedLook).
 	Team string `json:"team,omitempty"`
 }
 
@@ -129,15 +129,14 @@ var ErrCheckStart = errors.New("plan check: bad start")
 
 // CheckOptions are the choices of a plan check. A run that starts inside the plan is checked from where the driver puts the party: at
 // Plan.LegStart (the end of the leg before) for a leg, at Plan.GatherSpot for a pull group; the earlier part of the plan is not walked.
-// The zero value checks the whole plan, every team's parts, with the driver's default look.
+// The zero value checks the whole plan with the driver's default look. A pull group or boss gated to a team is checked like any other:
+// the remote driver looks at a part of the other team (gatedLook, the same walk to its positions) before it skips the fight, and its issues
+// carry the team.
 type CheckOptions struct {
 	// FromLeg and FromPullGroup (0-based, as dungeon_run takes them) say where the run starts. With a pull group (nil: none given; 0 is the
 	// leg's first group) the run starts at the group: the leg's own via points and `to` and the groups before it are not checked.
 	FromLeg       int
 	FromPullGroup *int
-	// Team is the party's team ("alliance" or "horde"): a pull group or boss gated to the other team is left out, as the driver skips it.
-	// Empty checks them all and labels the gated ones in the issues.
-	Team string
 	// LookStandoff and LookArrive are the run's tuned look (tune.go: look_standoff, look_arrive); 0 takes the defaults.
 	LookStandoff, LookArrive float32
 }
@@ -290,7 +289,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	}
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
-		if g.NeedsWalk || c.otherTeam(g.Team) {
+		if g.NeedsWalk {
 			continue
 		}
 		first := cur
@@ -308,7 +307,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	if cur, err = c.steps("steps", l.Steps, cur); err != nil {
 		return cur, err
 	}
-	if b := l.Boss; b != nil && !b.NeedsWalk && !c.otherTeam(b.Team) {
+	if b := l.Boss; b != nil && !b.NeedsWalk {
 		stand, err := c.look("boss look", 0, b.Team, b.Position, cur)
 		if err != nil {
 			return cur, err
@@ -316,11 +315,6 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 		cur = stand
 	}
 	return c.steps("after_boss", l.AfterBoss, cur)
-}
-
-// otherTeam says whether something gated to team is for the other team than the run's (never when the check has no team).
-func (c *planChecker) otherTeam(team string) bool {
-	return team != "" && c.opt.Team != "" && team != c.opt.Team
 }
 
 // steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there

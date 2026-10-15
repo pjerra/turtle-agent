@@ -41,7 +41,7 @@ func serverUp(t *testing.T, r *agentRig) {
 // nothing but the run's own pause and resume (asked through the RPC) until the leader says done; the card data is in the report.
 func TestDungeonRunObserveEndToEnd(t *testing.T) {
 	r := observeRig(t)
-	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"observe","lead_bot":"Tanky","bots":["Healy"],"preflight":"off"}`))
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"observe","lead_bot":"Tanky","bots":["Healy"],"preflight":"off"}`))
 	if start["mode"] != "observe" || start["run_mode"] != "observe" || start["started"] != true || start["lead_bot"] != "Tanky" {
 		t.Fatalf("%v", start)
 	}
@@ -117,7 +117,7 @@ func observeOf(status map[string]any) map[string]any {
 // A server that does not know `.bot run` is refused before the bots are bound.
 func TestDungeonRunObserveRefusesAServerWithoutTheRunLeader(t *testing.T) {
 	r := observeRig(t)
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"observe","lead_bot":"Tanky","bots":["Healy"],"preflight":"off"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"observe","lead_bot":"Tanky","bots":["Healy"],"preflight":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot run list"))
 	// an older module answers nothing at all (or an "unknown command" line)
 	r.system("There is no such command.")

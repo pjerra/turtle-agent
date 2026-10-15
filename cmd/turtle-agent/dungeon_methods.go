@@ -110,7 +110,9 @@ type dungeonRunParams struct {
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
 	StartHere     bool `json:"start_here,omitempty"`
-	// Force runs a plan whose plan check (plan_check) found a failing point; without it such a plan is refused.
+	// Force runs a commander-mode plan the plan check (plan_check) refuses: a live-checked plan with a failing point, or one that could not be
+	// checked (no navmesh planner or files for the map, an error in the check). A plan of any other status (draft, mapped) is run anyway,
+	// with the failing points in the result's plan_check.
 	Force bool `json:"force,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
 	HaveItems   []uint32       `json:"have_items,omitempty"`
@@ -289,6 +291,8 @@ type dungeonRunner struct {
 	remote *commanderService
 	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
 	tracesDir string
+	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
+	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.
 	tunePath string
 
@@ -347,19 +351,12 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	}, r
 }
 
-// runTeam is the team the run's team gate uses: the team option, else the agent's own (the owned bots share its faction).
-func (r *dungeonRunner) runTeam(p dungeonRunParams) string {
-	if p.Team != "" {
-		return p.Team
-	}
-	return r.cur().Team()
-}
-
-// planCheckApplies says whether dungeon_run checks the plan: not for a pull test (it runs one pack) and not for an observed run (the server
-// walks the plan).
+// planCheckApplies says whether dungeon_run checks the plan: only a commander run (the driver whose look and gather walks the check
+// models), and not a pull test (it runs one pack). Leader mode walks the plan with the agent's own movement, and an observed run is walked
+// by the server.
 func planCheckApplies(p dungeonRunParams) bool {
 	mode, _, _ := runMode(p.Mode)
-	return p.Pulltest == nil && mode != modeObserve
+	return p.Pulltest == nil && mode == modeCommander
 }
 
 // planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
@@ -411,6 +408,16 @@ func (r *dungeonRunner) control(verb string) (dungeonStatusResult, error) {
 		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_" + verb + ": no dungeon run is going"}
 	}
 	return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server resumes and skips); a paused commander run goes on with dungeon_run (resume, from_leg)"}
+}
+
+// busy is the refusal of a run asked for while one is going (nil when none is).
+func (r *dungeonRunner) busy() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running() {
+		return &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
+	}
+	return nil
 }
 
 func (r *dungeonRunner) running() bool {
@@ -528,9 +535,13 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
 	}
+	// A second run is refused before it pays for a plan check; the check itself follows.
+	if err := r.busy(); err != nil {
+		return dungeonRunResult{}, err
+	}
 	// The plan check walks the plan on the navmesh first, from where the run starts, with the look the run is tuned to.
 	if planCheckApplies(p) {
-		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, r.runTeam(p), from, p.FromPullGroup), p.Force)
+		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, from, p.FromPullGroup), p.Force)
 		if err != nil {
 			return dungeonRunResult{}, err
 		}

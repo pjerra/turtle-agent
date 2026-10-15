@@ -18,9 +18,9 @@ import (
 func TestTuneRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","force":true,"tune":"x.json"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"live_reload":false}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","tune":"/no/such/tunables.json"}`, "tune: "},
+		{`{"name":"rig","tune":"x.json"}`, `go with mode "remote"`},
+		{`{"name":"rig","live_reload":false}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","tune":"/no/such/tunables.json"}`, "tune: "},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -128,7 +128,7 @@ func TestTuneSetAndFileInARemoteRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","preflight":"off"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|1|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))

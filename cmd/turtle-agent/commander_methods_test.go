@@ -155,52 +155,52 @@ func TestBotViewMethod(t *testing.T) {
 func TestDungeonRunRemoteRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","force":true,"mode":"fly"}`, `mode must be "commander", "observe" or "leader"`},
-		{`{"name":"rig","force":true,"lead_bot":"Tanky"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote"}`, "needs lead_bot"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tank y"}`, "needs lead_bot"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","bots":["A","B","C","D","E"]}`, "at most 4"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","bots":["Healy","healy"]}`, "listed twice"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","tank":"x;y"}`, "tank:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","healer":"x;y"}`, "healer:"},
-		{`{"name":"rig","force":true,"healer":"Healy"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"team":"horde"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"on_end":"stay"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"carrier":"Magey"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","carrier":"Ma gey"}`, "carrier:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","loot_restore":"ffa"}`, "loot_restore:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","object_fallback":"maybe"}`, "object_fallback:"},
-		{`{"name":"rig","force":true,"object_fallback":"agent"}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","enter":"fly"}`, "enter:"},
-		{`{"name":"rig","force":true,"mode":"group","enter":"gm"}`, "go with mode"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "play the agent's own character"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","gm":true}`, "no GM command"},
+		{`{"name":"rig","mode":"fly"}`, `mode must be "commander", "observe" or "leader"`},
+		{`{"name":"rig","lead_bot":"Tanky"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote"}`, "needs lead_bot"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tank y"}`, "needs lead_bot"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","bots":["A","B","C","D","E"]}`, "at most 4"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","bots":["Healy","healy"]}`, "listed twice"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","tank":"x;y"}`, "tank:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","healer":"x;y"}`, "healer:"},
+		{`{"name":"rig","healer":"Healy"}`, `go with mode "remote"`},
+		{`{"name":"rig","team":"horde"}`, `go with mode "remote"`},
+		{`{"name":"rig","on_end":"stay"}`, `go with mode "remote"`},
+		{`{"name":"rig","carrier":"Magey"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","carrier":"Ma gey"}`, "carrier:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","loot_restore":"ffa"}`, "loot_restore:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","object_fallback":"maybe"}`, "object_fallback:"},
+		{`{"name":"rig","object_fallback":"agent"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","enter":"fly"}`, "enter:"},
+		{`{"name":"rig","mode":"group","enter":"gm"}`, "go with mode"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "play the agent's own character"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","gm":true}`, "no GM command"},
 		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
-		{`{"name":"rig","force":true,"from_pull_group":0}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"start_here":true}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"pulltest":{"leg":0,"pull_group":0}}`, "scores the character: it needs a brain"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
-		{`{"name":"rig","force":true,"have_items":[7733]}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","have_items":[0]}`, "have_items"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","have_items":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}`, "have_items"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","from_pull_group":0,"start_here":true}`, "exclude each other"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","from_pull_group":0,"resume":true}`, "exclude each other"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"pull_group":0}}`, "needs leg"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0}}`, "needs leg"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"nowhere","pull_group":0}}`, "pulltest.leg: the plan has legs"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "names its own start"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":-1}}`, "use 1-10"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"reset":"fast"}}`, "pulltest.reset"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"second","pull_group":4}}`, "has 1 pull groups"},
+		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},
+		{`{"name":"rig","start_here":true}`, `go with mode "remote"`},
+		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, "scores the character: it needs a brain"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
+		{`{"name":"rig","have_items":[7733]}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","have_items":[0]}`, "have_items"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","have_items":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}`, "have_items"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":0,"start_here":true}`, "exclude each other"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":0,"resume":true}`, "exclude each other"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"pull_group":0}}`, "needs leg"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0}}`, "needs leg"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"nowhere","pull_group":0}}`, "pulltest.leg: the plan has legs"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "names its own start"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"tries":-1}}`, "use 1-10"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":0,"pull_group":0,"reset":"fast"}}`, "pulltest.reset"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","pulltest":{"leg":"second","pull_group":4}}`, "has 1 pull groups"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -218,7 +218,7 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","bots":["Healy"]}`))
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","bots":["Healy"]}`))
 	if start["mode"] != "remote" || start["lead_bot"] != "Tanky" || start["leader_gm"] != "false" || start["started"] != true {
 		t.Fatalf("%v", start)
 	}
@@ -280,7 +280,7 @@ func TestDungeonRunRemoteEntersByTele(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","enter":"gm","preflight":"off"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"gm","preflight":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
@@ -328,7 +328,7 @@ func TestDungeonRunRemotePrepareOverTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","preflight":"off","prepare":{"online":true,"gm_setup":[".gm visible off"]}}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","prepare":{"online":true,"gm_setup":[".gm visible off"]}}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
 	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|offline|0|-", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot add Tanky"))
@@ -382,13 +382,13 @@ func TestDungeonRunRemotePrepareOverTheSession(t *testing.T) {
 func TestDungeonRunPrepareRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","force":true,"prepare":{"online":true}}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"group","prepare":{}}`, `go with mode "remote"`},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm on"]}}`, "not allowed"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["instance unbind all"]}}`, "not allowed"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm visible off","gm visible on","gm visible off","gm visible on","gm visible off"]}}`, "at most"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","prepare":{"online":true,"online_wait_s":999}}`, "online_wait_s"},
-		{`{"name":"rig","force":true,"mode":"remote","lead_bot":"Tanky","prepare":{"fresh":true,"unbind":"all"}}`, "unbind"},
+		{`{"name":"rig","prepare":{"online":true}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"group","prepare":{}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm on"]}}`, "not allowed"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["instance unbind all"]}}`, "not allowed"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"gm_setup":["gm visible off","gm visible on","gm visible off","gm visible on","gm visible off"]}}`, "at most"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"online":true,"online_wait_s":999}}`, "online_wait_s"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","prepare":{"fresh":true,"unbind":"all"}}`, "unbind"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -405,7 +405,7 @@ func TestDungeonRunRemoteUnbindsWhenTheBindIsAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","enter":"off"}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off"}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
@@ -438,7 +438,7 @@ func TestDungeonRunRemoteKeepOnFailKeepsTheBindingUntilStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","enter":"off","keep_on_fail":true}`))
+	resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","enter":"off","keep_on_fail":true}`))
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander bind Tanky"))
 	r.system("TBM:ACTION_ACK|commander bind|party|2|Tanky")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
@@ -543,7 +543,7 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, methodOptions{DungeonsDir: dir})
-	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","force":true,"mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0}`))
+	start := resultOf(t, r.call("dungeon_run", `{"name":"rem","mode":"remote","lead_bot":"Tanky","preflight":"off","from_pull_group":0}`))
 	if start["from_leg"] != float64(0) || start["from_pull_group"] != float64(0) {
 		t.Fatalf("%v", start)
 	}

@@ -233,23 +233,20 @@ func TestPlanCheckStartsAtTheLegStart(t *testing.T) {
 	}
 }
 
-// A pull group or boss gated to the other team is skipped by the driver: the run's team leaves it out, a check without a team lists it,
-// labelled.
-func TestPlanCheckTeamGate(t *testing.T) {
+// A pull group or boss gated to a team is checked like the rest: the remote driver looks at a part of the other team (gatedLook) before it
+// skips the fight, so its look must work too. The issues carry the team.
+func TestPlanCheckTeamGatedPartsAreLookedAt(t *testing.T) {
 	nav := fakeNav{off: map[Point]bool{{10, 30, 0}: true, {10, 200, 0}: true}}
 	leg := Leg{Name: "a", To: Point{0, 0, 0},
 		PullGroups: []PullGroup{{Entries: []uint32{1}, Team: TeamHorde, Positions: []Point{{10, 30, 0}}}},
 		Boss:       &Boss{Entry: 9, Team: TeamHorde, Position: Point{10, 200, 0}}}
-	for team, want := range map[string]string{"": "0/pull group look/1/off the mesh 0/boss look/0/off the mesh", TeamHorde: "0/pull group look/1/off the mesh 0/boss look/0/off the mesh", TeamAlliance: ""} {
-		res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, nav, CheckOptions{Team: team})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := issueReasons(res.Issues); got != want {
-			t.Errorf("team %q: %q, want %q", team, got, want)
-		}
-		if team == "" && !strings.Contains(res.Summary(), "[horde only]") {
-			t.Errorf("not labelled: %s", res.Summary())
+	res := checkLegs(t, nav, 0, leg)
+	if got, want := issueReasons(res.Issues), "0/pull group look/1/off the mesh 0/boss look/0/off the mesh"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+	for _, is := range res.Issues {
+		if is.Team != TeamHorde || !strings.Contains(is.String(), "[horde only") {
+			t.Errorf("not labelled: %s", is)
 		}
 	}
 }
@@ -438,10 +435,10 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 	}
 }
 
-// planCheckSkip lists the shipped plans that fail the plan check today, with the failing points counted when the check came in. Issue #187
+// planCheckKnownFailing lists the shipped plans that fail the plan check today, with the failing points counted when the check came in. Issue #187
 // follows them up one by one (most are drafts from the world export, whose points were never walked; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
 // Zul'Farrak is not on it.
-var planCheckSkip = map[string]bool{
+var planCheckKnownFailing = map[string]bool{
 	"black_morass":          true,
 	"blackrock_depths":      true,
 	"blackwing_lair":        true,
@@ -472,7 +469,7 @@ var planCheckSkip = map[string]bool{
 	"zul_gurub":             true,
 }
 
-// Every shipped plan whose map has navmesh files here passes the plan check, except the ones listed in planCheckSkip.
+// Every shipped plan whose map has navmesh files here passes the plan check, except the ones listed in planCheckKnownFailing.
 func TestShippedPlansPassPlanCheck(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(plansDir, "*.json"))
 	var missing, failing []string
@@ -493,10 +490,10 @@ func TestShippedPlansPassPlanCheck(t *testing.T) {
 		skipNoEngine(t, err)
 		checked++
 		switch {
-		case res.OK() && planCheckSkip[p.Name]:
-			t.Errorf("%s passes the plan check now: remove %s from planCheckSkip", p.Name, p.Name)
+		case res.OK() && planCheckKnownFailing[p.Name]:
+			t.Errorf("%s passes the plan check now: remove %s from planCheckKnownFailing", p.Name, p.Name)
 		case res.OK():
-		case planCheckSkip[p.Name]:
+		case planCheckKnownFailing[p.Name]:
 			failing = append(failing, fmt.Sprintf("%s (%d of %d)", p.Name, len(res.Issues), res.Points))
 		default:
 			t.Errorf("%s: %d of %d points fail:\n%s", p.Name, len(res.Issues), res.Points, res.Summary())
@@ -505,5 +502,5 @@ func TestShippedPlansPassPlanCheck(t *testing.T) {
 	if checked == 0 {
 		t.Skip("no navmesh files for any shipped plan's map here")
 	}
-	t.Logf("%d plans checked; known failing (planCheckSkip, #187): %s; no navmesh files for %s", checked, strings.Join(failing, ", "), strings.Join(missing, ", "))
+	t.Logf("%d plans checked; known failing (planCheckKnownFailing, #187): %s; no navmesh files for %s", checked, strings.Join(failing, ", "), strings.Join(missing, ", "))
 }
