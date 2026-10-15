@@ -27,7 +27,7 @@
   "summoned_kill_first": [7785, 8179],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. THE ROUTE: Antu'sul (in seven legs), Theka the Martyr, Hydromancer Velratha (1470 yd of navmesh path from the entrance, checked by TestZulfarrakOnNavmesh), then the courtyard of the pyramid and Witch Doctor Zum'rah (PR B, TortoiseBots #984), then the legs after Zum'rah that were written from the instance script and have not run live: the stairs event (stairs, stairs_top, stairs_base), Sergeant Bly and his crew (bly), the End Door (weegli_door) and Chief Ukorz Sandscalp with Ruuzlu (ukorz). A failure in one of them ends the run; from_leg \"stairs\" starts there. Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
-    "Left out of this plan (the Gong is listed in dungeons/zulfarrak-extra.json): (1) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (2) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here. The legs after Zum'rah (stairs to ukorz) were written from the instance script (src/scripts/dungeons/zulfarrak/instance_zulfarrak.cpp and zulfarrak.cpp) and the world export, and none has run live. THE EVENT ORDER the script gave: any Troll Cage used (go_troll_cage) frees Bly's crew (faction 250) and sends it to the top of the stairs; when Weegli arrives there wave 1 (23 trolls) spawns at the foot of the stairs and runs up in groups of 2, 3, 4, ... every 10 s; 10 s after it is dead wave 2 (24 trolls) does the same; wave 3 (Nekrum Gutchewer 7796, Shadowpriest Sezz'ziz 7275 and five trolls, none with a spawn row) spawns the instant wave 2 is dead and is NOT sent up the stairs, the crew goes down to meet it; when wave 3 is dead the event is over, the crew stands at 1874-1895 1199-1206, and Bly's and Weegli's menus offer their option. Bly's option turns him, Raven, Oro and Murta hostile 10 s later and sends Weegli, who stays friendly, to blow the End Door; Weegli's own option does the same without the fight. The plan therefore does Bly's gossip and only waits for the door (see the weegli_door leg). Ukorz and Ruuzlu stand behind the door.",
+    "Left out of this plan (the Gong is listed in dungeons/zulfarrak-extra.json): (1) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (2) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here. The legs after Zum'rah (stairs to ukorz) were written from the instance script (src/scripts/dungeons/zulfarrak/instance_zulfarrak.cpp and zulfarrak.cpp) and the world export, and none has run live. THE EVENT ORDER the script gave: any Troll Cage used (go_troll_cage) frees Bly's crew (faction 250) and sends it to the top of the stairs; when Weegli arrives there wave 1 (23 trolls) spawns at the foot of the stairs and runs up in groups of 2, 3, 4, ... every 10 s; 10 s after it is dead wave 2 (24 trolls) does the same; wave 3 (Nekrum Gutchewer 7796, Shadowpriest Sezz'ziz 7275 and five trolls, none with a spawn row) spawns the instant wave 2 is dead and is NOT sent up the stairs, the crew goes down to meet it; when wave 3 is dead the event is over, the crew stands at 1874-1895 1199-1206, and Bly's and Weegli's menus offer their option. Weegli's option sends him to blow the End Door; Bly's option turns him, Raven, Oro and Murta hostile 10 s later (Weegli stays friendly) and sends Weegli too. The plan talks to Weegli first, waits for him to be gone and the door open, then talks to Bly (the weegli_door and bly legs), the order the Wowhead Classic comments advise. Ukorz and Ruuzlu stand behind the door.",
     "No team gate is needed: every mob of the route is hostile to both teams (factions 37, 16 and 107); the friendly NPCs (Sergeant Bly's crew faction 35, Elder Wildmane 15578 faction 35 npc_flags 3 at the gong, the three arena NPCs) are not in any pull group.",
     "The End Door (146084, 1854.5 1142.9 16.1) is shut (state ready, flags 32, seen live) and in the middle of the navmesh route between the graveyard (Zum'rah) and the gong: the navmesh has no doors, so the shortest Theka -\u003e Velratha path (562 yd) walks THROUGH the closed door (a GM did, live; bots would too, a player could not). The Velratha leg therefore starts west of the junction at (1645 909) and goes north by the west road (366 yd from the junction, walked live in 12 hops with no replan); no leg may route through the door, which TestZulfarrakOnNavmesh checks along the whole path. The graveyard (x 1832-1898, y 967-1054, about 70 Shallow Grave chests 128308/128403 with a trap 128972 each) is entered only by the zumrah leg, with the bots' looting off for the whole leg (companions_loot false), and left by the stairs leg, which has it off too; every other leg stays out of it. The ukorz leg is the one that goes through the End Door, after the weegli_door leg has waited for it to open.",
     "Entry: needs TortoiseBots #939 (`cmd enter`). The game has no game_tele inside Zul'Farrak (game_tele 160 \"Zul'Farrak\" is outside, map 1 at -6801.2 -2893.0 9.0, 28 yd from the portal), so there is no entrance_tele and `.tele name` (game_tele names only) cannot put a bot inside; `.go xyz` moves only the caller; and a bot that stands in area trigger 924 (map 1, centre -6773.5 -2889.8 15.1, radius 20) is not taken in, because the module handles CMSG_AREATRIGGER only from the master (PlayerbotAI.cpp:304, TeleportAction.cpp:41-47) and a headless bot never sends its own. The remote driver therefore walks the party to the portal and sends `.bot cmd enter 924` (entrance_trigger 924, whose areatrigger_teleport row sends to map 209 at 1212.67 842.04 8.93346, o 6.28319, required level 35, which is the plan's entrance); on a module without that order the entry fails and the run says it needs #939. outside_tele \"farrak\" is a partial match that only game_tele 160 has, for prepare.fresh. Live: a GM's `.go xyz 1212.7 842 8.9 209` made a private instance for the mapping walk; that is not an entry for a bound party.",
@@ -1008,7 +1008,7 @@
         "max_s": 10
       },
       "notes": [
-        "NEEDS A LIVE RUN. Leg 2 of 3 of the stairs event: the party holds 1887 1274 42, the spot the climbing trolls are sent to (instance_zulfarrak.cpp SendAddsUpStairs: MovePoint 1880+0..10, 1274, 42), with Bly's crew 5-10 yd below it at 1883-1891 1263-1273. Wave 1 (23 trolls: Slaves 7787, Drudges 7788, Cretins 7789, Acolytes 8876, Zealots 8877) spawns at the foot of the stairs (1874-1899, 1202-1226, z 8.87) and groups of 2, 3, 4, ... run up every 10 s (the last of the 23 after about 50 s); 10 s after the last one dies wave 2 (24 trolls, the same entries) spawns and comes the same way. A wait does not fight: the bots defend themselves at the top and the tank takes the trolls where they end (no formation can be asked of them). Wave 3 spawns the instant wave 2 is dead and is the only one with Nekrum Gutchewer (7796, no spawn row): the wait ends when he is in view. The agent's own character sees creatures out to the server's visibility distance, so he is seen from the top; a driver that cannot see units fails the step at once. Slaves (7787), Cretins (7789) and Acolytes (8876) flee at 15 % health (EventAI) and every unit of a wave must die for the next to start: a runner that has gone off holds the event until it comes back. The leg's rest gate is short on purpose (10 s): the first group of wave 1 is on its way as the party arrives."
+        "NEEDS A LIVE RUN. Leg 2 of 3 of the stairs event: the party holds 1887 1274 42, the spot the climbing trolls are sent to (instance_zulfarrak.cpp SendAddsUpStairs: MovePoint 1880+0..10, 1274, 42), with Bly's crew 5-10 yd below it at 1883-1891 1263-1273. Wave 1 (23 trolls: Slaves 7787, Drudges 7788, Cretins 7789, Acolytes 8876, Zealots 8877) spawns at the foot of the stairs (1874-1899, 1202-1226, z 8.87) and groups of 2, 3, 4, ... run up every 10 s (the last of the 23 after about 50 s); 10 s after the last one dies wave 2 (24 trolls, the same entries) spawns and comes the same way. A wait does not fight: the bots defend themselves at the top and the tank takes the trolls where they end (no formation can be asked of them). Wave 3 spawns the instant wave 2 is dead and is the only one with Nekrum Gutchewer (7796, no spawn row): the wait ends when he is in view. The agent's own character sees creatures out to the server's visibility distance, so he is seen from the top; a driver that cannot see units fails the step at once. Slaves (7787), Cretins (7789) and Acolytes (8876) flee at 15 % health (EventAI) and every unit of a wave must die for the next to start: a runner that has gone off holds the event until it comes back. The leg's rest gate is short on purpose (10 s): the first group of wave 1 is on its way as the party arrives. Wowhead (the Classic guide and the NPC comments, read 2026-10-15; data only) agrees with the script on where to stand: its comments say to STAY ON TOP OF THE TEMPLE while the waves climb, and that after a number of waves the crew goes down the steps while more come. Wowhead says nothing of a formation either."
       ]
     },
     {
@@ -1016,9 +1016,9 @@
       "to": {"x": 1885, "y": 1232, "z": 12.6},
       "skip": [7604, 7605, 7606, 7607, 7608, 7269],
       "boss": {
-        "entry": 7796,
-        "position": {"x": 1879.77, "y": 1207.96, "z": 8.87},
-        "first": [7275]
+        "entry": 7275,
+        "position": {"x": 1889.23, "y": 1207.72, "z": 8.87},
+        "first": [7796]
       },
       "after_boss": [
         {
@@ -1039,7 +1039,61 @@
         "max_s": 20
       },
       "notes": [
-        "NEEDS A LIVE RUN. Leg 3 of 3 of the stairs event: wave 3 is Nekrum Gutchewer (7796, level 45-46, 5.5k health, melee: spell list 77960 has no spell) and Shadowpriest Sezz'ziz (7275, spell list 72750: three priest spells, 12039, 8362 and 15537), with a Drudge, two Slaves, an Acolyte and a second Drudge (instance_zulfarrak.cpp pyramidSpawns wave 3: Sezz'ziz 1889.23 1207.72, Nekrum 1879.77 1207.96, z 8.87). Unlike waves 1 and 2 they are NOT sent up the stairs: 5 s after they spawn Bly's crew walks down to the foot of the stairs (1878-1897 1228 z 9.4-10) and the party has to go down as well; both bosses are summoned and have no spawn row, so the plan names them from the script. The boss step walks to Nekrum and kills Sezz'ziz first (a healer that would keep him up), the after_boss wait has the wave's trolls die. When the last unit of wave 3 is dead the event is over (PYRAMID_KILLED_ALL_TROLLS): the crew walks to 1874-1895 1199-1206 z 8.87 and Weegli's script heals every crew member to full."
+        "NEEDS A LIVE RUN. Leg 3 of 3 of the stairs event: wave 3 is Nekrum Gutchewer (7796, level 45-46, 5.5k health, melee: spell list 77960 has no spell) and Shadowpriest Sezz'ziz (7275, spell list 72750: three priest spells, 12039, 8362 and 15537), with a Drudge, two Slaves, an Acolyte and a second Drudge (instance_zulfarrak.cpp pyramidSpawns wave 3: Sezz'ziz 1889.23 1207.72, Nekrum 1879.77 1207.96, z 8.87). Unlike waves 1 and 2 they are NOT sent up the stairs: 5 s after they spawn Bly's crew walks down to the foot of the stairs (1878-1897 1228 z 9.4-10) and the party has to go down as well; both bosses are summoned and have no spawn row, so the plan names them from the script. The boss step is Sezz'ziz with Nekrum first: the Wowhead Classic guide says to burn Nekrum down first (he has the fewer abilities and the lower level, so fewer misses and resists) and to have a melee interrupt Sezz'ziz's heal in the meantime; its NPC page lists her spells as Renew, Heal, Psychic Scream and Shadow Bolt, and a comment warns that she hits hard from the back while the trash flows at the tank, so the tank should take her out. The script gives no order (it only summons them), and the bots cannot be told to interrupt, so the plan follows the guide; if Sezz'ziz's Heal keeps Nekrum up, swap the two (boss 7796, first 7275). The after_boss wait has the wave's trolls die. When the last unit of wave 3 is dead the event is over (PYRAMID_KILLED_ALL_TROLLS): the crew walks to 1874-1895 1199-1206 z 8.87 and Weegli's script heals every crew member to full."
+      ]
+    },
+    {
+      "name": "weegli_door",
+      "to": {"x": 1884, "y": 1212, "z": 9},
+      "skip": [7269],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [7607],
+              "near": {"x": 1877.52, "y": 1199.63, "z": 8.87},
+              "radius": 10,
+              "state": "seen"
+            },
+            "timeout_s": 60,
+            "fail_text": "Weegli Blastfuse is not at 1877.5 1199.6 (his place when the event is over): the crew walks there when the last troll of wave 3 is dead."
+          }
+        },
+        {
+          "gossip": {
+            "npc": 7607,
+            "near": {"x": 1877.52, "y": 1199.63, "z": 8.87},
+            "text": "blow",
+            "by": "tank",
+            "stand": {"x": 1877.5, "y": 1203.3, "z": 8.9},
+            "retry_s": 30,
+            "fail_text": "Weegli's menu has no option to blow up the door: the event is not over (PYRAMID_KILLED_ALL_TROLLS), or he is dead."
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [7607],
+              "state": "gone"
+            },
+            "timeout_s": 120,
+            "fail_text": "Weegli Blastfuse was still in view 120 s after the gossip: he walks to the End Door, blows it up and runs off to 1827 1184, where he despawns."
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 146084,
+              "near": {"x": 1854.5, "y": 1142.9, "z": 16.1},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "The End Door (146084) is not open although Weegli Blastfuse (7607) has gone: he opens it only if he reaches it alive and unhurt."
+          }
+        }
+      ],
+      "notes": [
+        "NEEDS A LIVE RUN. The End Door (146084 at 1854.53 1142.89 16.08, shut, state ready) opens only when Weegli Blastfuse (7607, level 43, 16.6k health) has blown it up (zulfarrak.cpp npc_weegli_blastfuseAI::DestroyDoor): he walks to 1858.57 1146.35 14.7 as a friendly (faction 35), plants an explosive (game object 144065 at 1856.3 1145 15.5), runs to 1863.77 1176.99, the explosive goes off, the door is used (EVENT_END_DOOR done, saved with the instance: a door blown once stays open for the run's later entries) and he runs on to 1827.1 1184 and despawns. Two things start it: Weegli's own option 'Will you blow up that door now?' (index 0, offered only while PYRAMID_KILLED_ALL_TROLLS) and Bly's option (the bly leg: 10 s after it, Bly's script calls Weegli's DoAction). This leg does Weegli's FIRST, as the Wowhead Classic comments on Weegli, Bly and Ukorz advise ('talk to the goblin first', 'try talking to him before Bly'): he is gone and the door open before the crew turns hostile, so the fight cannot kill him or keep him from the door (a comment: he cannot open the door if he is dead or attacking someone; one that hits him by mistake should not kill him but go back up and reset him). The script has no reason for the order (both orders run the same DestroyDoor); a second DestroyDoor on a Weegli that is still walking would plant a second barrel, which is why the leg waits for him to be gone before the bly leg talks to Bly. The gossip is by the tank, 3.8 yd from his place (1877.5 1199.6). If Weegli died in the waves nothing opens the door: the first wait fails after 60 s. The party waits where it is, 60 yd from the blast."
       ]
     },
     {
@@ -1089,28 +1143,7 @@
         "first": [7608, 7606, 7605]
       },
       "notes": [
-        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). So Weegli lives through the fight and needs no gossip of his own. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. The crew is the loot of the event (Bly's, Oro's and Murta's drops)."
-      ]
-    },
-    {
-      "name": "weegli_door",
-      "to": {"x": 1883.8, "y": 1204.5, "z": 8.9},
-      "skip": [7607, 7269],
-      "steps": [
-        {
-          "wait_for": {
-            "gameobject": {
-              "entry": 146084,
-              "near": {"x": 1854.5, "y": 1142.9, "z": 16.1},
-              "state": "active"
-            },
-            "timeout_s": 180,
-            "fail_text": "The End Door (146084) did not open within 180 s of the end of the fight. Weegli Blastfuse (7607) blows it up (he walks to 1858.6 1146.4, plants the barrel and runs on to 1863.8 1177): it opens only if he is alive. Bly's gossip sends him; if that did not run, his own gossip ('Will you blow up that door now?') does too."
-          }
-        }
-      ],
-      "notes": [
-        "NEEDS A LIVE RUN. The End Door (146084 at 1854.53 1142.89 16.08, shut, state ready) opens only when Weegli Blastfuse (7607, level 43, 16.6k health) has blown it up (zulfarrak.cpp npc_weegli_blastfuseAI::DestroyDoor): he walks to 1858.57 1146.35 14.7 as a friendly (faction 35), plants an explosive (game object 144065 at 1856.3 1145 15.5), runs to 1863.77 1176.99, the explosive goes off, the door is used (EVENT_END_DOOR done, saved with the instance: a door blown once stays open for the run's later entries) and he runs on to 1827.1 1184 and despawns. Two things start it: Bly's gossip option (the bly leg: 10 s after it) and Weegli's own option 'Will you blow up that door now?' (index 0, offered only while PYRAMID_KILLED_ALL_TROLLS). This plan uses Bly's, which the bly leg does anyway, so the leg only waits for the door: a gossip to Weegli here would fail at once, because he has walked away and despawned. If Weegli died in the waves (the crew fights with the party) nothing opens the door and this wait fails after 180 s. The party waits where it killed the crew, 60 yd from the blast."
+        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). Weegli is already gone (the weegli_door leg ran first), and if he were not, Bly's script would call his DoAction again. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. Wowhead (guide, comments): Oro's area damage (Rain of Fire) and Murta's healing make this fight hard, so Murta and Oro die before Bly (boss.first: Murta, Oro, Raven); Murta is the priest with Holy Smite, Renew, Heal and Power Word: Shield, Oro the warlock with Shadow Bolt, Immolate, Rain of Fire and Curse of Weakness, Raven the rogue with Poison, Backstab and Gouge; Bly is 18k health with Revenge and Shield Bash and has no loot table (the guide) but the Divino-matic Rod of the quest 'Divino-matic Rod' (item 8548). Two Wowhead differences from this server: a comment says the crew uses Hearthstones and leaves after the event if the party rests (the script has no such thing: they stand at their places), and that talking to Weegli, waiting for them to leave, then Bly leaves Bly alone to fight; neither applies here."
       ]
     },
     {
@@ -1163,7 +1196,7 @@
         "first": [7797]
       },
       "notes": [
-        "NEEDS A LIVE RUN. Chief Ukorz Sandscalp (7267, level 48, 14.4k health, spell list 72670: Cleave 15496 and two more; yells at 60 % and 30 % and goes into Frenzy 8269) and Ruuzlu (7797, level 46, 9.6k, Cleave 15496, executes at 20 %) stand on top of the pyramid (1727.5 1017.4 54.9 and 1730.3 1015.2 54.9), with the Flame of Farrak (2020161) beside them. The way up is the spiral ramp from the End Door (193 yd by the path; the navmesh has no doors, so the plan check walks through it: the leg starts at the doorstep, 9.9 yd from it, and the weegli_door leg has waited for it to open). Sandfury Shadowhunters (7246) patrol the lower ramp, Sandfury Guardians (7268) and Sul'lithuz Abominations (8120) hold the top. Ruuzlu dies first (boss.first)."
+        "NEEDS A LIVE RUN. Chief Ukorz Sandscalp (7267, level 48, 14.4k health, spell list 72670: Cleave 15496 and two more; yells at 60 % and 30 % and goes into Frenzy 8269) and Ruuzlu (7797, level 46, 9.6k, Cleave 15496, executes at 20 %) stand on top of the pyramid (1727.5 1017.4 54.9 and 1730.3 1015.2 54.9), with the Flame of Farrak (2020161) beside them. The way up is the spiral ramp from the End Door (193 yd by the path; the navmesh has no doors, so the plan check walks through it: the leg starts at the doorstep, 9.9 yd from it, and the weegli_door leg has waited for it to open). Sandfury Shadowhunters (7246) patrol the lower ramp, Sandfury Guardians (7268) and Sul'lithuz Abominations (8120) hold the top. Ruuzlu dies first (boss.first). Wowhead (guide, NPC comments): Ukorz has Cleave, Wide Slash, Enrage and Berserker Stance, Ruuzlu Cleave, Execute and Berserker Stance; 'face these two away from the group, melee behind them to avoid the cleave, kill Ruuzlu first'; both are immune to CC and the tank should hold both; a comment says Ukorz can run back to his spawn and heal at about 6 % (the boss step's search covers 80 yd). The bots cannot be told to stand behind them; the plan only sets the kill order. A comment says the four serpents on the sides of the top need not be killed; the plan pulls the two Sul'lithuz Abomination groups (8120) because the ramp passes within their aggro range (the route test asks for every mob within 20 yd), a skip would leave them to join the fight."
       ]
     }
   ]

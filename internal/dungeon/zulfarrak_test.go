@@ -89,7 +89,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah stairs stairs_top stairs_base bly weegli_door ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271 7796 7604 7267]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271 7275 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -170,6 +170,35 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 }
 
+// The stairs event in order: the cage, the hold at the top, wave 3 at the foot of the stairs (Nekrum first, then Sezz'ziz), then Weegli
+// (gossip, gone, the End Door open) BEFORE Bly (gossip, hostile, the crew), then Ukorz with Ruuzlu first.
+func TestZulfarrakStairsEventOrder(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	var names []string
+	for _, l := range p.Legs[11:] {
+		names = append(names, l.Name)
+	}
+	if fmt.Sprint(names) != "[stairs stairs_top stairs_base weegli_door bly ukorz]" {
+		t.Fatalf("%v", names)
+	}
+	if b := zfLeg(t, p, "stairs_base").Boss; b == nil || b.Entry != 7275 || fmt.Sprint(b.First) != "[7796]" {
+		t.Errorf("wave 3: Nekrum first, Sezz'ziz the boss: %+v", b)
+	}
+	w := zfLeg(t, p, "weegli_door")
+	if len(w.Steps) != 4 || w.Steps[1].Gossip == nil || w.Steps[1].Gossip.NPC != 7607 || w.Steps[1].Gossip.By != "tank" ||
+		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.Unit == nil || w.Steps[2].WaitFor.Unit.State != "gone" ||
+		w.Steps[3].WaitFor == nil || w.Steps[3].WaitFor.GameObject == nil || w.Steps[3].WaitFor.GameObject.Entry != 146084 {
+		t.Errorf("weegli_door: %+v", w.Steps)
+	}
+	y := zfLeg(t, p, "bly")
+	if y.Steps[1].Gossip == nil || y.Steps[1].Gossip.NPC != 7604 || y.Boss == nil || y.Boss.Entry != 7604 || fmt.Sprint(y.Boss.First) != "[7608 7606 7605]" {
+		t.Errorf("bly: %+v %+v", y.Steps, y.Boss)
+	}
+	if u := zfLeg(t, p, "ukorz").Boss; u == nil || u.Entry != 7267 || fmt.Sprint(u.First) != "[7797]" {
+		t.Errorf("ukorz: %+v", u)
+	}
+}
+
 // Every pack member and boss the plans name is a spawn of the export at that place, and the Troll Cage and the Gong are objects of it.
 // What the instance script summons (Gahz'rilla, Nekrum, Sezz'ziz, the waves) has no row and is not looked for.
 func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
@@ -186,8 +215,8 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 	// What the instance script summons or moves has no row at the plan's place: Gahz'rilla (the Gong), Nekrum and Sezz'ziz (wave 3 of the
 	// stairs event) have none at all; Bly and his crew have rows in the cages (1881-1891 1294-1299 z 48) and stand at 1874-1895 1199-1206 z 8.87
 	// once the event is over (instance_zulfarrak.cpp, the move after PYRAMID_KILLED_ALL_TROLLS).
-	summoned := map[uint32]bool{7273: true, 7796: true, 7604: true}
-	scripted := map[uint32]bool{7275: true, 7605: true, 7606: true, 7608: true}
+	summoned := map[uint32]bool{7273: true, 7275: true, 7604: true}
+	scripted := map[uint32]bool{7796: true, 7605: true, 7606: true, 7608: true}
 	patrolBosses := map[uint32]bool{7272: true, 7795: true} // Theka walks a 45 yd loop, Velratha the strip by the gong
 	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
 		p := loadPlan(t, f)

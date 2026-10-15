@@ -601,7 +601,7 @@ func TestLeftoverEntriesParseAndKeepTheirForm(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	zf := loadPlan(t, zulfarrakPlan)
-	if l := zf.Legs[len(zf.Legs)-1]; fmt.Sprint(l.LeftoverEntries) != "[7286 7276]" {
+	if l := zfLeg(t, zf, "zumrah"); fmt.Sprint(l.LeftoverEntries) != "[7286 7276]" {
 		t.Fatalf("the Zum'rah leg's leftover_entries: %v", l.LeftoverEntries)
 	}
 }
