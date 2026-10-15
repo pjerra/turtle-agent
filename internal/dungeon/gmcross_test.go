@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // gm_cross (remote_gmcross.go): a waypoint a GM account moves the party to, for a gap no walk crosses.
@@ -163,5 +165,126 @@ func TestGroupDriverRefusesAGMCross(t *testing.T) {
 	}
 	if len(g.chats) != 0 || len(g.gms) != 0 {
 		t.Fatalf("chats %v gms %v", g.chats, g.gms)
+	}
+}
+
+// crossOnly is a plan whose only leg starts with the gm_cross (nothing walks or sends a follow before it).
+func crossOnly(at Point) *Plan {
+	return remotePlan(Leg{Name: "b", Via: []Waypoint{{Point: at, Direct: true, GMCross: true}}, To: Point{at.X + 30, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{300}, Positions: []Point{{at.X + 50, 5, 0}}}}})
+}
+
+// A follow that is refused fails the crossing: the summoned bots would stay on the commander and be left behind.
+func TestRemoteGMCrossFailsWhenFollowIsRefused(t *testing.T) {
+	g := newStartFake(t)
+	g.addMob(300, Point{350, 5, 0})
+	g.cmdErr["follow"] = []string{"invalid", "invalid", "invalid"}
+	rep, err := runFrom(t, g, crossOnly(Point{300, 0, 0}), startOpts(), 0)
+	if err == nil || !strings.Contains(err.Error(), "cmd follow was refused three times") || rep.Remote.GMCrosses != 0 {
+		t.Fatalf("%v crosses %d\n%s", err, rep.Remote.GMCrosses, notesOf(rep))
+	}
+	if n := len(g.ordersOf("cmd follow")); n != 3 {
+		t.Fatalf("follow orders %v", g.ordersOf("cmd follow"))
+	}
+	// One refusal is retried and the crossing goes on.
+	g = newStartFake(t)
+	g.addMob(300, Point{350, 5, 0})
+	g.cmdErr["follow"] = []string{"invalid"}
+	if rep, err := runFrom(t, g, crossOnly(Point{300, 0, 0}), startOpts(), 0); err != nil || rep.Remote.GMCrosses != 1 || !strings.Contains(notesOf(rep), "cmd follow after the move was refused (try 1)") {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+// omitFake is a startFake whose feed leaves some members out of every frame from frame number fromN on (a stale or partial frame).
+type omitFake struct {
+	*startFake
+	omit  map[string]bool
+	fromN uint64
+}
+
+func (g *omitFake) Frame() (tbm.ViewFrame, uint64, bool) {
+	f, n, ok := g.startFake.Frame()
+	if !ok || n < g.fromN {
+		return f, n, ok
+	}
+	party := []tbm.PartyRec{}
+	for _, p := range f.Party {
+		if !g.omit[p.Name] {
+			party = append(party, p)
+		}
+	}
+	f.Party = party
+	return f, n, ok
+}
+
+// A frame that omits an expected bot (or all of them) says nothing about where they are: never "already there"; a bot the frame still omits
+// after the summons fails the crossing.
+func TestRemoteGMCrossNeedsTheWholePartyInAFreshFrame(t *testing.T) {
+	const fromN = 1
+	near := Point{GMCrossRadius - 2, 0, 0} // the party stands within the radius of it (the lead bot starts at the origin)
+	// Control: the whole party in the frames takes the shortcut.
+	g := &omitFake{startFake: newStartFake(t), fromN: fromN}
+	g.addMob(300, Point{350, 5, 0})
+	if rep, err := runFrom(t, g, crossOnly(near), startOpts(), 0); err != nil || !strings.Contains(notesOf(rep), "already: no GM move") {
+		t.Fatalf("control: %v\n%s", err, notesOf(rep))
+	}
+	// Partial frame before the move: Magey is not listed, so the party is not known to be there: Magey is summoned by name, the move is made,
+	// and the crossing fails because the frame never lists Magey.
+	g = &omitFake{startFake: newStartFake(t), fromN: fromN, omit: map[string]bool{"Magey": true}}
+	g.addMob(300, Point{350, 5, 0})
+	rep, err := runFrom(t, g, crossOnly(near), startOpts(), 0)
+	if strings.Contains(notesOf(rep), "already: no GM move") || !strings.Contains(fmt.Sprint(g.summonsLog), "Magey") || len(g.gos) != 1 {
+		t.Fatalf("a partial frame took the shortcut: summons %v gos %v err %v\n%s", g.summonsLog, g.gos, err, notesOf(rep))
+	}
+	// (the run's own party-short stop, or the crossing's, ends it: never a crossing reported done)
+	if err == nil || rep.Remote.GMCrosses != 0 {
+		t.Fatalf("a bot still missing after the summons did not fail the crossing: %v", err)
+	}
+	// An empty frame: no member listed at all.
+	g = &omitFake{startFake: newStartFake(t), fromN: fromN, omit: map[string]bool{"Tanky": true, "Healy": true, "Magey": true}}
+	g.addMob(300, Point{350, 5, 0})
+	rep, err = runFrom(t, g, crossOnly(near), startOpts(), 0)
+	if err == nil || strings.Contains(notesOf(rep), "already: no GM move") || rep.Remote.GMCrosses != 0 {
+		t.Fatalf("an empty frame: %v\n%s", err, notesOf(rep))
+	}
+	// Partial frame after the summons: the crossing is far, the move is made, the bot lands but the frame never lists it.
+	g = &omitFake{startFake: newStartFake(t), fromN: fromN, omit: map[string]bool{"Magey": true}}
+	g.addMob(300, Point{350, 5, 0})
+	rep, err = runFrom(t, g, crossOnly(Point{300, 0, 0}), startOpts(), 0)
+	if err == nil || rep.Remote.GMCrosses != 0 || len(g.gos) != 1 {
+		t.Fatalf("%v gos %v\n%s", err, g.gos, notesOf(rep))
+	}
+}
+
+// The readiness is judged from the expected party (the lead bot and the named bots), not from the members a frame happens to list.
+func TestCrossUnresolvedIsJudgedFromTheExpectedParty(t *testing.T) {
+	g := newStartFake(t)
+	d := NewRemoteDriver(gmCrossPlan(), g, DefaultConfig(), opts(), g.clock())
+	at := Point{300, 0, 0}
+	rec := func(name string, x float32, dead bool) tbm.PartyRec {
+		return tbm.PartyRec{Name: name, X: x, Map: 0, Dead: dead}
+	}
+	for _, c := range []struct {
+		name  string
+		party []tbm.PartyRec
+		want  string
+	}{
+		{"all there", []tbm.PartyRec{rec("Tanky", 300, false), rec("Healy", 302, false), rec("Magey", 305, false)}, ""},
+		{"empty frame", nil, "Tanky (not in the frame), Healy (not in the frame), Magey (not in the frame)"},
+		{"one bot missing", []tbm.PartyRec{rec("Tanky", 300, false), rec("Healy", 302, false)}, "Magey (not in the frame)"},
+		{"one bot far", []tbm.PartyRec{rec("Tanky", 300, false), rec("Healy", 302, false), rec("Magey", 330, false)}, "Magey"},
+		{"a dead bot is not waited for", []tbm.PartyRec{rec("Tanky", 300, false), rec("Healy", 302, false), rec("Magey", 0, true)}, ""},
+		{"lead missing", []tbm.PartyRec{rec("Healy", 302, false), rec("Magey", 305, false)}, "Tanky (not in the frame)"},
+	} {
+		d.fr.Party = c.party
+		if got := strings.Join(d.crossUnresolved(at), ", "); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A run that named no bots expects the party it began with.
+	d.opt.Bots, d.wantParty = nil, 3
+	d.fr.Party = []tbm.PartyRec{rec("Tanky", 300, false), rec("Healy", 302, false)}
+	if got := strings.Join(d.crossUnresolved(at), ", "); !strings.Contains(got, "2 of 3 members in the frame") {
+		t.Errorf("unnamed bots: %q", got)
 	}
 }
