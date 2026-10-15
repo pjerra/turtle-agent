@@ -645,7 +645,7 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	}()
 	if a.Kind == ActLoot && a.SpawnGUID != 0 {
 		// Whatever the party is still fighting (the last grave's mobs, a pack that came by) is fought out before the carrier walks to the next chest.
-		if err := d.fightOut(ctx, a.Label); err != nil {
+		if err := d.fightEngagedOut(ctx, a.Label); err != nil {
 			return err
 		}
 	}

@@ -1309,3 +1309,90 @@ func TestHealerStragglerIsSummonedAtTheFirstGatherTimeout(t *testing.T) {
 		}
 	}
 }
+
+// The adds a boss leaves (Zum'rah's Zombies and Dead Heroes killed 2-4 bots every time after the kill) are fought out before the leg ends.
+func TestAddsAfterTheBossKillAreFoughtBeforeTheLegEnds(t *testing.T) {
+	g := newFakeRemote(t)
+	boss := g.addMob(9, Point{30, 0, 0})
+	spawned := false
+	g.onTick = func(f *fakeRemote) {
+		if !spawned && boss.hp <= 0 {
+			spawned = true
+			for i := 0; i < 2; i++ {
+				m := f.addMob(7286, Point{28, float32(i), 0})
+				m.pulled, m.pullAt = true, f.now
+			}
+		}
+	}
+	plan := remotePlan(Leg{Name: "boss", To: Point{20, 0, 0}, Boss: &Boss{Entry: 9, Position: Point{30, 0, 0}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || rep.State != "done" || !spawned || g.mobsKilled != 3 || len(g.mobs) != 0 {
+		t.Fatalf("%v %s spawned %v killed %d left %d\\n%s", err, rep.State, spawned, g.mobsKilled, len(g.mobs), notesOf(rep))
+	}
+}
+
+// After a wipe's revives the run waits until every member is alive and with the lead bot before the next pull; a bot that never comes costs
+// the bound (120 s) and a note, not the run.
+func TestRecoveryWaitsForRevivedBotsToRejoin(t *testing.T) {
+	run := func(lag time.Duration) (time.Duration, Report) {
+		g := newFakeRemote(t)
+		g.advance(time.Second)
+		g.party[1].X = 100 // Healy is far from the lead bot
+		g.lagUntil = map[packet.GUID]time.Time{gHealer: g.now.Add(lag + time.Second)}
+		g.advance(time.Second) // the frame shows it
+		d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+		d.look()
+		start := g.now
+		if err := d.waitRevivedRejoin(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		rep := d.rep.snapshot()
+		return g.now.Sub(start), rep
+	}
+	took, rep := run(15 * time.Second)
+	if took < 15*time.Second || took > 40*time.Second || !strings.Contains(notesOf(rep), "every member is alive and with the lead bot again") {
+		t.Fatalf("took %v\\n%s", took, notesOf(rep))
+	}
+	took, rep = run(time.Hour)
+	if took < revivedRejoinWait || took > revivedRejoinWait+10*time.Second || !strings.Contains(notesOf(rep), "Healy 100 yd not back with the lead bot after 120 s; going on") {
+		t.Fatalf("took %v\\n%s", took, notesOf(rep))
+	}
+}
+
+// A rest gate that waits only for the healer's mana (nothing else under its line) gives up after 120 s even when the leg lets gates run for 10 minutes.
+func TestRestGateCapsAHealerOnlyManaWait(t *testing.T) {
+	g := newFakeRemote(t)
+	g.party[1].Power = 100 // Healy at 10 % mana, and it never rises
+	g.addMob(299, Point{40, 0, 0})
+	plan := remotePlan(Leg{Name: "p", To: Point{0, 0, 0}, Rest: &RestSpec{MaxS: 600}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 0, 0}}}}})
+	start := g.now
+	rep, err := runRemote(t, g, plan, objOpts(), nil)
+	if err != nil || rep.State != "done" || !strings.Contains(notesOf(rep), "rest gate does not wait for the healer's mana any longer in this leg (120 s cap") {
+		t.Fatalf("%v %s\\n%s", err, rep.State, notesOf(rep))
+	}
+	if took := g.now.Sub(start); took < 120*time.Second || took > 200*time.Second {
+		t.Fatalf("took %v", took)
+	}
+}
+
+// The lead bot alone alive outside the dungeon (the tank died as the boss fell and was spirit-healed at the graveyard: live, zum2-s1) stops the leg
+// as a party down and the recovery summons it in, instead of the walk being refused eight times.
+func TestLeadAloneOutsideTheDungeonIsPartyDown(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 3)}
+	g.agent = Point{5, 0, 0}
+	died := false
+	g.onTick = func(fr *fakeRemote) {
+		if !died && fr.lead().X > 5 {
+			died = true
+			fr.memberMap = map[packet.GUID]uint32{gTank: 1}
+		}
+	}
+	cfg := DefaultConfig()
+	cfg.Setup, cfg.RecoverWipe = []string{"gm visible off"}, true
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || fmt.Sprint(g.summons) != "[Tanky]" || len(g.memberMap) != 0 {
+		t.Fatalf("%v downs %d summons %v\n%s", err, rep.PartyDowns, g.summons, notesOf(rep))
+	}
+}

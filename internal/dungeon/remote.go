@@ -513,6 +513,8 @@ type RemoteDriver struct {
 	lastRevive     map[packet.GUID]time.Time
 	wipeRecover    int
 	wipeRecoverLeg map[int]int // recovered wipes per leg
+	healerCapped   int         // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	bossFight      bool        // a boss fight (doKill) is on
 	recoveries     int
 
 	tank        packet.GUID
@@ -749,6 +751,10 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			d.rep.note(r.String())
 		}
 	}
+	if step, ok := d.st.SkipToFiredTrigger(); ok {
+		resumed = true
+		d.rep.note(fmt.Sprintf("resume: the area trigger of leg %d (step %d) was taken already: the party is in the room, the walk, the pulls and the steps before it are not run again", d.st.leg, step))
+	}
 	d.midStart, d.midStartLeg = fromLeg > 0 || d.opt.StartHere || d.opt.FromPullGroup != nil || resumed, fromLeg
 	waiting := [2]int{-1, -1}
 	for {
@@ -829,6 +835,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doPull(ctx, a)
 		case ActKill:
 			err = d.doBoss(ctx, a)
+			if err == nil {
+				err = d.fightEngagedOut(ctx, a.Label) // the adds the boss left are fought before the leg ends or anyone rests
+			}
 			if err == nil {
 				err = d.agentGoHome(ctx, true) // the boss (Zum'rah) is dead: the agent leaves the zone it stayed in; a failed walk is no failure now
 			}
@@ -1422,7 +1431,11 @@ func (d *RemoteDriver) outsideAlive() int {
 			continue
 		}
 		if now.Sub(since) >= outsideGrace {
-			n++
+			if p.GUID == d.fr.Lead {
+				n += d.tx.PartyDownDead // a lead outside cannot walk the party anywhere: it is party down by itself (live, zum2-s1: the walk was refused 8 times)
+			} else {
+				n++
+			}
 		}
 	}
 	return n
@@ -2230,7 +2243,54 @@ func (d *RemoteDriver) recoverWipe(ctx context.Context) error {
 	if err := d.reviveDead(ctx, "the party wiped"); err != nil {
 		return err
 	}
-	return nil
+	return d.waitRevivedRejoin(ctx)
+}
+
+// healerManaCap is the most a rest gate waits when the healer's mana is the only thing under its line.
+const healerManaCap = 120 * time.Second
+
+// revivedRejoinWait bounds waitRevivedRejoin.
+const revivedRejoinWait = 120 * time.Second
+
+// waitRevivedRejoin waits, after a wipe's revives, until every member is alive and within GatherNear of the lead bot (a revived bot runs back
+// from the graveyard), summoning the far ones when the agent is a GM (the rejoin), so that the next pull is not made with dead or distant
+// bots (live, zum2-s1: three packs pulled with dead bots, four more bots lost in the 6 minutes after a wipe). It never fails the run: past the
+// bound it says who is missing and the step goes on.
+func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
+	until := d.clk.Now().Add(revivedRejoinWait)
+	noted := false
+	for {
+		d.look()
+		missing := d.awayFromLead(float64(d.tx.GatherNear))
+		dead := d.deadMembers()
+		if len(missing) == 0 && len(dead) == 0 {
+			if noted {
+				d.rep.note(fmt.Sprintf("recovery: every member is alive and with the lead bot again (%.0f s after the revives)", d.clk.Now().Sub(until.Add(-revivedRejoinWait)).Seconds()))
+			}
+			return nil
+		}
+		if !d.clk.Now().Before(until) {
+			var names []string
+			for _, b := range missing {
+				names = append(names, fmt.Sprintf("%s %.0f yd", b.name, b.dist))
+			}
+			for _, m := range dead {
+				names = append(names, m.Name+" dead")
+			}
+			d.rep.note(fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s; going on", strings.Join(names, ", "), revivedRejoinWait.Seconds()))
+			return nil
+		}
+		if !noted {
+			noted = true
+			d.rep.note(fmt.Sprintf("recovery: waiting for %d revived bot(s) to be alive and with the lead bot before the next pull", len(missing)+len(dead)))
+		}
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
+		if err := d.tick(ctx, d.cfg.Poll*2); err != nil && !errors.Is(err, errWipe) {
+			return err
+		}
+	}
 }
 
 // ---- resting ----------------------------------------------------------------------------------------------------------
@@ -2340,7 +2400,7 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 	defer ft.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
-	var lastRest time.Time
+	var lastRest, healerFrom time.Time
 	calm := began
 	var fightBegan time.Time
 	rw := newRestWatch(tgt)
@@ -2423,6 +2483,23 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 				rec.g.PartyRestRefused = true
 			}
 			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent cmd rest again (%s)", d.curLeg, fresh[0].Name, fresh[0].Pct, d.cfg.DrinkNudge.Seconds(), replyText(r)))
+		}
+		// The healer alone under its mana line is waited for healerManaCap at most (live, zum2-s1: a gate sat 359 s for a healer at 23-24 % mana
+		// that did not rise); the others' lines and every health line keep the gate's own cap.
+		if len(st.short) == 1 && d.opt.Healer != "" && strings.HasPrefix(st.short[0], d.opt.Healer+" mana ") {
+			if healerFrom.IsZero() {
+				healerFrom = d.clk.Now()
+			}
+			// Once the cap was hit in a leg, the later gates of that leg do not wait for the healer's mana at all (three gates of 120 s each
+			// would be the same 360 s).
+			if (d.healerCapped == d.curLeg+1 || d.clk.Now().Sub(healerFrom) > healerManaCap) && st.minHealth >= d.cfg.RestMinHealth {
+				d.healerCapped = d.curLeg + 1
+				rec.g.Result = "gave_up"
+				d.rep.note(fmt.Sprintf("leg %d: rest gate does not wait for the healer's mana any longer in this leg (%.0f s cap: %s); went on with at least %d%% health", d.curLeg, healerManaCap.Seconds(), st.why, st.minHealth))
+				return nil
+			}
+		} else {
+			healerFrom = time.Time{}
 		}
 		if d.clk.Now().Sub(calm) > tgt.max {
 			if st.minHealth >= d.cfg.RestMinHealth {

@@ -304,24 +304,51 @@ func TestObjectSpawnGuidParses(t *testing.T) {
 	}
 }
 
-// A pack that stands near but whose way is a long detour (another layer) leaves the tank no firing position: the plan check says so.
+// A pack that stands near but whose way is a long detour (another layer) leaves the tank no firing position: the plan check warns (it never
+// fails a plan: the drafts of other dungeons have many).
 func TestPlanCheckPullDetour(t *testing.T) {
 	leg := Leg{Name: "p", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{30, 0, 0}}}}}
-	if res := checkLegs(t, fakeNav{}, 0, leg); !res.OK() {
+	if res := checkLegs(t, fakeNav{}, 0, leg); !res.OK() || len(res.Warnings) != 0 {
 		t.Fatalf("%s", res.Summary())
 	}
 	// 30 yd in a line, 120 yd by the path: a detour (more than twice the line plus 25 yd).
 	res := checkLegs(t, fakeNav{detour: map[Point]float32{{30, 0, 0}: 120}}, 0, leg)
-	if got, want := issueReasons(res.Issues), "0/pull group look/1/detour"; got != want || !strings.Contains(res.Summary(), "the pack is 30 yd away but the way to it is 120 yd") {
-		t.Fatalf("%q: %s", got, res.Summary())
+	if got, want := issueReasons(res.Warnings), "0/pull group look/1/detour"; got != want || !res.OK() || !strings.Contains(res.WarningSummary(), "the pack is 30 yd away but the way to it is 120 yd") {
+		t.Fatalf("%q: ok %v %s", got, res.OK(), res.WarningSummary())
 	}
 	// 30 yd in a line, 70 yd by the path: still fine (under 2 x 30 + 25).
-	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{30, 0, 0}: 80}}, 0, leg); !res.OK() {
+	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{30, 0, 0}: 80}}, 0, leg); !res.OK() || len(res.Warnings) != 0 {
 		t.Fatalf("%s", res.Summary())
 	}
 	// A pack farther than the near limit is not judged.
 	far := Leg{Name: "p", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{60, 0, 0}}}}}
-	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{60, 0, 0}: 400}}, 0, far); !res.OK() {
+	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{60, 0, 0}: 400}}, 0, far); !res.OK() || len(res.Warnings) != 0 {
 		t.Fatalf("%s", res.Summary())
+	}
+}
+
+// A run that starts in a leg whose trigger was taken already (Zum'rah hostile, or dead) goes to the trigger step at once: no walk, no pulls, no
+// grave steps before it.
+func TestStepperSkipsToAFiredTrigger(t *testing.T) {
+	steps := `{"loot_object":{"entry":128403,"near":{"x":5,"y":0,"z":0},"stand":{"x":3,"y":0,"z":0}}},` + triggerStep
+	p := mustPlan(t, `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":50,"y":0,"z":0},"steps":[`+steps+`]}]}`)
+	w := &unitWorld{}
+	s := NewStepper(p, w, nil)
+	if _, ok := s.SkipToFiredTrigger(); ok {
+		t.Fatal("nothing fired yet")
+	}
+	w.sights = []unitSight{{guid: 5, entry: 7271, hostile: true}}
+	step, ok := s.SkipToFiredTrigger()
+	if !ok || step != 1 {
+		t.Fatalf("%d %v", step, ok)
+	}
+	if a := s.Next(); a.Kind != ActTrigger || a.Step != 1 {
+		t.Fatalf("%+v", a)
+	}
+	// Dead counts too (the world sees a corpse).
+	s = NewStepper(p, w, nil)
+	w.sights = []unitSight{{guid: 5, entry: 7271, dead: true}}
+	if step, ok := s.SkipToFiredTrigger(); !ok || step != 1 {
+		t.Fatalf("dead: %d %v", step, ok)
 	}
 }

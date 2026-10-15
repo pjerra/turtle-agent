@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -67,5 +68,38 @@ func TestCCKeepsUldamanBossFirstAdds(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("Uldaman has no boss.first entry to check")
+	}
+}
+
+// In a boss fight the attack order goes out again after 3 s (the tank held Zum'rah in 1 of 4 fights), not after the pack fights' 5-10 s.
+func TestBossFightResendsTheAttackOrderAfterThreeSeconds(t *testing.T) {
+	d := ledgerDriver(t)
+	h := tbm.HostileRec{GUID: packet.GUID(0xF130000000000099), Entry: 7271, HPPct: 100}
+	d.tf.init()
+	d.tf.sentGUID, d.tf.sentAt = h.GUID, d.clk.Now().Add(-4*time.Second)
+	if d.attackAllowed(h) {
+		t.Fatal("a pack fight sends again after 4 s")
+	}
+	d.bossFight = true
+	if !d.attackAllowed(h) {
+		t.Fatal("a boss fight does not send again after 4 s")
+	}
+	d.tf.sentGUID, d.tf.sentAt = h.GUID, d.clk.Now().Add(-2*time.Second)
+	if d.attackAllowed(h) {
+		t.Fatal("2 s is too soon")
+	}
+}
+
+// The ward 7785 (summoned_kill_first) is attacked at once, whatever its target field says: no wait for the tank's threat.
+func TestSummonedKillFirstUnitIsNeverHeldForThreat(t *testing.T) {
+	d := ledgerDriver(t)
+	d.plan.KillFirst, d.plan.SummonedKillFirst = []uint32{7785}, []uint32{7785}
+	ward := tbm.HostileRec{GUID: packet.GUID(0xF130000000000077), Entry: 7785, HPPct: 100, Target: gMage}
+	if !d.threatAllows(ward) {
+		t.Fatal("the ward was held for the tank's threat")
+	}
+	other := tbm.HostileRec{GUID: packet.GUID(0xF130000000000078), Entry: 299, HPPct: 100, Target: gMage}
+	if d.threatAllows(other) {
+		t.Fatal("an ordinary mob on the mage is not sent at without the tank's threat")
 	}
 }

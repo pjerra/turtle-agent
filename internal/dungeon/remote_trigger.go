@@ -701,6 +701,28 @@ const fightOutRounds = 6
 // fightOutSettle is how long fightOut waits after a chest was opened for what it summoned to show and come at the party.
 const fightOutSettle = 3 * time.Second
 
+// fightEngagedOut fights out what the party is in combat with right now, with no settle and no rest gate: the engaged hostiles until none
+// has fought the party for AggroQuiet, then the loot wait (afterFight). It does nothing when the party is not in combat. It runs before an
+// object step and after a boss dies (the adds he left: live, zum2, the Zombies and Dead Heroes killed 2-4 bots every time after the kill).
+func (d *RemoteDriver) fightEngagedOut(ctx context.Context, label string) error {
+	for round := 0; round < fightOutRounds; round++ {
+		d.look()
+		if !d.inCombat() && len(d.fr.EngagedHostiles()) == 0 {
+			return nil
+		}
+		if round == 0 {
+			d.rep.note(fmt.Sprintf("%s: the party is in a fight: fighting it out first", label))
+		}
+		if err := d.fightEngaged(ctx); err != nil {
+			return err
+		}
+		if err := d.afterFight(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // fightOut fights out what the party is in combat with (the mobs a grave summoned, a pack that came by): the engaged hostiles are fought
 // until none has fought the party for AggroQuiet, then the loot wait and the stay spot (afterFight), and the rest gate runs when a rest
 // line is crossed (no fixed wait per chest). It looks first after fightOutSettle, so that the mobs a chest has just summoned are in the feed.

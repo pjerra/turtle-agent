@@ -24,7 +24,7 @@ const (
 	ReasonNoLOS       = "no line of sight"
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
-	// ReasonDetour is a pull group whose way from where the party stands is a long detour for a mob that is near: the bots' pull finds no
+	// ReasonDetour (a warning, never a failure: the draft plans of other dungeons have many) is a pull group whose way from where the party stands is a long detour for a mob that is near: the bots' pull finds no
 	// firing position ("The tank could not start moving to a firing position for the pull", live, Zul'Farrak).
 	ReasonDetour = "detour"
 	// ReasonOutsideZone is an area_trigger whose stand point lies outside its zone: whoever stands there takes no trigger.
@@ -517,7 +517,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	// within the ranged pull range: it answers unreachable. Only pull group looks (a boss is walked to).
 	if part == "pull group look" && path.Status == navmesh.Complete {
 		if straight := dist3(from, at); straight <= pullDetourNear && float64(path.Length) > pullDetourFactor*straight+pullDetourSlack {
-			c.fail(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length)
+			c.res.Warnings = append(c.res.Warnings, c.issue(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length))
 		}
 	}
 	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
