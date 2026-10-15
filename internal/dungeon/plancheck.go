@@ -24,6 +24,9 @@ const (
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
 
+	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
+	ReasonSkipped = "skipped"
+
 	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
 	WarnNeedlessDirect = "needless direct"
 )
@@ -91,6 +94,8 @@ type PlanCheck struct {
 	Issues []PlanIssue `json:"issues"`
 	// Warnings are points that work but are fragile (WarnNeedlessDirect); they never fail the plan.
 	Warnings []PlanIssue `json:"warnings"`
+	// Exempt are the hops the plan exempts from the check (Waypoint.CheckSkip); Detail is the plan's reason.
+	Exempt []PlanIssue `json:"exempt"`
 }
 
 // OK says the plan passed.
@@ -98,6 +103,9 @@ func (c *PlanCheck) OK() bool { return len(c.Issues) == 0 }
 
 // Summary is one line per issue, for a refusal or a log.
 func (c *PlanCheck) Summary() string { return joinIssues(c.Issues) }
+
+// ExemptSummary is one line per hop the plan exempts.
+func (c *PlanCheck) ExemptSummary() string { return joinIssues(c.Exempt) }
 
 // WarningSummary is one line per warning.
 func (c *PlanCheck) WarningSummary() string { return joinIssues(c.Warnings) }
@@ -110,18 +118,39 @@ func joinIssues(is []PlanIssue) string {
 	return strings.Join(lines, "\n")
 }
 
+// CheckOptions are the choices of a plan check. The zero value checks everything with the driver's default look.
+type CheckOptions struct {
+	// FromLeg and FromPullGroup (0-based, as dungeon_run takes them) say where the run starts: what comes before is walked to place the
+	// party but reports nothing. With a pull group the walk of the leg's own via points and `to` is not checked either (the run starts at
+	// the group).
+	FromLeg, FromPullGroup int
+	// LookStandoff and LookArrive are the run's tuned look (tune.go: look_standoff, look_arrive); 0 takes the defaults.
+	LookStandoff, LookArrive float32
+}
+
 // CheckPlan walks the plan from leg fromLeg on (the legs before it are walked too, to know where the party stands, but report nothing).
 // The error is for what the check cannot answer (no navmesh engine, no files for the map): the plan is then unchecked, not failed.
 func CheckPlan(p *Plan, nav Navmesh, fromLeg int) (*PlanCheck, error) {
-	return checkPlan(p, nav, fromLeg, LookPoint)
+	return CheckPlanWith(p, nav, CheckOptions{FromLeg: fromLeg})
 }
 
-// checkPlan is CheckPlan with the look point function given (the tests run the old one, StandoffPoint alone, on the old plan).
-func checkPlan(p *Plan, nav Navmesh, fromLeg int, look lookFunc) (*PlanCheck, error) {
-	c := &planChecker{p: p, nav: nav, lookAt: look, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}}}
+// CheckPlanWith is CheckPlan with options.
+func CheckPlanWith(p *Plan, nav Navmesh, opt CheckOptions) (*PlanCheck, error) {
+	return checkPlan(p, nav, opt, LookPoint)
+}
+
+// checkPlan is CheckPlanWith with the look point function given (the tests run the old one, StandoffPoint alone, on the old plan).
+func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanCheck, error) {
+	if opt.LookStandoff <= 0 {
+		opt.LookStandoff = LookStandoff
+	}
+	if opt.LookArrive <= 0 {
+		opt.LookArrive = lookArrive
+	}
+	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}}}
 	cur := p.Entrance
 	for i, l := range p.Legs {
-		c.leg, c.report = i, i >= fromLeg
+		c.leg = i
 		var err error
 		if cur, err = c.checkLeg(l, cur); err != nil {
 			return nil, err
@@ -137,6 +166,7 @@ type planChecker struct {
 	p      *Plan
 	nav    Navmesh
 	lookAt lookFunc
+	opt    CheckOptions
 	res    *PlanCheck
 	leg    int
 	report bool
@@ -170,14 +200,21 @@ func (c *planChecker) warn(part string, at, from Point, reason, format string, a
 	}
 }
 
-// checkLeg walks one leg from cur and returns where the party stands at its end.
+// checkLeg walks one leg from cur and returns where the party stands at its end. Points before the run's start (FromLeg, FromPullGroup)
+// are walked but not reported.
 func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 	c.l = l
+	inRun := c.leg >= c.opt.FromLeg
+	c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == 0)
 	for vi, w := range l.Via {
 		var err error
-		if w.Direct {
+		switch {
+		case w.CheckSkip != "":
+			c.skip(fmt.Sprintf("via %d", vi), w.Point, cur, w.CheckSkip)
+			cur = w.Point
+		case w.Direct:
 			cur, err = c.direct(fmt.Sprintf("direct via %d", vi), w.Point, cur)
-		} else {
+		default:
 			cur, err = c.walk(fmt.Sprintf("via %d", vi), w.Point, cur)
 		}
 		if err != nil {
@@ -196,6 +233,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 		if g.NeedsWalk {
 			continue
 		}
+		c.report = inRun && (c.leg > c.opt.FromLeg || gi >= c.opt.FromPullGroup)
 		first := cur
 		for pi, at := range g.Positions {
 			stand, err := c.look("pull group look", gi+1, at, first)
@@ -207,6 +245,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 			}
 		}
 	}
+	c.report = inRun
 	if b := l.Boss; b != nil && !b.NeedsWalk {
 		stand, err := c.look("boss look", 0, b.Position, cur)
 		if err != nil {
@@ -217,9 +256,23 @@ func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 	return cur, nil
 }
 
+// skip records a hop the plan exempts from the check.
+func (c *planChecker) skip(part string, at, from Point, why string) {
+	if c.report {
+		c.res.Exempt = append(c.res.Exempt, c.issue(part, 0, at, from, ReasonSkipped, "%s", why))
+	}
+}
+
+// count counts a checked point (only those of the run's part of the plan).
+func (c *planChecker) count() {
+	if c.report {
+		c.res.Points++
+	}
+}
+
 // walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
-	c.res.Points++
+	c.count()
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
 	if err != nil {
 		return from, err
@@ -253,7 +306,7 @@ func pathReason(p navmesh.Path) string {
 
 // direct checks a direct via: a step within the limits of the module (DirectStepOK), ground under its end and a clear line over the mesh.
 func (c *planChecker) direct(part string, to, from Point) (Point, error) {
-	c.res.Points++
+	c.count()
 	if !DirectStepOK(from, to) {
 		c.fail(part, 0, to, from, ReasonTooFar, "%.1f yd across and %.1f up or down: the limits are %g and %g", hdist(from, to), math.Abs(float64(to.Z-from.Z)), DirectMaxDistance, DirectMaxVertical)
 		return to, nil
@@ -303,7 +356,7 @@ func (c *planChecker) line(from, to Point) (clear bool, hit float64, err error) 
 // the look point on it (LookPoint) must be within ClearSeeRadius of the pack. It returns the look point (the party's place afterwards;
 // `from` when the path is shorter than the standoff, as the driver does not move then).
 func (c *planChecker) look(part string, group int, at, from Point) (Point, error) {
-	c.res.Points++
+	c.count()
 	path, err := c.nav.Plan(c.p.Map, vec(from), vec(at))
 	if err != nil {
 		return from, err
@@ -323,12 +376,13 @@ func (c *planChecker) look(part string, group int, at, from Point) (Point, error
 		c.fail(part, group, at, from, ReasonUnreachable, "path_to is %s: %s", path.Status, path.Reason)
 		return from, nil
 	}
-	stand, moved := c.lookAt(pts, at, LookStandoff, ClearSeeRadius)
+	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, lookView(c.opt.LookStandoff, c.opt.LookArrive))
 	if !moved {
 		stand = from
 	}
-	if d := dist3(stand, at); d > ClearSeeRadius {
-		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd): the path ends %.1f %.1f %.1f, %.1f yd short of it", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, end.X, end.Y, end.Z, dist3(end, at))
+	// The lead bot may stop LookArrive short of the look point, and the view is ClearSeeRadius: the look point must leave room for both.
+	if d := dist3(stand, at); d > ClearSeeRadius-float64(c.opt.LookArrive) {
+		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd, less %g for the lead bot's stop): the path ends %.1f %.1f %.1f, %.1f yd short of it", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, c.opt.LookArrive, end.X, end.Y, end.Z, dist3(end, at))
 	}
 	return stand, nil
 }

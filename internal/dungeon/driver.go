@@ -2058,6 +2058,12 @@ func StandoffPoint(path []Point, standoff float32) (Point, bool) {
 	return Point{}, false
 }
 
+// lookView is how near a pack the look point must be: the standoff, and no more than the view less the look's arrival slack (the lead bot
+// may stop that far short of the point, and lookAt drops frames from beyond ClearSeeRadius) less a yard.
+func lookView(standoff, arrive float32) float32 {
+	return min(standoff, ClearSeeRadius-arrive-1)
+}
+
 // LookPoint is where the lead bot stands to look at a pack at `pack`: StandoffPoint(path, standoff), moved up the path to the first point
 // within view yards of the pack when that is farther (a pack off the mesh ends the path short of it, and the standoff counted back from
 // there leaves the look 30 yd away: Zul'Farrak's Velratha group 9). When no point of the path is within view it is the path's end.

@@ -347,6 +347,13 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	}, r
 }
 
+// planCheckApplies says whether dungeon_run checks the plan: not for a pull test (it runs one pack) and not for an observed run (the server
+// walks the plan).
+func planCheckApplies(p dungeonRunParams) bool {
+	mode, _, _ := runMode(p.Mode)
+	return p.Pulltest == nil && mode != modeObserve
+}
+
 // planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
 // draft plan has had no mapping walk, so it runs only when the caller says allow_draft.
 func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
@@ -513,9 +520,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
 	}
-	// The plan check walks the plan on the navmesh first; a pull test runs one pack and an observed run is walked by the server.
-	if mode, _, _ := runMode(p.Mode); p.Pulltest == nil && mode != modeObserve {
-		note, err := r.checkForRun(plan, from, p.Force)
+	// The plan check walks the plan on the navmesh first, from where the run starts, with the look the run is tuned to.
+	if planCheckApplies(p) {
+		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, from, p.FromPullGroup), p.Force)
 		if err != nil {
 			return dungeonRunResult{}, err
 		}

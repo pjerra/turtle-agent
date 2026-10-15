@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -16,7 +17,7 @@ import (
 // exitPlanCheck: plan-check found a point the navmesh cannot take (a failing plan is not a usage error).
 const exitPlanCheck = 11
 
-const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N] [--json] <plan>..."
+const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>..."
 
 // planCheckCmd walks the named plans on the navmesh (README, "Plan check") and prints each failing point. It reads the plan files and
 // the mmaps folder and nothing else.
@@ -26,6 +27,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", "dungeons", "the folder with the plan files")
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps (<map>.mmap and <map>*.mmtile); required")
 	from := fs.Int("from-leg", 0, "check from this leg on (the legs before it only place the party)")
+	fromGroup := fs.Int("from-pull-group", 0, "with --from-leg: check from this pull group (0-based) of that leg on")
 	asJSON := fs.Bool("json", false, "print the results as JSON")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -48,7 +50,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "plan-check: %v\n", err)
 			return exitUsage
 		}
-		res, err := dungeon.CheckPlan(p, planner, *from)
+		res, err := dungeon.CheckPlanWith(p, planner, dungeon.CheckOptions{FromLeg: *from, FromPullGroup: *fromGroup})
 		if err != nil {
 			fmt.Fprintf(stderr, "plan-check: %s: %v\n", n, err)
 			return exitUsage
@@ -62,6 +64,9 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s: ok, %d points on the map %d navmesh\n", n, res.Points, res.Map)
 		} else {
 			fmt.Fprintf(stdout, "%s: %d of %d points fail\n%s\n", n, len(res.Issues), res.Points, res.Summary())
+		}
+		if len(res.Exempt) > 0 {
+			fmt.Fprintf(stdout, "%s: %d hops exempted by the plan (check_skip)\n%s\n", n, len(res.Exempt), res.ExemptSummary())
 		}
 		if len(res.Warnings) > 0 {
 			fmt.Fprintf(stdout, "%s: %d warnings\n%s\n", n, len(res.Warnings), res.WarningSummary())
@@ -91,6 +96,8 @@ func planCheckSkip(err error) (string, bool) {
 type planCheckParams struct {
 	Name    string    `json:"name"`
 	FromLeg *legParam `json:"from_leg,omitempty"`
+	// FromPullGroup (0-based, with from_leg) checks from that pull group of the leg on.
+	FromPullGroup *int `json:"from_pull_group,omitempty"`
 }
 
 // planCheckResult is plan_check's answer: the check, or the reason it could not run (Checked false).
@@ -103,13 +110,42 @@ type planCheckResult struct {
 // maxRefusedIssues is how many failing points a refusal names; plan_check lists all of them.
 const maxRefusedIssues = 12
 
-// check runs the plan check on the planner of the commander service (the one the run plans on, so the same mmaps_dir). A nil planner
-// or missing navmesh files leave the plan unchecked, with the reason in skipped.
-func (r *dungeonRunner) check(plan *dungeon.Plan, from int) (planCheckResult, error) {
+// checkOptions is where the run starts and (when tuned: the commander driver) its tuned look: look_standoff and look_arrive of the tunables file it reads (the one named, else
+// the login's --tune, else <plan>.tune.json beside the plan; a missing or bad file leaves the defaults, the run itself reports a bad one).
+func (r *dungeonRunner) checkOptions(planPath, tune string, tuned bool, from int, group *int) dungeon.CheckOptions {
+	opt := dungeon.CheckOptions{FromLeg: from}
+	if group != nil {
+		opt.FromPullGroup = *group
+	}
+	if !tuned { // only the commander driver reads a tunables file
+		return opt
+	}
+	path, err := r.tuneFile(dungeonRunParams{Tune: tune}, planPath)
+	if err != nil {
+		return opt
+	}
+	if path == "" {
+		path = dungeon.DefaultTunePath(planPath)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return opt
+	}
+	if vals, err := dungeon.ParseTuneFile(data); err == nil {
+		opt.LookStandoff, opt.LookArrive = float32(vals["look_standoff"]), float32(vals["look_arrive"])
+	}
+	return opt
+}
+
+// check runs the plan check on a scratch planner (its own tile cache: a run going at the same time keeps its tiles) over the same mmaps_dir
+// the run plans on. A nil planner or missing navmesh files leave the plan unchecked, with the reason in skipped.
+func (r *dungeonRunner) check(plan *dungeon.Plan, opt dungeon.CheckOptions) (planCheckResult, error) {
 	if r.remote == nil || r.remote.planner == nil {
 		return planCheckResult{Skipped: `no navmesh planner (set "mmaps_dir" in the settings file)`}, nil
 	}
-	res, err := dungeon.CheckPlan(plan, r.remote.planner, from)
+	pl := r.remote.planner.Scratch()
+	defer pl.Close()
+	res, err := dungeon.CheckPlanWith(plan, pl, opt)
 	if why, skip := planCheckSkip(err); skip {
 		return planCheckResult{Skipped: why}, nil
 	}
@@ -124,7 +160,8 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 	if !planName.MatchString(p.Name) {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "zulfarrak" (a-z, 0-9, _ and -)`}
 	}
-	plan, err := dungeon.Load(filepath.Join(r.dir, p.Name+".json"))
+	planPath := filepath.Join(r.dir, p.Name+".json")
+	plan, err := dungeon.Load(planPath)
 	if err != nil {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
 	}
@@ -134,7 +171,7 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 			return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", legNames(plan), len(plan.Legs)-1)}
 		}
 	}
-	res, err := r.check(plan, from)
+	res, err := r.check(plan, r.checkOptions(planPath, "", true, from, p.FromPullGroup))
 	if err != nil {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "plan check: " + err.Error()}
 	}
@@ -144,19 +181,25 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 	if res.Warnings == nil {
 		res.Warnings = []dungeon.PlanIssue{}
 	}
+	if res.Exempt == nil {
+		res.Exempt = []dungeon.PlanIssue{}
+	}
 	return res, nil
 }
 
 // checkForRun is dungeon_run's plan check: it refuses a plan with a failing point unless force is set, and returns the line for the result.
-func (r *dungeonRunner) checkForRun(plan *dungeon.Plan, from int, force bool) (string, error) {
-	res, err := r.check(plan, from)
+// With force an error inside the check (a corrupt tile, a failed ray) is passed too, and noted.
+func (r *dungeonRunner) checkForRun(plan *dungeon.Plan, opt dungeon.CheckOptions, force bool) (string, error) {
+	res, err := r.check(plan, opt)
 	switch {
+	case err != nil && force:
+		return "forced past check error: " + err.Error(), nil
 	case err != nil:
-		return "", &rpc.Error{Code: rpc.CodeGame, Message: "plan check: " + err.Error()}
+		return "", &rpc.Error{Code: rpc.CodeGame, Message: "plan check: " + err.Error() + "\npass force to run the plan unchecked"}
 	case !res.Checked:
 		return "not run: " + res.Skipped, nil
 	case res.OK():
-		return fmt.Sprintf("passed: %d points on the navmesh, %d warnings (plan_check lists them)", res.Points, len(res.Warnings)), nil
+		return fmt.Sprintf("passed: %d points on the navmesh, %d warnings, %d hops exempted by the plan (plan_check lists them)", res.Points, len(res.Warnings), len(res.Exempt)), nil
 	}
 	shown := res.PlanCheck
 	if len(shown.Issues) > maxRefusedIssues {

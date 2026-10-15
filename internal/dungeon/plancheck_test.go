@@ -127,6 +127,51 @@ func TestPlanCheckFromLeg(t *testing.T) {
 	}
 }
 
+func TestPlanCheckExemptHop(t *testing.T) {
+	leg := Leg{To: Point{40, 0, 0}, Via: []Waypoint{{Point: Point{10, 0, 0}}, {Point: Point{40, 0, 0}, Direct: true, CheckSkip: "a hole in the mesh"}}}
+	res := checkLegs(t, fakeNav{}, 0, leg)
+	if !res.OK() || len(res.Exempt) != 1 || res.Exempt[0].Reason != ReasonSkipped || res.Exempt[0].Detail != "a hole in the mesh" || len(res.Warnings) != 0 {
+		t.Errorf("%+v", res)
+	}
+	if res.Points != 2 { // via 0 and `to`
+		t.Errorf("points %d", res.Points)
+	}
+}
+
+// The run starts at from_leg / from_pull_group: what comes before is not checked, the pull groups after it are.
+func TestPlanCheckFromPullGroup(t *testing.T) {
+	nav := fakeNav{off: map[Point]bool{{5, 0, 0}: true, {10, 30, 0}: true, {10, 90, 0}: true}}
+	leg := Leg{Name: "a", To: Point{5, 0, 0}, PullGroups: []PullGroup{pg(10, 30), pg(10, 90)}}
+	for from, want := range map[int]string{0: "0/to/0/off the mesh 0/pull group look/1/off the mesh 0/pull group look/2/off the mesh", 1: "0/pull group look/2/off the mesh"} {
+		res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, nav, CheckOptions{FromPullGroup: from})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issueReasons(res.Issues); got != want {
+			t.Errorf("from group %d: %q, want %q", from, got, want)
+		}
+	}
+}
+
+// The tuned look counts: a pack off the mesh whose path ends 17 yd short of it is in view from the end with the default arrival slack (3),
+// not with look_arrive 10 (the lead bot may stop 10 yd short of the look point, and the view is 25).
+func TestPlanCheckTunedLook(t *testing.T) {
+	nav := fakeNav{partial: map[Point]Point{{0, 60, 0}: {0, 43, 0}}}
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{To: Point{0, 0, 0}, PullGroups: []PullGroup{pg(0, 60)}}}}
+	for _, c := range []struct {
+		opt  CheckOptions
+		want string
+	}{{CheckOptions{}, ""}, {CheckOptions{LookArrive: 10}, "0/pull group look/1/too far"}, {CheckOptions{LookStandoff: 12}, ""}} {
+		res, err := CheckPlanWith(plan, nav, c.opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issueReasons(res.Issues); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.opt, got, c.want)
+		}
+	}
+}
+
 // Velratha's pull group 9 (ZF batch 2, Haiku s2): the pack at 1636 1105 stands off the mesh, the path ends at 1625.6 1109.3, and the look
 // point 21 yd back from there was 31 yd from the pack (the live move ended at 1605.47 1104.17, the run stopped on "could not get a view").
 // LookPoint moves it up the path to the first point within the view.
@@ -137,24 +182,41 @@ func TestLookPointStaysWithinView(t *testing.T) {
 	if !ok || math.Abs(float64(old.X-1605.475)) > 1 || math.Abs(float64(old.Y-1104.167)) > 1 || dist3(old, pack) < 29 {
 		t.Fatalf("the old look point %v (ok %v) should be the live 1605.47 1104.17, 30 yd from the pack", old, ok)
 	}
-	got, ok := LookPoint(path, pack, LookStandoff, ClearSeeRadius)
-	if !ok || dist3(got, pack) > ClearSeeRadius || dist3(got, pack) < ClearSeeRadius-1 {
-		t.Errorf("the look point %v is %.1f yd from the pack (ok %v): want the first point within %d", got, dist3(got, pack), ok, ClearSeeRadius)
+	view := lookView(LookStandoff, lookArrive)
+	if view != 21 {
+		t.Fatalf("view %v", view)
+	}
+	got, ok := LookPoint(path, pack, LookStandoff, view)
+	// The lead bot may stop lookArrive short of the point and lookAt drops frames beyond ClearSeeRadius: the point leaves room for both.
+	if !ok || dist3(got, pack) > ClearSeeRadius-lookArrive || dist3(got, pack) < float64(view)-1 {
+		t.Errorf("the look point %v is %.1f yd from the pack (ok %v): want %v, at most %d", got, dist3(got, pack), ok, view, ClearSeeRadius-lookArrive)
 	}
 	if got.X < old.X { // on the path and nearer its end than the old point
 		t.Errorf("%v is not past %v", got, old)
 	}
-	// A standoff point already in view is left alone; a path that never comes within view ends at its end; a short path does not move.
+	// A pack on a complete path keeps the old standoff point; a look point already in view is left alone.
+	onPath := Point{1625.6, 1109.33, 9.6}
+	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, onPath, LookStandoff, view); return p }() != want {
+		t.Errorf("a pack at the path's end moved the look point")
+	}
 	near := Point{1622, 1108, 9.6}
-	if s, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, near, LookStandoff, ClearSeeRadius); return p }() != s {
+	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, near, LookStandoff, view); return p }() != want {
 		t.Errorf("a look point in view moved")
 	}
+	// A path that never comes within view ends at its end; a short path does not move.
 	far := Point{1700, 1300, 9}
-	if p, ok := LookPoint(path, far, LookStandoff, ClearSeeRadius); !ok || p != path[2] {
+	if p, ok := LookPoint(path, far, LookStandoff, view); !ok || p != path[2] {
 		t.Errorf("out of view everywhere: %v %v", p, ok)
 	}
-	if _, ok := LookPoint(path[1:], pack, 40, ClearSeeRadius); ok {
+	if _, ok := LookPoint(path[1:], pack, 40, view); ok {
 		t.Errorf("a path shorter than the standoff should not move")
+	}
+	// The tuned look: a longer arrival slack pulls the point nearer, a standoff under the margin stays the limit.
+	if v := lookView(LookStandoff, 8); v != 16 {
+		t.Errorf("look_arrive 8: view %v", v)
+	}
+	if v := lookView(15, lookArrive); v != 15 {
+		t.Errorf("look_standoff 15: view %v", v)
 	}
 }
 
@@ -205,7 +267,7 @@ func TestZulfarrakPlanCheck(t *testing.T) {
 func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 	pl := zfNav(t)
 	old := loadPlan(t, filepath.Join("testdata", "zulfarrak-c86c1e62ee5a.json"))
-	res, err := checkPlan(old, pl, 0, oldLook)
+	res, err := checkPlan(old, pl, CheckOptions{}, oldLook)
 	skipNoEngine(t, err)
 	var gp9 int
 	for _, is := range res.Issues {
@@ -239,8 +301,7 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 }
 
 // planCheckSkip lists the shipped plans that fail the plan check today, with the failing points counted when the check came in. Issue #187
-// follows them up one by one (most are drafts from the world export, whose points were never walked; Uldaman's two are its scorpid pit
-// hole, which the navmesh does not link and the plan crosses with direct steps on purpose). Take a plan off the list when it is fixed;
+// follows them up one by one (most are drafts from the world export, whose points were never walked; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
 // Zul'Farrak is not on it.
 var planCheckSkip = map[string]bool{
 	"black_morass":          true,
@@ -267,7 +328,6 @@ var planCheckSkip = map[string]bool{
 	"stratholme_live":       true,
 	"sunken_temple":         true,
 	"timbermaw_hold":        true,
-	"uldaman":               true,
 	"upper_karazhan_halls":  true,
 	"wailing_caverns":       true,
 	"windhorn_canyon":       true,
@@ -295,6 +355,8 @@ func TestShippedPlansPassPlanCheck(t *testing.T) {
 		skipNoEngine(t, err)
 		checked++
 		switch {
+		case res.OK() && planCheckSkip[p.Name]:
+			t.Errorf("%s passes the plan check now: remove %s from planCheckSkip", p.Name, p.Name)
 		case res.OK():
 		case planCheckSkip[p.Name]:
 			failing = append(failing, fmt.Sprintf("%s (%d of %d)", p.Name, len(res.Issues), res.Points))
