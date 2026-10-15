@@ -75,6 +75,14 @@ func (d *RemoteDriver) approachObject(ctx context.Context, rec *objRec, carrier 
 	if at == nil {
 		return false, nil
 	}
+	if d.batch != nil {
+		// A grave of a batch: the party stands at the batch's centre throughout (batchBegin held it there) and only the carrier walks, with its
+		// own open order; no walk of the party, no stay and no follow per chest, and no wait: the summons of the chests already opened fight on.
+		rec.update(func(s *ObjectStepReport) {
+			s.Approach = "batch: the party stays at the batch centre, the carrier walks with its open order"
+		})
+		return false, nil
+	}
 	began := d.clk.Now()
 	to := *at
 	if stand != nil {

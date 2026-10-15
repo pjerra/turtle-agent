@@ -464,8 +464,8 @@ func (d *RemoteDriver) reactiveCC(ctx context.Context, pulled packet.GUID, mobs 
 			held = &mobs[i]
 			continue
 		}
-		if d.summonedKillFirst(h) {
-			continue // a summoned healing ward is a kill target, not a CC target (kill_first)
+		if d.summonedKillFirst(h) || !d.ccAllowed(h) {
+			continue // a summoned healing ward is a kill target, not a CC target (kill_first); a boss, a kill_first entry, an undead is never sheeped
 		}
 		if h.CrowdControlled() || h.GUID == tankTarget || h.GUID == d.tf.focus || h.HPPct < ccLowHP || d.rccN[h.GUID] >= maxCCPerMob {
 			continue

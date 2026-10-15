@@ -7,6 +7,7 @@
 package planexport
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -111,12 +112,33 @@ type Options struct {
 	// Cut, when set, cuts a hop longer than MoveGapWarnYd between two moves into via points: it returns the points to walk through
 	// (not including the two ends), e.g. a navmesh path. Nil: the long hops stay and are reported in Warnings.
 	Cut func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
+	// DropCompanionsLoot lets a plan with a leg whose companions_loot is false be exported all the same, without it: the rows have no
+	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
+	// graveyard chests). Without this option such a plan is refused.
+	DropCompanionsLoot bool
 }
+
+// ErrCompanionsLoot is the refusal of a plan with a leg whose companions_loot is false (see Options.DropCompanionsLoot).
+var ErrCompanionsLoot = errors.New("plan not exported")
+
+// ErrNoRunLeaderStep marks a step the run leader has no step for (a gossip, a unit wait, an area trigger by the agent). A plan whose first
+// leg has one is refused; a plan that has one in a later leg is exported up to that leg (Result.Cut).
+var ErrNoRunLeaderStep = errors.New("a step the run leader cannot do")
+
+type noRunLeaderStep struct{ msg string }
+
+func (e noRunLeaderStep) Error() string        { return e.msg }
+func (e noRunLeaderStep) Is(target error) bool { return target == ErrNoRunLeaderStep }
+
+func noStep(format string, a ...any) error { return noRunLeaderStep{fmt.Sprintf(format, a...)} }
 
 // Result is a plan's rows and what the exporter had to say about them.
 type Result struct {
 	Rows     Rows
 	Warnings []string
+	// Cut is the note of a plan exported only up to the first leg with a step the run leader cannot do ("" for a whole plan): it names the
+	// leg and the step, is in Warnings and ends the plan row's comment.
+	Cut string
 }
 
 var planNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
@@ -157,10 +179,25 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	}
 	b := &builder{opt: opt, plan: p, name: name}
 	b.rows.Plan = PlanRow{Plan: name, Map: p.Map, CCPriority: slices.Clone(p.CCPriority), CCAlways: slices.Clone(p.CCAlways), KillFirst: slices.Clone(p.KillFirst), Source: clip(source, MaxSource), Comment: clip(planComment(p), MaxComment)}
+	cut, cutLeg := "", 0
 	for li := range p.Legs {
+		nl, ns, nw := len(b.rows.Legs), len(b.rows.Steps), len(b.warnings)
 		if err := b.leg(li); err != nil {
+			if li > 0 && errors.Is(err, ErrNoRunLeaderStep) {
+				// The legs before it are a plan the run leader can run: export them, and say where and why the rest was left off.
+				b.rows.Legs, b.rows.Steps, b.warnings = b.rows.Legs[:nl], b.rows.Steps[:ns], b.warnings[:nw]
+				// The rows number the legs that were written: an optional leg left out earlier takes no number, so the note counts rows, not plan legs.
+				n := len(b.rows.Legs)
+				cutLeg = li
+				cut = fmt.Sprintf("plan %s: exported legs 0-%d (%s) only; cut before leg %d (%s), which has a step the run leader cannot do: %v; that leg and the %d after it are not in the rows", name, n-1, b.rows.Legs[n-1].Name, n, p.Legs[li].Name, err, len(p.Legs)-li-1)
+				break
+			}
 			return Result{}, fmt.Errorf("plan %s: leg %d (%s): %w", name, li, p.Legs[li].Name, err)
 		}
+	}
+	if cut != "" {
+		b.warnings = append(b.warnings, cut)
+		b.rows.Plan.Comment = clip(planComment(p)+"; cut before leg "+strconv.Itoa(len(b.rows.Legs))+" ("+p.Legs[cutLeg].Name+"): a step the run leader cannot do", MaxComment)
 	}
 	if err := b.cutLongHops(); err != nil {
 		return Result{}, err
@@ -168,7 +205,7 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
-	return Result{Rows: b.rows, Warnings: b.warnings}, nil
+	return Result{Rows: b.rows, Warnings: b.warnings, Cut: cut}, nil
 }
 
 func planComment(p *dungeon.Plan) string {
@@ -180,19 +217,21 @@ func planComment(p *dungeon.Plan) string {
 }
 
 type builder struct {
-	opt      Options
-	plan     *dungeon.Plan
-	name     string
-	rows     Rows
-	warnings []string
-	leg_     int
-	seq      int
-	last     dungeon.Point // the last point a step of the leg put the party at
-	haveLast bool
+	opt         Options
+	plan        *dungeon.Plan
+	name        string
+	rows        Rows
+	warnings    []string
+	leg_        int // the plan's leg being built
+	outLeg      int // the row number of the next leg written (an optional leg left out takes none)
+	seq         int
+	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
+	last        dungeon.Point // the last point a step of the leg put the party at
+	haveLast    bool
 }
 
 func (b *builder) add(s StepRow) {
-	s.Plan, s.Leg, s.Seq = b.name, b.leg_, b.seq
+	s.Plan, s.Leg, s.Seq = b.name, b.outLeg, b.seq
 	b.seq++
 	b.rows.Steps = append(b.rows.Steps, s)
 }
@@ -208,8 +247,18 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
-	b.leg_, b.seq, b.haveLast = li, 0, false
-	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: li, Name: clip(l.Name, MaxLegName)})
+	if l.Optional != nil {
+		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
+		// end the run at its first use of the object: the leg is left out and the later legs close up.
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
+		return nil
+	}
+	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
+	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
+		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
+	}
+	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName)})
+	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
 		if w.GMCross {
@@ -224,6 +273,12 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.Steps {
+		// A leg whose companions_loot is false (only exported with DropCompanionsLoot) has its chests opened by the carrier bot alone: with the
+		// leg's looting setting dropped those steps would send bots at them, so they are left out, with a warning.
+		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot {
+			b.skippedLoot++
+			continue
+		}
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("steps[%d]: %w", si, err)
 		}
@@ -237,6 +292,9 @@ func (b *builder) leg(li int) error {
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("after_boss[%d]: %w", si, err)
 		}
+	}
+	if b.skippedLoot > 0 {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): %d loot_object steps left out: the leg's companions_loot false (looting off for every bot, only the carrier opens these) cannot be exported", li, l.Name, b.skippedLoot))
 	}
 	if b.seq > MaxSteps {
 		return fmt.Errorf("%d steps (at most %d)", b.seq, MaxSteps)
@@ -325,6 +383,9 @@ func (b *builder) step(st dungeon.Step) error {
 	switch {
 	case st.UseObject != nil:
 		u := st.UseObject
+		if u.ViaItem {
+			return fmt.Errorf("use_object %d with via_item (the item is used on the object): the run leader's open row cannot carry it", u.Entry)
+		}
 		if u.Stand != nil {
 			b.move(*u.Stand, false, "stand")
 		}
@@ -339,9 +400,21 @@ func (b *builder) step(st dungeon.Step) error {
 		b.add(StepRow{Kind: KindUseItem, Entry: u.Entry, Item: itemEntry(u.ExpectItem), Comment: clip("use "+nameOr(u.Name, fmt.Sprintf("item %d", u.Entry))+madeNote(u.ExpectItem), MaxComment)})
 	case st.WaitFor != nil:
 		return b.wait(st.WaitFor)
+	case st.AreaTrigger != nil:
+		// The run leader has no area trigger step. A lead bot that walks into the zone takes the trigger itself when the module lists it
+		// (AiPlayerbot.BotAreaTriggers, TortoiseBots #1002), which is the plan's "auto" and "bot": a move to the stand point. The agent's own
+		// character ("agent") and the expect check exist only in a driven run.
+		t := st.AreaTrigger
+		if t.By == dungeon.TriggerAgent {
+			return noStep("area_trigger %d: by \"agent\" has no run leader step (the leader is a bot: use \"auto\" or \"bot\")", t.ID)
+		}
+		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})
+	case st.Gossip != nil:
+		g := st.Gossip
+		return noStep("gossip (NPC %d, %s): the run leader's plan has no gossip step yet, so a plan with one cannot be exported until it has", g.NPC, g.OptionText())
 	default:
 		return fmt.Errorf("an empty step")
 	}
@@ -377,6 +450,8 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 			c = b.plan.Legs[b.leg_].To
 		}
 		b.add(StepRow{Kind: KindWaitClear, X: c.X, Y: c.Y, Z: c.Z, Radius: h.Radius, TimeoutS: timeout, Comment: clip(waitComment("wait until no hostile", w), MaxComment)})
+	case w.Unit != nil:
+		return noStep("wait_for.unit has no run leader step (%s)", w.Unit.String())
 	default:
 		return fmt.Errorf("wait_for: neither gameobject nor hostiles_gone")
 	}

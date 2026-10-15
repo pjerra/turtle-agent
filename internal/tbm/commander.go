@@ -21,7 +21,7 @@ import (
 // Intents of the commander commands (the first two words of the command).
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
-	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state"}
+	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state", "gossip"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.
@@ -30,6 +30,21 @@ var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond"
 // argRe is what one argument of a command may be: names, numbers, a GUID, a mark, an object by entry (entry:<id>@x,y,z). No spaces, no control characters, no way to
 // put a second command on the line.
 var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
+
+// BadOrderWords says why a text cannot be the tail of one command line: every whitespace-separated word has to be an argument the
+// commander accepts (argRe). It returns "" for a text that can, else the first word that cannot, with the reason.
+func BadOrderWords(text string) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return "it is empty"
+	}
+	for _, w := range words {
+		if !argRe.MatchString(w) {
+			return fmt.Sprintf("the word %q is not an argument (letters, digits and _ . , : + - only)", w)
+		}
+	}
+	return ""
+}
 
 // Link is the commander's way to the game: the say chat the commands go out on, and the event log the replies come back in.
 type Link interface {

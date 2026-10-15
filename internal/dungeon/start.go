@@ -227,6 +227,9 @@ func (p *Plan) SkippedNeeds(from int, haveItems []uint32) error {
 	}
 	for li := from; li < len(p.Legs); li++ {
 		l := p.Legs[li]
+		if l.Optional != nil {
+			continue // run only when its item is in the bags (Leg.Optional); a start without it skips the leg
+		}
 		for _, group := range [][]Step{l.Steps, l.AfterBoss} {
 			for si, st := range group {
 				var needs []ItemRef
@@ -392,6 +395,13 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 		d.startNote("the party is at the start point already: no GM move")
 		return nil
 	}
+	if d.startGroup() < 0 && d.partyInLeg(fromLeg) {
+		// A resume into a leg whose party already stands in the leg's own ground (the Zum'rah room after the trigger, 1.9 min lost live when
+		// it was sent back to the courtyard at the previous leg's end): it stays, and the leg starts from where it is.
+		d.startReport(func(s *StartReport) { s.Method, s.Seconds = "already in the leg", d.clk.Now().Sub(began).Seconds() })
+		d.startNote(fmt.Sprintf("the party is in leg %d's own ground already (within %.0f yd of its points): no GM move", fromLeg, legRoomYd))
+		return nil
+	}
 	h, ok := d.g.(StartHands)
 	if !ok {
 		return fmt.Errorf("start at %s: this game cannot move the commander's own character (no .go xyz)", what)
@@ -425,6 +435,46 @@ func (d *RemoteDriver) partyAt(at Point) bool {
 		return false
 	}
 	return len(d.apart(lead)) == 0
+}
+
+// legRoomYd is how near one of a leg's points (its To, via points, step stands and objects, boss) the lead bot must stand for the party to count as
+// in that leg's ground.
+const legRoomYd = 60.0
+
+// partyInLeg says whether the lead bot stands within legRoomYd of one of the leg's points and every living bot is with it.
+func (d *RemoteDriver) partyInLeg(leg int) bool {
+	d.look()
+	lead, ok := d.leadPos()
+	if !ok || leg < 0 || leg >= len(d.plan.Legs) {
+		return false
+	}
+	l := d.plan.Legs[leg]
+	pts := []Point{l.To}
+	for _, w := range l.Via {
+		pts = append(pts, w.Point)
+	}
+	for _, steps := range [][]Step{l.Steps, l.AfterBoss} {
+		for _, st := range steps {
+			switch {
+			case st.LootObject != nil && st.LootObject.Stand != nil:
+				pts = append(pts, *st.LootObject.Stand)
+			case st.UseObject != nil && st.UseObject.Stand != nil:
+				pts = append(pts, *st.UseObject.Stand)
+			case st.AreaTrigger != nil:
+				pts = append(pts, st.AreaTrigger.Stand)
+			}
+		}
+	}
+	if l.Boss != nil {
+		pts = append(pts, l.Boss.Position)
+	}
+	near := false
+	for _, p := range pts {
+		if dist3(lead, p) <= legRoomYd {
+			near = true
+		}
+	}
+	return near && len(d.apart(lead)) == 0
 }
 
 // apart names the living members of the feed that stand more than startTogether yards from p (or on another map).

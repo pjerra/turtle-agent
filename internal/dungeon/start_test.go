@@ -266,6 +266,24 @@ func TestStartFromLegAlreadyThere(t *testing.T) {
 	}
 }
 
+// A resume into a leg whose own ground the party stands in already (the Zum'rah room after the trigger) does not send it back to the previous
+// leg's end: no GM move, the leg starts from where the party is.
+func TestStartFromLegInTheLegsOwnGround(t *testing.T) {
+	g := newStartFake(t)
+	g.addMob(300, Point{250, 5, 0})
+	g.lead().X = 230 // 130 yd past the start point (leg 0's To), 30 yd from leg 1's To
+	rep, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if len(g.appears)+len(g.gos)+len(g.botLines)+len(g.summonsLog) != 0 || rep.Remote.GMCommands != 0 {
+		t.Fatalf("appears %v gos %v lines %v summons %v", g.appears, g.gos, g.botLines, g.summonsLog)
+	}
+	if rep.Start == nil || rep.Start.Method != "already in the leg" || !strings.Contains(notesOf(rep), "in leg 1's own ground already") {
+		t.Fatalf("start %+v", rep.Start)
+	}
+}
+
 // A player's account cannot start inside: the run fails before it sends anything, and still unbinds.
 func TestStartNeedsAGM(t *testing.T) {
 	for _, c := range []struct {

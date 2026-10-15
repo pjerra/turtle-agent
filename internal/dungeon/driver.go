@@ -366,6 +366,7 @@ type Driver struct {
 	fightFirst, fightLast time.Time
 
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
+	unitSeen map[*UnitWait]bool // the "gone" unit waits that saw a matching unit alive (UnitHolds)
 	wd       *watchdog
 	wdRepick flagOnce // end the fight, to pick the target again
 	wdObject flagOnce // give up the wait of the object step
@@ -461,6 +462,12 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
+				if skipped, err := d.skipOptionalLeg(ctx, a.Leg); err != nil {
+					d.st.Fail(err.Error())
+					continue
+				} else if skipped {
+					continue
+				}
 				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					d.st.Fail(err.Error())
 					d.countWipe(err)
@@ -504,6 +511,10 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			err = d.doLoot(ctx, a)
 		case ActItem:
 			err = d.doUseItem(ctx, a)
+		case ActTrigger:
+			err = d.doAreaTrigger(ctx, a)
+		case ActGossip:
+			err = d.doGossip(ctx, a)
 		case ActRitual:
 			err = errors.New("a ritual step needs several bots using the object: it runs in remote mode only (dungeon_run with a bound commander party), not with the agent's own companions yet")
 		default:
@@ -739,6 +750,11 @@ func (d *Driver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	// The group driver has no way to keep its companions from looting a whole leg (it orders looting off only around a boss fight:
+	// Boss.CompanionsLoot): a leg that needs it off is not started.
+	if cl := d.plan.Legs[i].CompanionsLoot; cl != nil && !*cl {
+		return fmt.Errorf("leg %d (%s): companions_loot is false, which only a remote (commander) run can enforce for a whole leg: group mode would let its companions loot the leg's chests; the leg is not started", i, name)
+	}
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
@@ -881,6 +897,60 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 		}
 	}
 	return n
+}
+
+// UnitHolds makes the group driver's world a UnitWorld: the creatures of the agent's own object store.
+func (w stepWorld) UnitHolds(u *UnitWait) bool {
+	sights := storeSights(w.d.g.Units(), nil)
+	if u.State != UnitGone {
+		return u.holds(sights, false)
+	}
+	// "gone" needs a unit that was seen alive first: an empty store proves nothing.
+	if w.d.unitSeen == nil {
+		w.d.unitSeen = map[*UnitWait]bool{}
+	}
+	if (&UnitWait{Entries: u.Entries, Near: u.Near, Radius: u.Radius, State: UnitSeen}).holds(sights, false) {
+		w.d.unitSeen[u] = true
+	}
+	return w.d.unitSeen[u] && u.holds(sights, false)
+}
+
+// doAreaTrigger is the area_trigger step of the group driver: the leader is the agent's own character, so it is the one that takes the
+// trigger (a lead bot exists only in remote mode, and by "bot" fails). It walks to the step's stand point inside the zone, sends the packet
+// as a client does and waits for Expect up to the step's timeout. The companions follow the leader; nothing is sent twice.
+func (d *Driver) doAreaTrigger(ctx context.Context, a Action) error {
+	t := a.Trigger
+	if t.By == TriggerBot {
+		return fmt.Errorf("%s: by \"bot\" needs a lead bot: it runs in remote mode only; use \"auto\" or \"agent\"", a.Label)
+	}
+	uw := func() bool { return t.ExpectUnit.holds(storeSights(d.g.Units(), nil), false) }
+	if uw() {
+		d.rep.note(fmt.Sprintf("%s: %s already: the trigger is not sent", a.Label, t.ExpectUnit.describe()))
+		return nil
+	}
+	if dead := (&UnitWait{Entries: t.ExpectUnit.Entries, Near: t.ExpectUnit.Near, Radius: t.ExpectUnit.Radius, State: UnitDead}); dead.holds(storeSights(d.g.Units(), nil), false) {
+		d.rep.note(fmt.Sprintf("%s: %s is dead already: the trigger is not sent", a.Label, t.ExpectUnit.String()))
+		return nil
+	}
+	if dist3(d.g.Position(), t.Center) > float64(t.Radius) {
+		if err := d.doWalk(ctx, t.Stand); err != nil {
+			return fmt.Errorf("%s: %w", a.Label, err)
+		}
+	}
+	if err := d.areaTrigger(ctx, t.ID); err != nil {
+		return fmt.Errorf("%s: sending area trigger %d: %w", a.Label, t.ID, err)
+	}
+	d.rep.note(fmt.Sprintf("%s: sent area trigger %d from %.1f %.1f %.1f", a.Label, t.ID, d.g.Position().X, d.g.Position().Y, d.g.Position().Z))
+	until := d.clk.Now().Add(time.Duration(t.TimeoutS) * time.Second)
+	for !uw() {
+		if !d.clk.Now().Before(until) {
+			return fmt.Errorf("%s: area trigger %d was sent and %s did not hold within %d s", a.Label, t.ID, t.ExpectUnit.describe(), t.TimeoutS)
+		}
+		if err := d.sleep(ctx, d.cfg.WaitPoll); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it
@@ -1152,6 +1222,9 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 // between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
 // the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
+	if a.ViaItem {
+		return fmt.Errorf("%s: use_object with via_item uses %s ON the object (a carrier bot's `cmd use <item> <bot> <object>`), which only a remote (commander) run can do", a.Label, a.Requires)
+	}
 	if err := d.checkUseItem(ctx, a.Requires); err != nil {
 		return err
 	}

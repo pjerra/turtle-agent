@@ -45,6 +45,8 @@ func allHostilesStealthed(hs []tbm.HostileRec) bool {
 // doKill kills Boss.First in order, then the boss.
 func (d *RemoteDriver) doKill(ctx context.Context, a Action) error {
 	b := a.Boss
+	d.bossFight = true // the attack order is sent again after bossResendWait, not the pack fights' longer wait (attackAllowed)
+	defer func() { d.bossFight = false }()
 	enc := append(slices.Clone(b.First), b.Entry)
 	for _, e := range enc {
 		spec := fightSpec{pick: []uint32{e}, track: enc, skip: a.Skip, anchors: []Point{b.Position}, limit: d.cfg.BossTimeout, required: e == b.Entry, wide: true}
@@ -270,6 +272,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		})
 		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
+			// A wipe that comes after the kills (the adds a boss left) must not lose them: the ledger of kills is what tells that the boss is dead.
+			if res.kills > 0 {
+				d.noteKilled(res)
+			}
 			return err
 		}
 		kills += res.kills
@@ -795,7 +801,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return fightResult{}, err
+			return fightResult{kills: len(killed), dead: deadOf()}, err // the kills so far are kept: a wipe after the boss died must not lose him
 		}
 		if d.stale() {
 			lastCombat = d.clk.Now() // a quiet feed proves nothing about the fight
@@ -906,7 +912,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // assistEvery sends the party at the nearest of mobs, the first time at once (when the threat allows) and then every AssistEvery.
 func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, last *time.Time) error {
 	now := d.clk.Now()
-	if !last.IsZero() && now.Sub(*last) < d.cfg.AssistEvery {
+	if !last.IsZero() && now.Sub(*last) < d.assistGap() {
 		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
 		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
@@ -924,7 +930,7 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
 	_, runner := d.runnerIn(mobs)
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.assistGap() || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -986,6 +992,17 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	return true, nil
 }
 
+// assistGap is how often the party is sent at the nearest mob again: AssistEvery, or bossResendWait in a boss fight.
+func (d *RemoteDriver) assistGap() time.Duration {
+	if d.bossFight {
+		return min(d.cfg.AssistEvery, bossResendWait)
+	}
+	return d.cfg.AssistEvery
+}
+
+// bossResendWait is how long after an attack order at a boss the order is sent again while the tank does not hold him.
+const bossResendWait = 3 * time.Second
+
 // attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
 const attackHoldYd = 45
 
@@ -1000,6 +1017,9 @@ func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 		return true
 	}
 	wait := max(d.cfg.AssistEvery, 5*time.Second)
+	if d.bossFight {
+		wait = bossResendWait // live (zum2): the tank held Zum'rah in 1 of 4 fights; the order goes to the tank again within 3 s
+	}
 	now := d.clk.Now()
 	if now.Sub(d.tf.sentAt) < wait {
 		return false
@@ -1026,8 +1046,8 @@ func (d *RemoteDriver) threatAllows(h tbm.HostileRec) bool {
 	if _, ok := d.engagedAt[h.GUID]; !ok {
 		d.engagedAt[h.GUID] = now
 	}
-	if d.summonedKillFirst(h) && h.Target == 0 {
-		return true // a healing ward hits nobody: no threat to wait for, and each pulse heals the pack (a planned healer still waits)
+	if d.summonedKillFirst(h) {
+		return true // a healing ward hits nobody (whatever its target field says: live, zum2, the ward 7785 was held 10 s "not on the tank yet"): no threat to wait for, and each pulse heals the pack (a planned healer still waits)
 	}
 	holder, ok := d.fr.ThreatHolder(h.GUID)
 	held := ok && d.fr.IsMember(holder) && (h.Target == 0 || h.Target == holder)
