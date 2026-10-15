@@ -865,6 +865,8 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doObjectStep(ctx, a)
 		case ActTrigger:
 			err = d.doAreaTrigger(ctx, a)
+		case ActGossip:
+			err = d.doGossip(ctx, a)
 		default:
 			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
 		}

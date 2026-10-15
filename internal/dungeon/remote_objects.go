@@ -309,9 +309,17 @@ type objRec struct {
 func (o *objRec) targetGUID() packet.GUID { return o.target }
 
 func (d *RemoteDriver) newObjRec(leg int, label, kind, carrier string) *objRec {
+	return d.newObjRecAs(leg, label, kind, carrier, true)
+}
+
+// newObjRecAs is newObjRec; setCarrier false leaves the run's carrier (RemoteReport.Carrier) as it is: the step's own talker, a gossip
+// step's tank or the agent, is not the one that carries the run's objects.
+func (d *RemoteDriver) newObjRecAs(leg int, label, kind, carrier string, setCarrier bool) *objRec {
 	var idx int
 	d.remote(func(r *RemoteReport) {
-		r.Carrier = carrier
+		if setCarrier {
+			r.Carrier = carrier
+		}
 		r.ObjectSteps = append(r.ObjectSteps, ObjectStepReport{Leg: leg, Label: label, Kind: kind, Carrier: carrier, Orders: []ObjectOrder{}, Gained: []string{}, Result: "running"})
 		idx = len(r.ObjectSteps) - 1
 	})

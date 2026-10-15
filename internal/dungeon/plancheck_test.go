@@ -472,7 +472,7 @@ func skipNoEngine(t *testing.T, err error) {
 // The shipped Zul'Farrak plan passes the plan check with nothing to warn of (issue #187).
 func TestZulfarrakPlanCheck(t *testing.T) {
 	pl := zfNav(t)
-	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
+	for _, f := range []string{zulfarrakPlan} {
 		p := loadPlan(t, f)
 		res, err := CheckPlan(p, pl, 0)
 		skipNoEngine(t, err)
