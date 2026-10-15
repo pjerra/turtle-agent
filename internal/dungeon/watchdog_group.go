@@ -22,7 +22,7 @@ func wdPhaseName(k ActionKind) string {
 	switch k {
 	case ActKill:
 		return "boss"
-	case ActLoot, ActUse, ActItem, ActRitual:
+	case ActLoot, ActUse, ActItem, ActRitual, ActGossip:
 		return "object step"
 	}
 	return string(k)
@@ -30,7 +30,7 @@ func wdPhaseName(k ActionKind) string {
 
 // wdObjectKind says whether k is an object step: its end is progress.
 func wdObjectKind(k ActionKind) bool {
-	return k == ActLoot || k == ActUse || k == ActItem || k == ActRitual
+	return k == ActLoot || k == ActUse || k == ActItem || k == ActRitual || k == ActGossip
 }
 
 // unitsHP is each unit's health percent, for the watchdog's per-mob lows (watchdog.lowLocked).

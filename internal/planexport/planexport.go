@@ -339,6 +339,9 @@ func (b *builder) step(st dungeon.Step) error {
 	case st.Ritual != nil:
 		r := st.Ritual
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})
+	case st.Gossip != nil:
+		g := st.Gossip
+		return fmt.Errorf("gossip (NPC %d, %s): the run leader's plan has no gossip step yet, so a plan with one cannot be exported until it has", g.NPC, g.OptionText())
 	default:
 		return fmt.Errorf("an empty step")
 	}

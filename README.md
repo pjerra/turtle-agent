@@ -312,7 +312,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `tbm_buttons` | `tab` (Fight, Camp, Party, Roster, Guild, Raid, BotPanel; default all) | `addon_commit`, `send_delay_ms`, `poll_after_cmd_ms`, `action_timeout_ms`, `buttons[]` (`name`, `label`, `tab`, `command`, `bot_command`, `args`, `optional`, `scope`, `toggle`, `needs_enemy`, `pull_seconds`, `reply`, `intent`, `ok`, `fail`, `follow_up`, `mini_bar`, `requires_cap`, `multi`, `source`) |
 | `tbm_click` | `button` (`Fight.AoE`), `args` (`state`, `bot`, `name`, `mark`, `seconds`, `bag`, `slot`, …), `transport` (auto, chat, addon), `wait_ms` (default 8000), `force`, `follow_up` | `since`, `next`, `button`, `scope`, `sent` (`transport`, `text`, `channel`, `prefix`), `transport_reason`, `refreshed`, `reply` (`kind` ack, err, text, inventory, snapshot or timeout; `ok`, `line`, `ack`, `acks`, `err`, `lines`), `follow_up` (the roster response) |
 | `tbm_send` | `command` (with or without `.bot`), `transport`, `wait_ms` | like `tbm_click` without `button` and `scope`: the reply is the first ACK/ERR or roster response |
-| `commander` | `op` (`bind`, `unbind`, `status`, `view`, `cmd` or `run`), `lead_bot` and `bots` (bind), `on` (view), `verb` and `args` (cmd: `attack`, `pull`, `pullback`, `cc`, `focus`, `move`, `stay`, `follow`, `rest`, `revive`, `summon`, `loot`, `open`, `use`, `ritual`, `lootmethod`, `state`), `wait_ms` (default 4000) | `sent` (the `.bot` line), `reply` (`kind` `ack`, `err` or `timeout`, `ack`/`err` parsed, `lines`). `loot`, `open`, `use` and `ritual` wait through `ACTION_PENDING` for the final line and add `order` (`pending`, `loot`, `opened`, `ritual` and `participants` for `cmd ritual`, `spell`, `waited_ns`). The [remote commander](#remote-leader) by hand |
+| `commander` | `op` (`bind`, `unbind`, `status`, `view`, `cmd` or `run`), `lead_bot` and `bots` (bind), `on` (view), `verb` and `args` (cmd: `attack`, `pull`, `pullback`, `cc`, `focus`, `move`, `stay`, `follow`, `rest`, `revive`, `summon`, `loot`, `open`, `use`, `ritual`, `lootmethod`, `state`, `gossip`), `wait_ms` (default 4000) | `sent` (the `.bot` line), `reply` (`kind` `ack`, `err` or `timeout`, `ack`/`err` parsed, `lines`). `loot`, `open`, `use` and `ritual` wait through `ACTION_PENDING` for the final line and add `order` (`pending`, `loot`, `opened`, `ritual` and `participants` for `cmd ritual`, `spell`, `waited_ns`). The [remote commander](#remote-leader) by hand |
 | `bot_view` | `after_n` and `wait_ms` (wait for a frame newer than the `n` of the last answer) | `have`, `n`, `age_ms`, `frame` (`seq`, `lead`, `party[]`, `hostiles[]`, `threats[]`, `truncated`), `stats` (the feed's counters), `binding_ends[]`. The latest `TBM:VIEW` frame, see [Remote leader](#remote-leader) |
 | `addon_start` | `clock` (real, the default, or manual); the addon is the settings' `tbm_addon_dir`, else `.cache/tbmcontract/addon-<pinned commit>` under the working directory, run by `lua5.1` from PATH | `dir`, `version` (the .toc version), `files`, `clock`, `sent` (what the addon sent while loading) |
 | `addon_stop` | | |
@@ -616,7 +616,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   in order. `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
   (percentages 1-100; `max_s` 1-600 seconds; `walk_yd`, `walk_health`, `walk_healer_mana` and `walk_mana` set the walking rest, see **rest gate** under
   [Dungeon runs](#dungeon-runs)).
-- A **step** is exactly one of `use_object`, `wait_for`, `loot_object`, `use_item` and `ritual`. `use_object` names a game object by `entry`, by `near` (a position;
+- A **step** is exactly one of `use_object`, `wait_for`, `loot_object`, `use_item`, `ritual` and `gossip`. `use_object` names a game object by `entry`, by `near` (a position;
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
   driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
   for the use to do anything, as the object's lock names it (the Uldaman Keystone needs the Staff; the core ignores the use of a
@@ -641,6 +641,27 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   ritual spell has run, and the one final answer ends the step and is its result. Do **not** put a `wait_for` the altar `active` after it: when the bots are let go their own movement
   ends the helper channel and the core sends the altar back to `ready`; wait for what lasts (the door the Stone Keepers' death opens, the boss). Group mode
   (the agent plus its own companions) fails a ritual step with "remote mode only".
+- `gossip` talks to an NPC and picks one option of its menu (`CMSG_GOSSIP_HELLO`, then `CMSG_GOSSIP_SELECT_OPTION`): Weegli Blastfuse (7607) blows Zul'Farrak's End Door, Sergeant Bly (7604)
+  starts his fight. `{"gossip": {"npc": 7607, "near": {"x": 1858.2, "y": 1114.4, "z": 10.5}, "text": "blow", "by": "tank", "stand": {"x": 1856, "y": 1114, "z": 10.5}, "retry_s": 15, "fail_text": "the event is not over"}}`.
+  `npc` is the creature entry and `near` where it stands (its spawn): the NPC is the living creature of that entry nearest to `near` within 15 yd. The option is **`option`** (the menu's
+  own index, as `gossip_hello` shows it) or **`text`** (a case-insensitive substring of the line; a text that two lines hold fails the step, the plan has to say which): exactly one of the two.
+  A coded option (the client asks for a code) fails the step. `by` says who talks: `agent` (the default), `carrier` or `tank`. `stand` is optional: where the talker stands, within 5 yd of
+  `near` (the core answers a hello only within about 5 yd: live 2026-10-15, Weegli and Bly answered at 3.6 yd and not at 9-10); without it the agent stops 2.5 yd short of the NPC.
+  `retry_s` (1-120, default 15) is how long a menu that **lacks the option** is asked again (every 2 s): the NPC's phase lags one update behind the event that adds the option. `fail_text`
+  (one line, up to 400 characters) is the reason a person should read when it still lacks it. The step fails at once, without a retry, for an NPC that is not in view within 15 yd of `near`
+  (missing) or is dead, and for another panel (a vendor list) in the place of the menu.
+  - **By the agent**: the agent's own character is brought up to the NPC and uses the `gossip_hello` and `gossip_select` calls; the option is matched by `option` or `text`. In a commander run
+    the agent is first brought to the lead bot (the keep-near rule: `.appear <lead bot>` for a GM that the setup made invisible, else a walk, a GM assist counted in `run_gm_assists`), then it walks
+    (never through a fight) to the `stand`, or 2.5 yd short of the NPC. It stays where it ends: the step does not walk it back, so an option that starts a fight (Bly's) belongs to `by: tank` or
+    `carrier`, or to a plan whose later steps keep the agent out of it. In group mode the leader is the agent's own character: it does every gossip step itself (`carrier` and `tank` are noted).
+  - **By the carrier or the tank** (commander runs): the party is walked to the NPC like for a chest (the approach), then the bot gets `cmd gossip <npc entry> <bot> <option>`
+    (TortoiseBots #1012; `<option>` is the index, or the words of `text`, which the module matches as a substring: a bot's `text` may use only letters, digits and `_ . , : + -` in each
+    word, and must not be a number, which the plan loader checks). The final ACK ends the step; any other refusal is sent again until `retry_s` has passed (`busy`, `in-combat` and the other
+    waits as for the other orders), then the step fails with it and the `fail_text`. A module that does not know the verb (an unknown-verb refusal, or no answer to the order at all, as for
+    `cmd enter`) makes **the agent take the step once** (noted, `fallback_used` in the step's report, the notes say `the module has no cmd gossip`); the agent's attempt is the last one.
+  - The step **ends at `SMSG_GOSSIP_COMPLETE`** (the agent) or the order's ACK (a bot): it does not check what the option did. Put a `wait_for` after it (the door `active`, the unit hostile). A select that is
+    answered with another menu, another panel or nothing within 5 s fails the step: the option was sent, but nothing says it ran.
+  - It is the commander report's `object_steps` entry with `kind: "gossip"` (`carrier`: the bot, or `agent`), and `plan-export` refuses a plan with a gossip step until the TortoiseBots run leader has one.
 - `use_item` uses an item from the leader's bags (`entry`, `name` for the messages) with `CMSG_USE_ITEM` on itself, waits for the
   cast, and checks `expect_item` the same way (spell 9594 of the Gni'kiv Medallion makes the Staff of Prehistoria, 7733). `requires_item` is a
   second item the use consumes (the Shaft of Tsol, 7741): checked before the use, so that the failure names it. A leader that carries the
@@ -677,7 +698,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `boss.first` (the leg would fight it and never wait for it).
 
 The stepper (`dungeon.NewStepper(plan, world, clock)`) does no networking. `Next` returns the action to do now (`walk`, `pull`,
-`use_object`, `loot_object`, `use_item`, `ritual`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
+`use_object`, `loot_object`, `use_item`, `ritual`, `gossip`, `kill_boss`, `wait`, `done` or `failed`) and repeats it until the driver calls `Complete` (or `Fail` with a reason);
 it asks a `World` (position, game objects in view, hostiles within a radius) and decides by itself that a walk is not needed when the
 player stands at `to`, that a wait is over when its condition holds, and that a wait failed when it timed out. A `use_object`
 step whose object is out of reach gives a `walk` to the object first; such a step fails after `MaxStepWalks` (4) walks or
@@ -743,7 +764,7 @@ What it checks:
   the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count; on a path shorter than the standoff the lead bot stays put when the pack is in view and otherwise moves up the path the same way; the moved point is put on the navmesh floor by the driver and the check alike). The positions of a group are looked at in order, each look starting where the one before ended, and the next group goes on from the last; a position within 25 yd of the party needs no look. No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
   called most packs blind that were pulled fine live. A pull group or boss gated to a `team` is checked like the rest (the commander driver looks at it before it skips the fight); its issues name the team;
 - a leg `to`, pull group or boss marked `needs_walk` (never snapped to the navmesh: its mapping walk is still to do) is a failing point (`needs a mapping walk`), not a silent skip; Zul'Farrak and Uldaman have none;
-- the `stand` points of `use_object`, `loot_object` and `ritual` steps (before the boss, and the `after_boss` ones), walked like `via` points.
+- the `stand` points of `use_object`, `loot_object`, `ritual` and `gossip` steps (before the boss, and the `after_boss` ones), walked like `via` points; the `stand` of a `gossip` must also lie within 5 yd of the NPC's `near` (`too far` otherwise), and a gossip step `by` the agent does not move the party's point for the hops after it.
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 
@@ -780,7 +801,7 @@ Per leg the rows are, in the order the driver does them: the `via` waypoints (`m
 mean of its positions, the radius is its `radius` or the farthest position plus 10 yd, `entries` once each in first-seen order, flags 1 ambush / 2 alliance / 4 horde from `ambush`
 and `team`), the `steps` (`use_object` as a `move` to its `stand` and an `open` whose `item` is `requires_item`; `wait_for.gameobject` as `wait_object` with `param` 0/1/2 for
 ready/active/active_alt; `hostiles_gone` as `wait_clear`, centred on its `center` or on the last point of the leg; `loot_object` as `loot` with `item` the `expect_item`; `use_item` with
-`item` the `expect_item`; `ritual`), the `boss` (`entries` = `first`, `flags` from `team`; its `loot_item` as a `loot` of the boss entry right after it) and the `after_boss` steps.
+`item` the `expect_item`; `ritual`; a `gossip` step is **refused**: the run leader has none), the `boss` (`entries` = `first`, `flags` from `team`; its `loot_item` as a `loot` of the boss entry right after it) and the `after_boss` steps.
 `skip`, `rest`, `companions_loot` and `watchdog` are not carried over, as the guide says. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
 step without its entry) is refused here. The written SQL is read back and compared with the rows before the file is written. Uldaman exports 118 rows (14 legs, 103 steps); with its navmesh
 the 7 long hops are cut and it is 220 rows (205 steps).
@@ -1480,6 +1501,7 @@ after 10 s if it is not).
 | `use_item` (the Medallion combine, spell 9594) | `cmd use <itemId> <c>` | before: the item, and `requires_item` (the Shaft), in `.bot inv <c>`, else the step fails naming the bot and the item; after: `expect_item` (the Staff) in `.bot inv <c>` (looked at up to 4 times, the cast being over a moment before the bags change) |
 | `use_object` (the Keystone, `requires_item` the Staff) | the approach, `cmd open <go guid> <c>` | `requires_item` in `.bot inv <c>` first; the ACK `opened` |
 | `ritual` (the altars of Uldaman) | the approach, then **one** `cmd ritual entry:<id>@x,y,z <c> <bot> <bot>`; ordered again (at most 3 orders in all) only after `interrupted`, or after a fight that kept the bots from starting, **and** only when `cmd state` says the altar is not active: a ritual that has fired is never sent again, and `in-combat`/`interrupted` with an active altar ends the step as done (the Keepers woke into a fight) | the final line `TBM:ACTION_ACK\|cmd ritual\|party\|3\|done` is the result (the bots did their part, not the object's script; the altar reads ready again after the release, so no wait on it); `not-enough`, `busy`, `not-found` and the others as for the other orders. Needs entry targets and TortoiseBots with `cmd ritual`; the agent's character cannot take the step over |
+| `gossip` (Weegli's End Door, Bly's fight; Zul'Farrak) | `by: carrier` or `tank`: the approach, then `cmd gossip <npc entry> <bot> <option>`; `by: agent`: the agent's own `gossip_hello` / `gossip_select` next to the NPC | the ACK (bot) or `SMSG_GOSSIP_COMPLETE` (agent); a refusal or a menu without the option is tried again for `retry_s` (default 15 s), then fails with the menu id or the code; an unknown-verb refusal (or no answer) hands the step to the agent once. What the option did is for the next `wait_for` to check |
 | `wait_for` a game object (the Seal) | none; with entry targets `cmd state entry:<id>@x,y,z` every 2 s | with entry targets the module's answer (`state:active`, or the plan's state), whether or not the agent sees the object; without them the state in the agent's object store when the agent sees the object, else the wait is taken as met after 10 s and a note says so |
 
 **The approach.** Before a `cmd open` or `cmd loot` (the chest, the Keystone, a boss's corpse; not `cmd use`) the party is brought to the object, because the
