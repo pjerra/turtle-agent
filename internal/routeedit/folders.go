@@ -70,3 +70,9 @@ func ensureDir(p string) error {
 
 // CheckSource says the folder the edits start from exists.
 func CheckSource(source string) error { return ensureDir(source) }
+
+// Overlaps reports whether two folders are the same, or one lies inside the other (symlinks resolved).
+func Overlaps(a, b string) bool {
+	ra, rb := realPath(a), realPath(b)
+	return within(ra, rb) || within(rb, ra)
+}

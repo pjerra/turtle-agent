@@ -3155,6 +3155,25 @@ unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-d
 `/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
 `/vNNNN/diff`.
 
+**Using the edits in a run (`route-edits`).** An agent reads one plain plan file, so an edit reaches a run by copy, never by overlay:
+
+```
+turtle-agent route-edits list [<plan>]                        # versions, status, who, when, the check result
+turtle-agent route-edits export --to ~/ta-new/dungeons zulfarrak [v0007|latest]
+turtle-agent route-edits promote --worktree ~/wt-ta-x zulfarrak v0007
+```
+
+`export` copies the newest checked version (or the named one) as `<plan>.json` into a fresh folder (it must not exist or be empty) and prints
+`route_edit=<plan>@v0007 sha256=<hex>`. It refuses a refused version (a refused edit has no plan file), a file that was changed after it was
+written (the record's sha256), and a folder that is, holds or lies inside the `dungeons_dir` of an agent that reports a run in progress (or
+whose state cannot be read), since that run reloads its plan file at every leg; it warns when a slot that reads the folder has another
+`mmaps_dir` than the one the version was checked on. Point a stopped slot's `dungeons_dir` at the folder and start the run with
+`trace_meta: {"route_edit": "<plan>@v0007 sha256=<hex>"}` in `dungeon_run`: the run's trace then names the edit, and the run card says "run uses
+route edit v0007" (or warns when the file the run read is another version). `promote` writes the version over `dungeons/<plan>.json` of a
+worktree for a PR and prints the commit message (who, when, what moved, what it was checked on); it refuses when the worktree's file is no
+longer the one the edit started from. The brief rule for the lead: before copying plans for a run, `route-edits list <plan>`; when a checked
+version is newer than the golden or worktree copy, export it into the slot's fresh `dungeons_dir` instead.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
 `<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub

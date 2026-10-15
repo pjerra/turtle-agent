@@ -82,6 +82,17 @@
     return { level: "warn", text: "run's copy not seen: the map shows the dashboard's" };
   }
 
+  // The badge for a run started with a route edit (trace_meta.route_edit, "<plan>@v0007 sha256=<hex>", as `turtle-agent route-edits export` prints it):
+  // ok when the file the run last read is that edit, warn when it is another (the run reloaded another version, or the tag was not for this file).
+  function routeEditBadge(tag, pc) {
+    const m = /^([a-z0-9][a-z0-9_-]{0,39})@(v\d{4}) sha256=([0-9a-f]{64})$/.exec(tag || "");
+    if (!m) return null;
+    const read = pc ? pc.run_sha256 || (pc.run && pc.run.sha256) || (pc.drawn && pc.drawn.sha256) : "";
+    if (!read) return { level: "info", version: m[2], text: "run started with route edit " + m[2] + " (the file it read is not known)" };
+    if (read === m[3]) return { level: "ok", version: m[2], text: "run uses route edit " + m[2] };
+    return { level: "warn", version: m[2], text: "run was started with route edit " + m[2] + ", but the file it read is another version (" + read.slice(0, 8) + ")" };
+  }
+
   // Whether the plan drawn can be the plan the run walks: the leg the run says it is in (its number and name) must be in the drawing under that
   // number with that name. "" when it fits (or there is nothing to compare), else the reason, for the card to show instead of a drawing that
   // would put the party on the wrong leg.
@@ -112,6 +123,6 @@
     };
   }
 
-  const api = { parseRoute, planHash, allLegs, normalizeSel, visibleLegs, toggleLeg, onlyLeg, hideAll, filterGeo, boundsOf, copyBadge, copyRowText, planMismatch, planCard, short };
+  const api = { parseRoute, planHash, allLegs, normalizeSel, visibleLegs, toggleLeg, onlyLeg, hideAll, filterGeo, boundsOf, copyBadge, routeEditBadge, copyRowText, planMismatch, planCard, short };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PlanView = api;
 })(typeof self !== "undefined" ? self : this);

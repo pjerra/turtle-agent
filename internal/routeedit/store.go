@@ -99,6 +99,22 @@ func NewStore(root string) (*Store, error) {
 	return &Store{root: real}, nil
 }
 
+// OpenStore opens an existing store folder without making it (for reading: list, export, promote).
+func OpenStore(root string) (*Store, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("edits folder: %w", err)
+	}
+	if st, err := os.Stat(real); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("%s is not a folder", root)
+	}
+	return &Store{root: real}, nil
+}
+
 // Root is the folder, symlinks resolved.
 func (s *Store) Root() string { return s.root }
 
