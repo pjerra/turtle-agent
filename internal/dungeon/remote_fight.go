@@ -270,6 +270,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		})
 		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
+			// A wipe that comes after the kills (the adds a boss left) must not lose them: the ledger of kills is what tells that the boss is dead.
+			if res.kills > 0 {
+				d.noteKilled(res)
+			}
 			return err
 		}
 		kills += res.kills
@@ -795,7 +799,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return fightResult{}, err
+			return fightResult{kills: len(killed), dead: deadOf()}, err // the kills so far are kept: a wipe after the boss died must not lose him
 		}
 		if d.stale() {
 			lastCombat = d.clk.Now() // a quiet feed proves nothing about the fight

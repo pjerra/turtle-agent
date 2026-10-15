@@ -158,6 +158,7 @@ type fakeRemote struct {
 	// The bound party (remote_party.go): bots in left are out of the group (the feed and `commander status` do not list them) until a bind
 	// names them; leaveOnBind lists the bots that drop out right after a bind (once, or after every bind when stubborn); joinErr[name] is
 	// the code the bind refuses to invite that bot with.
+	reviveStuck map[string]bool // `cmd revive` is acknowledged and does nothing for these bots (a ghost outside the dungeon)
 	left        map[string]bool
 	lateJoin    map[string]time.Time // a bot in left joins the group (is loaded, arrives) at that time
 	leaveOnBind []string
@@ -645,7 +646,7 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		return ack(intent), nil
 	case "cmd revive":
 		for _, p := range g.party {
-			if strings.EqualFold(p.Name, f[2]) && p.Dead {
+			if strings.EqualFold(p.Name, f[2]) && p.Dead && !g.reviveStuck[p.Name] {
 				p.Dead, p.HP, p.State = false, p.MaxHP/2, "n"
 				g.revived = append(g.revived, p.Name)
 			}

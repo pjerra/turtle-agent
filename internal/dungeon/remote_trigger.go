@@ -518,3 +518,51 @@ func (d *RemoteDriver) legLootSync(ctx context.Context) error {
 	}
 	return nil
 }
+
+// BotReviver is the optional part of a RemoteGame that revives one of the commander's bots with the GM command `.revive <bot>`: the way back
+// for a bot that is dead outside the dungeon (reviveOffMap). Only a GM account has it.
+type BotReviver interface {
+	ReviveBot(ctx context.Context, name string) error
+}
+
+// maxGMRevives is how many `.revive` lines one bot gets before the run gives up on it.
+const maxGMRevives = 3
+
+// reviveOffMap deals with a dead bot that stands on another map than the plan's (a ghost at a graveyard outside the dungeon) after a
+// `cmd revive` did not bring it back. A GM account revives it where it stands (a GM assist: run_gm_assists, setup_shortcuts), and the
+// rejoin (`cmd summon`) takes it into the instance once the party is calm; the revive is repeated up to maxGMRevives times, 20 s apart.
+// Without a GM account or the hands, handled is true and nothing is sent: the ghost runs back through the entrance on its own and the
+// recovery's own time limit decides. handled false: out of options, the caller fails the bot.
+func (d *RemoteDriver) reviveOffMap(ctx context.Context, m tbm.PartyRec) (handled bool, err error) {
+	f, ok := d.g.(Follower)
+	br, ok2 := d.g.(BotReviver)
+	if !ok || !ok2 || !d.agentGM(ctx, f) {
+		if d.rejoin.once("offmap-" + m.Name) {
+			d.rep.note(fmt.Sprintf("recovery: %s is dead on map %d, outside the dungeon, and `cmd revive` did not bring it back; no GM account to revive it there: it is left to run back through the entrance (until the recovery's time limit)", m.Name, m.Map))
+		}
+		return true, nil
+	}
+	if d.gmRevived == nil {
+		d.gmRevived = map[packet.GUID]int{}
+	}
+	if d.gmRevived[m.GUID] >= maxGMRevives {
+		return false, nil
+	}
+	if last, ok := d.lastGMRevive[m.GUID]; ok && d.clk.Now().Sub(last) < 20*time.Second {
+		return true, nil
+	}
+	if d.lastGMRevive == nil {
+		d.lastGMRevive = map[packet.GUID]time.Time{}
+	}
+	d.gmRevived[m.GUID]++
+	d.lastGMRevive[m.GUID] = d.clk.Now()
+	if err := br.ReviveBot(ctx, m.Name); err != nil {
+		d.rep.note(fmt.Sprintf("recovery: .revive %s failed: %v", m.Name, err))
+		return true, nil
+	}
+	cmd := ".revive " + m.Name
+	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
+	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
+	d.rep.note(fmt.Sprintf("recovery: %s was dead on map %d, outside the dungeon: %s (a GM assist during the run); the rejoin summons it into the instance", m.Name, m.Map, cmd))
+	return true, nil
+}

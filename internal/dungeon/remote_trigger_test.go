@@ -905,3 +905,143 @@ func TestGroupDriverRefusesALegWithCompanionsLootFalse(t *testing.T) {
 		t.Fatalf("%v walks %v", err, g.walks)
 	}
 }
+
+// ---- recovery of a bot that is dead outside the dungeon, and a wipe after the boss kill ----
+
+// reviveGame is a nearGame whose GM account can `.revive` a bot.
+type reviveGame struct {
+	*nearGame
+	revives []string
+}
+
+func (g *reviveGame) ReviveBot(ctx context.Context, name string) error {
+	g.revives = append(g.revives, name)
+	for _, p := range g.party {
+		if p.Name == name {
+			delete(g.reviveStuck, name)
+			p.Dead, p.HP, p.State = false, p.MaxHP/2, "n"
+		}
+	}
+	return nil
+}
+
+// deadOffMapPlan: the lead bot dies on its walk and Healy is a ghost on map 1 that `cmd revive` does nothing for.
+func deadOffMapRun(t *testing.T, g interface {
+	RemoteGame
+	clock() Clock
+}, f *fakeRemote) (Report, error) {
+	t.Helper()
+	f.reviveStuck = map[string]bool{"Healy": true}
+	died := false
+	f.onTick = func(fr *fakeRemote) {
+		if !died && fr.lead().X > 5 {
+			died = true
+			fr.lead().Dead, fr.lead().HP = true, 0
+			fr.party[1].Dead, fr.party[1].HP = true, 0
+			fr.memberMap = map[packet.GUID]uint32{gHealer: 1}
+		}
+	}
+	plan := remotePlan(Leg{Name: "a", To: Point{60, 0, 0}})
+	cfg := DefaultConfig()
+	cfg.Setup = []string{"gm visible off"}
+	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	return rep, err
+}
+
+// A GM account revives the ghost where it is (`.revive`) instead of failing after three `cmd revive` orders, and the rejoin summons it in.
+func TestRecoveryRevivesABotDeadOutsideTheDungeonWithTheGM(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 3)}
+	g.agent = Point{5, 0, 0}
+	rep, err := deadOffMapRun(t, g, g.fakeRemote)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if fmt.Sprint(g.revives) != "[Healy]" || g.indexOf("cmd summon Healy") < 0 || !strings.Contains(notesOf(rep), "was dead on map 1, outside the dungeon: .revive Healy") {
+		t.Fatalf("revives %v orders %v\n%s", g.revives, g.orders, notesOf(rep))
+	}
+}
+
+// Without a GM account the ghost is left to run back through the entrance, for the recovery's own time: no failure after three orders.
+func TestRecoveryLeavesAGhostOutsideTheDungeonToRunBackWithoutAGM(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 0)}
+	g.agent = Point{5, 0, 0}
+	var back time.Time
+	prev := g.onTick
+	_ = prev
+	rep, err := func() (Report, error) {
+		g.reviveStuck = map[string]bool{"Healy": true}
+		died := false
+		g.onTick = func(fr *fakeRemote) {
+			if !died && fr.lead().X > 5 {
+				died = true
+				back = fr.now.Add(70 * time.Second) // longer than three revive orders (20 s apart)
+				fr.lead().Dead, fr.lead().HP = true, 0
+				fr.party[1].Dead, fr.party[1].HP = true, 0
+				fr.memberMap = map[packet.GUID]uint32{gHealer: 1}
+			}
+			if died && !back.IsZero() && !fr.now.Before(back) && fr.party[1].Dead {
+				fr.party[1].Dead, fr.party[1].HP = false, fr.party[1].MaxHP
+				delete(fr.memberMap, gHealer)
+			}
+		}
+		cfg := DefaultConfig()
+		d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), g, cfg, objOpts(), g.clock())
+		err := d.Run(context.Background(), 0)
+		rep, _ := d.Status()
+		return rep, err
+	}()
+	if err != nil || rep.State != "done" || len(g.revives) != 0 || !strings.Contains(notesOf(rep), "no GM account to revive it there") {
+		t.Fatalf("%v %v\n%s", err, g.revives, notesOf(rep))
+	}
+}
+
+// A wipe in a leg whose boss is dead is no failure of the boss step: it is recovered (also with recover_wipe off), counted apart as a wipe
+// after the kill, and the leg finishes.
+func TestWipeAfterTheBossKillIsRecoveredAndCountedApart(t *testing.T) {
+	g := newFakeRemote(t)
+	boss := g.addMob(9, Point{30, 0, 0})
+	wiped := false
+	var diedAt time.Time
+	g.onTick = func(f *fakeRemote) {
+		if diedAt.IsZero() && boss.hp <= 0 {
+			diedAt = f.now
+		}
+		if !wiped && !diedAt.IsZero() && f.now.Sub(diedAt) >= 3*time.Second {
+			wiped = true // the adds the boss left kill the party, a few seconds after the kill
+			for _, p := range f.party {
+				p.Dead, p.HP = true, 0
+			}
+		}
+	}
+	plan := remotePlan(Leg{Name: "boss", To: Point{20, 0, 0}, Boss: &Boss{Entry: 9, Position: Point{30, 0, 0}}})
+	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.RecoverWipe = false })
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	r := rep.Remote
+	if !wiped || r.WipesAfterKill != 1 || rep.Wipes != 0 || rep.PartyDowns != 0 || len(g.revived) != 3 || !strings.Contains(notesOf(rep), "wipe after the kill: the boss of leg 0 is dead") {
+		t.Fatalf("wiped %v after_kill %d wipes %d downs %d revived %v\n%s", wiped, r.WipesAfterKill, rep.Wipes, rep.PartyDowns, g.revived, notesOf(rep))
+	}
+}
+
+// A wipe before the boss is dead stays a wipe (and, with recover_wipe off, a failure).
+func TestWipeBeforeTheBossKillIsStillAWipe(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(9, Point{30, 0, 0})
+	killed := false
+	g.onTick = func(f *fakeRemote) {
+		if !killed && len(f.mobs) > 0 && f.mobs[0].engaged {
+			killed = true
+			for _, p := range f.party {
+				p.Dead, p.HP = true, 0
+			}
+		}
+	}
+	plan := remotePlan(Leg{Name: "boss", To: Point{20, 0, 0}, Boss: &Boss{Entry: 9, Position: Point{30, 0, 0}}})
+	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.RecoverWipe = false })
+	if err == nil || rep.State != "failed" || rep.Remote.WipesAfterKill != 0 {
+		t.Fatalf("%v %s %d", err, rep.State, rep.Remote.WipesAfterKill)
+	}
+}

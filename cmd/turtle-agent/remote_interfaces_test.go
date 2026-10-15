@@ -16,6 +16,7 @@ var (
 	_ dungeon.FloorSnapper     = remoteGame{}
 	_ dungeon.Follower         = remoteGame{}
 	_ dungeon.HireGame         = remoteGame{}
+	_ dungeon.BotReviver       = remoteGame{}
 	_ dungeon.ItemSource       = remoteGame{}
 	_ dungeon.OrderGame        = remoteGame{}
 	_ dungeon.PathPlanner      = remoteGame{}

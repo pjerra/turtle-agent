@@ -421,8 +421,11 @@ type RemoteReport struct {
 
 	// AreaTriggers are the area_trigger steps the run took and who took each (remote_trigger.go); AgentTriggers counts the CMSG_AREATRIGGER
 	// packets the agent's own character sent (each is a step the lead bot could not take).
-	AreaTriggers  []TriggerReport `json:"area_triggers,omitempty"`
-	AgentTriggers int             `json:"agent_triggers,omitempty"`
+	AreaTriggers []TriggerReport `json:"area_triggers,omitempty"`
+	// WipesAfterKill counts the wipes that came after the leg's boss was dead (the adds he left killed the party): recovered, not counted in
+	// wipes or party_downs, and no failure of the boss step.
+	WipesAfterKill int `json:"wipes_after_kill,omitempty"`
+	AgentTriggers  int `json:"agent_triggers,omitempty"`
 
 	// Observe is the run leader watch of an observed run (observe.go); absent in a driven run.
 	Observe *ObserveReport `json:"observe,omitempty"`
@@ -533,19 +536,21 @@ type RemoteDriver struct {
 	shortSince time.Time
 	shortSaid  bool
 	// paused: Pause was called; the run ends stopped and keeps its binding (dungeon_pause).
-	paused     atomic.Bool
-	skipped    map[packet.GUID]string
-	lastAssist time.Time
-	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
-	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
-	haveMoveTo bool
-	tf         tankFirst                 // the tank-first state of the fights (remote_tank.go)
-	unitMem    map[*UnitWait]*unitMemory // what each "gone" unit wait has seen (remote_trigger.go)
-	home       *agentHome                // the agent's safe point after an area trigger it took itself (remote_trigger.go)
-	legLoot    bool                      // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
-	legMuted   []string                  // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
-	kit        restKit                   // the bots' drink counts and refills (remote_rest.go)
-	maint      maintState                // the automatic `.bot maintenance` that is due (remote_maint.go)
+	paused       atomic.Bool
+	skipped      map[packet.GUID]string
+	lastAssist   time.Time
+	lastMove     time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
+	moveTo       Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
+	haveMoveTo   bool
+	tf           tankFirst                 // the tank-first state of the fights (remote_tank.go)
+	gmRevived    map[packet.GUID]int       // `.revive` lines sent for a bot dead outside the dungeon (reviveOffMap)
+	lastGMRevive map[packet.GUID]time.Time //
+	unitMem      map[*UnitWait]*unitMemory // what each "gone" unit wait has seen (remote_trigger.go)
+	home         *agentHome                // the agent's safe point after an area trigger it took itself (remote_trigger.go)
+	legLoot      bool                      // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
+	legMuted     []string                  // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
+	kit          restKit                   // the bots' drink counts and refills (remote_rest.go)
+	maint        maintState                // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
@@ -892,16 +897,26 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
 		d.ledgerClearAbsences()
 		down := errors.Is(err, errPartyDown)
+		// A wipe in a leg whose boss is dead already (the party died to the adds the boss left: Zum'rah's zombies and Dead Heroes) is no
+		// failure of the boss step: it is recovered like any wipe (also with recover_wipe off: the boss is down) and the leg goes on, and the
+		// report counts it apart ("wipe after the kill").
+		after := d.legBossDead()
 		d.rep.update(func(r *Report) {
-			if down {
+			switch {
+			case after:
+			case down:
 				r.PartyDowns++
-			} else {
+			default:
 				r.Wipes++
 			}
 		})
-		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down})
+		if after {
+			d.remote(func(r *RemoteReport) { r.WipesAfterKill++ })
+			d.rep.note(fmt.Sprintf("wipe after the kill: the boss of leg %d is dead; recovering the party, the leg goes on (%v)", max(d.curLeg, 0), err))
+		}
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down, "after_kill": after})
 		d.rep.note(err.Error())
-		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
+		if (d.cfg.RecoverWipe || after) && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
 			d.wipeRecover++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
 				_ = d.maintWipeRecovered(ctx) // once the party is calm; a context error ends the run at the next look
@@ -2001,6 +2016,9 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 	for {
 		dead := d.deadMembers()
 		if len(dead) == 0 {
+			if len(d.gmRevived) > 0 {
+				return d.rejoinFar(ctx) // a bot revived outside the dungeon is summoned in (a no-op when nobody stands far)
+			}
 			return nil
 		}
 		if d.clk.Now().After(deadline) {
@@ -2009,6 +2027,17 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 		for _, m := range dead {
 			if last, ok := d.lastRevive[m.GUID]; ok && d.clk.Now().Sub(last) < 20*time.Second {
 				continue
+			}
+			// A bot that released to a graveyard outside the dungeon (another map than the plan's) does not come back by `cmd revive`: the
+			// module acknowledges it and the ghost stays out (live 2026-10-15, Velratha group 9 wipe: "still dead after 3 revive orders").
+			// A GM account revives it where it is (`.revive`; the next rejoin summons it into the instance); any other account leaves it to
+			// run back through the entrance, for as long as the recovery's own limit.
+			if m.Map != d.plan.Map && d.revived[m.GUID] >= 1 {
+				if handled, err := d.reviveOffMap(ctx, m); err != nil {
+					return err
+				} else if handled {
+					continue
+				}
 			}
 			if d.revived[m.GUID] >= 3 {
 				return fmt.Errorf("%s is still dead after %d revive orders", m.Name, d.revived[m.GUID])
@@ -2393,4 +2422,17 @@ func distToLead(d *RemoteDriver, p Point) float64 {
 		return math.MaxFloat64
 	}
 	return dist3(l, p)
+}
+
+// legBossDead says whether the leg under way has a boss and the run knows him dead (a kill, the ledger, or his corpse in view).
+func (d *RemoteDriver) legBossDead() bool {
+	if d.curLeg < 0 || d.curLeg >= len(d.plan.Legs) {
+		return false
+	}
+	b := d.plan.Legs[d.curLeg].Boss
+	if b == nil {
+		return false
+	}
+	dead, _ := d.bossDead(fightSpec{pick: []uint32{b.Entry}, wide: true})
+	return dead
 }

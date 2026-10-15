@@ -65,3 +65,12 @@ var _ dungeon.AgentHands = remoteGame{}
 func (g remoteGame) AreaTrigger(ctx context.Context, id uint32) error {
 	return g.c.cur().AreaTrigger(ctx, id)
 }
+
+// ReviveBot sends the GM line ".revive <bot>" for one of the commander's bots (dungeon.BotReviver): a bot that is dead outside the dungeon.
+// The name is checked first; only a GM account's server accepts it.
+func (g remoteGame) ReviveBot(ctx context.Context, name string) error {
+	if !botName.MatchString(name) {
+		return fmt.Errorf("revive: %q is not a bot name", name)
+	}
+	return g.c.cur().GM(ctx, ".revive "+name)
+}
