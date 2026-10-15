@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -37,6 +37,8 @@ function legSelFor(name, n) {
   return PV.normalizeSel(legSel.get(name), n);
 }
 function setLegSel(name, sel) { legSel.set(name, sel); store("legsel:" + name, JSON.stringify(sel)); }
+// The route editor (routeeditui.js): the panel of the plan view and the handles on its map. It is there only when the dashboard was started with --edit.
+const EU = window.RouteEditUI.create({ h, s, MV, rerender: () => scheduleRender(), applyViewBox: (rec) => applyViewBox(rec), geoOf: (name) => { const g = plans.get(name); return g && g.legs ? g : null; }, currentPlan: () => (route.kind === "plan" ? route.plan : "") });
 // The leg a live run on this plan is in (-1 when none runs it).
 function liveLegOf(name) {
   const a = ((last && last.agents) || []).find((x) => x.online && x.label.plan === name && x.run.state === "running");
@@ -272,11 +274,12 @@ function renderPlanHead(c, rec) {
 
 function renderPlanInfo(c, rec) {
   const name = c.label.plan, geo = plans.get(name), n = geo && geo.legs ? geo.legs.length : 0;
+  const editPanel = EU.panel(name, geo && geo.legs ? geo : null); // one element that stays, so what is typed in it stays
   const sel = legSelFor(name, n), runLeg = liveLegOf(name), vis = PV.visibleLegs(sel, n, runLeg);
   const key = JSON.stringify([sel, runLeg, geo && geo.source, copyRows]);
   if (rec.planInfoKey === key) return;
   rec.planInfoKey = key;
-  const blocks = [];
+  const blocks = [editPanel];
   const src = geo && geo.source;
   const where = !src ? "loading..." : src.role === "build" ? src.path + " (" + PV.short(src) + "): no plans folder of the dashboard has this plan, so it draws the copy built into its binary"
     : (src.role === "slot" ? "a slot's copy " : "the dashboard's plans folder, ") + src.path + " (" + PV.short(src) + (src.modified ? ", changed " + new Date(src.modified).toLocaleString() : "") + ")";
@@ -587,7 +590,7 @@ function ensureSvg(rec, geo) {
   const svg = s("svg", { preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": "map of the run: route, packs, bosses and the party" });
   const stat = s("g", { class: "static" });
   stat.innerHTML = geo.svg; // built by the server from the plan file, text escaped
-  svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "dyn" }));
+  svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "dyn" }), s("g", { class: "editg" }));
   rec.parts.stage.replaceChildren(svg);
   rec.svg = svg; rec.geoName = geo.plan; rec.geoSha = sha; rec.layerApplied = null; rec.geo = geo;
   if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); }
@@ -765,6 +768,7 @@ function renderMap(c, rec) {
     g.classList.toggle("done", run.leg >= 0 && i < run.leg);
     g.classList.toggle("legoff", !!vis && !vis.includes(i));
   });
+  if (c.synthetic) EU.overlay(rec, name, geo, vis || []);
   svg.querySelectorAll(".pull, .pin").forEach((e) => {
     const i = +e.dataset.leg, gi = +e.dataset.group;
     const cleared = run.leg >= 0 && i === run.leg && run.group > 0 && gi < run.group - 1;

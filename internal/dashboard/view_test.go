@@ -43,7 +43,7 @@ func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "routeedit.js", "routeeditui.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -109,10 +109,14 @@ func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js"
 // TestPlanView: the plan view's address, its leg switches and the words about which copy of a plan is drawn.
 func TestPlanView(t *testing.T) { runCheck(t, "planview_check.js", "planview.js") }
 
+// TestRouteEditModel: the route editor's ops, the route with ops applied, handles, undo and redo, and the words for a change.
+func TestRouteEditModel(t *testing.T) { runCheck(t, "routeedit_check.js", "routeedit.js") }
+
 // The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.
 func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
 	html, err := os.ReadFile(filepath.Join("static", "index.html"))
-	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) || !strings.Contains(string(html), `src="planview.js"`) {
+	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) || !strings.Contains(string(html), `src="planview.js"`) ||
+		!strings.Contains(string(html), `src="routeedit.js"`) || strings.Index(string(html), `src="routeeditui.js"`) > strings.Index(string(html), `src="app.js"`) || !strings.Contains(string(html), `src="routeeditui.js"`) {
 		t.Fatalf("index.html must load unitinfo.js and planview.js: %v", err)
 	}
 	css, err := os.ReadFile(filepath.Join("static", "app.css"))
