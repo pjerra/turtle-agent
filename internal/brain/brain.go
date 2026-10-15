@@ -152,6 +152,8 @@ type memory struct {
 	dru         druMem  // the druid's refused Mark of the Wild casts (druid.go)
 	rez         rezMem  // resurrections sent and the moment one could be cast last (rez.go)
 
+	drink drinkMem // rest_drink's "no drink" line, once per rest (heal.go)
+
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/spells"
@@ -973,7 +974,9 @@ func healerPosition() *Strategy {
 
 // restDrink is a mana class's drinking at a rest gate, for a class that conjures no water: out of combat, with no mob to fight, below
 // 80% mana for a healer (the driver's gate wants 75) and below 65% otherwise, the best drink in the bags that the level allows (the
-// vendor table of drinksFor). A drink just used is not used again for 5 s and nothing is sent while the Drink aura is awaited.
+// vendor table of drinksFor). A drink just used is not used again for 5 s and nothing is sent while the Drink aura is awaited. With no
+// drink in the bags the rule is off (its trigger needs one, and none of these classes conjures one), and the rest says so once: the
+// first tick of a rest with an empty bag logs "no drink", the next rest logs it again (drinkMem).
 func restDrink() *Strategy {
 	below := func(c *Ctx) int {
 		if rezNeedsMana(c) {
@@ -984,8 +987,17 @@ func restDrink() *Strategy {
 		}
 		return manaDrinkPct
 	}
+	// resting is the state the rule drinks in, the bag aside: at a rest gate with the mana under the line.
+	resting := func(c *Ctx) bool {
+		return c.RestOK && onSelf(c) && !inCombat(c) && ValFight.Get(c).Mob == nil && PowerPct(c) < below(c)
+	}
 	return &Strategy{
 		Name: "rest_drink",
+		Before: func(c *Ctx) {
+			if c.mem.drink.restWithoutDrink(resting(c) && c.Class().Drinks && drinkEntry(c, true) == 0) {
+				c.G.Emit(events.Event{Kind: events.KindBrainIdle, Text: "no_drink", Data: map[string]any{"reason": "no_drink", "trigger": "mana_low"}})
+			}
+		},
 		Actions: []*Action{{Name: "drink", Settle: drinkSettle,
 			Possible: func(c *Ctx) bool { return !inCombat(c) && c.Class().Drinks && drinkEntry(c, false) != 0 },
 			Useful:   func(c *Ctx) bool { return !HasAura(&c.Self, "Drink") },
@@ -1001,7 +1013,29 @@ func restDrink() *Strategy {
 				return nil
 			}}},
 		Rules: []Rule{{Trigger: Trigger{Name: "mana_low", Active: func(c *Ctx) bool {
-			return c.RestOK && onSelf(c) && !inCombat(c) && ValFight.Get(c).Mob == nil && PowerPct(c) < below(c)
+			return resting(c) && c.Class().Drinks && drinkEntry(c, false) != 0
 		}}, Do: []Next{{"drink", RelNormal}}}},
 	}
+}
+
+// drinkMem is what rest_drink remembers between ticks: whether the rest the leader is in has said there is no drink.
+type drinkMem struct {
+	mu       sync.Mutex
+	noneSaid bool
+}
+
+// restWithoutDrink reports whether the "no drink" line is due: this tick is at a rest with an empty bag (atRest) and the rest has not
+// said so yet. A tick that is no such rest ends the rest, so the next one says it again.
+func (d *drinkMem) restWithoutDrink(atRest bool) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !atRest {
+		d.noneSaid = false
+		return false
+	}
+	if d.noneSaid {
+		return false
+	}
+	d.noneSaid = true
+	return true
 }
