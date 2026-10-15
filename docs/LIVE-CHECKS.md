@@ -1022,14 +1022,19 @@ README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like
    `arms_warrior` (stance, `execute`, `overpower` after a dodge, `heroic_strike` once per swing, `battle_shout` at a rest gate).
 3. **The new specs, not played before**: `fire_mage` (Scorch stacks `Fire Vulnerability` to 5 at the start of a long fight: does the aura show under that name in `units`? Fireball is refused on a fire-immune mob and
    Frostbolt takes over for the 5 s back-off; `fire_blast_moving` while walking), `arcane_mage` (`Arcane Rupture`, a Turtle talent: its aura and rhythm with Arcane Missiles are not read; does Missiles channel through to the end?).
-   Record time to kill, casts, mana at the end per fight and compare with the Go `frost_mage` on the same pack: `trace-score` on both traces. The pull test scores the party of a commander run, where the agent's character does not fight: **running it in
-   leader mode is the open step for a real A/B** (until then the arms are two leader-mode runs of the same leg, three or more each).
+   Record time to kill, casts, mana at the end per fight and compare with the Go `frost_mage` on the same pack: the leader-mode pull test below.
 4. **Boss tactics** (Uldaman, leader mode, a character with an interrupt - mage Counterspell, warrior Pummel in Battle or Berserker Stance): on Revelosh, `brain_state` `encounter` (`uldaman/revelosh`) when he is pulled, then `interrupt` on
    `Chain Lightning` / `Lightning Bolt` before any other cast; on the Obsidian Sentinel the character attacks the Obsidian Shards (7209) first when they appear at 60/40/20 % (also 80 %?) and goes back to the boss; on Grimlok `Chain Bolt`.
    `encounter_end` when the boss dies. Does the 1.12 client show the boss's cast (`Casting` on the unit) early enough for `interruptMinLeft` 350 ms?
 5. **`move_out`** has no shipped plan yet (needs the radius of a real cast, from the spell's `SpellRadius`): try `{"cast": "Fire Nova", "yards": 10}` on Galgann and a `ground` rule on a boss's ground effect; the character must leave on the navmesh and not
    leave the tank (a tank ignores `cast` circles), and must not stand in the circle at the end of the cast.
 6. **`dispel`** with a healer preset on a real aura of a boss (Antu'sul's, Velratha's): dispelled before a slow, at 20 % mana.
+7. **The pull test in leader mode** (`mode: "leader"`, `pulltest`; README "Pull test in leader mode"): hired or named party and the character in the instance at an Uldaman pack (leg 0, the Baelog
+   trash is cheap), `gm: true` for `.respawn`. `tools/run-uldaman.sh --mode leader --pulltest 0:0:3 --rotation frost_mage`, then the same with no `--rotation` and `turtle-agent pulltest --compare`. Check: the three tries kill the pack and the
+   pack comes back (`reset` `respawn`, `gm_commands` `.respawn`, within 80 yd of the pack; the selection is cleared first); `time_to_kill_s` against the trace's `pull_start`/`pull_end`;
+   `damage_done` against the sum of the `spell_damage`/`melee` events with the character as the source (and that a wand shot, a pet's damage and a DoT tick are or are not in it);
+   `power_spent` against the mana the unit rows show; `casts_failed_by_reason` against the `spell_failed` events; `idle_pct` against a watched fight; `mobs_on_me` against who the mobs target in `units`.
+   Run the same arm twice: the spread is the noise `--compare` has to beat (it says "the noise" when both sides name the same brain).
 
 ## Observe mode: the agent watches a TortoiseBots run leader (`mode: "observe"`, `plan-export`; tested against fakes only, never run live)
 

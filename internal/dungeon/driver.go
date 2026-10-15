@@ -151,6 +151,9 @@ type Config struct {
 	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
 	Brain     Brain
 	BrainName string
+	// Pulltest, when set, makes the run the leader-mode pull test (pulltest_leader.go): the plan's pack is pulled and killed Tries times by
+	// the party with the agent's own character playing, and each try is scored. The run's from_leg is the spec's leg.
+	Pulltest *PulltestSpec
 	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
 	Trace tracerun.Config
 	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
@@ -190,21 +193,24 @@ type Config struct {
 	RestWalkHealerManaPct int
 	RestWalkManaPct       int
 	RefillBelow           int
-	RestMinHealth         int           // after RestTimeout the run goes on only if everyone has at least this health
-	GatherRadius          float32       // yards: rested also asks every living member to be this close
-	WaitPoll              time.Duration // time between two looks at a wait step
-	Poll                  time.Duration // time between two looks at a fight
-	ArriveTimeout         time.Duration // the party's walk to the leader after a teleport
-	ManaStall             time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
-	ManaStallPct          int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
-	HealerManaMin         int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
-	ReviveWait            time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
-	AggroQuiet            time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
-	AmbushPause           time.Duration // how long the party stands at each position of a stealthed pack
-	WalkWatch             time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
-	BuffGap               time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait          time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
-	BuffMaxDist           float32       // yards: a companion farther than this from the leader is not selected for a buff
+	// MaintenanceEveryLegs: remote mode sends `.bot maintenance` to every bot at the start of legs N, 2N, ... (0: never, also not after a
+	// recovered wipe; the default is 3; remote_maint.go). Unlike the fields above a zero here is not filled with the default.
+	MaintenanceEveryLegs int
+	RestMinHealth        int           // after RestTimeout the run goes on only if everyone has at least this health
+	GatherRadius         float32       // yards: rested also asks every living member to be this close
+	WaitPoll             time.Duration // time between two looks at a wait step
+	Poll                 time.Duration // time between two looks at a fight
+	ArriveTimeout        time.Duration // the party's walk to the leader after a teleport
+	ManaStall            time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct         int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin        int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait           time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet           time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause          time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch            time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap              time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait         time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist          float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
 	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
@@ -226,7 +232,7 @@ func DefaultConfig() Config {
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
-		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3,
+		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
@@ -350,6 +356,11 @@ type Driver struct {
 	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	stopSampler func()
 
+	// What the leader-mode pull test reads (pulltest_leader.go): the kills of the fights, and the span from the first pull to the last
+	// fight's end since it was last cleared.
+	fightKills            int
+	fightFirst, fightLast time.Time
+
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
 	wd       *watchdog
 	wdRepick flagOnce // end the fight, to pick the target again
@@ -423,6 +434,9 @@ func ctxDone(err error) bool {
 }
 
 func (d *Driver) run(ctx context.Context, fromLeg int) error {
+	if d.cfg.Pulltest != nil {
+		return d.runPulltest(ctx)
+	}
 	if err := d.begin(ctx, fromLeg); err != nil {
 		return err
 	}
@@ -1609,6 +1623,9 @@ type fightSpec struct {
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool
+	// patrol is the group's patrol (PullGroup.Patrol, remote mode only), and patrolSt what its gate has done for this group so far.
+	patrol   *Patrol
+	patrolSt *patrolState
 }
 
 type outcome int

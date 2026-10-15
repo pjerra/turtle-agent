@@ -164,6 +164,10 @@ func (d *RemoteDriver) RunControl(verb string) error {
 
 func (d *RemoteDriver) observing() bool { return d.opt.Observe != nil }
 
+// Observing is whether the run is an observed one (mode observe): the RPC's dungeon_pause, dungeon_resume and dungeon_skip go to the run
+// leader for it, and act on the commander's own run otherwise.
+func (d *RemoteDriver) Observing() bool { return d.observing() }
+
 // runLeaderRefusal explains why the module refused `.bot run <verb>` with this code.
 func runLeaderRefusal(verb, plan string, e *tbm.Err) string {
 	if e == nil {

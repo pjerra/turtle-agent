@@ -166,6 +166,8 @@ type dungeonRunParams struct {
 	// Carrier names the bot that does the object steps in remote mode (loot_object, a boss's loot_item, use_item, use_object): it loots,
 	// opens and uses items on `cmd` orders. Empty: the first living bot that is not the lead bot, the tank or the healer.
 	Carrier string `json:"carrier,omitempty"`
+	// CCBot names the bot that takes the big-pack CC mark (README "big packs"); a hired party sets its mage.
+	CCBot string `json:"cc_bot,omitempty"`
 	// LootRestore is the loot method put back after the carrier's free-for-all loot (remote mode): group (default), rr, master or nbg.
 	LootRestore string `json:"loot_restore,omitempty"`
 	// ObjectFallback is what an object step does when the carrier's order fails twice (remote mode): "agent" (the default) lets the
@@ -184,7 +186,8 @@ type dungeonRunParams struct {
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
 	// KeepOnFail (remote mode): a FAILED run keeps its binding and the party in its instance, so that a resume re-enters the same
-	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding.
+	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding. dungeon_pause
+	// halts a running run with the binding kept, keep_on_fail or not.
 	KeepOnFail bool `json:"keep_on_fail,omitempty"`
 	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
 	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
@@ -289,9 +292,12 @@ type dungeonRunner struct {
 	drv dungeon.Runner
 	// kept is the hires of a binding the last run kept (keep_on_fail): dungeon_stop unbinds it, the next run's prepare takes their class
 	// and level from it (a bound hire does not answer `who`).
-	kept   map[string]tbm.Who
-	cancel context.CancelFunc
-	done   chan struct{}
+	kept map[string]tbm.Who
+	// classes is the class of every hire any run of this process has read (name, lower case): a hire's class never changes, so it is
+	// kept whatever became of the binding, and a later run that names its party finds its mage here (RemoteOptions.ClassMemory).
+	classes map[string]string
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
@@ -319,14 +325,12 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	srv.Register("dungeon_stop", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.stop(), nil
 	}))
-	// The observed run's controls (mode observe): pause, resume and skip go to the run leader on the server; dungeon_stop stops it.
+	// dungeon_pause, dungeon_resume and dungeon_skip act on the active run, by its mode (control): an observed run (mode observe) passes them to the
+	// TortoiseBots run leader (`.bot run pause|resume|skip`); a commander run (mode remote) has dungeon_pause only, which keeps its binding.
 	for _, verb := range []string{"pause", "resume", "skip"} {
 		verb := verb
 		srv.Register("dungeon_"+verb, rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
-			if err := r.runControl(verb); err != nil {
-				return dungeonStatusResult{}, err
-			}
-			return r.status(), nil
+			return r.control(verb)
 		}))
 	}
 	registerTuneMethods(srv, r)
@@ -363,6 +367,28 @@ func (r *dungeonRunner) runControl(verb string) error {
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	}
 	return nil
+}
+
+// control is dungeon_pause, dungeon_resume and dungeon_skip: one set of commands that acts on the active run by its mode. An observed run
+// sends the verb to the run leader on the server (runControl); a commander run pauses with its binding kept (pause) and has no resume or
+// skip (the next dungeon_run with resume does that); with no run going pause changes nothing and the others are refused.
+func (r *dungeonRunner) control(verb string) (dungeonStatusResult, error) {
+	r.mu.Lock()
+	drv, running := r.drv, r.running()
+	r.mu.Unlock()
+	if o, ok := drv.(interface{ Observing() bool }); ok && running && o.Observing() {
+		if err := r.runControl(verb); err != nil {
+			return dungeonStatusResult{}, err
+		}
+		return r.status(), nil
+	}
+	if verb == "pause" {
+		return r.pause()
+	}
+	if !running {
+		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_" + verb + ": no dungeon run is going"}
+	}
+	return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server resumes and skips); a paused commander run goes on with dungeon_run (resume, from_leg)"}
 }
 
 func (r *dungeonRunner) running() bool {
@@ -437,6 +463,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "buffs need a GM account (.aura, developer level): with gm false run without buffs"}
 		}
 	}
+	if p.Pulltest != nil && !remote && p.Brain == "" {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest in leader mode scores the character: it needs a brain (mode \"leader\" picks the preset of its class)"}
+	}
 	var hook dungeon.Brain
 	brainName := p.Brain
 	if p.Brain != "" && !remote {
@@ -454,7 +483,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		hook = &driverBrain{ctl: r.brain, params: bp, runID: tcfg.RunID}
 	}
 	from := legIndex(plan, p.FromLeg)
-	if pt := p.Pulltest; pt != nil && remote {
+	if pt := p.Pulltest; pt != nil && (remote || p.Brain != "") {
 		if pt.Leg == nil || pt.PullGroup == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest needs leg (a number or a name) and pull_group"}
 		}
@@ -469,7 +498,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if from < 0 || from >= len(plan.Legs) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", names, len(plan.Legs)-1)}
 	}
-	if remote {
+	if remote || p.Pulltest != nil {
 		if err := checkStartParams(p, plan, from); err != nil {
 			return dungeonRunResult{}, err
 		}
@@ -498,6 +527,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		cfg.Watchdog = *p.Watchdog
 	}
 	cfg.Resume = p.Resume != nil && *p.Resume
+	if pt := p.Pulltest; pt != nil {
+		spec := dungeon.PulltestSpec{Leg: from, PullGroup: *pt.PullGroup, Tries: pt.Tries, Reset: pt.Reset}.Normalized()
+		cfg.Pulltest = &spec
+	}
 	leaderGM := "probe"
 	switch {
 	case p.GM == nil:
@@ -667,10 +700,43 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 	return r.status()
 }
 
+// pause halts a remote run so that it can be resumed: the run ends "stopped" with the bots stood still and the commander binding KEPT,
+// so the next dungeon_run (resume, from_leg) re-enters the same group and instance. dungeon_stop unbinds, which returns the hires to the
+// commander's raid and loses the instance. With no run going it changes nothing (a kept binding stays kept). Group-mode runs have no
+// binding: pause is refused for them.
+func (r *dungeonRunner) pause() (dungeonStatusResult, error) {
+	r.mu.Lock()
+	cancel, drv, running := r.cancel, r.drv, r.running()
+	r.mu.Unlock()
+	if !running {
+		return r.status(), nil
+	}
+	p, ok := drv.(interface{ Pause() })
+	if !ok {
+		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_pause: the run is a group-mode run with no commander binding to keep; dungeon_stop ends it"}
+	}
+	p.Pause()
+	if cancel != nil {
+		cancel()
+		r.wait(10 * time.Second)
+	}
+	return r.status(), nil
+}
+
 // keptFrom notes the hires of the binding a finished run kept (keep_on_fail), from its report; nothing when it unbound.
 func (r *dungeonRunner) keptFrom(rep dungeon.Report) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rep.Ready != nil {
+		for _, b := range rep.Ready.Bots {
+			if b.Class != "" {
+				if r.classes == nil {
+					r.classes = map[string]string{}
+				}
+				r.classes[strings.ToLower(b.Name)] = strings.ToLower(b.Class)
+			}
+		}
+	}
 	r.kept = nil
 	if rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept") {
 		return

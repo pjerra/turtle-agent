@@ -34,8 +34,11 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch mode {
 	case modeLeader:
-		if p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 {
-			return false, bad(`from_pull_group, start_here, have_items and pulltest go with mode "remote" (commander; leader and group mode have teleport)`)
+		if p.FromPullGroup != nil || p.StartHere || len(p.HaveItems) > 0 {
+			return false, bad(`from_pull_group, start_here and have_items go with mode "remote" (commander; leader and group mode have teleport)`)
+		}
+		if p.Pulltest != nil && (p.Teleport || p.Resume != nil) {
+			return false, bad(`pulltest in leader mode runs where the party stands, at the pack: leave teleport and resume out`)
 		}
 		if p.Tune != "" || p.LiveReload != nil {
 			return false, bad(`tune and live_reload go with mode "remote" (commander)`)
@@ -178,7 +181,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	if mode, _, _ := runMode(p.Mode); mode == modeObserve {
 		observe = observeSpec(p.Observe)
 	}
-	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

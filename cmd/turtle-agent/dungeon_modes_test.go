@@ -138,3 +138,39 @@ func TestPlanEncountersCarryTheBossTactics(t *testing.T) {
 		t.Fatalf("%v", names)
 	}
 }
+
+func TestDungeonRunLeaderPulltestRefusals(t *testing.T) {
+	r := dungeonRig(t)
+	for _, c := range []struct{ params, want string }{
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"teleport":true}`, "leave teleport and resume out"},
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":7}}`, "pull_group"},
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0}}`, "needs leg"},
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
+		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "go with mode"},
+	} {
+		out := r.call("dungeon_run", c.params)
+		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
+			t.Errorf("%s: %v", c.params, out["error"])
+		}
+	}
+}
+
+func TestDungeonRunLeaderPulltestStartsAndReportsItsMode(t *testing.T) {
+	r := dungeonRig(t)
+	r.groupWith("Gorm")
+	out := r.call("dungeon_run", `{"name":"rig","mode":"leader","brain":"frost_mage","rotation":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":2,"reset":"none"}}`)
+	if out["error"] != nil {
+		t.Fatalf("%v", out)
+	}
+	rot, _ := brain.RotationNamed("frost_mage")
+	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+		rep, _ := m["result"].(map[string]any)["report"].(map[string]any)
+		return rep != nil && rep["pulltest"] != nil
+	})["result"].(map[string]any)
+	pt := st["report"].(map[string]any)["pulltest"].(map[string]any)
+	if pt["mode"] != "leader" || pt["brain"] != "frost_mage+rot:frost_mage@"+rot.SHA() || pt["tries_asked"] != float64(2) || pt["reset"] != "none" {
+		t.Fatalf("%v", pt)
+	}
+	r.call("dungeon_stop", "{}")
+}

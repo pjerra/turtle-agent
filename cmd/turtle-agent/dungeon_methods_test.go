@@ -35,7 +35,7 @@ func dungeonRig(t *testing.T) *agentRig {
 
 func TestDungeonStatusIsIdleAtFirst(t *testing.T) {
 	r := dungeonRig(t)
-	for _, m := range []string{"dungeon_status", "dungeon_stop"} {
+	for _, m := range []string{"dungeon_status", "dungeon_stop", "dungeon_pause"} {
 		if res := r.call(m, "{}")["result"].(map[string]any); res["state"] != "idle" || res["running"] != false || res["report"] != nil {
 			t.Fatalf("%s: %v", m, res)
 		}
@@ -149,6 +149,13 @@ func TestDungeonStopEndsARun(t *testing.T) {
 	}
 	if out := r.call("dungeon_run", `{"name":"rig"}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "dungeon_stop it first") {
 		t.Fatalf("%v", out)
+	}
+	// dungeon_pause keeps a remote run's binding; a group-mode run has none, so it is refused and the run goes on.
+	if out := r.call("dungeon_pause", "{}"); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "no commander binding") {
+		t.Fatalf("%v", out)
+	}
+	if st := r.call("dungeon_status", "{}")["result"].(map[string]any); st["running"] != true {
+		t.Fatalf("a refused pause stopped the run: %v", st)
 	}
 	stopped := r.call("dungeon_stop", "{}")["result"].(map[string]any)
 	rep := stopped["report"].(map[string]any)

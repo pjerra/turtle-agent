@@ -92,8 +92,13 @@ func TestDungeonRunObserveEndToEnd(t *testing.T) {
 	if legs := rep["legs"].([]any); len(legs) != 2 || legs[0].(map[string]any)["name"] != "here" || legs[1].(map[string]any)["name"] != "there" {
 		t.Fatalf("legs %v", rep["legs"])
 	}
-	// the pause and resume are for an observed run only
-	if out := r.call("dungeon_pause", `{}`); errCode(out) == 0 {
+	// resume and skip need a run; a pause with no run going changes nothing (the commander pause's rule)
+	for _, m := range []string{"dungeon_resume", "dungeon_skip"} {
+		if out := r.call(m, `{}`); errCode(out) == 0 {
+			t.Fatalf("%s with no run going: %v", m, out)
+		}
+	}
+	if out := r.call("dungeon_pause", `{}`); errCode(out) != 0 {
 		t.Fatalf("a pause with no run going: %v", out)
 	}
 }

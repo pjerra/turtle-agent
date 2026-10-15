@@ -151,13 +151,16 @@ type memory struct {
 	idleAt      time.Time
 	idle        string
 	lastErr     string
-	ext         memExt  // positioning, line of sight, interrupts, items (world.go)
-	mel         melMem  // auto attack and stance changes (melee.go)
-	heal        healMem // health history, shields, dispels and the last friendly cast (heal.go)
-	sham        shamMem // the shaman's totems and weapon imbue (shaman.go)
-	dru         druMem  // the druid's refused Mark of the Wild casts (druid.go)
-	rez         rezMem  // resurrections sent and the moment one could be cast last (rez.go)
-	encounter   string  // the encounter that is on (encounter.go), "" for none
+	ext         memExt   // positioning, line of sight, interrupts, items (world.go)
+	mel         melMem   // auto attack and stance changes (melee.go)
+	heal        healMem  // health history, shields, dispels and the last friendly cast (heal.go)
+	sham        shamMem  // the shaman's totems and weapon imbue (shaman.go)
+	dru         druMem   // the druid's refused Mark of the Wild casts (druid.go)
+	rez         rezMem   // resurrections sent and the moment one could be cast last (rez.go)
+	encounter   string   // the encounter that is on (encounter.go), "" for none
+	stat        statsMem // the counters of the character's own play (stats.go)
+
+	drink drinkMem // rest_drink's "no drink" line, once per rest (heal.go)
 
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
@@ -278,6 +281,7 @@ func assemble(g Game, cfg Config, p Params, strats []*Strategy, names []string) 
 	}
 	b := &Brain{g: g, cfg: cfg.withDefaults(), p: p, strategies: strats, names: names, actions: map[string]*Action{},
 		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]hold{}, eholds: map[uint32]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }, lock: NewMoveLock()}
+	b.mem.stat.reset()
 	for _, s := range strats {
 		for _, a := range s.Actions {
 			b.actions[a.Name] = a
@@ -382,6 +386,8 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 			continue
 		}
 		if ok, d := b.try(ctx, c, cd.a, cd.trigger, cd.rel, "", map[string]bool{}, 0); ok {
+			b.statDecision(d)
+			b.statTick(c, true)
 			b.record(d)
 			b.emitDecision(d)
 			b.mem.mu.Lock()
@@ -391,6 +397,7 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 			return &d
 		}
 	}
+	b.statTick(c, false)
 	b.report(c, cands)
 	return nil
 }
@@ -533,6 +540,9 @@ func (b *Brain) observeFailures(c *Ctx) {
 		return
 	}
 	f := cs.LastFailure
+	if cs.Failures > seen {
+		b.statRefused(f.ReasonName, cs.Failures-seen)
+	}
 	d, ok := holdFor[f.ReasonName]
 	if !ok {
 		d = defaultHold

@@ -49,6 +49,9 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 // adoptHired takes the lead bot, the other bots, the tank and the healer from the hire step: the run was started without names.
 func (d *RemoteDriver) adoptHired(h *HiredParty) {
 	d.opt.Lead, d.opt.Bots, d.opt.Tank, d.opt.Healer = h.Lead, slices.Clone(h.Bots), h.Tank, h.Healer
+	if h.CC != "" && d.opt.CCBot == "" {
+		d.opt.CCBot = h.CC
+	}
 	d.remote(func(r *RemoteReport) { r.LeadBot, r.Bots, r.Tank = h.Lead, slices.Clone(h.Bots), h.Tank })
 	d.rep.note(fmt.Sprintf("hired party: lead bot %s%s, tank %s, healer %s", h.Lead, botsSuffix(h.Bots), h.Tank, h.Healer))
 	d.tr.Event("hired_party", map[string]any{"lead_bot": h.Lead, "bots": slices.Clone(h.Bots), "tank": h.Tank, "healer": h.Healer})

@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -221,5 +222,22 @@ func TestParseAfterBoss(t *testing.T) {
 	b, _ := Marshal(p)
 	if q, err := Parse("t.json", b); err != nil || len(q.Legs[0].AfterBoss) != 2 {
 		t.Fatalf("%v", err)
+	}
+}
+
+// `fleers` lists creature entries that run at low health; an entry of 0 is refused like any other.
+func TestParseFleers(t *testing.T) {
+	base := func(f string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},` + f + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+	}
+	p, err := Parse("t.json", []byte(base(`"fleers":[4853,7321],`)))
+	if err != nil || fmt.Sprint(p.Fleers) != "[4853 7321]" {
+		t.Fatalf("%v %v", err, p)
+	}
+	if _, err := Parse("t.json", []byte(base(`"fleers":[4853,0],`))); err == nil || !strings.Contains(err.Error(), "fleers[1]: 0 is no creature entry") {
+		t.Fatalf("%v", err)
+	}
+	if p, err := Parse("t.json", []byte(base(``))); err != nil || len(p.Fleers) != 0 {
+		t.Fatalf("%v %v", err, p)
 	}
 }

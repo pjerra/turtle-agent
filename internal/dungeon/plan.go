@@ -92,9 +92,20 @@ type Plan struct {
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
 	LevelBand []int `json:"level_band,omitempty"`
-	// HireComposition is the party the plan wants hired, "class:role" each (see HireSpec.Composition): the prepare step takes it when its own
-	// hire block gives none. Dungeon plans only.
+	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
+	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
 	HireComposition []string `json:"hire_composition,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
+	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPriority []uint32 `json:"cc_priority,omitempty"`
+	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
+	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
+	CCAlways []uint32 `json:"cc_always,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
@@ -198,9 +209,27 @@ type PullGroup struct {
 	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
 	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
 	Equiv string `json:"equiv,omitempty"`
+	// Patrol is a patrol that walks near the group (remote_patrol.go): before the group is pulled the driver waits until it is out of
+	// patrol_aggro of the pull, or pulls it alone first when it passes the party away from the pack, and counts it in the pack while
+	// it stands within patrol_aggro of the pull. Nil: no patrol comes by.
+	Patrol *Patrol `json:"patrol,omitempty"`
 	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
+
+// Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
+// waypoints in the order it walks them (it goes on from the last to the first, as the core's waypoint movement does), PeriodS how long
+// one round takes, in seconds (the path's length at the mobs' walk speed, 2.5 yd/s for speed_walk 1).
+type Patrol struct {
+	Entries []uint32 `json:"entries"`
+	Path    []Point  `json:"path"`
+	PeriodS float32  `json:"period_s"`
+	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
+	Source string `json:"source,omitempty"`
+}
+
+// maxPatrolPeriod bounds a patrol's round (seconds).
+const maxPatrolPeriod = 900
 
 // MaxEquivLen is the longest Equiv label.
 const MaxEquivLen = 40
@@ -355,7 +384,7 @@ type rawPlan struct {
 	Name     string            `json:"name"`
 	Kind     string            `json:"kind"`
 	Status   string            `json:"status"`
-	Hire     []string          `json:"hire_composition"`
+	Fleers   []uint32          `json:"fleers"`
 	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
@@ -364,6 +393,9 @@ type rawPlan struct {
 	Outside  string            `json:"outside_tele"`
 	Portal   *rawPortal        `json:"portal"`
 	Band     []int             `json:"level_band"`
+	Hire     []string          `json:"hire_composition"`
+	CCPrio   []uint32          `json:"cc_priority"`
+	CCAlways []uint32          `json:"cc_always"`
 	Notes    []string          `json:"notes"`
 	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
@@ -401,6 +433,14 @@ type rawPullGroup struct {
 	Team      string     `json:"team"`
 	Equiv     string     `json:"equiv"`
 	NeedsWalk bool       `json:"needs_walk"`
+	Patrol    *rawPatrol `json:"patrol"`
+}
+
+type rawPatrol struct {
+	Entries []uint32   `json:"entries"`
+	Path    []rawPoint `json:"path"`
+	PeriodS float32    `json:"period_s"`
+	Source  string     `json:"source"`
 }
 
 type rawBoss struct {
@@ -569,6 +609,12 @@ func Parse(name string, data []byte) (*Plan, error) {
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
 	}
+	if len(rp.CCPrio) > 0 {
+		p.CCPriority = slices.Clone(rp.CCPrio)
+	}
+	if len(rp.CCAlways) > 0 {
+		p.CCAlways = slices.Clone(rp.CCAlways)
+	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
 			c.fail("portal.map", "required (the outer map id)")
@@ -617,6 +663,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
 		if rp.Kind == KindRaid {
 			c.fail("hire_composition", "a raid plan has a raid block instead")
@@ -736,6 +784,21 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		for j := range g.Positions {
 			pg.Positions = append(pg.Positions, c.point(fmt.Sprintf("%s.positions[%d]", gp, j), &g.Positions[j]))
+		}
+		if rp := g.Patrol; rp != nil {
+			pp := gp + ".patrol"
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, Source: rp.Source}
+			c.entries(pp+".entries", rp.Entries, true)
+			if len(rp.Path) < 2 {
+				c.fail(pp+".path", "needs at least two points")
+			}
+			for j := range rp.Path {
+				pat.Path = append(pat.Path, c.point(fmt.Sprintf("%s.path[%d]", pp, j), &rp.Path[j]))
+			}
+			if rp.PeriodS <= 0 || rp.PeriodS > maxPatrolPeriod {
+				c.fail(pp+".period_s", "%g: one round of the path takes 1-%d seconds", rp.PeriodS, maxPatrolPeriod)
+			}
+			pg.Patrol = pat
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}

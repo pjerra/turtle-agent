@@ -184,7 +184,7 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
 		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},
 		{`{"name":"rig","start_here":true}`, `go with mode "remote"`},
-		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, `go with mode "remote"`},
+		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, "scores the character: it needs a brain"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
 		{`{"name":"rig","have_items":[7733]}`, `go with mode "remote"`},
@@ -229,6 +229,9 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	r.system(viewFrame(1, false)...)
 	// The run turns corpse looting on for the bound bots first (a run that ended in a crash may have left it off), then the pre-run kit
 	// check: maintenance, then the bags (plain `.bot` lines, answered by system messages).
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot maintenance Tanky"))
@@ -287,6 +290,9 @@ func TestDungeonRunRemoteEntersByTele(t *testing.T) {
 	inside := viewFrame(2, false)
 	inside[1] = strings.Replace(inside[1], ",1.50,0,0,", ",1.50,70,0,", 1)
 	r.system(inside...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
@@ -337,6 +343,9 @@ func TestDungeonRunRemotePrepareOverTheSession(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|1|on")
 	r.system(viewFrame(1, false)...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
@@ -543,6 +552,9 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|1|on")
 	r.system(viewFrame(1, false)...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".account"))

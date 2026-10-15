@@ -43,7 +43,7 @@ func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -91,5 +91,34 @@ func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
 	}
 	if !strings.Contains(string(css), "rect.ic") {
 		t.Error("the door icon rect must be styled by its own class")
+	}
+}
+
+// TestMapLayers: the layer defaults, the one global saved choice, availability and the geometry of the newer layers.
+func TestMapLayers(t *testing.T) { runCheck(t, "layers_check.js", "layers.js") }
+
+// TestUnitInfo: what a character is doing, the hover box, status icons, threat colours, the event feed and the run progress.
+// TestPathMath: trails, planned vs walked, pull-group states, objects, aggro rings, patrols, combat lines, the ghost and the heat bins.
+func TestPathMath(t *testing.T) { runCheck(t, "paths_check.js", "paths.js") }
+
+// TestPathDraw: the path layers on a fake SVG.
+func TestPathDraw(t *testing.T) { runCheck(t, "pathdraw_check.js", "pathdraw.js") }
+
+func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js") }
+
+// The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.
+func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) {
+		t.Fatalf("index.html must load unitinfo.js: %v", err)
+	}
+	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"bossmark", "hpbars", "statusicons", "threatcolors", "events", "hostilenames"} {
+		if !strings.Contains(string(css), "hide-"+k) {
+			t.Errorf("app.css has no rule for layer %s", k)
+		}
 	}
 }
