@@ -58,6 +58,12 @@ type PathPlanner interface {
 	PlanPath(ctx context.Context, mapID uint32, from, to Point) ([]Point, error)
 }
 
+// FloorSnapper is the optional part of a RemoteGame that puts a point on the navmesh floor under it (false: there is none near): the look
+// point of a pack (LookPoint) is snapped with it, as the plan check snaps its own.
+type FloorSnapper interface {
+	SnapToFloor(ctx context.Context, mapID uint32, p Point) (Point, bool)
+}
+
 // CCRule asks for a mob entry to be crowd-controlled in a fight: `.bot cmd cc <mark> <guid> [bot]` before the pull.
 type CCRule struct {
 	Entry uint32 `json:"entry"`

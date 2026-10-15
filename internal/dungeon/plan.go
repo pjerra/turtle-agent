@@ -170,6 +170,9 @@ const (
 type Waypoint struct {
 	Point
 	Direct bool `json:"direct,omitempty"`
+	// CheckSkip exempts the hop from the plan check (plancheck.go) and says why: a hop the navmesh cannot judge on purpose (Uldaman's scorpid
+	// pit, a gap the mesh does not link). The check lists it as skipped with this text instead of failing it. Empty: checked.
+	CheckSkip string `json:"check_skip,omitempty"`
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -407,8 +410,9 @@ type rawPortal struct {
 }
 
 type rawWaypoint struct {
-	X, Y, Z *float32
-	Direct  bool `json:"direct"`
+	X, Y, Z   *float32
+	Direct    bool   `json:"direct"`
+	CheckSkip string `json:"check_skip"`
 }
 
 type rawLeg struct {
@@ -753,7 +757,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip})
 		if !w.Direct {
 			continue
 		}

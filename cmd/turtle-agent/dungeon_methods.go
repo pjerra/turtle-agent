@@ -110,6 +110,10 @@ type dungeonRunParams struct {
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
 	StartHere     bool `json:"start_here,omitempty"`
+	// Force runs a commander-mode plan the plan check (plan_check) refuses: a live-checked plan with a failing point, or one that could not be
+	// checked (no navmesh planner or files for the map, an error in the check). A plan of any other status (draft, mapped) is run anyway,
+	// with the failing points in the result's plan_check.
+	Force bool `json:"force,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
 	HaveItems   []uint32       `json:"have_items,omitempty"`
 	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
@@ -255,6 +259,8 @@ type dungeonRunResult struct {
 	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
 	RunID     string `json:"run_id"`
 	TraceFile string `json:"trace_file,omitempty"`
+	// PlanCheck is what the plan check said: "passed: ..." or "forced past ..." (force: failing points, a check error, or no navmesh to check on).
+	PlanCheck string `json:"plan_check,omitempty"`
 }
 
 type dungeonStatusResult struct {
@@ -285,6 +291,8 @@ type dungeonRunner struct {
 	remote *commanderService
 	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
 	tracesDir string
+	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
+	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.
 	tunePath string
 
@@ -319,6 +327,9 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 		}
 		return res, err
 	}))
+	srv.Register("plan_check", rpc.Typed(func(ctx context.Context, p planCheckParams) (planCheckResult, error) {
+		return r.planCheck(p)
+	}))
 	srv.Register("dungeon_status", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.status(), nil
 	}))
@@ -338,6 +349,14 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 		cancel()
 		r.wait(10 * time.Second)
 	}, r
+}
+
+// planCheckApplies says whether dungeon_run checks the plan: only a commander run (the driver whose look and gather walks the check
+// models), and not a pull test (it runs one pack). Leader mode walks the plan with the agent's own movement, and an observed run is walked
+// by the server.
+func planCheckApplies(p dungeonRunParams) bool {
+	mode, _, _ := runMode(p.Mode)
+	return p.Pulltest == nil && mode == modeCommander
 }
 
 // planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
@@ -391,6 +410,16 @@ func (r *dungeonRunner) control(verb string) (dungeonStatusResult, error) {
 	return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server resumes and skips); a paused commander run goes on with dungeon_run (resume, from_leg)"}
 }
 
+// busy is the refusal of a run asked for while one is going (nil when none is).
+func (r *dungeonRunner) busy() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running() {
+		return &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
+	}
+	return nil
+}
+
 func (r *dungeonRunner) running() bool {
 	if r.done == nil {
 		return false
@@ -403,7 +432,7 @@ func (r *dungeonRunner) running() bool {
 	}
 }
 
-func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
+func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error) {
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
@@ -505,6 +534,22 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
+	}
+	// A second run is refused before it pays for a plan check; the check itself follows.
+	if err := r.busy(); err != nil {
+		return dungeonRunResult{}, err
+	}
+	// The plan check walks the plan on the navmesh first, from where the run starts, with the look the run is tuned to.
+	if planCheckApplies(p) {
+		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, from, p.FromPullGroup), p.Force)
+		if err != nil {
+			return dungeonRunResult{}, err
+		}
+		defer func() {
+			if res.Started {
+				res.PlanCheck = note
+			}
+		}()
 	}
 
 	r.mu.Lock()

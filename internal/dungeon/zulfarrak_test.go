@@ -77,7 +77,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha]" || fmt.Sprint(bosses) != "[8127 7272 7795]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
-	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): direct hops, and the
+	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
 	// Shadowhunters' patrol on the two groups by its loop.
 	var direct, patrols int
 	for _, l := range p.Legs[:6] {
@@ -95,7 +95,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if direct != 7 || patrols != 2 { // zf2-run3: the first two hops of the road leg (1485.6 and 1498.7) are dropped
+	if direct != 0 || patrols != 2 { // the plan check (#187) turned the seven direct hops into plain waypoints: the navmesh joins them
 		t.Errorf("direct hops %d, patrols %d", direct, patrols)
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any

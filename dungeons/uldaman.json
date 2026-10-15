@@ -308,13 +308,15 @@
           "x": -162.8,
           "y": 294.8,
           "z": -51.2,
-          "direct": true
+          "direct": true,
+          "check_skip": "the scorpid pit is the one hole in the map 70 navmesh (no link under the overhang and up the ramp); the hop is walked on the vmap line, checked offline (TestUldamanDirectSteps), and the navmesh ray and path cannot judge it"
         },
         {
           "x": -158.4,
           "y": 283.7,
           "z": -48.9,
-          "direct": true
+          "direct": true,
+          "check_skip": "the scorpid pit is the one hole in the map 70 navmesh (no link under the overhang and up the ramp); the hop is walked on the vmap line, checked offline (TestUldamanDirectSteps), and the navmesh ray and path cannot judge it"
         }
       ],
       "pull_groups": [
