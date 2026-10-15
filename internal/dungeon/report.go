@@ -41,6 +41,10 @@ type Report struct {
 	// summon), as dungeon_run's setup parameter gave them: the run did not make them, but a run that needed any is
 	// not one a player could have started either.
 	SetupShortcuts []string `json:"setup_shortcuts"`
+	// Degraded lists what a run that ended "done" could not put right at its end: looting left off on bots after a companions_loot false
+	// leg, the agent not back at its safe point after an area trigger. The state stays "done" (the plan was cleared); the dungeon_done
+	// event and the report carry it, and the run's final text says "(degraded: ...)".
+	Degraded []string `json:"degraded,omitempty"`
 	// Buffs are the spells the run was asked to put on the companions (GM .aura); each application is also a "buff"
 	// entry in gm_shortcuts, so a buffed run is never mistaken for a player's.
 	Buffs []Buff `json:"buffs"`
@@ -201,6 +205,7 @@ func (p *reporter) snapshot() Report {
 	r.Deaths = append([]Death{}, p.r.Deaths...)
 	r.Shortcuts = append([]Shortcut{}, p.r.Shortcuts...)
 	r.SetupShortcuts = append([]string{}, p.r.SetupShortcuts...)
+	r.Degraded = append([]string(nil), p.r.Degraded...)
 	r.Buffs = append([]Buff{}, p.r.Buffs...)
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)

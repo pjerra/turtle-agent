@@ -280,7 +280,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
 	}
 	sql := WriteSQL([]Rows{r})
-	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '5650,7247,7246,5648', '5650,7246', '7785,8179,5650,7247', 'test', "
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,7247,5648', '7246', '7785,8179,5650,7247', 'test', "
 	if !strings.Contains(sql, want) {
 		t.Fatalf("the migration lacks %q", want)
 	}

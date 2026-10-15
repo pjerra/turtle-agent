@@ -366,6 +366,7 @@ type Driver struct {
 	fightFirst, fightLast time.Time
 
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
+	unitSeen map[*UnitWait]bool // the "gone" unit waits that saw a matching unit alive (UnitHolds)
 	wd       *watchdog
 	wdRepick flagOnce // end the fight, to pick the target again
 	wdObject flagOnce // give up the wait of the object step
@@ -738,6 +739,11 @@ func (d *Driver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	// The group driver has no way to keep its companions from looting a whole leg (it orders looting off only around a boss fight:
+	// Boss.CompanionsLoot): a leg that needs it off is not started.
+	if cl := d.plan.Legs[i].CompanionsLoot; cl != nil && !*cl {
+		return fmt.Errorf("leg %d (%s): companions_loot is false, which only a remote (commander) run can enforce for a whole leg: group mode would let its companions loot the leg's chests; the leg is not started", i, name)
+	}
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
@@ -884,7 +890,18 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 
 // UnitHolds makes the group driver's world a UnitWorld: the creatures of the agent's own object store.
 func (w stepWorld) UnitHolds(u *UnitWait) bool {
-	return u.holds(storeSights(w.d.g.Units(), nil), false)
+	sights := storeSights(w.d.g.Units(), nil)
+	if u.State != UnitGone {
+		return u.holds(sights, false)
+	}
+	// "gone" needs a unit that was seen alive first: an empty store proves nothing.
+	if w.d.unitSeen == nil {
+		w.d.unitSeen = map[*UnitWait]bool{}
+	}
+	if (&UnitWait{Entries: u.Entries, Near: u.Near, Radius: u.Radius, State: UnitSeen}).holds(sights, false) {
+		w.d.unitSeen[u] = true
+	}
+	return w.d.unitSeen[u] && u.holds(sights, false)
 }
 
 // doAreaTrigger is the area_trigger step of the group driver: the leader is the agent's own character, so it is the one that takes the
@@ -898,6 +915,10 @@ func (d *Driver) doAreaTrigger(ctx context.Context, a Action) error {
 	uw := func() bool { return t.ExpectUnit.holds(storeSights(d.g.Units(), nil), false) }
 	if uw() {
 		d.rep.note(fmt.Sprintf("%s: %s already: the trigger is not sent", a.Label, t.ExpectUnit.describe()))
+		return nil
+	}
+	if dead := (&UnitWait{Entries: t.ExpectUnit.Entries, Near: t.ExpectUnit.Near, Radius: t.ExpectUnit.Radius, State: UnitDead}); dead.holds(storeSights(d.g.Units(), nil), false) {
+		d.rep.note(fmt.Sprintf("%s: %s is dead already: the trigger is not sent", a.Label, t.ExpectUnit.String()))
 		return nil
 	}
 	if dist3(d.g.Position(), t.Center) > float64(t.Radius) {

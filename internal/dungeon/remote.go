@@ -539,12 +539,13 @@ type RemoteDriver struct {
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
 	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo bool
-	tf         tankFirst  // the tank-first state of the fights (remote_tank.go)
-	home       *agentHome // the agent's safe point after an area trigger it took itself (remote_trigger.go)
-	legLoot    bool       // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
-	legMuted   []string   // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
-	kit        restKit    // the bots' drink counts and refills (remote_rest.go)
-	maint      maintState // the automatic `.bot maintenance` that is due (remote_maint.go)
+	tf         tankFirst                 // the tank-first state of the fights (remote_tank.go)
+	unitMem    map[*UnitWait]*unitMemory // what each "gone" unit wait has seen (remote_trigger.go)
+	home       *agentHome                // the agent's safe point after an area trigger it took itself (remote_trigger.go)
+	legLoot    bool                      // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
+	legMuted   []string                  // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
+	kit        restKit                   // the bots' drink counts and refills (remote_rest.go)
+	maint      maintState                // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
@@ -671,6 +672,9 @@ func (d *RemoteDriver) finish(err error) {
 	switch {
 	case err == nil:
 		state, kind, text = "done", events.KindDungeonDone, "dungeon "+d.plan.Name+" done (remote)"
+		if deg := d.rep.snapshot().Degraded; len(deg) > 0 {
+			text += " (degraded: " + strings.Join(deg, "; ") + ")"
+		}
 	case ctxDone(err):
 		state, errText, kind, text = "stopped", "stopped", events.KindDungeonFailed, "dungeon "+d.plan.Name+" stopped (remote)"
 	default:
@@ -682,6 +686,9 @@ func (d *RemoteDriver) finish(err error) {
 	data := d.rep.summaryEnded(state, errText, at)
 	if err != nil {
 		data["error"], data["leg"] = errText, leg
+	}
+	if deg := d.rep.snapshot().Degraded; len(deg) > 0 {
+		data["degraded"] = deg
 	}
 	d.emit(kind, text, data)
 	d.traceEnd(state, errText, at)

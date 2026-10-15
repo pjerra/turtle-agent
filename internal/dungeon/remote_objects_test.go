@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -43,6 +44,7 @@ type fakeCarrier struct {
 	invErr    bool
 	cut       map[string]bool
 	noMute    map[string]bool // bots that refuse `behavior loot off`
+	noUnmute  map[string]int  // bots that refuse the next n `behavior loot on` orders after they were turned off (-1: all)
 }
 
 func newFakeCarrier(t *testing.T) *fakeCarrier {
@@ -154,6 +156,12 @@ func (g *fakeCarrier) Behavior(ctx context.Context, bot, key string, on bool) (t
 	}
 	g.orders = append(g.orders, ".bot behavior "+bot+" "+key+" "+state)
 	g.orderAt = append(g.orderAt, g.now)
+	if key == "loot" && on && g.noUnmute[bot] != 0 && slices.Contains(g.behaviors, bot+" loot false") {
+		if g.noUnmute[bot] > 0 {
+			g.noUnmute[bot]--
+		}
+		return errReply("behavior "+key, "refused"), nil
+	}
 	if g.noMute[bot] && key == "loot" && !on {
 		return errReply("behavior "+key, "refused"), nil
 	}

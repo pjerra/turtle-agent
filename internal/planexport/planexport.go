@@ -7,6 +7,7 @@
 package planexport
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -117,6 +118,9 @@ type Options struct {
 	DropCompanionsLoot bool
 }
 
+// ErrCompanionsLoot is the refusal of a plan with a leg whose companions_loot is false (see Options.DropCompanionsLoot).
+var ErrCompanionsLoot = errors.New("plan not exported")
+
 // Result is a plan's rows and what the exporter had to say about them.
 type Result struct {
 	Rows     Rows
@@ -214,7 +218,7 @@ func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
 	b.leg_, b.seq, b.haveLast = li, 0, false
 	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
-		return fmt.Errorf("leg %d (%s): companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it)", li, l.Name)
+		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
 	}
 	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: li, Name: clip(l.Name, MaxLegName)})
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.

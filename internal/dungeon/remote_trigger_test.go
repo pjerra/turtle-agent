@@ -27,8 +27,10 @@ type triggerGame struct {
 	sentFrom     []Point
 	sentAt       time.Time
 	teles        []Point
-	blockReturn  bool // after the packet every walk of the agent's fails (it cannot get back)
-	movesBefore  int  // the lead bot's move orders when the agent sent the packet
+	teleErr      error // GoXYZ fails
+	teleStays    bool  // GoXYZ is accepted and the agent does not move
+	blockReturn  bool  // after the packet every walk of the agent's fails (it cannot get back)
+	movesBefore  int   // the lead bot's move orders when the agent sent the packet
 	fired        bool
 	onFire       func(f *fakeRemote) // runs when the trigger takes effect
 	friend       *rmob               // a unit of the boss's entry the feed lists friendly until the trigger: it turns hostile instead of a new one appearing
@@ -61,7 +63,12 @@ func (g *triggerGame) fire() {
 // GoXYZ is the GM `.go xyz` the agent's return falls back on after the boss is dead.
 func (g *triggerGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
 	g.teles = append(g.teles, at)
-	g.agent = at
+	if g.teleErr != nil {
+		return g.teleErr
+	}
+	if !g.teleStays {
+		g.agent = at
+	}
 	return nil
 }
 
@@ -308,6 +315,45 @@ func TestAreaTriggerReturnAfterTheKillFallsBackToATeleport(t *testing.T) {
 		}
 	}
 }
+
+// A failed walk AND a failed, unsupported or ineffective teleport end the run "done (degraded: agent not back at its safe point)": the
+// state stays done, the report lists it.
+func TestAreaTriggerReturnThatCannotBeFixedDegradesTheRun(t *testing.T) {
+	for name, setup := range map[string]func(g *triggerGame){
+		"the teleport fails":            func(g *triggerGame) { g.teleErr = errors.New("no such command") },
+		"the teleport does not move it": func(g *triggerGame) { g.teleStays = true },
+	} {
+		g := newTriggerGame(t, 3)
+		g.agent = Point{45, 0, 0}
+		g.blockReturn = true
+		setup(g)
+		rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+		if err != nil || rep.State != "done" {
+			t.Fatalf("%s: %v\n%s", name, err, notesOf(rep))
+		}
+		if len(rep.Degraded) != 1 || !strings.Contains(rep.Degraded[0], "agent not back at its safe point 45.0 0.0 0.0") {
+			t.Errorf("%s: degraded %v", name, rep.Degraded)
+		}
+	}
+	// A game with no teleport at all (no StartHands) is the same.
+	g := &noTeleGame{newTriggerGame(t, 3)}
+	g.agent = Point{45, 0, 0}
+	g.blockReturn = true
+	cfg := DefaultConfig()
+	cfg.Setup = []string{"gm visible off"}
+	d := NewRemoteDriver(remotePlan(zumrahLeg("agent", 15)), g, cfg, objOpts(), g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ := d.Status(); rep.State != "done" || len(rep.Degraded) != 1 {
+		t.Fatalf("%s %v", rep.State, rep.Degraded)
+	}
+}
+
+// noTeleGame hides the triggerGame's GoXYZ.
+type noTeleGame struct{ *triggerGame }
+
+func (noTeleGame) GoXYZ() {} // a different signature: the game is no StartHands
 
 // Before the boss is dead a failed return still fails the step it ran for (here the next leg's walk: nothing was killed).
 func TestAreaTriggerReturnBeforeTheKillFailsTheStep(t *testing.T) {
@@ -566,6 +612,45 @@ func TestLegCompanionsLootEmptyPartyFails(t *testing.T) {
 	}
 }
 
+// The order that turns looting back on is tried three times; a bot that still refuses ends the run "done (degraded: looting left off on
+// <bots>)", with the list in the report; a bot that gives in on the third try is no degradation.
+func TestLegCompanionsLootRestoreRetriesThenDegrades(t *testing.T) {
+	g := carrierGame(t)
+	g.addMob(9, Point{40, 0, 0})
+	g.noUnmute = map[string]int{"Healy": 2}
+	rep, err := runCarrier(t, g, lootLegPlan(false), objOpts())
+	if err != nil || rep.State != "done" || len(rep.Degraded) != 0 {
+		t.Fatalf("two refusals then ok: %v %s %v", err, rep.State, rep.Degraded)
+	}
+	ons := 0
+	for _, b := range g.behaviors {
+		if b == "Healy loot true" {
+			ons++
+		}
+	}
+	if ons != 1+3 { // the run's start, then three tries at the leg's end
+		t.Errorf("healy on orders %d: %v", ons, g.behaviors)
+	}
+	g = carrierGame(t)
+	g.addMob(9, Point{40, 0, 0})
+	g.noUnmute = map[string]int{"Healy": -1, "Magey": -1}
+	rep, err = runCarrier(t, g, lootLegPlan(false), objOpts())
+	if err != nil || rep.State != "done" || len(rep.Degraded) != 1 || rep.Degraded[0] != "looting left off on Healy, Magey" {
+		t.Fatalf("%v %s %v\n%s", err, rep.State, rep.Degraded, notesOf(rep))
+	}
+}
+
+// A game that cannot send the order at the leg's end is noted and degrades the run, not silent.
+func TestLegLootOnWithoutBehaviorOrdersDegrades(t *testing.T) {
+	g := newFakeRemote(t)
+	d := NewRemoteDriver(lootLegPlan(false), g, DefaultConfig(), opts(), g.clock())
+	d.legMuted = []string{"Tanky"}
+	d.legLootOn()
+	if rep, _ := d.Status(); len(rep.Degraded) != 1 || !strings.Contains(rep.Degraded[0], "looting left off on Tanky") {
+		t.Fatalf("%v", rep.Degraded)
+	}
+}
+
 func TestLegCompanionsLootNeedsBehaviorOrders(t *testing.T) {
 	g := newFakeRemote(t) // no OrderGame: it cannot send behavior orders
 	_, err := runRemote(t, g, lootLegPlan(false), opts(), nil)
@@ -648,6 +733,60 @@ func TestKillFirstIgnoresAWardAwayFromTheEncounter(t *testing.T) {
 	rep, err := runRemote(t, g, zumrahFightPlan(true), opts(), nil)
 	if err != nil || rep.State != "done" || ward == nil || g.indexOf("cmd attack "+tbm.GUIDArg(ward.guid)) >= 0 || ward.hp <= 0 {
 		t.Fatalf("%v %s\n%v", err, notesOf(rep), g.orders)
+	}
+}
+
+// "gone" needs a unit that was seen alive first, and then whole new frames without it: an empty feed is unknown, a blink does not pass.
+func TestWaitForUnitGoneNeedsASightingAndSteadyAbsence(t *testing.T) {
+	goneStep := Step{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitGone}, TimeoutS: 20}}
+	// Never seen: not gone, and the wait times out.
+	g := newNearGame(t, 3)
+	plan := remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Steps: []Step{goneStep}})
+	err := NewRemoteDriver(plan, g, DefaultConfig(), objOpts(), g.clock()).Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "waited 20 s for unit 7271 gone") {
+		t.Fatalf("never seen: %v", err)
+	}
+	// Seen, then gone for good: the wait passes (after the steady absence).
+	g = newNearGame(t, 3)
+	m := g.addMob(7271, Point{150, 100, 0}) // far off the walk: the wait sees it alive, nothing pulls it
+	g.onTick = func(f *fakeRemote) {
+		if f.now.After(time.Unix(1_000_000, 0).Add(10 * time.Second)) {
+			m.hp = 0
+			f.mobs = nil
+		}
+	}
+	if err := NewRemoteDriver(remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Steps: []Step{goneStep}}), g, DefaultConfig(), objOpts(), g.clock()).Run(context.Background(), 0); err != nil {
+		t.Fatalf("seen then gone: %v", err)
+	}
+	// Unit unit test: one empty frame does not pass; two do; a truncated frame counts for nothing.
+	d := NewRemoteDriver(remotePlan(Leg{Name: "w", To: Point{20, 0, 0}}), newFakeRemote(t), DefaultConfig(), objOpts(), Clock{})
+	u := &UnitWait{Entries: []uint32{7271}, State: UnitGone}
+	d.haveFr, d.n = true, 1
+	d.fr.Hostiles = []tbm.HostileRec{{GUID: 1, Entry: 7271, HPPct: 100}}
+	if d.unitGone(u) {
+		t.Fatal("alive")
+	}
+	d.fr.Hostiles, d.n = nil, 2
+	if d.unitGone(u) {
+		t.Fatal("one empty frame passed")
+	}
+	d.fr.Truncated, d.n = true, 3
+	if d.unitGone(u) {
+		t.Fatal("a truncated frame counted")
+	}
+	d.fr.Truncated, d.n = false, 4
+	if !d.unitGone(u) {
+		t.Fatal("two whole empty frames after a sighting")
+	}
+}
+
+// A resumed run whose Zum'rah is dead already (his corpse in the agent's view) does not send the trigger.
+func TestAreaTriggerSkippedWhenTheUnitIsDeadAlready(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.units = []objects.Unit{corpseOf(7271, Point{118, 0, 0})}
+	rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err != nil || len(g.sent) != 0 || triggerOf(t, rep).By != "already" || !strings.Contains(notesOf(rep), "is dead already: the trigger is not sent") {
+		t.Fatalf("%v sent %v\n%s", err, g.sent, notesOf(rep))
 	}
 }
 
@@ -744,5 +883,25 @@ func TestGroupDriverWaitsForAUnit(t *testing.T) {
 	d := NewDriver(zumrahMapPlan(Leg{Name: "w", To: Point{10, 0, 0}, Steps: []Step{w}}), g, Config{}, g.clock())
 	if err := d.Run(context.Background(), 0); err != nil || !g.friend.Hostile {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestGroupDriverAreaTriggerSkippedWhenDeadAlready(t *testing.T) {
+	g := newZumrahGame(true)
+	g.friend.Dead, g.friend.Health = true, 0
+	d := NewDriver(zumrahGroupPlan("auto", 15), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil || len(g.sentPos) != 0 {
+		t.Fatalf("%v sent %v", err, g.sentPos)
+	}
+}
+
+// The group driver cannot keep its companions from looting a whole leg: a leg with companions_loot false is not started.
+func TestGroupDriverRefusesALegWithCompanionsLootFalse(t *testing.T) {
+	g := newFake()
+	off := false
+	d := NewDriver(zumrahMapPlan(Leg{Name: "grave", To: Point{10, 0, 0}, CompanionsLoot: &off, Steps: []Step{{WaitFor: &WaitFor{HostilesGone: &HostilesGone{Radius: 5}}}}}), g, Config{}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "leg 0 (grave): companions_loot is false, which only a remote (commander) run can enforce") || len(g.walks) != 0 {
+		t.Fatalf("%v walks %v", err, g.walks)
 	}
 }

@@ -72,7 +72,43 @@ func (d *RemoteDriver) unitSights() []unitSight {
 // after the feed has dropped the corpse; with `near`, only a death at a place within the wait's radius of it does, so that an earlier kill of
 // the same entry elsewhere in the dungeon proves nothing.
 func (d *RemoteDriver) unitHolds(u *UnitWait) bool {
+	if u.State == UnitGone {
+		return d.unitGone(u)
+	}
 	return u.holds(d.unitSights(), d.killSeen(u))
+}
+
+// unitMemory is what a "gone" wait has seen so far: that a matching unit was alive in view, and for how many new frames in a row none was.
+type unitMemory struct {
+	seen   bool
+	absent int
+	lastN  uint64
+}
+
+// goneFrames is how many new frames in a row must show no living unit before a wait for "gone" holds.
+const goneFrames = 2
+
+// unitGone is the "gone" state of a unit wait: a unit that was never seen is not gone (nothing says it was ever there: an empty feed is
+// unknown, not an answer), and one seen alive earlier in the step is gone only after goneFrames whole new frames without it, none of them
+// truncated or stale, so that a feed that goes quiet for a moment does not pass the wait.
+func (d *RemoteDriver) unitGone(u *UnitWait) bool {
+	if d.unitMem == nil {
+		d.unitMem = map[*UnitWait]*unitMemory{}
+	}
+	m := d.unitMem[u]
+	if m == nil {
+		m = &unitMemory{}
+		d.unitMem[u] = m
+	}
+	alive := (&UnitWait{Entries: u.Entries, Near: u.Near, Radius: u.Radius, State: UnitSeen}).holds(d.unitSights(), false)
+	switch {
+	case alive:
+		m.seen, m.absent = true, 0
+	case d.n != m.lastN && d.haveFr && !d.fr.Truncated && !d.stale():
+		m.absent++
+	}
+	m.lastN = d.n
+	return m.seen && m.absent >= goneFrames
 }
 
 // killSeen says whether the run has seen a unit of the wait's entries die, within the wait's radius of Near when it has one.
@@ -131,6 +167,11 @@ func (d *RemoteDriver) takeTrigger(ctx context.Context, a Action) (string, error
 	d.look()
 	if d.unitHolds(exp) {
 		d.rep.note(fmt.Sprintf("%s: %s already: the trigger is not sent", a.Label, exp.describe()))
+		return "already", nil
+	}
+	// A resumed run whose unit is dead already (the kill ledger, or its corpse in view) has nothing to wake.
+	if dead := (&UnitWait{Entries: exp.Entries, Near: exp.Near, Radius: exp.Radius, State: UnitDead}); d.unitHolds(dead) {
+		d.rep.note(fmt.Sprintf("%s: %s is dead already: the trigger is not sent", a.Label, exp.String()))
 		return "already", nil
 	}
 	var botErr error
@@ -288,27 +329,35 @@ func (d *RemoteDriver) agentGoHome(ctx context.Context, afterKill bool) error {
 	if afterKill || d.unitHolds(&UnitWait{Entries: h.entries, State: UnitDead}) {
 		d.home = nil
 		d.rep.note(fmt.Sprintf("area trigger: the boss is dead and the agent could not walk back (%v)", err))
-		d.teleHome(ctx, f, h)
+		if !d.teleHome(ctx, f, h) {
+			d.degrade(fmt.Sprintf("agent not back at its safe point %.1f %.1f %.1f", h.at.X, h.at.Y, h.at.Z))
+		}
 		return nil
 	}
 	return err
 }
 
-// teleHome puts the agent back at its safe point with `.go xyz` (a GM assist during the run, counted in run_gm_assists); a failure is noted.
-func (d *RemoteDriver) teleHome(ctx context.Context, f Follower, h *agentHome) {
+// teleHome puts the agent back at its safe point with `.go xyz` (a GM assist during the run, counted in run_gm_assists) and checks where it
+// stands afterwards. It reports whether the agent is back; the reason it is not is noted.
+func (d *RemoteDriver) teleHome(ctx context.Context, f Follower, h *agentHome) bool {
 	sh, ok := f.(StartHands)
 	if !ok {
 		d.rep.note("area trigger: this game cannot teleport the agent: it stays where it is")
-		return
+		return false
 	}
 	if err := sh.GoXYZ(ctx, d.plan.Map, h.at); err != nil {
 		d.rep.note(fmt.Sprintf("area trigger: .go xyz back to the safe point failed: %v", err))
-		return
+		return false
 	}
 	cmd := fmt.Sprintf(".go xyz %.2f %.2f %.2f %d", h.at.X, h.at.Y, h.at.Z, d.plan.Map)
 	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
 	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
+	if at, m, here := f.AgentPlace(); !here || m != d.plan.Map || dist3(at, h.at) > triggerReturnYd {
+		d.rep.note(fmt.Sprintf("area trigger: %s sent, but the agent does not stand at its safe point after it", cmd))
+		return false
+	}
 	d.rep.note(fmt.Sprintf("area trigger: %s: the agent is back at its safe point (a GM assist during the run)", cmd))
+	return true
 }
 
 // walkHome walks the agent to the safe point once the party is out of combat (up to triggerFightWait), never through a fight, and checks
@@ -395,8 +444,18 @@ func (d *RemoteDriver) legLootOff(ctx context.Context, leg int) error {
 	return nil
 }
 
+// degrade records what a run could not put right at its end: the run still ends "done", with "(degraded: ...)" and the list in the report.
+func (d *RemoteDriver) degrade(what string) {
+	d.rep.update(func(r *Report) { r.Degraded = append(r.Degraded, what) })
+	d.rep.note("degraded: " + what)
+}
+
+// lootRestoreTries is how often the order that turns a bot's looting back on is sent before the bot is given up on.
+const lootRestoreTries = 3
+
 // legLootOn puts the looting of the bots legLootOff muted back on; it runs when the leg ends, with a context of its own (a stopped run has
-// none left).
+// none left). Each bot's order is tried lootRestoreTries times; a bot that still refuses, or a game that cannot send the order, makes the
+// run "done (degraded: looting left off on ...)": the next run's start turns looting on for everyone (lootOnAtStart).
 func (d *RemoteDriver) legLootOn() {
 	d.legLoot = false
 	if len(d.legMuted) == 0 {
@@ -406,16 +465,34 @@ func (d *RemoteDriver) legLootOn() {
 	d.legMuted = nil
 	og, ok := d.orderGame()
 	if !ok {
+		d.degrade(fmt.Sprintf("looting left off on %s: this game cannot send behavior orders to turn it back on", strings.Join(muted, ", ")))
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	var back, left []string
 	for _, n := range muted {
-		if r, err := og.Behavior(ctx, n, "loot", true); err != nil || r.Kind != tbm.KindAck {
-			d.rep.note(fmt.Sprintf("could not turn %s's looting back on after the leg: %s", n, behaviorWhy(r, err)))
+		var why string
+		okOn := false
+		for try := 1; try <= lootRestoreTries && !okOn; try++ {
+			r, err := og.Behavior(ctx, n, "loot", true)
+			if okOn = err == nil && r.Kind == tbm.KindAck; !okOn {
+				why = behaviorWhy(r, err)
+			}
 		}
+		if okOn {
+			back = append(back, n)
+			continue
+		}
+		left = append(left, n)
+		d.rep.note(fmt.Sprintf("could not turn %s's looting back on after the leg (%d tries): %s", n, lootRestoreTries, why))
 	}
-	d.rep.note(fmt.Sprintf("looting turned back on for %v after the leg", muted))
+	if len(back) > 0 {
+		d.rep.note(fmt.Sprintf("looting turned back on for %v after the leg", back))
+	}
+	if len(left) > 0 {
+		d.degrade(fmt.Sprintf("looting left off on %s", strings.Join(left, ", ")))
+	}
 }
 
 // legLootSync turns the looting off for a bot that joined the party after the leg began (a hire in the middle of the leg, a bot that came

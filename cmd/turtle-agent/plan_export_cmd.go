@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -128,6 +129,11 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		o.Source += " dungeons/" + n + ".json"
 		res, err := planexport.Build(p, o)
+		if err != nil && *allLive && errors.Is(err, planexport.ErrCompanionsLoot) {
+			// A batch lists the plans it cannot export and goes on with the rest; a plan named on the command line fails the command.
+			fmt.Fprintf(stderr, "plan-export: %s: skipped: %v\n", n, err)
+			continue
+		}
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -137,6 +143,9 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		all = append(all, res.Rows)
 		total += res.Rows.Count()
 		fmt.Fprintf(stdout, "%s: map %d, %d legs, %d steps (%d rows)\n", n, p.Map, len(res.Rows.Legs), len(res.Rows.Steps), res.Rows.Count())
+	}
+	if len(all) == 0 {
+		return fail("no plan could be exported")
 	}
 	sql := planexport.WriteSQL(all)
 	// The check: what was written reads back as the rows that were built.

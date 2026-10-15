@@ -100,7 +100,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[5650 7247 7246 5648]" || fmt.Sprint(p.CCAlways) != "[5650 7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 7247 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
 		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
@@ -585,5 +585,19 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 	// The ward (7785) is killed first.
 	if l.Boss.Tactics == nil || fmt.Sprint(l.Boss.Tactics.KillFirst) != "[7785]" {
 		t.Errorf("%+v", l.Boss.Tactics)
+	}
+}
+
+// The Sul'Farrak Hatchlings (8130) cannot be attacked by the bots: antusul_b has no pull group of them, and skips the entry.
+func TestZulfarrakHatchlingsAreSkippedNotPulled(t *testing.T) {
+	for _, l := range loadPlan(t, zulfarrakPlan).Legs {
+		for _, g := range l.PullGroups {
+			if slicesContains(g.Entries, 8130) {
+				t.Errorf("%s pulls the Hatchlings", l.Name)
+			}
+		}
+		if (l.Name == "antusul_b" || l.Name == "theka") && !slicesContains(l.Skip, 8130) { // theka walks back past them
+			t.Errorf("%s skip %v", l.Name, l.Skip)
+		}
 	}
 }
