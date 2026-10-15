@@ -4,7 +4,9 @@ name: test
 # job `test`; branch protection on dev and main requires it.
 on:
   push:
+    branches: [main, dev]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: test-${{ github.ref }}
@@ -15,6 +17,8 @@ permissions:
 
 jobs:
   test:
+    # Draft PRs are work in progress; CI runs when the PR is marked ready.
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
