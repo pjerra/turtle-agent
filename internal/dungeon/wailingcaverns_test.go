@@ -93,7 +93,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	if p.Map != 43 || p.Name != "wailing_caverns" || p.EntranceTrigger != 228 || p.Portal == nil || p.Portal.Map != 1 {
 		t.Fatalf("%+v", p)
 	}
-	if lo, hi := p.Band(); lo != 18 || hi != 23 || p.Status != DraftStatus {
+	if lo, hi := p.Band(); lo != 18 || hi != 23 || p.Status != "mapped (not live-checked)" {
 		t.Fatalf("band %d-%d status %q", lo, hi, p.Status)
 	}
 	ss := wcSpawns(t)
@@ -103,7 +103,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	hops := 0
 	for i, l := range p.Legs {
 		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
-			t.Errorf("legs[%d] (%s): a draft has no steps (the event is in the extra file)", i, l.Name)
+			t.Errorf("legs[%d] (%s): the first-run plan has no steps (the event is in the extra file)", i, l.Name)
 		}
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
@@ -135,6 +135,9 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 				}
 			}
 			if g.Patrol != nil {
+				if g.Patrol.PeriodEstimate {
+					t.Errorf("legs[%d] pull_groups[%d]: the patrol periods were measured on the live walk", i, gi)
+				}
 				// Source is "creature_movement guid N (entry E)": the path is that guid's waypoints (thinned to 40 points at most).
 				var guid string
 				var entry int
@@ -204,6 +207,89 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	}
 }
 
+// The live walk of 2026-10-15 found two packs within aggro of the road that the first version left out. No hostile spawn of the export that
+// no pull group claims (within its radius, by entry) may stand within 15 yd (3-D) of a walk point (a mob that stands that near aggroes on its own) of the plan: the to, via and pull positions
+// and the boss. The boss's own adds (first) and a patrol's entries are claimed by those lists.
+func TestWailingCavernsNoUnclaimedMobNearAWalkPoint(t *testing.T) {
+	p := loadPlan(t, wailingPlan)
+	ss := wcSpawns(t)
+	skip := map[uint32]bool{2914: true, 3835: true, 3653: true, 3678: true, 3679: true, 5912: true, 61218: true}
+	for _, l := range p.Legs {
+		for _, e := range l.Skip {
+			skip[e] = true
+		}
+	}
+	d3 := func(a, b Point) float64 {
+		return math.Sqrt(float64((a.X-b.X)*(a.X-b.X) + (a.Y-b.Y)*(a.Y-b.Y) + (a.Z-b.Z)*(a.Z-b.Z)))
+	}
+	var points []Point
+	for _, l := range p.Legs {
+		for _, w := range l.Via {
+			points = append(points, w.Point)
+		}
+		points = append(points, l.To)
+		for _, g := range l.PullGroups {
+			points = append(points, g.Positions...)
+		}
+		if l.Boss != nil {
+			points = append(points, l.Boss.Position)
+		}
+	}
+	claimed := func(s wcSpawn) bool {
+		for _, l := range p.Legs {
+			if l.Boss != nil && (l.Boss.Entry == s.entry || func() bool {
+				for _, f := range l.Boss.First {
+					if f == s.entry && d3(l.Boss.Position, s.pos) <= 25 {
+						return true
+					}
+				}
+				return false
+			}()) {
+				return true
+			}
+			for _, g := range l.PullGroups {
+				r := float64(g.Radius)
+				if r == 0 {
+					r = 25
+				}
+				ents := append([]uint32{}, g.Entries...)
+				if g.Patrol != nil {
+					ents = append(ents, g.Patrol.Entries...)
+					for _, w := range g.Patrol.Path { // a patrol's spawn row is a waypoint of its path
+						for _, e := range g.Patrol.Entries {
+							if e == s.entry && d3(w, s.pos) <= 8 {
+								return true
+							}
+						}
+					}
+				}
+				for _, e := range ents {
+					if e != s.entry {
+						continue
+					}
+					for _, q := range g.Positions {
+						if d3(q, s.pos) <= r {
+							return true
+						}
+					}
+				}
+			}
+		}
+		return false
+	}
+	for _, s := range ss {
+		if skip[s.entry] || s.entry == 3678 || claimed(s) {
+			continue
+		}
+		for _, q := range points {
+			if d := d3(q, s.pos); d <= 15 {
+				t.Errorf("a spawn of entry %d at %.1f %.1f %.1f is in no pull group and %.0f yd from the walk point %v", s.entry, s.pos.X, s.pos.Y, s.pos.Z, d, q)
+				break
+			}
+		}
+	}
+}
+
 // The extra plan is a record: the escort stops, the summoned waves (pull groups at the places the script summons them) and Mutanus. It is a
 // draft like the plan, so it holds no steps: the waits the driver cannot do are in its notes.
 func TestWailingCavernsExtraPlanLoads(t *testing.T) {
@@ -223,7 +309,7 @@ func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 }
 
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
-// the hop is the only break, and the whole walk to every member position is about 5990 yd (a change of route moves this number: update it with the plan's notes).
+// the hop is the only break, and the whole walk to every member position is about 6590 yd (a change of route moves this number: update it with the plan's notes).
 func TestWailingCavernsOnNavmesh(t *testing.T) {
 	dir := mapMmaps(43)
 	if dir == "" {
@@ -265,8 +351,8 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
-		if p.Name == "wailing_caverns" && (total < 5700 || total > 6300 || hops != 1) {
-			t.Errorf("%s: %.0f yd and %d hops, expected about 5990 yd and one hop", p.Name, total, hops)
+		if p.Name == "wailing_caverns" && (total < 6300 || total > 6900 || hops != 1) {
+			t.Errorf("%s: %.0f yd and %d hops, expected about 6590 yd and one hop", p.Name, total, hops)
 		}
 	}
 }
