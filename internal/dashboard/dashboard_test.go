@@ -547,7 +547,7 @@ func TestDiscoverAgents(t *testing.T) {
 
 func TestClientIsReadOnly(t *testing.T) {
 	cl := NewClient(Agent{ID: "1", Addr: "127.0.0.1:1"}, time.Second)
-	for _, m := range []string{"chat", "gm", "logout", "teleport", "commander", "tune_set", "dungeon_run", "dungeon_stop", "brain_start", "walk_to", "cast", "invite", ""} {
+	for _, m := range []string{"chat", "gm", "logout", "teleport", "commander", "tune_set", "dungeon_run", "dungeon_stop", "dungeon_pause", "brain_start", "walk_to", "cast", "invite", ""} {
 		if _, err := cl.Call(context.Background(), m); err != ErrNotAllowed {
 			t.Errorf("%q: %v, want ErrNotAllowed", m, err)
 		}

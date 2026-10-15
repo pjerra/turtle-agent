@@ -49,6 +49,49 @@ type GeoLeg struct {
 	Boss   uint32        `json:"boss,omitempty"`
 	Path   []GeoPoint    `json:"path"`
 	Stops  []GeoWaypoint `json:"stops"`
+	// Groups, Objects and BossAt are what the map's pull-group, object and patrol layers draw: every pull group with its place and
+	// radius (and its patrol), every object the steps use, and where the boss stands.
+	Packs   []GeoGroup  `json:"packs,omitempty"`
+	Objects []GeoObject `json:"objects,omitempty"`
+	BossAt  *GeoXY      `json:"boss_at,omitempty"`
+}
+
+// GeoXY is a point of the drawing.
+type GeoXY struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// GeoGroup is one pull group of a leg. X and Y are the first position (the one the group is pulled at), Points all of them.
+type GeoGroup struct {
+	Index   int        `json:"index"`
+	X       float64    `json:"x"`
+	Y       float64    `json:"y"`
+	R       float64    `json:"r"` // the radius a member may stand from a position
+	N       int        `json:"n"` // creatures listed
+	Ambush  bool       `json:"ambush,omitempty"`
+	Label   string     `json:"label"`
+	Entries []uint32   `json:"entries,omitempty"`
+	Points  []GeoXY    `json:"points,omitempty"`
+	Patrol  *GeoPatrol `json:"patrol,omitempty"`
+}
+
+// GeoPatrol is the path of a patrol that walks near a pull group, in the order it walks (it goes on from the last point to the first).
+type GeoPatrol struct {
+	Path    []GeoXY  `json:"path"`
+	PeriodS float64  `json:"period_s,omitempty"`
+	Entries []uint32 `json:"entries,omitempty"`
+}
+
+// GeoObject is a place a step of the leg uses: a door, chest, altar or keystone. Kind is use, loot, ritual or door (a wait for it).
+type GeoObject struct {
+	Kind  string  `json:"kind"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	Entry uint32  `json:"entry,omitempty"`
+	Label string  `json:"label"`
+	Step  int     `json:"step"`
+	After bool    `json:"after,omitempty"` // a step after the boss
 }
 
 // legLabel is a leg's name in words ("sentinel_room" -> "Sentinel room"), "Section N" for a leg without one.
@@ -217,16 +260,39 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 					html.EscapeString(fmt.Sprintf("%s, step %d of %d: %s", gl.Label, stopOf(gl.Stops, k), len(gl.Stops)-1, packLabel(k, pg, names))))
 			}
 		}
+		for k, pg := range leg.PullGroups {
+			if len(pg.Positions) == 0 {
+				continue
+			}
+			x, y := Project(pg.Positions[0].X, pg.Positions[0].Y)
+			gg := GeoGroup{Index: k, X: round1(x), Y: round1(y), R: groupRadius(pg), N: len(pg.Entries), Ambush: pg.Ambush, Label: packLabel(k, pg, names), Entries: pg.Entries}
+			for _, pos := range pg.Positions {
+				px, py := Project(pos.X, pos.Y)
+				gg.Points = append(gg.Points, GeoXY{round1(px), round1(py)})
+			}
+			if pt := pg.Patrol; pt != nil && len(pt.Path) >= 2 {
+				gp := &GeoPatrol{PeriodS: float64(pt.PeriodS), Entries: pt.Entries}
+				for _, w := range pt.Path {
+					px, py := Project(w.X, w.Y)
+					bb.add(px, py, 0)
+					gp.Path = append(gp.Path, GeoXY{round1(px), round1(py)})
+				}
+				gg.Patrol = gp
+			}
+			gl.Packs = append(gl.Packs, gg)
+		}
 		if b := leg.Boss; b != nil {
 			x, y := Project(b.Position.X, b.Position.Y)
 			bb.add(x, y, 6)
 			gl.Boss = b.Entry
+			gl.BossAt = &GeoXY{round1(x), round1(y)}
 			fmt.Fprintf(&sb, `<g class="mk boss" data-leg="%d" data-x="%.1f" data-y="%.1f"><polygon points="0,-14 14,0 0,14 -14,0"/><path d="M-5,-4 L5,4 M5,-4 L-5,4"/>%s</g>`,
 				i, x, y, label(stopLabel(gl.Stops, "boss", fmt.Sprintf("boss %d", b.Entry)), 18, 5, "lt"))
 		}
 		for _, p := range stepPoints(leg) {
 			x, y := Project(p.pt.X, p.pt.Y)
 			bb.add(x, y, 2)
+			gl.Objects = append(gl.Objects, GeoObject{Kind: p.kind, X: round1(x), Y: round1(y), Entry: p.entry, Label: p.label, Step: p.step, After: p.after})
 			fmt.Fprintf(&sb, `<g class="mk obj %s" data-leg="%d" data-x="%.1f" data-y="%.1f"><rect class="ic" x="-4" y="-5" width="8" height="10" rx="1"/><circle class="knob" cx="1.5" cy="0" r="1"/>%s</g>`,
 				p.kind, i, x, y, label(p.label, 9, 4, "lt"))
 		}
@@ -273,27 +339,35 @@ type stepPoint struct {
 	pt    dungeon.Point
 	kind  string
 	label string
+	entry uint32
+	step  int  // the step's index in Steps or AfterBoss
+	after bool // it is one of AfterBoss
 }
 
 // stepPoints are the places the steps of a leg use: objects by their Near point, rituals, waits for hostiles to be gone.
 func stepPoints(leg dungeon.Leg) []stepPoint {
 	var out []stepPoint
-	add := func(steps []dungeon.Step) {
-		for _, s := range steps {
+	add := func(steps []dungeon.Step, after bool) {
+		for i, s := range steps {
+			var p *stepPoint
 			switch {
 			case s.UseObject != nil && s.UseObject.Near != nil:
-				out = append(out, stepPoint{*s.UseObject.Near, "use", fmt.Sprintf("use %d", s.UseObject.Entry)})
+				p = &stepPoint{pt: *s.UseObject.Near, kind: "use", label: fmt.Sprintf("use %d", s.UseObject.Entry), entry: s.UseObject.Entry}
 			case s.LootObject != nil && s.LootObject.Near != nil:
-				out = append(out, stepPoint{*s.LootObject.Near, "loot", fmt.Sprintf("loot %d", s.LootObject.Entry)})
+				p = &stepPoint{pt: *s.LootObject.Near, kind: "loot", label: fmt.Sprintf("loot %d", s.LootObject.Entry), entry: s.LootObject.Entry}
 			case s.Ritual != nil:
-				out = append(out, stepPoint{s.Ritual.Position, "ritual", fmt.Sprintf("ritual %d", s.Ritual.Entry)})
+				p = &stepPoint{pt: s.Ritual.Position, kind: "ritual", label: fmt.Sprintf("ritual %d", s.Ritual.Entry), entry: s.Ritual.Entry}
 			case s.WaitFor != nil && s.WaitFor.GameObject != nil && s.WaitFor.GameObject.Near != nil:
-				out = append(out, stepPoint{*s.WaitFor.GameObject.Near, "door", fmt.Sprintf("wait %d %s", s.WaitFor.GameObject.Entry, s.WaitFor.GameObject.State)})
+				p = &stepPoint{pt: *s.WaitFor.GameObject.Near, kind: "door", label: fmt.Sprintf("wait %d %s", s.WaitFor.GameObject.Entry, s.WaitFor.GameObject.State), entry: s.WaitFor.GameObject.Entry}
+			}
+			if p != nil {
+				p.step, p.after = i, after
+				out = append(out, *p)
 			}
 		}
 	}
-	add(leg.Steps)
-	add(leg.AfterBoss)
+	add(leg.Steps, false)
+	add(leg.AfterBoss, true)
 	return out
 }
 

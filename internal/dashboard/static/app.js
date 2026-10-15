@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -20,6 +20,11 @@ try { hiddenGroups = new Set(JSON.parse(localStorage.getItem("grouphide") || "[]
 // "hide-<key>" on the svg when it is off (the stylesheet), and greyed out in a card's panel when that card's map has no data for it.
 let layerState = ML.defaults();
 try { layerState = ML.load(window.localStorage); } catch (e) { /* storage may be blocked */ }
+// The sliders of the layers (minutes shown, opacity, thickness) are saved once for all maps, like the choice of layers.
+let styleState = ML.styleDefaults();
+try { styleState = ML.loadStyle(window.localStorage); } catch (e) { /* storage may be blocked */ }
+const ghosts = new Map(), heats = new Map(); // "<plan>|<run>" / plan -> {at, loading, data}: the best earlier run and the death places, from the server
+const GHOST_TTL_MS = 300000, LIVE_EVERY_MS = 3000;
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 const namesOf = (c) => { const g = plans.get(c.label.plan); return g && g.names ? g.names : {}; };
 
@@ -44,6 +49,49 @@ function bar(pct, cls) {
   return h("span", { class: "bar " + (cls || "") + (pct < 30 && !cls ? " low" : "") }, h("i", { style: "width:" + Math.max(0, Math.min(100, pct)) + "%" }));
 }
 
+// A sample for one line of the legend: a dark chip with the glyph, a ring in the colour, or the health bar's colours.
+function legendSample(l) {
+  const ring = { "lg-thr-tank": "#2f80ff", "lg-thr-other": "#ff3b3b", "lg-thr-target": "#ffffff", "lg-pull": "#ffd400" }[l.sample];
+  if (ring) return h("i", { class: "lgs ring" + (l.sample === "lg-pull" ? " dash" : ""), style: "--c:" + ring });
+  if (l.sample === "lg-hp") return h("i", { class: "lgs hps" });
+  const colour = { "lg-boss": "#ffd400", "lg-ps-cleared": "#22c55e", "lg-ps-next": "#ffd400", "lg-ps-skipped": "#9aa3b2", "lg-ps-failed": "#ff3b3b", "lg-wp": "#ffb020", "lg-rest": "#7aa7ff",
+    "lg-obj": "#22c55e", "lg-stall": "#ffb020", "lg-ref": "#ff3b3b", "lg-aggro": "#ff3b3b", "lg-patrol": "#c084fc", "lg-combat": "#67e8f9", "lg-ghost": "#e9d5ff", "lg-heat": "#ff2d2d" }[l.sample];
+  return h("i", { class: "lgs", style: colour ? "color:" + colour : null, text: l.glyph });
+}
+
+// The sliders under a layer's row: one per property it has (minutes shown, opacity, thickness). They show while the layer is on.
+function styleSliders(parts, key) {
+  const box = h("div", { class: "lstyle", hidden: true }), inputs = {};
+  for (const prop of Object.keys(ML.STYLES[key])) {
+    const sl = ML.SLIDERS[prop], val = h("span", { class: "sv" });
+    const input = h("input", { type: "range", min: sl.min, max: sl.max, step: sl.step, "aria-label": sl.label + " of " + key });
+    input.addEventListener("input", () => {
+      styleState = ML.setStyle(styleState, key, prop, +input.value);
+      ML.saveStyle(window.localStorage, styleState);
+      for (const r of cards.values()) paintStyleUi(r);
+      scheduleRender();
+    });
+    inputs[prop] = { input, val };
+    box.append(h("label", { class: "srow" }, h("span", { class: "sl", text: sl.label }), input, val));
+  }
+  parts.sliders[key] = { box, inputs };
+  return box;
+}
+const styleValueText = (prop, v) => (prop === "minutes" ? (v >= ML.WHOLE_RUN_MIN ? "whole run" : v + " min") : prop === "opacity" ? v + " %" : v + " px");
+function paintStyleUi(rec) {
+  for (const [key, sl] of Object.entries(rec.parts.sliders)) {
+    const b = rec.parts.boxes[key], shown = !!layerState[key] && !(b && b.cb.disabled);
+    sl.box.hidden = !shown;
+    for (const [prop, io] of Object.entries(sl.inputs)) {
+      const v = styleState[key][prop];
+      if (document.activeElement !== io.input) io.input.value = String(v);
+      io.val.textContent = styleValueText(prop, v);
+    }
+  }
+}
+let renderQueued = 0;
+function scheduleRender() { if (renderQueued) return; renderQueued = requestAnimationFrame(() => { renderQueued = 0; if (last) render(last); }); }
+
 function makeCard(c) {
   const parts = {}, rec = { geo: null, card: c, svg: null, layerName: null, layerApplied: null, pick: null,
     v: null, goal: null, fit: null, mode: "fit", followOn: followPref, paused: false, following: false, followScale: null, raf: 0, geoName: null, viewLoaded: null, avail: null };
@@ -62,6 +110,7 @@ function makeCard(c) {
   parts.dim = h("input", { type: "range", min: 0, max: 80, value: dim, title: "Darken the game map under the drawing", "aria-label": "dim the background" });
   parts.dim.addEventListener("input", () => { dim = +parts.dim.value; store("mapdim", String(dim)); for (const r of cards.values()) { r.parts.dim.value = String(dim); applyDim(r); } });
   parts.boxes = {};
+  parts.sliders = {}; // layer key -> {box, inputs: {prop: {input, val}}}
   const dimRow = h("label", { class: "dimlbl" }, "Dim the picture ", parts.dim);
   const lbody = [];
   for (const group of ML.groups()) {
@@ -72,15 +121,21 @@ function makeCard(c) {
       parts.boxes[d.key] = { cb, why, row: null };
       parts.boxes[d.key].row = h("label", { class: "lrow" }, cb, h("span", { text: " " + d.label }), why);
       lbody.push(parts.boxes[d.key].row);
+      if (ML.STYLES[d.key]) lbody.push(styleSliders(parts, d.key));
     }
   }
-  const resetBtn = btn("Reset layers", "Back to the layers shown by default", () => { layerState = ML.defaults(); ML.save(window.localStorage, layerState); syncLayers(); });
+  const lgRows = UI.LEGEND.map((l) => h("div", { class: "lgrow" }, legendSample(l), h("span", { text: l.text })));
+  const legendBox = h("details", { class: "lgd" }, h("summary", { text: "Legend: what the marks mean" }), ...lgRows);
+  const resetBtn = btn("Reset layers", "Back to the layers and sliders shown by default", () => { layerState = ML.defaults(); ML.save(window.localStorage, layerState); styleState = ML.styleDefaults(); ML.saveStyle(window.localStorage, styleState); syncLayers(); });
   parts.layersBox = h("details", { class: "layers" }, h("summary", { class: "mb", title: "Choose what is drawn on the map (one choice for all maps)", text: "Layers" }),
-    h("div", { class: "lpanel" }, h("p", { class: "lnote", text: "One choice for all maps. A greyed layer has no data on this map now." }), ...lbody, dimRow, resetBtn));
+    h("div", { class: "lpanel" }, h("p", { class: "lnote", text: "One choice for all maps. A greyed layer has no data on this map now." }), ...lbody, legendBox, dimRow, resetBtn));
   parts.groups = h("span", { class: "groups", title: "Show or hide the walked path and the dots of each group on this map" });
   parts.bar = h("div", { class: "mapbar" }, parts.bIn, parts.bOut, parts.bFit, parts.bFollow, parts.chip, parts.groups, h("span", { class: "spacer" }), parts.layersBox);
   parts.scale = h("div", { class: "scalebar", hidden: true }, h("i"), h("span"));
-  parts.map.append(parts.bar, parts.stage, parts.scale);
+  parts.runinfo = h("div", { class: "runinfo", hidden: true });
+  parts.feed = h("div", { class: "evfeed", hidden: true, "aria-label": "events of the run" });
+  parts.tip = h("div", { class: "unittip", hidden: true, role: "tooltip" });
+  parts.map.append(parts.bar, parts.runinfo, parts.stage, parts.scale, parts.feed, parts.tip);
   const swatches = [["dot", "#2f80ff", "tank"], ["dot", "#22c55e", "healer"], ["dot", "#ff9f1c", "damage"], ["dot", "#c084fc", "commander"], ["dot", "#ff3b3b", "hostile creature"],
     ["dot", "#9aa3b2", "neutral"], ["ring", "#ffd400", "pack to pull"], ["dia", "#ff2fd6", "boss"], ["sq", "#ffffff", "door or object"], ["line", "#00e5ff", "planned route"], ["dash", "#00e5ff", "route still to do"],
     ["trail", "#ff6ec7", "path walked (fades with age)"], ["arrow", "#ffffff", "next stop"]];
@@ -127,6 +182,39 @@ function ensureMinimap(id) {
     .catch(() => { minimaps.set(id, null); minimapMiss.set(id, Date.now()); });
   return "loading";
 }
+
+const getJSON = (url) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+// The digest of the agent's run (member walks, stalls, refused walks, rests, pulls, objects), from the server's follow of the run's trace: asked again every few
+// seconds, whatever the layers, so that a layer's availability is known before it is switched on. null when the run has no readable trace.
+function ensureLive(rec, c) {
+  if (!c.online || !c.label.plan) { rec.live = null; return; }
+  const now = Date.now();
+  if (rec.liveBusy || now - (rec.liveAt || 0) < LIVE_EVERY_MS) return;
+  rec.liveBusy = true; rec.liveAt = now;
+  const mins = ML.trailMinutes(styleState, "trail_members") || 0;
+  getJSON("/api/live/" + encodeURIComponent(c.id) + "?min=" + mins).then((d) => {
+    const first = !rec.live && !!d;
+    rec.live = d; rec.liveBusy = false;
+    if (first) scheduleRender();
+  });
+}
+
+// The best earlier run of the plan (not this run) and the places parties died in the latest runs: asked once per plan, again after a few minutes.
+function cachedFetch(map, key, url) {
+  const e = map.get(key);
+  if (e && (e.loading || Date.now() - e.at < GHOST_TTL_MS)) return e.data;
+  map.set(key, { at: Date.now(), loading: true, data: e ? e.data : null });
+  getJSON(url).then((d) => { map.set(key, { at: Date.now(), loading: false, data: d }); scheduleRender(); });
+  return e ? e.data : null;
+}
+const RUN_ID_OK = /^[A-Za-z0-9._-]{1,64}$/;
+function ensureGhost(c) {
+  const plan = c.label.plan, run = RUN_ID_OK.test(c.label.run_id || "") ? c.label.run_id : "";
+  const g = plan ? plans.get(plan) : null, legs = g && g.legs ? g.legs.length : 0; // the plan's sections tell the server what a clear of the whole dungeon is
+  return plan ? cachedFetch(ghosts, plan + "|" + run + "|" + legs, "/api/ghost/" + encodeURIComponent(plan) + "?legs=" + legs + (run ? "&exclude=" + encodeURIComponent(run) : "")) : null;
+}
+function ensureHeat(c) { return c.label.plan ? cachedFetch(heats, c.label.plan, "/api/heat/" + encodeURIComponent(c.label.plan)) : null; }
 
 // The image goes under the plan drawing; its rectangle is in the drawing's plane (yards), so the plan lines up with it.
 function applyLayer(rec, svg, geo) {
@@ -180,13 +268,14 @@ function renderInfo(c, rec) {
     return h("tr", { class: b.alive ? "" : "dead" }, nm, h("td", { text: w.kind }),
       h("td", { class: "num", title: "Health " + w.hp + " %" }, bar(w.hp), String(w.hp)),
       h("td", { class: "num", title: w.powerLabel + " " + w.power + " %" }, bar(w.power, "p"), String(w.power)),
+      h("td", { class: "td-doing", text: UI.activity(b).word, title: UI.activity(b).raw }),
       h("td", { text: w.target, title: [b.action, b.result, b.reason].filter(Boolean).join(" ") }),
       h("td", { class: "num", text: w.dist }));
   });
   if (rows.length) {
     const feed = c.feed.have ? "updated " + (c.feed.age_ms / 1000).toFixed(1) + " s ago" + (c.feed.stale ? " (stale)" : "") : "no data from the bots yet";
     blocks.push(h("div", {}, h("h3", { text: "Party \u00b7 " + feed }),
-      h("table", {}, h("tr", {}, ...["Name", "Class", "Health", "Mana / power", "Target", "Distance"].map((t) => h("th", { text: t }))), ...rows)));
+      h("table", {}, h("tr", {}, ...["Name", "Class", "Health", "Mana / power", "Doing", "Target", "Distance"].map((t) => h("th", { text: t }))), ...rows)));
   }
   // orders
   const orders = c.orders.slice().reverse().map((o) => {
@@ -318,8 +407,9 @@ function paintLayerUi(rec) {
     b.row.title = a.ok ? "" : "Greyed out: " + a.why;
     b.why.textContent = a.ok ? "" : a.why;
   }
+  paintStyleUi(rec);
 }
-function syncLayers() { for (const rec of cards.values()) { paintLayerUi(rec); applyLayers(rec); if (rec.svg) applyViewBox(rec); } }
+function syncLayers() { for (const rec of cards.values()) { paintLayerUi(rec); applyLayers(rec); if (rec.svg) applyViewBox(rec); } if (last) render(last); }
 
 function applyDim(rec) { if (rec.svg) rec.svg.style.setProperty("--bright", String(1 - dim / 100)); }
 
@@ -423,6 +513,7 @@ function ensureSvg(rec, geo) {
   if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); }
   applyLayers(rec);
   attachControls(rec, svg);
+  attachHover(rec, svg);
   applyDim(rec);
   return svg;
 }
@@ -462,20 +553,111 @@ function renderGroupChips(rec, groups) {
   }));
 }
 
-function trailEls(pts, color) {
-  const out = [];
-  for (const seg of MV.trailSegments(pts, 24, 0.25)) {
+// The walked path of a group's lead: its last N minutes (the Layers slider; the top is the whole run), fading with age, in the thickness and opacity the
+// sliders say. The own group's lead is drawn in its role colour, brighter than the other trails; another group's in the group's colour.
+function trailEls(card, groupColor, own) {
+  const sty = styleState.trail, nowS = Date.parse(last && last.time) / 1000 || Date.now() / 1000;
+  const lead = (card.bots || []).find((b) => b.lead), color = own && lead ? MP.trailColor(MP.roleOf(lead), true) : groupColor;
+  const r = MP.recent(card.trail || [], card.trail_t, nowS, ML.trailMinutes(styleState, "trail"));
+  const w = sty.width, o = sty.opacity / 100, out = [];
+  for (const seg of MV.trailSegments(r.points, 24, 0.25)) {
     const points = seg.points.map((p) => p[0] + "," + p[1]).join(" ");
-    out.push(s("polyline", { class: "trail-halo", points, opacity: (seg.alpha * 0.7).toFixed(2) }), s("polyline", { class: "trail", points, stroke: color, opacity: seg.alpha.toFixed(2) }));
+    out.push(s("polyline", { class: "trail-halo", points, opacity: (seg.alpha * 0.7 * o).toFixed(2), style: "stroke-width:" + (w + 2.5) }),
+      s("polyline", { class: "trail", points, stroke: color, opacity: (seg.alpha * o).toFixed(2), style: "stroke-width:" + w }));
   }
   return out;
+}
+
+// ---- marks over the units, the hover box, the run line and the event feed ----
+
+// A thin health bar centred over a marker, in pixels around its origin (y is its top edge).
+function hpBarEl(pct, y, w) {
+  const p = Math.max(0, Math.min(100, pct == null ? 0 : pct)), g = s("g", { class: "hpb" });
+  g.append(s("rect", { class: "bg", x: -w / 2 - 1, y: y - 1, width: w + 2, height: 5, rx: 1.5 }), s("rect", { class: "fg", x: -w / 2, y, width: (w * p / 100).toFixed(1), height: 3, fill: UI.hpColor(p) }));
+  return g;
+}
+
+// The status glyphs of a unit, in one text element beside its marker.
+function statusEl(kinds, x, y) {
+  const t = s("text", { class: "sti", x, y }, kinds.map((k) => UI.STATUS[k].glyph).join(""));
+  t.append(s("title", {}, kinds.map((k) => UI.STATUS[k].text).join(", ")));
+  return t;
+}
+
+function renderRunInfo(rec, prog, ghostLine) {
+  const el = rec.parts.runinfo, showRun = !!(layerState.runinfo && prog), showGhost = !!(layerState.ghost && ghostLine);
+  el.hidden = !(showRun || showGhost);
+  if (el.hidden) return;
+  const kids = showRun ? [h("span", { text: UI.progressLine({ ...prog, bosses: [], total: 0 }) })] : [];
+  if (showRun && prog.bosses.length) {
+    kids.push(h("span", { class: "boxes" }, " · bosses: ", ...prog.bosses.map((b, i) => h("span", { class: b.done ? "ok" : "", text: (i ? ", " : "") + (b.done ? "\u2713 " : "\u25A1 ") + b.name })),
+      prog.next ? " · next: " + prog.next : prog.done === prog.total ? " · all down" : ""));
+  }
+  if (showGhost) kids.push(h("span", { class: "ghostline", title: "The best earlier run of this dungeon in the tests folder", text: (kids.length ? " \u00b7 " : "") + ghostLine }));
+  el.replaceChildren(...kids);
+}
+
+function renderFeed(rec, c) {
+  const el = rec.parts.feed, lines = UI.feedLines(c.events, 8);
+  el.hidden = !(layerState.feed && lines.length);
+  if (el.hidden) return;
+  el.replaceChildren(...lines.map((l) => h("div", { class: l.kind }, h("span", { class: "t", text: l.time || "--:--:--" }), h("span", { class: "g", text: l.glyph }), l.text)));
+}
+
+function hideTip(rec) { rec.tipKey = null; rec.parts.tip.hidden = true; }
+
+// Fill the box with the unit (textContent only) and put it near the pointer inside the map panel.
+function showTip(rec, key, clientX, clientY) {
+  const u = rec.units && rec.units.get(key);
+  if (!u) { hideTip(rec); return; }
+  const d = UI.describeUnit(u, rec.tipCtx || {}), tip = rec.parts.tip;
+  tip.replaceChildren(h("div", {}, h("b", { text: d.title }), h("span", { class: "badge", text: d.badge })), h("dl", {}, ...d.rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])));
+  rec.tipKey = key;
+  tip.hidden = false;
+  if (clientX != null) {
+    const r = rec.parts.map.getBoundingClientRect(), w = tip.offsetWidth, hh = tip.offsetHeight;
+    let x = clientX - r.left + 14, y = clientY - r.top + 14;
+    if (x + w > r.width - 6) x = Math.max(6, clientX - r.left - w - 14);
+    if (y + hh > r.height - 6) y = Math.max(6, clientY - r.top - hh - 14);
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+}
+
+// After a redraw the box shows the same unit again with fresh numbers (or goes when the unit is gone).
+function refreshTip(rec) { if (rec.tipKey) showTip(rec, rec.tipKey, null, null); }
+
+function unitKeyAt(e) {
+  for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+    const g = el.closest && el.closest("[data-uid]");
+    if (g && g.dataset.uid) return g.dataset.uid;
+  }
+  return null;
+}
+
+// A mouse shows the box while it is over a unit; a finger opens it with a tap on the unit and closes it with a tap elsewhere.
+function attachHover(rec, svg) {
+  let down = null, raf = 0;
+  svg.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+  svg.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse" || e.buttons || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; const k = unitKeyAt(e); if (k) showTip(rec, k, e.clientX, e.clientY); else hideTip(rec); });
+  });
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTip(rec); });
+  svg.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "mouse" || !down || down.id !== e.pointerId) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    down = null;
+    if (moved > 8) return;
+    const k = unitKeyAt(e);
+    if (k && k !== rec.tipKey) showTip(rec, k, e.clientX, e.clientY); else hideTip(rec);
+  });
 }
 
 function renderMap(c, rec) {
   const stage = rec.parts.stage, m = rec.parts.map, name = c.label.plan;
   rec.card = c;
   const geo = name ? ensurePlan(name) : null;
-  const msg = (t) => { rec.svg = null; stage.replaceChildren(h("div", { class: "nomap", text: t })); rec.parts.bar.hidden = true; };
+  const msg = (t) => { rec.svg = null; stage.replaceChildren(h("div", { class: "nomap", text: t })); rec.parts.bar.hidden = true; rec.parts.runinfo.hidden = true; rec.parts.feed.hidden = true; hideTip(rec); };
   if (geo && geo.error) { msg("Plan " + name + ": " + geo.error); return; }
   if (!geo || geo === "loading") { msg(name ? "Loading the plan " + name + "..." : "No run, so there is no plan to draw."); return; }
   rec.parts.bar.hidden = false;
@@ -497,18 +679,22 @@ function renderMap(c, rec) {
   });
   const dyn = svg.querySelector(".dyn"), kids = [];
   const at = (x, y, cls) => s("g", { class: "mk " + cls, "data-x": x, "data-y": y });
+  // Every unit that can be hovered gets an id on its marker; the hover box looks the unit up in rec.units.
+  const units = new Map();
+  const unitG = (g, key, u) => { u.key = key; units.set(key, u); g.dataset.uid = key; g.append(s("circle", { class: "hit", r: 13 })); return g; };
   // the walked path of every group on this map, then the other groups' dots
   const groups = groupsOf(c);
   renderGroupChips(rec, groups);
-  for (const g of groups) if (!hiddenGroups.has(g.card.id)) kids.push(...trailEls(g.card.trail || [], g.color));
+  for (const g of groups) if (!hiddenGroups.has(g.card.id)) kids.push(...trailEls(g.card, g.color, g.own));
   for (const g of groups) {
     if (g.own || hiddenGroups.has(g.card.id)) continue;
     for (const b of g.card.bots) {
       if (!b.known) continue;
       const m = at(b.x, b.y, "o");
       const d = s("circle", { r: 7, class: "other", fill: g.color });
-      d.append(s("title", {}, g.name + ": " + b.name));
       m.append(d);
+      unitG(m, "o:" + g.card.id + ":" + b.name, { type: "other", data: b, group: g.name });
+      m.append(hpBarEl(b.alive ? b.hp_pct : 0, -15, 18));
       kids.push(m);
     }
   }
@@ -553,12 +739,31 @@ function renderMap(c, rec) {
     g.append(s("circle", { class: "tsdot", r: 3 }), plate(new Date(st.t * 1000).toLocaleTimeString(), 6, -6, "tslbl"));
     kids.push(g);
   }
+  const tankT = UI.tankTargets(c.bots), pullKeys = new Set(pulls.map((m) => UI.guidKey(m.guid)));
+  const leadXY = lead ? { x: lead.x, y: lead.y } : null;
+  const ctx = { names, lead: leadXY };
+  let anyThreat = false, anyStatus = false;
   for (const mob of c.mobs) {
     const g = at(mob.x, mob.y, "m " + mob.kind + (mob.cleared ? " cleared" : "") + (mob.boss ? " boss" : ""));
     const dot = s("circle", { r: mob.kind === "hostile" ? 6.5 : 5, class: "mob " + mob.kind + (mob.cleared ? " cleared" : "") + (mob.engaged ? " engaged" : "") + (mob.boss ? " boss" : "") });
-    dot.append(s("title", {}, [PT.mobName(names, mob.entry) + " (" + mob.kind + ")", mob.hp_pct + " % health", mob.target ? "fighting " + mob.target : "", mob.cc ? "crowd controlled" : "", mob.evade ? "walking back to its spot" : "",
-      mob.group >= 0 ? "pack " + (mob.group + 1) + " of this section" : mob.boss ? "boss fight" : "", "id " + mob.entry].filter(Boolean).join(", ")));
     g.append(dot);
+    const u = { type: "mob", data: mob };
+    unitG(g, "m:" + mob.guid, u);
+    // threat colours: the ring is whom the creature attacks, the tank's target is outlined, the pull target marked
+    const thr = UI.threatOf(mob, c.bots), key = UI.guidKey(mob.guid);
+    if (thr) { g.append(s("circle", { class: "thr " + thr, r: 10 })); anyThreat = true; }
+    if (key && tankT.has(key)) { g.append(s("circle", { class: "thr tgt", r: 13.5 })); anyThreat = true; }
+    if (pullKeys.has(key)) { g.append(s("circle", { class: "thr pull", r: 17 })); anyThreat = true; }
+    const top = mob.boss ? -20 : -(dot.getAttribute("r") * 1 + 8);
+    g.append(hpBarEl(mob.hp_pct, top, mob.boss ? 26 : 18));
+    const st = UI.statuses(u);
+    if (st.length) { anyStatus = true; g.append(statusEl(st, mob.boss ? 15 : 10, mob.boss ? -12 : -9)); }
+    if (mob.kind === "hostile") g.append(plate(UI.mobName(names, mob.entry), 10, 16, "hname"));
+    if (mob.boss) {
+      const bm = s("g", { class: "bossmk" });
+      bm.append(s("circle", { class: "ring", r: 13 }), s("path", { class: "crown", d: "M-8,-26 L-5,-34 L0,-28 L5,-34 L8,-26 Z" }), plate(UI.mobName(names, mob.entry), 16, 5, ""));
+      g.append(bm);
+    }
     kids.push(g);
   }
   for (const b of c.bots) {
@@ -566,28 +771,52 @@ function renderMap(c, rec) {
     const g = at(b.x, b.y, "b");
     const role = b.role === "tank" ? "tank" : b.role === "healer" ? "healer" : "dps";
     const dot = s("circle", { r: 9, class: "bot " + role + (b.alive ? "" : " dead") });
-    const w = PT.botRow(b, names);
-    dot.append(s("title", {}, b.name + " (" + w.kind + "): " + b.hp_pct + " % health, " + b.power_pct + " % " + w.powerLabel.toLowerCase() + (w.dist ? ", " + w.dist : "") + (w.target ? ", fighting " + w.target : "")));
     g.append(dot, plate(b.name, 13, 4, "botname" + (b.alive ? "" : " dead")));
+    const u = { type: "bot", data: b };
+    unitG(g, "b:" + b.name, u);
+    g.append(hpBarEl(b.alive ? b.hp_pct : 0, -17, 20));
+    const st = UI.statuses(u);
+    if (st.length) { anyStatus = true; g.append(statusEl(st, 11, -11)); }
     kids.push(g);
   }
   if (c.commander) {
     const g = at(c.commander.x, c.commander.y, "c");
     const d = s("circle", { r: 10, class: "cmd" });
-    d.append(s("title", {}, "commander " + c.commander.name));
     g.append(d, plate(c.commander.name, 14, 4, "cmdl"));
+    unitG(g, "c:" + c.id, { type: "commander", data: c.commander });
     kids.push(g);
   }
+  // the events of the run as pins
+  const pins = UI.pinnedEvents(c.events);
+  pins.forEach((e, i) => {
+    const g = at(e.x, e.y, "evpin " + e.kind);
+    g.append(s("circle", { r: 9 }), s("text", { class: "g", y: 4 }, UI.eventGlyph(e.kind)));
+    unitG(g, "e:" + c.id + ":" + i, { type: "event", data: e });
+    kids.push(g);
+  });
+  // the path layers: what lies under the units (heat, ghost, routes, rings, lines) and what marks them (spots, X marks, targets)
+  ensureLive(rec, c);
+  const pd = PD.build({ s, plate, at, unitG, on: layerState, style: styleState, layers: ML, card: c, geo, svg, live: rec.live, ghost: ensureGhost(c), heat: ensureHeat(c), lead: leadXY, nextTarget: nt, threat });
+  kids.unshift(...pd.under);
+  kids.push(...pd.over);
+  rec.units = units; rec.tipCtx = ctx;
   dyn.replaceChildren(...kids);
+  const prog = UI.progress(c, geo, c.events);
+  renderRunInfo(rec, prog, pd.ghostLine);
+  renderFeed(rec, c);
   const has = (sel) => !!svg.querySelector(sel), kind = (...ks) => c.mobs.some((m) => ks.includes(m.kind));
   rec.avail = ML.availability({
     picture: !!rec.pick, route: has(".route, .direct"), packs: has(".pull, .pin"), cleared: c.mobs.some((m) => m.cleared) || has(".pull.cleared, .pin.cleared, .leg.done"),
     bosses: has(".boss"), doors: has(".obj"), sections: has(".legname"), steps: has(".stepn"), trail: (c.trail || []).length >= 2, trailtime: stamps.length > 0, heading: !!(hd && lead),
     next: !!nt, bots: c.bots.some((b) => b.known), botTargets: botLines.length > 0, healer: healers.length > 0, commander: !!c.commander, cmdline: !!(c.commander && leadPos),
     hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,
+    bossmob: c.mobs.some((m) => m.boss), hpunits: c.bots.some((b) => b.known) || c.mobs.length > 0, status: anyStatus, threatcolor: anyThreat,
+    events: (c.events || []).length > 0, runinfo: !!prog,
+    ...pd.avail,
   });
   paintLayerUi(rec);
   applyViewBox(rec);
+  refreshTip(rec);
   const note = !c.bots.some((b) => b.known) ? (c.feed.have ? "No bot is inside this map." : "Waiting for the bots' position feed.") : "";
   let n = m.querySelector(":scope > .nomap");
   if (note) { if (!n) { n = h("div", { class: "nomap note" }); m.append(n); } n.textContent = note; } else if (n) n.remove();

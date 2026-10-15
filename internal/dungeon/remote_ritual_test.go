@@ -193,8 +193,9 @@ func TestRitualStepThenAWaitOnWhatLastsGoesOn(t *testing.T) {
 func TestRitualStepNeedsEnoughLivingBots(t *testing.T) {
 	g := newRitualGame(t, 4)
 	g.party = g.party[:3] // Dpsy and Rogy are not there: Tanky, Healy and Magey are left
+	// Two bots missing from the group: the run stops at its first walk instead of going on with three (remote_party.go).
 	_, err := ritualRun(t, g, ritualPlan(4))
-	if err == nil || !strings.Contains(err.Error(), "the ritual needs 4 bots, the party has 3 living") || len(g.rituals) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "party short: the party has 3 of 5 bots, Dpsy, Rogy left the group") || len(g.rituals) != 0 {
 		t.Fatalf("%v %v", err, g.rituals)
 	}
 }

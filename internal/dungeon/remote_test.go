@@ -58,6 +58,8 @@ type rmob struct {
 	untouchable        bool // no order hurts it while it runs (it is out of reach or out of sight)
 	fleeStart, backAt  time.Time
 	fleeOrigin         Point
+	// ccUntil: a `cmd cc` at it holds it (flag c, no target) until then (fakeRemote.ccLasts)
+	ccUntil time.Time
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -86,27 +88,38 @@ type fakeRemote struct {
 	noFrames bool // the feed never starts
 	cutAt    time.Time
 
-	ignoreMoves int                 // the next n moves do nothing (the bot is stuck)
-	moveErrs    []string            // codes the next moves are refused with
-	directErrs  []string            // codes the next direct moves (`cmd move x y z direct`) are refused with
-	noDirect    bool                // the module does not know the direct flag: a move with it is refused as invalid
-	cmdErr      map[string][]string // verb -> codes the next such orders are refused with
-	holdDelay   time.Duration       // the mob goes on the tank this long after the pull; negative: the mage keeps it
-	engageDelay time.Duration
-	killRate    float64 // hp per second once attacked
-	resting     bool
-	healRate    float64
-	onTick      func(g *fakeRemote)
-	revived     []string
-	mobsKilled  int
-	hide        int  // the next n frames list no hostile (the bots lost sight of everything for a moment)
-	truncating  bool // frames are marked truncated and list no hostile
-	panicOn     string
-	vanish      bool // after a pullback the mob leaves the world without a fight
-	oldModule   bool // a bot-scoped `cmd attack` is answered party-scoped (the module ignores the bot name)
-	ignorePull  bool // a bot-scoped `cmd attack` at an engaged mob changes nothing (the tank does not take it)
-	orderAt     []time.Time
-	sight       float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
+	ignoreMoves int      // the next n moves do nothing (the bot is stuck)
+	moveErrs    []string // codes the next moves are refused with
+	directErrs  []string // codes the next direct moves (`cmd move x y z direct`) are refused with
+	// strictDirect: a direct move is refused too-far (naming the bot, as TortoiseBots #948 does) while a living bot stands more than 5 yd
+	// from the lead bot. farOnce makes the next direct move lose that bot (it falls 10 yd behind and sticks) and answers it too-far.
+	strictDirect bool
+	farOnce      string
+	summoned     []string // bots `cmd summon` fetched to the lead bot
+	// moveFetches: a plain `cmd move` brings the lagging bots (lagUntil) to the point, as the module's party move does.
+	moveFetches bool
+	// strictAttack: a bot-scoped `cmd attack <guid> <bot>` is refused too-far while that bot stands more than 60 yd from the mob (the
+	// module\'s sight distance); tankTooFar makes the next n such orders too-far whatever the feed shows.
+	strictAttack bool
+	tankTooFar   int
+	noDirect     bool                // the module does not know the direct flag: a move with it is refused as invalid
+	cmdErr       map[string][]string // verb -> codes the next such orders are refused with
+	holdDelay    time.Duration       // the mob goes on the tank this long after the pull; negative: the mage keeps it
+	engageDelay  time.Duration
+	killRate     float64 // hp per second once attacked
+	resting      bool
+	healRate     float64
+	onTick       func(g *fakeRemote)
+	revived      []string
+	mobsKilled   int
+	hide         int  // the next n frames list no hostile (the bots lost sight of everything for a moment)
+	truncating   bool // frames are marked truncated and list no hostile
+	panicOn      string
+	vanish       bool // after a pullback the mob leaves the world without a fight
+	oldModule    bool // a bot-scoped `cmd attack` is answered party-scoped (the module ignores the bot name)
+	ignorePull   bool // a bot-scoped `cmd attack` at an engaged mob changes nothing (the tank does not take it)
+	orderAt      []time.Time
+	sight        float64 // when > 0 the bots list only the hostiles within this many yards of the lead bot (line of sight)
 	// followTo, when set, is where `cmd follow` runs the lead bot (to the commander), and a pull or an attack 20 s or more after it runs
 	// it back to the mob, as the module does; nil: `cmd follow` moves nobody.
 	followTo *Point
@@ -115,6 +128,10 @@ type fakeRemote struct {
 	// > 0 makes a mob that is not fighting yet come at the party when a living bot gets within that many yards of it (a walk into it).
 	lagUntil map[packet.GUID]time.Time
 	aggro    float64
+	// minMove > 0: a `cmd move` to a point nearer the lead bot than this is acknowledged and does nothing, as the module does with a move
+	// under about 6 yd. ccLasts > 0: a `cmd cc` puts the mob in crowd control (flag c, no target) for that long.
+	minMove float64
+	ccLasts time.Duration
 
 	moveDelay     time.Duration // a `cmd move` takes effect this long after it is sent (the bot runs on to the old point meanwhile)
 	pendingMove   *Point
@@ -228,6 +245,9 @@ func (g *fakeRemote) advance(d time.Duration) {
 	live := g.mobs[:0]
 	anyEngaged := false
 	for _, m := range g.mobs {
+		if !m.ccUntil.IsZero() && !g.now.Before(m.ccUntil) {
+			m.ccUntil, m.flags, m.noTarget = time.Time{}, "-", false // the sheep runs out
+		}
 		if m.pulled && !m.engaged && g.now.Sub(m.pullAt) >= g.engageDelay {
 			m.engaged = true
 		}
@@ -389,6 +409,12 @@ func errReply(intent, code string) tbm.Reply {
 	return tbm.Reply{Kind: tbm.KindErr, Err: &e, Lines: []string{}}
 }
 
+// tooFarReply is the module's answer to a direct step with a follower away from the lead bot (TortoiseBots #948).
+func tooFarReply(intent, bot, lead string) tbm.Reply {
+	e := tbm.Err{Intent: intent, Code: "too-far", Message: bot + " is not with " + lead + " (no navmesh path of at most 40 yd to its spot, and not within 5 yd of it on its floor in its sight). A direct step takes the lead bot's line: gather the party on it first."}
+	return tbm.Reply{Kind: tbm.KindErr, Err: &e, Lines: []string{}}
+}
+
 func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	g.orders = append(g.orders, command)
 	g.orderAt = append(g.orderAt, g.now)
@@ -465,6 +491,27 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			if g.noDirect {
 				return errReply(intent, "invalid"), nil
 			}
+			if g.farOnce != "" {
+				name := g.farOnce
+				g.farOnce = ""
+				for _, p := range g.party {
+					if p.Name == name {
+						p.X, p.Y, p.Z = g.lead().X-10, g.lead().Y, g.lead().Z
+						if g.lagUntil == nil {
+							g.lagUntil = map[packet.GUID]time.Time{}
+						}
+						g.lagUntil[p.GUID] = g.now.Add(time.Hour)
+					}
+				}
+				return tooFarReply(intent, name, g.lead().Name), nil
+			}
+			if g.strictDirect {
+				for _, p := range g.party {
+					if !p.Dead && !g.left[p.Name] && p != g.lead() && dist3(Point{p.X, p.Y, p.Z}, Point{g.lead().X, g.lead().Y, g.lead().Z}) > 5 {
+						return tooFarReply(intent, p.Name, g.lead().Name), nil
+					}
+				}
+			}
 			if len(g.directErrs) > 0 {
 				c := g.directErrs[0]
 				g.directErrs = g.directErrs[1:]
@@ -482,8 +529,20 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		y, _ := strconv.ParseFloat(f[3], 32)
 		z, _ := strconv.ParseFloat(f[4], 32)
 		l := g.lead()
+		if g.moveFetches && len(f) == 5 {
+			for _, p := range g.party[1:] {
+				if _, lag := g.lagUntil[p.GUID]; lag {
+					p.X, p.Y, p.Z = float32(x), float32(y), float32(z)
+					delete(g.lagUntil, p.GUID)
+				}
+			}
+		}
 		if dx, dy := x-float64(l.X), y-float64(l.Y); sqrt(dx*dx+dy*dy) > 150 {
 			return errReply(intent, "too-far"), nil
+		}
+		if dx, dy := x-float64(l.X), y-float64(l.Y); g.minMove > 0 && sqrt(dx*dx+dy*dy) < g.minMove {
+			g.moveOrderDest = append(g.moveOrderDest, Point{float32(x), float32(y), float32(z)})
+			return ack(intent), nil // too short: the module does not move
 		}
 		g.moveOrderPos = append(g.moveOrderPos, Point{l.X, l.Y, l.Z})
 		g.moveOrderDest = append(g.moveOrderDest, Point{float32(x), float32(y), float32(z)})
@@ -526,6 +585,19 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			m.hit = true // a damage dealer is sent after the runner
 		}
 		if len(f) > 3 {
+			if g.tankTooFar > 0 {
+				g.tankTooFar--
+				return tooFarReply(intent, f[3], "the mob"), nil
+			}
+			if g.strictAttack {
+				for _, p := range g.party {
+					if strings.EqualFold(p.Name, f[3]) {
+						if dx, dy := float64(p.X-m.pos.X), float64(p.Y-m.pos.Y); sqrt(dx*dx+dy*dy) > 60 {
+							return tooFarReply(intent, p.Name, "the mob"), nil
+						}
+					}
+				}
+			}
 			// bot-scoped (#928): only that bot goes; the tank takes the mob, the party does not join
 			if m.engaged && !g.ignorePull && strings.EqualFold(f[3], g.party[0].Name) {
 				m.hold = 0
@@ -539,10 +611,28 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		m.attacked = true
 		g.runToMob(m)
 		return ack(intent), nil
+	case "cmd cc":
+		if len(f) < 4 {
+			return ack(intent), nil
+		}
+		if m := g.mobByArg(f[3]); m != nil && g.ccLasts > 0 {
+			m.ccUntil, m.flags, m.noTarget = g.now.Add(g.ccLasts), "c", true
+		}
+		return ack(intent), nil
 	case "cmd follow":
 		if g.followTo != nil {
 			to := *g.followTo
 			g.moveTo, g.pendingMove, g.followAt = &to, nil, g.now
+		}
+		return ack(intent), nil
+	case "cmd summon":
+		for _, p := range g.party {
+			if strings.EqualFold(p.Name, f[2]) {
+				p.X, p.Y, p.Z = g.lead().X, g.lead().Y, g.lead().Z
+				delete(g.lagUntil, p.GUID)
+				delete(g.memberMap, p.GUID)
+				g.summoned = append(g.summoned, p.Name)
+			}
 		}
 		return ack(intent), nil
 	case "cmd rest":
@@ -596,6 +686,15 @@ func (g *fakeRemote) ordersOf(prefix string) []string {
 		}
 	}
 	return out
+}
+
+func (g *fakeRemote) lastIndexOf(prefix string) int {
+	for i := len(g.orders) - 1; i >= 0; i-- {
+		if strings.HasPrefix(g.orders[i], prefix) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (g *fakeRemote) indexOf(prefix string) int {

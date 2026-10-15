@@ -147,7 +147,7 @@ svg circle.other { stroke: #000; stroke-width: 1.5; }
 .layers > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
 .layers > summary::-webkit-details-marker { display: none; }
 .layers[open] > summary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(260px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
+.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(310px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .35); display: grid; gap: 2px; }
 .lrow { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 13px; cursor: pointer; }
 .lrow input { width: 18px; height: 18px; }
@@ -193,3 +193,62 @@ svg.hide-threat .tline, svg.hide-bottarget .btline, svg.hide-cmdline .cmdline, s
 .lrow .why:empty { display: none; }
 .lrow { flex-wrap: wrap; }
 .lpanel .mb { margin-top: 6px; }
+
+/* unit marks: health bars, status icons, threat rings, boss marks, names of hostile mobs, event pins */
+svg .hit { fill: transparent; stroke: none; pointer-events: all; }
+svg .hpb rect.bg { fill: rgba(0, 0, 0, .8); } svg .hpb rect.fg { stroke: none; }
+svg .sti { font: 700 13px system-ui, "Segoe UI Symbol", sans-serif; fill: #fff; stroke: #000; stroke-width: 2.5px; paint-order: stroke; pointer-events: none; }
+svg .thr { fill: none; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .thr.tank { stroke: #2f80ff; stroke-width: 4; } svg .thr.other { stroke: #ff3b3b; stroke-width: 4; }
+svg .thr.tgt { stroke: #fff; stroke-width: 2.5; } svg .thr.pull { stroke: #ffd400; stroke-width: 2.5; stroke-dasharray: 4 3; }
+svg .bossmk .ring { fill: none; stroke: #ffd400; stroke-width: 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .bossmk .crown { fill: #ffd400; stroke: #000; stroke-width: 1.5; stroke-linejoin: round; pointer-events: none; }
+svg .bossmk .lbg { fill: rgba(60, 0, 50, .85); }
+svg .hname { display: none; }
+svg:not(.hide-hostilenames) .hname { display: inline; }
+svg .evpin circle { fill: #111; stroke: #fff; stroke-width: 2; }
+svg .evpin.death circle, svg .evpin.wipe circle { fill: #7a1f1f; } svg .evpin.boss circle { fill: #6b2a8f; } svg .evpin.open circle, svg .evpin.use circle, svg .evpin.loot circle { fill: #1f4f7a; }
+svg .evpin text.g { fill: #fff; text-anchor: middle; font-size: 12px; pointer-events: none; }
+svg.hide-bossmark .bossmk, svg.hide-hpbars .hpb, svg.hide-statusicons .sti, svg.hide-threatcolors .thr, svg.hide-events .evpin { display: none; }
+.unittip { position: absolute; z-index: 6; max-width: min(280px, calc(100% - 16px)); background: rgba(14, 18, 26, .95); color: #f2f4f8; border: 1px solid #5a6578; border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); pointer-events: none; }
+.unittip[hidden] { display: none; }
+.unittip b { font-size: 13px; } .unittip .badge { margin-left: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #ffd400; }
+.unittip dl { margin: 4px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; }
+.unittip dt { color: #98a2b3; } .unittip dd { margin: 0; overflow-wrap: anywhere; }
+.runinfo { padding: 5px 12px; font-size: 13px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; }
+.runinfo[hidden], .evfeed[hidden] { display: none; }
+.runinfo .boxes { font-weight: 400; color: var(--muted); }
+.runinfo .boxes .ok { color: var(--ok); }
+.evfeed { padding: 4px 12px 6px; font: 12px/1.45 ui-monospace, monospace; background: var(--panel); border-top: 1px solid var(--line); max-height: 9.5em; overflow: auto; }
+.evfeed div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.evfeed .t { color: var(--muted); margin-right: 6px; } .evfeed .g { display: inline-block; width: 1.3em; text-align: center; }
+.evfeed .death .g, .evfeed .wipe .g { color: var(--bad); } .evfeed .boss .g { color: #8a3fb8; }
+.lpanel details.lgd { border: 0; padding: 4px 0 0; } .lpanel details.lgd summary { cursor: pointer; font-size: 13px; }
+.lgd .lgrow { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+.lgd .lgs { flex: none; min-width: 30px; text-align: center; font-size: 14px; background: #0b0e13; color: #fff; border-radius: 4px; padding: 1px 4px; box-sizing: border-box; }
+.lgd .lgs.ring { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--c); box-sizing: border-box; min-width: 0; }
+.lgd .lgs.dash { border-style: dashed; border-width: 2px; }
+.lgd .lgs.hps { width: 28px; height: 5px; border-radius: 2px; background: linear-gradient(90deg, #ff4d4d 30%, #ffb020 30% 60%, #3ddc84 60%); margin: 0; }
+.td-doing { max-width: 14em; }
+svg:not(.hide-bossmark) .m.boss .hname { display: none; }
+
+/* path layers: sliders under a layer, pull groups recoloured by state, the ghost line in the run line */
+.lstyle { margin: 0 0 4px 22px; padding: 2px 0 4px; }
+.lstyle[hidden] { display: none; }
+.srow { display: grid; grid-template-columns: 6.2em 1fr 4.6em; align-items: center; gap: 6px; font-size: 12px; min-height: 28px; }
+.srow .sl { color: var(--muted); } .srow .sv { text-align: right; font-variant-numeric: tabular-nums; }
+.srow input[type=range] { width: 100%; min-width: 0; height: 24px; margin: 0; }
+svg.ps-on .pin.ps-cleared circle { fill: #22c55e; } svg.ps-on .pull.ps-cleared { stroke: #22c55e; fill: rgba(34, 197, 94, .12); }
+svg.ps-on .pin.ps-next circle { fill: #ffd400; } svg.ps-on .pull.ps-next { stroke: #ffd400; fill: rgba(255, 212, 0, .26); stroke-width: 3.5; }
+svg.ps-on .pin.ps-skipped circle { fill: #9aa3b2; } svg.ps-on .pull.ps-skipped { stroke: #9aa3b2; fill: rgba(154, 163, 178, .1); }
+svg.ps-on .pin.ps-failed circle { fill: #ff3b3b; } svg.ps-on .pull.ps-failed { stroke: #ff3b3b; fill: rgba(255, 59, 59, .14); }
+svg.ps-on .pin.ps-pending circle { fill: #1f2937; stroke: #fff; } svg.ps-on .pin.ps-pending text.num { fill: #fff; }
+svg.ps-on .pull.ps-pending { stroke: #e5e7eb; }
+svg .psm .hit, svg .wpv .hit { pointer-events: all; }
+svg .bossst text.g { pointer-events: none; font-weight: 700; }
+svg .stallm text.g, svg .rg text.g, svg .objst text.g { pointer-events: none; }
+.runinfo .ghostline { color: #6b21a8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .runinfo .ghostline { color: #e9d5ff; } }
+:root[data-theme="dark"] .runinfo .ghostline { color: #e9d5ff; }
+@media (max-width: 600px) { .srow { grid-template-columns: 5.2em 1fr 4.2em; } .lrow { padding: 6px 0; } }

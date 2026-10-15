@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -30,7 +31,9 @@ type botFake struct {
 }
 
 func (g *botFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
-	g.lines = append(g.lines, command)
+	if command != "roster" { // the start of a run reads the roster for its cc bot (resolveCCBot); what these tests count are the other lines
+		g.lines = append(g.lines, command)
+	}
 	var got []string
 	for _, l := range g.replies[command] {
 		got = append(got, l)
@@ -216,13 +219,32 @@ func TestRemoteRezWaitLetsTheHealerRaise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v %v", err, rep.Notes)
 	}
-	if len(g.ordersOf("cmd revive")) != 0 || rep.Remote.Revives != 0 || rep.Remote.RezWaits != 1 || rep.Remote.Rezzed != 1 {
+	if len(g.ordersOf("cmd revive")) != 0 || rep.Remote.Revives != 0 || rep.Remote.RezWaits != 1 || rep.Remote.Rezzed != 1 || rep.Remote.Rezzes != 1 {
 		t.Fatalf("orders %v %+v\n%s", g.ordersOf("cmd revive"), rep.Remote, notesOf(rep))
 	}
 }
 
 func plan1() *Plan {
 	return remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
+}
+
+// A body lying far from every living caster (rez_reach_yd) is not waited for: the caster would have to run to it, and the existing revive
+// path takes it at once. A body near the caster is left to it (the test above).
+func TestRemoteRezWaitSkippedForAFarCorpse(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.party[2].Dead, g.party[2].HP, g.party[2].State = true, 0, "d"
+	g.party[2].X = -100 // its body lies 100 yd from the healer
+	g.lagUntil = map[packet.GUID]time.Time{gMage: g.now.Add(time.Hour)}
+	o := opts()
+	o.Healer = "Healy"
+	rep, err := runRemote(t, g, plan1(), o, nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	if len(g.ordersOf("cmd revive")) != 1 || rep.Remote.RezWaits != 0 || rep.Remote.Rezzes != 0 {
+		t.Fatalf("%v %+v", g.orders, rep.Remote)
+	}
 }
 
 // G8: no caster left to raise it (the dead bot is the only one with mana besides none): released at once, no wait.
