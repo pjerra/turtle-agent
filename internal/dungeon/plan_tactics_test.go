@@ -46,7 +46,7 @@ func TestShippedPlansCarryTheirBossTactics(t *testing.T) {
 	// the Obsidian Shard 7209 is what the Sentinel's EventAI summons; Grimlok 48540; Antu'sul 81270 and EventAI 812701-812709; Velratha 77950).
 	want := map[string]map[string]string{
 		"uldaman":   {"revelosh": "interrupt", "sentinel": "kill_first", "grimlok": "interrupt"},
-		"zulfarrak": {"antusul": "interrupt", "velratha": "interrupt"},
+		"zulfarrak": {"antusul_b": "interrupt", "velratha": "interrupt"},
 	}
 	for name, legs := range want {
 		p, err := Load("../../dungeons/" + name + ".json")
