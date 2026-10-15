@@ -327,6 +327,7 @@ func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpe
 	began := d.clk.Now()
 	d.rep.note(fmt.Sprintf("%s: boss %s is not at his spot; waiting up to %.0f s for him to walk back into range", label, entriesList(sp.pick), wait.Seconds()))
 	d.remote(func(r *RemoteReport) { r.BossSearches++ })
+	noted := map[packet.GUID]bool{}
 	for d.clk.Now().Sub(began) < wait {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
 			return 0, false, err
@@ -335,8 +336,10 @@ func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpe
 			d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
 			return 0, true, nil
 		}
-		// Any living unit of the entries in the feed counts, wherever it stands (no anchor or 80 yd filter): the patrol took him far from
-		// his spot. That exact unit is then approached and pulled (fightSpec.seen).
+		// A living unit of the entries in the feed counts when he stands within bossSearchRangeYd of his spot and the way to him is a complete
+		// navmesh path that passes no pull group of a later leg (a pull on the way would drag the party through uncleared packs); there is
+		// no anchor or 80 yd filter beyond that, since the patrol took him away from his spot. That exact unit is then approached and
+		// pulled (fightSpec.seen). A unit that does not qualify is noted once and the wait goes on.
 		for _, h := range d.fr.Hostiles {
 			if h.Entry == 0 || h.HPPct <= 0 || !slices.Contains(sp.pick, h.Entry) || slices.Contains(sp.skip, h.Entry) || sp.passed[h.GUID] {
 				continue
@@ -344,12 +347,64 @@ func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpe
 			if _, refused := d.skipped[h.GUID]; refused {
 				continue
 			}
-			d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f after %.0f s (%.0f yd from his spot)", label, entriesList(sp.pick), h.X, h.Y, h.Z, d.clk.Now().Sub(began).Seconds(), nearestAnchorDist(sp, h)))
+			away := nearestAnchorDist(sp, h)
+			if why := d.bossWayBlocked(ctx, sp, h, away); why != "" {
+				if !noted[h.GUID] {
+					noted[h.GUID] = true
+					d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f (%.0f yd from his spot) but not taken: %s; waiting on", label, entriesList(sp.pick), h.X, h.Y, h.Z, away, why))
+				}
+				continue
+			}
+			d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f after %.0f s (%.0f yd from his spot)", label, entriesList(sp.pick), h.X, h.Y, h.Z, d.clk.Now().Sub(began).Seconds(), away))
 			return h.GUID, false, nil
 		}
 	}
 	return 0, false, nil
 }
+
+// bossSearchRangeYd is how far from his plan spot a boss found by the search may stand and still be approached.
+const bossSearchRangeYd = 120
+
+// bossWayBlocked says why the party should not go for the boss unit h found by the search, or "" when it may: he is within
+// bossSearchRangeYd of his spot (away), the navmesh path from the lead bot to him is complete (a game without a planner is judged on the
+// straight line), and it passes no pull group of a later leg: the way would drag the party through uncleared packs.
+func (d *RemoteDriver) bossWayBlocked(ctx context.Context, sp fightSpec, h tbm.HostileRec, away float64) string {
+	if len(sp.anchors) > 0 && away > bossSearchRangeYd {
+		return fmt.Sprintf("%.0f yd from his spot, more than %d", away, bossSearchRangeYd)
+	}
+	here, ok := d.leadPos()
+	if !ok {
+		return "the lead bot's place is not known"
+	}
+	to := hostilePoint(h)
+	path := []Point{here, to}
+	if pl, ok := d.g.(PathPlanner); ok {
+		pts, err := pl.PlanPath(ctx, d.plan.Map, here, to)
+		if err != nil || len(pts) < 2 || dist3(pts[len(pts)-1], to) > bossPathEndYd {
+			return "no complete navmesh path to him"
+		}
+		path = pts
+	}
+	for li := max(d.curLeg, -1) + 1; li < len(d.plan.Legs); li++ {
+		for gi, g := range d.plan.Legs[li].PullGroups {
+			r := g.Radius
+			if r <= 0 {
+				r = d.cfg.PackRadius
+			}
+			for _, at := range g.Positions {
+				for k := 1; k < len(path); k++ {
+					if distToSegment(at, path[k-1], path[k]) <= float64(r) {
+						return fmt.Sprintf("the way passes pull group %d of leg %d (%s), not cleared", gi, li, d.plan.Legs[li].Name)
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// bossPathEndYd is how near the boss a path must end to be taken as complete (a partial path stops short of its goal).
+const bossPathEndYd = 8
 
 // nearestAnchorDist is how far h stands from the nearest anchor of the step (0 without anchors).
 func nearestAnchorDist(sp fightSpec, h tbm.HostileRec) float64 {
