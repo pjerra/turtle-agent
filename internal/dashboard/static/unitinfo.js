@@ -109,6 +109,11 @@
       add("Distance to lead", d.lead ? "" : yd(toLead));
       return { title: (d.lead ? "★ " : "") + d.name, badge: d.lead ? "lead" : "friendly", rows };
     }
+    if (u.type === "mark") {
+      // a mark of the path layers: {title, badge, rows: [[label, value]]}, built by pathdraw.js
+      for (const r of d.rows || []) add(r[0], r[1]);
+      return { title: d.title || "", badge: d.badge || "", rows };
+    }
     if (u.type === "event") {
       add("When", clockOf(d.at));
       add("What", d.text);
@@ -229,6 +234,20 @@
     { sample: "lg-thr-target", glyph: "", text: "white outline: the tank's current target" },
     { sample: "lg-pull", glyph: "", text: "dashed yellow ring: the pull target" },
     { sample: "lg-event", glyph: EVENT_GLYPH.death + EVENT_GLYPH.boss + EVENT_GLYPH.open, text: "pins: death or wipe, boss killed, door or chest opened or looted" },
+    { sample: "lg-ps-cleared", glyph: "\u25CF", text: "numbered pack, green: cleared" },
+    { sample: "lg-ps-next", glyph: "\u25CF", text: "numbered pack, yellow: next to pull (or being pulled)" },
+    { sample: "lg-ps-skipped", glyph: "\u25CF", text: "numbered pack, grey: skipped (the run went past it without a pull)" },
+    { sample: "lg-ps-failed", glyph: "\u25CF", text: "numbered pack, red: the pull failed (hover for the reason)" },
+    { sample: "lg-wp", glyph: "\u25C6", text: "amber dashes and diamonds: the leg's planned walk line and via points; the white ring is the target point; orange-red is where the lead left the plan" },
+    { sample: "lg-rest", glyph: STATUS.rest.glyph + "\u25CE", text: "rest spot (blue) and gather spot (green) of this run, from its trace" },
+    { sample: "lg-obj", glyph: "\u2713?\u2715", text: "doors, chests, altars: green done (open, looted, used), white not yet, red failed" },
+    { sample: "lg-stall", glyph: "30s", text: "amber ring: the party stood still over 30 s (the reason on hover)" },
+    { sample: "lg-ref", glyph: "\u2715", text: "red X: a walk the module refused, a spot it could not reach, or a bot that got stuck (the reason on hover)" },
+    { sample: "lg-aggro", glyph: "\u25EF", text: "red dashed ring around a hostile pack: aggro range, 20 yd at equal level plus or minus 1 per level (the feed gives no creature level, so 20 yd)" },
+    { sample: "lg-patrol", glyph: "\u25C6", text: "purple dotted loop: a patrol's route from the plan; the filled diamond is the patrol where the feed sees it" },
+    { sample: "lg-combat", glyph: "\u2192", text: "combat lines: red mob to its victim, green healer to the friend it targets (the feed names the target, not the spell), cyan caster to the creature it crowd controls (only for casters the commander ordered; the feed does not say who put a crowd control on)" },
+    { sample: "lg-ghost", glyph: "\u25CC", text: "pale dotted line and dot: the best earlier run of this dungeon (the ghost); the run line says how far ahead or behind it is" },
+    { sample: "lg-heat", glyph: "\u2588", text: "red patches: where parties died in the latest 20 runs of this dungeon (darker red, more deaths)" },
   ];
 
   const api = { guidKey, mobName, entryText, activity, mobActivity, describeUnit, statuses, STATUS, threatOf, tankTargets, hpColor, eventGlyph, clockOf, feedLine,

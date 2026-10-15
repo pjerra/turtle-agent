@@ -23,7 +23,14 @@
     { key: "doors", label: "Doors and objects", group: "Plan", def: true, needs: "doors", why: "the plan has no door or object here" },
     { key: "sections", label: "Section labels", group: "Plan", def: true, needs: "sections", why: "the plan has no sections here" },
     { key: "steps", label: "Step numbers", group: "Plan", def: false, needs: "steps", why: "the plan has no steps here" },
-    { key: "trail", label: "Walked path", group: "Walk", def: true, needs: "trail", why: "the lead has not moved yet" },
+    { key: "waypoints", label: "Waypoints: dashed walk line, via points, target point, planned vs walked", group: "Plan", def: true, needs: "waypoints", why: "the plan has no route here" },
+    { key: "pullstate", label: "Pull groups by state (cleared, next, skipped, failed) and boss marks", group: "Plan", def: true, needs: "packs", why: "the plan has no pull groups here" },
+    { key: "restgather", label: "Rest and gather spots", group: "Plan", def: true, needs: "restgather", why: "the run's trace has no rest or gather yet" },
+    { key: "objects", label: "Objects with state (doors, chests, altars, keystones)", group: "Plan", def: false, needs: "objects", why: "the plan has no object step here" },
+    { key: "patrols", label: "Patrol routes and the patrol's live position", group: "Plan", def: false, needs: "patrols", why: "the plan has no patrol here" },
+    { key: "trail", label: "Lead's path trail (class colour, brighter)", group: "Walk", def: true, needs: "trail", why: "the lead has not moved yet" },
+    { key: "trail_members", label: "Path trails of the other party members", group: "Walk", def: false, needs: "membertrails", why: "the run's trace holds no member positions yet" },
+    { key: "ghost", label: "Best earlier run (ghost) and how far ahead or behind it is", group: "Walk", def: false, needs: "ghost", why: "no earlier run of this dungeon in the tests folder" },
     { key: "trailtime", label: "Times on the walked path", group: "Walk", def: false, needs: "trailtime", why: "the walked path has no times yet" },
     { key: "heading", label: "Lead's heading arrow (from its movement)", group: "Walk", def: false, needs: "heading", why: "the lead has not moved enough to tell" },
     { key: "next", label: "Next-stop arrow", group: "Walk", def: true, needs: "next", why: "no leg is being walked" },
@@ -38,15 +45,72 @@
     { key: "critter", label: "Critters", group: "Mobs", def: false, needs: "critter", why: "no critter in the feed" },
     { key: "threat", label: "Threat lines (mob to whom it targets)", group: "Mobs", def: false, needs: "threat", why: "no mob has a target I can place" },
     { key: "aggro", label: "Aggro range (20 yd) around pull targets", group: "Mobs", def: false, needs: "pulltargets", why: "no pull target now" },
+    { key: "packrings", label: "Aggro rings around hostile packs (20 yd, plus or minus 1 per level)", group: "Mobs", def: false, needs: "packrings", why: "no hostile mob in the feed" },
+    { key: "combat", label: "Combat lines (mob to victim, healer to heal target, crowd control)", group: "Mobs", def: false, needs: "combat", why: "no mob has a victim, healer a heal target or crowd control I can place" },
     { key: "hostilenames", label: "Names of hostile mobs", group: "Marks", def: false, needs: "hostile", why: "no hostile mob in the feed" },
     { key: "bossmark", label: "Boss mark (bigger ring, crown, name always shown)", group: "Marks", def: true, needs: "bossmob", why: "no boss in the feed now" },
     { key: "hpbars", label: "Health bars over units", group: "Marks", def: true, needs: "hpunits", why: "no unit with a health reading" },
     { key: "statusicons", label: "Status icons (dead, casting, crowd controlled, resting, fleeing)", group: "Marks", def: false, needs: "status", why: "no unit has a status to show now" },
     { key: "threatcolors", label: "Threat colours (ring = whom a mob attacks), tank's target, pull target", group: "Marks", def: false, needs: "threatcolor", why: "no mob has a target I can place" },
+    { key: "stalls", label: "Stall spots (party stood still over 30 s)", group: "Run", def: false, needs: "stalls", why: "the party has not stood still for 30 s" },
+    { key: "refusals", label: "Refused or unreachable walks (red X, reason on hover)", group: "Run", def: false, needs: "refusals", why: "no walk was refused in this run" },
+    { key: "deathheat", label: "Death heat map (latest runs of this dungeon)", group: "Run", def: false, needs: "deathheat", why: "no death in the earlier runs of this dungeon" },
     { key: "events", label: "Event pins (deaths, wipes, boss kills, doors and chests)", group: "Run", def: false, needs: "events", why: "nothing has happened in this run yet" },
     { key: "feed", label: "Event feed under the map", group: "Run", def: false, needs: "events", why: "nothing has happened in this run yet" },
     { key: "runinfo", label: "Run timer, section and boss checklist", group: "Run", def: false, needs: "runinfo", why: "no run on this card" },
   ];
+
+  // The sliders of a layer, saved once for all maps like the choice of layers: minutes (how much of a walk is drawn; the top of the slider is
+  // the whole run), opacity (percent) and width (pixels). Only layers that draw lines have a width. A value outside its range is brought back into it.
+  const STYLE_KEY = "maplayers.style.v1";
+  const WHOLE_RUN_MIN = 120;
+  const SLIDERS = {
+    minutes: { min: 1, max: WHOLE_RUN_MIN, step: 1, label: "Minutes shown" },
+    opacity: { min: 10, max: 100, step: 5, label: "Opacity" },
+    width: { min: 1, max: 8, step: 0.5, label: "Thickness" },
+  };
+  const STYLES = {
+    trail: { minutes: 120, opacity: 100, width: 2.5 },
+    trail_members: { minutes: 5, opacity: 80, width: 2 },
+    waypoints: { opacity: 90, width: 2.5 },
+    pullstate: { opacity: 100 },
+    restgather: { opacity: 100 },
+    objects: { opacity: 100 },
+    patrols: { opacity: 90, width: 2 },
+    ghost: { opacity: 40, width: 3 },
+    stalls: { opacity: 100 },
+    refusals: { opacity: 100 },
+    packrings: { opacity: 70, width: 1.5 },
+    combat: { opacity: 85, width: 2 },
+    deathheat: { opacity: 60 },
+  };
+  const clampTo = (v, p) => Math.min(SLIDERS[p].max, Math.max(SLIDERS[p].min, v));
+  function styleDefaults() { const o = {}; Object.keys(STYLES).forEach((k) => { o[k] = Object.assign({}, STYLES[k]); }); return o; }
+  // Whatever was stored, as a full set: unknown layers and properties dropped, non-numbers back to the default, numbers clamped.
+  function normalizeStyle(raw) {
+    const out = styleDefaults();
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      Object.keys(STYLES).forEach((k) => {
+        const r = raw[k];
+        if (!r || typeof r !== "object") return;
+        Object.keys(STYLES[k]).forEach((p) => { if (typeof r[p] === "number" && isFinite(r[p])) out[k][p] = clampTo(r[p], p); });
+      });
+    }
+    return out;
+  }
+  function loadStyle(storage) {
+    try { const t = storage && storage.getItem(STYLE_KEY); return normalizeStyle(t ? JSON.parse(t) : null); } catch (e) { return styleDefaults(); }
+  }
+  function saveStyle(storage, st) {
+    try { if (!storage) return false; storage.setItem(STYLE_KEY, JSON.stringify(normalizeStyle(st))); return true; } catch (e) { return false; }
+  }
+  function setStyle(st, key, prop, value) {
+    const out = normalizeStyle(st);
+    if (out[key] && prop in out[key] && typeof value === "number" && isFinite(value)) out[key][prop] = clampTo(value, prop);
+    return out;
+  }
+  // The minutes of a trail, null for the whole run.
+  const trailMinutes = (st, key) => { const m = st && st[key] && st[key].minutes; return m == null || m >= WHOLE_RUN_MIN ? null : m; };
 
   const keys = () => DEFS.map((d) => d.key);
   function defaults() { const o = {}; DEFS.forEach((d) => { o[d.key] = d.def; }); return o; }
@@ -164,6 +228,7 @@
 
   const api = {
     STORAGE_KEY, HEAL_RANGE_YD, AGGRO_YD, DEFS, keys, defaults, normalize, load, save, set, availability, groups,
+    STYLE_KEY, SLIDERS, STYLES, WHOLE_RUN_MIN, styleDefaults, normalizeStyle, loadStyle, saveStyle, setStyle, trailMinutes,
     guidKey, threatLines, botTargetLines, pullTargets, heading, trailStamps, scaleBar, gridStep, gridLines,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MapLayers = api;

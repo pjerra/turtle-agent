@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -20,6 +20,11 @@ try { hiddenGroups = new Set(JSON.parse(localStorage.getItem("grouphide") || "[]
 // "hide-<key>" on the svg when it is off (the stylesheet), and greyed out in a card's panel when that card's map has no data for it.
 let layerState = ML.defaults();
 try { layerState = ML.load(window.localStorage); } catch (e) { /* storage may be blocked */ }
+// The sliders of the layers (minutes shown, opacity, thickness) are saved once for all maps, like the choice of layers.
+let styleState = ML.styleDefaults();
+try { styleState = ML.loadStyle(window.localStorage); } catch (e) { /* storage may be blocked */ }
+const ghosts = new Map(), heats = new Map(); // "<plan>|<run>" / plan -> {at, loading, data}: the best earlier run and the death places, from the server
+const GHOST_TTL_MS = 300000, LIVE_EVERY_MS = 3000;
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 const namesOf = (c) => { const g = plans.get(c.label.plan); return g && g.names ? g.names : {}; };
 
@@ -49,9 +54,43 @@ function legendSample(l) {
   const ring = { "lg-thr-tank": "#2f80ff", "lg-thr-other": "#ff3b3b", "lg-thr-target": "#ffffff", "lg-pull": "#ffd400" }[l.sample];
   if (ring) return h("i", { class: "lgs ring" + (l.sample === "lg-pull" ? " dash" : ""), style: "--c:" + ring });
   if (l.sample === "lg-hp") return h("i", { class: "lgs hps" });
-  const colour = { "lg-boss": "#ffd400" }[l.sample];
+  const colour = { "lg-boss": "#ffd400", "lg-ps-cleared": "#22c55e", "lg-ps-next": "#ffd400", "lg-ps-skipped": "#9aa3b2", "lg-ps-failed": "#ff3b3b", "lg-wp": "#ffb020", "lg-rest": "#7aa7ff",
+    "lg-obj": "#22c55e", "lg-stall": "#ffb020", "lg-ref": "#ff3b3b", "lg-aggro": "#ff3b3b", "lg-patrol": "#c084fc", "lg-combat": "#67e8f9", "lg-ghost": "#e9d5ff", "lg-heat": "#ff2d2d" }[l.sample];
   return h("i", { class: "lgs", style: colour ? "color:" + colour : null, text: l.glyph });
 }
+
+// The sliders under a layer's row: one per property it has (minutes shown, opacity, thickness). They show while the layer is on.
+function styleSliders(parts, key) {
+  const box = h("div", { class: "lstyle", hidden: true }), inputs = {};
+  for (const prop of Object.keys(ML.STYLES[key])) {
+    const sl = ML.SLIDERS[prop], val = h("span", { class: "sv" });
+    const input = h("input", { type: "range", min: sl.min, max: sl.max, step: sl.step, "aria-label": sl.label + " of " + key });
+    input.addEventListener("input", () => {
+      styleState = ML.setStyle(styleState, key, prop, +input.value);
+      ML.saveStyle(window.localStorage, styleState);
+      for (const r of cards.values()) paintStyleUi(r);
+      scheduleRender();
+    });
+    inputs[prop] = { input, val };
+    box.append(h("label", { class: "srow" }, h("span", { class: "sl", text: sl.label }), input, val));
+  }
+  parts.sliders[key] = { box, inputs };
+  return box;
+}
+const styleValueText = (prop, v) => (prop === "minutes" ? (v >= ML.WHOLE_RUN_MIN ? "whole run" : v + " min") : prop === "opacity" ? v + " %" : v + " px");
+function paintStyleUi(rec) {
+  for (const [key, sl] of Object.entries(rec.parts.sliders)) {
+    const b = rec.parts.boxes[key], shown = !!layerState[key] && !(b && b.cb.disabled);
+    sl.box.hidden = !shown;
+    for (const [prop, io] of Object.entries(sl.inputs)) {
+      const v = styleState[key][prop];
+      if (document.activeElement !== io.input) io.input.value = String(v);
+      io.val.textContent = styleValueText(prop, v);
+    }
+  }
+}
+let renderQueued = 0;
+function scheduleRender() { if (renderQueued) return; renderQueued = requestAnimationFrame(() => { renderQueued = 0; if (last) render(last); }); }
 
 function makeCard(c) {
   const parts = {}, rec = { geo: null, card: c, svg: null, layerName: null, layerApplied: null, pick: null,
@@ -71,6 +110,7 @@ function makeCard(c) {
   parts.dim = h("input", { type: "range", min: 0, max: 80, value: dim, title: "Darken the game map under the drawing", "aria-label": "dim the background" });
   parts.dim.addEventListener("input", () => { dim = +parts.dim.value; store("mapdim", String(dim)); for (const r of cards.values()) { r.parts.dim.value = String(dim); applyDim(r); } });
   parts.boxes = {};
+  parts.sliders = {}; // layer key -> {box, inputs: {prop: {input, val}}}
   const dimRow = h("label", { class: "dimlbl" }, "Dim the picture ", parts.dim);
   const lbody = [];
   for (const group of ML.groups()) {
@@ -81,11 +121,12 @@ function makeCard(c) {
       parts.boxes[d.key] = { cb, why, row: null };
       parts.boxes[d.key].row = h("label", { class: "lrow" }, cb, h("span", { text: " " + d.label }), why);
       lbody.push(parts.boxes[d.key].row);
+      if (ML.STYLES[d.key]) lbody.push(styleSliders(parts, d.key));
     }
   }
   const lgRows = UI.LEGEND.map((l) => h("div", { class: "lgrow" }, legendSample(l), h("span", { text: l.text })));
   const legendBox = h("details", { class: "lgd" }, h("summary", { text: "Legend: what the marks mean" }), ...lgRows);
-  const resetBtn = btn("Reset layers", "Back to the layers shown by default", () => { layerState = ML.defaults(); ML.save(window.localStorage, layerState); syncLayers(); });
+  const resetBtn = btn("Reset layers", "Back to the layers and sliders shown by default", () => { layerState = ML.defaults(); ML.save(window.localStorage, layerState); styleState = ML.styleDefaults(); ML.saveStyle(window.localStorage, styleState); syncLayers(); });
   parts.layersBox = h("details", { class: "layers" }, h("summary", { class: "mb", title: "Choose what is drawn on the map (one choice for all maps)", text: "Layers" }),
     h("div", { class: "lpanel" }, h("p", { class: "lnote", text: "One choice for all maps. A greyed layer has no data on this map now." }), ...lbody, legendBox, dimRow, resetBtn));
   parts.groups = h("span", { class: "groups", title: "Show or hide the walked path and the dots of each group on this map" });
@@ -141,6 +182,39 @@ function ensureMinimap(id) {
     .catch(() => { minimaps.set(id, null); minimapMiss.set(id, Date.now()); });
   return "loading";
 }
+
+const getJSON = (url) => fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+// The digest of the agent's run (member walks, stalls, refused walks, rests, pulls, objects), from the server's follow of the run's trace: asked again every few
+// seconds, whatever the layers, so that a layer's availability is known before it is switched on. null when the run has no readable trace.
+function ensureLive(rec, c) {
+  if (!c.online || !c.label.plan) { rec.live = null; return; }
+  const now = Date.now();
+  if (rec.liveBusy || now - (rec.liveAt || 0) < LIVE_EVERY_MS) return;
+  rec.liveBusy = true; rec.liveAt = now;
+  const mins = ML.trailMinutes(styleState, "trail_members") || 0;
+  getJSON("/api/live/" + encodeURIComponent(c.id) + "?min=" + mins).then((d) => {
+    const first = !rec.live && !!d;
+    rec.live = d; rec.liveBusy = false;
+    if (first) scheduleRender();
+  });
+}
+
+// The best earlier run of the plan (not this run) and the places parties died in the latest runs: asked once per plan, again after a few minutes.
+function cachedFetch(map, key, url) {
+  const e = map.get(key);
+  if (e && (e.loading || Date.now() - e.at < GHOST_TTL_MS)) return e.data;
+  map.set(key, { at: Date.now(), loading: true, data: e ? e.data : null });
+  getJSON(url).then((d) => { map.set(key, { at: Date.now(), loading: false, data: d }); scheduleRender(); });
+  return e ? e.data : null;
+}
+const RUN_ID_OK = /^[A-Za-z0-9._-]{1,64}$/;
+function ensureGhost(c) {
+  const plan = c.label.plan, run = RUN_ID_OK.test(c.label.run_id || "") ? c.label.run_id : "";
+  const g = plan ? plans.get(plan) : null, legs = g && g.legs ? g.legs.length : 0; // the plan's sections tell the server what a clear of the whole dungeon is
+  return plan ? cachedFetch(ghosts, plan + "|" + run + "|" + legs, "/api/ghost/" + encodeURIComponent(plan) + "?legs=" + legs + (run ? "&exclude=" + encodeURIComponent(run) : "")) : null;
+}
+function ensureHeat(c) { return c.label.plan ? cachedFetch(heats, c.label.plan, "/api/heat/" + encodeURIComponent(c.label.plan)) : null; }
 
 // The image goes under the plan drawing; its rectangle is in the drawing's plane (yards), so the plan lines up with it.
 function applyLayer(rec, svg, geo) {
@@ -333,6 +407,7 @@ function paintLayerUi(rec) {
     b.row.title = a.ok ? "" : "Greyed out: " + a.why;
     b.why.textContent = a.ok ? "" : a.why;
   }
+  paintStyleUi(rec);
 }
 function syncLayers() { for (const rec of cards.values()) { paintLayerUi(rec); applyLayers(rec); if (rec.svg) applyViewBox(rec); } if (last) render(last); }
 
@@ -478,11 +553,17 @@ function renderGroupChips(rec, groups) {
   }));
 }
 
-function trailEls(pts, color) {
-  const out = [];
-  for (const seg of MV.trailSegments(pts, 24, 0.25)) {
+// The walked path of a group's lead: its last N minutes (the Layers slider; the top is the whole run), fading with age, in the thickness and opacity the
+// sliders say. The own group's lead is drawn in its role colour, brighter than the other trails; another group's in the group's colour.
+function trailEls(card, groupColor, own) {
+  const sty = styleState.trail, nowS = Date.parse(last && last.time) / 1000 || Date.now() / 1000;
+  const lead = (card.bots || []).find((b) => b.lead), color = own && lead ? MP.trailColor(MP.roleOf(lead), true) : groupColor;
+  const r = MP.recent(card.trail || [], card.trail_t, nowS, ML.trailMinutes(styleState, "trail"));
+  const w = sty.width, o = sty.opacity / 100, out = [];
+  for (const seg of MV.trailSegments(r.points, 24, 0.25)) {
     const points = seg.points.map((p) => p[0] + "," + p[1]).join(" ");
-    out.push(s("polyline", { class: "trail-halo", points, opacity: (seg.alpha * 0.7).toFixed(2) }), s("polyline", { class: "trail", points, stroke: color, opacity: seg.alpha.toFixed(2) }));
+    out.push(s("polyline", { class: "trail-halo", points, opacity: (seg.alpha * 0.7 * o).toFixed(2), style: "stroke-width:" + (w + 2.5) }),
+      s("polyline", { class: "trail", points, stroke: color, opacity: (seg.alpha * o).toFixed(2), style: "stroke-width:" + w }));
   }
   return out;
 }
@@ -503,15 +584,16 @@ function statusEl(kinds, x, y) {
   return t;
 }
 
-function renderRunInfo(rec, prog) {
-  const el = rec.parts.runinfo;
-  el.hidden = !(layerState.runinfo && prog);
+function renderRunInfo(rec, prog, ghostLine) {
+  const el = rec.parts.runinfo, showRun = !!(layerState.runinfo && prog), showGhost = !!(layerState.ghost && ghostLine);
+  el.hidden = !(showRun || showGhost);
   if (el.hidden) return;
-  const kids = [h("span", { text: UI.progressLine({ ...prog, bosses: [], total: 0 }) })];
-  if (prog.bosses.length) {
+  const kids = showRun ? [h("span", { text: UI.progressLine({ ...prog, bosses: [], total: 0 }) })] : [];
+  if (showRun && prog.bosses.length) {
     kids.push(h("span", { class: "boxes" }, " · bosses: ", ...prog.bosses.map((b, i) => h("span", { class: b.done ? "ok" : "", text: (i ? ", " : "") + (b.done ? "\u2713 " : "\u25A1 ") + b.name })),
       prog.next ? " · next: " + prog.next : prog.done === prog.total ? " · all down" : ""));
   }
+  if (showGhost) kids.push(h("span", { class: "ghostline", title: "The best earlier run of this dungeon in the tests folder", text: (kids.length ? " \u00b7 " : "") + ghostLine }));
   el.replaceChildren(...kids);
 }
 
@@ -603,7 +685,7 @@ function renderMap(c, rec) {
   // the walked path of every group on this map, then the other groups' dots
   const groups = groupsOf(c);
   renderGroupChips(rec, groups);
-  for (const g of groups) if (!hiddenGroups.has(g.card.id)) kids.push(...trailEls(g.card.trail || [], g.color));
+  for (const g of groups) if (!hiddenGroups.has(g.card.id)) kids.push(...trailEls(g.card, g.color, g.own));
   for (const g of groups) {
     if (g.own || hiddenGroups.has(g.card.id)) continue;
     for (const b of g.card.bots) {
@@ -712,10 +794,15 @@ function renderMap(c, rec) {
     unitG(g, "e:" + c.id + ":" + i, { type: "event", data: e });
     kids.push(g);
   });
+  // the path layers: what lies under the units (heat, ghost, routes, rings, lines) and what marks them (spots, X marks, targets)
+  ensureLive(rec, c);
+  const pd = PD.build({ s, plate, at, unitG, on: layerState, style: styleState, layers: ML, card: c, geo, svg, live: rec.live, ghost: ensureGhost(c), heat: ensureHeat(c), lead: leadXY, nextTarget: nt, threat });
+  kids.unshift(...pd.under);
+  kids.push(...pd.over);
   rec.units = units; rec.tipCtx = ctx;
   dyn.replaceChildren(...kids);
   const prog = UI.progress(c, geo, c.events);
-  renderRunInfo(rec, prog);
+  renderRunInfo(rec, prog, pd.ghostLine);
   renderFeed(rec, c);
   const has = (sel) => !!svg.querySelector(sel), kind = (...ks) => c.mobs.some((m) => ks.includes(m.kind));
   rec.avail = ML.availability({
@@ -725,6 +812,7 @@ function renderMap(c, rec) {
     hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,
     bossmob: c.mobs.some((m) => m.boss), hpunits: c.bots.some((b) => b.known) || c.mobs.length > 0, status: anyStatus, threatcolor: anyThreat,
     events: (c.events || []).length > 0, runinfo: !!prog,
+    ...pd.avail,
   });
   paintLayerUi(rec);
   applyViewBox(rec);
