@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
@@ -182,8 +183,8 @@ func TestDeadminesDoorsAndEvents(t *testing.T) {
 			t.Errorf("%s: last group %+v first %v", leg, last, l.Boss.First)
 		}
 	}
-	// Greenskin's Pirate (with its Defias Companion) is his first; the Squallshaper of his formation is crowd-controlled and killed last.
-	if g := dmLegSteps(p, "captain_greenskin"); fmt.Sprint(g.Boss.First) != "[657]" {
+	// Greenskin's Defias Companion (3450, no spawn row) and his Pirate are his first; the Squallshaper of his formation is crowd-controlled and killed last.
+	if g := dmLegSteps(p, "captain_greenskin"); fmt.Sprint(g.Boss.First) != "[3450 657]" {
 		t.Errorf("greenskin first %v", g.Boss.First)
 	}
 }
@@ -219,6 +220,20 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 				continue
 			}
 			for k, at := range g.Positions {
+				if g.Entries[k] == defiasCompanion {
+					// A level 14-15 pet the server makes with a Pirate at the start of the instance (no spawn row; 9 seen on the 2026-10-15 walk, 2.3 to 4.8 yd
+					// from a Pirate of the same group, or at the spawn point of a patrolling Pirate).
+					near := false
+					for q, e := range g.Entries {
+						if e == 657 && dist3(g.Positions[q], at) <= 5.5 {
+							near = true
+						}
+					}
+					if !near {
+						t.Errorf("legs[%d] (%s).pull_groups[%d]: the Defias Companion at %v is not within 5.5 yd of a Pirate of the group", i, l.Name, j, at)
+					}
+					continue
+				}
 				if !hasC(g.Entries[k], at) {
 					t.Errorf("legs[%d] (%s).pull_groups[%d]: no spawn of %d at %v", i, l.Name, j, g.Entries[k], at)
 				}
@@ -253,6 +268,9 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 				t.Errorf("legs[%d].boss: no spawn of %d at %v", i, l.Boss.Entry, l.Boss.Position)
 			}
 			for _, e := range l.Boss.First {
+				if e == defiasCompanion {
+					continue // Greenskin's Pirate carries one
+				}
 				found := false
 				for _, m := range cs {
 					if m["entry"] == strconv.Itoa(int(e)) && dist3(l.Boss.Position, Point{float32(dmFloat(m, "x")), float32(dmFloat(m, "y")), float32(dmFloat(m, "z"))}) < 25 {
@@ -277,8 +295,38 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 	}
 }
 
+// deadminesPatrolGuids are the spawn rows of the patrols the plan carries: the spawn its source names and its formation members.
+func deadminesPatrolGuids(p *Plan) map[string]bool {
+	out := map[string]bool{}
+	num := regexp.MustCompile(`\d{5,}`)
+	spawn := regexp.MustCompile(`creature_movement of spawn (\d+) `)
+	for _, l := range p.Legs {
+		for _, g := range l.PullGroups {
+			if g.Patrol == nil {
+				continue
+			}
+			if m := spawn.FindStringSubmatch(g.Patrol.Source); m != nil {
+				out[m[1]] = true
+			}
+			if i := strings.Index(g.Patrol.Source, "formation members "); i >= 0 {
+				rest := g.Patrol.Source[i+len("formation members "):]
+				if j := strings.Index(rest, ";"); j >= 0 {
+					rest = rest[:j]
+				}
+				for _, n := range num.FindAllString(rest, -1) {
+					out[n] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
 // deadminesPlanned reports whether the plan accounts for a spawn: a pull group member, a boss, a boss.first escort, or an entry the leg skips.
-func deadminesPlanned(p *Plan, l Leg, entry uint32, at Point) bool {
+func deadminesPlanned(p *Plan, l Leg, entry uint32, at Point, guid string) bool {
+	if deadminesPatrolGuids(p)[guid] {
+		return true // a member of a patrol the plan carries: it is met on its path, not at its spawn point
+	}
 	if slicesContains(l.Skip, entry) {
 		return true
 	}
@@ -397,13 +445,19 @@ func TestDeadminesPlanPointsOnMesh(t *testing.T) {
 // while any is open.
 type deadminesExemption struct{ Reason, Settled string }
 
+const defiasCompanion = 3450 // summoned with a Pirate (EventAI 65701, Bloodsail Companion 5172): a level 14-15 hostile, no spawn row
+
+// deadminesDoorsVerified is the finding of the 2026-10-15 walk on the two script-less Heavy Doors (spawns 26183 and 26184): shut at the start (state ready,
+// flags 32), one click opens each (state active, flags 33), and they stayed open for 50 minutes.
+const deadminesDoorsVerified = "2026-10-15 walk (tests/walk-dm): one click opens each, both start shut and stay open"
+
 // Three Defias Overseers stand on a catwalk at z 57.8 over the goblin hall, with no ramp near the route (the plan check of #192 warns "detour" for
 // a pack like that: the way to them is longer than twice the line plus 25 yd). They may see the party from above and join a fight. Settle on the
 // walk: either they do not aggro (they stay listed and Settled gets the walk's date and the finding) or the plan gets a controlled pull.
 var deadminesExemptions = map[string]deadminesExemption{
-	"2583051": {Reason: "Defias Overseer on the z 57.8 catwalk over the goblin hall"},
-	"2583058": {Reason: "Defias Overseer on the z 57.8 catwalk over the goblin hall"},
-	"2583061": {Reason: "Defias Overseer on the z 57.8 catwalk over the goblin hall"},
+	"2583051": {Reason: "Defias Overseer on the z 57.8 catwalk over the goblin hall: it PATROLS two points along y -584 (x -92.5 to -64.5); the route passes it at 0.9 yd on the ground, 6.6 yd in 3-D (harvester pull stand -82 -583 51), 7 of 81 walked points within 20 yd; the plan carries its patrol (period estimated, not timed); no mesh link to the floor, aggro unverified (open: a plan point is inside its aggro radius)"},
+	"2583058": {Reason: "Defias Overseer on the z 57.8 catwalk, static at -107.6 -556.7: nearest walked point 10.8 yd in 3-D (harvester pull stand -116 -557 51), 5 of 81 within 20 yd; no mesh link to the floor, aggro unverified (open: a plan point is inside its aggro radius)"},
+	"2583061": {Reason: "Defias Overseer on the z 57.8 catwalk, static at -68.4 -556.3: nearest walked point 8.4 yd in 3-D (harvester pull stand -64 -559 51), 3 of 81 within 20 yd; no mesh link to the floor, aggro unverified (open: a plan point is inside its aggro radius)"},
 }
 
 // A plan that says mapped or live-checked has had its route corrected by a mapping walk (README "Dungeon plans"): while an exemption is unsettled,
@@ -426,25 +480,49 @@ func TestDeadminesStatusNeedsSettledExemptions(t *testing.T) {
 			}
 		}
 	}
-	t.Errorf("status %q: the clicked Heavy Doors (spawns 26183 and 26184) were never tried in the game; a mapped plan needs the walk's finding recorded here", p.Status)
+	if deadminesDoorsVerified == "" {
+		t.Errorf("status %q: the clicked Heavy Doors (spawns 26183 and 26184) have no finding recorded", p.Status)
+	}
 }
 
-// While the plan is a draft, every patrol has period_estimate: true (the walk measures them).
-func TestDeadminesPatrolPeriodsAreMarkedEstimated(t *testing.T) {
+// The patrol periods were timed on the 2026-10-15 walk (tests/walk-dm/patrol_period.json, 0.6 s polls): each carries the measured round and no
+// period_estimate; the catwalk Overseer 2583051 was out of range of every sampling spot and keeps its calculated 22 s as an estimate.
+func TestDeadminesPatrolPeriodsAreMeasured(t *testing.T) {
 	p := loadPlan(t, deadminesPlan)
-	n := 0
+	measured := map[string]float32{"79144": 107.5, "79138": 33, "2583011": 58, "79188": 81, "79189": 37.5, "79147": 66.5, "79152": 49.5, "79374": 86.5,
+		"79171": 112.5, "79170": 70, "79207": 47.5, "79229": 57.5, "79246": 69.5, "79233": 29, "79284": 130.5, "2582923": 62, "2583073": 16.5, "79213": 85,
+		"79214": 65, "79260": 52.5, "79289": 25, "79290": 25, "79302": 68, "79313": 71.5, "79310": 58, "79322": 80}
+	spawn := regexp.MustCompile(`creature_movement of spawn (\d+) `)
+	seen := map[string]bool{}
 	for _, l := range p.Legs {
 		for _, g := range l.PullGroups {
-			if g.Patrol != nil {
-				n++
-				if p.Status == DraftStatus && !g.Patrol.PeriodEstimate {
-					t.Errorf("%s: the patrol of %v is not marked period_estimate", l.Name, g.Patrol.Entries)
+			if g.Patrol == nil {
+				continue
+			}
+			m := spawn.FindStringSubmatch(g.Patrol.Source)
+			if m == nil {
+				t.Errorf("%s: patrol of %v: the source names no spawn", l.Name, g.Patrol.Entries)
+				continue
+			}
+			if m[1] == "2583051" {
+				if !g.Patrol.PeriodEstimate {
+					t.Errorf("%s: the catwalk Overseer's patrol keeps period_estimate: true while it is untimed", l.Name)
 				}
+				continue
+			}
+			want, ok := measured[m[1]]
+			if !ok {
+				t.Errorf("%s: patrol of spawn %s has no measured period", l.Name, m[1])
+				continue
+			}
+			seen[m[1]] = true
+			if g.Patrol.PeriodEstimate || g.Patrol.PeriodS != want {
+				t.Errorf("%s: patrol of spawn %s: period_s %g estimate %v, measured %g", l.Name, m[1], g.Patrol.PeriodS, g.Patrol.PeriodEstimate, want)
 			}
 		}
 	}
-	if n < 20 {
-		t.Errorf("%d patrols", n)
+	if len(seen) != len(measured) {
+		t.Errorf("%d measured patrols carried, want %d", len(seen), len(measured))
 	}
 }
 
@@ -517,7 +595,7 @@ func TestDeadminesRouteHasNoUnplannedPack(t *testing.T) {
 					e64, _ := strconv.ParseUint(m["entry"], 10, 32)
 					at := Point{float32(dmFloat(m, "x")), float32(dmFloat(m, "y")), float32(dmFloat(m, "z"))}
 					entry := uint32(e64)
-					if flagged[m["guid"]] || deadminesExemptions[m["guid"]].Reason != "" || distToSegment(at, a, b) > routeAggro || math.Abs(float64(at.Z-a.Z)) > 9 || deadminesPlanned(p, l, entry, at) {
+					if flagged[m["guid"]] || deadminesExemptions[m["guid"]].Reason != "" || distToSegment(at, a, b) > routeAggro || math.Abs(float64(at.Z-a.Z)) > 9 || deadminesPlanned(p, l, entry, at, m["guid"]) {
 						continue
 					}
 					flagged[m["guid"]] = true

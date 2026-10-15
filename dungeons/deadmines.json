@@ -27,6 +27,7 @@
   "kill_first": [636, 622],
   "notes": [
     "The Deadmines (map 36), written from the world database export of tortoise-wow (tools/dungeongen/testdata/map36, read with export.sh; creature_movement of the patrols in movement.tsv), the instance script (src/scripts/dungeons/deadmines: instance_deadmines.cpp, deadmines.cpp, boss_mr_smite.cpp), the EventAI and creature_spells rows, Lock.dbc, and the map 36 navmesh (every route point is a point of a path_to route; TestDeadminesOnNavmesh). Wowhead Classic (the instance page zone=1581, the strategy guide 7786 and the npc pages with their comments, fetched with tools/wowhead/wh.py) was read for the kill order, the trash to watch and the boss tips; where it differs from the database or the script the plan follows the server and the README section lists the differences. Status stays draft (not mapped, not live-checked) until the GM-invisible walk (step 2) has checked the route, the doors and the patrols in the instance; dungeon_run refuses it without allow_draft. The patrol periods are estimates (path length at 2.5 yd/s plus the waits), not timed.",
+    "Mapping walk 2026-10-15 (GM, invisible, nothing attacked; tests/walk-dm/FINDINGS.txt in the audit folder): entered by area_trigger 78, all 16 legs walked (206 paths complete, 5112 yd, 0 stuck), 249 of 252 spawns seen at the export's places with no entry mismatch, Smite, VanCleef and the Blackguards to 0.1 yd, gunpowder radius 45 holds exactly the 15 spawns of cannon_a and cannon. The two clicked Heavy Doors (26183, 26184) open with one click (flags 32 to 33) and stay open for 50 minutes; they start shut. The walk cannot prove the doors that scripted deaths open: the navmesh and the GM walk go through shut doors. 25 patrol periods were timed (24 within 3 % of the estimate, the miner 79144 at 1.65 yd/s, the Wizard pack of hall at 130.5 s on its own path); nine Defias Companions (3450, level 14-15, hostile, server-made pets 2.3 to 4.8 yd from Pirates) stand with eight planned Pirates and Greenskin's and are members of those groups (no spawn row); the Pirate 79341's Companion is left out with its pack (stern, on no leg). Still open: the three catwalk Overseers, which the route passes 6.6 to 10.8 yd below (so the plan stays a draft), and one live run.",
     "Route (1611 yd of navmesh path, 16 legs, 130 pull groups, 7 bosses): mine_a and rhahk_zor along the upper mine to Rhahk'Zor (644, opens the Factory Door 13965 by dying); factory and the Heavy Door 17153 at -262.7 -482.4; sneed (Sneed's Shredder 642, then Sneed 643, whose death opens the Heavy Door at -290.3 -537.0); west_area and the Heavy Door 17154 at -243.0 -578.6; hall and harvester (Masterpiece Harvester 61963 on the z 51 plateau, a side branch the navmesh reaches before the foundry); gilnid (down the spiral ramp to Gilnid 1763, whose death opens the Heavy Door 26182 at -168.5 -579.9); cannon_a and cannon (Defias Gunpowder 17155, Defias Cannon 16398, the Iron Clad Door 16397); dock and mr_smite (Mr. Smite 646); deck_a, deck_b and captain_greenskin (647); edwin_vancleef (639). Cookie (645), Miner Johnson (3586), Jared Voss (61961) and the laboratory are named mobs on no leg.",
     "Doors, from the instance script and the gameobject_scripts rows: Rhahk'Zor's death opens 13965 (state active); Sneed's death opens spawn 26185 (17153 at -290.3 -537.0); Gilnid's death opens spawn 26182 (17153 at -168.5 -579.9); the cannon sets 16397 to active_alt. The levers 101831, 101832, 101834 (gameobject_scripts 26188, 26197, 26192) open the same three doors for 15 s from the far side and are not used; the lever 101833 does something only once the Iron Clad Door is open. Spawns 26183 (-262.7 -482.4) and 26184 (-243.0 -578.6) have no script and no lever: the plan clicks them (use_object, wait_for active), which is what their lock 86 (Quick Open, no key) allows; NOT VERIFIED, the walk must try both.",
     "Mechanics the plan cannot express (the step types do not exist): killing a unit that has no spawn row (Sneed 643, the Defias Overseer the gunpowder summons) is done by a wait_for hostiles_gone, not by a step that names it; a trigger that waits for a door to be shut again; the alarm event after the cannon; picking the Smite phases (nothing to do but heal and survive the 6 s swaps). See the README section on the Deadmines plan.",
@@ -83,9 +84,8 @@
               {"x": -60.7, "y": -384.7, "z": 53.7},
               {"x": -53.5, "y": -377.2, "z": 54.3}
             ],
-            "period_s": 71,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 107.5,
+            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -119,9 +119,8 @@
               {"x": -60.7, "y": -384.7, "z": 53.7},
               {"x": -53.5, "y": -377.2, "z": 54.3}
             ],
-            "period_s": 71,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 107.5,
+            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -157,9 +156,8 @@
               {"x": -55.1, "y": -379.2, "z": 54.2},
               {"x": -45.4, "y": -382.3, "z": 55.4}
             ],
-            "period_s": 32,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79138 (Defias Evoker, 8 points, 81 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 33,
+            "source": "creature_movement of spawn 79138 (Defias Evoker, 8 points, 81 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -180,8 +178,7 @@
               {"x": -88, "y": -442.3, "z": 55.6}
             ],
             "period_s": 58,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 2583011 (Defias Overseer, 6 points, 145 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 2583011 (Defias Overseer, 6 points, 145 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -216,9 +213,8 @@
               {"x": -117.3, "y": -397.7, "z": 57.3},
               {"x": -109.4, "y": -391.6, "z": 57.2}
             ],
-            "period_s": 80,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 81,
+            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -259,9 +255,8 @@
               {"x": -100.4, "y": -398.9, "z": 58.6},
               {"x": -98.5, "y": -399.1, "z": 58.4}
             ],
-            "period_s": 37,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79189 (Defias Overseer, 11 points, 93 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 37.5,
+            "source": "creature_movement of spawn 79189 (Defias Overseer, 11 points, 93 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -283,9 +278,8 @@
               {"x": -98.4, "y": -378.1, "z": 58.3},
               {"x": -90.1, "y": -375.9, "z": 57.9}
             ],
-            "period_s": 66,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79147 (Defias Evoker, 9 points, 165 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 66.5,
+            "source": "creature_movement of spawn 79147 (Defias Evoker, 9 points, 165 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -320,9 +314,8 @@
               {"x": -117.3, "y": -397.7, "z": 57.3},
               {"x": -109.4, "y": -391.6, "z": 57.2}
             ],
-            "period_s": 80,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 81,
+            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
       ]
@@ -354,9 +347,8 @@
               {"x": -125.2, "y": -405.2, "z": 58.6},
               {"x": -119.1, "y": -408.5, "z": 59}
             ],
-            "period_s": 50,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 49.5,
+            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -383,9 +375,8 @@
               {"x": -125.2, "y": -405.2, "z": 58.6},
               {"x": -119.1, "y": -408.5, "z": 59}
             ],
-            "period_s": 50,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 49.5,
+            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -454,9 +445,8 @@
               {"x": -180, "y": -416.8, "z": 54.9},
               {"x": -171.4, "y": -405.6, "z": 56.9}
             ],
-            "period_s": 86,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 86.5,
+            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -494,9 +484,8 @@
               {"x": -180, "y": -416.8, "z": 54.9},
               {"x": -171.4, "y": -405.6, "z": 56.9}
             ],
-            "period_s": 86,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 86.5,
+            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -594,9 +583,8 @@
               {"x": -156.8, "y": -509, "z": 53.4},
               {"x": -153.8, "y": -518.7, "z": 52.5}
             ],
-            "period_s": 112,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 112.5,
+            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -629,9 +617,8 @@
               {"x": -156.8, "y": -509, "z": 53.4},
               {"x": -153.8, "y": -518.7, "z": 52.5}
             ],
-            "period_s": 112,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 112.5,
+            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -689,9 +676,8 @@
               {"x": -187.3, "y": -492.5, "z": 53.6},
               {"x": -189.2, "y": -483.4, "z": 54}
             ],
-            "period_s": 68,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 70,
+            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -731,9 +717,8 @@
               {"x": -187.3, "y": -492.5, "z": 53.6},
               {"x": -189.2, "y": -483.4, "z": 54}
             ],
-            "period_s": 68,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 70,
+            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -797,9 +782,8 @@
               {"x": -271.2, "y": -482.4, "z": 48.9},
               {"x": -282.8, "y": -496, "z": 49.3}
             ],
-            "period_s": 48,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 47.5,
+            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -832,9 +816,8 @@
               {"x": -271.2, "y": -482.4, "z": 48.9},
               {"x": -282.8, "y": -496, "z": 49.3}
             ],
-            "period_s": 48,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 47.5,
+            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -880,7 +863,7 @@
         }
       ],
       "notes": [
-        "Sneed's Shredder (642, spawn 79223) walks a 15-point loop around its room (creature_movement, a boss fight searches 80 yd). When it dies, Eject Sneed (5141) puts Sneed (643, 3128 hp, Disarm 6430) in its place with a fresh threat table: he has no spawn row, so no plan field can name him; the wait for hostiles to be gone after the boss is what kills him. The Shredder casts Terrify (7399, instant) and Distracting Pain (3603). The Goblin Woodcarvers (641) Axe Toss (6466). Wowhead's guide and the DB agree that the whole room must be cleared of Woodcarvers first: Terrify sends a feared player into them (the leg pulls every Woodcarver within 45 yd of the Shredder)."
+        "Sneed's Shredder (642, spawn 79223) walks a 15-point loop around its room (x -310.6 to -289.4, y -532.6 to -499.4; 134 yd, 72.0 s a lap with two 8 s waits, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt); a boss fight searches 80 yd). When it dies, Eject Sneed (5141) puts Sneed (643, 3128 hp, Disarm 6430) in its place with a fresh threat table: he has no spawn row, so no plan field can name him; the wait for hostiles to be gone after the boss is what kills him. The Shredder casts Terrify (7399, instant) and Distracting Pain (3603). The Goblin Woodcarvers (641) Axe Toss (6466). Wowhead's guide and the DB agree that the whole room must be cleared of Woodcarvers first: Terrify sends a feared player into them (the leg pulls every Woodcarver within 45 yd of the Shredder)."
       ]
     },
     {
@@ -929,9 +912,8 @@
               {"x": -297.5, "y": -600.9, "z": 47.6},
               {"x": -290, "y": -600.1, "z": 47.8}
             ],
-            "period_s": 57,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79229 (Defias Wizard, 18 points, 142 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 57.5,
+            "source": "creature_movement of spawn 79229 (Defias Wizard, 18 points, 142 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -997,9 +979,8 @@
               {"x": -293.2, "y": -572.5, "z": 48.8},
               {"x": -291.1, "y": -559.3, "z": 48.8}
             ],
-            "period_s": 68,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79246 (Defias Taskmaster, 18 points, 171 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 69.5,
+            "source": "creature_movement of spawn 79246 (Defias Taskmaster, 18 points, 171 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1023,16 +1004,8 @@
               {"x": -261.2, "y": -582.2, "z": 50.7}
             ],
             "period_s": 29,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
-        },
-        {
-          "entries": [4418],
-          "positions": [
-            {"x": -272.331, "y": -583.156, "z": 50.1907}
-          ],
-          "radius": 3
         },
         {
           "entries": [4416],
@@ -1075,8 +1048,7 @@
               {"x": -261.2, "y": -582.2, "z": 50.7}
             ],
             "period_s": 29,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
       ],
@@ -1101,22 +1073,13 @@
         }
       ],
       "notes": [
-        "Beyond the Heavy Door 26185 (opened by Sneed's death) the way turns west and south through the Defias Strip Miner cave, then east to the Heavy Door 17154 at -243.0 -578.6 (spawn 26184, no script and no lever, clicked open like the first one). Defias Taskmasters (4417) run away from their target and shoot (Piercing Shot 6685); the Wizard (4418) casts Chains of Ice 113 and Fireball 9053."
+        "Beyond the Heavy Door 26185 (opened by Sneed's death) the way turns west and south through the Defias Strip Miner cave, then east to the Heavy Door 17154 at -243.0 -578.6 (spawn 26184, no script and no lever, clicked open like the first one). Defias Taskmasters (4417) run away from their target and shoot (Piercing Shot 6685); the Wizard (4418) casts Chains of Ice 113 and Fireball 9053. The Wizard 79229 is no pull group of his own: he patrols 18 points (57.5 s) from his spawn point and is the patrol of west_area:2."
       ]
     },
     {
       "name": "hall",
       "to": {"x": -245.5, "y": -575.8, "z": 51.2},
       "pull_groups": [
-        {
-          "entries": [4417, 4418, 4417],
-          "positions": [
-            {"x": -239.833, "y": -578.879, "z": 51.1657},
-            {"x": -229.584, "y": -578.362, "z": 51.2588},
-            {"x": -228.095, "y": -576.564, "z": 51.2145}
-          ],
-          "radius": 18
-        },
         {
           "entries": [634, 634],
           "positions": [
@@ -1125,25 +1088,47 @@
           ],
           "radius": 15,
           "patrol": {
-            "entries": [4417],
+            "entries": [4418, 4417, 4417],
             "path": [
-              {"x": -236, "y": -578, "z": 51.2},
-              {"x": -232.7, "y": -566.5, "z": 51.2},
-              {"x": -226.8, "y": -558.4, "z": 51.2},
-              {"x": -216.5, "y": -551.7, "z": 51.2},
-              {"x": -206.4, "y": -549.7, "z": 51.2},
-              {"x": -190.7, "y": -554.2, "z": 51.2},
-              {"x": -194.5, "y": -559.7, "z": 51.2},
-              {"x": -204.3, "y": -556.9, "z": 51.2},
-              {"x": -212.2, "y": -557.3, "z": 51.2},
-              {"x": -221.3, "y": -562.4, "z": 51.2},
-              {"x": -227, "y": -571.1, "z": 51.2},
-              {"x": -228.7, "y": -581.3, "z": 51.2},
-              {"x": -235.1, "y": -580.9, "z": 51.2}
+              {"x": -228.812, "y": -569.757, "z": 51.2314},
+              {"x": -225.332, "y": -562.401, "z": 51.23},
+              {"x": -220.089, "y": -556.916, "z": 51.23},
+              {"x": -211.182, "y": -553.736, "z": 51.23},
+              {"x": -203.248, "y": -553.507, "z": 51.23},
+              {"x": -194.853, "y": -555.999, "z": 51.23},
+              {"x": -187.356, "y": -561.157, "z": 51.23},
+              {"x": -182.826, "y": -567.105, "z": 51.072},
+              {"x": -179.251, "y": -573.939, "z": 48.0013},
+              {"x": -179.25, "y": -581.854, "z": 45.0103},
+              {"x": -180.508, "y": -588.861, "z": 42.1844},
+              {"x": -185.547, "y": -596.173, "z": 38.7453},
+              {"x": -193.62, "y": -601.311, "z": 34.4809},
+              {"x": -202.36, "y": -605.164, "z": 30.8329},
+              {"x": -212.195, "y": -603.824, "z": 26.463},
+              {"x": -219.832, "y": -602.784, "z": 23.3996},
+              {"x": -226.192, "y": -596.772, "z": 20.6368},
+              {"x": -228.849, "y": -592.655, "z": 19.4674},
+              {"x": -222.017, "y": -602.068, "z": 22.7777},
+              {"x": -215.955, "y": -606.225, "z": 25.5062},
+              {"x": -206.392, "y": -607.716, "z": 28.9385},
+              {"x": -195.975, "y": -605.079, "z": 33.3159},
+              {"x": -190.92, "y": -602.234, "z": 35.448},
+              {"x": -186.186, "y": -599.686, "z": 37.3745},
+              {"x": -181.845, "y": -593.462, "z": 40.1753},
+              {"x": -179.362, "y": -585.189, "z": 43.6891},
+              {"x": -180.207, "y": -574.755, "z": 47.8364},
+              {"x": -183.317, "y": -567.58, "z": 51.0124},
+              {"x": -188.935, "y": -559.687, "z": 51.2296},
+              {"x": -195.706, "y": -554.703, "z": 51.2296},
+              {"x": -204.469, "y": -552.705, "z": 51.2296},
+              {"x": -213.906, "y": -554.141, "z": 51.2296},
+              {"x": -222.241, "y": -558.84, "z": 51.2296},
+              {"x": -227.752, "y": -566.248, "z": 51.2296},
+              {"x": -230.554, "y": -574.552, "z": 51.223},
+              {"x": -230.624, "y": -583.197, "z": 51.2233}
             ],
-            "period_s": 51,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79283 (Defias Taskmaster, 13 points, 126 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 130.5,
+            "source": "creature_movement of spawn 79284 (Defias Wizard, 36 points, 324 yd) with its formation members 79283, 79285; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1153,25 +1138,47 @@
           ],
           "radius": 14,
           "patrol": {
-            "entries": [4417],
+            "entries": [4418, 4417, 4417],
             "path": [
-              {"x": -236, "y": -578, "z": 51.2},
-              {"x": -232.7, "y": -566.5, "z": 51.2},
-              {"x": -226.8, "y": -558.4, "z": 51.2},
-              {"x": -216.5, "y": -551.7, "z": 51.2},
-              {"x": -206.4, "y": -549.7, "z": 51.2},
-              {"x": -190.7, "y": -554.2, "z": 51.2},
-              {"x": -194.5, "y": -559.7, "z": 51.2},
-              {"x": -204.3, "y": -556.9, "z": 51.2},
-              {"x": -212.2, "y": -557.3, "z": 51.2},
-              {"x": -221.3, "y": -562.4, "z": 51.2},
-              {"x": -227, "y": -571.1, "z": 51.2},
-              {"x": -228.7, "y": -581.3, "z": 51.2},
-              {"x": -235.1, "y": -580.9, "z": 51.2}
+              {"x": -228.812, "y": -569.757, "z": 51.2314},
+              {"x": -225.332, "y": -562.401, "z": 51.23},
+              {"x": -220.089, "y": -556.916, "z": 51.23},
+              {"x": -211.182, "y": -553.736, "z": 51.23},
+              {"x": -203.248, "y": -553.507, "z": 51.23},
+              {"x": -194.853, "y": -555.999, "z": 51.23},
+              {"x": -187.356, "y": -561.157, "z": 51.23},
+              {"x": -182.826, "y": -567.105, "z": 51.072},
+              {"x": -179.251, "y": -573.939, "z": 48.0013},
+              {"x": -179.25, "y": -581.854, "z": 45.0103},
+              {"x": -180.508, "y": -588.861, "z": 42.1844},
+              {"x": -185.547, "y": -596.173, "z": 38.7453},
+              {"x": -193.62, "y": -601.311, "z": 34.4809},
+              {"x": -202.36, "y": -605.164, "z": 30.8329},
+              {"x": -212.195, "y": -603.824, "z": 26.463},
+              {"x": -219.832, "y": -602.784, "z": 23.3996},
+              {"x": -226.192, "y": -596.772, "z": 20.6368},
+              {"x": -228.849, "y": -592.655, "z": 19.4674},
+              {"x": -222.017, "y": -602.068, "z": 22.7777},
+              {"x": -215.955, "y": -606.225, "z": 25.5062},
+              {"x": -206.392, "y": -607.716, "z": 28.9385},
+              {"x": -195.975, "y": -605.079, "z": 33.3159},
+              {"x": -190.92, "y": -602.234, "z": 35.448},
+              {"x": -186.186, "y": -599.686, "z": 37.3745},
+              {"x": -181.845, "y": -593.462, "z": 40.1753},
+              {"x": -179.362, "y": -585.189, "z": 43.6891},
+              {"x": -180.207, "y": -574.755, "z": 47.8364},
+              {"x": -183.317, "y": -567.58, "z": 51.0124},
+              {"x": -188.935, "y": -559.687, "z": 51.2296},
+              {"x": -195.706, "y": -554.703, "z": 51.2296},
+              {"x": -204.469, "y": -552.705, "z": 51.2296},
+              {"x": -213.906, "y": -554.141, "z": 51.2296},
+              {"x": -222.241, "y": -558.84, "z": 51.2296},
+              {"x": -227.752, "y": -566.248, "z": 51.2296},
+              {"x": -230.554, "y": -574.552, "z": 51.223},
+              {"x": -230.624, "y": -583.197, "z": 51.2233}
             ],
-            "period_s": 51,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79283 (Defias Taskmaster, 13 points, 126 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 130.5,
+            "source": "creature_movement of spawn 79284 (Defias Wizard, 36 points, 324 yd) with its formation members 79283, 79285; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1192,8 +1199,7 @@
               {"x": -169.2, "y": -549.8, "z": 51.2}
             ],
             "period_s": 62,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1221,14 +1227,14 @@
               {"x": -169.2, "y": -549.8, "z": 51.2}
             ],
             "period_s": 62,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
       ],
       "skip": [3586],
       "notes": [
-        "The goblin hall (z 51.2). Three Defias Overseers (634) stand on a catwalk at z 57.8 (spawn rows 2583051, 2583058, 2583061) with no ramp near the route: not pulled; they may join a fight from above. Miner Johnson (3586, faction 14, rare, 7-day respawn) stands at -152.5 -532.1 and is skipped. Jared Voss (61961, poison) and the Defias Chemists and Mixologists (61959, 61960) stand in the laboratory at x -85 to -110, y -489 to -526, which no leg walks."
+        "The goblin hall (z 51.2). Three Defias Overseers (634) stand on a catwalk at z 57.8 (spawn rows 2583051, 2583058, 2583061; the first PATROLS two points along y -584, x -92.5 to -64.5, see the harvester leg) with no mesh link to the floor: not pulled, 6.6 to 10.8 yd above the route in 3-D (walk 2026-10-15); whether they aggro cannot be seen from an invisible GM, so it stays a risk. Miner Johnson (3586, faction 14, rare, 7-day respawn) stands at -152.5 -532.1 and is skipped. Jared Voss (61961, poison) and the Defias Chemists and Mixologists (61959, 61960) stand in the laboratory at x -85 to -110, y -489 to -526, which no leg walks.",
+        "The pack of Wizard 79284 (Wizard 4418 with two Taskmasters 4417: spawns 79284, 79283, 79285) walks a 36-point, 312 yd path in 130.5 s (timed on the 2026-10-15 walk; the plan had the path of the follower 79283, 51 s). It is no pull group of its own: it is the patrol of hall:1 and hall:2. hall:1 lists two Defias Overseers (2583026, 2583027), static guards; the Taskmasters in its patrol block are that patrol, not members of the group, which is how patrol blocks are meant."
       ]
     },
     {
@@ -1263,7 +1269,17 @@
           "positions": [
             {"x": -95.9344, "y": -569.47, "z": 51.2296}
           ],
-          "radius": 6
+          "radius": 6,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -92.5058, "y": -583.909, "z": 57.8392},
+              {"x": -64.5507, "y": -584.832, "z": 57.8392}
+            ],
+            "period_s": 22,
+            "period_estimate": true,
+            "source": "creature_movement of spawn 2583051 (Defias Overseer on the z 57.8 catwalk, 2 points, 56 yd round trip); period_s is an estimate, calculated and not timed (out of range of every sampling spot of the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)); the catwalk has no mesh link to the floor"
+          }
         },
         {
           "entries": [1731, 622, 61962],
@@ -1279,9 +1295,8 @@
               {"x": -95.9, "y": -569.5, "z": 51.2},
               {"x": -75.3, "y": -569.8, "z": 51.2}
             ],
-            "period_s": 17,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 16.5,
+            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1296,9 +1311,8 @@
               {"x": -95.9, "y": -569.5, "z": 51.2},
               {"x": -75.3, "y": -569.8, "z": 51.2}
             ],
-            "period_s": 17,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 16.5,
+            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1388,8 +1402,7 @@
               {"x": -233.7, "y": -588.7, "z": 19.3}
             ],
             "period_s": 85,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1458,8 +1471,7 @@
               {"x": -233.7, "y": -588.7, "z": 19.3}
             ],
             "period_s": 85,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
       ],
@@ -1543,9 +1555,8 @@
               {"x": -126.7, "y": -635.7, "z": 12.9},
               {"x": -131.1, "y": -621.2, "z": 13.1}
             ],
-            "period_s": 64,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 65,
+            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1566,9 +1577,8 @@
               {"x": -126.7, "y": -635.7, "z": 12.9},
               {"x": -131.1, "y": -621.2, "z": 13.1}
             ],
-            "period_s": 64,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 65,
+            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1600,9 +1610,8 @@
               {"x": -131, "y": -628.7, "z": 13.2},
               {"x": -123.9, "y": -637.7, "z": 12.8}
             ],
-            "period_s": 52,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 52.5,
+            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1643,9 +1652,8 @@
               {"x": -131, "y": -628.7, "z": 13.2},
               {"x": -123.9, "y": -637.7, "z": 12.8}
             ],
-            "period_s": 52,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 52.5,
+            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1718,7 +1726,7 @@
         }
       ],
       "notes": [
-        "The Iron Clad Door (16397) at -100.5 -668.8 is the way to the ship. The Defias Gunpowder (17155, a chest, lock 57, loot 17155 = Defias Gunpowder item 5397, 100 %) at -106.4 -617.3 z 13.8 summons one Defias Overseer (634) from -131.3 -591.2 that runs to -115.3 -617.4 (go_defias_gunpowder, once per instance reset). The Defias Cannon (16398, goober, lock 83 = item 5397) at -107.6 -659.7: using it sets the Iron Clad Door to ACTIVE_ALTERNATIVE (state 2), the wait_for says active_alt. The Door Lever 101833 at -96.9 -670.6 (go_door_lever_dm) works only once the door is open (it then keeps the door open 300 s) and is not used. Mr. Smite says his alarm text 3 s after the cannon."
+        "The Iron Clad Door (16397) at -100.5 -668.8 is the way to the ship. The Defias Gunpowder (17155, a chest, lock 57, loot 17155 = Defias Gunpowder item 5397, 100 %) at -106.4 -617.3 z 13.8 summons one Defias Overseer (634) from -131.3 -591.2 that runs to -115.3 -617.4 (go_defias_gunpowder, once per instance reset). The Defias Cannon (16398, goober, lock 83 = item 5397) at -107.6 -659.7: using it sets the Iron Clad Door to ACTIVE_ALTERNATIVE (state 2), the wait_for says active_alt. The Door Lever 101833 at -96.9 -670.6 (go_door_lever_dm) works only once the door is open (it then keeps the door open 300 s) and is not used. Mr. Smite says his alarm text 3 s after the cannon. The two Defias Strip Miners 3.7 and 3.9 yd from the chest (spawns 79255 and 79257) are the first group of this leg (cannon:2), pulled before the steps: they are dead before the loot."
       ]
     },
     {
@@ -1744,8 +1752,7 @@
               {"x": -102.5, "y": -702.8, "z": 9.3}
             ],
             "period_s": 25,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1767,8 +1774,7 @@
               {"x": -102.5, "y": -702.8, "z": 9.3}
             ],
             "period_s": 25,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1786,11 +1792,12 @@
           "radius": 11
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -95.1414, "y": -722.4, "z": 8.48278}
+            {"x": -95.1414, "y": -722.4, "z": 8.48278},
+            {"x": -92.74, "y": -722.4, "z": 8.48}
           ],
-          "radius": 13
+          "radius": 11
         },
         {
           "entries": [657],
@@ -1811,8 +1818,7 @@
               {"x": -89, "y": -699.7, "z": 8.8}
             ],
             "period_s": 25,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79290 (Defias Pirate, 8 points, 62 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79290 (Defias Pirate, 8 points, 62 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1856,8 +1862,7 @@
               {"x": -61.1, "y": -731.6, "z": 8.8}
             ],
             "period_s": 68,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1887,8 +1892,7 @@
               {"x": -61.1, "y": -731.6, "z": 8.8}
             ],
             "period_s": 68,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
       ]
@@ -1912,9 +1916,10 @@
           "radius": 9
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -9.25067, "y": -740.91, "z": 8.91751}
+            {"x": -9.25067, "y": -740.91, "z": 8.91751},
+            {"x": -7.03, "y": -740.33, "z": 8.84}
           ],
           "radius": 11
         },
@@ -1947,9 +1952,8 @@
               {"x": -63.7, "y": -780.9, "z": 17.8},
               {"x": -56.1, "y": -782.5, "z": 18.1}
             ],
-            "period_s": 70,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79313 (Defias Squallshaper, 18 points, 176 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 71.5,
+            "source": "creature_movement of spawn 79313 (Defias Squallshaper, 18 points, 176 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -1990,9 +1994,10 @@
       "to": {"x": -59.4, "y": -786.3, "z": 18.2},
       "pull_groups": [
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -79.6583, "y": -782.438, "z": 17.965}
+            {"x": -79.6583, "y": -782.438, "z": 17.965},
+            {"x": -79.43, "y": -780.15, "z": 17.43}
           ],
           "radius": 6,
           "patrol": {
@@ -2017,8 +2022,7 @@
               {"x": -82.7, "y": -776.5, "z": 26.8}
             ],
             "period_s": 58,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -2049,8 +2053,7 @@
               {"x": -82.7, "y": -776.5, "z": 26.8}
             ],
             "period_s": 58,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -2094,9 +2097,8 @@
               {"x": -99.9, "y": -789.3, "z": 17},
               {"x": -111.1, "y": -795.2, "z": 16.9}
             ],
-            "period_s": 79,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 80,
+            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
@@ -2126,15 +2128,15 @@
               {"x": -99.9, "y": -789.3, "z": 17},
               {"x": -111.1, "y": -795.2, "z": 16.9}
             ],
-            "period_s": 79,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s is an estimate (the path's length at 2.5 yd/s plus the waits), not timed live"
+            "period_s": 80,
+            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -114.177, "y": -796.366, "z": 16.8931}
+            {"x": -114.177, "y": -796.366, "z": 16.8931},
+            {"x": -111.78, "y": -796.37, "z": 16.89}
           ],
           "radius": 9
         },
@@ -2146,9 +2148,10 @@
           "radius": 8
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -74.8631, "y": -783.376, "z": 26.2465}
+            {"x": -74.8631, "y": -783.376, "z": 26.2465},
+            {"x": -76.8, "y": -784.78, "z": 26.38}
           ],
           "radius": 6
         },
@@ -2213,31 +2216,33 @@
           "radius": 9
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -52.9977, "y": -791.268, "z": 38.6091}
+            {"x": -52.9977, "y": -791.268, "z": 38.6091},
+            {"x": -57.62, "y": -790.28, "z": 39.63}
           ],
-          "radius": 10
+          "radius": 6
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -40.2788, "y": -797.973, "z": 39.3257}
+            {"x": -40.2788, "y": -797.973, "z": 39.3257},
+            {"x": -40.59, "y": -795.6, "z": 39.41}
           ],
-          "radius": 11
+          "radius": 10
         }
       ],
       "skip": [645],
       "boss": {
         "entry": 647,
         "position": {"x": -68.9846, "y": -807.998, "z": 40.7529},
-        "first": [657],
+        "first": [3450, 657],
         "tactics": {
           "interrupt": [5208]
         }
       },
       "notes": [
-        "Captain Greenskin (647, spawn 79333) walks a 9-point loop on the upper deck with a Defias Pirate (657) and a Squallshaper (1732) (creature_groups 79333 formation, flags 15), at -69.0 -808.0 z 40.8: the Pirate is boss.first (it summons a Defias Companion 3450, a non-elite: kill it, then the Pirate, then Greenskin, with the Squallshaper crowd-controlled and killed last; the Squallshaper is not boss.first for that reason). He casts Cleave (face him away from the party) and Poisoned Harpoon (5208, 2.5 s), which the party interrupts. He is easy to pull by accident from the stairs: the packs of the lower decks join (Wowhead: pull from above, one pack at a time)."
+        "Captain Greenskin (647, spawn 79333) walks a 9-point loop on the upper deck (x -101.2 to -57.9, y -832.7 to -807.9, z 38.2 to 41.8; 120 yd, 48.0 s a lap, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)) with a Defias Pirate (657) and a Squallshaper (1732) (creature_groups 79333 formation, flags 15), at -69.0 -808.0 z 40.8: the Pirate is boss.first (it summons a Defias Companion 3450, a non-elite: kill it, then the Pirate, then Greenskin, with the Squallshaper crowd-controlled and killed last; the Squallshaper is not boss.first for that reason). He casts Cleave (face him away from the party) and Poisoned Harpoon (5208, 2.5 s), which the party interrupts. He is easy to pull by accident from the stairs: the packs of the lower decks join (Wowhead: pull from above, one pack at a time). His loop passes the stair Shipbuilders (captain_greenskin:0, -97.7 -805.6 z 30.7) at 4.0 yd on the ground and 8.8 yd in 3-D, and VanCleef's two Blackguards at 8.7 to 8.9 yd; the lower-deck packs stay 21.6 yd or more away in 3-D. Pull the stair pack when he is on the far end of his lap, more than 40 yd away. The Pirate, Squallshaper and a Defias Companion (3450) follow him."
       ]
     },
     {
