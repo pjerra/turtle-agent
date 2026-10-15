@@ -72,3 +72,30 @@ func TestPlanExportRefusesDraftsAndAllLiveSkipsThem(t *testing.T) {
 		t.Fatal("--out is required")
 	}
 }
+
+// A plan with a leg whose companions_loot is false is refused when named, listed and skipped by --all-live (the batch goes on), and
+// exported with --drop-companions-loot.
+func TestPlanExportCompanionsLootFalse(t *testing.T) {
+	dir := t.TempDir()
+	plans := t.TempDir()
+	live := `{"version":1,"name":"livecave","status":"live-checked","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":1,"position":{"x":5,"y":0,"z":0}}}]}`
+	grave := strings.NewReplacer("livecave", "gravecave", `"name":"a",`, `"name":"a","companions_loot":false,`).Replace(live)
+	for n, js := range map[string]string{"livecave": live, "gravecave": grave} {
+		if err := os.WriteFile(filepath.Join(plans, n+".json"), []byte(js), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _, errs := runExport("--dir", plans, "--out", dir, "gravecave"); code != exitUsage || !strings.Contains(errs, "companions_loot is false") {
+		t.Fatalf("named: %d %q", code, errs)
+	}
+	code, out, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190200", "--all-live")
+	if code != exitOK || !strings.Contains(out, "livecave") || strings.Contains(out, "gravecave: map") || !strings.Contains(errs, "gravecave: skipped") {
+		t.Fatalf("--all-live: %d %q %q", code, out, errs)
+	}
+	if code, out, _ := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190300", "--drop-companions-loot", "gravecave"); code != exitOK || !strings.Contains(out, "gravecave: map 70") {
+		t.Fatalf("--drop-companions-loot: %d %q", code, out)
+	}
+	if code, _, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190400", "--all-live", "gravecave"); code != exitUsage {
+		t.Fatalf("%d %q", code, errs)
+	}
+}

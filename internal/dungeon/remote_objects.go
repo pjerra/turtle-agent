@@ -338,6 +338,15 @@ func (o *objRec) order(res tbm.OrderResult, began time.Time) {
 		o.target = t.GUID
 		oo.Target = fmt.Sprintf("%s entry %d", tbm.GUIDArg(t.GUID), t.Entry)
 	}
+	// Every order of an object step is a trace event with its answer, so a run whose order got no ACK or ERR (live, round 3: the gong) says so.
+	ev := map[string]any{"leg": o.d.curLeg, "step": o.label(), "command": oo.Command, "result": oo.Result, "reply": oo.Reply, "pending": oo.Pending, "seconds": oo.Seconds}
+	if oo.Target != "" {
+		ev["target"] = oo.Target
+	}
+	if res.Spell != 0 {
+		ev["spell"] = res.Spell
+	}
+	o.d.tr.Event("object_order", ev)
 	o.update(func(s *ObjectStepReport) {
 		s.Orders = append(s.Orders, oo)
 		if res.Target != nil {
@@ -500,6 +509,11 @@ func (d *RemoteDriver) carrierInv(ctx context.Context, bot string) (tbm.Inventor
 	if !ok {
 		return tbm.Inventory{}, errors.New("this game cannot send .bot inv")
 	}
+	return botInventory(ctx, bl, bot)
+}
+
+// botInventory sends `.bot inv <bot>` and reads the snapshot (the carrier's check, and the bag check of the prepare step's give_items).
+func botInventory(ctx context.Context, bl BotLiner, bot string) (tbm.Inventory, error) {
 	lines, settled, err := bl.BotLines(ctx, "inv "+bot, 8*time.Second, func(line string) bool {
 		return strings.HasPrefix(line, "TBM:INV_END|") || strings.HasPrefix(line, "TBM:ACTION_ERR|inv|")
 	})
@@ -643,6 +657,16 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 		leave()
 		d.wd.progress("object step result: " + a.Label)
 	}()
+	if a.Kind == ActLoot && a.Batch != "" && d.batch == nil {
+		if err := d.batchBegin(ctx, a); err != nil {
+			return err
+		}
+	} else if a.Kind == ActLoot && a.SpawnGUID != 0 && a.Batch == "" {
+		// Whatever the party is still fighting (the last grave's mobs, a pack that came by) is fought out before the carrier walks to the next chest.
+		if err := d.fightEngagedOut(ctx, a.Label); err != nil {
+			return err
+		}
+	}
 	if _, err := d.keepNear(ctx); err != nil {
 		return err
 	}
@@ -654,17 +678,26 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	if st := d.stepOf(a); st != nil && objectStepKind(*st) != "" {
 		kind = objectStepKind(*st)
 	}
+	if a.Kind == ActUse {
+		c = d.keyHolder(ctx, c, a.Requires) // a lock's key may be in the lead bot's bags (give_items "lead"), not the carrier's
+	}
 	rec := d.newObjRec(a.Leg, a.Label, kind, c.Name)
 	var note string
 	switch a.Kind {
 	case ActLoot:
 		note, err = d.stepLoot(ctx, a, c.Name, rec)
+		if err == nil && note == "" && a.SpawnGUID != 0 && a.Batch == "" {
+			err = d.fightOut(ctx, a.Label) // what the chest brought (a grave's Zombie and Dead Hero) is fought out before the next step
+		}
 	case ActUse:
 		note, err = d.stepOpen(ctx, a, c.Name, rec)
 	case ActItem:
 		note, err = d.stepItem(ctx, a, c.Name, rec)
 	case ActRitual:
 		note, err = d.stepRitual(ctx, a, c, rec)
+	}
+	if err == nil && a.Kind == ActLoot && a.Batch != "" {
+		err = d.batchStepDone(ctx, a, note != "")
 	}
 	if err == nil && note != "carries it already" {
 		err = d.waitRejoin(ctx, c.Name)
@@ -695,11 +728,23 @@ func (d *RemoteDriver) stepLoot(ctx context.Context, a Action, carrier string, r
 			return "carries it already", nil
 		}
 	}
+	// A chest of an exact spawn that is opened already, or gone, is skipped (a resumed run goes on at the first unopened grave).
+	skip, why, sure := d.spawnOpened(ctx, a)
+	if skip {
+		d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
+		return why, nil
+	}
 	stayed, err := d.approachObject(ctx, rec, carrier, objectPoint(a), d.standOf(a))
 	if err != nil {
 		return "", err
 	}
 	defer d.resumeFollow(ctx, stayed)
+	if !sure { // the first look was out of the bots' reach: look again where the carrier stands now
+		if skip, why, _ := d.spawnOpened(ctx, a); skip {
+			d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
+			return why, nil
+		}
+	}
 	var res tbm.OrderResult
 	var failed bool
 	err = d.withFFA(ctx, rec, func() error {
@@ -749,7 +794,16 @@ func (d *RemoteDriver) stepOpen(ctx context.Context, a Action, carrier string, r
 		return "", err
 	}
 	defer d.resumeFollow(ctx, stayed)
-	res, failed, err := d.carryObject(ctx, rec, a, func(arg string) string { return "cmd open " + arg + " " + carrier })
+	// With via_item the Mallet-like key is USED ON the object: `cmd use <item> <bot> <target>` (the bot walks to it and casts the item's spell at
+	// it); otherwise the object is used like a right click (`cmd open`).
+	build := func(arg string) string { return "cmd open " + arg + " " + carrier }
+	if a.ViaItem && a.Requires != nil {
+		build = func(arg string) string { return fmt.Sprintf("cmd use %d %s %s", a.Requires.Entry, carrier, arg) }
+	}
+	res, failed, err := d.carryObject(ctx, rec, a, build)
+	if err == nil && a.ViaItem && res.Spell != 0 {
+		d.rep.note(fmt.Sprintf("%s: %s cast spell %d from %s on the object", a.Label, carrier, res.Spell, a.Requires))
+	}
 	if err != nil {
 		if failed && a.Requires != nil && d.agentHolds(a.Requires) && !d.laterNeeds(a, a.Requires.Entry) {
 			return "", d.fallbackOpen(ctx, a, carrier, rec, err)
@@ -828,7 +882,8 @@ func (d *RemoteDriver) doBoss(ctx context.Context, a Action) error {
 	}
 	b := a.Boss
 	og, ok := d.orderGame()
-	off := b.CompanionsLoot != nil && !*b.CompanionsLoot
+	// A leg that has its looting off (Leg.CompanionsLoot false) has the bots muted already: the boss's own mute would turn it back on early.
+	off := b.CompanionsLoot != nil && !*b.CompanionsLoot && len(d.legMuted) == 0
 	if !ok || (b.LootItem == nil && !off) {
 		return d.doKill(ctx, a)
 	}

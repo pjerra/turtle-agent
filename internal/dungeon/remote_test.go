@@ -60,6 +60,8 @@ type rmob struct {
 	fleeOrigin         Point
 	// ccUntil: a `cmd cc` at it holds it (flag c, no target) until then (fakeRemote.ccLasts)
 	ccUntil time.Time
+	// passive: a unit that never fights the party (a ward): no target, no threat record, never engaged; an attack order at it hurts it.
+	passive bool
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -156,6 +158,7 @@ type fakeRemote struct {
 	// The bound party (remote_party.go): bots in left are out of the group (the feed and `commander status` do not list them) until a bind
 	// names them; leaveOnBind lists the bots that drop out right after a bind (once, or after every bind when stubborn); joinErr[name] is
 	// the code the bind refuses to invite that bot with.
+	reviveStuck map[string]bool // `cmd revive` is acknowledged and does nothing for these bots (a ghost outside the dungeon)
 	left        map[string]bool
 	lateJoin    map[string]time.Time // a bot in left joins the group (is loaded, arrives) at that time
 	leaveOnBind []string
@@ -287,6 +290,9 @@ func (g *fakeRemote) advance(d time.Duration) {
 			if m.attacked && (!m.fleeing || m.hit && !m.untouchable && dist3(m.pos, m.fleeOrigin) <= 12) {
 				m.hp -= g.killRate * sec
 			}
+		}
+		if m.passive && m.attacked {
+			m.hp -= g.killRate * sec
 		}
 		if m.hp > 0 {
 			live = append(live, m)
@@ -640,7 +646,7 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		return ack(intent), nil
 	case "cmd revive":
 		for _, p := range g.party {
-			if strings.EqualFold(p.Name, f[2]) && p.Dead {
+			if strings.EqualFold(p.Name, f[2]) && p.Dead && !g.reviveStuck[p.Name] {
 				p.Dead, p.HP, p.State = false, p.MaxHP/2, "n"
 				g.revived = append(g.revived, p.Name)
 			}

@@ -40,6 +40,7 @@ func (f *hireFlow) checkBot(ctx context.Context, b *hireBot) {
 		}
 	}
 	b.rb.Level, b.rb.MaxHP = m.Level, m.MaxHP
+	kept := b.reused && f.kept[strings.ToLower(b.name)]
 	switch {
 	case m.Dead:
 		b.fail("dead")
@@ -50,6 +51,12 @@ func (f *hireFlow) checkBot(ctx context.Context, b *hireBot) {
 	}
 	if p := f.levelProblem(m.Level); p != "" {
 		b.fail("%s", p)
+	}
+	if kept {
+		// A hire of a kept binding (a resume into the group and instance the run before left) is bound: it answers no `.bot` line, so its gear,
+		// spells, talents and pet cannot be read, and the run that hired it checked them. The resume goes on with the party as it is.
+		b.warn("a bound hire of a kept binding answers no .bot line: its gear, spells, talents and pet are not checked again (the run that left the binding checked them)")
+		return
 	}
 	f.gearAndSupplies(ctx, b)
 	f.checkSpells(ctx, b, m)
@@ -558,7 +565,9 @@ func (f *hireFlow) checkPet(ctx context.Context, b *hireBot, m HireMember) {
 	if b.slot.Class != "hunter" && b.slot.Class != "warlock" {
 		return
 	}
-	deadline := f.e.now().Add(hirePetWait)
+	began := f.e.now()
+	deadline := began.Add(hirePetWait)
+	nudged := false
 	for {
 		cur, ok := f.hg.Player(b.name)
 		if !ok || cur.Class == "" {
@@ -572,6 +581,17 @@ func (f *hireFlow) checkPet(ctx context.Context, b *hireBot, m HireMember) {
 		if !f.e.now().Before(deadline) {
 			b.fail("no pet out %.0f s after it showed", hirePetWait.Seconds())
 			return
+		}
+		if !nudged && !f.e.now().Before(began.Add(hirePetNudge)) {
+			// Once: a warlock whose demon the regear dismissed is told to summon one (a hunter to call its pet). The answer is not waited for.
+			nudged = true
+			text := "summon voidwalker"
+			if b.slot.Class == "hunter" {
+				text = "call pet"
+			}
+			if _, _, err := f.e.g.BotLines(ctx, "command "+b.name+" "+text, time.Second, func(string) bool { return true }); err != nil {
+				b.warn("could not tell it to summon its pet: %v", err)
+			}
 		}
 		if err := f.e.sleep(ctx, time.Second); err != nil {
 			return

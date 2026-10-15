@@ -66,7 +66,11 @@ type hireFake struct {
 	unreachable map[string]bool     // bots that answer no whisper (teleporting, offline in the grace)
 	noTalents   map[string]bool     // bots that answer `who` and `spells` but not `talents`
 	whoSilent   map[string]bool     // bots that answer everything but `who` (the hires of a kept binding)
+	deaf        map[string]bool     // bots that answer no `.bot` line at all (bound hires)
 	noPet       bool
+	petLate     int // the pets show only on the n-th look (about n seconds after the check began)
+	petLooks    map[string]int
+	botCmds     []string // every `.bot` line sent to a bot
 	itemSilent  bool
 	hireReply   string
 	items       map[uint32]ItemInfo
@@ -191,6 +195,10 @@ func (g *hireFake) restock(h *fhire) {
 }
 
 func (g *hireFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
+	g.botCmds = append(g.botCmds, command)
+	if g.deafTo(command) {
+		return nil, false, nil
+	}
 	reply, handled := g.reply(command)
 	if !handled {
 		return nil, false, nil
@@ -207,6 +215,9 @@ func (g *hireFake) BotLines(_ context.Context, command string, _ time.Duration, 
 
 // BotBurst models tbm.Commander.Burst: the reply's lines from the first one begin accepts; began is false when none does.
 func (g *hireFake) BotBurst(_ context.Context, command string, _, _ time.Duration, begin func(string) bool) ([]string, bool, error) {
+	if g.deafTo(command) {
+		return nil, false, nil
+	}
 	reply, _ := g.reply(command)
 	for i, l := range reply {
 		if begin(l) {
@@ -214,6 +225,16 @@ func (g *hireFake) BotBurst(_ context.Context, command string, _, _ time.Duratio
 		}
 	}
 	return nil, false, nil
+}
+
+// deafTo says whether the line names a bot that answers no `.bot` line.
+func (g *hireFake) deafTo(command string) bool {
+	for _, w := range strings.Fields(command) {
+		if g.deaf[w] {
+			return true
+		}
+	}
+	return false
 }
 
 // reply is what the server and the bots say to a `.bot` line, in order; handled is false for a line the fake does not know.
@@ -528,6 +549,14 @@ func (g *hireFake) Player(name string) (HireMember, bool) {
 func (g *hireFake) PetOf(guid packet.GUID) (string, bool) {
 	for _, h := range g.hires {
 		if g.member(h, false).GUID == guid && h.pet {
+			if g.petLate > 0 {
+				if g.petLooks == nil {
+					g.petLooks = map[string]int{}
+				}
+				if g.petLooks[h.name]++; g.petLooks[h.name] < g.petLate {
+					return "", false
+				}
+			}
 			return h.name + "'s pet", true
 		}
 	}
@@ -1108,8 +1137,36 @@ func TestHireMissingPetFailsWithinItsCeiling(t *testing.T) {
 	if !failed(rep, err, "Corkhas", "no pet out") || !strings.Contains(err.Error(), "Zisorlo") {
 		t.Fatalf("%v %s", err, rep.State)
 	}
-	if took := g.now.Sub(began); took > 120*time.Second {
+	if took := g.now.Sub(began); took > 150*time.Second { // the hunter and the warlock wait 60 s each
 		t.Fatalf("took %v", took)
+	}
+}
+
+// A pet that shows 50 s after the check began is waited for (the ceiling is 60 s), and a bot with no pet at 20 s is told once to summon one;
+// a pet that never comes still fails.
+func TestHireWaitsSixtySecondsForAPetAndNudgesOnce(t *testing.T) {
+	g := newHireFake(t)
+	g.petLate = 50
+	rep, err := g.run(hireSpec())
+	if err != nil || rep.State == "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	nudges := map[string]int{}
+	for _, c := range g.botCmds {
+		if strings.Contains(c, " summon voidwalker") || strings.Contains(c, " call pet") {
+			nudges[c]++
+		}
+	}
+	if len(nudges) == 0 {
+		t.Fatalf("no summon-pet order: %v", g.botCmds)
+	}
+	for c, n := range nudges {
+		if n != 1 {
+			t.Errorf("%q sent %d times", c, n)
+		}
+	}
+	if hirePetWait != 60*time.Second || hirePetNudge != 20*time.Second {
+		t.Errorf("%v %v", hirePetWait, hirePetNudge)
 	}
 }
 
@@ -1181,7 +1238,7 @@ func TestHireCommanderLeftInTheGroupFailsAfterItsCeiling(t *testing.T) {
 	if !failed(rep, err, "commander is still in a group", "#935") {
 		t.Fatalf("%v %s", err, rep.State)
 	}
-	if took := g.now.Sub(began); took > 120*time.Second {
+	if took := g.now.Sub(began); took > 150*time.Second { // the hunter and the warlock wait 60 s each
 		t.Fatalf("took %v", took)
 	}
 	// The failed step took the binding down again.
@@ -1385,6 +1442,30 @@ func TestHireKeptBindingTakesWhoFromMemory(t *testing.T) {
 	rep, err = runRemote(t, g, g.plan, RemoteOptions{Prepare: hireSpec(), HireMemory: mem}, nil)
 	if err != nil || rep.State != "done" || g.count("logout") != 0 || len(g.hireLines) != 0 || len(rep.Ready.Reused) != 5 {
 		t.Fatalf("%v %s %v\n%s", err, rep.State, g.events, notesOf(rep))
+	}
+}
+
+// A resume with prepare party: hire into a kept binding: the bound hires answer no `.bot` line, so their gear, spells, talents and pet are not
+// read again (a warning each); the party is reused as it is and the run goes on.
+func TestHireKeptBindingIsNotCheckedAgain(t *testing.T) {
+	g := newHireFake(t)
+	g.whoSilent, g.deaf = map[string]bool{}, map[string]bool{}
+	mem := map[string]tbm.Who{}
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+		h := g.preHire(c[0], c[1], 43)
+		g.whoSilent[h.name], g.deaf[h.name] = true, true
+		mem[strings.ToLower(h.name)] = tbm.Who{Class: h.class, Level: h.level, Trees: h.trees}
+	}
+	g.nextName, g.raid = 5, true
+	g.preBind()
+	rep, err := runRemote(t, g, g.plan, RemoteOptions{Prepare: hireSpec(), HireMemory: mem}, nil)
+	if err != nil || rep.State != "done" || len(rep.Ready.Reused) != 5 {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	for _, b := range rep.Ready.Bots {
+		if len(b.Problems) != 0 || len(b.Warnings) == 0 || !strings.Contains(b.Warnings[len(b.Warnings)-1], "a bound hire of a kept binding answers no .bot line") {
+			t.Errorf("%+v", b)
+		}
 	}
 }
 

@@ -60,3 +60,26 @@ func (g remoteGame) Trade(ctx context.Context, to string, items []dungeon.ItemCo
 }
 
 var _ dungeon.AgentHands = remoteGame{}
+
+// AreaTrigger sends CMSG_AREATRIGGER for the agent's own character (dungeon.AreaTriggerGame): the area_trigger step's fallback.
+func (g remoteGame) AreaTrigger(ctx context.Context, id uint32) error {
+	return g.c.cur().AreaTrigger(ctx, id)
+}
+
+// ReviveBot sends the GM line ".revive <bot>" for one of the commander's bots (dungeon.BotReviver): a bot that is dead outside the dungeon.
+// The name is checked first; only a GM account's server accepts it.
+func (g remoteGame) ReviveBot(ctx context.Context, name string) error {
+	if !botName.MatchString(name) {
+		return fmt.Errorf("revive: %q is not a bot name", name)
+	}
+	return g.c.cur().GM(ctx, ".revive "+name)
+}
+
+// SummonBot sends the GM line ".summon <bot>" (dungeon.BotSummoner): one of the commander's bots, to the agent's own character. The name is
+// checked first; only a GM account's server accepts it.
+func (g remoteGame) SummonBot(ctx context.Context, name string) error {
+	if !botName.MatchString(name) {
+		return fmt.Errorf("summon: %q is not a bot name", name)
+	}
+	return g.c.cur().GM(ctx, ".summon "+name)
+}
