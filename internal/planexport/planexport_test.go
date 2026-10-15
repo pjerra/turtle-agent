@@ -267,10 +267,7 @@ func TestUldaman(t *testing.T) {
 // TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
 // ai_dungeon_plan), as comma lists like `entries`, in the column order of that migration, and they read back.
 func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
-	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := zulfarrakThroughZumrah(t)
 	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)
@@ -333,12 +330,40 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 	}
 }
 
-// The shipped Zul'Farrak plan, with the courtyard and Zum'rah legs, still exports: the area trigger is the walk into the zone.
-func TestZulfarrakWithZumrahExports(t *testing.T) {
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
+// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
+	t.Helper()
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i, l := range p.Legs {
+		if l.Name == "zumrah" {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatal("the plan has no zumrah leg")
+	return nil
+}
+
+// The whole shipped Zul'Farrak plan is refused by the export, naming the first leg after Zum'rah: the run leader cannot wait for a unit or
+// talk to an NPC, so only the part through Zum'rah (above) can be put on the server.
+func TestZulfarrakStairsLegsAreRefusedByTheExport(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err == nil || !strings.Contains(err.Error(), "(stairs)") || !strings.Contains(err.Error(), "has no run leader step") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// The shipped Zul'Farrak plan, with the courtyard and Zum'rah legs, still exports: the area trigger is the walk into the zone.
+func TestZulfarrakWithZumrahExports(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
 	res, err := Build(p, Options{Source: "turtle-agent test dungeons/zulfarrak.json", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)

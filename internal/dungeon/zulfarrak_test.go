@@ -29,6 +29,21 @@ func loadPlan(t *testing.T, path string) *Plan {
 	return p
 }
 
+// zfStepLegs are the legs of the plan that have steps: the Zum'rah leg and the stairs event's.
+var zfStepLegs = map[string]bool{"zumrah": true, "stairs": true, "stairs_top": true, "bly": true, "weegli_door": true}
+
+// zfLeg is the leg of the plan with that name.
+func zfLeg(t *testing.T, p *Plan, name string) Leg {
+	t.Helper()
+	for _, l := range p.Legs {
+		if l.Name == name {
+			return l
+		}
+	}
+	t.Fatalf("the plan has no leg %q", name)
+	return Leg{}
+}
+
 func zfTSV(t *testing.T, name string) []map[string]string {
 	t.Helper()
 	f, err := os.Open(filepath.Join(zulfarrakData, name))
@@ -55,7 +70,7 @@ func zfTSV(t *testing.T, name string) []map[string]string {
 
 func TestZulfarrakPlansLoad(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 11 {
+	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 17 {
 		t.Fatalf("%+v", p)
 	}
 	var names []string
@@ -65,8 +80,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
 		}
-		if (len(l.Steps) != 0 && l.Name != "zumrah") || len(l.AfterBoss) != 0 {
-			t.Errorf("the plan has no steps but the Zum'rah trigger: %s", l.Name)
+		if (len(l.Steps) != 0 && !zfStepLegs[l.Name]) || (len(l.AfterBoss) != 0 && l.Name != "stairs_base") {
+			t.Errorf("the plan has steps only in the Zum'rah leg and the stairs event's legs: %s", l.Name)
 		}
 		for _, g := range l.PullGroups {
 			if g.Team != "" || g.Ambush {
@@ -74,7 +89,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah stairs stairs_top stairs_base bly weegli_door ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271 7796 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -108,9 +123,10 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		t.Errorf("tele %q outside %q portal %+v trigger %d", p.EntranceTele, p.OutsideTele, p.Portal, p.EntranceTrigger)
 	}
 	// Zum'rah (faction 35 until area trigger 962) is a boss of the main plan only, behind the area_trigger step; Weegli's crew (7604-7608) is
-	// in no pull group, boss or step of either plan.
+	// in no pull group of either plan, and only Bly (with Raven, Oro and Murta first) is a boss: the bly leg, after his gossip turns the crew
+	// hostile. Weegli (7607) is in no pull group, boss or kill list at all: he has to live to blow the End Door.
 	x := loadPlan(t, zulfarrakExtra)
-	if len(x.Legs) != 3 || x.Legs[0].Name != "gong" || x.Legs[1].Name != "stairs" || x.Legs[2].Name != "ukorz" {
+	if len(x.Legs) != 1 || x.Legs[0].Name != "gong" {
 		t.Fatalf("%+v", x.Legs)
 	}
 	for _, pl := range []*Plan{p, x} {
@@ -121,6 +137,12 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 						t.Errorf("%s/%s: %d is not a mob to pull", pl.Name, l.Name, e)
 					}
 				}
+			}
+			if l.Boss != nil && (l.Boss.Entry == 7607 || slicesContains(l.Boss.First, 7607)) {
+				t.Errorf("%s/%s: Weegli (7607) must not be killed: he blows the End Door", pl.Name, l.Name)
+			}
+			if l.Boss != nil && l.Boss.Entry >= 7604 && l.Boss.Entry <= 7608 && (pl != p || l.Name != "bly" || l.Boss.Entry != 7604 || len(l.Steps) < 2 || l.Steps[1].Gossip == nil || l.Steps[1].Gossip.NPC != 7604) {
+				t.Errorf("%s/%s: the crew is a boss only in the bly leg, after Bly's gossip", pl.Name, l.Name)
 			}
 			if l.Boss != nil && l.Boss.Entry == 7271 && (pl != p || l.Name != "zumrah" || len(l.Steps) == 0 || l.Steps[len(l.Steps)-1].AreaTrigger == nil) {
 				t.Errorf("%s/%s: Zum'rah is a boss only behind the area trigger of the zumrah leg", pl.Name, l.Name)
@@ -161,7 +183,11 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 		}
 		return false
 	}
-	summoned := map[uint32]bool{7273: true}
+	// What the instance script summons or moves has no row at the plan's place: Gahz'rilla (the Gong), Nekrum and Sezz'ziz (wave 3 of the
+	// stairs event) have none at all; Bly and his crew have rows in the cages (1881-1891 1294-1299 z 48) and stand at 1874-1895 1199-1206 z 8.87
+	// once the event is over (instance_zulfarrak.cpp, the move after PYRAMID_KILLED_ALL_TROLLS).
+	summoned := map[uint32]bool{7273: true, 7796: true, 7604: true}
+	scripted := map[uint32]bool{7275: true, 7605: true, 7606: true, 7608: true}
 	patrolBosses := map[uint32]bool{7272: true, 7795: true} // Theka walks a 45 yd loop, Velratha the strip by the gong
 	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
 		p := loadPlan(t, f)
@@ -203,7 +229,7 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 							found = true
 						}
 					}
-					if !found {
+					if !found && !scripted[e] {
 						t.Errorf("%s legs[%d].boss.first: no spawn of %d within 25 yd of the boss", p.Name, i, e)
 					}
 				}
@@ -235,8 +261,9 @@ func zulfarrakMmaps() string {
 }
 
 // Every waypoint of the plans is on the navmesh (within 2.5 yd: the Sul'lithuz Hatchlings stand on a cliff edge) and reachable from the one before it, and no leg's route passes the End Door (the
-// navmesh has no doors, so the shortest Theka -> Velratha path would walk through it; the Velratha leg starts west of the junction to avoid that) and
-// none but the zumrah leg (which has the bots' looting off for the whole leg) crosses the graveyard of Shallow Grave chests and traps.
+// navmesh has no doors, so the shortest Theka -> Velratha path would walk through it; the Velratha leg starts west of the junction to avoid that;
+// the ukorz leg, which comes after the door was blown up, is the one that goes through) and none but the legs that have the bots' looting off for the
+// whole leg (zumrah, and stairs, which walks out of the graveyard) crosses the graveyard of Shallow Grave chests and traps.
 func TestZulfarrakOnNavmesh(t *testing.T) {
 	dir := zulfarrakMmaps()
 	if dir == "" {
@@ -287,11 +314,11 @@ func TestZulfarrakOnNavmesh(t *testing.T) {
 						for q := 0; q <= n; q++ {
 							f := float32(q) / float32(n)
 							x, y := a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f
-							if math.Hypot(float64(x-endDoor.X), float64(y-endDoor.Y)) < 12 {
+							if l.Name != "ukorz" && math.Hypot(float64(x-endDoor.X), float64(y-endDoor.Y)) < 12 { // the ukorz leg goes through it: the weegli_door leg waited for it to open
 								t.Errorf("%s legs[%d] (%s) waypoint %d: the route passes the End Door at (%.0f %.0f)", p.Name, i, l.Name, j, x, y)
 								break
 							}
-							if l.Name != "zumrah" && x > 1824 && x < 1906 && y > 959 && y < 1062 { // the graveyard of Shallow Grave chests and traps, 8 yd margin (the zumrah leg is the one that goes in: companions_loot false)
+							if l.Name != "zumrah" && (l.CompanionsLoot == nil || *l.CompanionsLoot) && x > 1824 && x < 1906 && y > 959 && y < 1062 { // the graveyard of Shallow Grave chests and traps, 8 yd margin (the zumrah leg is the one that goes in: companions_loot false)
 								t.Errorf("%s legs[%d] (%s) waypoint %d: the route crosses the graveyard at (%.0f %.0f)", p.Name, i, l.Name, j, x, y)
 								break
 							}
@@ -428,7 +455,7 @@ func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
 						}
 					}
 				}
-				if l.Boss != nil && l.Boss.Entry == entry {
+				if l.Boss != nil && (l.Boss.Entry == entry || slicesContains(l.Boss.First, entry)) {
 					return true
 				}
 			}
@@ -503,7 +530,7 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 			l = x
 		}
 	}
-	if l.Name == "" || p.Legs[len(p.Legs)-2].Name != "courtyard" || p.Legs[len(p.Legs)-3].Name != "velratha" {
+	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "velratha" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
 		t.Fatalf("the courtyard leg follows Velratha's")
 	}
 	if l.To != (Point{1822, 1177, 9.1}) || l.Boss != nil || len(l.Steps) != 0 || l.CompanionsLoot != nil {
@@ -542,7 +569,7 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 // stays off for every bot but the carrier.
 func TestZulfarrakZumrahLeg(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	l := p.Legs[len(p.Legs)-1]
+	l := zfLeg(t, p, "zumrah")
 	if l.Name != "zumrah" || l.To != (Point{1859, 1058, 9.3}) || len(l.Via) != 1 || l.Via[0].Point != (Point{1892.3, 1198.4, 8.9}) || l.Via[0].Direct || len(l.PullGroups) != 0 {
 		t.Fatalf("%s to %v via %d groups %d", l.Name, l.To, len(l.Via), len(l.PullGroups))
 	}
@@ -581,7 +608,7 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 // graves nearer to him and the 9 graves of entry 128308 are not among them.
 func TestZulfarrakGraveSteps(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	l := p.Legs[len(p.Legs)-1]
+	l := zfLeg(t, p, "zumrah")
 	gos := zfTSV(t, "gameobjects.tsv")
 	all := map[string]Point{}
 	total := 0

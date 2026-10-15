@@ -84,7 +84,7 @@ func TestStepperGivesTheBatchSection(t *testing.T) {
 // The graves of the shipped Zul'Farrak plan are in batches of 3 to 6 within 15 yd of their centre.
 func TestZulfarrakGravesAreInBatches(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	l := p.Legs[len(p.Legs)-1]
+	l := zfLeg(t, p, "zumrah")
 	sizes := map[string][]Point{}
 	var order []string
 	for _, s := range l.Steps {
