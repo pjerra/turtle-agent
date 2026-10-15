@@ -563,7 +563,6 @@ var planCheckKnownFailing = map[string]bool{
 	"stormwrought_ruins":    true,
 	"timbermaw_hold":        true,
 	"upper_karazhan_halls":  true,
-	"wailing_caverns":       true,
 	"windhorn_canyon":       true,
 	"zul_gurub":             true,
 }
