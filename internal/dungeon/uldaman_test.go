@@ -354,6 +354,9 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(*s.Ritual.Stand, false)
 		}
+		if s.LootObject != nil && s.LootObject.Stand != nil {
+			add(*s.LootObject.Stand, false)
+		}
 		if s.AreaTrigger != nil {
 			add(s.AreaTrigger.Stand, false)
 		}
@@ -594,6 +597,9 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 		}
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(fmt.Sprintf("steps[%d].ritual.stand", si), *s.Ritual.Stand)
+		}
+		if s.LootObject != nil && s.LootObject.Stand != nil {
+			add(fmt.Sprintf("steps[%d].loot_object.stand", si), *s.LootObject.Stand)
 		}
 		if s.AreaTrigger != nil {
 			add(fmt.Sprintf("steps[%d].area_trigger.stand", si), s.AreaTrigger.Stand)

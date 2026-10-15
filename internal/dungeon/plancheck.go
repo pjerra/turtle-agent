@@ -339,6 +339,17 @@ func (c *planChecker) trigger(part string, t *AreaTrigger, from Point) {
 	}
 }
 
+// useRange checks that the stand point of a loot_object step (a chest) is within the use range (UseRange) of the object's position: a chest the
+// party stands farther from than that is not opened. A use_object is not measured: a gong or a door is used from farther than a chest is. A step with no stand or no position has nothing to measure.
+func (c *planChecker) useRange(part string, ref ObjectRef, stand *Point, from Point) {
+	if stand == nil || ref.Near == nil {
+		return
+	}
+	if d := dist3(*stand, *ref.Near); d > UseRange {
+		c.fail(part, 0, *stand, from, ReasonTooFar, "the stand is %.1f yd from game object %d at %.1f %.1f %.1f: the use range is %g yd", d, ref.Entry, ref.Near.X, ref.Near.Y, ref.Near.Z, UseRange)
+	}
+}
+
 // steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there
 // before the step. A step without a stand stands wherever the object is approached from, which only a run can say.
 func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
@@ -350,6 +361,7 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 			stand, label = st.UseObject.Stand, label+"use_object.stand"
 		case st.LootObject != nil:
 			stand, label = st.LootObject.Stand, label+"loot_object.stand"
+			c.useRange(label, st.LootObject.ObjectRef, stand, cur)
 		case st.Ritual != nil:
 			stand, label = st.Ritual.Stand, label+"ritual.stand"
 		case st.AreaTrigger != nil:

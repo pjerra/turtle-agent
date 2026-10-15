@@ -347,9 +347,12 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if p.Legs[last].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
 		t.Fatalf("%s", p.Legs[last].Name)
 	}
-	// three vias, to, the walk into the zone, the boss.
-	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move move move boss" {
+	// via, to, the walk into the zone, the boss: the grave steps (the carrier bot's loot_object) are left out of a leg whose companions_loot is false.
+	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
 		t.Fatalf("%s", got)
+	}
+	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "28 loot_object steps left out") {
+		t.Fatalf("warnings %v", res.Warnings)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {

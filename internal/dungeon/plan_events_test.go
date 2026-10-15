@@ -259,3 +259,19 @@ func TestLegCompanionsLootFalseRefusesABossLootItem(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The stand of a loot_object step (a chest) must be within the use range of the object's position: the plan check says so. A use_object (a gong,
+// a door) is used from farther and is not measured.
+func TestPlanCheckObjectStandWithinUseRange(t *testing.T) {
+	step := func(stand Point) Leg {
+		near := Point{10, 0, 0}
+		return Leg{Name: "g", To: Point{0, 0, 0}, Steps: []Step{{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: 128403, Near: &near, Range: 2}, Stand: &stand}}, {UseObject: &UseObject{ObjectRef: ObjectRef{Entry: 5, Near: &near}, Stand: &stand}}}}
+	}
+	if res := checkLegs(t, fakeNav{}, 0, step(Point{7, 0, 0})); !res.OK() {
+		t.Fatalf("%s", res.Summary())
+	}
+	res := checkLegs(t, fakeNav{}, 0, step(Point{4, 0, 0}))
+	if got, want := issueReasons(res.Issues), "0/steps[0].loot_object.stand/0/too far"; got != want || !strings.Contains(res.Summary(), "the stand is 6.0 yd from game object 128403 at 10.0 0.0 0.0: the use range is 4.5 yd") {
+		t.Fatalf("%q: %s", got, res.Summary())
+	}
+}

@@ -108,6 +108,9 @@ type Plan struct {
 	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
 	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
 	CCAlways []uint32 `json:"cc_always,omitempty"`
+	// NoCC lists entries the pack and reactive CC never take, besides the plan's bosses and kill_first entries (which are never crowd-controlled
+	// either): the undead and the others a Polymorph does not land on (Zul'Farrak's Zombie 7286 and Dead Hero 7276: nine orders, one cast).
+	NoCC []uint32 `json:"no_cc,omitempty"`
 	// KillFirst lists, best first, the entries the party kills before the rest of a fight, unless one is crowd-controlled (Zul'Farrak's
 	// Greater Healing Ward 8179, the Witch Doctor 5650 and the Soul Eater 7247, the healers whose heals outlast the party). A summoned
 	// entry (the ward) is a kill target, never a CC target. Empty: the tank's order only (remote_fight.go).
@@ -515,6 +518,7 @@ type rawPlan struct {
 	Hire       []string          `json:"hire_composition"`
 	CCPrio     []uint32          `json:"cc_priority"`
 	CCAlways   []uint32          `json:"cc_always"`
+	NoCC       []uint32          `json:"no_cc"`
 	KillFirst  []uint32          `json:"kill_first"`
 	SummonedKF []uint32          `json:"summoned_kill_first"`
 	Notes      []string          `json:"notes"`
@@ -757,6 +761,10 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	if len(rp.CCAlways) > 0 {
 		p.CCAlways = slices.Clone(rp.CCAlways)
+	}
+	c.entries("no_cc", rp.NoCC, false)
+	if len(rp.NoCC) > 0 {
+		p.NoCC = slices.Clone(rp.NoCC)
 	}
 	if len(rp.KillFirst) > 0 {
 		p.KillFirst = slices.Clone(rp.KillFirst)

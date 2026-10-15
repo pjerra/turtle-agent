@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -222,6 +223,27 @@ func (d *RemoteDriver) ccStillOn(h tbm.HostileRec) bool {
 	return ok && d.clk.Now().Sub(at) < ccFresh
 }
 
+// ccAllowed says whether the pack and reactive CC may take h: never a boss of the plan (a boss is not sheeped: live, 8 orders at Velratha, none
+// landed), an entry of the plan's kill_first (the healers and wards that are killed first, never sheeped: the Witch Doctor 5650 was sheeped ten
+// times against the plan), an entry of no_cc (undead: nine orders at Zombies and Dead Heroes, one cast), or a unit with a pet's GUID.
+func (d *RemoteDriver) ccAllowed(h tbm.HostileRec) bool {
+	if h.GUID.High() == packet.HighPet { // a Polymorph at a pet's GUID lands nowhere
+		return false
+	}
+	if d.plan == nil {
+		return true
+	}
+	if slices.Contains(d.plan.KillFirst, h.Entry) || slices.Contains(d.plan.NoCC, h.Entry) {
+		return false
+	}
+	for _, l := range d.plan.Legs {
+		if b := l.Boss; b != nil && (b.Entry == h.Entry || slices.Contains(b.First, h.Entry)) {
+			return false
+		}
+	}
+	return true
+}
+
 // ccPick is the member of pack the CC takes: never the pull target; a cc_always member when there is one (always), then the plan's
 // cc_priority entries (in their order), the member farthest from the target among equals.
 func (d *RemoteDriver) ccPick(t tbm.HostileRec, pack []tbm.HostileRec, always bool) (tbm.HostileRec, bool) {
@@ -234,8 +256,8 @@ func (d *RemoteDriver) ccPick(t tbm.HostileRec, pack []tbm.HostileRec, always bo
 	var best tbm.HostileRec
 	found := false
 	for _, h := range pack {
-		if h.GUID == t.GUID || (always && !slices.Contains(d.plan.CCAlways, h.Entry)) {
-			continue // a pack below big_pack is CCed for its cc_always member only
+		if h.GUID == t.GUID || (always && !slices.Contains(d.plan.CCAlways, h.Entry)) || !d.ccAllowed(h) {
+			continue // a pack below big_pack is CCed for its cc_always member only; a boss, a kill_first entry, an undead is never taken
 		}
 		if !found || rank(h) < rank(best) || (rank(h) == rank(best) && dist3(hostilePoint(h), hostilePoint(t)) > dist3(hostilePoint(best), hostilePoint(t))) {
 			best, found = h, true

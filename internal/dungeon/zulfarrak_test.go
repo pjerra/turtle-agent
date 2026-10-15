@@ -122,7 +122,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 					}
 				}
 			}
-			if l.Boss != nil && l.Boss.Entry == 7271 && (pl != p || l.Name != "zumrah" || len(l.Steps) != 1 || l.Steps[0].AreaTrigger == nil) {
+			if l.Boss != nil && l.Boss.Entry == 7271 && (pl != p || l.Name != "zumrah" || len(l.Steps) == 0 || l.Steps[len(l.Steps)-1].AreaTrigger == nil) {
 				t.Errorf("%s/%s: Zum'rah is a boss only behind the area trigger of the zumrah leg", pl.Name, l.Name)
 			}
 		}
@@ -538,35 +538,27 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 	}
 }
 
-// The Zum'rah leg (PR B): the trigger's zone, the stand inside it, the boss, the kill_first ward and the looting that stays off.
+// The Zum'rah leg (PR B): the grave steps, then the trigger's zone, the stand inside it, the boss, the kill_first ward and the looting that
+// stays off for every bot but the carrier.
 func TestZulfarrakZumrahLeg(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	l := p.Legs[len(p.Legs)-1]
-	if l.Name != "zumrah" || l.To != (Point{1885, 1012, 9.2}) || len(l.Via) != 3 || l.Via[0].Point != (Point{1859, 1058, 9.3}) || l.Via[1].Point != (Point{1854, 1055, 8.9}) || l.Via[2].Point != (Point{1860, 1037, 8.9}) || len(l.PullGroups) != 0 {
-		t.Fatalf("%+v", l)
-	}
-	// The detour (owner decision 2026-10-15) keeps every segment of the route in the graveyard at least 3.5 yd clear of each Shallow Grave chest and trap;
-	// the straight line from 1859 1058 to 1885 1012 passes 0.3 yd from one.
-	route := []Point{l.Via[0].Point, l.Via[1].Point, l.Via[2].Point, l.To}
-	for _, m := range zfTSV(t, "gameobjects.tsv") {
-		if m["entry"] != "128308" && m["entry"] != "128403" && m["entry"] != "128972" {
-			continue
-		}
-		x, _ := strconv.ParseFloat(m["x"], 64)
-		y, _ := strconv.ParseFloat(m["y"], 64)
-		for k := 1; k < len(route); k++ {
-			if d := distToSegment(Point{float32(x), float32(y), 0}, Point{route[k-1].X, route[k-1].Y, 0}, Point{route[k].X, route[k].Y, 0}); d < 3.4 {
-				t.Errorf("%s %s at %.1f %.1f is %.1f yd from the route segment %d", m["name"], m["entry"], x, y, d, k)
-			}
-		}
+	if l.Name != "zumrah" || l.To != (Point{1859, 1058, 9.3}) || len(l.Via) != 1 || l.Via[0].Point != (Point{1892.3, 1198.4, 8.9}) || l.Via[0].Direct || len(l.PullGroups) != 0 {
+		t.Fatalf("%s to %v via %d groups %d", l.Name, l.To, len(l.Via), len(l.PullGroups))
 	}
 	if l.CompanionsLoot == nil || *l.CompanionsLoot {
-		t.Errorf("companions_loot must be false: the bots may not open the graveyard's chests")
+		t.Errorf("companions_loot must be false: only the carrier opens the graves")
 	}
-	if len(l.Steps) != 1 || l.Steps[0].AreaTrigger == nil {
-		t.Fatalf("%+v", l.Steps)
+	n := len(l.Steps)
+	if n != 29 || l.Steps[n-1].AreaTrigger == nil {
+		t.Fatalf("%d steps", n)
 	}
-	a := l.Steps[0].AreaTrigger
+	for i, s := range l.Steps[:n-1] {
+		if s.LootObject == nil {
+			t.Fatalf("steps[%d] is no loot_object", i)
+		}
+	}
+	a := l.Steps[n-1].AreaTrigger
 	// at_zumrah: area trigger 962, centre 1909.27 1015.11 11.5, radius 10 (zf-probe-events, 2026-10-15).
 	if a.ID != 962 || a.Center != (Point{1909.27, 1015.11, 11.5}) || a.Radius != 10 || a.By != TriggerAuto || a.Expect != "unit 7271 hostile" {
 		t.Errorf("%+v", a)
@@ -578,13 +570,73 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 	if l.Boss == nil || l.Boss.Entry != 7271 || dist3(a.Stand, l.Boss.Position) > TriggerMaxStandToBoss {
 		t.Fatalf("%+v", l.Boss)
 	}
-	// 27 yd from Zum'rah: the lead bot's `to` is where he aggroes it on his own once he is hostile.
-	if d := hdist(l.To, l.Boss.Position); d < 25 || d > 29 {
-		t.Errorf("`to` is %.1f yd from the boss", d)
-	}
 	// The ward (7785) is killed first.
 	if l.Boss.Tactics == nil || fmt.Sprint(l.Boss.Tactics.KillFirst) != "[7785]" {
 		t.Errorf("%+v", l.Boss.Tactics)
+	}
+}
+
+// The grave steps (owner order 2026-10-15): every one is an entry 128403 spawn of the export (the graves Zum'rah's spell 10731 opens, each with
+// the linked trap that summons a Zombie and a Dead Hero), more than 30 yd from him, once each, with a stand within the use range; the three
+// graves nearer to him and the 9 graves of entry 128308 are not among them.
+func TestZulfarrakGraveSteps(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	l := p.Legs[len(p.Legs)-1]
+	gos := zfTSV(t, "gameobjects.tsv")
+	all := map[string]Point{}
+	total := 0
+	for _, m := range gos {
+		if m["entry"] == "128403" {
+			x, _ := strconv.ParseFloat(m["x"], 64)
+			y, _ := strconv.ParseFloat(m["y"], 64)
+			z, _ := strconv.ParseFloat(m["z"], 64)
+			all[m["guid"]] = Point{float32(x), float32(y), float32(z)}
+			total++
+		}
+	}
+	zumrah := l.Boss.Position
+	far := 0
+	for _, at := range all {
+		if hdist(at, zumrah) > 30 {
+			far++
+		}
+	}
+	seen := map[Point]bool{}
+	for i, s := range l.Steps {
+		lo := s.LootObject
+		if lo == nil {
+			continue
+		}
+		where := fmt.Sprintf("steps[%d]", i)
+		if lo.Entry != 128403 || lo.Near == nil || lo.Stand == nil || lo.Range != 2 || lo.ExpectItem != nil {
+			t.Errorf("%s: %+v", where, lo)
+			continue
+		}
+		match := false
+		for _, at := range all {
+			if dist3(at, *lo.Near) < 0.1 {
+				match = true
+			}
+		}
+		if !match {
+			t.Errorf("%s: no grave of entry 128403 at %v", where, *lo.Near)
+		}
+		if d := hdist(*lo.Near, zumrah); d <= 30 {
+			t.Errorf("%s: the grave is %.1f yd from Zum'rah", where, d)
+		}
+		if d := dist3(*lo.Stand, *lo.Near); d > UseRange {
+			t.Errorf("%s: the stand is %.1f yd from the grave", where, d)
+		}
+		if hdist(*lo.Stand, zumrah) <= 30 {
+			t.Errorf("%s: the stand is within 30 yd of Zum'rah", where)
+		}
+		if seen[*lo.Near] {
+			t.Errorf("%s: grave %v twice", where, *lo.Near)
+		}
+		seen[*lo.Near] = true
+	}
+	if total != 31 || far != 28 || len(seen) != far {
+		t.Errorf("%d graves of 128403 in the export, %d beyond 30 yd, %d steps", total, far, len(seen))
 	}
 }
 
@@ -598,6 +650,71 @@ func TestZulfarrakHatchlingsAreSkippedNotPulled(t *testing.T) {
 		}
 		if (l.Name == "antusul_b" || l.Name == "theka") && !slicesContains(l.Skip, 8130) { // theka walks back past them
 			t.Errorf("%s skip %v", l.Name, l.Skip)
+		}
+	}
+}
+
+// antusul_a2 ends where its first pull is pulled from, not inside the pack: the leg's To is outside the aggro range (about 20 yd; checked at 22)
+// of every member of its first group (zf-zum round 1: the healer died at the old To 1310 834.3, 10-18 yd from them, in 2 of 4 runs).
+func TestZulfarrakAntusulA2EndsOutsideTheFirstPacksAggro(t *testing.T) {
+	for _, l := range loadPlan(t, zulfarrakPlan).Legs {
+		if l.Name != "antusul_a2" {
+			continue
+		}
+		for _, at := range l.PullGroups[0].Positions {
+			if d := hdist(l.To, at); d < 22 {
+				t.Errorf("To %v is %.1f yd from the member at %v", l.To, d, at)
+			}
+		}
+		return
+	}
+	t.Fatal("no antusul_a2")
+}
+
+// The way out of the courtyard to the graveyard never passes the End Door ramp, from any of the courtyard's pack positions (live: the hop at
+// 1847.1 1164 on the ramp path was unreachable six times): every start reaches the zumrah leg's first via on a path at least 15 yd from the door.
+func TestZulfarrakCourtyardExitsAvoidTheEndDoor(t *testing.T) {
+	dir := zulfarrakMmaps()
+	if dir == "" {
+		t.Skip("no map 209 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 209.mmap and the 209*.mmtile tiles")
+	}
+	p := loadPlan(t, zulfarrakPlan)
+	var courtyard, zumrah Leg
+	for _, l := range p.Legs {
+		switch l.Name {
+		case "courtyard":
+			courtyard = l
+		case "zumrah":
+			zumrah = l
+		}
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	door := Point{1854.5, 1142.9, 16.1}
+	to := zumrah.Via[0].Point
+	starts := []Point{courtyard.To}
+	for _, g := range courtyard.PullGroups {
+		starts = append(starts, g.Positions...)
+	}
+	for _, s := range starts {
+		path, err := pl.Plan(209, [3]float32{s.X, s.Y, s.Z}, [3]float32{to.X, to.Y, to.Z})
+		if errors.Is(err, navmesh.ErrNoEngine) {
+			t.Skip("built without cgo: no navmesh engine")
+		}
+		if err != nil || path.Status != navmesh.Complete {
+			t.Errorf("from %v: %v %s", s, err, path.Status)
+			continue
+		}
+		for k := 1; k < len(path.Points); k++ {
+			a, b := path.Points[k-1], path.Points[k]
+			n := int(math.Hypot(float64(b[0]-a[0]), float64(b[1]-a[1]))/2) + 1
+			for q := 0; q <= n; q++ {
+				f := float32(q) / float32(n)
+				if d := math.Hypot(float64(a[0]+(b[0]-a[0])*f-door.X), float64(a[1]+(b[1]-a[1])*f-door.Y)); d < 15 {
+					t.Errorf("from %v: the path passes %.1f yd from the End Door", s, d)
+					break
+				}
+			}
 		}
 	}
 }

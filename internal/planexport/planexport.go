@@ -188,15 +188,16 @@ func planComment(p *dungeon.Plan) string {
 }
 
 type builder struct {
-	opt      Options
-	plan     *dungeon.Plan
-	name     string
-	rows     Rows
-	warnings []string
-	leg_     int
-	seq      int
-	last     dungeon.Point // the last point a step of the leg put the party at
-	haveLast bool
+	opt         Options
+	plan        *dungeon.Plan
+	name        string
+	rows        Rows
+	warnings    []string
+	leg_        int
+	seq         int
+	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
+	last        dungeon.Point // the last point a step of the leg put the party at
+	haveLast    bool
 }
 
 func (b *builder) add(s StepRow) {
@@ -216,7 +217,7 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
-	b.leg_, b.seq, b.haveLast = li, 0, false
+	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
 	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
 		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
 	}
@@ -232,6 +233,12 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.Steps {
+		// A leg whose companions_loot is false (only exported with DropCompanionsLoot) has its chests opened by the carrier bot alone: with the
+		// leg's looting setting dropped those steps would send bots at them, so they are left out, with a warning.
+		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot {
+			b.skippedLoot++
+			continue
+		}
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("steps[%d]: %w", si, err)
 		}
@@ -245,6 +252,9 @@ func (b *builder) leg(li int) error {
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("after_boss[%d]: %w", si, err)
 		}
+	}
+	if b.skippedLoot > 0 {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): %d loot_object steps left out: the leg's companions_loot false (looting off for every bot, only the carrier opens these) cannot be exported", li, l.Name, b.skippedLoot))
 	}
 	if b.seq > MaxSteps {
 		return fmt.Errorf("%d steps (at most %d)", b.seq, MaxSteps)
