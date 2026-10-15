@@ -34,6 +34,13 @@ const (
 	patrolWindow = 40 * time.Second
 	// patrolWait bounds the waits of one pull group for its patrol.
 	patrolWait = 90 * time.Second
+	// patrolLocate bounds the look of one pull group for a patrol none of whose members the bots see (ZF-2 run 3i: the Shadowhunters were
+	// out of view when the pull of 1642 902 began and joined it 30 s later, with the camp beside it: nine mobs, wipe). The group's patrol
+	// is looked for up to this long, and never longer than the patrol's own round plus 10 s: a patrol that walks past the pull is seen
+	// once in a round.
+	patrolLocate = 120 * time.Second
+	// patrolKnown is how long after a patrol member was seen walking the patrol counts as located for the next group of the leg.
+	patrolKnown = 45 * time.Second
 	// patrolPullYd is how near the lead bot a patrol member must pass to be pulled alone.
 	patrolPullYd = 40
 	// patrolCorridor is how far (yards) from its path a member of a patrol may stand and still be taken as walking it.
@@ -59,6 +66,12 @@ type patrolState struct {
 	timedOut  bool
 	pulls     int
 	passed    map[packet.GUID]bool // members a patrol pull did not win against: not pulled again by this group
+	// the look for a patrol out of view: located says a member was seen on its path (or one was seen in the last patrolKnown),
+	// locating that the party is waiting to see one, locateDone that the look ran out unrewarded.
+	located    bool
+	locating   bool
+	locateDone bool
+	locateAt   time.Time
 }
 
 // pathLen is the length of the patrol's round: its path and the way back from the last point to the first.
@@ -239,7 +252,8 @@ func (d *RemoteDriver) patrolGate(ctx context.Context, t tbm.HostileRec, sp figh
 			at = append(at, here)
 		}
 		var danger []tbm.HostileRec
-		for _, h := range d.patrolMembers(p) {
+		members := d.patrolMembers(p)
+		for _, h := range members {
 			if st.passed[h.GUID] || h.GUID == t.GUID {
 				continue
 			}
@@ -247,10 +261,22 @@ func (d *RemoteDriver) patrolGate(ctx context.Context, t tbm.HostileRec, sp figh
 				danger = append(danger, h)
 			}
 		}
+		if len(members) > 0 {
+			st.located = true
+			d.patrolWalkedAt[p] = d.clk.Now()
+		}
 		if len(danger) == 0 {
+			// No member of the patrol in view is no patrol: it may be one corner away, on a round that brings it to the pull in 30 s.
+			// The party looks for it for up to a round before it pulls (remote_patrol.go, patrolLocate).
+			if wait, err := d.locatePatrol(ctx, p, st, t, len(members) > 0); err != nil {
+				return false, err
+			} else if wait {
+				continue
+			}
 			stop()
 			return false, nil
 		}
+		d.endLocate(st)
 		if ok && st.pulls < maxPatrolPulls {
 			sort.SliceStable(danger, func(i, j int) bool {
 				return dist3(hostilePoint(danger[i]), here) < dist3(hostilePoint(danger[j]), here)
@@ -287,6 +313,48 @@ func (d *RemoteDriver) patrolGate(ctx context.Context, t tbm.HostileRec, sp figh
 			return false, err
 		}
 	}
+}
+
+// locatePatrol holds the gate while no member of the group's patrol is in view and none was seen walking lately (patrolKnown): the plan
+// knows the patrol's path and round but not where it is on it. It waits at most min(patrol_locate_s, the patrol's round + 10 s) per group.
+// It reports whether the gate waited (the caller loops); a patrol seen at any time ends it, and a look that ran out is noted once.
+func (d *RemoteDriver) locatePatrol(ctx context.Context, p *Patrol, st *patrolState, t tbm.HostileRec, inView bool) (waited bool, err error) {
+	if inView || st.located || st.locateDone || d.tx.PatrolLocate <= 0 {
+		d.endLocate(st)
+		return false, nil
+	}
+	if at, ok := d.patrolWalkedAt[p]; ok && d.clk.Now().Sub(at) < patrolKnown {
+		st.located = true
+		return false, nil
+	}
+	limit := min(d.tx.PatrolLocate, time.Duration(p.PeriodS+10)*time.Second)
+	now := d.clk.Now()
+	if !st.locating {
+		st.locating, st.locateAt = true, now
+		d.remote(func(r *RemoteReport) { r.PatrolLocates++ })
+		d.rep.note(fmt.Sprintf("leg %d: no member of the patrol (entries %v) is in view of the pull of %s; the party watches for it up to %.0f s before the pull", d.curLeg, p.Entries, d.hostileName(t), limit.Seconds()))
+	}
+	if now.Sub(st.locateAt) >= limit {
+		st.locateDone = true
+		d.endLocate(st)
+		d.rep.note(fmt.Sprintf("leg %d: the patrol (entries %v) did not come into view in %.0f s; pulling %s without it counted", d.curLeg, p.Entries, limit.Seconds(), d.hostileName(t)))
+		return false, nil
+	}
+	d.wd.progress("looking for the patrol") // a bounded look: the watchdog's clock starts again (ZF-1 run 6: a stall warning after 120 s)
+	if err := d.tick(ctx, d.cfg.Poll); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// endLocate closes the look for a patrol (its seconds go in the report).
+func (d *RemoteDriver) endLocate(st *patrolState) {
+	if !st.locating {
+		return
+	}
+	st.locating = false
+	el := d.clk.Now().Sub(st.locateAt)
+	d.remote(func(r *RemoteReport) { r.PatrolLocateS += el.Seconds() })
 }
 
 func patrolText(d *RemoteDriver, hs []tbm.HostileRec) string {
@@ -344,6 +412,7 @@ func (d *RemoteDriver) reactiveCC(ctx context.Context, pulled packet.GUID, mobs 
 	if d.tx.BigPack <= 0 || len(mobs) < 2 {
 		return nil
 	}
+	d.ensureCCBot()
 	bot := strings.TrimSpace(d.opt.CCBot)
 	if bot == "" {
 		return nil

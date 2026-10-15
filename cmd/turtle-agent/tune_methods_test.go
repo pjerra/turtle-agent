@@ -150,6 +150,9 @@ func TestTuneSetAndFileInARemoteRun(t *testing.T) {
 	if listed != 1 {
 		t.Fatal("tune_list does not show pull_range with its limits")
 	}
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	// Both changes are taken at the leg's start, where the run stands on its wait; then the run is stopped.

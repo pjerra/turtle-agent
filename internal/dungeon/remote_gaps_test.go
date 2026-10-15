@@ -31,7 +31,9 @@ type botFake struct {
 }
 
 func (g *botFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
-	g.lines = append(g.lines, command)
+	if command != "roster" { // the start of a run reads the roster for its cc bot (resolveCCBot); what these tests count are the other lines
+		g.lines = append(g.lines, command)
+	}
 	var got []string
 	for _, l := range g.replies[command] {
 		got = append(got, l)

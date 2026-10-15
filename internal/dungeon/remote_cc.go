@@ -20,6 +20,119 @@ import (
 // pulls it as it is. A pack with a member of the plan's cc_always entries (Zul'Farrak's Shadowhunter and its Hex) gets the CC whatever its
 // size, on that member.
 
+// mageClassID is the class id of a mage in the roster (TBM:ROSTER, the game's class table).
+const mageClassID = 8
+
+// mageSpells are spells only a mage casts (1.12). The feed's party record carries the bot's last AI action, a spell name cut to 16
+// characters, which tells the mage when no list of classes can be had.
+var mageSpells = []string{"frostbolt", "fireball", "scorch", "arcane missiles", "arcane explosion", "fire blast", "frost nova", "blink",
+	"polymorph", "counterspell", "cone of cold", "blizzard", "flamestrike", "pyroblast", "conjure water", "conjure food", "mana shield",
+	"ice barrier", "evocation", "frost armor", "ice armor", "mage armor", "arcane intellect", "arcane brilliance", "dampen magic",
+	"amplify magic", "ice block", "presence of mind", "arcane power", "combustion", "cold snap", "remove lesser curse", "slow fall"}
+
+// isMageAction says whether a party record's last action is a mage spell (a name cut at 16 characters matches by its prefix).
+func isMageAction(action string) bool {
+	a := strings.ToLower(strings.TrimSpace(action))
+	if a == "" {
+		return false
+	}
+	for _, s := range mageSpells {
+		if a == s || (len(a) >= 15 && strings.HasPrefix(s, a)) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveCCBot gives a run that names no cc bot the party's mage (ZF-2 run 3i and run 4: a party named by lead_bot/bots/tank/healer, with
+// no prepare hire step to name one, pulled big packs "as they are, with no cc bot" and wiped; run 4 resumed seven times and never had a
+// Polymorph, because `.bot roster` lists none of the bound hires and the hire memory of a failed prepare run was gone). Sources, in
+// order: the class the agent learned of a hire in any earlier run (RemoteOptions.ClassMemory), what a kept binding's run read
+// (HireMemory), `.bot roster` (once, at the start), and the spells the bots cast (the party record's last action). The first mage in the
+// feed's party order takes it. A cc_bot the caller gave is never replaced; a run that finds none tries again at each big pack
+// (ensureCCBot), since a mage shows itself by casting.
+func (d *RemoteDriver) resolveCCBot(ctx context.Context) {
+	if strings.TrimSpace(d.opt.CCBot) != "" || d.tx.BigPack <= 0 || !d.haveFr {
+		return
+	}
+	if n := d.mageOfParty(); n != "" {
+		d.takeCCBot(n, "the hire memory")
+		return
+	}
+	var names []string
+	for _, p := range d.fr.Party {
+		names = append(names, p.Name)
+	}
+	if bl, ok := d.g.(BotLiner); ok {
+		var st tbm.Status
+		_, settled, err := bl.BotLines(ctx, "roster", prepareRosterWait, func(line string) bool {
+			if !strings.HasPrefix(line, "TBM:") {
+				return false
+			}
+			st.Add(line)
+			return strings.HasPrefix(line, "TBM:ROSTER_END") || strings.HasPrefix(line, "TBM:ROSTER_ERROR")
+		})
+		if err == nil && settled {
+			for _, n := range names {
+				for _, r := range st.Roster {
+					if strings.EqualFold(r.Name, n) && r.Class == mageClassID {
+						d.takeCCBot(n, "the roster")
+						return
+					}
+				}
+			}
+		}
+	}
+	d.rep.note("cc bot: none given and no mage is known in the party yet (the class memory, the hire memory and the roster name none); it is looked for again at each big pack, from the spells the bots cast")
+}
+
+// mageOfParty is the first bot of the feed's party known to be a mage from the memories or from its last action ("" for none).
+func (d *RemoteDriver) mageOfParty() string {
+	for _, p := range d.fr.Party {
+		l := strings.ToLower(p.Name)
+		if c := d.opt.ClassMemory[l]; c != "" {
+			if c == "mage" {
+				return p.Name
+			}
+			continue
+		}
+		if w, ok := d.opt.HireMemory[l]; ok && w.Class != "" {
+			if w.Class == "mage" {
+				return p.Name
+			}
+			continue
+		}
+		if isMageAction(p.Action) {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+func (d *RemoteDriver) takeCCBot(n, from string) {
+	d.opt.CCBot = n
+	d.rep.note(fmt.Sprintf("cc bot: none given; %s, the mage of the party (%s), takes the big-pack and reactive CC", n, from))
+}
+
+// ensureCCBot looks again for the party's mage when the run has no cc bot, at most once in ccLookEvery: the spells the bots have cast since
+// the start tell the mage.
+func (d *RemoteDriver) ensureCCBot() {
+	if strings.TrimSpace(d.opt.CCBot) != "" || d.tx.BigPack <= 0 || !d.haveFr {
+		return
+	}
+	now := d.clk.Now()
+	if !d.ccLookAt.IsZero() && now.Sub(d.ccLookAt) < ccLookEvery {
+		return
+	}
+	d.ccLookAt = now
+	if n := d.mageOfParty(); n != "" {
+		d.takeCCBot(n, "its spells")
+	}
+}
+
+// ccLookEvery is how often a run without a cc bot looks for the mage again.
+const ccLookEvery = 10 * time.Second
+
 // BigPack is the size of a pack (living mobs the bots see within the group's radius of the pull target) that gets a CC before the pull.
 const BigPack = 5
 
@@ -43,6 +156,7 @@ func (d *RemoteDriver) bigPackCC(ctx context.Context, t tbm.HostileRec, sp fight
 			return nil // a CC rule (or an earlier try) already took one, and it holds
 		}
 	}
+	d.ensureCCBot()
 	bot := strings.TrimSpace(d.opt.CCBot)
 	if bot == "" {
 		d.rep.note(fmt.Sprintf("leg %d: the pack of %s has %d mobs (big_pack %d) and the run has no cc bot; pulled as it is", d.curLeg, d.hostileName(t), len(pack), d.tx.BigPack))
