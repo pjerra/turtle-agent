@@ -60,3 +60,8 @@ func (g remoteGame) Trade(ctx context.Context, to string, items []dungeon.ItemCo
 }
 
 var _ dungeon.AgentHands = remoteGame{}
+
+// AreaTrigger sends CMSG_AREATRIGGER for the agent's own character (dungeon.AreaTriggerGame): the area_trigger step's fallback.
+func (g remoteGame) AreaTrigger(ctx context.Context, id uint32) error {
+	return g.c.cur().AreaTrigger(ctx, id)
+}

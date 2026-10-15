@@ -1789,7 +1789,7 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    out of every group; still in one means a server before #935 and fails. The run's own bind then finds the binding (`already-bound`, the same lead
    and count) and reuses it. The hires stay in the commander's raid afterwards (`unbind` returns them), so a later run finds them.
 
-Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 10 s for the pet, 12 s for dismissals, 240 s for the
+Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 60 s for the pet (a bot with no pet at 20 s is told once to `summon voidwalker`, a hunter to `call pet`), 12 s for dismissals, a hire of a **kept binding** (a resume into the group the run before left: it is bound, so it answers no `.bot` line) is not checked again for gear, spells, talents or pet (a warning each; what the first run read is kept in the hire memory), 240 s for the
 whole step); no loop is extended by a retry (a hire line is sent at most three times: the raid conversion and the level fallback are one try each).
 
 **Report.** `report.ready`: `party` (`hire`), `level`, `level_note` (why the level differs from the asked one, when it does), `hired[]`, `reused[]`,
