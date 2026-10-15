@@ -348,8 +348,9 @@ type RemoteReport struct {
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
 	// GraveBatches is one record per batch of chests opened back to back (remote_batch.go; the notes "graves-batch: ..." say the same).
-	GraveBatches  []GraveBatch `json:"grave_batches,omitempty"`
-	LeftoverPulls int          `json:"leftover_pulls,omitempty"` // idle summons pulled by the leftover sweeps
+	GraveBatches   []GraveBatch `json:"grave_batches,omitempty"`
+	LeftoverPulls  int          `json:"leftover_pulls,omitempty"`  // idle summons pulled by the leftover sweeps
+	LeftoverSweeps int          `json:"leftover_sweeps,omitempty"` // leftover sweeps run (each logs a note, also when it found nothing)
 	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
 	// and marks put again on a mob whose CC lapsed while the fight went on.
 	ReactiveCC int `json:"reactive_cc"`
@@ -512,22 +513,23 @@ type RemoteDriver struct {
 	downSaid      bool      // partyDown has stopped the leg for this round of deaths
 	gatherSt      gatherState
 	// aheadPassedLeg: hostiles a pull on the way passed over (no fight, evaded, refused), with the leg it happened in
-	aheadPassedLeg map[packet.GUID]int
-	endsAtBind     int
-	stats0         tbm.ViewStats
-	statsMu        sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
-	prevDead       map[packet.GUID]bool
-	deadSeen       bool
-	revived        map[packet.GUID]int
-	lastRevive     map[packet.GUID]time.Time
-	wipeRecover    int
-	wipeRecoverLeg map[int]int // recovered wipes per leg
-	batch          *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
-	gb             gravesState
-	sweepWiped     bool // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
-	healerCapped   int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
-	bossFight      bool // a boss fight (doKill) is on
-	recoveries     int
+	aheadPassedLeg   map[packet.GUID]int
+	endsAtBind       int
+	stats0           tbm.ViewStats
+	statsMu          sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
+	prevDead         map[packet.GUID]bool
+	deadSeen         bool
+	revived          map[packet.GUID]int
+	lastRevive       map[packet.GUID]time.Time
+	wipeRecover      int
+	wipeRecoverLeg   map[int]int // recovered wipes per leg
+	batch            *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
+	gb               gravesState
+	lastFallbackTook bool // the agent's last fallback loot took an item or money (a grave's open that took nothing is not counted as opened)
+	sweepWiped       bool // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
+	healerCapped     int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	bossFight        bool // a boss fight (doKill) is on
+	recoveries       int
 
 	tank        packet.GUID
 	engagedAt   map[packet.GUID]time.Time // when a mob was first seen fighting the party

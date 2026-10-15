@@ -69,6 +69,10 @@ type gravesState struct {
 	lastClean int             // the largest batch that went by without a wipe
 	wipes     int             // wipes during batches
 	wipedAt   int             // the size that wiped first
+	opened    int             // chests opened in all batches
+	skipped   int             // chests skipped (open already, gone, or the agent took nothing)
+	cuts      int             // batches cut by the radius
+	maxRadius float64         // the widest batch
 	aoe       map[string]bool // each bot's area spells as the driver set them (true: on); absent: not set by a batch
 }
 
@@ -81,6 +85,8 @@ type batchRun struct {
 	adds    map[packet.GUID]bool
 	deaths0 int
 	stayed  bool // the party was told to stay at the centre
+	// sectionLeft is how many chests of the section follow this batch (0: it is the last one).
+	sectionLeft int
 }
 
 // gravesMode names how the batch size is decided.
@@ -180,7 +186,7 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 	cut := size < want
 	gb.n++
 	b := &batchRun{
-		left: size, began: d.clk.Now(), adds: map[packet.GUID]bool{},
+		left: size, sectionLeft: len(a.Section) - size, began: d.clk.Now(), adds: map[packet.GUID]bool{},
 		deaths0: len(d.rep.snapshot().Deaths),
 		rec: GraveBatch{Leg: max(d.curLeg, 0), N: gb.n, Mode: mode, Wanted: wanted, Size: size, TankMin: -1, HealMin: -1,
 			RadiusYd: BatchSpread(pts), Centre: BatchCentre(pts)},
@@ -379,6 +385,12 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	} else {
 		r.HealMana = -1
 	}
+	gb.opened += r.Opened
+	gb.skipped += r.Skipped
+	gb.maxRadius = max(gb.maxRadius, r.RadiusYd)
+	if r.CutByRadius {
+		gb.cuts++
+	}
 	if wipe {
 		gb.wipes++
 		if gb.wipes == 1 {
@@ -397,6 +409,9 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	}
 	d.rep.note(text)
 	d.remote(func(rr *RemoteReport) { rr.GraveBatches = append(rr.GraveBatches, *r) })
+	if !wipe && b.sectionLeft <= 0 {
+		d.gravesSummary()
+	}
 	d.tr.Event("graves_batch", map[string]any{"n": r.N, "leg": r.Leg, "mode": r.Mode, "wanted": r.Wanted, "size": r.Size, "opened": r.Opened,
 		"skipped": r.Skipped, "adds": r.Adds, "fight_s": r.FightS, "deaths": r.Deaths, "wipe": wipe, "tank_min_pct": r.TankMin,
 		"healer_min_pct": r.HealMin, "healer_mana_end_pct": r.HealMana, "aoe": r.AoE, "threat_wait_s": r.ThreatWaitS, "tank_held": r.TankHeld, "cut_by_radius": r.CutByRadius, "radius_yd": r.RadiusYd})
@@ -537,10 +552,14 @@ func (d *RemoteDriver) sweepLeftovers(ctx context.Context, when string, centre P
 		return nil
 	}
 	tried := map[packet.GUID]bool{}
+	d.remote(func(r *RemoteReport) { r.LeftoverSweeps++ })
 	for round := 0; round < leftoverRounds; round++ {
 		d.look()
 		idle := d.idleLeftovers(entries, centre, tried)
 		if len(idle) == 0 {
+			if round == 0 {
+				d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: no idle summon of %v within %.0f yd of %.0f %.0f %.0f", when, entries, LeftoverRadius, centre.X, centre.Y, centre.Z))
+			}
 			if round > 0 {
 				if left := d.idleLeftovers(entries, centre, map[packet.GUID]bool{}); len(left) > 0 {
 					d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) could not be pulled and stay within %.0f yd of %.0f %.0f %.0f; going on", when, len(left), LeftoverRadius, centre.X, centre.Y, centre.Z))
@@ -576,4 +595,19 @@ func (d *RemoteDriver) sweepErr(err error) error {
 		d.sweepWiped = true
 	}
 	return err
+}
+
+// gravesSummary notes, once at the end of the graves, how the batches went: how many, the largest size that went by clean, the size that wiped
+// first, the widest radius, the chests opened and skipped, and how the batch size was decided.
+func (d *RemoteDriver) gravesSummary() {
+	gb := &d.gb
+	wiped := "none"
+	if gb.wipes > 0 {
+		wiped = fmt.Sprint(gb.wipedAt)
+	}
+	text := fmt.Sprintf("graves-summary: leg=%d mode=%s batches=%d opened=%d skipped=%d max_clean_size=%d wipes=%d wiped_at_size=%s cut_by_radius=%d max_radius_yd=%.1f",
+		max(d.curLeg, 0), d.gravesMode(), gb.n, gb.opened, gb.skipped, gb.lastClean, gb.wipes, wiped, gb.cuts, gb.maxRadius)
+	d.rep.note(text)
+	d.tr.Event("graves_summary", map[string]any{"leg": max(d.curLeg, 0), "mode": d.gravesMode(), "batches": gb.n, "opened": gb.opened, "skipped": gb.skipped,
+		"max_clean_size": gb.lastClean, "wipes": gb.wipes, "wiped_at_size": gb.wipedAt, "cut_by_radius": gb.cuts, "max_radius_yd": gb.maxRadius})
 }

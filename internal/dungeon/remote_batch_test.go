@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -671,7 +672,7 @@ func TestLeftoverSweepOnlyTakesTheLegsEntries(t *testing.T) {
 	leg.LeftoverEntries = []uint32{7286}
 	m = g.addMob(299, Point{40, 30, 0})
 	o = runBatches(t, g, leg, gs, objOpts())
-	if o.err != nil || strings.Contains(notesOf(o.rep), "leftover sweep") || m.hp <= 0 {
+	if o.err != nil || strings.Contains(notesOf(o.rep), "pulling") || m.hp <= 0 {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
 	}
 }
@@ -829,4 +830,94 @@ func TestWipeInALeftoverSweepKeepsTheBossSlot(t *testing.T) {
 			t.Fatalf("%v recoveries %v\n%s", o.err, o.d.wipeRecoverLeg, notesOf(o.rep))
 		}
 	})
+}
+
+// ---- opens that did not open (zf-r4-s5) ----
+
+// A grave the server says is not on the map ("No game object with that GUID is on the bot's map") while the carrier is alive on the plan's map
+// is gone: it is skipped and counted as skipped, not as opened, and no agent fallback is tried for it.
+func TestInvalidTargetOnAGraveIsGoneNotOpened(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script = map[string][]tbm.OrderResult{"open": {errOrder("cmd open", "invalid-target"), errOrder("cmd open", "invalid-target")}}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || len(o.rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	b := o.rep.Remote.GraveBatches[0]
+	if b.Opened != 1 || b.Skipped != 2 || b.Size != 3 { // the two refused ones are gone, the third opens
+		t.Fatalf("%+v\n%s", b, notesOf(o.rep))
+	}
+	if !strings.Contains(notesOf(o.rep), "it is gone (opened and despawned, or not spawned); skipped, not counted as opened") || strings.Contains(notesOf(o.rep), "the agent takes over") {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+// An invalid-target while the carrier is not on the plan's map (a ghost outside) is not "gone": the usual fallback applies.
+func TestInvalidTargetWhileTheCarrierIsOutsideIsNotGone(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script = map[string][]tbm.OrderResult{"open": {errOrder("cmd open", "invalid-target"), errOrder("cmd open", "invalid-target")}}
+	g.memberMap = map[packet.GUID]uint32{gMage: 1} // Magey, the carrier, is on map 1
+	o := runBatches(t, g, leg, gs, objOpts())
+	if strings.Contains(notesOf(o.rep), "it is gone") {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+// The agent's fallback opens a grave and takes nothing: the grave is not counted as opened.
+func TestAgentFallbackThatTakesNothingIsNotAnOpen(t *testing.T) {
+	g := newHandsGame(t, 3)
+	g.emptyChest = true
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script["open"] = openFails("failed", 2)
+	g.gobjs = []objects.GameObject{{GUID: gs[0].guid, Entry: 128403, X: gs[0].at.X, Y: gs[0].at.Y, Z: gs[0].at.Z, Distance: 10, State: "ready"}}
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	rep, err := handsRun(t, g, remotePlan(leg), nil)
+	if err != nil || len(rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if b := rep.Remote.GraveBatches[0]; b.Opened != 2 || b.Skipped != 1 {
+		t.Fatalf("%+v\n%s", b, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "the agent took nothing from the object") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// Every leftover sweep leaves a note, also when it found nothing, and is counted.
+func TestLeftoverSweepNotesAlsoWhenNothingIsIdle(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	leg.LeftoverEntries = []uint32{7286, 7276}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || !strings.Contains(notesOf(o.rep), "leftover sweep before the batch: no idle summon of [7286 7276]") || !strings.Contains(notesOf(o.rep), "leftover sweep after the batch: no idle summon") {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	if o.rep.Remote.LeftoverSweeps != 4 { // before and after each of the two batches
+		t.Fatalf("sweeps %d", o.rep.Remote.LeftoverSweeps)
+	}
+}
+
+// One summary note ends the graves.
+func TestGravesSummaryNoteEndsTheSection(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(16, 3, func(i int) string { return "g1" })
+	opt := objOpts()
+	opt.GravesRamp = &GravesRamp{}
+	o := runBatches(t, g, leg, gs, opt, 8) // a wipe in the batch of 4
+	if o.err != nil {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	n := notesOf(o.rep)
+	if strings.Count(n, "graves-summary:") != 1 || !strings.Contains(n, "mode=ramp") || !strings.Contains(n, "max_clean_size=3") || !strings.Contains(n, "wiped_at_size=4") || !strings.Contains(n, "wipes=1") {
+		t.Fatalf("%s", n)
+	}
+	// It comes after the last batch's note.
+	if strings.Index(n, "graves-summary:") < strings.LastIndex(n, "graves-batch: n=") {
+		t.Fatalf("%s", n)
+	}
 }
