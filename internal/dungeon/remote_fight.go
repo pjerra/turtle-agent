@@ -1146,7 +1146,7 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 	lastSeen := began
 	for {
 		now := d.clk.Now()
-		if eng := d.fr.EngagedHostiles(); len(eng) > 0 {
+		if eng := d.fightHostiles(); len(eng) > 0 {
 			lastSeen = now
 			d.wd.mobHealth(hostilesHP(eng))
 			d.watchThreat(eng)

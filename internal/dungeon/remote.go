@@ -1405,7 +1405,10 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
-	d.legLootOff(ctx, i) // companions_loot false: off from here to the leg's end
+	// companions_loot false: off from here to the leg's end; a leg that cannot have it does not start (before the walk, the rest gate, anything).
+	if err := d.legLootOff(ctx, i); err != nil {
+		return err
+	}
 	// Every few legs the bots get `.bot maintenance` again (remote_maint.go), before the gate so that the gate sees the full bags.
 	if err := d.maintLegStart(ctx, i); err != nil {
 		return err

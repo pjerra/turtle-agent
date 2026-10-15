@@ -100,7 +100,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[5650 7247 7246 5648]" || fmt.Sprint(p.CCAlways) != "[5650 7246]" || fmt.Sprint(p.KillFirst) != "[8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[8179]" {
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[5650 7247 7246 5648]" || fmt.Sprint(p.CCAlways) != "[5650 7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
 		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
@@ -542,8 +542,23 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 func TestZulfarrakZumrahLeg(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	l := p.Legs[len(p.Legs)-1]
-	if l.Name != "zumrah" || l.To != (Point{1885, 1012, 9.2}) || len(l.Via) != 1 || l.Via[0].Point != (Point{1859, 1058, 9.3}) || l.Via[0].Direct || len(l.PullGroups) != 0 {
+	if l.Name != "zumrah" || l.To != (Point{1885, 1012, 9.2}) || len(l.Via) != 3 || l.Via[0].Point != (Point{1859, 1058, 9.3}) || l.Via[1].Point != (Point{1854, 1055, 8.9}) || l.Via[2].Point != (Point{1860, 1037, 8.9}) || len(l.PullGroups) != 0 {
 		t.Fatalf("%+v", l)
+	}
+	// The detour (owner decision 2026-10-15) keeps every segment of the route in the graveyard at least 3.5 yd clear of each Shallow Grave chest and trap;
+	// the straight line from 1859 1058 to 1885 1012 passes 0.3 yd from one.
+	route := []Point{l.Via[0].Point, l.Via[1].Point, l.Via[2].Point, l.To}
+	for _, m := range zfTSV(t, "gameobjects.tsv") {
+		if m["entry"] != "128308" && m["entry"] != "128403" && m["entry"] != "128972" {
+			continue
+		}
+		x, _ := strconv.ParseFloat(m["x"], 64)
+		y, _ := strconv.ParseFloat(m["y"], 64)
+		for k := 1; k < len(route); k++ {
+			if d := distToSegment(Point{float32(x), float32(y), 0}, Point{route[k-1].X, route[k-1].Y, 0}, Point{route[k].X, route[k].Y, 0}); d < 3.4 {
+				t.Errorf("%s %s at %.1f %.1f is %.1f yd from the route segment %d", m["name"], m["entry"], x, y, d, k)
+			}
+		}
 	}
 	if l.CompanionsLoot == nil || *l.CompanionsLoot {
 		t.Errorf("companions_loot must be false: the bots may not open the graveyard's chests")

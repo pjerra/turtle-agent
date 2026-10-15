@@ -280,7 +280,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
 	}
 	sql := WriteSQL([]Rows{r})
-	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '5650,7247,7246,5648', '5650,7246', '8179,5650,7247', 'test', "
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '5650,7247,7246,5648', '5650,7246', '7785,8179,5650,7247', 'test', "
 	if !strings.Contains(sql, want) {
 		t.Fatalf("the migration lacks %q", want)
 	}
@@ -291,7 +291,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 	if err := Equal([]Rows{r}, back); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(back[0].Plan.KillFirst) != "[8179 5650 7247]" {
+	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247]" {
 		t.Fatalf("read back %+v", back[0].Plan)
 	}
 }
@@ -347,8 +347,8 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if p.Legs[last].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
 		t.Fatalf("%s", p.Legs[last].Name)
 	}
-	// via, to, the walk into the zone, the boss.
-	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
+	// three vias, to, the walk into the zone, the boss.
+	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move move move boss" {
 		t.Fatalf("%s", got)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))

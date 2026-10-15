@@ -42,6 +42,7 @@ type fakeCarrier struct {
 	recipe    func(bot string) string // after a `use`: what happened to the bags ("" nothing)
 	invErr    bool
 	cut       map[string]bool
+	noMute    map[string]bool // bots that refuse `behavior loot off`
 }
 
 func newFakeCarrier(t *testing.T) *fakeCarrier {
@@ -153,6 +154,9 @@ func (g *fakeCarrier) Behavior(ctx context.Context, bot, key string, on bool) (t
 	}
 	g.orders = append(g.orders, ".bot behavior "+bot+" "+key+" "+state)
 	g.orderAt = append(g.orderAt, g.now)
+	if g.noMute[bot] && key == "loot" && !on {
+		return errReply("behavior "+key, "refused"), nil
+	}
 	a := tbm.Ack{Intent: "behavior " + key, Scope: "bot:" + bot, Count: 1, Executor: "off"}
 	return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}, nil
 }

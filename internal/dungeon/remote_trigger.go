@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,16 +68,29 @@ func (d *RemoteDriver) unitSights() []unitSight {
 	return out
 }
 
-// unitHolds says whether the unit wait's state is true now. A death the run saw (the kill ledger) counts for "dead" after the feed has
-// dropped the corpse.
+// unitHolds says whether the unit wait's state is true now. A death the run saw (the kill ledger, the places of won pulls) counts for "dead"
+// after the feed has dropped the corpse; with `near`, only a death at a place within the wait's radius of it does, so that an earlier kill of
+// the same entry elsewhere in the dungeon proves nothing.
 func (d *RemoteDriver) unitHolds(u *UnitWait) bool {
-	known := false
+	return u.holds(d.unitSights(), d.killSeen(u))
+}
+
+// killSeen says whether the run has seen a unit of the wait's entries die, within the wait's radius of Near when it has one.
+func (d *RemoteDriver) killSeen(u *UnitWait) bool {
+	near := func(p Point) bool { return u.Near == nil || dist3(p, *u.Near) <= float64(u.radius()) }
 	for _, e := range u.Entries {
-		if len(d.killedAt[e]) > 0 {
-			known = true
+		for _, p := range d.killedAt[e] {
+			if near(p) {
+				return true
+			}
 		}
 	}
-	return u.holds(d.unitSights(), known || d.ledgerDead(u.Entries))
+	for _, m := range d.ledger {
+		if m.dead && slices.Contains(u.Entries, m.last.Entry) && near(hostilePoint(m.last)) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitUnit waits up to limit for the unit wait to hold, looking every poll. It reports whether it held.
@@ -163,7 +177,11 @@ func (d *RemoteDriver) triggerByLead(ctx context.Context, a Action, wait time.Du
 	return d.waitUnit(ctx, t.ExpectUnit, wait)
 }
 
-// triggerByAgent is the agent's own character taking the trigger: near the party, into the zone, the packet, back.
+// triggerByAgent is the agent's own character taking the trigger: near the party, into the zone, the packet, and back to where it stood.
+// Only a GM that the setup made invisible does it (`gm visible off`): the boss that the trigger wakes stands 9 yd from the zone's stand
+// point and takes a visible character for a target. The agent never walks through a fight: when the trigger starts one it stays in the
+// zone (invisible), the party fights with the driver's orders, and the agent walks back once the party is out of combat, within
+// triggerFightWait. The step is done only when the agent is back; a failed return fails it.
 func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 	t := a.Trigger
 	f, ok := d.g.(Follower)
@@ -171,10 +189,16 @@ func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 	if !ok || !ok2 {
 		return errors.New("the agent has no hands for an area trigger in this game")
 	}
+	if !d.agentGM(ctx, f) {
+		return errors.New("the agent's character may take an area trigger only as a GM (it is no GM, or its level is unknown): the boss the trigger wakes would see and attack it; use by \"bot\" with TortoiseBots #1002, or run with a GM account")
+	}
+	if !d.setupHas("gm visible off") {
+		return errors.New("the agent's character may take an area trigger only while invisible: the run's setup does not list \"gm visible off\" (pass it in dungeon_run setup after running it)")
+	}
 	if err := d.fallbackGate(ctx, "take an area trigger"); err != nil {
 		return err
 	}
-	// Near the party first: `.appear <lead bot>` for a GM (a GM assist, and only when the setup made the agent invisible), else a walk.
+	// Near the party first: `.appear <lead bot>` (a GM assist, counted in run_gm_assists).
 	if _, err := d.keepNearOpt(ctx, true); err != nil {
 		return err
 	}
@@ -183,9 +207,9 @@ func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 		return errors.New("the agent's own character is not in the world")
 	}
 	if dist > keepNearFar {
-		return fmt.Errorf("the agent's own character is %.0f yd from the lead bot (more than %d) and could not be brought up: it needs a GM account (and \"gm visible off\" in the setup) to .appear, or to be on the map to walk", dist, int(keepNearFar))
+		return fmt.Errorf("the agent's own character is %.0f yd from the lead bot (more than %d) and could not be brought up", dist, int(keepNearFar))
 	}
-	home, _, _ := f.AgentPlace()
+	home, _, _ := f.AgentPlace() // the safe point: where it stood before it walked into the zone
 	if ok, err := d.agentWalkOpt(ctx, f, t.Stand, triggerWalkMax, true); err != nil {
 		return err
 	} else if !ok {
@@ -197,59 +221,132 @@ func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 	}
 	sendErr := tg.AreaTrigger(ctx, t.ID)
 	d.remote(func(r *RemoteReport) { r.AgentTriggers++ })
-	if sendErr != nil {
-		d.triggerHome(ctx, f, home)
-		return fmt.Errorf("sending area trigger %d: %w", t.ID, sendErr)
+	var held bool
+	var werr error
+	if sendErr == nil {
+		d.rep.note(fmt.Sprintf("%s: the agent sent area trigger %d from %.1f %.1f %.1f", a.Label, t.ID, at.X, at.Y, at.Z))
+		held, werr = d.waitUnit(ctx, t.ExpectUnit, time.Duration(t.TimeoutS)*time.Second)
 	}
-	d.rep.note(fmt.Sprintf("%s: the agent sent area trigger %d from %.1f %.1f %.1f", a.Label, t.ID, at.X, at.Y, at.Z))
-	held, err := d.waitUnit(ctx, t.ExpectUnit, time.Duration(t.TimeoutS)*time.Second)
-	// Out of the zone either way, a fight or not: the agent is no part of the party's play.
-	d.triggerHome(ctx, f, home)
-	if err != nil {
+	if runEnded(ctx, werr) {
+		return werr
+	}
+	// Back to the safe point, whatever happened, but never through a fight.
+	back := d.triggerReturn(ctx, f, home)
+	switch {
+	case sendErr != nil:
+		return errors.Join(fmt.Errorf("sending area trigger %d: %w", t.ID, sendErr), back)
+	case werr != nil:
+		return errors.Join(werr, back)
+	case !held:
+		return errors.Join(fmt.Errorf("the agent sent area trigger %d from inside its zone and %s did not hold within %d s: the trigger's script did not run, or it changed something else", t.ID, t.ExpectUnit.describe(), t.TimeoutS), back)
+	}
+	return back
+}
+
+// triggerFightWait is how long the agent waits in the zone for a fight the trigger started to end before it walks back.
+const triggerFightWait = 5 * time.Minute
+
+// triggerReturnYd is how close to its safe point the agent must be for the return to count.
+const triggerReturnYd = 6.0
+
+// triggerSettle is how long the agent waits after the trigger took effect before it decides the party is out of combat: the boss it woke
+// aggroes within about 2 s (zf-probe-zumrah), so the first frames after the trigger show no fight yet.
+const triggerSettle = 4 * time.Second
+
+// triggerReturn waits for the trigger's fight, if there is one, to end (up to triggerFightWait, fighting with the driver's orders
+// meanwhile), then walks the agent back to home and checks it got there. A walk that a fight stopped is waited out and made again. Its
+// error is the step's.
+func (d *RemoteDriver) triggerReturn(ctx context.Context, f Follower, home Point) error {
+	until := d.clk.Now().Add(triggerFightWait)
+	if err := d.tick(ctx, triggerSettle); err != nil {
 		return err
 	}
-	if !held {
-		return fmt.Errorf("the agent sent area trigger %d from inside its zone and %s did not hold within %d s: the trigger's script did not run, or it changed something else", t.ID, t.ExpectUnit.describe(), t.TimeoutS)
+	for {
+		if err := d.waitOutOfCombat(ctx, until.Sub(d.clk.Now())); err != nil {
+			return fmt.Errorf("the agent could not walk back to %.1f %.1f %.1f: %w", home.X, home.Y, home.Z, err)
+		}
+		ok, err := d.agentWalkOpt(ctx, f, home, triggerBackMax, true)
+		if err != nil {
+			return err
+		}
+		at, _, here := f.AgentPlace()
+		if here && dist3(at, home) <= triggerReturnYd {
+			return nil
+		}
+		if d.inCombat() && d.clk.Now().Before(until) {
+			continue // a fight began on the way back and stopped the walk: wait it out and go on
+		}
+		why := "the walk did not finish"
+		if ok {
+			why = "the walk ended short of it"
+		}
+		return fmt.Errorf("the agent did not get back to its safe point %.1f %.1f %.1f (%s)", home.X, home.Y, home.Z, why)
+	}
+}
+
+// waitOutOfCombat waits until the party is out of combat, for at most bound. A fight in the feed is fought with the driver's orders (the
+// tank first, kill_first, CC: fightEngaged), a party that is in combat with nothing to order at is waited out.
+func (d *RemoteDriver) waitOutOfCombat(ctx context.Context, bound time.Duration) error {
+	until := d.clk.Now().Add(bound)
+	d.look()
+	for d.inCombat() {
+		if !d.clk.Now().Before(until) {
+			return fmt.Errorf("the party was still in combat after %.0f s: the agent does not walk through a fight", bound.Seconds())
+		}
+		if len(d.fightHostiles()) > 0 {
+			if err := d.fightEngaged(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// triggerHome walks the agent back to where it stood before the step. A failure is noted: the step's result does not hang on it.
-func (d *RemoteDriver) triggerHome(ctx context.Context, f Follower, home Point) {
-	if ctx.Err() != nil {
-		return
+// fightHostiles are the hostiles a fight is fought with: those that fight the party, and the summoned kill_first units with encounter
+// evidence (inFight: a ward by a hostile that fights the party).
+func (d *RemoteDriver) fightHostiles() []tbm.HostileRec {
+	out := slices.Clone(d.fr.EngagedHostiles())
+	for _, h := range d.fr.Hostiles {
+		if h.HPPct > 0 && d.inFight(h) && !slices.ContainsFunc(out, func(o tbm.HostileRec) bool { return o.GUID == h.GUID }) {
+			out = append(out, h)
+		}
 	}
-	if ok, err := d.agentWalkOpt(ctx, f, home, triggerBackMax, false); !ok && err == nil {
-		d.rep.note(fmt.Sprintf("area trigger: the agent did not get back to %.1f %.1f %.1f", home.X, home.Y, home.Z))
-	}
+	return out
 }
 
 // ---- Leg.CompanionsLoot: corpse looting off for the whole leg ----
 
-// legLootOff turns the party's looting off for a leg whose plan says companions_loot false, and remembers whom, for legLootOn.
-func (d *RemoteDriver) legLootOff(ctx context.Context, leg int) {
+// legLootOff turns the party's looting off for a leg whose plan says companions_loot false, and remembers whom, for legLootOn. A leg that
+// needs the looting off does not start without it: a game that cannot send behavior orders, or a bot that refuses, fails the leg before it
+// moves, naming the bots, and the bots already muted are turned back on.
+func (d *RemoteDriver) legLootOff(ctx context.Context, leg int) error {
 	l := d.plan.Legs[leg]
 	if l.CompanionsLoot == nil || *l.CompanionsLoot {
-		return
+		return nil
 	}
 	og, ok := d.orderGame()
 	if !ok {
-		d.rep.note(fmt.Sprintf("leg %d: companions_loot is false but the game cannot send behavior orders: the bots keep looting", leg))
-		return
+		return fmt.Errorf("leg %d (%s): companions_loot is false but this game cannot send behavior orders: the bots would loot the leg's chests (the graveyard's); the leg is not started", leg, l.Name)
 	}
 	var muted, failed []string
 	for _, m := range d.fr.Party {
 		if r, err := og.Behavior(ctx, m.Name, "loot", false); err != nil || r.Kind != tbm.KindAck {
-			failed = append(failed, m.Name+": "+behaviorWhy(r, err))
+			failed = append(failed, m.Name+" ("+behaviorWhy(r, err)+")")
 			continue
 		}
 		muted = append(muted, m.Name)
 	}
 	d.legMuted = muted
-	d.rep.note(fmt.Sprintf("leg %d: corpse and object looting is off for %v for the whole leg (companions_loot false)", leg, muted))
 	if len(failed) > 0 {
-		d.rep.note(fmt.Sprintf("leg %d: could not turn looting off for %s", leg, strings.Join(failed, "; ")))
+		d.legLootOn() // the ones that did turn off go back on
+		return fmt.Errorf("leg %d (%s): companions_loot is false but looting could not be turned off for %s: the leg is not started (%d of %d bots were turned off and are back on)", leg, l.Name, strings.Join(failed, ", "), len(muted), len(muted)+len(failed))
 	}
+	d.rep.note(fmt.Sprintf("leg %d: corpse and object looting is off for %v for the whole leg (companions_loot false)", leg, muted))
+	return nil
 }
 
 // legLootOn puts the looting of the bots legLootOff muted back on; it runs when the leg ends, with a context of its own (a stopped run has

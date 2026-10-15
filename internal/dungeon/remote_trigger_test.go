@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,8 +26,10 @@ type triggerGame struct {
 	sent         []uint32
 	sentFrom     []Point
 	sentAt       time.Time
-	movesBefore  int // the lead bot's move orders when the agent sent the packet
+	blockReturn  bool // after the packet every walk of the agent's fails (it cannot get back)
+	movesBefore  int  // the lead bot's move orders when the agent sent the packet
 	fired        bool
+	onFire       func(f *fakeRemote) // runs when the trigger takes effect
 }
 
 func newTriggerGame(t *testing.T, level int) *triggerGame {
@@ -44,12 +47,18 @@ func newTriggerGame(t *testing.T, level int) *triggerGame {
 func (g *triggerGame) fire() {
 	g.fired = true
 	g.addMob(7271, g.boss)
+	if g.onFire != nil {
+		g.onFire(g.fakeRemote)
+	}
 }
 
 func (g *triggerGame) AreaTrigger(ctx context.Context, id uint32) error {
 	g.sent = append(g.sent, id)
 	g.sentFrom = append(g.sentFrom, g.agent)
 	g.sentAt, g.movesBefore = g.now, len(g.moveOrderDest)
+	if g.blockReturn {
+		g.walkErr = errors.New("path blocked")
+	}
 	if g.packetWorks && !g.fired && dist3(g.agent, g.center) <= float64(g.radius) {
 		g.fire()
 	}
@@ -66,7 +75,9 @@ func runTrigger(t *testing.T, g *triggerGame, legs ...Leg) (Report, error) {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
-	cfg.Setup = []string{"gm visible off"}
+	if !g.noVisibleOff {
+		cfg.Setup = []string{"gm visible off"}
+	}
 	d := NewRemoteDriver(remotePlan(legs...), g, cfg, objOpts(), g.clock())
 	err := d.Run(context.Background(), 0)
 	rep, ended := d.Status()
@@ -197,13 +208,73 @@ func TestAreaTriggerThatChangesNothingFailsOnce(t *testing.T) {
 	}
 }
 
-// An agent that is no GM and stands on another map cannot get to the zone: the step says so and sends nothing.
-func TestAreaTriggerAgentThatCannotFollowFails(t *testing.T) {
-	g := newTriggerGame(t, 0)
-	g.agentMap = 5
+// The agent's fallback is for a GM that is invisible: anything else is refused with the reason, and nothing is sent.
+func TestAreaTriggerFallbackNeedsAnInvisibleGM(t *testing.T) {
+	g := newTriggerGame(t, 0) // no GM
 	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
-	if err == nil || !strings.Contains(err.Error(), "could not be brought up: it needs a GM account") || len(g.sent) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "only as a GM") || len(g.sent) != 0 || movedNear(g.walks, Point{104, 0, 0}) {
+		t.Fatalf("%v sent %v walks %v", err, g.sent, g.walks)
+	}
+	g = newTriggerGame(t, 3)
+	g.noVisibleOff = true // a GM, but the setup did not make it invisible
+	_, err = runTrigger(t, g, zumrahLeg("agent", 15))
+	if err == nil || !strings.Contains(err.Error(), `the run's setup does not list "gm visible off"`) || len(g.sent) != 0 || movedNear(g.walks, Point{104, 0, 0}) {
+		t.Fatalf("%v sent %v walks %v", err, g.sent, g.walks)
+	}
+	// By auto the lead bot gets its chance first, then the fallback is refused the same way.
+	g = newTriggerGame(t, 0)
+	_, err = runTrigger(t, g, zumrahLeg("auto", 15))
+	if err == nil || !strings.Contains(err.Error(), "only as a GM") || len(g.sent) != 0 {
 		t.Fatalf("%v sent %v", err, g.sent)
+	}
+}
+
+// The agent does not walk through a fight: the trigger starts one, the agent waits in the zone and walks back when the party is out of
+// combat, and the step is done only when it is back at the point it came from.
+func TestAreaTriggerAgentWaitsOutTheFightThenReturns(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	var home Point
+	var walkedInCombat []string
+	g.onWalk = func(n *nearGame, to Point) {
+		if n.party[0].State == "c" {
+			walkedInCombat = append(walkedInCombat, fmt.Sprint(to))
+		}
+	}
+	g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(20 * time.Second) } // Zum'rah aggroes the party
+	rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if len(walkedInCombat) != 0 {
+		t.Errorf("the agent walked during the fight: %v", walkedInCombat)
+	}
+	n := len(g.walks)
+	home = g.walks[n-1]
+	if n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || dist3(g.agent, home) > 0.1 || dist3(home, Point{104, 0, 0}) < 20 {
+		t.Errorf("walks %v agent %v", g.walks, g.agent)
+	}
+}
+
+// A fight that outlasts the wait fails the step: the agent is still in the zone, and says why.
+func TestAreaTriggerAgentThatCannotWalkBackFailsTheStep(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(time.Hour) }
+	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err == nil || !strings.Contains(err.Error(), "the agent could not walk back to") || !strings.Contains(err.Error(), "does not walk through a fight") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.sent) != 1 {
+		t.Errorf("sent %v", g.sent)
+	}
+}
+
+// A walk back that does not take the agent home fails the step as well.
+func TestAreaTriggerAgentThatDoesNotGetHomeFailsTheStep(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.blockReturn = true
+	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err == nil || !strings.Contains(err.Error(), "did not get back to its safe point") {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -287,6 +358,28 @@ func TestWaitForUnitDeadAfterAKill(t *testing.T) {
 	}
 }
 
+// With near, the kill the wait counts is one that happened within its radius of it: an earlier kill of the same entry elsewhere says
+// nothing about the unit that stands here.
+func TestWaitForUnitDeadNearNeedsTheKillThere(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		near Point
+		ok   bool
+	}{{"kill at the place", Point{30, 0, 0}, true}, {"kill elsewhere", Point{500, 0, 0}, false}} {
+		g := carrierGame(t)
+		g.addMob(7271, Point{30, 0, 0})
+		plan := remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Boss: &Boss{Entry: 7271, Position: Point{30, 0, 0}},
+			AfterBoss: []Step{{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitDead, Near: &tc.near, Radius: 20}, TimeoutS: 5}}}})
+		rep, err := runCarrier(t, g, plan, objOpts())
+		if tc.ok && (err != nil || rep.State != "done") {
+			t.Errorf("%s: %v\n%s", tc.name, err, notesOf(rep))
+		}
+		if !tc.ok && (err == nil || !strings.Contains(err.Error(), "waited 5 s for unit 7271 dead within 20 yd of 500 0 0")) {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+}
+
 // ---- Leg.CompanionsLoot ----
 
 func lootLegPlan(withBossOff bool) *Plan {
@@ -322,6 +415,62 @@ func TestLegCompanionsLootOffForTheWholeLeg(t *testing.T) {
 		if !strings.Contains(notesOf(rep), "corpse and object looting is off for") || !strings.Contains(notesOf(rep), "looting turned back on for") {
 			t.Errorf("%s", notesOf(rep))
 		}
+	}
+}
+
+// A leg that needs the looting off does not start without it. Partial: the bots that did turn off are turned back on and the run
+// fails before the lead bot moves, naming the one that refused. None: all named. No behavior orders at all: the same.
+func TestLegCompanionsLootRefusedFailsTheLegBeforeItMoves(t *testing.T) {
+	for name, tc := range map[string]struct {
+		refuse   []string
+		wantErr  []string
+		wantBack []string // bots turned off and back on
+	}{
+		"partial": {[]string{"Healy"}, []string{"Healy (refused"}, []string{"Tanky", "Magey"}},
+		"none":    {[]string{"Tanky", "Healy", "Magey"}, []string{"Tanky (", "Healy (", "Magey ("}, nil},
+	} {
+		g := carrierGame(t)
+		g.noMute = map[string]bool{}
+		for _, b := range tc.refuse {
+			g.noMute[b] = true
+		}
+		g.addMob(9, Point{40, 0, 0})
+		rep, err := runCarrier(t, g, lootLegPlan(false), objOpts())
+		if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "companions_loot is false but looting could not be turned off for") || !strings.Contains(err.Error(), "the leg is not started") {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, w := range tc.wantErr {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("%s: %q is not named: %v", name, w, err)
+			}
+		}
+		if g.indexOf("cmd move") >= 0 || g.indexOf("cmd pull") >= 0 {
+			t.Errorf("%s: the leg moved before it failed: %v", name, g.orders)
+		}
+		// Every bot that turned off is turned on again (after the run's own start-up `on` for all three).
+		tail := g.behaviors
+		for _, bot := range tc.wantBack {
+			offAt, onAfter := -1, false
+			for i, b := range tail {
+				if b == bot+" loot false" {
+					offAt = i
+				}
+				if offAt >= 0 && b == bot+" loot true" {
+					onAfter = true
+				}
+			}
+			if offAt < 0 || !onAfter {
+				t.Errorf("%s: %s was not turned off and back on: %v", name, bot, tail)
+			}
+		}
+	}
+}
+
+func TestLegCompanionsLootNeedsBehaviorOrders(t *testing.T) {
+	g := newFakeRemote(t) // no OrderGame: it cannot send behavior orders
+	_, err := runRemote(t, g, lootLegPlan(false), opts(), nil)
+	if err == nil || !strings.Contains(err.Error(), "this game cannot send behavior orders") || g.indexOf("cmd move") >= 0 {
+		t.Fatalf("%v %v", err, g.orders)
 	}
 }
 
