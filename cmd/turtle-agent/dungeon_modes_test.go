@@ -174,3 +174,27 @@ func TestDungeonRunLeaderPulltestStartsAndReportsItsMode(t *testing.T) {
 	}
 	r.call("dungeon_stop", "{}")
 }
+
+// give_items is a remote-mode option: a commander run takes it (checked), a leader or observe run refuses it, and a bad entry is refused.
+func TestCheckModeGiveItems(t *testing.T) {
+	give := []dungeon.GiveItem{{Bot: "lead", Item: 9240}}
+	p := dungeonRunParams{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: give}
+	if remote, err := checkMode(p); !remote || err != nil {
+		t.Fatalf("remote: %v %v", remote, err)
+	}
+	hire := dungeonRunParams{Mode: "remote", Prepare: &dungeon.PrepareSpec{Party: "hire"}, GiveItems: []dungeon.GiveItem{{Bot: "carrier", Item: 9240}}}
+	if remote, err := checkMode(hire); !remote || err != nil {
+		t.Fatalf("hired party: %v %v", remote, err)
+	}
+	for _, bad := range []dungeonRunParams{
+		{Mode: "leader", GiveItems: give},
+		{GiveItems: give},
+		{Mode: "observe", LeadBot: "Lcwarra", Observe: &observeParam{}, GiveItems: give},
+		{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: []dungeon.GiveItem{{Bot: "lead"}}},
+		{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: []dungeon.GiveItem{{Bot: "not a name", Item: 1}}},
+	} {
+		if _, err := checkMode(bad); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
+	}
+}

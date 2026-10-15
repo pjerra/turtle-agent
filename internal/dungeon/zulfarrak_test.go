@@ -55,7 +55,7 @@ func zfTSV(t *testing.T, name string) []map[string]string {
 
 func TestZulfarrakPlansLoad(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 11 {
+	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 12 {
 		t.Fatalf("%+v", p)
 	}
 	var names []string
@@ -65,8 +65,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
 		}
-		if (len(l.Steps) != 0 && l.Name != "zumrah") || len(l.AfterBoss) != 0 {
-			t.Errorf("the plan has no steps but the Zum'rah trigger: %s", l.Name)
+		if (len(l.Steps) != 0 && l.Name != "zumrah" && l.Name != "gahzrilla") || len(l.AfterBoss) != 0 {
+			t.Errorf("the plan has no steps but the Zum'rah trigger and the gong: %s", l.Name)
 		}
 		for _, g := range l.PullGroups {
 			if g.Team != "" || g.Ambush {
@@ -74,7 +74,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha gahzrilla courtyard zumrah]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -110,7 +110,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	// Zum'rah (faction 35 until area trigger 962) is a boss of the main plan only, behind the area_trigger step; Weegli's crew (7604-7608) is
 	// in no pull group, boss or step of either plan.
 	x := loadPlan(t, zulfarrakExtra)
-	if len(x.Legs) != 3 || x.Legs[0].Name != "gong" || x.Legs[1].Name != "stairs" || x.Legs[2].Name != "ukorz" {
+	if len(x.Legs) != 2 || x.Legs[0].Name != "stairs" || x.Legs[1].Name != "ukorz" {
 		t.Fatalf("%+v", x.Legs)
 	}
 	for _, pl := range []*Plan{p, x} {
@@ -127,9 +127,11 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	// The gong needs the Mallet, which an honest run does not have: it is only in the extra plan.
-	if us := x.Legs[0].Steps[0].UseObject; us == nil || us.Entry != 141832 || us.RequiresItem == nil || us.RequiresItem.Entry != 9240 {
-		t.Errorf("%+v", x.Legs[0].Steps)
+	// The gong needs the Mallet, which an honest run does not have: its leg is optional (TestZulfarrakGahzrillaLeg).
+	for _, l := range x.Legs {
+		if l.Name == "gong" || l.Optional != nil {
+			t.Errorf("the gong is the main plan's optional gahzrilla leg, not %s", l.Name)
+		}
 	}
 	// The files are kept in the form Marshal writes.
 	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
@@ -503,8 +505,8 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 			l = x
 		}
 	}
-	if l.Name == "" || p.Legs[len(p.Legs)-2].Name != "courtyard" || p.Legs[len(p.Legs)-3].Name != "velratha" {
-		t.Fatalf("the courtyard leg follows Velratha's")
+	if l.Name == "" || p.Legs[len(p.Legs)-2].Name != "courtyard" || p.Legs[len(p.Legs)-3].Name != "gahzrilla" || p.Legs[len(p.Legs)-4].Name != "velratha" {
+		t.Fatalf("the courtyard leg follows the gahzrilla leg, which follows Velratha's")
 	}
 	if l.To != (Point{1822, 1177, 9.1}) || l.Boss != nil || len(l.Steps) != 0 || l.CompanionsLoot != nil {
 		t.Errorf("%+v", l)
@@ -742,5 +744,98 @@ func TestZulfarrakCourtyardExitsAvoidTheEndDoor(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The gahzrilla leg (PR A, TortoiseBots #984): the optional gong leg between Velratha and the courtyard. Pins what the world database says:
+// gong 141832 (spawn row 27140, lock 459, event 2488), the Mallet 9240, Gahz'rilla 7273 summoned at the pit and walked out by event 2489 to
+// 1702.58 1224.19, and the eight packs on or near that walk (TestZulfarrakPlansMatchTheWorldExport checks every member against its spawn row,
+// TestZulfarrakRouteHasNoUnplannedPack that no other mob stands near the route).
+func TestZulfarrakGahzrillaLeg(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	var l Leg
+	idx := -1
+	for i, x := range p.Legs {
+		if x.Name == "gahzrilla" {
+			l, idx = x, i
+		}
+	}
+	if idx != 9 || p.Legs[idx-1].Name != "velratha" || p.Legs[idx+1].Name != "courtyard" {
+		t.Fatalf("the leg is at %d", idx)
+	}
+	if l.Optional == nil || l.Optional.Item != 9240 || l.Optional.Name != "Mallet of Zul'Farrak" {
+		t.Fatalf("optional %+v", l.Optional)
+	}
+	if l.To != (Point{1654.5, 1166.5, 10.3}) {
+		t.Errorf("the walk ends at the gong stand, not %v", l.To)
+	}
+	// The order: the packs of the pool ring, then the gong (a bot that carries the Mallet), the wait for him to show, the boss.
+	if len(l.Steps) != 2 || l.Steps[0].UseObject == nil || l.Steps[1].WaitFor == nil || len(l.AfterBoss) != 0 {
+		t.Fatalf("steps %+v", l.Steps)
+	}
+	u := l.Steps[0].UseObject
+	if u.Entry != 141832 || *u.Near != (Point{1650.9, 1171.9, 10.9}) || *u.Stand != l.To || u.RequiresItem == nil || u.RequiresItem.Entry != 9240 {
+		t.Errorf("use_object %+v", u)
+	}
+	w := l.Steps[1].WaitFor
+	if w.Unit == nil || fmt.Sprint(w.Unit.Entries) != "[7273]" || w.Unit.State != UnitSeen || w.TimeoutS != 30 || w.FailText == "" {
+		t.Errorf("wait_for %+v", w)
+	}
+	if l.Boss == nil || l.Boss.Entry != 7273 || l.Boss.Position != (Point{1702.58, 1224.19, 8.88}) {
+		t.Errorf("boss %+v", l.Boss)
+	}
+	if l.CompanionsLoot != nil || fmt.Sprint(l.Skip) != "[7269 10080 10082 15578]" {
+		t.Errorf("companions_loot %v skip %v", l.CompanionsLoot, l.Skip)
+	}
+	// The packs, in pull order (the first position of each), and how far each is from the walk event 2489 makes (pit to 1702.58 1224.19).
+	want := []struct {
+		entries string
+		at      Point
+		radius  float32
+	}{
+		{"[5649 5649 5650]", Point{1624.85, 1192.94, 9.09}, 15},
+		{"[5650]", Point{1643.59, 1200.11, 9.05}, 15},
+		{"[7246 7246 8095]", Point{1652.63, 1210.28, 9.17}, 30},
+		{"[5649]", Point{1652.06, 1219.91, 9.67}, 15},
+		{"[5649]", Point{1666.97, 1233.6, 9.41}, 15},
+		{"[5649]", Point{1699.81, 1233.84, 8.96}, 15},
+		{"[5650 7246]", Point{1700.27, 1248.3, 9.8}, 15},
+		{"[5649]", Point{1714.38, 1218.58, 8.96}, 15},
+	}
+	if len(l.PullGroups) != len(want) {
+		t.Fatalf("%d groups", len(l.PullGroups))
+	}
+	walk := []Point{{1664.65, 1187.67, -2.89}, {1672.66, 1195.93, 0.96}, {1681.74, 1204.13, 5.67}, {1686.09, 1207.3, 9.75}, {1690.54, 1211.53, 10.18}, {1692.57, 1213.66, 8.88}, {1702.58, 1224.19, 8.88}}
+	for i, g := range l.PullGroups {
+		if fmt.Sprint(g.Entries) != want[i].entries || g.Positions[0] != want[i].at || g.Radius != want[i].radius || len(g.Positions) != len(g.Entries) {
+			t.Errorf("group %d: %v %v radius %g", i, g.Entries, g.Positions, g.Radius)
+		}
+		near := 1e9
+		for _, at := range g.Positions {
+			for k := 1; k < len(walk); k++ {
+				near = math.Min(near, distToSegment(at, walk[k-1], walk[k]))
+			}
+		}
+		if near > 45 {
+			t.Errorf("group %d (%v) is %.0f yd from his walk: it is not on it", i, g.Entries, near)
+		}
+	}
+}
+
+// The gong and the Mallet are what the server database says: object 141832 at the leg's `near` is in the export, and the optional item is the
+// one the step requires.
+func TestZulfarrakGongIsInTheExport(t *testing.T) {
+	gos := zfTSV(t, "gameobjects.tsv")
+	found := false
+	for _, m := range gos {
+		if m["entry"] == "141832" {
+			x, _ := strconv.ParseFloat(m["x"], 64)
+			y, _ := strconv.ParseFloat(m["y"], 64)
+			z, _ := strconv.ParseFloat(m["z"], 64)
+			found = math.Abs(x-1650.91) < 0.06 && math.Abs(y-1171.88) < 0.06 && math.Abs(z-10.901) < 0.06
+		}
+	}
+	if !found {
+		t.Error("no gong 141832 at 1650.91 1171.88 10.901 in the export")
 	}
 }

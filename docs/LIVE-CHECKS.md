@@ -977,8 +977,12 @@ Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull 
 4. **Theka** patrols a ~45 yd loop from (1778 860): the boss fight must find him (it looks within 80 yd of the lead bot); the 30% transform must not end the fight early; the scarabs (7269) are skipped, not waited for.
 5. **The way to Velratha** goes by the west road (junction 1645 909), NOT through the End Door: check that no bot is ever at 1854.5 1142.9 and that nothing opened the door (`gameobjects` entry 146084 stays `ready`).
 6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
-7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
+7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears (a run without a Mallet skips the optional gahzrilla leg: `legs[]` says `skipped: no Mallet of Zul'Farrak ...`; check 9).
 8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
+9. **Gahz'rilla (the optional `gahzrilla` leg, PR A; first run with the Mallet, a GM account of level 3)**: start with `"give_items": [{"bot": "lead", "item": 9240}]` and a fresh instance. Record: the setup line `additem 9240 on <lead> (test setup: Mallet of Zul'Farrak)` in `setup_shortcuts` and the
+   `.bot inv` that shows the item; the eight pull groups of the pool ring one by one (the Blood Drinker at 1714.4 1218.6 is the one the tank found no firing position for in the Velratha leg's runs); the lead bot walking to the stand (1654.5 1166.5) and ringing the gong: the `cmd open entry:141832@...`
+   order and its ACK or ERR (an ERR here is the server's lock check: does 9240 open lock 459?); the 30 s wait: when Gahz'rilla (7273) appears in the feed and where (the pit 1664.65 1187.67 -2.89, then the walk 1672.7 1195.9 -> 1681.7 1204.1 -> 1686.1 1207.3 -> 1690.5 1211.5 -> 1692.6 1213.7 -> 1702.6 1224.2, one point per second);
+   whether he comes at the party on his own or waits at 1702.6 1224.2; any troll or other add at the pit; the kill time, his spells (11836 Freeze Solid, 11902, 11131), deaths. Then a run **without** the item: the leg is skipped with its reason and the run goes on to the courtyard.
 
 ## Start anywhere and the pull test (`from_leg`, `from_pull_group`, `dungeon_run.pulltest`)
 

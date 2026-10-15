@@ -146,6 +146,10 @@ type Portal struct {
 type Leg struct {
 	Name string `json:"name,omitempty"`
 	To   Point  `json:"to"`
+	// Optional marks a leg that needs an item no honest run carries (Zul'Farrak's gong needs the Mallet of Zul'Farrak): at the leg's start the
+	// run looks for the item in the lead bot's and the carrier's bags and, when neither has it, skips the whole leg (the leg's result says
+	// so) instead of failing. The run-start check for a step's requires_item leaves such a leg out.
+	Optional *OptionalLeg `json:"optional,omitempty"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
 	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
@@ -176,6 +180,15 @@ type Leg struct {
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
 }
+
+// OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
+type OptionalLeg struct {
+	Item uint32 `json:"item"`
+	Name string `json:"name,omitempty"`
+}
+
+// Ref is the item as an ItemRef.
+func (o OptionalLeg) Ref() ItemRef { return ItemRef{Entry: o.Item, Name: o.Name} }
 
 // The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
@@ -572,11 +585,12 @@ type rawLeg struct {
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	// CompanionsLoot is Leg.CompanionsLoot.
-	CompanionsLoot *bool     `json:"companions_loot"`
-	Leftover       []uint32  `json:"leftover_entries"`
-	Rest           *RestSpec `json:"rest"`
-	Notes          []string  `json:"notes"`
-	NeedsWalk      bool      `json:"needs_walk"`
+	CompanionsLoot *bool        `json:"companions_loot"`
+	Leftover       []uint32     `json:"leftover_entries"`
+	Optional       *OptionalLeg `json:"optional"`
+	Rest           *RestSpec    `json:"rest"`
+	Notes          []string     `json:"notes"`
+	NeedsWalk      bool         `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -964,6 +978,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 	}
 	l.To = c.point(path+".to", r.To)
+	if o := r.Optional; o != nil {
+		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
+		if o.Item == 0 {
+			c.fail(path+".optional.item", "required (the item entry the leg needs)")
+		}
+	}
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
@@ -1078,6 +1098,11 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			continue
 		}
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
+	}
+	if o := l.Optional; o != nil && o.Item != 0 && !slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
+		return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item
+	}) {
+		c.fail(path+".optional.item", "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", o.Item)
 	}
 	if rs := r.Rest; rs != nil {
 		for _, f := range []struct {

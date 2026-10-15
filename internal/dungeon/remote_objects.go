@@ -500,6 +500,11 @@ func (d *RemoteDriver) carrierInv(ctx context.Context, bot string) (tbm.Inventor
 	if !ok {
 		return tbm.Inventory{}, errors.New("this game cannot send .bot inv")
 	}
+	return botInventory(ctx, bl, bot)
+}
+
+// botInventory sends `.bot inv <bot>` and reads the snapshot (the carrier's check, and the bag check of the prepare step's give_items).
+func botInventory(ctx context.Context, bl BotLiner, bot string) (tbm.Inventory, error) {
 	lines, settled, err := bl.BotLines(ctx, "inv "+bot, 8*time.Second, func(line string) bool {
 		return strings.HasPrefix(line, "TBM:INV_END|") || strings.HasPrefix(line, "TBM:ACTION_ERR|inv|")
 	})
@@ -663,6 +668,9 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	kind := "object step"
 	if st := d.stepOf(a); st != nil && objectStepKind(*st) != "" {
 		kind = objectStepKind(*st)
+	}
+	if a.Kind == ActUse {
+		c = d.keyHolder(ctx, c, a.Requires) // a lock's key may be in the lead bot's bags (give_items "lead"), not the carrier's
 	}
 	rec := d.newObjRec(a.Leg, a.Label, kind, c.Name)
 	var note string

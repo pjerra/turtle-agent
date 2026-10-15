@@ -132,6 +132,8 @@ type RemoteOptions struct {
 	StartWait     time.Duration
 	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
 	HaveItems []uint32
+	// GiveItems is the give_items run option: GM `.additem` lines on named bots at the prepare step (prepare_give.go).
+	GiveItems []GiveItem
 	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
 	Pulltest *PulltestSpec
 	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
@@ -797,6 +799,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
+				if skipped, err := d.skipOptionalLeg(ctx, a.Leg); err != nil {
+					d.stepFailedRecover(ctx, err)
+					continue
+				} else if skipped {
+					continue
+				}
 				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					if d.stepFailedRecover(ctx, err) {
 						continue

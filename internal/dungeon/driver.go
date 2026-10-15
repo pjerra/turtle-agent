@@ -459,6 +459,12 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
+				if skipped, err := d.skipOptionalLeg(ctx, a.Leg); err != nil {
+					d.st.Fail(err.Error())
+					continue
+				} else if skipped {
+					continue
+				}
 				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					d.st.Fail(err.Error())
 					d.countWipe(err)

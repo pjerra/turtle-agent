@@ -193,7 +193,8 @@ type builder struct {
 	name        string
 	rows        Rows
 	warnings    []string
-	leg_        int
+	leg_        int // the plan's leg being built
+	outLeg      int // the row number of the next leg written (an optional leg left out takes none)
 	seq         int
 	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
 	last        dungeon.Point // the last point a step of the leg put the party at
@@ -201,7 +202,7 @@ type builder struct {
 }
 
 func (b *builder) add(s StepRow) {
-	s.Plan, s.Leg, s.Seq = b.name, b.leg_, b.seq
+	s.Plan, s.Leg, s.Seq = b.name, b.outLeg, b.seq
 	b.seq++
 	b.rows.Steps = append(b.rows.Steps, s)
 }
@@ -217,11 +218,18 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
+	if l.Optional != nil {
+		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
+		// end the run at its first use of the object: the leg is left out and the later legs close up.
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
+		return nil
+	}
 	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
 	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
 		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
 	}
-	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: li, Name: clip(l.Name, MaxLegName)})
+	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName)})
+	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
 		b.move(w.Point, w.Direct, "via")

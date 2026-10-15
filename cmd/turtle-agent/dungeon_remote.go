@@ -37,6 +37,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		if p.FromPullGroup != nil || p.StartHere || len(p.HaveItems) > 0 {
 			return false, bad(`from_pull_group, start_here and have_items go with mode "remote" (commander; leader and group mode have teleport)`)
 		}
+		if len(p.GiveItems) > 0 {
+			return false, bad(`give_items goes with mode "remote" (commander): it sends .additem to a hired or named bot at the prepare step`)
+		}
 		if p.Pulltest != nil && (p.Teleport || p.Resume != nil) {
 			return false, bad(`pulltest in leader mode runs where the party stands, at the pack: leave teleport and resume out`)
 		}
@@ -97,6 +100,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 			return true, bad("%v", err)
 		}
 	}
+	if err := dungeon.ValidateGiveItems(p.GiveItems); err != nil {
+		return true, bad("%v", err)
+	}
 	for _, c := range p.CC {
 		if c.Entry == 0 || !slices.Contains(tbm.CCMarks, strings.ToLower(c.Mark)) || (c.Bot != "" && !botName.MatchString(c.Bot)) {
 			return true, bad("cc: each rule needs an entry, a mark (%s) and optionally a bot name", strings.Join(tbm.CCMarks, ", "))
@@ -123,6 +129,8 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 	switch {
 	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
 		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
+	case len(p.GiveItems) > 0:
+		return bad(`give_items puts items in the bags of the driven run's bots; in observe mode the run leader on the server gives the agent no such step (and its plan leaves an optional item leg out)`)
 	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil || p.GravesBatch != 0 || p.GravesRamp != nil:
 		return bad(`cc, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
 	case p.Tune != "" || p.LiveReload != nil:
@@ -205,7 +213,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

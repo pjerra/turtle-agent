@@ -183,6 +183,14 @@ func (s *Stepper) enterLeg(i int) {
 // RestartLeg begins the current leg again from its first point: for a leg whose plan was reloaded before anything of it was done.
 func (s *Stepper) RestartLeg() { s.enterLeg(s.leg) }
 
+// SkipLeg gives up the current leg and goes on at the next one: the driver's way past an optional leg whose item is missing. It does nothing
+// on a plan that is done or failed.
+func (s *Stepper) SkipLeg() {
+	if s.ph != phDone && s.ph != phFailed {
+		s.enterLeg(s.leg + 1)
+	}
+}
+
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
 	return s.leg, [...]string{"walk", "pull_groups", "steps", "boss", "after_boss", "done", "failed"}[s.ph], s.idx
