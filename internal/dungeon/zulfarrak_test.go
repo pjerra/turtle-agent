@@ -515,6 +515,10 @@ func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
 					if entry == 7246 && ((math.Abs(x-1591) < 0.2 && math.Abs(y-1047.7) < 0.2) || (math.Abs(x-1626.5) < 0.2 && math.Abs(y-1136) < 0.2)) {
 						continue
 					}
+					// The lone patrolling Soul Eater of the courtyard (spawn row 81550) is left out too (route edit Z10, 2026-10-16): it aggroes on the walk.
+					if entry == 7247 && math.Abs(x-1757.16) < 0.2 && math.Abs(y-1141.25) < 0.2 {
+						continue
+					}
 					if flagged[m["guid"]] || slicesContains(l.Skip, entry) || distToSegment(at, a, b) > routeAggro || planned(entry, at) {
 						continue
 					}
