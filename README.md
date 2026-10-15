@@ -609,7 +609,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   a member of the group, for packs of one entry that stand closer together than that; `patrol` (optional,
   `{"entries": [..], "path": [{"x":..,"y":..,"z":..}, ..], "period_s": .., "source": ".."}`) is a patrol that walks by the group: its members' entries,
   its waypoints in walking order (at least two; it goes on from the last to the first, as the core's waypoint movement does: take them from
-  `creature_movement` for the spawn guid) and one round in seconds (1-900: the path's length at 2.5 yd/s for `speed_walk` 1); see **patrols** under
+  `creature_movement` for the spawn guid) and one round in seconds (1-900: the path's length at 2.5 yd/s for `speed_walk` 1); `period_estimate: true` says that round is only that estimate and not measured: the driver then predicts no phase from it (the patrol is a danger while the pull lies within 150 yd ahead of a member on its path, so the party waits until it is past, and a patrol out of view is looked for the whole `patrol_locate_s`), notes it once per group, and the plan check warns for each such patrol (the mapping walk measures the round and drops the flag); see **patrols** under
   [Dungeon runs](#dungeon-runs)); run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,

@@ -284,3 +284,88 @@ func TestRemoteStaticMobOnThePatrolPathIsNoPatrol(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// An estimated period (period_estimate) gives no pace: where the estimate says the patrol is far from the pull in the window, the party
+// still waits for it (nothing is predicted from the estimate), and writes a note; a measured period of the same size does predict it safe.
+func TestRemoteEstimatedPatrolPeriodIsNeverPredictedSafe(t *testing.T) {
+	run := func(estimate bool) (Report, float32) {
+		g := newFakeRemote(t)
+		g.addMob(299, Point{60, 0, 0})
+		p := g.addMob(301, Point{200, 0, 0}) // 140 yd from the pack, walking at 5 yd/s: the estimate below says 0.7 yd/s
+		g.onTick = walker(p, 80, 300, 5, -1)
+		pat := &Patrol{Entries: []uint32{301}, Path: []Point{{300, 0, 0}, {80, 0, 0}}, PeriodS: 600, PeriodEstimate: estimate}
+		plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}, Patrol: pat}}})
+		var atPull float32 = -1
+		walk := g.onTick
+		g.onTick = func(g *fakeRemote) {
+			walk(g)
+			if atPull < 0 && g.indexOf("cmd pullback") >= 0 {
+				atPull = p.pos.X
+			}
+		}
+		rep, err := runRemote(t, g, plan, opts(), nil)
+		if err != nil {
+			t.Fatalf("%v %v", err, rep.Notes)
+		}
+		return rep, atPull
+	}
+	rep, atPull := run(true)
+	if r := rep.Remote; r.PatrolWaits < 1 || r.PatrolTimeouts != 0 {
+		t.Fatalf("%+v %v", r, rep.Notes)
+	}
+	if atPull <= 60+PatrolAggro {
+		t.Fatalf("pulled with the patrol at %.0f", atPull)
+	}
+	if n := notesOf(rep); !strings.Contains(n, "period_estimate") || !strings.Contains(n, "phase is not predicted") {
+		t.Fatalf("no note about the estimate: %s", n)
+	}
+	// The same patrol with a measured period is predicted safe (far from the pull in the window): no wait, no note.
+	rep, _ = run(false)
+	if r := rep.Remote; r.PatrolWaits != 0 || strings.Contains(notesOf(rep), "period_estimate") {
+		t.Fatalf("%+v %v", r, rep.Notes)
+	}
+}
+
+// patrolDanger of an estimated patrol looks a distance ahead, not a time.
+func TestPatrolDangerOfAnEstimatedPeriodLooksADistanceAhead(t *testing.T) {
+	g := newFakeRemote(t)
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{60, 0, 0}}}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	member := tbm.HostileRec{Entry: 301, X: 200, Y: 0, Z: 0}
+	for _, c := range []struct {
+		estimate bool
+		want     bool
+	}{{false, false}, {true, true}} {
+		p := &Patrol{Entries: []uint32{301}, Path: []Point{{300, 0, 0}, {0, 0, 0}}, PeriodS: 600, PeriodEstimate: c.estimate}
+		if got := d.patrolDanger(p, member, []Point{{60, 0, 0}}); got != c.want {
+			t.Errorf("estimate %v: danger %v, want %v", c.estimate, got, c.want)
+		}
+	}
+}
+
+func TestPatrolPeriodEstimateParsesAndWarns(t *testing.T) {
+	doc := `{"version":1,"name":"p","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":1,"z":0}],"patrol":{"entries":[2],"path":[{"x":1,"y":1,"z":0},{"x":9,"y":1,"z":0}],"period_s":30,"period_estimate":true}}]}]}`
+	p, err := Parse("p.json", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Legs[0].PullGroups[0].Patrol.PeriodEstimate {
+		t.Fatal("period_estimate not read")
+	}
+	b, err := Marshal(p)
+	if err != nil || !strings.Contains(string(b), `"period_estimate": true`) {
+		t.Fatalf("%v %s", err, b)
+	}
+	res, err := CheckPlan(p, fakeNav{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		found = found || w.Reason == WarnEstimatedPatrol
+	}
+	if !found || !res.OK() {
+		t.Fatalf("warnings %+v ok %v", res.Warnings, res.OK())
+	}
+}
