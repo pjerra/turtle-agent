@@ -43,8 +43,8 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		if p.Tune != "" || p.LiveReload != nil {
 			return false, bad(`tune and live_reload go with mode "remote" (commander)`)
 		}
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.KeepOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
-			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote" (commander)`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.KeepOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.GravesBatch != 0 || p.GravesRamp != nil || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
+			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote" (commander)`)
 		}
 		if (p.Rotation != "" || p.Role != "") && p.Brain == "" && !strings.EqualFold(p.Mode, modeLeader) {
 			return false, bad(`rotation and role go with a brain (brain, or mode "leader", which picks the preset of the character's class)`)
@@ -66,6 +66,19 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	if v := strings.ToLower(p.ObjectFallback); !slices.Contains([]string{"", dungeon.ObjectFallbackAgent, dungeon.ObjectFallbackOff}, v) {
 		return true, bad("object_fallback: %q is neither %q nor %q", p.ObjectFallback, dungeon.ObjectFallbackAgent, dungeon.ObjectFallbackOff)
+	}
+	if p.GravesBatch < 0 || p.GravesBatch > 20 {
+		return true, bad("graves_batch: %d is outside 1-20", p.GravesBatch)
+	}
+	if r := p.GravesRamp; r != nil {
+		switch {
+		case p.GravesBatch != 0:
+			return true, bad("graves_batch and graves_ramp are two ways to set the batch size: give one")
+		case r.Start < 0 || r.Start > 20 || r.Step < 0 || r.Step > 10 || r.Max < 0 || r.Max > 40:
+			return true, bad("graves_ramp: start is 0-20 (default %d), step 0-10 (default %d), max 0-40 (0: no limit)", dungeon.GravesRampStart, dungeon.GravesRampStep)
+		case r.Max > 0 && r.Start > r.Max:
+			return true, bad("graves_ramp: start %d is above max %d", r.Start, r.Max)
+		}
 	}
 	if t := strings.ToLower(p.Team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
 		return true, bad("team: %q is neither %q nor %q", p.Team, dungeon.TeamAlliance, dungeon.TeamHorde)
@@ -110,8 +123,8 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 	switch {
 	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
 		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
-	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil:
-		return bad(`cc, carrier, loot_restore, object_fallback, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
+	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil || p.GravesBatch != 0 || p.GravesRamp != nil:
+		return bad(`cc, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
 	case p.Tune != "" || p.LiveReload != nil:
 		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
 	}
@@ -192,7 +205,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

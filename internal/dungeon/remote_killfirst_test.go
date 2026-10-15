@@ -22,7 +22,7 @@ func entriesOf(hs []tbm.HostileRec) string {
 }
 
 func TestPlanReadsKillFirst(t *testing.T) {
-	p, err := Parse("t.json", []byte(`{"version":1,"name":"kf","map":1,"entrance":{"x":0,"y":0,"z":0},"cc_priority":[5650],"kill_first":[8179,5650,7247],"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":5,"position":{"x":5,"y":0,"z":0}}}]}`))
+	p, err := Parse("t.json", []byte(`{"version":1,"name":"kf","map":1,"entrance":{"x":0,"y":0,"z":0},"cc_priority":[5649],"kill_first":[8179,5650,7247],"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":5,"position":{"x":5,"y":0,"z":0}}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,7 @@
 package planexport
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -111,7 +112,14 @@ type Options struct {
 	// Cut, when set, cuts a hop longer than MoveGapWarnYd between two moves into via points: it returns the points to walk through
 	// (not including the two ends), e.g. a navmesh path. Nil: the long hops stay and are reported in Warnings.
 	Cut func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
+	// DropCompanionsLoot lets a plan with a leg whose companions_loot is false be exported all the same, without it: the rows have no
+	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
+	// graveyard chests). Without this option such a plan is refused.
+	DropCompanionsLoot bool
 }
+
+// ErrCompanionsLoot is the refusal of a plan with a leg whose companions_loot is false (see Options.DropCompanionsLoot).
+var ErrCompanionsLoot = errors.New("plan not exported")
 
 // Result is a plan's rows and what the exporter had to say about them.
 type Result struct {
@@ -180,15 +188,16 @@ func planComment(p *dungeon.Plan) string {
 }
 
 type builder struct {
-	opt      Options
-	plan     *dungeon.Plan
-	name     string
-	rows     Rows
-	warnings []string
-	leg_     int
-	seq      int
-	last     dungeon.Point // the last point a step of the leg put the party at
-	haveLast bool
+	opt         Options
+	plan        *dungeon.Plan
+	name        string
+	rows        Rows
+	warnings    []string
+	leg_        int
+	seq         int
+	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
+	last        dungeon.Point // the last point a step of the leg put the party at
+	haveLast    bool
 }
 
 func (b *builder) add(s StepRow) {
@@ -208,7 +217,10 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
-	b.leg_, b.seq, b.haveLast = li, 0, false
+	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
+	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
+		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
+	}
 	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: li, Name: clip(l.Name, MaxLegName)})
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
@@ -221,6 +233,12 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.Steps {
+		// A leg whose companions_loot is false (only exported with DropCompanionsLoot) has its chests opened by the carrier bot alone: with the
+		// leg's looting setting dropped those steps would send bots at them, so they are left out, with a warning.
+		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot {
+			b.skippedLoot++
+			continue
+		}
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("steps[%d]: %w", si, err)
 		}
@@ -234,6 +252,9 @@ func (b *builder) leg(li int) error {
 		if err := b.step(st); err != nil {
 			return fmt.Errorf("after_boss[%d]: %w", si, err)
 		}
+	}
+	if b.skippedLoot > 0 {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): %d loot_object steps left out: the leg's companions_loot false (looting off for every bot, only the carrier opens these) cannot be exported", li, l.Name, b.skippedLoot))
 	}
 	if b.seq > MaxSteps {
 		return fmt.Errorf("%d steps (at most %d)", b.seq, MaxSteps)
@@ -336,6 +357,15 @@ func (b *builder) step(st dungeon.Step) error {
 		b.add(StepRow{Kind: KindUseItem, Entry: u.Entry, Item: itemEntry(u.ExpectItem), Comment: clip("use "+nameOr(u.Name, fmt.Sprintf("item %d", u.Entry))+madeNote(u.ExpectItem), MaxComment)})
 	case st.WaitFor != nil:
 		return b.wait(st.WaitFor)
+	case st.AreaTrigger != nil:
+		// The run leader has no area trigger step. A lead bot that walks into the zone takes the trigger itself when the module lists it
+		// (AiPlayerbot.BotAreaTriggers, TortoiseBots #1002), which is the plan's "auto" and "bot": a move to the stand point. The agent's own
+		// character ("agent") and the expect check exist only in a driven run.
+		t := st.AreaTrigger
+		if t.By == dungeon.TriggerAgent {
+			return fmt.Errorf("area_trigger %d: by \"agent\" has no run leader step (the leader is a bot: use \"auto\" or \"bot\")", t.ID)
+		}
+		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})
@@ -374,6 +404,8 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 			c = b.plan.Legs[b.leg_].To
 		}
 		b.add(StepRow{Kind: KindWaitClear, X: c.X, Y: c.Y, Z: c.Z, Radius: h.Radius, TimeoutS: timeout, Comment: clip(waitComment("wait until no hostile", w), MaxComment)})
+	case w.Unit != nil:
+		return fmt.Errorf("wait_for.unit has no run leader step (%s)", w.Unit.String())
 	default:
 		return fmt.Errorf("wait_for: neither gameobject nor hostiles_gone")
 	}

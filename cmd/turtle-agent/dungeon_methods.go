@@ -187,6 +187,12 @@ type dungeonRunParams struct {
 	// ObjectFallback is what an object step does when the carrier's order fails twice (remote mode): "agent" (the default) lets the
 	// agent's own character open the object and trade the item to the carrier, "off" fails the step.
 	ObjectFallback string `json:"object_fallback,omitempty"`
+	// GravesBatch is how many chests of a plan's batched loot_object steps (Zum'rah's graves) are opened back to back before the party fights
+	// what came out (remote mode): a fixed size, 1 to 20. GravesRamp instead starts at start (default 2) and adds step (default 1) after each
+	// batch without a wipe, up to max (0: no limit but the chests that lie together), and stops growing at the first wipe. Neither: the
+	// plan's own batches (3 to 6 chests). Each batch is noted as "graves-batch: ..." and listed in the report's remote.grave_batches.
+	GravesBatch int                 `json:"graves_batch,omitempty"`
+	GravesRamp  *dungeon.GravesRamp `json:"graves_ramp,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the

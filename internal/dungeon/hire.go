@@ -63,7 +63,8 @@ const (
 	hireSpellWait    = 3 * time.Second        // the first line of one `spells <filter>` answer
 	hireSpellQuiet   = 400 * time.Millisecond // its burst of lines ends when none came for this long
 	hireItemWait     = 3 * time.Second
-	hirePetWait      = 40 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short)
+	hirePetWait      = 60 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short; 40 s was too short once more in the 2026-10-15 live run)
+	hirePetNudge     = 20 * time.Second // a bot with no pet this long after it showed is told once to summon one
 	hireOutOfGroup   = 10 * time.Second // the commander leaves the group after a bind
 	maxHireComposite = 5
 )
@@ -374,6 +375,7 @@ type hireFlow struct {
 	dropped []string
 	problem []string
 	who     map[string]tbm.Who // the bots' own `who` answers
+	kept    map[string]bool    // the hires (lower case) of a kept binding: bound bots answer no `.bot` line (taken from the memory of the run that left it)
 }
 
 func (f *hireFlow) over() error {
@@ -598,6 +600,10 @@ func (f *hireFlow) currentHires(ctx context.Context) ([]*heldHire, error) {
 				f.who = map[string]tbm.Who{}
 			}
 			f.who[strings.ToLower(h.name)] = w
+			if f.kept == nil {
+				f.kept = map[string]bool{}
+			}
+			f.kept[strings.ToLower(h.name)] = true
 			f.note("%s: a bound hire of a kept binding does not answer who; taken as level %d %s from the run that left it", h.name, w.Level, w.Class)
 		}
 		w, why := f.readWho(ctx, h.name)

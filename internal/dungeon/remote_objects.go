@@ -643,6 +643,16 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 		leave()
 		d.wd.progress("object step result: " + a.Label)
 	}()
+	if a.Kind == ActLoot && a.Batch != "" && d.batch == nil {
+		if err := d.batchBegin(ctx, a); err != nil {
+			return err
+		}
+	} else if a.Kind == ActLoot && a.SpawnGUID != 0 && a.Batch == "" {
+		// Whatever the party is still fighting (the last grave's mobs, a pack that came by) is fought out before the carrier walks to the next chest.
+		if err := d.fightEngagedOut(ctx, a.Label); err != nil {
+			return err
+		}
+	}
 	if _, err := d.keepNear(ctx); err != nil {
 		return err
 	}
@@ -659,12 +669,18 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	switch a.Kind {
 	case ActLoot:
 		note, err = d.stepLoot(ctx, a, c.Name, rec)
+		if err == nil && note == "" && a.SpawnGUID != 0 && a.Batch == "" {
+			err = d.fightOut(ctx, a.Label) // what the chest brought (a grave's Zombie and Dead Hero) is fought out before the next step
+		}
 	case ActUse:
 		note, err = d.stepOpen(ctx, a, c.Name, rec)
 	case ActItem:
 		note, err = d.stepItem(ctx, a, c.Name, rec)
 	case ActRitual:
 		note, err = d.stepRitual(ctx, a, c, rec)
+	}
+	if err == nil && a.Kind == ActLoot && a.Batch != "" {
+		err = d.batchStepDone(ctx, a, note != "")
 	}
 	if err == nil && note != "carries it already" {
 		err = d.waitRejoin(ctx, c.Name)
@@ -695,11 +711,23 @@ func (d *RemoteDriver) stepLoot(ctx context.Context, a Action, carrier string, r
 			return "carries it already", nil
 		}
 	}
+	// A chest of an exact spawn that is opened already, or gone, is skipped (a resumed run goes on at the first unopened grave).
+	skip, why, sure := d.spawnOpened(ctx, a)
+	if skip {
+		d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
+		return why, nil
+	}
 	stayed, err := d.approachObject(ctx, rec, carrier, objectPoint(a), d.standOf(a))
 	if err != nil {
 		return "", err
 	}
 	defer d.resumeFollow(ctx, stayed)
+	if !sure { // the first look was out of the bots' reach: look again where the carrier stands now
+		if skip, why, _ := d.spawnOpened(ctx, a); skip {
+			d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
+			return why, nil
+		}
+	}
 	var res tbm.OrderResult
 	var failed bool
 	err = d.withFFA(ctx, rec, func() error {
@@ -828,7 +856,8 @@ func (d *RemoteDriver) doBoss(ctx context.Context, a Action) error {
 	}
 	b := a.Boss
 	og, ok := d.orderGame()
-	off := b.CompanionsLoot != nil && !*b.CompanionsLoot
+	// A leg that has its looting off (Leg.CompanionsLoot false) has the bots muted already: the boss's own mute would turn it back on early.
+	off := b.CompanionsLoot != nil && !*b.CompanionsLoot && len(d.legMuted) == 0
 	if !ok || (b.LootItem == nil && !off) {
 		return d.doKill(ctx, a)
 	}
