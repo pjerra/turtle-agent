@@ -1251,3 +1251,61 @@ func TestOneBotOutsideForAMomentIsNoWipe(t *testing.T) {
 		t.Fatalf("%v downs %d wipes %d", err, rep.PartyDowns, rep.Wipes)
 	}
 }
+
+// The cap of recovered wipes counts per leg: a wipe in each of three legs is recovered (live, zf-zum2-s2: the third, in the Zum'rah leg,
+// hit a run-wide cap of 2 and ended "failed: wipe"); a third wipe in the same leg still fails.
+func TestWipeRecoveryCapCountsPerLeg(t *testing.T) {
+	wipeAt := func(g *fakeRemote, xs ...float32) {
+		next := 0
+		g.onTick = func(f *fakeRemote) {
+			if next < len(xs) && f.lead().X >= xs[next] && !f.party[0].Dead {
+				next++
+				for _, p := range f.party {
+					p.Dead, p.HP = true, 0
+				}
+			}
+		}
+	}
+	g := newFakeRemote(t)
+	wipeAt(g, 30, 70, 110)
+	plan := remotePlan(Leg{Name: "a", To: Point{40, 0, 0}}, Leg{Name: "b", To: Point{80, 0, 0}}, Leg{Name: "c", To: Point{120, 0, 0}})
+	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.RecoverWipe = true })
+	if err != nil || rep.State != "done" || len(g.revived) != 9 {
+		t.Fatalf("a wipe in each of three legs: %v %s revived %v\\n%s", err, rep.State, g.revived, notesOf(rep))
+	}
+	// Three wipes in one leg: the third is not recovered.
+	g = newFakeRemote(t)
+	wipeAt(g, 30, 60, 90) // all in leg a
+	rep, err = runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{200, 0, 0}}), opts(), func(c *Config) { c.RecoverWipe = true })
+	if err == nil || rep.State != "failed" || len(g.revived) != 6 {
+		t.Fatalf("three wipes in one leg: %v %s revived %v", err, rep.State, g.revived)
+	}
+}
+
+// The healer is the straggler: at the gather's first timeout it is summoned (a GM assist) instead of waited for, and the gathers of the leg
+// do not give up on it ("came no closer"). A non-healer straggler is still given up on as before.
+func TestHealerStragglerIsSummonedAtTheFirstGatherTimeout(t *testing.T) {
+	for _, who := range []string{"Healy", "Magey"} {
+		g := newNearGame(t, 3)
+		g.addMob(299, Point{40, 0, 0})
+		idx := 1
+		if who == "Magey" {
+			idx = 2
+		}
+		g.party[idx].X = -30
+		g.lagUntil = map[packet.GUID]time.Time{g.party[idx].GUID: g.now.Add(time.Hour)}
+		plan := remotePlan(Leg{Name: "first", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 0, 0}}}}})
+		rep, err := nearRun(t, g, plan)
+		if err != nil || rep.State != "done" {
+			t.Fatalf("%s: %v\\n%s", who, err, notesOf(rep))
+		}
+		summoned := g.indexOf("cmd summon "+who) >= 0
+		gaveUp := strings.Contains(notesOf(rep), who+" came no closer")
+		if (who == "Healy") != summoned || (who == "Healy") == gaveUp {
+			t.Fatalf("%s: summoned %v gave up %v\\n%s", who, summoned, gaveUp, notesOf(rep))
+		}
+		if who == "Healy" && (rep.Remote.RejoinTPs < 1 || g.indexOf("cmd follow") < 0) {
+			t.Errorf("rejoin tps %d, orders %v", rep.Remote.RejoinTPs, g.orders)
+		}
+	}
+}

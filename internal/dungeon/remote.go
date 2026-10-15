@@ -512,6 +512,7 @@ type RemoteDriver struct {
 	revived        map[packet.GUID]int
 	lastRevive     map[packet.GUID]time.Time
 	wipeRecover    int
+	wipeRecoverLeg map[int]int // recovered wipes per leg
 	recoveries     int
 
 	tank        packet.GUID
@@ -918,8 +919,15 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		}
 		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down, "after_kill": after})
 		d.rep.note(err.Error())
-		if (d.cfg.RecoverWipe || after) && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
+		// The cap counts per leg (MaxWipeRecoveries recoveries in one leg), with a run-wide ceiling of wipeRecoverRunFactor times that: a run
+		// with a wipe in each of several legs recovers each of them (live, zf-zum2-s2: wipes in legs 5 and 8 recovered, the third, in the
+		// Zum'rah leg, hit the run-wide cap of 2 and failed "wipe").
+		if d.wipeRecoverLeg == nil {
+			d.wipeRecoverLeg = map[int]int{}
+		}
+		if (d.cfg.RecoverWipe || after) && d.wipeRecoverLeg[d.curLeg] < d.cfg.MaxWipeRecoveries && d.wipeRecover < d.cfg.MaxWipeRecoveries*wipeRecoverRunFactor && ctx.Err() == nil {
 			d.wipeRecover++
+			d.wipeRecoverLeg[d.curLeg]++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
 				_ = d.maintWipeRecovered(ctx) // once the party is calm; a context error ends the run at the next look
 				d.obj.waitAt = time.Time{}    // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
@@ -935,6 +943,9 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	d.st.Fail(err.Error())
 	return false
 }
+
+// wipeRecoverRunFactor times MaxWipeRecoveries is the run-wide ceiling of recovered wipes (the cap itself counts per leg).
+const wipeRecoverRunFactor = 5
 
 // remoteWorld is the Stepper's World over the feed: the lead bot's position and the hostiles the bots see. It has no game
 // objects: the agent does not see the dungeon.

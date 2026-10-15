@@ -24,6 +24,9 @@ const (
 	ReasonNoLOS       = "no line of sight"
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
+	// ReasonDetour is a pull group whose way from where the party stands is a long detour for a mob that is near: the bots' pull finds no
+	// firing position ("The tank could not start moving to a firing position for the pull", live, Zul'Farrak).
+	ReasonDetour = "detour"
 	// ReasonOutsideZone is an area_trigger whose stand point lies outside its zone: whoever stands there takes no trigger.
 	ReasonOutsideZone = "outside the zone"
 	// ReasonNeedsWalk is a point the plan marks needs_walk: it was never snapped to the navmesh and its mapping walk is still to do.
@@ -42,6 +45,14 @@ type Navmesh interface {
 	Raycast(mapID uint32, from, to navmesh.Vec3) (navmesh.Ray, error)
 	Nearest(mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error)
 }
+
+// A pull group is a detour when it stands within pullDetourNear yards in a line and the path to it is longer than pullDetourFactor times that
+// plus pullDetourSlack yards.
+const (
+	pullDetourNear   = 45.0
+	pullDetourFactor = 2.0
+	pullDetourSlack  = 25.0
+)
 
 // The tolerances of the check, in yards.
 const (
@@ -502,6 +513,13 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		pts[i] = point(v)
 	}
 	end := pts[len(pts)-1]
+	// A pack that is near but whose way is a long detour (another layer: a mob under a bridge, on a ledge) leaves the tank no firing position
+	// within the ranged pull range: it answers unreachable. Only pull group looks (a boss is walked to).
+	if part == "pull group look" && path.Status == navmesh.Complete {
+		if straight := dist3(from, at); straight <= pullDetourNear && float64(path.Length) > pullDetourFactor*straight+pullDetourSlack {
+			c.fail(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length)
+		}
+	}
 	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
 	var snapErr error
 	snap := func(p Point) Point { // the same floor snap the driver passes (FloorSnapper)

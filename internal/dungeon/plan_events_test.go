@@ -303,3 +303,25 @@ func TestObjectSpawnGuidParses(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A pack that stands near but whose way is a long detour (another layer) leaves the tank no firing position: the plan check says so.
+func TestPlanCheckPullDetour(t *testing.T) {
+	leg := Leg{Name: "p", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{30, 0, 0}}}}}
+	if res := checkLegs(t, fakeNav{}, 0, leg); !res.OK() {
+		t.Fatalf("%s", res.Summary())
+	}
+	// 30 yd in a line, 120 yd by the path: a detour (more than twice the line plus 25 yd).
+	res := checkLegs(t, fakeNav{detour: map[Point]float32{{30, 0, 0}: 120}}, 0, leg)
+	if got, want := issueReasons(res.Issues), "0/pull group look/1/detour"; got != want || !strings.Contains(res.Summary(), "the pack is 30 yd away but the way to it is 120 yd") {
+		t.Fatalf("%q: %s", got, res.Summary())
+	}
+	// 30 yd in a line, 70 yd by the path: still fine (under 2 x 30 + 25).
+	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{30, 0, 0}: 80}}, 0, leg); !res.OK() {
+		t.Fatalf("%s", res.Summary())
+	}
+	// A pack farther than the near limit is not judged.
+	far := Leg{Name: "p", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{60, 0, 0}}}}}
+	if res := checkLegs(t, fakeNav{detour: map[Point]float32{{60, 0, 0}: 400}}, 0, far); !res.OK() {
+		t.Fatalf("%s", res.Summary())
+	}
+}
