@@ -46,7 +46,7 @@ func (n holeNav) Nearest(_ uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error) {
 func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 	base := load(t)
 	clean := holeNav{}
-	if res := Evaluate(base, base, clean); !res.Checked || !res.OK || res.BaseIssues != 0 || res.NewIssues != 0 || res.Points == 0 {
+	if res := Evaluate(base, base, clean); !res.Checked || !res.OK || !res.Accepted || res.BaseIssues != 0 || res.NewIssues != 0 || res.Points == 0 {
 		t.Fatalf("the plan as it is: %+v", res)
 	}
 	// an edit that moves a via point into a hole makes an issue: not OK, and the issue is marked new
@@ -56,7 +56,7 @@ func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 	}
 	holey := holeNav{holes: [][4]float32{{10, 40, 30, 60}}}
 	res := Evaluate(base, edited, holey)
-	if !res.Checked || res.OK || res.NewIssues != 1 || len(res.Issues) != 1 || !res.Issues[0].New || res.Issues[0].Reason != "off the mesh" || res.Issues[0].Text == "" {
+	if !res.Checked || res.OK || res.Accepted || res.NewIssues != 1 || len(res.Issues) != 1 || !res.Issues[0].New || res.Issues[0].Reason != "off the mesh" || res.Issues[0].Text == "" {
 		t.Fatalf("%+v", res)
 	}
 	if res.Refusal() == "" {
@@ -72,7 +72,7 @@ func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 		t.Fatal(err)
 	}
 	res = Evaluate(base, harmless, oldHole)
-	if !res.OK || res.NewIssues != 0 || res.BaseIssues == 0 || len(res.Issues) != res.BaseIssues || res.Issues[0].New {
+	if !res.Accepted || res.OK || res.NewIssues != 0 || res.BaseIssues == 0 || len(res.Issues) != res.BaseIssues || res.Issues[0].New {
 		t.Fatalf("%+v", res)
 	}
 	// inserting a via point before the failing one renumbers it ("via 1" becomes "via 2") and it is still not new
@@ -80,7 +80,7 @@ func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := Evaluate(base, inserted, oldHole); !res.OK || res.NewIssues != 0 {
+	if res := Evaluate(base, inserted, oldHole); !res.Accepted || res.OK || res.NewIssues != 0 {
 		t.Fatalf("%+v", res)
 	}
 	// an edit that fixes the point passes with fewer issues than the plan had
@@ -88,7 +88,8 @@ func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := Evaluate(base, fixed, oldHole); !res.OK || len(res.Issues) >= res.BaseIssues {
+	// moving via 1 off the hole also shortens the direct step after it: the plan has no issue left, so this edit is "checked"
+	if res := Evaluate(base, fixed, oldHole); !res.OK || !res.Accepted || len(res.Issues) >= res.BaseIssues {
 		t.Fatalf("%+v", res)
 	}
 }
@@ -96,7 +97,7 @@ func TestEvaluateRefusesTheIssuesAnEditMakesNotTheOnesThePlanHad(t *testing.T) {
 func TestEvaluateCannotProveWhatTheNavmeshCannotAnswer(t *testing.T) {
 	base := load(t)
 	res := Evaluate(base, base, holeNav{err: errors.New("no tiles for map 209")})
-	if res.Checked || res.OK || res.Skipped == "" || res.Refusal() == "" {
+	if res.Checked || res.OK || res.Accepted || res.Skipped == "" || res.Refusal() == "" {
 		t.Fatalf("%+v", res)
 	}
 }

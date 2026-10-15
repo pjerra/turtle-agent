@@ -19,25 +19,11 @@
    "title": "Wailing Caverns",
    "map": 43,
    "kind": "dungeon",
-   "data": "map43",
-   "trigger": 228,
-   "bosses": [
-    3671,
-    3669,
-    3653,
-    3670,
-    3674,
-    3673,
-    5775
-   ],
-   "entrance_tele": "wc",
-   "outside_tele": "WailingCaverns",
+   "handwritten": true,
    "special": [
-    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (escort, ritual waves) summons him",
-    "the Awakening of Naralex gossip with the Disciple (3678)"
-   ],
-   "notes": [
-    "Turtle adds Vangros (61965) and Zandara Windhoof (61968), rank-1 named mobs in no leg as bosses; they are pulled as packs."
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
+    "Lady Anacondra has four spawn rows in one pool (one up per reset)",
+    "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a gm_cross waypoint (a GM moves the party)"
    ]
   },
   {

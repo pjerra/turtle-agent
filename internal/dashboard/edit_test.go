@@ -561,5 +561,136 @@ func TestSnapTakesTheEditsBeforeIt(t *testing.T) {
 	}
 	if got := q(`[{"leg":0,"kind":"delete","index":9}]`); !strings.Contains(got.body, `"ok":false`) {
 		t.Errorf("a prior op that cannot apply: %s", got.body)
+
+	}
+}
+
+// "checked" means the edited plan has no plan check issue at all. An edit that adds none to a plan that has issues of its own is kept under
+// another status, "unchecked", which the newest-checked lookup (export, promote) never picks.
+func TestAnEditOfABrokenPlanIsKeptAsUncheckedNotChecked(t *testing.T) {
+	r := newEditRig(t, testNav{holes: [][4]float32{{35, -5, 45, 5}}}) // swallows via 1 (40, 0): the plan fails there already
+	got := r.post("edit1", r.edit(move(1, 0, 201, 1)), editToken)
+	var rep EditReply
+	must(t, json.Unmarshal([]byte(got.body), &rep))
+	if got.code != http.StatusOK || rep.Status != "unchecked" || rep.Check.OK || !rep.Check.Accepted || rep.Check.NewIssues != 0 || len(rep.Check.Issues) == 0 || !strings.Contains(rep.Message, "own") {
+		t.Fatalf("%d %s", got.code, got.body)
+	}
+	if v, _ := r.ed.cfg.Store.Latest("edit1"); v != 0 {
+		t.Errorf("Latest picked version %d of a plan with issues", v)
+	}
+	if _, err := os.Stat(filepath.Join(r.ed.cfg.Store.Root(), "edit1", "v0001.json")); err != nil {
+		t.Errorf("an unchecked edit keeps its plan, to go on from: %v", err)
+	}
+	m, _ := r.ed.cfg.Store.Meta("edit1", 1)
+	if m.Status != "unchecked" {
+		t.Errorf("status %q", m.Status)
+	}
+	// an edit that fixes the plan is checked
+	got = r.post("edit1", r.edit(move(0, 1, 40, 8)), editToken)
+	must(t, json.Unmarshal([]byte(got.body), &rep))
+	if got.code != http.StatusOK || rep.Status != "checked" || !rep.Check.OK || len(rep.Check.Issues) != 0 {
+		t.Fatalf("%d %s", got.code, got.body)
+	}
+	if v, _ := r.ed.cfg.Store.Latest("edit1"); v != 2 {
+		t.Errorf("latest %d", v)
+	}
+}
+
+// The slot-folder guard fails closed: a settings file that cannot be read or decoded, or a slot whose plan folder cannot be told, stops edits.
+func TestSlotFoldersFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string, mode os.FileMode) {
+		must(t, os.WriteFile(filepath.Join(dir, name), []byte(body), mode))
+	}
+	abs := t.TempDir()
+	write("settings-1.json", `{"rpc":"127.0.0.1:8765","dungeons_dir":`+string(mustJSON(t, abs))+`}`, 0o600)
+	write("settings.json", `{"mmaps_dir":"/x"}`, 0o600) // no rpc: not an agent that can be commanded
+	got, err := SlotFolders(dir, nil)
+	if err != nil || len(got) != 1 || got[0] != abs {
+		t.Fatalf("a good config: %v %v", got, err)
+	}
+	cases := map[string]struct{ name, body string }{
+		"malformed":          {"settings-2.json", `{"rpc": `},
+		"empty dungeons_dir": {"settings-2.json", `{"rpc":"127.0.0.1:8766"}`},
+		"relative":           {"settings-2.json", `{"rpc":"127.0.0.1:8766","dungeons_dir":"dungeons"}`},
+		"not an object":      {"settings-2.json", `[1,2]`},
+	}
+	for name, c := range cases {
+		write(c.name, c.body, 0o600)
+		if got, err := SlotFolders(dir, nil); err == nil || !strings.Contains(err.Error(), c.name) {
+			t.Errorf("%s: %v %v", name, got, err)
+		}
+		os.Remove(filepath.Join(dir, c.name))
+	}
+	// unreadable
+	write("settings-3.json", `{"rpc":"127.0.0.1:8767","dungeons_dir":"/x"}`, 0o000)
+	if os.Getuid() != 0 {
+		if _, err := SlotFolders(dir, nil); err == nil || !strings.Contains(err.Error(), "settings-3.json cannot be read") {
+			t.Errorf("unreadable: %v", err)
+		}
+	}
+	os.Remove(filepath.Join(dir, "settings-3.json"))
+	// the operator vouches for a file with a default folder; the vouching is by file name and covers only that file
+	write("settings-4.json", `{"rpc":"127.0.0.1:8768"}`, 0o600)
+	if _, err := SlotFolders(dir, []string{"settings-5.json"}); err == nil {
+		t.Error("vouched for another file")
+	}
+	if got, err := SlotFolders(dir, []string{"settings-4.json"}); err != nil || len(got) != 1 {
+		t.Errorf("vouched: %v %v", got, err)
+	}
+	// ~ is the home folder; a missing config folder is an error
+	write("settings-6.json", `{"rpc":"127.0.0.1:8769","dungeons_dir":"~/ta-x/dungeons"}`, 0o600)
+	home, _ := os.UserHomeDir()
+	if got, _ := SlotFolders(dir, []string{"settings-4.json"}); !containsStr(got, filepath.Join(home, "ta-x", "dungeons")) {
+		t.Errorf("~ not expanded: %v", got)
+	}
+	if _, err := SlotFolders(filepath.Join(dir, "nope"), nil); err == nil {
+		t.Error("a missing config folder")
+	}
+}
+
+func containsStr(l []string, s string) bool {
+	for _, x := range l {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEditsAreRefusedWhenASlotsFolderCannotBeTold(t *testing.T) {
+	for name, body := range map[string]string{
+		"malformed settings":    `{"rpc": `,
+		"empty dungeons_dir":    `{"rpc":"127.0.0.1:8766"}`,
+		"relative dungeons_dir": `{"rpc":"127.0.0.1:8766","dungeons_dir":"dungeons"}`,
+	} {
+		r := newEditRig(t, nil)
+		must(t, os.WriteFile(filepath.Join(r.cfg, "settings-2.json"), []byte(body), 0o600))
+		before := tree(t, filepath.Dir(r.edits))
+		got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken)
+		if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "settings-2.json") {
+			t.Errorf("%s: %d %s", name, got.code, got.body)
+		}
+		if tree(t, filepath.Dir(r.edits)) != before {
+			t.Errorf("%s: wrote", name)
+		}
+		// and the editor does not start on it
+		tk, _ := routeedit.LoadTokens(r.tokens)
+		store, _ := routeedit.NewStore(filepath.Join(t.TempDir(), "e"))
+		if _, err := NewEditor(r.p, EditConfig{Source: r.src, Store: store, Tokens: tk, Nav: testNav{}, Mmaps: "/m"}); err == nil {
+			t.Errorf("%s: started", name)
+		}
+		// vouching for that file lets it go on
+		if name == "empty dungeons_dir" {
+			if _, err := NewEditor(r.p, EditConfig{Source: r.src, Store: store, Tokens: tk, Nav: testNav{}, Mmaps: "/m", AllowDefaultDir: []string{"settings-2.json"}}); err != nil {
+				t.Errorf("vouched: %v", err)
+			}
+		}
+	}
+	// agents given by address have no settings file
+	r := newEditRig(t, nil)
+	r.p.opt.Agents = "auto,8770"
+	if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "--agents auto") {
+		t.Errorf("explicit agents: %d %s", got.code, got.body)
 	}
 }

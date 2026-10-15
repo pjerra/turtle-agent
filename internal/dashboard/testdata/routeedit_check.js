@@ -14,6 +14,10 @@ const geo = { legs: [
   { index: 3, label: "Four", name: "four", packs: [{}], stops: [stop("start", -300, 0), stop("stage", -400, 0)] },
 ] };
 const model = E.buildModel(geo);
+const gx = { legs: [{ index: 0, stops: [stop("start", 0, 0), stop("via", -30, -10, { direct: true, gm_cross: true }), stop("stage", -50, -10)] }] };
+const gxm = E.buildModel(gx);
+assert.ok(gxm.legs[0].via[0].locked && gxm.legs[0].via[0].why.includes("gm_cross"), "a gm_cross point is locked");
+assert.ok(E.checkOp(gxm.legs, { leg: 0, kind: "delete", index: 0 }).includes("gm_cross"));
 assert.strictEqual(model.legs.length, 4);
 assert.deepStrictEqual(model.legs[0].via.map((v) => v.locked), [false, true, true]);
 assert.ok(model.legs[0].via[1].why.includes("direct") && model.legs[0].via[2].why.includes("check_skip"));

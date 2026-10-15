@@ -183,6 +183,8 @@ func Apply(base *dungeon.Plan, ops []Op, nav Floorer) (*dungeon.Plan, []Change, 
 // locked says why a via point cannot be edited from the map, or nil.
 func locked(w dungeon.Waypoint) error {
 	switch {
+	case w.GMCross:
+		return errors.New("a gm_cross point (a GM moves the party there): locked, edit it in the plan file")
 	case w.Direct:
 		return errors.New("a direct (straight-line) step: locked, edit it in the plan file")
 	case w.CheckSkip != "":

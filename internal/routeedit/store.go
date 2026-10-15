@@ -12,8 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
@@ -26,9 +26,10 @@ var versionName = regexp.MustCompile(`^v(\d{4})$`)
 
 // The statuses of a version.
 const (
-	StatusChecked  = "checked"  // the plan check passed: no issue the edit made
-	StatusRefused  = "refused"  // the plan check failed (or could not run): a record only, there is no plan file
-	StatusAccepted = "accepted" // a run walked it and passed (set by whoever promotes it)
+	StatusChecked   = "checked"   // the plan check found no issue in the edited plan at all
+	StatusUnchecked = "unchecked" // the edit made no new issue, but the plan has plan check issues of its own: kept, never picked for a run
+	StatusRefused   = "refused"   // the plan check failed (or could not run): a record only, there is no plan file
+	StatusAccepted  = "accepted"  // a run walked it and passed (set by whoever promotes it)
 )
 
 // MaxVersions is the highest version number: the name is four digits.
@@ -73,58 +74,57 @@ func ParseVersion(s string) (int, bool) {
 
 // Store keeps the versions of every plan under one folder: <root>/<plan>/vNNNN.json (the whole plan, dungeon.Marshal),
 // vNNNN.meta.json (Meta) and vNNNN.diff (a unified text diff against the base). A refused edit has the last two only. Versions are
-// never overwritten or removed. The only file names it creates are built here, from a validated plan name and a number it counts.
+// never overwritten or removed. The only file names it creates are built here, from a validated plan name and a number it counts, and every
+// path step is made relative to a directory descriptor opened without following links (dirfd_linux.go).
 type Store struct {
 	root string
+	rd   *rootDir
 	mu   sync.Mutex
 }
 
-// NewStore makes the folder (private to the user) if it is not there and keeps its real path, so that a link put in its place later is not
-// followed.
-func NewStore(root string) (*Store, error) {
+func newStore(root string, create bool) (*Store, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(root, 0o750); err != nil {
-		return nil, err
+	if create {
+		if err := os.MkdirAll(root, 0o750); err != nil {
+			return nil, err
+		}
 	}
 	real, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("edits folder: %w", err)
 	}
 	if st, err := os.Stat(real); err != nil || !st.IsDir() {
 		return nil, fmt.Errorf("%s is not a folder", root)
 	}
-	return &Store{root: real}, nil
+	rd, err := openRoot(real)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{root: real, rd: rd}, nil
 }
+
+// NewStore makes the folder (private to the user) if it is not there, resolves its real path and holds it open, so that a link put in its
+// place later is not followed.
+func NewStore(root string) (*Store, error) { return newStore(root, true) }
+
+// OpenStore opens an existing store folder without making it (for reading: list, export, promote).
+func OpenStore(root string) (*Store, error) { return newStore(root, false) }
+
+// Close lets go of the folder.
+func (s *Store) Close() { s.rd.close() }
 
 // Root is the folder, symlinks resolved.
 func (s *Store) Root() string { return s.root }
 
-// dir is the folder of a plan; with create it is made. A plan folder that is a link, or a file, is refused.
-func (s *Store) dir(plan string, create bool) (string, error) {
+// dir opens the folder of a plan; with create it is made. A plan folder that is a link, or a file, is refused.
+func (s *Store) dir(plan string, create bool) (*planDir, error) {
 	if !PlanName.MatchString(plan) {
-		return "", fmt.Errorf("%q is not a plan name", plan)
+		return nil, fmt.Errorf("%q is not a plan name", plan)
 	}
-	d := filepath.Join(s.root, plan)
-	st, err := os.Lstat(d)
-	switch {
-	case err == nil && !st.IsDir():
-		return "", fmt.Errorf("%s is not a folder (a link or a file): refused", d)
-	case err != nil && errors.Is(err, os.ErrNotExist) && create:
-		if err := os.Mkdir(d, 0o750); err != nil {
-			return "", err
-		}
-	case err != nil:
-		return "", err
-	}
-	return d, nil
-}
-
-// create opens a new file for writing: it must not exist and must not be a link.
-func create(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
+	return s.rd.openPlanDir(plan, create)
 }
 
 // Save writes the next version of plan. meta.Version is set here; planJSON is the whole plan (nil for a refused edit, which keeps no plan).
@@ -136,7 +136,8 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 	if err != nil {
 		return 0, err
 	}
-	have, err := s.versions(d)
+	defer d.close()
+	have, err := versionsOf(d)
 	if err != nil {
 		return 0, err
 	}
@@ -146,18 +147,18 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 	}
 	for ; n <= MaxVersions; n++ {
 		// the record is the claim on the number: two writers cannot both create it
-		mf, err := create(filepath.Join(d, Name(n)+".meta.json"))
+		mf, err := d.create(Name(n) + ".meta.json")
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
 		if err != nil {
 			return 0, err
 		}
-		written := []string{mf.Name()}
+		written := []string{Name(n) + ".meta.json"}
 		fail := func(err error) (int, error) {
 			mf.Close()
 			for _, f := range written {
-				os.Remove(f) // only files this call made
+				d.remove(f) // only files this call made
 			}
 			return 0, err
 		}
@@ -165,11 +166,11 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 		if planJSON != nil {
 			sum := sha256.Sum256(planJSON)
 			meta.SHA256 = hex.EncodeToString(sum[:])
-			if err := writeNew(filepath.Join(d, Name(n)+".json"), planJSON, &written); err != nil {
+			if err := writeNew(d, Name(n)+".json", planJSON, &written); err != nil {
 				return fail(err)
 			}
 		}
-		if err := writeNew(filepath.Join(d, Name(n)+".diff"), []byte(diff), &written); err != nil {
+		if err := writeNew(d, Name(n)+".diff", []byte(diff), &written); err != nil {
 			return fail(err)
 		}
 		mb, err := json.MarshalIndent(meta, "", "  ")
@@ -184,12 +185,12 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 	return 0, fmt.Errorf("%s has %d versions: the numbers are used up", plan, MaxVersions)
 }
 
-func writeNew(path string, data []byte, written *[]string) error {
-	f, err := create(path)
+func writeNew(d *planDir, name string, data []byte, written *[]string) error {
+	f, err := d.create(name)
 	if err != nil {
 		return err
 	}
-	*written = append(*written, path)
+	*written = append(*written, name)
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return err
@@ -197,17 +198,16 @@ func writeNew(path string, data []byte, written *[]string) error {
 	return f.Close()
 }
 
-// versions lists the version numbers that have a record in folder d, ascending.
-func (s *Store) versions(d string) ([]int, error) {
-	ents, err := os.ReadDir(d)
+// versionsOf lists the version numbers that have a record in the plan folder, ascending.
+func versionsOf(d *planDir) ([]int, error) {
+	names, err := d.names()
 	if err != nil {
 		return nil, err
 	}
 	var out []int
-	for _, e := range ents {
-		name := e.Name()
-		if len(name) > len(".meta.json") && name[len(name)-len(".meta.json"):] == ".meta.json" {
-			if n, ok := ParseVersion(name[:len(name)-len(".meta.json")]); ok {
+	for _, name := range names {
+		if stem, ok := strings.CutSuffix(name, ".meta.json"); ok {
+			if n, ok := ParseVersion(stem); ok {
 				out = append(out, n)
 			}
 		}
@@ -225,7 +225,8 @@ func (s *Store) List(plan string) ([]Meta, error) {
 	if err != nil {
 		return nil, err
 	}
-	ns, err := s.versions(d)
+	ns, err := versionsOf(d)
+	d.close()
 	if err != nil {
 		return nil, err
 	}
@@ -240,14 +241,14 @@ func (s *Store) List(plan string) ([]Meta, error) {
 
 // Plans lists the plans that have versions.
 func (s *Store) Plans() ([]string, error) {
-	ents, err := os.ReadDir(s.root)
+	names, err := s.rd.planNames()
 	if err != nil {
 		return nil, err
 	}
 	out := []string{}
-	for _, e := range ents {
-		if e.IsDir() && PlanName.MatchString(e.Name()) {
-			out = append(out, e.Name())
+	for _, n := range names {
+		if PlanName.MatchString(n) {
+			out = append(out, n)
 		}
 	}
 	return out, nil
@@ -257,14 +258,15 @@ func (s *Store) Plans() ([]string, error) {
 const maxFile = 8 << 20
 
 func (s *Store) read(plan string, v int, suffix string) ([]byte, error) {
+	if v <= 0 || v > MaxVersions {
+		return nil, fmt.Errorf("version %d", v)
+	}
 	d, err := s.dir(plan, false)
 	if err != nil {
 		return nil, err
 	}
-	if v <= 0 || v > MaxVersions {
-		return nil, fmt.Errorf("version %d", v)
-	}
-	f, err := os.OpenFile(filepath.Join(d, Name(v)+suffix), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	defer d.close()
+	f, err := d.open(Name(v) + suffix)
 	if err != nil {
 		return nil, err
 	}

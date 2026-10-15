@@ -195,9 +195,10 @@
       st.busy = false;
       if (r.status === 401 || r.status === 429) { st.msg = r.status === 401 ? "Wrong or missing editing token." : "Too many wrong tokens: wait a minute."; refresh(st); return; }
       sess.set(token);
-      if (json && (json.status === "checked" || json.status === "refused")) {
+      if (json && (json.status === "checked" || json.status === "unchecked" || json.status === "refused")) {
         st.reply = json; st.diff = json.diff || null;
         if (json.status === "checked") { st.savedJSON = JSON.stringify(st.hist.ops); st.msg = "Saved as " + json.name + ": checked."; }
+        else if (json.status === "unchecked") { st.savedJSON = JSON.stringify(st.hist.ops); st.msg = "Saved as " + json.name + ", but UNCHECKED: " + (json.message || "the plan has plan check issues of its own") + "."; }
         else st.msg = "Refused (kept as " + json.name + "): " + (json.message || "the plan check failed") + ".";
         st.infoAt = 0; loadInfo(st);
       } else {
@@ -249,7 +250,7 @@
       if (st.msg) kids.push(h("div", { class: "editmsg", text: st.msg }));
       if (st.reply && st.reply.check) {
         const c = st.reply.check, lines = [];
-        lines.push(h("div", { class: "pill " + (st.reply.status === "checked" ? "running" : "failed"), text: st.reply.status + (c.checked ? " · " + c.points + " points checked" : " · not checked") }));
+        lines.push(h("div", { class: "pill " + (st.reply.status === "checked" ? "running" : st.reply.status === "unchecked" ? "yellow" : "failed"), text: st.reply.status + (c.checked ? " · " + c.points + " points checked" : " · not checked") }));
         if (c.skipped) lines.push(h("div", { class: "err-line", text: "Could not check: " + c.skipped }));
         for (const is of c.issues || []) lines.push(h("div", { class: is.new ? "err-line" : "muted", text: (is.new ? "NEW " : "already there: ") + (is.text || is.reason) }));
         for (const t of RE.describeChanges(st.reply.changes)) lines.push(h("div", { text: t }));

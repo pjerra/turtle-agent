@@ -14,7 +14,7 @@
       const m = { index: l.index, label: l.label || "", name: l.name || "", start: null, via: [], to: null, exitIsTo: !l.boss_at && !(l.packs && l.packs.length) };
       for (const st of l.stops || []) {
         if (st.kind === "start") m.start = { x: st.x, y: st.y };
-        else if (st.kind === "via") m.via.push({ x: st.x, y: st.y, locked: !!(st.direct || st.check_skip), why: st.direct ? "a direct (straight-line) step" : st.check_skip ? "a hop the plan check skips (check_skip)" : "" });
+        else if (st.kind === "via") m.via.push({ x: st.x, y: st.y, locked: !!(st.direct || st.check_skip || st.gm_cross), why: st.gm_cross ? "a gm_cross point (a GM moves the party there)" : st.direct ? "a direct (straight-line) step" : st.check_skip ? "a hop the plan check skips (check_skip)" : "" });
         else if (st.kind === "stage") m.to = { x: st.x, y: st.y };
       }
       return m;
