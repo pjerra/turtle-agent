@@ -30,6 +30,7 @@ type triggerGame struct {
 	movesBefore  int  // the lead bot's move orders when the agent sent the packet
 	fired        bool
 	onFire       func(f *fakeRemote) // runs when the trigger takes effect
+	friend       *rmob               // a unit of the boss's entry the feed lists friendly until the trigger: it turns hostile instead of a new one appearing
 }
 
 func newTriggerGame(t *testing.T, level int) *triggerGame {
@@ -46,7 +47,11 @@ func newTriggerGame(t *testing.T, level int) *triggerGame {
 
 func (g *triggerGame) fire() {
 	g.fired = true
-	g.addMob(7271, g.boss)
+	if g.friend != nil {
+		g.friend.reaction = "h"
+	} else {
+		g.addMob(7271, g.boss)
+	}
 	if g.onFire != nil {
 		g.onFire(g.fakeRemote)
 	}
@@ -152,8 +157,10 @@ func TestAreaTriggerFallsBackToTheAgent(t *testing.T) {
 	if d := dist3(g.sentFrom[0], Point{104, 0, 0}); d > 0.1 {
 		t.Errorf("sent from %v", g.sentFrom[0])
 	}
-	if n := len(g.walks); n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || dist3(g.walks[n-1], g.walks[n-2]) < 20 {
-		t.Errorf("walks %v", g.walks)
+	// The step ended at once; the boss step killed him; then the agent went back to where it stood before the first `.appear` (-300 0 0),
+	// not to the lead bot.
+	if n := len(g.walks); n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || g.walks[n-1] != (Point{-300, 0, 0}) || g.agent != (Point{-300, 0, 0}) {
+		t.Errorf("walks %v agent %v", g.walks, g.agent)
 	}
 	if !strings.Contains(notesOf(rep), "did not hold 5 s after the lead bot stood in the zone; the agent takes the trigger") {
 		t.Errorf("%s", notesOf(rep))
@@ -229,38 +236,55 @@ func TestAreaTriggerFallbackNeedsAnInvisibleGM(t *testing.T) {
 	}
 }
 
-// The agent does not walk through a fight: the trigger starts one, the agent waits in the zone and walks back when the party is out of
-// combat, and the step is done only when it is back at the point it came from.
-func TestAreaTriggerAgentWaitsOutTheFightThenReturns(t *testing.T) {
+// The trigger step ends as soon as `expect` holds. The fight it starts is the boss step's: it kills him (counted as killed, under its own
+// timeout) while the agent stays in the zone, and the agent walks back only after the fight, never during it.
+func TestAreaTriggerStepEndsAtOnceAndTheBossStepOwnsTheFight(t *testing.T) {
 	g := newTriggerGame(t, 3)
-	var home Point
+	g.agent = Point{-300, 0, 0}
 	var walkedInCombat []string
+	var bossDied, backAt time.Time
 	g.onWalk = func(n *nearGame, to Point) {
 		if n.party[0].State == "c" {
 			walkedInCombat = append(walkedInCombat, fmt.Sprint(to))
 		}
+		if to == (Point{-300, 0, 0}) {
+			backAt = n.now
+		}
 	}
-	g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(20 * time.Second) } // Zum'rah aggroes the party
-	rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	var boss *rmob
+	g.onFire = func(f *fakeRemote) { // the boss aggroes the party the moment the trigger runs (the fight starts inside the trigger step)
+		boss = f.mobs[len(f.mobs)-1]
+		boss.pulled, boss.pullAt = true, f.now
+	}
+	prev := g.onTick
+	g.onTick = func(f *fakeRemote) {
+		prev(f)
+		if boss != nil && bossDied.IsZero() && boss.hp <= 0 {
+			bossDied = f.now
+		}
+	}
+	leg := zumrahLeg("agent", 15)
+	// The kill is credited: a wait for the unit dead near him passes after the boss step.
+	leg.AfterBoss = []Step{{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitDead, Near: &Point{118, 0, 0}, Radius: 20}, TimeoutS: 5}}}
+	rep, err := runTrigger(t, g, leg)
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
-	if len(walkedInCombat) != 0 {
-		t.Errorf("the agent walked during the fight: %v", walkedInCombat)
+	tr := triggerOf(t, rep)
+	if tr.By != "agent" || tr.Seconds > 8 || g.mobsKilled != 1 || len(walkedInCombat) != 0 {
+		t.Errorf("trigger step %+v killed %d walked in combat %v", tr, g.mobsKilled, walkedInCombat)
 	}
-	n := len(g.walks)
-	home = g.walks[n-1]
-	if n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || dist3(g.agent, home) > 0.1 || dist3(home, Point{104, 0, 0}) < 20 {
-		t.Errorf("walks %v agent %v", g.walks, g.agent)
+	if bossDied.IsZero() || backAt.IsZero() || backAt.Before(bossDied) || g.agent != (Point{-300, 0, 0}) {
+		t.Errorf("the boss died at %v, the agent was back at %v (%v)", bossDied, backAt, g.agent)
 	}
 }
 
-// A fight that outlasts the wait fails the step: the agent is still in the zone, and says why.
+// A fight that never ends keeps the agent in the zone: the return fails the step after the wait, saying why.
 func TestAreaTriggerAgentThatCannotWalkBackFailsTheStep(t *testing.T) {
 	g := newTriggerGame(t, 3)
 	g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(time.Hour) }
 	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
-	if err == nil || !strings.Contains(err.Error(), "the agent could not walk back to") || !strings.Contains(err.Error(), "does not walk through a fight") {
+	if err == nil || !strings.Contains(err.Error(), "the agent could not walk back to its safe point") || !strings.Contains(err.Error(), "does not walk through a fight") {
 		t.Fatalf("%v", err)
 	}
 	if len(g.sent) != 1 {
@@ -271,10 +295,30 @@ func TestAreaTriggerAgentThatCannotWalkBackFailsTheStep(t *testing.T) {
 // A walk back that does not take the agent home fails the step as well.
 func TestAreaTriggerAgentThatDoesNotGetHomeFailsTheStep(t *testing.T) {
 	g := newTriggerGame(t, 3)
+	g.agent = Point{-300, 0, 0}
 	g.blockReturn = true
 	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
 	if err == nil || !strings.Contains(err.Error(), "did not get back to its safe point") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// The feed lists Zum'rah as a friendly unit before the trigger (reaction f): that is not "hostile", and the trigger is still sent.
+func TestAreaTriggerFriendlyUnitInTheFeedIsNotHostile(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	friend := g.addMob(7271, g.boss)
+	friend.reaction = "f"
+	g.friend = friend
+	rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if tr := triggerOf(t, rep); tr.By != "agent" || fmt.Sprint(g.sent) != "[962]" {
+		t.Fatalf("%+v %v", tr, g.sent)
+	}
+	// A bystander (a critter) of the entry is not hostile either.
+	if (&UnitWait{Entries: []uint32{7271}, State: UnitHostile}).holds([]unitSight{{entry: 7271, hostile: false}}, false) {
+		t.Fatal("not hostile")
 	}
 }
 
@@ -463,6 +507,43 @@ func TestLegCompanionsLootRefusedFailsTheLegBeforeItMoves(t *testing.T) {
 				t.Errorf("%s: %s was not turned off and back on: %v", name, bot, tail)
 			}
 		}
+	}
+}
+
+// A bot that joins the party during the leg (a hire in the middle of it) has its looting turned off too, and back on at the leg's end.
+func TestLegCompanionsLootCoversABotThatJoinsMidLeg(t *testing.T) {
+	g := carrierGame(t)
+	g.addMob(9, Point{40, 0, 0})
+	g.left = map[string]bool{"Magey": true}
+	g.lateJoin = map[string]time.Time{"Magey": g.now.Add(3 * time.Second)}
+	o := objOpts()
+	o.Bots = []string{"Healy"}
+	rep, err := runCarrier(t, g, lootLegPlan(false), o)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	off, on := -1, -1
+	for i, b := range g.behaviors {
+		if b == "Magey loot false" {
+			off = i
+		}
+		if b == "Magey loot true" {
+			on = i
+		}
+	}
+	if off < 0 || on < off || !strings.Contains(notesOf(rep), "Magey joined the party during the leg") {
+		t.Fatalf("off %d on %d: %v\n%s", off, on, g.behaviors, notesOf(rep))
+	}
+}
+
+// An empty party list is a failure for companions_loot false: nothing could be turned off.
+func TestLegCompanionsLootEmptyPartyFails(t *testing.T) {
+	g := carrierGame(t)
+	g.addMob(9, Point{40, 0, 0})
+	d := NewRemoteDriver(lootLegPlan(false), g, DefaultConfig(), objOpts(), g.clock())
+	d.fr.Party = nil
+	if err := d.legLootOff(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "the feed lists no party member") {
+		t.Fatalf("%v", err)
 	}
 }
 

@@ -111,6 +111,10 @@ type Options struct {
 	// Cut, when set, cuts a hop longer than MoveGapWarnYd between two moves into via points: it returns the points to walk through
 	// (not including the two ends), e.g. a navmesh path. Nil: the long hops stay and are reported in Warnings.
 	Cut func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
+	// DropCompanionsLoot lets a plan with a leg whose companions_loot is false be exported all the same, without it: the rows have no
+	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
+	// graveyard chests). Without this option such a plan is refused.
+	DropCompanionsLoot bool
 }
 
 // Result is a plan's rows and what the exporter had to say about them.
@@ -209,6 +213,9 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
 	b.leg_, b.seq, b.haveLast = li, 0, false
+	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
+		return fmt.Errorf("leg %d (%s): companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it)", li, l.Name)
+	}
 	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: li, Name: clip(l.Name, MaxLegName)})
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
@@ -344,7 +351,7 @@ func (b *builder) step(st dungeon.Step) error {
 		if t.By == dungeon.TriggerAgent {
 			return fmt.Errorf("area_trigger %d: by \"agent\" has no run leader step (the leader is a bot: use \"auto\" or \"bot\")", t.ID)
 		}
-		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone (AiPlayerbot.BotAreaTriggers); expect %s", t.ID, t.Expect), MaxComment))
+		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})

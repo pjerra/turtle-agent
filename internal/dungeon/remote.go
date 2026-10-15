@@ -540,6 +540,9 @@ type RemoteDriver struct {
 	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo bool
 	tf         tankFirst  // the tank-first state of the fights (remote_tank.go)
+	origin     *agentHome // where the agent stood before the run's first `.appear` (remote_near.go)
+	home       *agentHome // the agent's safe point after an area trigger it took itself (remote_trigger.go)
+	legLoot    bool       // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
 	legMuted   []string   // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
 	kit        restKit    // the bots' drink counts and refills (remote_rest.go)
 	maint      maintState // the automatic `.bot maintenance` that is due (remote_maint.go)
@@ -738,6 +741,10 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if err := d.legLootSync(ctx); err != nil {
+			d.stepFailedRecover(ctx, err)
+			continue
+		}
 		if err := d.nearBeforeObjectStep(ctx); err != nil {
 			d.stepFailedRecover(ctx, err)
 			continue
@@ -794,7 +801,11 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
-			if err = d.tracedWalkAs(ctx, a.To, a.Direct); err == nil {
+			err = d.agentGoHome(ctx) // an agent left in a trigger's zone goes back before the party walks on
+			if err == nil {
+				err = d.tracedWalkAs(ctx, a.To, a.Direct)
+			}
+			if err == nil {
 				d.obj.unchecked = ""     // the party walked on: whatever a wait passed unchecked let it through
 				_, err = d.keepNear(ctx) // the leg's walk is over: bring the agent up
 			} else if d.obj.unchecked != "" {
@@ -804,6 +815,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doPull(ctx, a)
 		case ActKill:
 			err = d.doBoss(ctx, a)
+			if err == nil {
+				err = d.agentGoHome(ctx) // the boss (Zum'rah) is dead: the agent leaves the zone it stayed in
+			}
 		case ActLoot, ActUse, ActItem, ActRitual:
 			err = d.doObjectStep(ctx, a)
 		case ActTrigger:
