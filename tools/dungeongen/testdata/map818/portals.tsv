@@ -1,0 +1,3 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+818	5347	Stormwrought Ruins – Front Entrance	35	0	-8823.1	2903.17	135.492	3	0	0	0	-5632.67	-4393.33	249.982
+818	5605	Stormwrought Ruins – Back Entrance	35	0	-9278.35	2995.44	147	3	0	0	0	-6391.73	-3836.82	218.569

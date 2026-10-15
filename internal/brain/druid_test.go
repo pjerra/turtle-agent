@@ -940,6 +940,40 @@ func TestCatLeavesItsFormToEat(t *testing.T) {
 	}
 }
 
+// A cat with nothing to eat asks for no meal in its form: the core refuses items there, and the eat rule's veto used to be logged
+// as no_items_in_form every 3 s.
+func TestCatAsksForNoMealInItsFormWithNothingToEat(t *testing.T) {
+	r, _ := catRig(t)
+	r.g.setSelf(func(u *objects.Unit) { u.Health = 600 }) // half of its 1200
+	r.g.evs = nil
+	for i := 0; i < 3; i++ {
+		if d := r.tick(time.Second); d != nil {
+			t.Fatalf("tick %d: %+v", i, d)
+		}
+	}
+	for _, e := range r.g.events("brain_decision") {
+		if e.Data["why"] == "no_items_in_form" {
+			t.Fatalf("an eat refused in the form was logged: %+v", e)
+		}
+	}
+}
+
+// A cat short of its finishers asks for neither: a Rip or a Bite at two combo points is not a decision the tick could make, so the
+// refusal is not logged.
+func TestCatDoesNotAskForRipOrBiteShortOfItsPoints(t *testing.T) {
+	r, mg := catRig(t)
+	catFight(r, mg)
+	setCP(r.g, 2, mobA)
+	setEnergy(r.g, 20) // too little for either finisher
+	r.g.evs = nil
+	r.tick(1600 * time.Millisecond)
+	for _, e := range r.g.events("brain_decision") {
+		if e.Text == "rip" || e.Text == "ferocious_bite" {
+			t.Fatalf("%s asked for at two points and refused: %+v", e.Text, e)
+		}
+	}
+}
+
 func TestCatLeavesItsFormToBuffWhenTheManaIsGood(t *testing.T) {
 	r, mg := catRig(t)
 	r.g.setSelf(func(u *objects.Unit) { u.Auras = []objects.Aura{formAura(formCat, drCat)} }) // no Mark of the Wild

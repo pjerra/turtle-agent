@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/spells"
 )
 
 // The stall thresholds of the card: yellow at two minutes without progress, red at five (the owner's stale-run rule).
@@ -68,7 +69,12 @@ type Card struct {
 	Bots      []BotView    `json:"bots"`
 	Mobs      []MobView    `json:"mobs"`
 	Commander *Dot         `json:"commander,omitempty"` // the agent's own character, when it stands on the plan's map
+	TrailT    []int64      `json:"trail_t,omitempty"`   // the unix second of each point of Trail (the lead was last seen there)
 	Trail     [][2]float64 `json:"trail,omitempty"`     // where the lead bot has been this run ([x, y] in the drawing's plane), oldest first
+	Events    []Event      `json:"events"`              // what happened this run (deaths, wipes, boss kills, doors and chests), oldest first; the poller fills it
+
+	ev        evInputs // what the event log reads of the report; never sent
+	tracePath string   // the trace file of the run, for the live digest; never sent
 }
 
 // Link is a file of the run the page links to, served from --tests-dir.
@@ -169,43 +175,48 @@ type Feed struct {
 
 // BotView is one bot of the party.
 type BotView struct {
-	Name      string   `json:"name"`
-	Class     string   `json:"class,omitempty"`
-	Role      string   `json:"role,omitempty"`
-	Lead      bool     `json:"lead,omitempty"`
-	HPPct     int      `json:"hp_pct"`
-	PowerPct  int      `json:"power_pct"`
-	PowerType string   `json:"power_type,omitempty"`
-	Alive     bool     `json:"alive"`
-	State     string   `json:"state,omitempty"`
-	Action    string   `json:"action,omitempty"`
-	Result    string   `json:"result,omitempty"`
-	Reason    string   `json:"reason,omitempty"`
-	Target    string   `json:"target,omitempty"`
-	DistTank  *float64 `json:"dist_tank,omitempty"`
-	X         float64  `json:"x"`
-	Y         float64  `json:"y"`
-	Known     bool     `json:"known"` // x and y are a position (the drawing plane)
-	InMap     bool     `json:"in_map"`
+	GUID       string   `json:"guid,omitempty"`        // the feed's guid of the bot (what a mob's or a bot's target_guid names)
+	TargetGUID string   `json:"target_guid,omitempty"` // the guid of the unit the bot has targeted, when it has one
+	Name       string   `json:"name"`
+	Class      string   `json:"class,omitempty"`
+	Role       string   `json:"role,omitempty"`
+	Lead       bool     `json:"lead,omitempty"`
+	HPPct      int      `json:"hp_pct"`
+	PowerPct   int      `json:"power_pct"`
+	PowerType  string   `json:"power_type,omitempty"`
+	Alive      bool     `json:"alive"`
+	State      string   `json:"state,omitempty"`
+	Action     string   `json:"action,omitempty"`
+	Cast       string   `json:"cast,omitempty"` // the spell it casts or channels now (its name, else "spell <id>"), when the feed says
+	Result     string   `json:"result,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+	Target     string   `json:"target,omitempty"`
+	DistTank   *float64 `json:"dist_tank,omitempty"`
+	X          float64  `json:"x"`
+	Y          float64  `json:"y"`
+	Known      bool     `json:"known"` // x and y are a position (the drawing plane)
+	InMap      bool     `json:"in_map"`
 }
 
 // MobView is one creature of the feed.
 type MobView struct {
-	GUID    string  `json:"guid"`
-	Entry   uint32  `json:"entry"`
-	Kind    string  `json:"kind"` // hostile, neutral, friendly
-	HPPct   int     `json:"hp_pct"`
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`
-	Engaged bool    `json:"engaged,omitempty"`
-	Target  string  `json:"target,omitempty"`
-	CC      bool    `json:"cc,omitempty"`
-	Evade   bool    `json:"evade,omitempty"`
-	Stealth bool    `json:"stealth,omitempty"`
-	Leg     int     `json:"leg"`   // the plan leg whose group it belongs to, -1 for none
-	Group   int     `json:"group"` // the group's index in the leg, -1 for none
-	Boss    bool    `json:"boss,omitempty"`
-	Cleared bool    `json:"cleared,omitempty"` // its group is behind the run: shown dimmed
+	TargetGUID string  `json:"target_guid,omitempty"` // the guid of the unit it targets (a bot of the party, as a rule)
+	GUID       string  `json:"guid"`
+	Entry      uint32  `json:"entry"`
+	Kind       string  `json:"kind"` // hostile, neutral, friendly or critter
+	HPPct      int     `json:"hp_pct"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Engaged    bool    `json:"engaged,omitempty"`
+	Target     string  `json:"target,omitempty"`
+	CC         bool    `json:"cc,omitempty"`
+	Cast       string  `json:"cast,omitempty"` // the spell it casts or channels now (its name, else "spell <id>"), when the feed says
+	Evade      bool    `json:"evade,omitempty"`
+	Stealth    bool    `json:"stealth,omitempty"`
+	Leg        int     `json:"leg"`   // the plan leg whose group it belongs to, -1 for none
+	Group      int     `json:"group"` // the group's index in the leg, -1 for none
+	Boss       bool    `json:"boss,omitempty"`
+	Cleared    bool    `json:"cleared,omitempty"` // its group is behind the run: shown dimmed
 }
 
 // raw shapes, read leniently: a field the agent adds later is ignored.
@@ -332,6 +343,7 @@ type rawView struct {
 			Dead     bool    `json:"dead"`
 			State    string  `json:"state"`
 			Action   string  `json:"action"`
+			Spell    uint32  `json:"spell"`
 			Result   string  `json:"result"`
 			Reason   string  `json:"reason"`
 		} `json:"party"`
@@ -342,6 +354,7 @@ type rawView struct {
 			Y        float32 `json:"y"`
 			HPPct    int     `json:"hp_pct"`
 			Target   string  `json:"target"`
+			Spell    uint32  `json:"spell"`
 			Flags    string  `json:"flags"`
 			Reaction string  `json:"reaction"`
 			Kind     string  `json:"kind"`
@@ -362,7 +375,7 @@ var powerNames = [...]string{"mana", "rage", "focus", "energy"}
 
 // BuildCard turns the answers of one poll into the card. It is pure: the same inputs give the same card.
 func BuildCard(in Inputs) Card {
-	c := Card{ID: in.Agent.ID, RPC: in.Agent.Addr, Orders: []Order{}, Changes: []Change{}, Bots: []BotView{}, Mobs: []MobView{}}
+	c := Card{ID: in.Agent.ID, RPC: in.Agent.Addr, Orders: []Order{}, Changes: []Change{}, Bots: []BotView{}, Mobs: []MobView{}, Events: []Event{}}
 	c.Run = RunInfo{State: "idle", Phase: "idle", Leg: -1}
 	c.Stall.Level = "none"
 	var st rawStatus
@@ -391,6 +404,7 @@ func BuildCard(in Inputs) Card {
 	}
 	if rep != nil {
 		fillRun(&c, rep, ds, in)
+		fillEventInputs(&c, rep, in)
 	}
 	if in.Trace != nil {
 		c.SHA = in.Trace.SHA
@@ -601,8 +615,8 @@ func fillView(c *Card, rep *rawReport, in Inputs) {
 		}
 	}
 	for _, p := range f.Party {
-		b := BotView{Name: p.Name, Class: class[p.Name], Role: role[p.Name], Lead: guidNum(p.GUID) == guidNum(f.Lead) && f.Lead != "",
-			HPPct: pct(p.HP, p.MaxHP), PowerPct: pct(p.Power, p.MaxPower), Alive: !p.Dead, State: p.State, Action: p.Action, Result: p.Result, Reason: p.Reason}
+		b := BotView{GUID: p.GUID, Name: p.Name, Class: class[p.Name], Role: role[p.Name], Lead: guidNum(p.GUID) == guidNum(f.Lead) && f.Lead != "",
+			HPPct: pct(p.HP, p.MaxHP), PowerPct: pct(p.Power, p.MaxPower), Alive: !p.Dead, State: p.State, Action: p.Action, Cast: spellText(p.Spell), Result: p.Result, Reason: p.Reason}
 		if p.PType >= 0 && p.PType < len(powerNames) {
 			b.PowerType = powerNames[p.PType]
 		}
@@ -629,17 +643,22 @@ func fillView(c *Card, rep *rawReport, in Inputs) {
 		for _, p := range f.Party {
 			if p.Name == c.Bots[i].Name {
 				c.Bots[i].Target = tname(p.Target)
+				if guidNum(p.Target) != 0 {
+					c.Bots[i].TargetGUID = p.Target
+				}
 			}
 		}
 	}
 	for _, h := range f.Hostiles {
-		m := MobView{GUID: h.GUID, Entry: h.Entry, HPPct: h.HPPct, Leg: -1, Group: -1, Target: tname(h.Target), Engaged: h.Target != "" && guidNum(h.Target) != 0,
+		m := MobView{GUID: h.GUID, TargetGUID: targetGUID(h.Target), Entry: h.Entry, HPPct: h.HPPct, Leg: -1, Group: -1, Target: tname(h.Target), Cast: spellText(h.Spell), Engaged: h.Target != "" && guidNum(h.Target) != 0,
 			CC: strings.Contains(h.Flags, "c"), Evade: strings.Contains(h.Flags, "e"), Stealth: strings.Contains(h.Flags, "s")}
 		m.X, m.Y = Project(h.X, h.Y)
 		switch {
 		case h.Reaction == "f":
 			m.Kind = "friendly"
-		case h.Reaction == "n" || strings.ContainsAny(h.Kind, "kvgu"):
+		case strings.Contains(h.Kind, "k"):
+			m.Kind = "critter"
+		case h.Reaction == "n" || strings.ContainsAny(h.Kind, "vgu"):
 			m.Kind = "neutral"
 		default:
 			m.Kind = "hostile"
@@ -653,6 +672,17 @@ func fillView(c *Card, rep *rawReport, in Inputs) {
 }
 
 // clearedGroup says whether a pack lies behind the run: in an earlier leg, or an earlier group of the current one.
+// spellText is a spell's name for the page, "spell <id>" for one the name table lacks, and "" for none.
+func spellText(id uint32) string {
+	if id == 0 {
+		return ""
+	}
+	if n := spells.Name(id); n != "" {
+		return n
+	}
+	return "spell " + strconv.FormatUint(uint64(id), 10)
+}
+
 func clearedGroup(mobLeg, mobGroup, leg, group int) bool {
 	if mobLeg < 0 || leg < 0 {
 		return false
@@ -661,6 +691,14 @@ func clearedGroup(mobLeg, mobGroup, leg, group int) bool {
 		return mobLeg < leg
 	}
 	return mobGroup >= 0 && group > 0 && mobGroup < group-1
+}
+
+// targetGUID is the guid string of a target, or "" for none (an empty or all-zero guid).
+func targetGUID(g string) string {
+	if g == "" || guidNum(g) == 0 {
+		return ""
+	}
+	return g
 }
 
 func guidNum(s string) uint64 {

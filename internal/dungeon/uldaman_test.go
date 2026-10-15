@@ -167,9 +167,17 @@ func TestUldamanFullPlan(t *testing.T) {
 			t.Errorf("%s: no ritual step of 3 with a stand point for altar %d: %+v", name, altar, l.Steps)
 		}
 	}
-	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
-	if f := leg("sentinel").Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+	// The Sentinel's room: the Relic Hunter camp (five Hunters and a Geologist, the two ledge Hunters among them 23-24 yd from the Sentinel)
+	// is one pack that a pull wakes together with the Sentinel (hires-3 wipe): one pull group of six, so that the big-pack CC counts it all,
+	// and no boss.first, the camp is cleared before the boss.
+	sen := leg("sentinel")
+	if f := sen.Boss.First; len(f) != 0 {
 		t.Errorf("sentinel first %v", f)
+	}
+	if n := len(sen.PullGroups); n != 4 {
+		t.Errorf("sentinel has %d pull groups, want 4 (bat, scorpids, basilisk, the camp)", n)
+	} else if camp := sen.PullGroups[n-1]; fmt.Sprint(camp.Entries) != "[4847 4847 4847 4847 4847 7030]" || len(camp.Positions) != 6 {
+		t.Errorf("sentinel camp: %+v", camp)
 	}
 	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
 	a := leg("archaedas")
@@ -729,5 +737,75 @@ func TestUldamanDirectSteps(t *testing.T) {
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
+	}
+}
+
+// Uldaman A run 6 (2026-10-14): Grimlok's corridor wiped at pull group 4 because the trio of two Brawlers and a Geomancer 25 yd east of the
+// group of three at 55 417 aggroed on the tank's way to it. Every Stonevault Brawler and Geomancer of the corridor that is not Grimlok's own
+// group is a position of a pull group, and the trio is pulled before the group of three.
+func TestUldamanGrimlokCorridorHasNoUnplannedPack(t *testing.T) {
+	p := loadUldaman(t)
+	var leg *Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "grimlok" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil {
+		t.Fatal("no grimlok leg")
+	}
+	planned := func(m map[string]string) int {
+		for gi, g := range leg.PullGroups {
+			for _, at := range g.Positions {
+				if c := mustPoint(m); dist3(Point{at.X, at.Y, 0}, Point{c.X, c.Y, 0}) < 0.5 {
+					return gi
+				}
+			}
+		}
+		return -1
+	}
+	for _, m := range tsv(t, "creatures.tsv") {
+		x, y := mustPoint(m).X, mustPoint(m).Y
+		if (m["entry"] != "4853" && m["entry"] != "4855") || m["group_leader"] == "27528" || x < 25 || y < 360 || y > 450 {
+			continue
+		}
+		if planned(m) < 0 {
+			t.Errorf("creature %s (entry %s) at %.1f %.1f is in no pull group of the grimlok leg", m["guid"], m["entry"], x, y)
+		}
+	}
+	trio, three := -1, -1
+	for gi, g := range leg.PullGroups {
+		for _, at := range g.Positions {
+			if dist3(Point{at.X, at.Y, 0}, Point{78.9, 404.9, 0}) < 1 {
+				trio = gi
+			}
+			if dist3(Point{at.X, at.Y, 0}, Point{55.8, 416.1, 0}) < 1 {
+				three = gi
+			}
+		}
+	}
+	if trio < 0 || three < 0 || trio >= three || fmt.Sprint(leg.PullGroups[trio].Entries) != "[4855 4855 4853]" {
+		t.Errorf("the trio at 79 405 is group %d, the group of three at 56 416 is group %d: the trio comes first", trio, three)
+	}
+}
+
+func mustPoint(m map[string]string) Point {
+	f := func(k string) float32 { v, _ := strconv.ParseFloat(m[k], 32); return float32(v) }
+	return Point{f("x"), f("y"), f("z")}
+}
+
+// The rest gates of the legs after the Sentinel (Uldaman A run 5/6: the healer pulled at 63 % mana with the default 50 % and Galgann's
+// section wiped; with these gates it went clean): the party is full before every pull of the big sections.
+func TestUldamanLateLegsRestUntilTheHealerIsFull(t *testing.T) {
+	p := loadUldaman(t)
+	for i := 6; i <= 12; i++ {
+		r := p.Legs[i].Rest
+		if r == nil || r.Health != 95 || r.HealerMana != 90 || r.Mana != 70 || r.MaxS != 150 {
+			t.Errorf("leg %d (%s): rest %+v", i, p.Legs[i].Name, r)
+		}
+	}
+	// The casters that run at 15 % health are named, so that the driver kills them before they are out of reach.
+	if fmt.Sprint(p.Fleers) != "[4853 4848 4849 7321]" {
+		t.Errorf("fleers %v", p.Fleers)
 	}
 }

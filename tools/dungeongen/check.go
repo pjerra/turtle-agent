@@ -42,6 +42,9 @@ type CheckOptions struct {
 	// Archaedas). The export carries only the spawn faction, so without this a plan that fights them is warned about as if it asked the
 	// party to kill a friend. Their npc_flags (none) are still looked at.
 	Awakened map[uint32]bool
+	// Scripted lists creature entries that are NPCs (npc_flags such as gossip or questgiver, or faction 35) until a script or a dialogue
+	// makes them hostile: Moroes, Vaelastrasz, the Gordok guards. Nothing is said about their flags or factions.
+	Scripted map[uint32]bool
 }
 
 // Check lints a plan against the creature export (creatures.tsv): a boss or pack member that is no mob, or that is friendly to the leader's
@@ -75,8 +78,8 @@ func Check(p *dungeon.Plan, cs []creature, o CheckOptions) []string {
 	seen := map[string]bool{}
 	warn := func(where string, entry uint32, gate string) {
 		c, ok := byEntry[entry]
-		if !ok {
-			return // not in the export: nothing to say
+		if !ok || o.Scripted[entry] {
+			return // not in the export, or an NPC the script turns hostile: nothing to say
 		}
 		var why []string
 		// A part gated to a team is one the author meant that team to fight (the Lost Dwarves are questgivers the Horde kills), so the

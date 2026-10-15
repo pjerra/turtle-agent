@@ -160,6 +160,8 @@ type memory struct {
 	encounter   string   // the encounter that is on (encounter.go), "" for none
 	stat        statsMem // the counters of the character's own play (stats.go)
 
+	drink drinkMem // rest_drink's "no drink" line, once per rest (heal.go)
+
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
 }

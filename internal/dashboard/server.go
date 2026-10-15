@@ -9,9 +9,16 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/netutil"
+)
+
+var (
+	agentID = regexp.MustCompile(`^\d{1,6}$`)
+	runID   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
 
 //go:embed static
@@ -41,6 +48,38 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 			return
 		}
 		writeJSON(w, geo)
+	})
+	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
+		if !agentID.MatchString(id) {
+			http.NotFound(w, r)
+			return
+		}
+		minutes, _ := strconv.Atoi(r.URL.Query().Get("min"))
+		b, ok := p.LiveJSON(id, minutes)
+		if !ok {
+			http.Error(w, "no readable trace for this agent's run", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/ghost/", func(w http.ResponseWriter, r *http.Request) {
+		plan := strings.TrimPrefix(r.URL.Path, "/api/ghost/")
+		exclude := r.URL.Query().Get("exclude")
+		if !planName.MatchString(plan) || (exclude != "" && !runID.MatchString(exclude)) {
+			http.NotFound(w, r)
+			return
+		}
+		legs, _ := strconv.Atoi(r.URL.Query().Get("legs"))
+		writeJSON(w, p.Ghost(plan, exclude, min(max(legs, 0), 200)))
+	})
+	mux.HandleFunc("/api/heat/", func(w http.ResponseWriter, r *http.Request) {
+		plan := strings.TrimPrefix(r.URL.Path, "/api/heat/")
+		if !planName.MatchString(plan) {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, p.Heat(plan))
 	})
 	mux.HandleFunc("/api/minimap/", func(w http.ResponseWriter, r *http.Request) {
 		serveMinimapLayers(w, r, p.opt.MinimapDir)

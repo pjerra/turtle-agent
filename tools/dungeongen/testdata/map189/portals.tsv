@@ -1,0 +1,5 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+189	45	Scarlet Monastery Graveyard - Entrance	20	0	2924.38	-798.429	161.611	8	0	0	0	1687.27	1050.09	18.6773
+189	610	Scarlet Monastery Cathedral - Entrance	20	0	2925.18	-820.545	161.634	8	0	0	0	853.179	1319.18	18.6714
+189	612	Scarlet Monastery Armory - Entrance	20	0	2877.98	-839.267	163.049	6	0	0	0	1608.1	-318.919	18.6714
+189	614	Scarlet Monastery Library - Entrance	20	0	2859.73	-824.91	162.083	8	0	0	0	253.672	-206.624	18.6773
