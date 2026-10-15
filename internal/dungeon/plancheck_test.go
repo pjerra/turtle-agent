@@ -276,6 +276,23 @@ func TestPlanCheckWalksTheStepStands(t *testing.T) {
 	}
 }
 
+// A point the plan marks needs_walk was never snapped to the navmesh: it is a failing point (reached by the check), not a silent skip.
+func TestPlanCheckFailsNeedsWalkPoints(t *testing.T) {
+	leg := Leg{Name: "a", To: Point{5, 0, 0}, NeedsWalk: true,
+		PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{10, 30, 0}}, NeedsWalk: true}, pg(10, 60)},
+		Boss:       &Boss{Entry: 9, Position: Point{10, 200, 0}, NeedsWalk: true}}
+	res := checkLegs(t, fakeNav{}, 0, leg)
+	if got, want := issueReasons(res.Issues), "0/to/0/needs a mapping walk 0/pull group look/1/needs a mapping walk 0/boss look/0/needs a mapping walk"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+	// A run that starts past them does not reach them.
+	one := 1
+	res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, fakeNav{}, CheckOptions{FromPullGroup: &one})
+	if err != nil || issueReasons(res.Issues) != "0/boss look/0/needs a mapping walk" {
+		t.Errorf("%v %q", err, issueReasons(res.Issues))
+	}
+}
+
 // The tuned look counts: a pack off the mesh whose path ends 17 yd short of it is in view from the end with the default arrival slack (3),
 // not with look_arrive 10 (the lead bot may stop 10 yd short of the look point, and the view is 25).
 func TestPlanCheckTunedLook(t *testing.T) {
@@ -436,9 +453,15 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 }
 
 // planCheckKnownFailing lists the shipped plans that fail the plan check today, with the failing points counted when the check came in. Issue #187
-// follows them up one by one (most are drafts from the world export, whose points were never walked; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
+// follows them up one by one (most are drafts from the world export, whose points were never walked; blackfathom_deeps, razorfen_downs, ruins_of_ahnqiraj, scarlet_graveyard, stratholme_undead and temple_of_ahnqiraj fail only on their needs_walk points; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
 // Zul'Farrak is not on it.
 var planCheckKnownFailing = map[string]bool{
+	"temple_of_ahnqiraj":    true,
+	"stratholme_undead":     true,
+	"scarlet_graveyard":     true,
+	"ruins_of_ahnqiraj":     true,
+	"razorfen_downs":        true,
+	"blackfathom_deeps":     true,
 	"black_morass":          true,
 	"blackrock_depths":      true,
 	"blackwing_lair":        true,

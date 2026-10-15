@@ -24,6 +24,8 @@ const (
 	ReasonNoLOS       = "no line of sight"
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
+	// ReasonNeedsWalk is a point the plan marks needs_walk: it was never snapped to the navmesh and its mapping walk is still to do.
+	ReasonNeedsWalk = "needs a mapping walk"
 
 	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
 	ReasonSkipped = "skipped"
@@ -283,6 +285,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 				return cur, err
 			}
 		} else {
+			c.needsWalk("to", 0, "", l.To, cur)
 			cur = l.To
 		}
 		group = 0
@@ -290,8 +293,11 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
 		if g.NeedsWalk {
+			c.needsWalk("pull group look", gi+1, g.Team, g.Positions[0], cur)
 			continue
 		}
+		// The look at each position starts from the point before the group; the next group goes on from the first position's look point
+		// (the one pulled).
 		first := cur
 		for pi, at := range g.Positions {
 			stand, err := c.look("pull group look", gi+1, g.Team, at, first)
@@ -299,7 +305,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 				return cur, err
 			}
 			if pi == 0 {
-				cur = stand // the first position is the one pulled; the party goes on from where it looked
+				cur = stand
 			}
 		}
 	}
@@ -307,7 +313,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	if cur, err = c.steps("steps", l.Steps, cur); err != nil {
 		return cur, err
 	}
-	if b := l.Boss; b != nil && !b.NeedsWalk {
+	if b := l.Boss; b != nil && b.NeedsWalk {
+		c.needsWalk("boss look", 0, b.Team, b.Position, cur)
+	} else if b != nil {
 		stand, err := c.look("boss look", 0, b.Team, b.Position, cur)
 		if err != nil {
 			return cur, err
@@ -340,6 +348,14 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 		}
 	}
 	return cur, nil
+}
+
+// needsWalk records a point the plan marks needs_walk: the generator could not snap it to the navmesh, so nothing about it is checked and a
+// live-checked plan must not carry one.
+func (c *planChecker) needsWalk(part string, group int, team string, at, from Point) {
+	c.team = team
+	c.fail(part, group, at, from, ReasonNeedsWalk, "the plan marks it needs_walk: its mapping walk is still to do")
+	c.team = ""
 }
 
 // skip records a hop the plan exempts from the check.

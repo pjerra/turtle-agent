@@ -178,6 +178,10 @@ func gateRig(t *testing.T, checks *int) *agentRig {
 		"ok":    fmt.Sprintf(gatePlan, "ok", "live-checked", 7),
 		"bad":   fmt.Sprintf(gatePlan, "bad", "live-checked", 99),
 		"mappy": fmt.Sprintf(gatePlan, "mappy", "mapped (not live-checked)", 99),
+		// A point nobody has mapped yet (needs_walk) on a leg, a pull group and a boss.
+		"walkleg":   `{"version":1,"name":"walkleg","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","needs_walk":true,"to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"positions":[{"x":6,"y":5,"z":5}]}]}]}`,
+		"walkgroup": `{"version":1,"name":"walkgroup","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"needs_walk":true,"positions":[{"x":6,"y":5,"z":5}]}]}]}`,
+		"walkboss":  `{"version":1,"name":"walkboss","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"boss":{"entry":9,"needs_walk":true,"position":{"x":6,"y":5,"z":5}}}]}`,
 		// An encounter of the other team: the driver looks at it before it skips the fight, so its unreachable look refuses the run.
 		"teamy": `{"version":1,"name":"teamy","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"team":"horde","positions":[{"x":99,"y":5,"z":5}]}]}]}`,
 	} {
@@ -220,6 +224,11 @@ func TestDungeonRunPlanCheckGateWithAStubNavmesh(t *testing.T) {
 	}
 	if out := run(`{"name":"teamy"` + cmdr); !strings.Contains(fmt.Sprint(out["error"]), "[horde only") {
 		t.Errorf("an other-team encounter that cannot be looked at was not refused: %v", out)
+	}
+	for _, name := range []string{"walkleg", "walkgroup", "walkboss"} {
+		if out := run(`{"name":"` + name + `"` + cmdr); !strings.Contains(fmt.Sprint(out["error"]), "needs a mapping walk") {
+			t.Errorf("%s: a needs_walk point was not refused: %v", name, out)
+		}
 	}
 	if note := noteOf(run(`{"name":"bad","force":true` + cmdr)); !strings.HasPrefix(note, "forced past plan check failed, 1 of ") {
 		t.Errorf("force: %q", note)

@@ -734,6 +734,7 @@ What it checks:
   standoff (`look_standoff`, 21 yd) back from the path's end, moved up the path to the first point within `min(standoff, 25 - look_arrive - 1)` of the pack (21 yd by default;
   the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count). No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
   called most packs blind that were pulled fine live. A pull group or boss gated to a `team` is checked like the rest (the commander driver looks at it before it skips the fight); its issues name the team;
+- a leg `to`, pull group or boss marked `needs_walk` (never snapped to the navmesh: its mapping walk is still to do) is a failing point (`needs a mapping walk`), not a silent skip; Zul'Farrak and Uldaman have none;
 - the `stand` points of `use_object`, `loot_object` and `ritual` steps (before the boss, and the `after_boss` ones), walked like `via` points.
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
