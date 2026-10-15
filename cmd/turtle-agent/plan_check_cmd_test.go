@@ -175,8 +175,8 @@ func gateRig(t *testing.T, checks *int) *agentRig {
 	t.Helper()
 	dir := t.TempDir()
 	for name, doc := range map[string]string{
-		"ok":     fmt.Sprintf(gatePlan, "ok", "live-checked", 7),
-		"bad":    fmt.Sprintf(gatePlan, "bad", "live-checked", 99),
+		"ok":    fmt.Sprintf(gatePlan, "ok", "live-checked", 7),
+		"bad":   fmt.Sprintf(gatePlan, "bad", "live-checked", 99),
 		"mappy": fmt.Sprintf(gatePlan, "mappy", "mapped (not live-checked)", 99),
 		// An encounter of the other team: the driver looks at it before it skips the fight, so its unreachable look refuses the run.
 		"teamy": `{"version":1,"name":"teamy","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"team":"horde","positions":[{"x":99,"y":5,"z":5}]}]}]}`,
