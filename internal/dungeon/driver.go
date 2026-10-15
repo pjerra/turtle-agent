@@ -2089,11 +2089,15 @@ func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point
 		if seg == 0 {
 			continue
 		}
-		for t := 0.0; t <= seg; t += 0.5 {
+		for t := 0.0; ; t += 0.5 {
+			t = min(t, seg) // the last sample is the segment's end, whatever its length
 			f := t / seg
 			p := Point{X: a.X + float32(f)*(b.X-a.X), Y: a.Y + float32(f)*(b.Y-a.Y), Z: a.Z + float32(f)*(b.Z-a.Z)}
 			if dist3(p, pack) <= float64(view) {
 				return snap(p), true
+			}
+			if t >= seg {
+				break
 			}
 		}
 	}

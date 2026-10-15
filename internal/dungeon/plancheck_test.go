@@ -419,6 +419,30 @@ func TestLookPointMovesWhenTheShortPathLeavesTheLeadOutOfView(t *testing.T) {
 	}
 }
 
+// The look point is sought every half yard along the path and at each segment's end: a path that comes into view only in the last
+// fraction of a segment (a length that is no multiple of 0.5) still gets its end as the look point, instead of the old standoff.
+func TestLookPointSeesTheLastFractionOfASegment(t *testing.T) {
+	// A 10.3 yd segment ending exactly view yd from the pack (21): the samples at 0, 0.5, ... 10.0 are all farther, only the end is in.
+	pack := Point{0, 31.3, 0}
+	path := []Point{{0, 0, 0}, {0, 10.3, 0}}
+	view := float32(21)
+	if d := dist3(path[1], pack); d > float64(view) {
+		t.Fatalf("the end is %.2f yd from the pack", d)
+	}
+	if d := dist3(Point{0, 10, 0}, pack); d <= float64(view) {
+		t.Fatalf("the sample before the end is in view (%.2f yd): the test needs it out", d)
+	}
+	got, ok := LookPoint(path, pack, 40, view, nil)
+	if !ok || got != path[1] {
+		t.Errorf("look point %v (ok %v), want the segment's end %v", got, ok, path[1])
+	}
+	// Several segments, the entry on the end of the second.
+	path = []Point{{0, 0, 0}, {0, 5.2, 0}, {0, 10.3, 0}}
+	if got, ok := LookPoint(path, pack, 40, view, nil); !ok || got != path[2] {
+		t.Errorf("look point %v (ok %v), want %v", got, ok, path[2])
+	}
+}
+
 // oldLook is the look point before LookPoint: the standoff counted back from the path's end.
 func oldLook(path []Point, _ Point, standoff, _ float32, _ func(Point) Point) (Point, bool) {
 	return StandoffPoint(path, standoff)
