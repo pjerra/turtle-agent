@@ -1265,24 +1265,30 @@ const holdSpotYd = 3.0
 
 // holdHere makes the lead bot's "stay" spot the place it stands, once a fight is over (see afterFight). `cmd move` sets that spot to its point
 // (BotCommands.cpp, CommanderMove), and after a fight the bot's "return to stay position" walks it back to the last point it was sent
-// to: the party would run back, rest there, and run forward again. A move to its own position costs nothing and ends that. A refusal
-// (the module may not take a move to where the bot already stands) is counted by order() and otherwise ignored.
+// to: the party would run back, rest there, and run forward again. A refusal is counted by order() and otherwise ignored.
 //
 // A lead bot that stands within holdSpotYd of the point of its last move already has its stay spot here (the module's return trigger
-// fires only beyond the follow range), and a move to where a bot stands is one the server cannot path (`unreachable`: about 23
-// refusals in a Uldaman run, hires-1 2026-10-14): none is sent then. (A run that has sent no move yet still sends it.)
+// fires only beyond the follow range). Otherwise the move does not go to the lead bot's own position: the server cannot build a path of no
+// length (PathFinder NOPATH, answered `unreachable`: 229 of the 230 "no walkable path" refusals of the Zul'Farrak runs, and about 23 in a
+// Uldaman run, hires-1 2026-10-14), so the stay spot is set holdStepYd yards from the lead bot toward the point of its last move: ground it
+// came over, on the mesh, and close enough that the party does not run back. Without a last move there is no such ground known and no hold
+// is sent (a lead bot that has been sent nowhere has no stay spot to walk back to). `cmd stay` would stay every bot and is not used.
 func (d *RemoteDriver) holdHere(ctx context.Context) {
 	here, ok := d.leadPos()
-	if !ok || d.stale() {
+	if !ok || d.stale() || !d.haveMoveTo {
 		return
 	}
-	if d.haveMoveTo && dist3(here, d.moveTo) <= holdSpotYd {
+	if dist3(here, d.moveTo) <= holdSpotYd {
 		return
+	}
+	spot := lerp(here, d.moveTo, holdStepYd/dist3(here, d.moveTo))
+	if dist3(spot, here) < holdMinYd {
+		return // never a move to where the lead bot stands
 	}
 	if d.moveGap(ctx) != nil {
 		return
 	}
-	r, err := d.order(ctx, "move", moveArgs(here)...)
+	r, err := d.order(ctx, "move", moveArgs(spot)...)
 	if err != nil {
 		return
 	}
@@ -1290,6 +1296,13 @@ func (d *RemoteDriver) holdHere(ctx context.Context) {
 		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
 	}
 }
+
+// holdStepYd is how far from the lead bot toward its last move point holdHere sets the stay spot; holdMinYd is the least a hold move may
+// differ from the lead bot's position.
+const (
+	holdStepYd = 2.0
+	holdMinYd  = 1.5
+)
 
 // unreachableStandoffs are the distances (yards from the mob) the party is walked to, one after the other, when the tank answers a pull
 // with "unreachable"; the pull is sent again from each. Run 2 gave up on such packs and counted them cleared with their mobs alive.
