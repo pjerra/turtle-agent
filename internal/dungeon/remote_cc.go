@@ -52,7 +52,8 @@ func isMageAction(action string) bool {
 // feed's party order takes it. A cc_bot the caller gave is never replaced; a run that finds none tries again at each big pack
 // (ensureCCBot), since a mage shows itself by casting.
 func (d *RemoteDriver) resolveCCBot(ctx context.Context) {
-	if strings.TrimSpace(d.opt.CCBot) != "" || d.tx.BigPack <= 0 || !d.haveFr {
+	// An observed run has no pulls of the agent's: the run leader on the server does the fighting, so no cc bot is looked for.
+	if d.observing() || strings.TrimSpace(d.opt.CCBot) != "" || d.tx.BigPack <= 0 || !d.haveFr {
 		return
 	}
 	if n := d.mageOfParty(); n != "" {

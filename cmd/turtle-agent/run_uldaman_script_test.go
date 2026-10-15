@@ -51,7 +51,7 @@ func TestRunUldamanScriptParamsAreWhatDungeonRunTakes(t *testing.T) {
 	}
 }
 
-// The script's leader mode builds the params of a leader run, and refuses what only the commander does; observe is refused up front.
+// The script's leader mode builds the params of a leader run, and refuses what only the commander does; observe mode builds a watch run.
 func TestRunUldamanScriptModes(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
@@ -77,7 +77,8 @@ func TestRunUldamanScriptModes(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--mode", "observe", "--print-params"}, "run leader"},
+		{[]string{"--mode", "observe", "--from-leg", "2", "--print-params"}, "observe mode starts at the plan's first step"},
+		{[]string{"--mode", "observe", "--brain", "frost_mage", "--print-params"}, "go with --mode leader"},
 		{[]string{"--mode", "fly", "--print-params"}, "commander, observe or leader"},
 		{[]string{"--mode", "leader", "--hire", "--print-params"}, "commander options"},
 		{[]string{"--mode", "leader", "--pull-group", "1", "--print-params"}, "commander options"},

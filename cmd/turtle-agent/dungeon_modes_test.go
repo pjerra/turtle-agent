@@ -19,8 +19,8 @@ func TestRunModeNames(t *testing.T) {
 	if _, explicit, _ := runMode(""); explicit {
 		t.Error("an omitted mode is the older group mode, not an explicit leader")
 	}
-	if _, _, err := runMode("observe"); err == nil || !strings.Contains(err.Error(), "run leader") || !strings.Contains(err.Error(), "phase P3") {
-		t.Errorf("observe: %v", err)
+	if got, explicit, err := runMode("observe"); err != nil || got != modeObserve || !explicit {
+		t.Errorf("observe: %q %v %v", got, explicit, err)
 	}
 	if _, _, err := runMode("fly"); err == nil {
 		t.Error("fly")
@@ -59,7 +59,9 @@ func TestLeaderPresetPerClassAndRole(t *testing.T) {
 func TestDungeonRunModesAreRefusedClearly(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","mode":"observe"}`, "phase P3"},
+		{`{"name":"rig","mode":"observe"}`, "needs lead_bot"},
+		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","from_leg":1}`, "start inside the plan"},
+		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","tank":"Tanky"}`, "the agent sends no order"},
 		{`{"name":"rig","mode":"commander"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"leader","lead_bot":"Tanky"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"commander","lead_bot":"Tanky","rotation":"frost_mage"}`, "in remote (commander) mode the bots fight"},

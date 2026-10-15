@@ -40,6 +40,14 @@ for (const [ph, text, want] of [["enter", "enter", "Entering the dungeon"], ["re
 }
 c = base(); c.run.state = "failed"; assert.strictEqual(T.phaseWord(c), "Failed");
 
+// an observed run: the run leader's own words
+c = base(); c.run.phase = "leader"; c.run.leader = { state: "running", text: "Run leader: Sentinel · pull 7/41 · pulling" };
+assert.strictEqual(T.stateLine(c, names), "Run leader: Sentinel · pull 7/41 · pulling");
+assert.strictEqual(T.phaseWord(c), "Run leader");
+c.run.leader = { state: "paused", text: "Run leader paused: Sentinel · boss 12/41 · 3 dead" };
+assert.strictEqual(T.phaseWord(c), "Run leader paused");
+c.run.state = "done"; assert.strictEqual(T.phaseWord(c), "Finished");
+
 // the summary line
 c = base(); c.counters.deaths = 1;
 assert.strictEqual(T.summaryLine(c), "Uldaman · Group A (Glacienne) · 18 min · 1 death · Sentinel");

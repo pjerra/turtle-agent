@@ -13,6 +13,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // The stall thresholds of the card: yellow at two minutes without progress, red at five (the owner's stale-run rule).
@@ -120,6 +121,21 @@ type RunInfo struct {
 	LastStep string  `json:"last_progress,omitempty"`
 	Mode     string  `json:"mode,omitempty"`
 	PrepareS float64 `json:"prepare_s,omitempty"`
+	// Leader is the TortoiseBots run leader's own status in an observed run (mode observe); nil in any other.
+	Leader *LeaderInfo `json:"leader,omitempty"`
+}
+
+// LeaderInfo is the TBM:RUN status of an observed run: what the run leader on the server is doing, as the agent last read it.
+type LeaderInfo struct {
+	State string `json:"state"` // running, paused, done or none
+	Leg   string `json:"leg,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	Phase string `json:"phase,omitempty"`
+	Note  string `json:"note,omitempty"`
+	Step  int    `json:"step"`
+	Steps int    `json:"steps"`
+	// Text is the status in plain words: "Run leader: Sentinel · pull 7/41 · pulling".
+	Text string `json:"text"`
 }
 
 // StallInfo is the stall timer: the seconds since the run last made progress and how loud to show it.
@@ -293,6 +309,17 @@ type rawReport struct {
 			Leg      int       `json:"leg"`
 			Boundary string    `json:"boundary"`
 		} `json:"tune_changes"`
+		Observe *struct {
+			Started bool   `json:"started"`
+			State   string `json:"state"`
+			Step    int    `json:"step"`
+			Steps   int    `json:"steps"`
+			Leg     string `json:"leg"`
+			Kind    string `json:"kind"`
+			Phase   string `json:"phase"`
+			Note    string `json:"note"`
+			Lines   int    `json:"lines"`
+		} `json:"observe"`
 		PlanReloads []struct {
 			OK       bool              `json:"ok"`
 			At       time.Time         `json:"at"`
@@ -476,6 +503,12 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 		c.Counters.GMCommands, c.Counters.GMAssists, c.Counters.AgentWalks = r.GMCommands, r.RunGMAssists, r.AgentWalks
 		c.Counters.OrdersSent, c.Counters.OrdersRefused, c.Counters.OrdersUnanswered = r.OrdersSent, r.OrdersRefused, r.OrdersUnanswered
 		c.Counters.Unreachable = r.Unreachable
+		if o := r.Observe; o != nil && o.Lines > 0 {
+			c.Run.Leader = leaderInfo(tbm.RunStatus{State: o.State, Step: o.Step, Steps: o.Steps, Leg: o.Leg, Kind: o.Kind, Phase: o.Phase, Note: o.Note})
+			if c.Run.State == "running" {
+				c.Run.Phase = "leader"
+			}
+		}
 		for _, t := range r.TuneChanges {
 			c.Changes = append(c.Changes, Change{At: t.At, Kind: "tune_change",
 				Text: fmt.Sprintf("%s %s -> %s (%s, before %s of leg %d)", t.Key, num(t.Old), num(t.New), t.Source, strings.ReplaceAll(t.Boundary, "_", " "), t.Leg)})
@@ -498,6 +531,33 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 	if rep.Error != "" {
 		c.LastError = rep.Error
 	}
+}
+
+// leaderInfo is the card's view of a run leader status, with its plain-words line.
+func leaderInfo(st tbm.RunStatus) *LeaderInfo {
+	li := &LeaderInfo{State: st.State, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Step: st.Step, Steps: st.Steps}
+	text := st.Text()
+	if text != "" {
+		text = strings.ToUpper(text[:1]) + text[1:]
+	}
+	switch st.State {
+	case tbm.RunPaused:
+		li.Text = "Run leader paused: " + text
+	case tbm.RunDone:
+		if st.Steps > 0 && st.Step >= st.Steps && !strings.HasPrefix(st.Note, "stopped") {
+			li.Text = fmt.Sprintf("Run leader: finished all %d steps", st.Steps)
+		} else {
+			li.Text = "Run leader stopped: " + text
+			if st.Note != "" {
+				li.Text += " · " + st.Note
+			}
+		}
+	case tbm.RunNone:
+		li.Text = "Run leader: no run"
+	default:
+		li.Text = "Run leader: " + text
+	}
+	return li
 }
 
 // phaseOf names what the run is doing: the final state of an ended run, else the first word of what the watchdog says it

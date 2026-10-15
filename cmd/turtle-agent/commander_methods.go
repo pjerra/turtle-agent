@@ -83,11 +83,11 @@ func (c *commanderService) intercept(e events.Event) bool {
 }
 
 type commanderParams struct {
-	Op      string   `json:"op"`                 // bind, unbind, status, view or cmd
+	Op      string   `json:"op"`                 // bind, unbind, status, view, cmd or run
 	LeadBot string   `json:"lead_bot,omitempty"` // bind: the lead bot
 	Bots    []string `json:"bots,omitempty"`     // bind: the other bots
 	On      *bool    `json:"on,omitempty"`       // view: on or off
-	Verb    string   `json:"verb,omitempty"`     // cmd: attack, pull, pullback, cc, focus, move, stay, follow, rest, revive or summon
+	Verb    string   `json:"verb,omitempty"`     // cmd: attack, pull, ... ; run: start, pause, resume, skip, stop, status or list
 	Args    []string `json:"args,omitempty"`     // cmd: the arguments of the verb (a GUID is "0x" + hex)
 	WaitMS  int      `json:"wait_ms,omitempty"`  // how long to wait for the reply; default 4000
 }
@@ -119,13 +119,18 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 		if *p.On {
 			command = "commander view on"
 		}
+	case "run":
+		if p.Verb == "" {
+			return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "run needs a verb: " + strings.Join(tbm.RunVerbs, ", ")}
+		}
+		command = strings.Join(append([]string{"run", p.Verb}, p.Args...), " ")
 	case "cmd":
 		if p.Verb == "" {
 			return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "cmd needs a verb: " + strings.Join(tbm.CmdVerbs, ", ")}
 		}
 		command = strings.Join(append([]string{"cmd", p.Verb}, p.Args...), " ")
 	default:
-		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "op must be bind, unbind, status, view or cmd"}
+		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "op must be bind, unbind, status, view, cmd or run"}
 	}
 	if err := tbm.CheckCommand(command); err != nil {
 		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
@@ -223,9 +228,12 @@ func (g remoteGame) GameObjects() []objects.GameObject {
 }
 
 func (g remoteGame) Frame() (tbm.ViewFrame, uint64, bool) { return g.c.feed.Latest() }
-func (g remoteGame) ResetView()                           { g.c.feed.Reset() }
-func (g remoteGame) BindingEnds() []tbm.BindingEnd        { return g.c.feed.Ends() }
-func (g remoteGame) ViewStats() tbm.ViewStats             { return g.c.feed.Stats() }
+
+// RunStatus is the newest TBM:RUN line the feed read (dungeon.RunLeaderWatcher).
+func (g remoteGame) RunStatus() (tbm.RunStatus, uint64, bool) { return g.c.feed.RunLatest() }
+func (g remoteGame) ResetView()                               { g.c.feed.Reset() }
+func (g remoteGame) BindingEnds() []tbm.BindingEnd            { return g.c.feed.Ends() }
+func (g remoteGame) ViewStats() tbm.ViewStats                 { return g.c.feed.Stats() }
 
 // Team is the agent's own side (dungeon.TeamSource): the feed carries no race, and the owned bots share the account's faction.
 func (g remoteGame) Team() string { return g.c.cur().Team() }

@@ -1015,8 +1015,8 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
 README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like character in a party with a tank bot and a healer bot inside the instance (leader mode has no hiring or binding yet),
 `mmaps_dir` set. What the first live use has to settle:
 
-1. **`mode: "leader"` without `brain`**: the preset of the character's class is taken (`brain` in the result and the report); a class or role without a default is refused with the list. `mode: "observe"` is refused
-   and nothing is sent. `commander` and `remote` behave as before (compare one `tools/run-uldaman.sh --print-params` with the last live run).
+1. **`mode: "leader"` without `brain`**: the preset of the character's class is taken (`brain` in the result and the report); a class or role without a default is refused with the list. `mode: "observe"` is the observe mode, see
+   "Observe mode" at the end of this file. `commander` and `remote` behave as before (compare one `tools/run-uldaman.sh --print-params` with the last live run).
 2. **A rotation file in place of the Go strategy**: `brain_start {"strategies":["frost_mage"],"rotation":"frost_mage"}` in a fight: the `brain_decision` stream has the same action names as without the option
    (`frostbolt`, `frost_nova`, `fire_blast`, `cone_of_cold`), `brain_state.strategies` has `rot:frost_mage` and not `mage_frost`, and `trace` header `options.rotation` carries the digest. Then `shadow_priest` and
    `arms_warrior` (stance, `execute`, `overpower` after a dodge, `heroic_strike` once per swing, `battle_shout` at a rest gate).
@@ -1035,3 +1035,19 @@ README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like
    `damage_done` against the sum of the `spell_damage`/`melee` events with the character as the source (and that a wand shot, a pet's damage and a DoT tick are or are not in it);
    `power_spent` against the mana the unit rows show; `casts_failed_by_reason` against the `spell_failed` events; `idle_pct` against a watched fight; `mobs_on_me` against who the mobs target in `units`.
    Run the same arm twice: the spread is the noise `--compare` has to beat (it says "the noise" when both sides name the same brain).
+
+## Observe mode: the agent watches a TortoiseBots run leader (`mode: "observe"`, `plan-export`; tested against fakes only, never run live)
+
+README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Needs a server build with TortoiseBots PRs #962 and #963 (the run leader and the plan tables),
+`AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteCommander = 1`, and a GM commander account as for a commander run. What the first live use has to settle:
+
+1. **The export applies.** `turtle-agent plan-export --mmaps <dir> --out <TortoiseBots>/data/sql/world/ uldaman` (the stamp must sort after `20261014150000`), restart the server: the log has no
+   `ai_dungeon_step: plan ... skipped` line, `.bot run list` names `uldaman` with its steps and how many are "not supported yet" (the two `ritual` steps). Compare the step count with the export's.
+2. **The probe.** `dungeon_run {"mode":"observe", ...}` on a server without the run leader (an older build) fails in about 4 s with "needs the TortoiseBots run leader" and the log shows no hire and no bind; with the plan missing it names the plans the server has.
+3. **No order after the start.** Run Uldaman from leg 0 (`tools/run-uldaman.sh --mode observe --hire`). The run leader must never show `paused ... paused by .bot cmd ...`: the agent's `commander view`, `.bot run status` polls and `cmd stay` at the end are the only things sent after `run start`.
+   Check the trace: `run_leader` events follow the module's `TBM:RUN` lines one for one (step, leg, kind, phase, note) and `report.remote.orders` holds only `stay`.
+4. **The status feed.** Are `TBM:RUN` lines pushed to the commander on the system chat (the feed reads them there) or only on the addon channel? `report.remote.observe.lines` against `polls` tells: lines with no poll answering them means the push works.
+5. **Pause, resume, stop.** `dungeon_pause` during a pull: the run leader pauses (`paused by .bot run pause`) and the bots hold; `dungeon_resume` goes on at the same step; `dungeon_stop` sends `.bot run stop` before the unbind and leaves the party still bound for the stay and unbind.
+6. **The module pauses itself.** At 3 dead the status is `paused` with the note; the watch waits `paused_wait_s` (10 min) and then stops the run with that note as the failure. Is 10 minutes the right wait, and does a person's `.bot run resume` on the server end the wait (the next status line is `running`)?
+7. **Legs and the dashboard card.** The report has one leg entry per leg name the module sent (`legs[]` with seconds), and the card of `turtle-agent dashboard` reads "Run leader: <leg> · <kind> n/m · <phase>". Does the `phase` word `pull` cover both the approach and the fight well enough for the card?
+8. **`ritual` steps.** The run leader pauses on Uldaman's two `ritual` steps (not run yet): the observed run ends `failed` after `paused_wait_s` unless a person does the ritual by hand (`.bot cmd ritual`), then `.bot run skip` and `resume`. Record how a run through the altars goes and whether `dungeon_skip` is enough.
