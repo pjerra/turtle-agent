@@ -235,6 +235,10 @@ type Patrol struct {
 	Entries []uint32 `json:"entries"`
 	Path    []Point  `json:"path"`
 	PeriodS float32  `json:"period_s"`
+	// PeriodEstimate says PeriodS is an estimate (the path's length at 2.5 yd/s, not a measured round): the driver then does not predict where
+	// the patrol will be (it takes no phase from the period): it locates a member and waits until the patrol is past the pull, see
+	// patrolDanger. The mapping walk measures the round and drops the flag. The plan check warns for each such patrol.
+	PeriodEstimate bool `json:"period_estimate,omitempty"`
 	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
 	Source string `json:"source,omitempty"`
 }
@@ -454,7 +458,9 @@ type rawPatrol struct {
 	Entries []uint32   `json:"entries"`
 	Path    []rawPoint `json:"path"`
 	PeriodS float32    `json:"period_s"`
-	Source  string     `json:"source"`
+	// PeriodEstimate is Patrol.PeriodEstimate.
+	PeriodEstimate bool   `json:"period_estimate"`
+	Source         string `json:"source"`
 }
 
 type rawBoss struct {
@@ -826,7 +832,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if rp := g.Patrol; rp != nil {
 			pp := gp + ".patrol"
-			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, Source: rp.Source}
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, PeriodEstimate: rp.PeriodEstimate, Source: rp.Source}
 			c.entries(pp+".entries", rp.Entries, true)
 			if len(rp.Path) < 2 {
 				c.fail(pp+".path", "needs at least two points")
