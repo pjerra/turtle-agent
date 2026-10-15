@@ -1,6 +1,7 @@
 package planexport
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -142,7 +143,7 @@ func TestSQLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// idempotent: each plan's deletes come before its inserts
-	if strings.Index(sql, "DELETE FROM `ai_dungeon_plan` WHERE `plan` = 'other'") > strings.Index(sql, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `source`, `comment`) VALUES\n('other'") {
+	if strings.Index(sql, "DELETE FROM `ai_dungeon_plan` WHERE `plan` = 'other'") > strings.Index(sql, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('other'") {
 		t.Fatal("delete after insert")
 	}
 }
@@ -261,4 +262,46 @@ func TestUldaman(t *testing.T) {
 		t.Fatalf("read back %d plans", len(back))
 	}
 	t.Logf("uldaman: %d legs, %d steps, %d rows, %d warnings", len(r.Legs), len(r.Steps), r.Count(), len(res.Warnings))
+}
+
+// TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
+// ai_dungeon_plan), as comma lists like `entries`, in the column order of that migration, and they read back.
+func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Rows
+	if len(r.Plan.CCPriority) == 0 || len(r.Plan.CCAlways) == 0 || len(r.Plan.KillFirst) == 0 {
+		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
+	}
+	sql := WriteSQL([]Rows{r})
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '5650,7247,7246,5648', '5650,7246', '8179,5650,7247', 'test', "
+	if !strings.Contains(sql, want) {
+		t.Fatalf("the migration lacks %q", want)
+	}
+	back, err := Parse(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(back[0].Plan.KillFirst) != "[8179 5650 7247]" {
+		t.Fatalf("read back %+v", back[0].Plan)
+	}
+}
+
+func TestPlanListTooLongIsRefused(t *testing.T) {
+	p := parsePlan(t, small)
+	for i := 0; i < 60; i++ {
+		p.KillFirst = append(p.KillFirst, 10000+uint32(i))
+	}
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "kill_first") {
+		t.Fatalf("a kill_first list over 255 characters must be refused: %v", err)
+	}
 }

@@ -34,7 +34,8 @@ func entriesText(es []uint32) string {
 // Header is the comment at the top of a migration.
 const Header = `-- Dungeon plans for the run leader (.bot run), exported by turtle-agent (plan-export). Plan format v1; the mapping is
 -- docs/guides/dungeon-run-leader.md ("From plan v1 to rows"). The plan file in turtle-agent is the single source: edit it
--- there and export again, never these rows by hand. Never edit this file once applied; export a new one.
+-- there and export again, never these rows by hand. The plan row carries the unit lists cc_priority, cc_always and kill_first
+-- (columns from 20261015200000_world.sql). Never edit this file once applied; export a new one.
 --
 -- Idempotent: each plan's rows are deleted, then inserted. The tables come from 20261014150000_world.sql.
 `
@@ -49,7 +50,8 @@ func WriteSQL(plans []Rows) string {
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_step` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_plan` WHERE `plan` = %s;\n", quote(p.Plan))
-		fmt.Fprintf(&b, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `source`, `comment`) VALUES\n(%s, %d, %s, %s);\n", quote(p.Plan), p.Map, quote(p.Source), quote(p.Comment))
+		fmt.Fprintf(&b, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n(%s, %d, %s, %s, %s, %s, %s);\n", quote(p.Plan), p.Map,
+			quote(entriesText(p.CCPriority)), quote(entriesText(p.CCAlways)), quote(entriesText(p.KillFirst)), quote(p.Source), quote(p.Comment))
 		b.WriteString("INSERT INTO `ai_dungeon_leg` (`plan`, `leg`, `name`, `comment`) VALUES\n")
 		for i, l := range r.Legs {
 			sep := ",\n"
@@ -107,15 +109,21 @@ func Parse(sql string) ([]Rows, error) {
 		}
 		switch table {
 		case "ai_dungeon_plan":
-			if len(f) != 4 {
+			if len(f) != 7 {
 				return nil, fmt.Errorf("line %d: %d columns in ai_dungeon_plan", line, len(f))
 			}
 			m, err := strconv.ParseUint(f[1], 10, 32)
 			if err != nil {
 				return nil, fmt.Errorf("line %d: map: %w", line, err)
 			}
+			var lists [3][]uint32
+			for i := range lists {
+				if lists[i], err = parseEntries(f[2+i]); err != nil {
+					return nil, fmt.Errorf("line %d: %w", line, err)
+				}
+			}
 			byPlan[f[0]] = len(out)
-			out = append(out, Rows{Plan: PlanRow{Plan: f[0], Map: uint32(m), Source: f[2], Comment: f[3]}})
+			out = append(out, Rows{Plan: PlanRow{Plan: f[0], Map: uint32(m), CCPriority: lists[0], CCAlways: lists[1], KillFirst: lists[2], Source: f[5], Comment: f[6]}})
 		case "ai_dungeon_leg":
 			if len(f) != 4 {
 				return nil, fmt.Errorf("line %d: %d columns in ai_dungeon_leg", line, len(f))
@@ -156,14 +164,9 @@ func Parse(sql string) ([]Rows, error) {
 			s.Leg, s.Seq, s.Entry = ints(1), ints(2), uint32(ints(4))
 			s.X, s.Y, s.Z, s.Radius = floats(5), floats(6), floats(7), floats(8)
 			s.Item, s.Param, s.Flags, s.TimeoutS = uint32(ints(9)), uint32(ints(10)), uint32(ints(11)), ints(12)
-			if f[13] != "" {
-				for _, e := range strings.Split(f[13], ",") {
-					v, err := strconv.ParseUint(e, 10, 32)
-					if err != nil && e1 == nil {
-						e1 = fmt.Errorf("entries: %w", err)
-					}
-					s.Entries = append(s.Entries, uint32(v))
-				}
+			var eerr error
+			if s.Entries, eerr = parseEntries(f[13]); eerr != nil && e1 == nil {
+				e1 = eerr
 			}
 			if e1 != nil {
 				return nil, fmt.Errorf("line %d: %w", line, e1)
@@ -174,6 +177,22 @@ func Parse(sql string) ([]Rows, error) {
 		}
 	}
 	return out, sc.Err()
+}
+
+// parseEntries reads a comma list of creature entries back (” is none).
+func parseEntries(text string) ([]uint32, error) {
+	if text == "" {
+		return nil, nil
+	}
+	var out []uint32
+	for _, e := range strings.Split(text, ",") {
+		v, err := strconv.ParseUint(e, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("entries: %w", err)
+		}
+		out = append(out, uint32(v))
+	}
+	return out, nil
 }
 
 // splitTuple splits "(a, 'b', 3)," into its values; strings are unquoted.
@@ -239,7 +258,14 @@ func Equal(want, got []Rows) error {
 	}
 	for i := range want {
 		w, g := want[i], got[i]
-		if w.Plan != g.Plan {
+		wp, gp := w.Plan, g.Plan
+		for _, l := range [][2]*[]uint32{{&wp.CCPriority, &gp.CCPriority}, {&wp.CCAlways, &gp.CCAlways}, {&wp.KillFirst, &gp.KillFirst}} {
+			if entriesText(*l[0]) != entriesText(*l[1]) {
+				return fmt.Errorf("plan %s: row %+v, read back %+v", w.Plan.Plan, w.Plan, g.Plan)
+			}
+			*l[0], *l[1] = nil, nil
+		}
+		if wp.Plan != gp.Plan || wp.Map != gp.Map || wp.Source != gp.Source || wp.Comment != gp.Comment {
 			return fmt.Errorf("plan %s: row %+v, read back %+v", w.Plan.Plan, w.Plan, g.Plan)
 		}
 		if len(w.Legs) != len(g.Legs) {

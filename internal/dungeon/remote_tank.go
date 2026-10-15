@@ -109,6 +109,51 @@ func (d *RemoteDriver) respectCC(mobs []tbm.HostileRec) []tbm.HostileRec {
 	return free
 }
 
+// killFirstFirst puts the plan's kill_first entries ahead of mobs (as rankByTank left them), in the list's order, the rest keeping their
+// order. A kill_first mob under CC stays where it was: the party leaves a held Witch Doctor alone. It runs after respectCC and
+// rankByTank, so the tank's order decides among equals only.
+func (d *RemoteDriver) killFirstFirst(mobs []tbm.HostileRec) []tbm.HostileRec {
+	if d.plan == nil || len(d.plan.KillFirst) == 0 {
+		return mobs
+	}
+	n := len(d.plan.KillFirst)
+	rank := func(h tbm.HostileRec) int {
+		if i := slices.Index(d.plan.KillFirst, h.Entry); i >= 0 && h.Entry != 0 && !d.ccd(h) {
+			return i
+		}
+		return n
+	}
+	out := slices.Clone(mobs)
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
+}
+
+// summonedKillFirst says whether h is a summoned unit the plan names in summoned_kill_first (Zul'Farrak's Greater Healing Ward 8179).
+func (d *RemoteDriver) summonedKillFirst(h tbm.HostileRec) bool {
+	return d.plan != nil && h.Entry != 0 && slices.Contains(d.plan.SummonedKillFirst, h.Entry)
+}
+
+// wardNearYd is how near a hostile that fights the party a summoned unit must stand to count as part of that fight.
+const wardNearYd = 10
+
+// inFight says whether the hostile is part of the fight: it fights the party (engagedWith), or it is a summoned_kill_first unit with
+// encounter evidence: it stands within wardNearYd of a living, non-summoned hostile that fights the party. A ward by a pack that does
+// not fight is left alone. (The feed has no owner field, so the summoner is the hostile it stands by.)
+func (d *RemoteDriver) inFight(h tbm.HostileRec) bool {
+	if d.engagedWith(h) {
+		return true
+	}
+	if !d.summonedKillFirst(h) || h.HPPct <= 0 {
+		return false
+	}
+	for _, o := range d.fr.Hostiles {
+		if o.GUID != h.GUID && o.HPPct > 0 && !d.summonedKillFirst(o) && d.engagedWith(o) && dist3(hostilePoint(o), hostilePoint(h)) <= wardNearYd {
+			return true
+		}
+	}
+	return false
+}
+
 // tankShare is the tank's share of the top threat on the mob: 100 when it tops the list, 0 when it is not among the top three.
 func (d *RemoteDriver) tankShare(h tbm.HostileRec) int {
 	if d.tank == 0 {

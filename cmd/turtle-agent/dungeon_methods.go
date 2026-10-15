@@ -99,6 +99,15 @@ func (b *buffsParam) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// recoverWipeOn is the recover_wipe setting of a run: the caller's word when it gave one, else on in a commander run and off in a group run
+// (a wipe ended the run and needed a person: 42 of the 56 ZF traces of 2026-10-15 had it off).
+func recoverWipeOn(v *bool, commander bool) bool {
+	if v != nil {
+		return *v
+	}
+	return commander
+}
+
 type dungeonRunParams struct {
 	Name string `json:"name"`
 	// AllowDraft lets the run take a plan whose status is "draft": a skeleton from the world database that has not had its mapping walk
@@ -139,8 +148,9 @@ type dungeonRunParams struct {
 	// 3 developer and above: also revive and buffs). Only with gm true.
 	GMLevel *int `json:"gm_level,omitempty"`
 	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
-	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
-	RecoverWipe bool `json:"recover_wipe,omitempty"`
+	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way. Omitted: on in a
+	// commander run (the bots are revived with `.bot cmd revive`; a wipe needed a person otherwise), off in a group run. false turns it off.
+	RecoverWipe *bool `json:"recover_wipe,omitempty"`
 	// Resume true skips what the leader has already passed when it stands further along from_leg's route than its first point: the walk to
 	// the leg's first point and the pull groups behind it that a party member stands near and sees empty. Off by default (not yet checked live).
 	Resume *bool `json:"resume,omitempty"`
@@ -567,7 +577,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
-	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
+	cfg.RecoverWipe, cfg.WaitSickness = recoverWipeOn(p.RecoverWipe, false), p.WaitSickness
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}

@@ -241,6 +241,88 @@ func (c *Commander) Lines(ctx context.Context, command string, wait time.Duratio
 	}
 }
 
+// LineRequest is one command of LinesAll and the test of its reply's last line.
+type LineRequest struct {
+	Command string
+	Done    func(line string) bool
+}
+
+// LineResult is what LinesAll read for one request: the lines of its reply, and whether Done said they ended.
+type LineResult struct {
+	Lines   []string
+	Settled bool
+}
+
+// LinesAll is Lines for several commands at once: it sends every ".bot <command>" first, then reads the log once until each request's
+// Done has said so or wait (for all of them together) has run out. `command <bot> ...` requests read only that bot's own words, so
+// the replies of different bots do not mix; a system line (the "Forwarded command" echo) is offered to every request that is still
+// open. It exists for a check over a whole party (the preflight talents): N sequential Lines calls cost N times wait when the bots
+// do not answer. Results are in the order of reqs; an error stops at the first command that cannot be sent.
+func (c *Commander) LinesAll(ctx context.Context, reqs []LineRequest, wait time.Duration) ([]LineResult, error) {
+	cmds := make([]string, len(reqs))
+	for i, r := range reqs {
+		cmds[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(r.Command), ".bot "))
+		if err := CheckBotLine(cmds[i]); err != nil {
+			return nil, err
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	log := c.link.Log()
+	since := log.Last()
+	for _, cmd := range cmds {
+		if err := c.link.Say(ctx, Chat(cmd)); err != nil {
+			return nil, err
+		}
+	}
+	if wait <= 0 {
+		wait = DefaultOrderWait
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	out := make([]LineResult, len(reqs))
+	for i := range out {
+		out[i].Lines = []string{}
+	}
+	open := len(reqs)
+	cursor := since
+	for open > 0 {
+		p := log.Read(events.Query{Since: cursor, Kinds: []string{events.KindSystem, events.KindAddon, events.KindWhisper, events.KindChat}, Limit: events.MaxLimit})
+		for _, e := range p.Events {
+			for i, r := range reqs {
+				if out[i].Settled {
+					continue
+				}
+				line, ok := replyLine(e, replyFrom(cmds[i]))
+				if !ok || strings.HasPrefix(line, ViewPrefix) {
+					continue
+				}
+				if len(out[i].Lines) < maxLines {
+					out[i].Lines = append(out[i].Lines, line)
+				}
+				if r.Done(line) {
+					out[i].Settled = true
+					open--
+				}
+			}
+		}
+		cursor = p.Next
+		if p.More {
+			continue
+		}
+		if open == 0 {
+			break
+		}
+		if log.Wait(wctx, cursor) != nil {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
+			break
+		}
+	}
+	return out, nil
+}
+
 // replyLine is the text of an event that can be part of a reply: a system or addon line, or (with from set) the named bot's own words. Only
 // the named bot's chat counts, not a whisper inform of ours and not another player's chat.
 func replyLine(e events.Event, from string) (string, bool) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -580,5 +581,52 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 	sr, _ := rep["start"].(map[string]any)
 	if rem["gm_commands"].(float64) != 0 || rem["unbound"] != true || sr == nil || sr["kind"] != "pull_gather" || sr["pull_group"] != float64(0) || len(sr["gm_commands"].([]any)) != 0 {
 		t.Fatalf("remote %v start %v", rem, sr)
+	}
+}
+
+// recover_wipe is on by default in a commander run, off in a group run, and the caller's word wins either way.
+func TestRecoverWipeDefaultsOnForCommanderRuns(t *testing.T) {
+	parse := func(js string) dungeonRunParams {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(js), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct {
+		params    string
+		commander bool
+		want      bool
+	}{
+		{`{"name":"x"}`, true, true},
+		{`{"name":"x"}`, false, false},
+		{`{"name":"x","recover_wipe":false}`, true, false},
+		{`{"name":"x","recover_wipe":true}`, true, true},
+		{`{"name":"x","recover_wipe":true}`, false, true},
+	} {
+		if got := recoverWipeOn(parse(c.params).RecoverWipe, c.commander); got != c.want {
+			t.Errorf("%s commander %v: %v, want %v", c.params, c.commander, got, c.want)
+		}
+	}
+}
+
+// An observed run steers nothing: its recover_wipe is off (the trace options say so), a commander run's is on, the legacy "remote" too.
+func TestRemoteRecoverWipeIsOffForObservedRuns(t *testing.T) {
+	for mode, want := range map[string]bool{"commander": true, "remote": true, "": true, "observe": false} {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(`{"name":"x","mode":"`+mode+`"}`), &p); err != nil {
+			t.Fatal(err)
+		}
+		if got := remoteRecoverWipe(p); got != want {
+			t.Errorf("mode %q: %v, want %v", mode, got, want)
+		}
+	}
+	// observe refuses any recover_wipe value, false included.
+	r := dungeonRig(t)
+	for _, v := range []string{"true", "false"} {
+		out := r.call("dungeon_run", `{"name":"rig","mode":"observe","lead_bot":"Tanky","recover_wipe":`+v+`}`)
+		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), "recover_wipe") {
+			t.Errorf("recover_wipe %s: %v", v, out["error"])
+		}
 	}
 }

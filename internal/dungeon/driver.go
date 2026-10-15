@@ -173,6 +173,7 @@ type Config struct {
 	AssistEvery    time.Duration // how often the leader re-orders the party onto the nearest pack member
 	FightTimeout   time.Duration // one pull group
 	BossTimeout    time.Duration // one boss fight
+	BossSearch     time.Duration // remote: how long a kill-boss step waits for a boss that is not at his spot to walk back into range; 0: 60 s, below 0: no search (boss_search_s 0)
 	PostFight      time.Duration // wait after the last pack member died (loot, last hits)
 	AddsWait       time.Duration // longest wait for loose hostile units to be dealt with after a fight
 	RestTimeout    time.Duration // longest rest gate (a leg's rest.max_s overrides it)
@@ -230,7 +231,7 @@ func DefaultConfig() Config {
 		WalkAttempts: 3, WalkRetryDelay: 2 * time.Second, UseSettle: 1500 * time.Millisecond, ItemsWait: 3 * time.Second,
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
-		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
+		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, BossSearch: 60 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
 		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
@@ -271,6 +272,9 @@ func (c Config) withDefaults() Config {
 	fill(&c.AssistEvery, d.AssistEvery)
 	fill(&c.FightTimeout, d.FightTimeout)
 	fill(&c.BossTimeout, d.BossTimeout)
+	if c.BossSearch == 0 {
+		c.BossSearch = d.BossSearch
+	}
 	fill(&c.PostFight, d.PostFight)
 	fill(&c.AddsWait, d.AddsWait)
 	fill(&c.RestTimeout, d.RestTimeout)
@@ -1616,10 +1620,11 @@ type fightSpec struct {
 	skip     []uint32
 	anchors  []Point // where the pack stands
 	limit    time.Duration
-	required bool    // not finding the target fails the run (a boss), else the fight is taken as already won
-	sneak    bool    // a target that turns out stealthed is walked past (sneakPast) instead of pulled
-	wide     bool    // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
-	radius   float32 // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
+	required bool        // not finding the target fails the run (a boss), else the fight is taken as already won
+	sneak    bool        // a target that turns out stealthed is walked past (sneakPast) instead of pulled
+	seen     packet.GUID // the boss the search found away from his spot (remote searchBoss): it is a candidate wherever it stands
+	wide     bool        // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
+	radius   float32     // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool
