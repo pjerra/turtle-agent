@@ -161,6 +161,11 @@ type Leg struct {
 	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
 	// Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// LeftoverEntries are summoned creatures a step of the leg leaves standing idle (Zul'Farrak's Zombies 7286 and Dead Heroes 7276 that a grave
+	// brings: round 3, 11 of them stood idle after step 16 and all aggroed at once when the carrier went to the next grave). The remote driver
+	// pulls the ones within LeftoverRadius of the next batch of chests and fights them before the chests are opened, after each batch, and
+	// before an area trigger (remote_batch.go). Empty: no sweep.
+	LeftoverEntries []uint32 `json:"leftover_entries,omitempty"`
 	// NeedsWalk marks a To that is not on the navmesh and could not be snapped to it (no walkable floor within a few yards: a scripted
 	// area, a platform): the mapping walk has to find the real waypoint. The same flag on a pull group or the boss says the same of its position.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
@@ -402,6 +407,8 @@ const (
 	// BatchRadius is how far from the batch's centre (the mean of its chests) a chest of a plan batch may lie: the summons of the batch
 	// stand close enough together for the party's area spells to hit them all.
 	BatchRadius = 15.0
+	// LeftoverRadius is how far from a batch's centre (or the trigger's stand point) an idle summon of the leg's leftover_entries is swept.
+	LeftoverRadius = 35.0
 )
 
 // UseItem uses an item from the leader's bags (a right-click: CMSG_USE_ITEM) and waits for its effect. ExpectItem is the item the use
@@ -566,6 +573,7 @@ type rawLeg struct {
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	// CompanionsLoot is Leg.CompanionsLoot.
 	CompanionsLoot *bool     `json:"companions_loot"`
+	Leftover       []uint32  `json:"leftover_entries"`
 	Rest           *RestSpec `json:"rest"`
 	Notes          []string  `json:"notes"`
 	NeedsWalk      bool      `json:"needs_walk"`
@@ -949,7 +957,12 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover}
+	for i, e := range r.Leftover {
+		if e == 0 {
+			c.fail(fmt.Sprintf("%s.leftover_entries[%d]", path, i), "0 is not a creature entry")
+		}
+	}
 	l.To = c.point(path+".to", r.To)
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)

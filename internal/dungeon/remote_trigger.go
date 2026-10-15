@@ -151,6 +151,10 @@ func (d *RemoteDriver) doAreaTrigger(ctx context.Context, a Action) error {
 	t := a.Trigger
 	began := d.clk.Now()
 	rep := TriggerReport{Leg: a.Leg, Trigger: t.ID}
+	// Summons the leg's steps left standing idle (the graves' Zombies and Dead Heroes) are fought before the trigger wakes the boss.
+	if err := d.sweepLeftovers(ctx, "before the trigger", t.Stand); err != nil {
+		return err
+	}
 	by, err := d.takeTrigger(ctx, a)
 	rep.By, rep.Result, rep.Seconds = by, "done", d.clk.Now().Sub(began).Seconds()
 	if err != nil {

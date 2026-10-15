@@ -286,10 +286,15 @@ func (d *RemoteDriver) aheadPassed(g packet.GUID) bool {
 // pullAhead pulls h, a hostile near the walk's next hop, to the gathered party and fights it to the end. A won fight marks where its
 // mobs died; any other outcome passes h over for the rest of the walk.
 func (d *RemoteDriver) pullAhead(ctx context.Context, h tbm.HostileRec) error {
+	return d.pullAheadNote(ctx, h, fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
+}
+
+// pullAheadNote is pullAhead with the note that says why the pull is made.
+func (d *RemoteDriver) pullAheadNote(ctx context.Context, h tbm.HostileRec, why string) error {
 	d.aheadPulling = true
 	defer func() { d.aheadPulling = false }()
 	d.remote(func(r *RemoteReport) { r.AheadPulls++ })
-	d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
+	d.rep.note(why)
 	// What would come with h is counted as for a planned pull (packOf, the pack radius, h's floor): a pull of big_pack mobs or more, or
 	// of a pack with a cc_always member, is a big pull. It is gathered for like the rest, and fight() puts the pack CC on one member
 	// (bigPackCC: Polymorph by cc_priority) before the pullback to the gathered party; with no cc bot it is pulled as it is, noted.

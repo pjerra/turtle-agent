@@ -585,3 +585,138 @@ func TestBatchCountsSkippedChests(t *testing.T) {
 }
 
 // graves_batch and graves_ramp are refused in observe mode and together (the rpc layer): see cmd/turtle-agent.
+
+// ---- leftover summons ----
+
+func TestLeftoverEntriesParseAndKeepTheirForm(t *testing.T) {
+	p := mustPlan(t, eventPlan(`{"loot_object":{"entry":128403,"near":{"x":1,"y":2,"z":3}}}`, `"leftover_entries":[7286,7276],`))
+	if fmt.Sprint(p.Legs[0].LeftoverEntries) != "[7286 7276]" {
+		t.Fatalf("%v", p.Legs[0].LeftoverEntries)
+	}
+	out, _ := Marshal(p)
+	if !strings.Contains(string(out), `"leftover_entries"`) {
+		t.Fatalf("%s", out)
+	}
+	if _, err := Parse("t.json", []byte(eventPlan(`{"loot_object":{"entry":128403,"near":{"x":1,"y":2,"z":3}}}`, `"leftover_entries":[0],`))); err == nil || !strings.Contains(err.Error(), "leftover_entries[0]") {
+		t.Fatalf("%v", err)
+	}
+	zf := loadPlan(t, zulfarrakPlan)
+	if l := zf.Legs[len(zf.Legs)-1]; fmt.Sprint(l.LeftoverEntries) != "[7286 7276]" {
+		t.Fatalf("the Zum'rah leg's leftover_entries: %v", l.LeftoverEntries)
+	}
+}
+
+// Idle summons left near the next batch (the leftovers of earlier graves) are pulled and fought before the batch's first open.
+func TestIdleLeftoversNearTheBatchAreFoughtBeforeTheOpen(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	leg.LeftoverEntries = []uint32{7286, 7276}
+	for i := 0; i < 3; i++ {
+		g.addMob(7286, Point{40 + float32(i), 30, 0}) // idle, 100% hp, not pulled; off the walk, so that the walk's own pulls leave it
+	}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || o.rep.State != "done" {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	if len(o.killedAtOpen) == 0 || o.killedAtOpen[0] < 3 {
+		t.Fatalf("hostiles dead at the first open: %v\n%s", o.killedAtOpen, notesOf(o.rep))
+	}
+	if !strings.Contains(notesOf(o.rep), "leftover sweep before the batch: 3 idle summon(s)") || o.rep.Remote.LeftoverPulls < 1 {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+// Summons a batch's fight-out leaves idle are fought after the batch, before the rest gate, so that the next batch's approach does not pull them all.
+func TestIdleLeftoversAfterABatchAreSweptBeforeTheNextBatch(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	leg.LeftoverEntries = []uint32{7286}
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	opens := 0
+	g.onGrave = func(c *fakeCarrier, gv *fakeGrave) {
+		opens++
+		c.addMob(7286, Point{gv.at.X + 4, 30, 0}) // a summon that stays where it is, idle
+	}
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	d := NewRemoteDriver(remotePlan(leg), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if len(g.mobs) != 0 || g.mobsKilled != 6 {
+		t.Fatalf("mobs left %d, killed %d\n%s", len(g.mobs), g.mobsKilled, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "leftover sweep after the batch") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// A leg without leftover_entries sweeps nothing; a summon of another entry is left alone.
+func TestLeftoverSweepOnlyTakesTheLegsEntries(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	m := g.addMob(299, Point{40, 30, 0})
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || strings.Contains(notesOf(o.rep), "leftover sweep") || m.hp <= 0 {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	g = carrierGame(t)
+	leg, gs = batchGraves(3, 3, func(i int) string { return "g1" })
+	leg.LeftoverEntries = []uint32{7286}
+	m = g.addMob(299, Point{40, 30, 0})
+	o = runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || strings.Contains(notesOf(o.rep), "leftover sweep") || m.hp <= 0 {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+}
+
+// The sweep is bounded: a leftover the party cannot pull is tried once, the sweep says so and the run goes on.
+func TestLeftoverSweepIsBounded(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	leg.LeftoverEntries = []uint32{7286}
+	for i := 0; i < 12; i++ {
+		g.addMob(7286, Point{40 + float32(i), 30 + float32(i), 0})
+	}
+	g.script = map[string][]tbm.OrderResult{"pullback": repeatOrder(errOrder("cmd pullback x", "unreachable"), 100)}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.rep.Remote.LeftoverPulls < 1 || o.rep.Remote.LeftoverPulls > 2*leftoverRounds {
+		t.Fatalf("pulls %d\n%s", o.rep.Remote.LeftoverPulls, notesOf(o.rep))
+	}
+	if !strings.Contains(notesOf(o.rep), "leftover sweep before the batch") {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+func repeatOrder(r tbm.OrderResult, n int) []tbm.OrderResult {
+	out := make([]tbm.OrderResult, n)
+	for i := range out {
+		out[i] = r
+	}
+	return out
+}
+
+// Idle leftovers near the trigger's stand are fought before the trigger is sent (and so before Zum'rah wakes).
+func TestIdleLeftoversAreFoughtBeforeTheAreaTrigger(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.moduleTakes = true
+	z := g.addMob(7286, Point{104, 20, 0}) // idle, within 35 yd of the stand point 104 0 0, off the walk to the leg's To 80 0 0
+	leg := zumrahLeg("auto", 15)
+	leg.LeftoverEntries = []uint32{7286, 7276}
+	rep, err := runTrigger(t, g, leg)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if z.hp > 0 || !strings.Contains(notesOf(rep), "leftover sweep before the trigger") || rep.Remote.LeftoverPulls < 1 {
+		t.Fatalf("zombie hp %v\n%s", z.hp, notesOf(rep))
+	}
+	// And the trigger came after: Zum'rah was killed last (two hostiles died in all).
+	if g.mobsKilled != 2 {
+		t.Errorf("killed %d", g.mobsKilled)
+	}
+}

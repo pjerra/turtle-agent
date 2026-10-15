@@ -346,7 +346,8 @@ type RemoteReport struct {
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
 	// GraveBatches is one record per batch of chests opened back to back (remote_batch.go; the notes "graves-batch: ..." say the same).
-	GraveBatches []GraveBatch `json:"grave_batches,omitempty"`
+	GraveBatches  []GraveBatch `json:"grave_batches,omitempty"`
+	LeftoverPulls int          `json:"leftover_pulls,omitempty"` // idle summons pulled by the leftover sweeps
 	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
 	// and marks put again on a mob whose CC lapsed while the fight went on.
 	ReactiveCC int `json:"reactive_cc"`

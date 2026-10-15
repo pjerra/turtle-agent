@@ -3,6 +3,8 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -187,6 +189,9 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		b.rec.Note = fmt.Sprintf("wanted %d, only %d chests lie within %.0f yd of their centre", wanted, size, BatchRadius)
 	}
 	d.rep.note(fmt.Sprintf("graves-batch begin: %d chest(s) around %.0f %.0f %.0f (%s mode, wanted %d, radius %.1f yd)%s", size, b.rec.Centre.X, b.rec.Centre.Y, b.rec.Centre.Z, mode, wanted, b.rec.RadiusYd, ifNote(b.rec.Note)))
+	if err := d.sweepLeftovers(ctx, "before the batch", b.rec.Centre); err != nil {
+		return err
+	}
 	d.batch = b
 	d.setAoE(ctx, false) // the opens go with the area spells off: the tank takes the summons first, the spells come on after its threat lead
 	if err := d.doWalk(ctx, b.rec.Centre); err != nil {
@@ -346,6 +351,9 @@ func (d *RemoteDriver) batchStepDone(ctx context.Context, a Action, skipped bool
 	if err := d.fightOutOnly(ctx, a.Label); err != nil {
 		return err // a wipe is recorded by batchWiped, which stepFailedRecover calls
 	}
+	if err := d.sweepLeftovers(ctx, "after the batch", b.rec.Centre); err != nil {
+		return err
+	}
 	d.batchFinish(false)
 	return d.restGate(ctx, false)
 }
@@ -489,4 +497,73 @@ func (d *RemoteDriver) sampleBatchFrame(b *batchRun) {
 // between two chests goes on, the bots defend themselves); the fight is after the last chest.
 func (d *RemoteDriver) batchOpening() bool {
 	return d.batch != nil && d.batch.left > 0
+}
+
+// leftoverRounds bounds sweepLeftovers: each round is the pull and fight of one idle summon with what stands around it.
+const leftoverRounds = 8
+
+// idleLeftovers are the living hostiles of the entries that do not fight the party and stand within LeftoverRadius of centre, nearest first.
+func (d *RemoteDriver) idleLeftovers(entries []uint32, centre Point, tried map[packet.GUID]bool) []tbm.HostileRec {
+	engaged := map[packet.GUID]bool{}
+	for _, h := range d.fr.EngagedHostiles() {
+		engaged[h.GUID] = true
+	}
+	var out []tbm.HostileRec
+	for _, h := range d.fr.Hostiles {
+		if h.HPPct <= 0 || engaged[h.GUID] || tried[h.GUID] || !slices.Contains(entries, h.Entry) || h.Reaction == "f" || strings.Contains(h.Flags, "e") {
+			continue
+		}
+		if math.Hypot(float64(h.X-centre.X), float64(h.Y-centre.Y)) <= LeftoverRadius {
+			out = append(out, h)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return dist3(hostilePoint(out[i]), centre) < dist3(hostilePoint(out[j]), centre)
+	})
+	return out
+}
+
+// sweepLeftovers fights the summons the leg leaves standing idle (Leg.LeftoverEntries) within LeftoverRadius of centre: the nearest is pulled
+// to the gathered party and fought with what stands around it, and again until none is left, at most leftoverRounds times; what is left is
+// noted. It does nothing in a leg without leftover_entries. when says for the notes where in the run it is (before the batch, after the batch,
+// before the trigger).
+func (d *RemoteDriver) sweepLeftovers(ctx context.Context, when string, centre Point) error {
+	if d.curLeg < 0 || d.curLeg >= len(d.plan.Legs) {
+		return nil
+	}
+	entries := d.plan.Legs[d.curLeg].LeftoverEntries
+	if len(entries) == 0 {
+		return nil
+	}
+	tried := map[packet.GUID]bool{}
+	for round := 0; round < leftoverRounds; round++ {
+		d.look()
+		idle := d.idleLeftovers(entries, centre, tried)
+		if len(idle) == 0 {
+			if round > 0 {
+				if left := d.idleLeftovers(entries, centre, map[packet.GUID]bool{}); len(left) > 0 {
+					d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) could not be pulled and stay within %.0f yd of %.0f %.0f %.0f; going on", when, len(left), LeftoverRadius, centre.X, centre.Y, centre.Z))
+				} else {
+					d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: no idle summon is left within %.0f yd of %.0f %.0f %.0f", when, LeftoverRadius, centre.X, centre.Y, centre.Z))
+				}
+			}
+			return nil
+		}
+		h := idle[0]
+		tried[h.GUID] = true
+		d.remote(func(r *RemoteReport) { r.LeftoverPulls++ })
+		why := fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) of %v within %.0f yd of %.0f %.0f %.0f; pulling %s at %.0f %.0f %.0f (round %d of %d)",
+			when, len(idle), entries, LeftoverRadius, centre.X, centre.Y, centre.Z, d.hostileName(h), h.X, h.Y, h.Z, round+1, leftoverRounds)
+		if err := d.pullAheadNote(ctx, h, why); err != nil {
+			return err
+		}
+		if err := d.afterFight(ctx); err != nil {
+			return err
+		}
+	}
+	d.look()
+	if left := d.idleLeftovers(entries, centre, map[packet.GUID]bool{}); len(left) > 0 {
+		d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) are still within %.0f yd of %.0f %.0f %.0f after %d rounds; going on", when, len(left), LeftoverRadius, centre.X, centre.Y, centre.Z, leftoverRounds))
+	}
+	return nil
 }
