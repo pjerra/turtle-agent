@@ -60,6 +60,7 @@ type hireFake struct {
 	noSupplies  bool // hires come with empty bags (maintenance fills them)
 	epic        map[string]bool
 	noShield    map[string]bool
+	noSlot      map[string][]int    // class -> equipment slots that stay empty even after autogear (no blue piece at the level)
 	lack        map[string][]string // class -> spells the bots of the class do not know
 	silentList  bool                // the bot never answers `spells <filter>`
 	unreachable map[string]bool     // bots that answer no whisper (teleporting, offline in the grace)
@@ -86,7 +87,7 @@ func newHireFake(t *testing.T) *hireFake {
 	e.agentMap = outsideMap
 	g := &hireFake{enterFake: e, agentLvl: 45, maxHires: 5, arriveIn: 3 * time.Second, noSupplies: true,
 		names: []string{"Zamoraela", "Khaeworval", "Corkhas", "Gredel", "Zisorlo", "Alrunmel", "Thundrik", "Sevaria", "Brannoch", "Ilyandra", "Morgrim", "Tessaly", "Varkull"},
-		epic:  map[string]bool{}, unreachable: map[string]bool{}, noTalents: map[string]bool{}, noShield: map[string]bool{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}}
+		epic:  map[string]bool{}, unreachable: map[string]bool{}, noTalents: map[string]bool{}, noShield: map[string]bool{}, noSlot: map[string][]int{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}}
 	for s := 0; s < 19; s++ {
 		g.items[uint32(90000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Blue %d", s), Quality: hQuality, ItemLevel: 40 + s%5}
 		g.items[uint32(91000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Epic %d", s), Quality: 4, ItemLevel: 60}
@@ -166,6 +167,9 @@ func (g *hireFake) newHire(class, role string, level int) *fhire {
 	}
 	if class == "hunter" {
 		h.equip[tbm.SlotRanged] = bulletWeaponEntries[0]
+	}
+	for _, sl := range g.noSlot[class] {
+		delete(h.equip, sl)
 	}
 	if g.epic[class] {
 		h.equip[slotChest] = uint32(91000 + slotChest)
@@ -284,6 +288,9 @@ func (g *hireFake) reply(command string) (reply []string, handled bool) {
 			}
 			if h.class == "hunter" {
 				h.equip[tbm.SlotRanged] = bulletWeaponEntries[0]
+			}
+			for _, sl := range g.noSlot[h.class] {
+				delete(h.equip, sl)
 			}
 		}
 		reply = []string{fmt.Sprintf("Re-geared %s within the configured caps.", h.name)}
@@ -977,6 +984,57 @@ func TestHireEpicGearAndAMissingShieldAreFixedWithAutogear(t *testing.T) {
 	}
 	if len(lock.Fixed) == 0 || !strings.HasPrefix(lock.Fixed[0], "autogear blue: epic Epic 4") || lock.Quality != "rare" {
 		t.Errorf("warlock %+v", lock)
+	}
+}
+
+// At level 16 autogear has no blue head piece for plate, leather or mail (the first Ragefire start): a soft armor slot that stays empty after
+// autogear is a note and the hire is ready; an empty main hand still fails, and so does a hunter without a ranged weapon.
+func TestHireAnEmptyHeadAfterAutogearIsANoteNotAFailure(t *testing.T) {
+	g := newHireFake(t)
+	g.noSlot["warrior"] = []int{slotHead}
+	g.noSlot["rogue"] = []int{slotHead, slotFeet}
+	spec := hireSpec()
+	spec.Hire = &HireSpec{Level: 16, Composition: []string{"warrior:tank", "priest:healer", "mage:dps", "rogue:dps", "hunter:dps"}}
+	rep, err := g.run(spec)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if g.count("autogear") != 2 {
+		t.Fatalf("autogear lines: %v", g.events)
+	}
+	tank, rogue := rep.Ready.Bots[0], rep.Ready.Bots[3]
+	if !tank.Ready || len(tank.Problems) != 0 || len(tank.Warnings) == 0 || !strings.Contains(strings.Join(tank.Warnings, "|"), "head empty after autogear at level") {
+		t.Errorf("tank %+v", tank)
+	}
+	if !rogue.Ready || !strings.Contains(strings.Join(rogue.Warnings, "|"), "head, feet empty after autogear at level") {
+		t.Errorf("rogue %+v", rogue)
+	}
+}
+
+func TestHireAnEmptyMainHandAfterAutogearStillFails(t *testing.T) {
+	g := newHireFake(t)
+	g.noSlot["warrior"] = []int{slotHead, tbm.SlotMainHand}
+	rep, err := g.run(hireSpec())
+	if !failed(rep, err, "1 of 5 hires are not ready", "gear still wrong after autogear blue: main hand") {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if rep.Ready.Bots[0].Ready || len(rep.Ready.Bots[0].Problems) != 1 || strings.Contains(rep.Ready.Bots[0].Problems[0], "head") {
+		t.Errorf("a missing head is not a problem: %+v", rep.Ready.Bots[0])
+	}
+}
+
+func TestHireNoFixWithOnlyAnEmptyHeadIsANote(t *testing.T) {
+	g := newHireFake(t)
+	g.noSlot["warrior"] = []int{slotHead}
+	spec := hireSpec()
+	spec.Hire = &HireSpec{NoFix: true}
+	rep, _ := g.run(spec) // other bots may lack supplies without maintenance: only the tank's gear is looked at
+	if rep.Ready == nil || g.count("autogear") != 0 {
+		t.Fatalf("%s %v", rep.State, g.events)
+	}
+	tank := rep.Ready.Bots[0]
+	if len(tank.Problems) != 0 || !strings.Contains(strings.Join(tank.Warnings, "|"), "head empty at level") {
+		t.Errorf("%+v", tank)
 	}
 }
 

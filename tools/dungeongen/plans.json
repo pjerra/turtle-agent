@@ -9,18 +9,9 @@
    "title": "Ragefire Chasm",
    "map": 389,
    "kind": "dungeon",
-   "data": "map389",
-   "trigger": 2230,
-   "bosses": [
-    11517,
-    11520,
-    11518,
-    11519
-   ],
-   "entrance_tele": "rfc",
-   "outside_tele": "RagefireChasm",
-   "notes": [
-    "Boss order is the usual one (Oggleflint, Taragaman, Jergosh, Bazzalan); the map has no instance script in the core."
+   "handwritten": true,
+   "special": [
+    "none: no door, event, gossip or item (no instance script); walked 2026-10-15 (patrol periods measured); six terrace mobs left out of the pulls, kept out of aggro range by where the party stands"
    ]
   },
   {

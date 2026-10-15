@@ -68,6 +68,7 @@ type EnterReport struct {
 	AccountLevel   *int               `json:"account_level,omitempty"` // read by the probe (auto only)
 	AgentLeftGroup bool               `json:"agent_left_group"`        // the agent's character had to leave a group first
 	Tele           string             `json:"tele,omitempty"`          // the game_tele the lead bot was sent to
+	PartyMoved     string             `json:"party_moved,omitempty"`   // the GM move of the party to the portal (an unreachable or very long walk)
 	Summoned       []string           `json:"summoned,omitempty"`      // the bots summoned to the lead bot, in order
 	CmdEnter       *CmdEnterReport    `json:"cmd_enter,omitempty"`     // the `cmd enter` order (method cmd)
 	Resummoned     []string           `json:"resummoned,omitempty"`    // the bots still outside after EnterVerify, summoned once more
@@ -407,6 +408,16 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 	defer func() { d.outside = nil }()
 	refusals, stalls, aggros := 0, 0, 0
 	leg := d.opt.MoveLeg
+	// A walk that cannot work is found out before it spends its tries (remote_portalgm.go).
+	gmMoved, accepted := false, false
+	if !d.leadInside() {
+		d.look()
+		moved, err := d.portalLong(ctx, pt)
+		if err != nil {
+			return err
+		}
+		gmMoved = moved
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -429,6 +440,16 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			return nil
 		}
 		if l.Map != pt.Map {
+			if !gmMoved {
+				// The party is on another map: a GM account moves it (the commander is teleported, the bots summoned), else the phase fails.
+				if h, _ := d.portalGMHands(ctx); h != nil {
+					if err := d.moveToPortalByGM(ctx, h, pt, fmt.Sprintf("the lead bot %s is on map %d, the portal on map %d", l.Name, l.Map, pt.Map)); err != nil {
+						return fmt.Errorf("enter: %w", err)
+					}
+					gmMoved = true
+					continue
+				}
+			}
 			return fmt.Errorf("enter: the lead bot %s is on map %d; the portal is on map %d", l.Name, l.Map, pt.Map)
 		}
 		here := partyPoint(l)
@@ -459,7 +480,7 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			}
 			continue
 		}
-		wp := d.waypoint(ctx, here, pt.Point, leg)
+		wp, realWP := d.waypointSrc(ctx, here, pt.Point, leg)
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
@@ -468,6 +489,16 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			return err
 		}
 		if ref, bad := refusedOf(r); bad {
+			if ref.Code == "unreachable" && !accepted && (realWP || refusals >= d.cfg.WalkAttempts+d.opt.MoveRetries) {
+				// Nothing was accepted yet and a point the planner gave on a real path (or the portal itself) has no path for the module: ask no
+				// more, move the party (GM) or fail now. A straight-line point (no planner, no tiles) says nothing about the portal: those
+				// refusals halve the leg and replan first, and only when the whole budget went on "unreachable" is the portal given up.
+				if err := d.portalUnreachable(ctx, pt, ref, gmMoved); err != nil {
+					return err
+				}
+				gmMoved = true
+				continue
+			}
 			if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries {
 				return fmt.Errorf("enter: the lead bot was refused %d times on the way to the portal (%s: %s)", refusals, ref.Code, ref.Message)
 			}
@@ -479,6 +510,7 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			}
 			continue
 		}
+		accepted = true
 		arrive := d.opt.MoveArrive
 		if wp != pt.Point {
 			arrive = max(arrive, 8)

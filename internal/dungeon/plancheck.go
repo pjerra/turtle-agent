@@ -37,6 +37,8 @@ const (
 
 	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
 	WarnNeedlessDirect = "needless direct"
+	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
+	WarnEstimatedPatrol = "estimated patrol period"
 )
 
 // Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
@@ -301,6 +303,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	}
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
+		if g.Patrol != nil && g.Patrol.PeriodEstimate {
+			c.warn("patrol", g.Positions[0], cur, WarnEstimatedPatrol, "pull group %d: the patrol of %v has only an estimated period_s (%.0f s): the driver does not predict its phase, it locates the patrol and waits until it is past; the walk measures the round", gi+1, g.Patrol.Entries, g.Patrol.PeriodS)
+		}
 		if g.NeedsWalk {
 			c.needsWalk("pull group look", gi+1, g.Team, g.Positions[0], cur)
 			continue
