@@ -543,6 +543,7 @@ type RemoteDriver struct {
 	moveTo       Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo   bool
 	tf           tankFirst                 // the tank-first state of the fights (remote_tank.go)
+	outSince     map[packet.GUID]time.Time // since when each living member stands on another map than the plan's (outsideAlive)
 	offSince     map[packet.GUID]time.Time // when a bot dead outside the dungeon was first left to run back (no GM account)
 	gmRevived    map[packet.GUID]int       // `.revive` lines sent for a bot dead outside the dungeon (reviveOffMap)
 	lastGMRevive map[packet.GUID]time.Time //
@@ -1354,7 +1355,7 @@ func (d *RemoteDriver) check() error {
 		return fmt.Errorf("%w: the whole party is dead", errWipe)
 	}
 	if n, all := d.partyDown(); n > 0 {
-		return fmt.Errorf("%w: %w: %d of %d bots are dead", errWipe, errPartyDown, n, all)
+		return fmt.Errorf("%w: %w: %d of %d bots are dead or outside the dungeon", errWipe, errPartyDown, n, all)
 	}
 	return d.partyIntact()
 }
@@ -1374,7 +1375,9 @@ func (d *RemoteDriver) partyDown() (dead, all int) {
 		return 0, 0
 	}
 	all = len(d.fr.Party)
-	dead = len(d.deadMembers())
+	// Dead in the instance, and alive on another map: a party that released to a graveyard outside and was spirit-healed there (live,
+	// Antu'sul: all alive on map 1, the in-instance count never fired) is down as much as a dead one.
+	dead = len(d.deadMembers()) + d.outsideAlive()
 	if dead < d.tx.PartyDownDead {
 		d.downSaid = false
 		return 0, all
@@ -1384,6 +1387,34 @@ func (d *RemoteDriver) partyDown() (dead, all int) {
 	}
 	d.downSaid = true
 	return dead, all
+}
+
+// outsideGrace is how long a living member must stand on another map than the plan's before it counts as outside (a bot that is taking
+// the portal, or arriving after a summon, is for a moment on the old map).
+const outsideGrace = 8 * time.Second
+
+// outsideAlive counts the living members that have stood on another map than the plan's for outsideGrace, inside a leg.
+func (d *RemoteDriver) outsideAlive() int {
+	n := 0
+	now := d.clk.Now()
+	if d.outSince == nil {
+		d.outSince = map[packet.GUID]time.Time{}
+	}
+	for _, p := range d.fr.Party {
+		if p.Dead || p.Map == d.plan.Map || d.curLeg < 0 {
+			delete(d.outSince, p.GUID)
+			continue
+		}
+		since, ok := d.outSince[p.GUID]
+		if !ok {
+			d.outSince[p.GUID] = now
+			continue
+		}
+		if now.Sub(since) >= outsideGrace {
+			n++
+		}
+	}
+	return n
 }
 
 func (d *RemoteDriver) observeInit() {

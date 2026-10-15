@@ -1206,3 +1206,48 @@ func TestGraveStepsOfAResumedRunSkipOpenedGraves(t *testing.T) {
 		}
 	}
 }
+
+// A party spirit-healed at a graveyard outside the dungeon (all alive on map 1) is a wipe: it was not detected live (Antu'sul, three
+// deaths inside, then everyone alive outside: wipes 0, and the run died on an unreachable walk). Most of the party dead or outside, for a
+// few seconds, is party down; the recovery brings the lead in first and the others to it.
+func TestPartyAliveOutsideTheDungeonIsAWipeAndIsRecovered(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 3)}
+	g.agent = Point{5, 0, 0}
+	died := false
+	g.onTick = func(fr *fakeRemote) {
+		if !died && fr.lead().X > 5 {
+			died = true
+			fr.memberMap = map[packet.GUID]uint32{gTank: 1, gHealer: 1, gMage: 1} // all alive, on map 1
+		}
+	}
+	cfg := DefaultConfig()
+	cfg.Setup, cfg.RecoverWipe = []string{"gm visible off"}, true
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\\n%s", err, notesOf(rep))
+	}
+	if rep.PartyDowns != 1 || !strings.Contains(notesOf(rep), "bots are dead or outside the dungeon") || fmt.Sprint(g.summons) != "[Tanky]" || g.indexOf("cmd summon Healy") < 0 || len(g.memberMap) != 0 {
+		t.Fatalf("party downs %d summons %v map %v\\n%s", rep.PartyDowns, g.summons, g.memberMap, notesOf(rep))
+	}
+}
+
+// One bot outside for a moment (a summon on its way) is no wipe.
+func TestOneBotOutsideForAMomentIsNoWipe(t *testing.T) {
+	g := newFakeRemote(t)
+	back := time.Time{}
+	g.onTick = func(fr *fakeRemote) {
+		if back.IsZero() && fr.lead().X > 5 {
+			back = fr.now.Add(20 * time.Second)
+			fr.memberMap = map[packet.GUID]uint32{gHealer: 1, gMage: 1} // two outside: below the three that stop the leg
+		}
+		if !back.IsZero() && !fr.now.Before(back) {
+			fr.memberMap = nil
+		}
+	}
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "a", To: Point{300, 0, 0}}), opts(), func(c *Config) { c.RecoverWipe = true })
+	if err != nil || rep.PartyDowns != 0 || rep.Wipes != 0 {
+		t.Fatalf("%v downs %d wipes %d", err, rep.PartyDowns, rep.Wipes)
+	}
+}
