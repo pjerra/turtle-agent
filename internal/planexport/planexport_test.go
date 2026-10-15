@@ -437,3 +437,12 @@ func TestOptionalLegIsLeftOut(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A use_object whose item is used ON the object (via_item) has no row in the run leader's tables: the export is refused, naming the step.
+func TestViaItemUseObjectIsRefused(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"vi","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"gong","to":{"x":30,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"stand":{"x":32,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`)
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item") {
+		t.Fatalf("%v", err)
+	}
+}

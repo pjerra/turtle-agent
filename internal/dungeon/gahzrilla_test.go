@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // The gahzrilla leg's machinery (PR A, TortoiseBots #984): an optional leg that needs an item, the give_items run option that puts the item in
@@ -32,21 +35,21 @@ func gongLeg() Leg {
 		PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 5, 0}}}},
 		Optional:   &OptionalLeg{Item: itMallet, Name: "Mallet of Zul'Farrak"},
 		Steps: []Step{
-			{UseObject: &UseObject{ObjectRef: ObjectRef{Entry: goGong, Near: &Point{20, 0, 0}}, Stand: &Point{20, 0, 0}, RequiresItem: malletRef}},
+			{UseObject: &UseObject{ObjectRef: ObjectRef{Entry: goGong, Near: &Point{20, 0, 0}}, Stand: &Point{20, 0, 0}, RequiresItem: malletRef, ViaItem: true}},
 			{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{npcGahz}, State: UnitSeen}, TimeoutS: 30}},
 		},
 		Boss: &Boss{Entry: npcGahz, Position: Point{60, 0, 0}},
 	}
 }
 
-// gongGame is a carrier game with the gong at the leg's stand and a pack; ringing it (the first `cmd open`) puts Gahz'rilla in view.
+// gongGame is a carrier game with the gong at the leg's stand and a pack; ringing it (the first `cmd use` of the Mallet on it) puts Gahz'rilla in view.
 func gongGame(t *testing.T) *fakeCarrier {
 	g := newFakeCarrier(t)
 	g.gobjs = []objects.GameObject{{GUID: gongGUID, Entry: goGong, X: 20, Y: 0, Z: 0, Distance: 3, State: "ready"}}
 	g.addMob(299, Point{40, 5, 0})
 	rung := false
 	g.fakeRemote.onTick = func(*fakeRemote) {
-		if !rung && len(g.ordersOf("cmd open")) > 0 {
+		if !rung && len(g.ordersOf("cmd use")) > 0 {
 			rung = true
 			g.addMob(npcGahz, Point{60, 0, 0})
 		}
@@ -67,7 +70,7 @@ func TestGongLegOrderAndHolder(t *testing.T) {
 		if err != nil || rep.State != "done" {
 			t.Fatalf("%s holds it: %v\n%s", tc.holder, err, notesOf(rep))
 		}
-		open := g.indexOf("cmd open " + tbm.GUIDArg(gongGUID) + " " + tc.holder)
+		open := g.indexOf(fmt.Sprintf("cmd use %d %s %s", itMallet, tc.holder, tbm.GUIDArg(gongGUID)))
 		pull, atk := g.indexOf("cmd pullback"), -1
 		for i, o := range g.orders {
 			if strings.HasPrefix(o, "cmd attack") && i > open {
@@ -75,10 +78,10 @@ func TestGongLegOrderAndHolder(t *testing.T) {
 				break
 			}
 		}
-		if pull < 0 || open < pull || atk < open || len(g.ordersOf("cmd open")) != 1 {
+		if pull < 0 || open < pull || atk < open || len(g.ordersOf("cmd use")) != 1 || g.indexOf("cmd open") >= 0 {
 			t.Fatalf("%s: pack %d, gong %d, boss attack %d: %v", tc.holder, pull, open, atk, g.orders)
 		}
-		if strings.Contains(strings.Join(g.orders, "\n"), "cmd open "+tbm.GUIDArg(gongGUID)+" "+tc.other) || rep.LeaderGM || len(rep.Shortcuts) != 0 || rep.Remote.GMCommands != 0 {
+		if strings.Contains(strings.Join(g.orders, "\n"), fmt.Sprintf("cmd use %d %s ", itMallet, tc.other)) || rep.LeaderGM || len(rep.Shortcuts) != 0 || rep.Remote.GMCommands != 0 {
 			t.Fatalf("the other bot rang the gong, or a GM did: %v %+v", g.orders, rep.Shortcuts)
 		}
 		if len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || rep.Legs[1].Result != "done" {
@@ -106,7 +109,7 @@ func TestOptionalLegIsSkippedWithoutTheMallet(t *testing.T) {
 	if got := rep.Legs[0].Result; !strings.HasPrefix(got, "skipped: no Mallet of Zul'Farrak (item 9240) in the bags of Magey or Tanky") {
 		t.Fatalf("result %q", got)
 	}
-	if g.indexOf("cmd pullback") >= 0 || g.indexOf("cmd open") >= 0 || g.indexOf("cmd attack") >= 0 {
+	if g.indexOf("cmd pullback") >= 0 || g.indexOf("cmd use") >= 0 || g.indexOf("cmd open") >= 0 || g.indexOf("cmd attack") >= 0 {
 		t.Fatalf("the skipped leg did something: %v", g.orders)
 	}
 	noted := false
@@ -453,6 +456,105 @@ func TestRemoteAbilities(t *testing.T) {
 	}
 	// An optional leg needs the bags read.
 	if err := RemoteAbilities(struct{}{}, RemoteOptions{}, gongPlan()); err == nil || !strings.Contains(err.Error(), "BotLiner (leg 0 (gahzrilla) is optional") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// The Mallet is USED ON the gong (`cmd use 9240 <bot> <object>`), not the gong used (live round 3: `cmd open` of the gong did nothing and
+// answered nothing): the order carries the item entry, the holder and the object, and every order of the step, ACK or ERR, is a trace event.
+func TestGongIsRungWithTheMalletOnTheObjectAndTheAnswerIsTraced(t *testing.T) {
+	g := gongGame(t)
+	g.bag("Tanky")[itMallet] = 1
+	dir := t.TempDir()
+	rep, err := runCarrier2(t, g, gongPlan(), objOpts(), tracerun.Config{On: true, Dir: dir, RunID: "r-gong"})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-gong.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *trace.Event
+	for i, e := range f.Events {
+		if e.Ev == "object_order" {
+			found = &f.Events[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("no object_order event: %v", evNames(f))
+	}
+	cmd, _ := found.D["command"].(string)
+	if !strings.HasPrefix(cmd, "cmd use 9240 Tanky ") || found.D["result"] != "ack" || found.D["spell"] == nil || !strings.Contains(fmt.Sprint(found.D["step"]), "use game object 141832") {
+		t.Fatalf("%+v", found.D)
+	}
+	// A refusal is traced as well, with its code, and fails the step naming it.
+	g = gongGame(t)
+	g.bag("Tanky")[itMallet] = 1
+	g.script["use"] = []tbm.OrderResult{errOrder("cmd use", "too-far"), errOrder("cmd use", "too-far"), errOrder("cmd use", "too-far"), errOrder("cmd use", "too-far")}
+	dir = t.TempDir()
+	if _, err := runCarrier2(t, g, gongPlan(), objOpts(), tracerun.Config{On: true, Dir: dir, RunID: "r-gong2"}); err == nil || !strings.Contains(err.Error(), "too-far") {
+		t.Fatalf("%v", err)
+	}
+	f, err = trace.Read(filepath.Join(dir, "r-gong2.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := 0
+	for _, e := range f.Events {
+		if e.Ev == "object_order" && e.D["result"] == "too-far" {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Fatalf("the refusal is not in the trace: %v", evNames(f))
+	}
+}
+
+func runCarrier2(t *testing.T, g *fakeCarrier, plan *Plan, o RemoteOptions, tc tracerun.Config) (Report, error) {
+	t.Helper()
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.Trace = tc
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, ended := d.Status()
+	if !ended {
+		t.Fatal("not ended")
+	}
+	return rep, err
+}
+
+// via_item: the item is used on the object, so the plan must name the item, and the stand must be where the item's short-range spell reaches.
+func TestPlanViaItemRules(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"gong","to":{"x":20,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":20,"y":0,"z":0},"stand":{"x":23,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`
+	p := mustPlan(t, src)
+	if u := p.Legs[0].Steps[0].UseObject; !u.ViaItem {
+		t.Fatalf("%+v", u)
+	}
+	if b, err := Marshal(p); err != nil || !strings.Contains(string(b), `"via_item": true`) {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	for _, c := range []struct{ from, to, want string }{
+		{`,"requires_item":{"entry":9240}`, ``, "legs[0].steps[0].use_object.via_item: needs requires_item"},
+		{`,"stand":{"x":23,"y":0,"z":0}`, ``, "needs near and stand"},
+		{`"stand":{"x":23,"y":0,"z":0}`, `"stand":{"x":27,"y":0,"z":0}`, "legs[0].steps[0].use_object.stand: is 7.0 yd from near"},
+	} {
+		if _, err := Parse("t.json", []byte(strings.Replace(src, c.from, c.to, 1))); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: %v", c.want, err)
+		}
+	}
+	// The plan check measures it too (a stand moved after the load).
+	leg := p.Legs[0]
+	leg.Steps = []Step{{UseObject: &UseObject{ObjectRef: leg.Steps[0].UseObject.ObjectRef, Stand: &Point{30, 0, 0}, RequiresItem: malletRef, ViaItem: true}}}
+	res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, fakeNav{}, CheckOptions{})
+	if err != nil || res.OK() || !strings.Contains(res.Summary(), "the use range is") {
+		t.Fatalf("%v %s", err, res.Summary())
+	}
+	// The group driver cannot use an item on an object: it says so.
+	g, _ := runFixture(t)
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.doUse(context.Background(), Action{ViaItem: true, Requires: malletRef, Label: "x"}); err == nil || !strings.Contains(err.Error(), "only a remote") {
 		t.Fatalf("%v", err)
 	}
 }

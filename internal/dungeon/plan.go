@@ -396,6 +396,12 @@ type UseObject struct {
 	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
 	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
 	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+	// ViaItem says the required item is USED ON the object instead of the object being used: the remote driver orders `cmd use <item> <bot>
+	// entry:<object>@<point>` (TortoiseBots walks the bot to the object and casts the item's spell on it). Zul'Farrak's Gong of Zul'Farrak is
+	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
+	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
+	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
+	ViaItem bool `json:"via_item,omitempty"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -700,6 +706,7 @@ type rawUse struct {
 	rawRef
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
+	ViaItem      bool      `json:"via_item"`
 }
 
 type rawItem struct {
@@ -1191,6 +1198,16 @@ func (c *checker) step(path string, r *rawStep) Step {
 			u.Stand = &p
 		}
 		u.RequiresItem = c.item(path+".use_object.requires_item", r.UseObject.RequiresItem)
+		if u.ViaItem = r.UseObject.ViaItem; u.ViaItem {
+			switch {
+			case u.RequiresItem == nil:
+				c.fail(path+".use_object.via_item", "needs requires_item: the item that is used on the object")
+			case u.Stand == nil || u.Near == nil:
+				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
+			case dist3(*u.Stand, *u.Near) > UseRange:
+				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
 		s.UseObject = u
 	case r.LootObject != nil:
 		l := &LootObject{ObjectRef: c.ref(path+".loot_object", &r.LootObject.rawRef)}

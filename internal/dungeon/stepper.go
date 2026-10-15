@@ -101,6 +101,7 @@ type Action struct {
 	Section      []BatchChest
 	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
+	ViaItem      bool          // use: the Requires item is used on the object (UseObject.ViaItem)
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
 	Item         *ItemRef      // use_item: the item to use
 	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
@@ -422,7 +423,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 				}
 			}
 			if st.UseObject != nil {
-				base.Requires = st.UseObject.RequiresItem
+				base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 			} else {
 				base.Expect = st.LootObject.ExpectItem
 			}
@@ -458,7 +459,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		}
 		base.Kind, base.Object, base.GUID = kind, &o, o.GUID
 		if st.UseObject != nil {
-			base.Requires = st.UseObject.RequiresItem
+			base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 		} else {
 			base.Expect = st.LootObject.ExpectItem
 		}

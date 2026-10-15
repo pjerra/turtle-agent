@@ -766,15 +766,16 @@ func TestZulfarrakGahzrillaLeg(t *testing.T) {
 	if l.Optional == nil || l.Optional.Item != 9240 || l.Optional.Name != "Mallet of Zul'Farrak" {
 		t.Fatalf("optional %+v", l.Optional)
 	}
-	if l.To != (Point{1654.5, 1166.5, 10.3}) {
+	if l.To != (Point{1652.84, 1168.99, 10.67}) {
 		t.Errorf("the walk ends at the gong stand, not %v", l.To)
 	}
-	// The order: the packs of the pool ring, then the gong (a bot that carries the Mallet), the wait for him to show, the boss.
+	// The order: the packs of the pool ring, then the Mallet used on the gong (item 9240's spell 11434 opens the gong's lock; a plain use of the
+	// gong did nothing live), by a bot that carries it, 3.5 yd from the gong; the wait for him to show; the boss.
 	if len(l.Steps) != 2 || l.Steps[0].UseObject == nil || l.Steps[1].WaitFor == nil || len(l.AfterBoss) != 0 {
 		t.Fatalf("steps %+v", l.Steps)
 	}
 	u := l.Steps[0].UseObject
-	if u.Entry != 141832 || *u.Near != (Point{1650.9, 1171.9, 10.9}) || *u.Stand != l.To || u.RequiresItem == nil || u.RequiresItem.Entry != 9240 {
+	if u.Entry != 141832 || *u.Near != (Point{1650.9, 1171.9, 10.9}) || *u.Stand != l.To || u.RequiresItem == nil || u.RequiresItem.Entry != 9240 || !u.ViaItem || dist3(*u.Stand, *u.Near) > UseRange {
 		t.Errorf("use_object %+v", u)
 	}
 	w := l.Steps[1].WaitFor

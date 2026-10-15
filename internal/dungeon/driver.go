@@ -1217,6 +1217,9 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 // between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
 // the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
+	if a.ViaItem {
+		return fmt.Errorf("%s: use_object with via_item uses %s ON the object (a carrier bot's `cmd use <item> <bot> <object>`), which only a remote (commander) run can do", a.Label, a.Requires)
+	}
 	if err := d.checkUseItem(ctx, a.Requires); err != nil {
 		return err
 	}

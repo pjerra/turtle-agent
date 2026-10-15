@@ -351,6 +351,9 @@ func (b *builder) step(st dungeon.Step) error {
 	switch {
 	case st.UseObject != nil:
 		u := st.UseObject
+		if u.ViaItem {
+			return fmt.Errorf("use_object %d with via_item (the item is used on the object): the run leader's open row cannot carry it", u.Entry)
+		}
 		if u.Stand != nil {
 			b.move(*u.Stand, false, "stand")
 		}
