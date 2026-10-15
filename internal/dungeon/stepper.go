@@ -19,6 +19,13 @@ type World interface {
 	HostilesWithin(center Point, radius float32) int
 }
 
+// UnitWorld is the optional part of a World that tells whether a unit wait holds (wait_for unit, the expect of an area_trigger): what the
+// bots' feed lists and what the agent's own object store holds. A World without it cannot do those steps; the Stepper fails them with that
+// reason instead of waiting out their timeout.
+type UnitWorld interface {
+	UnitHolds(u *UnitWait) bool
+}
+
 // EntryWorld is the optional part of a World whose object steps are done by entry: the carrier's order names the object by its entry
 // and the plan's point (`cmd open entry:<id>@x,y,z`), and a game-object wait asks `cmd state`, so the agent need not see the object. With
 // it a use_object or loot_object step whose object has an entry is returned as an action at once (no walk to bring the object into view;
@@ -52,16 +59,17 @@ const (
 type ActionKind string
 
 const (
-	ActWalk   ActionKind = "walk"        // walk the navmesh to To
-	ActPull   ActionKind = "pull"        // pull and kill the group in Entries/Positions
-	ActUse    ActionKind = "use_object"  // use game object GUID (it is within UseRange)
-	ActLoot   ActionKind = "loot_object" // open and loot game object GUID (it is within UseRange)
-	ActItem   ActionKind = "use_item"    // use the item Item from the bags
-	ActRitual ActionKind = "ritual"      // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
-	ActKill   ActionKind = "kill_boss"   // kill Boss, First entries before it
-	ActWait   ActionKind = "wait"        // nothing to do yet: look again with Next
-	ActDone   ActionKind = "done"        // the plan is finished
-	ActFailed ActionKind = "failed"      // the plan cannot go on: Err says why
+	ActWalk    ActionKind = "walk"         // walk the navmesh to To
+	ActPull    ActionKind = "pull"         // pull and kill the group in Entries/Positions
+	ActUse     ActionKind = "use_object"   // use game object GUID (it is within UseRange)
+	ActLoot    ActionKind = "loot_object"  // open and loot game object GUID (it is within UseRange)
+	ActItem    ActionKind = "use_item"     // use the item Item from the bags
+	ActRitual  ActionKind = "ritual"       // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
+	ActTrigger ActionKind = "area_trigger" // take the area trigger Trigger (the lead bot walks in, or the agent's own character sends it)
+	ActKill    ActionKind = "kill_boss"    // kill Boss, First entries before it
+	ActWait    ActionKind = "wait"         // nothing to do yet: look again with Next
+	ActDone    ActionKind = "done"         // the plan is finished
+	ActFailed  ActionKind = "failed"       // the plan cannot go on: Err says why
 )
 
 // Action is the Stepper's current request. Leg and Step locate it in the plan (Step is -1 outside the steps).
@@ -86,6 +94,7 @@ type Action struct {
 	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
 	Entry        uint32
 	EntryAt      *Point
+	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
 	Item         *ItemRef      // use_item: the item to use
@@ -189,7 +198,7 @@ func (s *Stepper) Complete() {
 	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse, ActLoot, ActItem, ActRitual:
+		case ActUse, ActLoot, ActItem, ActRitual, ActTrigger:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
@@ -368,6 +377,11 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		base.Kind, base.Entry, base.EntryAt, base.Participants = ActRitual, r.Entry, &at, r.Participants
 		base.Label = s.label("step %d: ritual at game object %d with %d participants", s.idx, r.Entry, r.Participants)
 		return base, false
+	case st.AreaTrigger != nil:
+		t := st.AreaTrigger
+		base.Kind, base.Trigger = ActTrigger, t
+		base.Label = s.label("step %d: area trigger %d (by %s, expect %s)", s.idx, t.ID, t.By, t.Expect)
+		return base, false
 	case st.UseObject != nil || st.LootObject != nil:
 		ref, stand := objectOf(st)
 		kind, verb := ActUse, "use"
@@ -433,6 +447,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		return base, false
 	case st.WaitFor != nil:
 		w := st.WaitFor
+		if _, ok := s.w.(UnitWorld); w.Unit != nil && !ok {
+			return fail("wait for %s: this driver does not see units", describeWait(w))
+		}
 		if s.since.IsZero() {
 			s.since = s.now()
 		}
@@ -542,6 +559,9 @@ func (s *Stepper) holds(w *WaitFor) bool {
 			c = *w.HostilesGone.Center
 		}
 		return s.w.HostilesWithin(c, w.HostilesGone.Radius) == 0
+	case w.Unit != nil:
+		uw, ok := s.w.(UnitWorld)
+		return ok && uw.UnitHolds(w.Unit)
 	}
 	return false
 }
@@ -610,6 +630,25 @@ func describeWait(w *WaitFor) string {
 		return describeRef(&w.GameObject.ObjectRef) + " to be " + w.GameObject.State
 	case w.HostilesGone != nil:
 		return fmt.Sprintf("no hostiles within %.0f yd", w.HostilesGone.Radius)
+	case w.Unit != nil:
+		return w.Unit.describe()
 	}
 	return "nothing"
+}
+
+// describe is the unit wait for a message: "unit 7271 hostile", with "within 40 yd of x y z" when it is narrowed.
+func (u UnitWait) describe() string {
+	s := u.String()
+	if u.Near != nil {
+		s += fmt.Sprintf(" within %.0f yd of %.0f %.0f %.0f", u.radius(), u.Near.X, u.Near.Y, u.Near.Z)
+	}
+	return s
+}
+
+// radius is the radius round Near: Radius, or DefaultUnitRadius.
+func (u UnitWait) radius() float32 {
+	if u.Radius > 0 {
+		return u.Radius
+	}
+	return DefaultUnitRadius
 }

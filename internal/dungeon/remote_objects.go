@@ -828,7 +828,8 @@ func (d *RemoteDriver) doBoss(ctx context.Context, a Action) error {
 	}
 	b := a.Boss
 	og, ok := d.orderGame()
-	off := b.CompanionsLoot != nil && !*b.CompanionsLoot
+	// A leg that has its looting off (Leg.CompanionsLoot false) has the bots muted already: the boss's own mute would turn it back on early.
+	off := b.CompanionsLoot != nil && !*b.CompanionsLoot && len(d.legMuted) == 0
 	if !ok || (b.LootItem == nil && !off) {
 		return d.doKill(ctx, a)
 	}

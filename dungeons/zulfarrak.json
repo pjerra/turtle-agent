@@ -22,8 +22,8 @@
   ],
   "cc_priority": [5650, 7247, 7246, 5648],
   "cc_always": [5650, 7246],
-  "kill_first": [8179, 5650, 7247],
-  "summoned_kill_first": [8179],
+  "kill_first": [7785, 8179, 5650, 7247],
+  "summoned_kill_first": [7785, 8179],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. FIRST-RUN ROUTE: three legs, Antu'sul, Theka the Martyr, Hydromancer Velratha, 1470 yd of navmesh path from the entrance (checked by TestZulfarrakOnNavmesh). Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
     "Left out of this plan because the driver cannot do them yet (all listed in dungeons/zulfarrak-extra.json or here): (1) Witch Doctor Zum'rah (7271): faction 35 (friendly) until the area trigger 962 (at_zumrah, centre 1909.3 1015.1 11.5, radius 10) fires, and a trigger is only taken from a client packet; the TortoiseBots bots send CMSG_AREATRIGGER only when their master does, and the remote agent stays outside. dungeongen -check -strict would also flag a faction 35 boss. Needs an area_trigger step the agent takes while standing in the instance, or a bot-side order. (2) The stairs event (Sergeant Bly's crew in the cages at the top of the pyramid stairs, three waves of Sandfury trolls, wave 3 summons Nekrum Gutchewer 7796 and Shadowpriest Sezz'ziz 7275: they have NO spawn row, the instance script summons them) and (3) Chief Ukorz Sandscalp + Ruuzlu: Ukorz sits behind the End Door (146084), which only Weegli Blastfuse (7607) opens, through his gossip menu after the stairs event; the driver has no gossip/talk step, and a wait inside a step does not fight the waves. (4) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (5) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here.",
@@ -547,6 +547,122 @@
         "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) must not be used (no Mallet); Gahz'rilla's pit is at 1664.7 1187.7 -2.9, off the navmesh. The lone Blood Drinker at 1714.4 1218.6 (5649) is no pull group: the plan check passes it, but live the tank found no firing position for it (a server refusal) in two batch-2 runs, both finished without it, and it lies beyond the boss.",
         "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152)."
+      ]
+    },
+    {
+      "name": "courtyard",
+      "to": {"x": 1822, "y": 1177, "z": 9.1},
+      "pull_groups": [
+        {
+          "entries": [7247],
+          "positions": [
+            {"x": 1757.16, "y": 1141.25, "z": 9.1}
+          ],
+          "radius": 30
+        },
+        {
+          "entries": [7247, 5649],
+          "positions": [
+            {"x": 1821.7, "y": 1177, "z": 9},
+            {"x": 1849.2, "y": 1184.55, "z": 9}
+          ],
+          "radius": 30
+        },
+        {
+          "entries": [5650],
+          "positions": [
+            {"x": 1863.11, "y": 1199.95, "z": 9}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [7246],
+          "positions": [
+            {"x": 1878.71, "y": 1159.65, "z": 9.6}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [5649, 5649, 5650, 5649],
+          "positions": [
+            {"x": 1903.87, "y": 1133.99, "z": 9},
+            {"x": 1899.6, "y": 1136.85, "z": 9.1},
+            {"x": 1911.82, "y": 1153.47, "z": 9.6},
+            {"x": 1900.33, "y": 1166.45, "z": 9}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [5650],
+          "positions": [
+            {"x": 1926.08, "y": 1131.13, "z": 10.8}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [7246, 8095, 7246, 5650],
+          "positions": [
+            {"x": 1865.24, "y": 1118.27, "z": 10.9},
+            {"x": 1867.35, "y": 1117.43, "z": 9.8},
+            {"x": 1869.56, "y": 1120.73, "z": 10.5},
+            {"x": 1879.2, "y": 1110.64, "z": 9}
+          ],
+          "radius": 30
+        },
+        {
+          "entries": [5650, 5650, 7246],
+          "positions": [
+            {"x": 1913.5, "y": 1199.53, "z": 9},
+            {"x": 1915.55, "y": 1194.25, "z": 9},
+            {"x": 1920.28, "y": 1198.52, "z": 9}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [7247, 7246, 5649],
+          "positions": [
+            {"x": 1899.24, "y": 1214.72, "z": 9},
+            {"x": 1899.49, "y": 1211.08, "z": 9},
+            {"x": 1885.64, "y": 1222.54, "z": 9.2}
+          ],
+          "radius": 15
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "PR B (zulfarrak events design, TortoiseBots #984). The courtyard of the pyramid after Velratha, east along y 1147-1166 from the junction at the east end of the gong strip; nine pull groups, every member checked against the export (creatures.tsv: spawn rows 81526-81551, positions to the decimal). The first is a lone patrolling Soul Eater (row 81550 at 1757.2 1141.2, movement type 2, radius 30) that the design list did not have: it stands 6 yd from the navmesh path to `to` (TestZulfarrakRouteHasNoUnplannedPack found it), so the party meets it on the walk and the group is then cleared by the kill. The Soul Eater 81541 (7247) and the Sandcrawler 81531 (8095) and Witch Doctor 81526 (5650) of group 6 are movement type 2 (patrols): their groups have a 30 yd radius, as the road packs of the Antu'sul legs have. The two Shadowhunters 81528/81529 at 1819-1829 1116-1121 z 25-29 are on the ramp above (the ukorz leg of zulfarrak-extra.json), the scarabs (7269) are skipped. The End Door (146084 at 1854.5 1142.9 z 16.1) is shut: the navmesh path from here to the next leg stays 25 yd from it (TestZulfarrakOnNavmesh)."
+      ]
+    },
+    {
+      "name": "zumrah",
+      "to": {"x": 1885, "y": 1012, "z": 9.2},
+      "via": [
+        {"x": 1859, "y": 1058, "z": 9.3}
+      ],
+      "skip": [7269, 10080, 10082],
+      "steps": [
+        {
+          "area_trigger": {
+            "id": 962,
+            "center": {"x": 1909.27, "y": 1015.11, "z": 11.5},
+            "radius": 10,
+            "stand": {"x": 1903, "y": 1014, "z": 11.8},
+            "by": "auto",
+            "expect": "unit 7271 hostile",
+            "timeout_s": 15
+          }
+        }
+      ],
+      "boss": {
+        "entry": 7271,
+        "position": {"x": 1912.2, "y": 1016.1, "z": 11.6},
+        "tactics": {
+          "kill_first": [7785]
+        }
+      },
+      "companions_loot": false,
+      "notes": [
+        "PR B (TortoiseBots #984). Witch Doctor Zum'rah (7271, spawn row 81524 at 1912.17 1016.11 11.6) is friendly (faction 35, flag IMMUNE_TO_PLAYER 0x100) until area trigger 962 (at_zumrah, centre 1909.27 1015.11 11.5, radius 10) fires, and a trigger is taken only from a client packet. The step is by auto: the lead bot walks to the stand (1903 1014 11.8, 6.4 yd from the centre, 9 yd from him and 6 yd from the Campfire 2061 at 1909.5 1016.1 that a stand on the centre would be in) and the module takes the trigger for it when AiPlayerbot.BotAreaTriggers lists 962 (TortoiseBots #1002); when `unit 7271 hostile` does not hold 5 s later the agent's own character does it (.appear to the lead bot, a walk into the zone, the packet, a walk back). Live 2026-10-15 (tests/zf-probe-events, zf-probe-zumrah): trigger 962 sent from 1909.3 1015.1 turns him from faction 35 to 37 and he yells; he keeps the flag until combat, but aggroes a bot at 27 yd (the `to`, 1885 1012) within about 2 s on his own and the flag clears in combat, so the bots can fight him. In combat he summons Zombies (7286) and Dead Heroes (7276) and a Ward (7785): kill_first [7785] sends the party at the ward first (the remote driver reads boss.tactics.kill_first). The leg walks THROUGH the graveyard (about 70 Shallow Grave chests 128308/128403 with a trap 128972 each; the straight 53 yd line from 1859 1058 to 1885 1012 passes 0.3 and 0.8 yd from two traps at 1867.7 1041.8 and 1862.1 1050.8, a detour via 1854 1055 and 1860 1037 keeps 4 yd clear of every grave and costs 8 yd): companions_loot false has the bots' looting off for the whole leg so that none opens a grave chest. The route from the courtyard goes by the pyramid's south-west side (1877 1131, 1858 1061), never within 12 yd of the End Door."
       ]
     }
   ]

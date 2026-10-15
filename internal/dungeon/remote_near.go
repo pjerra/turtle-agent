@@ -243,6 +243,12 @@ func (d *RemoteDriver) agentWayClear(path []Point, stand Point) bool {
 // agentWalk walks the agent's character to stand and keeps the run going meanwhile; a fight stops the walk, and so does limit (when it
 // is not 0). It reports whether the walk ended well; the error is the run's.
 func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, limit time.Duration) (bool, error) {
+	return d.agentWalkOpt(ctx, f, stand, limit, true)
+}
+
+// agentWalkOpt is agentWalk; stopOnFight false keeps the walk going through a fight (the agent's walk out of a zone it has just taken a
+// trigger in: the party is about to fight there).
+func (d *RemoteDriver) agentWalkOpt(ctx context.Context, f Follower, stand Point, limit time.Duration, stopOnFight bool) (bool, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type result struct {
@@ -272,7 +278,7 @@ func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, l
 			<-done
 			return false, err
 		}
-		if d.inCombat() {
+		if stopOnFight && d.inCombat() {
 			cancel()
 			<-done
 			d.rep.note("keep near: a fight began: the agent stopped walking")

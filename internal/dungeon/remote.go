@@ -419,6 +419,11 @@ type RemoteReport struct {
 	EntryTargets string `json:"entry_targets,omitempty"`
 	StatePolls   int    `json:"state_polls,omitempty"`
 
+	// AreaTriggers are the area_trigger steps the run took and who took each (remote_trigger.go); AgentTriggers counts the CMSG_AREATRIGGER
+	// packets the agent's own character sent (each is a step the lead bot could not take).
+	AreaTriggers  []TriggerReport `json:"area_triggers,omitempty"`
+	AgentTriggers int             `json:"agent_triggers,omitempty"`
+
 	// Observe is the run leader watch of an observed run (observe.go); absent in a driven run.
 	Observe *ObserveReport `json:"observe,omitempty"`
 
@@ -443,6 +448,7 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.Enter = r.Enter.clone()
 	c.Observe = r.Observe.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
+	c.AreaTriggers = r.cloneTriggers()
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
 	return &c
@@ -534,6 +540,7 @@ type RemoteDriver struct {
 	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo bool
 	tf         tankFirst  // the tank-first state of the fights (remote_tank.go)
+	legMuted   []string   // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
 	kit        restKit    // the bots' drink counts and refills (remote_rest.go)
 	maint      maintState // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
@@ -799,6 +806,8 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doBoss(ctx, a)
 		case ActLoot, ActUse, ActItem, ActRitual:
 			err = d.doObjectStep(ctx, a)
+		case ActTrigger:
+			err = d.doAreaTrigger(ctx, a)
 		default:
 			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
 		}
@@ -1396,6 +1405,7 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
+	d.legLootOff(ctx, i) // companions_loot false: off from here to the leg's end
 	// Every few legs the bots get `.bot maintenance` again (remote_maint.go), before the gate so that the gate sees the full bags.
 	if err := d.maintLegStart(ctx, i); err != nil {
 		return err
@@ -1411,6 +1421,7 @@ func (d *RemoteDriver) endLeg(result string) {
 		return
 	}
 	d.maintLegEnd()
+	d.legLootOn()
 	d.curLeg = -1
 	var l LegReport
 	d.rep.update(func(r *Report) {

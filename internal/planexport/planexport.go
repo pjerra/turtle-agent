@@ -336,6 +336,15 @@ func (b *builder) step(st dungeon.Step) error {
 		b.add(StepRow{Kind: KindUseItem, Entry: u.Entry, Item: itemEntry(u.ExpectItem), Comment: clip("use "+nameOr(u.Name, fmt.Sprintf("item %d", u.Entry))+madeNote(u.ExpectItem), MaxComment)})
 	case st.WaitFor != nil:
 		return b.wait(st.WaitFor)
+	case st.AreaTrigger != nil:
+		// The run leader has no area trigger step. A lead bot that walks into the zone takes the trigger itself when the module lists it
+		// (AiPlayerbot.BotAreaTriggers, TortoiseBots #1002), which is the plan's "auto" and "bot": a move to the stand point. The agent's own
+		// character ("agent") and the expect check exist only in a driven run.
+		t := st.AreaTrigger
+		if t.By == dungeon.TriggerAgent {
+			return fmt.Errorf("area_trigger %d: by \"agent\" has no run leader step (the leader is a bot: use \"auto\" or \"bot\")", t.ID)
+		}
+		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone (AiPlayerbot.BotAreaTriggers); expect %s", t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})
@@ -374,6 +383,8 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 			c = b.plan.Legs[b.leg_].To
 		}
 		b.add(StepRow{Kind: KindWaitClear, X: c.X, Y: c.Y, Z: c.Z, Radius: h.Radius, TimeoutS: timeout, Comment: clip(waitComment("wait until no hostile", w), MaxComment)})
+	case w.Unit != nil:
+		return fmt.Errorf("wait_for.unit has no run leader step (%s)", w.Unit.String())
 	default:
 		return fmt.Errorf("wait_for: neither gameobject nor hostiles_gone")
 	}

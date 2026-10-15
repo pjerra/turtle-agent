@@ -24,6 +24,8 @@ const (
 	ReasonNoLOS       = "no line of sight"
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
+	// ReasonOutsideZone is an area_trigger whose stand point lies outside its zone: whoever stands there takes no trigger.
+	ReasonOutsideZone = "outside the zone"
 	// ReasonNeedsWalk is a point the plan marks needs_walk: it was never snapped to the navmesh and its mapping walk is still to do.
 	ReasonNeedsWalk = "needs a mapping walk"
 
@@ -323,6 +325,20 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	return c.steps("after_boss", l.AfterBoss, cur)
 }
 
+// trigger checks the geometry of an area_trigger step: its stand point inside the zone (a trigger is taken only by someone standing in it),
+// and the leg's boss, if there is one, within TriggerMaxStandToBoss of the stand (the trigger starts that fight: Zum'rah turns hostile
+// where the party stands). The stand's walk is checked with the other stands.
+func (c *planChecker) trigger(part string, t *AreaTrigger, from Point) {
+	if d := dist3(t.Stand, t.Center); d > float64(t.Radius) {
+		c.fail(part, 0, t.Stand, from, ReasonOutsideZone, "the stand is %.1f yd from the centre %.1f %.1f %.1f of trigger %d; its radius is %g", d, t.Center.X, t.Center.Y, t.Center.Z, t.ID, t.Radius)
+	}
+	if b := c.l.Boss; b != nil {
+		if d := dist3(t.Stand, b.Position); d > TriggerMaxStandToBoss {
+			c.fail(part, 0, t.Stand, from, ReasonTooFar, "boss %d stands %.1f yd from the stand (at most %g): the trigger would start a fight the party is not at", b.Entry, d, TriggerMaxStandToBoss)
+		}
+	}
+}
+
 // steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there
 // before the step. A step without a stand stands wherever the object is approached from, which only a run can say.
 func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
@@ -336,6 +352,10 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 			stand, label = st.LootObject.Stand, label+"loot_object.stand"
 		case st.Ritual != nil:
 			stand, label = st.Ritual.Stand, label+"ritual.stand"
+		case st.AreaTrigger != nil:
+			t := st.AreaTrigger
+			stand, label = &t.Stand, label+"area_trigger.stand"
+			c.trigger(label, t, cur)
 		}
 		if stand == nil {
 			continue

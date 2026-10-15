@@ -1,0 +1,499 @@
+package dungeon
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tbm"
+)
+
+// The area_trigger step, wait_for unit, a leg's companions_loot and the boss's kill_first in remote mode (remote_trigger.go).
+
+// triggerGame is a nearGame whose agent can send area triggers, and a world where a trigger changes something: the module (moduleTakes)
+// turns the boss hostile when the lead bot stands in the zone, and the agent's packet does when the agent stands in it.
+type triggerGame struct {
+	*nearGame
+	center, boss Point
+	radius       float32
+	moduleTakes  bool // TortoiseBots' AiPlayerbot.BotAreaTriggers lists the trigger
+	packetWorks  bool // the agent's CMSG_AREATRIGGER runs the script
+	sent         []uint32
+	sentFrom     []Point
+	sentAt       time.Time
+	movesBefore  int // the lead bot's move orders when the agent sent the packet
+	fired        bool
+}
+
+func newTriggerGame(t *testing.T, level int) *triggerGame {
+	g := &triggerGame{nearGame: newNearGame(t, level), center: Point{110, 0, 0}, boss: Point{118, 0, 0}, radius: 10, packetWorks: true}
+	g.agent = Point{-5, 0, 0}
+	g.onTick = func(f *fakeRemote) {
+		l := f.lead()
+		if g.moduleTakes && !g.fired && dist3(Point{l.X, l.Y, l.Z}, g.center) <= float64(g.radius) {
+			g.fire()
+		}
+	}
+	return g
+}
+
+func (g *triggerGame) fire() {
+	g.fired = true
+	g.addMob(7271, g.boss)
+}
+
+func (g *triggerGame) AreaTrigger(ctx context.Context, id uint32) error {
+	g.sent = append(g.sent, id)
+	g.sentFrom = append(g.sentFrom, g.agent)
+	g.sentAt, g.movesBefore = g.now, len(g.moveOrderDest)
+	if g.packetWorks && !g.fired && dist3(g.agent, g.center) <= float64(g.radius) {
+		g.fire()
+	}
+	return nil
+}
+
+func zumrahLeg(by string, timeout int) Leg {
+	t := &AreaTrigger{ID: 962, Center: Point{110, 0, 0}, Radius: 10, Stand: Point{104, 0, 0}, By: by, TimeoutS: timeout, Expect: "unit 7271 hostile",
+		ExpectUnit: &UnitWait{Entries: []uint32{7271}, State: UnitHostile}}
+	return Leg{Name: "zumrah", To: Point{80, 0, 0}, Steps: []Step{{AreaTrigger: t}}, Boss: &Boss{Entry: 7271, Position: Point{118, 0, 0}}}
+}
+
+func runTrigger(t *testing.T, g *triggerGame, legs ...Leg) (Report, error) {
+	t.Helper()
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.Setup = []string{"gm visible off"}
+	d := NewRemoteDriver(remotePlan(legs...), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, ended := d.Status()
+	if !ended {
+		t.Fatal("not ended")
+	}
+	return rep, err
+}
+
+// movedNear says whether one of the move orders went to within a yard of p.
+func movedNear(dests []Point, p Point) bool {
+	for _, d := range dests {
+		if dist3(d, p) < 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func triggerOf(t *testing.T, rep Report) TriggerReport {
+	t.Helper()
+	if rep.Remote == nil || len(rep.Remote.AreaTriggers) != 1 {
+		t.Fatalf("area triggers: %+v", rep.Remote)
+	}
+	return rep.Remote.AreaTriggers[0]
+}
+
+// The lead bot walks into the zone and the module takes the trigger for it: the agent sends nothing, and the party then kills him.
+func TestAreaTriggerTakenByTheLeadBot(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.moduleTakes = true
+	rep, err := runTrigger(t, g, zumrahLeg("auto", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	tr := triggerOf(t, rep)
+	if tr.By != "lead bot" || tr.Result != "done" || tr.Trigger != 962 || len(g.sent) != 0 || rep.Remote.AgentTriggers != 0 {
+		t.Fatalf("%+v sent %v", tr, g.sent)
+	}
+	// The lead bot was sent to the stand point inside the zone, and he died there.
+	if !movedNear(g.moveOrderDest, Point{104, 0, 0}) {
+		t.Errorf("no move to the stand: %v", g.moveOrderDest)
+	}
+	if g.mobsKilled != 1 {
+		t.Errorf("killed %d", g.mobsKilled)
+	}
+}
+
+// The module does not take the trigger: five seconds after the lead bot stands in the zone the agent does it itself: it comes up to
+// the party with .appear (a GM assist), walks into the zone, sends the packet once and walks back.
+func TestAreaTriggerFallsBackToTheAgent(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.agent = Point{-300, 0, 0} // far behind: it has to be brought up first
+	var botStood time.Time
+	g.onTick = func(f *fakeRemote) {
+		if l := f.lead(); botStood.IsZero() && dist3(Point{l.X, l.Y, l.Z}, Point{104, 0, 0}) < 5 {
+			botStood = f.now
+		}
+	}
+	rep, err := runTrigger(t, g, zumrahLeg("auto", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	tr := triggerOf(t, rep)
+	if wait := g.sentAt.Sub(botStood); botStood.IsZero() || wait < TriggerBotWait {
+		t.Errorf("the agent sent %s after the lead bot stood in the zone: it must wait %s first", wait, TriggerBotWait)
+	}
+	if tr.By != "agent" || tr.Result != "done" || fmt.Sprint(g.sent) != "[962]" || rep.Remote.AgentTriggers != 1 || rep.Remote.RunGMAssists != 1 || fmt.Sprint(g.appears) != "[Tanky]" {
+		t.Fatalf("%+v sent %v appears %v %+v", tr, g.sent, g.appears, rep.Remote)
+	}
+	// It sent from inside the zone (the stand point), and went back to where it had stood before walking in.
+	if d := dist3(g.sentFrom[0], Point{104, 0, 0}); d > 0.1 {
+		t.Errorf("sent from %v", g.sentFrom[0])
+	}
+	if n := len(g.walks); n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || dist3(g.walks[n-1], g.walks[n-2]) < 20 {
+		t.Errorf("walks %v", g.walks)
+	}
+	if !strings.Contains(notesOf(rep), "did not hold 5 s after the lead bot stood in the zone; the agent takes the trigger") {
+		t.Errorf("%s", notesOf(rep))
+	}
+	if g.mobsKilled != 1 {
+		t.Errorf("killed %d", g.mobsKilled)
+	}
+}
+
+// by "bot" never calls the agent: a module without the trigger in its list fails the step, with the way to fix it.
+func TestAreaTriggerByBotFailsWithoutTheModule(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	rep, err := runTrigger(t, g, zumrahLeg("bot", 8))
+	if err == nil || !strings.Contains(err.Error(), "did not hold: the module does not take area trigger 962 for a bot (TortoiseBots AiPlayerbot.BotAreaTriggers must list it, #1002)") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.sent) != 0 || triggerOf(t, rep).Result != "failed" || rep.State != "failed" {
+		t.Fatalf("sent %v appears %v %+v", g.sent, g.appears, rep.Remote.AreaTriggers)
+	}
+}
+
+// by "agent": the lead bot is not walked into the zone at all.
+func TestAreaTriggerByAgentOnly(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.moduleTakes = true // would take it, if the bot stood there
+	rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if tr := triggerOf(t, rep); tr.By != "agent" || fmt.Sprint(g.sent) != "[962]" {
+		t.Fatalf("%+v %v", tr, g.sent)
+	}
+	if movedNear(g.moveOrderDest[:g.movesBefore], Point{104, 0, 0}) {
+		t.Errorf("the lead bot was sent to the stand before the agent's packet: %v", g.moveOrderDest[:g.movesBefore])
+	}
+}
+
+// The agent sends the packet and nothing changes: the step fails, naming what did not hold, after one attempt: nothing is sent again.
+func TestAreaTriggerThatChangesNothingFailsOnce(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.packetWorks = false
+	_, err := runTrigger(t, g, zumrahLeg("auto", 6))
+	if err == nil || !strings.Contains(err.Error(), "the agent sent area trigger 962 from inside its zone and unit 7271 hostile did not hold within 6 s") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.sent) != 1 {
+		t.Fatalf("sent %v: one attempt", g.sent)
+	}
+	// It walked out of the zone again even so.
+	if n := len(g.walks); n < 2 || g.walks[n-1] == (Point{104, 0, 0}) {
+		t.Errorf("walks %v", g.walks)
+	}
+}
+
+// An agent that is no GM and stands on another map cannot get to the zone: the step says so and sends nothing.
+func TestAreaTriggerAgentThatCannotFollowFails(t *testing.T) {
+	g := newTriggerGame(t, 0)
+	g.agentMap = 5
+	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
+	if err == nil || !strings.Contains(err.Error(), "could not be brought up: it needs a GM account") || len(g.sent) != 0 {
+		t.Fatalf("%v sent %v", err, g.sent)
+	}
+}
+
+// A game with no hands for the packet fails the agent's part with that reason.
+type noPacketGame struct{ *nearGame }
+
+func TestAreaTriggerGameWithoutHands(t *testing.T) {
+	g := &noPacketGame{newNearGame(t, 3)}
+	g.agent = Point{-5, 0, 0}
+	cfg := DefaultConfig()
+	d := NewRemoteDriver(remotePlan(zumrahLeg("agent", 5)), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "the agent has no hands for an area trigger in this game") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// Expect already true (a resumed run, the trigger taken before): nothing is walked or sent.
+func TestAreaTriggerAlreadyDone(t *testing.T) {
+	g := newTriggerGame(t, 3)
+	g.fire() // the boss is hostile from the start
+	rep, err := runTrigger(t, g, zumrahLeg("auto", 15))
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if tr := triggerOf(t, rep); tr.By != "already" || len(g.sent) != 0 || !strings.Contains(notesOf(rep), "unit 7271 hostile already: the trigger is not sent") {
+		t.Fatalf("%+v %v", tr, g.sent)
+	}
+}
+
+// ---- wait_for unit ----
+
+// A wait for a unit reads the agent's own store when the feed does not list it (a friendly one): the agent's store holds Zum'rah as friendly,
+// then hostile.
+func TestWaitForUnitReadsTheAgentsStore(t *testing.T) {
+	g := newNearGame(t, 3)
+	g.agent = Point{-5, 0, 0}
+	me := objects.Unit{GUID: packet.GUID(0xF130000000001234), Type: "creature", Entry: 7271, X: 50, Y: 0, PosAgeMS: 100, Health: 100, MaxHealth: 100}
+	g.units = []objects.Unit{me}
+	flips := false
+	g.onTick = func(f *fakeRemote) {
+		if !flips && f.now.After(time.Unix(1_000_000, 0).Add(12*time.Second)) {
+			flips = true
+			g.units[0].Hostile = true
+		}
+	}
+	w := func(state string) Step {
+		return Step{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: state}, TimeoutS: 60}}
+	}
+	plan := remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Steps: []Step{w(UnitSeen), w(UnitHostile)}})
+	cfg := DefaultConfig()
+	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		rep, _ := d.Status()
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if !flips {
+		t.Fatal("the unit never turned hostile: the second wait did not wait")
+	}
+}
+
+func TestWaitForUnitTimesOut(t *testing.T) {
+	g := newNearGame(t, 3)
+	plan := remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Steps: []Step{{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitHostile}, TimeoutS: 5, FailText: "the trigger did not run"}}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "waited 5 s for unit 7271 hostile: the trigger did not run") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// The kill ledger counts for "dead" after the feed has dropped the corpse.
+func TestWaitForUnitDeadAfterAKill(t *testing.T) {
+	g := carrierGame(t)
+	g.addMob(7271, Point{30, 0, 0})
+	plan := remotePlan(Leg{Name: "w", To: Point{20, 0, 0}, Boss: &Boss{Entry: 7271, Position: Point{30, 0, 0}},
+		AfterBoss: []Step{{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitDead}, TimeoutS: 5}}}})
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+// ---- Leg.CompanionsLoot ----
+
+func lootLegPlan(withBossOff bool) *Plan {
+	off := false
+	boss := &Boss{Entry: 9, Position: Point{40, 0, 0}}
+	if withBossOff {
+		boss.CompanionsLoot = &off
+	}
+	return remotePlan(Leg{Name: "grave", To: Point{20, 0, 0}, CompanionsLoot: &off, Boss: boss}, Leg{Name: "after", To: Point{60, 0, 0}})
+}
+
+// The leg turns every bot's looting off when it starts and back on when it ends, and the boss's own companions_loot adds nothing to it (it
+// would turn the looting back on in the middle of the leg).
+func TestLegCompanionsLootOffForTheWholeLeg(t *testing.T) {
+	for _, bossOff := range []bool{false, true} {
+		g := carrierGame(t)
+		g.addMob(9, Point{40, 0, 0})
+		rep, err := runCarrier(t, g, lootLegPlan(bossOff), objOpts())
+		if err != nil || rep.State != "done" {
+			t.Fatalf("boss off %v: %v\n%s", bossOff, err, notesOf(rep))
+		}
+		// The run's start turns looting on for everyone (an earlier run may have left it off), the first leg off for everyone, the end of the
+		// leg on again; the second leg has no say.
+		var seq []string
+		for _, b := range g.behaviors {
+			f := strings.Fields(b)
+			seq = append(seq, f[1]+" "+f[2])
+		}
+		want := strings.Repeat("loot true,", 3) + strings.Repeat("loot false,", 3) + strings.Repeat("loot true,", 3)
+		if got := strings.Join(seq, ",") + ","; got != want {
+			t.Errorf("boss off %v: %s\nwant %s", bossOff, got, want)
+		}
+		if !strings.Contains(notesOf(rep), "corpse and object looting is off for") || !strings.Contains(notesOf(rep), "looting turned back on for") {
+			t.Errorf("%s", notesOf(rep))
+		}
+	}
+}
+
+// ---- the ward of Zum'rah: plan kill_first and summoned_kill_first (the design of #190) ----
+
+// zumrahFightPlan is a boss leg whose plan names the ward 7785 as a summoned kill_first unit.
+func zumrahFightPlan(killFirst bool) *Plan {
+	p := remotePlan(Leg{Name: "boss", To: Point{20, 0, 0}, Boss: &Boss{Entry: 7271, Position: Point{30, 0, 0}}})
+	if killFirst {
+		p.KillFirst, p.SummonedKillFirst = []uint32{7785}, []uint32{7785}
+	}
+	return p
+}
+
+// Zum'rah's ward joins the fight and heals without ever fighting the party. It stands by the boss, which fights the party: that is the
+// encounter evidence, and the party is sent at it ahead of the boss and without the tank's threat wait. Without kill_first it stays up and
+// is never attacked. A unit of the same entry that is not in the encounter (it stands far from every hostile that fights the party, or was
+// there before the boss was engaged) is left alone however near the lead bot it stands.
+func TestKillFirstSendsThePartyAtTheWardFirst(t *testing.T) {
+	for _, withKillFirst := range []bool{true, false} {
+		g := newFakeRemote(t)
+		boss := g.addMob(7271, Point{30, 0, 0})
+		// A ward of someone else's, up by the lead bot (10 yd) and 20 yd from the boss: not in this encounter.
+		var stray, ward *rmob
+		var bossDied time.Time
+		g.onTick = func(f *fakeRemote) {
+			if ward == nil && boss.attacked { // summoned once the party is on the boss, as Zum'rah's is
+				ward = f.addMob(7785, Point{38, 0, 0})
+				ward.passive = true
+				stray = f.addMob(7785, Point{10, -3, 0})
+				stray.passive = true
+			}
+			if bossDied.IsZero() && boss.hp <= 0 {
+				bossDied = f.now
+			}
+		}
+		rep, err := runRemote(t, g, zumrahFightPlan(withKillFirst), opts(), nil)
+		if err != nil || rep.State != "done" {
+			t.Fatalf("kill_first %v: %v\n%s", withKillFirst, err, notesOf(rep))
+		}
+		if ward == nil {
+			t.Fatal("the ward never appeared")
+		}
+		wardAttack := g.indexOf("cmd attack " + tbm.GUIDArg(ward.guid))
+		if g.indexOf("cmd attack "+tbm.GUIDArg(stray.guid)) >= 0 || stray.hp <= 0 {
+			t.Errorf("kill_first %v: the unrelated ward was attacked: hp %.0f\n%v", withKillFirst, stray.hp, g.orders)
+		}
+		if !withKillFirst {
+			if wardAttack >= 0 || ward.hp <= 0 {
+				t.Errorf("without kill_first the ward is left alone: attack at %d, hp %.0f", wardAttack, ward.hp)
+			}
+			continue
+		}
+		if wardAttack < 0 || ward.hp > 0 {
+			t.Fatalf("the ward was not attacked and killed: attack at %d, hp %.0f\n%v", wardAttack, ward.hp, g.orders)
+		}
+		// The party was sent at the ward while the boss still lived: it is the first order after it joined, not a leftover once the boss is dead.
+		if at := g.orderAt[wardAttack]; bossDied.IsZero() || !at.Before(bossDied) {
+			t.Errorf("the ward was attacked at %v, the boss died at %v: not first\n%v", at, bossDied, g.orders)
+		}
+	}
+}
+
+// A same-entry unit within 40 yd of the lead bot but far from the encounter is not part of it.
+func TestKillFirstIgnoresAWardAwayFromTheEncounter(t *testing.T) {
+	g := newFakeRemote(t)
+	boss := g.addMob(7271, Point{30, 0, 0})
+	var ward *rmob
+	g.onTick = func(f *fakeRemote) {
+		if ward == nil && boss.attacked {
+			ward = f.addMob(7785, Point{20, 30, 0}) // 30 yd from the lead bot, 31.6 from the boss
+			ward.passive = true
+		}
+	}
+	rep, err := runRemote(t, g, zumrahFightPlan(true), opts(), nil)
+	if err != nil || rep.State != "done" || ward == nil || g.indexOf("cmd attack "+tbm.GUIDArg(ward.guid)) >= 0 || ward.hp <= 0 {
+		t.Fatalf("%v %s\n%v", err, notesOf(rep), g.orders)
+	}
+}
+
+// ---- group mode: the agent leads, so the agent takes the trigger ----
+
+// zumrahGame is the group driver's fake: the agent's packet turns Zum'rah hostile when it stands in the zone.
+type zumrahGame struct {
+	*fakeGame
+	center  Point
+	radius  float32
+	friend  *fakeUnit // Zum'rah before the trigger: friendly
+	works   bool
+	sentPos []Point
+}
+
+func newZumrahGame(works bool) *zumrahGame {
+	g := &zumrahGame{fakeGame: newFake(), center: Point{110, 0, 0}, radius: 10, works: works}
+	g.friend = g.add(77, 7271, Point{118, 0, 0})
+	g.friend.Hostile = false
+	return g
+}
+
+func (g *zumrahGame) AreaTrigger(ctx context.Context, id uint32) error {
+	g.sentPos = append(g.sentPos, g.pos)
+	if g.works && id == 962 && dist3(g.pos, g.center) <= float64(g.radius) {
+		g.friend.Hostile = true
+	}
+	return nil
+}
+
+func zumrahGroupPlan(by string, timeout int) *Plan {
+	l := zumrahLeg(by, timeout)
+	l.Boss = nil
+	return zumrahMapPlan(l)
+}
+
+// zumrahMapPlan is a plan on the group fake's map.
+func zumrahMapPlan(legs ...Leg) *Plan {
+	p := remotePlan(legs...)
+	p.Map = 70
+	return p
+}
+
+func TestGroupDriverTakesTheAreaTriggerWithTheAgent(t *testing.T) {
+	for _, by := range []string{"auto", "agent"} {
+		g := newZumrahGame(true)
+		d := NewDriver(zumrahGroupPlan(by, 15), g, Config{}, g.clock())
+		if err := d.Run(context.Background(), 0); err != nil {
+			t.Fatalf("%s: %v\n%+v", by, err, d.Report())
+		}
+		// It walked to the stand point in the zone, sent the packet once from there, and Zum'rah turned hostile.
+		if len(g.sentPos) != 1 || dist3(g.sentPos[0], Point{104, 0, 0}) > 0.5 || !g.friend.Hostile {
+			t.Fatalf("%s: sent from %v", by, g.sentPos)
+		}
+	}
+}
+
+func TestGroupDriverAreaTriggerByBotNeedsALeadBot(t *testing.T) {
+	g := newZumrahGame(true)
+	d := NewDriver(zumrahGroupPlan("bot", 15), g, Config{}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), `by "bot" needs a lead bot: it runs in remote mode only`) || len(g.sentPos) != 0 {
+		t.Fatalf("%v sent %v", err, g.sentPos)
+	}
+}
+
+func TestGroupDriverAreaTriggerThatDoesNothingFailsOnce(t *testing.T) {
+	g := newZumrahGame(false)
+	d := NewDriver(zumrahGroupPlan("auto", 6), g, Config{}, g.clock())
+	err := d.Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "area trigger 962 was sent and unit 7271 hostile did not hold within 6 s") || len(g.sentPos) != 1 {
+		t.Fatalf("%v sent %v", err, g.sentPos)
+	}
+}
+
+func TestGroupDriverAreaTriggerAlreadyDone(t *testing.T) {
+	g := newZumrahGame(true)
+	g.friend.Hostile = true
+	d := NewDriver(zumrahGroupPlan("auto", 15), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil || len(g.sentPos) != 0 {
+		t.Fatalf("%v sent %v", err, g.sentPos)
+	}
+}
+
+// A wait for a unit in group mode reads the agent's own store.
+func TestGroupDriverWaitsForAUnit(t *testing.T) {
+	g := newZumrahGame(true)
+	w := Step{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{7271}, State: UnitHostile}, TimeoutS: 30}}
+	g.onTick = func(f *fakeGame) {
+		if f.now.After(time.Unix(1_000_000, 0).Add(8 * time.Second)) {
+			g.friend.Hostile = true
+		}
+	}
+	d := NewDriver(zumrahMapPlan(Leg{Name: "w", To: Point{10, 0, 0}, Steps: []Step{w}}), g, Config{}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil || !g.friend.Hostile {
+		t.Fatalf("%v", err)
+	}
+}

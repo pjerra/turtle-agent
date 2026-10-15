@@ -354,6 +354,9 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(*s.Ritual.Stand, false)
 		}
+		if s.AreaTrigger != nil {
+			add(s.AreaTrigger.Stand, false)
+		}
 	}
 	if l.Boss != nil {
 		add(l.Boss.Position, false)
@@ -591,6 +594,9 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 		}
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(fmt.Sprintf("steps[%d].ritual.stand", si), *s.Ritual.Stand)
+		}
+		if s.AreaTrigger != nil {
+			add(fmt.Sprintf("steps[%d].area_trigger.stand", si), s.AreaTrigger.Stand)
 		}
 	}
 	if l.Boss != nil {

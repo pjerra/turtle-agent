@@ -501,6 +501,8 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			err = d.doLoot(ctx, a)
 		case ActItem:
 			err = d.doUseItem(ctx, a)
+		case ActTrigger:
+			err = d.doAreaTrigger(ctx, a)
 		case ActRitual:
 			err = errors.New("a ritual step needs several bots using the object: it runs in remote mode only (dungeon_run with a bound commander party), not with the agent's own companions yet")
 		default:
@@ -878,6 +880,45 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 		}
 	}
 	return n
+}
+
+// UnitHolds makes the group driver's world a UnitWorld: the creatures of the agent's own object store.
+func (w stepWorld) UnitHolds(u *UnitWait) bool {
+	return u.holds(storeSights(w.d.g.Units(), nil), false)
+}
+
+// doAreaTrigger is the area_trigger step of the group driver: the leader is the agent's own character, so it is the one that takes the
+// trigger (a lead bot exists only in remote mode, and by "bot" fails). It walks to the step's stand point inside the zone, sends the packet
+// as a client does and waits for Expect up to the step's timeout. The companions follow the leader; nothing is sent twice.
+func (d *Driver) doAreaTrigger(ctx context.Context, a Action) error {
+	t := a.Trigger
+	if t.By == TriggerBot {
+		return fmt.Errorf("%s: by \"bot\" needs a lead bot: it runs in remote mode only; use \"auto\" or \"agent\"", a.Label)
+	}
+	uw := func() bool { return t.ExpectUnit.holds(storeSights(d.g.Units(), nil), false) }
+	if uw() {
+		d.rep.note(fmt.Sprintf("%s: %s already: the trigger is not sent", a.Label, t.ExpectUnit.describe()))
+		return nil
+	}
+	if dist3(d.g.Position(), t.Center) > float64(t.Radius) {
+		if err := d.doWalk(ctx, t.Stand); err != nil {
+			return fmt.Errorf("%s: %w", a.Label, err)
+		}
+	}
+	if err := d.areaTrigger(ctx, t.ID); err != nil {
+		return fmt.Errorf("%s: sending area trigger %d: %w", a.Label, t.ID, err)
+	}
+	d.rep.note(fmt.Sprintf("%s: sent area trigger %d from %.1f %.1f %.1f", a.Label, t.ID, d.g.Position().X, d.g.Position().Y, d.g.Position().Z))
+	until := d.clk.Now().Add(time.Duration(t.TimeoutS) * time.Second)
+	for !uw() {
+		if !d.clk.Now().Before(until) {
+			return fmt.Errorf("%s: area trigger %d was sent and %s did not hold within %d s", a.Label, t.ID, t.ExpectUnit.describe(), t.TimeoutS)
+		}
+		if err := d.sleep(ctx, d.cfg.WaitPoll); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it

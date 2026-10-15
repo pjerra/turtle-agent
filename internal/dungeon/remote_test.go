@@ -60,6 +60,8 @@ type rmob struct {
 	fleeOrigin         Point
 	// ccUntil: a `cmd cc` at it holds it (flag c, no target) until then (fakeRemote.ccLasts)
 	ccUntil time.Time
+	// passive: a unit that never fights the party (a ward): no target, no threat record, never engaged; an attack order at it hurts it.
+	passive bool
 }
 
 // fakeRemote is a RemoteGame the test steers: time moves only when the driver sleeps; the lead bot walks to the point of a
@@ -287,6 +289,9 @@ func (g *fakeRemote) advance(d time.Duration) {
 			if m.attacked && (!m.fleeing || m.hit && !m.untouchable && dist3(m.pos, m.fleeOrigin) <= 12) {
 				m.hp -= g.killRate * sec
 			}
+		}
+		if m.passive && m.attacked {
+			m.hp -= g.killRate * sec
 		}
 		if m.hp > 0 {
 			live = append(live, m)
