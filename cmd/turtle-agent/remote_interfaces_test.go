@@ -11,6 +11,7 @@ var (
 	_ dungeon.AgentHands       = remoteGame{}
 	_ dungeon.AreaTriggerGame  = remoteGame{}
 	_ dungeon.BotLiner         = remoteGame{}
+	_ dungeon.BotLinesAller    = remoteGame{}
 	_ dungeon.Enterer          = remoteGame{}
 	_ dungeon.EntryLedger      = remoteGame{}
 	_ dungeon.FloorSnapper     = remoteGame{}
@@ -18,6 +19,7 @@ var (
 	_ dungeon.HireGame         = remoteGame{}
 	_ dungeon.BotSummoner      = remoteGame{}
 	_ dungeon.BotReviver       = remoteGame{}
+	_ dungeon.ItemGiver        = remoteGame{}
 	_ dungeon.ItemSource       = remoteGame{}
 	_ dungeon.OrderGame        = remoteGame{}
 	_ dungeon.PathPlanner      = remoteGame{}

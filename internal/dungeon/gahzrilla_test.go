@@ -372,8 +372,19 @@ func TestGiveItemsNeedsABotOfTheRunAndAGame(t *testing.T) {
 	// A game that cannot send .additem is refused, not ignored.
 	pf := newPrepFake(t, map[string]string{"Tanky": "online"})
 	o := RemoteOptions{Lead: "Tanky", Bots: []string{"Healy", "Magey"}, GiveItems: []GiveItem{{Item: itMallet}}, Preflight: PreflightOff}
-	if _, err := runRemote(t, pf, pf.plan, o, nil); err == nil || !strings.Contains(err.Error(), "cannot send .additem") {
+	rep, err := runRemote(t, pf, pf.plan, o, nil)
+	if err == nil || !strings.Contains(err.Error(), "ItemGiver (give_items sends .additem)") || !strings.Contains(err.Error(), "nothing was hired or sent") {
 		t.Fatalf("%v", err)
+	}
+	// It fails before the prepare step: no roster, no hire, no login, no GM line, no bind.
+	if len(pf.events) != 0 || pf.indexOf("commander bind") >= 0 || len(rep.SetupShortcuts) != 0 {
+		t.Fatalf("something was sent: %v %v", pf.events, pf.orders)
+	}
+	// With a hired party the missing ability is named before a single hire.
+	hf := newPrepFake(t, map[string]string{"Tanky": "online"})
+	o = RemoteOptions{Prepare: PrepareSpec{Party: PartyHire}, GiveItems: []GiveItem{{Item: itMallet}}, Preflight: PreflightOff}
+	if _, err := runRemote(t, hf, hf.plan, o, nil); err == nil || !strings.Contains(err.Error(), "HireGame") || !strings.Contains(err.Error(), "ItemGiver") || len(hf.events) != 0 {
+		t.Fatalf("%v %v", err, hf.events)
 	}
 }
 
@@ -419,5 +430,29 @@ func TestPlanCheckCoversTheGongStand(t *testing.T) {
 	res, err = CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, fakeNav{block: func(from, to Point) bool { return to.Y == 90 }}, CheckOptions{})
 	if err != nil || res.OK() || len(res.Issues) != 1 || res.Issues[0].Part != "steps[0].use_object.stand" || res.Issues[0].Leg != 0 {
 		t.Fatalf("%v %+v (ok run counted %d points)", err, res.Issues, counted)
+	}
+}
+
+// RemoteAbilities names every ability the options need and the game lacks, and passes a game that has them all.
+func TestRemoteAbilities(t *testing.T) {
+	plain := newPrepFake(t, nil)
+	if err := RemoteAbilities(plain, RemoteOptions{}, plain.plan); err != nil {
+		t.Fatalf("no options need nothing: %v", err)
+	}
+	if err := RemoteAbilities(plain, RemoteOptions{Prepare: PrepareSpec{Online: true}}, plain.plan); err != nil {
+		t.Fatalf("a Preparer runs prepare: %v", err)
+	}
+	if err := RemoteAbilities(struct{}{}, RemoteOptions{Prepare: PrepareSpec{Online: true}}, nil); err == nil || !strings.Contains(err.Error(), "Preparer") {
+		t.Fatalf("%v", err)
+	}
+	if err := RemoteAbilities(plain, RemoteOptions{GiveItems: []GiveItem{{Item: 1}}}, nil); err == nil || !strings.Contains(err.Error(), "ItemGiver") || strings.Contains(err.Error(), "BotLiner") {
+		t.Fatalf("%v", err)
+	}
+	if err := RemoteAbilities(newGiveFake(t), RemoteOptions{GiveItems: []GiveItem{{Item: 1}}}, nil); err != nil {
+		t.Fatalf("%v", err)
+	}
+	// An optional leg needs the bags read.
+	if err := RemoteAbilities(struct{}{}, RemoteOptions{}, gongPlan()); err == nil || !strings.Contains(err.Error(), "BotLiner (leg 0 (gahzrilla) is optional") {
+		t.Fatalf("%v", err)
 	}
 }

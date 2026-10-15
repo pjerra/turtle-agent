@@ -231,6 +231,10 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)
 	}
+	// The abilities the options need are checked before the driver starts, so that a run that cannot give items fails before it hires anyone.
+	if err := dungeon.RemoteAbilities(remoteGame{r.remote}, opt, plan); err != nil {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: err.Error()}
+	}
 	drv := dungeon.NewRemoteDriver(plan, remoteGame{r.remote}, cfg, opt, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})

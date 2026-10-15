@@ -186,3 +186,42 @@ func (e *prepEnv) waitBag(ctx context.Context, bl BotLiner, who string, item uin
 		}
 	}
 }
+
+// RemoteAbilities checks, before anything is paid for (a hire, a login, a teleport), that the game has every optional ability the run's options
+// need. The remote driver finds these by asserting interfaces on its game (d.g.(X)), and a game without one fails a step late: a hired
+// party is already bought when prepare's give_items finds out it cannot send `.additem`. g is the game the driver will get.
+func RemoteAbilities(g any, opt RemoteOptions, plan *Plan) error {
+	var missing []string
+	need := func(ok bool, what, why string) {
+		if !ok {
+			missing = append(missing, what+" ("+why+")")
+		}
+	}
+	prep := len(opt.GiveItems) > 0 || opt.Prepare.Active()
+	_, isPrep := g.(Preparer)
+	_, isLiner := g.(BotLiner)
+	_, isGiver := g.(ItemGiver)
+	_, isHire := g.(HireGame)
+	if prep {
+		need(isPrep, "Preparer", "the prepare step: bots online, fresh, gm_setup, give_items")
+	}
+	if opt.Prepare.HiredParty() {
+		need(isHire, "HireGame", `prepare party "hire"`)
+	}
+	if len(opt.GiveItems) > 0 {
+		need(isGiver, "ItemGiver", "give_items sends .additem")
+		need(isLiner, "BotLiner", "give_items checks the bags with .bot inv")
+	}
+	if plan != nil {
+		for i, l := range plan.Legs {
+			if l.Optional != nil {
+				need(isLiner, "BotLiner", fmt.Sprintf("leg %d (%s) is optional: its item is looked for with .bot inv", i, l.Name))
+				break
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("this game cannot do what the run's options need: %s (nothing was hired or sent)", strings.Join(missing, "; "))
+	}
+	return nil
+}

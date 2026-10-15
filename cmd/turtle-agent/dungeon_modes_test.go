@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
@@ -195,6 +197,21 @@ func TestCheckModeGiveItems(t *testing.T) {
 	} {
 		if _, err := checkMode(bad); err == nil {
 			t.Errorf("%+v was accepted", bad)
+		}
+	}
+}
+
+// remoteGame's GiveItem (dungeon.ItemGiver, the run option give_items) refuses what is not a bot name, a GUID and an item entry before it
+// touches the session.
+func TestRemoteGameGiveItemRefusesBadArguments(t *testing.T) {
+	g := remoteGame{}
+	for _, c := range []struct {
+		who  string
+		guid packet.GUID
+		item uint32
+	}{{"not a name", 1, 9240}, {"Lcwarra", 0, 9240}, {"Lcwarra", 1, 0}} {
+		if err := g.GiveItem(context.Background(), c.who, c.guid, c.item); err == nil || !strings.Contains(err.Error(), "additem") {
+			t.Errorf("%+v: %v", c, err)
 		}
 	}
 }

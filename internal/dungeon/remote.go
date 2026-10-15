@@ -1094,6 +1094,9 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if strings.TrimSpace(d.opt.Lead) == "" && !d.opt.Prepare.HiredParty() {
 		return errors.New("remote mode needs a lead_bot")
 	}
+	if err := RemoteAbilities(d.g, d.opt, d.plan); err != nil {
+		return err
+	}
 	if err := d.prepare(ctx); err != nil {
 		return err
 	}
