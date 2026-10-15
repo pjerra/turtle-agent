@@ -180,8 +180,9 @@ func (d *RemoteDriver) triggerByLead(ctx context.Context, a Action, wait time.Du
 // agentHome is where the agent's own character stood before an area trigger brought it to the zone: its safe point. The step does not
 // walk back (the boss it woke is fought by the boss step); agentGoHome does, when the fight is over or before the next walk.
 type agentHome struct {
-	at    Point
-	known bool // on the plan's map: a place the agent can walk back to
+	at      Point
+	known   bool     // on the plan's map: a place the agent can walk back to
+	entries []uint32 // the entries the trigger's expect names: when one is dead, the boss is down and a failed return is no failure
 }
 
 // triggerByAgent is the agent's own character taking the trigger: near the party, into the zone, the packet. It ends as soon as `expect`
@@ -204,20 +205,17 @@ func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 	if err := d.fallbackGate(ctx, "take an area trigger"); err != nil {
 		return err
 	}
-	// The safe point is where the agent stood before the run's first `.appear` put it next to the lead bot (appear records it), or, when it
-	// was never brought up, where it stands now.
+	// The safe point is where the agent stands just before this trigger's `.appear` (keepNearOpt) puts it next to the lead bot.
+	var pre *agentHome
+	if at, m, here := f.AgentPlace(); here {
+		pre = &agentHome{at: at, known: m == d.plan.Map}
+	}
 	if _, err := d.keepNearOpt(ctx, true); err != nil {
 		return err
 	}
-	if d.home == nil {
-		switch {
-		case d.origin != nil:
-			d.home = d.origin
-		default:
-			if at, m, here := f.AgentPlace(); here {
-				d.home = &agentHome{at: at, known: m == d.plan.Map}
-			}
-		}
+	if d.home == nil && pre != nil {
+		pre.entries = t.ExpectUnit.Entries
+		d.home = pre
 	}
 	dist, known := d.agentDistance(f)
 	if !known {
@@ -247,7 +245,7 @@ func (d *RemoteDriver) triggerByAgent(ctx context.Context, a Action) error {
 	}
 	if !held {
 		// Nothing was woken: no fight to wait for, so the agent goes home now (best effort; the step fails with the reason below).
-		_ = d.agentGoHome(ctx)
+		_ = d.agentGoHome(ctx, false)
 		return fmt.Errorf("the agent sent area trigger %d from inside its zone and %s did not hold within %d s: the trigger's script did not run, or it changed something else", t.ID, t.ExpectUnit.describe(), t.TimeoutS)
 	}
 	return nil
@@ -259,10 +257,11 @@ const triggerFightWait = 5 * time.Minute
 // triggerReturnYd is how close to its safe point the agent must be for the return to count.
 const triggerReturnYd = 6.0
 
-// agentGoHome walks the agent back to the safe point an agent-taken area trigger recorded, once the party is out of combat (up to
-// triggerFightWait), never through a fight, and checks it got there. It does nothing when there is no safe point. A safe point on another
-// map cannot be walked to: it is dropped with a note. Its error is the step's it ran for: a failed return fails the step.
-func (d *RemoteDriver) agentGoHome(ctx context.Context) error {
+// agentGoHome sends the agent back to the safe point an agent-taken area trigger recorded. It does nothing when there is no safe point.
+// afterKill says the boss step has killed the boss (the same is true when the trigger's unit is dead): then a return that fails or is
+// blocked, or a fight that outlasts the wait, is a note and a GM `.go xyz` back to the safe point (a GM assist during the run), never an
+// error: a dead boss does not fail a run. Before the boss is dead a failed return is the error of the step it ran for.
+func (d *RemoteDriver) agentGoHome(ctx context.Context, afterKill bool) error {
 	h := d.home
 	if h == nil {
 		return nil
@@ -277,6 +276,44 @@ func (d *RemoteDriver) agentGoHome(ctx context.Context) error {
 		d.home = nil
 		return nil
 	}
+	err := d.walkHome(ctx, f, h)
+	if err == nil {
+		d.home = nil
+		d.rep.note(fmt.Sprintf("area trigger: the agent is back at its safe point %.1f %.1f %.1f", h.at.X, h.at.Y, h.at.Z))
+		return nil
+	}
+	if runEnded(ctx, err) {
+		return err
+	}
+	if afterKill || d.unitHolds(&UnitWait{Entries: h.entries, State: UnitDead}) {
+		d.home = nil
+		d.rep.note(fmt.Sprintf("area trigger: the boss is dead and the agent could not walk back (%v)", err))
+		d.teleHome(ctx, f, h)
+		return nil
+	}
+	return err
+}
+
+// teleHome puts the agent back at its safe point with `.go xyz` (a GM assist during the run, counted in run_gm_assists); a failure is noted.
+func (d *RemoteDriver) teleHome(ctx context.Context, f Follower, h *agentHome) {
+	sh, ok := f.(StartHands)
+	if !ok {
+		d.rep.note("area trigger: this game cannot teleport the agent: it stays where it is")
+		return
+	}
+	if err := sh.GoXYZ(ctx, d.plan.Map, h.at); err != nil {
+		d.rep.note(fmt.Sprintf("area trigger: .go xyz back to the safe point failed: %v", err))
+		return
+	}
+	cmd := fmt.Sprintf(".go xyz %.2f %.2f %.2f %d", h.at.X, h.at.Y, h.at.Z, d.plan.Map)
+	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
+	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
+	d.rep.note(fmt.Sprintf("area trigger: %s: the agent is back at its safe point (a GM assist during the run)", cmd))
+}
+
+// walkHome walks the agent to the safe point once the party is out of combat (up to triggerFightWait), never through a fight, and checks
+// it got there.
+func (d *RemoteDriver) walkHome(ctx context.Context, f Follower, h *agentHome) error {
 	until := d.clk.Now().Add(triggerFightWait)
 	for {
 		if err := d.waitOutOfCombat(ctx, until.Sub(d.clk.Now())); err != nil {
@@ -288,8 +325,6 @@ func (d *RemoteDriver) agentGoHome(ctx context.Context) error {
 		}
 		at, _, here := f.AgentPlace()
 		if here && dist3(at, h.at) <= triggerReturnYd {
-			d.home = nil
-			d.rep.note(fmt.Sprintf("area trigger: the agent is back at its safe point %.1f %.1f %.1f", h.at.X, h.at.Y, h.at.Z))
 			return nil
 		}
 		if d.inCombat() && d.clk.Now().Before(until) {

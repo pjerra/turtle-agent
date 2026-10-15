@@ -137,11 +137,6 @@ func (d *RemoteDriver) keepNearOpt(ctx context.Context, force bool) (moved bool,
 }
 
 func (d *RemoteDriver) appear(ctx context.Context, f Follower, player string, dist float64) (bool, error) {
-	if d.origin == nil { // where the agent stood before the first `.appear` of the run: the safe point of an area trigger it takes (remote_trigger.go)
-		if at, m, here := f.AgentPlace(); here {
-			d.origin = &agentHome{at: at, known: m == d.plan.Map}
-		}
-	}
 	if err := f.Appear(ctx, player); err != nil {
 		d.rep.note(fmt.Sprintf("keep near: .appear %s failed: %v", player, err))
 		return false, nil

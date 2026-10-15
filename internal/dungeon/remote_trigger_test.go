@@ -26,6 +26,7 @@ type triggerGame struct {
 	sent         []uint32
 	sentFrom     []Point
 	sentAt       time.Time
+	teles        []Point
 	blockReturn  bool // after the packet every walk of the agent's fails (it cannot get back)
 	movesBefore  int  // the lead bot's move orders when the agent sent the packet
 	fired        bool
@@ -55,6 +56,13 @@ func (g *triggerGame) fire() {
 	if g.onFire != nil {
 		g.onFire(g.fakeRemote)
 	}
+}
+
+// GoXYZ is the GM `.go xyz` the agent's return falls back on after the boss is dead.
+func (g *triggerGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
+	g.teles = append(g.teles, at)
+	g.agent = at
+	return nil
 }
 
 func (g *triggerGame) AreaTrigger(ctx context.Context, id uint32) error {
@@ -135,7 +143,7 @@ func TestAreaTriggerTakenByTheLeadBot(t *testing.T) {
 // the party with .appear (a GM assist), walks into the zone, sends the packet once and walks back.
 func TestAreaTriggerFallsBackToTheAgent(t *testing.T) {
 	g := newTriggerGame(t, 3)
-	g.agent = Point{-300, 0, 0} // far behind: it has to be brought up first
+	g.agent = Point{45, 0, 0} // 35 yd behind the lead bot after the leg's walk (no appear then), 59 once the lead bot is at the stand: this step brings it up
 	var botStood time.Time
 	g.onTick = func(f *fakeRemote) {
 		if l := f.lead(); botStood.IsZero() && dist3(Point{l.X, l.Y, l.Z}, Point{104, 0, 0}) < 5 {
@@ -157,9 +165,8 @@ func TestAreaTriggerFallsBackToTheAgent(t *testing.T) {
 	if d := dist3(g.sentFrom[0], Point{104, 0, 0}); d > 0.1 {
 		t.Errorf("sent from %v", g.sentFrom[0])
 	}
-	// The step ended at once; the boss step killed him; then the agent went back to where it stood before the first `.appear` (-300 0 0),
-	// not to the lead bot.
-	if n := len(g.walks); n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || g.walks[n-1] != (Point{-300, 0, 0}) || g.agent != (Point{-300, 0, 0}) {
+	// The step ended at once; the boss step killed him; then the agent went back to where it stood just before THIS step's `.appear`.
+	if n := len(g.walks); n < 2 || g.walks[n-2] != (Point{104, 0, 0}) || g.walks[n-1] != (Point{45, 0, 0}) || g.agent != (Point{45, 0, 0}) || len(g.teles) != 0 {
 		t.Errorf("walks %v agent %v", g.walks, g.agent)
 	}
 	if !strings.Contains(notesOf(rep), "did not hold 5 s after the lead bot stood in the zone; the agent takes the trigger") {
@@ -240,14 +247,14 @@ func TestAreaTriggerFallbackNeedsAnInvisibleGM(t *testing.T) {
 // timeout) while the agent stays in the zone, and the agent walks back only after the fight, never during it.
 func TestAreaTriggerStepEndsAtOnceAndTheBossStepOwnsTheFight(t *testing.T) {
 	g := newTriggerGame(t, 3)
-	g.agent = Point{-300, 0, 0}
+	g.agent = Point{45, 0, 0}
 	var walkedInCombat []string
 	var bossDied, backAt time.Time
 	g.onWalk = func(n *nearGame, to Point) {
 		if n.party[0].State == "c" {
 			walkedInCombat = append(walkedInCombat, fmt.Sprint(to))
 		}
-		if to == (Point{-300, 0, 0}) {
+		if to == (Point{45, 0, 0}) {
 			backAt = n.now
 		}
 	}
@@ -274,32 +281,44 @@ func TestAreaTriggerStepEndsAtOnceAndTheBossStepOwnsTheFight(t *testing.T) {
 	if tr.By != "agent" || tr.Seconds > 8 || g.mobsKilled != 1 || len(walkedInCombat) != 0 {
 		t.Errorf("trigger step %+v killed %d walked in combat %v", tr, g.mobsKilled, walkedInCombat)
 	}
-	if bossDied.IsZero() || backAt.IsZero() || backAt.Before(bossDied) || g.agent != (Point{-300, 0, 0}) {
+	if bossDied.IsZero() || backAt.IsZero() || backAt.Before(bossDied) || g.agent != (Point{45, 0, 0}) {
 		t.Errorf("the boss died at %v, the agent was back at %v (%v)", bossDied, backAt, g.agent)
 	}
 }
 
-// A fight that never ends keeps the agent in the zone: the return fails the step after the wait, saying why.
-func TestAreaTriggerAgentThatCannotWalkBackFailsTheStep(t *testing.T) {
-	g := newTriggerGame(t, 3)
-	g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(time.Hour) }
-	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
-	if err == nil || !strings.Contains(err.Error(), "the agent could not walk back to its safe point") || !strings.Contains(err.Error(), "does not walk through a fight") {
-		t.Fatalf("%v", err)
-	}
-	if len(g.sent) != 1 {
-		t.Errorf("sent %v", g.sent)
+// A dead boss never fails a run: a fight that outlasts the wait, or a walk that is blocked, after the boss step has killed the boss is a
+// note and a GM `.go xyz` back to the safe point (a GM assist), not an error.
+func TestAreaTriggerReturnAfterTheKillFallsBackToATeleport(t *testing.T) {
+	for name, setup := range map[string]func(g *triggerGame){
+		"a fight that never ends": func(g *triggerGame) { g.onFire = func(f *fakeRemote) { f.combatUntil = f.now.Add(time.Hour) } },
+		"a blocked walk":          func(g *triggerGame) { g.blockReturn = true },
+	} {
+		g := newTriggerGame(t, 3)
+		g.agent = Point{45, 0, 0}
+		setup(g)
+		rep, err := runTrigger(t, g, zumrahLeg("agent", 15))
+		if err != nil || rep.State != "done" {
+			t.Fatalf("%s: %v\n%s", name, err, notesOf(rep))
+		}
+		if fmt.Sprint(g.teles) != "[{45 0 0}]" || g.agent != (Point{45, 0, 0}) || g.mobsKilled != 1 || len(g.sent) != 1 {
+			t.Errorf("%s: teles %v agent %v killed %d sent %v", name, g.teles, g.agent, g.mobsKilled, g.sent)
+		}
+		if !strings.Contains(notesOf(rep), "the boss is dead and the agent could not walk back") || rep.Remote.RunGMAssists != 1 { // the .go xyz (the agent stood 35 yd from the lead bot: no .appear)
+			t.Errorf("%s: gm assists %d\n%s", name, rep.Remote.RunGMAssists, notesOf(rep))
+		}
 	}
 }
 
-// A walk back that does not take the agent home fails the step as well.
-func TestAreaTriggerAgentThatDoesNotGetHomeFailsTheStep(t *testing.T) {
+// Before the boss is dead a failed return still fails the step it ran for (here the next leg's walk: nothing was killed).
+func TestAreaTriggerReturnBeforeTheKillFailsTheStep(t *testing.T) {
 	g := newTriggerGame(t, 3)
-	g.agent = Point{-300, 0, 0}
+	g.agent = Point{45, 0, 0}
 	g.blockReturn = true
-	_, err := runTrigger(t, g, zumrahLeg("agent", 15))
-	if err == nil || !strings.Contains(err.Error(), "did not get back to its safe point") {
-		t.Fatalf("%v", err)
+	leg := zumrahLeg("agent", 15)
+	leg.Boss = nil // the trigger's unit stays alive
+	_, err := runTrigger(t, g, leg, Leg{Name: "next", To: Point{140, 0, 0}})
+	if err == nil || !strings.Contains(err.Error(), "did not get back to its safe point") || len(g.teles) != 0 {
+		t.Fatalf("%v teles %v", err, g.teles)
 	}
 }
 

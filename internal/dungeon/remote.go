@@ -540,7 +540,6 @@ type RemoteDriver struct {
 	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
 	haveMoveTo bool
 	tf         tankFirst  // the tank-first state of the fights (remote_tank.go)
-	origin     *agentHome // where the agent stood before the run's first `.appear` (remote_near.go)
 	home       *agentHome // the agent's safe point after an area trigger it took itself (remote_trigger.go)
 	legLoot    bool       // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
 	legMuted   []string   // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
@@ -801,7 +800,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
-			err = d.agentGoHome(ctx) // an agent left in a trigger's zone goes back before the party walks on
+			err = d.agentGoHome(ctx, false) // an agent left in a trigger's zone goes back before the party walks on
 			if err == nil {
 				err = d.tracedWalkAs(ctx, a.To, a.Direct)
 			}
@@ -816,7 +815,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		case ActKill:
 			err = d.doBoss(ctx, a)
 			if err == nil {
-				err = d.agentGoHome(ctx) // the boss (Zum'rah) is dead: the agent leaves the zone it stayed in
+				err = d.agentGoHome(ctx, true) // the boss (Zum'rah) is dead: the agent leaves the zone it stayed in; a failed walk is no failure now
 			}
 		case ActLoot, ActUse, ActItem, ActRitual:
 			err = d.doObjectStep(ctx, a)
