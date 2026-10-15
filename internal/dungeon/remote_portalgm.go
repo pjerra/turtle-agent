@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -161,24 +162,59 @@ func (d *RemoteDriver) moveToPortalByGM(ctx context.Context, h StartHands, pt *P
 	return nil
 }
 
-// reviveBeforeMove revives the dead among the configured bots with the run's own revive (the lead bot first, an order per dead bot, the waits
-// of the rez gate); it fails the phase when one stays dead.
+// reviveBeforeMove revives the dead among the configured bots with `cmd revive <bot>` (the lead bot first; up to three orders per bot, 20 s apart)
+// and waits for them to show alive; it fails the phase when one stays dead. The run's reviveDead is not used: it ends by bringing the party into
+// the dungeon (bringPartyIn), and here the whole party is outside by design.
 func (d *RemoteDriver) reviveBeforeMove(ctx context.Context) error {
 	d.look()
-	var dead []string
-	for _, n := range append([]string{d.opt.Lead}, d.namedBots()...) {
-		if m, ok := d.memberByName(n); ok && m.Dead {
-			dead = append(dead, n)
+	deadNames := func() []string {
+		var out []string
+		for _, n := range append([]string{d.opt.Lead}, d.namedBots()...) {
+			if m, ok := d.memberByName(n); ok && m.Dead {
+				out = append(out, n)
+			}
 		}
+		return out
 	}
+	dead := deadNames()
 	if len(dead) == 0 {
 		return nil
 	}
 	d.enterNote("dead before the entry: " + strings.Join(dead, ", ") + "; reviving")
-	if err := d.reviveDead(ctx, "enter: "+strings.Join(dead, ", ")+" dead before the entry"); err != nil {
-		return fmt.Errorf("enter: %w", err)
+	last := map[string]time.Time{}
+	tries := map[string]int{}
+	deadline := d.clk.Now().Add(d.cfg.WipeRecoverTimeout)
+	for {
+		d.look()
+		dead = deadNames()
+		if len(dead) == 0 {
+			return nil
+		}
+		if !d.clk.Now().Before(deadline) {
+			return fmt.Errorf("enter: %s still dead %.0f s after the revive orders", strings.Join(dead, ", "), d.cfg.WipeRecoverTimeout.Seconds())
+		}
+		for _, n := range dead {
+			if at, ok := last[n]; ok && d.clk.Now().Sub(at) < 20*time.Second {
+				continue
+			}
+			if tries[n] >= 3 {
+				return fmt.Errorf("enter: %s is still dead after %d revive orders", n, tries[n])
+			}
+			tries[n]++
+			last[n] = d.clk.Now()
+			d.remote(func(r *RemoteReport) { r.Revives++ })
+			r, err := d.order(ctx, "revive", n)
+			if err != nil {
+				return err
+			}
+			if ref, bad := refusedOf(r); bad && ref.Code != "not-dead" {
+				return fmt.Errorf("enter: %s is dead and the revive order was refused: %s (%s)", n, ref.Code, ref.Message)
+			}
+		}
+		if err := d.tick(ctx, d.cfg.Poll*3); err != nil {
+			return err
+		}
 	}
-	return nil
 }
 
 // followAfterSummons puts the party on follow of the lead bot and requires the module's ACK. `.bot summon` and `cmd summon` made the
