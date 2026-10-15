@@ -54,6 +54,10 @@ const (
 	// patrolStaticAfter is how long a unit of a patrol's entries on its path must have been seen standing still (within 3 yd) to be
 	// taken for a mob that stands there (ZF: a static Shadowhunter stands on the patrol's loop at 1662 930), not a member of the patrol.
 	patrolStaticAfter = 6 * time.Second
+	// patrolEstimateAheadYd is how far along its path (yards, not seconds) a patrol whose period is only an estimate (Patrol.PeriodEstimate)
+	// is looked ahead: it takes no pace from the period, so the lookahead is a distance that covers the window at a faster pace than the
+	// estimate (the estimate's 2.5 yd/s over patrol_window is 100 yd).
+	patrolEstimateAheadYd = 150
 	// MinMove is the shortest move the module carries out (ZF-1 run 4: a move of 5.2 yd was ignored five times and failed the walk).
 	MinMove = 6
 )
@@ -72,6 +76,8 @@ type patrolState struct {
 	locating   bool
 	locateDone bool
 	locateAt   time.Time
+	// estNoted: the note that the patrol's period is an estimate (no phase predicted) was written for this group.
+	estNoted bool
 }
 
 // pathLen is the length of the patrol's round: its path and the way back from the last point to the first.
@@ -178,9 +184,14 @@ func (d *RemoteDriver) patrolDanger(p *Patrol, h tbm.HostileRec, at []Point) boo
 	if near(hostilePoint(h)) {
 		return true
 	}
-	speed := pathLen(p.Path) / float64(p.PeriodS)
+	// An estimated period gives no pace: no phase is predicted, the member counts as a danger while the pull lies within
+	// patrolEstimateAheadYd ahead of it on its path (the party waits until it is past), however slowly the estimate says it walks.
+	ahead := pathLen(p.Path) / float64(p.PeriodS) * d.tx.PatrolWindow.Seconds()
+	if p.PeriodEstimate {
+		ahead = patrolEstimateAheadYd
+	}
 	seg, along, _ := onPath(p.Path, hostilePoint(h))
-	for _, q := range pathAhead(p.Path, seg, along, speed*d.tx.PatrolWindow.Seconds()) {
+	for _, q := range pathAhead(p.Path, seg, along, ahead) {
 		if near(q) {
 			return true
 		}
@@ -243,6 +254,10 @@ func (d *RemoteDriver) patrolGate(ctx context.Context, t tbm.HostileRec, sp figh
 				return false, err
 			}
 			continue
+		}
+		if p.PeriodEstimate && !st.estNoted {
+			st.estNoted = true
+			d.rep.note(fmt.Sprintf("leg %d: the patrol (entries %v) has only an estimated period (period_estimate): its phase is not predicted; the party locates it and waits until it is past the pull of %s", d.curLeg, p.Entries, d.hostileName(t)))
 		}
 		here, ok := d.leadPos()
 		r := float64(d.groupRadius(sp))
@@ -328,6 +343,9 @@ func (d *RemoteDriver) locatePatrol(ctx context.Context, p *Patrol, st *patrolSt
 		return false, nil
 	}
 	limit := min(d.tx.PatrolLocate, time.Duration(p.PeriodS+10)*time.Second)
+	if p.PeriodEstimate {
+		limit = d.tx.PatrolLocate // the round is not known: look for the whole bound
+	}
 	now := d.clk.Now()
 	if !st.locating {
 		st.locating, st.locateAt = true, now
@@ -446,8 +464,8 @@ func (d *RemoteDriver) reactiveCC(ctx context.Context, pulled packet.GUID, mobs 
 			held = &mobs[i]
 			continue
 		}
-		if d.summonedKillFirst(h) {
-			continue // a summoned healing ward is a kill target, not a CC target (kill_first)
+		if d.summonedKillFirst(h) || !d.ccAllowed(h) {
+			continue // a summoned healing ward is a kill target, not a CC target (kill_first); a boss, a kill_first entry, an undead is never sheeped
 		}
 		if h.CrowdControlled() || h.GUID == tankTarget || h.GUID == d.tf.focus || h.HPPct < ccLowHP || d.rccN[h.GUID] >= maxCCPerMob {
 			continue

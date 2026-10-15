@@ -250,6 +250,9 @@ func (d *Driver) checkRequiredItems(fromLeg int) error {
 	}
 	for li := fromLeg; li < len(d.plan.Legs); li++ {
 		l := d.plan.Legs[li]
+		if l.Optional != nil {
+			continue // Leg.Optional: the leg is skipped, never a failure, when its item is missing
+		}
 		if err := scan(l.Steps, li, l.Name, "step"); err != nil {
 			return err
 		}

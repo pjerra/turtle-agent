@@ -72,3 +72,59 @@ func TestPlanExportRefusesDraftsAndAllLiveSkipsThem(t *testing.T) {
 		t.Fatal("--out is required")
 	}
 }
+
+// A plan with a leg whose companions_loot is false is refused when named, listed and skipped by --all-live (the batch goes on), and
+// exported with --drop-companions-loot.
+func TestPlanExportCompanionsLootFalse(t *testing.T) {
+	dir := t.TempDir()
+	plans := t.TempDir()
+	live := `{"version":1,"name":"livecave","status":"live-checked","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":1,"position":{"x":5,"y":0,"z":0}}}]}`
+	grave := strings.NewReplacer("livecave", "gravecave", `"name":"a",`, `"name":"a","companions_loot":false,`).Replace(live)
+	for n, js := range map[string]string{"livecave": live, "gravecave": grave} {
+		if err := os.WriteFile(filepath.Join(plans, n+".json"), []byte(js), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _, errs := runExport("--dir", plans, "--out", dir, "gravecave"); code != exitUsage || !strings.Contains(errs, "companions_loot is false") {
+		t.Fatalf("named: %d %q", code, errs)
+	}
+	code, out, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190200", "--all-live")
+	if code != exitOK || !strings.Contains(out, "livecave") || strings.Contains(out, "gravecave: map") || !strings.Contains(errs, "gravecave: skipped") {
+		t.Fatalf("--all-live: %d %q %q", code, out, errs)
+	}
+	if code, out, _ := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190300", "--drop-companions-loot", "gravecave"); code != exitOK || !strings.Contains(out, "gravecave: map 70") {
+		t.Fatalf("--drop-companions-loot: %d %q", code, out)
+	}
+	if code, _, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190400", "--all-live", "gravecave"); code != exitUsage {
+		t.Fatalf("%d %q", code, errs)
+	}
+}
+
+// A plan with a step the run leader cannot do after its first leg is exported up to that leg, with the note on stderr, and --all-live goes on
+// (exit 0); a plan whose first leg has one is refused when named and fails the batch.
+func TestPlanExportCutsAtAStepTheRunLeaderCannotDo(t *testing.T) {
+	dir := t.TempDir()
+	plans := t.TempDir()
+	walk := `{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":1,"position":{"x":5,"y":0,"z":0}}}`
+	talk := `{"name":"b","to":{"x":10,"y":0,"z":0},"steps":[{"gossip":{"npc":7607,"near":{"x":12,"y":0,"z":0},"text":"blow","by":"tank"}}]}`
+	mk := func(name string, legs ...string) string {
+		return `{"version":1,"name":"` + name + `","status":"live-checked","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[` + strings.Join(legs, ",") + `]}`
+	}
+	for n, js := range map[string]string{"cutcave": mk("cutcave", walk, talk), "wholecave": mk("wholecave", walk)} {
+		if err := os.WriteFile(filepath.Join(plans, n+".json"), []byte(js), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190500", "--all-live")
+	if code != exitOK || !strings.Contains(out, "cutcave: map 70, 1 legs") || !strings.Contains(out, "cutcave: CUT: 1 of 2 legs exported") || !strings.Contains(out, "wholecave: map 70") ||
+		!strings.Contains(errs, "cutcave: plan cutcave: exported legs 0-0 (a) only; cut before leg 1 (b)") || strings.Contains(errs, "wholecave") {
+		t.Fatalf("--all-live: %d %q %q", code, out, errs)
+	}
+	first := filepath.Join(plans, "firstcave.json")
+	if err := os.WriteFile(first, []byte(mk("firstcave", talk, walk)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runExport("--dir", plans, "--out", dir, "--stamp", "20261014190600", "firstcave"); code != exitUsage || !strings.Contains(errs, "leg 0 (b)") || !strings.Contains(errs, "gossip (NPC 7607") {
+		t.Fatalf("first leg: %d %q", code, errs)
+	}
+}

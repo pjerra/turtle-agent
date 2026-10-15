@@ -394,13 +394,31 @@ func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error
 	}
 }
 
-// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line with the selection repeated in the same
-// session step (GMOn).
+// gmSelectAttempts is how many times selectThenGM selects and confirms again when the selection changed after the confirmation.
+const gmSelectAttempts = 3
+
+// gmAfterConfirm is a test seam: it runs between the server's confirmation of the selection and the line, where another request (the target RPC,
+// the addon host) can select another unit.
+var gmAfterConfirm func()
+
+// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line as one session operation that sends NO
+// selection of its own (GMOnConfirmed): the line is sent only while the confirmed selection still stands. A selection sent right before a
+// chat line would not be in force when the line runs (the core handles the two on different threads). If another request changed the selection
+// after the confirmation, nothing is sent and the unit is selected and confirmed again, up to gmSelectAttempts times.
 func (g remoteGame) selectThenGM(ctx context.Context, guid packet.GUID, line string) error {
-	if err := g.selectConfirmed(ctx, guid); err != nil {
-		return err
+	var err error
+	for try := 0; try < gmSelectAttempts; try++ {
+		if err = g.selectConfirmed(ctx, guid); err != nil {
+			return err
+		}
+		if gmAfterConfirm != nil {
+			gmAfterConfirm()
+		}
+		if err = g.c.cur().GMOnConfirmed(ctx, guid, line); !errors.Is(err, session.ErrSelectionChanged) {
+			return err
+		}
 	}
-	return g.c.cur().GMOn(ctx, guid, line)
+	return fmt.Errorf("%w: it changed %d times between the server's confirmation and the line, which was not sent", err, gmSelectAttempts)
 }
 
 // UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
@@ -411,6 +429,16 @@ func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet
 		return fmt.Errorf("instance unbind: %q (%v) is not a character name and a GUID", who, guid)
 	}
 	return g.selectThenGM(ctx, guid, ".instance unbind all")
+}
+
+// GiveItem implements dungeon.ItemGiver: it selects the bot by GUID, waits until the server shows that selection, and sends ".additem <entry>"
+// as one operation of the session (GMOn), so the line acts on that bot and never on whatever the agent had selected. The core runs it on the
+// selected player (HandleAddItemCommand), from account level 3; the caller checks the level and the bag afterwards.
+func (g remoteGame) GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32) error {
+	if !botName.MatchString(who) || guid == 0 || entry == 0 {
+		return fmt.Errorf("additem: %q (%v) item %d is not a character name, a GUID and an item entry", who, guid, entry)
+	}
+	return g.selectThenGM(ctx, guid, fmt.Sprintf(".additem %d", entry))
 }
 
 // GroupUnbind selects the player with the GUID, waits for the server to show the selection, sends ".instance groupunbind all" as one

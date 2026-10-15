@@ -233,11 +233,12 @@ func TestRemoteHoldWaitsForTheAdds(t *testing.T) {
 	g.onTick = func(g *fakeRemote) {
 		if g.mobsKilled == 1 && !spawned {
 			spawned = true
+			g.lead().X += 10 // the fight carries the lead bot away from the point it was last sent to, so that a hold has something to anchor
 			m := g.addMob(300, Point{20, 0, 0})
 			m.pulled, m.pullAt, m.engaged, m.target = true, g.now, true, gTank
 		}
 	}
-	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
+	plan := remotePlan(Leg{Name: "a", To: Point{-10, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
 	rep, err := runRemote(t, g, plan, opts(), nil)
 	if err != nil || len(g.killTimes) != 2 || rep.Remote.FightHolds != 1 {
 		t.Fatalf("%v kills %v %+v", err, g.killTimes, rep.Remote)

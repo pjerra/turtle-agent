@@ -19,6 +19,13 @@ type World interface {
 	HostilesWithin(center Point, radius float32) int
 }
 
+// UnitWorld is the optional part of a World that tells whether a unit wait holds (wait_for unit, the expect of an area_trigger): what the
+// bots' feed lists and what the agent's own object store holds. A World without it cannot do those steps; the Stepper fails them with that
+// reason instead of waiting out their timeout.
+type UnitWorld interface {
+	UnitHolds(u *UnitWait) bool
+}
+
 // EntryWorld is the optional part of a World whose object steps are done by entry: the carrier's order names the object by its entry
 // and the plan's point (`cmd open entry:<id>@x,y,z`), and a game-object wait asks `cmd state`, so the agent need not see the object. With
 // it a use_object or loot_object step whose object has an entry is returned as an action at once (no walk to bring the object into view;
@@ -52,16 +59,18 @@ const (
 type ActionKind string
 
 const (
-	ActWalk   ActionKind = "walk"        // walk the navmesh to To
-	ActPull   ActionKind = "pull"        // pull and kill the group in Entries/Positions
-	ActUse    ActionKind = "use_object"  // use game object GUID (it is within UseRange)
-	ActLoot   ActionKind = "loot_object" // open and loot game object GUID (it is within UseRange)
-	ActItem   ActionKind = "use_item"    // use the item Item from the bags
-	ActRitual ActionKind = "ritual"      // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
-	ActKill   ActionKind = "kill_boss"   // kill Boss, First entries before it
-	ActWait   ActionKind = "wait"        // nothing to do yet: look again with Next
-	ActDone   ActionKind = "done"        // the plan is finished
-	ActFailed ActionKind = "failed"      // the plan cannot go on: Err says why
+	ActWalk    ActionKind = "walk"         // walk the navmesh to To
+	ActPull    ActionKind = "pull"         // pull and kill the group in Entries/Positions
+	ActUse     ActionKind = "use_object"   // use game object GUID (it is within UseRange)
+	ActLoot    ActionKind = "loot_object"  // open and loot game object GUID (it is within UseRange)
+	ActItem    ActionKind = "use_item"     // use the item Item from the bags
+	ActRitual  ActionKind = "ritual"       // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
+	ActTrigger ActionKind = "area_trigger" // take the area trigger Trigger (the lead bot walks in, or the agent's own character sends it)
+	ActGossip  ActionKind = "gossip"       // talk to Gossip.NPC and pick its option (Gossip carries who talks)
+	ActKill    ActionKind = "kill_boss"    // kill Boss, First entries before it
+	ActWait    ActionKind = "wait"         // nothing to do yet: look again with Next
+	ActDone    ActionKind = "done"         // the plan is finished
+	ActFailed  ActionKind = "failed"       // the plan cannot go on: Err says why
 )
 
 // Action is the Stepper's current request. Leg and Step locate it in the plan (Step is -1 outside the steps).
@@ -84,9 +93,17 @@ type Action struct {
 	GUID      packet.GUID         // use (0 when the agent does not see the object: an entry-form action, see Entry)
 	// Entry and EntryAt are set when the World names objects by entry (EntryWorld): the order says `entry:<Entry>@EntryAt` and the server
 	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
-	Entry        uint32
-	EntryAt      *Point
+	Entry     uint32
+	EntryAt   *Point
+	SpawnGUID packet.GUID // use_object, loot_object: the exact spawn (ObjectRef.Spawn as a GUID); 0 when the plan gives none
+	// Batch is the loot_object step's batch id (LootObject.Batch; "" when it has none) and Section the chests from this step on of the run
+	// of consecutive loot_object steps that have a batch, so that the driver can group them into batches of the run's own size.
+	Batch        string
+	Section      []BatchChest
+	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
+	ViaItem      bool          // use: the Requires item is used on the object (UseObject.ViaItem)
+	Gossip       *Gossip       // gossip: the step
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
 	Item         *ItemRef      // use_item: the item to use
 	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
@@ -169,6 +186,14 @@ func (s *Stepper) enterLeg(i int) {
 // RestartLeg begins the current leg again from its first point: for a leg whose plan was reloaded before anything of it was done.
 func (s *Stepper) RestartLeg() { s.enterLeg(s.leg) }
 
+// SkipLeg gives up the current leg and goes on at the next one: the driver's way past an optional leg whose item is missing. It does nothing
+// on a plan that is done or failed.
+func (s *Stepper) SkipLeg() {
+	if s.ph != phDone && s.ph != phFailed {
+		s.enterLeg(s.leg + 1)
+	}
+}
+
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
 	return s.leg, [...]string{"walk", "pull_groups", "steps", "boss", "after_boss", "done", "failed"}[s.ph], s.idx
@@ -189,7 +214,7 @@ func (s *Stepper) Complete() {
 	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse, ActLoot, ActItem, ActRitual:
+		case ActUse, ActLoot, ActItem, ActRitual, ActTrigger, ActGossip:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
@@ -307,6 +332,9 @@ func (s *Stepper) next() Action {
 				s.nextStep()
 				continue
 			}
+			if a.Kind == ActLoot {
+				a.Batch, a.Section = batchSection(steps[s.idx:])
+			}
 			return a
 		case phBoss:
 			if l.Boss == nil {
@@ -362,11 +390,21 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		base.Kind, base.Item, base.Requires, base.Expect = ActItem, &ItemRef{Entry: u.Entry, Name: u.Name}, u.RequiresItem, u.ExpectItem
 		base.Label = s.label("step %d: use item %s", s.idx, base.Item)
 		return base, false
+	case st.Gossip != nil:
+		g := st.Gossip
+		base.Kind, base.Gossip = ActGossip, g
+		base.Label = s.label("step %d: gossip with NPC %d (%s, by %s)", s.idx, g.NPC, g.OptionText(), g.Talker())
+		return base, false
 	case st.Ritual != nil:
 		r := st.Ritual
 		at := r.Position
 		base.Kind, base.Entry, base.EntryAt, base.Participants = ActRitual, r.Entry, &at, r.Participants
 		base.Label = s.label("step %d: ritual at game object %d with %d participants", s.idx, r.Entry, r.Participants)
+		return base, false
+	case st.AreaTrigger != nil:
+		t := st.AreaTrigger
+		base.Kind, base.Trigger = ActTrigger, t
+		base.Label = s.label("step %d: area trigger %d (by %s, expect %s)", s.idx, t.ID, t.By, t.Expect)
 		return base, false
 	case st.UseObject != nil || st.LootObject != nil:
 		ref, stand := objectOf(st)
@@ -376,6 +414,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		}
 		if ew, isEntry := s.w.(EntryWorld); isEntry && ref.Entry != 0 && ew.EntryTargets() {
 			base.Kind, base.Entry = kind, ref.Entry
+			if ref.Spawn != 0 {
+				base.SpawnGUID = packet.GUID(uint64(packet.HighGameObject)<<48 | uint64(ref.Entry)<<24 | uint64(ref.Spawn))
+			}
 			switch {
 			case ref.Near != nil:
 				base.EntryAt = ref.Near
@@ -389,7 +430,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 				}
 			}
 			if st.UseObject != nil {
-				base.Requires = st.UseObject.RequiresItem
+				base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 			} else {
 				base.Expect = st.LootObject.ExpectItem
 			}
@@ -425,7 +466,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		}
 		base.Kind, base.Object, base.GUID = kind, &o, o.GUID
 		if st.UseObject != nil {
-			base.Requires = st.UseObject.RequiresItem
+			base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 		} else {
 			base.Expect = st.LootObject.ExpectItem
 		}
@@ -433,6 +474,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		return base, false
 	case st.WaitFor != nil:
 		w := st.WaitFor
+		if _, ok := s.w.(UnitWorld); w.Unit != nil && !ok {
+			return fail("wait for %s: this driver does not see units", describeWait(w))
+		}
 		if s.since.IsZero() {
 			s.since = s.now()
 		}
@@ -542,6 +586,9 @@ func (s *Stepper) holds(w *WaitFor) bool {
 			c = *w.HostilesGone.Center
 		}
 		return s.w.HostilesWithin(c, w.HostilesGone.Radius) == 0
+	case w.Unit != nil:
+		uw, ok := s.w.(UnitWorld)
+		return ok && uw.UnitHolds(w.Unit)
 	}
 	return false
 }
@@ -610,6 +657,48 @@ func describeWait(w *WaitFor) string {
 		return describeRef(&w.GameObject.ObjectRef) + " to be " + w.GameObject.State
 	case w.HostilesGone != nil:
 		return fmt.Sprintf("no hostiles within %.0f yd", w.HostilesGone.Radius)
+	case w.Unit != nil:
+		return w.Unit.describe()
 	}
 	return "nothing"
+}
+
+// describe is the unit wait for a message: "unit 7271 hostile", with "within 40 yd of x y z" when it is narrowed.
+func (u UnitWait) describe() string {
+	s := u.String()
+	if u.Near != nil {
+		s += fmt.Sprintf(" within %.0f yd of %.0f %.0f %.0f", u.radius(), u.Near.X, u.Near.Y, u.Near.Z)
+	}
+	return s
+}
+
+// radius is the radius round Near: Radius, or DefaultUnitRadius.
+func (u UnitWait) radius() float32 {
+	if u.Radius > 0 {
+		return u.Radius
+	}
+	return DefaultUnitRadius
+}
+
+// BatchChest is one chest of a Section: the plan's batch id of its step and where it lies.
+type BatchChest struct {
+	ID string
+	At Point
+}
+
+// batchSection reads the section that starts at steps[0]: the run of loot_object steps with a batch id (any id) from there on.
+func batchSection(steps []Step) (string, []BatchChest) {
+	if len(steps) == 0 || steps[0].LootObject == nil || steps[0].LootObject.Batch == "" {
+		return "", nil
+	}
+	var out []BatchChest
+	for _, st := range steps {
+		l := st.LootObject
+		if l == nil || l.Batch == "" {
+			break
+		}
+		p, _ := batchPoint(l)
+		out = append(out, BatchChest{ID: l.Batch, At: p})
+	}
+	return steps[0].LootObject.Batch, out
 }

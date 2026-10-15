@@ -3,6 +3,7 @@ package dungeon
 import (
 	"fmt"
 	"math"
+	"time"
 )
 
 // Resume: a run started with the party already inside a leg (a restart halfway through it) must not run back to the leg's first
@@ -115,4 +116,30 @@ func (s *Stepper) ResumeAt() (r Resumed, ok bool) {
 // String says what a resume did, for the report's notes.
 func (r Resumed) String() string {
 	return fmt.Sprintf("resumed leg %d at %.0f %.0f %.0f: skipped the walk to the leg's first point and %d pull group(s) behind the leader", r.Leg, r.At.X, r.At.Y, r.At.Z, r.SkippedGroups)
+}
+
+// SkipToFiredTrigger moves a Stepper that has just entered its leg to the leg's area_trigger step when that step's expect already holds
+// (the unit is hostile) or its unit is dead already: the trigger was taken before, the party stands in the room, and the walk, the pulls and
+// the grave steps before it are not run again (a resume into the Zum'rah leg re-cleared the room for minutes). It reports the step's index.
+func (s *Stepper) SkipToFiredTrigger() (step int, ok bool) {
+	if s.leg >= len(s.plan.Legs) || (s.ph != phWalk && s.ph != phPulls) {
+		return 0, false
+	}
+	uw, isU := s.w.(UnitWorld)
+	if !isU {
+		return 0, false
+	}
+	for i, st := range s.plan.Legs[s.leg].Steps {
+		t := st.AreaTrigger
+		if t == nil {
+			continue
+		}
+		dead := &UnitWait{Entries: t.ExpectUnit.Entries, Near: t.ExpectUnit.Near, Radius: t.ExpectUnit.Radius, State: UnitDead}
+		if uw.UnitHolds(t.ExpectUnit) || uw.UnitHolds(dead) {
+			s.ph, s.idx = phSteps, i
+			s.since, s.stepAt, s.stepWalks = time.Time{}, time.Time{}, 0
+			return i, true
+		}
+	}
+	return 0, false
 }

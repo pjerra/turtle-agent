@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -157,6 +158,18 @@ func (d *RemoteDriver) gather(ctx context.Context, why string) error {
 				r.GatherTimeouts++
 			})
 			d.rep.note(fmt.Sprintf("leg %d: the party did not gather within %.0f yd of the lead bot in %.0f s before %s (%s); going on", d.curLeg, float64(d.tx.GatherNear), d.opt.GatherWait.Seconds(), why, awayText(away)))
+			// The healer is the member that matters most to have in place before a pull (live, zf-zum2-s2: "came no closer in 12 s" twelve
+			// times, and the healer died first in 8 of 10 deadly fights): when it is among the stragglers it is summoned at this first
+			// timeout, not waited for again.
+			if landed := d.summonHealerStraggler(ctx, away); len(landed) > 0 {
+				var rest []awayBot
+				for _, b := range away {
+					if !slices.Contains(landed, b.guid) {
+						rest = append(rest, b)
+					}
+				}
+				away = rest
+			}
 			// A bot that got no closer in the whole wait is not coming (it cannot path, or it is stuck): the leg's gathers stop waiting
 			// for it until it is back by itself.
 			var stuck []string
@@ -273,10 +286,15 @@ func (d *RemoteDriver) aheadPassed(g packet.GUID) bool {
 // pullAhead pulls h, a hostile near the walk's next hop, to the gathered party and fights it to the end. A won fight marks where its
 // mobs died; any other outcome passes h over for the rest of the walk.
 func (d *RemoteDriver) pullAhead(ctx context.Context, h tbm.HostileRec) error {
+	return d.pullAheadNote(ctx, h, fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
+}
+
+// pullAheadNote is pullAhead with the note that says why the pull is made.
+func (d *RemoteDriver) pullAheadNote(ctx context.Context, h tbm.HostileRec, why string) error {
 	d.aheadPulling = true
 	defer func() { d.aheadPulling = false }()
 	d.remote(func(r *RemoteReport) { r.AheadPulls++ })
-	d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands within %.0f yd of the walk's next hop; the party gathers and pulls it before walking on", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z, float64(d.tx.AggroGuard)))
+	d.rep.note(why)
 	// What would come with h is counted as for a planned pull (packOf, the pack radius, h's floor): a pull of big_pack mobs or more, or
 	// of a pack with a cc_always member, is a big pull. It is gathered for like the rest, and fight() puts the pack CC on one member
 	// (bigPackCC: Polymorph by cc_priority) before the pullback to the gathered party; with no cc bot it is pulled as it is, noted.
@@ -316,4 +334,67 @@ func (d *RemoteDriver) pullAhead(ctx context.Context, h tbm.HostileRec) error {
 	}
 	d.rep.note(fmt.Sprintf("leg %d: the pull of %s on the way %s (%s); walking on", d.curLeg, d.hostileName(h), outcomeName(res.out), res.why))
 	return nil
+}
+
+// summonHealerStraggler summons the named healer (RemoteOptions.Healer) with `cmd summon` when it is among the away bots at a gather's
+// timeout, on a GM account, out of combat and not summoned in the last rejoin gap: the same GM assist as the rejoin (run_gm_assists,
+// rejoin_tps). It waits up to rejoinLand for the bot to land by the lead bot and puts the party back on follow. It returns the GUIDs that
+// landed.
+func (d *RemoteDriver) summonHealerStraggler(ctx context.Context, away []awayBot) []packet.GUID {
+	if d.opt.Healer == "" || d.tx.RejoinTPDist <= 0 || d.inCombat() || d.leadOutside() {
+		return nil
+	}
+	var b *awayBot
+	for i := range away {
+		if strings.EqualFold(away[i].name, d.opt.Healer) {
+			b = &away[i]
+		}
+	}
+	f, ok := d.g.(Follower)
+	if b == nil || !ok || !d.agentGM(ctx, f) {
+		return nil
+	}
+	if d.rejoin.last == nil {
+		d.rejoin.last = map[packet.GUID]time.Time{}
+	}
+	if last, ok := d.rejoin.last[b.guid]; ok && d.clk.Now().Sub(last) < d.tx.RejoinGap {
+		return nil
+	}
+	if !d.rejoinSummon(ctx, rejoinBot{guid: b.guid, name: b.name, dist: b.dist}) {
+		return nil
+	}
+	until := d.clk.Now().Add(rejoinLand)
+	for d.clk.Now().Before(until) {
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return nil
+		}
+		if m, ok := d.fr.Member(b.guid); ok && !m.Dead && !farHas(d.rejoinFarBotsAny(float64(d.tx.GatherNear)), b.guid) {
+			if r, err := d.order(ctx, "follow"); err == nil {
+				_ = r
+			}
+			delete(d.gatherIgnored(), b.guid)
+			return []packet.GUID{b.guid}
+		}
+	}
+	return nil
+}
+
+// rejoinFarBotsAny is rejoinFarBots without the named-bots filter: every living bot farther than yd from the lead bot or on another map.
+func (d *RemoteDriver) rejoinFarBotsAny(yd float64) []rejoinBot {
+	var out []rejoinBot
+	l, ok := d.fr.LeadRec()
+	if !ok {
+		return nil
+	}
+	for _, m := range d.fr.Party {
+		if m.GUID == l.GUID || m.Dead {
+			continue
+		}
+		if m.Map != l.Map {
+			out = append(out, rejoinBot{guid: m.GUID, name: m.Name, dist: math.Inf(1), other: true})
+		} else if dd := dist3(partyPoint(m), partyPoint(l)); dd > yd {
+			out = append(out, rejoinBot{guid: m.GUID, name: m.Name, dist: dd})
+		}
+	}
+	return out
 }

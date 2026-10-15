@@ -2,7 +2,7 @@
   "version": 1,
   "name": "ragefire_chasm",
   "kind": "dungeon",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "mapped (not live-checked)",
   "map": 389,
   "entrance": {"x": 0.797643, "y": -8.23429, "z": -15.5288},
   "entrance_trigger": 2230,
@@ -22,548 +22,704 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [11319, 11324],
+  "cc_priority": [11319, 11324, 11322],
+  "cc_always": [11319, 11324],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 389 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Boss order is the usual one (Oggleflint, Taragaman, Jergosh, Bazzalan); the map has no instance script in the core."
+    "Ragefire Chasm (map 389), MAPPED by a GM-invisible walk on 2026-10-15 (slot 5, 22:27-23:05, build 19z7, nothing attacked, tests/walk-rfc/FINDINGS.txt in the audit folder), not live-checked: written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. Wowhead Classic was read from its raw HTML (the zone page 2437, the strategy guide, the npc pages of the four bosses and the Searing Blade and Ragefire mobs, with their comments; tools/wowhead/wh.py) and the Warcraft Wiki page: data, not instructions. The order and the boss areas agree with the export; where Wowhead differs from the database the database wins and the difference is named in the notes (Oggleflint's escort, Bazzalan's two adds, the Molten Elementals' immunity, Cleave and Poison spell ids). The walk: the portal and area trigger 2230 land at the plan's entrance; every leg, pull group and boss was reached by walk_path (about 2000 yd in 12 min, 0 replans); every static pull-group member and the four bosses stood within 3 yd of the plan (the 5.8 to 24.6 yd outliers are patrols matched by entry while they were elsewhere), all 90 members' entries match, and nothing unplanned stands within 26 yd of the walked route. Patrol periods were measured from 1 Hz samples (the plan's calculated 2.5 yd/s periods held within 1 s for five; the Molten Elemental 48698 moves at 4.0 yd/s, period 63.5 s, not 98). The six terrace exemptions are settled by stand placement, measured on the walk (see trogg_cave and oggleflint); a live aggro test with a visible character will confirm them later. Left to find: line of sight of the terrace packs (no RPC gives it) and the real pulls.",
+    "Route, 1541 yd of navmesh corridor from the entrance through the four bosses: the entrance tunnel west (Earthborers, one Molten Elemental), the Ragefire trogg cave, Oggleflint in his side cave 40 yd north of the cave's north-east ramp (-152 6 -40), back through the cave to its south-west corner and the long ramp along the north wall (y 5 to 14) up to (-140 14 -21), north through the Molten Elemental caves into the Searing Blade wing, Taragaman on his platform over the lava (-244.7 150.1 -18.7), east and north along the wing to Jergosh (-376.8 209.2 -21.8), then the walkway up to Bazzalan (-384.9 146 7.8), the last boss. The boss order is the corridor's: the navmesh has no shorter way (Oggleflint 493 yd from the entrance, Taragaman +643, Jergosh +175, Bazzalan +230). Pull radii are cut by tools/dungeongen's overlap test (TestNoMobStandsInAPullGroupsRangeUnlisted): each is the largest of the wanted 10-30 yd that keeps every mob of another pack out of range (radius + 3 yd, 3-D), so the pull takes its own pack and a patrol's group has a short radius (2 to 17 yd; the patrol's path, not the radius, finds a member that has walked off). Nine legs, 55 pull groups of 86 mobs and 4 bosses with their escorts (the plan check and TestRagefireRouteHasNoUnplannedPack: no hostile spawn within 20 yd of the route is in no group, bar the six terrace mobs named in the cave legs).",
+    "Casters and healers (creature_spells, creature_ai_events): Ragefire Shaman 11319 casts Healing Wave and Lightning Bolt and flees at 15 % health; Searing Blade Warlock 11324 casts Shadow Bolt, comes with a Voidwalker Minion (entry 8996, same level as its warlock, faction 554, hostile; EventAI 1132402 casts Summon Voidwalker 12746 when it spawns, so the pet is not in the export): the walk saw 10 of 10 warlocks with it already out, 2.2 to 3.7 yd away, so the seven warlock groups of the route list it (entry 8996 at its live place) and flees at 15 %; Searing Blade Cultist 11322 casts Curse of Agony; Searing Blade Enforcer 11323 Shield Slam (stun); Ragefire Trogg 11318 Strike; Earthborer 11320 Earthborer Acid. cc_priority and cc_always put the mage's Polymorph on the Shaman, then the Warlock, then the Cultist (all humanoid); there is no kill_first: the loader refuses an entry that is also in the CC lists (a kill_first entry is never crowd-controlled), and the mage's Polymorph on the healer and the casters is the plan's way; without a mage the tank's threat decides the order. `fleers` makes the remote driver kill the two fleeing entries before they are out of reach and wait for one that got away. The Molten Elementals 11321 (spawn mechanic-immunity mask 646014751: charm, disorient, disarm, distract, fear, silence, sleep, snare, knockout, bleed, polymorph, horror, interrupt, daze, sap) cannot be crowd-controlled and carry a Fire Shield (EventAI 1132101/1132102, spell 18968): they are tanked and burned down, the database gives them fire resistance 22 and nature resistance 15 and no school immunity (a Wowhead comment says nature spells, Lightning, Earth Shock, are immune and only fire hurts: the database wins, expect resists, and the mage and shaman should check on the walk).",
+    "Factions: every hostile is hostile to both teams (Troggs 59, Earthborers 16, Molten Elementals 834, Searing Blade 554), no team gate is needed. Maur Grimtotem (11834, faction 35, npc_flags 2, quest giver at -148.1 23.6 -38.6, 15 yd before Oggleflint) is friendly and in the Oggleflint leg's skip. The area trigger 2230 asks for level 8 (areatrigger_teleport); the mobs are level 13-15 (elite rank 1) and the bosses 16, so the band is 13-18 (the Wowhead guide's own range: hires take its middle, level 15 or 16; the zone page says 15-25, the Warcraft Wiki 15-21). Everything is elite; Wowhead calls it the easiest dungeon in the game, runs it at 12-15 with a tank, a healer and CC, and 'you need a few CC as the enemies are close together'. Entering: `cmd enter 2230` at the portal (area trigger 2230 on map 1, box 21.7 x 11.8 x 21.2 at 1818.4 -4427.26 -10.45 in the Cleft of Shadow, Orgrimmar), or game_tele 209 `rfc` inside the instance.",
+    "What the driver cannot do yet: nothing the clear needs. There is no door, lever, key, gossip, item, escort, ritual or scripted summon in this dungeon, so no leg has a step. Two limits of the plan are not missing step types but ground the driver does not know: (1) the terrace packs (spawn rows 38050 + 48637, 48638, 38049 + 43580 + 43581; see trogg_cave and oggleflint) stand on floors the cave joins only by a 378 yd loop round its southern camps, so the plan leaves them out and a pull from the ledge would send the party round the loop; (2) the patrols (six, below) are met on their paths, the driver's patrol handling (waits for one to walk off, or pulls it alone first) is the only tool. No `area_trigger` or other client packet is needed: the map has no scripted area trigger."
   ],
   "legs": [
     {
-      "name": "oggleflint",
-      "to": {"x": -15.9865, "y": -50.1693, "z": -21.7804},
+      "name": "tunnel",
+      "to": {"x": 0.8, "y": -8.23, "z": -15.53},
       "pull_groups": [
         {
           "entries": [11320],
           "positions": [
-            {"x": -15.9865, "y": -50.1693, "z": -21.7804}
-          ]
+            {"x": -15.99, "y": -50.17, "z": -21.78}
+          ],
+          "radius": 11
         },
         {
           "entries": [11320],
           "positions": [
-            {"x": -23.8034, "y": -62.1556, "z": -21.3704}
-          ]
+            {"x": -23.8, "y": -62.16, "z": -21.37}
+          ],
+          "radius": 11
         },
         {
           "entries": [11321],
           "positions": [
-            {"x": -36.4604, "y": -42.0863, "z": -21.773}
-          ]
+            {"x": -36.46, "y": -42.09, "z": -21.77}
+          ],
+          "radius": 13
         },
         {
           "entries": [11320],
           "positions": [
-            {"x": -45.0298, "y": -27.7645, "z": -21.2917}
-          ]
+            {"x": -45.03, "y": -27.76, "z": -21.29}
+          ],
+          "radius": 12
         },
         {
           "entries": [11320],
           "positions": [
-            {"x": -70.6122, "y": -32.8292, "z": -18.4872}
-          ]
+            {"x": -70.61, "y": -32.83, "z": -18.49}
+          ],
+          "radius": 15
+        }
+      ],
+      "notes": [
+        "The entrance tunnel, from the area trigger's landing (0.8 -8.2 -15.5) west and down to the trogg cave: four Earthborers (11320, 886-973 hp, Earthborer Acid; two more in the next leg) and stand within 22 yd of the walk, all wanderers (wander 2 to 5, movement type 1), pulled one at a time. The Earthborer 38045 at -23.8 -62.2 is 14 yd off the road and 22 yd from the path; it is a group of its own because a wanderer of wander 5 passes it. The leg's `to` is the entrance itself (the party stands there after the portal)."
+      ]
+    },
+    {
+      "name": "tunnel_end",
+      "to": {"x": -70.61, "y": -32.83, "z": -18.49},
+      "pull_groups": [
+        {
+          "entries": [11320],
+          "positions": [
+            {"x": -106.32, "y": -37.66, "z": -30.04}
+          ],
+          "radius": 12
         },
         {
           "entries": [11320],
           "positions": [
-            {"x": -106.32, "y": -37.6574, "z": -30.0448}
-          ]
-        },
-        {
-          "entries": [11320],
-          "positions": [
-            {"x": -129.135, "y": -35.1578, "z": -33.2627}
-          ]
-        },
-        {
-          "entries": [11319, 11318, 11319],
-          "positions": [
-            {"x": -142.4, "y": -12.8618, "z": -54.2942},
-            {"x": -142.297, "y": -6.18364, "z": -53.1894},
-            {"x": -136.804, "y": -3.84714, "z": -53.0579}
-          ]
-        },
-        {
-          "entries": [11319, 11318],
-          "positions": [
-            {"x": -147.681, "y": 0.443873, "z": -39.1503},
-            {"x": -152.453, "y": 3.90943, "z": -40.59}
-          ]
-        },
-        {
-          "entries": [11320],
-          "positions": [
-            {"x": -168.542, "y": 13.3261, "z": -29.6158}
-          ]
-        },
-        {
-          "entries": [11318, 11319],
-          "positions": [
-            {"x": -154.037, "y": 27.9676, "z": -38.5669},
-            {"x": -148.041, "y": 27.1943, "z": -38.8538}
-          ]
-        },
+            {"x": -129.13, "y": -35.16, "z": -33.26}
+          ],
+          "radius": 12,
+          "patrol": {
+            "entries": [11318],
+            "path": [
+              {"x": -181.5, "y": -32.1, "z": -44.4},
+              {"x": -221.2, "y": -34.7, "z": -55.2},
+              {"x": -234.4, "y": -36.4, "z": -55.7},
+              {"x": -275.3, "y": -42, "z": -60.8},
+              {"x": -285.3, "y": -54.1, "z": -60.8},
+              {"x": -238.7, "y": -36.8, "z": -56.7},
+              {"x": -193.9, "y": -35.3, "z": -46.1},
+              {"x": -149.5, "y": -33.9, "z": -35.3},
+              {"x": -175.8, "y": -29.7, "z": -43.6}
+            ],
+            "period_s": 115.7,
+            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s = 115 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48648b@"
+          }
+        }
+      ],
+      "notes": [
+        "The last two Earthborers of the tunnel (-106.3 -37.7 -30 and -129.1 -35.2 -33.3), the road dropping 8 yd between them. Split from the first tunnel leg because the plan check's look point for the pack at -106 is 22 yd away in 3-D from the previous pack's look point (the slope), outside the 21 yd view."
+      ]
+    },
+    {
+      "name": "trogg_cave",
+      "to": {"x": -129.13, "y": -35.16, "z": -33.26},
+      "pull_groups": [
         {
           "entries": [11318],
           "positions": [
-            {"x": -183.393, "y": 2.79912, "z": -56.8092}
-          ]
-        },
-        {
-          "entries": [11318, 11319, 11318],
-          "positions": [
-            {"x": -204.723, "y": -1.24259, "z": -61.6764},
-            {"x": -211.07, "y": -7.25025, "z": -61.8044},
-            {"x": -217.669, "y": -5.11624, "z": -61.7999}
-          ]
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -215.446, "y": -15.9344, "z": -61.8032}
-          ]
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -240.714, "y": -8.03152, "z": -61.5235}
-          ]
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -261.781, "y": -5.76433, "z": -63.9288}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -252.09, "y": 7.15975, "z": -50.0273}
-          ]
-        },
-        {
-          "entries": [11320],
-          "positions": [
-            {"x": -272.518, "y": 8.65636, "z": -49.9972}
-          ]
-        },
-        {
-          "entries": [11320],
-          "positions": [
-            {"x": -296.563, "y": 7.55345, "z": -47.5269}
-          ]
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -285.522, "y": -20.8822, "z": -60.4145}
-          ]
+            {"x": -181.51, "y": -32.07, "z": -44.43}
+          ],
+          "radius": 20,
+          "patrol": {
+            "entries": [11318],
+            "path": [
+              {"x": -181.5, "y": -32.1, "z": -44.4},
+              {"x": -221.2, "y": -34.7, "z": -55.2},
+              {"x": -234.4, "y": -36.4, "z": -55.7},
+              {"x": -275.3, "y": -42, "z": -60.8},
+              {"x": -285.3, "y": -54.1, "z": -60.8},
+              {"x": -238.7, "y": -36.8, "z": -56.7},
+              {"x": -193.9, "y": -35.3, "z": -46.1},
+              {"x": -149.5, "y": -33.9, "z": -35.3},
+              {"x": -175.8, "y": -29.7, "z": -43.6}
+            ],
+            "period_s": 115.7,
+            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s = 115 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48648@"
+          }
         },
         {
           "entries": [11318, 11318],
           "positions": [
-            {"x": -300.512, "y": -28.4078, "z": -60.4574},
-            {"x": -306.314, "y": -29.1276, "z": -60.1744}
-          ]
+            {"x": -238.66, "y": -31.56, "z": -56.62},
+            {"x": -237.99, "y": -40.35, "z": -56.27}
+          ],
+          "radius": 12
         },
         {
-          "entries": [11318, 11319],
+          "entries": [11319],
           "positions": [
-            {"x": -290.812, "y": -47.0829, "z": -60.89},
-            {"x": -280.902, "y": -49.179, "z": -60.9322}
-          ]
+            {"x": -253.89, "y": -38.88, "z": -60.46}
+          ],
+          "radius": 9
         },
         {
           "entries": [11318, 11318, 11319],
           "positions": [
-            {"x": -276.93, "y": -63.3295, "z": -60.3566},
-            {"x": -269.28, "y": -60.0032, "z": -60.3566},
-            {"x": -271.827, "y": -64.4, "z": -60.3566}
-          ]
+            {"x": -262.22, "y": -29.89, "z": -60.61},
+            {"x": -270.13, "y": -31.88, "z": -60.61},
+            {"x": -266.73, "y": -28.03, "z": -60.61}
+          ],
+          "radius": 9
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -255.431, "y": -66.4518, "z": -62.1072}
-          ]
+            {"x": -266.61, "y": -44.4, "z": -60.85}
+          ],
+          "radius": 10
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -266.61, "y": -44.4024, "z": -60.8488}
-          ]
-        },
-        {
-          "entries": [11319],
-          "positions": [
-            {"x": -253.886, "y": -38.8841, "z": -60.4593}
-          ]
-        },
-        {
-          "entries": [11318, 11319, 11318],
-          "positions": [
-            {"x": -262.216, "y": -29.8943, "z": -60.6085},
-            {"x": -266.73, "y": -28.0281, "z": -60.6085},
-            {"x": -270.127, "y": -31.8806, "z": -60.6085}
-          ]
+            {"x": -285.52, "y": -20.88, "z": -60.41}
+          ],
+          "radius": 12
         },
         {
           "entries": [11318, 11318],
           "positions": [
-            {"x": -238.656, "y": -31.5648, "z": -56.6214},
-            {"x": -237.985, "y": -40.3476, "z": -56.2706}
-          ]
+            {"x": -300.51, "y": -28.41, "z": -60.46},
+            {"x": -306.31, "y": -29.13, "z": -60.17}
+          ],
+          "radius": 12
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -229.281, "y": -59.7834, "z": -61.3117}
-          ]
+            {"x": -261.78, "y": -5.76, "z": -63.93}
+          ],
+          "radius": 12
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -200.409, "y": -69.7984, "z": -63.2233}
-          ]
-        },
-        {
-          "entries": [11319],
-          "positions": [
-            {"x": -174.416, "y": -65.4036, "z": -57.8333}
-          ]
+            {"x": -240.71, "y": -8.03, "z": -61.52}
+          ],
+          "radius": 12
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -160.754, "y": -65.051, "z": -59.4342}
-          ]
+            {"x": -215.45, "y": -15.93, "z": -61.8}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [11318],
+            "path": [
+              {"x": -215.4, "y": -15.9, "z": -61.8},
+              {"x": -217.7, "y": -11.7, "z": -61.8},
+              {"x": -277.6, "y": -8.9, "z": -62.5},
+              {"x": -287.4, "y": -23.7, "z": -60},
+              {"x": -264.4, "y": -6.3, "z": -63.9},
+              {"x": -216.8, "y": -11.2, "z": -61.8}
+            ],
+            "period_s": 66,
+            "source": "creature_movement of spawn 48655 (Ragefire Trogg, movement type 2, 6 points, 165 yd at 2.5 yd/s = 66 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48655@"
+          }
         },
         {
-          "entries": [11319, 11318],
+          "entries": [11318, 11319, 11318],
           "positions": [
-            {"x": -145.738, "y": -57.7801, "z": -58.4145},
-            {"x": -148.183, "y": -52.4618, "z": -57.7852}
-          ]
+            {"x": -217.67, "y": -5.12, "z": -61.8},
+            {"x": -211.07, "y": -7.25, "z": -61.8},
+            {"x": -204.72, "y": -1.24, "z": -61.68}
+          ],
+          "radius": 6
         },
         {
           "entries": [11318],
           "positions": [
-            {"x": -162.128, "y": -43.5051, "z": -59.124}
-          ]
-        },
-        {
-          "entries": [11319, 11318],
-          "positions": [
-            {"x": -162.553, "y": -26.8425, "z": -57.8494},
-            {"x": -157.268, "y": -21.7249, "z": -57.2708}
-          ]
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -181.511, "y": -32.0671, "z": -44.4307}
-          ]
-        },
-        {
-          "entries": [11321, 11321],
-          "positions": [
-            {"x": -208.558, "y": 55.8574, "z": -13.9447},
-            {"x": -198.621, "y": 60.1696, "z": -13.8611}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -176.654, "y": 75.2942, "z": -21.8957}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -144.941, "y": 79.1501, "z": -20.9783}
-          ]
-        },
-        {
-          "entries": [11321, 11320],
-          "positions": [
-            {"x": -127.906, "y": 75.5442, "z": -21.8833},
-            {"x": -125.112, "y": 80.0961, "z": -21.3202}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -124.161, "y": 63.9612, "z": -21.2143}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -111.344, "y": 52.0495, "z": -18.6906}
-          ]
-        },
-        {
-          "entries": [11321, 11320],
-          "positions": [
-            {"x": -94.604, "y": 54.1892, "z": -17.9829},
-            {"x": -95.8062, "y": 45.3441, "z": -17.4092}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -111.204, "y": 76.3607, "z": -20.1425}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -85.7455, "y": 97.3632, "z": -7.39686}
-          ]
-        },
-        {
-          "entries": [11321],
-          "positions": [
-            {"x": -74.6995, "y": 89.9573, "z": -7.32838}
-          ]
-        },
+            {"x": -183.39, "y": 2.8, "z": -56.81}
+          ],
+          "radius": 12
+        }
+      ],
+      "notes": [
+        "The Ragefire trogg cave, first pass along its north strip (y about -8, floor z -57 to -64) from the tunnel's opening at (-169 -35 -41): the patrolling Trogg 48648, the troggs and shamans of the strip, the south-west corner, and the way east to the foot of the ramp up to Oggleflint (-152 6 -40). Packs are linked by creature_groups (flags 2 = OPTION_AGGRO_TOGETHER, CreatureGroups.h: the members aggro together): [48654 + 48653], [48660 + 48666 + shaman 48657], [48656 + shaman 48652 + 48649]. The Shaman is the pack's healer (Healing Wave): the mage sheeps it, the rest burn the troggs. A Wowhead comment on the zone page (rated -1) warns of exactly this: a Warlock pulling near the ledge by the dead Tauren of the Lost Satchel quest (the east path down into the cave, guarded by troggs) 'aggroed the entire remaining Trogg population, around 20 from the pit below': the cave floor under that ledge is the trogg cave's strip and the terrace packs below. Left out on purpose, 17-20 yd below the route and reachable only by the 378 yd loop through the cave's southern camps (the navmesh path from the tunnel end to them goes -235 -43 -56, -277 -64 -60, -285 -84 -61, east along y -62 and north at -152): the terrace pair Trogg 38050 + Shaman 48637 (-157.3 -21.7 -57.3, -162.6 -26.8 -57.8) and the Trogg 48638 (-162.1 -43.5 -59.1), at the cave's north-east alcove under the tunnel's opening. Settled on the 2026-10-15 walk by stand placement, not by a pull: every look point of the plan (where the party stands to pull) is at least the mob's aggro radius plus 2 yd from each of the six, 19 yd for a level-13 mob and 21 for a level-15 one (TestRagefireStandsKeepClear; the pull of the patrolling Trogg 48648 on the ledge stands at (-161.4 -33.3 -39.4), 19.6 yd from the Shaman 48637 whose radius is 17). The route past the opening comes as near as 18.4 yd to the Shaman 48637 (level 13, aggro radius 17: outside by 1.4 yd), 20.2 to the Trogg 48638 (radius 19) and 20.6 to the Trogg 38050; it cannot be moved away: the ledge is 16-18 yd above them and 8 to 9 yd to the side of the route on both sides, so no lateral move gains the missing yard. A party spread of 3 yd puts the Shaman and the Trogg 48638 inside range; whether rock blocks the view is not known (no RPC gives line of sight): a live aggro test with a visible character at the opening (-165.7 -33 -40.7) will confirm it, and the patrolling Trogg 48648 also walks this ledge (5 yd from the route). The southern camps (rows 48639-48640, 48647, 48651, 48663, 48665, 48667-48668, 48671, 48674, 42629, 43579 and and the patrolling Shaman 48669, 109 s round, 213 yd at 2.5 yd/s through the south camps near (-234 -61), measured on the walk) are 25 yd or more from the route and are not pulled. The camp of 48665 + 48667 + 48671 is not pulled with the shaman 48670 of the south-west corner (see trogg_west)."
+      ]
+    },
+    {
+      "name": "oggleflint",
+      "to": {"x": -192, "y": 0, "z": -59},
+      "pull_groups": [
         {
           "entries": [11318, 11319],
           "positions": [
-            {"x": -264.196, "y": -92.5713, "z": -61.7963},
-            {"x": -270.089, "y": -96.8868, "z": -61.9013}
-          ]
-        },
+            {"x": -152.45, "y": 3.91, "z": -40.59},
+            {"x": -147.68, "y": 0.44, "z": -39.15}
+          ],
+          "radius": 12
+        }
+      ],
+      "skip": [11834],
+      "boss": {
+        "entry": 11517,
+        "position": {"x": -147.55, "y": 38.71, "z": -38.8},
+        "first": [11319, 11318]
+      },
+      "notes": [
+        "Oggleflint (11517, 1540 hp, Cleave 15584 every 5 s, faction 59, immune to fear and horror) stands at -147.5 38.7 -38.8 with a Ragefire Shaman (48643, Healing Wave) and a Ragefire Trogg (48645): creature_groups 48644 (flags 2, aggro together) links all three, so they are `boss.first` (kill the Shaman, then the Trogg, then Oggleflint) and not a pull group. Wowhead guide: CC one add (the Shaman), the tank picks up the other and faces Oggleflint away from the group (Cleave, Wowhead lists spell 15496, the database 15584 every 5 s), the damage dealers kill the free add first, then Oggleflint, and the crowd-controlled add last (the driver leaves a polymorphed mob alone until it is the last one). Wowhead's guide says two Troggs and a comment says the adds can be pulled and Oggleflint left alone; the database has a Shaman and a Trogg in creature_groups 48644 with him (aggro together), so expect all three. Trogg 43583 + Shaman 43582 at the foot of the ramp (-152.5 3.9 -40.6 and -147.7 0.4 -39.2, linked by creature_groups 43582) are the one pull group of the leg. Left out: the terrace pit under the ramp (Shaman 38049, Shaman 43580, Trogg 43581 at -136.8 -3.8 -53.1, -142.4 -12.9 -54.3, -142.3 -6.2 -53.2), reached only by the south loop (231-257 yd). The walk found the Trogg 43581 (level 13, radius 17) 15.9 yd from the position of Shaman 43582 (-147.7 0.4 -39.2) and 18.8 yd from the ramp foot; the plan's look point for this pack (where the party stands to pull it) is (-170.8 2.5 -50.8) then (-166.1 2.7 -48.2), 25 yd or more from all three pit mobs, and the pack is pulled to the tank there, not fought at the pack's own spot. Keep the fight at the ramp's foot: the mobs of the pack come to the tank. Maur Grimtotem (11834) is a friendly quest giver next to Oggleflint (skip)."
+      ]
+    },
+    {
+      "name": "trogg_west",
+      "to": {"x": -271, "y": -11, "z": -63},
+      "pull_groups": [
         {
           "entries": [11319],
           "positions": [
-            {"x": -287.744, "y": -73.9324, "z": -60.5234}
-          ]
+            {"x": -280.9, "y": -49.18, "z": -60.93}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [11318],
+          "positions": [
+            {"x": -290.81, "y": -47.08, "z": -60.89}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [11320],
+          "positions": [
+            {"x": -296.56, "y": 7.55, "z": -47.53}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11320],
+          "positions": [
+            {"x": -272.52, "y": 8.66, "z": -50}
+          ],
+          "radius": 17,
+          "patrol": {
+            "entries": [11320],
+            "path": [
+              {"x": -272.4, "y": 8.6, "z": -50},
+              {"x": -256.8, "y": 9.4, "z": -49.9},
+              {"x": -241.5, "y": 7.9, "z": -46.6},
+              {"x": -228.5, "y": 6.8, "z": -44.2},
+              {"x": -214.3, "y": 5.5, "z": -41.2},
+              {"x": -197.9, "y": 6.4, "z": -35.1},
+              {"x": -177.4, "y": 9.7, "z": -31.8},
+              {"x": -162.8, "y": 12.6, "z": -27.9},
+              {"x": -146.6, "y": 11.5, "z": -22.2},
+              {"x": -135.5, "y": 7.4, "z": -20.9},
+              {"x": -147.3, "y": 9.4, "z": -22.5},
+              {"x": -172.2, "y": 13.7, "z": -30.6},
+              {"x": -187.5, "y": 12.5, "z": -32.9},
+              {"x": -203.8, "y": 11.3, "z": -37},
+              {"x": -236.3, "y": 8.2, "z": -44.5},
+              {"x": -242.9, "y": 7.7, "z": -47.2},
+              {"x": -263.6, "y": 9.2, "z": -49.8},
+              {"x": -279.6, "y": 10.3, "z": -48.4}
+            ],
+            "period_s": 120,
+            "source": "creature_movement of spawn 48675 (Earthborer, movement type 2, 18 points, 298 yd at 2.5 yd/s = 119 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48675@"
+          }
+        },
+        {
+          "entries": [11321],
+          "positions": [
+            {"x": -252.09, "y": 7.16, "z": -50.03}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11320],
+          "positions": [
+            {"x": -168.54, "y": 13.33, "z": -29.62}
+          ],
+          "radius": 12
         }
       ],
-      "boss": {
-        "entry": 11517,
-        "position": {"x": -147.548, "y": 38.7127, "z": -38.8039}
-      }
+      "notes": [
+        "Second pass: back west along the strip (already cleared) to the cave's south-west corner and up the ramp that starts there (the path goes -295 -39 -61 north along the west wall -300 -14 -54, -295 2 -47, then east along y 5 to 14, floor rising from -47 to -21). Pulls in route order: the Shaman 48670 and Trogg 48673 of the corner (wanderers; the walk found the camp of Shaman 48671 + Troggs 48665 and 48667 at -270 to -277 -60 to -64 14.7 to 17.7 yd from the position of 48670, inside the aggro of a party standing there, and 25 to 29 yd from 48673). Two ways were open: one four-mob pull with two Shamans, or the stand away from the camp. The plan takes the stand: the look point for the pull of 48670 is (-284.7 -30.6 -60.1), 32 to 35 yd from all three camp mobs, and 48670 and 48673 are pulled to the tank there, so the camp is not drawn in unless a wanderer leads it (TestRagefireStandsKeepClear keeps every look point 20 yd or more from the camp). Safer than the merge: the camp stays asleep and every pull is one or two mobs; the cost is that a Shaman that wanders south toward the camp must be left to come back, the Earthborers 48679 and 48675 (patrolling), the Molten Elemental 48664 and the Earthborer 48642 at the ramp's end (-168.5 13.3 -29.6)."
+      ]
     },
     {
-      "name": "taragaman_the_hungerer",
-      "to": {"x": -193.884, "y": 94.2191, "z": -24.6305},
+      "name": "molten_cave",
+      "to": {"x": -140, "y": 14, "z": -21},
       "pull_groups": [
         {
-          "entries": [11322, 11322, 11323],
+          "entries": [11321],
           "positions": [
-            {"x": -193.884, "y": 94.2191, "z": -24.6305},
-            {"x": -202.037, "y": 89.1225, "z": -25.0507},
-            {"x": -205.738, "y": 95.4673, "z": -25.5053}
-          ]
+            {"x": -111.34, "y": 52.05, "z": -18.69}
+          ],
+          "radius": 13,
+          "patrol": {
+            "entries": [11321],
+            "path": [
+              {"x": -77, "y": 94.3, "z": -7.2},
+              {"x": -92.6, "y": 102.4, "z": -7.7},
+              {"x": -101.3, "y": 102.8, "z": -10.9},
+              {"x": -122.1, "y": 103, "z": -18.6},
+              {"x": -130.5, "y": 97.9, "z": -20.6},
+              {"x": -133.4, "y": 88.5, "z": -20.9},
+              {"x": -133, "y": 80.8, "z": -21.1},
+              {"x": -100.4, "y": 51.5, "z": -17.8},
+              {"x": -116.6, "y": 69.3, "z": -20.9},
+              {"x": -133.6, "y": 87.8, "z": -20.9},
+              {"x": -132.8, "y": 95.4, "z": -20.8},
+              {"x": -122, "y": 102.7, "z": -18.6},
+              {"x": -111.2, "y": 103.8, "z": -14.8},
+              {"x": -92.6, "y": 102.9, "z": -7.8},
+              {"x": -79.2, "y": 98.2, "z": -7},
+              {"x": -77.4, "y": 91.8, "z": -7.4}
+            ],
+            "period_s": 63.5,
+            "source": "creature_movement of spawn 48698 (Molten Elemental, movement type 2, 16 points, 246 yd at 4.0 yd/s = 61 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48698@"
+          }
         },
         {
-          "entries": [11323],
+          "entries": [11321],
           "positions": [
-            {"x": -208.058, "y": 95.3564, "z": -25.3951}
-          ]
+            {"x": -94.6, "y": 54.19, "z": -17.98}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [11320],
+          "positions": [
+            {"x": -95.81, "y": 45.34, "z": -17.41}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [11321],
+          "positions": [
+            {"x": -124.16, "y": 63.96, "z": -21.21}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [11321],
+          "positions": [
+            {"x": -111.2, "y": 76.36, "z": -20.14}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [11321, 11320],
+          "positions": [
+            {"x": -127.91, "y": 75.54, "z": -21.88},
+            {"x": -125.11, "y": 80.1, "z": -21.32}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [11321],
+          "positions": [
+            {"x": -144.94, "y": 79.15, "z": -20.98}
+          ],
+          "radius": 14
+        },
+        {
+          "entries": [11321],
+          "positions": [
+            {"x": -176.65, "y": 75.29, "z": -21.9}
+          ],
+          "radius": 15
+        }
+      ],
+      "notes": [
+        "The Molten Elemental caves (north of the ramp's top at -140 14 -21, floor z -17 to -22): seven Molten Elementals (11321, CC-immune, Fire Shield) and two Earthborers, all wanderers (wander 2 to 5), pulled one by one along the route (-111 52, -124 64, -128 75, -145 79, -177 75); the side wing at -95 45 to 54 (rows 38048 and 44184) is 17 yd off the path and pulled from it. The patrolling Molten Elemental 48698 walks (-100 52) to (-134 88) to the north-east (high ground, z -7) and meets the first two groups."
+      ]
+    },
+    {
+      "name": "taragaman",
+      "to": {"x": -172, "y": 80, "z": -21},
+      "pull_groups": [
+        {
+          "entries": [11322, 11322, 11323, 11323],
+          "positions": [
+            {"x": -193.88, "y": 94.22, "z": -24.63},
+            {"x": -202.04, "y": 89.12, "z": -25.05},
+            {"x": -205.74, "y": 95.47, "z": -25.51},
+            {"x": -208.06, "y": 95.36, "z": -25.4}
+          ],
+          "radius": 12,
+          "patrol": {
+            "entries": [11323],
+            "path": [
+              {"x": -207.5, "y": 92.5, "z": -25.3},
+              {"x": -222.8, "y": 92.4, "z": -24.8},
+              {"x": -241.3, "y": 93.6, "z": -22.3},
+              {"x": -258.9, "y": 93.7, "z": -25},
+              {"x": -268.3, "y": 96.7, "z": -25},
+              {"x": -285.7, "y": 98.3, "z": -25.3},
+              {"x": -298.9, "y": 109.7, "z": -26.6},
+              {"x": -306.2, "y": 125.5, "z": -24.9},
+              {"x": -307, "y": 135.3, "z": -24.8},
+              {"x": -303.6, "y": 142.2, "z": -24.9},
+              {"x": -297.8, "y": 157.4, "z": -25.1},
+              {"x": -296.5, "y": 168.2, "z": -21.3},
+              {"x": -295.4, "y": 178, "z": -20.9},
+              {"x": -293.6, "y": 194.3, "z": -25.5},
+              {"x": -291.5, "y": 212.8, "z": -25.4},
+              {"x": -277.4, "y": 211.2, "z": -25},
+              {"x": -269.7, "y": 210.3, "z": -24.6},
+              {"x": -252.3, "y": 208.3, "z": -21.1},
+              {"x": -232.7, "y": 206.1, "z": -24.9},
+              {"x": -218.7, "y": 212.4, "z": -25},
+              {"x": -209.2, "y": 214.6, "z": -25},
+              {"x": -197.5, "y": 208.9, "z": -23.5},
+              {"x": -187.8, "y": 201.5, "z": -24.8},
+              {"x": -181.3, "y": 190.2, "z": -25.9},
+              {"x": -180.9, "y": 179.2, "z": -25.8},
+              {"x": -180.4, "y": 166.1, "z": -25.1},
+              {"x": -182.5, "y": 156.4, "z": -25.2},
+              {"x": -188.5, "y": 142.4, "z": -25.2},
+              {"x": -193.7, "y": 130.3, "z": -22.5},
+              {"x": -198, "y": 116.8, "z": -23},
+              {"x": -203.3, "y": 100.1, "z": -25.5},
+              {"x": -206.2, "y": 94.3, "z": -25.5}
+            ],
+            "period_s": 173.5,
+            "source": "creature_movement of spawn 48696 (Searing Blade Enforcer, movement type 2, 32 points, 432 yd at 2.5 yd/s = 173 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48696@"
+          }
         },
         {
           "entries": [11323, 11323],
           "positions": [
-            {"x": -219.3, "y": 94.5484, "z": -24.9351},
-            {"x": -223.454, "y": 87.2837, "z": -24.9351}
-          ]
+            {"x": -219.3, "y": 94.55, "z": -24.94},
+            {"x": -223.45, "y": 87.28, "z": -24.94}
+          ],
+          "radius": 8
         },
         {
           "entries": [11323, 11323],
           "positions": [
-            {"x": -203.218, "y": 107.389, "z": -25},
-            {"x": -195.347, "y": 108.507, "z": -24.2915}
-          ]
+            {"x": -203.22, "y": 107.39, "z": -25},
+            {"x": -195.35, "y": 108.51, "z": -24.29}
+          ],
+          "radius": 9
         },
         {
-          "entries": [11323, 11322, 11323, 11324],
+          "entries": [11322, 11324, 8996],
           "positions": [
-            {"x": -198.964, "y": 151.226, "z": -25.1366},
-            {"x": -187.521, "y": 153.224, "z": -25.1366},
-            {"x": -199.194, "y": 159.015, "z": -25.1366},
-            {"x": -183.648, "y": 160.15, "z": -25.2199}
-          ]
-        },
-        {
-          "entries": [11323, 11323],
-          "positions": [
-            {"x": -230.133, "y": 191.085, "z": -24.9191},
-            {"x": -237.417, "y": 192.851, "z": -24.3585}
-          ]
-        },
-        {
-          "entries": [11322, 11324, 11322],
-          "positions": [
-            {"x": -229.394, "y": 206.597, "z": -24.7948},
-            {"x": -231.167, "y": 212.064, "z": -24.9235},
-            {"x": -224.395, "y": 213.183, "z": -24.9818}
-          ]
-        },
-        {
-          "entries": [11322, 11322, 11324],
-          "positions": [
-            {"x": -275.823, "y": 219.821, "z": -25.0184},
-            {"x": -279.577, "y": 210.296, "z": -25.0184},
-            {"x": -284.913, "y": 216.073, "z": -25.0184}
-          ]
-        },
-        {
-          "entries": [11322, 11322, 11324],
-          "positions": [
-            {"x": -300.145, "y": 204.932, "z": -25.1219},
-            {"x": -294.636, "y": 196.863, "z": -25.415},
-            {"x": -299.173, "y": 199.104, "z": -24.7852}
-          ]
-        },
-        {
-          "entries": [11324, 11322],
-          "positions": [
-            {"x": -297.067, "y": 154.025, "z": -25.1295},
-            {"x": -296.907, "y": 146.956, "z": -25.0033}
-          ]
+            {"x": -187.52, "y": 153.22, "z": -25.14},
+            {"x": -183.65, "y": 160.15, "z": -25.22},
+            {"x": -186.6, "y": 159, "z": -25.22}
+          ],
+          "radius": 8
         },
         {
           "entries": [11323, 11323],
           "positions": [
-            {"x": -283.586, "y": 143.856, "z": -25.2988},
-            {"x": -283.762, "y": 152.501, "z": -25.3249}
-          ]
-        },
-        {
-          "entries": [11323],
-          "positions": [
-            {"x": -263.519, "y": 150.466, "z": -18.9955}
-          ]
-        },
-        {
-          "entries": [11323, 11323, 11322, 11324, 11322],
-          "positions": [
-            {"x": -267.366, "y": 110.757, "z": -24.9361},
-            {"x": -257.459, "y": 106.184, "z": -24.9368},
-            {"x": -269.276, "y": 96.1538, "z": -25.02},
-            {"x": -261.428, "y": 94.8909, "z": -24.9335},
-            {"x": -269.254, "y": 91.9884, "z": -24.9291}
-          ]
+            {"x": -198.96, "y": 151.23, "z": -25.14},
+            {"x": -199.19, "y": 159.01, "z": -25.14}
+          ],
+          "radius": 8
         }
       ],
       "boss": {
         "entry": 11520,
-        "position": {"x": -244.743, "y": 150.085, "z": -18.7494}
-      }
+        "position": {"x": -244.74, "y": 150.09, "z": -18.75},
+        "tactics": {
+          "move_out": [
+            {
+              "cast": "Fire Nova",
+              "yards": 10
+            }
+          ]
+        }
+      },
+      "notes": [
+        "The Searing Blade wing, west part. Cultist packs (creature_groups): [Cultist 48689 + Cultist 48687 + Enforcer 48690] at -194 to -206 89 to 95, the Enforcer pair [48694 + 48688] at -221 91 (20 yd west of it), the Enforcer pair [48695 + 48691] at -195 to -203 108, then [Warlock 48702 + Cultist 48701] at -184 to -188 153 to 160 and the Enforcer pair [48700 + 48699] at -199 151 to 159. The Enforcer 48696 patrols the whole wing (a 432 yd loop through the corridor and both halves; on its spawn it stands in the first pack), so the first pack carries its patrol (the Enforcer stands 2 yd from that pack's own Enforcer; the driver waits until it walks off or pulls it alone). Taragaman the Hungerer (11520, 2022 hp, Fire Nova 11970 and Uppercut 18072, faction 554, immune to fear and horror) stands at -244.7 150.1 -18.7 on his platform over the lava (z -18.7, the platform in the lava lake): the Wowhead guide: the tank pulls him away from the platform's edges so that Uppercut cannot knock it off, and the ranged stay at maximum range so that Fire Nova does little damage (the rest is tank and spank); comments (38 and 67 votes): 'do not stand on the edge of the ramp or platform, a knockback into the lava is a very painful death' and 'do not fall into the lava'. His loot: Cursed Felblade, Crystalline Cuffs, Subterranean Cape (quest 'Slaying the Beast'). The Enforcer 48707 patrols his room (x -283 to -200, y 140 to 165) and is a pull group of the next leg."
+      ]
     },
     {
-      "name": "jergosh_the_invoker",
-      "to": {"x": -309.146, "y": 224.228, "z": -23.7467},
+      "name": "jergosh",
+      "to": {"x": -244.74, "y": 150.09, "z": -18.75},
       "pull_groups": [
         {
-          "entries": [11322, 11324],
+          "entries": [11323],
           "positions": [
-            {"x": -309.146, "y": 224.228, "z": -23.7467},
-            {"x": -316.556, "y": 222.633, "z": -22.1718}
-          ]
-        },
-        {
-          "entries": [11323, 11323, 11322, 11322],
-          "positions": [
-            {"x": -329.782, "y": 210.636, "z": -19.9161},
-            {"x": -336.361, "y": 224.257, "z": -20.2678},
-            {"x": -340.183, "y": 207.471, "z": -21.4877},
-            {"x": -346.643, "y": 213.994, "z": -21.3899}
-          ]
-        },
-        {
-          "entries": [11322, 11322],
-          "positions": [
-            {"x": -369.356, "y": 211.166, "z": -21.801},
-            {"x": -374.127, "y": 201.24, "z": -21.801}
-          ]
-        },
-        {
-          "entries": [11324, 11322, 11322],
-          "positions": [
-            {"x": -367.19, "y": 180.435, "z": -22.1573},
-            {"x": -360.933, "y": 179.061, "z": -22.1946},
-            {"x": -367.06, "y": 173.695, "z": -22.0076}
-          ]
-        },
-        {
-          "entries": [11322],
-          "positions": [
-            {"x": -400.436, "y": 216.18, "z": -1.01054}
-          ]
-        },
-        {
-          "entries": [11324, 11322],
-          "positions": [
-            {"x": -385.122, "y": 239.621, "z": -4.84661},
-            {"x": -392.023, "y": 244.262, "z": -4.84661}
-          ]
-        },
-        {
-          "entries": [11322, 11324, 11322, 11322],
-          "positions": [
-            {"x": -387.038, "y": 259.729, "z": -4.84658},
-            {"x": -375.796, "y": 256.279, "z": -4.84658},
-            {"x": -367.589, "y": 254.246, "z": -5.0474},
-            {"x": -372.27, "y": 265.154, "z": -4.84659}
-          ]
-        },
-        {
-          "entries": [11322],
-          "positions": [
-            {"x": -342.315, "y": 256.423, "z": -7.97652}
-          ]
+            {"x": -263.52, "y": 150.47, "z": -19}
+          ],
+          "radius": 15,
+          "patrol": {
+            "entries": [11323],
+            "path": [
+              {"x": -263.5, "y": 150.5, "z": -19},
+              {"x": -275.9, "y": 149, "z": -22.2},
+              {"x": -283.1, "y": 148.1, "z": -25.4},
+              {"x": -275.9, "y": 149, "z": -22.2},
+              {"x": -263.5, "y": 150.5, "z": -19},
+              {"x": -247.9, "y": 140.2, "z": -18.6},
+              {"x": -225, "y": 153.1, "z": -19},
+              {"x": -212.7, "y": 154.9, "z": -21.5},
+              {"x": -199.5, "y": 155.4, "z": -25.2},
+              {"x": -212.7, "y": 154.9, "z": -21.5},
+              {"x": -225, "y": 153.1, "z": -19},
+              {"x": -240.9, "y": 165, "z": -18.6}
+            ],
+            "period_s": 74.5,
+            "source": "creature_movement of spawn 48707 (Searing Blade Enforcer, movement type 2, 12 points, 186 yd at 2.5 yd/s = 74 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48707@"
+          }
         },
         {
           "entries": [11323, 11323],
           "positions": [
-            {"x": -321.875, "y": 247.56, "z": -11.5076},
-            {"x": -318.951, "y": 256.642, "z": -11.5058}
-          ]
+            {"x": -283.76, "y": 152.5, "z": -25.32},
+            {"x": -283.59, "y": 143.86, "z": -25.3}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [11322, 11324, 8996],
+          "positions": [
+            {"x": -296.91, "y": 146.96, "z": -25},
+            {"x": -297.07, "y": 154.03, "z": -25.13},
+            {"x": -297.1, "y": 150.9, "z": -25.13}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [11322, 11322, 11324, 8996],
+          "positions": [
+            {"x": -294.64, "y": 196.86, "z": -25.41},
+            {"x": -300.14, "y": 204.93, "z": -25.12},
+            {"x": -299.17, "y": 199.1, "z": -24.79},
+            {"x": -299.3, "y": 196.1, "z": -24.79}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11322, 11324, 11322, 8996],
+          "positions": [
+            {"x": -279.58, "y": 210.3, "z": -25.02},
+            {"x": -284.91, "y": 216.07, "z": -25.02},
+            {"x": -275.82, "y": 219.82, "z": -25.02},
+            {"x": -284.4, "y": 220.4, "z": -25.02}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11322, 11324, 8996],
+          "positions": [
+            {"x": -309.15, "y": 224.23, "z": -23.75},
+            {"x": -316.56, "y": 222.63, "z": -22.17},
+            {"x": -314.1, "y": 220.8, "z": -22.17}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [11323, 11323],
+          "positions": [
+            {"x": -329.78, "y": 210.64, "z": -19.92},
+            {"x": -336.36, "y": 224.26, "z": -20.27}
+          ],
+          "radius": 7
         },
         {
           "entries": [11322, 11322],
           "positions": [
-            {"x": -301.24, "y": 251.092, "z": -13.0535},
-            {"x": -293.292, "y": 256.603, "z": -14.8024}
-          ]
+            {"x": -340.18, "y": 207.47, "z": -21.49},
+            {"x": -346.64, "y": 213.99, "z": -21.39}
+          ],
+          "radius": 7
         }
       ],
       "boss": {
         "entry": 11518,
-        "position": {"x": -376.811, "y": 209.224, "z": -21.801}
-      }
+        "position": {"x": -376.81, "y": 209.22, "z": -21.8},
+        "first": [11322, 11322],
+        "tactics": {
+          "dispel": [
+            "Immolate"
+          ]
+        }
+      },
+      "notes": [
+        "East and north of Taragaman: the Enforcer 48707 (patrolling Taragaman's room, so it is pulled first, after the boss: it started 19 yd from him) and the packs of the corridor to Jergosh: Enforcers [48711 + 48708] at -284 144 to 152 and [Warlock 48709 + Cultist 48710] at -297 147 to 154, [Cultist 48718 + Cultist 48714 + Warlock 48716] at -295 to -300 197 to 205, [Cultist 48717 + Cultist 48722 + Warlock 48715] at -276 to -285 210 to 220 (the pack 20 yd off the path), [Cultist 48723 + Warlock 48724] at -309 to -317 223 to 224, Enforcers [48731 + 48725] at -330 to -336 211 to 224 and Cultists [48728 + 48732] at -340 to -347 207 to 214. Jergosh the Invoker (11518, 1493 hp, 1712 mana, Immolate 20800 and Curse of Weakness 18267, faction 554, immune to fear and horror) stands at -376.8 209.2 -21.8 with two Cultists (48737 -369.4 211.2, 48741 -374.1 201.2): creature_groups 48740 (flags 2) links them, so they are `boss.first` (Wowhead guide: CC one Cultist, kill the other, then Jergosh; his Immolate and Curse of Weakness make threat hard for the tank and hurt the healer; the priest dispels Immolate, a mage removes the Curse of Weakness). Two more packs of the wing's north-west (-224 to -237 191 to 213: [48712 + 48713], [48719 + 48720 + 48721]) lie 30 yd or more off the corridor and are not pulled."
+      ]
     },
     {
       "name": "bazzalan",
-      "to": {"x": -404.929, "y": 181.384, "z": 6.57811},
+      "to": {"x": -354, "y": 222, "z": -21},
       "pull_groups": [
         {
           "entries": [11323, 11323],
           "positions": [
-            {"x": -404.929, "y": 181.384, "z": 6.57811},
-            {"x": -412.364, "y": 177.342, "z": 6.70869}
-          ]
+            {"x": -321.88, "y": 247.56, "z": -11.51},
+            {"x": -318.95, "y": 256.64, "z": -11.51}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11322, 11322],
+          "positions": [
+            {"x": -301.24, "y": 251.09, "z": -13.05},
+            {"x": -293.29, "y": 256.6, "z": -14.8}
+          ],
+          "radius": 15
         },
         {
           "entries": [11322],
           "positions": [
-            {"x": -396.309, "y": 150.828, "z": 7.82184}
-          ]
+            {"x": -342.31, "y": 256.42, "z": -7.98}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11322, 11322, 11324, 8996],
+          "positions": [
+            {"x": -367.59, "y": 254.25, "z": -5.05},
+            {"x": -372.27, "y": 265.15, "z": -4.85},
+            {"x": -375.8, "y": 256.28, "z": -4.85},
+            {"x": -374.9, "y": 259.2, "z": -4.85}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [11324, 11322, 11322, 8996],
+          "positions": [
+            {"x": -385.12, "y": 239.62, "z": -4.85},
+            {"x": -392.02, "y": 244.26, "z": -4.85},
+            {"x": -387.04, "y": 259.73, "z": -4.85},
+            {"x": -382.1, "y": 239.3, "z": -4.85}
+          ],
+          "radius": 8
         },
         {
           "entries": [11322],
           "positions": [
-            {"x": -385.157, "y": 156.603, "z": 7.7385}
-          ]
+            {"x": -400.44, "y": 216.18, "z": -1.01}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11323, 11323],
+          "positions": [
+            {"x": -404.93, "y": 181.38, "z": 6.58},
+            {"x": -412.36, "y": 177.34, "z": 6.71}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [11322],
+          "positions": [
+            {"x": -396.31, "y": 150.83, "z": 7.82}
+          ],
+          "radius": 9
         }
       ],
       "boss": {
         "entry": 11519,
-        "position": {"x": -384.867, "y": 146.045, "z": 7.82184}
-      }
+        "position": {"x": -384.87, "y": 146.04, "z": 7.82},
+        "first": [11322]
+      },
+      "notes": [
+        "From Jergosh the walkway climbs north-east (-354 222 -21, -330 237 -15, -327 242 -11) and then west along a raised ledge (z -11 to -5) to the ramp at -382 233 -3, -403 208 1 up the ramp to Bazzalan's hall (z 6 to 9). Packs (all stationary but the wanderers): Enforcers [48729 + 48730] at -319 to -322 248 to 257, Cultists [48726 + 48727] at -293 to -301 251 to 257 (20 yd behind the Enforcers), the Cultist 48733 (-342.3 256.4), the Warlock camp [Cultist 48735 + Cultist 48734 + Warlock 48736] at -368 to -376 254 to 265, [Warlock 48738 + Cultist 48746 + Cultist 48743] at -385 to -392 240 to 260, the Cultist 48742 (-400.4 216.2) and the Enforcers [48747 + 48748] at -405 to -412 177 to 181 at the foot of the hall. The Warlocks come with Voidwalkers and flee at 15 %: the mage's Polymorph goes on them. Bazzalan (11519, 1637 hp, EventAI Sinister Strike 14873 every 5-16 s and Poison 744, faction 554, immune to fear and horror) stands at -384.9 146 7.8 (facing 2.51 rad) with two Cultists (48749 -385.2 156.6, 10.6 yd away on his right, and 48751 -396.3 150.8, 12.1 yd away on his left), stationary and NOT linked by creature_groups. The Wowhead guide says the add on the left (the party's right) can be pulled without the boss, which greatly eases the fight, and the other is crowd-controlled while the group burns Bazzalan, who deals significant single-target damage: so 48751 is the last pull group of the leg: the walk showed the pull stand (-400 171.4 8.1, the plan's look point) is 30 yd from Bazzalan (aggro 20) and 21 yd from the add, on one floor in an open hall, and the add and Bazzalan stand 12 to 15 yd apart, outside the 10 yd social range, so he is not drawn unless the add is fought within about 10 yd of him: fight it at the stand. 48749 (11.6 yd from him) would need a stand 31 yd out too; it is `boss.first` and 48749 is `boss.first`. Wowhead lists Sinister Strike 14873 and Deadly Poison 2818, the database Sinister Strike and Poison 744 (EventAI): the database wins. Wowhead's comments: he is above Jergosh up a thin winding ramp from the end of the criss-cross bridges room (matches the navmesh), and he drops only ordinary loot. The last boss of the dungeon; no event follows."
+      ]
     }
   ]
 }

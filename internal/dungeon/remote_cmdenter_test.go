@@ -268,3 +268,26 @@ func TestRemoteEnterCmdCeilingIncludesTheWalk(t *testing.T) {
 		t.Fatalf("the phase took %v", span)
 	}
 }
+
+// The ceiling is progress-based: a fight on the way to the door does not count against it (zf-zum2-s1: the party fought trash from the graveyard
+// and the flat 240 s ran out). A walk of 240 s plus a fight of about a minute gets in; the same walk without the fight fails.
+func TestRemoteEnterCmdCeilingDoesNotCountAFightOnTheWay(t *testing.T) {
+	run := func(fight bool) (*enterOrders, Report, error) {
+		g := newEnterOrders(t, enterAck(3))
+		g.plan.Portal = &Portal{Map: 0, Point: Point{2420, 0, 0}} // about 242 s of walking: right at the ceiling
+		if fight {
+			m := g.addMob(5646, Point{1000, 0, 0})
+			g.aggro, g.killRate = 25, 1.6 // the mob comes at the party; it takes about a minute to kill
+			_ = m
+		}
+		rep, err := g.run(RemoteOptions{})
+		return g, rep, err
+	}
+	g, rep, err := run(true)
+	if err != nil || rep.State != "done" || len(g.sent) != 1 || !strings.Contains(notesOf(rep), "a fight on the way to the door took") {
+		t.Fatalf("with the fight: %v %s sent %v\n%s", err, rep.State, g.sent, notesOf(rep))
+	}
+	if _, _, err := run(false); err == nil || !strings.Contains(err.Error(), "did not get the party in within 240 s") {
+		t.Fatalf("without the fight the ceiling holds: %v", err)
+	}
+}

@@ -24,6 +24,11 @@ const (
 	ReasonNoLOS       = "no line of sight"
 	ReasonTooFar      = "too far"
 	ReasonOffMesh     = "off the mesh"
+	// ReasonDetour (a warning, never a failure: the draft plans of other dungeons have many) is a pull group whose way from where the party stands is a long detour for a mob that is near: the bots' pull finds no
+	// firing position ("The tank could not start moving to a firing position for the pull", live, Zul'Farrak).
+	ReasonDetour = "detour"
+	// ReasonOutsideZone is an area_trigger whose stand point lies outside its zone: whoever stands there takes no trigger.
+	ReasonOutsideZone = "outside the zone"
 	// ReasonNeedsWalk is a point the plan marks needs_walk: it was never snapped to the navmesh and its mapping walk is still to do.
 	ReasonNeedsWalk = "needs a mapping walk"
 
@@ -32,6 +37,8 @@ const (
 
 	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
 	WarnNeedlessDirect = "needless direct"
+	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
+	WarnEstimatedPatrol = "estimated patrol period"
 )
 
 // Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
@@ -40,6 +47,14 @@ type Navmesh interface {
 	Raycast(mapID uint32, from, to navmesh.Vec3) (navmesh.Ray, error)
 	Nearest(mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error)
 }
+
+// A pull group is a detour when it stands within pullDetourNear yards in a line and the path to it is longer than pullDetourFactor times that
+// plus pullDetourSlack yards.
+const (
+	pullDetourNear   = 45.0
+	pullDetourFactor = 2.0
+	pullDetourSlack  = 25.0
+)
 
 // The tolerances of the check, in yards.
 const (
@@ -288,6 +303,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	}
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
+		if g.Patrol != nil && g.Patrol.PeriodEstimate {
+			c.warn("patrol", g.Positions[0], cur, WarnEstimatedPatrol, "pull group %d: the patrol of %v has only an estimated period_s (%.0f s): the driver does not predict its phase, it locates the patrol and waits until it is past; the walk measures the round", gi+1, g.Patrol.Entries, g.Patrol.PeriodS)
+		}
 		if g.NeedsWalk {
 			c.needsWalk("pull group look", gi+1, g.Team, g.Positions[0], cur)
 			continue
@@ -323,7 +341,32 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	return c.steps("after_boss", l.AfterBoss, cur)
 }
 
-// steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there
+// trigger checks the geometry of an area_trigger step: its stand point inside the zone (a trigger is taken only by someone standing in it),
+// and the leg's boss, if there is one, within TriggerMaxStandToBoss of the stand (the trigger starts that fight: Zum'rah turns hostile
+// where the party stands). The stand's walk is checked with the other stands.
+func (c *planChecker) trigger(part string, t *AreaTrigger, from Point) {
+	if d := dist3(t.Stand, t.Center); d > float64(t.Radius) {
+		c.fail(part, 0, t.Stand, from, ReasonOutsideZone, "the stand is %.1f yd from the centre %.1f %.1f %.1f of trigger %d; its radius is %g", d, t.Center.X, t.Center.Y, t.Center.Z, t.ID, t.Radius)
+	}
+	if b := c.l.Boss; b != nil {
+		if d := dist3(t.Stand, b.Position); d > TriggerMaxStandToBoss {
+			c.fail(part, 0, t.Stand, from, ReasonTooFar, "boss %d stands %.1f yd from the stand (at most %g): the trigger would start a fight the party is not at", b.Entry, d, TriggerMaxStandToBoss)
+		}
+	}
+}
+
+// useRange checks that the stand point of a loot_object step (a chest) is within the use range (UseRange) of the object's position: a chest the
+// party stands farther from than that is not opened. A use_object is not measured: a gong or a door is used from farther than a chest is. A step with no stand or no position has nothing to measure.
+func (c *planChecker) useRange(part string, ref ObjectRef, stand *Point, from Point) {
+	if stand == nil || ref.Near == nil {
+		return
+	}
+	if d := dist3(*stand, *ref.Near); d > UseRange {
+		c.fail(part, 0, *stand, from, ReasonTooFar, "the stand is %.1f yd from game object %d at %.1f %.1f %.1f: the use range is %g yd", d, ref.Entry, ref.Near.X, ref.Near.Y, ref.Near.Z, UseRange)
+	}
+}
+
+// steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual, area_trigger, gossip): the driver stands the party there
 // before the step. A step without a stand stands wherever the object is approached from, which only a run can say.
 func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
 	for si, st := range steps {
@@ -332,17 +375,36 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 		switch {
 		case st.UseObject != nil:
 			stand, label = st.UseObject.Stand, label+"use_object.stand"
+			if st.UseObject.ViaItem { // the item's spell is cast at the object from the stand: it has a short range
+				c.useRange(label, st.UseObject.ObjectRef, stand, cur)
+			}
 		case st.LootObject != nil:
 			stand, label = st.LootObject.Stand, label+"loot_object.stand"
+			c.useRange(label, st.LootObject.ObjectRef, stand, cur)
 		case st.Ritual != nil:
 			stand, label = st.Ritual.Stand, label+"ritual.stand"
+		case st.AreaTrigger != nil:
+			t := st.AreaTrigger
+			stand, label = &t.Stand, label+"area_trigger.stand"
+			c.trigger(label, t, cur)
+		case st.Gossip != nil:
+			g := st.Gossip
+			stand, label = g.Stand, label+"gossip.stand"
+			if stand != nil && dist3(*stand, g.Near) > GossipRange {
+				c.count()
+				c.fail(label, 0, *stand, cur, ReasonTooFar, "%.1f yd from the NPC's spawn %.1f %.1f %.1f: the server answers a gossip hello only within %g yd", dist3(*stand, g.Near), g.Near.X, g.Near.Y, g.Near.Z, GossipRange)
+			}
 		}
 		if stand == nil {
 			continue
 		}
+		prev := cur
 		var err error
 		if cur, err = c.walk(label, *stand, cur); err != nil {
 			return cur, err
+		}
+		if st.Gossip != nil && st.Gossip.Talker() == GossipByAgent {
+			cur = prev // the agent's own character walks to it: the party stays where it was
 		}
 	}
 	return cur, nil
@@ -470,6 +532,13 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		pts[i] = point(v)
 	}
 	end := pts[len(pts)-1]
+	// A pack that is near but whose way is a long detour (another layer: a mob under a bridge, on a ledge) leaves the tank no firing position
+	// within the ranged pull range: it answers unreachable. Only pull group looks (a boss is walked to).
+	if part == "pull group look" && path.Status == navmesh.Complete {
+		if straight := dist3(from, at); straight <= pullDetourNear && float64(path.Length) > pullDetourFactor*straight+pullDetourSlack {
+			c.res.Warnings = append(c.res.Warnings, c.issue(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length))
+		}
+	}
 	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
 	var snapErr error
 	snap := func(p Point) Point { // the same floor snap the driver passes (FloorSnapper)

@@ -45,6 +45,8 @@ func allHostilesStealthed(hs []tbm.HostileRec) bool {
 // doKill kills Boss.First in order, then the boss.
 func (d *RemoteDriver) doKill(ctx context.Context, a Action) error {
 	b := a.Boss
+	d.bossFight = true // the attack order is sent again after bossResendWait, not the pack fights' longer wait (attackAllowed)
+	defer func() { d.bossFight = false }()
 	enc := append(slices.Clone(b.First), b.Entry)
 	for _, e := range enc {
 		spec := fightSpec{pick: []uint32{e}, track: enc, skip: a.Skip, anchors: []Point{b.Position}, limit: d.cfg.BossTimeout, required: e == b.Entry, wide: true}
@@ -270,6 +272,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		})
 		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
+			// A wipe that comes after the kills (the adds a boss left) must not lose them: the ledger of kills is what tells that the boss is dead.
+			if res.kills > 0 {
+				d.noteKilled(res)
+			}
 			return err
 		}
 		kills += res.kills
@@ -795,7 +801,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return fightResult{}, err
+			return fightResult{kills: len(killed), dead: deadOf()}, err // the kills so far are kept: a wipe after the boss died must not lose him
 		}
 		if d.stale() {
 			lastCombat = d.clk.Now() // a quiet feed proves nothing about the fight
@@ -906,7 +912,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // assistEvery sends the party at the nearest of mobs, the first time at once (when the threat allows) and then every AssistEvery.
 func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, last *time.Time) error {
 	now := d.clk.Now()
-	if !last.IsZero() && now.Sub(*last) < d.cfg.AssistEvery {
+	if !last.IsZero() && now.Sub(*last) < d.assistGap() {
 		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
 		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
@@ -924,7 +930,7 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
 	_, runner := d.runnerIn(mobs)
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.assistGap() || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -986,6 +992,17 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	return true, nil
 }
 
+// assistGap is how often the party is sent at the nearest mob again: AssistEvery, or bossResendWait in a boss fight.
+func (d *RemoteDriver) assistGap() time.Duration {
+	if d.bossFight {
+		return min(d.cfg.AssistEvery, bossResendWait)
+	}
+	return d.cfg.AssistEvery
+}
+
+// bossResendWait is how long after an attack order at a boss the order is sent again while the tank does not hold him.
+const bossResendWait = 3 * time.Second
+
 // attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
 const attackHoldYd = 45
 
@@ -1000,6 +1017,9 @@ func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 		return true
 	}
 	wait := max(d.cfg.AssistEvery, 5*time.Second)
+	if d.bossFight {
+		wait = bossResendWait // live (zum2): the tank held Zum'rah in 1 of 4 fights; the order goes to the tank again within 3 s
+	}
 	now := d.clk.Now()
 	if now.Sub(d.tf.sentAt) < wait {
 		return false
@@ -1026,8 +1046,8 @@ func (d *RemoteDriver) threatAllows(h tbm.HostileRec) bool {
 	if _, ok := d.engagedAt[h.GUID]; !ok {
 		d.engagedAt[h.GUID] = now
 	}
-	if d.summonedKillFirst(h) && h.Target == 0 {
-		return true // a healing ward hits nobody: no threat to wait for, and each pulse heals the pack (a planned healer still waits)
+	if d.summonedKillFirst(h) {
+		return true // a healing ward hits nobody (whatever its target field says: live, zum2, the ward 7785 was held 10 s "not on the tank yet"): no threat to wait for, and each pulse heals the pack (a planned healer still waits)
 	}
 	holder, ok := d.fr.ThreatHolder(h.GUID)
 	held := ok && d.fr.IsMember(holder) && (h.Target == 0 || h.Target == holder)
@@ -1265,24 +1285,30 @@ const holdSpotYd = 3.0
 
 // holdHere makes the lead bot's "stay" spot the place it stands, once a fight is over (see afterFight). `cmd move` sets that spot to its point
 // (BotCommands.cpp, CommanderMove), and after a fight the bot's "return to stay position" walks it back to the last point it was sent
-// to: the party would run back, rest there, and run forward again. A move to its own position costs nothing and ends that. A refusal
-// (the module may not take a move to where the bot already stands) is counted by order() and otherwise ignored.
+// to: the party would run back, rest there, and run forward again. A refusal is counted by order() and otherwise ignored.
 //
 // A lead bot that stands within holdSpotYd of the point of its last move already has its stay spot here (the module's return trigger
-// fires only beyond the follow range), and a move to where a bot stands is one the server cannot path (`unreachable`: about 23
-// refusals in a Uldaman run, hires-1 2026-10-14): none is sent then. (A run that has sent no move yet still sends it.)
+// fires only beyond the follow range). Otherwise the move does not go to the lead bot's own position: the server cannot build a path of no
+// length (PathFinder NOPATH, answered `unreachable`: 229 of the 230 "no walkable path" refusals of the Zul'Farrak runs, and about 23 in a
+// Uldaman run, hires-1 2026-10-14), so the stay spot is set holdStepYd yards from the lead bot toward the point of its last move: ground it
+// came over, on the mesh, and close enough that the party does not run back. Without a last move there is no such ground known and no hold
+// is sent (a lead bot that has been sent nowhere has no stay spot to walk back to). `cmd stay` would stay every bot and is not used.
 func (d *RemoteDriver) holdHere(ctx context.Context) {
 	here, ok := d.leadPos()
-	if !ok || d.stale() {
+	if !ok || d.stale() || !d.haveMoveTo {
 		return
 	}
-	if d.haveMoveTo && dist3(here, d.moveTo) <= holdSpotYd {
+	if dist3(here, d.moveTo) <= holdSpotYd {
 		return
+	}
+	spot := lerp(here, d.moveTo, holdStepYd/dist3(here, d.moveTo))
+	if dist3(spot, here) < holdMinYd {
+		return // never a move to where the lead bot stands
 	}
 	if d.moveGap(ctx) != nil {
 		return
 	}
-	r, err := d.order(ctx, "move", moveArgs(here)...)
+	r, err := d.order(ctx, "move", moveArgs(spot)...)
 	if err != nil {
 		return
 	}
@@ -1290,6 +1316,13 @@ func (d *RemoteDriver) holdHere(ctx context.Context) {
 		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
 	}
 }
+
+// holdStepYd is how far from the lead bot toward its last move point holdHere sets the stay spot; holdMinYd is the least a hold move may
+// differ from the lead bot's position.
+const (
+	holdStepYd = 2.0
+	holdMinYd  = 1.5
+)
 
 // unreachableStandoffs are the distances (yards from the mob) the party is walked to, one after the other, when the tank answers a pull
 // with "unreachable"; the pull is sent again from each. Run 2 gave up on such packs and counted them cleared with their mobs alive.
