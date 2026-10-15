@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw; // view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -26,7 +26,22 @@ try { styleState = ML.loadStyle(window.localStorage); } catch (e) { /* storage m
 const ghosts = new Map(), heats = new Map(); // "<plan>|<run>" / plan -> {at, loading, data}: the best earlier run and the death places, from the server
 const GHOST_TTL_MS = 300000, LIVE_EVERY_MS = 3000;
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
-const namesOf = (c) => { const g = plans.get(c.label.plan); return g && g.names ? g.names : {}; };
+const namesOf = (c) => { const g = plans.get(planKeyOf(c)); return g && g.names ? g.names : {}; };
+// The plan view (#/plan/<name>): the plan with no run. route says which page is shown; planList is /api/plans (the plan files the dashboard can draw);
+// copyRows is /api/plan-copies/<plan> (which copy each slot's runs read); legSel holds which legs of a plan are switched on.
+let route = PV.parseRoute(location.hash);
+let planList = new Map(), copyRows = [], copyAt = 0, planListAt = 0;
+const legSel = new Map(), refetching = new Set();
+function legSelFor(name, n) {
+  if (!legSel.has(name)) { let raw = null; try { raw = JSON.parse(localStorage.getItem("legsel:" + name) || "null"); } catch (e) { /* ignore */ } legSel.set(name, PV.normalizeSel(raw, n)); }
+  return PV.normalizeSel(legSel.get(name), n);
+}
+function setLegSel(name, sel) { legSel.set(name, sel); store("legsel:" + name, JSON.stringify(sel)); }
+// The leg a live run on this plan is in (-1 when none runs it).
+function liveLegOf(name) {
+  const a = ((last && last.agents) || []).find((x) => x.online && x.label.plan === name && x.run.state === "running");
+  return a ? a.run.leg : -1;
+}
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -162,13 +177,24 @@ async function loadRaw(id, parts) {
   } catch (e) { parts.debug.querySelector("pre").textContent = String(e); }
 }
 
-function ensurePlan(name) {
-  if (!name || plans.has(name)) return plans.get(name);
-  plans.set(name, "loading");
-  fetch("/api/plan/" + encodeURIComponent(name), { cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : r.text().then((t) => ({ error: t.trim() || "plan not found" }))))
-    .then((g) => { plans.set(name, g); if (last) render(last); })
-    .catch(() => plans.set(name, null));
+// A card's plan is the file its slot reads when the server found that file (plan_copy.run), else the dashboard's own copy. Each is kept apart.
+function planKeyOf(c) { return c.label.plan ? c.label.plan + (c.plan_copy && c.plan_copy.run ? "@" + c.id : "") : ""; }
+const fetchPlan = (c) => fetch("/api/plan/" + encodeURIComponent(c.label.plan) + (c.plan_copy && c.plan_copy.run ? "?agent=" + encodeURIComponent(c.id) : ""), { cache: "no-store" })
+  .then((r) => (r.ok ? r.json() : r.text().then((t) => ({ error: t.trim() || "plan not found" }))));
+function ensurePlan(c) {
+  const key = planKeyOf(c);
+  if (!key) return undefined;
+  const have = plans.get(key), want = c.plan_copy ? c.plan_copy.drawn.sha256 : c.want_sha;
+  // the file changed under the page (an edit, a copy over it): fetch it again and keep drawing the old one until it is there
+  const stale = have && have !== "loading" && have.source && want && have.source.sha256 !== want && !refetching.has(key);
+  if (stale) {
+    refetching.add(key);
+    fetchPlan(c).then((g) => { plans.set(key, g); refetching.delete(key); if (last) render(last); }).catch(() => refetching.delete(key));
+    return have;
+  }
+  if (plans.has(key)) return have;
+  plans.set(key, "loading");
+  fetchPlan(c).then((g) => { plans.set(key, g); if (last) render(last); }).catch(() => plans.set(key, null));
   return "loading";
 }
 
@@ -211,7 +237,7 @@ function cachedFetch(map, key, url) {
 const RUN_ID_OK = /^[A-Za-z0-9._-]{1,64}$/;
 function ensureGhost(c) {
   const plan = c.label.plan, run = RUN_ID_OK.test(c.label.run_id || "") ? c.label.run_id : "";
-  const g = plan ? plans.get(plan) : null, legs = g && g.legs ? g.legs.length : 0; // the plan's sections tell the server what a clear of the whole dungeon is
+  const g = plan ? plans.get(planKeyOf(c)) : null, legs = g && g.legs ? g.legs.length : 0; // the plan's sections tell the server what a clear of the whole dungeon is
   return plan ? cachedFetch(ghosts, plan + "|" + run + "|" + legs, "/api/ghost/" + encodeURIComponent(plan) + "?legs=" + legs + (run ? "&exclude=" + encodeURIComponent(run) : "")) : null;
 }
 function ensureHeat(c) { return c.label.plan ? cachedFetch(heats, c.label.plan, "/api/heat/" + encodeURIComponent(c.label.plan)) : null; }
@@ -235,7 +261,49 @@ function applyLayer(rec, svg, geo) {
   svg.insertBefore(img, svg.firstChild);
 }
 
+// The head and the side panel of the plan view: the plan, the file it is drawn from, the copy each slot reads, and the leg switches.
+function renderPlanHead(c, rec) {
+  const geo = plans.get(c.label.plan), pi = planList.get(c.label.plan);
+  const kids = [h("h2", { text: "Plan " + c.label.plan })];
+  if (geo && geo.legs) kids.push(h("span", { class: "sum", text: geo.legs.length + " legs, map " + geo.map + (pi && pi.status ? " \u00b7 " + pi.status : "") }));
+  kids.push(h("span", { class: "pill", text: "no run: the plan only" }));
+  rec.parts.head.replaceChildren(...kids);
+}
+
+function renderPlanInfo(c, rec) {
+  const name = c.label.plan, geo = plans.get(name), n = geo && geo.legs ? geo.legs.length : 0;
+  const sel = legSelFor(name, n), runLeg = liveLegOf(name), vis = PV.visibleLegs(sel, n, runLeg);
+  const key = JSON.stringify([sel, runLeg, geo && geo.source, copyRows]);
+  if (rec.planInfoKey === key) return;
+  rec.planInfoKey = key;
+  const blocks = [];
+  const src = geo && geo.source;
+  const where = !src ? "loading..." : src.role === "build" ? src.path + " (" + PV.short(src) + "): no plans folder of the dashboard has this plan, so it draws the copy built into its binary"
+    : (src.role === "slot" ? "a slot's copy " : "the dashboard's plans folder, ") + src.path + " (" + PV.short(src) + (src.modified ? ", changed " + new Date(src.modified).toLocaleString() : "") + ")";
+  blocks.push(h("div", { class: "plancopy" }, h("h3", { text: "Drawn from" }), h("div", { text: where }),
+    h("div", { class: "muted", text: "A run reads the copy in its own slot folder (dungeons_dir), which can be another file: the table shows whether it is the same one." })));
+  const rows = copyRows.map((r) => h("tr", { class: r.run && !r.same ? "diff" : "" }, h("td", { text: "agent " + r.agent }), h("td", { text: PV.copyRowText(r) })));
+  blocks.push(h("div", {}, h("h3", { text: "Which copy each run reads" }),
+    rows.length ? h("table", {}, ...rows) : h("div", { class: "muted", text: "no agent found" })));
+  if (n) {
+    const toolbar = h("div", { class: "legtools" });
+    const tb = (text, title, sels) => { const b = h("button", { type: "button", class: "mb", title, text }); b.addEventListener("click", () => { setLegSel(name, sels()); if (last) render(last); }); return b; };
+    toolbar.append(tb("All legs", "Show every leg", () => PV.allLegs()), tb("No legs", "Hide every leg", () => PV.hideAll(n)));
+    if (runLeg >= 0) toolbar.append(tb("Current leg + next", "Show the leg the live run is in and the one after it (follows the run)", () => ({ mode: "follow", only: -1, off: [] })));
+    const list = (geo.legs || []).map((l, i) => {
+      const cb = h("input", { type: "checkbox", "aria-label": "show " + l.label }), only = h("button", { type: "button", class: "mb mini", title: "Show only this leg", text: "only" });
+      cb.checked = vis.includes(i);
+      cb.addEventListener("change", () => { setLegSel(name, PV.toggleLeg(sel, i, n, runLeg)); if (last) render(last); });
+      only.addEventListener("click", () => { setLegSel(name, PV.onlyLeg(i, n)); if (last) render(last); });
+      return h("label", { class: "legrow" + (i === runLeg ? " now" : "") }, cb, h("span", { text: " " + (i + 1) + ". " + l.label + " \u00b7 " + l.groups + " pack" + (l.groups === 1 ? "" : "s") + (l.boss ? " \u00b7 boss" : "") + (i === runLeg ? " (run is here)" : "") }), only);
+    });
+    blocks.push(h("div", {}, h("h3", { text: "Legs (" + vis.length + " of " + n + " shown)" }), toolbar, h("div", { class: "legs" }, ...list)));
+  }
+  rec.parts.info.replaceChildren(...blocks);
+}
+
 function renderHead(c, rec) {
+  if (c.synthetic) { renderPlanHead(c, rec); return; }
   const p = rec.parts.head, r = c.run;
   const kids = [h("h2", { text: c.character ? c.character + (c.level ? " (level " + c.level + ")" : "") : "agent " + c.id })];
   if (!c.online) kids.push(h("span", { class: "pill failed", text: "offline" }), h("span", { class: "muted", text: c.error || "" }));
@@ -247,15 +315,26 @@ function renderHead(c, rec) {
   p.replaceChildren(...kids);
 }
 
+// Which plan file the map draws and which one the run reads, in words, with the way into the plan view.
+function planCopyBlock(c) {
+  const pc = c.plan_copy, b = PV.copyBadge(pc);
+  return h("div", { class: "plancopy " + (b ? b.level : "") },
+    h("h3", { text: "Plan file" }),
+    h("div", { text: pc.text }),
+    h("div", { class: "muted" }, b ? b.text + ". " : "", h("a", { href: PV.planHash(c.label.plan), text: "Open this plan in the plan view" })));
+}
+
 function kv(item) { return h("div", { class: item.hot ? "hot" : "", title: item.tip }, h("b", { text: item.value }), h("span", { text: item.label })); }
 
 function renderInfo(c, rec) {
+  if (c.synthetic) { renderPlanInfo(c, rec); return; }
   const r = c.run, names = namesOf(c);
   const blocks = [];
   if (!c.online) { rec.parts.info.replaceChildren(h("p", { class: "err-line", text: c.error || "not reachable" })); return; }
   const raw = [r.text, r.waiting ? "waiting on: " + r.waiting : "", r.mode ? "mode: " + r.mode : ""].filter(Boolean).join("\n");
   blocks.push(h("div", {}, h("h3", { text: "Now" }), h("div", { class: "now", title: raw, text: PT.stateLine(c, names) }),
     r.state === "running" ? h("div", { class: "muted " + c.stall.level, text: PT.stallText(c.stall) }) : null));
+  if (c.plan_copy) blocks.push(planCopyBlock(c));
   blocks.push(h("div", { class: "kv" }, ...PT.counterList(c).map(kv), kv({ label: "Build", value: c.sha ? c.sha.slice(0, 8) : "?", tip: "The turtle-agent build this run uses." })));
   if (c.last_error) blocks.push(h("div", {}, h("h3", { text: "Last problem" }), h("div", { class: "err-line", text: c.last_error })));
   if (c.last_refusal) blocks.push(h("div", {}, h("h3", { text: "Last order the bots refused" }), h("div", { class: "err-line", text: c.last_refusal })));
@@ -323,7 +402,7 @@ function loadView(rec) {
 function computeView(rec) {
   const geo = rec.geo, c = rec.card, { pw, ph } = panelSize(rec);
   if (!geo || !c || pw < 20 || ph < 20) return false;
-  const b = geo.bounds || geo.view_box;
+  const b = rec.boundsOv || geo.bounds || geo.view_box;
   const rects = [{ x: b[0], y: b[1], w: b[2], h: b[3] }];
   if (rec.pick) rects.push({ x: rec.pick.x, y: rec.pick.y, w: rec.pick.w, h: rec.pick.h });
   rec.fit = MV.fit(MV.union(rects), pw, ph, 16);
@@ -503,13 +582,14 @@ function attachControls(rec, svg) {
 }
 
 function ensureSvg(rec, geo) {
-  if (rec.svg && rec.geoName === geo.plan) return rec.svg;
+  const sha = geo.source ? geo.source.sha256 : "";
+  if (rec.svg && rec.geoName === geo.plan && rec.geoSha === sha) return rec.svg;
   const svg = s("svg", { preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": "map of the run: route, packs, bosses and the party" });
   const stat = s("g", { class: "static" });
   stat.innerHTML = geo.svg; // built by the server from the plan file, text escaped
   svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "dyn" }));
   rec.parts.stage.replaceChildren(svg);
-  rec.svg = svg; rec.geoName = geo.plan; rec.layerApplied = null; rec.geo = geo;
+  rec.svg = svg; rec.geoName = geo.plan; rec.geoSha = sha; rec.layerApplied = null; rec.geo = geo;
   if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); }
   applyLayers(rec);
   attachControls(rec, svg);
@@ -656,20 +736,34 @@ function attachHover(rec, svg) {
 function renderMap(c, rec) {
   const stage = rec.parts.stage, m = rec.parts.map, name = c.label.plan;
   rec.card = c;
-  const geo = name ? ensurePlan(name) : null;
+  if (c.synthetic) { const pi = planList.get(name); c.want_sha = pi && pi.source ? pi.source.sha256 : ""; }
+  const geo = name ? ensurePlan(c) : null;
   const msg = (t) => { rec.svg = null; stage.replaceChildren(h("div", { class: "nomap", text: t })); rec.parts.bar.hidden = true; rec.parts.runinfo.hidden = true; rec.parts.feed.hidden = true; hideTip(rec); };
   if (geo && geo.error) { msg("Plan " + name + ": " + geo.error); return; }
   if (!geo || geo === "loading") { msg(name ? "Loading the plan " + name + "..." : "No run, so there is no plan to draw."); return; }
+  const mismatch = c.synthetic ? "" : PV.planMismatch(geo, c.run);
+  if (mismatch) { msg("Plan " + name + ": dashboard plan does not match the run's plan (" + mismatch + "). " + (c.plan_copy ? c.plan_copy.text : "")); return; }
   rec.parts.bar.hidden = false;
   const svg = ensureSvg(rec, geo);
   rec.geo = geo;
   applyLayer(rec, svg, geo);
   computeView(rec);
   const run = c.run, names = namesOf(c);
+  // the plan view switches legs on and off: a leg that is off is not drawn, and the fit follows the legs that are on
+  let vis = null, vgeo = geo;
+  rec.boundsOv = null;
+  if (c.synthetic && geo.legs) {
+    const n = geo.legs.length;
+    vis = PV.visibleLegs(legSelFor(name, n), n, liveLegOf(name));
+    vgeo = PV.filterGeo(geo, vis);
+    if (vis.length < n) rec.boundsOv = PV.boundsOf(geo, vis);
+    computeView(rec);
+  }
   svg.querySelectorAll(".leg").forEach((g) => {
     const i = +g.dataset.leg;
     g.classList.toggle("current", i === run.leg && run.state === "running");
     g.classList.toggle("done", run.leg >= 0 && i < run.leg);
+    g.classList.toggle("legoff", !!vis && !vis.includes(i));
   });
   svg.querySelectorAll(".pull, .pin").forEach((e) => {
     const i = +e.dataset.leg, gi = +e.dataset.group;
@@ -795,8 +889,8 @@ function renderMap(c, rec) {
     kids.push(g);
   });
   // the path layers: what lies under the units (heat, ghost, routes, rings, lines) and what marks them (spots, X marks, targets)
-  ensureLive(rec, c);
-  const pd = PD.build({ s, plate, at, unitG, on: layerState, style: styleState, layers: ML, card: c, geo, svg, live: rec.live, ghost: ensureGhost(c), heat: ensureHeat(c), lead: leadXY, nextTarget: nt, threat });
+  if (!c.synthetic) ensureLive(rec, c);
+  const pd = PD.build({ s, plate, at, unitG, on: layerState, style: styleState, layers: ML, card: c, geo: vgeo, svg, live: rec.live, ghost: ensureGhost(c), heat: ensureHeat(c), lead: leadXY, nextTarget: nt, threat });
   kids.unshift(...pd.under);
   kids.push(...pd.over);
   rec.units = units; rec.tipCtx = ctx;
@@ -812,6 +906,7 @@ function renderMap(c, rec) {
     hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,
     bossmob: c.mobs.some((m) => m.boss), hpunits: c.bots.some((b) => b.known) || c.mobs.length > 0, status: anyStatus, threatcolor: anyThreat,
     events: (c.events || []).length > 0, runinfo: !!prog,
+    looks: has(".look"), standmarks: has(".trg, .gossip, .stand"), flags: has(".nw, .cskip"),
     ...pd.avail,
   });
   paintLayerUi(rec);
@@ -824,16 +919,18 @@ function renderMap(c, rec) {
 
 function render(state) {
   last = state;
-  const list = state.agents || [];
-  $("summary").textContent = list.length + " agent" + (list.length === 1 ? "" : "s") + (state.offline.length ? ", not running: " + state.offline.join(", ") : "");
+  const agents = state.agents || [];
+  $("summary").textContent = agents.length + " agent" + (agents.length === 1 ? "" : "s") + (state.offline.length ? ", not running: " + state.offline.join(", ") : "");
   $("updated").textContent = "updated " + new Date(state.time).toLocaleTimeString();
+  const list = route.kind === "plan" ? [PV.planCard(route.plan, plans.get(route.plan))] : agents;
   $("empty").hidden = list.length > 0;
   const ids = new Set(list.map((c) => c.id));
   for (const [id, rec] of cards) if (!ids.has(id)) { rec.el.remove(); cards.delete(id); }
   for (const c of list) {
     let rec = cards.get(c.id);
-    if (!rec) { rec = makeCard(c); cards.set(c.id, rec); $("cards").append(rec.el); }
+    if (!rec) { rec = makeCard(c); if (c.synthetic) rec.parts.debug.hidden = true; cards.set(c.id, rec); $("cards").append(rec.el); }
     rec.el.classList.toggle("offline", !c.online);
+    rec.card = c;
     renderHead(c, rec); renderInfo(c, rec); renderMap(c, rec);
   }
   if (!activeTab || !ids.has(activeTab)) activeTab = list.length ? list[0].id : null;
@@ -854,13 +951,55 @@ function setView(v) { view = v; try { localStorage.setItem("view", v); } catch (
 $("v-grid").onclick = () => setView("grid");
 $("v-tabs").onclick = () => setView("tabs");
 
+// ---- the page address and the plan list ----
+// The select at the top names the pages: the run cards, or the plan view of any plan the dashboard can draw. The list is asked again every few seconds so that a
+// plan file that changed (and so its drawing) is fetched again.
+function paintRouteSelect() {
+  const sel = $("route"), want = route.kind === "plan" ? route.plan : "";
+  const names = [...planList.keys()];
+  if (want && !planList.has(want)) names.push(want);
+  const key = names.join("|");
+  if (sel.dataset.names !== key) {
+    sel.dataset.names = key;
+    sel.replaceChildren(h("option", { value: "", text: "Runs (live)" }), ...names.map((n) => h("option", { value: n, text: "Plan: " + n })));
+  }
+  sel.value = want;
+}
+$("route").addEventListener("change", () => { location.hash = PV.planHash($("route").value); });
+function onRoute() {
+  const next = PV.parseRoute(location.hash);
+  if (next.kind === route.kind && next.plan === route.plan) return;
+  route = next;
+  copyRows = []; copyAt = 0;
+  for (const rec of cards.values()) rec.el.remove();
+  cards.clear();
+  paintRouteSelect();
+  if (last) render(last);
+  pollPlans();
+}
+window.addEventListener("hashchange", onRoute);
+async function pollPlans() {
+  const now = Date.now();
+  if (now - planListAt < 3500) return;
+  planListAt = now;
+  const list = await getJSON("/api/plans");
+  if (Array.isArray(list)) { planList = new Map(list.map((p) => [p.name, p])); paintRouteSelect(); }
+  if (route.kind === "plan") {
+    const rows = await getJSON("/api/plan-copies/" + encodeURIComponent(route.plan));
+    if (Array.isArray(rows)) copyRows = rows;
+    if (last) render(last);
+  }
+}
+
 async function poll() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
     if (r.ok) render(await r.json());
+    pollPlans();
     // an open debug panel follows its agent
     for (const [id, rec] of cards) if (rec.parts.debug.open) loadRaw(id, rec.parts);
   } catch (e) { $("updated").textContent = "dashboard not reachable: " + e; }
 }
+paintRouteSelect();
 poll();
 setInterval(poll, POLL_MS);

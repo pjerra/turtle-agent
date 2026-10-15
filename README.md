@@ -3117,11 +3117,19 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 `<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
 and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
 
-**What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
+**What it reads.** From a settings file only the `rpc` and `dungeons_dir` fields (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
 agent gets the four calls in parallel with a 2 s bound; the answer is built into a card and cached as JSON, so a page
 request does no work. The trace of the run (the path in `dungeon_status`'s `report.trace_file`) is followed from the byte it
 was last read to, so a poll costs the new lines only.
+
+**Plan view and plan copies.** The select at the top opens `#/plan/<name>`: a plan drawn with no run (every plan of `--plans-dir`
+and of the binary), with a checkbox per leg, "only" per leg and, while a run is on the plan, "Current leg + next". The layers
+add the computed look and gather points of the packs (straight lines, not the navmesh), area triggers, gossip NPCs and stand
+points, and the plan's `needs_walk` points and `check_skip` hops. A run reads its plan from the `dungeons_dir` of its settings
+file, which is usually not the file in `--plans-dir`; so a run card draws the slot's own copy when the file is there, and says in
+words which file is drawn, which file the run reads, and whether they are the same bytes (sha256). The plan view lists the same
+for every agent. `/api/plans`, `/api/plan/<name>[?agent=<port>]` and `/api/plan-copies/<name>` serve this; all are GET.
 
 **The page.** A card per commander (a grid, or tabs with the Grid/Tabs switch; the choice is remembered in the browser):
 

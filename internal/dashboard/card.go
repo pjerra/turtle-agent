@@ -35,7 +35,8 @@ type Inputs struct {
 	Folder    string // the capture folder the run belongs to
 	Plan      *dungeon.Plan
 	PlanErr   string
-	StatusErr string // why the status call failed, when it did
+	PlanCopy  *PlanCopy // which plan file is drawn and which one the run reads
+	StatusErr string    // why the status call failed, when it did
 	WasOnline bool
 }
 
@@ -72,10 +73,12 @@ type Card struct {
 	Commander *Dot         `json:"commander,omitempty"` // the agent's own character, when it stands on the plan's map
 	TrailT    []int64      `json:"trail_t,omitempty"`   // the unix second of each point of Trail (the lead was last seen there)
 	Trail     [][2]float64 `json:"trail,omitempty"`     // where the lead bot has been this run ([x, y] in the drawing's plane), oldest first
+	PlanCopy  *PlanCopy    `json:"plan_copy,omitempty"` // which plan file the map draws and which one the run reads
 	Events    []Event      `json:"events"`              // what happened this run (deaths, wipes, boss kills, doors and chests), oldest first; the poller fills it
 
-	ev        evInputs // what the event log reads of the report; never sent
-	tracePath string   // the trace file of the run, for the live digest; never sent
+	ev        evInputs     // what the event log reads of the report; never sent
+	tracePath string       // the trace file of the run, for the live digest; never sent
+	runPlan   reportedPlan // the plan file the run reports; never sent
 }
 
 // Link is a file of the run the page links to, served from --tests-dir.
@@ -477,6 +480,7 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 	if in.Plan != nil {
 		c.Run.LegCount = len(in.Plan.Legs)
 	}
+	c.PlanCopy = in.PlanCopy
 	if m := legRe.FindStringSubmatch(rep.Current); m != nil {
 		c.Run.Leg, _ = strconv.Atoi(m[1])
 		c.Run.LegName = m[2]
