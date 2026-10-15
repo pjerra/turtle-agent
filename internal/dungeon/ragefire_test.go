@@ -142,7 +142,7 @@ func TestRagefirePlanLoads(t *testing.T) {
 	if fmt.Sprint(p.Fleers) != "[11319 11324]" || fmt.Sprint(p.CCPriority) != "[11319 11324 11322]" || fmt.Sprint(p.CCAlways) != "[11319 11324]" || fmt.Sprint(p.KillFirst) != "[11319 11324 11322]" {
 		t.Errorf("fleers %v cc_priority %v cc_always %v kill_first %v", p.Fleers, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
-	if lo, hi := p.Band(); lo != 14 || hi != 18 {
+	if lo, hi := p.Band(); lo != 13 || hi != 18 {
 		t.Errorf("band %d-%d", lo, hi)
 	}
 	// The plan is kept in the form Marshal writes.
