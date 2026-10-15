@@ -969,7 +969,7 @@ meets them:
 
 ## Dungeon plan: Zul'Farrak (`dungeons/zulfarrak.json`, #130; written from the world data, walked by a GM invisible on 2026-10-14, not run as a party)
 
-Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. `dungeons/zulfarrak-extra.json` is a record of what the driver cannot do, not a plan to run. What the first live run has to settle, in the order it meets them:
+Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. The gong leg that `dungeons/zulfarrak-extra.json` once recorded is the optional `gahzrilla` leg of the plan since PR A (check 9). What the first live run has to settle, in the order it meets them:
 
 1. **Entry** (needs TortoiseBots #939). The run walks the party to the portal and sends `.bot cmd enter 924`: record the `TBM:ACTION_PENDING|cmd enter|party|<budget>|924` line, the final ACK (`entered`, n bots) or ERR code, the seconds, and that the lead bot lands on map 209 at 1212.7 842.0 and the others come by the same order or by `cmd summon`; the group must not change after that. On a module without the order the run must fail with "needs TortoiseBots #939" within about 15 s of arriving at the portal. `prepare.fresh` uses `outside_tele` `farrak` (partial match of game_tele 160): check that the bots and the agent land outside, map 1, near -6801 -2893.
 2. **The road to Antu'sul** (leg 0): the 15 pull groups come in the order of the plan; the four static Shadowcasters at 1505-1511 845 are their own group; the patrolling groups (radius 30) are found where they walk, not at their spawn rows. Count walk aggros and the time (about 807 yd).
@@ -977,8 +977,12 @@ Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull 
 4. **Theka** patrols a ~45 yd loop from (1778 860): the boss fight must find him (it looks within 80 yd of the lead bot); the 30% transform must not end the fight early; the scarabs (7269) are skipped, not waited for.
 5. **The way to Velratha** goes by the west road (junction 1645 909), NOT through the End Door: check that no bot is ever at 1854.5 1142.9 and that nothing opened the door (`gameobjects` entry 146084 stays `ready`).
 6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
-7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
+7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears (a run without a Mallet skips the optional gahzrilla leg: `legs[]` says `skipped: no Mallet of Zul'Farrak ...`; check 9).
 8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
+9. **Gahz'rilla (the optional `gahzrilla` leg, PR A; first run with the Mallet, a GM account of level 3)**: start with `"give_items": [{"bot": "lead", "item": 9240}]` and a fresh instance. Record: the setup line `additem 9240 on <lead> (test setup: Mallet of Zul'Farrak)` in `setup_shortcuts` and the
+   `.bot inv` that shows the item; the eight pull groups of the pool ring one by one (the Blood Drinker at 1714.4 1218.6 is the one the tank found no firing position for in the Velratha leg's runs); the lead bot walking to the stand (1652.84 1168.99) and ringing the gong: the `cmd use 9240 <lead> entry:141832@1650.9,1171.9,10.9`
+   order (the Mallet used ON the gong; the trace event `object_order` has its ACK with `spell:11434`, or the ERR code: `failed` with a cast check number is the server refusing the cast) and whether event 2488 ran; the 30 s wait: when Gahz'rilla (7273) appears in the feed and where (the pit 1664.65 1187.67 -2.89, then the walk 1672.7 1195.9 -> 1681.7 1204.1 -> 1686.1 1207.3 -> 1690.5 1211.5 -> 1692.6 1213.7 -> 1702.6 1224.2, one point per second);
+   whether he comes at the party on his own or waits at 1702.6 1224.2; any troll or other add at the pit; the kill time, his spells (11836 Freeze Solid, 11902, 11131), deaths. Then a run **without** the item: the leg is skipped with its reason and the run goes on to the courtyard.
 
 ## Start anywhere and the pull test (`from_leg`, `from_pull_group`, `dungeon_run.pulltest`)
 

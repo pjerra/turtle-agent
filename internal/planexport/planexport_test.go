@@ -424,16 +424,34 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := len(p.Legs) - 1
-	if p.Legs[last].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
-		t.Fatalf("%s", p.Legs[last].Name)
+	// The optional gahzrilla leg is left out of the run leader's rows (its bots carry no Mallet), so the rows have one leg fewer and the later
+	// legs close up: the last leg is the plan's last, one number lower.
+	if len(res.Rows.Legs) != len(p.Legs)-1 {
+		t.Fatalf("%d rows legs for %d plan legs", len(res.Rows.Legs), len(p.Legs))
+	}
+	last := len(res.Rows.Legs) - 1
+	if p.Legs[len(p.Legs)-1].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
+		t.Fatalf("%s", p.Legs[len(p.Legs)-1].Name)
+	}
+	for _, l := range res.Rows.Legs {
+		if l.Name == "gahzrilla" {
+			t.Errorf("the optional leg is in the rows: %+v", l)
+		}
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Entry == 7273 || s.Entry == 141832 {
+			t.Errorf("a step of the optional leg is in the rows: %+v", s)
+		}
 	}
 	// via, to, the walk into the zone, the boss: the grave steps (the carrier bot's loot_object) are left out of a leg whose companions_loot is false.
 	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
 		t.Fatalf("%s", got)
 	}
-	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "28 loot_object steps left out") {
+	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
+		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
@@ -467,5 +485,45 @@ func TestCompanionsLootFalseLegIsRefused(t *testing.T) {
 	}
 	if _, err := Build(z, Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "(zumrah): companions_loot is false") {
 		t.Fatalf("the shipped Zul'Farrak plan: %v", err)
+	}
+}
+
+// An optional leg (it needs an item no bot of the run leader carries) is left out of the rows with a warning, and the legs after it take its
+// numbers; every row's leg number is one of the legs written.
+func TestOptionalLegIsLeftOut(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"opt","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"boss":{"entry":1,"position":{"x":20,"y":0,"z":0}}},
+ {"name":"gong","to":{"x":30,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"requires_item":{"entry":9240,"name":"Mallet"}}}],"boss":{"entry":7273,"position":{"x":40,"y":0,"z":0}}},
+ {"name":"c","to":{"x":50,"y":0,"z":0},"boss":{"entry":3,"position":{"x":60,"y":0,"z":0}}}]}`)
+	res, err := Build(p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Legs) != 2 || res.Rows.Legs[0].Name != "a" || res.Rows.Legs[1].Name != "c" || res.Rows.Legs[1].Leg != 1 {
+		t.Fatalf("legs %+v", res.Rows.Legs)
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Leg > 1 || s.Entry == 7273 || s.Entry == 141832 {
+			t.Errorf("row %+v belongs to the optional leg or to a leg that is not written", s)
+		}
+	}
+	if got := strings.Join(kinds(res.Rows, 1), " "); got != "move boss" {
+		t.Errorf("leg 1: %s", got)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "leg 1 (gong): optional (needs Mallet (item 9240)") {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// A use_object whose item is used ON the object (via_item) has no row in the run leader's tables: the export is refused, naming the step.
+func TestViaItemUseObjectIsRefused(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"vi","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"gong","to":{"x":30,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"stand":{"x":32,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`)
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item") {
+		t.Fatalf("%v", err)
 	}
 }

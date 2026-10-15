@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -510,7 +511,7 @@ func (d *RemoteDriver) idleLeftovers(entries []uint32, centre Point, tried map[p
 	}
 	var out []tbm.HostileRec
 	for _, h := range d.fr.Hostiles {
-		if h.HPPct <= 0 || engaged[h.GUID] || tried[h.GUID] || !slices.Contains(entries, h.Entry) || h.Reaction == "f" || strings.Contains(h.Flags, "e") {
+		if h.HPPct <= 0 || engaged[h.GUID] || tried[h.GUID] || !slices.Contains(entries, h.Entry) || !h.Hostile() || h.Bystander() || h.Evading() {
 			continue
 		}
 		if math.Hypot(float64(h.X-centre.X), float64(h.Y-centre.Y)) <= LeftoverRadius {
@@ -555,10 +556,10 @@ func (d *RemoteDriver) sweepLeftovers(ctx context.Context, when string, centre P
 		why := fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) of %v within %.0f yd of %.0f %.0f %.0f; pulling %s at %.0f %.0f %.0f (round %d of %d)",
 			when, len(idle), entries, LeftoverRadius, centre.X, centre.Y, centre.Z, d.hostileName(h), h.X, h.Y, h.Z, round+1, leftoverRounds)
 		if err := d.pullAheadNote(ctx, h, why); err != nil {
-			return err
+			return d.sweepErr(err)
 		}
 		if err := d.afterFight(ctx); err != nil {
-			return err
+			return d.sweepErr(err)
 		}
 	}
 	d.look()
@@ -566,4 +567,13 @@ func (d *RemoteDriver) sweepLeftovers(ctx context.Context, when string, centre P
 		d.rep.note(fmt.Sprintf("graves-batch: leftover sweep %s: %d idle summon(s) are still within %.0f yd of %.0f %.0f %.0f after %d rounds; going on", when, len(left), LeftoverRadius, centre.X, centre.Y, centre.Z, leftoverRounds))
 	}
 	return nil
+}
+
+// sweepErr marks a wipe that ended a leftover sweep (the sweeps before a batch, after one and before the trigger run outside any batch): the
+// step fails with it, and stepFailedRecover then treats it as a wipe in the graves, which does not take the leg's last recovery slot.
+func (d *RemoteDriver) sweepErr(err error) error {
+	if errors.Is(err, errWipe) {
+		d.sweepWiped = true
+	}
+	return err
 }

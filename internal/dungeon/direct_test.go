@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
@@ -217,5 +218,41 @@ func TestRemoteShortDirectHopIsStillSent(t *testing.T) {
 	}
 	if len(direct) != 2 || direct[0] != "cmd move 43.50 0.00 1.00 direct" || direct[1] != "cmd move 55.00 0.00 4.00 direct" {
 		t.Fatalf("direct steps sent: %v", direct)
+	}
+}
+
+// A hold at the lead bot's own spot sends no move (the server cannot path a zero-length move: `unreachable`), whether or not a move was sent
+// before; and a hold for a lead bot that a fight carried away is a point holdStepYd yards from it toward its last move point, never its own
+// position.
+func TestHoldHereSendsNoMoveToTheLeadBotsOwnSpot(t *testing.T) {
+	g := newFakeRemote(t)
+	g.advance(time.Second) // the first frame
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), opts(), g.clock())
+	d.look()
+	d.bound = true
+	here, ok := d.leadPos()
+	if !ok {
+		t.Fatal("no lead position in the feed")
+	}
+	// No move was sent yet: nothing is known to anchor, nothing is sent.
+	d.holdHere(context.Background())
+	if len(g.ordersOf("cmd move")) != 0 {
+		t.Fatalf("a hold with no last move: %v", g.orders)
+	}
+	// The last move point is the lead bot's own spot: nothing is sent.
+	d.moveTo, d.haveMoveTo = here, true
+	d.holdHere(context.Background())
+	if len(g.ordersOf("cmd move")) != 0 {
+		t.Fatalf("a hold at the lead bot's own spot: %v", g.orders)
+	}
+	// The last move point is farther than holdSpotYd away: the stay spot is 2 yd from the lead bot toward it.
+	d.moveTo = Point{here.X - 12, here.Y, here.Z}
+	d.holdHere(context.Background())
+	mv := g.ordersOf("cmd move")
+	if len(mv) != 1 {
+		t.Fatalf("moves %v here %v moveTo %v have %v stale %v", mv, here, d.moveTo, d.haveMoveTo, d.stale())
+	}
+	if dest := g.moveOrderDest[len(g.moveOrderDest)-1]; dist3(dest, here) < holdMinYd || dist3(dest, here) > holdStepYd+0.1 || dest.X >= here.X {
+		t.Fatalf("hold to %v from %v", dest, here)
 	}
 }

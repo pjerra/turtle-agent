@@ -147,6 +147,10 @@ type Portal struct {
 type Leg struct {
 	Name string `json:"name,omitempty"`
 	To   Point  `json:"to"`
+	// Optional marks a leg that needs an item no honest run carries (Zul'Farrak's gong needs the Mallet of Zul'Farrak): at the leg's start the
+	// run looks for the item in the lead bot's and the carrier's bags and, when neither has it, skips the whole leg (the leg's result says
+	// so) instead of failing. The run-start check for a step's requires_item leaves such a leg out.
+	Optional *OptionalLeg `json:"optional,omitempty"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
 	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
@@ -177,6 +181,15 @@ type Leg struct {
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
 }
+
+// OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
+type OptionalLeg struct {
+	Item uint32 `json:"item"`
+	Name string `json:"name,omitempty"`
+}
+
+// Ref is the item as an ItemRef.
+func (o OptionalLeg) Ref() ItemRef { return ItemRef{Entry: o.Item, Name: o.Name} }
 
 // The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
@@ -445,6 +458,12 @@ type UseObject struct {
 	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
 	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
 	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+	// ViaItem says the required item is USED ON the object instead of the object being used: the remote driver orders `cmd use <item> <bot>
+	// entry:<object>@<point>` (TortoiseBots walks the bot to the object and casts the item's spell on it). Zul'Farrak's Gong of Zul'Farrak is
+	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
+	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
+	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
+	ViaItem bool `json:"via_item,omitempty"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -634,11 +653,12 @@ type rawLeg struct {
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	// CompanionsLoot is Leg.CompanionsLoot.
-	CompanionsLoot *bool     `json:"companions_loot"`
-	Leftover       []uint32  `json:"leftover_entries"`
-	Rest           *RestSpec `json:"rest"`
-	Notes          []string  `json:"notes"`
-	NeedsWalk      bool      `json:"needs_walk"`
+	CompanionsLoot *bool        `json:"companions_loot"`
+	Leftover       []uint32     `json:"leftover_entries"`
+	Optional       *OptionalLeg `json:"optional"`
+	Rest           *RestSpec    `json:"rest"`
+	Notes          []string     `json:"notes"`
+	NeedsWalk      bool         `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -760,6 +780,7 @@ type rawUse struct {
 	rawRef
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
+	ViaItem      bool      `json:"via_item"`
 }
 
 type rawItem struct {
@@ -1038,6 +1059,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 	}
 	l.To = c.point(path+".to", r.To)
+	if o := r.Optional; o != nil {
+		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
+		if o.Item == 0 {
+			c.fail(path+".optional.item", "required (the item entry the leg needs)")
+		}
+	}
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
@@ -1153,6 +1180,11 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
 	}
+	if o := l.Optional; o != nil && o.Item != 0 && !slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
+		return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item
+	}) {
+		c.fail(path+".optional.item", "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", o.Item)
+	}
 	if rs := r.Rest; rs != nil {
 		for _, f := range []struct {
 			name string
@@ -1240,6 +1272,16 @@ func (c *checker) step(path string, r *rawStep) Step {
 			u.Stand = &p
 		}
 		u.RequiresItem = c.item(path+".use_object.requires_item", r.UseObject.RequiresItem)
+		if u.ViaItem = r.UseObject.ViaItem; u.ViaItem {
+			switch {
+			case u.RequiresItem == nil:
+				c.fail(path+".use_object.via_item", "needs requires_item: the item that is used on the object")
+			case u.Stand == nil || u.Near == nil:
+				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
+			case dist3(*u.Stand, *u.Near) > UseRange:
+				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
 		s.UseObject = u
 	case r.LootObject != nil:
 		l := &LootObject{ObjectRef: c.ref(path+".loot_object", &r.LootObject.rawRef)}

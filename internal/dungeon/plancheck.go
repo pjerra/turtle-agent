@@ -370,6 +370,9 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 		switch {
 		case st.UseObject != nil:
 			stand, label = st.UseObject.Stand, label+"use_object.stand"
+			if st.UseObject.ViaItem { // the item's spell is cast at the object from the stand: it has a short range
+				c.useRange(label, st.UseObject.ObjectRef, stand, cur)
+			}
 		case st.LootObject != nil:
 			stand, label = st.LootObject.Stand, label+"loot_object.stand"
 			c.useRange(label, st.LootObject.ObjectRef, stand, cur)

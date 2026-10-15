@@ -124,10 +124,13 @@ type dungeonRunParams struct {
 	// with the failing points in the result's plan_check.
 	Force bool `json:"force,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
-	HaveItems   []uint32       `json:"have_items,omitempty"`
-	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
-	Teleport    bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
-	NoShortcuts bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	HaveItems []uint32 `json:"have_items,omitempty"`
+	// GiveItems puts items in bots' bags at the prepare step with the GM line `.additem <entry>` on each named bot (remote mode, GM account of
+	// level 3; README "Give items"): [{"bot": "lead" | "carrier" | <name>, "item": 9240}]. It is test setup, listed in setup_shortcuts.
+	GiveItems   []dungeon.GiveItem `json:"give_items,omitempty"`
+	Pulltest    *pulltestParam     `json:"pulltest,omitempty"`
+	Teleport    bool               `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
+	NoShortcuts bool               `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`

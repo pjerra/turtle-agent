@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ func TestZulfarrakGravesAreInBatches(t *testing.T) {
 			t.Errorf("batch %s: %d graves, %.1f yd", id, len(pts), BatchSpread(pts))
 		}
 	}
-	if total != 28 || len(order) < 5 {
+	if total != 31 || len(order) < 5 {
 		t.Fatalf("%d graves in %v", total, order)
 	}
 }
@@ -719,4 +720,113 @@ func TestIdleLeftoversAreFoughtBeforeTheAreaTrigger(t *testing.T) {
 	if g.mobsKilled != 2 {
 		t.Errorf("killed %d", g.mobsKilled)
 	}
+}
+
+// The leftover selector takes hostile units only: not friendly (f), not neutral (n), not non-attackable (kind u) or any other bystander; the
+// legacy empty reaction (an older module) and h or - count as hostile.
+func TestLeftoverSelectorTakesOnlyHostileAttackableUnits(t *testing.T) {
+	g := carrierGame(t)
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{0, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	mk := func(n int, reaction, kind string) tbm.HostileRec {
+		return tbm.HostileRec{GUID: packet.GUID(0xF130001C76000000 + uint64(n)), Entry: 7286, X: 10, Y: 0, HPPct: 100, Reaction: reaction, Kind: kind, Flags: "-"}
+	}
+	d.fr = tbm.ViewFrame{Hostiles: []tbm.HostileRec{mk(1, "f", ""), mk(2, "n", ""), mk(3, "h", "u"), mk(4, "", ""), mk(5, "h", ""), mk(6, "-", ""), mk(7, "h", "k"), mk(8, "h", "g")}}
+	var got []int
+	for _, h := range d.idleLeftovers([]uint32{7286}, Point{0, 0, 0}, map[packet.GUID]bool{}) {
+		got = append(got, int(h.GUID&0xFF))
+	}
+	slices.Sort(got)
+	if fmt.Sprint(got) != "[4 5 6]" {
+		t.Fatalf("selected %v: want the legacy empty, h and - reactions only", got)
+	}
+	// A unit that is evading, dead or too far is not taken either.
+	far, dead, evading := mk(9, "h", ""), mk(10, "h", ""), mk(11, "h", "")
+	far.X, dead.HPPct, evading.Flags = 80, 0, "e"
+	d.fr = tbm.ViewFrame{Hostiles: []tbm.HostileRec{far, dead, evading}}
+	if got := d.idleLeftovers([]uint32{7286}, Point{0, 0, 0}, map[packet.GUID]bool{}); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A wipe in a leftover sweep is a wipe in the graves: with the leg's first recovery already used it is not recovered, so the last slot stays for
+// the boss. Before a batch, and before the trigger.
+func TestWipeInALeftoverSweepKeepsTheBossSlot(t *testing.T) {
+	wipeOnFight := func(f *fakeRemote) {
+		for _, m := range f.mobs {
+			if m.engaged || m.pulled {
+				for _, p := range f.party {
+					p.Dead, p.HP = true, 0
+				}
+				return
+			}
+		}
+	}
+	t.Run("before a batch", func(t *testing.T) {
+		g := carrierGame(t)
+		leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+		leg.LeftoverEntries = []uint32{7286}
+		g.addMob(7286, Point{40, 30, 0})
+		g.onTick = wipeOnFight
+		g.graves = map[packet.GUID]*fakeGrave{}
+		for _, gv := range gs {
+			g.graves[gv.guid] = gv
+		}
+		cfg := DefaultConfig()
+		cfg.RecoverWipe = true
+		d := NewRemoteDriver(remotePlan(leg), g, cfg, objOpts(), g.clock())
+		d.wipeRecoverLeg = map[int]int{0: 1} // the leg's first recovery is used already
+		err := d.Run(context.Background(), 0)
+		rep, _ := d.Status()
+		if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "wipe in the graves: not recovered") || d.wipeRecoverLeg[0] != 1 || len(g.revived) != 0 {
+			t.Fatalf("%v %s recoveries %v revived %v\n%s", err, rep.State, d.wipeRecoverLeg, g.revived, notesOf(rep))
+		}
+	})
+	t.Run("before the trigger", func(t *testing.T) {
+		g := newTriggerGame(t, 3)
+		g.moduleTakes = true
+		g.addMob(7286, Point{104, 20, 0})
+		g.onTick = func(f *fakeRemote) {
+			wipeOnFight(f)
+			l := f.lead()
+			if g.moduleTakes && !g.fired && !l.Dead && dist3(Point{l.X, l.Y, l.Z}, g.center) <= float64(g.radius) {
+				g.fire()
+			}
+		}
+		leg := zumrahLeg("auto", 15)
+		leg.LeftoverEntries = []uint32{7286}
+		cfg := DefaultConfig()
+		cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+		cfg.RecoverWipe = true
+		cfg.Setup = []string{"gm visible off"}
+		d := NewRemoteDriver(remotePlan(leg), g, cfg, objOpts(), g.clock())
+		d.wipeRecoverLeg = map[int]int{0: 1}
+		err := d.Run(context.Background(), 0)
+		rep, _ := d.Status()
+		if err == nil || rep.State != "failed" || !strings.Contains(err.Error(), "wipe in the graves: not recovered") || d.wipeRecoverLeg[0] != 1 || len(g.revived) != 0 {
+			t.Fatalf("%v %s recoveries %v revived %v\n%s", err, rep.State, d.wipeRecoverLeg, g.revived, notesOf(rep))
+		}
+	})
+	// With a slot to spare the same wipe is recovered like any other.
+	t.Run("a spare slot recovers", func(t *testing.T) {
+		g := carrierGame(t)
+		leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+		leg.LeftoverEntries = []uint32{7286}
+		g.addMob(7286, Point{40, 30, 0})
+		once := false
+		g.onTick = func(f *fakeRemote) {
+			if !once {
+				for _, m := range f.mobs {
+					if m.engaged || m.pulled {
+						once = true
+						wipeOnFight(f)
+						return
+					}
+				}
+			}
+		}
+		o := runBatches(t, g, leg, gs, objOpts())
+		if o.err != nil || o.d.wipeRecoverLeg[0] != 1 {
+			t.Fatalf("%v recoveries %v\n%s", o.err, o.d.wipeRecoverLeg, notesOf(o.rep))
+		}
+	})
 }

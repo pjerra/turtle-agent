@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	zulfarrakPlan  = "../../dungeons/zulfarrak.json"
-	zulfarrakExtra = "../../dungeons/zulfarrak-extra.json"
-	zulfarrakData  = "../../tools/dungeongen/testdata/zulfarrak" // the world database export the plans were written from
+	zulfarrakPlan = "../../dungeons/zulfarrak.json"
+	zulfarrakData = "../../tools/dungeongen/testdata/zulfarrak" // the world database export the plans were written from
 )
 
 func loadPlan(t *testing.T, path string) *Plan {
@@ -70,7 +69,7 @@ func zfTSV(t *testing.T, name string) []map[string]string {
 
 func TestZulfarrakPlansLoad(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 17 {
+	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 18 {
 		t.Fatalf("%+v", p)
 	}
 	var names []string
@@ -80,8 +79,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
 		}
-		if (len(l.Steps) != 0 && !zfStepLegs[l.Name]) || (len(l.AfterBoss) != 0 && l.Name != "stairs_base") {
-			t.Errorf("the plan has steps only in the Zum'rah leg and the stairs event's legs: %s", l.Name)
+		if (len(l.Steps) != 0 && !zfStepLegs[l.Name] && l.Name != "gahzrilla") || (len(l.AfterBoss) != 0 && l.Name != "stairs_base") {
+			t.Errorf("the plan has steps only in the Zum'rah leg and the stairs event's legs and the gong: %s", l.Name)
 		}
 		for _, g := range l.PullGroups {
 			if g.Team != "" || g.Ambush {
@@ -89,7 +88,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7271 7275 7604 7267]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7275 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -125,11 +124,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	// Zum'rah (faction 35 until area trigger 962) is a boss of the main plan only, behind the area_trigger step; Weegli's crew (7604-7608) is
 	// in no pull group of either plan, and only Bly (with Raven, Oro and Murta first) is a boss: the bly leg, after his gossip turns the crew
 	// hostile. Weegli (7607) is in no pull group, boss or kill list at all: he has to live to blow the End Door.
-	x := loadPlan(t, zulfarrakExtra)
-	if len(x.Legs) != 1 || x.Legs[0].Name != "gong" {
-		t.Fatalf("%+v", x.Legs)
-	}
-	for _, pl := range []*Plan{p, x} {
+	for _, pl := range []*Plan{p} {
 		for _, l := range pl.Legs {
 			for _, g := range l.PullGroups {
 				for _, e := range g.Entries {
@@ -149,12 +144,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	// The gong needs the Mallet, which an honest run does not have: it is only in the extra plan.
-	if us := x.Legs[0].Steps[0].UseObject; us == nil || us.Entry != 141832 || us.RequiresItem == nil || us.RequiresItem.Entry != 9240 {
-		t.Errorf("%+v", x.Legs[0].Steps)
-	}
 	// The files are kept in the form Marshal writes.
-	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
+	for _, f := range []string{zulfarrakPlan} {
 		pl := loadPlan(t, f)
 		raw, err := os.ReadFile(f)
 		if err != nil {
@@ -175,7 +166,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 func TestZulfarrakStairsEventOrder(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	var names []string
-	for _, l := range p.Legs[11:] {
+	for _, l := range p.Legs[12:] {
 		names = append(names, l.Name)
 	}
 	if fmt.Sprint(names) != "[stairs stairs_top stairs_base weegli_door bly ukorz]" {
@@ -218,7 +209,7 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 	summoned := map[uint32]bool{7273: true, 7275: true, 7604: true}
 	scripted := map[uint32]bool{7796: true, 7605: true, 7606: true, 7608: true}
 	patrolBosses := map[uint32]bool{7272: true, 7795: true} // Theka walks a 45 yd loop, Velratha the strip by the gong
-	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
+	for _, f := range []string{zulfarrakPlan} {
 		p := loadPlan(t, f)
 		for i, l := range p.Legs {
 			for j, g := range l.PullGroups {
@@ -301,15 +292,12 @@ func TestZulfarrakOnNavmesh(t *testing.T) {
 	endDoor := Point{1854.5, 1142.9, 16.1}
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
-	for _, f := range []string{zulfarrakPlan, zulfarrakExtra} {
+	for _, f := range []string{zulfarrakPlan} {
 		p := loadPlan(t, f)
 		from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
 		checked := 0
 		for i, l := range p.Legs {
 			for j, w := range waypoints(l) {
-				if p.Name == "zulfarrak-extra" && i > 0 && j == 0 {
-					from = [3]float32{w.X, w.Y, w.Z} // the extra legs are separate starts, not one walk
-				}
 				to := [3]float32{w.X, w.Y, w.Z}
 				path, err := pl.Plan(p.Map, from, to)
 				if errors.Is(err, navmesh.ErrNoEngine) {
@@ -473,9 +461,8 @@ func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
 	}
 	const routeAggro = 20
 	p := loadPlan(t, zulfarrakPlan)
-	extra := loadPlan(t, zulfarrakExtra)
 	planned := func(entry uint32, at Point) bool {
-		for _, q := range []*Plan{p, extra} {
+		for _, q := range []*Plan{p} {
 			for _, l := range q.Legs {
 				for _, g := range l.PullGroups {
 					for k, pos := range g.Positions {
@@ -559,8 +546,8 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 			l = x
 		}
 	}
-	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "velratha" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
-		t.Fatalf("the courtyard leg follows Velratha's")
+	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "gahzrilla" || p.Legs[len(p.Legs)-10].Name != "velratha" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
+		t.Fatalf("the courtyard leg follows the gahzrilla leg, which follows Velratha's")
 	}
 	if l.To != (Point{1822, 1177, 9.1}) || l.Boss != nil || len(l.Steps) != 0 || l.CompanionsLoot != nil {
 		t.Errorf("%+v", l)
@@ -606,7 +593,7 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 		t.Errorf("companions_loot must be false: only the carrier opens the graves")
 	}
 	n := len(l.Steps)
-	if n != 29 || l.Steps[n-1].AreaTrigger == nil {
+	if n != 32 || l.Steps[n-1].AreaTrigger == nil {
 		t.Fatalf("%d steps", n)
 	}
 	for i, s := range l.Steps[:n-1] {
@@ -632,9 +619,12 @@ func TestZulfarrakZumrahLeg(t *testing.T) {
 	}
 }
 
-// The grave steps (owner order 2026-10-15): every one is an entry 128403 spawn of the export (the graves Zum'rah's spell 10731 opens, each with
-// the linked trap that summons a Zombie and a Dead Hero), more than 30 yd from him, once each, with a stand within the use range; the three
-// graves nearer to him and the 9 graves of entry 128308 are not among them.
+// The grave steps (owner order 2026-10-15): every one is an entry 128403 spawn of the export (the only game object Zum'rah's spell 10731 uses:
+// spell_script_target; each grave has the linked trap that summons a Zombie and a Dead Hero), once each, with a stand within the use range; the
+// 9 graves of entry 128308 (the spell does not use them) are not among them. Owner: "the boss opens all the graveyards, and if not all are opened
+// before, they get pulled while they try to kill the boss. There can be 1 or 2 graveyards left but not more": at most two of the graves he can
+// awaken (entry 128403 within 100 yd of him) are left unopened when the area trigger fires; the plan opens all 31, the three nearer ones too
+// (he is friendly until the trigger).
 func TestZulfarrakGraveSteps(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	l := zfLeg(t, p, "zumrah")
@@ -677,14 +667,8 @@ func TestZulfarrakGraveSteps(t *testing.T) {
 		if !match {
 			t.Errorf("%s: no grave of entry 128403 at %v", where, *lo.Near)
 		}
-		if d := hdist(*lo.Near, zumrah); d <= 30 {
-			t.Errorf("%s: the grave is %.1f yd from Zum'rah", where, d)
-		}
 		if d := dist3(*lo.Stand, *lo.Near); d > UseRange {
 			t.Errorf("%s: the stand is %.1f yd from the grave", where, d)
-		}
-		if hdist(*lo.Stand, zumrah) <= 30 {
-			t.Errorf("%s: the stand is within 30 yd of Zum'rah", where)
 		}
 		// The spawn guid is the export's gameobject.guid of that exact grave.
 		spawnOK := false
@@ -701,8 +685,27 @@ func TestZulfarrakGraveSteps(t *testing.T) {
 		}
 		seen[*lo.Near] = true
 	}
-	if total != 31 || far != 28 || len(seen) != far {
+	if total != 31 || far != 28 || len(seen) != total {
 		t.Errorf("%d graves of 128403 in the export, %d beyond 30 yd, %d steps", total, far, len(seen))
+	}
+	// The graves the boss can awaken and the plan leaves unopened before the trigger.
+	left := 0
+	for g, at := range all {
+		if hdist(at, zumrah) > 100 {
+			continue
+		}
+		opened := false
+		for _, s := range l.Steps {
+			if lo := s.LootObject; lo != nil && strconv.Itoa(int(lo.Spawn)) == g {
+				opened = true
+			}
+		}
+		if !opened {
+			left++
+		}
+	}
+	if left > 2 {
+		t.Errorf("%d summon-usable graves are left unopened before the trigger: at most 2 may be", left)
 	}
 }
 
@@ -782,5 +785,99 @@ func TestZulfarrakCourtyardExitsAvoidTheEndDoor(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The gahzrilla leg (PR A, TortoiseBots #984): the optional gong leg between Velratha and the courtyard. Pins what the world database says:
+// gong 141832 (spawn row 27140, lock 459, event 2488), the Mallet 9240, Gahz'rilla 7273 summoned at the pit and walked out by event 2489 to
+// 1702.58 1224.19, and the eight packs on or near that walk (TestZulfarrakPlansMatchTheWorldExport checks every member against its spawn row,
+// TestZulfarrakRouteHasNoUnplannedPack that no other mob stands near the route).
+func TestZulfarrakGahzrillaLeg(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	var l Leg
+	idx := -1
+	for i, x := range p.Legs {
+		if x.Name == "gahzrilla" {
+			l, idx = x, i
+		}
+	}
+	if idx != 9 || p.Legs[idx-1].Name != "velratha" || p.Legs[idx+1].Name != "courtyard" {
+		t.Fatalf("the leg is at %d", idx)
+	}
+	if l.Optional == nil || l.Optional.Item != 9240 || l.Optional.Name != "Mallet of Zul'Farrak" {
+		t.Fatalf("optional %+v", l.Optional)
+	}
+	if l.To != (Point{1652.84, 1168.99, 10.67}) {
+		t.Errorf("the walk ends at the gong stand, not %v", l.To)
+	}
+	// The order: the packs of the pool ring, then the Mallet used on the gong (item 9240's spell 11434 opens the gong's lock; a plain use of the
+	// gong did nothing live), by a bot that carries it, 3.5 yd from the gong; the wait for him to show; the boss.
+	if len(l.Steps) != 2 || l.Steps[0].UseObject == nil || l.Steps[1].WaitFor == nil || len(l.AfterBoss) != 0 {
+		t.Fatalf("steps %+v", l.Steps)
+	}
+	u := l.Steps[0].UseObject
+	if u.Entry != 141832 || *u.Near != (Point{1650.9, 1171.9, 10.9}) || *u.Stand != l.To || u.RequiresItem == nil || u.RequiresItem.Entry != 9240 || !u.ViaItem || dist3(*u.Stand, *u.Near) > UseRange {
+		t.Errorf("use_object %+v", u)
+	}
+	w := l.Steps[1].WaitFor
+	if w.Unit == nil || fmt.Sprint(w.Unit.Entries) != "[7273]" || w.Unit.State != UnitSeen || w.TimeoutS != 30 || w.FailText == "" {
+		t.Errorf("wait_for %+v", w)
+	}
+	if l.Boss == nil || l.Boss.Entry != 7273 || l.Boss.Position != (Point{1702.58, 1224.19, 8.88}) {
+		t.Errorf("boss %+v", l.Boss)
+	}
+	if l.CompanionsLoot != nil || fmt.Sprint(l.Skip) != "[7269 10080 10082 15578]" {
+		t.Errorf("companions_loot %v skip %v", l.CompanionsLoot, l.Skip)
+	}
+	// The packs, in pull order (the first position of each), and how far each is from the walk event 2489 makes (pit to 1702.58 1224.19).
+	want := []struct {
+		entries string
+		at      Point
+		radius  float32
+	}{
+		{"[5649 5649 5650]", Point{1624.85, 1192.94, 9.09}, 15},
+		{"[5650]", Point{1643.59, 1200.11, 9.05}, 15},
+		{"[7246 7246 8095]", Point{1652.63, 1210.28, 9.17}, 30},
+		{"[5649]", Point{1652.06, 1219.91, 9.67}, 15},
+		{"[5649]", Point{1666.97, 1233.6, 9.41}, 15},
+		{"[5649]", Point{1699.81, 1233.84, 8.96}, 15},
+		{"[5650 7246]", Point{1700.27, 1248.3, 9.8}, 15},
+		{"[5649]", Point{1714.38, 1218.58, 8.96}, 15},
+	}
+	if len(l.PullGroups) != len(want) {
+		t.Fatalf("%d groups", len(l.PullGroups))
+	}
+	walk := []Point{{1664.65, 1187.67, -2.89}, {1672.66, 1195.93, 0.96}, {1681.74, 1204.13, 5.67}, {1686.09, 1207.3, 9.75}, {1690.54, 1211.53, 10.18}, {1692.57, 1213.66, 8.88}, {1702.58, 1224.19, 8.88}}
+	for i, g := range l.PullGroups {
+		if fmt.Sprint(g.Entries) != want[i].entries || g.Positions[0] != want[i].at || g.Radius != want[i].radius || len(g.Positions) != len(g.Entries) {
+			t.Errorf("group %d: %v %v radius %g", i, g.Entries, g.Positions, g.Radius)
+		}
+		near := 1e9
+		for _, at := range g.Positions {
+			for k := 1; k < len(walk); k++ {
+				near = math.Min(near, distToSegment(at, walk[k-1], walk[k]))
+			}
+		}
+		if near > 45 {
+			t.Errorf("group %d (%v) is %.0f yd from his walk: it is not on it", i, g.Entries, near)
+		}
+	}
+}
+
+// The gong and the Mallet are what the server database says: object 141832 at the leg's `near` is in the export, and the optional item is the
+// one the step requires.
+func TestZulfarrakGongIsInTheExport(t *testing.T) {
+	gos := zfTSV(t, "gameobjects.tsv")
+	found := false
+	for _, m := range gos {
+		if m["entry"] == "141832" {
+			x, _ := strconv.ParseFloat(m["x"], 64)
+			y, _ := strconv.ParseFloat(m["y"], 64)
+			z, _ := strconv.ParseFloat(m["z"], 64)
+			found = math.Abs(x-1650.91) < 0.06 && math.Abs(y-1171.88) < 0.06 && math.Abs(z-10.901) < 0.06
+		}
+	}
+	if !found {
+		t.Error("no gong 141832 at 1650.91 1171.88 10.901 in the export")
 	}
 }
