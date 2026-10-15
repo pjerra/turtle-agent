@@ -400,9 +400,10 @@
           "radius": 50
         },
         {
-          "entries": [5650],
+          "entries": [5650, 7246],
           "positions": [
-            {"x": 1759.63, "y": 730.254, "z": 17.6822}
+            {"x": 1759.63, "y": 730.254, "z": 17.6822},
+            {"x": 1752.93, "y": 718.564, "z": 21.2051}
           ],
           "radius": 10
         },
@@ -428,7 +429,7 @@
       "notes": [
         "The three Sul'lithuz Hatchlings (8130, faction 16, at 1812-1820 667-678, spawn rows by Antu'sul) cannot be attacked by the bots (\"The group cannot attack that target\": TortoiseBots side, live 2026-10-15): they are no pull group any more and the leg skips the entry, so no pull waits for them. Antu'sul's own fight does not need them dead.",
         "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals).",
-        "Route edit Z9 (2026-10-16): the patrolling Witch Doctor 81482 (spawn 1759.6 730.3, wanders 1761-1802 730) was met by the party in all three runs; it is group 2, before the Sandcrawler at 1802 739."
+        "Route edit Z9 (2026-10-16): the patrolling Witch Doctor 81482 (spawn 1759.6 730.3, wanders 1761-1802 730) was met by the party in all three runs; it is group 2 with the Shadowhunter 81517 that stands 13 yd from it (1752.9 718.6, which the look walk would otherwise pass within 20 yd), before the Sandcrawler at 1802 739."
       ]
     },
     {
@@ -492,6 +493,15 @@
           "radius": 30
         },
         {
+          "entries": [5650, 5650, 7246],
+          "positions": [
+            {"x": 1554.3, "y": 1006.74, "z": 8.96011},
+            {"x": 1556.35, "y": 1002.31, "z": 8.96011},
+            {"x": 1545.05, "y": 995.059, "z": 8.96011}
+          ],
+          "radius": 12
+        },
+        {
           "entries": [7246, 8095],
           "positions": [
             {"x": 1565, "y": 1019, "z": 9},
@@ -532,7 +542,7 @@
       "notes": [
         "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
         "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152).",
-        "Route edit Z4 (2026-10-16, test it in one group): the Shadowhunter / Sandcrawler pair at 1565 1019 (7246 and 8095, the wandering members of the patrol group at 1576-1590 1079-1092) is group 5, before the Blood Drinker at 1585 1035 (radius 10, not the 15 of the route file: a radius of 15 reaches the two Witch Doctors of the pack at 1554 1006): seen in 5 of 5 traces, pulled 'on the way' and evaded after 60-89 s, now from a look point 21 yd off. Its positions are where the traces saw it, not spawn rows (the export has none there); TestZulfarrakPlansMatchTheWorldExport lists them. The lone Shadowhunter at 1591 1048 stays out (its pulls drew no fight, 25 s each: zf1-run6)."
+        "Route edit Z4 (2026-10-16, test it in one group): the Shadowhunter / Sandcrawler pair at 1565 1019 (7246 and 8095, the wandering members of the patrol group at 1576-1590 1079-1092) is group 5, before the Blood Drinker at 1585 1035 (radius 10, not the 15 of the route file: a radius of 15 reaches the two Witch Doctors of the pack at 1554 1006): seen in 5 of 5 traces, pulled 'on the way' and evaded after 60-89 s, now from a look point 21 yd off. Its positions are where the traces saw it, not spawn rows (the export has none there); TestZulfarrakPlansMatchTheWorldExport lists them. The lone Shadowhunter at 1591 1048 stays out (its pulls drew no fight, 25 s each: zf1-run6). Group 5 is the static pack right before it (two Witch Doctors 81618/81619 and the Shadowhunter 81624 at 1545-1556 995-1007), added because the look point of the pair brings the lead within 20 yd of it (TestZulfarrakRouteHasNoUnplannedPack)."
       ]
     },
     {

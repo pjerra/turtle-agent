@@ -485,7 +485,7 @@ func TestZulfarrakPlanCheck(t *testing.T) {
 		// A run from a pull group starts at its gather spot: the same plan passes from the groups of the Velratha legs (legs 7 and 8, split at
 		// the pack of five at 1636 1105 by the route edits of 2026-10-16) and from a leg start.
 		if p.Name == "zulfarrak" {
-			for _, from := range []struct{ leg, group int }{{7, 0}, {7, 6}, {8, 0}, {8, 2}} {
+			for _, from := range []struct{ leg, group int }{{7, 0}, {7, 7}, {8, 0}, {8, 2}} {
 				g := from.group
 				res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: from.leg, FromPullGroup: &g})
 				if err != nil || !res.OK() {
