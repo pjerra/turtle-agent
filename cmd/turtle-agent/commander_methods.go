@@ -294,6 +294,25 @@ func (g remoteGame) SnapToFloor(ctx context.Context, mapID uint32, p dungeon.Poi
 	return dungeon.Point{X: n[0], Y: n[1], Z: n[2]}, true
 }
 
+// FloorsAt implements dungeon.FloorLister: the walkable ground floors of the navmesh under (x, y) within 12 yd of z, highest first;
+// false when there is no planner, the tile is missing or the lookup fails.
+func (g remoteGame) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
+	if g.c.planner == nil {
+		return nil, false
+	}
+	fl, err := g.c.planner.Floors(mapID, x, y, z-12, z+12)
+	if err != nil || len(fl) == 0 {
+		return nil, false
+	}
+	var out []float32
+	for _, f := range fl {
+		if f.Flags&navmesh.NavGround != 0 {
+			out = append(out, f.Z)
+		}
+	}
+	return out, len(out) > 0
+}
+
 // The enter phase of a remote run (dungeon.Enterer): the agent's own character, which stays outside and ungrouped, and the one GM
 // command the phase sends.
 
