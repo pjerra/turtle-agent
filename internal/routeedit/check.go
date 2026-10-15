@@ -20,7 +20,9 @@ type CheckResult struct {
 	// Checked: the check ran. False when the navmesh could not answer (no engine, no tiles): the edit is then refused, nothing is proven.
 	Checked bool   `json:"checked"`
 	Skipped string `json:"skipped,omitempty"`
-	// OK: checked and the edit makes no new issue.
+	// Accepted: checked and the edit makes no new issue, so it may be saved. OK: checked and the edited plan has no plan check issue at all;
+	// only such an edit is "checked" and usable for a run. An accepted edit of a plan with issues of its own is kept as "unchecked".
+	Accepted   bool                `json:"accepted"`
 	OK         bool                `json:"ok"`
 	Points     int                 `json:"points"`
 	BaseIssues int                 `json:"base_issues"`
@@ -56,7 +58,8 @@ func Evaluate(base, edited *dungeon.Plan, nav dungeon.Navmesh) CheckResult {
 		res.Issues = append(res.Issues, Issue{PlanIssue: is, New: n, Text: is.String()})
 	}
 	res.Warnings, res.Exempt = append(res.Warnings, after.Warnings...), append(res.Exempt, after.Exempt...)
-	res.OK = res.NewIssues == 0
+	res.Accepted = res.NewIssues == 0
+	res.OK = res.Accepted && len(res.Issues) == 0
 	return res
 }
 
@@ -71,4 +74,9 @@ func (c CheckResult) Refusal() string {
 		return "the plan check could not run (" + c.Skipped + "): nothing is proven, the edit is refused"
 	}
 	return fmt.Sprintf("the edit makes %d new plan check issue(s)", c.NewIssues)
+}
+
+// Unchecked is the sentence for an accepted edit of a plan that has plan check issues of its own.
+func (c CheckResult) Unchecked() string {
+	return fmt.Sprintf("the edit adds no plan check issue, but the plan has %d of its own: kept as unchecked, and not used for a run until they are fixed", len(c.Issues))
 }

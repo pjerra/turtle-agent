@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -33,7 +32,7 @@ type Tokens struct {
 // else (mode 0600 or tighter); a line that is not `label token`, a short token, a repeated label or token is an error, and so is a file with
 // no token in it. Blank lines and lines starting with # are skipped.
 func LoadTokens(path string) (*Tokens, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
 	if err != nil {
 		return nil, fmt.Errorf("token file: %w", err)
 	}
@@ -48,7 +47,7 @@ func LoadTokens(path string) (*Tokens, error) {
 	if st.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("token file %s is readable by others (mode %04o): chmod 600 it", path, st.Mode().Perm())
 	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok && int(sys.Uid) != os.Getuid() {
+	if !ownedByUser(st) {
 		return nil, fmt.Errorf("token file %s belongs to another user", path)
 	}
 	t := &Tokens{fails: map[string][]time.Time{}}

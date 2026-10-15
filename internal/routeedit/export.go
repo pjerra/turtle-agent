@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
@@ -32,6 +31,9 @@ func Pick(s *Store, plan string, version int) (*Meta, []byte, error) {
 	m, err := s.Meta(plan, version)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s %s: no such version", plan, Name(version))
+	}
+	if m.Status == StatusUnchecked {
+		return nil, nil, fmt.Errorf("%s %s is unchecked: the plan has %d plan check issue(s) of its own, so no edit of it is proven (fix them, then edit again)", plan, Name(version), len(m.Check.Issues))
 	}
 	if m.Status == StatusRefused {
 		return nil, nil, fmt.Errorf("%s %s was refused by the plan check (%s): there is no plan file to use", plan, Name(version), m.Check.Refusal())
@@ -100,7 +102,7 @@ func Export(s *Store, plan string, version int, dir string, guard func(realDir s
 		return nil, err
 	}
 	path := filepath.Join(real, plan+".json")
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|oNoFollow, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +159,7 @@ func Promote(s *Store, plan string, version int, worktree string) (*Promoted, er
 		return nil, fmt.Errorf("the worktree's %s (sha256 %s) is not the file this edit started from (%s): the plan changed meanwhile, so edit it again on the new base", plan+".json", hex.EncodeToString(sum[:])[:8], short(m.Base.SHA256))
 	}
 	tmp := filepath.Join(dir, "."+plan+".json.route-edit")
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|oNoFollow, 0o644)
 	if err != nil {
 		return nil, err
 	}

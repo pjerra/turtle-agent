@@ -527,3 +527,11 @@ func TestViaItemUseObjectIsRefused(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A gm_cross waypoint is a GM move of a remote run: the TortoiseBots run leader has no such step, so the export is refused.
+func TestGMCrossIsRefused(t *testing.T) {
+	p := parsePlan(t, strings.Replace(small, `{"x":10,"y":0,"z":0,"direct":true}`, `{"x":10,"y":0,"z":0,"direct":true,"gm_cross":true}`, 1))
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "gm_cross") {
+		t.Fatalf("%v", err)
+	}
+}

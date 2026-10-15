@@ -261,6 +261,9 @@ func (b *builder) leg(li int) error {
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
+		if w.GMCross {
+			return fmt.Errorf("via %.1f %.1f %.1f is a gm_cross: a GM moves the party there in a remote run, and the TortoiseBots run leader has no such step", w.X, w.Y, w.Z)
+		}
 		b.move(w.Point, w.Direct, "via")
 	}
 	b.move(l.To, false, "to")

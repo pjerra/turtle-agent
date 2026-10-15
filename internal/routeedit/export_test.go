@@ -210,3 +210,31 @@ func TestOverlaps(t *testing.T) {
 		t.Error("overlaps")
 	}
 }
+
+// An unchecked version (an edit of a plan that has plan check issues of its own) is kept, but never used: not as "latest", and not when named.
+func TestUncheckedVersionsAreNeverPickedExportedOrPromoted(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	v1, baseBytes, _ := editedVersion(t, s, StatusChecked)
+	v2, _, _ := editedVersion(t, s, StatusUnchecked)
+	if m, _, err := Pick(s, "edit1", 0); err != nil || m.Version != v1 {
+		t.Fatalf("latest must skip the unchecked version: %v %+v", err, m)
+	}
+	if _, _, err := Pick(s, "edit1", v2); err == nil || !strings.Contains(err.Error(), "unchecked") {
+		t.Errorf("named: %v", err)
+	}
+	dest := filepath.Join(t.TempDir(), "d")
+	if _, err := Export(s, "edit1", v2, dest, nil); err == nil {
+		t.Error("exported an unchecked version")
+	}
+	if _, err := os.Stat(dest); err == nil {
+		t.Error("a refused export made the folder")
+	}
+	if _, err := Promote(s, "edit1", v2, worktree(t, string(baseBytes))); err == nil {
+		t.Error("promoted an unchecked version")
+	}
+	only, _ := NewStore(t.TempDir())
+	editedVersion(t, only, StatusUnchecked)
+	if _, _, err := Pick(only, "edit1", 0); err == nil {
+		t.Error("latest of a plan with only unchecked versions")
+	}
+}

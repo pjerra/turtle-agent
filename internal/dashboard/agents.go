@@ -56,24 +56,51 @@ func expandHome(p string) string {
 	return p
 }
 
-// SlotDungeonDirs lists the dungeons_dir of every settings*.json in configDir (even a file with no rpc field): the folders the commander
-// runs of this machine read their plans from. A leading ~/ is made the home folder; a file that does not read is skipped, and an error is
-// returned for a configDir that cannot be listed.
-func SlotDungeonDirs(configDir string) ([]string, error) {
+// SlotFolders lists the folder every settings*.json of configDir has its runs read plans from (dungeons_dir, a leading ~/ made the home folder).
+// It fails closed, for the editor's guard: an error when configDir is not a folder, when a settings file cannot be read or decoded, or when a
+// slot (a file with an rpc field: an agent that can be sent a dungeon_run) has no folder that can be told: an empty dungeons_dir, or a relative
+// one, means dungeons/ under the agent's working folder, which is not known here. A settings file named in allowDefault (by file name) is
+// vouched for by the operator, who says its default folder is elsewhere; it is left out of the list.
+func SlotFolders(configDir string, allowDefault []string) ([]string, error) {
+	if st, err := os.Stat(configDir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("the config folder %s cannot be read, so the slots' plan folders are unknown", configDir)
+	}
 	files, err := filepath.Glob(filepath.Join(configDir, "settings*.json"))
 	if err != nil {
 		return nil, err
 	}
+	allowed := map[string]bool{}
+	for _, a := range allowDefault {
+		allowed[a] = true
+	}
 	var out []string
+	var problems []string
 	for _, f := range files {
+		name := filepath.Base(f)
 		data, err := os.ReadFile(f)
 		if err != nil {
+			problems = append(problems, name+" cannot be read: "+err.Error())
 			continue
 		}
 		var s settingsFields
-		if json.Unmarshal(data, &s) == nil && s.DungeonsDir != "" {
-			out = append(out, expandHome(s.DungeonsDir))
+		if err := json.Unmarshal(data, &s); err != nil {
+			problems = append(problems, name+" is not a settings file that can be decoded: "+firstLine(err.Error()))
+			continue
 		}
+		dir := expandHome(s.DungeonsDir)
+		switch {
+		case dir != "" && filepath.IsAbs(dir):
+			out = append(out, dir)
+		case s.RPC == "" || allowed[name]:
+			// not an agent that can be commanded, or the operator vouches for its default folder
+		case dir == "":
+			problems = append(problems, name+" names no dungeons_dir, so its runs read dungeons/ under the agent's working folder, which cannot be checked (set dungeons_dir, or pass --edit-allow-default-dir "+name+")")
+		default:
+			problems = append(problems, name+" has the relative dungeons_dir "+s.DungeonsDir+", which depends on the agent's working folder (use an absolute path, or pass --edit-allow-default-dir "+name+")")
+		}
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "; "))
 	}
 	return out, nil
 }
