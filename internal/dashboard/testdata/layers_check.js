@@ -13,8 +13,10 @@ const wasOn = ["bg", "route", "trail", "next", "packs", "hostile", "cleared", "b
 const wasOff = ["neutral", "steps"];
 wasOn.forEach((k) => assert.strictEqual(def[k], true, k));
 wasOff.forEach((k) => assert.strictEqual(def[k], false, k));
-const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0);
-assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "critter", "grid", "healring", "heading", "scale", "threat", "trailtime", "zonenames"].sort());
+const newOn = ["bossmark", "hpbars"]; // the owner's upgrade of 2026-10-15: the boss mark and the health bars start on, everything else new is off
+newOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
+const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0);
+assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "critter", "events", "feed", "grid", "healring", "heading", "hostilenames", "runinfo", "scale", "statusicons", "threat", "threatcolors", "trailtime", "zonenames"].sort());
 added.forEach((k) => assert.strictEqual(def[k], false, k + " starts off"));
 L.DEFS.forEach((d) => { assert.ok(d.label && d.group, d.key); assert.ok(!d.needs || d.why, d.key + " needs a reason"); });
 
@@ -54,7 +56,7 @@ assert.strictEqual(av.zonenames.ok, false);
 av = L.availability({ trail: true, trailtime: true, threat: true, healer: true });
 assert.strictEqual(av.threat.ok, true); assert.strictEqual(av.healring.ok, true); assert.strictEqual(av.trailtime.ok, true);
 assert.strictEqual(av.heading.ok, false); assert.strictEqual(av.aggro.ok, false);
-assert.deepStrictEqual(L.groups(), ["Map", "Plan", "Walk", "Party", "Mobs"]);
+assert.deepStrictEqual(L.groups(), ["Map", "Plan", "Walk", "Party", "Mobs", "Marks", "Run"]);
 
 // ---- guids: the feed prints them in different widths
 assert.strictEqual(L.guidKey("0x00000000000002DC"), "2dc");

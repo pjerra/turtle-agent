@@ -35,6 +35,7 @@ type Poller struct {
 	clients map[string]*Client
 	alive   map[string]bool // agents that have answered since the start
 	trails  map[string]*Trail
+	events  map[string]*EventLog
 	agents  []Agent
 	lastDis time.Time
 }
@@ -56,7 +57,7 @@ func NewPoller(o Options) *Poller {
 	if o.Agents == "" {
 		o.Agents = "auto"
 	}
-	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}}
+	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}, events: map[string]*EventLog{}}
 	p.state = []byte(`{"agents":[],"offline":[]}`)
 	return p
 }
@@ -118,6 +119,7 @@ func (p *Poller) Tick(ctx context.Context) {
 		if c.Online {
 			p.alive[a.ID] = true
 			p.trackTrail(a.ID, &c)
+			p.trackEvents(a.ID, &c, now)
 		}
 		switch {
 		case c.Online:
@@ -168,6 +170,16 @@ func (p *Poller) trackTrail(id string, c *Card) {
 	}
 	c.Trail = t.Points()
 	c.TrailT = t.Times()
+}
+
+// trackEvents puts the run's events on the card. The caller holds p.mu.
+func (p *Poller) trackEvents(id string, c *Card, now time.Time) {
+	l := p.events[id]
+	if l == nil {
+		l = &EventLog{}
+		p.events[id] = l
+	}
+	c.Events = l.Observe(c, now)
 }
 
 func (p *Poller) client(a Agent) *Client {
