@@ -181,6 +181,30 @@ type Waypoint struct {
 	// CheckSkip exempts the hop from the plan check (plancheck.go) and says why: a hop the navmesh cannot judge on purpose (Uldaman's scorpid
 	// pit, a gap the mesh does not link). The check lists it as skipped with this text instead of failing it. Empty: checked.
 	CheckSkip string `json:"check_skip,omitempty"`
+	// GMCross says the party does not walk to this point: a GM account moves it there (remote driver, gmCross): the commander's own
+	// character goes to the point (`.appear <lead bot>` when it is not near, then `.go xyz`), `.bot summon <lead bot>` brings the lead
+	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
+	// It is for a gap no walk crosses (Wailing Caverns: a 3.9 yd chasm, a jump down and no way up). It is a direct waypoint (the file says
+	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
+	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account (developer level for .go xyz): without
+	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
+	// {"x": -289.1, "y": 3.2, "z": -64.1, "direct": true, "gm_cross": true}.
+	GMCross bool `json:"gm_cross,omitempty"`
+}
+
+// GMCrossRadius is the yards within which every living member must stand of a gm_cross point before the run goes on.
+const GMCrossRadius = 10.0
+
+// HasGMCross says whether a leg of the plan from leg `from` on has a gm_cross waypoint.
+func (p *Plan) HasGMCross(from int) bool {
+	for i := max(from, 0); i < len(p.Legs); i++ {
+		for _, w := range p.Legs[i].Via {
+			if w.GMCross {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -427,6 +451,7 @@ type rawWaypoint struct {
 	X, Y, Z   *float32
 	Direct    bool   `json:"direct"`
 	CheckSkip string `json:"check_skip"`
+	GMCross   bool   `json:"gm_cross"`
 }
 
 type rawLeg struct {
@@ -798,7 +823,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
+		if w.GMCross {
+			if !w.Direct {
+				c.fail(wp, "gm_cross is a direct waypoint: add \"direct\": true")
+			}
+			continue // a GM moves the party: no gathering point before it and no direct limits
+		}
 		if !w.Direct {
 			continue
 		}

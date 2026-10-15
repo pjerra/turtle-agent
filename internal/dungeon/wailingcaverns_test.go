@@ -165,9 +165,8 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 				continue
 			}
 			hops++
-			prev := l.Via[0].Point
-			if w.CheckSkip == "" || math.Hypot(float64(w.X-prev.X), float64(w.Y-prev.Y)) > DirectMaxDistance || math.Abs(float64(w.Z-prev.Z)) > DirectMaxVertical {
-				t.Errorf("legs[%d] (%s): the direct hop %v needs a check_skip and the module's limits", i, l.Name, w)
+			if !w.GMCross {
+				t.Errorf("legs[%d] (%s): the direct hop %v is the gm_cross over the gap", i, l.Name, w)
 			}
 		}
 	}

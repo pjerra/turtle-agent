@@ -291,13 +291,22 @@ func (d *RemoteDriver) startPoint(ctx context.Context, fromLeg int) (Point, stri
 
 // startNote records a step of the start phase as a note and a dungeon_step event.
 func (d *RemoteDriver) startNote(text string) {
-	d.rep.note("start: " + text)
-	d.emit(events.KindDungeonStep, "start: "+text, map[string]any{"action": "start", "ok": true, "mode": "remote"})
+	prefix, action := "start: ", "start"
+	if d.gmCrossing {
+		prefix, action = "gm_cross: ", "gm_cross"
+	}
+	d.rep.note(prefix + text)
+	d.emit(events.KindDungeonStep, prefix+text, map[string]any{"action": action, "ok": true, "mode": "remote"})
 }
 
 // startGM books a GM line of the start phase: a setup shortcut, a GM command of the run, and a line of the start report.
 func (d *RemoteDriver) startGM(line string) {
+	crossing := d.gmCrossing
 	d.rep.update(func(r *Report) {
+		if crossing {
+			r.SetupShortcuts = append(r.SetupShortcuts, line+" (GM crossing)")
+			return
+		}
 		r.SetupShortcuts = append(r.SetupShortcuts, line+" (GM start point)")
 		if r.Start != nil {
 			r.Start.GMCommands = append(r.Start.GMCommands, line)
@@ -308,6 +317,9 @@ func (d *RemoteDriver) startGM(line string) {
 }
 
 func (d *RemoteDriver) startReport(f func(*StartReport)) {
+	if d.gmCrossing {
+		return // a crossing is no start: the start block is the run's own
+	}
 	d.rep.update(func(r *Report) {
 		if r.Start != nil {
 			f(r.Start)

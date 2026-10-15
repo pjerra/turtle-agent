@@ -32,7 +32,7 @@
    "special": [
     "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
     "Lady Anacondra has four spawn rows in one pool (one up per reset)",
-    "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): one direct hop, no step for a GM move of the party"
+    "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a gm_cross waypoint (a GM moves the party)"
    ]
   },
   {
