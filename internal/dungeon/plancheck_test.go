@@ -698,14 +698,16 @@ func TestLookTargetIsTheSameAtRuntimeAndInThePlanCheck(t *testing.T) {
 	}
 }
 
-// A pack no point of the path gets within view of: the lead bot is not taken to the end of the path. The look point is the old one (the
-// standoff back from the path's end, or none when the path is shorter), and the check reports the pack as too far.
+// A pack no point of the path gets within view of: the approach itself does not chase the path's end (the look point is the old one, the standoff
+// back from the path's end, or none when the path is shorter, and the check reports the pack as too far); the run then walks the lead bot
+// straight toward the pack (confirmGone, lookWalkTries) instead of failing "could not get a view" with no order sent (zf-r4-s4, Velratha group
+// 11), so the lead bot ends within view of the pack.
 func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 	pack := Point{0, 100, 0}
 	for _, c := range []struct {
 		name string
 		end  float32
-		want []Point // the moves the lead bot gets
+		want []Point // the moves the approach alone gives the lead bot (the first moves)
 	}{{"long path", 40, []Point{{0, 19, 0}}}, {"short path", 10, nil}} {
 		nav := shapeNav{floor: func(p Point) Point { return p }, path: func(from, to Point) []Point {
 			if to == pack {
@@ -721,8 +723,11 @@ func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 				got = append(got, to)
 			}
 		}
-		if len(got) != len(c.want) || (len(got) == 1 && dist3(got[0], c.want[0]) > 0.5) {
-			t.Errorf("%s: the lead bot was sent to %v, want %v (not the path's end)", c.name, got, c.want)
+		if len(got) < len(c.want) || (len(c.want) == 1 && dist3(got[0], c.want[0]) > 0.5) {
+			t.Errorf("%s: the lead bot was sent to %v, want first %v", c.name, got, c.want)
+		}
+		if l := g.lead(); dist3(Point{l.X, l.Y, l.Z}, pack) > float64(ClearSeeRadius) {
+			t.Errorf("%s: the lead bot ends %.0f yd from the pack (moves %v)", c.name, dist3(Point{l.X, l.Y, l.Z}, pack), got)
 		}
 		plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{pack}}}}}}
 		res, err := CheckPlanWith(plan, nav, CheckOptions{})

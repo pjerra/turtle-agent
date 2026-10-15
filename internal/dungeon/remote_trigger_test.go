@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1033,7 +1034,7 @@ func TestWipeAfterTheBossKillIsRecoveredAndCountedApart(t *testing.T) {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
 	r := rep.Remote
-	if !wiped || r.WipesAfterKill != 1 || rep.Wipes != 0 || rep.PartyDowns != 0 || len(g.revived) != 3 || !strings.Contains(notesOf(rep), "wipe after the kill: the boss of leg 0 is dead") {
+	if !wiped || r.WipesAfterKill != 1 || rep.Wipes != 1 || rep.PartyDowns != 0 || len(g.revived) != 3 || !strings.Contains(notesOf(rep), "wipe after the kill: the boss of leg 0 is dead") {
 		t.Fatalf("wiped %v after_kill %d wipes %d downs %d revived %v\n%s", wiped, r.WipesAfterKill, rep.Wipes, rep.PartyDowns, g.revived, notesOf(rep))
 	}
 }
@@ -1440,8 +1441,14 @@ func TestLeadAloneOutsideTheDungeonIsPartyDown(t *testing.T) {
 	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || fmt.Sprint(g.summons) != "[Tanky]" || len(g.memberMap) != 0 {
 		t.Fatalf("%v downs %d summons %v\n%s", err, rep.PartyDowns, g.summons, notesOf(rep))
 	}
-	// The report counts the recovered wipe, not only the whole-party ones: wipes 0 with a party down recovered was misleading (round 3, slot 4).
-	if rep.WipeRecoveries != 1 || rep.AllWipes() != 1 || rep.Wipes != 0 {
+	// The report counts the recovered wipe, not only the whole-party ones: wipes 0 with a party down recovered was misleading (Wipes now counts every wipe, PartyDowns says how many were stops at three dead bots) (round 3, slot 4).
+	if rep.WipeRecoveries != 1 || rep.AllWipes() != 1 || rep.Wipes != 1 {
 		t.Fatalf("recoveries %d all wipes %d wipes %d", rep.WipeRecoveries, rep.AllWipes(), rep.Wipes)
+	}
+	// What dungeon_status hands the watchers is this report as JSON, and the end record is summaryBase: both say one wipe.
+	raw, merr := json.Marshal(rep)
+	var asMap map[string]any
+	if merr != nil || json.Unmarshal(raw, &asMap) != nil || asMap["wipes"] != float64(1) || asMap["party_downs"] != float64(1) || summaryBase(rep)["wipes"] != 1 || summaryBase(rep)["wipes_whole_party"] != 0 {
+		t.Fatalf("status json wipes %v party_downs %v, end record %v / %v (%v)", asMap["wipes"], asMap["party_downs"], summaryBase(rep)["wipes"], summaryBase(rep)["wipes_whole_party"], merr)
 	}
 }

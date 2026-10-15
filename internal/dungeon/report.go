@@ -20,11 +20,11 @@ type Report struct {
 	Current string     `json:"current,omitempty"` // the action in progress
 	Error   string     `json:"error,omitempty"`
 	Wipes   int        `json:"wipes"`
-	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead (counted apart from Wipes).
+	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead: part of Wipes, not extra to it (a run
+	// with five recovered party downs said wipes 0 before Wipes counted every wipe, zf-r4-s4).
 	PartyDowns int `json:"party_downs,omitempty"`
 	// WipeRecoveries are the wipes the remote run recovered from (a whole-party wipe, a party down or a wipe after the boss's kill alike: each one
-	// revived the party and went on). Wipes counts only the whole-party ones that were not after a kill, so a run with five recovered
-	// party downs said wipes 0; the end record's "wipes" is AllWipes.
+	// revived the party and went on).
 	WipeRecoveries int `json:"wipe_recoveries,omitempty"`
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
@@ -267,18 +267,22 @@ func summaryOf(r Report) map[string]any {
 	return m
 }
 
-// AllWipes is every wipe the run met: the whole-party ones, the stops at three dead bots (party downs) and the wipes after a boss's kill.
-func (r Report) AllWipes() int {
-	n := r.Wipes + r.PartyDowns
+// AllWipes is every wipe the run met: the whole-party ones, the stops at three dead bots (party downs) and the wipes after a boss's kill. Wipes
+// counts them all (dungeon_status reads it); AllWipes is kept for the callers that named it.
+func (r Report) AllWipes() int { return r.Wipes }
+
+// wholePartyWipes are the wipes that were neither a stop at three dead bots nor after a boss's kill.
+func (r Report) wholePartyWipes() int {
+	n := r.Wipes - r.PartyDowns
 	if r.Remote != nil {
-		n += r.Remote.WipesAfterKill
+		n -= r.Remote.WipesAfterKill
 	}
-	return n
+	return max(n, 0)
 }
 
 func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": r.runLegs(), "deaths": len(r.Deaths),
-		"wipes": r.AllWipes(), "wipes_whole_party": r.Wipes, "party_downs": r.PartyDowns, "wipe_recoveries": r.WipeRecoveries, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
+		"wipes": r.AllWipes(), "wipes_whole_party": r.wholePartyWipes(), "party_downs": r.PartyDowns, "wipe_recoveries": r.WipeRecoveries, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
 		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}
 }

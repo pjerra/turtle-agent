@@ -73,6 +73,7 @@ type gravesState struct {
 	opened    int             // chests opened in all batches
 	skipped   int             // chests skipped (open already, gone, or the agent took nothing)
 	cuts      int             // batches cut by the radius
+	healMana  int             // the healer's mana % at the end of the last batch that did not wipe (-1: not known)
 	maxRadius float64         // the widest batch
 	aoe       map[string]bool // each bot's area spells as the driver set them (true: on); absent: not set by a batch
 }
@@ -167,7 +168,17 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 	}
 	gb := &d.gb
 	if gb.n == 0 {
+		gb.healMana = -1
 		if err := d.restGate(ctx, false); err != nil { // the first batch: the rest gate that follows each fight has not run
+			return err
+		}
+	} else if gb.healMana >= 0 && gb.healMana < batchManaLowPct {
+		// The healer ended the last batch nearly out of mana (zf-r4-s4: three batches at 0 %). The rest gate after the fight gives up on a
+		// healer-only mana wait after healerManaCap, once per leg, and then no later gate waits for it: this gate gets its cap back and waits
+		// for the healer before the next chests are opened.
+		d.rep.note(fmt.Sprintf("graves-batch: the healer ended the last batch at %d%% mana (under %d%%): mana gate before the next batch", gb.healMana, batchManaLowPct))
+		d.healerCapped = 0
+		if err := d.restGate(ctx, false); err != nil {
 			return err
 		}
 	}
@@ -397,7 +408,9 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	if r.CutByRadius {
 		gb.cuts++
 	}
+	gb.healMana = r.HealMana
 	if wipe {
+		gb.healMana = -1 // the revived bots are not at the mana the batch ended with
 		gb.wipes++
 		if gb.wipes == 1 {
 			gb.wipedAt = r.Size
@@ -520,6 +533,9 @@ func (d *RemoteDriver) sampleBatchFrame(b *batchRun) {
 func (d *RemoteDriver) batchOpening() bool {
 	return d.batch != nil && d.batch.left > 0
 }
+
+// batchManaLowPct is the healer's mana (percent) under which the next batch waits for a mana gate.
+const batchManaLowPct = 20
 
 // leftoverRounds bounds sweepLeftovers: each round is the pull and fight of one idle summon with what stands around it.
 const leftoverRounds = 8

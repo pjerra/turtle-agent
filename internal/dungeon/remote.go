@@ -946,13 +946,12 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		after := d.legBossDead()
 		inBatch := d.batch != nil || d.sweepWiped // a wipe in a grave batch (batchWiped clears it) or in a leftover sweep
 		d.sweepWiped = false
+		// Every wipe event counts in Wipes (what dungeon_status, the dashboard and the end record read); PartyDowns says how many of them were
+		// stops at three dead bots, WipesAfterKill how many came after the boss's kill.
 		d.rep.update(func(r *Report) {
-			switch {
-			case after:
-			case down:
+			r.Wipes++
+			if down && !after {
 				r.PartyDowns++
-			default:
-				r.Wipes++
 			}
 		})
 		if after {

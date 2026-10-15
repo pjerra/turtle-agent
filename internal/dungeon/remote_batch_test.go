@@ -1048,3 +1048,70 @@ func TestAgentOpenIsRefusedWithoutGMOrInvisibility(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// ---- a pack out of view (zf-r4-s4) ----
+
+// shortPathFake plans a path that ends a few yards after its start whatever the goal (a pack off the mesh: the path stops short, and the
+// look point is the lead bot's own spot).
+type shortPathFake struct{ *fakeRemote }
+
+func (g shortPathFake) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
+	return []Point{from, lerp(from, to, 3/dist3(from, to))}, nil
+}
+
+// A pack the approach could not get a look point for (the path ends short of it, the lead bot far away) is walked toward, straight at it, before
+// it is given up on: the run does not fail "could not get a view of the pack" with no order sent.
+func TestPackOutOfViewIsWalkedTowardBeforeGivingUp(t *testing.T) {
+	g := shortPathFake{newFakeRemote(t)}
+	at := Point{91, 0, 0}
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{at}}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	ctx := context.Background()
+	if err := d.begin(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	d.curLeg = 0
+	sp := fightSpec{pick: []uint32{299}, track: []uint32{299}, anchors: []Point{at}}
+	cleared, why, err := d.confirmGone(ctx, sp, newClearing())
+	if err != nil || !cleared {
+		t.Fatalf("cleared %v (%s) %v\n%s", cleared, why, err, strings.Join(d.Report().Notes, "\n"))
+	}
+	if l := g.lead(); dist3(Point{l.X, l.Y, l.Z}, at) > float64(ClearSeeRadius) {
+		t.Fatalf("the lead bot stands %.0f yd from the pack", dist3(Point{l.X, l.Y, l.Z}, at))
+	}
+	if !strings.Contains(strings.Join(d.Report().Notes, "\n"), "walking toward it") {
+		t.Fatalf("%v", d.Report().Notes)
+	}
+}
+
+// A healer that ends a batch nearly out of mana gets a mana gate before the next batch, with the rest gate's healer cap given back (the cap
+// used once in a leg switches the healer's mana wait off for the later gates: zf-r4-s4, three batches at 0 % mana).
+func TestHealerLowOnManaGetsAGateBeforeTheNextBatch(t *testing.T) {
+	g := carrierGame(t)
+	g.party[1].Power = 100 // Healy at 10 % mana, and it never rises
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || o.rep.State != "done" {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	n := notesOf(o.rep)
+	if strings.Count(n, "mana gate before the next batch") != 1 {
+		t.Fatalf("%s", n)
+	}
+	// The gate ran between the two batches: its own outcome note stands between the gate note and the second batch's begin.
+	i := strings.Index(n, "mana gate before the next batch")
+	j := strings.Index(n[i:], "graves-batch begin")
+	if i < 0 || j < 0 || !strings.Contains(n[i:i+j], "rest gate") {
+		t.Fatalf("no rest gate between the batches\n%s", n)
+	}
+}
+
+// A healer with mana is not waited for.
+func TestHealerWithManaGetsNoExtraGate(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || strings.Contains(notesOf(o.rep), "mana gate before the next batch") {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+}
