@@ -93,23 +93,7 @@
           "positions": [
             {"x": -129.13, "y": -35.16, "z": -33.26}
           ],
-          "radius": 12,
-          "patrol": {
-            "entries": [11318],
-            "path": [
-              {"x": -181.5, "y": -32.1, "z": -44.4},
-              {"x": -221.2, "y": -34.7, "z": -55.2},
-              {"x": -234.4, "y": -36.4, "z": -55.7},
-              {"x": -275.3, "y": -42, "z": -60.8},
-              {"x": -285.3, "y": -54.1, "z": -60.8},
-              {"x": -238.7, "y": -36.8, "z": -56.7},
-              {"x": -193.9, "y": -35.3, "z": -46.1},
-              {"x": -149.5, "y": -33.9, "z": -35.3},
-              {"x": -175.8, "y": -29.7, "z": -43.6}
-            ],
-            "period_s": 115.7,
-            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s = 115 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48648b@"
-          }
+          "radius": 12
         }
       ],
       "notes": [
@@ -152,54 +136,30 @@
           "radius": 12
         },
         {
-          "entries": [11319],
+          "entries": [11319, 11318, 11318, 11319, 11318],
           "positions": [
-            {"x": -253.89, "y": -38.88, "z": -60.46}
-          ],
-          "radius": 9
-        },
-        {
-          "entries": [11318, 11318, 11319],
-          "positions": [
+            {"x": -253.89, "y": -38.88, "z": -60.46},
             {"x": -262.22, "y": -29.89, "z": -60.61},
             {"x": -270.13, "y": -31.88, "z": -60.61},
-            {"x": -266.73, "y": -28.03, "z": -60.61}
-          ],
-          "radius": 9
-        },
-        {
-          "entries": [11318],
-          "positions": [
+            {"x": -266.73, "y": -28.03, "z": -60.61},
             {"x": -266.61, "y": -44.4, "z": -60.85}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -285.52, "y": -20.88, "z": -60.41}
           ],
           "radius": 12
         },
         {
           "entries": [11318, 11318],
           "positions": [
-            {"x": -300.51, "y": -28.41, "z": -60.46},
-            {"x": -306.31, "y": -29.13, "z": -60.17}
-          ],
-          "radius": 12
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -261.78, "y": -5.76, "z": -63.93}
-          ],
-          "radius": 12
-        },
-        {
-          "entries": [11318],
-          "positions": [
+            {"x": -285.52, "y": -20.88, "z": -60.41},
             {"x": -240.71, "y": -8.03, "z": -61.52}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11318, 11318, 11318],
+          "positions": [
+            {"x": -300.51, "y": -28.41, "z": -60.46},
+            {"x": -306.31, "y": -29.13, "z": -60.17},
+            {"x": -261.78, "y": -5.76, "z": -63.93}
           ],
           "radius": 12
         },
@@ -260,8 +220,7 @@
       "skip": [11834],
       "boss": {
         "entry": 11517,
-        "position": {"x": -147.55, "y": 38.71, "z": -38.8},
-        "first": [11319, 11318]
+        "position": {"x": -147.55, "y": 38.71, "z": -38.8}
       },
       "notes": [
         "Oggleflint (11517, 1540 hp, Cleave 15584 every 5 s, faction 59, immune to fear and horror) stands at -147.5 38.7 -38.8 with a Ragefire Shaman (48643, Healing Wave) and a Ragefire Trogg (48645): creature_groups 48644 (flags 2, aggro together) links all three, so they are `boss.first` (kill the Shaman, then the Trogg, then Oggleflint) and not a pull group. Wowhead guide: CC one add (the Shaman), the tank picks up the other and faces Oggleflint away from the group (Cleave, Wowhead lists spell 15496, the database 15584 every 5 s), the damage dealers kill the free add first, then Oggleflint, and the crowd-controlled add last (the driver leaves a polymorphed mob alone until it is the last one). Wowhead's guide says two Troggs and a comment says the adds can be pulled and Oggleflint left alone; the database has a Shaman and a Trogg in creature_groups 48644 with him (aggro together), so expect all three. Trogg 43583 + Shaman 43582 at the foot of the ramp (-152.5 3.9 -40.6 and -147.7 0.4 -39.2, linked by creature_groups 43582) are the one pull group of the leg. Left out: the terrace pit under the ramp (Shaman 38049, Shaman 43580, Trogg 43581 at -136.8 -3.8 -53.1, -142.4 -12.9 -54.3, -142.3 -6.2 -53.2), reached only by the south loop (231-257 yd). The walk found the Trogg 43581 (level 13, radius 17) 15.9 yd from the position of Shaman 43582 (-147.7 0.4 -39.2) and 18.8 yd from the ramp foot; the plan's look point for this pack (where the party stands to pull it) is (-170.8 2.5 -50.8) then (-166.1 2.7 -48.2), 25 yd or more from all three pit mobs, and the pack is pulled to the tank there, not fought at the pack's own spot. Keep the fight at the ramp's foot: the mobs of the pack come to the tank. Maur Grimtotem (11834) is a friendly quest giver next to Oggleflint (skip)."
@@ -631,7 +590,6 @@
       "boss": {
         "entry": 11518,
         "position": {"x": -376.81, "y": 209.22, "z": -21.8},
-        "first": [11322, 11322],
         "tactics": {
           "dispel": [
             "Immolate"
@@ -714,8 +672,7 @@
       ],
       "boss": {
         "entry": 11519,
-        "position": {"x": -384.87, "y": 146.04, "z": 7.82},
-        "first": [11322]
+        "position": {"x": -384.87, "y": 146.04, "z": 7.82}
       },
       "notes": [
         "From Jergosh the walkway climbs north-east (-354 222 -21, -330 237 -15, -327 242 -11) and then west along a raised ledge (z -11 to -5) to the ramp at -382 233 -3, -403 208 1 up the ramp to Bazzalan's hall (z 6 to 9). Packs (all stationary but the wanderers): Enforcers [48729 + 48730] at -319 to -322 248 to 257, Cultists [48726 + 48727] at -293 to -301 251 to 257 (20 yd behind the Enforcers), the Cultist 48733 (-342.3 256.4), the Warlock camp [Cultist 48735 + Cultist 48734 + Warlock 48736] at -368 to -376 254 to 265, [Warlock 48738 + Cultist 48746 + Cultist 48743] at -385 to -392 240 to 260, the Cultist 48742 (-400.4 216.2) and the Enforcers [48747 + 48748] at -405 to -412 177 to 181 at the foot of the hall. The Warlocks come with Voidwalkers and flee at 15 %: the mage's Polymorph goes on them. Bazzalan (11519, 1637 hp, EventAI Sinister Strike 14873 every 5-16 s and Poison 744, faction 554, immune to fear and horror) stands at -384.9 146 7.8 (facing 2.51 rad) with two Cultists (48749 -385.2 156.6, 10.6 yd away on his right, and 48751 -396.3 150.8, 12.1 yd away on his left), stationary and NOT linked by creature_groups. The Wowhead guide says the add on the left (the party's right) can be pulled without the boss, which greatly eases the fight, and the other is crowd-controlled while the group burns Bazzalan, who deals significant single-target damage: so 48751 is the last pull group of the leg: the walk showed the pull stand (-400 171.4 8.1, the plan's look point) is 30 yd from Bazzalan (aggro 20) and 21 yd from the add, on one floor in an open hall, and the add and Bazzalan stand 12 to 15 yd apart, outside the 10 yd social range, so he is not drawn unless the add is fought within about 10 yd of him: fight it at the stand. 48749 (11.6 yd from him) would need a stand 31 yd out too; it is `boss.first` and 48749 is `boss.first`. Wowhead lists Sinister Strike 14873 and Deadly Poison 2818, the database Sinister Strike and Poison 744 (EventAI): the database wins. Wowhead's comments: he is above Jergosh up a thin winding ramp from the end of the criss-cross bridges room (matches the navmesh), and he drops only ordinary loot. The last boss of the dungeon; no event follows."

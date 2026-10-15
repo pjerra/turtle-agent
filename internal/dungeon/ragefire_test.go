@@ -289,8 +289,8 @@ func TestRagefirePlanMatchesTheWorldExport(t *testing.T) {
 			}
 		}
 	}
-	if patrols != 7 { // six patrolling spawns; 48648 is on two groups (the last tunnel Earthborer and the first pack of the cave)
-		t.Errorf("%d patrols, want the six patrolling mobs of the route (one on two groups)", patrols)
+	if patrols != 6 { // six patrolling spawns, one group each: 48648's patrol block stays on the first pack of the cave only (route edit R2, 2026-10-16: the tunnel Earthborer never met it)
+		t.Errorf("%d patrols, want the six patrolling mobs of the route", patrols)
 	}
 }
 
