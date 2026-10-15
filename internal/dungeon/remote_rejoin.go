@@ -133,6 +133,9 @@ func (d *RemoteDriver) rejoinFar(ctx context.Context) error {
 		}
 		return nil
 	}
+	if safe, err := d.leadSafeForSummon(ctx); err != nil || !safe {
+		return err // a lead bot on deadly ground is moved off it first; none is summoned onto it (remote_avoid.go)
+	}
 	began := d.clk.Now()
 	calmFrom := began
 	if d.rejoin.last == nil {
@@ -217,6 +220,18 @@ func farHas(far []rejoinBot, g packet.GUID) bool {
 // rejoinSummon sends `cmd summon <bot>` for one far bot and reports whether the module took it. The counters, the trace event and the
 // setup_shortcuts line are the GM assist's.
 func (d *RemoteDriver) rejoinSummon(ctx context.Context, b rejoinBot) bool {
+	if d.rejoin.last == nil {
+		d.rejoin.last = map[packet.GUID]time.Time{}
+	}
+	if l, ok := d.fr.LeadRec(); ok {
+		if why, bad := d.deadlyAt(partyPoint(l), l.Map); bad {
+			// The summon lands on the lead bot: never onto ground that kills (rfc-live-1e r1: summoned into the lava three times).
+			if d.rejoin.once(fmt.Sprintf("deadly-%d-%.0f-%.0f", d.curLeg, l.X, l.Y)) {
+				d.rep.note(fmt.Sprintf("leg %d: rejoin: cmd summon %s not sent: the lead bot stands at %.1f %.1f %.1f, %s", d.curLeg, b.name, l.X, l.Y, l.Z, why))
+			}
+			return false
+		}
+	}
 	d.rejoin.last[b.guid] = d.clk.Now()
 	r, err := d.order(ctx, "summon", b.name)
 	cmd := "cmd summon " + b.name

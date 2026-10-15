@@ -306,6 +306,7 @@ func TestRagefireOnNavmesh(t *testing.T) {
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
 	p := loadPlan(t, ragefirePlan)
+	pl.SetAvoid(p.Map, NavBoxes(p.Avoid)) // the run's planner keeps out of the lava basin: the route must stand without it
 	from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
 	checked := 0
 	for i, l := range p.Legs {
@@ -400,6 +401,7 @@ func TestRagefireRouteHasNoUnplannedPack(t *testing.T) {
 	}
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
+	pl.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	cs := rfTSV(t, "creatures.tsv")
 	from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
 	flagged := map[string]bool{}
@@ -537,6 +539,7 @@ func TestRagefireStandsKeepClear(t *testing.T) {
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
 	p := loadPlan(t, ragefirePlan)
+	pl.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	looks := ragefireLooks(t, p, pl)
 	if len(looks) < 60 {
 		t.Fatalf("only %d looks", len(looks))
@@ -582,5 +585,80 @@ func TestRagefireStandsKeepClear(t *testing.T) {
 		if best < min {
 			t.Errorf("the route comes %.1f yd from the terrace mob %s, the walk measured %.1f", best, guid, min+1)
 		}
+	}
+}
+
+// ragefireLavaDeaths are the bodies of the bots that died in rfc-live-1d and 1e with no damage in the feed (botwatch.jsonl and the 1d trace
+// frames, the first frame that shows each dead): all on the trogg cave's lava basin floor, under the magma surface (z -64.5).
+var ragefireLavaDeaths = []Point{
+	{-204.6, -25.2, -64.9}, {-206.5, -26.2, -65}, {-206.6, -27.4, -65}, {-198.8, -57.8, -64.6}, // 1e, first wipe of leg 3
+	{-204.8, -56.4, -64.9}, {-209.4, -57.4, -64.9}, {-206, -54.9, -65}, {-201, -52.5, -64.6}, // 1e, the walk back across the basin
+	{-204.7, -31.7, -64.9}, {-202.2, -23.6, -64.8}, {-206.9, -24.4, -64.9}, // 1e r1, summoned into the basin
+	{-199.8, -53.9, -65.5}, {-206.2, -26.9, -64.9}, {-217.7, -56.7, -65.8}, // 1d: the tank, the healer, a dps
+}
+
+// The plan's avoid box holds every lava death of the two runs, and the floors the route walks next to the basin stay outside it.
+func TestRagefireLavaBoxHoldsTheDeaths(t *testing.T) {
+	p := loadPlan(t, ragefirePlan)
+	if len(p.Avoid) != 1 {
+		t.Fatalf("avoid %+v, want the lava basin", p.Avoid)
+	}
+	for _, at := range ragefireLavaDeaths {
+		if _, in := p.InAvoid(at); !in {
+			t.Errorf("the lava death at %v is outside the avoid box", at)
+		}
+	}
+	// The strip and the ramp foot (leg 2's last packs and its end), the ramp stand of leg 3 and the south rim (-219.8 -64.2, where 1e's
+	// tank fought) are walkable.
+	for _, at := range []Point{{-215.45, -15.93, -61.8}, {-204.72, -1.24, -61.68}, {-183.39, 2.8, -56.81}, {-192, 0, -59.5}, {-170.8, 2.5, -50.8}, {-219.8, -64.2, -61.2}, {-209.3, -17.3, -60.9}} {
+		if b, in := p.InAvoid(at); in {
+			t.Errorf("%v lies in the avoid box %q", at, b.Name)
+		}
+	}
+}
+
+// On the map's navmesh the planner, told the plan's avoid box, keeps out of the basin: the walk from the south rim back to the ramp's foot
+// (rfc-live-1e: planned straight over the basin floor, cmd move -207.8 -56.1 -65.5, three bots dead) goes round by the west, no lava death
+// spot has a walkable point within 5 yd, and leg 3's stand is reached.
+func TestRagefirePlannerKeepsOutOfTheLava(t *testing.T) {
+	dir := mapMmaps(389)
+	if dir == "" {
+		t.Skip("no map 389 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 389.mmap and the 389*.mmtile tiles")
+	}
+	p := loadPlan(t, ragefirePlan)
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	from, to := vec(Point{-219.8, -64.2, -61.2}), vec(Point{-186.3, -0.3, -54.4})
+	inLava := func(path navmesh.Path) int {
+		n := 0
+		for _, seg := range append([][]navmesh.Vec3{path.Points}, path.Ground...) {
+			for _, q := range seg {
+				if _, in := p.InAvoid(point(q)); in {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	before, err := pl.Plan(p.Map, from, to)
+	if errors.Is(err, navmesh.ErrNoEngine) {
+		t.Skip("built without cgo: no navmesh engine")
+	}
+	if err != nil || inLava(before) == 0 {
+		t.Fatalf("without the box the path should cross the basin (the run's): %v, %d points in the box", err, inLava(before))
+	}
+	pl.SetAvoid(p.Map, NavBoxes(p.Avoid))
+	after, err := pl.Plan(p.Map, from, to)
+	if err != nil || after.Status != navmesh.Complete || inLava(after) != 0 {
+		t.Fatalf("with the box: %v %s, %d points in the box: %v", err, after.Status, inLava(after), after.Points)
+	}
+	for _, at := range ragefireLavaDeaths {
+		if n, ok, err := pl.Nearest(p.Map, vec(at)); err != nil || (ok && dist3(point(n), at) < 5) {
+			t.Errorf("a walkable point %v %v within 5 yd of the lava death at %v", n, ok, at)
+		}
+	}
+	stand := p.Legs[3].To
+	if path, err := pl.Plan(p.Map, vec(Point{-183.39, 2.8, -56.81}), vec(stand)); err != nil || path.Status != navmesh.Complete || path.Length > 20 {
+		t.Fatalf("leg 3's stand from leg 2's end: %v %+v", err, path)
 	}
 }

@@ -599,6 +599,19 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   [7785, 8179, 5650, 7247] (Zum'rah's Ward, the Greater Healing Ward the Witch Doctor's Healing Ward summons, the Witch Doctor, the Soul Eater), `summoned_kill_first` [7785, 8179].
 - `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
   the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
+- `avoid` (optional, at most 32) lists regions of the map that kill although the navmesh calls them ground:
+  `{"name": "lava basin of the trogg cave", "min": {"x":..,"y":..,"z":..}, "max": {..}, "why": ".."}`, a box from `min` to `max` (a floor
+  band: its top just above the deadly surface, so ledges above it stay walkable). The mmap generator flags a liquid only where it is at
+  least the agent's height deep, so shallow lava (Ragefire Chasm's basin, under a yard deep, 605-610 damage a tick) is plain ground to both
+  the agent's planner and the server's. The loader refuses a box with `min` not below `max`, wider than 400 yd, and any plan point in a box
+  (entrance, `via`, `to`, pull group positions, boss, step stands); [Plan check](#plan-check) fails a look point in one. The agent's
+  planner marks every navmesh polygon whose centre or any corner lies in a box as lava (`navmesh.Planner.SetAvoid`), so paths, floor
+  snaps and walkability rays keep out of it. The remote driver also: cuts a walk's hop at a path corner when its straight line would pass
+  over a box (the server walks each `move` on its own navmesh); does not pull on the way a hostile the party reaches only round a box
+  (path longer than twice the straight line plus 25 yd); summons no bot onto a lead bot standing in a box or within 6 yd of a **silent
+  death** (a bot that died at 80% health or more one frame before, or out of combat: the feed has no environmental damage), and moves the
+  lead bot to the nearest safe floor (up to 20 yd) first; and raises no body lying in a box in place (it releases it). A silent
+  death is noted (`silent_death` trace event) and its spot is kept for the summons for the rest of the run, with or without boxes.
 - `via` (optional, per leg) lists waypoints walked in order before `to`: `{"x":..,"y":..,"z":..}` is a plain walk on the navmesh; with `"direct": true` the step is a straight line, for a gap the
   navmesh does not bridge (Uldaman's scorpid-pit ramp; [Plan check](#plan-check) warns of a direct hop the navmesh already joins). The remote driver sends it as `.bot cmd move x y z direct` (TortoiseBots #942: every bot walks the line; each must be within 25 yd
   across and 8 yd up or down of the point, and the point needs ground within 3 yd of its height). The loader refuses a direct step without a via point before it (where the party gathers) or longer than
@@ -1302,6 +1315,8 @@ Events (`ev`; fields beside `ev`, a field named like an envelope field is writte
 | `stuck`, `unstuck` | a member that should be moving stood still for 5 s, with its position (`a`, `name`, `x y z`, `seconds`, `lead`, `dist_lead`); it moved again or stopped being expected to move (`seconds` is the total) |
 | `rez` | remote: a dead bot was left to a living caster's resurrection: `leg`, `bot`, `raised`, `seconds`, `why` |
 | `rejoin_tp` | remote: the commander sent `cmd summon <bot>` to bring a far bot to the lead bot: `leg`, `bot`, `reply`, `other_map`, `dist` (yd), `code` when refused |
+| `silent_death` | remote: a bot died at 80% health or more one frame before, or out of combat (lava, slime, a fall: the feed has no line for it); its spot gets no summon for the rest of the run: `name`, `leg`, `x y z`, `map`, `full`, `combat` |
+| `lead_off_deadly` | remote: before a summon, the lead bot stood in an avoid box or on a silent death's spot and was sent to a safe floor: `leg`, `x y z`, `to_x to_y to_z`, `why` |
 | `feed_stall` | remote: no new feed frame for the stale limit |
 | `roster` | remote: the party names in the first feed frame |
 | `note` | the report's notes, as they are made |

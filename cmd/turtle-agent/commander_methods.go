@@ -282,6 +282,17 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	return out, nil
 }
 
+var _ dungeon.AvoidMarker = remoteGame{}
+
+// MarkAvoid implements dungeon.AvoidMarker: the plan's avoid boxes are marked on the agent's planner, so its paths and floor snaps keep
+// out of them (the session's own walks too: it is the same planner).
+func (g remoteGame) MarkAvoid(mapID uint32, boxes []dungeon.AvoidBox) {
+	if g.c.planner == nil {
+		return
+	}
+	g.c.planner.SetAvoid(mapID, dungeon.NavBoxes(boxes))
+}
+
 // SnapToFloor implements dungeon.FloorSnapper: the navmesh floor point nearest p (within a few yards), false when there is none.
 func (g remoteGame) SnapToFloor(ctx context.Context, mapID uint32, p dungeon.Point) (dungeon.Point, bool) {
 	if g.c.planner == nil {

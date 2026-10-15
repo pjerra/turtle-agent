@@ -214,6 +214,51 @@ extern "C" int nd_polys(void* h, const float* box, float* out, int max) {
     return (int)total;
 }
 
+inline int inBox(const float* w, const float* box) {
+    return w[0] >= box[0] && w[0] <= box[3] && w[1] >= box[1] && w[1] <= box[4] && w[2] >= box[2] && w[2] <= box[5];
+}
+
+// The polygons whose centre (the mean of their corners) or any corner lies inside box = {x0, y0, z0, x1, y1, z1} (WoW, x0 <= x1, ...)
+// get flag added to their flags, in every loaded tile. Returns how many polygons now carry it from this call.
+extern "C" int nd_mark_box(void* h, const float* box, unsigned short flag) {
+    Nav* n = (Nav*)h;
+    if (!n || !n->mesh)
+        return -1;
+    dtNavMesh* mesh = n->mesh;
+    int marked = 0;
+    for (int ti = 0; ti < mesh->getMaxTiles(); ++ti) {
+        const dtMeshTile* t = ((const dtNavMesh*)mesh)->getTile(ti);
+        if (!t || !t->header)
+            continue;
+        if (t->header->bmax[2] < box[0] || t->header->bmin[2] > box[3] || t->header->bmax[0] < box[1] ||
+            t->header->bmin[0] > box[4])
+            continue;
+        const dtPolyRef base = mesh->getPolyRefBase(t);
+        for (int pi = 0; pi < t->header->polyCount; ++pi) {
+            const dtPoly* p = &t->polys[pi];
+            if (p->getType() != DT_POLYTYPE_GROUND || p->vertCount < 3)
+                continue;
+            float c[3] = {0, 0, 0};
+            int in = 0;
+            for (int k = 0; k < p->vertCount; ++k) {
+                float w[3];
+                toWow(&t->verts[p->verts[k] * 3], w);
+                c[0] += w[0];
+                c[1] += w[1];
+                c[2] += w[2];
+                in += inBox(w, box);
+            }
+            for (int k = 0; k < 3; ++k)
+                c[k] /= (float)p->vertCount;
+            if (!inBox(c, box) && in == 0)
+                continue;
+            if (dtStatusSucceed(mesh->setPolyFlags(base | (dtPolyRef)pi, p->flags | flag)))
+                ++marked;
+        }
+    }
+    return marked;
+}
+
 extern "C" int nd_raycast(void* h, const float* start, const float* end, unsigned short include,
                           unsigned short exclude, float* t) {
     Nav* n = (Nav*)h;

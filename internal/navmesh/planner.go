@@ -80,6 +80,8 @@ type Planner struct {
 	mu   sync.Mutex
 	maps map[uint32]*mapMesh
 	max  int // MaxTiles; tests lower it
+	// avoid holds each map's avoid boxes (SetAvoid), applied to every tile as it loads.
+	avoid map[uint32][]Box
 }
 
 type mapMesh struct {
@@ -87,6 +89,55 @@ type mapMesh struct {
 	tiles   map[string]*loaded
 	missing map[string]bool // tile files Floors found missing; Plan forgets them
 	tick    uint64
+	avoid   []Box // the map's avoid boxes, marked NavMagma on each tile load
+}
+
+// Box is a region of a map, WoW (x, y, z) from Min to Max, inclusive.
+type Box struct {
+	Min, Max Vec3
+}
+
+// Contains says whether p lies inside the box.
+func (b Box) Contains(p Vec3) bool {
+	for i := range 3 {
+		if p[i] < b.Min[i] || p[i] > b.Max[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// SetAvoid marks the polygons of a map whose centre or any corner lies inside one of boxes as NavMagma, on the tiles loaded now and on each
+// one loaded later, so every query (Plan, Nearest, Raycast) keeps out of them as it keeps out of the lava the tiles flag. It is for ground the
+// tiles call plain ground although it kills (Ragefire Chasm's lava basin: the mmap generator flags a liquid only where it is at least the
+// agent's height deep, and the lava there is under a yard deep). Floors still lists those floors (with the flag). Calling it again with the same
+// boxes does nothing; other boxes drop the map's loaded tiles, which load again with the new marks. Nil boxes clear the map's marks.
+func (p *Planner) SetAvoid(mapID uint32, boxes []Box) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if slices.Equal(p.avoid[mapID], boxes) {
+		return
+	}
+	if p.avoid == nil {
+		p.avoid = map[uint32][]Box{}
+	}
+	if len(boxes) == 0 {
+		delete(p.avoid, mapID)
+	} else {
+		p.avoid[mapID] = slices.Clone(boxes)
+	}
+	if m := p.maps[mapID]; m != nil {
+		// Marks cannot be taken back from a loaded tile: start the map afresh (its tiles load again on the next query).
+		m.eng.close()
+		delete(p.maps, mapID)
+	}
+}
+
+// Avoid is the map's avoid boxes (SetAvoid).
+func (p *Planner) Avoid(mapID uint32) []Box {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.avoid[mapID])
 }
 
 type loaded struct {
@@ -100,8 +151,19 @@ func NewPlanner(dir string) *Planner {
 
 // Scratch returns a planner on the same folder with a tile cache of its own. Work that must not unload this planner's
 // tiles (a map image's background, read with Polygons, while a dungeon run plans on this one) draws with a scratch
-// planner and closes it when done.
-func (p *Planner) Scratch() *Planner { return NewPlanner(p.dir) }
+// planner and closes it when done. It keeps out of the same avoid boxes (SetAvoid).
+func (p *Planner) Scratch() *Planner {
+	s := NewPlanner(p.dir)
+	p.mu.Lock()
+	for id, bs := range p.avoid {
+		if s.avoid == nil {
+			s.avoid = map[uint32][]Box{}
+		}
+		s.avoid[id] = slices.Clone(bs)
+	}
+	p.mu.Unlock()
+	return s
+}
 
 // Close frees the Detour meshes.
 func (p *Planner) Close() {
@@ -425,7 +487,7 @@ func (p *Planner) mesh(mapID uint32) (*mapMesh, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	m := &mapMesh{eng: eng, tiles: map[string]*loaded{}}
+	m := &mapMesh{eng: eng, tiles: map[string]*loaded{}, avoid: slices.Clone(p.avoid[mapID])}
 	p.maps[mapID] = m
 	return m, nil
 }
@@ -524,6 +586,10 @@ func (p *Planner) load(m *mapMesh, want []string, data map[string][]byte) error 
 			return fmt.Errorf("navmesh: %s: %w", n, err)
 		}
 		m.tiles[n] = &loaded{ref: ref, used: m.tick}
+		// Mark the avoid boxes on the new tile (a box over tiles loaded before marks them again: the flag is only added).
+		for _, b := range m.avoid {
+			m.eng.markBox(b, NavMagma)
+		}
 	}
 	return nil
 }

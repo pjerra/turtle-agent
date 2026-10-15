@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -408,6 +409,10 @@ func (d *RemoteDriver) reloadPlan(b liveBoundary) bool {
 	}
 	d.plan.Notes = merged.Notes
 	copy(d.plan.Legs, merged.Legs)
+	if !slices.Equal(d.plan.Avoid, next.Avoid) {
+		d.plan.Avoid = slices.Clone(next.Avoid)
+		d.markAvoid()
+	}
 	rec := PlanReload{OK: true, At: d.clk.Now(), Leg: b.leg, Boundary: b.kind, File: path, Ops: ops, Ignored: ignored}
 	d.remote(func(r *RemoteReport) {
 		if len(r.PlanReloads) < maxLiveRecords {
