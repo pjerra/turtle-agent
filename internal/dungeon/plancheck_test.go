@@ -13,16 +13,20 @@ import (
 
 // fakeNav is a flat world: every point has floor, a path is the straight line, except where the test says otherwise.
 type fakeNav struct {
-	off     map[Point]bool        // points with no floor
-	partial map[Point]Point       // goal -> where its path ends instead (status partial)
-	cut     func(a, b Point) bool // the ray from a to b leaves the mesh
-	detour  map[Point]float32     // goal -> path length (a path longer than the line)
+	off     map[Point]bool            // points with no floor
+	partial map[Point]Point           // goal -> where its path ends instead (status partial)
+	cut     func(a, b Point) bool     // the ray from a to b leaves the mesh
+	block   func(from, to Point) bool // no path from from to to
+	detour  map[Point]float32         // goal -> path length (a path longer than the line)
 }
 
 func (f fakeNav) Plan(_ uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
 	g := Point{to[0], to[1], to[2]}
 	if f.off[g] {
 		return navmesh.Path{Status: navmesh.NoPath, Reason: "goal is not on the navmesh (no walkable polygon within 5 yd)", Points: []navmesh.Vec3{}}, nil
+	}
+	if f.block != nil && f.block(Point{from[0], from[1], from[2]}, g) {
+		return navmesh.Path{Status: navmesh.NoPath, Reason: "Detour found no path", Points: []navmesh.Vec3{}}, nil
 	}
 	end := to
 	st := navmesh.Complete
@@ -176,6 +180,105 @@ func TestPlanCheckRefusesABadStart(t *testing.T) {
 	}
 }
 
+// A run that starts at a pull group is checked from the gather spot the driver uses (Plan.GatherSpot), not from the look point of the
+// group before it: where the two routes disagree, the gather spot's wins.
+func TestPlanCheckStartsAtTheGatherSpot(t *testing.T) {
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{pg(0, 100), pg(0, 200)}}}}
+	one := 1
+	spot, _ := plan.GatherSpot(0, 1, nil)
+	if spot.Y != 145 { // 55 yd short of the group on the straight line
+		t.Fatalf("gather spot %v", spot)
+	}
+	// The way to group 2 is open from the gather spot, closed from group 1's look point: a run from the plan's start fails there, a run
+	// at group 2 does not.
+	fromSpotOpen := fakeNav{block: func(from, to Point) bool { return to.Y == 200 && from.Y < 120 }}
+	for _, c := range []struct {
+		from *int
+		want string
+	}{{nil, "0/pull group look/2/unreachable"}, {&one, ""}} {
+		res, err := CheckPlanWith(plan, fromSpotOpen, CheckOptions{FromPullGroup: c.from})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issueReasons(res.Issues); got != c.want {
+			t.Errorf("from group %v, route open from the gather spot only: %q, want %q", c.from, got, c.want)
+		}
+	}
+	// And the other way round: closed from the gather spot, open from group 1's look point.
+	fromSpotClosed := fakeNav{block: func(from, to Point) bool { return to.Y == 200 && from.Y > 120 }}
+	for _, c := range []struct {
+		from *int
+		want string
+	}{{nil, ""}, {&one, "0/pull group look/2/unreachable"}} {
+		res, err := CheckPlanWith(plan, fromSpotClosed, CheckOptions{FromPullGroup: c.from})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issueReasons(res.Issues); got != c.want {
+			t.Errorf("from group %v, route closed from the gather spot: %q, want %q", c.from, got, c.want)
+		}
+	}
+}
+
+// A run from a leg starts where the leg before ended (Plan.LegStart: its boss), not at the simulated look point of its last pack.
+func TestPlanCheckStartsAtTheLegStart(t *testing.T) {
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{
+		{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{pg(0, 100)}, Boss: &Boss{Entry: 9, Position: Point{0, 300, 0}}},
+		{Name: "b", To: Point{0, 400, 0}},
+	}}
+	nav := fakeNav{block: func(from, to Point) bool { return to.Y == 400 && from.Y != 300 }}
+	res, err := CheckPlanWith(plan, nav, CheckOptions{FromLeg: 1})
+	if err != nil || !res.OK() {
+		t.Errorf("%v %q", err, issueReasons(res.Issues))
+	}
+}
+
+// A pull group or boss gated to the other team is skipped by the driver: the run's team leaves it out, a check without a team lists it,
+// labelled.
+func TestPlanCheckTeamGate(t *testing.T) {
+	nav := fakeNav{off: map[Point]bool{{10, 30, 0}: true, {10, 200, 0}: true}}
+	leg := Leg{Name: "a", To: Point{0, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{1}, Team: TeamHorde, Positions: []Point{{10, 30, 0}}}},
+		Boss:       &Boss{Entry: 9, Team: TeamHorde, Position: Point{10, 200, 0}}}
+	for team, want := range map[string]string{"": "0/pull group look/1/off the mesh 0/boss look/0/off the mesh", TeamHorde: "0/pull group look/1/off the mesh 0/boss look/0/off the mesh", TeamAlliance: ""} {
+		res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, nav, CheckOptions{Team: team})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issueReasons(res.Issues); got != want {
+			t.Errorf("team %q: %q, want %q", team, got, want)
+		}
+		if team == "" && !strings.Contains(res.Summary(), "[horde only]") {
+			t.Errorf("not labelled: %s", res.Summary())
+		}
+	}
+}
+
+// The stand points of the steps are walked before the boss: an unreachable stand is reported, and the boss is looked at from the last one.
+func TestPlanCheckWalksTheStepStands(t *testing.T) {
+	stand, bad, chest := Point{0, 150, 0}, Point{0, 160, 0}, Point{0, 400, 0}
+	leg := Leg{Name: "a", To: Point{0, 0, 0},
+		Steps: []Step{
+			{UseObject: &UseObject{ObjectRef: ObjectRef{Entry: 1}, Stand: &stand}},
+			{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: 2}}}, // no stand: nothing to walk
+			{Ritual: &Ritual{Entry: 3, Participants: 3, Stand: &bad}},
+		},
+		Boss:      &Boss{Entry: 9, Position: Point{0, 250, 0}},
+		AfterBoss: []Step{{LootObject: &LootObject{ObjectRef: ObjectRef{Entry: 4}, Stand: &chest}}}}
+	nav := fakeNav{off: map[Point]bool{bad: true, chest: true}}
+	res := checkLegs(t, nav, 0, leg)
+	if got, want := issueReasons(res.Issues), "0/steps[2].ritual.stand/0/off the mesh 0/after_boss[0].loot_object.stand/0/off the mesh"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+	// The boss is looked at from the last stand the party reached (0,150): the path to it is open only from there.
+	nav = fakeNav{block: func(from, to Point) bool { return to.Y == 250 && from.Y != 150 }}
+	leg.AfterBoss = nil
+	leg.Steps = leg.Steps[:1]
+	if res := checkLegs(t, nav, 0, leg); !res.OK() {
+		t.Errorf("the boss was not looked at from the step's stand: %s", res.Summary())
+	}
+}
+
 // The tuned look counts: a pack off the mesh whose path ends 17 yd short of it is in view from the end with the default arrival slack (3),
 // not with look_arrive 10 (the lead bot may stop 10 yd short of the look point, and the view is 25).
 func TestPlanCheckTunedLook(t *testing.T) {
@@ -281,6 +384,18 @@ func TestZulfarrakPlanCheck(t *testing.T) {
 		}
 		if p.Name == "zulfarrak" && res.Points < 100 {
 			t.Errorf("only %d points checked", res.Points)
+		}
+		// A run from a pull group starts at its gather spot: the same plan passes from Velratha's group 9 (of 11) and from a leg start.
+		if p.Name == "zulfarrak" {
+			for _, g := range []int{0, 8, 10} {
+				res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: 8, FromPullGroup: &g})
+				if err != nil || !res.OK() {
+					t.Errorf("from leg 8 pull group %d: %v\n%s", g, err, res.Summary())
+				}
+			}
+			if res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: 4}); err != nil || !res.OK() {
+				t.Errorf("from leg 4: %v\n%s", err, res.Summary())
+			}
 		}
 	}
 }

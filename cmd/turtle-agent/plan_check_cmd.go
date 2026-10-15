@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
@@ -17,7 +18,7 @@ import (
 // exitPlanCheck: plan-check found a point the navmesh cannot take (a failing plan is not a usage error).
 const exitPlanCheck = 11
 
-const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>..."
+const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--team alliance|horde] [--json] <plan>..."
 
 // planCheckCmd walks the named plans on the navmesh (README, "Plan check") and prints each failing point. It reads the plan files and
 // the mmaps folder and nothing else.
@@ -28,12 +29,17 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps (<map>.mmap and <map>*.mmtile); required")
 	from := fs.Int("from-leg", 0, "check from this leg on (the legs before it only place the party)")
 	fromGroup := fs.Int("from-pull-group", -1, "with --from-leg: check from this pull group (0-based) of that leg on (default: the leg's own walk too)")
+	team := fs.String("team", "", "alliance or horde: leave out the parts of the other team, as a run does (default: check all)")
 	asJSON := fs.Bool("json", false, "print the results as JSON")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	if fs.NArg() == 0 || *mmaps == "" {
 		fmt.Fprintln(stderr, planCheckUsage)
+		return exitUsage
+	}
+	if t := strings.ToLower(*team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
+		fmt.Fprintf(stderr, "plan-check: --team %q is neither %q nor %q\n", *team, dungeon.TeamAlliance, dungeon.TeamHorde)
 		return exitUsage
 	}
 	planner := navmesh.NewPlanner(*mmaps)
@@ -50,7 +56,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "plan-check: %v\n", err)
 			return exitUsage
 		}
-		opt := dungeon.CheckOptions{FromLeg: *from}
+		opt := dungeon.CheckOptions{FromLeg: *from, Team: strings.ToLower(*team)}
 		if *fromGroup >= 0 {
 			opt.FromPullGroup = fromGroup
 		}
@@ -102,6 +108,9 @@ type planCheckParams struct {
 	FromLeg *legParam `json:"from_leg,omitempty"`
 	// FromPullGroup (0-based, with from_leg) checks from that pull group of the leg on.
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
+	// Team ("alliance" or "horde") leaves out the pull groups and bosses of the other team, as the run does; omitted: all are checked and
+	// the team-only ones are labelled.
+	Team string `json:"team,omitempty"`
 }
 
 // planCheckResult is plan_check's answer: the check, or the reason it could not run (Checked false).
@@ -116,8 +125,8 @@ const maxRefusedIssues = 12
 
 // checkOptions is where the run starts and (when tuned: the commander driver) its tuned look: look_standoff and look_arrive of the tunables file it reads (the one named, else
 // the login's --tune, else <plan>.tune.json beside the plan; a missing or bad file leaves the defaults, the run itself reports a bad one).
-func (r *dungeonRunner) checkOptions(planPath, tune string, tuned bool, from int, group *int) dungeon.CheckOptions {
-	opt := dungeon.CheckOptions{FromLeg: from, FromPullGroup: group}
+func (r *dungeonRunner) checkOptions(planPath, tune string, tuned bool, team string, from int, group *int) dungeon.CheckOptions {
+	opt := dungeon.CheckOptions{FromLeg: from, FromPullGroup: group, Team: strings.ToLower(team)}
 	if !tuned { // only the commander driver reads a tunables file
 		return opt
 	}
@@ -164,6 +173,9 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 	if !planName.MatchString(p.Name) {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "zulfarrak" (a-z, 0-9, _ and -)`}
 	}
+	if t := strings.ToLower(p.Team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
+		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("team: %q is neither %q nor %q", p.Team, dungeon.TeamAlliance, dungeon.TeamHorde)}
+	}
 	planPath := filepath.Join(r.dir, p.Name+".json")
 	plan, err := dungeon.Load(planPath)
 	if err != nil {
@@ -175,7 +187,7 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 			return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", legNames(plan), len(plan.Legs)-1)}
 		}
 	}
-	res, err := r.check(plan, r.checkOptions(planPath, "", true, from, p.FromPullGroup))
+	res, err := r.check(plan, r.checkOptions(planPath, "", true, p.Team, from, p.FromPullGroup))
 	if errors.Is(err, dungeon.ErrCheckStart) {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	}

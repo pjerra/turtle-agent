@@ -69,6 +69,8 @@ type PlanIssue struct {
 	From   Point  `json:"from"`
 	Reason string `json:"reason"`
 	Detail string `json:"detail,omitempty"`
+	// Team is the team a pull group or boss is gated to ("horde"); the run's own team skips the other's, a check without a team lists both.
+	Team string `json:"team,omitempty"`
 }
 
 func (i PlanIssue) String() string {
@@ -78,6 +80,9 @@ func (i PlanIssue) String() string {
 	}
 	if i.PullGroup > 0 {
 		where += fmt.Sprintf(" pull group %d of %d", i.PullGroup, i.PullGroups)
+	}
+	if i.Team != "" {
+		where += " [" + i.Team + " only]"
 	}
 	s := fmt.Sprintf("%s %s %.1f %.1f %.1f: %s", where, i.Part, i.Point.X, i.Point.Y, i.Point.Z, i.Reason)
 	if i.Detail != "" {
@@ -122,13 +127,17 @@ func joinIssues(is []PlanIssue) string {
 // ErrCheckStart is the error of a check asked to start at a leg or pull group the plan does not have.
 var ErrCheckStart = errors.New("plan check: bad start")
 
-// CheckOptions are the choices of a plan check. The zero value checks everything with the driver's default look.
+// CheckOptions are the choices of a plan check. A run that starts inside the plan is checked from where the driver puts the party: at
+// Plan.LegStart (the end of the leg before) for a leg, at Plan.GatherSpot for a pull group; the earlier part of the plan is not walked.
+// The zero value checks the whole plan, every team's parts, with the driver's default look.
 type CheckOptions struct {
-	// FromLeg and FromPullGroup (0-based, as dungeon_run takes them) say where the run starts: what comes before is walked to place the
-	// party but reports nothing. With a pull group (nil: none given; 0 is the leg's first group) the walk of the leg's own via points and
-	// `to` is not checked either (the run starts at the group).
+	// FromLeg and FromPullGroup (0-based, as dungeon_run takes them) say where the run starts. With a pull group (nil: none given; 0 is the
+	// leg's first group) the run starts at the group: the leg's own via points and `to` and the groups before it are not checked.
 	FromLeg       int
 	FromPullGroup *int
+	// Team is the party's team ("alliance" or "horde"): a pull group or boss gated to the other team is left out, as the driver skips it.
+	// Empty checks them all and labels the gated ones in the issues.
+	Team string
 	// LookStandoff and LookArrive are the run's tuned look (tune.go: look_standoff, look_arrive); 0 takes the defaults.
 	LookStandoff, LookArrive float32
 }
@@ -146,7 +155,7 @@ func (o CheckOptions) Validate(p *Plan) error {
 	return nil
 }
 
-// CheckPlan walks the plan from leg fromLeg on (the legs before it are walked too, to know where the party stands, but report nothing).
+// CheckPlan walks the plan from leg fromLeg on.
 // The error is for what the check cannot answer (no navmesh engine, no files for the map): the plan is then unchecked, not failed.
 func CheckPlan(p *Plan, nav Navmesh, fromLeg int) (*PlanCheck, error) {
 	return CheckPlanWith(p, nav, CheckOptions{FromLeg: fromLeg})
@@ -169,13 +178,25 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 		opt.LookArrive = lookArrive
 	}
 	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}}}
-	cur := p.Entrance
-	for i, l := range p.Legs {
+	cur, group := p.Entrance, -1
+	switch {
+	case opt.FromPullGroup != nil:
+		// The commander's own move puts the party at the group's gather spot (RemoteDriver.startPoint: the same function).
+		group = *opt.FromPullGroup
+		cur, _ = p.GatherSpot(opt.FromLeg, group, c.planPoints)
+	case opt.FromLeg > 0:
+		cur, _ = p.LegStart(opt.FromLeg)
+	}
+	if c.pathErr != nil {
+		return nil, c.pathErr
+	}
+	for i := opt.FromLeg; i < len(p.Legs); i++ {
 		c.leg = i
 		var err error
-		if cur, err = c.checkLeg(l, cur); err != nil {
+		if cur, err = c.checkLeg(p.Legs[i], cur, group); err != nil {
 			return nil, err
 		}
+		group = -1
 	}
 	return c.res, nil
 }
@@ -183,15 +204,34 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
 type lookFunc func(path []Point, pack Point, standoff, view float32) (Point, bool)
 
+// planPoints is GatherSpot's path function over the navmesh.
+func (c *planChecker) planPoints(from, to Point) []Point {
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
+	if err != nil {
+		if c.pathErr == nil {
+			c.pathErr = err
+		}
+		return nil
+	}
+	pts := make([]Point, len(path.Points))
+	for i, v := range path.Points {
+		pts[i] = point(v)
+	}
+	return pts
+}
+
 type planChecker struct {
 	p      *Plan
 	nav    Navmesh
 	lookAt lookFunc
 	opt    CheckOptions
-	res    *PlanCheck
-	leg    int
-	report bool
-	l      Leg
+	// pathErr is the first navmesh error of planPoints (GatherSpot takes a function without an error).
+	pathErr error
+	// team is the team of the pack or boss being looked at (set on its issues).
+	team string
+	res  *PlanCheck
+	leg  int
+	l    Leg
 }
 
 func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
@@ -204,60 +244,58 @@ func (c *planChecker) issue(part string, group int, at, from Point, reason, form
 	if group > 0 {
 		is.PullGroup, is.PullGroups = group, len(c.l.PullGroups)
 	}
+	is.Team = c.team
 	return is
 }
 
 // fail records a failing point of the current leg.
 func (c *planChecker) fail(part string, group int, at, from Point, reason, format string, a ...any) {
-	if c.report {
-		c.res.Issues = append(c.res.Issues, c.issue(part, group, at, from, reason, format, a...))
-	}
+	c.res.Issues = append(c.res.Issues, c.issue(part, group, at, from, reason, format, a...))
 }
 
 // warn records a warning of the current leg.
 func (c *planChecker) warn(part string, at, from Point, reason, format string, a ...any) {
-	if c.report {
-		c.res.Warnings = append(c.res.Warnings, c.issue(part, 0, at, from, reason, format, a...))
-	}
+	c.res.Warnings = append(c.res.Warnings, c.issue(part, 0, at, from, reason, format, a...))
 }
 
-// checkLeg walks one leg from cur and returns where the party stands at its end. Points before the run's start (FromLeg, FromPullGroup)
-// are walked but not reported.
-func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
+// checkLeg walks one leg from cur and returns where the party stands at its end. A leg the run enters at a pull group (group 0 or more)
+// starts at that group: the leg's own via points and `to` and the groups before it are not walked.
+func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	c.l = l
-	inRun := c.leg >= c.opt.FromLeg
-	c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == nil)
-	for vi, w := range l.Via {
-		var err error
-		switch {
-		case w.CheckSkip != "":
-			c.skip(fmt.Sprintf("via %d", vi), w.Point, cur, w.CheckSkip)
-			cur = w.Point
-		case w.Direct:
-			cur, err = c.direct(fmt.Sprintf("direct via %d", vi), w.Point, cur)
-		default:
-			cur, err = c.walk(fmt.Sprintf("via %d", vi), w.Point, cur)
+	if group < 0 {
+		for vi, w := range l.Via {
+			var err error
+			switch {
+			case w.CheckSkip != "":
+				c.skip(fmt.Sprintf("via %d", vi), w.Point, cur, w.CheckSkip)
+				cur = w.Point
+			case w.Direct:
+				cur, err = c.direct(fmt.Sprintf("direct via %d", vi), w.Point, cur)
+			default:
+				cur, err = c.walk(fmt.Sprintf("via %d", vi), w.Point, cur)
+			}
+			if err != nil {
+				return cur, err
+			}
 		}
-		if err != nil {
-			return cur, err
+		if !l.NeedsWalk {
+			var err error
+			if cur, err = c.walk("to", l.To, cur); err != nil {
+				return cur, err
+			}
+		} else {
+			cur = l.To
 		}
+		group = 0
 	}
-	if !l.NeedsWalk {
-		var err error
-		if cur, err = c.walk("to", l.To, cur); err != nil {
-			return cur, err
-		}
-	} else {
-		cur = l.To
-	}
-	for gi, g := range l.PullGroups {
-		if g.NeedsWalk {
+	for gi := group; gi < len(l.PullGroups); gi++ {
+		g := l.PullGroups[gi]
+		if g.NeedsWalk || c.otherTeam(g.Team) {
 			continue
 		}
-		c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == nil || gi >= *c.opt.FromPullGroup)
 		first := cur
 		for pi, at := range g.Positions {
-			stand, err := c.look("pull group look", gi+1, at, first)
+			stand, err := c.look("pull group look", gi+1, g.Team, at, first)
 			if err != nil {
 				return cur, err
 			}
@@ -266,29 +304,58 @@ func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 			}
 		}
 	}
-	c.report = inRun
-	if b := l.Boss; b != nil && !b.NeedsWalk {
-		stand, err := c.look("boss look", 0, b.Position, cur)
+	var err error
+	if cur, err = c.steps("steps", l.Steps, cur); err != nil {
+		return cur, err
+	}
+	if b := l.Boss; b != nil && !b.NeedsWalk && !c.otherTeam(b.Team) {
+		stand, err := c.look("boss look", 0, b.Team, b.Position, cur)
 		if err != nil {
 			return cur, err
 		}
 		cur = stand
+	}
+	return c.steps("after_boss", l.AfterBoss, cur)
+}
+
+// otherTeam says whether something gated to team is for the other team than the run's (never when the check has no team).
+func (c *planChecker) otherTeam(team string) bool {
+	return team != "" && c.opt.Team != "" && team != c.opt.Team
+}
+
+// steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there
+// before the step. A step without a stand stands wherever the object is approached from, which only a run can say.
+func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
+	for si, st := range steps {
+		var stand *Point
+		label := fmt.Sprintf("%s[%d].", kind, si)
+		switch {
+		case st.UseObject != nil:
+			stand, label = st.UseObject.Stand, label+"use_object.stand"
+		case st.LootObject != nil:
+			stand, label = st.LootObject.Stand, label+"loot_object.stand"
+		case st.Ritual != nil:
+			stand, label = st.Ritual.Stand, label+"ritual.stand"
+		}
+		if stand == nil {
+			continue
+		}
+		var err error
+		if cur, err = c.walk(label, *stand, cur); err != nil {
+			return cur, err
+		}
 	}
 	return cur, nil
 }
 
 // skip records a hop the plan exempts from the check.
 func (c *planChecker) skip(part string, at, from Point, why string) {
-	if c.report {
-		c.res.Exempt = append(c.res.Exempt, c.issue(part, 0, at, from, ReasonSkipped, "%s", why))
-	}
+	c.res.Exempt = append(c.res.Exempt, c.issue(part, 0, at, from, ReasonSkipped, "%s", why))
 }
 
 // count counts a checked point (only those of the run's part of the plan).
 func (c *planChecker) count() {
-	if c.report {
-		c.res.Points++
-	}
+	c.res.Points++
 }
 
 // walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
@@ -376,8 +443,10 @@ func (c *planChecker) line(from, to Point) (clear bool, hit float64, err error) 
 // look checks a pack's position (or the boss's): the path from where the party stands must reach it, or come within checkPackReach, and
 // the look point on it (LookPoint) must be within ClearSeeRadius of the pack. It returns the look point (the party's place afterwards;
 // `from` when the path is shorter than the standoff, as the driver does not move then).
-func (c *planChecker) look(part string, group int, at, from Point) (Point, error) {
+func (c *planChecker) look(part string, group int, team string, at, from Point) (Point, error) {
 	c.count()
+	c.team = team
+	defer func() { c.team = "" }()
 	path, err := c.nav.Plan(c.p.Map, vec(from), vec(at))
 	if err != nil {
 		return from, err

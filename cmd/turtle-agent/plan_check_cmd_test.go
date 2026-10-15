@@ -244,3 +244,14 @@ func TestDungeonRunWithoutNavmeshNeedsForce(t *testing.T) {
 		t.Fatalf("%v", out)
 	}
 }
+
+func TestPlanCheckBadTeam(t *testing.T) {
+	r := &dungeonRunner{dir: "../../dungeons"}
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", Team: "orcs"}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams {
+		t.Errorf("team orcs: %v", err)
+	}
+	var out, errOut bytes.Buffer
+	if code := planCheckCmd([]string{"--mmaps", t.TempDir(), "--team", "orcs", "zulfarrak"}, &out, &errOut); code != exitUsage {
+		t.Errorf("--team orcs: exit %d", code)
+	}
+}

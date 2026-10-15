@@ -347,6 +347,14 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 	}, r
 }
 
+// runTeam is the team the run's team gate uses: the team option, else the agent's own (the owned bots share its faction).
+func (r *dungeonRunner) runTeam(p dungeonRunParams) string {
+	if p.Team != "" {
+		return p.Team
+	}
+	return r.cur().Team()
+}
+
 // planCheckApplies says whether dungeon_run checks the plan: not for a pull test (it runs one pack) and not for an observed run (the server
 // walks the plan).
 func planCheckApplies(p dungeonRunParams) bool {
@@ -522,7 +530,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	}
 	// The plan check walks the plan on the navmesh first, from where the run starts, with the look the run is tuned to.
 	if planCheckApplies(p) {
-		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, from, p.FromPullGroup), p.Force)
+		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, r.runTeam(p), from, p.FromPullGroup), p.Force)
 		if err != nil {
 			return dungeonRunResult{}, err
 		}
