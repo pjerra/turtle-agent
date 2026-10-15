@@ -2066,12 +2066,17 @@ func lookView(standoff, arrive float32) float32 {
 
 // LookPoint is where the lead bot stands to look at a pack at `pack`: StandoffPoint(path, standoff), moved up the path to the first point
 // within view yards of the pack when that is farther (a pack off the mesh ends the path short of it, and the standoff counted back from
-// there leaves the look 30 yd away: Zul'Farrak's Velratha group 9). When no point of the path is within view it is the path's end.
-// ok is false when the path is shorter than the standoff, as for StandoffPoint (the lead bot does not move).
+// there leaves the look 30 yd away: Zul'Farrak's Velratha group 9). When no point of the path is within view it is the path's end. A path
+// shorter than the standoff leaves the lead bot where it is (ok false, as for StandoffPoint) when it is within view already; when it is
+// not, the lead bot moves up the path the same way (the look from the last stand of the group's earlier positions: group 9's positions 4
+// and 5, 29 yd from the lead bot on a 14 yd path).
 func LookPoint(path []Point, pack Point, standoff, view float32) (Point, bool) {
 	stand, ok := StandoffPoint(path, standoff)
-	if !ok || dist3(stand, pack) <= float64(view) {
+	if ok && dist3(stand, pack) <= float64(view) {
 		return stand, ok
+	}
+	if !ok && (len(path) == 0 || dist3(path[0], pack) <= float64(view)) {
+		return stand, false
 	}
 	for i := 1; i < len(path); i++ {
 		a, b := path[i-1], path[i]

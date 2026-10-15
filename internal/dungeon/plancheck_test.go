@@ -84,7 +84,7 @@ func pg(x, y float32) PullGroup {
 func TestPlanCheckReasons(t *testing.T) {
 	nav := fakeNav{
 		off:     map[Point]bool{{10, 200, 0}: true},
-		partial: map[Point]Point{{10, 150, 0}: {10, 110, 0}}, // 40 yd short: past checkPackReach
+		partial: map[Point]Point{{10, 150, 0}: {10, 110, 0}}, // 40 yd short: past the look view
 	}
 	res := checkLegs(t, nav, 0, Leg{
 		Name: "a", To: Point{10, 0, 0},
@@ -293,15 +293,48 @@ func TestPlanCheckFailsNeedsWalkPoints(t *testing.T) {
 	}
 }
 
-// The tuned look counts: a pack off the mesh whose path ends 17 yd short of it is in view from the end with the default arrival slack (3),
-// not with look_arrive 10 (the lead bot may stop 10 yd short of the look point, and the view is 25).
+// The positions of a group are looked at in order, each look starting where the one before ended (confirmGone), and the next group goes on
+// from the last: a position can be open from the look point of the one before it but closed from the point before the group, and a group
+// open from the last look point but closed from the first.
+func TestPlanCheckLooksAtPositionsInSequence(t *testing.T) {
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1, 1}, Positions: []Point{{0, 100, 0}, {0, 200, 0}}}, pg(0, 300)}}}}
+	// Position 1's look point is 21 yd short of it, at y 79; position 2's at y 179.
+	nav := fakeNav{block: func(from, to Point) bool {
+		return (to.Y == 200 && from.Y < 20) || (to.Y == 300 && from.Y > 70 && from.Y < 90)
+	}}
+	res, err := CheckPlanWith(plan, nav, CheckOptions{})
+	if err != nil || !res.OK() {
+		t.Errorf("%v: position 2 was looked at from the point before the group, or group 2 from the first look point: %q", err, issueReasons(res.Issues))
+	}
+	// And the other way round, each fails when its own start is closed.
+	nav = fakeNav{block: func(from, to Point) bool {
+		return (to.Y == 200 && from.Y > 70 && from.Y < 90) || (to.Y == 300 && from.Y > 170 && from.Y < 190)
+	}}
+	res, err = CheckPlanWith(plan, nav, CheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := issueReasons(res.Issues), "0/pull group look/1/unreachable"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+	// A position within the view of the party needs no look (a bot that far from it that sees none is the evidence).
+	near := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1, 1}, Positions: []Point{{0, 100, 0}, {0, 90, 0}}}}}}}
+	res, err = CheckPlanWith(near, fakeNav{block: func(from, to Point) bool { return to.Y == 90 }}, CheckOptions{})
+	if err != nil || !res.OK() {
+		t.Errorf("%v %q", err, issueReasons(res.Issues))
+	}
+}
+
+// The tuned look counts: a pack off the mesh whose path ends 17 yd short of it is in view from the end with the default look (view 21), not
+// with look_arrive 10 (the lead bot may stop 10 yd short of the look point: view 14) or look_standoff 12 (view 12).
 func TestPlanCheckTunedLook(t *testing.T) {
 	nav := fakeNav{partial: map[Point]Point{{0, 60, 0}: {0, 43, 0}}}
 	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{To: Point{0, 0, 0}, PullGroups: []PullGroup{pg(0, 60)}}}}
 	for _, c := range []struct {
 		opt  CheckOptions
 		want string
-	}{{CheckOptions{}, ""}, {CheckOptions{LookArrive: 10}, "0/pull group look/1/too far"}, {CheckOptions{LookStandoff: 12}, ""}} {
+	}{{CheckOptions{}, ""}, {CheckOptions{LookArrive: 10}, "0/pull group look/1/unreachable"}, {CheckOptions{LookStandoff: 12}, "0/pull group look/1/unreachable"}} {
 		res, err := CheckPlanWith(plan, nav, c.opt)
 		if err != nil {
 			t.Fatal(err)
@@ -348,8 +381,9 @@ func TestLookPointStaysWithinView(t *testing.T) {
 	if p, ok := LookPoint(path, far, LookStandoff, view); !ok || p != path[2] {
 		t.Errorf("out of view everywhere: %v %v", p, ok)
 	}
-	if _, ok := LookPoint(path[1:], pack, 40, view); ok {
-		t.Errorf("a path shorter than the standoff should not move")
+	// A path shorter than the standoff leaves the lead bot where it is when the pack is in view from its start.
+	if _, ok := LookPoint(path[1:], Point{1622, 1108, 9.6}, 40, view); ok {
+		t.Errorf("a path shorter than the standoff moved a lead bot that is in view")
 	}
 	// The tuned look: a longer arrival slack pulls the point nearer, a standoff under the margin stays the limit.
 	if v := lookView(LookStandoff, 8); v != 16 {
@@ -357,6 +391,29 @@ func TestLookPointStaysWithinView(t *testing.T) {
 	}
 	if v := lookView(15, lookArrive); v != 15 {
 		t.Errorf("look_standoff 15: view %v", v)
+	}
+}
+
+// Velratha's group 9, positions 4 and 5 (1644.0 1105.0 and 1644.2 1107.4), looked at from the last stand of the positions before them
+// (1615.2 1107.3): the path to the pack is 14 yd, shorter than the 21 yd standoff, so StandoffPoint gives none and the lead bot stayed 29 yd
+// away ("could not get a view of the pack"). It now moves up the path into view.
+func TestLookPointMovesWhenTheShortPathLeavesTheLeadOutOfView(t *testing.T) {
+	path := []Point{{1615.2, 1107.3, 8.9}, {1629.0, 1119.2, 9.6}}
+	view := lookView(LookStandoff, lookArrive)
+	for _, pack := range []Point{{1644.0, 1105.0, 9.2}, {1644.2, 1107.4, 9.0}} {
+		if _, ok := StandoffPoint(path, LookStandoff); ok {
+			t.Fatal("the path is meant to be shorter than the standoff")
+		}
+		if d := dist3(path[0], pack); d < 28 {
+			t.Fatalf("the lead bot is %.1f yd from %v", d, pack)
+		}
+		got, ok := LookPoint(path, pack, LookStandoff, view)
+		if !ok || dist3(got, pack) > float64(view) {
+			t.Errorf("pack %v: look point %v (ok %v) is %.1f yd away, want within %v", pack, got, ok, dist3(got, pack), view)
+		}
+		if dist3(got, path[0]) == 0 || dist3(got, path[1]) > dist3(path[0], path[1]) {
+			t.Errorf("pack %v: %v is not on the path past its start", pack, got)
+		}
 	}
 }
 
@@ -466,25 +523,18 @@ var planCheckKnownFailing = map[string]bool{
 	"blackrock_depths":      true,
 	"blackwing_lair":        true,
 	"crescent_grove":        true,
-	"deadmines":             true,
 	"dire_maul_east":        true,
 	"dragonmaw_retreat":     true,
 	"gilneas_city":          true,
-	"gnomeregan":            true,
 	"hateforge_quarry":      true,
 	"karazhan_crypt":        true,
 	"lower_blackrock_spire": true,
-	"lower_karazhan_halls":  true,
 	"maraudon_orange":       true,
 	"maraudon_purple":       true,
 	"molten_core":           true,
 	"naxxramas":             true,
-	"ragefire_chasm":        true,
-	"scholomance":           true,
 	"shadowfang_keep":       true,
 	"stormwrought_ruins":    true,
-	"stratholme_live":       true,
-	"sunken_temple":         true,
 	"timbermaw_hold":        true,
 	"upper_karazhan_halls":  true,
 	"wailing_caverns":       true,

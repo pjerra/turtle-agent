@@ -49,10 +49,6 @@ const (
 	// checkStraight: a path up to this many times the straight distance (plus checkStraightSlack yards) counts as nearly straight.
 	checkStraight      = 1.15
 	checkStraightSlack = 1.0
-	// checkPackReach: a pack that stands off the mesh (on a ledge, in a pit) is looked at from the nearest reachable point when that is within
-	// this horizontal distance of it and checkPackDZ vertically (TestZulfarrakOnNavmesh's rule).
-	checkPackReach = 20.0
-	checkPackDZ    = 4.0
 	// checkRayEnd is how far short of its end a direct hop's ray may stop and still reach it (a unit stands on the mesh's edge as often as inside it).
 	checkRayEnd = 1.5
 )
@@ -296,17 +292,19 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 			c.needsWalk("pull group look", gi+1, g.Team, g.Positions[0], cur)
 			continue
 		}
-		// The look at each position starts from the point before the group; the next group goes on from the first position's look point
-		// (the one pulled).
-		first := cur
-		for pi, at := range g.Positions {
-			stand, err := c.look("pull group look", gi+1, g.Team, at, first)
+		// The driver looks at the positions in order, each look starting where the one before it ended (confirmGone), and the next group
+		// goes on from the last of them. A position within ClearSeeRadius of the party needs no look: a living bot that far from it that
+		// sees none is the evidence (anchorGone).
+		for _, at := range g.Positions {
+			if dist3(cur, at) <= ClearSeeRadius {
+				c.count()
+				continue
+			}
+			stand, err := c.look("pull group look", gi+1, g.Team, at, cur)
 			if err != nil {
 				return cur, err
 			}
-			if pi == 0 {
-				cur = stand
-			}
+			cur = stand
 		}
 	}
 	var err error
@@ -450,7 +448,7 @@ func (c *planChecker) line(from, to Point) (clear bool, hit float64, err error) 
 	return float64(ray.Hit) >= hdist(from, to)-checkRayEnd, float64(ray.Hit), nil
 }
 
-// look checks a pack's position (or the boss's): the path from where the party stands must reach it, or come within checkPackReach, and
+// look checks a pack's position (or the boss's): the path from where the party stands must reach it, or end within the look view of it, and
 // the look point on it (LookPoint) must be within ClearSeeRadius of the pack. It returns the look point (the party's place afterwards;
 // `from` when the path is shorter than the standoff, as the driver does not move then).
 func (c *planChecker) look(part string, group int, team string, at, from Point) (Point, error) {
@@ -472,13 +470,19 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		pts[i] = point(v)
 	}
 	end := pts[len(pts)-1]
-	if path.Status != navmesh.Complete && (hdist(end, at) > checkPackReach || math.Abs(float64(end.Z-at.Z)) > checkPackDZ) {
+	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
+	// A pack off the mesh (on a ledge, in a pit) is looked at from the nearest reachable point: the path's end must be within the look view.
+	if path.Status != navmesh.Complete && dist3(end, at) > float64(view) {
 		c.fail(part, group, at, from, ReasonUnreachable, "path_to is %s: %s", path.Status, path.Reason)
 		return from, nil
 	}
-	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, lookView(c.opt.LookStandoff, c.opt.LookArrive))
+	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, view)
 	if !moved {
 		stand = from
+	} else if n, ok, err := c.nav.Nearest(c.p.Map, vec(stand)); err != nil {
+		return from, err
+	} else if ok {
+		stand = point(n) // a point interpolated along a path over stairs or a drop may float: the party stands on the mesh floor under it
 	}
 	// The lead bot may stop LookArrive short of the look point, and the view is ClearSeeRadius: the look point must leave room for both.
 	if d := dist3(stand, at); d > ClearSeeRadius-float64(c.opt.LookArrive) {
