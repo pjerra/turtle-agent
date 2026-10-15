@@ -88,7 +88,9 @@ type batchRun struct {
 	deaths0 int
 	stayed  bool // the party was told to stay at the centre
 	// agentHome is where the agent stood before it opened the batch's chests (graves_open_by agent); it goes back there after the last one.
-	agentHome *agentHome
+	// safeSpot is where the lead bot stood when the batch began, before the party walked to the batch's centre: the agent's home when it came
+	// from outside the instance.
+	safeSpot *Point
 	// sectionLeft is how many chests of the section follow this batch (0: it is the last one).
 	sectionLeft int
 }
@@ -214,6 +216,9 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		return err
 	}
 	d.batch = b
+	if p, ok := d.leadPos(); ok {
+		b.safeSpot = &p
+	}
 	d.setAoE(ctx, false) // the opens go with the area spells off: the tank takes the summons first, the spells come on after its threat lead
 	if err := d.doWalk(ctx, b.rec.Centre); err != nil {
 		if runEnded(ctx, err) {
@@ -361,9 +366,7 @@ func (d *RemoteDriver) batchStepDone(ctx context.Context, a Action, skipped bool
 	if b.left > 0 {
 		return nil
 	}
-	if b.agentHome != nil {
-		d.agentLeavesTheFight(ctx, b)
-	}
+	d.agentRestore(ctx, "after the batch's last chest")
 	if b.stayed {
 		d.resumeFollow(ctx, true) // the fight is with the party free to move: `cmd follow` is the bots' own mode
 		b.stayed = false
@@ -446,6 +449,7 @@ func (d *RemoteDriver) batchWantedAfterWipe() int {
 
 // batchWiped is called when a wipe ends a step: a batch that is going is recorded with the wipe, and the ramp stops growing.
 func (d *RemoteDriver) batchWiped() {
+	d.agentRestore(context.Background(), "after a wipe")
 	if d.batch != nil {
 		d.batchFinish(true)
 	}
@@ -697,7 +701,7 @@ func (d *RemoteDriver) gmAssistGo(label string, at Point) {
 // stand point with `.go xyz` (a GM assist, noted for each open), casts its Opening spell at the exact spawn and takes what is in it. No order
 // goes to a carrier, and the party's fight is not waited for: the point is to open while the summons fight. A cast that takes nothing is
 // not counted as opened.
-func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRec) (string, error) {
+func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRec) (note string, err error) {
 	if skip, why, _ := d.spawnOpened(ctx, a); skip {
 		d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
 		return why, nil
@@ -709,7 +713,10 @@ func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRe
 		return "", errors.New("graves_open_by agent: this game gives the agent no hands")
 	}
 	b := d.batch
-	if b != nil && b.agentHome == nil {
+	if b != nil && d.agentAway == nil {
+		// Home is where the agent stands before the `.appear` when that is on the plan's map (the instance); when it started outside, it is the
+		// party's safe spot, where the lead bot stood when the batch began (before the walk to the batch's centre, the fight spot).
+		pre, preMap, preHere := f.AgentPlace()
 		if _, err := d.keepNearOpt(ctx, true); err != nil { // the agent into the instance, next to the party
 			return "", err
 		}
@@ -717,7 +724,25 @@ func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRe
 		if !here || m != d.plan.Map {
 			return "", fmt.Errorf("%s: the agent's character is not on map %d (in the instance) after `.appear`: it cannot `.go xyz` to the graves", a.Label, d.plan.Map)
 		}
-		b.agentHome = &agentHome{at: at, known: true}
+		home, why := agentHome{at: at, known: true}, "next to the party after `.appear`"
+		switch {
+		case preHere && preMap == d.plan.Map:
+			home, why = agentHome{at: pre, known: true}, "where it stood before the batch"
+		case b.safeSpot != nil:
+			home, why = agentHome{at: *b.safeSpot, known: true}, "the party's safe spot (where the lead bot stood when the batch began)"
+		}
+		d.agentAway = &home
+		d.rep.note(fmt.Sprintf("graves-batch: the agent's home for this batch is %.0f %.0f %.0f, %s", home.at.X, home.at.Y, home.at.Z, why))
+	}
+	if d.agentAway != nil {
+		// Every way out of this step that is not a success puts the agent back at home, with a context that a cancel does not end: a failed
+		// `.go xyz`, a failed cast, a wipe or a cancel must not leave the GM standing at the grave. A success leaves it where it is for the next
+		// chest; the batch's last chest (batchStepDone), a wipe (batchWiped) and the end of the run (run) bring it back.
+		defer func() {
+			if err != nil {
+				d.agentRestore(ctx, "after a failed open")
+			}
+		}()
 	}
 	to := d.standOf(a)
 	if to == nil {
@@ -731,9 +756,9 @@ func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRe
 	}
 	d.gmAssistGo(a.Label, *to)
 	var got Looted
-	var err error
+	var lerr error
 	for try := 0; try < 3; try++ {
-		if got, err = h.LootObject(ctx, a.SpawnGUID); err == nil {
+		if got, lerr = h.LootObject(ctx, a.SpawnGUID); lerr == nil {
 			break
 		}
 		if ctx.Err() != nil {
@@ -743,8 +768,8 @@ func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRe
 			return "", terr
 		}
 	}
-	if err != nil {
-		return "", fmt.Errorf("%s: the agent's own Opening cast at %s: %w", a.Label, tbm.GUIDArg(a.SpawnGUID), err)
+	if lerr != nil {
+		return "", fmt.Errorf("%s: the agent's own Opening cast at %s: %w", a.Label, tbm.GUIDArg(a.SpawnGUID), lerr)
 	}
 	d.remote(func(r *RemoteReport) { r.AgentOpens++ })
 	d.rep.note(fmt.Sprintf("%s: the agent opened the grave and took %s", a.Label, describeLooted(got)))
@@ -761,18 +786,24 @@ func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRe
 	return "", nil
 }
 
-// agentLeavesTheFight sends the agent back to where it stood before the batch's opens (`.go xyz`, a GM assist), out of the fight spot, after the
-// batch's last chest. A failure is noted: the agent is an invisible GM and the summons ignore it.
-func (d *RemoteDriver) agentLeavesTheFight(ctx context.Context, b *batchRun) {
-	h := b.agentHome
-	b.agentHome = nil
-	f, _ := d.g.(Follower)
-	sh, _ := d.g.(StartHands)
-	if h == nil || !h.known || f == nil || sh == nil {
+// agentRestore sends the agent back to its home (`.go xyz`, a GM assist) once, whatever way the batch or the run ends: it runs with its own
+// bounded context (context.WithoutCancel of ctx, 30 s) so that a cancel or a stop does not leave the invisible GM standing at an active grave.
+// A restore that fails is a degraded run, with where the agent was left. It does nothing when the agent is at home.
+func (d *RemoteDriver) agentRestore(ctx context.Context, when string) {
+	h := d.agentAway
+	if h == nil {
 		return
 	}
-	if err := sh.GoXYZ(ctx, d.plan.Map, h.at); err != nil {
-		d.rep.note(fmt.Sprintf("graves-batch: .go xyz back out of the fight spot failed: %v; the agent stays where it is", err))
+	d.agentAway = nil
+	sh, _ := d.g.(StartHands)
+	if !h.known || sh == nil {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := sh.GoXYZ(rctx, d.plan.Map, h.at); err != nil {
+		d.rep.note(fmt.Sprintf("graves-batch: .go xyz back to the agent's home %s failed: %v", when, err))
+		d.degrade(fmt.Sprintf("agent left away from its home %.0f %.0f %.0f after the grave opens (%s)", h.at.X, h.at.Y, h.at.Z, err))
 		return
 	}
 	d.gmAssistGo("graves-batch", h.at)

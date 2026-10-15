@@ -529,10 +529,11 @@ type RemoteDriver struct {
 	wipeRecoverLeg   map[int]int // recovered wipes per leg
 	batch            *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
 	gb               gravesState
-	lastFallbackTook bool // the agent's last fallback loot took an item or money (a grave's open that took nothing is not counted as opened)
-	sweepWiped       bool // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
-	healerCapped     int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
-	bossFight        bool // a boss fight (doKill) is on
+	lastFallbackTook bool       // the agent's last fallback loot took an item or money (a grave's open that took nothing is not counted as opened)
+	agentAway        *agentHome // where the agent goes back to after opening graves (graves_open_by agent); nil when it is at home
+	sweepWiped       bool       // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
+	healerCapped     int        // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	bossFight        bool       // a boss fight (doKill) is on
 	recoveries       int
 
 	tank        packet.GUID
@@ -734,6 +735,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	}()
 	// Declared after the unbind, so it runs before it: the bots' area spells that a grave batch turned off go back on while the binding lasts.
 	defer d.legAoEOn()
+	defer d.agentRestore(context.Background(), "at the end of the run")
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})

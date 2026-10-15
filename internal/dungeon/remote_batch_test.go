@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -927,11 +928,19 @@ func TestGravesSummaryNoteEndsTheSection(t *testing.T) {
 // agentHandsGame is a handsGame whose agent can `.go xyz`.
 type agentHandsGame struct {
 	*handsGame
-	teles []Point
+	teles   []Point
+	goCalls int
+	goFail  map[int]error // the nth GoXYZ call (from 1) fails with this error and does not move the agent
+	goCtx   []error       // ctx.Err() of each GoXYZ call that moved the agent
 }
 
 func (g *agentHandsGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
+	g.goCalls++
+	if err := g.goFail[g.goCalls]; err != nil {
+		return err
+	}
 	g.teles = append(g.teles, at)
+	g.goCtx = append(g.goCtx, ctx.Err())
 	g.agent = at
 	g.agentMap = mapID
 	g.log = append(g.log, fmt.Sprintf("go %.0f", at.X))
@@ -939,6 +948,11 @@ func (g *agentHandsGame) GoXYZ(ctx context.Context, mapID uint32, at Point) erro
 }
 
 func agentGravesRun(t *testing.T, g *agentHandsGame, leg Leg, gs []*fakeGrave, level int, setup []string) (*RemoteDriver, Report, error) {
+	t.Helper()
+	return agentGravesRunCtx(t, context.Background(), g, leg, gs, level, setup)
+}
+
+func agentGravesRunCtx(t *testing.T, ctx context.Context, g *agentHandsGame, leg Leg, gs []*fakeGrave, level int, setup []string) (*RemoteDriver, Report, error) {
 	t.Helper()
 	g.level = level
 	plan := remotePlan(leg)
@@ -955,7 +969,7 @@ func agentGravesRun(t *testing.T, g *agentHandsGame, leg Leg, gs []*fakeGrave, l
 	o := objOpts()
 	o.GravesOpenBy = GravesOpenAgent
 	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
-	err := d.Run(context.Background(), 0)
+	err := d.Run(ctx, 0)
 	rep, _ := d.Status()
 	return d, rep, err
 }
@@ -1113,5 +1127,140 @@ func TestHealerWithManaGetsNoExtraGate(t *testing.T) {
 	o := runBatches(t, g, leg, gs, objOpts())
 	if o.err != nil || strings.Contains(notesOf(o.rep), "mana gate before the next batch") {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+}
+
+// ---- the agent goes home whatever way an open ends ----
+
+var agentHomeSpot = Point{-300, 0, 0} // where agentGravesRun starts the agent, on the plan's map: the home of a batch
+
+// A failed `.go xyz` to the grave, a failed Opening cast, a cancel and a wipe in the middle of a batch each end with the agent moved back to
+// where it stood before the batch.
+func TestAgentIsBroughtHomeWhenAnOpenFails(t *testing.T) {
+	boom := errors.New("boom")
+	cases := map[string]func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error){
+		"go xyz fails": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			g.goFail = map[int]error{1: boom} // the first move to a grave; the way back is call 2
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"the cast fails": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			g.lootErrs = []error{boom, boom, boom}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"a cancel mid-batch": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			ctx, cancel := context.WithCancel(context.Background())
+			n := 0
+			g.onLoot = func(h *handsGame) {
+				if n++; n == 2 { // the second chest's cast is cut by the cancel
+					cancel()
+					h.lootErrs = []error{context.Canceled, context.Canceled, context.Canceled}
+				}
+			}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRunCtx(t, ctx, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"a wipe mid-batch": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			n := 0
+			g.onLoot = func(h *handsGame) {
+				if n++; n == 2 {
+					for _, p := range h.party {
+						p.Dead, p.HP = true, 0
+					}
+					h.lootErrs = []error{boom, boom, boom}
+				}
+			}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+	}
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			g, d, rep, err := run(t)
+			_ = err
+			if len(g.teles) == 0 {
+				t.Fatalf("the agent never moved\n%s", notesOf(rep))
+			}
+			if last := g.teles[len(g.teles)-1]; last != agentHomeSpot {
+				t.Fatalf("the agent ends at %v, not home %v (moves %v)\n%s", last, agentHomeSpot, g.teles, notesOf(rep))
+			}
+			if g.agent != agentHomeSpot {
+				t.Fatalf("the agent stands at %v", g.agent)
+			}
+			if d.agentAway != nil {
+				t.Fatalf("the driver still thinks the agent is away: %+v", d.agentAway)
+			}
+			// The way back never runs on a cancelled context.
+			for i, e := range g.goCtx {
+				if e != nil && g.teles[i] == agentHomeSpot {
+					t.Fatalf("the way home ran with a cancelled context: %v", e)
+				}
+			}
+			// The first move home comes right away: after the one chest's move that worked (none when the move itself failed).
+			first := slices.Index(g.teles, agentHomeSpot)
+			if first < 0 || first > 2 {
+				t.Fatalf("the first way home is move %d: %v", first, g.teles)
+			}
+		})
+	}
+}
+
+// A way home that fails too is a degraded run, with where the agent was left.
+func TestAgentHomeThatFailsMakesTheRunDegraded(t *testing.T) {
+	boom := errors.New("boom")
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	g.lootErrs = []error{boom, boom, boom}
+	g.goFail = map[int]error{2: boom} // the move to the grave works, the way home does not
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	_, rep, _ := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if !strings.Contains(strings.Join(rep.Degraded, "|"), "agent left away from its home") {
+		t.Fatalf("degraded %v\n%s", rep.Degraded, notesOf(rep))
+	}
+}
+
+// Home is the spot the agent stood at before the batch when that is on the plan's map; when the agent started outside the instance it is the
+// party's safe spot, where the lead bot stood when the batch began (not the batch's centre, the fight spot).
+func TestAgentHomeIsThePreBatchSpot(t *testing.T) {
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	_, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if err != nil || len(g.teles) == 0 || g.teles[len(g.teles)-1] != agentHomeSpot || !strings.Contains(notesOf(rep), "where it stood before the batch") {
+		t.Fatalf("%v teles %v\n%s", err, g.teles, notesOf(rep))
+	}
+	// From outside the instance (another map): the lead bot's spot at the batch's start.
+	g = &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs = batchGraves(3, 3, func(i int) string { return "g1" })
+	g.onAppear = func(n *nearGame) { n.agentMap = 70 } // placeholder, replaced below
+	g.onAppear = nil
+	plan := remotePlan(leg)
+	g.level = 3
+	g.agent, g.agentMap = Point{-300, 0, 0}, 1 // outside
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	g.onAppear = func(n *nearGame) { n.agentMap = plan.Map } // the `.appear` puts it in the instance
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.Setup = []string{"gm visible off"}
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	rep2, _ := d.Status()
+	last := g.teles[len(g.teles)-1]
+	if !strings.Contains(notesOf(rep2), "the party's safe spot") || last.X >= 30 || last.X < 15 || dist3(last, Point{33, 0, 0}) < 5 {
+		t.Fatalf("home %v (the batch centre is 33 0 0)\n%s", last, notesOf(rep2))
 	}
 }
