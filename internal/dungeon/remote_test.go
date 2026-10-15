@@ -585,6 +585,7 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 			if strings.EqualFold(p.Name, f[2]) {
 				p.X, p.Y, p.Z = g.lead().X, g.lead().Y, g.lead().Z
 				delete(g.lagUntil, p.GUID)
+				delete(g.memberMap, p.GUID)
 				g.summoned = append(g.summoned, p.Name)
 			}
 		}

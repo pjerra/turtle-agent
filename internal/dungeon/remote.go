@@ -360,6 +360,7 @@ type RemoteReport struct {
 	AttackResends  int `json:"attack_resends"`
 	RezWaits       int `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
 	Rezzed         int `json:"rezzed"`           // bots that got up during those waits
+	Rezzes         int `json:"rezzes"`           // the same count under the trace event's name (`rez`): bots a party caster raised instead of their releasing
 	PackLooks      int `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
 	PacksSeenEmpty int `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
 	// The careful walk (remote_gather.go): waits for the party to gather on the lead bot before a pull or a hop, their seconds, the waits
@@ -370,6 +371,9 @@ type RemoteReport struct {
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
 	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
+	// RejoinTPs are the `cmd summon <bot>` orders the commander sent to bring a bot back to the lead bot (remote_rejoin.go); each is also a
+	// run_gm_assists.
+	RejoinTPs int `json:"rejoin_tps"`
 	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
 	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
 	DirectGathers        int     `json:"direct_gathers"`
@@ -517,6 +521,7 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	rejoin        rejoinState                // bots brought back to the lead bot with cmd summon (remote_rejoin.go)
 	entry         entryState                 // object steps by entry and game-object waits on cmd state (remote_entry.go)
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
@@ -1656,6 +1661,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			meter = walkMeter{} // the fight is not a stop of the walk
 			continue
 		}
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		careful := d.careful()
 		hop := leg
 		if careful {
@@ -1947,14 +1955,23 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 }
 
 // resurrectors are the living bots out of combat that may raise a dead one: the named healer, else any bot that uses mana (the feed
-// carries no class, so a mage counts; the wait is bounded and a mage's absence of a resurrection costs RezWait at most).
+// carries no class, so a mage counts; the wait is bounded and a mage's absence of a resurrection costs RezWait at most). The module's own
+// AI raises a dead party member out of combat (priest Resurrection, paladin Redemption, shaman Ancestral Spirit; the commander has no
+// cast order, `cmd` verbs are listed in tbm.CmdVerbs), so the driver only leaves it the time. A caster counts only with a dead body within
+// RezReach yards of it (rez_reach_yd; a corpse farther off is released at once), or on the same map as it.
 func (d *RemoteDriver) resurrectors() []tbm.PartyRec {
 	var out []tbm.PartyRec
+	dead := d.deadMembers()
 	for _, p := range d.fr.Party {
 		if p.Dead || !p.UsesMana() || p.InCombat() {
 			continue
 		}
 		if d.opt.Healer != "" && !strings.EqualFold(d.opt.Healer, p.Name) {
+			continue
+		}
+		if !slices.ContainsFunc(dead, func(m tbm.PartyRec) bool {
+			return m.Map == p.Map && dist3(partyPoint(m), partyPoint(p)) <= float64(d.tx.RezReach)
+		}) {
 			continue
 		}
 		out = append(out, p)
@@ -1982,8 +1999,13 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 				raised++
 			}
 		}
+		for g := range seenDead {
+			if m, ok := d.fr.Member(g); ok {
+				d.tr.Event("rez", map[string]any{"leg": max(d.curLeg, 0), "bot": m.Name, "raised": !m.Dead, "seconds": d.clk.Now().Sub(began).Seconds(), "why": why})
+			}
+		}
 		if raised > 0 {
-			d.remote(func(r *RemoteReport) { r.Rezzed += raised })
+			d.remote(func(r *RemoteReport) { r.Rezzed += raised; r.Rezzes += raised })
 			d.rep.note(fmt.Sprintf("leg %d: %d dead bots were raised within %.0f s of waiting", max(d.curLeg, 0), raised, d.clk.Now().Sub(began).Seconds()))
 		}
 	}()
@@ -2201,6 +2223,9 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 		fightBegan = time.Time{}
 		ft.set(false)
 		gh.set(true)
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		st := d.restState(rw)
 		rec.g.Short = st.short
 		if len(st.dead) > 0 {
