@@ -958,6 +958,7 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 			d.wipeRecover++
 			d.wipeRecoverLeg[d.curLeg]++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
+				d.rep.update(func(r *Report) { r.WipeRecoveries++ })
 				_ = d.maintWipeRecovered(ctx) // once the party is calm; a context error ends the run at the next look
 				d.obj.waitAt = time.Time{}    // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
 				return true

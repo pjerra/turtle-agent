@@ -22,6 +22,10 @@ type Report struct {
 	Wipes   int        `json:"wipes"`
 	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead (counted apart from Wipes).
 	PartyDowns int `json:"party_downs,omitempty"`
+	// WipeRecoveries are the wipes the remote run recovered from (a whole-party wipe, a party down or a wipe after the boss's kill alike: each one
+	// revived the party and went on). Wipes counts only the whole-party ones that were not after a kill, so a run with five recovered
+	// party downs said wipes 0; the end record's "wipes" is AllWipes.
+	WipeRecoveries int `json:"wipe_recoveries,omitempty"`
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`
@@ -263,9 +267,18 @@ func summaryOf(r Report) map[string]any {
 	return m
 }
 
+// AllWipes is every wipe the run met: the whole-party ones, the stops at three dead bots (party downs) and the wipes after a boss's kill.
+func (r Report) AllWipes() int {
+	n := r.Wipes + r.PartyDowns
+	if r.Remote != nil {
+		n += r.Remote.WipesAfterKill
+	}
+	return n
+}
+
 func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": r.runLegs(), "deaths": len(r.Deaths),
-		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
+		"wipes": r.AllWipes(), "wipes_whole_party": r.Wipes, "party_downs": r.PartyDowns, "wipe_recoveries": r.WipeRecoveries, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
 		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}
 }

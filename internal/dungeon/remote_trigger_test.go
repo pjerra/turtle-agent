@@ -1440,4 +1440,8 @@ func TestLeadAloneOutsideTheDungeonIsPartyDown(t *testing.T) {
 	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || fmt.Sprint(g.summons) != "[Tanky]" || len(g.memberMap) != 0 {
 		t.Fatalf("%v downs %d summons %v\n%s", err, rep.PartyDowns, g.summons, notesOf(rep))
 	}
+	// The report counts the recovered wipe, not only the whole-party ones: wipes 0 with a party down recovered was misleading (round 3, slot 4).
+	if rep.WipeRecoveries != 1 || rep.AllWipes() != 1 || rep.Wipes != 0 {
+		t.Fatalf("recoveries %d all wipes %d wipes %d", rep.WipeRecoveries, rep.AllWipes(), rep.Wipes)
+	}
 }
