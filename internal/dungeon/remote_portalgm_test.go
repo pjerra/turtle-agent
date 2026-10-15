@@ -23,7 +23,9 @@ type portalFake struct {
 	agentOn          uint32
 	gos              []string
 	botLines         []string
-	planLen          float64 // the agent's navmesh path from the lead bot to the portal (0: the game plans nothing)
+	planLen          float64         // the agent's navmesh path from the lead bot to the portal (0: the straight line)
+	noPlanner        bool            // the planner fails (no tiles of the outer map): the walk falls back to straight-line points
+	stuckBot         map[string]bool // bots a `cmd summon` does not bring
 	leadTo           *Point
 	leadToAt         time.Time
 	summoned         []string
@@ -91,11 +93,11 @@ func (g *portalFake) BotLines(_ context.Context, command string, _ time.Duration
 	return nil, false, nil
 }
 func (g *portalFake) PlanPath(_ context.Context, mapID uint32, from, to Point) ([]Point, error) {
-	if g.planLen <= 0 || mapID != outsideMap {
+	if g.noPlanner || mapID != outsideMap {
 		return nil, errors.New("no planner")
 	}
 	d := dist3(from, to)
-	if d == 0 {
+	if g.planLen <= 0 || d == 0 {
 		return []Point{from, to}, nil
 	}
 	// A straight line stretched to planLen: a middle corner off the line.
@@ -114,7 +116,8 @@ func (g *portalFake) Command(ctx context.Context, command string) (tbm.Reply, er
 		g.log = append(g.log, "summon "+name)
 		g.orders = append(g.orders, command)
 		for _, p := range g.party {
-			if strings.EqualFold(p.Name, name) {
+			if strings.EqualFold(p.Name, name) && !g.stuckBot[name] {
+				delete(g.left, name)
 				l := g.lead()
 				p.X, p.Y, p.Z = l.X, l.Y, l.Z
 				g.memberMap[p.GUID] = g.memberMap[l.GUID]
@@ -257,5 +260,135 @@ func TestRemoteEnterPartyOnAnotherMapIsMovedByGM(t *testing.T) {
 	}
 	if _, err = p.run(RemoteOptions{}); err == nil || !strings.Contains(err.Error(), "is on map 1; the portal is on map 0") || len(p.gos) != 0 {
 		t.Fatalf("%v go %v", err, p.gos)
+	}
+}
+
+// The planner gave a real path and the module still has none to its first point: the portal is unreachable (the tests above). A planner that
+// failed made a straight-line point, and a refusal of that says nothing about the portal: the leg is halved and the move asked again first.
+func TestRemoteEnterPlannerFailureHalvesBeforeAnyGMMove(t *testing.T) {
+	g := newPortalFake(t, enterAck(3))
+	g.level = 1
+	g.noPlanner = true
+	g.moveErrs = []string{"unreachable"}
+	rep, err := g.run(RemoteOptions{})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if len(g.gos) != 0 || len(g.botLines) != 0 || len(g.summoned) != 0 || len(g.sent) != 1 || rep.Remote.Enter.PartyMoved != "" {
+		t.Fatalf("go %v lines %v summoned %v sent %v", g.gos, g.botLines, g.summoned, g.sent)
+	}
+	// An off-mesh first point is the same: halve and replan, never a GM move.
+	o := newPortalFake(t, enterAck(3))
+	o.level = 1
+	o.moveErrs = []string{"off-mesh"}
+	rep, err = o.run(RemoteOptions{})
+	if err != nil || rep.State != "done" || len(o.gos) != 0 || len(o.sent) != 1 {
+		t.Fatalf("%v %s go %v sent %v", err, rep.State, o.gos, o.sent)
+	}
+}
+
+// Only "unreachable" answers for the whole budget with no planner: the portal is given up after the walk's tries, by a GM move (late) or the clear failure.
+func TestRemoteEnterNoPlannerUnreachableAfterTheBudget(t *testing.T) {
+	errs := []string{}
+	for i := 0; i < 12; i++ {
+		errs = append(errs, "unreachable")
+	}
+	g := newPortalFake(t, enterAck(3))
+	g.level = 1
+	g.noPlanner = true
+	g.lagFollowers()
+	g.moveErrs = append([]string{}, errs...)
+	rep, err := g.run(RemoteOptions{})
+	if err != nil || rep.State != "done" || len(g.gos) != 1 || len(g.sent) != 1 || len(g.botLines) != 1 {
+		t.Fatalf("%v %s go %v sent %v\n%s", err, rep.State, g.gos, g.sent, notesOf(rep))
+	}
+	if n := len(g.walkMoves()); n < 8 {
+		t.Fatalf("the budget was not spent first: %d moves %v", n, g.walkMoves())
+	}
+	p := newPortalFake(t, enterAck(3))
+	p.level = 0
+	p.noPlanner = true
+	p.moveErrs = append([]string{}, errs...)
+	_, err = p.run(RemoteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "no walkable path to the portal") || len(p.gos) != 0 || len(p.sent) != 0 || len(p.ordersOf("cmd move")) < 8 {
+		t.Fatalf("%v go %v sent %v moves %d", err, p.gos, p.sent, len(p.ordersOf("cmd move")))
+	}
+}
+
+// The follow after the summons must be acknowledged: a refusal fails the phase before cmd enter; a busy answer is asked again.
+func TestRemoteEnterFollowAfterTheSummonsMustBeConfirmed(t *testing.T) {
+	g := newPortalFake(t, enterAck(3))
+	g.level = 1
+	g.lagFollowers()
+	g.moveErrs = []string{"unreachable"}
+	g.cmdErr["follow"] = []string{"denied"}
+	rep, err := g.run(RemoteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "cmd follow after the summons was not confirmed (denied") || len(g.sent) != 0 || rep.State == "done" {
+		t.Fatalf("%v sent %v", err, g.sent)
+	}
+	if n := len(g.ordersOf("cmd follow")); n != 1 {
+		t.Fatalf("a refusal that is not transient was asked %d times", n)
+	}
+
+	b := newPortalFake(t, enterAck(3))
+	b.level = 1
+	b.lagFollowers()
+	b.moveErrs = []string{"unreachable"}
+	b.cmdErr["follow"] = []string{"busy", "busy"}
+	rep, err = b.run(RemoteOptions{})
+	if err != nil || rep.State != "done" || len(b.sent) != 1 || len(b.ordersOf("cmd follow")) != 3 || !strings.Contains(notesOf(rep), "acknowledged at try 3") {
+		t.Fatalf("%v %s follow %v sent %v", err, rep.State, b.ordersOf("cmd follow"), b.sent)
+	}
+
+	c := newPortalFake(t, enterAck(3))
+	c.level = 1
+	c.lagFollowers()
+	c.moveErrs = []string{"unreachable"}
+	c.cmdErr["follow"] = []string{"busy", "busy", "busy", "busy"}
+	_, err = c.run(RemoteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "not confirmed (busy") || len(c.sent) != 0 || len(c.ordersOf("cmd follow")) != 3 {
+		t.Fatalf("%v follow %d sent %v", err, len(c.ordersOf("cmd follow")), c.sent)
+	}
+}
+
+// Every configured bot counts as apart until the feed shows it alive within 15 yd of the portal: one missing from the feed, on another map or
+// dead is summoned (a dead one revived first) and waited for; one that never comes fails the phase before PartyMoved and cmd enter.
+func TestRemoteEnterGatherCountsMissingDeadAndFarBotsAsApart(t *testing.T) {
+	moved := func(t *testing.T, tweak func(g *portalFake)) (*portalFake, Report, error) {
+		g := newPortalFake(t, enterAck(3))
+		g.level = 1
+		g.lagFollowers()
+		g.moveErrs = []string{"unreachable"}
+		tweak(g)
+		rep, err := g.run(RemoteOptions{})
+		return g, rep, err
+	}
+	// missing from the feed
+	g, rep, err := moved(t, func(g *portalFake) { g.left = map[string]bool{"Healy": true} })
+	if err != nil || rep.State != "done" || !strings.Contains(strings.Join(g.summoned, ","), "Healy") || len(g.sent) != 1 {
+		t.Fatalf("missing: %v %s summoned %v\n%s", err, rep.State, g.summoned, notesOf(rep))
+	}
+	// on another map
+	g, rep, err = moved(t, func(g *portalFake) { g.memberMap[g.party[1].GUID] = 1 })
+	if err != nil || rep.State != "done" || !strings.Contains(strings.Join(g.summoned, ","), "Healy") {
+		t.Fatalf("other map: %v %s", err, rep.State)
+	}
+	// dead: revived, then summoned
+	g, rep, err = moved(t, func(g *portalFake) { g.party[1].Dead, g.party[1].HP = true, 0 })
+	if err != nil || rep.State != "done" || len(g.revived) != 1 || g.revived[0] != "Healy" || !strings.Contains(strings.Join(g.summoned, ","), "Healy") || len(g.sent) != 1 {
+		t.Fatalf("dead: %v %s revived %v summoned %v\n%s", err, rep.State, g.revived, g.summoned, notesOf(rep))
+	}
+	// a bot a summon does not bring fails the phase before cmd enter, whichever way it was apart
+	for name, tweak := range map[string]func(g *portalFake){
+		"missing": func(g *portalFake) {
+			g.left = map[string]bool{"Healy": true}
+			g.stuckBot = map[string]bool{"Healy": true}
+		},
+		"other map": func(g *portalFake) { g.memberMap[g.party[1].GUID] = 1; g.stuckBot = map[string]bool{"Healy": true} },
+	} {
+		g, rep, err = moved(t, tweak)
+		if err == nil || !strings.Contains(err.Error(), "the party did not gather at the portal: Healy") || len(g.sent) != 0 || (rep.Remote != nil && rep.Remote.Enter != nil && rep.Remote.Enter.PartyMoved != "") {
+			t.Fatalf("%s: %v sent %v", name, err, g.sent)
+		}
 	}
 }

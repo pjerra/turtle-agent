@@ -469,7 +469,7 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			}
 			continue
 		}
-		wp := d.waypoint(ctx, here, pt.Point, leg)
+		wp, realWP := d.waypointSrc(ctx, here, pt.Point, leg)
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
@@ -478,8 +478,10 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			return err
 		}
 		if ref, bad := refusedOf(r); bad {
-			if ref.Code == "unreachable" && !accepted && refusals == 0 {
-				// Nothing was accepted yet and the very first move has no path: ask no more, move the party (GM) or fail now.
+			if ref.Code == "unreachable" && !accepted && (realWP || refusals >= d.cfg.WalkAttempts+d.opt.MoveRetries) {
+				// Nothing was accepted yet and a point the planner gave on a real path (or the portal itself) has no path for the module: ask no
+				// more, move the party (GM) or fail now. A straight-line point (no planner, no tiles) says nothing about the portal: those
+				// refusals halve the leg and replan first, and only when the whole budget went on "unreachable" is the portal given up.
 				if err := d.portalUnreachable(ctx, pt, ref, gmMoved); err != nil {
 					return err
 				}

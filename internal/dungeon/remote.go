@@ -1544,8 +1544,16 @@ func moveArgsPoint(args []string) (Point, bool) {
 // waypoint is the point to send the lead bot to on its way from `from` to `to`: `to` itself when within MoveLeg, else a point on
 // the navmesh path (when the game plans one), else on the straight line.
 func (d *RemoteDriver) waypoint(ctx context.Context, from, to Point, leg float32) Point {
+	p, _ := d.waypointSrc(ctx, from, to, leg)
+	return p
+}
+
+// waypointSrc is waypoint with the source of the point: real is true when it is `to` itself or a point of a path the game's navmesh planned,
+// false for the straight-line fallback (no planner, no tiles, a planner error): a module refusal of a straight-line point says nothing about
+// the target (the enter phase's unreachable portal, remote_portalgm.go).
+func (d *RemoteDriver) waypointSrc(ctx context.Context, from, to Point, leg float32) (p Point, real bool) {
 	if dist3(from, to) <= float64(leg) {
-		return to
+		return to, true
 	}
 	if pl, ok := d.g.(PathPlanner); ok {
 		mapID := d.plan.Map
@@ -1554,11 +1562,11 @@ func (d *RemoteDriver) waypoint(ctx context.Context, from, to Point, leg float32
 		}
 		if pts, err := pl.PlanPath(ctx, mapID, from, to); err == nil && len(pts) >= 2 {
 			if p, ok := alongPath(pts, from, leg); ok {
-				return p
+				return p, true
 			}
 		}
 	}
-	return alongLine(from, to, float64(leg))
+	return alongLine(from, to, float64(leg)), false
 }
 
 // alongPath is the farthest point of the path within leg yards of from, following the corners in order.

@@ -3,7 +3,10 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // The GM move of the enter phase. The hires spawn at the commander, wherever it stands: the first Ragefire start had the party in Tanaris and
@@ -21,12 +24,13 @@ import (
 // summons cross maps. Only one GM move is made per run: a lead bot that is still refused at the portal fails the phase.
 
 const (
-	portalLongWalk  = 300.0 // yards of navmesh path beyond which a GM account moves the party to the portal instead of walking it
-	portalTogether  = 15.0  // yards: every bot of the run within this of the portal ends the move
-	portalGMLabel   = " (GM move to the portal)"
-	portalGMNoPath  = "the lead bot has no walkable path to the portal"
-	portalGMAdvice  = "hire the party near it or use a GM account"
-	portalMoveTries = 2 // rounds of `cmd summon` for the bots still apart
+	portalLongWalk    = 300.0 // yards of navmesh path beyond which a GM account moves the party to the portal instead of walking it
+	portalTogether    = 15.0  // yards: every bot of the run within this of the portal ends the move
+	portalGMLabel     = " (GM move to the portal)"
+	portalGMNoPath    = "the lead bot has no walkable path to the portal"
+	portalGMAdvice    = "hire the party near it or use a GM account"
+	portalMoveTries   = 2 // rounds of `cmd summon` for the bots still apart
+	portalFollowTries = 3 // asks for the ACK of `cmd follow`
 )
 
 // portalPathLength is the length of the agent's own navmesh path from the lead bot to the portal (0 when the lead bot is not on the portal's
@@ -82,6 +86,9 @@ func (d *RemoteDriver) portalGMBook(line string) {
 }
 
 // moveToPortalByGM moves the commander to the portal, brings the lead bot and the others to it, and waits until all stand together there.
+// Every configured bot (the lead bot and RemoteOptions.Bots) counts as apart until the feed shows it alive within portalTogether yards of the
+// portal on its map: one that is missing from the feed, dead or on another map is summoned (a dead one revived first, with the run's own
+// revive) and waited for, and the phase fails before PartyMoved and `cmd enter` if it does not come.
 func (d *RemoteDriver) moveToPortalByGM(ctx context.Context, h StartHands, pt *Portal, reason string) error {
 	began := d.clk.Now()
 	d.enterNote(fmt.Sprintf("%s: moving the party to the portal at %.1f %.1f %.1f on map %d by GM (.go xyz, .bot summon, cmd summon)", reason, pt.X, pt.Y, pt.Z, pt.Map))
@@ -92,14 +99,23 @@ func (d *RemoteDriver) moveToPortalByGM(ctx context.Context, h StartHands, pt *P
 	if p, m, ok := h.AgentPlace(); !ok || m != pt.Map || hdist(p, pt.Point) > startNear {
 		return fmt.Errorf("the commander is not at the portal after .go xyz (at %.0f %.0f on map %d)", p.X, p.Y, m)
 	}
+	// A dead bot cannot be summoned ("cannot be summoned" while dead): the run's revive first.
+	if err := d.reviveBeforeMove(ctx); err != nil {
+		return err
+	}
 	d.look()
+	leadBrought := false
 	if l, ok := d.fr.LeadRec(); !ok || l.Map != pt.Map || dist3(partyPoint(l), pt.Point) > portalTogether {
 		if err := d.bringLead(ctx, h, pt.Point); err != nil {
 			return err
 		}
+		leadBrought = true
 	}
 	summoned := false
 	for round := 1; round <= portalMoveTries; round++ {
+		if err := d.reviveBeforeMove(ctx); err != nil {
+			return err
+		}
 		d.look()
 		apart := d.apartFromPortal(pt)
 		if len(apart) == 0 {
@@ -131,17 +147,11 @@ func (d *RemoteDriver) moveToPortalByGM(ctx context.Context, h StartHands, pt *P
 		}
 	}
 	if apart := d.apartFromPortal(pt); len(apart) > 0 {
-		return fmt.Errorf("the party did not gather at the portal: %s still apart after %d summons", strings.Join(apart, ", "), portalMoveTries)
+		return fmt.Errorf("the party did not gather at the portal: %s not seen alive within %.0f yd of it after %d summons", strings.Join(apart, ", "), portalTogether, portalMoveTries)
 	}
-	if summoned {
-		// `cmd summon` made the commander the bots' master and put them on follow: with the commander outside the instance they would be
-		// pulled out of it again after the entry (hires-3 run 1). One `cmd follow` puts the party back on the lead bot (as rejoin does).
-		r, err := d.order(ctx, "follow")
-		if err != nil {
+	if summoned || leadBrought {
+		if err := d.followAfterSummons(ctx); err != nil {
 			return err
-		}
-		if ref, bad := refusedOf(r); bad {
-			d.enterNote(fmt.Sprintf("cmd follow after the summons was refused: %s (%s)", ref.Code, ref.Message))
 		}
 	}
 	n := len(d.namedBots())
@@ -151,15 +161,67 @@ func (d *RemoteDriver) moveToPortalByGM(ctx context.Context, h StartHands, pt *P
 	return nil
 }
 
-// apartFromPortal names the lead bot and the named bots (living, in the feed) that do not stand within portalTogether yards of the portal on its map.
+// reviveBeforeMove revives the dead among the configured bots with the run's own revive (the lead bot first, an order per dead bot, the waits
+// of the rez gate); it fails the phase when one stays dead.
+func (d *RemoteDriver) reviveBeforeMove(ctx context.Context) error {
+	d.look()
+	var dead []string
+	for _, n := range append([]string{d.opt.Lead}, d.namedBots()...) {
+		if m, ok := d.memberByName(n); ok && m.Dead {
+			dead = append(dead, n)
+		}
+	}
+	if len(dead) == 0 {
+		return nil
+	}
+	d.enterNote("dead before the entry: " + strings.Join(dead, ", ") + "; reviving")
+	if err := d.reviveDead(ctx, "enter: "+strings.Join(dead, ", ")+" dead before the entry"); err != nil {
+		return fmt.Errorf("enter: %w", err)
+	}
+	return nil
+}
+
+// followAfterSummons puts the party on follow of the lead bot and requires the module's ACK. `.bot summon` and `cmd summon` made the
+// commander the bots' master and put them on follow of it; with the commander outside the instance they are pulled out again after the entry
+// (hires-3 run 1), so a follow that is not confirmed fails the phase before `cmd enter`. A busy, cancelled or in-combat answer, or none, is
+// asked again (portalFollowTries times, SummonGap apart); any other refusal fails at once.
+func (d *RemoteDriver) followAfterSummons(ctx context.Context) error {
+	var last string
+	for try := 1; try <= portalFollowTries; try++ {
+		if try > 1 {
+			if err := d.tick(ctx, d.opt.SummonGap); err != nil {
+				return err
+			}
+		}
+		r, err := d.order(ctx, "follow")
+		if err != nil {
+			return err
+		}
+		if r.Kind == tbm.KindAck {
+			if try > 1 {
+				d.enterNote(fmt.Sprintf("cmd follow after the summons was acknowledged at try %d", try))
+			}
+			return nil
+		}
+		if ref, bad := refusedOf(r); bad {
+			last = ref.Code + ": " + ref.Message
+			if !slices.Contains([]string{"busy", "cancelled", "in-combat", "tank-busy"}, ref.Code) {
+				break
+			}
+		} else {
+			last = "no ACK (" + replyText(r) + ")"
+		}
+	}
+	return fmt.Errorf("enter: cmd follow after the summons was not confirmed (%s): the bots would follow the commander, who stays outside the instance, and be pulled out after the entry; nothing was sent through the portal", last)
+}
+
+// apartFromPortal names the lead bot and every configured bot that the feed does not show alive within portalTogether yards of the portal on
+// its map: a bot missing from the feed, dead or on another map counts as apart.
 func (d *RemoteDriver) apartFromPortal(pt *Portal) []string {
 	var out []string
 	for _, n := range append([]string{d.opt.Lead}, d.namedBots()...) {
 		m, ok := d.memberByName(n)
-		if !ok || m.Dead {
-			continue
-		}
-		if m.Map != pt.Map || dist3(partyPoint(m), pt.Point) > portalTogether {
+		if !ok || m.Dead || m.Map != pt.Map || dist3(partyPoint(m), pt.Point) > portalTogether {
 			out = append(out, n)
 		}
 	}
