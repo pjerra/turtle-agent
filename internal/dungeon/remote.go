@@ -505,17 +505,19 @@ type RemoteDriver struct {
 	wipeRecover    int
 	recoveries     int
 
-	tank       packet.GUID
-	engagedAt  map[packet.GUID]time.Time // when a mob was first seen fighting the party
-	attacked   map[packet.GUID]bool      // mobs the party was sent at
-	heldNoted  map[packet.GUID]bool
-	waitNoted  map[packet.GUID]bool
-	warned     map[string]bool
-	ccDone     map[packet.GUID]bool
-	ccOrdered  map[packet.GUID]time.Time  // when a big-pack CC order went out for a mob (remote_cc.go)
-	rccLast    time.Time                  // the last reactive CC order (remote_patrol.go)
-	rccN       map[packet.GUID]int        // reactive CC orders per mob
-	patrolSeen map[packet.GUID]*patrolObs // units of patrol entries seen on a patrol path (remote_patrol.go)
+	tank        packet.GUID
+	engagedAt   map[packet.GUID]time.Time // when a mob was first seen fighting the party
+	attacked    map[packet.GUID]bool      // mobs the party was sent at
+	heldNoted   map[packet.GUID]bool
+	waitNoted   map[packet.GUID]bool
+	warned      map[string]bool
+	ccDone      map[packet.GUID]bool
+	ccOrdered   map[packet.GUID]time.Time  // when a big-pack CC order went out for a mob (remote_cc.go)
+	rccLast     time.Time                  // the last reactive CC order (remote_patrol.go)
+	midStart    bool                       // the run began mid-plan (from_leg, from_pull_group, start_here, resume) ...
+	midStartLeg int                        // ... in this leg
+	rccN        map[packet.GUID]int        // reactive CC orders per mob
+	patrolSeen  map[packet.GUID]*patrolObs // units of patrol entries seen on a patrol path (remote_patrol.go)
 	// patrolWalkedAt is when a member of each patrol was last seen walking (the next group of the leg does not look for it again at once).
 	patrolWalkedAt map[*Patrol]time.Time
 	// wantParty is how many bots the party has when the run starts (the lead bot and the named bots; the feed's party when none are
@@ -715,12 +717,15 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	if d.opt.Pulltest != nil {
 		return d.runPulltest(ctx)
 	}
+	resumed := false
 	if d.cfg.Resume {
 		if r, ok := d.st.ResumeAt(); ok {
+			resumed = true
 			d.rep.update(func(rp *Report) { rp.Resumed = &r })
 			d.rep.note(r.String())
 		}
 	}
+	d.midStart, d.midStartLeg = fromLeg > 0 || d.opt.StartHere || d.opt.FromPullGroup != nil || resumed, fromLeg
 	waiting := [2]int{-1, -1}
 	for {
 		if err := ctx.Err(); err != nil {

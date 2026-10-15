@@ -76,6 +76,21 @@ func TestSummonedKillFirstComesFromThePlanField(t *testing.T) {
 	}
 }
 
+func TestPlanKillFirstRejectsDuplicatesAndZero(t *testing.T) {
+	const head = `{"version":1,"name":"kf","map":1,"entrance":{"x":0,"y":0,"z":0},`
+	const legs = `"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":5,"position":{"x":5,"y":0,"z":0}}}]}`
+	for list, want := range map[string]string{
+		`"kill_first":[5650,7247,5650],`:                         "5650 is listed twice",
+		`"kill_first":[8179,0],`:                                 "0 is not a creature entry",
+		`"kill_first":[8179],"summoned_kill_first":[8179,8179],`: "8179 is listed twice",
+		`"kill_first":[8179],"summoned_kill_first":[0],`:         "0 is not a creature entry",
+	} {
+		if _, err := Parse("t.json", []byte(head+list+legs)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", list, err, want)
+		}
+	}
+}
+
 func TestPlanSummonedKillFirstMustBeInKillFirst(t *testing.T) {
 	const head = `{"version":1,"name":"kf","map":1,"entrance":{"x":0,"y":0,"z":0},`
 	const legs = `"legs":[{"name":"a","to":{"x":1,"y":0,"z":0},"boss":{"entry":5,"position":{"x":5,"y":0,"z":0}}}]}`

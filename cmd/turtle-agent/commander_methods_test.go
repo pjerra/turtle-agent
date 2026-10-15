@@ -609,3 +609,24 @@ func TestRecoverWipeDefaultsOnForCommanderRuns(t *testing.T) {
 		}
 	}
 }
+
+// An observed run steers nothing: its recover_wipe is off (the trace options say so), a commander run's is on, the legacy "remote" too.
+func TestRemoteRecoverWipeIsOffForObservedRuns(t *testing.T) {
+	for mode, want := range map[string]bool{"commander": true, "remote": true, "": true, "observe": false} {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(`{"name":"x","mode":"`+mode+`"}`), &p); err != nil {
+			t.Fatal(err)
+		}
+		if got := remoteRecoverWipe(p); got != want {
+			t.Errorf("mode %q: %v, want %v", mode, got, want)
+		}
+	}
+	// observe refuses any recover_wipe value, false included.
+	r := dungeonRig(t)
+	for _, v := range []string{"true", "false"} {
+		out := r.call("dungeon_run", `{"name":"rig","mode":"observe","lead_bot":"Tanky","recover_wipe":`+v+`}`)
+		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), "recover_wipe") {
+			t.Errorf("recover_wipe %s: %v", v, out["error"])
+		}
+	}
+}

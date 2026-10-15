@@ -795,3 +795,23 @@ func TestRemotePreflightTalentsAllAnswered(t *testing.T) {
 		}
 	}
 }
+
+// A bot that answers 0 spent points through BotLinesAll is warned about (a reset spec), the others are not.
+func TestRemotePreflightTalentsZeroPointsWarnsInTheTogetherPath(t *testing.T) {
+	g := &multiFake{botFake: kitFake(t)}
+	g.replies["command Healy talents"] = []string{"Forwarded command for Healy: talents; action success is not guaranteed.", "My current talent spec is: Holy (0/0/0) Link: 0"}
+	rep, err := runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	pf := rep.Remote.Preflight
+	all := strings.Join(pf.Warnings, "\n")
+	if g.calls != 1 || pf.OK || !strings.Contains(all, "Healy: no talent points spent (0/0/0): a reset spec?") || strings.Contains(all, "Tanky: no talent") || strings.Contains(all, "Magey: no talent") {
+		t.Fatalf("calls %d warnings %v", g.calls, pf.Warnings)
+	}
+	for _, b := range pf.Bots {
+		if b.Name == "Healy" && b.Talents != "0/0/0" {
+			t.Errorf("%+v", b)
+		}
+	}
+}

@@ -153,3 +153,80 @@ func TestRemoteBossSearchNeedsACompleteNavmeshPath(t *testing.T) {
 		t.Fatalf("a complete path: %v killed %d", err, g.mobsKilled)
 	}
 }
+
+// boss_search_s 0 turns the search off: the step fails at once, as it did before the search existed.
+func TestRemoteBossSearchCanBeTurnedOff(t *testing.T) {
+	spec := tuneIndex["boss_search_s"]
+	var cfg Config
+	spec.set(&tuneTarget{cfg: &cfg}, 0)
+	if cfg.BossSearch >= 0 || spec.get(&tuneTarget{cfg: &cfg}) != 0 {
+		t.Fatalf("0 must switch it off and read back as 0: %v", cfg.BossSearch)
+	}
+	spec.set(&tuneTarget{cfg: &cfg}, 45)
+	if cfg.BossSearch != 45*time.Second {
+		t.Fatalf("%v", cfg.BossSearch)
+	}
+	g := newFakeRemote(t)
+	began := g.now
+	rep, err := runRemoteTx(t, g, bossSearchPlan(), opts(), func(d *RemoteDriver) { d.cfg.BossSearch = -time.Millisecond })
+	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") || rep.Remote.BossSearches != 0 || g.now.Sub(began) > 50*time.Second {
+		t.Fatalf("%v searches %d waited %v", err, rep.Remote.BossSearches, g.now.Sub(began))
+	}
+}
+
+// A run that began inside the boss's leg from a later start does not search: he may have been killed before this run.
+func TestRemoteBossSearchSkippedAfterAMidPlanStart(t *testing.T) {
+	plan := remotePlan(Leg{Name: "first", To: Point{10, 0, 0}, Boss: &Boss{Entry: 778, Position: Point{30, 0, 0}}}, Leg{Name: "b", To: Point{20, 0, 0}, Boss: &Boss{Entry: 777, Position: Point{60, 0, 0}}})
+	g := newFakeRemote(t)
+	g.lead().X = 30 // where leg 0 ends, the start of leg 1
+	began := g.now
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	err := d.Run(context.Background(), 1) // from_leg 1: the boss of leg 1 may have died in the run before
+	rep, _ := d.Status()
+	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") || rep.Remote.BossSearches != 0 || g.now.Sub(began) > 50*time.Second {
+		t.Fatalf("%v searches %d waited %v\n%s", err, rep.Remote.BossSearches, g.now.Sub(began), notesOf(rep))
+	}
+}
+
+// A group of the current leg that the feed still shows alive blocks the way too; a cleared one does not.
+func TestBossWayChecksTheCurrentLegsPacks(t *testing.T) {
+	plan := remotePlan(Leg{Name: "b", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{300}, Positions: []Point{{49, 50, 0}}}}, Boss: &Boss{Entry: 777, Position: Point{60, 0, 0}}})
+	g := newFakeRemote(t)
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	d.curLeg = 0
+	boss := tbm.HostileRec{GUID: 0x501, Entry: 777, X: 60, Y: 100, HPPct: 100, Flags: "-"}
+	pack := tbm.HostileRec{GUID: 0x502, Entry: 300, X: 50, Y: 52, HPPct: 100, Flags: "-"}
+	sp := fightSpec{pick: []uint32{777}, anchors: []Point{{60, 0, 0}}, wide: true, required: true}
+	look := func(hs ...tbm.HostileRec) string {
+		d.fr = tbm.ViewFrame{Lead: gTank, Party: []tbm.PartyRec{{GUID: gTank, Name: "Tanky", X: 39}}, Hostiles: hs}
+		d.haveFr = true
+		_, why := d.bossWay(context.Background(), sp, boss, 100)
+		return why
+	}
+	if why := look(boss, pack); !strings.Contains(why, "pull group 0 of leg 0") {
+		t.Fatalf("a living member of this leg's pack is on the way: %q", why)
+	}
+	if why := look(boss); why != "" {
+		t.Fatalf("a cleared group does not block: %q", why)
+	}
+}
+
+// The way is checked again before every hop: a path that comes to pass an uncleared pack stops the walk and fails the step.
+func TestRemoteBossWalkStopsWhenTheWayChanges(t *testing.T) {
+	plan := bossSearchPlan()
+	plan.Legs = append(plan.Legs, Leg{Name: "next", To: Point{500, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{300}, Positions: []Point{{200, 200, 0}}}}})
+	g := newFakeRemote(t)
+	g.addMob(777, Point{60, 100, 0})
+	calls := 0
+	path := func(from, to Point) ([]Point, error) {
+		calls++
+		if calls >= 2 {
+			return []Point{from, {200, 200, 0}, to}, nil // re-planned through the pack of the next leg
+		}
+		return []Point{from, to}, nil
+	}
+	rep, err := runRemote(t, plannerFake{g, path}, plan, opts(), nil)
+	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") || !strings.Contains(err.Error(), "blocked on the walk") || len(g.ordersOf("cmd pullback")) != 0 {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}

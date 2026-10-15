@@ -632,6 +632,20 @@ func Parse(name string, data []byte) (*Plan, error) {
 	if len(rp.KillFirst) > 0 {
 		p.KillFirst = slices.Clone(rp.KillFirst)
 	}
+	for _, l := range []struct {
+		name string
+		es   []uint32
+	}{{"kill_first", rp.KillFirst}, {"summoned_kill_first", rp.SummonedKF}} {
+		seen := map[uint32]bool{}
+		for _, e := range l.es {
+			if e == 0 {
+				c.fail(l.name, "0 is not a creature entry")
+			} else if seen[e] {
+				c.fail(l.name, "%d is listed twice", e)
+			}
+			seen[e] = true
+		}
+	}
 	for _, e := range rp.SummonedKF {
 		if !slices.Contains(rp.KillFirst, e) {
 			c.fail("summoned_kill_first", "%d is not in kill_first", e)

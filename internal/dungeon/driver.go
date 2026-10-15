@@ -173,7 +173,7 @@ type Config struct {
 	AssistEvery    time.Duration // how often the leader re-orders the party onto the nearest pack member
 	FightTimeout   time.Duration // one pull group
 	BossTimeout    time.Duration // one boss fight
-	BossSearch     time.Duration // remote: how long a kill-boss step waits for a boss that is not at his spot to walk back into range
+	BossSearch     time.Duration // remote: how long a kill-boss step waits for a boss that is not at his spot to walk back into range; 0: 60 s, below 0: no search (boss_search_s 0)
 	PostFight      time.Duration // wait after the last pack member died (loot, last hits)
 	AddsWait       time.Duration // longest wait for loose hostile units to be dealt with after a fight
 	RestTimeout    time.Duration // longest rest gate (a leg's rest.max_s overrides it)
@@ -272,7 +272,9 @@ func (c Config) withDefaults() Config {
 	fill(&c.AssistEvery, d.AssistEvery)
 	fill(&c.FightTimeout, d.FightTimeout)
 	fill(&c.BossTimeout, d.BossTimeout)
-	fill(&c.BossSearch, d.BossSearch)
+	if c.BossSearch == 0 {
+		c.BossSearch = d.BossSearch
+	}
 	fill(&c.PostFight, d.PostFight)
 	fill(&c.AddsWait, d.AddsWait)
 	fill(&c.RestTimeout, d.RestTimeout)

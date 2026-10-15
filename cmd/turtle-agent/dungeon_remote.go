@@ -165,6 +165,13 @@ func checkNamedParty(p dungeonRunParams, bad func(string, ...any) error) error {
 	return nil
 }
 
+// remoteRecoverWipe is the recover_wipe setting of a run that goes through startRemote: the caller's word, else on in a commander run and off
+// in an observed one (the agent steers nothing there; checkObserve refuses the option, so only the default is left).
+func remoteRecoverWipe(p dungeonRunParams) bool {
+	mode, _, _ := runMode(p.Mode)
+	return recoverWipeOn(p.RecoverWipe, mode != modeObserve)
+}
+
 // startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.
 func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, plan *dungeon.Plan, planPath, tunePath string, setup []string, from int, names []string) (dungeonRunResult, error) {
 	if r.remote == nil {
@@ -172,15 +179,19 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
-	cfg.Setup, cfg.RecoverWipe = setup, recoverWipeOn(p.RecoverWipe, true)
+	cfg.Setup = setup
 	cfg.Resume = p.Resume != nil && *p.Resume
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
 	var observe *dungeon.ObserveSpec
-	if mode, _, _ := runMode(p.Mode); mode == modeObserve {
+	mode, _, _ := runMode(p.Mode)
+	if mode == modeObserve {
 		observe = observeSpec(p.Observe)
 	}
+	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
+	// options say off.
+	cfg.RecoverWipe = remoteRecoverWipe(p)
 	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
