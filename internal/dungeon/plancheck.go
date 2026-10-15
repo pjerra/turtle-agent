@@ -1,0 +1,334 @@
+package dungeon
+
+import (
+	"fmt"
+	"math"
+	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/navmesh"
+)
+
+// The plan check (issue #187): before a run, walk every point of a plan on the navmesh the run itself plans on, so that a point the
+// driver cannot reach, or a pack it cannot see, is found in seconds instead of by a stopped run. It follows the order the driver goes:
+// the walk from the previous leg's end to each via point and to the leg's `to` (a direct via is a straight step: within the limits of
+// DirectStepOK, ground under its end and a clear line: a direct step walks the straight line, so the navmesh ray is the test), then every
+// pull group in order and the boss. A pack is looked at from LookPoint (what confirmGone's approach walks to), which the check wants
+// within ClearSeeRadius of the pack. It casts no ray to a pack: navmesh.Planner.Raycast is only a walkability stand-in for line of sight
+// (the server's vmaps are not here), and it called most of Zul'Farrak's packs blind, which were pulled fine live. A direct hop over ground
+// the navmesh already joins with a straight path is a warning, not a failure: a plain walk does the same and survives a fight.
+
+// The reasons a plan point fails.
+const (
+	ReasonUnreachable = "unreachable"
+	ReasonNoLOS       = "no line of sight"
+	ReasonTooFar      = "too far"
+	ReasonOffMesh     = "off the mesh"
+
+	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
+	WarnNeedlessDirect = "needless direct"
+)
+
+// Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
+type Navmesh interface {
+	Plan(mapID uint32, from, to navmesh.Vec3) (navmesh.Path, error)
+	Raycast(mapID uint32, from, to navmesh.Vec3) (navmesh.Ray, error)
+	Nearest(mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error)
+}
+
+// The tolerances of the check, in yards.
+const (
+	// checkWalkDZ and checkWalkDH: a walk point needs mesh floor this near it (up or down, sideways).
+	checkWalkDZ = 3.0
+	checkWalkDH = 2.5
+	// checkStraight: a path up to this many times the straight distance (plus checkStraightSlack yards) counts as nearly straight.
+	checkStraight      = 1.15
+	checkStraightSlack = 1.0
+	// checkPackReach: a pack that stands off the mesh (on a ledge, in a pit) is looked at from the nearest reachable point when that is within
+	// this horizontal distance of it and checkPackDZ vertically (TestZulfarrakOnNavmesh's rule).
+	checkPackReach = 20.0
+	checkPackDZ    = 4.0
+	// checkRayEnd is how far short of its end a direct hop's ray may stop and still reach it (a unit stands on the mesh's edge as often as inside it).
+	checkRayEnd = 1.5
+)
+
+// PlanIssue is one failing point of a plan.
+type PlanIssue struct {
+	Leg     int    `json:"leg"`
+	LegName string `json:"leg_name,omitempty"`
+	// Part says what the point is: "via 2", "direct via 1", "to", "pull group look" or "boss look".
+	Part string `json:"part"`
+	// PullGroup and PullGroups number the pack the way dungeon_status does ("pull group 9 of 12"); 0 for a point that is not a pack's.
+	PullGroup  int   `json:"pull_group,omitempty"`
+	PullGroups int   `json:"pull_groups,omitempty"`
+	Point      Point `json:"point"`
+	// From is where the walk to the point starts (the previous point of the plan, or the stand point of the previous pack).
+	From   Point  `json:"from"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func (i PlanIssue) String() string {
+	where := fmt.Sprintf("leg %d", i.Leg)
+	if i.LegName != "" {
+		where += " (" + i.LegName + ")"
+	}
+	if i.PullGroup > 0 {
+		where += fmt.Sprintf(" pull group %d of %d", i.PullGroup, i.PullGroups)
+	}
+	s := fmt.Sprintf("%s %s %.1f %.1f %.1f: %s", where, i.Part, i.Point.X, i.Point.Y, i.Point.Z, i.Reason)
+	if i.Detail != "" {
+		s += " (" + i.Detail + ")"
+	}
+	return s
+}
+
+// PlanCheck is the result of CheckPlan.
+type PlanCheck struct {
+	Plan string `json:"plan"`
+	Map  uint32 `json:"map"`
+	// Points is how many plan points were checked; needs_walk points are left out (the generator could not snap them to the mesh).
+	Points int         `json:"points"`
+	Issues []PlanIssue `json:"issues"`
+	// Warnings are points that work but are fragile (WarnNeedlessDirect); they never fail the plan.
+	Warnings []PlanIssue `json:"warnings"`
+}
+
+// OK says the plan passed.
+func (c *PlanCheck) OK() bool { return len(c.Issues) == 0 }
+
+// Summary is one line per issue, for a refusal or a log.
+func (c *PlanCheck) Summary() string { return joinIssues(c.Issues) }
+
+// WarningSummary is one line per warning.
+func (c *PlanCheck) WarningSummary() string { return joinIssues(c.Warnings) }
+
+func joinIssues(is []PlanIssue) string {
+	lines := make([]string, len(is))
+	for i, x := range is {
+		lines[i] = x.String()
+	}
+	return strings.Join(lines, "\n")
+}
+
+// CheckPlan walks the plan from leg fromLeg on (the legs before it are walked too, to know where the party stands, but report nothing).
+// The error is for what the check cannot answer (no navmesh engine, no files for the map): the plan is then unchecked, not failed.
+func CheckPlan(p *Plan, nav Navmesh, fromLeg int) (*PlanCheck, error) {
+	return checkPlan(p, nav, fromLeg, LookPoint)
+}
+
+// checkPlan is CheckPlan with the look point function given (the tests run the old one, StandoffPoint alone, on the old plan).
+func checkPlan(p *Plan, nav Navmesh, fromLeg int, look lookFunc) (*PlanCheck, error) {
+	c := &planChecker{p: p, nav: nav, lookAt: look, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}}}
+	cur := p.Entrance
+	for i, l := range p.Legs {
+		c.leg, c.report = i, i >= fromLeg
+		var err error
+		if cur, err = c.checkLeg(l, cur); err != nil {
+			return nil, err
+		}
+	}
+	return c.res, nil
+}
+
+// lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
+type lookFunc func(path []Point, pack Point, standoff, view float32) (Point, bool)
+
+type planChecker struct {
+	p      *Plan
+	nav    Navmesh
+	lookAt lookFunc
+	res    *PlanCheck
+	leg    int
+	report bool
+	l      Leg
+}
+
+func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
+
+func point(v navmesh.Vec3) Point { return Point{v[0], v[1], v[2]} }
+
+// issue builds an issue of the current leg.
+func (c *planChecker) issue(part string, group int, at, from Point, reason, format string, a ...any) PlanIssue {
+	is := PlanIssue{Leg: c.leg, LegName: c.l.Name, Part: part, Point: at, From: from, Reason: reason, Detail: fmt.Sprintf(format, a...)}
+	if group > 0 {
+		is.PullGroup, is.PullGroups = group, len(c.l.PullGroups)
+	}
+	return is
+}
+
+// fail records a failing point of the current leg.
+func (c *planChecker) fail(part string, group int, at, from Point, reason, format string, a ...any) {
+	if c.report {
+		c.res.Issues = append(c.res.Issues, c.issue(part, group, at, from, reason, format, a...))
+	}
+}
+
+// warn records a warning of the current leg.
+func (c *planChecker) warn(part string, at, from Point, reason, format string, a ...any) {
+	if c.report {
+		c.res.Warnings = append(c.res.Warnings, c.issue(part, 0, at, from, reason, format, a...))
+	}
+}
+
+// checkLeg walks one leg from cur and returns where the party stands at its end.
+func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
+	c.l = l
+	for vi, w := range l.Via {
+		var err error
+		if w.Direct {
+			cur, err = c.direct(fmt.Sprintf("direct via %d", vi), w.Point, cur)
+		} else {
+			cur, err = c.walk(fmt.Sprintf("via %d", vi), w.Point, cur)
+		}
+		if err != nil {
+			return cur, err
+		}
+	}
+	if !l.NeedsWalk {
+		var err error
+		if cur, err = c.walk("to", l.To, cur); err != nil {
+			return cur, err
+		}
+	} else {
+		cur = l.To
+	}
+	for gi, g := range l.PullGroups {
+		if g.NeedsWalk {
+			continue
+		}
+		first := cur
+		for pi, at := range g.Positions {
+			stand, err := c.look("pull group look", gi+1, at, first)
+			if err != nil {
+				return cur, err
+			}
+			if pi == 0 {
+				cur = stand // the first position is the one pulled; the party goes on from where it looked
+			}
+		}
+	}
+	if b := l.Boss; b != nil && !b.NeedsWalk {
+		stand, err := c.look("boss look", 0, b.Position, cur)
+		if err != nil {
+			return cur, err
+		}
+		cur = stand
+	}
+	return cur, nil
+}
+
+// walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
+func (c *planChecker) walk(part string, to, from Point) (Point, error) {
+	c.res.Points++
+	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
+	if err != nil {
+		return from, err
+	}
+	if dz, dh := math.Abs(float64(n[2]-to.Z)), math.Hypot(float64(n[0]-to.X), float64(n[1]-to.Y)); !ok || dz > checkWalkDZ || dh > checkWalkDH {
+		if ok {
+			c.fail(part, 0, to, from, ReasonOffMesh, "the nearest floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off", n[0], n[1], n[2], dz, dh)
+		} else {
+			c.fail(part, 0, to, from, ReasonOffMesh, "no walkable polygon within 4 yd")
+		}
+		return from, nil
+	}
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
+	if err != nil {
+		return from, err
+	}
+	if path.Status != navmesh.Complete {
+		c.fail(part, 0, to, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+		return from, nil
+	}
+	return to, nil
+}
+
+// pathReason is the reason a path that is not complete gives: the goal off the mesh, else unreachable.
+func pathReason(p navmesh.Path) string {
+	if p.Status == navmesh.NoPath && strings.HasPrefix(p.Reason, "goal ") {
+		return ReasonOffMesh
+	}
+	return ReasonUnreachable
+}
+
+// direct checks a direct via: a step within the limits of the module (DirectStepOK), ground under its end and a clear line over the mesh.
+func (c *planChecker) direct(part string, to, from Point) (Point, error) {
+	c.res.Points++
+	if !DirectStepOK(from, to) {
+		c.fail(part, 0, to, from, ReasonTooFar, "%.1f yd across and %.1f up or down: the limits are %g and %g", hdist(from, to), math.Abs(float64(to.Z-from.Z)), DirectMaxDistance, DirectMaxVertical)
+		return to, nil
+	}
+	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
+	if err != nil {
+		return from, err
+	}
+	if dz := math.Abs(float64(n[2] - to.Z)); !ok || dz > DirectGroundTolerance || math.Hypot(float64(n[0]-to.X), float64(n[1]-to.Y)) > checkWalkDH {
+		c.fail(part, 0, to, from, ReasonOffMesh, "no ground within %g yd under it", DirectGroundTolerance)
+		return to, nil
+	}
+	if clear, hit, err := c.line(from, to); err != nil {
+		return from, err
+	} else if !clear {
+		c.fail(part, 0, to, from, ReasonNoLOS, "the line from %.1f %.1f %.1f leaves the mesh after %.1f of %.1f yd", from.X, from.Y, from.Z, hit, hdist(from, to))
+		return to, nil
+	}
+	// The hop is fine; is it needed? A navmesh that joins the two points with a straight path walks it as a plain waypoint, which can be
+	// sent again from wherever a fight leaves the lead bot (a direct step needs the lead bot at its start and in sight of its end).
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
+	if err != nil {
+		return from, err
+	}
+	if straight := dist3(from, to); path.Status == navmesh.Complete && float64(path.Length) <= straight*checkStraight+checkStraightSlack {
+		c.warn(part, to, from, WarnNeedlessDirect, "the navmesh joins it with a complete path of %.1f yd (%.1f yd in a line): drop the direct flag", path.Length, straight)
+	}
+	return to, nil
+}
+
+// line casts the walkability ray from one point to the other.
+func (c *planChecker) line(from, to Point) (clear bool, hit float64, err error) {
+	ray, err := c.nav.Raycast(c.p.Map, vec(from), vec(to))
+	if err != nil {
+		return false, 0, err
+	}
+	if !ray.Known {
+		return false, 0, nil // the start is off the mesh or a tile is missing: the walk checks already say so
+	}
+	if ray.Clear {
+		return true, 0, nil
+	}
+	return float64(ray.Hit) >= hdist(from, to)-checkRayEnd, float64(ray.Hit), nil
+}
+
+// look checks a pack's position (or the boss's): the path from where the party stands must reach it, or come within checkPackReach, and
+// the look point on it (LookPoint) must be within ClearSeeRadius of the pack. It returns the look point (the party's place afterwards;
+// `from` when the path is shorter than the standoff, as the driver does not move then).
+func (c *planChecker) look(part string, group int, at, from Point) (Point, error) {
+	c.res.Points++
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(at))
+	if err != nil {
+		return from, err
+	}
+	if len(path.Points) < 2 {
+		if path.Status != navmesh.Complete { // complete with one point: the party is at the pack already
+			c.fail(part, group, at, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+		}
+		return from, nil
+	}
+	pts := make([]Point, len(path.Points))
+	for i, v := range path.Points {
+		pts[i] = point(v)
+	}
+	end := pts[len(pts)-1]
+	if path.Status != navmesh.Complete && (hdist(end, at) > checkPackReach || math.Abs(float64(end.Z-at.Z)) > checkPackDZ) {
+		c.fail(part, group, at, from, ReasonUnreachable, "path_to is %s: %s", path.Status, path.Reason)
+		return from, nil
+	}
+	stand, moved := c.lookAt(pts, at, LookStandoff, ClearSeeRadius)
+	if !moved {
+		stand = from
+	}
+	if d := dist3(stand, at); d > ClearSeeRadius {
+		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd): the path ends %.1f %.1f %.1f, %.1f yd short of it", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, end.X, end.Y, end.Z, dist3(end, at))
+	}
+	return stand, nil
+}

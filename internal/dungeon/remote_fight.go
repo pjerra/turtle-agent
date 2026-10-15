@@ -387,6 +387,12 @@ func (d *RemoteDriver) approach(ctx context.Context, p Point, standoff float32) 
 
 // approachArrive is approach with its own arrival distance.
 func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, arrive float32) error {
+	return d.approachView(ctx, p, standoff, arrive, 0)
+}
+
+// approachView is approachArrive for a look at p: with view above 0 the stand point is LookPoint's, within view yards of p where the
+// path allows, instead of the plain standoff.
+func (d *RemoteDriver) approachView(ctx context.Context, p Point, standoff, arrive, view float32) error {
 	here, ok := d.leadPos()
 	if !ok {
 		return nil
@@ -394,7 +400,11 @@ func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, ar
 	var stand Point
 	if pl, ok := d.g.(PathPlanner); ok {
 		if pts, err := pl.PlanPath(ctx, d.plan.Map, here, p); err == nil {
-			if s, ok := StandoffPoint(pts, standoff); ok {
+			s, ok := StandoffPoint(pts, standoff)
+			if view > 0 {
+				s, ok = LookPoint(pts, p, standoff, view)
+			}
+			if ok {
 				stand = s
 			} else {
 				return nil

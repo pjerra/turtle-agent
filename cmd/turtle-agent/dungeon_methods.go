@@ -110,6 +110,8 @@ type dungeonRunParams struct {
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
 	StartHere     bool `json:"start_here,omitempty"`
+	// Force runs a plan whose plan check (plan_check) found a failing point; without it such a plan is refused.
+	Force bool `json:"force,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
 	HaveItems   []uint32       `json:"have_items,omitempty"`
 	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
@@ -255,6 +257,8 @@ type dungeonRunResult struct {
 	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
 	RunID     string `json:"run_id"`
 	TraceFile string `json:"trace_file,omitempty"`
+	// PlanCheck is what the plan check said: "passed: ...", "forced past ..." (force) or "not run: ..." (no navmesh files for the map).
+	PlanCheck string `json:"plan_check,omitempty"`
 }
 
 type dungeonStatusResult struct {
@@ -318,6 +322,9 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 			res.RunID, res.TraceFile = rep.RunID, rep.TraceFile
 		}
 		return res, err
+	}))
+	srv.Register("plan_check", rpc.Typed(func(ctx context.Context, p planCheckParams) (planCheckResult, error) {
+		return r.planCheck(p)
 	}))
 	srv.Register("dungeon_status", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.status(), nil
@@ -403,7 +410,7 @@ func (r *dungeonRunner) running() bool {
 	}
 }
 
-func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
+func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error) {
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
@@ -505,6 +512,18 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
+	}
+	// The plan check walks the plan on the navmesh first; a pull test runs one pack and an observed run is walked by the server.
+	if mode, _, _ := runMode(p.Mode); p.Pulltest == nil && mode != modeObserve {
+		note, err := r.checkForRun(plan, from, p.Force)
+		if err != nil {
+			return dungeonRunResult{}, err
+		}
+		defer func() {
+			if res.Started {
+				res.PlanCheck = note
+			}
+		}()
 	}
 
 	r.mu.Lock()
