@@ -425,3 +425,21 @@ func petSpellList(sps []PetSpell) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// PetOfPlayer is the pet another player has out, as the object store shows it: the unit its summon field names, else a pet-class creature
+// in view that names it as its summoner or creator (objects.Store.PetOf). ok is false when the player has none in view. The pre-run check
+// of a hunter or warlock hire reads it.
+func (s *Session) PetOfPlayer(owner packet.GUID) (objects.Unit, bool) {
+	g := s.store.PetOf(owner)
+	if g == 0 {
+		return objects.Unit{}, false
+	}
+	x, y, z, _ := s.selfPos()
+	u, ok := s.store.Get(g, x, y, z)
+	if !ok {
+		return objects.Unit{}, false
+	}
+	u.GUID = g
+	u.Name, _ = s.cachedName(g)
+	return u, true
+}

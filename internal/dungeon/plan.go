@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -25,6 +26,7 @@ const (
 	MaxTimeoutS        = 600
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
+	MaxFailText        = 400 // characters of a wait's fail_text
 )
 
 // Point is a position in the map's coordinates.
@@ -34,36 +36,137 @@ type Point struct {
 	Z float32 `json:"z"`
 }
 
+// The kinds of plan: a 5-man (or smaller) dungeon, run with a hired party, and a raid, run with a raid group.
+const (
+	KindDungeon = "dungeon"
+	KindRaid    = "raid"
+)
+
+// Plan status: how far a plan has been checked. The field is free text after one of these words, so a plan can say what is
+// missing ("draft (not mapped, not live-checked)"). Only a plan that is mapped or live-checked has had its route corrected from a
+// walk; a draft is a skeleton from the world database export (tools/dungeongen) and is not to be run before its mapping walk.
+const (
+	StatusDraft       = "draft"
+	StatusMapped      = "mapped"
+	StatusLiveChecked = "live-checked"
+
+	// DraftStatus is the status line tools/dungeongen writes.
+	DraftStatus = "draft (not mapped, not live-checked)"
+)
+
+// RaidSpec is a raid plan's group: how many players and, as a placeholder until a raid has been run, the roles they are split into.
+// Size is 10, 20 or 40 and Tanks + Healers + DPS must add up to it.
+type RaidSpec struct {
+	Size    int `json:"size"`
+	Tanks   int `json:"tanks"`
+	Healers int `json:"healers"`
+	DPS     int `json:"dps"`
+}
+
 // Plan is a loaded, validated dungeon plan.
 type Plan struct {
-	Version  int    `json:"version"`
-	Name     string `json:"name"`
+	Version int    `json:"version"`
+	Name    string `json:"name"`
+	// Kind is "dungeon" (the default when absent) or "raid".
+	Kind string `json:"kind,omitempty"`
+	// Status says how far the plan has been checked: draft, mapped or live-checked, then free text (see StatusDraft). Absent: not said.
+	Status   string `json:"status,omitempty"`
 	Map      uint32 `json:"map"`
 	Entrance Point  `json:"entrance"`
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
 	// database; Uldaman 286). A ghost whose corpse lies inside sends it at the portal to be taken in and revived (the client
 	// does the same on stepping into it). Without it a corpse run into the dungeon is refused; the rest of the run does not need it.
-	EntranceTrigger uint32   `json:"entrance_trigger,omitempty"`
-	Notes           []string `json:"notes,omitempty"`
-	Legs            []Leg    `json:"legs"`
+	EntranceTrigger uint32 `json:"entrance_trigger,omitempty"`
+	// EntranceTele is the name of the game_tele row that puts a player at the entrance inside the dungeon (Uldaman "ulda", game_tele
+	// 169): a remote run's enter phase sends `.tele name <lead bot> <name>` with it when the account is a developer-level GM.
+	EntranceTele string `json:"entrance_tele,omitempty"`
+	// OutsideTele is the game_tele row that puts a player at the entrance OUTSIDE, on the outer map (Uldaman "uldaman"): the prepare step
+	// of a remote run (`fresh`) brings the bots and the agent out of an old instance with it before it unbinds them.
+	OutsideTele string `json:"outside_tele,omitempty"`
+	// Portal is the entrance portal on the outer map (the area trigger of EntranceTrigger): where a remote run's enter phase walks the
+	// lead bot when it has no GM rights.
+	Portal *Portal `json:"portal,omitempty"`
+	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
+	// middle of it as its level. Empty: the plan gives none.
+	LevelBand []int `json:"level_band,omitempty"`
+	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
+	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
+	HireComposition []string `json:"hire_composition,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
+	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPriority []uint32 `json:"cc_priority,omitempty"`
+	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
+	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
+	CCAlways []uint32 `json:"cc_always,omitempty"`
+	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
+	Raid  *RaidSpec `json:"raid,omitempty"`
+	Notes []string  `json:"notes,omitempty"`
+	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
+	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
+	Legs     []Leg           `json:"legs"`
+}
+
+// Band is the plan's level band, low and high; 0, 0 when it gives none.
+func (p *Plan) Band() (lo, hi int) {
+	if len(p.LevelBand) != 2 {
+		return 0, 0
+	}
+	return p.LevelBand[0], p.LevelBand[1]
+}
+
+// Portal is a point of the outer map: the centre of the entrance's area trigger.
+type Portal struct {
+	Map uint32 `json:"map"`
+	Point
 }
 
 // Leg is one stretch of the dungeon. The driver walks to To, clears PullGroups in order, runs Steps in order, then
 // walks to the Boss and kills it. Every part is optional but a leg must hold at least one of them.
 type Leg struct {
-	Name       string      `json:"name,omitempty"`
-	To         Point       `json:"to"`
+	Name string `json:"name,omitempty"`
+	To   Point  `json:"to"`
+	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
+	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
+	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
+	// and take its line (TortoiseBots #948). See Waypoint.
+	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
 	Skip  []uint32 `json:"skip,omitempty"`
 	Steps []Step   `json:"steps,omitempty"`
 	Boss  *Boss    `json:"boss,omitempty"`
+	// NeedsWalk marks a To that is not on the navmesh and could not be snapped to it (no walkable floor within a few yards: a scripted
+	// area, a platform): the mapping walk has to find the real waypoint. The same flag on a pull group or the boss says the same of its position.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 	// AfterBoss are steps done once the boss is dead (or skipped for the leader's team): the chest by the camp that a hostile boss
 	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
 	AfterBoss []Step `json:"after_boss,omitempty"`
 	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+}
+
+// The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
+// yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
+const (
+	DirectMaxDistance     = 25.0
+	DirectMaxVertical     = 8.0
+	DirectGroundTolerance = 3.0
+)
+
+// Waypoint is a point of a leg's Via. Direct makes the step to it a straight line (`cmd move ... direct`) instead of a navmesh
+// path: only for a short step (see the limits above) over ground the navmesh lacks, such as Uldaman's scorpid-pit ramp. A direct
+// waypoint must be preceded by a Via point within the limits, so the party is gathered where the step starts. Only the remote
+// driver can take such a step; the agent's own companions walk it as a plain waypoint. In the file:
+// {"x": -155.7, "y": 279.6, "z": -46.8, "direct": true}.
+type Waypoint struct {
+	Point
+	Direct bool `json:"direct,omitempty"`
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -74,6 +177,13 @@ type RestSpec struct {
 	HealerMana int `json:"healer_mana,omitempty"` // percent, 1-100
 	Mana       int `json:"mana,omitempty"`        // percent, 1-100
 	MaxS       int `json:"max_s,omitempty"`       // seconds, 1-MaxTimeoutS
+	// WalkYd is the walk length (yards) from which the gate at the leg's start lets the party rest while it walks instead of holding
+	// (the pull gates that follow still wait): 0 keeps the driver's 60, -1 makes the gate always hold. WalkHealth, WalkHealerMana and
+	// WalkMana are the floors everyone must be above for that (defaults 70, 40, 25; percent, 1-100).
+	WalkYd         int `json:"walk_yd,omitempty"`
+	WalkHealth     int `json:"walk_health,omitempty"`
+	WalkHealerMana int `json:"walk_healer_mana,omitempty"`
+	WalkMana       int `json:"walk_mana,omitempty"`
 }
 
 // PullGroup is one pack: the entries it holds and where its members stand (one position each, or fewer when they
@@ -93,7 +203,33 @@ type PullGroup struct {
 	Radius float32 `json:"radius,omitempty"`
 	// Team limits the group to a leader of that team ("alliance" or "horde"); the driver skips it for the other (see Team).
 	Team string `json:"team,omitempty"`
+	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
+	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
+	Equiv string `json:"equiv,omitempty"`
+	// Patrol is a patrol that walks near the group (remote_patrol.go): before the group is pulled the driver waits until it is out of
+	// patrol_aggro of the pull, or pulls it alone first when it passes the party away from the pack, and counts it in the pack while
+	// it stands within patrol_aggro of the pull. Nil: no patrol comes by.
+	Patrol *Patrol `json:"patrol,omitempty"`
+	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
+
+// Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
+// waypoints in the order it walks them (it goes on from the last to the first, as the core's waypoint movement does), PeriodS how long
+// one round takes, in seconds (the path's length at the mobs' walk speed, 2.5 yd/s for speed_walk 1).
+type Patrol struct {
+	Entries []uint32 `json:"entries"`
+	Path    []Point  `json:"path"`
+	PeriodS float32  `json:"period_s"`
+	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
+	Source string `json:"source,omitempty"`
+}
+
+// maxPatrolPeriod bounds a patrol's round (seconds).
+const maxPatrolPeriod = 900
+
+// MaxEquivLen is the longest Equiv label.
+const MaxEquivLen = 40
 
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
 // that heals it, the first of a group of brothers); the boss entry is killed last and the leg is done when it dies.
@@ -112,6 +248,8 @@ type Boss struct {
 	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
 	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
+	NeedsWalk bool `json:"needs_walk,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -126,6 +264,27 @@ type Step struct {
 	WaitFor    *WaitFor    `json:"wait_for,omitempty"`
 	LootObject *LootObject `json:"loot_object,omitempty"`
 	UseItem    *UseItem    `json:"use_item,omitempty"`
+	Ritual     *Ritual     `json:"ritual,omitempty"`
+}
+
+// Limits of a ritual step's party.
+const (
+	MinRitualParticipants = 2 // a ritual of one player is a use_object
+	MaxRitualParticipants = 5 // the party
+)
+
+// Ritual has several bots use a summoning ritual object together (game object type 18; Uldaman's Altar of the Keepers and Altar of
+// Archaedas need three different players). Remote runs only: the driver orders `cmd ritual entry:<Entry>@<Position> <carrier> <bot> <bot>`
+// (TortoiseBots), which walks the bots to the object, has them use it in turn and keeps them still until the object is active and the
+// ritual has run; the step ends with the final answer. A wait_for the object to be active (or whatever the ritual opens) belongs after it.
+// In the file, Position is [x, y, z] or {"x":..,"y":..,"z":..}.
+type Ritual struct {
+	Entry        uint32 `json:"entry"`
+	Position     Point  `json:"position"`
+	Participants int    `json:"participants"`
+	// Stand is where the party is held while the bots walk in (like UseObject.Stand); without it the driver stands the lead bot a few
+	// yards short of Position.
+	Stand *Point `json:"stand,omitempty"`
 }
 
 // ObjectRef picks a game object: by entry, by position, or both (the nearest object of that entry to Near).
@@ -188,6 +347,9 @@ type WaitFor struct {
 	GameObject   *ObjectState  `json:"gameobject,omitempty"`
 	HostilesGone *HostilesGone `json:"hostiles_gone,omitempty"`
 	TimeoutS     int           `json:"timeout_s,omitempty"`
+	// FailText is added to the failure when the wait times out: the reason a person should read (Uldaman's altar waits say that the
+	// ritual needs three participants).
+	FailText string `json:"fail_text,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
@@ -213,16 +375,39 @@ type rawPoint struct {
 type rawPlan struct {
 	Version  *int              `json:"version"`
 	Name     string            `json:"name"`
+	Kind     string            `json:"kind"`
+	Status   string            `json:"status"`
+	Fleers   []uint32          `json:"fleers"`
+	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
 	Trigger  uint32            `json:"entrance_trigger"`
+	Tele     string            `json:"entrance_tele"`
+	Outside  string            `json:"outside_tele"`
+	Portal   *rawPortal        `json:"portal"`
+	Band     []int             `json:"level_band"`
+	Hire     []string          `json:"hire_composition"`
+	CCPrio   []uint32          `json:"cc_priority"`
+	CCAlways []uint32          `json:"cc_always"`
 	Notes    []string          `json:"notes"`
+	Watchdog *WatchdogConfig   `json:"watchdog"`
 	Legs     []json.RawMessage `json:"legs"`
+}
+
+type rawPortal struct {
+	Map     *uint32 `json:"map"`
+	X, Y, Z *float32
+}
+
+type rawWaypoint struct {
+	X, Y, Z *float32
+	Direct  bool `json:"direct"`
 }
 
 type rawLeg struct {
 	Name       string            `json:"name"`
 	To         *rawPoint         `json:"to"`
+	Via        []rawWaypoint     `json:"via"`
 	PullGroups []rawPullGroup    `json:"pull_groups"`
 	Skip       []uint32          `json:"skip"`
 	Steps      []json.RawMessage `json:"steps"`
@@ -230,6 +415,7 @@ type rawLeg struct {
 	AfterBoss  []json.RawMessage `json:"after_boss"`
 	Rest       *RestSpec         `json:"rest"`
 	Notes      []string          `json:"notes"`
+	NeedsWalk  bool              `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -238,6 +424,16 @@ type rawPullGroup struct {
 	Ambush    bool       `json:"ambush"`
 	Radius    float32    `json:"radius"`
 	Team      string     `json:"team"`
+	Equiv     string     `json:"equiv"`
+	NeedsWalk bool       `json:"needs_walk"`
+	Patrol    *rawPatrol `json:"patrol"`
+}
+
+type rawPatrol struct {
+	Entries []uint32   `json:"entries"`
+	Path    []rawPoint `json:"path"`
+	PeriodS float32    `json:"period_s"`
+	Source  string     `json:"source"`
 }
 
 type rawBoss struct {
@@ -248,6 +444,7 @@ type rawBoss struct {
 	LootItem *rawItem  `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
+	NeedsWalk      bool  `json:"needs_walk"`
 }
 
 type rawStep struct {
@@ -255,6 +452,32 @@ type rawStep struct {
 	WaitFor    *rawWait    `json:"wait_for"`
 	LootObject *rawLoot    `json:"loot_object"`
 	UseItem    *rawUseItem `json:"use_item"`
+	Ritual     *rawRitual  `json:"ritual"`
+}
+
+type rawRitual struct {
+	Entry        uint32    `json:"entry"`
+	Position     *rawPos   `json:"position"`
+	Participants *int      `json:"participants"`
+	Stand        *rawPoint `json:"stand"`
+}
+
+// rawPos is a point written as [x, y, z] or as {"x":..,"y":..,"z":..}.
+type rawPos struct{ rawPoint }
+
+func (p *rawPos) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '[' {
+		var a []*float32
+		if err := json.Unmarshal(t, &a); err != nil {
+			return err
+		}
+		if len(a) != 3 || a[0] == nil || a[1] == nil || a[2] == nil {
+			return errors.New("a position array is [x, y, z]: three numbers")
+		}
+		p.X, p.Y, p.Z = a[0], a[1], a[2]
+		return nil
+	}
+	return strict(b, &p.rawPoint)
 }
 
 type rawLoot struct {
@@ -291,6 +514,7 @@ type rawWait struct {
 	GameObject   *rawObjState `json:"gameobject"`
 	HostilesGone *rawHostiles `json:"hostiles_gone"`
 	TimeoutS     *int         `json:"timeout_s"`
+	FailText     string       `json:"fail_text"`
 }
 
 type rawObjState struct {
@@ -356,8 +580,46 @@ func Parse(name string, data []byte) (*Plan, error) {
 	} else {
 		p.Map = *rp.Map
 	}
+	c.kindStatus(p, &rp)
 	p.Entrance = c.point("entrance", rp.Entrance)
 	p.EntranceTrigger = rp.Trigger
+	if rp.Tele != "" && !teleName.MatchString(rp.Tele) {
+		c.fail("entrance_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Tele)
+	} else {
+		p.EntranceTele = rp.Tele
+	}
+	if rp.Outside != "" && !teleName.MatchString(rp.Outside) {
+		c.fail("outside_tele", "%q is not a game_tele name (letters, digits and _ only)", rp.Outside)
+	} else {
+		p.OutsideTele = rp.Outside
+	}
+	switch {
+	case len(rp.Band) == 0:
+	case len(rp.Band) != 2 || rp.Band[0] < 1 || rp.Band[1] > 60 || rp.Band[0] > rp.Band[1]:
+		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
+	default:
+		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if len(rp.CCPrio) > 0 {
+		p.CCPriority = slices.Clone(rp.CCPrio)
+	}
+	if len(rp.CCAlways) > 0 {
+		p.CCAlways = slices.Clone(rp.CCAlways)
+	}
+	if rp.Portal != nil {
+		if rp.Portal.Map == nil {
+			c.fail("portal.map", "required (the outer map id)")
+		} else {
+			p.Portal = &Portal{Map: *rp.Portal.Map, Point: c.point("portal", &rawPoint{rp.Portal.X, rp.Portal.Y, rp.Portal.Z})}
+		}
+	}
+	if rp.Watchdog != nil {
+		if err := rp.Watchdog.Validate(); err != nil {
+			c.fail("watchdog", "%v", err)
+		} else {
+			p.Watchdog = rp.Watchdog
+		}
+	}
 	if len(rp.Legs) == 0 {
 		c.fail("legs", "needs at least one leg")
 	}
@@ -376,6 +638,56 @@ func Parse(name string, data []byte) (*Plan, error) {
 	return p, nil
 }
 
+// kindStatus checks and copies the kind, status, hire_composition and raid fields.
+func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
+	switch rp.Kind {
+	case "", KindDungeon, KindRaid:
+		p.Kind = rp.Kind
+	default:
+		c.fail("kind", "%q: use %q or %q", rp.Kind, KindDungeon, KindRaid)
+	}
+	if rp.Status != "" {
+		word, _, _ := strings.Cut(rp.Status, " ")
+		if !slices.Contains([]string{StatusDraft, StatusMapped, StatusLiveChecked}, word) {
+			c.fail("status", "%q: start with %s, %s or %s", rp.Status, StatusDraft, StatusMapped, StatusLiveChecked)
+		} else {
+			p.Status = rp.Status
+		}
+	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
+	if len(rp.Hire) > 0 {
+		if rp.Kind == KindRaid {
+			c.fail("hire_composition", "a raid plan has a raid block instead")
+		} else if _, err := (&HireSpec{Composition: rp.Hire}).slots(); err != nil {
+			c.fail("hire_composition", "%v", strings.TrimPrefix(err.Error(), "prepare.hire.composition: "))
+		} else {
+			p.HireComposition = rp.Hire
+		}
+	}
+	switch {
+	case rp.Raid == nil && rp.Kind == KindRaid:
+		c.fail("raid", "required for a raid plan: {\"size\": 40, \"tanks\": .., \"healers\": .., \"dps\": ..}")
+	case rp.Raid != nil && rp.Kind != KindRaid:
+		c.fail("raid", "only a plan of kind %q has a raid block", KindRaid)
+	case rp.Raid != nil:
+		r := *rp.Raid
+		switch {
+		case !slices.Contains([]int{10, 20, 40}, r.Size):
+			c.fail("raid.size", "%d: use 10, 20 or 40", r.Size)
+		case r.Tanks < 1 || r.Healers < 1 || r.DPS < 1:
+			c.fail("raid", "needs at least one tank, one healer and one damage dealer")
+		case r.Tanks+r.Healers+r.DPS != r.Size:
+			c.fail("raid", "%d tanks + %d healers + %d dps is %d, the size is %d", r.Tanks, r.Healers, r.DPS, r.Tanks+r.Healers+r.DPS, r.Size)
+		default:
+			p.Raid = &r
+		}
+	}
+}
+
+// IsRaid says whether the plan is a raid plan.
+func (p *Plan) IsRaid() bool { return p.Kind == KindRaid }
+
 // strict decodes JSON that must hold exactly one value of v's shape and no unknown field.
 func strict(data []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -388,6 +700,9 @@ func strict(data []byte, v any) error {
 	}
 	return nil
 }
+
+// teleName is what a game_tele name may be here: it goes into a GM command line.
+var teleName = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
 
 func (c *checker) point(path string, p *rawPoint) Point {
 	if p == nil {
@@ -424,12 +739,30 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk}
 	l.To = c.point(path+".to", r.To)
+	for i, w := range r.Via {
+		wp := fmt.Sprintf("%s.via[%d]", path, i)
+		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct})
+		if !w.Direct {
+			continue
+		}
+		if i == 0 {
+			c.fail(wp, "a direct step needs a via point before it, where the party gathers")
+			continue
+		}
+		if prev := l.Via[i-1].Point; !DirectStepOK(prev, pt) {
+			c.fail(wp, "the direct step from via[%d] is %.1f yd across and %.1f yd up or down; the limits are %g and %g", i-1, hdist(prev, pt), math.Abs(float64(pt.Z-prev.Z)), DirectMaxDistance, DirectMaxVertical)
+		}
+	}
 	for i, g := range r.PullGroups {
 		gp := fmt.Sprintf("%s.pull_groups[%d]", path, i)
-		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team}
+		pg := PullGroup{Entries: g.Entries, Ambush: g.Ambush, Radius: g.Radius, Team: g.Team, Equiv: g.Equiv, NeedsWalk: g.NeedsWalk}
 		c.team(gp+".team", g.Team)
+		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
+			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
+		}
 		if g.Radius < 0 || g.Radius > 60 {
 			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
 		}
@@ -442,6 +775,21 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		for j := range g.Positions {
 			pg.Positions = append(pg.Positions, c.point(fmt.Sprintf("%s.positions[%d]", gp, j), &g.Positions[j]))
+		}
+		if rp := g.Patrol; rp != nil {
+			pp := gp + ".patrol"
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, Source: rp.Source}
+			c.entries(pp+".entries", rp.Entries, true)
+			if len(rp.Path) < 2 {
+				c.fail(pp+".path", "needs at least two points")
+			}
+			for j := range rp.Path {
+				pat.Path = append(pat.Path, c.point(fmt.Sprintf("%s.path[%d]", pp, j), &rp.Path[j]))
+			}
+			if rp.PeriodS <= 0 || rp.PeriodS > maxPatrolPeriod {
+				c.fail(pp+".period_s", "%g: one round of the path takes 1-%d seconds", rp.PeriodS, maxPatrolPeriod)
+			}
+			pg.Patrol = pat
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}
@@ -458,7 +806,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
@@ -500,13 +848,16 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		for _, f := range []struct {
 			name string
 			v    int
-		}{{"health", rs.Health}, {"healer_mana", rs.HealerMana}, {"mana", rs.Mana}} {
+		}{{"health", rs.Health}, {"healer_mana", rs.HealerMana}, {"mana", rs.Mana}, {"walk_health", rs.WalkHealth}, {"walk_healer_mana", rs.WalkHealerMana}, {"walk_mana", rs.WalkMana}} {
 			if f.v < 0 || f.v > 100 {
 				c.fail(path+".rest."+f.name, "%d is outside 1-100 percent (omit it for the default)", f.v)
 			}
 		}
 		if rs.MaxS < 0 || rs.MaxS > MaxTimeoutS {
 			c.fail(path+".rest.max_s", "%d s is outside 1-%d (omit it for the default)", rs.MaxS, MaxTimeoutS)
+		}
+		if rs.WalkYd < -1 || rs.WalkYd > 5000 {
+			c.fail(path+".rest.walk_yd", "%d yd is outside 1-5000 (-1 turns walking rests off, omit it for the default)", rs.WalkYd)
 		}
 		v := *rs
 		l.Rest = &v
@@ -560,16 +911,16 @@ func (c *checker) item(path string, r *rawItem) *ItemRef {
 func (c *checker) step(path string, r *rawStep) Step {
 	var s Step
 	n := 0
-	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil} {
+	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil} {
 		if set {
 			n++
 		}
 	}
 	switch {
 	case n > 1:
-		c.fail(path, "has more than one of use_object, wait_for, loot_object and use_item: one step does one thing")
+		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item and ritual: one step does one thing")
 	case n == 0:
-		c.fail(path, "needs use_object, wait_for, loot_object or use_item")
+		c.fail(path, "needs use_object, wait_for, loot_object, use_item or ritual")
 	case r.UseObject != nil:
 		u := &UseObject{ObjectRef: c.ref(path+".use_object", &r.UseObject.rawRef)}
 		if r.UseObject.Stand != nil {
@@ -594,14 +945,46 @@ func (c *checker) step(path string, r *rawStep) Step {
 		u.RequiresItem = c.item(path+".use_item.requires_item", r.UseItem.RequiresItem)
 		u.ExpectItem = c.item(path+".use_item.expect_item", r.UseItem.ExpectItem)
 		s.UseItem = u
+	case r.Ritual != nil:
+		s.Ritual = c.ritual(path+".ritual", r.Ritual)
 	default:
 		s.WaitFor = c.wait(path+".wait_for", r.WaitFor)
 	}
 	return s
 }
 
+func (c *checker) ritual(path string, r *rawRitual) *Ritual {
+	out := &Ritual{Entry: r.Entry}
+	if r.Entry == 0 {
+		c.fail(path+".entry", "required (the entry of the summoning ritual object)")
+	}
+	if r.Position == nil {
+		c.fail(path+".position", "required ([x, y, z]: the server finds the object by its entry near this point)")
+	} else {
+		out.Position = c.point(path+".position", &r.Position.rawPoint)
+	}
+	switch {
+	case r.Participants == nil:
+		c.fail(path+".participants", "required (the bots that use the object: %d-%d; the object's own number is in its template)", MinRitualParticipants, MaxRitualParticipants)
+	case *r.Participants < MinRitualParticipants || *r.Participants > MaxRitualParticipants:
+		c.fail(path+".participants", "%d is outside %d-%d", *r.Participants, MinRitualParticipants, MaxRitualParticipants)
+	default:
+		out.Participants = *r.Participants
+	}
+	if r.Stand != nil {
+		p := c.point(path+".stand", r.Stand)
+		out.Stand = &p
+	}
+	return out
+}
+
 func (c *checker) wait(path string, r *rawWait) *WaitFor {
 	w := &WaitFor{TimeoutS: DefaultTimeoutS}
+	if len(r.FailText) > MaxFailText || strings.ContainsAny(r.FailText, "\r\n\t") {
+		c.fail(path+".fail_text", "is longer than %d characters or has a line break", MaxFailText)
+	} else {
+		w.FailText = r.FailText
+	}
 	if r.TimeoutS != nil {
 		if *r.TimeoutS <= 0 || *r.TimeoutS > MaxTimeoutS {
 			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, MaxTimeoutS)

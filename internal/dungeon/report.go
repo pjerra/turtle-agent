@@ -1,8 +1,11 @@
 package dungeon
 
 import (
+	"math"
 	"sync"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // Report is what a run did, kept while it goes and complete at the end. dungeon_status returns it as JSON.
@@ -17,6 +20,8 @@ type Report struct {
 	Current string     `json:"current,omitempty"` // the action in progress
 	Error   string     `json:"error,omitempty"`
 	Wipes   int        `json:"wipes"`
+	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead (counted apart from Wipes).
+	PartyDowns int `json:"party_downs,omitempty"`
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`
@@ -47,6 +52,11 @@ type Report struct {
 	// and whether a drink order went out.
 	RestSeconds float64    `json:"rest_seconds"`
 	RestGates   []RestGate `json:"rest_gates"`
+	// RestGatesSkipped counts the gates that cost nothing (RestGate.Skipped), RestWalkPasses those among them that passed because a long
+	// walk followed. RestShare is RestSeconds as a percent of the run's seconds (the trace's rest_share check measures the same).
+	RestGatesSkipped int     `json:"rest_gates_skipped"`
+	RestWalkPasses   int     `json:"rest_walk_passes"`
+	RestShare        float64 `json:"rest_share"`
 	// Resumed says what a run started inside a leg skipped (see Resumed); absent when it started at the leg's beginning.
 	Resumed *Resumed `json:"resumed,omitempty"`
 	// Refusals are the orders TortoiseBots turned down (TBM:ACTION_ERR replies to the driver's "/p .bot action ..."), by
@@ -55,6 +65,31 @@ type Report struct {
 	// Remote is set for a run in remote mode (dungeon_run mode "remote"): the commander binding, the feed, the orders and the
 	// decisions taken from the feed. Absent in group mode.
 	Remote *RemoteReport `json:"remote,omitempty"`
+	// TankFirst is the counters of the tank-first rules in a group run (README "Tank first"); a remote run has them in Remote. Absent
+	// until the first fight with a tank in view.
+	TankFirst *TankFirstReport `json:"tank_first,omitempty"`
+	// RunID names the run: it is in every dungeon event (data.run_id) and in the trace file's header.
+	RunID string `json:"run_id"`
+	// Trace says where the run's trace went and how it scored (README "Run traces and checks"); set when the run ends.
+	Trace *tracerun.Info `json:"trace,omitempty"`
+	// TraceFile is the trace's path while the run goes (empty when tracing is off or the file could not be made).
+	TraceFile string `json:"trace_file,omitempty"`
+	// Watchdog is the progress watchdog's view (README "Run watchdog"): when the run last made progress, for how long it has not, and the
+	// stall level.
+	Watchdog *WatchdogReport `json:"watchdog,omitempty"`
+	// Prepare is the prepare block's steps with their seconds (remote mode; absent when the run had none). SetupS is the whole setup: the
+	// seconds from the start of the run to its first step (prepare, bind, enter phase and preflight together).
+	Prepare *PrepareReport `json:"prepare,omitempty"`
+	SetupS  float64        `json:"setup_s"`
+	// Ready is the hired party's ready block (prepare party "hire", hire.go): per bot the class, level, item level and quality, what a `.bot`
+	// command fixed and what was seen, and the seconds the hire step and the whole setup took. Absent for named bots.
+	Ready *ReadyReport `json:"ready,omitempty"`
+	// Start is how a run that began inside the dungeon got there (from_leg past the first, from_pull_group; start.go): the start point, the
+	// GM lines, what was skipped. Absent for a run from the first leg's start.
+	Start *StartReport `json:"start,omitempty"`
+	// Pulltest is the pull-test scenario's result (dungeon_run pulltest; pulltest.go): per try the time to kill, deaths, threat overrides, adds,
+	// healer mana and rest, and the summary. Absent for a plan run.
+	Pulltest *PulltestReport `json:"pulltest,omitempty"`
 }
 
 // LegReport is one leg of the run: how long it took and what it cost.
@@ -67,9 +102,11 @@ type LegReport struct {
 	Deaths      int       `json:"deaths"`
 	Pulls       int       `json:"pulls"`        // fights started, retries included
 	PullRetries int       `json:"pull_retries"` // pulls that drew no fight or evaded, and were tried again
-	RestSeconds float64   `json:"rest_seconds"` // time in the rest gates
-	WalkAggros  int       `json:"walk_aggros"`  // packs that aggroed during a walk and were fought there (each also counts in pulls)
-	Ambushes    int       `json:"ambushes"`     // stealthed pull groups walked through instead of pulled
+	// Skipped says what of the leg the run did not do on purpose (from_pull_group); the legs before from_leg have Result "skipped (from_leg)".
+	Skipped     string  `json:"skipped,omitempty"`
+	RestSeconds float64 `json:"rest_seconds"` // time in the rest gates
+	WalkAggros  int     `json:"walk_aggros"`  // packs that aggroed during a walk and were fought there (each also counts in pulls)
+	Ambushes    int     `json:"ambushes"`     // stealthed pull groups walked through instead of pulled
 	// The leader's deaths in this leg: how many, how it came back, and the time it was dead.
 	LeaderDeaths  int     `json:"leader_deaths"`
 	Resurrections int     `json:"resurrections"`
@@ -98,6 +135,10 @@ type reporter struct {
 	mu  sync.Mutex
 	r   Report
 	now func() time.Time
+	// onNote, when set, sees each note (the trace copies them as events).
+	onNote func(string)
+	// wd, when set, is the run's watchdog; each snapshot carries its state as of now.
+	wd *watchdog
 }
 
 func (p *reporter) init(plan *Plan, now func() time.Time) {
@@ -120,6 +161,7 @@ func (p *reporter) end(state, errText string, t time.Time) {
 func endReport(r *Report, state, errText string, t time.Time) {
 	r.State, r.Error, r.Ended, r.Current = state, errText, &t, ""
 	r.Seconds = t.Sub(r.Started).Seconds()
+	r.setRestShare()
 }
 
 // snapshotEnded is snapshot and whether the run has ended, read together under the lock: a state that is not final
@@ -138,7 +180,12 @@ func (p *reporter) summaryEnded(state, errText string, t time.Time) map[string]a
 
 func (p *reporter) setCurrent(label string) { p.update(func(r *Report) { r.Current = label }) }
 
-func (p *reporter) note(s string) { p.update(func(r *Report) { r.Notes = append(r.Notes, s) }) }
+func (p *reporter) note(s string) {
+	p.update(func(r *Report) { r.Notes = append(r.Notes, s) })
+	if p.onNote != nil {
+		p.onNote(s)
+	}
+}
 
 func (p *reporter) update(f func(*Report)) {
 	p.mu.Lock()
@@ -160,6 +207,14 @@ func (p *reporter) snapshot() Report {
 	r.Refusals = append([]RefusalReport{}, p.r.Refusals...)
 	r.RestGates = append([]RestGate{}, p.r.RestGates...)
 	r.Remote = p.r.Remote.clone()
+	r.Prepare = p.r.Prepare.clone()
+	r.Ready = p.r.Ready.clone()
+	r.Start = p.r.Start.clone()
+	r.Pulltest = p.r.Pulltest.clone()
+	if p.r.TankFirst != nil {
+		tf := *p.r.TankFirst
+		r.TankFirst = &tf
+	}
 	if r.State == "running" {
 		now := p.now()
 		r.Seconds = now.Sub(r.Started).Seconds()
@@ -167,7 +222,27 @@ func (p *reporter) snapshot() Report {
 			r.Legs[n-1].Seconds = now.Sub(r.Legs[n-1].Started).Seconds()
 		}
 	}
+	r.setRestShare()
+	r.Watchdog = p.wd.report()
 	return r
+}
+
+// runLegs counts the legs the run walked: the legs before from_leg are in Legs as skipped, not as part of the run.
+func (r Report) runLegs() int {
+	n := 0
+	for _, l := range r.Legs {
+		if l.Result != SkippedFromLeg {
+			n++
+		}
+	}
+	return n
+}
+
+// setRestShare puts the rest gates' share of the run's seconds, in percent with one decimal, in RestShare.
+func (r *Report) setRestShare() {
+	if r.Seconds > 0 {
+		r.RestShare = math.Round(r.RestSeconds/r.Seconds*1000) / 10
+	}
 }
 
 // summary is the report's totals for the dungeon_done and dungeon_failed events.
@@ -175,15 +250,17 @@ func (p *reporter) summary() map[string]any { return summaryOf(p.snapshot()) }
 
 func summaryOf(r Report) map[string]any {
 	m := summaryBase(r)
+	m["run_id"] = r.RunID
 	if r.Remote != nil {
 		m["remote"], m["lead_bot"], m["frames_received"] = true, r.Remote.LeadBot, r.Remote.FramesReceived
-		m["orders_sent"], m["orders_refused"] = r.Remote.OrdersSent, r.Remote.OrdersRefused
+		m["orders_sent"], m["orders_refused"], m["refills"] = r.Remote.OrdersSent, r.Remote.OrdersRefused, len(r.Remote.Refills)
 	}
 	return m
 }
 
 func summaryBase(r Report) map[string]any {
-	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": len(r.Legs), "deaths": len(r.Deaths),
+	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": r.runLegs(), "deaths": len(r.Deaths),
 		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
-		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds}
+		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
+		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}
 }

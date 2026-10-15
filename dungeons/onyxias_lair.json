@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "name": "onyxias_lair",
+  "kind": "raid",
+  "status": "draft (not mapped, not live-checked)",
+  "map": 249,
+  "entrance": {"x": 30.8916, "y": -54.079, "z": -5.02784},
+  "entrance_trigger": 2848,
+  "entrance_tele": "onyxia",
+  "portal": {
+    "map": 1,
+    "x": -4768.61,
+    "y": -3752.11,
+    "z": 53.4317
+  },
+  "level_band": [60, 60],
+  "raid": {
+    "size": 40,
+    "tanks": 4,
+    "healers": 10,
+    "dps": 26
+  },
+  "notes": [
+    "DRAFT: a skeleton from the world database export of map 249 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
+    "Raid plan: 40 players, the tank/healer/dps split is a placeholder. dungeon_run has no raid driver yet; the file is data for the raid leader.",
+    "Needs: lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+  ],
+  "legs": [
+    {
+      "name": "onyxia",
+      "to": {"x": 49.8206, "y": -114.607, "z": -24.3112},
+      "pull_groups": [
+        {
+          "entries": [12129],
+          "positions": [
+            {"x": 49.8206, "y": -114.607, "z": -24.3112}
+          ]
+        },
+        {
+          "entries": [12129],
+          "positions": [
+            {"x": -52.9699, "y": -96.8813, "z": -38.6419}
+          ]
+        },
+        {
+          "entries": [12129],
+          "positions": [
+            {"x": -131.203, "y": -137.47, "z": -52.5151}
+          ]
+        },
+        {
+          "entries": [12129],
+          "positions": [
+            {"x": -166.623, "y": -196.003, "z": -66.2619}
+          ]
+        },
+        {
+          "entries": [12129],
+          "positions": [
+            {"x": -199.097, "y": -209.826, "z": -68.9112}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 10184,
+        "position": {"x": 0.69628, "y": -211.972, "z": -86.075}
+      }
+    }
+  ]
+}

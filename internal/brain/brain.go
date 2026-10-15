@@ -65,6 +65,9 @@ type Params struct {
 	// dungeon run sets it until the driver holds the move lock (Controller.HoldMove) around its own walks. Blink, a spell, is not
 	// a walk and is not affected.
 	NoMove bool `json:"no_move,omitempty"`
+	// RunID names the brain session: it is in the status, in every brain event (data.run_id) and in the trace's header. Empty:
+	// Start makes one (a dungeon run passes its own, so that both share it).
+	RunID string `json:"run_id,omitempty"`
 }
 
 // Config holds the engine's timings. A zero field takes the default of DefaultConfig.
@@ -446,6 +449,7 @@ func (b *Brain) emitDecision(d Decision) {
 	if d.Error != "" {
 		data["error"] = d.Error
 	}
+	data["run_id"] = b.p.RunID
 	b.g.Emit(events.Event{Kind: events.KindBrainDecision, Text: d.Action, SpellID: d.Spell, TargetGUID: d.Target, Data: data})
 }
 
@@ -465,6 +469,7 @@ func (b *Brain) idle(now time.Time, reason string, data map[string]any) {
 		data = map[string]any{}
 	}
 	data["reason"] = reason
+	data["run_id"] = b.p.RunID
 	b.g.Emit(events.Event{Kind: events.KindBrainIdle, Text: reason, Data: data})
 }
 

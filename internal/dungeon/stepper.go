@@ -19,6 +19,14 @@ type World interface {
 	HostilesWithin(center Point, radius float32) int
 }
 
+// EntryWorld is the optional part of a World whose object steps are done by entry: the carrier's order names the object by its entry
+// and the plan's point (`cmd open entry:<id>@x,y,z`), and a game-object wait asks `cmd state`, so the agent need not see the object. With
+// it a use_object or loot_object step whose object has an entry is returned as an action at once (no walk to bring the object into view;
+// the driver's approach does the walking), and a game-object wait with an entry never holds on the agent's own copy: the driver polls.
+type EntryWorld interface {
+	EntryTargets() bool
+}
+
 // PartyWorld is the optional part of a World that knows where the party stands: ResumeAt skips a pull group only when a member
 // stands near it (and sees it empty), because a World lists only the hostiles that someone sees.
 type PartyWorld interface {
@@ -49,6 +57,7 @@ const (
 	ActUse    ActionKind = "use_object"  // use game object GUID (it is within UseRange)
 	ActLoot   ActionKind = "loot_object" // open and loot game object GUID (it is within UseRange)
 	ActItem   ActionKind = "use_item"    // use the item Item from the bags
+	ActRitual ActionKind = "ritual"      // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
 	ActKill   ActionKind = "kill_boss"   // kill Boss, First entries before it
 	ActWait   ActionKind = "wait"        // nothing to do yet: look again with Next
 	ActDone   ActionKind = "done"        // the plan is finished
@@ -63,19 +72,30 @@ type Action struct {
 	Label string // for logs: "leg 2 (ironaya): use_object 124371"
 
 	To        Point               // walk target
+	Direct    bool                // walk: a straight-line step (`cmd move ... direct`), not a navmesh path (Waypoint.Direct)
 	Entries   []uint32            // pull: the group's entries
 	Positions []Point             // pull: where its members stand
 	Ambush    bool                // pull: the group is stealthed (PullGroup.Ambush)
 	Radius    float32             // pull: PullGroup.Radius, 0 for the default
+	Patrol    *Patrol             // pull: PullGroup.Patrol, nil when no patrol comes by
 	Skip      []uint32            // pull and boss: entries not to wait for
 	Boss      *Boss               // boss
 	Object    *objects.GameObject // use
-	GUID      packet.GUID         // use
-	Requires  *ItemRef            // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
-	Item      *ItemRef            // use_item: the item to use
-	Expect    *ItemRef            // loot_object, use_item: the item that must be in the bags afterwards
-	Remaining time.Duration       // wait: time left before the plan fails
-	Err       string              // failed
+	GUID      packet.GUID         // use (0 when the agent does not see the object: an entry-form action, see Entry)
+	// Entry and EntryAt are set when the World names objects by entry (EntryWorld): the order says `entry:<Entry>@EntryAt` and the server
+	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
+	Entry        uint32
+	EntryAt      *Point
+	Participants int           // ritual: the number of bots that use the object
+	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
+	Item         *ItemRef      // use_item: the item to use
+	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
+	Remaining    time.Duration // wait: time left before the plan fails
+	Err          string        // failed
+	// TeamGate is set on a pull or kill of a part gated to the other team that a World with TeamGateLook runs only after a look: the
+	// driver looks at the part's positions and skips it only if none of its mobs is there (or hostile). It reads like the skip note,
+	// "pull group 1 of 1 ([1]) is for team horde, the leader is alliance".
+	TeamGate string
 }
 
 type phase int
@@ -99,13 +119,14 @@ type Stepper struct {
 
 	leg       int
 	ph        phase
-	idx       int        // pull group or step index
+	idx       int        // pull group or step index; in the walk phase, the next via waypoint (len(Via): the leg's To)
 	since     time.Time  // when the current wait started; zero when not waiting
 	stepAt    time.Time  // when the current step was first looked at; zero before
 	stepWalks int        // walks Complete has seen in the current step
 	last      ActionKind // the kind of the action Next returned last
 	err       string
-	skipped   []string // what the team gate passed over since Skipped was last called
+	skipped   []string        // what the team gate passed over since Skipped was last called
+	teamSeen  map[string]bool // team-gated parts already noted as hostile in view (a note once per part)
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -125,6 +146,16 @@ func NewStepperAt(p *Plan, w World, now func() time.Time, leg int) *Stepper {
 	return s
 }
 
+// NewStepperAtGroup starts inside leg: at its pull group `group` (0 <= group < len(PullGroups)), with the walk to the leg's To and the
+// pull groups before `group` skipped. The caller has brought the party to the group's gather spot and reports what was skipped.
+func NewStepperAtGroup(p *Plan, w World, now func() time.Time, leg, group int) *Stepper {
+	s := NewStepperAt(p, w, now, leg)
+	if leg >= 0 && leg < len(p.Legs) && group >= 0 && group < len(p.Legs[leg].PullGroups) {
+		s.ph, s.idx = phPulls, group
+	}
+	return s
+}
+
 func (s *Stepper) enterLeg(i int) {
 	s.leg, s.idx, s.since = i, 0, time.Time{}
 	s.stepAt, s.stepWalks = time.Time{}, 0
@@ -134,6 +165,9 @@ func (s *Stepper) enterLeg(i int) {
 	}
 	s.ph = phWalk
 }
+
+// RestartLeg begins the current leg again from its first point: for a leg whose plan was reloaded before anything of it was done.
+func (s *Stepper) RestartLeg() { s.enterLeg(s.leg) }
 
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
@@ -145,19 +179,31 @@ func (s *Stepper) Position() (leg int, phase string, index int) {
 func (s *Stepper) Complete() {
 	switch s.ph {
 	case phWalk:
+		if s.idx < len(s.plan.Legs[s.leg].Via) {
+			s.idx++ // a via waypoint is done; the next one, or To, follows
+			break
+		}
 		s.ph, s.idx = phPulls, 0
 	case phPulls:
 		s.idx++
 	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse, ActLoot, ActItem:
+		case ActUse, ActLoot, ActItem, ActRitual:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
 		}
 	case phBoss:
 		s.ph, s.idx = phAfter, 0
+	}
+}
+
+// SkipStep gives up the step the stepper is on and goes to the next: the driver's way past a wait it cannot check (a game object the
+// agent does not see). It does nothing outside a leg's steps.
+func (s *Stepper) SkipStep() {
+	if s.ph == phSteps || s.ph == phAfter {
+		s.nextStep()
 	}
 }
 
@@ -207,6 +253,19 @@ func (s *Stepper) next() Action {
 		l := &s.plan.Legs[s.leg]
 		switch s.ph {
 		case phWalk:
+			if s.idx < len(l.Via) {
+				w := l.Via[s.idx]
+				// A direct waypoint is always walked (the party stands short of it by design), unless it stands on it already.
+				if dist3(s.w.Position(), w.Point) <= ArriveRadius {
+					s.idx++
+					continue
+				}
+				kind := "walk"
+				if w.Direct {
+					kind = "direct step"
+				}
+				return Action{Kind: ActWalk, Leg: s.leg, Step: -1, To: w.Point, Direct: w.Direct, Label: s.label("%s to %.1f %.1f %.1f", kind, w.X, w.Y, w.Z)}
+			}
 			if dist3(s.w.Position(), l.To) <= ArriveRadius {
 				s.Complete()
 				continue
@@ -218,12 +277,17 @@ func (s *Stepper) next() Action {
 				continue
 			}
 			g := l.PullGroups[s.idx]
-			if !s.teamOK(g.Team) {
-				s.skipped = append(s.skipped, s.label("pull group %d of %d (%v) is for team %s, the leader is %s: skipped", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team()))
-				s.idx++
-				continue
+			gate := ""
+			if !s.teamOK(g.Team) && !s.hostileOverride(fmt.Sprintf("g%d/%d", s.leg, s.idx), g.Entries, g.Team, s.label("pull group %d of %d (%v)", s.idx+1, len(l.PullGroups), g.Entries)) {
+				note := s.label("pull group %d of %d (%v) is for team %s, the leader is %s", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team())
+				if !s.looksFirst() {
+					s.skipped = append(s.skipped, note+": skipped")
+					s.idx++
+					continue
+				}
+				gate = note
 			}
-			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Skip: l.Skip,
+			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Patrol: g.Patrol, Skip: l.Skip, TeamGate: gate,
 				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
 		case phSteps, phAfter:
 			steps := l.Steps
@@ -249,12 +313,17 @@ func (s *Stepper) next() Action {
 				s.ph, s.idx = phAfter, 0
 				continue
 			}
-			if !s.teamOK(l.Boss.Team) {
-				s.skipped = append(s.skipped, s.label("boss %d is for team %s, the leader is %s: skipped", l.Boss.Entry, l.Boss.Team, s.team()))
-				s.ph, s.idx = phAfter, 0
-				continue
+			gate := ""
+			if !s.teamOK(l.Boss.Team) && !s.hostileOverride(fmt.Sprintf("b%d", s.leg), append([]uint32{l.Boss.Entry}, l.Boss.First...), l.Boss.Team, s.label("boss %d", l.Boss.Entry)) {
+				note := s.label("boss %d is for team %s, the leader is %s", l.Boss.Entry, l.Boss.Team, s.team())
+				if !s.looksFirst() {
+					s.skipped = append(s.skipped, note+": skipped")
+					s.ph, s.idx = phAfter, 0
+					continue
+				}
+				gate = note
 			}
-			return Action{Kind: ActKill, Leg: s.leg, Step: -1, Boss: l.Boss, Skip: l.Skip, Label: s.label("kill boss %d", l.Boss.Entry)}
+			return Action{Kind: ActKill, Leg: s.leg, Step: -1, Boss: l.Boss, Skip: l.Skip, TeamGate: gate, Label: s.label("kill boss %d", l.Boss.Entry)}
 		}
 	}
 }
@@ -293,11 +362,39 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		base.Kind, base.Item, base.Requires, base.Expect = ActItem, &ItemRef{Entry: u.Entry, Name: u.Name}, u.RequiresItem, u.ExpectItem
 		base.Label = s.label("step %d: use item %s", s.idx, base.Item)
 		return base, false
+	case st.Ritual != nil:
+		r := st.Ritual
+		at := r.Position
+		base.Kind, base.Entry, base.EntryAt, base.Participants = ActRitual, r.Entry, &at, r.Participants
+		base.Label = s.label("step %d: ritual at game object %d with %d participants", s.idx, r.Entry, r.Participants)
+		return base, false
 	case st.UseObject != nil || st.LootObject != nil:
 		ref, stand := objectOf(st)
 		kind, verb := ActUse, "use"
 		if st.LootObject != nil {
 			kind, verb = ActLoot, "loot"
+		}
+		if ew, isEntry := s.w.(EntryWorld); isEntry && ref.Entry != 0 && ew.EntryTargets() {
+			base.Kind, base.Entry = kind, ref.Entry
+			switch {
+			case ref.Near != nil:
+				base.EntryAt = ref.Near
+			case stand != nil:
+				base.EntryAt = stand
+			}
+			if o, seen := s.find(ref); seen && o.Distance >= 0 {
+				base.Object, base.GUID = &o, o.GUID
+				if base.EntryAt == nil {
+					base.EntryAt = &Point{o.X, o.Y, o.Z}
+				}
+			}
+			if st.UseObject != nil {
+				base.Requires = st.UseObject.RequiresItem
+			} else {
+				base.Expect = st.LootObject.ExpectItem
+			}
+			base.Label = s.label("step %d: %s %s", s.idx, verb, describeRef(ref))
+			return base, false
 		}
 		o, ok := s.find(ref)
 		if !ok || o.Distance < 0 {
@@ -345,6 +442,9 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		timeout := time.Duration(w.TimeoutS) * time.Second
 		left := timeout - s.now().Sub(s.since)
 		if left <= 0 {
+			if w.FailText != "" {
+				return fail("waited %d s for %s: %s", w.TimeoutS, describeWait(w), w.FailText)
+			}
 			return fail("waited %d s for %s", w.TimeoutS, describeWait(w))
 		}
 		base.Kind, base.Remaining = ActWait, left
@@ -384,6 +484,43 @@ func (s *Stepper) teamOK(team string) bool {
 	return team == "" || t == "" || t == team
 }
 
+// HostileWorld is the optional part of a World that says whether a unit of one of entries is hostile to the party: listed hostile in
+// the feed now (alive), or seen hostile earlier in the run. The team gate is data-driven with it: a part gated to the other team runs
+// anyway when its mobs turn out hostile (the Uldaman Lost Dwarves, "horde-only" in the plan, aggroed on the Alliance party of remote
+// run 2). A World without it keeps the plan's team gate as written.
+type HostileWorld interface {
+	HostileSeen(entries []uint32) bool
+}
+
+// TeamGateLook is the optional part of a World that wants the team gate to look before it skips: a part gated to the other team whose
+// mobs were never listed hostile is returned as an action with Action.TeamGate set, and the driver walks to its positions to look
+// (the feed lists only what the bots see, so "not in the feed" is not "not there"). A World without it skips such a part at once.
+type TeamGateLook interface {
+	TeamGateLook() bool
+}
+
+func (s *Stepper) looksFirst() bool {
+	tl, ok := s.w.(TeamGateLook)
+	return ok && tl.TeamGateLook()
+}
+
+// hostileOverride says whether a part gated to another team is fought anyway because its mobs are hostile to the party, and notes it
+// once. key names the part; what is its label for the note.
+func (s *Stepper) hostileOverride(key string, entries []uint32, team, what string) bool {
+	hw, ok := s.w.(HostileWorld)
+	if !ok || !hw.HostileSeen(entries) {
+		return false
+	}
+	if s.teamSeen == nil {
+		s.teamSeen = map[string]bool{}
+	}
+	if !s.teamSeen[key] {
+		s.teamSeen[key] = true
+		s.skipped = append(s.skipped, fmt.Sprintf("%s is for team %s, the leader is %s, but its mobs are hostile to the party: fought", what, team, s.team()))
+	}
+	return true
+}
+
 // Skipped returns what the team gate passed over since the last call, one line each, for the report.
 func (s *Stepper) Skipped() []string {
 	out := s.skipped
@@ -394,6 +531,9 @@ func (s *Stepper) Skipped() []string {
 func (s *Stepper) holds(w *WaitFor) bool {
 	switch {
 	case w.GameObject != nil:
+		if ew, isEntry := s.w.(EntryWorld); isEntry && w.GameObject.Entry != 0 && ew.EntryTargets() {
+			return false // the driver asks the module (cmd state): the agent's copy of the object proves nothing
+		}
 		o, ok := s.find(&w.GameObject.ObjectRef)
 		return ok && o.State == w.GameObject.State
 	case w.HostilesGone != nil:
@@ -436,6 +576,16 @@ func (s *Stepper) find(r *ObjectRef) (objects.GameObject, bool) {
 		}
 	}
 	return best, found
+}
+
+// hdist is the horizontal distance between two points.
+func hdist(a, b Point) float64 {
+	return math.Hypot(float64(a.X-b.X), float64(a.Y-b.Y))
+}
+
+// DirectStepOK says whether a straight step from a to b is within the limits TortoiseBots allows for `cmd move ... direct`.
+func DirectStepOK(a, b Point) bool {
+	return hdist(a, b) <= DirectMaxDistance && math.Abs(float64(b.Z-a.Z)) <= DirectMaxVertical
 }
 
 func dist3(a, b Point) float64 {

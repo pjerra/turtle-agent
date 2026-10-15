@@ -12,6 +12,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // Game is what the Driver does to the game and what it reads of it. The agent implements it over a session
@@ -150,6 +151,11 @@ type Config struct {
 	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
 	Brain     Brain
 	BrainName string
+	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
+	Trace tracerun.Config
+	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
+	// the default (120/240/420 s), a negative one turns that level off.
+	Watchdog WatchdogConfig
 
 	WalkAttempts   int           // tries of one walk (each is a walk_path, which replans by itself)
 	WalkRetryDelay time.Duration // wait between two tries
@@ -174,22 +180,34 @@ type Config struct {
 	// the bot named by RemoteOptions.Healer has it, and without one every caster does.
 	RestHealerManaPct int
 	// DrinkNudge is how long a member short of mana may show no rise at all before it gets one drink order of its own.
-	DrinkNudge    time.Duration
-	RestMinHealth int           // after RestTimeout the run goes on only if everyone has at least this health
-	GatherRadius  float32       // yards: rested also asks every living member to be this close
-	WaitPoll      time.Duration // time between two looks at a wait step
-	Poll          time.Duration // time between two looks at a fight
-	ArriveTimeout time.Duration // the party's walk to the leader after a teleport
-	ManaStall     time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
-	ManaStallPct  int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
-	HealerManaMin int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
-	ReviveWait    time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
-	AggroQuiet    time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
-	AmbushPause   time.Duration // how long the party stands at each position of a stealthed pack
-	WalkWatch     time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
-	BuffGap       time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait  time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
-	BuffMaxDist   float32       // yards: a companion farther than this from the leader is not selected for a buff
+	DrinkNudge time.Duration
+	// RestWalkYd is how far (yards) the walk that follows a leg's start gate must be for the gate to let the party rest while it walks
+	// instead of holding (0: 60; negative: the gate always holds); the RestWalk*Pct floors are what everyone must have for that
+	// (a leg's rest.walk_* overrides them). RefillBelow is the drink count under which a short caster gets `.bot maintenance` again
+	// at a rest gate (remote mode; 0: 3; negative: no refills).
+	RestWalkYd            float32
+	RestWalkHealthPct     int
+	RestWalkHealerManaPct int
+	RestWalkManaPct       int
+	RefillBelow           int
+	// MaintenanceEveryLegs: remote mode sends `.bot maintenance` to every bot at the start of legs N, 2N, ... (0: never, also not after a
+	// recovered wipe; the default is 3; remote_maint.go). Unlike the fields above a zero here is not filled with the default.
+	MaintenanceEveryLegs int
+	RestMinHealth        int           // after RestTimeout the run goes on only if everyone has at least this health
+	GatherRadius         float32       // yards: rested also asks every living member to be this close
+	WaitPoll             time.Duration // time between two looks at a wait step
+	Poll                 time.Duration // time between two looks at a fight
+	ArriveTimeout        time.Duration // the party's walk to the leader after a teleport
+	ManaStall            time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct         int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin        int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait           time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet           time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause          time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch            time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap              time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait         time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist          float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
 	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
@@ -211,6 +229,7 @@ func DefaultConfig() Config {
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
 		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
+		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
@@ -257,6 +276,15 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestManaPct, d.RestManaPct)
 	fillInt(&c.RestHealerManaPct, d.RestHealerManaPct)
 	fill(&c.DrinkNudge, d.DrinkNudge)
+	if c.RestWalkYd == 0 {
+		c.RestWalkYd = d.RestWalkYd
+	}
+	if c.RefillBelow == 0 {
+		c.RefillBelow = d.RefillBelow
+	}
+	fillInt(&c.RestWalkHealthPct, d.RestWalkHealthPct)
+	fillInt(&c.RestWalkHealerManaPct, d.RestWalkHealerManaPct)
+	fillInt(&c.RestWalkManaPct, d.RestWalkManaPct)
 	fillInt(&c.RestMinHealth, d.RestMinHealth)
 	fillF(&c.GatherRadius, d.GatherRadius)
 	fill(&c.WaitPoll, d.WaitPoll)
@@ -310,6 +338,7 @@ type Driver struct {
 	// no later pick or pull group looks at them again. The value says why, for the report.
 	skipped    map[packet.GUID]string
 	pendingRef []Refusal // refusals seen by a sleep and not yet looked at by a fight
+	tg         groupTank // the tank-first state of the fights (driver_tank.go)
 
 	gm             bool   // the leader's account is taken for a GM, level above 0 (decided in begin)
 	level          int    // its account level: probed, asserted (gm_level, else developer) or 0
@@ -320,6 +349,14 @@ type Driver struct {
 	recoveries     int    // how often the leader came back; a walk does not count the interruption as a failed try
 	leaderDeaths   int
 	wipeRecoveries int
+
+	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
+	stopSampler func()
+
+	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
+	wd       *watchdog
+	wdRepick flagOnce // end the fight, to pick the target again
+	wdObject flagOnce // give up the wait of the object step
 }
 
 // NewDriver prepares a run of plan. A zero clock is the wall clock.
@@ -329,9 +366,11 @@ func NewDriver(plan *Plan, g Game, cfg Config, clk Clock) *Driver {
 	}
 	d := &Driver{plan: plan, g: g, cfg: cfg.withDefaults(), clk: clk, curLeg: -1, prevDea: map[packet.GUID]bool{}, party: map[packet.GUID]bool{}, buffedAt: map[packet.GUID]int{}, skipped: map[packet.GUID]string{}}
 	d.rep.init(plan, clk.Now)
+	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
 	d.rep.r.Buffs = append([]Buff{}, cfg.Buffs...)
 	d.rep.r.Brain = cfg.BrainName
+	d.initTrace()
 	return d
 }
 
@@ -349,6 +388,8 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	d.rep.start(fromLeg)
+	d.traceBegin(fromLeg)
+	d.wd.start()
 	err := d.run(ctx, fromLeg)
 	d.finish(err)
 	return err
@@ -358,6 +399,7 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 // that sees "done", "failed" or "stopped" finds dungeon_done or dungeon_failed in the event log, and a report that is still "running"
 // is a run whose end has not been announced.
 func (d *Driver) finish(err error) {
+	d.wd.stop()
 	leg := d.curLeg
 	var state, errText, kind, text string
 	switch {
@@ -374,7 +416,8 @@ func (d *Driver) finish(err error) {
 	if err != nil {
 		data["error"], data["leg"] = errText, leg
 	}
-	d.g.Emit(kind, text, data)
+	d.emit(kind, text, data)
+	d.traceEnd(state, errText, at)
 	d.rep.end(state, errText, at)
 }
 
@@ -396,10 +439,11 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		a := d.st.Next()
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
+		d.wd.setStep(a.Label)
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
-				if err := d.startLeg(ctx, a.Leg); err != nil {
+				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					d.st.Fail(err.Error())
 					d.countWipe(err)
 					continue
@@ -414,18 +458,24 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		case ActWait:
 			if waiting != [2]int{a.Leg, a.Step} {
 				waiting = [2]int{a.Leg, a.Step}
-				d.g.Emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind)})
+				d.emit(events.KindDungeonStep, a.Label, map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind)})
 			}
-			if err := d.sleep(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
+			// A plan's wait has its own timeout_s: the watchdog does not count it.
+			release := d.wd.hold()
+			err := d.sleep(ctx, min(d.cfg.WaitPoll, a.Remaining))
+			release()
+			if err != nil {
 				d.stepFailed(err)
 			}
 			continue
 		}
 		began := d.clk.Now()
 		var err error
+		d.wdObject.clear() // a request left by an earlier step is not this step's
+		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
-			err = d.doWalk(ctx, a.To)
+			err = d.tracedWalk(ctx, a.To)
 		case ActUse:
 			err = d.doUse(ctx, a)
 		case ActPull:
@@ -436,19 +486,26 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			err = d.doLoot(ctx, a)
 		case ActItem:
 			err = d.doUseItem(ctx, a)
+		case ActRitual:
+			err = errors.New("a ritual step needs several bots using the object: it runs in remote mode only (dungeon_run with a bound commander party), not with the agent's own companions yet")
 		default:
 			err = fmt.Errorf("unknown action %q", a.Kind)
+		}
+		leave()
+		if wdObjectKind(a.Kind) {
+			d.wd.progress("object step result: " + a.Label)
 		}
 		data := map[string]any{"leg": a.Leg, "step": a.Step, "action": string(a.Kind), "ok": err == nil, "seconds": d.clk.Now().Sub(began).Seconds()}
 		if err != nil {
 			data["error"] = err.Error()
 		}
-		d.g.Emit(events.KindDungeonStep, a.Label, data)
+		d.emit(events.KindDungeonStep, a.Label, data)
 		if err != nil {
 			d.stepFailed(err)
 			continue
 		}
 		d.st.Complete()
+		d.wd.progress("step done: " + a.Label)
 	}
 }
 
@@ -465,6 +522,7 @@ func (d *Driver) stepFailed(err error) {
 func (d *Driver) countWipe(err error) {
 	if errors.Is(err, errWipe) {
 		d.rep.update(func(r *Report) { r.Wipes++ })
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error()})
 		d.rep.note(err.Error())
 	}
 }
@@ -624,7 +682,7 @@ func (d *Driver) gather(ctx context.Context) error {
 			return fmt.Errorf("the party did not reach the leader in %.0f s: %v", d.cfg.ArriveTimeout.Seconds(), missing)
 		}
 	}
-	return d.g.Chat(ctx, "party", ".bot action follow")
+	return d.chat(ctx, ".bot action follow")
 }
 
 // notNear names the living online members who are not in view within GatherRadius of the leader.
@@ -652,20 +710,25 @@ func (d *Driver) shortcut(kind string, leg int, detail string) {
 	d.rep.update(func(r *Report) {
 		r.Shortcuts = append(r.Shortcuts, Shortcut{Kind: kind, Leg: leg, Detail: detail, At: d.clk.Now()})
 	})
+	d.tr.Event("gm_shortcut", map[string]any{"kind": kind, "leg": leg, "detail": detail})
 }
 
 // startLeg opens a leg's report and event, and waits for the party to be rested.
-func (d *Driver) startLeg(ctx context.Context, i int) error {
+func (d *Driver) startLeg(ctx context.Context, i int, next Action) error {
 	d.curLeg = i
 	name := d.plan.Legs[i].Name
 	d.rep.update(func(r *Report) {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
-	return d.restGate(ctx)
+	var walk *walkRest
+	if w, ok := walkRestFor(d.cfg, d.plan, i); ok && next.Kind == ActWalk && dist3(d.g.Position(), next.To) >= float64(w.yd) {
+		walk = &w
+	}
+	return d.restGateWalk(ctx, walk)
 }
 
 // endLeg closes the current leg's report with result and sends its event; it does nothing when no leg is open.
@@ -684,7 +747,7 @@ func (d *Driver) endLeg(result string) {
 			l = *x
 		}
 	})
-	d.g.Emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
+	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s in %.0f s", i, l.Name, result, l.Seconds), map[string]any{
 		"leg": i, "name": l.Name, "phase": "end", "result": result, "seconds": l.Seconds, "deaths": l.Deaths,
 		"pulls": l.Pulls, "pull_retries": l.PullRetries, "rest_seconds": l.RestSeconds})
 }
@@ -704,7 +767,10 @@ func (d *Driver) sleep(ctx context.Context, dur time.Duration) error {
 		return err
 	}
 	d.drainRefusals()
-	return d.check(ctx)
+	if err := d.check(ctx); err != nil {
+		return err
+	}
+	return d.wd.watch(ctx)
 }
 
 // sleepHeld is sleep for a wait made under the brain's move lock: it only waits (and drains refusals), with no look at the party. A leader
@@ -715,7 +781,7 @@ func (d *Driver) sleepHeld(ctx context.Context, dur time.Duration) error {
 		return err
 	}
 	d.drainRefusals()
-	return nil
+	return d.wd.watch(ctx)
 }
 
 func (d *Driver) observeInit() {
@@ -739,6 +805,7 @@ func (d *Driver) observe() error {
 
 // countDeaths counts each death once (leader or member) and reports whether every online member is dead.
 func (d *Driver) countDeaths() (wholePartyDead bool) {
+	d.traceSample()
 	if !d.seen {
 		d.observeInit()
 	}
@@ -751,6 +818,7 @@ func (d *Driver) countDeaths() (wholePartyDead bool) {
 					r.Legs[n-1].Deaths++
 				}
 			})
+			d.tr.Event("death", map[string]any{"name": name, "a": guidText(g), "leg": d.curLeg})
 		}
 		d.prevDea[g] = dead
 	}
@@ -800,7 +868,14 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it
 // gave up on (a root that outlasted its wait, a server move too many). A pack that aggros on the way stops the walk:
 // the party fights it until the fight is over (walkAggro), then the walk goes on. That does not use up a try.
+//
+// Every walk of the leader (the plan's, an approach to a standoff point, a walk through a stealthed pack, an object step's) is the
+// watchdog's walk phase, and the watchdog looks at the leader after each walk_path (which blocks while it walks): a walk inside a pull
+// step that gets on after the recovery is progress there, not after the walk has ended.
 func (d *Driver) doWalk(ctx context.Context, p Point) error {
+	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(context.Context) (string, error) {
+		return "nothing to cancel: every try of the walk plans its path again from where the leader stands", nil
+	})()
 	var last string
 	aggros := 0
 	for try := 1; try <= d.cfg.WalkAttempts; {
@@ -824,6 +899,9 @@ func (d *Driver) doWalk(ctx context.Context, p Point) error {
 		}
 		if oerr := d.check(ctx); oerr != nil {
 			return oerr
+		}
+		if werr := d.wd.watch(ctx); werr != nil {
+			return werr
 		}
 		if d.recoveries != recovered { // the leader died on the way and came back: the walk is made again, from where it stands
 			continue
@@ -1013,6 +1091,7 @@ func (d *Driver) walkAggro(ctx context.Context) error {
 
 // fightAttackers orders the party onto the nearest attacker until none has hit it for AggroQuiet (or FightTimeout).
 func (d *Driver) fightAttackers(ctx context.Context) error {
+	defer d.wd.enter(wdFightPhase, "on the way", wdWaitFight)()
 	began := d.clk.Now()
 	lastSeen := began
 	var lastAssist time.Time
@@ -1021,10 +1100,14 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 		att := d.attackers()
 		if len(att) > 0 {
 			lastSeen = now
-			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
-				lastAssist = now
-				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.order(ctx, "attack"); err != nil {
+			d.wd.mobHealth(unitsHP(att))
+			if err := d.tankFirstGroup(ctx, att); err != nil {
+				return err
+			}
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(att) {
+				if t, ok := d.pickAssist(att); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, att); err != nil {
 						return err
 					}
 				}
@@ -1044,7 +1127,7 @@ func (d *Driver) fightAttackers(ctx context.Context) error {
 // order says ".bot action <intent>" in party chat and remembers the intent: a bot's whisper refusing it carries none.
 func (d *Driver) order(ctx context.Context, intent string) error {
 	d.lastOrder = intent
-	return d.g.Chat(ctx, "party", ".bot action "+intent)
+	return d.chat(ctx, ".bot action "+intent)
 }
 
 // doUse uses the object under the move lock, the settle wait included: a brain step must not carry the leader out of the object's reach
@@ -1087,7 +1170,13 @@ func (d *Driver) use(ctx context.Context, a Action) error {
 // judged. A caster whose mana has not risen ManaStallPct of its maximum for ManaStall (it does not drink) is let
 // pass when everything else is rested, with a note; a healer (HealerClasses) below HealerManaMin percent is not. After RestTimeout the run goes on if everyone has at least
 // RestMinHealth percent, else it fails.
-func (d *Driver) restGate(ctx context.Context) (err error) {
+func (d *Driver) restGate(ctx context.Context) error { return d.restGateWalk(ctx, nil) }
+
+// restGateWalk is restGate with the walking-rest rule of the gate that opens a leg (see RemoteDriver.restGateWalk): a party that is
+// not at the targets on the first frame but above walk's floors is let go, and the gate that follows the next fight holds again. A
+// gate that finds everyone at the targets on its first frame is counted as skipped.
+func (d *Driver) restGateWalk(ctx context.Context, walk *walkRest) (err error) {
+	defer d.traceRest(d.clk.Now())
 	if b := d.cfg.Brain; b != nil {
 		d.brainOn()
 		b.Rest(true)
@@ -1097,7 +1186,14 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
 	rec := newGateRec(max(d.curLeg, 0), tgt, began)
 	defer func() { rec.finish(&d.rep, d.clk.Now(), err) }()
+	// The gate has limits of its own (the cap, the fight timeout, the whole-gate bound): the watchdog's clock waits for it.
+	defer d.wd.enter("rest gate", "", nil)()
+	gh := &gateHold{w: d.wd}
+	defer gh.set(false)
+	ft := &fightToggle{w: d.wd, detail: "at a rest gate"} // a fight in the gate is watched by its mobs' health
+	defer ft.set(false)
 	ordered, refusedSeen := false, false
+	held := false // the gate has waited for something: its first frame did not pass it
 	calm := began // the rest timeout counts from here: the start of the gate, or the end of the last fight
 	var fightBegan, lastAssist time.Time
 	revived := map[packet.GUID]int{}
@@ -1112,6 +1208,9 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			return fmt.Errorf("the rest gate has gone on for more than %.0f s (fights keep interrupting it): the party is not rested", limit.Seconds())
 		}
 		if att := d.attackers(); len(att) > 0 {
+			gh.set(false)
+			ft.set(true)
+			d.wd.mobHealth(unitsHP(att))
 			now := d.clk.Now()
 			if fightBegan.IsZero() {
 				fightBegan = now
@@ -1119,15 +1218,18 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			if now.Sub(fightBegan) > d.cfg.FightTimeout {
 				return fmt.Errorf("the party is still in combat after %.0f s at a rest gate", d.cfg.FightTimeout.Seconds())
 			}
-			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery {
-				lastAssist = now
-				if err := d.g.Target(ctx, att[0].GUID); err == nil {
-					if err := d.order(ctx, "attack"); err != nil {
+			if err := d.tankFirstGroup(ctx, att); err != nil {
+				return err
+			}
+			if lastAssist.IsZero() || now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(att) {
+				if t, ok := d.pickAssist(att); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, att); err != nil {
 						return err
 					}
 				}
 			}
-			ordered, calm = false, now
+			ordered, calm, held = false, now, true
 			clear(rw.mana)
 			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 				return err
@@ -1135,8 +1237,13 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			continue
 		}
 		fightBegan, lastAssist = time.Time{}, time.Time{}
+		ft.set(false)
+		gh.set(true)
 		st := d.restState(rw)
 		rec.g.Short = st.short
+		if len(st.dead) > 0 {
+			held = true
+		}
 		if len(st.dead) == 0 {
 			rez = rezWatch{}
 		} else if d.brainRezWaiting(&rez) {
@@ -1193,13 +1300,22 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 				calm = d.clk.Now()
 			}
 		}
+		if !st.ok && !held && walk != nil {
+			if fs := d.restState(newRestWatch(walk.floor)); fs.ok && len(fs.dead) == 0 {
+				rec.g.Result, rec.g.Skipped = "walking", true
+				d.rep.note(fmt.Sprintf("leg %d: rest gate passed for a walk of %.0f yd or more (%s): resting on the way", d.curLeg, walk.yd, st.why))
+				return nil
+			}
+		}
 		if st.ok {
+			rec.g.Skipped = !held
 			if len(st.stalled) > 0 {
 				rec.g.Result = "stalled"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate passed with %s; mana did not rise in %.0f s", d.curLeg, strings.Join(st.stalled, ", "), d.cfg.ManaStall.Seconds()))
 			}
 			return nil
 		}
+		held = true
 		// The party rest order was refused (TB #916: "No scoped bot accepted the mature action"): the bots are asked one by one.
 		if ordered && !refusedSeen && d.restRefused() {
 			refusedSeen, rec.g.PartyRestRefused = true, true
@@ -1213,7 +1329,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 			}
 			rw.nudged[m.GUID] = true
 			rec.nudged(m.Name)
-			if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+			if err := d.chat(ctx, drinkOrder(m.Name, "drink")); err != nil {
 				return err
 			}
 			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent %q", d.curLeg, m.Name, m.Pct, d.cfg.DrinkNudge.Seconds(), drinkOrder(m.Name, "drink")))
@@ -1229,7 +1345,7 @@ func (d *Driver) restGate(ctx context.Context) (err error) {
 		if !ordered {
 			ordered = true
 			d.restRefused() // an old refusal is not an answer to this order
-			if err := d.g.Chat(ctx, "party", ".bot action rest"); err != nil {
+			if err := d.chat(ctx, ".bot action rest"); err != nil {
 				return err
 			}
 		}
@@ -1382,13 +1498,13 @@ func (d *Driver) orderEach(ctx context.Context, rw *restWatch, rec *gateRec, st 
 		}
 		rw.nudged[m.GUID] = true
 		rec.nudged(m.Name)
-		if err := d.g.Chat(ctx, "party", drinkOrder(m.Name, "drink")); err != nil {
+		if err := d.chat(ctx, drinkOrder(m.Name, "drink")); err != nil {
 			return err
 		}
 		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q (%s mana %d%%)", d.curLeg, why, drinkOrder(m.Name, "drink"), m.Name, m.Pct))
 	}
 	for _, name := range st.shortHP {
-		if err := d.g.Chat(ctx, "party", drinkOrder(name, "eat")); err != nil {
+		if err := d.chat(ctx, drinkOrder(name, "eat")); err != nil {
 			return err
 		}
 		d.rep.note(fmt.Sprintf("leg %d: %s: sent %q", d.curLeg, why, drinkOrder(name, "eat")))
@@ -1426,7 +1542,7 @@ func (d *Driver) sneakPast(ctx context.Context, label string, sp fightSpec) erro
 		return err
 	}
 	d.legStat(func(l *LegReport) { l.Ambushes++ })
-	if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+	if err := d.chat(ctx, ".bot action follow"); err != nil {
 		return err
 	}
 	fights := 0
@@ -1496,6 +1612,9 @@ type fightSpec struct {
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool
+	// patrol is the group's patrol (PullGroup.Patrol, remote mode only), and patrolSt what its gate has done for this group so far.
+	patrol   *Patrol
+	patrolSt *patrolState
 }
 
 type outcome int
@@ -1514,6 +1633,10 @@ type fightResult struct {
 	out   outcome
 	kills int
 	why   string // the refusal that ended the pull
+	// unreachable (remote): the tank answered "unreachable" to the pull from every approach point tried; the mob is alive and the party
+	// could not get at it, so its group is not cleared.
+	unreachable bool
+	dead        []deadAt // remote: the units that died, where the feed last showed them
 }
 
 // maxRetargets bounds the picks of one group that the bots answered with dead-target or no-target.
@@ -1567,7 +1690,7 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 				l.PullRetries++
 			}
 		})
-		res, err := d.fight(ctx, t, sp)
+		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
 			return err
 		}
@@ -1602,7 +1725,7 @@ func (d *Driver) engage(ctx context.Context, label string, sp fightSpec) error {
 			attempt++
 		}
 		d.rep.note(fmt.Sprintf("%s: pull of %s %s", label, t.Name, why))
-		if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+		if err := d.chat(ctx, ".bot action follow"); err != nil {
 			return err
 		}
 		if err := d.sleep(ctx, d.cfg.Poll*3); err != nil {
@@ -1778,6 +1901,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 	lastCombat, lastAssist := began, began
 	killed := map[packet.GUID]bool{} // members seen dead: the pull's progress
 	assistRefusals := 0
+	d.tg.looseSent, d.tg.focus = nil, 0 // the fight's first attack order comes at AssistEvery, after the pull's own join delay
 	for {
 		if err := d.sleep(ctx, d.cfg.Poll); err != nil {
 			return fightResult{}, err
@@ -1787,6 +1911,8 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		// a target that died or was never selected is picked again; a refused assist order is sent again at once.
 		for _, r := range d.takeRefusals() {
 			switch c := classify(r); {
+			case pullIntent(r) && d.tg.takeLooseAnswer(now):
+				// the answer to a tank order at a loose add, not to this fight's pull
 			case pullIntent(r) && c == refUnreachable:
 				return fightResult{out: refused, kills: len(killed), why: r.Code + ": " + r.Message}, nil
 			case pullIntent(r) && (c == refDead || c == refNoTarget):
@@ -1809,7 +1935,7 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 			}
 		}
 		alive, fighting := 0, false
-		var nearest *objects.Unit
+		var fighters []objects.Unit
 		for g := range tracked {
 			u, ok := byGUID[g]
 			if !ok { // out of view: gone
@@ -1826,14 +1952,15 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 			alive++
 			if u.InCombat || u.Health < u.MaxHealth {
 				fighting = true
-				if nearest == nil || u.Distance < nearest.Distance {
-					c := u
-					nearest = &c
-				}
+				fighters = append(fighters, u)
 			}
 		}
 		if fighting {
 			engaged, lastCombat = true, now
+		}
+		d.wd.fightSignal(len(killed), unitsHP(fighters))
+		if d.wdRepick.take() {
+			return fightResult{out: retarget, kills: len(killed), why: "the watchdog ended a stalled fight"}, nil
 		}
 		switch {
 		case alive == 0:
@@ -1845,11 +1972,17 @@ func (d *Driver) fight(ctx context.Context, t objects.Unit, sp fightSpec) (fight
 		case now.Sub(began) > sp.limit:
 			return fightResult{}, fmt.Errorf("the fight with %v lasted more than %.0f s", sp.pick, sp.limit.Seconds())
 		}
-		if engaged && nearest != nil && now.Sub(lastAssist) >= d.cfg.AssistEvery {
-			lastAssist = now
-			if err := d.g.Target(ctx, nearest.GUID); err == nil {
-				if err := d.order(ctx, "attack"); err != nil {
-					return fightResult{}, err
+		if engaged && len(fighters) > 0 {
+			if err := d.tankFirstGroup(ctx, fighters); err != nil {
+				return fightResult{}, err
+			}
+			// The leader targets the mob the tank holds best, not the nearest; a dead mob is replaced at once.
+			if now.Sub(lastAssist) >= d.cfg.AssistEvery || d.focusGoneIn(fighters) {
+				if t, ok := d.pickAssist(fighters); ok {
+					lastAssist = now
+					if _, err := d.assistOrder(ctx, t, fighters); err != nil {
+						return fightResult{}, err
+					}
 				}
 			}
 		}

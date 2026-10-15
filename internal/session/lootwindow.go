@@ -47,8 +47,11 @@ type lootState struct {
 	ansWin  *LootWindow
 	// skip is the window a new CMSG_LOOT closes first: the core releases the old loot
 	// before it answers the new one (Player.cpp:9304-9305, LootHandler.cpp:463-481), and that release is no answer.
-	skip  packet.GUID
-	wakes notifier
+	skip packet.GUID
+	// releasing says CMSG_LOOT_RELEASE for win is sent and its SMSG_LOOT_RELEASE_RESPONSE is not in yet: the window still
+	// reads as open, but nobody should release it again.
+	releasing bool
+	wakes     notifier
 }
 
 type lootAnswer struct {
@@ -366,21 +369,46 @@ func contains(xs []uint8, x uint8) bool {
 }
 
 // CloseLoot closes the open window (CMSG_LOOT_RELEASE) and waits up to wait for the
-// server's SMSG_LOOT_RELEASE_RESPONSE.
+// server's SMSG_LOOT_RELEASE_RESPONSE. A window the session already released (an emptied one) is not released twice; the call
+// waits for the server's answer to that release.
 func (s *Session) CloseLoot(ctx context.Context, wait time.Duration) error {
-	_, err := s.do(ctx, func() (any, error) {
+	return s.closeLoot(ctx, 0, true, wait)
+}
+
+// closeLoot releases the open window and waits for the server to close it. With guid set, it only acts on that window, and a
+// window that is gone or is another one counts as closed: the server may have closed it between the caller's look and now.
+// Without guid, or with open set, no window at all is an error. The check and the release run in one owner-loop turn, so a
+// release response cannot slip in between.
+func (s *Session) closeLoot(ctx context.Context, guid packet.GUID, open bool, wait time.Duration) error {
+	var target packet.GUID
+	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if s.loot.win == nil {
+		w := s.loot.win
+		if w == nil && open {
 			return nil, errors.New("no loot window is open")
 		}
-		return nil, s.conn.WritePacket(opcode.CMSGLootRelease, game.BuildLootRelease(s.loot.win.GUID))
+		if w == nil || (guid != 0 && w.GUID != guid) {
+			return true, nil
+		}
+		target = w.GUID
+		if s.loot.releasing {
+			return false, nil
+		}
+		if err := s.conn.WritePacket(opcode.CMSGLootRelease, game.BuildLootRelease(w.GUID)); err != nil {
+			return nil, err
+		}
+		s.loot.releasing = true
+		return false, nil
 	})
 	if err != nil {
 		return err
 	}
-	if err := s.awaitLoot(ctx, wait, func() bool { return s.loot.win == nil }); err != nil {
+	if v.(bool) {
+		return nil
+	}
+	if err := s.awaitLoot(ctx, wait, func() bool { return s.loot.win == nil || s.loot.win.GUID != target }); err != nil {
 		return fmt.Errorf("the server did not confirm the loot closed within %s: %w", wait, err)
 	}
 	return nil
@@ -407,7 +435,7 @@ func (s *Session) onLootResponse(body []byte) error {
 		l.wakes.wake()
 		return nil
 	}
-	l.win = &r
+	l.win, l.releasing = &r, false
 	l.answer(lootAnswer{guid: r.GUID}, windowOf(l.win))
 	s.emit(events.Event{Kind: events.KindLootOpen, SourceGUID: r.GUID, Amount: int64(r.Money), Data: lootOpenData(&r)})
 	s.closeIfEmpty()
@@ -431,12 +459,14 @@ func lootOpenData(r *game.LootResponse) map[string]any {
 // closeIfEmpty releases a window with nothing left in it, as the client closes the frame.
 func (s *Session) closeIfEmpty() {
 	w := s.loot.win
-	if w == nil || len(w.Items) > 0 || w.Money > 0 {
+	if w == nil || len(w.Items) > 0 || w.Money > 0 || s.loot.releasing {
 		return
 	}
 	if err := s.conn.WritePacket(opcode.CMSGLootRelease, game.BuildLootRelease(w.GUID)); err != nil {
 		fmt.Fprintf(s.logger, "loot release: %v\n", err)
+		return
 	}
+	s.loot.releasing = true
 }
 
 func (s *Session) onLootRelease(body []byte) error {
@@ -451,7 +481,7 @@ func (s *Session) onLootRelease(body []byte) error {
 		l.answer(lootAnswer{guid: g, released: true}, nil)
 	}
 	if l.win != nil && l.win.GUID == g {
-		l.win = nil
+		l.win, l.releasing = nil, false
 	}
 	s.emit(events.Event{Kind: events.KindLootClosed, SourceGUID: g})
 	l.wakes.wake()

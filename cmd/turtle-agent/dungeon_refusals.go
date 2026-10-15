@@ -8,6 +8,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -94,3 +95,6 @@ func (g *sessionGame) SelfAuras() ([]objects.Aura, bool) {
 
 // Items implements dungeon.ItemSource: the backpack and the bags of the leader.
 func (g *sessionGame) Items() []objects.Item { return g.cur().Items() }
+
+// RaidMarks implements dungeon.MarkSource: the group's raid icons by name and the unit each is on.
+func (g *sessionGame) RaidMarks() map[string]packet.GUID { return g.cur().Party().Marks }

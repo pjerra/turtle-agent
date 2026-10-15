@@ -147,7 +147,7 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
    - the rest gate: no 150 s waits for the priest (the note "not drinking"), no "not rested" failure during a fight, a gate that starts after a fight
      ends in a reasonable time (the walk-aggro and ambush fights are followed by a gate before the next pull);
    - the rest gate's drink nudge: with a healer that does not drink (TB #909), `rest_gates[]` shows `drink_orders: ["<healer>"]` about 15 s in and a gate of about 60 s at most; whether the healer sits and drinks after `.bot command <Name> u drink` (the log line and its mana in the next looks), and what the reply or refusal reads; in remote mode the nudge is a second `.bot cmd rest`;
-   - remote mode, walking: the commander test (deploy-19h) showed 68 walk bursts with a median pause of 6.3 s; with the look-ahead `walk_stops`/`walk_stopped_s` in the report should be near 0 on a long walk, and no `cmd move` should be refused for being sent early. Also whether a `cmd move` to the bot's own position (sent after each fight, `fight_holds`) is accepted and stops the walk back to the stay spot (a refusal shows in `refused`); and `resume: true` (off until this is seen): a restart halfway through a leg must not run the lead bot back (the report's `resumed`), and no live pack may be skipped; also how far the lead bot walks back toward the stay spot during the loot wait before the hold is sent;
+   - remote mode, walking: the commander test (deploy-19h) showed 68 walk bursts with a median pause of 6.3 s; with the look-ahead `walk_stops`/`walk_stopped_s` in the report should be near 0 on a long walk, and no `cmd move` should be refused for being sent early. Also whether a `cmd move` to the bot's own position (sent after a fight when the lead bot stands more than 3 yd from its last move point, `fight_holds`) is accepted and stops the walk back to the stay spot (a refusal shows in `refused`); and `resume: true` (off until this is seen): a restart halfway through a leg must not run the lead bot back (the report's `resumed`), and no live pack may be skipped; also how far the lead bot walks back toward the stay spot during the loot wait before the hold is sent;
    - `.revive <name>` on a companion: how long the party list takes to show it (the driver waits up to 5 s), with no second revive;
    - the Seal of Khaz'Mul active within the 60 s wait; Eric and Olaf needing a kill for a Horde leader (plan decision (b): no script links them to Baelog; an Alliance leader skips the three, they are friendly).
    - the optional GM buffs (`"buffs": "world"`, issue #73): `.aura <id>` on each selected companion lands on the companion (not the leader; developer
@@ -593,6 +593,28 @@ Run again with a level 40 character of each class that has its spells (`.learn a
 5. **Warlock.** `affliction_warlock` with the natural mana pool (and once with `.modify mana`): Summon Voidwalker (100% of the base mana) is not refused with `no_power`; `unit` shows `base_mana`.
 6. **Missing mmaps.** Remove map 001 from `mmaps_dir` and fight in Kalimdor: `melee_reposition` reports the missing `001.mmap` once, then not for 5 min. `mmaps_dir` must hold every map you play on.
 
+## Run traces and checks (issue #73, data-collection step 1)
+
+The trace writer, the recorder and the ten checks run only against the fake game, the fake feed and hand-made traces (README "Run traces
+and checks"). Nothing below has run live. Use the agent slot only, `trace_meta` to note the build, and keep the traces: they are the data.
+
+1. **A short group run.** `dungeon_run {"name":"uldaman","gm":false,"run_id":"live-1","trace_meta":{"tb_sha":"<sha>","build":"<n>"}}` with a
+   hired party, for two legs. The result has `run_id` and `trace_file`; `<traces_dir>/live-1.jsonl` grows while it goes (`tail -f`) with a frame about every
+   second. Check a frame against `units` and `party`: positions, `cb`, `tg`, `mv`, the members' power. When the run ends, `dungeon_status.report.trace`
+   has `verdict`, `failed[]` and ten `checks[]`; `live-1.summary.json` says the same. Read the file size per minute: is 32 MiB (the limit) hours away?
+2. **`stale_party` on the real party list.** In a long fight (a boss), does a caster's `pw` in the frames stop changing while the others' move? If
+   the check fails, compare with the bot's real mana (`.bot` status or the TBM roster) to tell stale party data from a bot that really did nothing.
+3. **Facing.** Is `fa` in group frames the members' real angle off their target (compare one melee member to what the client shows)? Does the `facing` check have
+   melee-range frames (members in view, target a hostile in view) to be anything but n/a? In a remote run, is the feed's `O` the bot's facing in radians (0 east)?
+4. **Stuck.** Walk a leg that has a known snag. Do the `stuck` events name the right member and place? Does a follower that is simply waiting for the lead
+   (inside 10 yd) stay quiet? Does the lead stopping for a use_object (not a walk) stay quiet?
+5. **Remote run.** The same with `mode: "remote"` (see "Remote leader"): frames have `via: "feed"` with `thr` threat lists; `order` events have `reply` and `ms`;
+   `threat_off_tank`, `feed_stalls` and `order_refusals` have values instead of n/a. A feed stall: stop the module's view (`commander view off`) for 15 s in the
+   middle of a run and see `feed_stall` and a `feed_stalls` fail.
+6. **Re-scoring.** `turtle-agent trace-score --set rest_share=30 <the trace>` prints the verdicts again from the file alone; exit code 11 on a fail.
+7. **Brain session.** `brain_start {"strategies":["frost_mage"],"run_id":"live-brain"}`, fight, `brain_stop`: `brain_status.run_id`, `data.run_id` on the
+   `brain_*` events and a `live-brain.jsonl` with `brain` events. With `dungeon_run ... "brain":"frost_mage"` the brain's decisions land in the run's trace.
+
 ## Remote leader (issue #83)
 
 Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B` truncated field of #901 when that is in) and
@@ -612,8 +634,7 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
    {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","from_leg":0}`: watch `dungeon_status.report.remote`: `bound`,
    `frames_received` rising, `orders` by verb, `threat_holds`/`threat_waits`/`threat_overrides`, `move_stalls`, `refused`. Expect the first leg's
    walk to take several `move` legs, pulls to start with `pullback` at feed guids, the party to be sent in once the tank holds the mob. The run is
-   expected to **fail at the first object step** (`remote mode: object step needs the agent nearby`); that is the designed limit. Run a leg range
-   without object steps (or accept the failure) and check that it ends with `unbound: true`.
+   object steps are done by the carrier since the object-steps work (see "Remote Uldaman: the carrier does the object steps" below); before that they failed with `remote mode: object step needs the agent nearby`.
 5. **Exits.** `dungeon_stop` in the middle of a fight: `remote.unbound` true, `.bot commander status` answers `not-bound`, the bots hold where they
    stand. Log the lead bot out during a run: the module's automatic `commander unbind` ACK ends the run with `the commander binding ended`.
 6. **Open questions the fixtures cannot answer.** How close `move` stops (arrival radius 5 yd assumed), how long a 120 yd leg takes in a dungeon (the
@@ -621,6 +642,35 @@ Needs the TortoiseBots 19h build (the remote commander of #898/#899, with the `B
    mob that is not yet in the lead bot's range answers `too-far`, and whether a hostile that dies is dropped from `H` at once (the fight counts a
    mob that was seen fighting and is absent for two frames as dead), and in a dense room (more than 24 hostiles) whether the fight is ever
    called early: check `frames_truncated` and that no pull ends `won` with 0 kills.
+
+## Remote Uldaman: friendly bosses, unseen packs, rez wait, kit check, end of run (issue #83)
+
+Tested with the fake feed and the fake game only (`internal/dungeon/remote_gaps_test.go`); nothing below has run live. Needs a TortoiseBots build
+with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBotMaintenanceEnabled = 1` for step 2.
+
+1. **Team gate.** `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...],"tank":"<tank>","healer":"<priest>"}` with an
+   Alliance agent and Alliance bots: the notes say `team gate: alliance, from the agent's own race`, the Baelog boss and its First entries are
+   skipped (`skip_team`) while the Lost Dwarves are not in the feed, and the run does not fail with `no living [6906]`; when the last pack's pull aggroes them (they were hostile to the Alliance in remote run 2) the note says `its mobs are hostile to the party: fought` (`team_override`) and the boss step kills them. Then `"team":"horde"`: the boss step runs (expect the failure). If the
+   agent and the bots are on different sides, check that `team` fixes it.
+2. **Kit check.** Watch `.bot maintenance <bot>` go out first, one per bot, and the answers (`Maintained ...`; with the switch off `disabled`).
+   Then `.bot inv <bot>`: compare `remote.preflight.bots[]` with the real bags: drink counts (and whether the server's drink items are all in the
+   table: a drink the table lacks reads as 0), a hunter's ammo against its weapon (TB #921 gun and bullets), the tank's shield. Try `"preflight":"strict"`
+   with a bot that has no drinks: the run must fail before the first `cmd`. Check the plain `.bot` lines do not trip the anticheat or the chat throttle
+   (five bots, ten lines).
+3. **Unseen packs.** Walk leg 0 and read the notes: every `nothing of [...] in view; walking to its position` line should be followed by either a
+   pull of that group or `counted as cleared: ...`. Count `pack_looks`, `packs_seen_empty`, `walk_aggros`: deploy-19h skipped 10 of 10 groups and met
+   2 packs on the walk to the boss. Check that the lead bot really gets within 25 yd of a pack (a pack behind a wall, up a ledge) and whether the
+   `could not get a view of the pack` failure shows up on a real position. Uldaman's ledge packs (a position up on a ledge the navmesh path does not
+   bring the lead bot within 25 yd of) are the expected case: an unreachable position fails the step on purpose, because passing it would count an
+   unseen pack as dead. Note which positions fail; the plan may need a closer `to` or a different pull for them. A kill clears only its own position of a
+   multi-position group: the lead bot still walks to the others. A group given up on (a mob that drew no fight, evaded or was refused) fails with
+   `were never seen` when one of its positions was never looked at; note how often that happens with the Oracles (G10).
+4. **Rez wait.** Let a DPS bot die with the priest alive and out of combat: no `cmd revive` should go out; the priest should raise it within the
+   30 s (`rez_waits` 1, `rezzed` 1, the note `were raised`). Then kill the priest too (or stun it in combat): the wait ends at once and `cmd revive`
+   goes out. Check the module's priest actually casts Resurrection on a body that has not released, and how long it takes.
+5. **End of run.** After `done`, `failed` and `dungeon_stop`: `remote.end_stay` is `ack` and the bots stay where they stood after the unbind, also
+   with the agent far away (move it and see they do not follow). `on_end: "logout"`: the bots log out after the unbind (`logged_out`); check the
+   module accepts `.bot logout` for a bot it was commanding a moment ago, and what happens to the party.
 
 ## Trade (issue #80)
 
@@ -639,3 +689,323 @@ is in the agent's group (or owned by it) and standing within 10 yd, and a Tortoi
 5. **Refusals.** A soulbound item: expect `cancelled` (the core refuses `CMSG_SET_TRADE_ITEM` with a cancel). A bot that is not in the group: expect the window not to open, `timeout` after `open_wait_ms` and a cancel sent.
 6. **Mage bot.** A mage bot may fill its side with conjured food and water (`AutoShareConjured`, default on): check `received` lists them and that the accept takes them without a second round of `back_to_trade` that runs the agent out of its four accepts.
 7. **Anticheat and idle.** A SEC_PLAYER leader: trade packets are not movement, but grep the anticheat log for the run anyway.
+
+## Tank first: the party follows the tank's threat (issues #83, #80)
+
+Built and tested against the fake game and the fake feed only; none of it has run live. The 2026-10-14 deploy-19h run (`~/TortoiseBots-audit/tests/deploy-19h/REPORT.md`) had the
+lead-bot tank at 15-25 % of the top threat while the rogue led: compare `report.remote.tank_threat_share` with that. Needs the 19h+ build and `RemoteCommander = 1`.
+
+1. **Remote, target.** A five-bot party (protection warrior named `tank`, healer, rogue, hunter, warlock) in a dungeon with a pack of three or more: `dungeon_run ... "mode":"remote"`. Read `orders`
+   (`attack` guids against the feed's `T` records, `bot_view`): the guid of each `attack` is the mob where the tank has the largest share, not the nearest. `tank_threat_share` over the fight
+   (expected well above 25), `threat_waits` (+1 per mob for the 2 s opener), `target_switches` (small; it should not rise every 10 s).
+2. **Remote, loose add.** Pull a pack, then let a second pack aggro on the healer or the warlock (or `.bot` move it): `loose_add_orders` rises and the order is `cmd pull <guid> 0`. Record the
+   module's answer: ACK or ERR (`no-tank`, `unreachable`, `too-far`), whether the tank walks to the add and keeps it (its `Target` in `bot_view` flips to the add, the add's `T` top becomes the tank), how long
+   `pull ... 0` holds the other bots ("stay" + "wait for attack" with a 0 s window, expected released at once for a mob in combat) and whether it resets the lead bot's stay spot, and whether the tank's pull ends with a "return to anchor" walk. If `pull` is refused or disturbs the fight, say which and the part to
+   change (it is the commander's only tank order; a bot-scoped `cmd attack <guid> <bot>` would be better, issue for TortoiseBots).
+3. **Remote, crowd control.** `cc: [{"entry":<mage-sheep entry>,"mark":"moon","bot":"<mage>"}]` on a pack with a sheepable mob: the sheep (feed flag `c` in `H`) is never in an `attack` order until it is
+   the last mob (`cc_respected` 1); confirm the flag is `c` on a polymorphed mob and that it clears when it breaks. A stunned or rooted mob also shows `c` (the flag is `UNIT_STAT_STUNNED|CONFUSED|FLEEING|ROOT`): the party must not drop a stunned mob the tank is hitting
+   (only mobs a `cc` order was accepted for are spared).
+4. **Remote, opener.** The first `attack` at a freshly pulled mob comes about 2 s after its `T` top is the tank (`orders` times in the event log), not at the pull.
+5. **Group mode, target.** `dungeon_run` as the leader with a tank, a mage and a healer: in a pack of three, the `target` the leader sets before each `.bot action attack` is the mob the tank
+   targets (check the tank's `target` in `units`), not the nearest. `report.tank_first.tank` names the tank; `tank_threat_share` is the share of mobs on it.
+6. **Group mode, loose add and CC.** Let a mob run at the healer: `loose_add_orders` 1, the chat shows `.bot action pull 0` right after the leader targeted the mob, and the tank goes for it. Polymorph one mob (`.bot action cc moon`) and set the moon icon: the leader never targets it for the attack order until it is the last (`cc_respected`).
+   Check `unit.auras` of a sheep shows the Polymorph name/mechanic the rule matches (Sap, Shackle Undead, Hibernate, Banish, Freezing Trap Effect too).
+
+## Remote Uldaman: the carrier does the object steps (issue #83, gap G2)
+
+Tested with a fake commander only (`internal/dungeon/remote_objects_test.go`, `internal/tbm/orders_test.go`); nothing below has run live. Needs the TortoiseBots
+build with #928 (`cmd loot|open|use|lootmethod`, `ACTION_PENDING`), `RemoteCommander = 1`, five owned alts in Uldaman and the agent's character **in view of the
+objects** (in the instance, or at its edge with the objects loaded). Read the order lines in the event log or `commander` replies for every item.
+
+1. **Manual orders first.** `commander {"op":"bind",...}`, then with the party at the chest: `commander {"op":"cmd","verb":"open","args":["0x<chest guid from gameobjects>","<DPS>"],"wait_ms":4000}`.
+   The result has `order.pending` (the budget) and `order.loot`. Note: does the chest answer with its item list (Gni'kiv Medallion 7740), is lock 93 opened by a bot
+   with no key, what is the PENDING budget and how long the whole order takes, and does the DPS bot rejoin the formation by itself (position in `bot_view` over 30 s).
+2. **Loot method.** `cmd lootmethod ffa` then `group`: the ACK reads back `ffa:<threshold>` and `group:<threshold>`; check the threshold is the one the party had (the run
+   puts back `group` and cannot know the old method: if the party was on round robin, set `loot_restore`).
+3. **Leg 0, the chest.** Kill Baelog, Eric and Olaf (Horde agent: the team gate decides), then the run's `loot_object`: `remote.object_steps[0]` with orders `lootmethod ffa`, `open`, `lootmethod group`; the
+   Medallion in the carrier's `.bot inv`; seconds. If `no-item` or `locked` comes, the ERR text says which kind.
+4. **Leg 1, the Shaft.** With `companions_loot: false` in the plan: `.bot behavior <bot> loot off` for four bots and `on` after (does the module answer an ACK, and does the BOTSTATE line change?). After
+   Revelosh dies: `cmd loot <corpse guid> <carrier> 7741` under free-for-all. The corpse GUID is the one the feed showed dying: check the module accepts it (`invalid-target` would mean the corpse
+   keeps another GUID). The ACK lists `7741:1`. Try it once with the method left on `group`/round robin to see the `failed` the documentation promises, and that the run says so.
+5. **Leg 1, the combine.** `cmd use 7740 <carrier>`: ACK `spell:9594`, and the Staff 7733 in `.bot inv` within 8 s; note whether the cast needs the party to stand still and whether `busy` shows up.
+6. **Leg 2, the Keystone.** Staff in the carrier's bags: `cmd open <keystone guid> <carrier>` answers `opened` (the Keystone is a goober that may despawn between looks: a `failed` "no change" with the
+   Seal opened anyway is the documented case). Then the Seal: with the Seal in the agent's view the wait follows its state; out of view the run waits 10 s and goes on (a note). Does the Seal open?
+7. **Refusals.** A carrier with an empty bag for `cmd use`: `no-item`. The Keystone with the Staff on another bot: the run fails before the order naming the carrier. Kill the carrier mid-walk: `unavailable`.
+   A fight starting during the walk: `in-combat`, and the run waits it out and orders again. Send `cmd move` by hand during an order: `cancelled`, then the run sends it again.
+8. **Agent out of view.** Run the leg with the agent in Ironforge: the step fails at once with `the agent must be within view of game object 123329`, with no order sent and the bots unbound.
+9. **Totals.** For a clean leg 0-2 run, `remote.object_steps` should list the chest, the Shaft, the combine and the Keystone, every order `ack`, seconds per step, `refused` empty.
+
+## Remote object steps: wait for a still carrier, and let the agent open and hand over when a bot cannot (issue #83, uldaman-remote-3)
+
+Tested with a fake commander and a fake agent only (`internal/dungeon/remote_fallback_test.go`); nothing below has run live. Evidence behind it: uldaman-remote-3 (the driver sent `cmd open`
+with the carrier ~20 yd from Baelog's Chest; even stationary, the bots' Opening cast was interrupted) and live-dungeon-4 (in group mode the agent opened the same chest first try with
+its own Opening cast). Needs the Baelog's Chest step of the Uldaman plan, five owned bots in the instance, the agent in view of the chest. A TortoiseBots fix for the open order may land
+in parallel: run the first check without it, to see the fallback work, and again with it, to see that the approach alone is enough.
+
+1. **Approach.** Run to the chest step. In the event log / trace: `cmd move` to the stand point (3 yd short of the chest), `cmd stay`, and only then `cmd lootmethod ffa`, `cmd open`. The step's
+   `approach` reads `<carrier> still N yd from the object after S s`; N is at most 5. Does the carrier stand still within a few seconds of the lead bot stopping, or does it keep drifting in
+   its formation (then `approach` says the order went out anyway after 20 s)? Is `cmd follow` after the step enough to make the party walk on with the lead bot?
+2. **Carrier open after the approach.** Does `cmd open` now succeed with the carrier within 5 yd and stationary (before any fallback)? If the Opening cast is still interrupted at once,
+   note the bots' own uncommanded casts (several bots at once) in the tbm log.
+3. **Fallback, GM agent.** Force the failure (a carrier with `cmd open` refused twice, e.g. an older module build, or `carrier` a bot with no Opening skill). Expected: two `open` orders in
+   `orders`, `fallback_used` true, the agent's own Opening cast (spell 6477, 5 s, standing still) in the event log, `.gm visible on` then the trade then `.gm visible off` in `setup_shortcuts`, `run_gm_assists`
+   up by those (and any `.appear`), the Medallion in `.bot inv <carrier>`, `fallback.trade.in_bags` true. Check that the bot actually accepts the trade (the trade RPC's `partner_accepted`) and that the
+   GM is invisible again afterwards (`.gm visible` state, mobs do not aggro it).
+4. **Fallback, player account.** The same with a non-GM agent: it walks to the chest, opens, walks to within 8 yd of the carrier, trades; no GM line anywhere.
+5. **No fallback in combat.** Start a fight (or leave a mob aggroed) while the carrier's orders fail: the run waits up to 60 s, then the step fails with `does not open the object in a fight`;
+   no `.gm visible on` is sent while the party is in combat.
+6. **Combine and Keystone.** Hold the Medallion and the Shaft in the agent's own bags (`.additem`) and refuse `cmd use` on the carrier: the agent uses the Medallion and trades the Staff.
+   With the Staff in the agent's bags and no bot holding it, the Keystone step opens with the agent's own use. With a later step that needs the Staff on a bot, it does not.
+7. **Report.** `remote.object_steps[]`: `carrier_result`, `fallback_used`, `fallback.trade` (`result`, `verified`, `in_bags`, `visible`), `approach`, seconds. The same in the trace (`object_approach`, `object_fallback`, `object_trade`).
+
+## Remote Uldaman: enter as the bots' own group, wait out a busy tank, read back talents (issue #83, deploy-19i fixes 1, 4, 5)
+
+Tested with a fake commander and feed only (`internal/dungeon/remote_enter_test.go`, `cmd/turtle-agent/commander_methods_test.go`,
+`internal/tbm/inventory_test.go`); nothing below has run live. Needs a TortoiseBots build with #929 (the bind keeps a bots+commander party,
+bound bots do not leave when their master does, `tank-busy`), `RemoteCommander = 1`, `OwnedBotMaintenanceEnabled = 1`, five owned alts **outside
+the dungeon** and the agent's character outside it too.
+
+**The entry procedure that works** (deploy-19i `BLOCKERS.md`; the run does it by itself since this change):
+
+1. The agent is ungrouped and outside any instance, from the start. Never invite the bots into the agent's party, and never run `leave_group`
+   once bots are inside. (A run started with the agent grouped with the bots binds first, which takes the agent out; the bound bots stay.)
+2. Optional: a stale solo Uldaman bind on the lead bot is cleared with `.instance unbind` (a GM); the lead's solo binds are copied to the new group.
+3. `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"<tank>","bots":[...four others...],"tank":"<tank>","healer":"<priest>"}`: `commander bind`
+   forms (or keeps) the bots-only group **outside**; the first frame shows the bots on map 0, so the enter phase runs. With a developer account
+   (`.account` says 3 or more): `.tele name <tank> ulda`, then `cmd summon <bot>` for the others, 6 s apart. Otherwise: `cmd move` legs to the portal at
+   the Badlands entrance (areatrigger 286), then summons for those that did not come.
+4. Every bot's frame shows map 70 within 30 s; then leg 0. No group change after this point (check the server log for no `leave` or `invite` of the bots).
+
+**The hourly limit.** The core refuses a 6th *new* instance per **account** per hour (`TRANSFER_ABORT_TOO_MANY_INSTANCES`). Every attempt that
+gets as far as entering is one: a failed run that entered still counts. The agent keeps the last hour's entries next to its settings file and
+refuses the 6th (`ignore_entry_limit` after a mangosd restart, which clears the server's list). Whether the agent's GM entries also spend the bots'
+budget depends on whether they share the account (open in BLOCKERS); the agent does not enter, only the bots do.
+
+Checks:
+
+1. **GM entry.** A developer account. The report's `remote.enter` has `method: "gm"`, `account_level`, `tele: "ulda"`, `summoned` (4 bots), `arrived` (the
+   seconds each bot first showed on map 70; expect the lead within ~5 s and the others 3-4 s after their summon), `entries: 1`,
+   `entries_last_hour`, and `remote.gm_commands` is 1. Server log: the bots' account got exactly one new instance, no group `leave`/`invite` after the
+   tele, and no homebind 60-90 s later (the 19i failure). Does `.tele name` of a bot put it in its *group's* instance (not a fresh one)?
+2. **Walking entry.** A non-GM account (or `enter: "walk"`). Does the lead bot go in when it walks into the portal's trigger (`remote.enter.method`
+   `walk`; no `stood at the portal and did not enter` failure)? Do the followers come by themselves within the 8 s grace, or are they summoned?
+3. **Wrong map.** Make one bot stick (kill it in the open world before the run, or log it out): the run fails with `<bot> (map N) not on map 70`, the
+   group is untouched, the binding is ended.
+4. **The limit.** Enter five instances inside the hour: the run refuses with the time the oldest entry leaves the list and sends no `.tele`.
+5. **Busy tank.** Pull while the tank is meleeing an add: the first `cmd pullback` is refused `tank-busy` (`remote.refused` `pullback:tank-busy`), the
+   driver waits (`tank_busy_waits`, at most 10 s), then pulls again; no `cmd attack` stands in for it and `pull_fallbacks` stays 0. Does the module
+   answer `tank-busy` for a tank in combat, and `no-tank` only for a party with no tank?
+6. **Talents read-back.** `preflight.bots[].talents` per bot ("0/5/31" for a protection warrior). Does the bot's answer to `.bot command <bot> talents`
+   reach the agent (a whisper from the bot, which `Lines` reads for `command <bot> ...` lines; otherwise `no answer`)? Reset a bot (`.bot command <bot> talents
+   reset`) and run again: `no talent points spent (0/0/0)` is a warning; with `preflight: "strict"` the run fails before the bind's first order.
+
+## Remote runs: refill drinks and skip needless rest gates (issue #83, rest share)
+
+Evidence: the first remote Uldaman run spent 36 % of its time in rest gates (target 20 % or less), with 6-7 drinks a bot and a gate after every group. The
+code is tested against the fake feed only; nothing below has run live. It needs the TortoiseBots build with the #924 party-record fields for check 3.
+
+1. **Refill.** A caster that starts a leg with few drinks (check `remote.preflight.bots[].drinks`): at the first gate where it is short of mana, does
+   `.bot maintenance <bot>` buy more? The module refuses it only for a pool bot, with maintenance disabled, or for a dead bot (there is no dungeon or
+   combat refusal), so read `refills[].maintenance` (`maintained`, `refused: ...`) and `refills[].before`/`after`: do the drinks really rise mid-dungeon, and
+   how many (maintenance topped up 6-7 before)? Does the bot sit and drink after the next `cmd rest`? One refill per bot per leg, never in a loop.
+2. **Lighter gates.** Count `rest_gates_skipped` against the gates in `rest_gates[]` after a clean run, and read `rest_share` in the `dungeon_done` summary
+   and in `trace-score`: they should agree with the `rest` events' seconds. A `walking` gate at a leg start: do the bots drink on the walk (the walk's `cmd move`
+   makes them stand up, so little mana comes back), and does the gate before the first pull wait the short rest it still needs? If the pull gates then take
+   as long as the old gate did, the walking rest saved nothing; lower `walk_health`/`walk_healer_mana` or turn it off with `walk_yd: -1`.
+3. **Drink pacing.** In the feed (`bot_view` / the trace) look at the `action`/`result`/`reason` of a caster that has run out of drinks. TortoiseBots reports
+   item-action failures as `drink,F,-` (run 1 had 50 of them), so the trigger is `no-item` (when the module ever gives it) or an `F` drink in two different frames
+   within 10 s: `refills[].why` is `no-item` or `drink-failed`. No promise about the delay: it is one to two gate polls (3 s each), plus the `.bot inv` read. If the
+   module names the action differently (not `drink`), neither fires and the low-drinks and nudge triggers remain; report the name.
+4. **Share target.** Repeat the remote Uldaman run: rest share at or under 20 % of the run, and no healer that went into a pull under 40 % mana.
+
+## Remote runs: bring the agent into view of every object step (issue #83, uldaman-remote-4)
+
+Evidence: remote run 4 did the chest, the Shaft, the Staff combine and the Keystone, then failed at the Seal of Khaz'Mul wait (object 124372, 41 yd from the party) with
+"the agent must be within view". The code is tested against the fake feed only; nothing below has run live.
+
+1. **Seal wait.** Repeat the Keystone leg with the agent beside the lead bot. In the notes: either `keep near: ... walks to ...` toward the Seal and
+   `... is in the agent's view after N s` (the wait is then really checked, expect the Seal `active` ~27 s after the Keystone), or the wait goes on unchecked with
+   `cannot see game object 124372 near ... (the agent stands N yd from it)`. In both cases the run goes on to Ironaya's leg; `agent_walks` counts the walk,
+   `gm_commands` and `run_gm_assists` are unchanged by it. How far from the Seal does the server first send it to the agent (the real view range)?
+2. **No walk past a pack.** With mobs near the way to the Seal (anywhere along it, seen by the bots or only by the agent) the agent stays put (`the agent stays where it is: ... stands near its way`) and the wait is unchecked.
+3. **Still carrier.** `object_steps[].approach` says `still N yd ... after S s`; the first `cmd open` of Baelog's Chest is no longer interrupted by a 1-2 yd move
+   (`cast interrupted ... the bot moved`).
+
+## Remote runs: target objects by entry and wait on cmd state (issue #83)
+
+Needs a server with TortoiseBots #933 (`cmd state`, `entry:<id>[@x,y,z]`). The code is tested against a fake commander only; nothing below has run live.
+The point: a clean Uldaman leg 0-2 run where the agent's character stays at the entrance (never `.appear`ed, never walking after the party).
+
+1. **Probe.** Start a remote run with the agent far from the party. The notes say `entry targets: the module answers cmd state entry:...` and `remote.entry_targets` is `on`. Against an older module
+   (no #933) it reads `off: ... was refused: invalid ...` and the run behaves as before (`.appear`/walks, GUIDs).
+2. **Baelog's chest by entry.** `remote.object_steps[0].orders` holds `cmd open entry:123329@-356.00,112.80,-43.20 <carrier>` and the step has `target_guid` (the module's ACTION_TARGET); the chest opens and the
+   Medallion is in the carrier's bags. Is the GUID the one `gameobjects` shows when the agent stands there? Does the ACTION_TARGET line arrive before PENDING?
+3. **Keystone and the Seal.** `cmd open entry:124371@... <carrier>` opens the Keystone; the Seal wait then polls `cmd state entry:124372@-234.60,294.80,-47.60` every 2 s (`remote.state_polls`): `state:ready` until
+   the Seal opens (about 27 s later), then the note `cmd state says ... is active`. Is the Seal `not-found` at any point (too far from the carrier, unloaded grid)? What does `cmd state` say for it before the Keystone?
+4. **Revelosh's corpse.** `cmd loot entry:6910@x,y,z <carrier> 7741` (the place Revelosh died) takes the Shaft with the agent nowhere near; the note about the corpse in the agent's view never appears.
+5. **No assists.** `remote.run_gm_assists` 0, `agent_walks` 0, no `.appear` in `setup_shortcuts`, for the whole run. Does a boss step still pass without the agent seeing the corpse?
+6. **Refusals.** A point more than `ReactDistance` from the carrier answers `too-far` before any search: the party is walked nearer once and the order retried. An entry with nothing spawned answers `not-found`
+   and the step fails naming the entry and the point.
+
+## Run watchdog: a run never sits stuck (issues #73, #83)
+
+Evidence: the three live remote Uldaman runs of 2026-10-14 waited where nothing could move them on (the carrier's `cmd open` at Baelog's chest,
+rest gates of 34 % of the run, an unbound party left fighting). The watchdog is tested against the fake feed and the fake game only; nothing below
+has run live. Use short levels so that the checks do not take ten minutes: `"watchdog": {"warn_s": 30, "recover_s": 60, "fail_s": 120}`.
+
+1. **Quiet while it works.** A normal remote run (and a group run) to the first boss with the default levels: `dungeon_status.stall_level` is `none`
+   at every poll, `stalled_for_s` stays under ~60 (a rest gate, a long walk), and `report.watchdog.warnings` is 0. Check `longest_stall_s` against the
+   slowest gate in `rest_gates[]`: if a normal gate (the 60 s cap, a leg's `rest.max_s`) ever warns, the defaults are too tight for that plan.
+2. **A boss fight of many minutes.** The Revelosh or Ironaya fight: no `stall` events while the boss's health falls; `last_progress` reads `a fought
+   mob's health fell to a new low` or `kill`; a boss that an add heals back up is progress only when it goes below its lowest health. A tank that holds a boss that is not being hurt (everyone dead but the healer) stalls for real.
+3. **Rest gate.** Make a caster out of drinks (`.bot maintenance` refused, or no drinks): the gate runs to its own cap (`rest.max_s`, default 60 s)
+   with `stalled_for_s` not growing and no `stall` event (the watchdog's clock waits for a gate while the party is out of combat); a fight inside
+   the gate is watched like any other.
+4. **Walk.** Root the lead bot (or `.gm`-freeze it) mid-walk: the warn note names `walk <step>` and the last `cmd move`; at `recover_s` a `cmd move`
+   of at most 40 yd from the bot's position goes out (`orders.move` +1, the note `planned the walk again`). Does the bot move on that order?
+5. **Object step.** The chest at Baelog's: with the module's `in-combat` or `busy` refusals the retries are cancelled at `recover_s` and the step goes
+   through its retry/fallback (`object_steps[].fallback`); the note says `cancelled the carrier order's retries`. A carrier whose `cmd open` never answers
+   is bounded by the order's own wait (`DefaultOrderWait` plus the pending budget), not by the watchdog: report how long that was.
+6. **Silent feed.** `commander view off` by hand mid-run: after `FeedLost / 2` (22 s) one `commander view on` goes out by itself (`the feed has been
+   silent for ... s`); with `FeedLost` raised past `fail_s`, the recovery sends it at `recover_s`. Does the module resume the feed on the second `view on`?
+7. **Fail.** Kill the carrier or hold a bot with a fear so that nothing progresses: at `fail_s` the run ends `failed` with
+   `stalled: <phase> <step> for N s, last progress <what>`, the party in combat is fought for up to `EndFightWait` before `cmd stay` and the unbind
+   (`remote.end_fight`), and `dungeon_status` shows `stall_level` `fail`.
+8. **Pauses.** A leader's death in group mode with a corpse run of several minutes, and a plan's `wait_for` of 60 s: `stalled_for_s` is 0 while they
+   last and no `stall` event comes.
+
+## Remote Uldaman in one command (issue #83, owner request 2026-10-14: setup took 11 minutes)
+
+A tester's setup for a remote Uldaman run was about 11 minutes: the agent rebuilt each run, deploys, and about 30 one-by-one calls (`.bot add` x5,
+`.bot maintenance` x5, talents, `.instance unbind all` per bot, the bind, a tele, summons x4). Goal: 1-2 minutes when nothing needs deploying.
+
+**The command.** `tools/run-uldaman.sh` (bash; needs `curl` and `jq` or `python3`; read the header for the environment it takes):
+
+```sh
+tools/run-uldaman.sh                  # fresh instance, leg 0
+tools/run-uldaman.sh --no-fresh --from-leg 2   # go on in the instance the bots are in
+tools/run-uldaman.sh --relogin        # log the agent out and in again with the binary of the newest origin/main
+```
+
+1. **Binary.** `git fetch`, then `~/turtle-agent/bin/turtle-agent-<sha8>` for origin/main's short SHA. It is used if it exists; if not, the script builds
+   origin/main on the test VM (`vmtest.sh <temporary worktree> 'make build'`) and copies the result there. Nothing is built on the laptop, and a run
+   after a merge that did not touch the agent still needs only the one build per SHA.
+2. **Login.** Only if `status` on the settings file's RPC port (`rpc`, read from the settings with `jq -r .rpc`, or `python3`) does not say `in_world`.
+   An agent that is logged in keeps the binary it started with (`--relogin` to change that); the agent stays online after the run so the next one skips
+   this. The settings file is read only for `rpc` and `rpc_token`; the token goes to `curl` on stdin, and nothing secret is printed.
+3. **Run.** `dungeon_run` for Uldaman with `prepare` (`online` + `fresh` + `gm_setup: ["gm visible off"]`, see README "Prepare: one step before
+   the bind"), the party of the remote runs (`Lcwarra` tank and lead, `Lcpriest` healer, `Lchunter`, `Lcrogue`, `Lcwarlock`; `LEAD`, `BOTS`, `TANK`, `HEALER` change it).
+4. **Poll** `dungeon_status` every 30 s and print `state`, the watchdog's phase, the step and `stalled_for_s`; after `MAX_MIN` (90) minutes
+   `dungeon_stop`.
+5. **End.** Prints `setup_s`, `report.prepare` (the seconds of each step), `preflight_s` and `enter_s`, then runs `turtle-agent trace-score` on the
+   run's trace (exit 11 when a check fails; the script exits with it). Expect the `gm_shortcuts` check to fail: the prepare step's GM lines are setup shortcuts by design.
+
+**On five hired bots (owner rule 2026-10-14: every commander group is hired, at the instance's level, the commander outside it).**
+
+```sh
+tools/run-uldaman.sh --hire              # keep the matching hires, hire the rest, check, bind
+tools/run-uldaman.sh --hire --rehire     # dismiss the current hires first: a clean instance
+tools/run-uldaman.sh --hire --level 44   # default: the middle of the plan's level_band (43)
+```
+
+The agent hires a warrior tank, a priest healer and a hunter, a rogue and a warlock, checks each of them (README "Hired party") and binds them; the script
+prints a `ready:` line (level, `ok`, `hire_s`, `setup_s`, who was hired and kept) and the run's report has the whole `ready` block. The commander needs
+the hire rights of a player of that level (`AiPlayerbot.HireMaxBotsPerPlayer` 5, `HireAnywhere` 1 away from a recruiter), a TortoiseBots with #935 (the
+bind of own hires; the step says so when the server refuses it, or leaves the commander in the group) and, for the level, #940 (`level=<n>`; without it
+the hires come at the commander's level, accepted only inside the plan's band).
+
+Checks to run live for it: (1) `hire_s` and `setup_s` of a cold start (five new hires) and of a run that keeps its hires, against the 2 minute goal;
+(2) the notes `hired X (class:role, level n)` and, on a build without #940, the `level_note`; (3) `ready.bots[].fixed` (what `autogear` and `maintenance`
+had to do) and `quality` `rare` on all five; (4) the spell and who questions: a hire's whisper to `.bot command <bot> spells taunt` is `=== Spells ===` then `[Taunt]` on its own line, `.bot command <bot> who` gives `<spec> (a/b/c) <class> (<n> lvl)`; a hire that is not answering is named, never dismissed; (5) the commander out of the group after the bind (`party` shows no
+group) and the run's own bind reusing the binding; (6) a second run with `--hire` and no `--rehire` keeps all five (`ready.reused`).
+
+**Checks to run live (none has been run; the prepare step is tested against the fake game only):**
+
+1. Time it: `report.setup_s` of a run with every bot online and the binary built should be 1-2 minutes. The parts: `prepare.steps[]`, `remote.enter.seconds`
+   (the tele, 4 summons 6 s apart: about 35 s), `remote.preflight.seconds`. If `setup_s` is still long, the largest of those is the next thing to cut
+   (the summon gap is the module's: a `cmd summon` takes ~3 s, the core counts an entry per bot).
+2. `online` after a mangosd restart (bots offline): the five `.bot add` lines are answered `queued for login`, the roster shows all `online` within
+   `online_wait_s`, the bind finds the party. Read the reply text of `.bot add` once: the step matches `queued for login`, `already online`, `not found`,
+   `may only control`, `owned by another`, `Failed to add`.
+3. `fresh` with the bots **inside** the old instance: the five teleports to `uldaman` (map 0) land them at the outside entrance, `Sees` finds them
+   from the agent within 25 s, and the instance is a new one (groups 1-10 alive again, not "seen empty"). The test account is level 3, so the step
+   binds the bots, sends `.instance groupunbind all` with the lead bot selected, and binds again: look for the three `commander bind` /
+   `.instance groupunbind all` / `commander bind` lines in that order, `prepare.group_unbound` = the lead bot (the reply `Group unbound.
+   Disbanding.` was seen), no `prepare.not_grouped`, no warning, and the notes `commander bind ...: Lcwarra with 4 bots, exactly as named`.
+   **Run 6b showed the old step failing here:** the reply to the group unbind read `Glacienne is not in a group.` (the agent's name, not
+   Lcwarra's): the selection packet had not been handled when the chat line ran. The step now sends the line only once the server shows the lead bot as the agent's selection (3 s, else it fails with nothing sent), and
+   accepts `Group unbound.` only if `commander status` then says `not-bound`; read the reply once to see it names the lead bot. Also check, with `.instance bind list` as a developer on a bot, that its binds are gone. At level 4 the per-bot
+   `.instance unbind all` is sent instead (`prepare.unbound`, its reply goes to the bot: not confirmed).
+3b. The whole party enters (run 6b: the run failed 30 s after the entry with `Lchunter (not in the feed) not on map 70`): after the bind the
+   notes say `bound party checked: Lcwarra with 4 bots, as named`. To see the repair, take one bot out of the group between the prepare and the
+   bind (`.bot command Lchunter leave`): the notes say `Lchunter not in commander status's listing`, a `commander unbind` + `commander bind` follow,
+   and the run enters with five. A refused bot (set one `hired`) fails the run before the tele with the module's code in the message. A bot that
+   does not arrive 30 s after the entry is summoned once more (`remote.enter.resummoned`).
+4. `fresh` with the hourly ledger full (5 entries): the run fails at the start with `the account entered 5 new instances`, nothing teleported.
+5. A player (non-GM) account with `fresh`: the run fails with `fresh needs a GM account`-style text before anything is sent.
+6. `gm_setup`: `setup_shortcuts` has `gm visible off` once, and the keep-near `.appear` assists still work (they read it).
+
+## Uldaman legs 4-13: scorpid cave to Archaedas (#73, #83; written from the world data, walked by a GM, not run as a party)
+
+`dungeons/uldaman.json` goes on past Ironaya to Archaedas (README, "The Uldaman plan"). Legs 4-13 come from the world database of tortoise-wow 5d79486, its C++ scripts and the
+map 70 navmesh, and were compared with the live map walk (`tests/uldaman-map/MAP.md` of the audit repo; nothing fought or used). What a first live run has to settle, in the order it
+meets them:
+
+1. **The hole at the scorpid pit** (leg 5, first walk): hires-1 (2026-10-14) answered the old target (-158.4 283.7): `cmd move` acked, the bots stop at the end of the partial path (-161.1 284.5 -52.1,
+   the pit floor, 3.4 yd below the ramp end). Leg 5 now walks to the lip (-163.5 298.7 -52.5) and crosses with `cmd move -155.7 279.6 -46.8 direct` (needs TortoiseBots #942): record whether the whole
+   party arrives on the plateau (positions in `bot_view`), whether the module answers `too-far` because a follower lags at the lip (the driver sends the step again; count it in `remote.refused`),
+   and that no `invalid` ("needs a TortoiseBots with the direct flag") shows on a server that has the flag.
+   The nest of ten Cleft Scorpids at the lip is pulled by leg 4 first.
+2. **Doors that no script opens** (Hall of the Keepers 124368, Archaedas 141869; plain doors, lock 86): does `cmd open` open them for a bot with nothing in its bags, or does it answer with an
+   error? Lock.dbc is not in the export.
+3. **The altars** (legs 10 and 13): the step needs the multi-bot ritual use that the driver does not have. The run should stop at the altar with the `fail_text` after 20 s. To go on, use the
+   altar by hand (three bots of the group, one `.bot cmd open entry:130511@104.8,272.5,-26.5 <bot>` each, standing still) and start the run again at the next leg; check the altar reads `active`
+   (`cmd state`) and the first Stone Keeper wakes.
+4. **The Stone Keepers** (leg 11): the wake order, whether the group of four is pulled as each wakes, the wait for the door 124367 (`active` within the 600 s), and whether a wipe resets them
+   (all four stoned again) with the altar still active. Whether the dormant statues (faction 35 in the SQL, hostile in the unit rows) show up as hostiles in the TBM feed.
+5. **Archaedas** (leg 13): the stand point of the door is 39 yd from his spawn (he resets beyond 38); the altar side is 11 yd. Count the minions that wake (one per 10 s, six Guardians at 66 %,
+   two Vault Warders at 33 %), the time to kill, and that the Vault door 124369 reads `active` after the kill.
+6. **The pace**: legs 4-13 are 2714 yd and 45 pull groups (147 mobs); the estimate is 50 to 80 min. Record `seconds` per leg and the watchdog stalls.
+
+## Dungeon plan: Zul'Farrak (`dungeons/zulfarrak.json`, #130; written from the world data, walked by a GM invisible on 2026-10-14, not run as a party)
+
+Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. `dungeons/zulfarrak-extra.json` is a record of what the driver cannot do, not a plan to run. What the first live run has to settle, in the order it meets them:
+
+1. **Entry** (needs TortoiseBots #939). The run walks the party to the portal and sends `.bot cmd enter 924`: record the `TBM:ACTION_PENDING|cmd enter|party|<budget>|924` line, the final ACK (`entered`, n bots) or ERR code, the seconds, and that the lead bot lands on map 209 at 1212.7 842.0 and the others come by the same order or by `cmd summon`; the group must not change after that. On a module without the order the run must fail with "needs TortoiseBots #939" within about 15 s of arriving at the portal. `prepare.fresh` uses `outside_tele` `farrak` (partial match of game_tele 160): check that the bots and the agent land outside, map 1, near -6801 -2893.
+2. **The road to Antu'sul** (leg 0): the 15 pull groups come in the order of the plan; the four static Shadowcasters at 1505-1511 845 are their own group; the patrolling groups (radius 30) are found where they walk, not at their spawn rows. Count walk aggros and the time (about 807 yd).
+3. **Antu'sul**: Broodlings (8138) on aggro, the totem and ward, the minions at 75% and 25%; the three Hatchlings read friendly to a GM but are mobs; keep the party off the campfire trap 2061 at 1810 673.
+4. **Theka** patrols a ~45 yd loop from (1778 860): the boss fight must find him (it looks within 80 yd of the lead bot); the 30% transform must not end the fight early; the scarabs (7269) are skipped, not waited for.
+5. **The way to Velratha** goes by the west road (junction 1645 909), NOT through the End Door: check that no bot is ever at 1854.5 1142.9 and that nothing opened the door (`gameobjects` entry 146084 stays `ready`).
+6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
+7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
+8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
+
+## Start anywhere and the pull test (`from_leg`, `from_pull_group`, `dungeon_run.pulltest`)
+
+Built and tested against the fake commander only; no live run was made. Use a hired party (or a named one) inside a **partly cleared** instance, a GM
+commander at developer level (`.respawn` needs it) and `gm visible off`. What the first live use has to settle, in the order it meets them:
+
+1. **Entering the lead bot's instance** (`start.gm_commands[0]`): the commander is outside; `.appear <lead bot>` must put it in the lead bot's instance (not a new one of its own),
+   and the account's entries in the last hour must not grow (`instance-entries-*.json`). If it opens its own instance the following `.go xyz` and the summons land in the wrong place.
+2. **`.go xyz <x> <y> <z> <map>` inside the instance**: the commander lands at the start point within 20 yd (the run fails with "not at the start point after .go xyz" otherwise) and settles on the
+   floor (`status` z against the plan's z; the run does not trust the plan's z for a gather spot that came from a navmesh path).
+3. **`.bot summon <lead bot>` of a bound lead bot** (a player command, the only way to bring the lead bot without a GM line aimed at it): the answer line
+   (`Summoning Tanky to a safe position near you (3s)...`), whether the bot lands within 12 yd of the commander in 3-6 s, and whether the binding survives it (`remote.ended_by_module`
+   stays empty, the feed does not stall). After the arrival the module puts the bot on `follow` (its master is the commander): check the first `cmd move` of the run still moves it, and that it
+   does not wander after the commander before that: the run sends `cmd move <landed point>` at once and watches 4 s (`start` notes "the lead bot holds at ..."); if it still walks after the commander
+   the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
+4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
+5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
+   start `skipped (from_leg)`, and that nothing of them was pulled or walked. A pack of those legs that is still alive near the start point (a fresh instance) will aggro: write down which.
+6. **Gather spots** (`from_pull_group`): 55 yd short of the pack on the navmesh path from the leg's `to`. Check on Uldaman that the spot is on the mesh, out of sight of other packs, not in a
+   pit (`start.warning`), and that the first pull from it needs no more than one approach (`pack_looks`, the walk after the rest gate).
+7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
+   selection field going to 0 before the `.respawn` chat line). Record what comes back within 80 yd of the commander in the instance: the killed pack (same GUIDs, full health), other
+   corpses, game objects (chests, doors that were opened). The visibility distance of an instance map decides how far it reaches; the run refuses to send it when the commander is farther than 80 yd from the pack.
+   Also check what `.respawn` brought back that it should not (a boss the party killed, looted chests, other corpses): the run refuses it when a plan boss is within 250 yd and not seen alive; see whether that is too strict on Uldaman.
+8. **Respawned mobs and the driver's memory**: the second try of a respawned pack must show `threat_overrides` 0 when the tank holds the mob, and the same `time_to_kill_s` order of magnitude as the
+   first; a try that ends `no_pack` means the respawn did not bring the pack (or the bots could not see it from the gather spot): look at `pack_looks` and the feed.
+9. **The numbers a try holds**: `off_tank_s` and `adds` against `bot_view` and the trace's threat records for one try read by hand; `healer_min_mana_pct` against the healer's mana in the frames;
+   `rest_s` against `rest_gates[]`. Then run the same pull twice with an unchanged build and see what the spread is: that is the noise `--compare` has to beat.
+10. **Equivalent packs** (`equiv` in a plan): none of the shipped plans marks any yet. Mark a pair of Uldaman packs of the same mobs on similar ground and check that the walk between them does
+    not aggro a third pack (`walk_aggros`, `adds`).

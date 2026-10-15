@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -11,6 +13,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -34,6 +38,9 @@ type commanderService struct {
 	cmdr    *tbm.Commander
 	feed    *tbm.ViewFeed
 	planner *navmesh.Planner
+	// ledger is the account's list of instance entries (the enter phase of a remote run); probeWindow is how long ".account" is awaited.
+	ledger      *entryLedger
+	probeWindow time.Duration
 
 	viewLogEvery atomic.Int64 // 0: no VIEW line is logged; n: every nth frame's lines are (debug)
 	viewLines    atomic.Uint64
@@ -41,12 +48,13 @@ type commanderService struct {
 }
 
 // newCommanderService wires the feed into the session's event log (the log outlives reconnects).
-func newCommanderService(cur func() *session.Session, planner *navmesh.Planner) *commanderService {
+func newCommanderService(cur func() *session.Session, planner *navmesh.Planner, ledgerPath string, probeWindow time.Duration) *commanderService {
 	log := cur().Log()
 	emit := func(kind, text string, data map[string]any) {
 		log.Append(events.Event{Kind: kind, Text: text, Data: data})
 	}
-	c := &commanderService{cur: cur, cmdr: tbm.NewCommander(sessionLink{cur}), feed: tbm.NewViewFeed(log, emit, tbm.DefaultEventEvery), planner: planner}
+	c := &commanderService{cur: cur, cmdr: tbm.NewCommander(sessionLink{cur}), feed: tbm.NewViewFeed(log, emit, tbm.DefaultEventEvery), planner: planner,
+		ledger: &entryLedger{path: ledgerPath}, probeWindow: probeWindow}
 	log.SetIntercept(c.intercept)
 	return c
 }
@@ -87,6 +95,8 @@ type commanderParams struct {
 type commanderResult struct {
 	Sent  string    `json:"sent"`
 	Reply tbm.Reply `json:"reply"`
+	// Order is the typed outcome of a loot, open, use or lootmethod order, which waits for its final line (through ACTION_PENDING).
+	Order *tbm.OrderResult `json:"order,omitempty"`
 }
 
 // do runs one commander call.
@@ -124,9 +134,17 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 	if p.WaitMS > 0 {
 		wait = waitBound(p.WaitMS, 4000)
 	}
+	if verb := strings.Fields(command); len(verb) > 1 && strings.EqualFold(verb[0], "cmd") && slices.Contains(orderVerbs, strings.ToLower(verb[1])) {
+		o, err := c.cmdr.OrderWait(ctx, command, wait)
+		rep := tbm.Reply{Kind: o.Kind, OK: o.OK, Line: o.Final, Ack: o.Ack, Err: o.Err, Lines: o.Lines}
+		return commanderResult{Sent: ".bot " + command, Reply: rep, Order: &o}, rpcErr(err)
+	}
 	r, err := c.cmdr.DoWait(ctx, command, wait)
 	return commanderResult{Sent: ".bot " + command, Reply: r}, rpcErr(err)
 }
+
+// orderVerbs are the `cmd` verbs that run for a while and answer ACTION_PENDING before their final line.
+var orderVerbs = []string{"loot", "open", "use", "ritual"}
 
 type botViewParams struct {
 	AfterN uint64 `json:"after_n,omitempty"` // wait for a frame newer than this counter (the n of the last result)
@@ -171,8 +189,8 @@ func (c *commanderService) view(ctx context.Context, p botViewParams) (botViewRe
 }
 
 // registerCommanderMethods wires commander and bot_view. The returned func removes the log's intercept.
-func registerCommanderMethods(srv *rpc.Server, cur func() *session.Session, planner *navmesh.Planner) (*commanderService, func()) {
-	c := newCommanderService(cur, planner)
+func registerCommanderMethods(srv *rpc.Server, cur func() *session.Session, planner *navmesh.Planner, ledgerPath string, probeWindow time.Duration) (*commanderService, func()) {
+	c := newCommanderService(cur, planner, ledgerPath, probeWindow)
 	srv.Register("commander", rpc.Typed(func(ctx context.Context, p commanderParams) (commanderResult, error) {
 		return c.do(ctx, p)
 	}))
@@ -189,10 +207,33 @@ func (g remoteGame) Command(ctx context.Context, command string) (tbm.Reply, err
 	return g.c.cmdr.Do(ctx, command)
 }
 
+// Order implements dungeon.OrderGame: a `cmd loot|open|use|lootmethod` order, waited for through ACTION_PENDING to its final line.
+func (g remoteGame) Order(ctx context.Context, command string) (tbm.OrderResult, error) {
+	return g.c.cmdr.Order(ctx, command)
+}
+
+// Behavior implements dungeon.OrderGame: `.bot behavior <bot> <key> on|off`.
+func (g remoteGame) Behavior(ctx context.Context, bot, key string, on bool) (tbm.Reply, error) {
+	return g.c.cmdr.Behavior(ctx, bot, key, on)
+}
+
+// GameObjects implements dungeon.OrderGame: the game objects the agent's own character has in view.
+func (g remoteGame) GameObjects() []objects.GameObject {
+	return g.c.cur().GameObjects(objects.GOFilter{Limit: 5000})
+}
+
 func (g remoteGame) Frame() (tbm.ViewFrame, uint64, bool) { return g.c.feed.Latest() }
 func (g remoteGame) ResetView()                           { g.c.feed.Reset() }
 func (g remoteGame) BindingEnds() []tbm.BindingEnd        { return g.c.feed.Ends() }
 func (g remoteGame) ViewStats() tbm.ViewStats             { return g.c.feed.Stats() }
+
+// Team is the agent's own side (dungeon.TeamSource): the feed carries no race, and the owned bots share the account's faction.
+func (g remoteGame) Team() string { return g.c.cur().Team() }
+
+// BotLines implements dungeon.BotLiner: a plain `.bot maintenance|inv|logout <bot>` and the lines it was answered with.
+func (g remoteGame) BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) ([]string, bool, error) {
+	return g.c.cmdr.Lines(ctx, command, wait, done)
+}
 
 func (g remoteGame) Emit(kind, text string, data map[string]any) {
 	g.c.cur().Log().Append(events.Event{Kind: kind, Text: text, Data: data})
@@ -217,4 +258,329 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 		out[i] = dungeon.Point{X: v[0], Y: v[1], Z: v[2]}
 	}
 	return out, nil
+}
+
+// The enter phase of a remote run (dungeon.Enterer): the agent's own character, which stays outside and ungrouped, and the one GM
+// command the phase sends.
+
+func (g remoteGame) InGroup() bool    { return g.c.cur().Party().InGroup }
+func (g remoteGame) AgentMap() uint32 { return g.c.cur().Status().Map }
+
+func (g remoteGame) LeaveGroup(ctx context.Context) error { return g.c.cur().LeaveGroup(ctx) }
+
+// AccountLevel reads the account's security level with ".account", as the group driver's probe does.
+func (g remoteGame) AccountLevel(ctx context.Context) (int, bool, error) {
+	return (&sessionGame{cur: g.c.cur, probeWindow: g.c.probeWindow}).ProbeAccount(ctx)
+}
+
+// teleLocation is what a game_tele name can be in the line TeleName sends.
+var teleLocation = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
+
+// TeleName sends ".tele name <bot> <location>": the only GM line the remote run sends. Both words are checked first.
+func (g remoteGame) TeleName(ctx context.Context, player, location string) error {
+	if !botName.MatchString(player) || !teleLocation.MatchString(location) {
+		return fmt.Errorf("tele name: %q %q is not a bot name and a game_tele name", player, location)
+	}
+	return g.c.cur().GM(ctx, ".tele name "+player+" "+location)
+}
+
+// The prepare step (dungeon.Preparer): the agent's own character and the three GM lines it may send beyond .tele name. Each takes the
+// text from this file, not from the caller: a name and a GUID are all that vary.
+
+// AgentName and AgentGUID are the agent's own character.
+func (g remoteGame) AgentName() string      { return g.c.cur().Status().Character }
+func (g remoteGame) AgentGUID() packet.GUID { return g.c.cur().Status().GUID }
+
+// Sees says whether the agent's own object store lists the named player.
+func (g remoteGame) Sees(name string) bool {
+	for _, u := range g.c.cur().Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" && strings.EqualFold(u.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// GMVisible sends ".gm visible on" or ".gm visible off".
+func (g remoteGame) GMVisible(ctx context.Context, on bool) error {
+	if on {
+		return g.c.cur().GM(ctx, ".gm visible on")
+	}
+	return g.c.cur().GM(ctx, ".gm visible off")
+}
+
+// gmSelectConfirmWait is how long the server is given to show a selection before a line that acts on it is given up on.
+var gmSelectConfirmWait = 3 * time.Second
+
+// selectConfirmed selects the unit and waits until the SERVER shows it as the agent's selection (the target field of the agent's own object,
+// which the core sends back after it handled CMSG_SET_SELECTION). The core queues that packet (map thread) apart from a GM's chat line (world
+// thread), so a line sent right after can run on the selection from before: none (the sender itself) or a stale one, which can be another
+// player. Run 6b: `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra. An error, with nothing sent, when
+// the server does not show the selection in time.
+func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error {
+	s := g.c.cur()
+	if _, err := s.Target(ctx, guid, ""); err != nil {
+		return err
+	}
+	timer := time.NewTimer(gmSelectConfirmWait)
+	defer timer.Stop()
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		sel, ok := s.ServerSelection()
+		if ok && sel == guid {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return fmt.Errorf("the server did not show %v as the agent's selection within %s (it shows %v): not sending a line that acts on the selection", guid, gmSelectConfirmWait, sel)
+		case <-tick.C:
+		}
+	}
+}
+
+// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line with the selection repeated in the same
+// session step (GMOn).
+func (g remoteGame) selectThenGM(ctx context.Context, guid packet.GUID, line string) error {
+	if err := g.selectConfirmed(ctx, guid); err != nil {
+		return err
+	}
+	return g.c.cur().GMOn(ctx, guid, line)
+}
+
+// UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
+// runs it on the selected player (from account level 4; below it on the sender), so the target is chosen by GUID and never left to
+// whatever the agent had selected. The selection is confirmed by the server first.
+func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet.GUID) error {
+	if !botName.MatchString(who) || guid == 0 {
+		return fmt.Errorf("instance unbind: %q (%v) is not a character name and a GUID", who, guid)
+	}
+	return g.selectThenGM(ctx, guid, ".instance unbind all")
+}
+
+// GroupUnbind selects the player with the GUID, waits for the server to show the selection, sends ".instance groupunbind all" as one
+// operation (GMOn), then reads the reply the sender gets: "Group unbound. Disbanding." or "<name> is not in a group."
+// (Commands.cpp, HandleInstanceGroupUnbindCommand). A "not in a group" that names the agent is GroupWrongTarget (the line ran on the sender),
+// one that names a third player is GroupThirdPlayer (it ran on somebody else's selection).
+func (g remoteGame) GroupUnbind(ctx context.Context, who string, guid packet.GUID) (dungeon.GroupUnbindResult, error) {
+	if !botName.MatchString(who) || guid == 0 {
+		return "", fmt.Errorf("instance groupunbind: %q (%v) is not a character name and a GUID", who, guid)
+	}
+	log := g.c.cur().Log()
+	since := log.Last()
+	if err := g.selectThenGM(ctx, guid, ".instance groupunbind all"); err != nil {
+		return "", err
+	}
+	res, subject := g.awaitGroupUnbind(ctx, log, since)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return classifyGroupUnbind(res, subject, who, g.AgentName()), nil
+}
+
+// classifyGroupUnbind tells whose "not in a group" a reply was: the lead bot's (the bot is in no group), the agent's (the line ran on the
+// sender) or a third player's (it ran on somebody else's selection). Any other reply is returned as it is.
+func classifyGroupUnbind(res dungeon.GroupUnbindResult, subject, who, agent string) dungeon.GroupUnbindResult {
+	if res != dungeon.GroupNotGroups || subject == "" || strings.EqualFold(subject, who) {
+		return res
+	}
+	if strings.EqualFold(subject, agent) {
+		return dungeon.GroupWrongTarget
+	}
+	return dungeon.GroupThirdPlayer
+}
+
+// awaitGroupUnbind reads the log after since for the answer to the group unbind: its result and, for "not in a group", whose name it
+// carries.
+func (g remoteGame) awaitGroupUnbind(ctx context.Context, log *events.Log, since uint64) (dungeon.GroupUnbindResult, string) {
+	wctx, cancel := context.WithTimeout(ctx, groupUnbindWait)
+	defer cancel()
+	cursor := since
+	for {
+		p := log.Read(events.Query{Since: cursor, Kinds: []string{events.KindSystem}, Limit: events.MaxLimit})
+		for _, e := range p.Events {
+			if r := groupUnbindReply(e.Text); r != "" {
+				return r, groupUnbindSubject(e.Text)
+			}
+		}
+		cursor = p.Next
+		if p.More {
+			continue
+		}
+		if log.Wait(wctx, cursor) != nil {
+			return dungeon.GroupNoAnswer, ""
+		}
+	}
+}
+
+// groupUnbindWait is how long the reply to the group unbind is awaited.
+const groupUnbindWait = 4 * time.Second
+
+// playerLinkName finds the name in a chat player link ("|Hplayer:Name|h[Name]|h") or, without a link, the first word.
+var playerLinkName = regexp.MustCompile(`\[([A-Za-z]{2,12})\]|^\s*([A-Za-z]{2,12}) is not in a group`)
+
+// groupUnbindSubject is the player a "... is not in a group." line names ("" for any other line).
+func groupUnbindSubject(text string) string {
+	if groupUnbindReply(text) != dungeon.GroupNotGroups {
+		return ""
+	}
+	m := playerLinkName.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	return m[1] + m[2]
+}
+
+// groupUnbindReply classifies a system line as the answer to ".instance groupunbind all" ("" for any other line).
+func groupUnbindReply(text string) dungeon.GroupUnbindResult {
+	low := strings.ToLower(text)
+	switch {
+	case strings.Contains(low, "group unbound"):
+		return dungeon.GroupUnbound
+	case strings.Contains(low, "is not in a group"):
+		return dungeon.GroupNotGroups
+	}
+	return ""
+}
+
+// Recent and Record implement dungeon.EntryLedger over the account's ledger file.
+func (g remoteGame) Recent(now time.Time) []time.Time { return g.c.ledger.Recent(now) }
+func (g remoteGame) Record(now time.Time) error       { return g.c.ledger.Record(now) }
+
+// Keeping the agent near the party (dungeon.Follower): its own character follows the bots after each leg's walk and before the object
+// steps. `.appear` is a GM line; it is a setup shortcut of the run (the driver reports it so), not a run GM command.
+
+func (g remoteGame) AgentPlace() (dungeon.Point, uint32, bool) {
+	st := g.c.cur().Status()
+	return dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}, st.Map, st.State == session.StatusInWorld
+}
+
+// Appear sends ".appear <player>"; the name is checked first.
+func (g remoteGame) Appear(ctx context.Context, player string) error {
+	if !botName.MatchString(player) {
+		return fmt.Errorf("appear: %q is not a bot name", player)
+	}
+	return g.c.cur().GM(ctx, ".appear "+player)
+}
+
+// GoXYZ sends ".go xyz x y z map" for the agent's own character (dungeon.StartHands) and waits for its teleport. The numbers are formatted
+// here; nothing the caller wrote goes into the line.
+func (g remoteGame) GoXYZ(ctx context.Context, mapID uint32, at dungeon.Point) error {
+	return g.c.cur().Teleport(ctx, at.X, at.Y, at.Z, int(mapID))
+}
+
+// Respawn sends the commander's own ".respawn" with nothing selected (dungeon.Respawner): the core respawns the creatures and game objects
+// around the commander. The selection is cleared first and the server is waited for to show it cleared, else the line would act on that
+// one unit alone (or fail on a player).
+func (g remoteGame) Respawn(ctx context.Context) error {
+	s := g.c.cur()
+	if err := s.ClearTarget(ctx); err != nil {
+		return err
+	}
+	timer := time.NewTimer(gmSelectConfirmWait)
+	defer timer.Stop()
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if sel, ok := s.ServerSelection(); ok && sel == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			sel, _ := s.ServerSelection()
+			return fmt.Errorf("the server did not show the selection cleared within %s (it shows %v): not sending .respawn", gmSelectConfirmWait, sel)
+		case <-tick.C:
+		}
+	}
+	return s.GM(ctx, ".respawn")
+}
+
+// WalkSelf is walk_path for the agent's character.
+func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.WalkResult, error) {
+	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
+	return dungeon.WalkResult{Result: r.Result, Reason: r.Reason, DistLeft: r.DistLeft}, err
+}
+
+// Units implements dungeon.UnitSource: the units in the agent's own view (a boss corpse the feed does not list).
+func (g remoteGame) Units() []objects.Unit { return g.c.cur().Units(objects.Filter{Limit: 5000}) }
+
+// The hire step of the prepare block (dungeon.HireGame): the agent's own group, the players in its view, their pets and the item
+// prototypes of what they wear.
+
+// classNames maps a unit's class id (UNIT_FIELD_BYTES_0, 1.12) to the name the hire command takes.
+var classNames = map[uint8]string{1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest", 7: "shaman", 8: "mage", 9: "warlock", 11: "druid"}
+
+func (g remoteGame) AgentLevel() int { return int(g.c.cur().Status().Level) }
+
+// Members are the other members of the agent's group; the class comes from the object store when the player is in view.
+func (g remoteGame) Members() []dungeon.HireMember {
+	s := g.c.cur()
+	party := s.Party()
+	units := map[packet.GUID]objects.Unit{}
+	for _, u := range s.Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" {
+			units[u.GUID] = u
+		}
+	}
+	var out []dungeon.HireMember
+	for _, m := range party.Members {
+		hm := dungeon.HireMember{Name: m.Name, GUID: m.GUID, Level: int(m.Level), InGroup: true, Online: m.Online, Dead: m.Dead, MaxHP: uint32(m.MaxHealth)}
+		if u, ok := units[m.GUID]; ok {
+			hm.Class = classNames[u.Class]
+			if u.Level != 0 {
+				hm.Level = int(u.Level)
+			}
+		}
+		out = append(out, hm)
+	}
+	return out
+}
+
+// Player looks a player up by name: the group first, then the players in view.
+func (g remoteGame) Player(name string) (dungeon.HireMember, bool) {
+	for _, m := range g.Members() {
+		if strings.EqualFold(m.Name, name) {
+			return m, true
+		}
+	}
+	for _, u := range g.c.cur().Units(objects.Filter{Limit: 5000}) {
+		if u.Type == "player" && strings.EqualFold(u.Name, name) {
+			return dungeon.HireMember{Name: u.Name, GUID: u.GUID, Level: int(u.Level), Class: classNames[u.Class], Online: true, Dead: u.Dead, MaxHP: u.MaxHealth}, true
+		}
+	}
+	return dungeon.HireMember{}, false
+}
+
+// PetOf is the name of the pet the player has out in the agent's view.
+func (g remoteGame) PetOf(guid packet.GUID) (string, bool) {
+	u, ok := g.c.cur().PetOfPlayer(guid)
+	if !ok {
+		return "", false
+	}
+	if u.Name == "" {
+		return "pet", true
+	}
+	return u.Name, true
+}
+
+// BotBurst implements dungeon.HireGame: a plain `.bot` line whose answer is a run of lines (a bot's spell list).
+func (g remoteGame) BotBurst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) ([]string, bool, error) {
+	return g.c.cmdr.Burst(ctx, command, wait, quiet, begin)
+}
+
+// ConvertRaid turns the agent's party into a raid.
+func (g remoteGame) ConvertRaid(ctx context.Context) error { return g.c.cur().ConvertRaid(ctx) }
+
+// ItemInfos asks the server for the item prototypes.
+func (g remoteGame) ItemInfos(ctx context.Context, entries []uint32, wait time.Duration) (map[uint32]dungeon.ItemInfo, error) {
+	m, err := g.c.cur().ItemInfos(ctx, entries, wait)
+	out := make(map[uint32]dungeon.ItemInfo, len(m))
+	for e, it := range m {
+		out[e] = dungeon.ItemInfo{Found: it.Found, Name: it.Name, Class: int(it.Class), SubClass: int(it.SubClass), Quality: int(it.Quality), InventoryType: int(it.InventoryType), ItemLevel: int(it.ItemLevel), RequiredLevel: int(it.RequiredLevel)}
+	}
+	return out, err
 }

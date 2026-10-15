@@ -134,6 +134,16 @@ func fingerprintPath(st config.Settings, account string) string {
 	return filepath.Join(st.FingerprintDir, "addon-fingerprint-"+hex.EncodeToString(sum[:6]))
 }
 
+// ledgerPath is the file of the instance entries of account's last hour, next to the settings file (named by a hash, like the
+// addon fingerprint, so the account name stays out of the folder listing); empty when the settings folder is not known.
+func ledgerPath(st config.Settings, account string) string {
+	if st.FingerprintDir == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.ToUpper(account)))
+	return filepath.Join(st.FingerprintDir, "instance-entries-"+hex.EncodeToString(sum[:6])+".json")
+}
+
 // addonOption makes the login present the same addon fingerprint every time: the one kept
 // in the account's file, or, on the first login, the one the server announces, which is then
 // saved there. A failed save is reported and costs only a new fingerprint next login.
@@ -161,6 +171,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	rpcAddr := fs.String("rpc", "", "JSON-RPC listen address (default: the settings file's rpc)")
 	reconnects := fs.Int("reconnect", 0, "after an unplanned disconnect, log in again up to N times (0: off)")
 	createSpec := fs.String("create", "", "create the character at login when the account lacks it: race,class[,gender] (numbers)")
+	tuneFile := fs.String("tune", "", "tunables file of remote dungeon runs that name none (default: <plan>.tune.json beside the plan; README \"Live tuning\")")
 	budgetAddr := fs.String("login-budget", "", "loopback address of the fleet's shared login budget (set by `fleet`; its token is in the environment)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -354,7 +365,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, Planner: planner})
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()

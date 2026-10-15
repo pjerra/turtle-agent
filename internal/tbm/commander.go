@@ -20,15 +20,15 @@ import (
 // Intents of the commander commands (the first two words of the command).
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
-	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon"}
+	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.
 var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond", "circle", "star"}
 
-// argRe is what one argument of a command may be: names, numbers, a GUID, a mark. No spaces, no control characters, no way to
+// argRe is what one argument of a command may be: names, numbers, a GUID, a mark, an object by entry (entry:<id>@x,y,z). No spaces, no control characters, no way to
 // put a second command on the line.
-var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+\-]{0,63}$`)
+var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
 
 // Link is the commander's way to the game: the say chat the commands go out on, and the event log the replies come back in.
 type Link interface {
@@ -45,6 +45,8 @@ type Commander struct {
 	link Link
 	// Wait is how long a command waits for its reply (DefaultOrderWait when 0).
 	Wait time.Duration
+	// PendingSlack is what an order that reports itself running (ACTION_PENDING) may take beyond its budget (DefaultPendingSlack when 0).
+	PendingSlack time.Duration
 
 	mu sync.Mutex
 }
@@ -204,6 +206,16 @@ func (c *Commander) Cmd(ctx context.Context, verb string, args ...string) (Reply
 
 // GUIDArg is a GUID as `.bot cmd` takes it.
 func GUIDArg(g packet.GUID) string { return fmt.Sprintf("0x%X", uint64(g)) }
+
+// EntryArg names a game object (or, for `cmd loot`, a corpse) by its entry as `.bot cmd open|loot|use|state` takes it: `entry:<id>`, or
+// `entry:<id>@x,y,z` with the point to search around (the server picks the nearest of that entry within 30 yd of it). The point is
+// written with commas and no spaces, which the module's parser wants.
+func EntryArg(entry uint32, at *[3]float32) string {
+	if at == nil {
+		return fmt.Sprintf("entry:%d", entry)
+	}
+	return fmt.Sprintf("entry:%d@%s,%s,%s", entry, CoordArg(at[0]), CoordArg(at[1]), CoordArg(at[2]))
+}
 
 // CoordArg formats a coordinate for `.bot cmd move`.
 func CoordArg(v float32) string { return fmt.Sprintf("%.2f", v) }

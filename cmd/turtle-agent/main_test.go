@@ -3,9 +3,22 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
+
+// TestMain keeps the run traces that dungeon_run writes by default out of the source tree.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "turtle-agent-traces-")
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Setenv(tracesDirEnv, dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func TestRunWithoutArgsPrintsUsage(t *testing.T) {
 	var out, errOut bytes.Buffer

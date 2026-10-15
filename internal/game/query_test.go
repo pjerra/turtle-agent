@@ -39,3 +39,25 @@ func TestParseCString(t *testing.T) {
 		t.Fatalf("%q %v", s, err)
 	}
 }
+
+func TestItemQuery(t *testing.T) {
+	if b := BuildItemQuery(2040); !bytes.Equal(b, packet.NewWriter().U32(2040).U64(0).Bytes()) {
+		t.Fatalf("% X", b)
+	}
+	// ItemHandler.cpp:370-398: entry, class, subclass, name + three empty names, display id, quality, flags, prices, inventory type,
+	// allowable class and race, item level, required level, then the rest (not read).
+	resp := packet.NewWriter().U32(2040).U32(4).U32(6).CString("Troll Protector").U8(0).U8(0).U8(0).
+		U32(1234).U32(3).U32(0).U32(100).U32(25).U32(14).U32(0xFFFFFFFF).U32(0xFFFFFFFF).U32(43).U32(38).U32(0).U32(0).Bytes()
+	it, err := ParseItemQueryResponse(resp)
+	want := ItemInfo{Entry: 2040, Found: true, Name: "Troll Protector", Class: 4, SubClass: 6, Quality: 3, InventoryType: 14, ItemLevel: 43, RequiredLevel: 38}
+	if err != nil || it != want {
+		t.Fatalf("%+v %v", it, err)
+	}
+	it, err = ParseItemQueryResponse(packet.NewWriter().U32(2040 | 0x80000000).Bytes())
+	if err != nil || it.Found || it.Entry != 2040 {
+		t.Fatalf("unknown item: %+v %v", it, err)
+	}
+	if _, err := ParseItemQueryResponse(resp[:20]); err == nil {
+		t.Fatal("a cut packet parsed")
+	}
+}

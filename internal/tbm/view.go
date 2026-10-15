@@ -63,6 +63,11 @@ type PartyRec struct {
 	Dead      bool        `json:"dead"`
 	State     string      `json:"state"`            // c combat, n non-combat, d dead, r reaction
 	Action    string      `json:"action,omitempty"` // the last action its AI ran
+	// Result and Reason are the verdict on that action (TB #924, fields 19 and 20, absent from older modules): Result is one letter
+	// (O ok, F failed, I impossible, U useless, P prerequisites queued, V dropped), Reason why a failed cast check did not run
+	// (no-item, oom, range, los, cd, moving, casting, no-target). Empty when the module sent none.
+	Result string `json:"result,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // HPPct is the bot's health in percent (100 when the maximum is unknown).
@@ -73,6 +78,15 @@ func (p PartyRec) PowerPct() int { return pctOf(p.Power, p.MaxPower) }
 
 // UsesMana says whether the bot's power is mana and it has any.
 func (p PartyRec) UsesMana() bool { return p.PowerType == 0 && p.MaxPower > 0 }
+
+// DrinkFailed says the bot's last action was a drink that failed, for whatever reason (TortoiseBots reports a failed item action
+// as `drink,F,-`, with no reason).
+func (p PartyRec) DrinkFailed() bool { return strings.EqualFold(p.Action, "drink") && p.Result == "F" }
+
+// DrinkFailedNoItem says the bot's last action was a drink that failed for want of one in the bags.
+func (p PartyRec) DrinkFailedNoItem() bool {
+	return strings.EqualFold(p.Action, "drink") && p.Result == "F" && p.Reason == "no-item"
+}
 
 // InCombat says whether the bot's AI is in a combat or reaction state.
 func (p PartyRec) InCombat() bool { return !p.Dead && (p.State == "c" || p.State == "r") }
@@ -95,7 +109,18 @@ type HostileRec struct {
 	Target packet.GUID `json:"target,omitempty"`
 	Spell  uint32      `json:"spell,omitempty"`
 	Flags  string      `json:"flags"` // s stealthed, e evading, c crowd-controlled, "-" none
+	// Reaction and Kind are the optional tenth and eleventh fields (TortoiseBots #943; empty from an older module, which lists only
+	// what it takes for hostile): Reaction is the unit's reaction to the party, h hostile, n neutral, f friendly, "-" unknown; Kind holds
+	// k critter, v civilian, g guard, u not attackable, or is "-".
+	Reaction string `json:"reaction,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 }
+
+// Hostile says whether the module reports the unit hostile to the party: reaction h, or no reaction known (an older module, or "-").
+func (h HostileRec) Hostile() bool { return h.Reaction == "" || h.Reaction == "h" || h.Reaction == "-" }
+
+// Bystander says whether the unit is a critter, a civilian, a guard or not attackable (Kind), the units a pull should leave alone.
+func (h HostileRec) Bystander() bool { return strings.ContainsAny(h.Kind, "kvgu") }
 
 // Stealthed says whether the unit is stealthed or invisible to the party at large (only a detecting bot lists it).
 func (h HostileRec) Stealthed() bool { return strings.Contains(h.Flags, "s") }
@@ -362,6 +387,12 @@ func ParsePartyRec(s string) (PartyRec, error) {
 	if p.Action == "-" {
 		p.Action = ""
 	}
+	if len(f) > 18 && f[18] != "-" {
+		p.Result = f[18]
+	}
+	if len(f) > 19 && f[19] != "-" {
+		p.Reason = f[19]
+	}
 	if r.err != nil {
 		return PartyRec{}, r.err
 	}
@@ -379,6 +410,14 @@ func ParseHostileRec(s string) (HostileRec, error) {
 		HPPct: r.pct(5, "hp%"), Target: r.guid(6, "target"), Spell: r.u32(7, "spell"), Flags: f[8]}
 	if r.err != nil {
 		return HostileRec{}, r.err
+	}
+	// TortoiseBots #943: reaction and kind follow the flags; an older module sends neither. Values are kept as sent (a letter this
+	// reader does not know is not an error: a newer module may add one), and only the known letters are acted on.
+	if len(f) > hostileFields {
+		h.Reaction = f[hostileFields]
+	}
+	if len(f) > hostileFields+1 {
+		h.Kind = f[hostileFields+1]
 	}
 	return h, nil
 }

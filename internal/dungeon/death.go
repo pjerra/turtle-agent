@@ -102,7 +102,7 @@ func (d *Driver) leaderEvent(phase string, extra map[string]any) {
 	for k, v := range extra {
 		data[k] = v
 	}
-	d.g.Emit(events.KindDungeonLeader, "leader "+phase, data)
+	d.emit(events.KindDungeonLeader, "leader "+phase, data)
 }
 
 // check looks at the party after a wait: deaths are counted, a dead leader is brought back, and a wipe ends the run (or is
@@ -165,6 +165,7 @@ func (d *Driver) healerAlive() bool {
 // recoverLeader gets a dead leader back (see the top of this file), then gathers the party and rests. It returns nil when
 // the run can go on, errWipe when the whole party died meanwhile, or why the leader could not come back.
 func (d *Driver) recoverLeader(ctx context.Context) error {
+	defer d.wd.hold()() // the corpse run and the waits have limits of their own
 	if err := d.bringBack(ctx, nil); err != nil {
 		return err
 	}
@@ -224,7 +225,7 @@ func (d *Driver) bringBack(ctx context.Context, orders func(context.Context) err
 
 // afterBack gathers the party round the leader and rests, the way a leg starts.
 func (d *Driver) afterBack(ctx context.Context) error {
-	if err := d.g.Chat(ctx, "party", ".bot action follow"); err != nil {
+	if err := d.chat(ctx, ".bot action follow"); err != nil {
 		return err
 	}
 	return d.restGate(ctx)
@@ -589,7 +590,7 @@ func (m *memberOrders) send(ctx context.Context) error {
 	}
 	if !m.released {
 		m.released = true
-		return d.g.Chat(ctx, "party", ".bot action release")
+		return d.chat(ctx, ".bot action release")
 	}
 	dead := false
 	for _, mb := range d.g.Party() {
@@ -599,7 +600,7 @@ func (m *memberOrders) send(ctx context.Context) error {
 	}
 	if dead && (m.lastRun.IsZero() && now.Sub(m.began) >= m.startAfter+5*time.Second || !m.lastRun.IsZero() && now.Sub(m.lastRun) >= 30*time.Second) {
 		m.lastRun = now
-		return d.g.Chat(ctx, "party", ".bot action corpse run")
+		return d.chat(ctx, ".bot action corpse run")
 	}
 	return nil
 }
@@ -619,6 +620,7 @@ func (d *Driver) membersDead() []string {
 // run to their corpses, brings the leader back (a corpse run: nobody is left to resurrect it), waits for the members, and
 // rests. The run goes on from the step it was on. Bounded by MaxWipeRecoveries and WipeRecoverTimeout.
 func (d *Driver) recoverWipe(ctx context.Context, cause error) error {
+	defer d.wd.hold()()
 	if d.wipeRecoveries >= d.cfg.MaxWipeRecoveries {
 		return fmt.Errorf("%w (after %d recoveries)", cause, d.wipeRecoveries)
 	}
@@ -680,6 +682,7 @@ func (d *Driver) waitMembers(ctx context.Context, mo *memberOrders, began time.T
 // recoverDeadMembers is the rest gate's answer to dead members when no GM revive is possible and RecoverWipe is on: a
 // healer may resurrect them (ResWait), else they release and run to their corpses, as in a wipe.
 func (d *Driver) recoverDeadMembers(ctx context.Context) error {
+	defer d.wd.hold()()
 	began := d.clk.Now()
 	d.rep.note(fmt.Sprintf("leg %d: dead members %v; waiting for a resurrection, then they release and run to their corpses", max(d.curLeg, 0), d.membersDead()))
 	mo := &memberOrders{d: d, began: began, startAfter: d.cfg.ResWait}

@@ -42,6 +42,35 @@ func restTargetFor(cfg Config, plan *Plan, leg int) restTarget {
 	return t
 }
 
+// walkRest is the rule that lets a gate pass while the party walks: the next step is a walk of at least yd yards, and everyone is
+// above the floors in floor (health, healer mana, other mana; max is not used).
+type walkRest struct {
+	yd    float32
+	floor restTarget
+}
+
+// walkRestFor resolves the walking-rest rule of leg: the Config's own, with the leg's rest.walk_* fields over them. ok is false when
+// the leg (or the Config) turns it off.
+func walkRestFor(cfg Config, plan *Plan, leg int) (w walkRest, ok bool) {
+	w = walkRest{yd: cfg.RestWalkYd, floor: restTarget{health: cfg.RestWalkHealthPct, healerMana: cfg.RestWalkHealerManaPct, mana: cfg.RestWalkManaPct}}
+	if plan != nil && leg >= 0 && leg < len(plan.Legs) && plan.Legs[leg].Rest != nil {
+		s := plan.Legs[leg].Rest
+		if s.WalkYd != 0 {
+			w.yd = float32(s.WalkYd)
+		}
+		if s.WalkHealth > 0 {
+			w.floor.health = s.WalkHealth
+		}
+		if s.WalkHealerMana > 0 {
+			w.floor.healerMana = s.WalkHealerMana
+		}
+		if s.WalkMana > 0 {
+			w.floor.mana = s.WalkMana
+		}
+	}
+	return w, w.yd > 0
+}
+
 // manaNeed is the mana percent a member must reach: the healer's target for a healer, the other for the rest.
 func (t restTarget) manaNeed(healer bool) int {
 	if healer {
@@ -118,6 +147,11 @@ type RestGate struct {
 	// shown yet that the bot drinks on it. Absent when none was sent.
 	DrinkOrderResult string `json:"drink_order_result,omitempty"`
 	PartyRestRefused bool   `json:"party_rest_refused,omitempty"`
+	// Skipped marks a gate that cost nothing: everyone was at the targets on its first frame (Result "rested"), or the next step was a
+	// long walk and everyone was above the walking floors (Result "walking": the party rests on the way, the next pull gate waits).
+	Skipped bool `json:"skipped,omitempty"`
+	// Refills names the bots `.bot maintenance` was sent to again during this gate (remote mode).
+	Refills []string `json:"refills,omitempty"`
 }
 
 // maxRestGates bounds the report's gate list.
@@ -152,6 +186,12 @@ func (r *gateRec) finish(rep *reporter, now time.Time, err error) {
 	}
 	rep.update(func(rp *Report) {
 		rp.RestSeconds += max(r.g.Seconds, 0)
+		if r.g.Skipped {
+			rp.RestGatesSkipped++
+			if r.g.Result == "walking" {
+				rp.RestWalkPasses++
+			}
+		}
 		if n := len(rp.Legs); n > 0 {
 			rp.Legs[n-1].RestSeconds += max(r.g.Seconds, 0)
 		}

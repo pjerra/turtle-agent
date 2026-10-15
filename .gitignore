@@ -2,3 +2,11 @@
 /captures/
 settings.json
 /.cache/
+/traces/
+# Extracted game assets stay local (README "Minimaps").
+/minimaps/
+/turtle-agent-minimaps/
+/bin/old/
+/minimaps/
+*.cap
+*.cap.gz

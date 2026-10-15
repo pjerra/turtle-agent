@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -64,6 +65,7 @@ func TestParseErrors(t *testing.T) {
 		{"no entrance", `{"version":1,"name":"t","map":1}`, "entrance: required"},
 		{"entrance z", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0}}`, "entrance.z: required"},
 		{"no legs", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[]}`, "legs: needs at least one leg"},
+		{"fail_text with a line break", step(`{"wait_for":{"hostiles_gone":{"radius":5},"fail_text":"a\nb"}}`), "wait_for.fail_text"},
 		{"unknown top field", `{"version":1,"colour":1}`, `unknown field "colour"`},
 		{"not json", `{`, "t.json:"},
 		{"two documents", validPlan + validPlan, "more than one JSON value"},
@@ -82,8 +84,8 @@ func TestParseErrors(t *testing.T) {
 		{"skip holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[4],"boss":{"entry":4,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: skips the boss (4)"},
 		{"skip also pulled", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[1],"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].skip[0]: 1 is also in pull_groups[0].entries"},
 		{"skip also first", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[3],"boss":{"entry":4,"first":[3],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: 3 is also in boss.first"},
-		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object, wait_for, loot_object or use_item"},
-		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has more than one of use_object, wait_for, loot_object and use_item"},
+		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object, wait_for, loot_object, use_item or ritual"},
+		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has more than one of use_object, wait_for, loot_object, use_item and ritual"},
 		{"unknown step field", step(`{"click":{"entry":1}}`), `legs[0].steps[0]: json: unknown field "click"`},
 		{"use nothing", step(`{"use_object":{}}`), "legs[0].steps[0].use_object: needs an entry, a near position, or both"},
 		{"range without near", step(`{"use_object":{"entry":1,"range":5}}`), "legs[0].steps[0].use_object.range: only means something with near"},
@@ -220,5 +222,22 @@ func TestParseAfterBoss(t *testing.T) {
 	b, _ := Marshal(p)
 	if q, err := Parse("t.json", b); err != nil || len(q.Legs[0].AfterBoss) != 2 {
 		t.Fatalf("%v", err)
+	}
+}
+
+// `fleers` lists creature entries that run at low health; an entry of 0 is refused like any other.
+func TestParseFleers(t *testing.T) {
+	base := func(f string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},` + f + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+	}
+	p, err := Parse("t.json", []byte(base(`"fleers":[4853,7321],`)))
+	if err != nil || fmt.Sprint(p.Fleers) != "[4853 7321]" {
+		t.Fatalf("%v %v", err, p)
+	}
+	if _, err := Parse("t.json", []byte(base(`"fleers":[4853,0],`))); err == nil || !strings.Contains(err.Error(), "fleers[1]: 0 is no creature entry") {
+		t.Fatalf("%v", err)
+	}
+	if p, err := Parse("t.json", []byte(base(``))); err != nil || len(p.Fleers) != 0 {
+		t.Fatalf("%v %v", err, p)
 	}
 }

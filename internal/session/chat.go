@@ -173,3 +173,23 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 	})
 	return err
 }
+
+// ClearTarget clears the selection, as a client does when the player drops the target (CMSG_SET_SELECTION with a zero GUID). A command that
+// acts on the selected unit when there is one and on the surroundings when there is none (".respawn", Commands.cpp HandleRespawnCommand)
+// needs it first, and the caller waits for ServerSelection to read zero before the line is sent: the core handles the selection on the map
+// thread and a chat line on the world thread.
+func (s *Session) ClearTarget(ctx context.Context) error {
+	_, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		if err := s.conn.WritePacket(opcode.CMSGSetSelection, game.BuildSetSelection(0)); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.target = 0
+		s.mu.Unlock()
+		return nil, nil
+	})
+	return err
+}
