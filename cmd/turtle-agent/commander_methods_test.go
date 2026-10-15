@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -580,5 +581,31 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 	sr, _ := rep["start"].(map[string]any)
 	if rem["gm_commands"].(float64) != 0 || rem["unbound"] != true || sr == nil || sr["kind"] != "pull_gather" || sr["pull_group"] != float64(0) || len(sr["gm_commands"].([]any)) != 0 {
 		t.Fatalf("remote %v start %v", rem, sr)
+	}
+}
+
+// recover_wipe is on by default in a commander run, off in a group run, and the caller's word wins either way.
+func TestRecoverWipeDefaultsOnForCommanderRuns(t *testing.T) {
+	parse := func(js string) dungeonRunParams {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(js), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct {
+		params    string
+		commander bool
+		want      bool
+	}{
+		{`{"name":"x"}`, true, true},
+		{`{"name":"x"}`, false, false},
+		{`{"name":"x","recover_wipe":false}`, true, false},
+		{`{"name":"x","recover_wipe":true}`, true, true},
+		{`{"name":"x","recover_wipe":true}`, false, true},
+	} {
+		if got := recoverWipeOn(parse(c.params).RecoverWipe, c.commander); got != c.want {
+			t.Errorf("%s commander %v: %v, want %v", c.params, c.commander, got, c.want)
+		}
 	}
 }

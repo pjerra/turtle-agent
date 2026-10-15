@@ -122,6 +122,7 @@ var tuneSpecs = []tuneSpec{
 	secs("adds_wait_s", 1, 90, "longest wait for loose hostiles after a fight", func(t *tuneTarget) *time.Duration { return &t.cfg.AddsWait }),
 	secs("fight_timeout_s", 30, 900, "one pull group", func(t *tuneTarget) *time.Duration { return &t.cfg.FightTimeout }),
 	secs("boss_timeout_s", 60, 1800, "one boss fight", func(t *tuneTarget) *time.Duration { return &t.cfg.BossTimeout }),
+	secs("boss_search_s", 5, 600, "how long a kill-boss step waits for a boss that is not at his spot to walk back", func(t *tuneTarget) *time.Duration { return &t.cfg.BossSearch }),
 	yds("look_standoff", 5, 24, "how far short of a pack's position the lead bot stops to look for it (under the 25 yd of the clear evidence)", func(t *tuneTarget) *float32 { return &t.x.LookStandoff }),
 	yds("attack_hold_yd", 10, 80, "how near the mob the tank must be for its threat to count as holding it", func(t *tuneTarget) *float32 { return &t.x.AttackHoldYd }),
 	ints("tank_busy_rounds", "count", 1, 6, "waits of one pull for a tank that stays in combat", func(t *tuneTarget) *int { return &t.x.TankBusyRounds }),

@@ -109,6 +109,58 @@ func (d *RemoteDriver) respectCC(mobs []tbm.HostileRec) []tbm.HostileRec {
 	return free
 }
 
+// isKillFirst says whether the plan's kill_first list has the entry.
+func (d *RemoteDriver) isKillFirst(entry uint32) bool {
+	return d.plan != nil && entry != 0 && slices.Contains(d.plan.KillFirst, entry)
+}
+
+// killFirstFirst puts the plan's kill_first entries ahead of mobs (as rankByTank left them), in the list's order, the rest keeping their
+// order. A kill_first mob under CC stays where it was: the party leaves a held Witch Doctor alone. It runs after respectCC and
+// rankByTank, so the tank's order decides among equals only.
+func (d *RemoteDriver) killFirstFirst(mobs []tbm.HostileRec) []tbm.HostileRec {
+	if d.plan == nil || len(d.plan.KillFirst) == 0 {
+		return mobs
+	}
+	n := len(d.plan.KillFirst)
+	rank := func(h tbm.HostileRec) int {
+		if i := slices.Index(d.plan.KillFirst, h.Entry); i >= 0 && h.Entry != 0 && !d.ccd(h) {
+			return i
+		}
+		return n
+	}
+	out := slices.Clone(mobs)
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
+}
+
+// summonedKillFirst says whether h is a kill_first entry the plan never plans a fight with (no pull group, boss, first or patrol
+// lists it): a summoned unit, Zul'Farrak's Greater Healing Ward 8179, which fights nobody but is part of the fight it pulses in.
+func (d *RemoteDriver) summonedKillFirst(h tbm.HostileRec) bool {
+	if !d.isKillFirst(h.Entry) {
+		return false
+	}
+	for _, l := range d.plan.Legs {
+		for _, g := range l.PullGroups {
+			if slices.Contains(g.Entries, h.Entry) || (g.Patrol != nil && slices.Contains(g.Patrol.Entries, h.Entry)) {
+				return false
+			}
+		}
+		if b := l.Boss; b != nil && (b.Entry == h.Entry || slices.Contains(b.First, h.Entry)) {
+			return false
+		}
+	}
+	return true
+}
+
+// wardRangeYd is how near the lead bot a summoned kill_first unit must be to count as part of the fight.
+const wardRangeYd = 40
+
+// inFight says whether the hostile is part of the fight: it fights the party (engagedWith), or it is a summoned kill_first unit (a
+// healing ward) within wardRangeYd of the lead bot, which fights nobody and is killed first all the same.
+func (d *RemoteDriver) inFight(h tbm.HostileRec) bool {
+	return d.engagedWith(h) || (d.summonedKillFirst(h) && distToLead(d, hostilePoint(h)) <= wardRangeYd)
+}
+
 // tankShare is the tank's share of the top threat on the mob: 100 when it tops the list, 0 when it is not among the top three.
 func (d *RemoteDriver) tankShare(h tbm.HostileRec) int {
 	if d.tank == 0 {

@@ -385,6 +385,8 @@ type RemoteReport struct {
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
 	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
+	// BossSearches counts the kill-boss steps that found no boss at his spot and waited for him to walk back (remote_fight.go searchBoss).
+	BossSearches int `json:"boss_searches"`
 	// RejoinTPs are the `cmd summon <bot>` orders the commander sent to bring a bot back to the lead bot (remote_rejoin.go); each is also a
 	// run_gm_assists.
 	RejoinTPs int `json:"rejoin_tps"`

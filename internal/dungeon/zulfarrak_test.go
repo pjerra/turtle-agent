@@ -100,8 +100,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5650 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" {
-		t.Errorf("hire %v cc_priority %v cc_always %v", p.HireComposition, p.CCPriority, p.CCAlways)
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[5650 7247 7246 5648]" || fmt.Sprint(p.CCAlways) != "[5650 7246]" || fmt.Sprint(p.KillFirst) != "[8179 5650 7247]" {
+		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
 	if p.EntranceTele != "" || p.OutsideTele != "farrak" || p.Portal == nil || p.Portal.Map != 1 || p.EntranceTrigger != 924 {

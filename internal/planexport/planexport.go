@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,6 +46,7 @@ const (
 	MaxEntries     = 16    // creature entries of a pull or boss
 	MaxPlanName    = 32    // ai_dungeon_plan.plan
 	MaxLegName     = 32    // ai_dungeon_leg.name
+	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
 	MaxSource      = 64    // ai_dungeon_plan.source
 	MaxComment     = 255   // every comment column
 	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
@@ -58,10 +60,13 @@ const (
 
 // PlanRow is one ai_dungeon_plan row.
 type PlanRow struct {
-	Plan    string
-	Map     uint32
-	Source  string
-	Comment string
+	Plan string
+	Map  uint32
+	// CCPriority, CCAlways and KillFirst are the plan's unit lists (cc_priority, cc_always, kill_first), written as comma lists like
+	// ai_dungeon_step.entries in the ai_dungeon_plan columns of the same names (TortoiseBots #1001, varchar(255), '' for none).
+	CCPriority, CCAlways, KillFirst []uint32
+	Source                          string
+	Comment                         string
 }
 
 // LegRow is one ai_dungeon_leg row.
@@ -142,8 +147,16 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	if source == "" {
 		source = "turtle-agent dungeons/" + name + ".json"
 	}
+	for _, l := range []struct {
+		col string
+		es  []uint32
+	}{{"cc_priority", p.CCPriority}, {"cc_always", p.CCAlways}, {"kill_first", p.KillFirst}} {
+		if n := len(entriesText(l.es)); n > MaxPlanList {
+			return Result{}, fmt.Errorf("plan %s: %s is %d characters as a comma list (ai_dungeon_plan.%s holds %d)", name, l.col, n, l.col, MaxPlanList)
+		}
+	}
 	b := &builder{opt: opt, plan: p, name: name}
-	b.rows.Plan = PlanRow{Plan: name, Map: p.Map, Source: clip(source, MaxSource), Comment: clip(planComment(p), MaxComment)}
+	b.rows.Plan = PlanRow{Plan: name, Map: p.Map, CCPriority: slices.Clone(p.CCPriority), CCAlways: slices.Clone(p.CCAlways), KillFirst: slices.Clone(p.KillFirst), Source: clip(source, MaxSource), Comment: clip(planComment(p), MaxComment)}
 	for li := range p.Legs {
 		if err := b.leg(li); err != nil {
 			return Result{}, fmt.Errorf("plan %s: leg %d (%s): %w", name, li, p.Legs[li].Name, err)

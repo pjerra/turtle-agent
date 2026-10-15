@@ -110,7 +110,7 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 	switch {
 	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
 		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
-	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe:
+	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil:
 		return bad(`cc, carrier, loot_restore, object_fallback, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
 	case p.Tune != "" || p.LiveReload != nil:
 		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
@@ -172,7 +172,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
-	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
+	cfg.Setup, cfg.RecoverWipe = setup, recoverWipeOn(p.RecoverWipe, true)
 	cfg.Resume = p.Resume != nil && *p.Resume
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog

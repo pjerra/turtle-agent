@@ -226,3 +226,48 @@ func TestBurstReadsTheWholeRunOfLines(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// LinesAll asks the whole party at once: the bots that answer are read from their own whispers, and the ones that do not cost one wait
+// together, not one each.
+func TestLinesAllReadsEachBotsAnswerInOneWait(t *testing.T) {
+	l := newFakeLink()
+	l.reply = nil
+	c := NewCommander(l)
+	l.sayHook = func(text string) {
+		switch text {
+		case ".bot command Tanky talents":
+			l.log.Append(events.Event{Kind: events.KindChat, Source: "Tanky", Text: "My current talent spec is: Protection (0/5/31) Link: x", Data: map[string]any{"type": "raid"}})
+		case ".bot command Healy talents":
+			l.log.Append(events.Event{Kind: events.KindWhisper, Source: "Healy", Text: "My current talent spec is: Holy (31/20/0) Link: x", Data: map[string]any{"type": "whisper"}})
+		}
+		// Magey never answers
+	}
+	var got [3][3]int
+	req := func(i int, bot string) LineRequest {
+		return LineRequest{Command: "command " + bot + " talents", Done: func(s string) bool {
+			tl, ok := ParseTalents([]string{s})
+			if ok {
+				got[i] = tl.Trees
+			}
+			return ok
+		}}
+	}
+	began := time.Now()
+	res, err := c.LinesAll(context.Background(), []LineRequest{req(0, "Tanky"), req(1, "Healy"), req(2, "Magey")}, 300*time.Millisecond)
+	took := time.Since(began)
+	if err != nil || len(res) != 3 || !res[0].Settled || !res[1].Settled || res[2].Settled {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got[0] != [3]int{0, 5, 31} || got[1] != [3]int{31, 20, 0} || got[2] != [3]int{} {
+		t.Fatalf("read %v", got)
+	}
+	if took > 600*time.Millisecond {
+		t.Fatalf("the silent bot cost %v: one wait of 300 ms was meant for all", took)
+	}
+	if len(l.sent) != 3 || l.sent[2] != ".bot command Magey talents" {
+		t.Fatalf("%v", l.sent)
+	}
+	if _, err := c.LinesAll(context.Background(), []LineRequest{{Command: "command Tank;y talents", Done: func(string) bool { return true }}}, time.Second); err == nil {
+		t.Fatal("a bad line was sent")
+	}
+}

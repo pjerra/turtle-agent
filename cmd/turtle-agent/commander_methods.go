@@ -243,6 +243,20 @@ func (g remoteGame) BotLines(ctx context.Context, command string, wait time.Dura
 	return g.c.cmdr.Lines(ctx, command, wait, done)
 }
 
+// BotLinesAll implements dungeon.BotLinesAller: several `.bot` lines sent together and answered in one wait.
+func (g remoteGame) BotLinesAll(ctx context.Context, reqs []dungeon.BotLineRequest, wait time.Duration) ([][]string, []bool, error) {
+	rs := make([]tbm.LineRequest, len(reqs))
+	for i, r := range reqs {
+		rs[i] = tbm.LineRequest{Command: r.Command, Done: r.Done}
+	}
+	res, err := g.c.cmdr.LinesAll(ctx, rs, wait)
+	lines, settled := make([][]string, len(res)), make([]bool, len(res))
+	for i, r := range res {
+		lines[i], settled[i] = r.Lines, r.Settled
+	}
+	return lines, settled, err
+}
+
 func (g remoteGame) Emit(kind, text string, data map[string]any) {
 	g.c.cur().Log().Append(events.Event{Kind: kind, Text: text, Data: data})
 }
