@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 )
 
@@ -35,18 +36,11 @@ func TestRagefireRefusedStepsSnapToTheFloor(t *testing.T) {
 	for _, c := range []struct{ x, y, z, under float32 }{
 		{-44.65, -39.53, -25.67, 4.16}, {-54.03, -39.04, -25.84, 5.31}, {-49.77, -39.3, -24.25, 3.25}, {-58.95, -38.8, -24.45, 5.54},
 	} {
-		zs, ok := g.FloorsAt(context.Background(), 389, c.x, c.y, c.z)
-		if !ok {
-			t.Fatalf("%v: no floors", c)
-		}
-		best := zs[0]
-		for _, z := range zs {
-			if math.Abs(float64(z-c.z)) < math.Abs(float64(best-c.z)) {
-				best = z
-			}
-		}
+		// the straight line ran from the lead bot's height to the next corner's; the step sat c.under yd under its floor
+		p := dungeon.StepOnFloor(context.Background(), g, 389, dungeon.Point{X: c.x, Y: c.y, Z: c.z}, c.z-1, c.z+c.under+1)
+		best := p.Z
 		if math.Abs(float64(best-(c.z+c.under))) > 0.3 {
-			t.Errorf("%v: floor %.2f, want about %.2f (floors %v)", c, best, c.z+c.under, zs)
+			t.Errorf("%v: snapped to z %.2f, want about %.2f", c, best, c.z+c.under)
 		}
 		n, ok, err := pl.Nearest(389, navmesh.Vec3{c.x, c.y, best})
 		if err != nil || !ok || math.Abs(float64(n[2]-best)) > 0.3 {
