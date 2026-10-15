@@ -28,16 +28,19 @@ type Poller struct {
 	opt    Options
 	plans  *planCache
 	tailer *Tailer
+	live   *Live
+	hist   *History
 
-	mu      sync.RWMutex
-	state   []byte
-	raw     map[string][]byte
-	clients map[string]*Client
-	alive   map[string]bool // agents that have answered since the start
-	trails  map[string]*Trail
-	events  map[string]*EventLog
-	agents  []Agent
-	lastDis time.Time
+	mu       sync.RWMutex
+	state    []byte
+	raw      map[string][]byte
+	clients  map[string]*Client
+	alive    map[string]bool // agents that have answered since the start
+	trails   map[string]*Trail
+	events   map[string]*EventLog
+	agents   []Agent
+	lastDis  time.Time
+	livePath map[string]string // agent id -> the trace file of its run, for the path layers
 }
 
 // NewPoller applies the defaults.
@@ -57,7 +60,7 @@ func NewPoller(o Options) *Poller {
 	if o.Agents == "" {
 		o.Agents = "auto"
 	}
-	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}, events: map[string]*EventLog{}}
+	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), live: NewLive(), hist: NewHistory(o.Now, o.TestsDir, o.TracesDir), livePath: map[string]string{}, raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}, events: map[string]*EventLog{}}
 	p.state = []byte(`{"agents":[],"offline":[]}`)
 	return p
 }
@@ -117,6 +120,7 @@ func (p *Poller) Tick(ctx context.Context) {
 	for i, a := range agents {
 		c := res[i].card
 		if c.Online {
+			p.livePath[a.ID] = c.tracePath
 			p.alive[a.ID] = true
 			p.trackTrail(a.ID, &c)
 			p.trackEvents(a.ID, &c, now)
@@ -231,6 +235,7 @@ func (p *Poller) pollOne(ctx context.Context, cl *Client, now time.Time) (Card, 
 	call("tune_list", &in.Tune)
 	call("bot_view", &in.View)
 	wg.Wait()
+	tracePath := ""
 	var ds struct {
 		Report *struct {
 			Plan      string `json:"plan"`
@@ -244,12 +249,15 @@ func (p *Poller) pollOne(ctx context.Context, cl *Client, now time.Time) (Card, 
 		if path, link, folder, ok := p.resolveTrace(ds.Report.TraceFile); ok {
 			if snap, err := p.tailer.Read(path, now); err == nil {
 				in.Trace = &snap
+				tracePath = path
+				p.live.Advance(path, now)
 				in.Folder = folder
 				in.Links = p.links(link)
 			}
 		}
 	}
 	card := BuildCard(in)
+	card.tracePath = tracePath
 	raw, _ := json.Marshal(map[string]json.RawMessage{"status": orNull(in.Status), "dungeon_status": orNull(in.Dungeon), "tune_list": orNull(in.Tune)})
 	raw, err = Scrub(raw, cl.Token())
 	if err != nil {
@@ -345,3 +353,27 @@ func (p *Poller) links(trace string) []Link {
 	}
 	return out
 }
+
+// LiveJSON is the digest of the run an agent is on (its walks cut to the last minutes), or false when the agent has no readable trace.
+func (p *Poller) LiveJSON(id string, minutes int) ([]byte, bool) {
+	p.mu.RLock()
+	path := p.livePath[id]
+	p.mu.RUnlock()
+	if path == "" {
+		return nil, false
+	}
+	b, ok := p.live.JSON(path, minutes)
+	if !ok {
+		return nil, false
+	}
+	b, err := Scrub(b, p.secrets()...)
+	return b, err == nil
+}
+
+// Ghost is the best earlier run of a plan as JSON (see History.Ghost).
+func (p *Poller) Ghost(plan, exclude string, planLegs int) []byte {
+	return p.hist.Ghost(plan, exclude, planLegs)
+}
+
+// Heat is the places parties died in the latest runs of a plan as JSON (see History.Heat).
+func (p *Poller) Heat(plan string) []byte { return p.hist.Heat(plan) }

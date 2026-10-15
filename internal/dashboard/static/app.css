@@ -147,7 +147,7 @@ svg circle.other { stroke: #000; stroke-width: 1.5; }
 .layers > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
 .layers > summary::-webkit-details-marker { display: none; }
 .layers[open] > summary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(260px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
+.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(310px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .35); display: grid; gap: 2px; }
 .lrow { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 13px; cursor: pointer; }
 .lrow input { width: 18px; height: 18px; }
@@ -232,3 +232,23 @@ svg.hide-bossmark .bossmk, svg.hide-hpbars .hpb, svg.hide-statusicons .sti, svg.
 .lgd .lgs.hps { width: 28px; height: 5px; border-radius: 2px; background: linear-gradient(90deg, #ff4d4d 30%, #ffb020 30% 60%, #3ddc84 60%); margin: 0; }
 .td-doing { max-width: 14em; }
 svg:not(.hide-bossmark) .m.boss .hname { display: none; }
+
+/* path layers: sliders under a layer, pull groups recoloured by state, the ghost line in the run line */
+.lstyle { margin: 0 0 4px 22px; padding: 2px 0 4px; }
+.lstyle[hidden] { display: none; }
+.srow { display: grid; grid-template-columns: 6.2em 1fr 4.6em; align-items: center; gap: 6px; font-size: 12px; min-height: 28px; }
+.srow .sl { color: var(--muted); } .srow .sv { text-align: right; font-variant-numeric: tabular-nums; }
+.srow input[type=range] { width: 100%; min-width: 0; height: 24px; margin: 0; }
+svg.ps-on .pin.ps-cleared circle { fill: #22c55e; } svg.ps-on .pull.ps-cleared { stroke: #22c55e; fill: rgba(34, 197, 94, .12); }
+svg.ps-on .pin.ps-next circle { fill: #ffd400; } svg.ps-on .pull.ps-next { stroke: #ffd400; fill: rgba(255, 212, 0, .26); stroke-width: 3.5; }
+svg.ps-on .pin.ps-skipped circle { fill: #9aa3b2; } svg.ps-on .pull.ps-skipped { stroke: #9aa3b2; fill: rgba(154, 163, 178, .1); }
+svg.ps-on .pin.ps-failed circle { fill: #ff3b3b; } svg.ps-on .pull.ps-failed { stroke: #ff3b3b; fill: rgba(255, 59, 59, .14); }
+svg.ps-on .pin.ps-pending circle { fill: #1f2937; stroke: #fff; } svg.ps-on .pin.ps-pending text.num { fill: #fff; }
+svg.ps-on .pull.ps-pending { stroke: #e5e7eb; }
+svg .psm .hit, svg .wpv .hit { pointer-events: all; }
+svg .bossst text.g { pointer-events: none; font-weight: 700; }
+svg .stallm text.g, svg .rg text.g, svg .objst text.g { pointer-events: none; }
+.runinfo .ghostline { color: #6b21a8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .runinfo .ghostline { color: #e9d5ff; } }
+:root[data-theme="dark"] .runinfo .ghostline { color: #e9d5ff; }
+@media (max-width: 600px) { .srow { grid-template-columns: 5.2em 1fr 4.2em; } .lrow { padding: 6px 0; } }

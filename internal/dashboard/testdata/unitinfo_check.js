@@ -122,4 +122,11 @@ assert.strictEqual(U.clock(3725), "1:02:05");
 // ---- the legend explains every mark
 assert.ok(U.LEGEND.length >= 10);
 U.LEGEND.forEach((l) => assert.ok(l.sample && l.text, l.sample));
+// ---- a mark of the path layers: its rows are shown, an empty one is left out
+const mk = U.describeUnit({ type: "mark", data: { title: "Party stood still", badge: "stall", rows: [["For", "60 s"], ["Why", ""], ["At", "1:40 into the run"]] } }, {});
+assert.strictEqual(mk.title, "Party stood still"); assert.strictEqual(mk.badge, "stall");
+assert.deepStrictEqual(mk.rows, [["For", "60 s"], ["At", "1:40 into the run"]]);
+assert.deepStrictEqual(U.describeUnit({ type: "mark", data: {} }, {}).rows, []);
+assert.ok(U.LEGEND.some((l) => /refused|stuck/.test(l.text)) && U.LEGEND.some((l) => /ghost/.test(l.text)) && U.LEGEND.some((l) => /patrol/.test(l.text)));
+assert.ok(U.LEGEND.some((l) => /does not say who put a crowd control on/.test(l.text)), "the legend says what the feed lacks");
 console.log("unitinfo.js ok");

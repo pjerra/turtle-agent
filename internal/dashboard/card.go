@@ -73,7 +73,8 @@ type Card struct {
 	Trail     [][2]float64 `json:"trail,omitempty"`     // where the lead bot has been this run ([x, y] in the drawing's plane), oldest first
 	Events    []Event      `json:"events"`              // what happened this run (deaths, wipes, boss kills, doors and chests), oldest first; the poller fills it
 
-	ev evInputs // what the event log reads of the report; never sent
+	ev        evInputs // what the event log reads of the report; never sent
+	tracePath string   // the trace file of the run, for the live digest; never sent
 }
 
 // Link is a file of the run the page links to, served from --tests-dir.

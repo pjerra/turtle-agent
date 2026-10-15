@@ -43,7 +43,7 @@ func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "unitinfo.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -98,6 +98,12 @@ func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
 func TestMapLayers(t *testing.T) { runCheck(t, "layers_check.js", "layers.js") }
 
 // TestUnitInfo: what a character is doing, the hover box, status icons, threat colours, the event feed and the run progress.
+// TestPathMath: trails, planned vs walked, pull-group states, objects, aggro rings, patrols, combat lines, the ghost and the heat bins.
+func TestPathMath(t *testing.T) { runCheck(t, "paths_check.js", "paths.js") }
+
+// TestPathDraw: the path layers on a fake SVG.
+func TestPathDraw(t *testing.T) { runCheck(t, "pathdraw_check.js", "pathdraw.js") }
+
 func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js") }
 
 // The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.

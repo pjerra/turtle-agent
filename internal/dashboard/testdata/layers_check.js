@@ -13,10 +13,10 @@ const wasOn = ["bg", "route", "trail", "next", "packs", "hostile", "cleared", "b
 const wasOff = ["neutral", "steps"];
 wasOn.forEach((k) => assert.strictEqual(def[k], true, k));
 wasOff.forEach((k) => assert.strictEqual(def[k], false, k));
-const newOn = ["bossmark", "hpbars"]; // the owner's upgrade of 2026-10-15: the boss mark and the health bars start on, everything else new is off
+const newOn = ["bossmark", "hpbars", "waypoints", "pullstate", "restgather"]; // the owner's upgrades of 2026-10-15: the boss mark, the health bars, the waypoints, the pull-group states and the rest and gather spots start on, everything else new is off
 newOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
 const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0);
-assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "critter", "events", "feed", "grid", "healring", "heading", "hostilenames", "runinfo", "scale", "statusicons", "threat", "threatcolors", "trailtime", "zonenames"].sort());
+assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "combat", "critter", "deathheat", "events", "feed", "ghost", "grid", "healring", "heading", "hostilenames", "objects", "packrings", "patrols", "refusals", "runinfo", "scale", "stalls", "statusicons", "threat", "threatcolors", "trail_members", "trailtime", "zonenames"].sort());
 added.forEach((k) => assert.strictEqual(def[k], false, k + " starts off"));
 L.DEFS.forEach((d) => { assert.ok(d.label && d.group, d.key); assert.ok(!d.needs || d.why, d.key + " needs a reason"); });
 
@@ -114,4 +114,34 @@ assert.deepStrictEqual(L.scaleBar(4, 110), { yd: 20, px: 80 });
 assert.strictEqual(L.scaleBar(900, 110).yd, 1);
 assert.strictEqual(L.gridStep(1), 100); assert.strictEqual(L.gridStep(4), 20);
 assert.deepStrictEqual(L.gridLines([-95, -30, 200, 100], 50).xs, [-50, 0, 50, 100]);
+// ---- the sliders of the path layers: defaults, one saved choice, clamping, junk
+const sd = L.styleDefaults();
+assert.deepStrictEqual(Object.keys(sd).sort(), Object.keys(L.STYLES).sort());
+Object.keys(L.STYLES).forEach((k) => assert.ok(L.keys().indexOf(k) >= 0, k + " is a layer"));
+Object.keys(L.STYLES).forEach((k) => assert.ok("opacity" in L.STYLES[k], k + " has an opacity slider"));
+// the layers that draw lines have a thickness slider, the trails also the minutes
+["trail", "trail_members", "waypoints", "ghost", "patrols", "packrings", "combat"].forEach((k) => assert.ok("width" in L.STYLES[k], k + " has a thickness"));
+["trail", "trail_members"].forEach((k) => assert.ok("minutes" in L.STYLES[k], k + " has minutes"));
+Object.keys(L.STYLES).forEach((k) => Object.keys(L.STYLES[k]).forEach((p) => { const v = L.STYLES[k][p], r = L.SLIDERS[p]; assert.ok(v >= r.min && v <= r.max, k + "." + p); }));
+assert.strictEqual(L.trailMinutes(sd, "trail"), null);            // the lead's trail starts as the whole run, as it always was
+assert.strictEqual(L.trailMinutes(sd, "trail_members"), 5);
+assert.strictEqual(L.trailMinutes(L.setStyle(sd, "trail", "minutes", 12), "trail"), 12);
+const s1 = L.setStyle(L.setStyle(L.setStyle(sd, "ghost", "opacity", 500), "ghost", "width", -3), "nope", "opacity", 50);
+assert.strictEqual(s1.ghost.opacity, 100); assert.strictEqual(s1.ghost.width, 1); assert.strictEqual(s1.nope, undefined);
+assert.strictEqual(L.setStyle(sd, "pullstate", "width", 5).pullstate.width, undefined); // no thickness where nothing draws a line
+assert.strictEqual(L.setStyle(sd, "ghost", "opacity", NaN).ghost.opacity, sd.ghost.opacity);
+const sm = mem();
+assert.deepStrictEqual(L.loadStyle(sm), sd);
+assert.strictEqual(L.saveStyle(sm, L.setStyle(sd, "trail", "width", 6)), true);
+assert.deepStrictEqual(Object.keys(sm.d), [L.STYLE_KEY]);
+assert.strictEqual(L.loadStyle(sm).trail.width, 6);
+assert.notStrictEqual(L.STYLE_KEY, L.STORAGE_KEY);
+sm.d[L.STYLE_KEY] = "{not json"; assert.deepStrictEqual(L.loadStyle(sm), sd);
+sm.d[L.STYLE_KEY] = JSON.stringify({ trail: { width: "x", opacity: 7, junk: 1 }, gone: { opacity: 1 } });
+const ld = L.loadStyle(sm); assert.strictEqual(ld.trail.width, sd.trail.width); assert.strictEqual(ld.trail.opacity, 10); assert.strictEqual(ld.trail.junk, undefined);
+assert.deepStrictEqual(L.loadStyle(null), sd);
+assert.deepStrictEqual(L.loadStyle({ getItem() { throw new Error("blocked"); } }), sd);
+assert.strictEqual(L.saveStyle({ setItem() { throw new Error("full"); } }, sd), false);
+assert.strictEqual(L.saveStyle(null, sd), false);
+
 console.log("layers.js ok");

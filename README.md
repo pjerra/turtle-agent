@@ -2794,6 +2794,28 @@ boss is a boss kill, named from the plan's notes) and from the accepted open, lo
 event seen already in the first report after the dashboard started has no time of its own (the kill of a boss is stamped when the leg is seen
 finished, to the poll); a pin sits where the bot died, at the boss's place, or at the party for an order.
 
+**Path layers (Plan, Walk, Run and Mobs groups).** Layers that draw lines have **opacity** and **thickness** sliders (the trails also **minutes shown**,
+the top of the slider being the whole run); they show under the layer's row while it is on and are saved once for all maps in `localStorage`
+`maplayers.style.v1`. On by default: the lead's trail (in its role colour, brighter than the others, whole run), the **waypoints** (the current leg's planned
+walk line dashed, its via points, the target point, and in orange-red the pieces of the lead's path more than 15 yd from the planned lines), the
+**pull groups by state** (the numbered circles turn green cleared, yellow next or being pulled, grey skipped, red failed with the reason on hover; the
+boss gets a check mark when killed) and the **rest and gather spots** of the run. Off by default: **other members' trails** (role colour, last 5 minutes),
+**objects with state** (doors, chests, altars, keystones: pending, open, looted, used, failed), **patrol routes** (the plan's patrol loop and the patrol's
+live position, when the feed sees it), the **ghost** (the best earlier run of the dungeon drawn faint, a dot where it was at this run's time, and "ghost is
+1.3 min ahead" or "behind" in the run line), **stall spots** (the party stood within 5 yd for over 30 s: how long and why, from the lead's combat flag, the
+rest gates and its action), **refused or unreachable walks** (red X with the module's reason: refused `move` orders, pulls and walks the navmesh did not
+reach, bots reported stuck), **aggro rings around hostile packs** (20 yd; plus or minus 1 yd per level of difference, 5 to 45, once a creature level is
+known) and **combat lines** (red mob to its victim, green healer to the friend it targets, cyan caster to the creature it crowd controls) and the **death
+heat map** (where parties died in the latest 20 runs of this dungeon).
+Data: the member trails, stalls, refusals, rests, gathers, pulls and object steps come from the run's own trace, which the server follows by reading the bytes
+it gained since the last poll (`digest.go`, `live.go`; the trace is only read). `GET /api/live/<agent id>?min=N` answers with that digest, the walks cut to the
+last N minutes (at most 120); `GET /api/ghost/<plan>?exclude=<run id>&legs=<plan sections>` the fastest earlier clear of the plan, else the run that got through
+most sections; `GET /api/heat/<plan>` the death places of the latest 20 runs. Both read the run traces (`r-*.jsonl`) under `--tests-dir` (and `--traces-dir`),
+at most 600 files, 6 folders deep, listed at most every 90 s, parsed once per change and cached (28 digests). What the data lacks is left out and the legend
+says so: the feed has **no creature level** (rings are 20 yd), **no name of who put a crowd control on** (the cyan line needs a `cmd cc` order of the commander),
+**no heal spell target** (a healer that targets a friend is taken to heal it), and patrols are only drawn when the plan has them. Runs that started at a later
+section (`from_leg`) are not counted as a clear of the whole dungeon. Botwatch files are not read: they carry no plan name.
+
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
 answered once and then stopped stays as "offline"; agents that never answered are listed in the header only.
