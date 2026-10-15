@@ -45,25 +45,12 @@
    "title": "The Deadmines",
    "map": 36,
    "kind": "dungeon",
-   "data": "map36",
-   "trigger": 78,
-   "bosses": [
-    644,
-    642,
-    1763,
-    61963,
-    646,
-    647,
-    639
-   ],
-   "entrance_tele": "deadmines",
+   "handwritten": true,
    "special": [
-    "Iron Clad Door: Defias Cannon (GO) fired with the door lever (go_door_lever_dm, gunpowder event) to reach the ship",
-    "Sneed (643) has no spawn row: he appears when Sneed's Shredder (642) dies",
-    "Mr. Smite's phase doors and chest (GO_SMITE_CHEST)"
-   ],
-   "notes": [
-    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement; Jared Voss (61961) and Cookie (645) are named mobs, not legs."
+    "Factory Door (13965) opens when Rhahk'Zor dies; Heavy Doors at -262.7 -482.4 and -243.0 -578.6 have no script (clicked open, not verified); Sneed's death (643, ejected by the Shredder 642) and Gilnid's death open the other two",
+    "Iron Clad Door: loot the Defias Gunpowder (17155, item 5397, summons an Overseer), fire the Defias Cannon (16398) with it, the door goes to active_alt",
+    "Mr. Smite: three phases, stealthed Blackguards (ambush group); Captain Greenskin walks a loop; VanCleef's Allies at 50 %",
+    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement on the z 51 plateau (side branch); Jared Voss (61961) and Cookie (645) are named mobs, not legs"
    ]
   },
   {
