@@ -432,13 +432,16 @@ func (d *RemoteDriver) packStands(g PullGroup, r float32) bool {
 }
 
 // bossWalkHops bounds the walk to a boss found by the search.
-const bossWalkHops = 60
+var bossWalkHops = 60 // a variable for the tests
 
 // walkToBoss walks the lead bot to the boss unit guid along the checked way, hop by hop: before each hop the way is checked again (bossWay,
 // from where the lead bot stands now), so a path that changed, a pack that came into it or a boss that went away stops the walk. It
 // returns why it stopped, or "" when the lead bot is within PullRange of him (the pull follows, with the pull's own checks).
 func (d *RemoteDriver) walkToBoss(ctx context.Context, label string, sp fightSpec, guid packet.GUID) (string, error) {
-	for hop := 0; hop < bossWalkHops; hop++ {
+	// Success is only the lead bot within PullRange of the boss's current position, seen at the top of a hop or after the last one. Every
+	// other way out (no stand point, an unknown lead position, a stand point reached short of the range, the hops used up) is a failure
+	// with its reason: the step must not hand the boss to the normal pull without the per-hop checks.
+	for hop := 0; ; hop++ {
 		h, ok := d.fr.Hostile(guid)
 		if !ok || h.HPPct <= 0 {
 			return "he is not in the feed any more", nil
@@ -446,24 +449,29 @@ func (d *RemoteDriver) walkToBoss(ctx context.Context, label string, sp fightSpe
 		if distToLead(d, hostilePoint(h)) <= float64(d.cfg.PullRange) {
 			return "", nil
 		}
+		if hop >= bossWalkHops {
+			return fmt.Sprintf("not within %.0f yd of him after %d hops", d.cfg.PullRange, bossWalkHops), nil
+		}
+		here, known := d.leadPos()
+		if !known {
+			return "the lead bot's place is not known", nil
+		}
 		path, why := d.bossWay(ctx, sp, h, nearestAnchorDist(sp, h))
 		if why != "" {
 			return why, nil
 		}
 		stand, ok := StandoffPoint(path, d.cfg.PullStandoff)
-		here, known := d.leadPos()
-		if !ok || !known {
-			return "", nil
+		if !ok {
+			return "the path to him has no stand point", nil
 		}
 		if dist3(here, stand) <= float64(d.opt.MoveArrive) {
-			return "", nil
+			return fmt.Sprintf("at the stand point but %.0f yd from him, more than the pull range %.0f", distToLead(d, hostilePoint(h)), d.cfg.PullRange), nil
 		}
 		wp := d.waypoint(ctx, here, stand, d.opt.MoveLeg)
 		if err := d.walkArrive(ctx, wp, d.opt.MoveArrive); err != nil {
 			return "", err
 		}
 	}
-	return "", nil
 }
 
 // bossPathEndYd is how near the boss a path must end to be taken as complete (a partial path stops short of its goal).

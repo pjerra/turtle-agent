@@ -230,3 +230,39 @@ func TestRemoteBossWalkStopsWhenTheWayChanges(t *testing.T) {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
 }
+
+// walkToBoss succeeds only with the lead bot within PullRange of the boss: every other way out is a failure with a reason, and no pull
+// follows (the step fails "blocked on the walk").
+func TestRemoteBossWalkFailsWithoutALeadPosition(t *testing.T) {
+	g := newFakeRemote(t)
+	d := NewRemoteDriver(bossSearchPlan(), g, DefaultConfig(), opts(), g.clock())
+	boss := tbm.HostileRec{GUID: 0x601, Entry: 777, X: 60, Y: 100, HPPct: 100, Flags: "-"}
+	d.fr = tbm.ViewFrame{Hostiles: []tbm.HostileRec{boss}} // no party, no lead
+	d.haveFr = true
+	why, err := d.walkToBoss(context.Background(), "boss", fightSpec{pick: []uint32{777}, anchors: []Point{{60, 0, 0}}}, boss.GUID)
+	if err != nil || !strings.Contains(why, "place is not known") || len(g.ordersOf("cmd pullback")) != 0 {
+		t.Fatalf("why %q err %v orders %v", why, err, g.orders)
+	}
+}
+
+func TestRemoteBossWalkFailsWithoutAStandPoint(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(777, Point{60, 100, 0})
+	// A "complete" path that ends at the boss but is a yard long: it holds no stand point 38 yd short of him.
+	short := func(from, to Point) ([]Point, error) { return []Point{{to.X, to.Y - 1, to.Z}, to}, nil }
+	rep, err := runRemote(t, plannerFake{g, short}, bossSearchPlan(), opts(), nil)
+	if err == nil || !strings.Contains(err.Error(), "blocked on the walk") || !strings.Contains(err.Error(), "no stand point") || len(g.ordersOf("cmd pullback")) != 0 {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+func TestRemoteBossWalkFailsWhenTheHopsRunOut(t *testing.T) {
+	defer func(n int) { bossWalkHops = n }(bossWalkHops)
+	bossWalkHops = 1
+	g := newFakeRemote(t)
+	g.addMob(777, Point{60, 119, 0})
+	rep, err := runRemoteTx(t, g, bossSearchPlan(), opts(), func(d *RemoteDriver) { d.opt.MoveLeg = 10 }) // one hop of 10 yd leaves him far off
+	if err == nil || !strings.Contains(err.Error(), "blocked on the walk") || !strings.Contains(err.Error(), "after 1 hops") || len(g.ordersOf("cmd pullback")) != 0 {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
