@@ -80,14 +80,14 @@ func TestRagefireStatusNeedsSettledExemptions(t *testing.T) {
 	}
 	for _, l := range p.Legs {
 		for _, g := range l.PullGroups {
-			if g.Patrol != nil && strings.Contains(g.Patrol.Source, "ESTIMATE") {
-				t.Errorf("status %q but the patrol of %v in %s still has an estimated period_s: measure it on the walk and drop ESTIMATE from its source", p.Status, g.Patrol.Entries, l.Name)
+			if g.Patrol != nil && g.Patrol.PeriodEstimate {
+				t.Errorf("status %q but the patrol of %v in %s still has period_estimate: true: measure it on the walk and drop the flag", p.Status, g.Patrol.Entries, l.Name)
 			}
 		}
 	}
 }
 
-// While the plan is a draft, every patrol period is marked as an estimate (the walk measures them), and the marker is on all six.
+// While the plan is a draft, every patrol has period_estimate: true (the walk measures them), and the marker is on all six.
 func TestRagefirePatrolPeriodsAreMarkedEstimated(t *testing.T) {
 	p := loadPlan(t, ragefirePlan)
 	n := 0
@@ -95,8 +95,8 @@ func TestRagefirePatrolPeriodsAreMarkedEstimated(t *testing.T) {
 		for _, g := range l.PullGroups {
 			if g.Patrol != nil {
 				n++
-				if p.Status == DraftStatus && !strings.Contains(g.Patrol.Source, "ESTIMATE") {
-					t.Errorf("%s: the patrol of %v does not say its period_s is an estimate", l.Name, g.Patrol.Entries)
+				if p.Status == DraftStatus && !g.Patrol.PeriodEstimate {
+					t.Errorf("%s: the patrol of %v is not marked period_estimate", l.Name, g.Patrol.Entries)
 				}
 			}
 		}

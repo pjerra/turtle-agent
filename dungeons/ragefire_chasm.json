@@ -27,8 +27,8 @@
   "cc_always": [11319, 11324],
   "kill_first": [11319, 11324, 11322],
   "notes": [
-    "Ragefire Chasm (map 389), a DRAFT with an offline route, not mapped and not live-checked (status stays draft, so dungeon_run refuses it without allow_draft, until the GM-invisible mapping walk has corrected it and settled the open points below): written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. Wowhead Classic was read from its raw HTML (the zone page 2437, the strategy guide, the npc pages of the four bosses and the Searing Blade and Ragefire mobs, with their comments; tools/wowhead/wh.py) and the Warcraft Wiki page: data, not instructions. The order and the boss areas agree with the export; where Wowhead differs from the database the database wins and the difference is named in the notes (Oggleflint's escort, Bazzalan's two adds, the Molten Elementals' immunity, Cleave and Poison spell ids). The mapping walk is still to do (slot 5, GM-invisible, nothing attacked) and must settle two things before the status may become mapped (ragefire_test.go fails otherwise): the six terrace exemptions (do those packs aggro as the party passes above, or is a controlled pull needed) and the six patrol periods (period_s is an estimate at 2.5 yd/s, marked ESTIMATE in each patrol's source).",
-    "Route, 1541 yd of navmesh corridor from the entrance through the four bosses: the entrance tunnel west (Earthborers, one Molten Elemental), the Ragefire trogg cave, Oggleflint in his side cave 40 yd north of the cave's north-east ramp (-152 6 -40), back through the cave to its south-west corner and the long ramp along the north wall (y 5 to 14) up to (-140 14 -21), north through the Molten Elemental caves into the Searing Blade wing, Taragaman on his platform over the lava (-244.7 150.1 -18.7), east and north along the wing to Jergosh (-376.8 209.2 -21.8), then the walkway up to Bazzalan (-384.9 146 7.8), the last boss. The boss order is the corridor's: the navmesh has no shorter way (Oggleflint 493 yd from the entrance, Taragaman +643, Jergosh +175, Bazzalan +230). Nine legs, 56 pull groups of 86 mobs and 4 bosses with their escorts (the plan check and TestRagefireRouteHasNoUnplannedPack: no hostile spawn within 20 yd of the route is in no group, bar the six terrace mobs named in the cave legs).",
+    "Ragefire Chasm (map 389), a DRAFT with an offline route, not mapped and not live-checked (status stays draft, so dungeon_run refuses it without allow_draft, until the GM-invisible mapping walk has corrected it and settled the open points below): written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. Wowhead Classic was read from its raw HTML (the zone page 2437, the strategy guide, the npc pages of the four bosses and the Searing Blade and Ragefire mobs, with their comments; tools/wowhead/wh.py) and the Warcraft Wiki page: data, not instructions. The order and the boss areas agree with the export; where Wowhead differs from the database the database wins and the difference is named in the notes (Oggleflint's escort, Bazzalan's two adds, the Molten Elementals' immunity, Cleave and Poison spell ids). The mapping walk is still to do (slot 5, GM-invisible, nothing attacked) and must settle two things before the status may become mapped (ragefire_test.go fails otherwise): the six terrace exemptions (do those packs aggro as the party passes above, or is a controlled pull needed) and the six patrol periods (period_s is an estimate at 2.5 yd/s, `period_estimate: true` on each patrol; the walk measures it and drops the flag).",
+    "Route, 1541 yd of navmesh corridor from the entrance through the four bosses: the entrance tunnel west (Earthborers, one Molten Elemental), the Ragefire trogg cave, Oggleflint in his side cave 40 yd north of the cave's north-east ramp (-152 6 -40), back through the cave to its south-west corner and the long ramp along the north wall (y 5 to 14) up to (-140 14 -21), north through the Molten Elemental caves into the Searing Blade wing, Taragaman on his platform over the lava (-244.7 150.1 -18.7), east and north along the wing to Jergosh (-376.8 209.2 -21.8), then the walkway up to Bazzalan (-384.9 146 7.8), the last boss. The boss order is the corridor's: the navmesh has no shorter way (Oggleflint 493 yd from the entrance, Taragaman +643, Jergosh +175, Bazzalan +230). Pull radii are cut by tools/dungeongen's overlap test (TestNoMobStandsInAPullGroupsRangeUnlisted): each is the largest of the wanted 10-30 yd that keeps every mob of another pack out of range (radius + 3 yd, 3-D), so the pull takes its own pack and a patrol's group has a short radius (2 to 17 yd; the patrol's path, not the radius, finds a member that has walked off). Nine legs, 55 pull groups of 86 mobs and 4 bosses with their escorts (the plan check and TestRagefireRouteHasNoUnplannedPack: no hostile spawn within 20 yd of the route is in no group, bar the six terrace mobs named in the cave legs).",
     "Casters and healers (creature_spells, creature_ai_events): Ragefire Shaman 11319 casts Healing Wave and Lightning Bolt and flees at 15 % health; Searing Blade Warlock 11324 casts Shadow Bolt, comes with a Voidwalker (EventAI 1132402 casts Summon Voidwalker 12746 when it spawns, a pet that is not in the export) and flees at 15 %; Searing Blade Cultist 11322 casts Curse of Agony; Searing Blade Enforcer 11323 Shield Slam (stun); Ragefire Trogg 11318 Strike; Earthborer 11320 Earthborer Acid. cc_priority and cc_always put the mage's Polymorph on the Shaman, then the Warlock, then the Cultist (all humanoid); kill_first is the same order, the healer and the damage dealer before the curse. `fleers` makes the remote driver kill the two fleeing entries before they are out of reach and wait for one that got away. The Molten Elementals 11321 (spawn mechanic-immunity mask 646014751: charm, disorient, disarm, distract, fear, silence, sleep, snare, knockout, bleed, polymorph, horror, interrupt, daze, sap) cannot be crowd-controlled and carry a Fire Shield (EventAI 1132101/1132102, spell 18968): they are tanked and burned down, the database gives them fire resistance 22 and nature resistance 15 and no school immunity (a Wowhead comment says nature spells, Lightning, Earth Shock, are immune and only fire hurts: the database wins, expect resists, and the mage and shaman should check on the walk).",
     "Factions: every hostile is hostile to both teams (Troggs 59, Earthborers 16, Molten Elementals 834, Searing Blade 554), no team gate is needed. Maur Grimtotem (11834, faction 35, npc_flags 2, quest giver at -148.1 23.6 -38.6, 15 yd before Oggleflint) is friendly and in the Oggleflint leg's skip. The area trigger 2230 asks for level 8 (areatrigger_teleport); the mobs are level 13-15 (elite rank 1) and the bosses 16, so the band is 13-18 (the Wowhead guide's own range: hires take its middle, level 15 or 16; the zone page says 15-25, the Warcraft Wiki 15-21). Everything is elite; Wowhead calls it the easiest dungeon in the game, runs it at 12-15 with a tank, a healer and CC, and 'you need a few CC as the enemies are close together'. Entering: `cmd enter 2230` at the portal (area trigger 2230 on map 1, box 21.7 x 11.8 x 21.2 at 1818.4 -4427.26 -10.45 in the Cleft of Shadow, Orgrimmar), or game_tele 209 `rfc` inside the instance.",
     "What the driver cannot do yet: nothing the clear needs. There is no door, lever, key, gossip, item, escort, ritual or scripted summon in this dungeon, so no leg has a step. Two limits of the plan are not missing step types but ground the driver does not know: (1) the terrace packs (spawn rows 38050 + 48637, 48638, 38049 + 43580 + 43581; see trogg_cave and oggleflint) stand on floors the cave joins only by a 378 yd loop round its southern camps, so the plan leaves them out and a pull from the ledge would send the party round the loop; (2) the patrols (six, below) are met on their paths, the driver's patrol handling (waits for one to walk off, or pulls it alone first) is the only tool. No `area_trigger` or other client packet is needed: the map has no scripted area trigger."
@@ -43,21 +43,21 @@
           "positions": [
             {"x": -15.99, "y": -50.17, "z": -21.78}
           ],
-          "radius": 12
+          "radius": 11
         },
         {
           "entries": [11320],
           "positions": [
             {"x": -23.8, "y": -62.16, "z": -21.37}
           ],
-          "radius": 12
+          "radius": 11
         },
         {
           "entries": [11321],
           "positions": [
             {"x": -36.46, "y": -42.09, "z": -21.77}
           ],
-          "radius": 15
+          "radius": 13
         },
         {
           "entries": [11320],
@@ -110,7 +110,7 @@
           "positions": [
             {"x": -181.51, "y": -32.07, "z": -44.43}
           ],
-          "radius": 30,
+          "radius": 20,
           "patrol": {
             "entries": [11318],
             "path": [
@@ -125,7 +125,8 @@
               {"x": -175.8, "y": -29.7, "z": -43.6}
             ],
             "period_s": 115,
-            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48648@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48648@"
           }
         },
         {
@@ -141,7 +142,7 @@
           "positions": [
             {"x": -253.89, "y": -38.88, "z": -60.46}
           ],
-          "radius": 12
+          "radius": 9
         },
         {
           "entries": [11318, 11318, 11319],
@@ -150,14 +151,14 @@
             {"x": -270.13, "y": -31.88, "z": -60.61},
             {"x": -266.73, "y": -28.03, "z": -60.61}
           ],
-          "radius": 12
+          "radius": 9
         },
         {
           "entries": [11318],
           "positions": [
             {"x": -266.61, "y": -44.4, "z": -60.85}
           ],
-          "radius": 12
+          "radius": 10
         },
         {
           "entries": [11318],
@@ -193,7 +194,7 @@
           "positions": [
             {"x": -215.45, "y": -15.93, "z": -61.8}
           ],
-          "radius": 30,
+          "radius": 6,
           "patrol": {
             "entries": [11318],
             "path": [
@@ -205,7 +206,8 @@
               {"x": -216.8, "y": -11.2, "z": -61.8}
             ],
             "period_s": 66,
-            "source": "creature_movement of spawn 48655 (Ragefire Trogg, movement type 2, 6 points, 165 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48655@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48655 (Ragefire Trogg, movement type 2, 6 points, 165 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48655@"
           }
         },
         {
@@ -215,7 +217,7 @@
             {"x": -211.07, "y": -7.25, "z": -61.8},
             {"x": -204.72, "y": -1.24, "z": -61.68}
           ],
-          "radius": 12
+          "radius": 6
         },
         {
           "entries": [11318],
@@ -261,14 +263,14 @@
           "positions": [
             {"x": -280.9, "y": -49.18, "z": -60.93}
           ],
-          "radius": 15
+          "radius": 7
         },
         {
           "entries": [11318],
           "positions": [
             {"x": -290.81, "y": -47.08, "z": -60.89}
           ],
-          "radius": 15
+          "radius": 7
         },
         {
           "entries": [11320],
@@ -282,7 +284,7 @@
           "positions": [
             {"x": -272.52, "y": 8.66, "z": -50}
           ],
-          "radius": 30,
+          "radius": 17,
           "patrol": {
             "entries": [11320],
             "path": [
@@ -306,7 +308,8 @@
               {"x": -279.6, "y": 10.3, "z": -48.4}
             ],
             "period_s": 119,
-            "source": "creature_movement of spawn 48675 (Earthborer, movement type 2, 18 points, 298 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48675@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48675 (Earthborer, movement type 2, 18 points, 298 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48675@"
           }
         },
         {
@@ -337,7 +340,7 @@
           "positions": [
             {"x": -111.34, "y": 52.05, "z": -18.69}
           ],
-          "radius": 25,
+          "radius": 13,
           "patrol": {
             "entries": [11321],
             "path": [
@@ -359,7 +362,8 @@
               {"x": -77.4, "y": 91.8, "z": -7.4}
             ],
             "period_s": 98,
-            "source": "creature_movement of spawn 48698 (Molten Elemental, movement type 2, 16 points, 246 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48698@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48698 (Molten Elemental, movement type 2, 16 points, 246 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48698@"
           }
         },
         {
@@ -367,28 +371,28 @@
           "positions": [
             {"x": -94.6, "y": 54.19, "z": -17.98}
           ],
-          "radius": 12
+          "radius": 5
         },
         {
           "entries": [11320],
           "positions": [
             {"x": -95.81, "y": 45.34, "z": -17.41}
           ],
-          "radius": 12
+          "radius": 5
         },
         {
           "entries": [11321],
           "positions": [
             {"x": -124.16, "y": 63.96, "z": -21.21}
           ],
-          "radius": 15
+          "radius": 9
         },
         {
           "entries": [11321],
           "positions": [
             {"x": -111.2, "y": 76.36, "z": -20.14}
           ],
-          "radius": 12
+          "radius": 11
         },
         {
           "entries": [11321, 11320],
@@ -396,14 +400,14 @@
             {"x": -127.91, "y": 75.54, "z": -21.88},
             {"x": -125.11, "y": 80.1, "z": -21.32}
           ],
-          "radius": 12
+          "radius": 9
         },
         {
           "entries": [11321],
           "positions": [
             {"x": -144.94, "y": 79.15, "z": -20.98}
           ],
-          "radius": 15
+          "radius": 14
         },
         {
           "entries": [11321],
@@ -422,11 +426,14 @@
       "to": {"x": -172, "y": 80, "z": -21},
       "pull_groups": [
         {
-          "entries": [11323],
+          "entries": [11322, 11322, 11323, 11323],
           "positions": [
+            {"x": -193.88, "y": 94.22, "z": -24.63},
+            {"x": -202.04, "y": 89.12, "z": -25.05},
+            {"x": -205.74, "y": 95.47, "z": -25.51},
             {"x": -208.06, "y": 95.36, "z": -25.4}
           ],
-          "radius": 30,
+          "radius": 12,
           "patrol": {
             "entries": [11323],
             "path": [
@@ -464,17 +471,9 @@
               {"x": -206.2, "y": 94.3, "z": -25.5}
             ],
             "period_s": 173,
-            "source": "creature_movement of spawn 48696 (Searing Blade Enforcer, movement type 2, 32 points, 432 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48696@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48696 (Searing Blade Enforcer, movement type 2, 32 points, 432 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48696@"
           }
-        },
-        {
-          "entries": [11322, 11322, 11323],
-          "positions": [
-            {"x": -193.88, "y": 94.22, "z": -24.63},
-            {"x": -202.04, "y": 89.12, "z": -25.05},
-            {"x": -205.74, "y": 95.47, "z": -25.51}
-          ],
-          "radius": 12
         },
         {
           "entries": [11323, 11323],
@@ -482,7 +481,7 @@
             {"x": -219.3, "y": 94.55, "z": -24.94},
             {"x": -223.45, "y": 87.28, "z": -24.94}
           ],
-          "radius": 10
+          "radius": 8
         },
         {
           "entries": [11323, 11323],
@@ -490,7 +489,7 @@
             {"x": -203.22, "y": 107.39, "z": -25},
             {"x": -195.35, "y": 108.51, "z": -24.29}
           ],
-          "radius": 10
+          "radius": 9
         },
         {
           "entries": [11322, 11324],
@@ -498,7 +497,7 @@
             {"x": -187.52, "y": 153.22, "z": -25.14},
             {"x": -183.65, "y": 160.15, "z": -25.22}
           ],
-          "radius": 10
+          "radius": 8
         },
         {
           "entries": [11323, 11323],
@@ -506,7 +505,7 @@
             {"x": -198.96, "y": 151.23, "z": -25.14},
             {"x": -199.19, "y": 159.01, "z": -25.14}
           ],
-          "radius": 10
+          "radius": 8
         }
       ],
       "boss": {
@@ -522,7 +521,7 @@
         }
       },
       "notes": [
-        "The Searing Blade wing, west part. Cultist packs (creature_groups): [Cultist 48689 + Cultist 48687 + Enforcer 48690] at -194 to -206 89 to 95, the Enforcer pair [48694 + 48688] at -221 91 (20 yd west of it), the Enforcer pair [48695 + 48691] at -195 to -203 108, then [Warlock 48702 + Cultist 48701] at -184 to -188 153 to 160 and the Enforcer pair [48700 + 48699] at -199 151 to 159. The Enforcer 48696 patrols the whole wing (a 432 yd loop through the corridor and both halves; on its spawn it stands in the first pack), so it is the first group and carries the patrol: the driver waits until it walks off or pulls it alone. Taragaman the Hungerer (11520, 2022 hp, Fire Nova 11970 and Uppercut 18072, faction 554, immune to fear and horror) stands at -244.7 150.1 -18.7 on his platform over the lava (z -18.7, the platform in the lava lake): the Wowhead guide: the tank pulls him away from the platform's edges so that Uppercut cannot knock it off, and the ranged stay at maximum range so that Fire Nova does little damage (the rest is tank and spank); comments (38 and 67 votes): 'do not stand on the edge of the ramp or platform, a knockback into the lava is a very painful death' and 'do not fall into the lava'. His loot: Cursed Felblade, Crystalline Cuffs, Subterranean Cape (quest 'Slaying the Beast'). The Enforcer 48707 patrols his room (x -283 to -200, y 140 to 165) and is a pull group of the next leg."
+        "The Searing Blade wing, west part. Cultist packs (creature_groups): [Cultist 48689 + Cultist 48687 + Enforcer 48690] at -194 to -206 89 to 95, the Enforcer pair [48694 + 48688] at -221 91 (20 yd west of it), the Enforcer pair [48695 + 48691] at -195 to -203 108, then [Warlock 48702 + Cultist 48701] at -184 to -188 153 to 160 and the Enforcer pair [48700 + 48699] at -199 151 to 159. The Enforcer 48696 patrols the whole wing (a 432 yd loop through the corridor and both halves; on its spawn it stands in the first pack), so the first pack carries its patrol (the Enforcer stands 2 yd from that pack's own Enforcer; the driver waits until it walks off or pulls it alone). Taragaman the Hungerer (11520, 2022 hp, Fire Nova 11970 and Uppercut 18072, faction 554, immune to fear and horror) stands at -244.7 150.1 -18.7 on his platform over the lava (z -18.7, the platform in the lava lake): the Wowhead guide: the tank pulls him away from the platform's edges so that Uppercut cannot knock it off, and the ranged stay at maximum range so that Fire Nova does little damage (the rest is tank and spank); comments (38 and 67 votes): 'do not stand on the edge of the ramp or platform, a knockback into the lava is a very painful death' and 'do not fall into the lava'. His loot: Cursed Felblade, Crystalline Cuffs, Subterranean Cape (quest 'Slaying the Beast'). The Enforcer 48707 patrols his room (x -283 to -200, y 140 to 165) and is a pull group of the next leg."
       ]
     },
     {
@@ -534,7 +533,7 @@
           "positions": [
             {"x": -263.52, "y": 150.47, "z": -19}
           ],
-          "radius": 30,
+          "radius": 15,
           "patrol": {
             "entries": [11323],
             "path": [
@@ -552,7 +551,8 @@
               {"x": -240.9, "y": 165, "z": -18.6}
             ],
             "period_s": 74,
-            "source": "creature_movement of spawn 48707 (Searing Blade Enforcer, movement type 2, 12 points, 186 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48707@"
+            "period_estimate": true,
+            "source": "creature_movement of spawn 48707 (Searing Blade Enforcer, movement type 2, 12 points, 186 yd at 2.5 yd/s, period_s not measured: the mapping walk measures it); @p48707@"
           }
         },
         {
@@ -603,7 +603,7 @@
             {"x": -329.78, "y": 210.64, "z": -19.92},
             {"x": -336.36, "y": 224.26, "z": -20.27}
           ],
-          "radius": 10
+          "radius": 7
         },
         {
           "entries": [11322, 11322],
@@ -611,7 +611,7 @@
             {"x": -340.18, "y": 207.47, "z": -21.49},
             {"x": -346.64, "y": 213.99, "z": -21.39}
           ],
-          "radius": 10
+          "radius": 7
         }
       ],
       "boss": {
@@ -662,7 +662,7 @@
             {"x": -372.27, "y": 265.15, "z": -4.85},
             {"x": -375.8, "y": 256.28, "z": -4.85}
           ],
-          "radius": 12
+          "radius": 8
         },
         {
           "entries": [11324, 11322, 11322],
@@ -671,7 +671,7 @@
             {"x": -392.02, "y": 244.26, "z": -4.85},
             {"x": -387.04, "y": 259.73, "z": -4.85}
           ],
-          "radius": 12
+          "radius": 8
         },
         {
           "entries": [11322],
@@ -693,7 +693,7 @@
           "positions": [
             {"x": -396.31, "y": 150.83, "z": 7.82}
           ],
-          "radius": 10
+          "radius": 9
         }
       ],
       "boss": {
