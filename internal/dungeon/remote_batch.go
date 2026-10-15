@@ -3,6 +3,8 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
@@ -52,7 +54,9 @@ type GraveBatch struct {
 	TankHeld    bool    `json:"tank_held"`
 	RadiusYd    float64 `json:"radius_yd"`
 	Centre      Point   `json:"centre"`
-	Note        string  `json:"note,omitempty"`
+	// CutByRadius says that the batch is shorter than asked for because the next chests were not within BatchRadius of its centre.
+	CutByRadius bool   `json:"cut_by_radius"`
+	Note        string `json:"note,omitempty"`
 }
 
 // gravesState is what the batches of a run remember.
@@ -73,6 +77,7 @@ type batchRun struct {
 	fightAt time.Time
 	adds    map[packet.GUID]bool
 	deaths0 int
+	stayed  bool // the party was told to stay at the centre
 }
 
 // gravesMode names how the batch size is decided.
@@ -98,26 +103,34 @@ func (d *RemoteDriver) rampOf() GravesRamp {
 	return r
 }
 
+// recoverySlotsLeft is how many wipe recoveries the leg has left under its cap.
+func (d *RemoteDriver) recoverySlotsLeft() int {
+	return d.cfg.MaxWipeRecoveries - d.wipeRecoverLeg[d.curLeg]
+}
+
+// slotReserved says that the leg has only the recovery slot left that the boss (Zum'rah) keeps: a wipe in a grave batch is not recovered
+// then (stepFailedRecover), and the graves are opened one at a time.
+func (d *RemoteDriver) slotReserved() bool {
+	return d.cfg.MaxWipeRecoveries >= 2 && d.recoverySlotsLeft() <= 1
+}
+
 // batchWanted is how many chests the next batch should take, before the chests that lie together cut it.
 func (d *RemoteDriver) batchWanted(a Action) int {
 	gb := &d.gb
+	if d.slotReserved() {
+		return 1 // a wipe in the graves from here on is not recovered, to keep the last slot for the boss: one chest at a time
+	}
 	wipes := max(gb.wipes, d.wipeRecoverLeg[d.curLeg]) // a wipe earlier in the leg used a recovery slot as much as one in the graves
 	switch d.gravesMode() {
 	case "fixed":
-		if wipes >= 2 {
-			return 1
-		}
 		return d.opt.GravesBatch
 	case "ramp":
 		r := d.rampOf()
 		if gb.size == 0 {
 			gb.size = r.Start
 		}
-		switch {
-		case wipes >= 2:
-			return 1 // the second wipe of the leg: the rest goes one chest at a time and the last recovery slot is left for the boss
-		case wipes == 1:
-			return max(gb.lastClean, 1)
+		if wipes >= 1 {
+			return max(gb.lastClean, 1) // no growth after a wipe: the last size that went by clean
 		}
 		if r.Max > 0 {
 			return min(gb.size, r.Max)
@@ -154,15 +167,14 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		pts = append(pts, c.At)
 	}
 	mode := d.gravesMode()
-	// A size of the run's own may reach past the plan's radius: the cluster widens as far as BatchWidenMax and the batch is cut beyond it.
-	limit := BatchWidenMax
-	if mode == "plan" {
-		limit = BatchRadius
-	}
-	for len(pts) > 1 && BatchSpread(pts) > limit {
+	// The loader's radius holds for a size of the run's own as well: the batch is cut where the next chests are not within BatchRadius of its
+	// centre, and the batch says so (cut_by_radius).
+	want := len(pts)
+	for len(pts) > 1 && BatchSpread(pts) > BatchRadius {
 		pts = pts[:len(pts)-1]
 	}
 	size = len(pts)
+	cut := size < want
 	gb.n++
 	b := &batchRun{
 		left: size, began: d.clk.Now(), adds: map[packet.GUID]bool{},
@@ -170,8 +182,9 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		rec: GraveBatch{Leg: max(d.curLeg, 0), N: gb.n, Mode: mode, Wanted: wanted, Size: size, TankMin: -1, HealMin: -1,
 			RadiusYd: BatchSpread(pts), Centre: BatchCentre(pts)},
 	}
-	if wanted > size {
-		b.rec.Note = fmt.Sprintf("wanted %d, %d chests lie within %.0f yd of each other", wanted, size, limit)
+	b.rec.CutByRadius = cut
+	if cut {
+		b.rec.Note = fmt.Sprintf("wanted %d, only %d chests lie within %.0f yd of their centre", wanted, size, BatchRadius)
 	}
 	d.rep.note(fmt.Sprintf("graves-batch begin: %d chest(s) around %.0f %.0f %.0f (%s mode, wanted %d, radius %.1f yd)%s", size, b.rec.Centre.X, b.rec.Centre.Y, b.rec.Centre.Z, mode, wanted, b.rec.RadiusYd, ifNote(b.rec.Note)))
 	d.batch = b
@@ -184,6 +197,14 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 	}
 	if err := d.gather(ctx, "the grave batch"); err != nil {
 		return err
+	}
+	// The party is held at the centre while the carrier opens the chests (the carrier's own order brings it to each chest and back).
+	if r, err := d.order(ctx, "stay"); err != nil {
+		return err
+	} else if ref, bad := refusedOf(r); bad {
+		d.rep.note(fmt.Sprintf("graves-batch: cmd stay was refused: %s (%s)", ref.Code, ref.Message))
+	} else {
+		b.stayed = true
 	}
 	return nil
 }
@@ -222,22 +243,46 @@ func (d *RemoteDriver) setAoE(ctx context.Context, on bool) bool {
 	return all
 }
 
-// legAoEOn puts the area spells back on for every bot a batch turned them off for (the module's default state), when the leg ends.
+// legAoEOn puts the area spells back on for every bot a batch turned them off for (the module's default state, and the switch is persisted: a
+// bot left off stays off across relogs). It runs when the leg ends and, with a bounded context of its own, as a defer of the run before the
+// unbind, whatever way the run ends (a failure, a cancel, a panic, a wipe nobody recovers from): the orders need the binding.
 func (d *RemoteDriver) legAoEOn() {
-	off := false
-	for _, on := range d.gb.aoe {
-		off = off || !on
+	var off []string
+	for name, on := range d.gb.aoe {
+		if !on {
+			off = append(off, name)
+		}
 	}
-	if !off {
+	if len(off) == 0 {
+		return
+	}
+	sort.Strings(off)
+	og, ok := d.orderGame()
+	if !ok {
+		d.degrade(fmt.Sprintf("area spells (aoe) left off on %s: this game cannot send behavior orders", strings.Join(off, ", ")))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if d.setAoE(ctx, true) {
-		d.rep.note("graves-batch: area spells (aoe) back on for every bot after the leg")
-	} else {
-		d.degrade("area spells (aoe) left off on some bot after the grave batches")
+	var left []string
+	for _, n := range off {
+		var okOn bool
+		for try := 0; try < 2 && !okOn; try++ {
+			r, err := og.Behavior(ctx, n, "aoe", true)
+			okOn = err == nil && r.Kind == tbm.KindAck
+		}
+		if okOn {
+			d.gb.aoe[n] = true
+		} else {
+			left = append(left, n)
+			delete(d.gb.aoe, n) // given up: the run's last restore (after the unbind) does not try again
+		}
 	}
+	if len(left) > 0 {
+		d.degrade(fmt.Sprintf("area spells (aoe) left off on %s after the grave batches", strings.Join(left, ", ")))
+		return
+	}
+	d.rep.note("graves-batch: area spells (aoe) back on for " + strings.Join(off, ", "))
 }
 
 // batchThreatLead is the pause between the last open and the area spells: the tank gets its threat lead on what the graves brought (live,
@@ -290,6 +335,10 @@ func (d *RemoteDriver) batchStepDone(ctx context.Context, a Action, skipped bool
 	if b.left > 0 {
 		return nil
 	}
+	if b.stayed {
+		d.resumeFollow(ctx, true) // the fight is with the party free to move: `cmd follow` is the bots' own mode
+		b.stayed = false
+	}
 	if err := d.batchThreatLead(ctx, b); err != nil {
 		return err
 	}
@@ -332,8 +381,8 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	if d.gravesMode() == "ramp" && !wipe && gb.wipes == 0 {
 		gb.size = r.Size + d.rampOf().Step
 	}
-	text := fmt.Sprintf("graves-batch: n=%d leg=%d mode=%s wanted=%d size=%d opened=%d skipped=%d adds=%d fight_s=%.0f deaths=%d wipe=%s tank_min_pct=%d healer_min_pct=%d healer_mana_end_pct=%d aoe=%s threat_wait_s=%.0f tank_held=%s radius_yd=%.1f",
-		r.N, r.Leg, r.Mode, r.Wanted, r.Size, r.Opened, r.Skipped, r.Adds, r.FightS, r.Deaths, yesNo(wipe), r.TankMin, r.HealMin, r.HealMana, onOff(r.AoE), r.ThreatWaitS, yesNo(r.TankHeld), r.RadiusYd)
+	text := fmt.Sprintf("graves-batch: n=%d leg=%d mode=%s wanted=%d size=%d opened=%d skipped=%d adds=%d fight_s=%.0f deaths=%d wipe=%s tank_min_pct=%d healer_min_pct=%d healer_mana_end_pct=%d aoe=%s threat_wait_s=%.0f tank_held=%s cut_by_radius=%s radius_yd=%.1f",
+		r.N, r.Leg, r.Mode, r.Wanted, r.Size, r.Opened, r.Skipped, r.Adds, r.FightS, r.Deaths, yesNo(wipe), r.TankMin, r.HealMin, r.HealMana, onOff(r.AoE), r.ThreatWaitS, yesNo(r.TankHeld), yesNo(r.CutByRadius), r.RadiusYd)
 	if wipe {
 		text += fmt.Sprintf(" wiped_at_size=%d next_size=%d", gb.wipedAt, d.batchWantedAfterWipe())
 	}
@@ -341,13 +390,13 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	d.remote(func(rr *RemoteReport) { rr.GraveBatches = append(rr.GraveBatches, *r) })
 	d.tr.Event("graves_batch", map[string]any{"n": r.N, "leg": r.Leg, "mode": r.Mode, "wanted": r.Wanted, "size": r.Size, "opened": r.Opened,
 		"skipped": r.Skipped, "adds": r.Adds, "fight_s": r.FightS, "deaths": r.Deaths, "wipe": wipe, "tank_min_pct": r.TankMin,
-		"healer_min_pct": r.HealMin, "healer_mana_end_pct": r.HealMana, "aoe": r.AoE, "threat_wait_s": r.ThreatWaitS, "tank_held": r.TankHeld, "radius_yd": r.RadiusYd})
+		"healer_min_pct": r.HealMin, "healer_mana_end_pct": r.HealMana, "aoe": r.AoE, "threat_wait_s": r.ThreatWaitS, "tank_held": r.TankHeld, "cut_by_radius": r.CutByRadius, "radius_yd": r.RadiusYd})
 }
 
 // batchWantedAfterWipe is the size the batches go on with after a wipe (for the note).
 func (d *RemoteDriver) batchWantedAfterWipe() int {
-	if d.gb.wipes >= 2 || d.wipeRecoverLeg[d.curLeg] >= 2 {
-		return 1
+	if d.cfg.MaxWipeRecoveries >= 2 && d.cfg.MaxWipeRecoveries-(d.wipeRecoverLeg[d.curLeg]+1) <= 1 {
+		return 1 // this wipe will use a slot (stepFailedRecover counts it after the note) and one is left for the boss
 	}
 	return max(d.gb.lastClean, 1)
 }

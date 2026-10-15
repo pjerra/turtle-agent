@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // ---- plan: the batch checks of the loader ----
@@ -137,6 +138,11 @@ type batchRunOut struct {
 // kills the whole party instead.
 func runBatches(t *testing.T, g *fakeCarrier, leg Leg, gs []*fakeGrave, o RemoteOptions, wipeAt ...int) batchRunOut {
 	t.Helper()
+	return runBatchesCfg(t, g, leg, gs, o, nil, wipeAt...)
+}
+
+func runBatchesCfg(t *testing.T, g *fakeCarrier, leg Leg, gs []*fakeGrave, o RemoteOptions, mod func(*Config), wipeAt ...int) batchRunOut {
+	t.Helper()
 	g.graves = map[packet.GUID]*fakeGrave{}
 	for _, gv := range gs {
 		g.graves[gv.guid] = gv
@@ -162,6 +168,9 @@ func runBatches(t *testing.T, g *fakeCarrier, leg Leg, gs []*fakeGrave, o Remote
 	cfg := DefaultConfig()
 	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
 	cfg.RecoverWipe = true
+	if mod != nil {
+		mod(&cfg)
+	}
 	d := NewRemoteDriver(remotePlan(leg), g, cfg, o, g.clock())
 	err := d.Run(context.Background(), 0)
 	rep, ended := d.Status()
@@ -294,8 +303,8 @@ func TestGravesRampGrowsByOnePerCleanBatch(t *testing.T) {
 	}
 }
 
-// After the first wipe in the graves the ramp stops growing: the rest runs at the last size that went by clean, and the wipe is recorded with
-// the size that wiped.
+// After the first wipe in the graves the ramp stops growing, and with the cap of two recoveries the one that is left is the boss's: the rest of
+// the graves is one chest at a time. The wipe is recorded with the size that wiped.
 func TestGravesRampStopsGrowingAtTheFirstWipe(t *testing.T) {
 	g := carrierGame(t)
 	leg, gs := batchGraves(16, 3, func(i int) string { return "g1" })
@@ -310,56 +319,77 @@ func TestGravesRampStopsGrowingAtTheFirstWipe(t *testing.T) {
 	for _, b := range bs {
 		wiped = append(wiped, b.Wipe)
 	}
-	// 2, 3 clean; 4 wipes; then 3 (the last clean size), 3, 3 ... what is left.
-	if fmt.Sprint(batchSizes(o.rep)[:4]) != "[2 3 4 3]" || fmt.Sprint(wiped[:4]) != "[false false true false]" {
+	if fmt.Sprint(batchSizes(o.rep)[:4]) != "[2 3 4 1]" || fmt.Sprint(wiped[:4]) != "[false false true false]" {
 		t.Fatalf("%v %v\n%s", batchSizes(o.rep), wiped, notesOf(o.rep))
 	}
 	for _, s := range batchSizes(o.rep)[3:] {
-		if s > 3 {
-			t.Errorf("the ramp grew after the wipe: %v", batchSizes(o.rep))
+		if s != 1 {
+			t.Errorf("after the wipe the graves go one at a time: %v", batchSizes(o.rep))
 		}
 	}
-	if !strings.Contains(notesOf(o.rep), "wipe=yes") || !strings.Contains(notesOf(o.rep), "wiped_at_size=4 next_size=3") || o.d.gb.wipedAt != 4 {
+	if !strings.Contains(notesOf(o.rep), "wipe=yes") || !strings.Contains(notesOf(o.rep), "wiped_at_size=4 next_size=1") || o.d.gb.wipedAt != 4 {
 		t.Fatalf("%s", notesOf(o.rep))
 	}
-	// One recovery slot was used; one is left for the boss.
-	if o.d.wipeRecoverLeg[0] != 1 || o.d.cfg.MaxWipeRecoveries-o.d.wipeRecoverLeg[0] < 1 {
+	if o.d.wipeRecoverLeg[0] != 1 || o.d.cfg.MaxWipeRecoveries-o.d.wipeRecoverLeg[0] != 1 {
 		t.Fatalf("recoveries %v", o.d.wipeRecoverLeg)
 	}
 }
 
-// A second wipe in the graves runs the rest one chest at a time; a third is over the leg's cap of two and ends the run.
-func TestGravesRampSecondWipeGoesOneAtATimeAndTheCapHolds(t *testing.T) {
+// With a cap of three recoveries the ramp's first wipe leaves two: the rest runs at the last clean size, singles only after the second wipe.
+func TestGravesRampWithALargerCapRunsAtTheLastCleanSize(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(16, 3, func(i int) string { return "g1" })
+	opt := objOpts()
+	opt.GravesRamp = &GravesRamp{}
+	o := runBatchesCfg(t, g, leg, gs, opt, func(c *Config) { c.MaxWipeRecoveries = 3 }, 8)
+	if o.err != nil || fmt.Sprint(batchSizes(o.rep)[:5]) != "[2 3 4 3 3]" {
+		t.Fatalf("%v %v\n%s", o.err, batchSizes(o.rep), notesOf(o.rep))
+	}
+}
+
+// A second wipe in the graves is not recovered (the last slot of the leg is the boss's): the run stops with a note that says so, and the
+// slot is unused.
+func TestSecondGraveWipeIsNotRecoveredToKeepTheBossSlot(t *testing.T) {
 	g := carrierGame(t)
 	leg, gs := batchGraves(30, 3, func(i int) string { return "g1" })
 	opt := objOpts()
 	opt.GravesRamp = &GravesRamp{}
-	// Opens 1-2 clean, 3-5 clean, then wipes at the 7th (batch of 4), at the 10th (a batch of 3) and at the 12th.
-	o := runBatches(t, g, leg, gs, opt, 7, 10, 12)
-	if o.err == nil || o.rep.State != "failed" || !strings.Contains(o.err.Error(), "wipe") {
+	o := runBatches(t, g, leg, gs, opt, 7, 10) // a wipe at the 7th open (recovered), another at the 10th
+	if o.err == nil || o.rep.State != "failed" || !strings.Contains(o.err.Error(), "wipe in the graves: not recovered") {
 		t.Fatalf("%v %s\n%s", o.err, o.rep.State, notesOf(o.rep))
 	}
-	if o.d.wipeRecoverLeg[0] != 2 || o.rep.Wipes != 3 {
+	if o.d.wipeRecoverLeg[0] != 1 || o.rep.Wipes != 2 || o.d.cfg.MaxWipeRecoveries-o.d.wipeRecoverLeg[0] != 1 || !strings.Contains(notesOf(o.rep), "the last slot is kept for the boss") {
 		t.Fatalf("recoveries %v wipes %d\n%s", o.d.wipeRecoverLeg, o.rep.Wipes, notesOf(o.rep))
 	}
-	bs := o.rep.Remote.GraveBatches
-	// After the second wipe every batch is one chest.
-	secondWipe := -1
-	n := 0
-	for i, b := range bs {
-		if b.Wipe {
-			if n++; n == 2 {
-				secondWipe = i
+	if n := len(g.revived); n != 3 { // the first wipe's revives only
+		t.Errorf("revived %v", g.revived)
+	}
+}
+
+// The full sequence: a grave wipe (recovered), the graves one at a time, then a wipe at the boss, which still has its slot, and the leg is done.
+func TestGraveWipeThenBossWipeStillRecovers(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(8, 3, func(i int) string { return "g1" })
+	leg.Boss = &Boss{Entry: 9, Position: Point{300, 0, 0}}
+	boss := g.addMob(9, Point{300, 0, 0})
+	bossWiped := false
+	g.onTick = func(f *fakeRemote) {
+		if !bossWiped && boss.hp < 100 && !f.party[0].Dead {
+			bossWiped = true
+			boss.hp, boss.engaged, boss.pulled, boss.attacked, boss.target = 100, false, false, false, 0 // the boss won this round and is back at full health, at his spot
+			for _, p := range f.party {
+				p.Dead, p.HP = true, 0
 			}
 		}
 	}
-	if secondWipe < 0 || secondWipe+1 >= len(bs) {
-		t.Fatalf("%+v\n%s", bs, notesOf(o.rep))
+	opt := objOpts()
+	opt.GravesRamp = &GravesRamp{}
+	o := runBatches(t, g, leg, gs, opt, 4)
+	if o.err != nil || o.rep.State != "done" || !bossWiped {
+		t.Fatalf("%v %s boss wiped %v\n%s", o.err, o.rep.State, bossWiped, notesOf(o.rep))
 	}
-	for _, b := range bs[secondWipe+1:] {
-		if b.Size != 1 {
-			t.Errorf("after the second wipe: %+v", b)
-		}
+	if o.d.wipeRecoverLeg[0] != 2 || o.rep.Wipes != 2 {
+		t.Fatalf("recoveries %v wipes %d\n%s", o.d.wipeRecoverLeg, o.rep.Wipes, notesOf(o.rep))
 	}
 }
 
@@ -374,23 +404,24 @@ func TestGravesRampCountsTheLegsEarlierWipes(t *testing.T) {
 	cfg.RecoverWipe = true
 	d := NewRemoteDriver(remotePlan(leg), g, cfg, opt, g.clock())
 	d.curLeg = 0
+	d.cfg.MaxWipeRecoveries = 4
 	d.wipeRecoverLeg = map[int]int{0: 1}
 	d.gb.lastClean = 3
 	a := Action{Batch: "g1", Section: []BatchChest{{ID: "g1"}, {ID: "g1"}, {ID: "g1"}, {ID: "g1"}, {ID: "g1"}}}
 	if got := d.batchWanted(a); got != 3 {
 		t.Fatalf("after one recovered wipe the size is the last clean one: %d", got)
 	}
-	d.wipeRecoverLeg[0] = 2
+	d.wipeRecoverLeg[0] = 3
 	if got := d.batchWanted(a); got != 1 {
-		t.Fatalf("with the cap used up: %d", got)
+		t.Fatalf("with only the boss's slot left: %d", got)
 	}
 	_ = gs
 }
 
-// The cluster widens for a size of the run's own and the real radius is logged; past BatchWidenMax the batch is cut shorter.
-func TestRunBatchSizeWidensTheClusterThenCuts(t *testing.T) {
+// The loader's 15 yd holds for a size of the run's own: the batch is cut where the next chests are not within 15 yd of its centre, and says so.
+func TestRunBatchSizeIsCutByTheRadius(t *testing.T) {
 	g := carrierGame(t)
-	leg, gs := batchGraves(8, 10, func(i int) string { return "g1" }) // 10 yd apart: 7 chests span 60 yd, 30 yd from the centre
+	leg, gs := batchGraves(8, 10, func(i int) string { return "g1" }) // 10 yd apart: 4 chests are 15 yd from their centre, 5 are 20
 	opt := objOpts()
 	opt.GravesBatch = 8
 	o := runBatches(t, g, leg, gs, opt)
@@ -398,12 +429,145 @@ func TestRunBatchSizeWidensTheClusterThenCuts(t *testing.T) {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
 	}
 	b := o.rep.Remote.GraveBatches[0]
-	if b.Wanted != 8 || b.Size != 7 || b.RadiusYd < 29.9 || b.RadiusYd > 30.1 || !strings.Contains(b.Note, "wanted 8, 7 chests lie within 30 yd") {
+	if b.Wanted != 8 || b.Size != 4 || !b.CutByRadius || b.RadiusYd > BatchRadius+0.01 || !strings.Contains(b.Note, "wanted 8, only 4 chests lie within 15 yd") {
 		t.Fatalf("%+v\n%s", b, notesOf(o.rep))
 	}
-	if fmt.Sprint(batchSizes(o.rep)) != "[7 1]" {
-		t.Fatalf("%v", batchSizes(o.rep))
+	if fmt.Sprint(batchSizes(o.rep)) != "[4 4]" || !strings.Contains(notesOf(o.rep), "cut_by_radius=yes") {
+		t.Fatalf("%v\n%s", batchSizes(o.rep), notesOf(o.rep))
 	}
+	// Running out of chests is not a cut by radius.
+	g = carrierGame(t)
+	leg, gs = batchGraves(3, 3, func(i int) string { return "g1" })
+	opt.GravesBatch = 6
+	o = runBatches(t, g, leg, gs, opt)
+	if b := o.rep.Remote.GraveBatches[0]; b.Size != 3 || b.CutByRadius {
+		t.Fatalf("%+v", b)
+	}
+}
+
+// The party stays at the batch centre: one cmd stay after the gather, no walk or stay per chest, and cmd follow only after the last open.
+func TestBatchPartyStaysAtTheCentreAndOnlyTheCarrierWalks(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(4, 4, func(i int) string { return "g1" })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	firstOpen, lastOpen := g.indexOf("cmd open"), -1
+	for i, ord := range g.orders {
+		if strings.HasPrefix(ord, "cmd open ") {
+			lastOpen = i
+		}
+	}
+	stays := 0
+	for _, ord := range g.orders[firstOpen:lastOpen] {
+		if ord == "cmd stay" || ord == "cmd follow" || strings.HasPrefix(ord, "cmd move") {
+			t.Errorf("an order between the opens of a batch: %q\n%v", ord, g.orders[firstOpen:lastOpen])
+		}
+	}
+	for _, ord := range g.orders[:firstOpen] {
+		if ord == "cmd stay" {
+			stays++
+		}
+	}
+	if stays == 0 {
+		t.Errorf("the party was not held at the centre before the opens: %v", g.orders[:firstOpen])
+	}
+	if g.indexOf("cmd follow") < lastOpen {
+		t.Errorf("cmd follow before the last open: %v", g.orders)
+	}
+}
+
+// The area spells are put back on before the unbind whatever way the run ends while a batch has them off.
+func TestAoEIsBackOnBeforeTheUnbindWhateverEndsTheRun(t *testing.T) {
+	check := func(t *testing.T, name string, g *fakeCarrier) {
+		t.Helper()
+		var lastAoE = map[string]string{}
+		unbind := -1
+		for i, ord := range g.orders {
+			if strings.HasPrefix(ord, ".bot behavior ") && strings.Contains(ord, " aoe ") {
+				lastAoE[strings.Fields(ord)[2]] = ord
+			}
+			if ord == "commander unbind" {
+				unbind = i
+			}
+		}
+		if len(lastAoE) != 3 || unbind < 0 {
+			t.Fatalf("%s: aoe orders %v, unbind at %d\n%v", name, lastAoE, unbind, g.orders)
+		}
+		for bot, ord := range lastAoE {
+			if !strings.HasSuffix(ord, " aoe on") {
+				t.Errorf("%s: %s ends with %q", name, bot, ord)
+			}
+		}
+		for i, ord := range g.orders {
+			if i > unbind && strings.Contains(ord, " aoe ") {
+				t.Errorf("%s: an aoe order after the unbind: %q", name, ord)
+			}
+		}
+	}
+	setup := func() (*fakeCarrier, Leg, []*fakeGrave) {
+		g := carrierGame(t)
+		leg, gs := batchGraves(6, 3, func(i int) string { return "g1" })
+		return g, leg, gs
+	}
+	t.Run("the open fails", func(t *testing.T) {
+		g, leg, gs := setup()
+		fail := errOrder("cmd open x Magey", "invalid")
+		g.script = map[string][]tbm.OrderResult{"open": {fail, fail, fail, fail}}
+		opt := objOpts()
+		opt.ObjectFallback = ObjectFallbackOff
+		o := runBatches(t, g, leg, gs, opt)
+		if o.err == nil {
+			t.Fatalf("the run did not fail\n%s", notesOf(o.rep))
+		}
+		check(t, "failure", g)
+	})
+	t.Run("the run is cancelled", func(t *testing.T) {
+		g, leg, gs := setup()
+		ctx, cancel := context.WithCancel(context.Background())
+		g.graves = map[packet.GUID]*fakeGrave{}
+		for _, gv := range gs {
+			g.graves[gv.guid] = gv
+		}
+		g.onGrave = func(c *fakeCarrier, gv *fakeGrave) { cancel() }
+		d := NewRemoteDriver(remotePlan(leg), g, DefaultConfig(), objOpts(), g.clock())
+		if err := d.Run(ctx, 0); err == nil {
+			t.Fatal("the run was not cancelled")
+		}
+		check(t, "cancel", g)
+	})
+	t.Run("a panic", func(t *testing.T) {
+		g, leg, gs := setup()
+		g.graves = map[packet.GUID]*fakeGrave{}
+		for _, gv := range gs {
+			g.graves[gv.guid] = gv
+		}
+		g.onGrave = func(c *fakeCarrier, gv *fakeGrave) { panic("boom") }
+		d := NewRemoteDriver(remotePlan(leg), g, DefaultConfig(), objOpts(), g.clock())
+		err := d.Run(context.Background(), 0)
+		if err == nil || !strings.Contains(err.Error(), "internal error: boom") {
+			t.Fatalf("%v", err)
+		}
+		check(t, "panic", g)
+	})
+	t.Run("a wipe nobody recovers", func(t *testing.T) {
+		g, leg, gs := setup()
+		g.graves = map[packet.GUID]*fakeGrave{}
+		for _, gv := range gs {
+			g.graves[gv.guid] = gv
+		}
+		g.onGrave = func(c *fakeCarrier, gv *fakeGrave) {
+			for _, p := range c.party {
+				p.Dead, p.HP = true, 0
+			}
+		}
+		d := NewRemoteDriver(remotePlan(leg), g, DefaultConfig(), objOpts(), g.clock()) // recover_wipe off
+		if err := d.Run(context.Background(), 0); err == nil {
+			t.Fatal("the wipe did not end the run")
+		}
+		check(t, "wipe", g)
+	})
 }
 
 // A chest that is open already is skipped and counted as skipped, not opened.

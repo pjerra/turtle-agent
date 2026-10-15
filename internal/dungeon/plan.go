@@ -402,9 +402,6 @@ const (
 	// BatchRadius is how far from the batch's centre (the mean of its chests) a chest of a plan batch may lie: the summons of the batch
 	// stand close enough together for the party's area spells to hit them all.
 	BatchRadius = 15.0
-	// BatchWidenMax is the largest radius a run's own batch size (graves_batch, graves_ramp) may widen the cluster to; past it the batch is
-	// cut shorter. The real radius of each batch is logged.
-	BatchWidenMax = 30.0
 )
 
 // UseItem uses an item from the leader's bags (a right-click: CMSG_USE_ITEM) and waits for its effect. ExpectItem is the item the use

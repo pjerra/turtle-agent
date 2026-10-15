@@ -719,6 +719,8 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	defer func() {
 		d.unbind((err != nil && !ctxDone(err) && d.opt.KeepOnFail) || (d.paused.Load() && ctxDone(err)))
 	}()
+	// Declared after the unbind, so it runs before it: the bots' area spells that a grave batch turned off go back on while the binding lasts.
+	defer d.legAoEOn()
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
@@ -921,6 +923,7 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		// failure of the boss step: it is recovered like any wipe (also with recover_wipe off: the boss is down) and the leg goes on, and the
 		// report counts it apart ("wipe after the kill").
 		after := d.legBossDead()
+		inBatch := d.batch != nil // a wipe in a grave batch (batchWiped clears it)
 		d.rep.update(func(r *Report) {
 			switch {
 			case after:
@@ -942,6 +945,14 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		// Zum'rah leg, hit the run-wide cap of 2 and failed "wipe").
 		if d.wipeRecoverLeg == nil {
 			d.wipeRecoverLeg = map[int]int{}
+		}
+		if inBatch && !after && d.slotReserved() {
+			// The leg's last recovery slot is kept for the boss: a wipe in the graves that would use it is not recovered. The party is dead and
+			// cannot go on to the boss without a recovery, so the run ends here; a run started again at this leg has a cap of its own, and the
+			// graves already opened are skipped (cmd state).
+			d.rep.note(fmt.Sprintf("wipe in the grave batches with %d of %d recovery slot(s) of the leg left: the last slot is kept for the boss, so this wipe is not recovered and the run stops here", d.recoverySlotsLeft(), d.cfg.MaxWipeRecoveries))
+			d.st.Fail("wipe in the graves: not recovered, the last recovery slot of the leg is kept for the boss")
+			return false
 		}
 		if (d.cfg.RecoverWipe || after) && d.wipeRecoverLeg[d.curLeg] < d.cfg.MaxWipeRecoveries && d.wipeRecover < d.cfg.MaxWipeRecoveries*wipeRecoverRunFactor && ctx.Err() == nil {
 			d.wipeRecover++
