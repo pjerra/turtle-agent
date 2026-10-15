@@ -194,6 +194,23 @@ func (g *gearRead) missingGear(class, role string) []string {
 	return out
 }
 
+// softSlots are the armor slots autogear may leave empty at a low level: at level 16 it has no blue head piece for plate, leather or mail
+// (the first Ragefire start: warrior, rogue and hunter "not ready: gear still wrong after autogear blue: head"). After autogear an empty one
+// is a note, not a failure; the main hand, a hunter's ranged weapon and a tank's shield still fail.
+var softSlots = map[string]bool{"head": true, "chest": true, "legs": true, "feet": true}
+
+// splitMissing sorts missingGear's names into the ones that fail the check (main hand, ranged weapon, shield) and the soft armor slots.
+func splitMissing(miss []string) (hard, soft []string) {
+	for _, m := range miss {
+		if softSlots[m] {
+			soft = append(soft, m)
+		} else {
+			hard = append(hard, m)
+		}
+	}
+	return hard, soft
+}
+
 // usesMana: the classes whose bots drink.
 func usesManaClass(class string) bool {
 	switch class {
@@ -275,10 +292,15 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 	for _, e := range epics {
 		gear = append(gear, "epic "+e)
 	}
-	gear = append(gear, g.missingGear(class, role)...)
+	hard0, soft0 := splitMissing(g.missingGear(class, role))
+	gear = append(append(gear, hard0...), soft0...)
 	if len(gear) > 0 {
 		if f.spec.NoFix {
-			b.fail("gear: %s (no_fix: not re-geared)", strings.Join(gear, ", "))
+			if len(gear) == len(soft0) { // only soft armor slots empty: not re-geared, a note
+				b.warn("%s empty at level %d (no_fix: not re-geared)", strings.Join(soft0, ", "), b.rb.Level)
+			} else {
+				b.fail("gear: %s (no_fix: not re-geared)", strings.Join(gear, ", "))
+			}
 		} else if v := f.autogear(ctx, b.name); v != "regeared" {
 			b.fail("gear: %s, and `.bot autogear %s blue` gave: %s", strings.Join(gear, ", "), b.name, v)
 		} else {
@@ -293,9 +315,13 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 			for _, e := range epics {
 				left = append(left, "epic "+e)
 			}
-			left = append(left, g.missingGear(class, role)...)
+			hard, soft := splitMissing(g.missingGear(class, role))
+			left = append(left, hard...)
 			if len(left) > 0 {
 				b.fail("gear still wrong after autogear blue: %s", strings.Join(left, ", "))
+			}
+			if len(soft) > 0 {
+				b.warn("%s empty after autogear at level %d", strings.Join(soft, ", "), b.rb.Level)
 			}
 		}
 	}

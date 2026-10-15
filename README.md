@@ -1764,7 +1764,7 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    - *level and class* as hired; not dead;
    - *gear:* the worn items are asked for with `CMSG_ITEM_QUERY_SINGLE` (what a client does for a tooltip; cached, the agent is a GM so the core answers
      for any item). No epic (quality 4) that is out of band (an epic is fine when it is for the bot's level: required level <= its level and item level <= its level + 5; owner rule 2026-10-14), head, chest, legs, feet and main hand filled, a shield on a warrior or paladin tank (an armor of the shield
-     subclass), a ranged weapon on a hunter. Else `.bot autogear <bot> blue` once, then read again; still wrong fails. `ilvl` is the average item
+     subclass), a ranged weapon on a hunter. Else `.bot autogear <bot> blue` once, then read again; still wrong fails, except that a head, chest, legs or feet slot that is still empty after autogear (at level 16 autogear has no blue head piece for plate, leather or mail) is only a warning (`head empty after autogear at level 16`); an empty main hand, a missing shield or a hunter's missing ranged weapon still fails, and with `no_fix` only empty armor slots are a note. `ilvl` is the average item
      level worn (shirt and tabard left out), `quality` the best worn. An item the server does not describe is a warning;
    - *supplies:* the drinks (a healer 20, any other mana user 10) and 100 shots of the kind the ranged weapon takes (as the preflight judges them);
      a shortage, and every kept hire, gets `.bot maintenance <bot>` and is read again; a shortage after it fails (`ready.bots[].fixed` has the numbers);
