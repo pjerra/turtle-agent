@@ -921,3 +921,130 @@ func TestGravesSummaryNoteEndsTheSection(t *testing.T) {
 		t.Fatalf("%s", n)
 	}
 }
+
+// ---- graves_open_by agent ----
+
+// agentHandsGame is a handsGame whose agent can `.go xyz`.
+type agentHandsGame struct {
+	*handsGame
+	teles []Point
+}
+
+func (g *agentHandsGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
+	g.teles = append(g.teles, at)
+	g.agent = at
+	g.agentMap = mapID
+	g.log = append(g.log, fmt.Sprintf("go %.0f", at.X))
+	return nil
+}
+
+func agentGravesRun(t *testing.T, g *agentHandsGame, leg Leg, gs []*fakeGrave, level int, setup []string) (*RemoteDriver, Report, error) {
+	t.Helper()
+	g.level = level
+	plan := remotePlan(leg)
+	g.agentMap = plan.Map
+	g.agent = Point{-300, 0, 0}
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.RecoverWipe = true
+	cfg.Setup = setup
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	return d, rep, err
+}
+
+// graves_open_by agent: the agent's own GM character opens every chest of a batch (`.go xyz` to each, its Opening cast), with no order to a
+// carrier, notes one GM assist per open, goes back out of the fight spot after the last, and the party fights afterwards.
+func TestAgentOpensAllChestsOfABatchWithoutCarrierOrders(t *testing.T) {
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	for i := 0; i < 3; i++ {
+		g.addMob(7286, Point{40 + float32(i), 30, 0})
+	}
+	g.onLoot = func(h *handsGame) {
+		h.addMob(7286, Point{36, 5, 0}) // what the grave brings
+	}
+	_, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if n := len(g.ordersOf("cmd open")); n != 0 {
+		t.Fatalf("%d cmd open orders in agent mode: %v", n, g.orders)
+	}
+	if g.loots != 3 || rep.Remote.AgentOpens != 3 {
+		t.Fatalf("loots %d agent opens %d\n%s", g.loots, rep.Remote.AgentOpens, notesOf(rep))
+	}
+	if len(rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%+v", rep.Remote.GraveBatches)
+	}
+	b := rep.Remote.GraveBatches[0]
+	if b.Opened != 3 || b.Skipped != 0 || b.OpenedBy != "agent" || !strings.Contains(notesOf(rep), "open_by=agent") {
+		t.Fatalf("%+v", b)
+	}
+	// One `.go xyz` per open, and one back out of the fight spot after the last, each a GM assist in setup_shortcuts and run_gm_assists.
+	goes := 0
+	for _, c := range rep.SetupShortcuts {
+		if strings.HasPrefix(c, ".go xyz") && strings.HasSuffix(c, "(GM assist during the run)") {
+			goes++
+		}
+	}
+	if goes != 4 || len(g.teles) != 4 {
+		t.Fatalf("go xyz %d / %d: %v", goes, len(g.teles), rep.SetupShortcuts)
+	}
+	if strings.Count(notesOf(rep), "a GM assist during the run (run_gm_assists; not counted in gm_commands)") < 4 {
+		t.Fatalf("%s", notesOf(rep))
+	}
+	// The opens come before the fight: the three loots happen before the log shows anything else but go xyz, and the last `.go` is the way back.
+	last := g.log[len(g.log)-1]
+	if !strings.HasPrefix(last, "go") {
+		// the last log entry may be a later GM line; the way back must still come after the last loot
+		lastLoot, lastGo := -1, -1
+		for i, e := range g.log {
+			if e == "loot" {
+				lastLoot = i
+			}
+			if strings.HasPrefix(e, "go") {
+				lastGo = i
+			}
+		}
+		if lastGo < lastLoot {
+			t.Fatalf("no .go xyz after the last loot: %v", g.log)
+		}
+	}
+}
+
+// graves_open_by agent is refused up front, before anything is sent, without a GM account, and without "gm visible off" in the setup.
+func TestAgentOpenIsRefusedWithoutGMOrInvisibility(t *testing.T) {
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g := &agentHandsGame{handsGame: newHandsGame(t, 0)}
+	d, _, err := agentGravesRun(t, g, leg, gs, 0, nil)
+	if err == nil || !strings.Contains(err.Error(), "needs a GM account") || len(g.orders) != 0 || d == nil {
+		t.Fatalf("%v orders %v", err, g.orders)
+	}
+	g = &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	_, _, err = agentGravesRun(t, g, leg, gs, 3, nil)
+	if err == nil || !strings.Contains(err.Error(), `"gm visible off"`) || len(g.orders) != 0 {
+		t.Fatalf("%v orders %v", err, g.orders)
+	}
+	// A game without the agent's hands is refused too.
+	cg := carrierGame(t)
+	cg.graves = map[packet.GUID]*fakeGrave{}
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	dd := NewRemoteDriver(remotePlan(leg), cg, DefaultConfig(), o, cg.clock())
+	if err := dd.Run(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "no hands") || len(cg.orders) != 0 {
+		t.Fatalf("%v orders %v", err, cg.orders)
+	}
+	// The default (carrier) needs none of it.
+	g = &agentHandsGame{handsGame: newHandsGame(t, 0)}
+	if err := (&RemoteDriver{plan: remotePlan(leg), g: g, opt: objOpts()}).checkGravesOpenBy(context.Background()); err != nil {
+		t.Fatalf("%v", err)
+	}
+}

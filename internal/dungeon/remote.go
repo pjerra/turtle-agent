@@ -84,6 +84,9 @@ type RemoteOptions struct {
 	// each batch without a wipe (remote_batch.go). Both off (0, nil): the plan's own batches. GravesRamp wins when both are given.
 	GravesBatch int
 	GravesRamp  *GravesRamp
+	// GravesOpenBy is who opens a batch's chests: "carrier" (default; the module refuses its open order while the carrier is in combat) or "agent"
+	// (the agent's own GM character: `.go xyz` to each chest and its Opening cast, so that the opens go on while the summons fight).
+	GravesOpenBy string
 	// CCBot names the bot that takes the big-pack CC mark (remote_cc.go: a pack of BigPack or more gets one member Polymorphed before the
 	// pull). A hired party sets it to its mage; empty: no big-pack CC.
 	CCBot string
@@ -351,6 +354,7 @@ type RemoteReport struct {
 	GraveBatches   []GraveBatch `json:"grave_batches,omitempty"`
 	LeftoverPulls  int          `json:"leftover_pulls,omitempty"`  // idle summons pulled by the leftover sweeps
 	LeftoverSweeps int          `json:"leftover_sweeps,omitempty"` // leftover sweeps run (each logs a note, also when it found nothing)
+	AgentOpens     int          `json:"agent_opens,omitempty"`     // chests the agent opened itself (graves_open_by agent)
 	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
 	// and marks put again on a mob whose CC lapsed while the fight went on.
 	ReactiveCC int `json:"reactive_cc"`
@@ -662,6 +666,9 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	if err := d.checkStart(fromLeg); err != nil {
+		return err
+	}
+	if err := d.checkGravesOpenBy(ctx); err != nil {
 		return err
 	}
 	d.rep.start(fromLeg)

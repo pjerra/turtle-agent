@@ -59,6 +59,7 @@ type GraveBatch struct {
 	Centre      Point   `json:"centre"`
 	// CutByRadius says that the batch is shorter than asked for because the next chests were not within BatchRadius of its centre.
 	CutByRadius bool   `json:"cut_by_radius"`
+	OpenedBy    string `json:"opened_by"` // carrier or agent (graves_open_by)
 	Note        string `json:"note,omitempty"`
 }
 
@@ -85,6 +86,8 @@ type batchRun struct {
 	adds    map[packet.GUID]bool
 	deaths0 int
 	stayed  bool // the party was told to stay at the centre
+	// agentHome is where the agent stood before it opened the batch's chests (graves_open_by agent); it goes back there after the last one.
+	agentHome *agentHome
 	// sectionLeft is how many chests of the section follow this batch (0: it is the last one).
 	sectionLeft int
 }
@@ -189,7 +192,7 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		left: size, sectionLeft: len(a.Section) - size, began: d.clk.Now(), adds: map[packet.GUID]bool{},
 		deaths0: len(d.rep.snapshot().Deaths),
 		rec: GraveBatch{Leg: max(d.curLeg, 0), N: gb.n, Mode: mode, Wanted: wanted, Size: size, TankMin: -1, HealMin: -1,
-			RadiusYd: BatchSpread(pts), Centre: BatchCentre(pts)},
+			RadiusYd: BatchSpread(pts), Centre: BatchCentre(pts), OpenedBy: d.gravesOpenBy()},
 	}
 	b.rec.CutByRadius = cut
 	if cut {
@@ -347,6 +350,9 @@ func (d *RemoteDriver) batchStepDone(ctx context.Context, a Action, skipped bool
 	if b.left > 0 {
 		return nil
 	}
+	if b.agentHome != nil {
+		d.agentLeavesTheFight(ctx, b)
+	}
 	if b.stayed {
 		d.resumeFollow(ctx, true) // the fight is with the party free to move: `cmd follow` is the bots' own mode
 		b.stayed = false
@@ -402,8 +408,8 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	if d.gravesMode() == "ramp" && !wipe && gb.wipes == 0 {
 		gb.size = r.Size + d.rampOf().Step
 	}
-	text := fmt.Sprintf("graves-batch: n=%d leg=%d mode=%s wanted=%d size=%d opened=%d skipped=%d adds=%d fight_s=%.0f deaths=%d wipe=%s tank_min_pct=%d healer_min_pct=%d healer_mana_end_pct=%d aoe=%s threat_wait_s=%.0f tank_held=%s cut_by_radius=%s radius_yd=%.1f",
-		r.N, r.Leg, r.Mode, r.Wanted, r.Size, r.Opened, r.Skipped, r.Adds, r.FightS, r.Deaths, yesNo(wipe), r.TankMin, r.HealMin, r.HealMana, onOff(r.AoE), r.ThreatWaitS, yesNo(r.TankHeld), yesNo(r.CutByRadius), r.RadiusYd)
+	text := fmt.Sprintf("graves-batch: n=%d leg=%d mode=%s wanted=%d size=%d opened=%d skipped=%d adds=%d fight_s=%.0f deaths=%d wipe=%s tank_min_pct=%d healer_min_pct=%d healer_mana_end_pct=%d aoe=%s threat_wait_s=%.0f tank_held=%s cut_by_radius=%s open_by=%s radius_yd=%.1f",
+		r.N, r.Leg, r.Mode, r.Wanted, r.Size, r.Opened, r.Skipped, r.Adds, r.FightS, r.Deaths, yesNo(wipe), r.TankMin, r.HealMin, r.HealMana, onOff(r.AoE), r.ThreatWaitS, yesNo(r.TankHeld), yesNo(r.CutByRadius), r.OpenedBy, r.RadiusYd)
 	if wipe {
 		text += fmt.Sprintf(" wiped_at_size=%d next_size=%d", gb.wipedAt, d.batchWantedAfterWipe())
 	}
@@ -414,7 +420,7 @@ func (d *RemoteDriver) batchFinish(wipe bool) {
 	}
 	d.tr.Event("graves_batch", map[string]any{"n": r.N, "leg": r.Leg, "mode": r.Mode, "wanted": r.Wanted, "size": r.Size, "opened": r.Opened,
 		"skipped": r.Skipped, "adds": r.Adds, "fight_s": r.FightS, "deaths": r.Deaths, "wipe": wipe, "tank_min_pct": r.TankMin,
-		"healer_min_pct": r.HealMin, "healer_mana_end_pct": r.HealMana, "aoe": r.AoE, "threat_wait_s": r.ThreatWaitS, "tank_held": r.TankHeld, "cut_by_radius": r.CutByRadius, "radius_yd": r.RadiusYd})
+		"healer_min_pct": r.HealMin, "healer_mana_end_pct": r.HealMana, "aoe": r.AoE, "threat_wait_s": r.ThreatWaitS, "tank_held": r.TankHeld, "cut_by_radius": r.CutByRadius, "open_by": r.OpenedBy, "radius_yd": r.RadiusYd})
 }
 
 // batchWantedAfterWipe is the size the batches go on with after a wipe (for the note).
@@ -610,4 +616,148 @@ func (d *RemoteDriver) gravesSummary() {
 	d.rep.note(text)
 	d.tr.Event("graves_summary", map[string]any{"leg": max(d.curLeg, 0), "mode": d.gravesMode(), "batches": gb.n, "opened": gb.opened, "skipped": gb.skipped,
 		"max_clean_size": gb.lastClean, "wipes": gb.wipes, "wiped_at_size": gb.wipedAt, "cut_by_radius": gb.cuts, "max_radius_yd": gb.maxRadius})
+}
+
+// ---- graves_open_by agent ----
+
+// GravesOpenCarrier and GravesOpenAgent are the values of RemoteOptions.GravesOpenBy.
+const (
+	GravesOpenCarrier = "carrier"
+	GravesOpenAgent   = "agent"
+)
+
+// gravesOpenBy is who opens the chests of a batch.
+func (d *RemoteDriver) gravesOpenBy() string {
+	if d.opt.GravesOpenBy == GravesOpenAgent {
+		return GravesOpenAgent
+	}
+	return GravesOpenCarrier
+}
+
+// planHasBatches says whether a loot_object step of the plan has a batch id.
+func (d *RemoteDriver) planHasBatches() bool {
+	for _, l := range d.plan.Legs {
+		for _, st := range l.Steps {
+			if st.LootObject != nil && st.LootObject.Batch != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkGravesOpenBy refuses a run that asks for the agent to open the graves (graves_open_by agent) when it cannot: the game has no hands
+// for the agent, its account is no GM, or the setup does not list "gm visible off" (the summons would take a visible GM for a target). The
+// carrier's order is refused by the module while the carrier is in combat ("The bot is in combat and stopped"), which is why the agent
+// opens: it is a GM and the summons ignore it while it is invisible.
+func (d *RemoteDriver) checkGravesOpenBy(ctx context.Context) error {
+	if d.gravesOpenBy() != GravesOpenAgent || !d.planHasBatches() {
+		return nil
+	}
+	f, ok := d.g.(Follower)
+	_, hands := d.g.(AgentHands)
+	_, tele := d.g.(StartHands)
+	switch {
+	case !ok || !hands || !tele:
+		return errors.New("graves_open_by agent: this game gives the agent no hands (its own Opening cast, .go xyz)")
+	case !d.agentGM(ctx, f):
+		return errors.New("graves_open_by agent needs a GM account: the agent's character is no GM, or its level is unknown (it moves with .go xyz and opens the graves itself); use graves_open_by carrier")
+	case !d.setupHas(setupVisibleOff):
+		return errors.New(`graves_open_by agent needs the agent invisible: the setup does not list "gm visible off" (pass it in dungeon_run setup after running it), so the summons would take the agent for a target`)
+	}
+	return nil
+}
+
+// gmAssistGo records a `.go xyz` the agent's opens sent: a GM assist during the run, in setup_shortcuts and run_gm_assists.
+func (d *RemoteDriver) gmAssistGo(label string, at Point) {
+	cmd := fmt.Sprintf(".go xyz %.2f %.2f %.2f %d", at.X, at.Y, at.Z, d.plan.Map)
+	d.rep.update(func(r *Report) { r.SetupShortcuts = append(r.SetupShortcuts, cmd+" (GM assist during the run)") })
+	d.remote(func(r *RemoteReport) { r.RunGMAssists++ })
+	d.rep.note(fmt.Sprintf("%s: %s: a GM assist during the run (run_gm_assists; not counted in gm_commands)", label, cmd))
+}
+
+// stepLootByAgent opens one chest of a batch with the agent's own character (graves_open_by agent): a chest that is open already or gone is
+// skipped; otherwise the agent is brought into the instance (the first chest of a batch: `.appear` to the lead bot), teleported to the chest's
+// stand point with `.go xyz` (a GM assist, noted for each open), casts its Opening spell at the exact spawn and takes what is in it. No order
+// goes to a carrier, and the party's fight is not waited for: the point is to open while the summons fight. A cast that takes nothing is
+// not counted as opened.
+func (d *RemoteDriver) stepLootByAgent(ctx context.Context, a Action, rec *objRec) (string, error) {
+	if skip, why, _ := d.spawnOpened(ctx, a); skip {
+		d.rep.note(fmt.Sprintf("%s: %s: skipped", a.Label, why))
+		return why, nil
+	}
+	f, _ := d.g.(Follower)
+	sh, _ := d.g.(StartHands)
+	h, _ := d.g.(AgentHands)
+	if f == nil || sh == nil || h == nil {
+		return "", errors.New("graves_open_by agent: this game gives the agent no hands")
+	}
+	b := d.batch
+	if b != nil && b.agentHome == nil {
+		if _, err := d.keepNearOpt(ctx, true); err != nil { // the agent into the instance, next to the party
+			return "", err
+		}
+		at, m, here := f.AgentPlace()
+		if !here || m != d.plan.Map {
+			return "", fmt.Errorf("%s: the agent's character is not on map %d (in the instance) after `.appear`: it cannot `.go xyz` to the graves", a.Label, d.plan.Map)
+		}
+		b.agentHome = &agentHome{at: at, known: true}
+	}
+	to := d.standOf(a)
+	if to == nil {
+		to = objectPoint(a)
+	}
+	if to == nil {
+		return "", fmt.Errorf("%s: no stand point or position for the grave", a.Label)
+	}
+	if err := sh.GoXYZ(ctx, d.plan.Map, *to); err != nil {
+		return "", fmt.Errorf("%s: .go xyz to the grave failed: %w", a.Label, err)
+	}
+	d.gmAssistGo(a.Label, *to)
+	var got Looted
+	var err error
+	for try := 0; try < 3; try++ {
+		if got, err = h.LootObject(ctx, a.SpawnGUID); err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if terr := d.tick(ctx, time.Second); terr != nil {
+			return "", terr
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: the agent's own Opening cast at %s: %w", a.Label, tbm.GUIDArg(a.SpawnGUID), err)
+	}
+	d.remote(func(r *RemoteReport) { r.AgentOpens++ })
+	d.rep.note(fmt.Sprintf("%s: the agent opened the grave and took %s", a.Label, describeLooted(got)))
+	for _, it := range got.Items {
+		rec.gained(fmt.Sprintf("%d x%d", it.Entry, it.Count))
+	}
+	if got.Money > 0 {
+		rec.gained(fmt.Sprintf("copper %d", got.Money))
+	}
+	if len(got.Items) == 0 && got.Money == 0 {
+		d.rep.note(fmt.Sprintf("%s: the agent took nothing from the object %s; not counted as opened", a.Label, tbm.GUIDArg(a.SpawnGUID)))
+		return "the agent took nothing", nil
+	}
+	return "", nil
+}
+
+// agentLeavesTheFight sends the agent back to where it stood before the batch's opens (`.go xyz`, a GM assist), out of the fight spot, after the
+// batch's last chest. A failure is noted: the agent is an invisible GM and the summons ignore it.
+func (d *RemoteDriver) agentLeavesTheFight(ctx context.Context, b *batchRun) {
+	h := b.agentHome
+	b.agentHome = nil
+	f, _ := d.g.(Follower)
+	sh, _ := d.g.(StartHands)
+	if h == nil || !h.known || f == nil || sh == nil {
+		return
+	}
+	if err := sh.GoXYZ(ctx, d.plan.Map, h.at); err != nil {
+		d.rep.note(fmt.Sprintf("graves-batch: .go xyz back out of the fight spot failed: %v; the agent stays where it is", err))
+		return
+	}
+	d.gmAssistGo("graves-batch", h.at)
 }

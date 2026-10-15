@@ -675,6 +675,9 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 			return err
 		}
 	}
+	if a.Kind == ActLoot && a.Batch != "" && d.gravesOpenBy() == GravesOpenAgent {
+		return d.doGraveByAgent(ctx, a)
+	}
 	if _, err := d.keepNear(ctx); err != nil {
 		return err
 	}
@@ -1128,4 +1131,25 @@ func (d *RemoteDriver) aliveOnPlanMap(name string) bool {
 	d.look()
 	m, ok := d.memberByName(name)
 	return ok && !m.Dead && m.Map == d.plan.Map
+}
+
+// doGraveByAgent is a batch's loot_object step done by the agent's own character (graves_open_by agent), with the same record and the same
+// batch accounting as the carrier's.
+func (d *RemoteDriver) doGraveByAgent(ctx context.Context, a Action) error {
+	rec := d.newObjRec(a.Leg, a.Label, "loot_object", "agent")
+	note, err := d.stepLootByAgent(ctx, a, rec)
+	if err == nil {
+		err = d.batchStepDone(ctx, a, note != "")
+	}
+	if err != nil {
+		rec.finish("failed", err, note)
+		d.emit(events.KindDungeonStep, a.Label+": "+err.Error(), map[string]any{"leg": a.Leg, "carrier": "agent", "ok": false, "mode": "remote"})
+		return fmt.Errorf("%s: %w", a.Label, err)
+	}
+	result := "done"
+	if note != "" {
+		result = "skipped"
+	}
+	rec.finish(result, nil, note)
+	return nil
 }
