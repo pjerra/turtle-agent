@@ -1359,6 +1359,51 @@ func TestRecoveryWaitsForRevivedBotsToRejoin(t *testing.T) {
 	}
 }
 
+// A party that is revived and dies again (and stays dead) gives ONE bounded recovery failure: the wait for the rejoin ends in an error at its
+// bound instead of "going on", so the step is not retried into the same wipe, the wipe is counted once and uses one recovery slot.
+func TestRecoveryOfAPartyThatStaysDeadFailsOnceAndCountsTheWipeOnce(t *testing.T) {
+	g := &reviveGame{nearGame: newNearGame(t, 0)}
+	g.agent = Point{5, 0, 0}
+	died, again, up := false, false, 0
+	var began time.Time
+	g.onTick = func(fr *fakeRemote) {
+		if !died && fr.lead().X > 5 {
+			died, began = true, fr.now
+			for _, p := range fr.party {
+				p.Dead, p.HP = true, 0
+			}
+		}
+		// The party is up for one frame (the revive wait sees it, with Magey far off, so the rejoin wait starts), then all die again, for good.
+		if died && !again && !fr.party[1].Dead {
+			fr.party[2].X = 100
+			if up++; up >= 2 {
+				again = true
+			}
+		}
+		if again {
+			for _, p := range fr.party {
+				p.Dead, p.HP = true, 0
+				fr.reviveStuck[p.Name] = true
+			}
+		}
+	}
+	g.reviveStuck = map[string]bool{}
+	cfg := DefaultConfig()
+	cfg.RecoverWipe = true
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}), g, cfg, objOpts(), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err == nil || rep.State == "done" || !strings.Contains(err.Error(), "still dead") {
+		t.Fatalf("%v state %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if n := rep.Wipes + rep.PartyDowns; n != 1 || d.wipeRecover != 1 || d.wipeRecoverLeg[0] != 1 {
+		t.Fatalf("wipes %d downs %d recoveries %d per leg %v\n%s", rep.Wipes, rep.PartyDowns, d.wipeRecover, d.wipeRecoverLeg, notesOf(rep))
+	}
+	if took := g.now.Sub(began); took > 6*time.Minute {
+		t.Fatalf("took %v", took)
+	}
+}
+
 // A rest gate that waits only for the healer's mana (nothing else under its line) gives up after 120 s even when the leg lets gates run for 10 minutes.
 func TestRestGateCapsAHealerOnlyManaWait(t *testing.T) {
 	g := newFakeRemote(t)

@@ -2254,8 +2254,9 @@ const revivedRejoinWait = 120 * time.Second
 
 // waitRevivedRejoin waits, after a wipe's revives, until every member is alive and within GatherNear of the lead bot (a revived bot runs back
 // from the graveyard), summoning the far ones when the agent is a GM (the rejoin), so that the next pull is not made with dead or distant
-// bots (live, zum2-s1: three packs pulled with dead bots, four more bots lost in the 6 minutes after a wipe). It never fails the run: past the
-// bound it says who is missing and the step goes on.
+// bots (live, zum2-s1: three packs pulled with dead bots, four more bots lost in the 6 minutes after a wipe). Past the bound a member that is
+// still dead fails the recovery (one error, so one wipe uses one recovery slot); members that are alive but far give a degraded success.
+// A wipe seen during the wait (the revived bots dying again) is the same unresolved wipe: it is not counted again, the wait runs to its bound.
 func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
 	until := d.clk.Now().Add(revivedRejoinWait)
 	noted := false
@@ -2270,14 +2271,24 @@ func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
 			return nil
 		}
 		if !d.clk.Now().Before(until) {
-			var names []string
+			var names, deadNames []string
 			for _, b := range missing {
 				names = append(names, fmt.Sprintf("%s %.0f yd", b.name, b.dist))
 			}
 			for _, m := range dead {
 				names = append(names, m.Name+" dead")
+				deadNames = append(deadNames, m.Name)
 			}
-			d.rep.note(fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s; going on", strings.Join(names, ", "), revivedRejoinWait.Seconds()))
+			note := fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s", strings.Join(names, ", "), revivedRejoinWait.Seconds())
+			if len(dead) > 0 {
+				// A member that is dead at the bound is an unresolved wipe: going on would retry the step, and the next party check would count
+				// the same wipe again and use up the leg's recovery cap without a second wipe. The recovery fails once here instead.
+				d.rep.note(note + "; the wipe is not recovered")
+				return fmt.Errorf("the wipe is not recovered: %s still dead %.0f s after the revives", strings.Join(deadNames, ", "), revivedRejoinWait.Seconds())
+			}
+			// Alive but far from the lead bot: the run goes on with fewer bots at hand, and the report says so.
+			d.rep.note(note + "; going on")
+			d.degrade(fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s", strings.Join(names, ", "), revivedRejoinWait.Seconds()))
 			return nil
 		}
 		if !noted {
