@@ -126,8 +126,13 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 					t.Errorf("legs[%d] (%s) pull_groups[%d]: entry %d is a critter, a neutral, a friendly, the rare or a boss", i, l.Name, gi, e)
 				}
 			}
-			if len(g.Entries) == 1 && g.Entries[0] == 3671 {
-				ana++
+			for _, e := range g.Entries {
+				if e == 3671 {
+					ana++
+					if len(g.Entries) < 2 {
+						t.Errorf("legs[%d] pull_groups[%d]: Lady Anacondra alone in a group: she stands with the pack at her spot", i, gi)
+					}
+				}
 			}
 			if g.Patrol != nil {
 				// Source is "creature_movement guid N (entry E)": the path is that guid's waypoints (thinned to 40 points at most).
@@ -174,7 +179,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 		}
 	}
 	if ana != 4 {
-		t.Errorf("%d one-member groups of Lady Anacondra, want her four spawn spots", ana)
+		t.Errorf("%d groups with Lady Anacondra as a member, want one per spawn spot (four)", ana)
 	}
 	spots := 0
 	for _, s := range ss {

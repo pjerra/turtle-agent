@@ -24,19 +24,21 @@
   ],
   "fleers": [3840, 3674],
   "cc_priority": [3840],
-  "kill_first": [3840],
+  "kill_first": [3840, 3671],
   "notes": [
-    "Wailing Caverns (map 43), mapped offline from the world database export of tortoise-wow (tools/dungeongen/testdata/map43, read with export.sh; re-exported 2026-10-15 and identical), the instance script src/scripts/dungeons/wailing_caverns (instance_wailing_caverns.cpp, wailing_caverns.cpp) and the navmesh tiles of map 43 (~/tb-ci/mmaps-turtle043 on yulon-ubuntu2). The status stays 'draft (not mapped, not live-checked)': it was written offline and nobody has walked it, and 'mapped' means after the in-game GM-invisible walk; dungeon_run refuses a draft without allow_draft. Wowhead's Classic guide page does not hand its text to a fetch (it is rendered by script), so the tips come from the core's creature_spells and EventAI tables (the spell ids in the tactics blocks) and the Icy Veins, Almar's Guides and Warcraft Tavern guides.",
-    "ROUTE (about 5170 yd of navmesh path from the entrance to Verdan by the first member of each group, 5990 yd with every member position, 12 legs, 89 pull groups with 174 mobs, 8 patrols): the cave mouth and Lady Anacondra's four possible spots (anacondra_a, anacondra_b), north to Lord Cobrahn (cobrahn_a to cobrahn_c; 861 yd from the last Anacondra spot, a dead end), back through the cave mouth and down the long south road to Lord Pythas (pythas_a to pythas_c), Skum in the far south-west (skum, a 372 yd dead end), the west column up to the foot of the ramp (west_column) and the hop onto it (serpentis: Lord Serpentis, then verdan: Verdan the Everliving). The order is the shortest of the ones tried (the four Fanglords all lie on dead-end branches; the other orders came to 6900 yd and more). The Disciple of Naralex event comes after Verdan and is in dungeons/wailing_caverns-extra.json, because the driver cannot do it yet.",
-    "The four Fanglords (Lady Anacondra 3671, Lord Cobrahn 3669, Lord Pythas 3670, Lord Serpentis 3673) are what unlock the Disciple event: instance_wailing_caverns.cpp opens the Disciple's second gossip menu (202, 'Let the event begin!') only when all four are DONE. Skum (3674), Verdan (5775) and Kresh (3653) are not part of it. Mutanus the Devourer (3654) has no spawn row; the escort script summons him.",
-    "Lady Anacondra has FOUR spawn rows (guids 27366, 1177978, 1177979, 1177980) in one spawn pool (pool_template 10004, max_limit 1): one of -67.8 122.6 -89.9, 46.5 184.0 -89.2, 15.3 297.2 -87.7 and -54.0 271.4 -92.8 is up per reset. The plan has no boss for her (a boss has one position) and no way to say 'one of these'. Instead each spot is a one-member pull group at the point of the road where the party passes it (group 11 of anacondra_a, groups 6 and 12 of anacondra_b and group 3 of cobrahn_a, radius 15): a group whose member is not in view is looked at, and the driver walks on when it sees none. Whichever spot is up gets pulled as a pack of one; the other three are looked at and found empty. NOT tested live. The proper fix is a boss with alternative positions (see the pull request text).",
-    "The hop: the navmesh of map 43 has two parts that do not touch. The big one holds everything from the cave mouth to Skum; the other (331 polygons, z -64 to -21) is the winding ramp up to the Serpentis hall with Serpentis and Verdan. The only place the two come near each other is the foot of the ramp: -293.3 0.5 -58.0 (main mesh) and -289.1 3.2 -64.1 (ramp), 4.9 yd across and 6.1 down; every other contact is 28 yd or more up or down. The leg 'serpentis' crosses it with a direct step (via, check_skip: the plan check cannot judge a step over a gap of the mesh). It is the one step of this plan that the mapping walk must prove: if the real ramp starts somewhere else, only that hop changes.",
-    "No team gate is needed: every mob of the route is hostile to both teams (faction 270 Deviate, 14 Skum and the oozes). Left out of the pull groups on purpose: the level-1 Snakes (2914, 40 of them) and Biletoads (3835), Kresh (3653, the turtle that walks the river, faction 7, neutral: he is never pulled and is in every leg's skip list), the rare Deviate Faerie Dragon (5912, skip), the Disciple of Naralex (3678) and Naralex (3679), faction 35. Four packs that stand on a lower or higher floor the route only looks across (a walk of 165 to 234 yd from the road: crocolisks in the river at z -106 and a Shambler and a Venomwing pocket) are not in a group either; they stay asleep unless the party walks into them.",
-    "Left out because they are not on the way to a boss: the Turtle-added west wing (map x -400 to -550: Vangros 61965, Kolkar Truthseeker 61966 and Explorer 61967, Unnatural Overgrowth 61964, a Deviate Coiler Hatchling 61218; the navmesh holds it as a separate 7700-polygon part reached from the south-west) and Zandara Windhoof (61968, 81.9 27.0 -66.8, a rank-1 named mob on a spur east of the road, 334 yd from Pythas), the giant pillar cavern at x -380 to -160, y 80 to 340 (its own mesh part, no spawn rows worth a route), the Kresh river. The bonfires and chests of the export (Large Battered Chest 75293, the Mysterious Wailing Caverns Chest 180055 of the Fortune Awaits quest) are not used by the plan.",
-    "Entry: the portal is area trigger 228 (map 1, -753.6 -2212.8 21.5, radius 13, required level 10; the same trigger row sends to map 43 at -158.441 131.601 -74.2552, the plan's entrance). Unlike Zul'Farrak this dungeon has game_tele rows on both sides: 205 'wc' (map 43, -163.5 132.9 -73.7, inside, the plan's entrance_tele) and 130 'WailingCaverns' (map 1, -731.6 -2218.4 17.0, outside, outside_tele). A GM leader is put inside with `.tele name \u003cbot\u003e wc`; any other leader enters with `cmd enter 228` at the portal (TortoiseBots #939). Row 448 'path1' (137.2 254.0 -100.3) is a GM tele into Naralex's chamber, useful for testing the final event on its own.",
-    "CC and kill order (plan fields): the Druids of the Fang (3840, humanoid, level 19-20, 1450-1550 hp) cast Sleep (700) and Healing Touch (5187) and Lightning Bolt (9532) and run at 15 percent (EventAI 384001, 80 percent of the time): they are cc_priority (the mage's Polymorph), kill_first and fleers. Skum (3674) also runs at 15 percent (EventAI 367402). Evolving Ectoplasm (3640, type 'not specified', walks as a patrol) cannot be crowd-controlled and becomes immune to a school for 10 s after it is hit by it (npc_evolving_ectoplasm: fire, frost, nature, shadow): change schools or use physical damage. Deviate Shamblers (5761, type elemental in the database) cast Wild Regeneration at 50 percent hp (kill them fast or interrupt), Deviate Dreadfangs (5056) Terrify (5s fear), Deviate Lashers (5055) Wide Slash, Deviate Adders (5048) poison on hit; a pack of Python (8886) at Cobrahn dies to area damage.",
-    "Patrols: 8 patrols of the export (creature_movement waypoints, walking at 2.5 yd/s, closing the loop; the period_s of each is an estimate from the path length, not a timing) are attached to the group they pass nearest (within 40 yd) as the group's patrol, the patrolling mob itself left out of the group's entries; the other five (Kresh, a Deviate Shambler at 22.8 -150.8 off the south road, Kolkar Truthseeker 61966 and two Shamblers of the west wing) are not on the route. Patrols are not placed at the start position: the plan lists the waypoint path; a patrol that is met is fought like any mob.",
-    "Checks done offline: the plan check (`turtle-agent plan-check --mmaps ~/tb-ci/mmaps-turtle043 wailing_caverns`: every hop, pull look and boss walk on the navmesh; the one direct hop is exempt with check_skip), TestWailingCavernsOnNavmesh (the whole route is complete navmesh paths, 5990 yd to every position, and the plan holds the four Fanglords, the four Anacondra spots and the hop) and the generic plan tests. 107 yd of the road to Cobrahn and 308 yd of the road back are shallow-water polygons (wading, flag ground+water); none is deep water. First live job: the GM-invisible mapping walk: every pull group's positions, the hop, the loop at -345 22 -101 and the spiral to Cobrahn."
+    "Wailing Caverns (map 43), written offline from the world database export of tortoise-wow (tools/dungeongen/testdata/map43, read with export.sh; re-exported 2026-10-15 and identical; movement.tsv holds the patrol paths), the instance script src/scripts/dungeons/wailing_caverns (instance_wailing_caverns.cpp, wailing_caverns.cpp), the core's creature_spells, creature_ai_events and spawn pool tables and the navmesh tiles of map 43 (~/tb-ci/mmaps-turtle043 on yulon-ubuntu2). The status stays 'draft (not mapped, not live-checked)': nobody has walked it, and 'mapped' means after the in-game GM-invisible walk; dungeon_run refuses a draft without allow_draft. Wowhead Classic (zone 718, the strategy guide 7843 and the npc pages with their comments, read from the raw page with tools/wowhead/wh.py) was read for the tips; it is data and the database and the script win: where they differ it is said below ('Wowhead differences').",
+    "ROUTE (about 5080 yd of navmesh path from the entrance to Verdan by the first member of each group, 5930 yd with every member position, 12 legs, 85 pull groups with 174 mobs, 8 patrols): the cave mouth and Lady Anacondra's four possible spots (anacondra_a, anacondra_b), north to Lord Cobrahn (cobrahn_a to cobrahn_c; 861 yd from the last Anacondra spot, a dead end), back through the cave mouth and down the south road to Lord Pythas (pythas_a to pythas_c), Skum in the far south-west (skum, a 372 yd dead end), the west column up to the foot of the ramp (west_column) and the hop onto it (serpentis: Lord Serpentis, then verdan: Verdan the Everliving). The order is the shortest of the ones tried (the four Fanglords all lie on dead-end branches; the other orders came to 6900 yd and more). The Disciple of Naralex event comes after Verdan and is in dungeons/wailing_caverns-extra.json, because the driver cannot do it yet.",
+    "The four Fanglords (Lady Anacondra 3671, Lord Cobrahn 3669, Lord Pythas 3670, Lord Serpentis 3673) unlock the Disciple event: instance_wailing_caverns.cpp opens the Disciple's second gossip menu (202, 'Let the event begin!') only when all four are DONE. Skum (3674), Verdan (5775) and Kresh (3653) are not part of it. Mutanus the Devourer (3654) has no spawn row; the escort script summons him. Wowhead comments: the escort can be tried once per reset (if the Disciple dies or the party wipes, the instance has to be reset and the four killed again), and a run split over two lockouts cannot start it.",
+    "Lady Anacondra has FOUR spawn rows (guids 27366, 1177978, 1177979, 1177980) in one spawn pool (pool_template 10004, max_limit 1): one of -67.8 122.6 -89.9, 46.5 184.0 -89.2, 15.3 297.2 -87.7 and -54.0 271.4 -92.8 is up per reset (Wowhead comments say 3 to 5 spots in the first big cave and that she is always somewhere; the database has four). A boss has one position and the plan has no way to say 'one of these', so each spot is a MEMBER of the pack that stands at it, last in that group's entries (group 9 of anacondra_a, group 4 of anacondra_b, group 9 of anacondra_b, group 2 of cobrahn_a): the member exists only while her pool spot is up, the group is the pack with her and the driver pulls it as one. Each of those packs stood 3 to 4 yd from her spawn (one Druid of the Fang stood on it) and would have been pulled with her anyway; a one-member group of her at each spot (the first version) pulled the trash with her without any boss handling. Her kill order is the plan's: kill_first has the Druid of the Fang and then her (3840, 3671), the leg notes carry her interrupts. NOT tested live. The proper fix is a boss with alternative positions (see the pull request text).",
+    "Pull radii: a pull group's radius is the distance from one of its positions within which a unit of its entries counts as a member (default 25 yd). The generator cut each radius to stay short of the nearest hostile spawn that is not a member of the group (radius = that gap - 3.5 yd, 6 yd at least, 25 at most), so a neighbouring pack is not dragged in by the radius; tools/dungeongen's TestNoMobStandsInAPullGroupsRangeUnlisted fails for any hand-written plan with a mob (another pack's, a boss, a forgotten spawn) within a group's radius + 3 yd that the group does not list. The adds that stand with a boss are the boss's first, not a pull group (Cobrahn's three Pythons, Pythas's Shambler and Druid), because the boss would otherwise be inside the group's radius.",
+    "The hop: the navmesh of map 43 has two parts that do not touch. The big one holds everything from the cave mouth to Skum; the other (331 polygons, z -64 to -21) is the winding ramp up to the Serpentis hall with Serpentis and Verdan. The only place the two come near each other is the foot of the ramp: -293.3 0.5 -58.0 (main mesh) and -289.1 3.2 -64.1 (ramp), 4.9 yd across and 6.1 down; every other contact is 28 yd or more up or down. The leg 'serpentis' crosses it with a direct step (via, check_skip: the plan check cannot judge a step over a gap of the mesh). It is the one step of this plan that the mapping walk must prove: if the real ramp starts somewhere else, only that hop changes. Wowhead comments on Lord Serpentis support it: 'go west from Skum ... when you reach the water/plant area, jump down onto the ledge below you, keep running up the path ... one more area with druids ... a steep path up: Verdan, and on his right Serpentis, with a druid and a serpent' (a jump down onto a ledge is a drop of the size of this hop).",
+    "No team gate is needed: every mob of the route is hostile to both teams (faction 270 Deviate, 14 Skum and the oozes). Left out of the pull groups on purpose: the level-1 Snakes (2914, 40 of them) and Biletoads (3835), Kresh (3653, the turtle that walks the river, faction 7, neutral, 'react 0' on Wowhead: he is never pulled and is in every leg's skip list), the rare Deviate Faerie Dragon (5912, skip), the Disciple of Naralex (3678) and Naralex (3679), faction 35. Four packs that stand on a lower or higher floor the route only looks across (a walk of 165 to 234 yd from the road: crocolisks in the river at z -106 and a Shambler and a Venomwing pocket) are not in a group either; they stay asleep unless the party walks into them.",
+    "Left out because they are not on the way to a boss: the Turtle-added west wing (map x -400 to -550: Vangros 61965, Kolkar Truthseeker 61966 and Explorer 61967, Unnatural Overgrowth 61964, a Deviate Coiler Hatchling 61218; the navmesh holds it as a separate 7700-polygon part reached from the south-west) and Zandara Windhoof (61968, 81.9 27.0 -66.8, a rank-1 named mob on a spur east of the road, 334 yd from Pythas), the giant pillar cavern at x -380 to -160, y 80 to 340 (its own mesh part, no spawn rows worth a route), the Kresh river. The rare Deviate Faerie Dragon (5912) stands at 2.7 -67.5 -65.9 with two Druids of the Fang and a Shambler 9 to 17 yd away, 107 yd from the nearest pull position: the Wowhead guide calls it 'a 4-mob pull of elites with two Druids of the Fang' and the database agrees; Wowhead comments put it near Skum or on the way to Serpentis, the database has one row, at this spot. The bonfires and chests of the export (Large Battered Chest 75293, the Mysterious Wailing Caverns Chest 180055 of the Fortune Awaits quest) are not used by the plan.",
+    "Entry: the portal is area trigger 228 (map 1, -753.6 -2212.8 21.5, radius 13, required level 10; the same trigger row sends to map 43 at -158.441 131.601 -74.2552, the plan's entrance). Unlike Zul'Farrak this dungeon has game_tele rows on both sides: 205 'wc' (map 43, -163.5 132.9 -73.7, inside, the plan's entrance_tele) and 130 'WailingCaverns' (map 1, -731.6 -2218.4 17.0, outside, outside_tele). A GM leader is put inside with `.tele name \u003cbot\u003e wc`; any other leader enters with `cmd enter 228` at the portal (TortoiseBots #939). Row 448 'path1' (137.2 254.0 -100.3) is a GM tele into Naralex's chamber, useful for testing the final event on its own. Wowhead comment: do not pull Lady Anacondra back to the portal, a Druid can get stuck behind it.",
+    "CC and kill order (plan fields): the Druids of the Fang (3840, humanoid, level 19-20, 1450-1550 hp) cast Druid's Slumber (8040: Wowhead says up to 15 s, it can hit the healer) and Sleep (700), Healing Touch (5187) and Lightning Bolt (9532), and run at 15 percent (EventAI 384001, 80 percent of the time; Serpent Form 8041 silences them, so a Druid that turned serpent casts no Slumber): they are cc_priority (the mage's Polymorph), kill_first (then Lady Anacondra) and fleers; the guide's rule is one Druid at a time, CC the others, burst the one you fight and interrupt Slumber. A Wowhead comment says they resist nature a lot (Earth Shock interrupts resisted). Sleep is a magic effect a priest or shaman removes; a Wowhead comment says paladins cannot before 42 (Cleanse takes poison and disease only). Skum (3674) also runs at 15 percent (EventAI 367402) and is immune to nature (a Wowhead comment: slow him before he gathers adds). Evolving Ectoplasm (3640, type 'not specified', walks as a patrol) cannot be crowd-controlled and becomes immune to a school for 10 s after it is hit by it (npc_evolving_ectoplasm: fire, frost, nature, shadow; a Wowhead comment: immune to roots and snares, and a new slime appears at low health, not in the script): change schools or use physical damage. Deviate Shamblers (5761, type elemental in the database) cast Wild Regeneration at 50 percent hp (kill them fast or interrupt), Deviate Dreadfangs (5056) Terrify (5s fear), Deviate Lashers (5055) Wide Slash, Deviate Adders (5048) poison on hit; the three Pythons at Cobrahn (8886) die to area damage.",
+    "Patrols: 8 patrols of the export (creature_movement waypoints, walking at 2.5 yd/s, closing the loop) are attached to the group they pass nearest (within 40 yd) as the group's patrol, the patrolling mob itself left out of the group's entries. Every period_s is an ESTIMATE (the path length at 2.5 yd/s, not a measured round) and carries period_estimate: the driver predicts no phase from it, locates the patrol and waits until it is past the pull, and the plan check warns for each one; the mapping walk measures the rounds. The other five patrols of the export (Kresh, a Deviate Shambler at 22.8 -150.8 off the south road, Kolkar Truthseeker 61966 and two Shamblers of the west wing) are not on the route. Wowhead comments warn of 'a druid and slime patrol that go across the entrance' (the database has Evolving Ectoplasm patrols and a Druid patrol at the first caves) and of 'one Druid of the Fang who patrols to Cobrahn: attack when the patrol is leaving' (the database has no patrol near Cobrahn: the walk should look).",
+    "Wowhead differences (the database and the script win): the zone page says level 17-27 and the guide 15-25 (plan band 18-23 from the mobs, level 20-21 bosses); the guide says Serpentis needs no trash (the database has a Druid and a Venomwing 24 yd from him, as the comment about 'a druid and a serpent' says: group 5 of serpentis); the guide's second wave and Mutanus without a third wave (the script: three Moccasins, seven Nightmare Ectoplasm, then Mutanus; a comment counts five ectoplasm); a comment says killing the slimes too fast can stop Mutanus from spawning (the script summons him on a timer, 102 s after the Disciple arrives, unless something else gates it); the guide says Cobrahn's serpent form adds 50 damage and 43 percent attack speed (the script: below 30 percent hp, spell 7965); Kresh's one ability is a daze (spell 13496, his spell lists are empty in the database).",
+    "Checks done offline: the plan check (`turtle-agent plan-check --mmaps ~/tb-ci/mmaps-turtle043 wailing_caverns`: every hop, pull look and boss walk on the navmesh; the one direct hop is exempt with check_skip; one warning per patrol for its estimated period), TestWailingCavernsOnNavmesh (the whole route is complete navmesh paths, 5930 yd to every position, and the plan holds the four Fanglords, the four Anacondra spots and the hop), the pull-range test above and the generic plan tests. 107 yd of the road to Cobrahn and 308 yd of the road back are shallow-water polygons (wading, flag ground+water); none is deep water. First live job: the GM-invisible mapping walk: every pull group's positions, the hop in both directions, the patrol rounds, the loop at -345 22 -101 and the spiral to Cobrahn."
   ],
   "legs": [
     {
@@ -48,29 +50,28 @@
           "positions": [
             {"x": -100.8, "y": 181.9, "z": -78.5}
           ],
-          "radius": 21
+          "radius": 21.8
         },
         {
           "entries": [3636, 3636],
           "positions": [
             {"x": -105.5, "y": 228.7, "z": -89.9},
             {"x": -107, "y": 240.2, "z": -92.8}
-          ],
-          "radius": 22
+          ]
         },
         {
           "entries": [3636],
           "positions": [
             {"x": -72.2, "y": 214.8, "z": -93.6}
           ],
-          "radius": 10
+          "radius": 13.8
         },
         {
           "entries": [3636],
           "positions": [
             {"x": -73.7, "y": 197.6, "z": -93.9}
           ],
-          "radius": 10,
+          "radius": 13.8,
           "patrol": {
             "entries": [3640],
             "path": [
@@ -82,6 +83,7 @@
               {"x": -70.6, "y": 200.4, "z": -93.7}
             ],
             "period_s": 35,
+            "period_estimate": true,
             "source": "creature_movement guid 26200 (entry 3640); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -91,7 +93,7 @@
             {"x": -35.2, "y": 198.1, "z": -96.6},
             {"x": -35, "y": 209.6, "z": -96.4}
           ],
-          "radius": 20,
+          "radius": 21.4,
           "patrol": {
             "entries": [3640],
             "path": [
@@ -104,6 +106,7 @@
               {"x": -32.3, "y": 228.2, "z": -95}
             ],
             "period_s": 54,
+            "period_estimate": true,
             "source": "creature_movement guid 26229 (entry 3640); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -114,29 +117,30 @@
             {"x": -32.5, "y": 173.3, "z": -96.3},
             {"x": -35.4, "y": 166.3, "z": -96.1}
           ],
-          "radius": 18
+          "radius": 11.1
         },
         {
           "entries": [3636],
           "positions": [
             {"x": -60.8, "y": 138.2, "z": -91.6}
           ],
-          "radius": 10
+          "radius": 9.5
         },
         {
           "entries": [3636],
           "positions": [
             {"x": -53.6, "y": 119.1, "z": -89.5}
           ],
-          "radius": 10
+          "radius": 11.1
         },
         {
-          "entries": [3840, 3637],
+          "entries": [3840, 3637, 3671],
           "positions": [
             {"x": -70.8, "y": 120.1, "z": -89.7},
-            {"x": -70.5, "y": 129.6, "z": -90.6}
+            {"x": -70.5, "y": 129.6, "z": -90.6},
+            {"x": -67.8, "y": 122.6, "z": -89.9}
           ],
-          "radius": 18
+          "radius": 9.5
         },
         {
           "entries": [3636, 3636],
@@ -144,19 +148,12 @@
             {"x": -71, "y": 106.6, "z": -89},
             {"x": -78.9, "y": 103.4, "z": -91.2}
           ],
-          "radius": 17
-        },
-        {
-          "entries": [3671],
-          "positions": [
-            {"x": -67.8, "y": 122.6, "z": -89.9}
-          ],
-          "radius": 15
+          "radius": 10
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "notes": [
-        "Cave mouth to the first of Lady Anacondra's four spots (-67.8 122.6 -89.9, the last group): trash of Deviate Ravagers (3636, beasts), Guardians (3637) and Druids of the Fang, and two Evolving Ectoplasm patrols (groups 4 and 5). The Disciple of Naralex (3678) stands 25 yd from the entrance point at -135 125.4 -78.1 (friendly, skip) and is not pulled: his gossip is the event after Verdan."
+        "Cave mouth to the first of Lady Anacondra's four spots: trash of Deviate Ravagers (3636, beasts), Guardians (3637) and Druids of the Fang, and two Evolving Ectoplasm patrols (groups 4 and 5). Group 9 is her spot 1 (-67.8 122.6 -89.9): the pack of a Druid of the Fang and a Guardian with her as a member when she is up there; kill the Druid first (kill_first), interrupt Sleep (700) and Lightning Bolt (9532) and Healing Touch (5187); Thorns Aura (8148) is not interruptible. The Disciple of Naralex (3678) stands 25 yd from the entrance point at -135 125.4 -78.1 (friendly, skip) and is not pulled: his gossip is the event after Verdan."
       ]
     },
     {
@@ -169,29 +166,30 @@
             {"x": -25, "y": 97.2, "z": -90.6},
             {"x": -27.9, "y": 85, "z": -91.3}
           ],
-          "radius": 21
+          "radius": 23
         },
         {
           "entries": [3637],
           "positions": [
             {"x": 12.8, "y": 160.5, "z": -87.9}
           ],
-          "radius": 14
+          "radius": 20.2
         },
         {
           "entries": [3636],
           "positions": [
             {"x": 33.3, "y": 172.4, "z": -87.8}
           ],
-          "radius": 10
+          "radius": 10.3
         },
         {
-          "entries": [3840, 3636],
+          "entries": [3840, 3636, 3671],
           "positions": [
             {"x": 43.2, "y": 183.3, "z": -88.7},
-            {"x": 42.2, "y": 183, "z": -88.6}
+            {"x": 42.2, "y": 183, "z": -88.6},
+            {"x": 46.5, "y": 184, "z": -89.2}
           ],
-          "radius": 10
+          "radius": 10.3
         },
         {
           "entries": [3636, 3640],
@@ -199,21 +197,14 @@
             {"x": 57.5, "y": 204, "z": -90.9},
             {"x": 60.7, "y": 207.6, "z": -91.7}
           ],
-          "radius": 13
-        },
-        {
-          "entries": [3671],
-          "positions": [
-            {"x": 46.5, "y": 184, "z": -89.2}
-          ],
-          "radius": 15
+          "radius": 9.4
         },
         {
           "entries": [3840],
           "positions": [
             {"x": 47.6, "y": 211.8, "z": -88.4}
           ],
-          "radius": 10
+          "radius": 9.4
         },
         {
           "entries": [3637, 3637],
@@ -221,22 +212,24 @@
             {"x": 47, "y": 230.1, "z": -88.2},
             {"x": 41.8, "y": 240.6, "z": -88.1}
           ],
-          "radius": 20
+          "radius": 14.8
         },
         {
           "entries": [3637],
           "positions": [
             {"x": 30.5, "y": 269.4, "z": -87.2}
           ],
-          "radius": 10
+          "radius": 11.3
         },
         {
-          "entries": [3637, 3637, 3840],
+          "entries": [3637, 3637, 3840, 3671],
           "positions": [
             {"x": 24.2, "y": 282.8, "z": -87.9},
             {"x": 11.6, "y": 290.1, "z": -87.3},
-            {"x": 15.3, "y": 297.2, "z": -87.8}
-          ]
+            {"x": 15.3, "y": 297.2, "z": -87.8},
+            {"x": 15.3, "y": 297.2, "z": -87.7}
+          ],
+          "radius": 11.3
         },
         {
           "entries": [3637],
@@ -244,18 +237,11 @@
             {"x": 2.7, "y": 312.2, "z": -88.9}
           ],
           "radius": 10
-        },
-        {
-          "entries": [3671],
-          "positions": [
-            {"x": 15.3, "y": 297.2, "z": -87.7}
-          ],
-          "radius": 15
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "notes": [
-        "Spot 2 (46.5 184.0 -89.2) and spot 3 (15.3 297.2 -87.7) of Lady Anacondra are the last groups of each stretch. The guides say she calls every raptor within about 100 yd when pulled, so the trash before her spot is cleared first (not in the database's EventAI, which has only her yell and her Nature Channeling 13236 out of combat). Her spells: Thorns Aura 8148, Healing Touch 5187, Sleep 700 (interrupt it) and Lightning Bolt 9532."
+        "Spots 2 (group 4: 46.5 184.0, with a Druid and a Ravager) and 3 (group 9: 15.3 297.2, with a Druid sitting on her spawn and two Guardians) of Lady Anacondra. If she is up she is pulled with the pack. The guides say she calls every raptor within about 100 yd when pulled, so the trash before her spot is cleared first (not in the database's EventAI, which has only her yell and her Nature Channeling 13236 out of combat); a second Druid in the fight is CC'd at once ('one Sleep can be dealt with, two or more will wipe you'). Her spells: Thorns Aura 8148, Healing Touch 5187, Sleep 700 (interrupt it) and Lightning Bolt 9532."
       ]
     },
     {
@@ -270,10 +256,11 @@
           "radius": 10
         },
         {
-          "entries": [3636, 3840],
+          "entries": [3636, 3840, 3671],
           "positions": [
             {"x": -47.7, "y": 254.8, "z": -92.8},
-            {"x": -55.3, "y": 274.7, "z": -92.8}
+            {"x": -55.3, "y": 274.7, "z": -92.8},
+            {"x": -54, "y": 271.4, "z": -92.8}
           ],
           "patrol": {
             "entries": [3840],
@@ -284,22 +271,15 @@
               {"x": -64.7, "y": 265.9, "z": -92.8}
             ],
             "period_s": 32,
+            "period_estimate": true,
             "source": "creature_movement guid 26239 (entry 3840); period_s is an estimate: the path length at 2.5 yd/s"
           }
-        },
-        {
-          "entries": [3671],
-          "positions": [
-            {"x": -54, "y": 271.4, "z": -92.8}
-          ],
-          "radius": 15
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -6.1, "y": 214.9, "z": -106.2}
           ],
-          "radius": 19,
           "patrol": {
             "entries": [3640],
             "path": [
@@ -313,6 +293,7 @@
               {"x": -21.5, "y": 186, "z": -103.3}
             ],
             "period_s": 71,
+            "period_estimate": true,
             "source": "creature_movement guid 26228 (entry 3640); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -333,26 +314,26 @@
           "positions": [
             {"x": -8.1, "y": 470.3, "z": -93.1}
           ],
-          "radius": 16
+          "radius": 22.7
         },
         {
           "entries": [5048],
           "positions": [
             {"x": 28.8, "y": 454.4, "z": -86.1}
           ],
-          "radius": 12
+          "radius": 17
         },
         {
           "entries": [5755],
           "positions": [
             {"x": 16.9, "y": 438.6, "z": -80.9}
           ],
-          "radius": 10
+          "radius": 10.2
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "notes": [
-        "Group 3 is spot 4 of Lady Anacondra (-54.0 271.4 -92.8); the escort of the later event does its Cleansing there (the Disciple stops at -54 276.2 -92.8 and three vipers are summoned). From the ledge the way to Cobrahn drops to the river (z -106). Kresh the turtle (3653, neutral, guid 27368) walks a 526 yd loop in that river at -64 319 -106: skip, never pulled."
+        "Group 2 is spot 4 of Lady Anacondra (-54.0 271.4 -92.8; with a Ravager and the patrolling Druid's pack); the escort of the later event does its Cleansing there (the Disciple stops at -54 276.2 -92.8 and three vipers are summoned). From the ledge the way to Cobrahn drops to the river (z -106). Kresh the turtle (3653, neutral, guid 27368) walks a 526 yd loop in that river at -64 319 -106: skip, never pulled."
       ]
     },
     {
@@ -365,14 +346,14 @@
             {"x": 5, "y": 440.3, "z": -74.3},
             {"x": 7.2, "y": 454.9, "z": -78.3}
           ],
-          "radius": 23
+          "radius": 10.2
         },
         {
           "entries": [3840],
           "positions": [
             {"x": -2.8, "y": 420, "z": -66.5}
           ],
-          "radius": 14
+          "radius": 19.6
         },
         {
           "entries": [5755, 3640, 3840],
@@ -381,14 +362,14 @@
             {"x": -39.6, "y": 401, "z": -59.7},
             {"x": -27, "y": 420.6, "z": -61}
           ],
-          "radius": 20
+          "radius": 21.4
         },
         {
           "entries": [5048],
           "positions": [
             {"x": 23.5, "y": 398.1, "z": -59.4}
           ],
-          "radius": 15
+          "radius": 21.7
         },
         {
           "entries": [8886, 8886, 3840],
@@ -397,14 +378,13 @@
             {"x": 53.5, "y": 398.2, "z": -63.1},
             {"x": 52.5, "y": 406.5, "z": -63.5}
           ],
-          "radius": 17
+          "radius": 21.7
         },
         {
           "entries": [5048],
           "positions": [
             {"x": 65.1, "y": 436.9, "z": -64.3}
-          ],
-          "radius": 20
+          ]
         },
         {
           "entries": [8886, 8886, 3840],
@@ -412,13 +392,12 @@
             {"x": 42.9, "y": 478.5, "z": -65.9},
             {"x": 42.1, "y": 475, "z": -65.9},
             {"x": 44.4, "y": 475.8, "z": -65.7}
-          ],
-          "radius": 18
+          ]
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "notes": [
-        "The road north climbs in a loop from the river at z -106 to z -54 (the plan check walks it): Deviate Adders (5048), Vipers (5755) and Python (8886) with Druids of the Fang (3840: Sleep and Healing Touch, kill or Polymorph first)."
+        "The road north climbs in a loop from the river at z -106 to z -54 (the plan check walks it): Deviate Adders (5048), Vipers (5755) and Pythons (8886) with Druids of the Fang (3840: Slumber and Sleep, kill or Polymorph first)."
       ]
     },
     {
@@ -430,7 +409,7 @@
           "positions": [
             {"x": 27.7, "y": 504, "z": -60.1}
           ],
-          "radius": 10
+          "radius": 12.9
         },
         {
           "entries": [3840, 5048, 3840, 5048],
@@ -439,14 +418,15 @@
             {"x": 14.5, "y": 522, "z": -57.2},
             {"x": 25.2, "y": 530.9, "z": -56.9},
             {"x": 24.9, "y": 524.5, "z": -57.3}
-          ]
+          ],
+          "radius": 12.9
         },
         {
           "entries": [5755],
           "positions": [
             {"x": -18.6, "y": 493.6, "z": -54.9}
           ],
-          "radius": 10
+          "radius": 12.3
         },
         {
           "entries": [5755, 8886, 8886, 8886, 3840, 5048],
@@ -457,7 +437,8 @@
             {"x": -47.7, "y": 475.8, "z": -56.1},
             {"x": -34.3, "y": 475.5, "z": -53.8},
             {"x": -24.2, "y": 478.8, "z": -55.2}
-          ]
+          ],
+          "radius": 12.3
         },
         {
           "entries": [3840, 5048, 5755],
@@ -466,7 +447,7 @@
             {"x": -79.3, "y": 471.6, "z": -67},
             {"x": -87.1, "y": 468, "z": -68.9}
           ],
-          "radius": 24
+          "radius": 17.5
         },
         {
           "entries": [8886, 8886, 5755, 3840, 3840, 3840],
@@ -478,7 +459,7 @@
             {"x": -113.8, "y": 458.8, "z": -72.1},
             {"x": -102.8, "y": 452.4, "z": -72.3}
           ],
-          "radius": 23
+          "radius": 17.5
         },
         {
           "entries": [5048, 3840],
@@ -486,28 +467,20 @@
             {"x": -123.7, "y": 412.6, "z": -72.7},
             {"x": -127.5, "y": 410.5, "z": -72.6}
           ],
-          "radius": 13
-        },
-        {
-          "entries": [8886, 8886, 8886],
-          "positions": [
-            {"x": -149, "y": 415.9, "z": -72.7},
-            {"x": -151.7, "y": 412, "z": -72.7},
-            {"x": -153.3, "y": 416.2, "z": -72.7}
-          ],
-          "radius": 13
+          "radius": 18.7
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "boss": {
         "entry": 3669,
         "position": {"x": -151.1, "y": 414.4, "z": -72.6},
+        "first": [8886],
         "tactics": {
-          "interrupt": [8040, 9532]
+          "interrupt": [8040, 9532, 5187]
         }
       },
       "notes": [
-        "Lord Cobrahn (3669, -151.1 414.4 -72.6, humanoid druid, level 20, 4389 hp): the last group (three Deviate Pythons, 8886, at his feet, 3 yd from him) is pulled first, so the party can use area damage on them; Cobrahn casts Druid's Slumber (8040, an 8 s sleep on one member) and Lightning Bolt (9532), and below 30 percent hp changes into a serpent for a while (EventAI 366903, Cobrahn Serpent Form 7965) and then back. Interrupt the casts. His gem is part of the Leaders of the Fang quest."
+        "Lord Cobrahn (3669, -151.1 414.4 -72.6, humanoid druid, level 20, 4389 hp): his three Deviate Pythons (8886, level 18-19, not elite, 3 yd from him) are his first, so the party uses area damage on them before it turns to him; Cobrahn casts Druid's Slumber (8040, an 8 s sleep on one member; interrupt it first, especially when the target is the healer), Lightning Bolt (9532) and Healing Touch (5187), and below 30 percent hp changes into a serpent for a while (EventAI 366903, Cobrahn Serpent Form 7965: Wowhead says +50 damage and +43 percent attack speed) and then back. His gem is part of the Leaders of the Fang quest."
       ]
     },
     {
@@ -519,14 +492,14 @@
           "positions": [
             {"x": -11.9, "y": 158.7, "z": -106.2}
           ],
-          "radius": 14
+          "radius": 12.5
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -50.5, "y": 81.7, "z": -106.2}
           ],
-          "radius": 16
+          "radius": 23.8
         },
         {
           "entries": [5053],
@@ -542,6 +515,7 @@
               {"x": -99.1, "y": 68.7, "z": -106.2}
             ],
             "period_s": 66,
+            "period_estimate": true,
             "source": "creature_movement guid 26197 (entry 5053); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -550,27 +524,28 @@
           "positions": [
             {"x": -161.5, "y": 51.8, "z": -106}
           ],
-          "radius": 20
+          "radius": 20.8
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -203.7, "y": -5.3, "z": -105.8}
-          ]
+          ],
+          "radius": 16.9
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -249.3, "y": -17.2, "z": -105.7}
           ],
-          "radius": 16
+          "radius": 22.7
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -273.7, "y": -7.6, "z": -106.4}
           ],
-          "radius": 16
+          "radius": 22.7
         },
         {
           "entries": [5761, 3840, 3640],
@@ -579,7 +554,7 @@
             {"x": -352.6, "y": 22.6, "z": -100.8},
             {"x": -344.5, "y": 24.5, "z": -101.1}
           ],
-          "radius": 16
+          "radius": 17.1
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
@@ -597,15 +572,14 @@
             {"x": -335.4, "y": 51, "z": -97.8},
             {"x": -343.8, "y": 51.5, "z": -98.6}
           ],
-          "radius": 16
+          "radius": 8.8
         },
         {
           "entries": [3840, 5761],
           "positions": [
             {"x": -265.9, "y": 43.1, "z": -87.7},
             {"x": -264.6, "y": 38, "z": -87.4}
-          ],
-          "radius": 22
+          ]
         },
         {
           "entries": [3840, 3840, 5761],
@@ -614,7 +588,6 @@
             {"x": -231.2, "y": 50.8, "z": -82.7},
             {"x": -220.4, "y": 49.3, "z": -82.3}
           ],
-          "radius": 22,
           "patrol": {
             "entries": [5761],
             "path": [
@@ -626,6 +599,7 @@
               {"x": -198.7, "y": 69.8, "z": -82.5}
             ],
             "period_s": 55,
+            "period_estimate": true,
             "source": "creature_movement guid 38116 (entry 5761); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -636,8 +610,7 @@
             {"x": -154.1, "y": 63.7, "z": -75.7},
             {"x": -159, "y": 75.6, "z": -76},
             {"x": -160.3, "y": 70.9, "z": -75.8}
-          ],
-          "radius": 20
+          ]
         },
         {
           "entries": [5055, 5055, 5055],
@@ -653,7 +626,7 @@
           "positions": [
             {"x": -133.5, "y": -31.8, "z": -76.9}
           ],
-          "radius": 14
+          "radius": 19.4
         },
         {
           "entries": [5055, 3840, 5055, 5055, 5055],
@@ -664,7 +637,7 @@
             {"x": -162.5, "y": -50.1, "z": -77.1},
             {"x": -156.4, "y": -53.7, "z": -76.9}
           ],
-          "radius": 21
+          "radius": 19.4
         },
         {
           "entries": [5761, 3840, 5761],
@@ -672,8 +645,7 @@
             {"x": -172.9, "y": -82.3, "z": -67.7},
             {"x": -174.4, "y": -87.5, "z": -67.8},
             {"x": -172.2, "y": -91.7, "z": -67.4}
-          ],
-          "radius": 21
+          ]
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
@@ -698,15 +670,14 @@
             {"x": -75.6, "y": -142.5, "z": -80.9},
             {"x": -61.6, "y": -152.9, "z": -78.7}
           ],
-          "radius": 21
+          "radius": 24.2
         },
         {
           "entries": [3840, 5761],
           "positions": [
             {"x": -36, "y": -188.9, "z": -74.2},
             {"x": -49.5, "y": -184.7, "z": -74.7}
-          ],
-          "radius": 22
+          ]
         },
         {
           "entries": [3840, 5055, 5055, 5055, 5055],
@@ -717,27 +688,20 @@
             {"x": 7.4, "y": -193.4, "z": -82.2},
             {"x": 14.4, "y": -194.2, "z": -83.2}
           ],
-          "radius": 22
-        },
-        {
-          "entries": [5761, 3840],
-          "positions": [
-            {"x": 22.7, "y": -238.8, "z": -78.3},
-            {"x": 30.9, "y": -242.4, "z": -78.9}
-          ],
-          "radius": 17
+          "radius": 24.9
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "boss": {
         "entry": 3670,
         "position": {"x": 36.8, "y": -241.1, "z": -79.5},
+        "first": [5761, 3840],
         "tactics": {
           "interrupt": [700, 5187, 9532]
         }
       },
       "notes": [
-        "Lord Pythas (3670, 36.8 -241.1 -79.5, level 21, 5110 hp): his Druid of the Fang (3840) and a Shambler stand 14 yd from him and join (last group); Sleep (700), Healing Touch (5187), Lightning Bolt (9532): interrupt, kill the Druid first. His table also holds Thunderclap (8147, an area slow around him): keep the party out of melee range of it."
+        "Lord Pythas (3670, 36.8 -241.1 -79.5, level 21, 5110 hp): his Shambler (5761) and a Druid of the Fang (3840) stand 14 to 17 yd from him and join: they are his first. Wowhead: burn the Shambler down before Pythas, CC the Druid, and keep the tank or one melee on Pythas so his Sleep (700) is interrupted; also Healing Touch (5187) and Lightning Bolt (9532). His table also holds Thunderclap (8147, an area slow around him): keep the party out of melee range of it."
       ]
     },
     {
@@ -753,28 +717,29 @@
             {"x": -4.8, "y": -255.5, "z": -69.2},
             {"x": 2.5, "y": -262.2, "z": -68.6},
             {"x": 7.6, "y": -261.8, "z": -69.1}
-          ]
+          ],
+          "radius": 9.3
         },
         {
           "entries": [3840],
           "positions": [
             {"x": -55.1, "y": -249.6, "z": -68.7}
           ],
-          "radius": 10
+          "radius": 10.2
         },
         {
           "entries": [5761],
           "positions": [
             {"x": -56.9, "y": -236, "z": -68.8}
           ],
-          "radius": 10
+          "radius": 10.2
         },
         {
           "entries": [3840],
           "positions": [
             {"x": -140.4, "y": -181.3, "z": -68.2}
           ],
-          "radius": 10
+          "radius": 10.9
         },
         {
           "entries": [5756, 5056],
@@ -782,22 +747,20 @@
             {"x": -144.3, "y": -195.2, "z": -68},
             {"x": -152, "y": -193.8, "z": -68.5}
           ],
-          "radius": 16
+          "radius": 10.9
         },
         {
           "entries": [5756],
           "positions": [
             {"x": -193, "y": -237.8, "z": -70.1}
-          ],
-          "radius": 18
+          ]
         },
         {
           "entries": [5056, 3840],
           "positions": [
             {"x": -221, "y": -248.7, "z": -64.5},
             {"x": -229.2, "y": -252.5, "z": -64.5}
-          ],
-          "radius": 18
+          ]
         },
         {
           "entries": [5055, 5055, 5055, 3840],
@@ -807,7 +770,7 @@
             {"x": -220.5, "y": -290.9, "z": -68.8},
             {"x": -219.2, "y": -307, "z": -71.1}
           ],
-          "radius": 23
+          "radius": 10.9
         },
         {
           "entries": [3840, 3840],
@@ -815,7 +778,7 @@
             {"x": -269.4, "y": -297.8, "z": -67.7},
             {"x": -264.5, "y": -301.8, "z": -68.4}
           ],
-          "radius": 23
+          "radius": 19.3
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
@@ -827,7 +790,7 @@
         }
       },
       "notes": [
-        "Skum (3674, -285.7 -313.7 -69.2, level 21 beast, 6944 hp): immune to nature, casts Chained Bolt (6254, interruptible), runs at 15 percent (fleers: the driver waits for him to come back with the next group). Optional in the game's quests but the party passes him anyway: the west column to Serpentis starts at his hall, 340 yd away."
+        "Skum (3674, -285.7 -313.7 -69.2, level 21 beast, 6944 hp): immune to nature, casts Chained Bolt (6254, interruptible; it chains to up to three melee that stand close together, so the melee spread out), runs at 15 percent (fleers: the driver waits for him to come back with the next group; a Wowhead comment: slow him before he gathers adds). Optional in the game's quests and in the guide (his loot makes him worthwhile): the west column to Serpentis starts at his hall, 340 yd away."
       ]
     },
     {
@@ -843,7 +806,8 @@
             {"x": -299.8, "y": -247.5, "z": -63.6},
             {"x": -307, "y": -232.2, "z": -63.2},
             {"x": -307.1, "y": -240.7, "z": -63.2}
-          ]
+          ],
+          "radius": 18.5
         },
         {
           "entries": [3840, 5756, 5056, 3840],
@@ -853,7 +817,7 @@
             {"x": -280.2, "y": -219.4, "z": -64.2},
             {"x": -290.9, "y": -215.1, "z": -63.1}
           ],
-          "radius": 23
+          "radius": 18.5
         },
         {
           "entries": [3840, 5056],
@@ -861,7 +825,6 @@
             {"x": -264.5, "y": -182.8, "z": -60.4},
             {"x": -271.5, "y": -179.9, "z": -60.2}
           ],
-          "radius": 20,
           "patrol": {
             "entries": [3640],
             "path": [
@@ -886,6 +849,7 @@
               {"x": -235.3, "y": -156.9, "z": -62.6}
             ],
             "period_s": 79,
+            "period_estimate": true,
             "source": "creature_movement guid 87115 (entry 3640); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -894,21 +858,21 @@
           "positions": [
             {"x": -307.4, "y": -147.5, "z": -61.3}
           ],
-          "radius": 12
+          "radius": 16.7
         },
         {
           "entries": [5756],
           "positions": [
             {"x": -322.4, "y": -134, "z": -62.2}
           ],
-          "radius": 12
+          "radius": 16.7
         },
         {
           "entries": [5056],
           "positions": [
             {"x": -304.7, "y": -104.3, "z": -63.8}
           ],
-          "radius": 21
+          "radius": 23.7
         },
         {
           "entries": [3840, 5056],
@@ -916,7 +880,7 @@
             {"x": -331.5, "y": -79.3, "z": -65.7},
             {"x": -333.9, "y": -72.2, "z": -65.4}
           ],
-          "radius": 22
+          "radius": 22.6
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
@@ -943,7 +907,7 @@
           "positions": [
             {"x": -219.9, "y": 58.7, "z": -48.9}
           ],
-          "radius": 16
+          "radius": 9.7
         },
         {
           "entries": [5756, 3840],
@@ -951,7 +915,7 @@
             {"x": -193.7, "y": 43.2, "z": -47.9},
             {"x": -198.3, "y": 34.7, "z": -49.2}
           ],
-          "radius": 18
+          "radius": 14.7
         },
         {
           "entries": [5055, 5055, 5055, 3840],
@@ -961,7 +925,7 @@
             {"x": -190.2, "y": 66.3, "z": -47.5},
             {"x": -191.8, "y": 61.3, "z": -47.7}
           ],
-          "radius": 16,
+          "radius": 14.7,
           "patrol": {
             "entries": [3640],
             "path": [
@@ -973,6 +937,7 @@
               {"x": -187.3, "y": 56.9, "z": -50}
             ],
             "period_s": 58,
+            "period_estimate": true,
             "source": "creature_movement guid 38117 (entry 3640); period_s is an estimate: the path length at 2.5 yd/s"
           }
         },
@@ -980,8 +945,7 @@
           "entries": [5056],
           "positions": [
             {"x": -145.7, "y": 2.4, "z": -28.6}
-          ],
-          "radius": 24
+          ]
         },
         {
           "entries": [3840, 5756],
@@ -989,7 +953,7 @@
             {"x": -102.1, "y": -8.8, "z": -29.1},
             {"x": -111, "y": -16.1, "z": -28.5}
           ],
-          "radius": 24
+          "radius": 9
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
@@ -1001,7 +965,7 @@
         }
       },
       "notes": [
-        "Starts with the hop from -293.3 0.5 -58.0 to -289.1 3.2 -64.1 (via 2, direct, check_skip: the navmesh has a seam there, see the plan notes; NOT walked live), then up the ramp past Shamblers and Druids to Lord Serpentis (3673, -120.2 -24.6 -28.6, level 21, 4289 hp): Sleep (700), Healing Touch (6778), Lightning Bolt (9532), no adds; he yells when the first of the other three Fanglords dies (SERPENTIS_YELL). Killing him completes the four that open the Disciple's menu."
+        "Starts with the hop from -293.3 0.5 -58.0 to -289.1 3.2 -64.1 (via 2, direct, check_skip: the navmesh has a seam there, see the plan notes; NOT walked live), then up the ramp past Shamblers and Druids to Lord Serpentis (3673, -120.2 -24.6 -28.6, level 21, 4289 hp): Sleep (700), Healing Touch (6778), Lightning Bolt (9532); the guide says he needs no trash, the database has a Druid and a Venomwing 24 yd from him (group 5); he yells when the first of the other three Fanglords dies (SERPENTIS_YELL). Killing him completes the four that open the Disciple's menu."
       ]
     },
     {
@@ -1013,7 +977,7 @@
         "position": {"x": -81.9, "y": 32.3, "z": -31}
       },
       "notes": [
-        "Verdan the Everliving (5775, -81.9 32.3 -31.0, level 21 elemental, 8099 hp, 69 yd from Serpentis): hits harder than anyone before him, Grasping Vines (8142, a root of 10 s, not interruptible; ranged stay 10 yd off), no adds. The game's shortcut behind him is a hole that drops into the river near the entrance; a fall is no plan step, so the way back to the Disciple is the same 1700 yd, through the hop upwards (see dungeons/wailing_caverns-extra.json)."
+        "Verdan the Everliving (5775, -81.9 32.3 -31.0, level 21 elemental, 8099 hp, 69 yd from Serpentis): hits harder than anyone before him (Wowhead comments: 150 to 470 per hit, start healing the tank at once), Grasping Vines (8142, a root of 10 s on everyone within 10 yd and a 2 s knockdown with damage, not interruptible; ranged stay 10 yd off), no adds. Wowhead: always kill him, it opens the waterfall shortcut behind him, a hole that drops into the river near the entrance; a fall is no plan step, so the way back to the Disciple is the same 1700 yd, through the hop upwards (see dungeons/wailing_caverns-extra.json)."
       ]
     }
   ]
