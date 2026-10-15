@@ -143,6 +143,9 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		all = append(all, res.Rows)
 		total += res.Rows.Count()
 		fmt.Fprintf(stdout, "%s: map %d, %d legs, %d steps (%d rows)\n", n, p.Map, len(res.Rows.Legs), len(res.Rows.Steps), res.Rows.Count())
+		if res.Cut != "" {
+			fmt.Fprintf(stdout, "%s: CUT: %d of %d legs exported (see the note above)\n", n, len(res.Rows.Legs), len(p.Legs))
+		}
 	}
 	if len(all) == 0 {
 		return fail("no plan could be exported")
