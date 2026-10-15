@@ -215,7 +215,7 @@ type Waypoint struct {
 	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
 	// It is for a gap no walk crosses (Wailing Caverns: a 3.9 yd chasm, a jump down and no way up). It is a direct waypoint (the file says
 	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
-	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account (developer level for .go xyz): without
+	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account that may .go xyz (level 1 and up, read with `.account`): without
 	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
 	// {"x": -289.1, "y": 3.2, "z": -64.1, "direct": true, "gm_cross": true}.
 	GMCross bool `json:"gm_cross,omitempty"`

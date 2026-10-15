@@ -288,3 +288,16 @@ func TestCrossUnresolvedIsJudgedFromTheExpectedParty(t *testing.T) {
 		t.Errorf("unnamed bots: %q", got)
 	}
 }
+
+// The account check is the keep-near probe (capsFor(level).Teleport): level 1 and up passes, a player is refused; the group driver's leader_gm
+// and gm_caps report fields are not read.
+func TestGMCrossNeedsAnAccountThatMayGoXYZ(t *testing.T) {
+	for level, ok := range map[int]bool{0: false, 1: true, 3: true, 6: true} {
+		g := newStartFake(t)
+		g.level = level
+		d := NewRemoteDriver(gmCrossPlan(), g, DefaultConfig(), opts(), g.clock())
+		if err := d.gmCrossCan(context.Background()); (err == nil) != ok {
+			t.Errorf("level %d: %v, want ok %v", level, err, ok)
+		}
+	}
+}

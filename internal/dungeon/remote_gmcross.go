@@ -14,8 +14,9 @@ import (
 // brought to it, and the run goes on when every living member stands within GMCrossRadius of the point. Each GM line is booked as a GM
 // command of the run, like the start phase's.
 //
-// What it needs: a remote run whose game can move the commander's own character (StartHands) and an account of developer level
-// (capsFor(level).Teleport, `.go xyz`). Run checks that before anything is sent (checkGMCross) when the plan has a gm_cross from the start leg
+// What it needs: a remote run whose game can move the commander's own character (StartHands) and a GM account that may `.go xyz`
+// (capsFor(level).Teleport: level 1 and up, the probe the keep-near and start phases use: `.account`; it does not read the group driver's
+// leader_gm or gm_caps report fields, which a remote run leaves false). Run checks that before anything is sent (checkGMCross) when the plan has a gm_cross from the start leg
 // on; the step itself checks again. The group driver refuses such a plan (Driver.Run). It is not for a fight: a party in combat is waited
 // for, up to startWait, then the step fails.
 
