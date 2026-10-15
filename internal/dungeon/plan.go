@@ -20,6 +20,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/spells"
 	"github.com/pjerra/turtle-agent/internal/tactics"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // Version is the plan format this package reads and writes.
@@ -299,6 +300,7 @@ type Step struct {
 	LootObject *LootObject `json:"loot_object,omitempty"`
 	UseItem    *UseItem    `json:"use_item,omitempty"`
 	Ritual     *Ritual     `json:"ritual,omitempty"`
+	Gossip     *Gossip     `json:"gossip,omitempty"`
 	// AreaTrigger takes an area trigger the way a player's client does (CMSG_AREATRIGGER): see AreaTrigger.
 	AreaTrigger *AreaTrigger `json:"area_trigger,omitempty"`
 }
@@ -360,6 +362,66 @@ type Ritual struct {
 	// Stand is where the party is held while the bots walk in (like UseObject.Stand); without it the driver stands the lead bot a few
 	// yards short of Position.
 	Stand *Point `json:"stand,omitempty"`
+}
+
+// Who talks to the NPC in a gossip step.
+const (
+	GossipByAgent   = "agent"   // the agent's own character (the default)
+	GossipByCarrier = "carrier" // the carrier bot: `.bot cmd gossip <npc> <bot> <option>` (TortoiseBots)
+	GossipByTank    = "tank"    // the tank bot, the same order
+)
+
+// Limits of a gossip step.
+const (
+	DefaultGossipRetryS = 15  // seconds a menu that lacks the option is looked at again
+	MaxGossipRetryS     = 120 // the most retry_s may say
+	GossipRange         = 5.0 // yards: the core answers a gossip hello only within INTERACTION_DISTANCE; the stand must lie inside
+	MaxGossipOption     = 99  // the highest option index a plan may name
+	MaxGossipText       = 80  // characters of a text option
+)
+
+// Gossip talks to an NPC and picks one option of its menu (CMSG_GOSSIP_HELLO, then CMSG_GOSSIP_SELECT_OPTION): Weegli Blastfuse blows
+// Zul'Farrak's End Door and Sergeant Bly starts his fight this way. NPC is the creature entry and Near where it stands (its spawn): the
+// NPC is the one of that entry nearest to Near. The option is Option (the menu's index) or Text (case-insensitive substring of the line),
+// exactly one of them. By says who talks: "agent" (the default; the agent's own character goes within 5 yd of the NPC, with `.appear
+// <lead bot>` as a GM assist when it is far, remote runs), or "carrier" and "tank" (the bot sends the order `cmd gossip <npc> <bot>
+// <option>`; a module that does not know the verb makes the agent take the step once). Stand is where the talker stands (within
+// GossipRange of Near), the NPC's own place when absent. A menu that lacks the option (the phase lags one update behind the event that
+// adds it) is asked again for RetryS seconds, then the step fails with the menu id it saw. The step ends at SMSG_GOSSIP_COMPLETE (or the
+// order's ACK): what happens next is for the following wait_for to check. FailText is added to the failure.
+type Gossip struct {
+	NPC      uint32  `json:"npc"`
+	Near     Point   `json:"near"`
+	Option   *uint32 `json:"option,omitempty"`
+	Text     string  `json:"text,omitempty"`
+	By       string  `json:"by,omitempty"`
+	Stand    *Point  `json:"stand,omitempty"`
+	RetryS   int     `json:"retry_s,omitempty"`
+	FailText string  `json:"fail_text,omitempty"`
+}
+
+// Talker is who talks, By or its default.
+func (g *Gossip) Talker() string {
+	if g.By == "" {
+		return GossipByAgent
+	}
+	return g.By
+}
+
+// Retry is how long a menu that lacks the option is asked again.
+func (g *Gossip) Retry() time.Duration {
+	if g.RetryS <= 0 {
+		return DefaultGossipRetryS * time.Second
+	}
+	return time.Duration(g.RetryS) * time.Second
+}
+
+// OptionText says which option the step picks, for logs: "option 1" or `"text"`.
+func (g *Gossip) OptionText() string {
+	if g.Option != nil {
+		return fmt.Sprintf("option %d", *g.Option)
+	}
+	return fmt.Sprintf("%q", g.Text)
 }
 
 // ObjectRef picks a game object: by entry, by position, or both (the nearest object of that entry to Near).
@@ -617,6 +679,7 @@ type rawStep struct {
 	UseItem     *rawUseItem `json:"use_item"`
 	Ritual      *rawRitual  `json:"ritual"`
 	AreaTrigger *rawTrigger `json:"area_trigger"`
+	Gossip      *rawGossip  `json:"gossip"`
 }
 
 type rawTrigger struct {
@@ -627,6 +690,17 @@ type rawTrigger struct {
 	By       string    `json:"by"`
 	Expect   string    `json:"expect"`
 	TimeoutS *int      `json:"timeout_s"`
+}
+
+type rawGossip struct {
+	NPC      uint32    `json:"npc"`
+	Near     *rawPoint `json:"near"`
+	Option   *int      `json:"option"`
+	Text     string    `json:"text"`
+	By       string    `json:"by"`
+	Stand    *rawPoint `json:"stand"`
+	RetryS   *int      `json:"retry_s"`
+	FailText string    `json:"fail_text"`
 }
 
 type rawUnitWait struct {
@@ -1149,16 +1223,16 @@ func (c *checker) item(path string, r *rawItem) *ItemRef {
 func (c *checker) step(path string, r *rawStep) Step {
 	var s Step
 	n := 0
-	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil, r.AreaTrigger != nil} {
+	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil, r.AreaTrigger != nil, r.Gossip != nil} {
 		if set {
 			n++
 		}
 	}
 	switch {
 	case n > 1:
-		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item, ritual and area_trigger: one step does one thing")
+		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item, ritual, area_trigger and gossip: one step does one thing")
 	case n == 0:
-		c.fail(path, "needs use_object, wait_for, loot_object, use_item, ritual or area_trigger")
+		c.fail(path, "needs use_object, wait_for, loot_object, use_item, ritual, area_trigger or gossip")
 	case r.UseObject != nil:
 		u := &UseObject{ObjectRef: c.ref(path+".use_object", &r.UseObject.rawRef)}
 		if r.UseObject.Stand != nil {
@@ -1188,6 +1262,8 @@ func (c *checker) step(path string, r *rawStep) Step {
 		s.Ritual = c.ritual(path+".ritual", r.Ritual)
 	case r.AreaTrigger != nil:
 		s.AreaTrigger = c.trigger(path+".area_trigger", r.AreaTrigger)
+	case r.Gossip != nil:
+		s.Gossip = c.gossip(path+".gossip", r.Gossip)
 	default:
 		s.WaitFor = c.wait(path+".wait_for", r.WaitFor)
 	}
@@ -1260,6 +1336,68 @@ func (c *checker) ritual(path string, r *rawRitual) *Ritual {
 	if r.Stand != nil {
 		p := c.point(path+".stand", r.Stand)
 		out.Stand = &p
+	}
+	return out
+}
+
+func (c *checker) gossip(path string, r *rawGossip) *Gossip {
+	out := &Gossip{NPC: r.NPC, By: r.By}
+	if r.NPC == 0 {
+		c.fail(path+".npc", "required (the entry of the creature to talk to)")
+	}
+	if r.Near == nil {
+		c.fail(path+".near", "required ({\"x\":..,\"y\":..,\"z\":..}: where the NPC stands; the one of that entry nearest to it is talked to)")
+	} else {
+		out.Near = c.point(path+".near", r.Near)
+	}
+	switch {
+	case r.Option != nil && r.Text != "":
+		c.fail(path, "has both option and text: one step picks one option")
+	case r.Option == nil && r.Text == "":
+		c.fail(path, "needs option (the menu's index) or text (a part of the option's line)")
+	case r.Option != nil:
+		if *r.Option < 0 || *r.Option > MaxGossipOption {
+			c.fail(path+".option", "%d is outside 0-%d", *r.Option, MaxGossipOption)
+		} else {
+			o := uint32(*r.Option)
+			out.Option = &o
+		}
+	default:
+		if len(r.Text) > MaxGossipText || strings.TrimSpace(r.Text) != r.Text || strings.ContainsAny(r.Text, "\r\n\t") {
+			c.fail(path+".text", "is longer than %d characters, has a line break, or has spaces around it", MaxGossipText)
+		} else {
+			out.Text = r.Text
+		}
+	}
+	switch r.By {
+	case "", GossipByAgent:
+	case GossipByCarrier, GossipByTank:
+		// The order is one command line: every word of a text option must be one argument the commander accepts.
+		if out.Text != "" {
+			if bad := tbm.BadOrderWords(out.Text); bad != "" {
+				c.fail(path+".text", "%q cannot be carried in the order `cmd gossip` (by %s): %s; use option (the index) or by \"agent\"", out.Text, r.By, bad)
+			} else if strings.Trim(out.Text, "0123456789") == "" {
+				c.fail(path+".text", "%q is a number: the order `cmd gossip` would read it as the option's index; use option", out.Text)
+			}
+		}
+	default:
+		c.fail(path+".by", "%q: use %q, %q or %q", r.By, GossipByAgent, GossipByCarrier, GossipByTank)
+	}
+	if r.Stand != nil {
+		p := c.point(path+".stand", r.Stand)
+		out.Stand = &p
+	}
+	if r.RetryS != nil {
+		if *r.RetryS <= 0 || *r.RetryS > MaxGossipRetryS {
+			c.fail(path+".retry_s", "%d s is outside 1-%d (omit it for %d)", *r.RetryS, MaxGossipRetryS, DefaultGossipRetryS)
+		} else {
+			out.RetryS = *r.RetryS
+		}
+	}
+	if len(r.FailText) > MaxFailText || strings.ContainsAny(r.FailText, "\r\n\t") {
+		c.fail(path+".fail_text", "is longer than %d characters or has a line break", MaxFailText)
+	} else {
+		out.FailText = r.FailText
 	}
 	return out
 }

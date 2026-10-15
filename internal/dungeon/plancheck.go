@@ -361,7 +361,7 @@ func (c *planChecker) useRange(part string, ref ObjectRef, stand *Point, from Po
 	}
 }
 
-// steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual): the driver stands the party there
+// steps walks the party to the stand point of each step that has one (use_object, loot_object, ritual, area_trigger, gossip): the driver stands the party there
 // before the step. A step without a stand stands wherever the object is approached from, which only a run can say.
 func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
 	for si, st := range steps {
@@ -379,13 +379,24 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 			t := st.AreaTrigger
 			stand, label = &t.Stand, label+"area_trigger.stand"
 			c.trigger(label, t, cur)
+		case st.Gossip != nil:
+			g := st.Gossip
+			stand, label = g.Stand, label+"gossip.stand"
+			if stand != nil && dist3(*stand, g.Near) > GossipRange {
+				c.count()
+				c.fail(label, 0, *stand, cur, ReasonTooFar, "%.1f yd from the NPC's spawn %.1f %.1f %.1f: the server answers a gossip hello only within %g yd", dist3(*stand, g.Near), g.Near.X, g.Near.Y, g.Near.Z, GossipRange)
+			}
 		}
 		if stand == nil {
 			continue
 		}
+		prev := cur
 		var err error
 		if cur, err = c.walk(label, *stand, cur); err != nil {
 			return cur, err
+		}
+		if st.Gossip != nil && st.Gossip.Talker() == GossipByAgent {
+			cur = prev // the agent's own character walks to it: the party stays where it was
 		}
 	}
 	return cur, nil

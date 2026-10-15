@@ -66,6 +66,7 @@ const (
 	ActItem    ActionKind = "use_item"     // use the item Item from the bags
 	ActRitual  ActionKind = "ritual"       // Participants bots use the summoning ritual Entry at EntryAt together (remote runs)
 	ActTrigger ActionKind = "area_trigger" // take the area trigger Trigger (the lead bot walks in, or the agent's own character sends it)
+	ActGossip  ActionKind = "gossip"       // talk to Gossip.NPC and pick its option (Gossip carries who talks)
 	ActKill    ActionKind = "kill_boss"    // kill Boss, First entries before it
 	ActWait    ActionKind = "wait"         // nothing to do yet: look again with Next
 	ActDone    ActionKind = "done"         // the plan is finished
@@ -101,6 +102,7 @@ type Action struct {
 	Section      []BatchChest
 	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
+	Gossip       *Gossip       // gossip: the step
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
 	Item         *ItemRef      // use_item: the item to use
 	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
@@ -203,7 +205,7 @@ func (s *Stepper) Complete() {
 	case phSteps, phAfter:
 		// A walk inside a step only brings the player to the object: the step itself is still to do.
 		switch s.last {
-		case ActUse, ActLoot, ActItem, ActRitual, ActTrigger:
+		case ActUse, ActLoot, ActItem, ActRitual, ActTrigger, ActGossip:
 			s.nextStep()
 		case ActWalk:
 			s.stepWalks++
@@ -378,6 +380,11 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		u := st.UseItem
 		base.Kind, base.Item, base.Requires, base.Expect = ActItem, &ItemRef{Entry: u.Entry, Name: u.Name}, u.RequiresItem, u.ExpectItem
 		base.Label = s.label("step %d: use item %s", s.idx, base.Item)
+		return base, false
+	case st.Gossip != nil:
+		g := st.Gossip
+		base.Kind, base.Gossip = ActGossip, g
+		base.Label = s.label("step %d: gossip with NPC %d (%s, by %s)", s.idx, g.NPC, g.OptionText(), g.Talker())
 		return base, false
 	case st.Ritual != nil:
 		r := st.Ritual
