@@ -64,6 +64,12 @@ type FloorSnapper interface {
 	SnapToFloor(ctx context.Context, mapID uint32, p Point) (Point, bool)
 }
 
+// FloorLister is the optional part of a RemoteGame that lists the walkable floors of the navmesh under (x, y) near height z, highest
+// first (false: no planner or no tile there). The walk puts each step on the floor nearest its height with it.
+type FloorLister interface {
+	FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool)
+}
+
 // CCRule asks for a mob entry to be crowd-controlled in a fight: `.bot cmd cc <mark> <guid> [bot]` before the pull.
 type CCRule struct {
 	Entry uint32 `json:"entry"`
@@ -1542,24 +1548,71 @@ func moveArgsPoint(args []string) (Point, bool) {
 }
 
 // waypoint is the point to send the lead bot to on its way from `from` to `to`: `to` itself when within MoveLeg, else a point on
-// the navmesh path (when the game plans one), else on the straight line.
+// the navmesh path (when the game plans one), else on the straight line. A point cut out of a segment is put on the navmesh floor
+// under it (onFloor): the server drops a floor more than 3 yd above the asked point, and in a sloping tunnel the segment's own height
+// runs under the floor.
 func (d *RemoteDriver) waypoint(ctx context.Context, from, to Point, leg float32) Point {
 	if dist3(from, to) <= float64(leg) {
 		return to
 	}
 	if pl, ok := d.g.(PathPlanner); ok {
-		mapID := d.plan.Map
-		if d.outside != nil {
-			mapID = *d.outside
-		}
-		if pts, err := pl.PlanPath(ctx, mapID, from, to); err == nil && len(pts) >= 2 {
+		if pts, err := pl.PlanPath(ctx, d.stepMap(), from, to); err == nil && len(pts) >= 2 {
 			if p, ok := alongPath(pts, from, leg); ok {
-				return p
+				return d.onFloor(ctx, p)
 			}
 		}
 	}
-	return alongLine(from, to, float64(leg))
+	return d.onFloor(ctx, alongLine(from, to, float64(leg)))
 }
+
+// stepMap is the map the lead bot walks on.
+func (d *RemoteDriver) stepMap() uint32 {
+	if d.outside != nil {
+		return *d.outside
+	}
+	return d.plan.Map
+}
+
+// floorWindow is how far (yd) from a step's height a navmesh floor still counts as the floor under it: the refused steps of the live
+// run were 3.1 to 5.5 yd under their floor; a floor much farther off is another level.
+const floorWindow = 8
+
+// onFloor is p with the height of the navmesh floor at its x, y nearest p's height; p itself when the game lists no floors (no planner,
+// no tile) or none lies within floorWindow.
+func (d *RemoteDriver) onFloor(ctx context.Context, p Point) Point {
+	fl, ok := d.g.(FloorLister)
+	if !ok {
+		return p
+	}
+	zs, ok := fl.FloorsAt(ctx, d.stepMap(), p.X, p.Y, p.Z)
+	if !ok {
+		return p
+	}
+	best, found := float32(0), false
+	for _, z := range zs {
+		if math.Abs(float64(z-p.Z)) <= floorWindow && (!found || math.Abs(float64(z-p.Z)) < math.Abs(float64(best-p.Z))) {
+			best, found = z, true
+		}
+	}
+	if !found {
+		return p
+	}
+	p.Z = best
+	return p
+}
+
+// refusedStepFix is the point to send again for a step the server answered `unreachable`: the step on the navmesh floor nearest it
+// (SnapToFloor), or when that finds nothing new the step raised floorRaise yd (the server accepts a floor up to 3 yd above the asked point).
+func (d *RemoteDriver) refusedStepFix(ctx context.Context, sent Point) Point {
+	if fs, ok := d.g.(FloorSnapper); ok {
+		if q, ok := fs.SnapToFloor(ctx, d.stepMap(), sent); ok && dist3(q, sent) > 0.05 {
+			return q
+		}
+	}
+	return Point{sent.X, sent.Y, sent.Z + floorRaise}
+}
+
+const floorRaise = 3
 
 // alongPath is the farthest point of the path within leg yards of from, following the corners in order.
 func alongPath(pts []Point, from Point, leg float32) (Point, bool) {
@@ -1666,6 +1719,8 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		arriveAt = min(arriveAt, directArrive)
 	}
 	refusals, stalls, aggros, aheads := 0, 0, 0, 0
+	var resend *Point // the step to send again, put on the floor, after the server called it unreachable
+	fixed := false    // the unreachable step has had its resend (until a move is taken)
 	leg := d.opt.MoveLeg
 	var last string
 	var meter walkMeter
@@ -1712,6 +1767,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			hop = min(leg, d.opt.CarefulHop)
 		}
 		wp := d.waypoint(ctx, here, p, hop)
+		if resend != nil && !direct {
+			wp, resend = *resend, nil
+		}
 		args := moveArgs(wp)
 		if direct {
 			wp, args = p, directMoveArgs(p) // one step, never hops
@@ -1747,7 +1805,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		// just past it, and the arrival counts within that overshoot.
 		tiny := 0.0
 		if dd := dist3(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) {
-			past := lerp(here, wp, (float64(d.tx.MinMove)+1)/dd)
+			past := d.onFloor(ctx, lerp(here, wp, (float64(d.tx.MinMove)+1)/dd))
 			args = moveArgs(past)
 			tiny = float64(d.tx.MinMove) + 1 - dd
 			d.remote(func(r *RemoteReport) { r.TinyMoves++ })
@@ -1785,6 +1843,19 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			if ref.Code == "unreachable" {
 				d.noteUnreachable("move", wp, fmt.Sprintf("walk to %.1f %.1f %.1f, leg of %.0f yd from %.1f %.1f %.1f", p.X, p.Y, p.Z, leg, here.X, here.Y, here.Z))
 			}
+			if ref.Code == "unreachable" && !fixed {
+				// A step under its floor is the usual cause (the server drops a floor more than 3 yd above the asked point): the same
+				// step on the floor goes first, and only a refusal of that halves the leg.
+				if sent, ok := moveArgsPoint(args); ok {
+					q := d.refusedStepFix(ctx, sent)
+					fixed, resend = true, &q
+					d.rep.note(fmt.Sprintf("walk to %.1f %.1f %.1f: step %.1f %.1f %.1f unreachable; sent again at z %.1f", p.X, p.Y, p.Z, sent.X, sent.Y, sent.Z, q.Z))
+					if err := d.tick(ctx, d.cfg.WalkRetryDelay); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			if ref.Code == "too-far" || ref.Code == "off-mesh" || ref.Code == "unreachable" {
 				leg = max(leg/2, 15) // a shorter leg: closer, and nearer the mesh
 			}
@@ -1793,6 +1864,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			}
 			continue
 		}
+		fixed = false
 		arrive := arriveAt
 		if wp != p {
 			arrive = max(arrive, 8)
