@@ -157,7 +157,7 @@ func TestBrainCastsOnAMobThatAttacksTheLeader(t *testing.T) {
 
 func TestDungeonRunBrainOption(t *testing.T) {
 	r := dungeonRig(t)
-	bad := r.call("dungeon_run", `{"name":"rig","brain":"lock_fire"}`)
+	bad := r.call("dungeon_run", `{"name":"rig","force":true,"brain":"lock_fire"}`)
 	if errCode(bad) != rpc.CodeInvalidParams || !strings.Contains(bad["error"].(map[string]any)["message"].(string), "brain: strategy") {
 		t.Fatalf("%v", bad)
 	}
@@ -171,12 +171,12 @@ func TestDungeonRunBrainOption(t *testing.T) {
 	if out := r.call("brain_start", `{"strategies":["frost_mage"]}`); out["error"] != nil {
 		t.Fatalf("%v", out)
 	}
-	if out := r.call("dungeon_run", `{"name":"rig","brain":"frost_mage"}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "brain_stop it first") {
+	if out := r.call("dungeon_run", `{"name":"rig","force":true,"brain":"frost_mage"}`); errCode(out) != rpc.CodeGame || !strings.Contains(out["error"].(map[string]any)["message"].(string), "brain_stop it first") {
 		t.Fatalf("%v", out)
 	}
 	r.call("brain_stop", "{}")
 	r.groupWith("Gorm") // a party that is not in view: the first rest gate waits for it, so the run goes on
-	out := r.call("dungeon_run", `{"name":"rig","brain":"frost_mage"}`)
+	out := r.call("dungeon_run", `{"name":"rig","force":true,"brain":"frost_mage"}`)
 	if out["error"] != nil || out["result"].(map[string]any)["brain"] != "frost_mage" {
 		t.Fatalf("%v", out)
 	}
@@ -215,7 +215,7 @@ func TestDungeonRunBrainOption(t *testing.T) {
 	}
 	r.call("brain_stop", "{}")
 	// Without the option the run starts no brain and says nothing of one.
-	out = r.call("dungeon_run", `{"name":"rig"}`)
+	out = r.call("dungeon_run", `{"name":"rig","force":true}`)
 	if out["error"] != nil || out["result"].(map[string]any)["brain"] != nil {
 		t.Fatalf("%v", out)
 	}
@@ -353,7 +353,7 @@ func TestDungeonRunSaysWhoHoldsTheBrain(t *testing.T) {
 	if !lease.acquire() {
 		t.Fatal("a free lease was refused")
 	}
-	_, err := run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage"})
+	_, err := run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage", Force: true})
 	if err == nil || !strings.Contains(err.Error(), "previous dungeon run still owns the brain") || strings.Contains(err.Error(), "brain_stop") {
 		t.Fatalf("lease held: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestDungeonRunSaysWhoHoldsTheBrain(t *testing.T) {
 	if _, err := ctl.Start(brain.Params{Strategies: []string{"frost_mage"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage"})
+	_, err = run.run(dungeonRunParams{Name: "rig", Brain: "frost_mage", Force: true})
 	if err == nil || !strings.Contains(err.Error(), "started by hand") || !strings.Contains(err.Error(), "brain_stop it first") {
 		t.Fatalf("hand brain: %v", err)
 	}

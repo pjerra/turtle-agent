@@ -138,18 +138,41 @@ func TestPlanCheckExemptHop(t *testing.T) {
 	}
 }
 
-// The run starts at from_leg / from_pull_group: what comes before is not checked, the pull groups after it are.
+// The run starts at from_leg / from_pull_group: what comes before is not checked, the pull groups after it are. An explicit group 0 starts
+// at the leg's first group (the leg's own walk is skipped); none given checks the walk too.
 func TestPlanCheckFromPullGroup(t *testing.T) {
 	nav := fakeNav{off: map[Point]bool{{5, 0, 0}: true, {10, 30, 0}: true, {10, 90, 0}: true}}
 	leg := Leg{Name: "a", To: Point{5, 0, 0}, PullGroups: []PullGroup{pg(10, 30), pg(10, 90)}}
-	for from, want := range map[int]string{0: "0/to/0/off the mesh 0/pull group look/1/off the mesh 0/pull group look/2/off the mesh", 1: "0/pull group look/2/off the mesh"} {
-		res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, nav, CheckOptions{FromPullGroup: from})
+	zero, one := 0, 1
+	for _, c := range []struct {
+		from *int
+		want string
+	}{
+		{nil, "0/to/0/off the mesh 0/pull group look/1/off the mesh 0/pull group look/2/off the mesh"},
+		{&zero, "0/pull group look/1/off the mesh 0/pull group look/2/off the mesh"},
+		{&one, "0/pull group look/2/off the mesh"},
+	} {
+		res, err := CheckPlanWith(&Plan{Name: "t", Map: 1, Legs: []Leg{leg}}, nav, CheckOptions{FromPullGroup: c.from})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := issueReasons(res.Issues); got != want {
-			t.Errorf("from group %d: %q, want %q", from, got, want)
+		if got := issueReasons(res.Issues); got != c.want {
+			t.Errorf("from group %v: %q, want %q", c.from, got, c.want)
 		}
+	}
+}
+
+// A start the plan does not have is an error, not an empty pass.
+func TestPlanCheckRefusesABadStart(t *testing.T) {
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{5, 0, 0}, PullGroups: []PullGroup{pg(10, 30)}}, {Name: "b", To: Point{9, 0, 0}}}}
+	two, neg, one := 2, -1, 1
+	for _, opt := range []CheckOptions{{FromLeg: 2}, {FromLeg: -1}, {FromPullGroup: &two}, {FromPullGroup: &neg}, {FromLeg: 1, FromPullGroup: &one}, {FromLeg: 1, FromPullGroup: new(int)}} {
+		if _, err := CheckPlanWith(plan, fakeNav{}, opt); !errors.Is(err, ErrCheckStart) {
+			t.Errorf("%+v: %v", opt, err)
+		}
+	}
+	if _, err := CheckPlanWith(plan, fakeNav{}, CheckOptions{FromLeg: 1}); err != nil {
+		t.Error(err)
 	}
 }
 

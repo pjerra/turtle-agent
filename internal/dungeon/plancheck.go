@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -118,14 +119,31 @@ func joinIssues(is []PlanIssue) string {
 	return strings.Join(lines, "\n")
 }
 
+// ErrCheckStart is the error of a check asked to start at a leg or pull group the plan does not have.
+var ErrCheckStart = errors.New("plan check: bad start")
+
 // CheckOptions are the choices of a plan check. The zero value checks everything with the driver's default look.
 type CheckOptions struct {
 	// FromLeg and FromPullGroup (0-based, as dungeon_run takes them) say where the run starts: what comes before is walked to place the
-	// party but reports nothing. With a pull group the walk of the leg's own via points and `to` is not checked either (the run starts at
-	// the group).
-	FromLeg, FromPullGroup int
+	// party but reports nothing. With a pull group (nil: none given; 0 is the leg's first group) the walk of the leg's own via points and
+	// `to` is not checked either (the run starts at the group).
+	FromLeg       int
+	FromPullGroup *int
 	// LookStandoff and LookArrive are the run's tuned look (tune.go: look_standoff, look_arrive); 0 takes the defaults.
 	LookStandoff, LookArrive float32
+}
+
+// Validate says whether the plan has the leg and pull group the check is to start at (an ErrCheckStart error when not).
+func (o CheckOptions) Validate(p *Plan) error {
+	if o.FromLeg < 0 || o.FromLeg >= len(p.Legs) {
+		return fmt.Errorf("%w: leg %d: the plan has %d legs (numbers 0-%d)", ErrCheckStart, o.FromLeg, len(p.Legs), len(p.Legs)-1)
+	}
+	if g := o.FromPullGroup; g != nil {
+		if n := len(p.Legs[o.FromLeg].PullGroups); *g < 0 || *g >= n {
+			return fmt.Errorf("%w: pull group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", ErrCheckStart, *g, o.FromLeg, p.Legs[o.FromLeg].Name, n, n-1)
+		}
+	}
+	return nil
 }
 
 // CheckPlan walks the plan from leg fromLeg on (the legs before it are walked too, to know where the party stands, but report nothing).
@@ -141,6 +159,9 @@ func CheckPlanWith(p *Plan, nav Navmesh, opt CheckOptions) (*PlanCheck, error) {
 
 // checkPlan is CheckPlanWith with the look point function given (the tests run the old one, StandoffPoint alone, on the old plan).
 func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanCheck, error) {
+	if err := opt.Validate(p); err != nil {
+		return nil, err
+	}
 	if opt.LookStandoff <= 0 {
 		opt.LookStandoff = LookStandoff
 	}
@@ -205,7 +226,7 @@ func (c *planChecker) warn(part string, at, from Point, reason, format string, a
 func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 	c.l = l
 	inRun := c.leg >= c.opt.FromLeg
-	c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == 0)
+	c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == nil)
 	for vi, w := range l.Via {
 		var err error
 		switch {
@@ -233,7 +254,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point) (Point, error) {
 		if g.NeedsWalk {
 			continue
 		}
-		c.report = inRun && (c.leg > c.opt.FromLeg || gi >= c.opt.FromPullGroup)
+		c.report = inRun && (c.leg > c.opt.FromLeg || c.opt.FromPullGroup == nil || gi >= *c.opt.FromPullGroup)
 		first := cur
 		for pi, at := range g.Positions {
 			stand, err := c.look("pull group look", gi+1, at, first)

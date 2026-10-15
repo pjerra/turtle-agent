@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,19 +24,64 @@ func TestPlanCheckCmdUsage(t *testing.T) {
 	}
 }
 
-// Without a planner the plan check does not run and the run goes ahead, with the reason in the result.
-func TestPlanCheckWithoutNavmesh(t *testing.T) {
-	r := &dungeonRunner{dir: "../../dungeons"}
-	res, err := r.planCheck(planCheckParams{Name: "zulfarrak"})
-	if err != nil || res.Checked || !strings.Contains(res.Skipped, "mmaps_dir") || res.Issues == nil {
-		t.Fatalf("%v %+v", err, res)
-	}
+// Without a planner, or without navmesh files for the map, the plan cannot be checked: dungeon_run refuses it unless force is given, which
+// runs it and says so.
+func TestPlanCheckFailsClosedWithoutNavmesh(t *testing.T) {
 	plan, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if note, err := r.checkForRun(plan, dungeon.CheckOptions{}, false); err != nil || !strings.HasPrefix(note, "not run: ") {
-		t.Errorf("%q %v", note, err)
+	noFiles := navmesh.NewPlanner(t.TempDir())
+	defer noFiles.Close()
+	for name, r := range map[string]*dungeonRunner{
+		"no planner": {dir: "../../dungeons"},
+		"no map":     {dir: "../../dungeons", remote: &commanderService{planner: noFiles}},
+	} {
+		res, err := r.planCheck(planCheckParams{Name: "zulfarrak"})
+		if err != nil || res.Checked || res.Skipped == "" || res.Issues == nil {
+			t.Fatalf("%s: %v %+v", name, err, res)
+		}
+		if _, err := r.checkForRun(plan, dungeon.CheckOptions{}, false); err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "plan check could not run: ") || !strings.Contains(err.Error(), "pass force to run anyway") {
+			t.Errorf("%s: not refused: %v", name, err)
+		}
+		if note, err := r.checkForRun(plan, dungeon.CheckOptions{}, true); err != nil || !strings.HasPrefix(note, "forced past: plan check not run (") {
+			t.Errorf("%s: %q %v", name, note, err)
+		}
+	}
+}
+
+func errCodeOf(err error) int {
+	var re *rpc.Error
+	if errors.As(err, &re) {
+		return re.Code
+	}
+	return 0
+}
+
+// The plan_check method and the command refuse a start the plan does not have.
+func TestPlanCheckBadStart(t *testing.T) {
+	r := &dungeonRunner{dir: "../../dungeons"}
+	leg, group := legParam{index: 99}, 99
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromLeg: &leg}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams {
+		t.Errorf("from_leg 99: %v", err)
+	}
+	zero := legParam{index: 0}
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromLeg: &zero, FromPullGroup: &group}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "pull group 99") {
+		t.Errorf("from_pull_group 99: %v", err)
+	}
+	// With no navmesh the start is still validated (no engine is needed for it) when a planner exists.
+	noFiles := navmesh.NewPlanner(t.TempDir())
+	defer noFiles.Close()
+	r.remote = &commanderService{planner: noFiles}
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromLeg: &zero, FromPullGroup: &group}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams {
+		t.Errorf("from_pull_group 99 with a planner: %v", err)
+	}
+	var out, errOut bytes.Buffer
+	for _, args := range [][]string{{"--from-leg", "99"}, {"--from-leg", "0", "--from-pull-group", "99"}} {
+		code := planCheckCmd(append([]string{"--dir", "../../dungeons", "--mmaps", t.TempDir()}, append(args, "zulfarrak")...), &out, &errOut)
+		if code == exitOK || !strings.Contains(errOut.String(), "bad start") {
+			t.Errorf("%v: exit %d: %s", args, code, errOut.String())
+		}
 	}
 }
 
@@ -182,5 +228,19 @@ func TestDungeonRunForcePassesACheckError(t *testing.T) {
 	}
 	if note, err := r.checkForRun(plan, dungeon.CheckOptions{}, true); err != nil || !strings.HasPrefix(note, "forced past check error: ") {
 		t.Errorf("%q %v", note, err)
+	}
+}
+
+// Through dungeon_run on a rig with no planner: refused without force, runs with it and says why.
+func TestDungeonRunWithoutNavmeshNeedsForce(t *testing.T) {
+	r := dungeonRig(t)
+	out := r.call("dungeon_run", `{"name":"rig"}`)
+	msg, _ := out["error"].(map[string]any)["message"].(string)
+	if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(msg, "plan check could not run: ") || !strings.Contains(msg, "mmaps_dir") || !strings.Contains(msg, "pass force") {
+		t.Fatalf("%v", out)
+	}
+	out = r.call("dungeon_run", `{"name":"rig","force":true}`)
+	if out["error"] != nil || !strings.HasPrefix(out["result"].(map[string]any)["plan_check"].(string), "forced past: plan check not run (") {
+		t.Fatalf("%v", out)
 	}
 }

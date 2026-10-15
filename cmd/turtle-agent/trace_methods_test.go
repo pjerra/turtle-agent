@@ -35,11 +35,11 @@ func TestDungeonRunTraceParametersAreChecked(t *testing.T) {
 	}
 	big, _ := json.Marshal(meta)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","run_id":"../x"}`, "run_id must be letters"},
-		{`{"name":"rig","run_id":"a b"}`, "run_id must be letters"},
-		{`{"name":"rig","trace_meta":` + string(big) + `}`, "at most 16"},
-		{`{"name":"rig","trace_meta":{"":"x"}}`, "trace_meta: keys and values"},
-		{`{"name":"rig","trace":"yes"}`, "trace"},
+		{`{"name":"rig","force":true,"run_id":"../x"}`, "run_id must be letters"},
+		{`{"name":"rig","force":true,"run_id":"a b"}`, "run_id must be letters"},
+		{`{"name":"rig","force":true,"trace_meta":` + string(big) + `}`, "at most 16"},
+		{`{"name":"rig","force":true,"trace_meta":{"":"x"}}`, "trace_meta: keys and values"},
+		{`{"name":"rig","force":true,"trace":"yes"}`, "trace"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
@@ -53,7 +53,7 @@ func TestDungeonRunTraceParametersAreChecked(t *testing.T) {
 // summary beside the trace.
 func TestDungeonRunWritesATraceUnderTheRunID(t *testing.T) {
 	r, dir := traceRig(t)
-	res := r.call("dungeon_run", `{"name":"rig","run_id":"r-cmd-1","trace_meta":{"tb_sha":"abc"}}`)["result"].(map[string]any)
+	res := r.call("dungeon_run", `{"name":"rig","force":true,"run_id":"r-cmd-1","trace_meta":{"tb_sha":"abc"}}`)["result"].(map[string]any)
 	want := filepath.Join(dir, "r-cmd-1.jsonl")
 	if res["run_id"] != "r-cmd-1" || res["trace_file"] != want {
 		t.Fatalf("%v", res)
@@ -82,7 +82,7 @@ func TestDungeonRunWritesATraceUnderTheRunID(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The same id again: the file exists, the run goes on without a trace and says why.
-	r.call("dungeon_run", `{"name":"rig","run_id":"r-cmd-1"}`)
+	r.call("dungeon_run", `{"name":"rig","force":true,"run_id":"r-cmd-1"}`)
 	st = r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
 		ds := m["result"].(map[string]any)
 		rp, _ := ds["report"].(map[string]any)
@@ -95,7 +95,7 @@ func TestDungeonRunWritesATraceUnderTheRunID(t *testing.T) {
 
 func TestDungeonRunTraceFalseWritesNothing(t *testing.T) {
 	r, dir := traceRig(t)
-	res := r.call("dungeon_run", `{"name":"rig","trace":false}`)["result"].(map[string]any)
+	res := r.call("dungeon_run", `{"name":"rig","force":true,"trace":false}`)["result"].(map[string]any)
 	id, _ := res["run_id"].(string)
 	if !strings.HasPrefix(id, "r-") || res["trace_file"] != nil {
 		t.Fatalf("%v", res)

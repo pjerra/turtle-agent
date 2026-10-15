@@ -110,12 +110,12 @@ func TestDeathMethods(t *testing.T) {
 func TestDungeonRunNonGM(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","gm":false,"teleport":true}`, "teleport needs a GM account"},
-		{`{"name":"rig","gm":false,"buffs":"world"}`, "buffs need a GM account"},
-		{`{"name":"rig","gm_level":2}`, "gm_level goes with gm true"},
-		{`{"name":"rig","gm":false,"gm_level":3}`, "gm_level goes with gm true"},
-		{`{"name":"rig","gm":true,"gm_level":0}`, "gm_level must be 1"},
-		{`{"name":"rig","gm":true,"gm_level":7}`, "gm_level must be 1"},
+		{`{"name":"rig","force":true,"gm":false,"teleport":true}`, "teleport needs a GM account"},
+		{`{"name":"rig","force":true,"gm":false,"buffs":"world"}`, "buffs need a GM account"},
+		{`{"name":"rig","force":true,"gm_level":2}`, "gm_level goes with gm true"},
+		{`{"name":"rig","force":true,"gm":false,"gm_level":3}`, "gm_level goes with gm true"},
+		{`{"name":"rig","force":true,"gm":true,"gm_level":0}`, "gm_level must be 1"},
+		{`{"name":"rig","force":true,"gm":true,"gm_level":7}`, "gm_level must be 1"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
@@ -124,7 +124,7 @@ func TestDungeonRunNonGM(t *testing.T) {
 		}
 	}
 	// A GM may; a probe (no gm) may too, and the result says how the run decides.
-	for params, want := range map[string]string{`{"name":"rig","gm":false}`: "false", `{"name":"rig","gm":true,"recover_wipe":true}`: "true", `{"name":"rig"}`: "probe"} {
+	for params, want := range map[string]string{`{"name":"rig","force":true,"gm":false}`: "false", `{"name":"rig","force":true,"gm":true,"recover_wipe":true}`: "true", `{"name":"rig","force":true}`: "probe"} {
 		res := r.call("dungeon_run", params)["result"].(map[string]any)
 		if res["leader_gm"] != want {
 			t.Fatalf("%s: %v", params, res)

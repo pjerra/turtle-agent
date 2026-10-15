@@ -257,7 +257,7 @@ type dungeonRunResult struct {
 	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
 	RunID     string `json:"run_id"`
 	TraceFile string `json:"trace_file,omitempty"`
-	// PlanCheck is what the plan check said: "passed: ...", "forced past ..." (force) or "not run: ..." (no navmesh files for the map).
+	// PlanCheck is what the plan check said: "passed: ..." or "forced past ..." (force: failing points, a check error, or no navmesh to check on).
 	PlanCheck string `json:"plan_check,omitempty"`
 }
 

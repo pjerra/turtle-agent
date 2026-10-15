@@ -59,18 +59,18 @@ func TestLeaderPresetPerClassAndRole(t *testing.T) {
 func TestDungeonRunModesAreRefusedClearly(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","mode":"observe"}`, "needs lead_bot"},
-		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","from_leg":1}`, "start inside the plan"},
-		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","tank":"Tanky"}`, "the agent sends no order"},
-		{`{"name":"rig","mode":"commander"}`, "needs lead_bot"},
-		{`{"name":"rig","mode":"leader","lead_bot":"Tanky"}`, `go with mode "remote"`},
-		{`{"name":"rig","mode":"commander","lead_bot":"Tanky","rotation":"frost_mage"}`, "in remote (commander) mode the bots fight"},
-		{`{"name":"rig","mode":"commander","lead_bot":"Tanky","role":"tank"}`, "in remote (commander) mode the bots fight"},
-		{`{"name":"rig","rotation":"frost_mage"}`, "go with a brain"},
-		{`{"name":"rig","role":"tank"}`, "go with a brain"},
-		{`{"name":"rig","brain":"frost_mage","rotation":"no_such_rotation"}`, "unknown"},
-		{`{"name":"rig","brain":"frost_mage","role":"healer"}`, "does not match the strategies"},
-		{`{"name":"rig","brain":"frost_mage","rotation":"arms_warrior"}`, "brain:"},
+		{`{"name":"rig","force":true,"mode":"observe"}`, "needs lead_bot"},
+		{`{"name":"rig","force":true,"mode":"observe","lead_bot":"Tanky","from_leg":1}`, "start inside the plan"},
+		{`{"name":"rig","force":true,"mode":"observe","lead_bot":"Tanky","tank":"Tanky"}`, "the agent sends no order"},
+		{`{"name":"rig","force":true,"mode":"commander"}`, "needs lead_bot"},
+		{`{"name":"rig","force":true,"mode":"leader","lead_bot":"Tanky"}`, `go with mode "remote"`},
+		{`{"name":"rig","force":true,"mode":"commander","lead_bot":"Tanky","rotation":"frost_mage"}`, "in remote (commander) mode the bots fight"},
+		{`{"name":"rig","force":true,"mode":"commander","lead_bot":"Tanky","role":"tank"}`, "in remote (commander) mode the bots fight"},
+		{`{"name":"rig","force":true,"rotation":"frost_mage"}`, "go with a brain"},
+		{`{"name":"rig","force":true,"role":"tank"}`, "go with a brain"},
+		{`{"name":"rig","force":true,"brain":"frost_mage","rotation":"no_such_rotation"}`, "unknown"},
+		{`{"name":"rig","force":true,"brain":"frost_mage","role":"healer"}`, "does not match the strategies"},
+		{`{"name":"rig","force":true,"brain":"frost_mage","rotation":"arms_warrior"}`, "brain:"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -82,7 +82,7 @@ func TestDungeonRunModesAreRefusedClearly(t *testing.T) {
 func TestDungeonRunLeaderModeWithARotation(t *testing.T) {
 	r := dungeonRig(t)
 	r.groupWith("Gorm")
-	out := r.call("dungeon_run", `{"name":"rig","mode":"leader","brain":"frost_mage","rotation":"frost_mage"}`)
+	out := r.call("dungeon_run", `{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","rotation":"frost_mage"}`)
 	if out["error"] != nil {
 		t.Fatalf("%v", out)
 	}
@@ -110,7 +110,7 @@ func TestDungeonRunLeaderModeWithARotation(t *testing.T) {
 
 func TestDungeonRunLeaderModeNeedsAClassToPickAPreset(t *testing.T) {
 	r := dungeonRig(t)
-	out := r.call("dungeon_run", `{"name":"rig","mode":"leader"}`)
+	out := r.call("dungeon_run", `{"name":"rig","force":true,"mode":"leader"}`)
 	if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), "pass brain") {
 		t.Fatalf("%v", out)
 	}
@@ -142,12 +142,12 @@ func TestPlanEncountersCarryTheBossTactics(t *testing.T) {
 func TestDungeonRunLeaderPulltestRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"teleport":true}`, "leave teleport and resume out"},
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":7}}`, "pull_group"},
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0}}`, "needs leg"},
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
-		{`{"name":"rig","mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "go with mode"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"teleport":true}`, "leave teleport and resume out"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_leg":1}`, "names its own start"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":7}}`, "pull_group"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0}}`, "needs leg"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":11}}`, "use 1-10"},
+		{`{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","pulltest":{"leg":0,"pull_group":0},"from_pull_group":0}`, "go with mode"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), c.want) {
@@ -159,7 +159,7 @@ func TestDungeonRunLeaderPulltestRefusals(t *testing.T) {
 func TestDungeonRunLeaderPulltestStartsAndReportsItsMode(t *testing.T) {
 	r := dungeonRig(t)
 	r.groupWith("Gorm")
-	out := r.call("dungeon_run", `{"name":"rig","mode":"leader","brain":"frost_mage","rotation":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":2,"reset":"none"}}`)
+	out := r.call("dungeon_run", `{"name":"rig","force":true,"mode":"leader","brain":"frost_mage","rotation":"frost_mage","pulltest":{"leg":0,"pull_group":0,"tries":2,"reset":"none"}}`)
 	if out["error"] != nil {
 		t.Fatalf("%v", out)
 	}
