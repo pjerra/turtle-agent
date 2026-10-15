@@ -55,6 +55,13 @@
     return panBy(z, m1.x - m0.x, m1.y - m0.y);
   }
 
+  // The zoom factor of a pinch alone (the fingers' distance now over before), for a map that follows the party: the party stays in the
+  // middle, so the fingers' own movement is not applied as a pan. 1 when the fingers started on one point.
+  function pinchFactor(a0, b0, a1, b1) {
+    const d0 = Math.hypot(a0.x - b0.x, a0.y - b0.y), d1 = Math.hypot(a1.x - b1.x, a1.y - b1.y);
+    return d0 > 1 ? d1 / d0 : 1;
+  }
+
   // The middle of a set of points [{x, y}] and the larger side of their box.
   function centroid(pts) {
     if (!pts.length) return null;
@@ -108,6 +115,6 @@
     return { index: reached + 1, stop: st, dist: Math.hypot(st.x - lead.x, st.y - lead.y) };
   }
 
-  const api = { trailSegments, nextTarget, union, fit, viewBox, toWorld, toPanel, clampScale, zoomAt, panBy, pinch, centroid, followScale, ease, MIN_REL, MAX_REL };
+  const api = { trailSegments, nextTarget, union, fit, viewBox, toWorld, toPanel, clampScale, zoomAt, panBy, pinch, pinchFactor, centroid, followScale, ease, MIN_REL, MAX_REL };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MapView = api;
 })(typeof self !== "undefined" ? self : this);

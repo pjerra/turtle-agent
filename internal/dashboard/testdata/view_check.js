@@ -88,4 +88,14 @@ assert.strictEqual(nt.stop.label, "c");
 assert.strictEqual(V.nextTarget(stops, [[300, 0]], { x: 300, y: 0 }), null); // at the leg's end
 assert.strictEqual(V.nextTarget(stops, [], null), null);
 assert.strictEqual(V.nextTarget([stops[0]], [], { x: 0, y: 0 }), null);
+// zoom while following: a pinch is only its zoom factor (the party stays in the middle), a drag is what pauses the following
+assert.strictEqual(V.pinchFactor({ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 50, y: 400 }, { x: 250, y: 400 }), 2); // spread 100 -> 200, and dragged down
+assert.strictEqual(V.pinchFactor({ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 120, y: 100 }, { x: 170, y: 100 }), 0.5);
+assert.strictEqual(V.pinchFactor({ x: 5, y: 5 }, { x: 5, y: 5 }, { x: 1, y: 1 }, { x: 90, y: 90 }), 1); // fingers started on one point
+{
+  const fsx = 0.5, v0 = { cx: 40, cy: 50, scale: 2 };
+  // the clamp keeps a followed zoom inside the limits and the centre is not touched by a factor alone
+  const sc = V.clampScale(v0.scale * V.pinchFactor({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 0 }, { x: 10000, y: 0 }), fsx);
+  assert.strictEqual(sc, fsx * V.MAX_REL);
+}
 console.log("ok");

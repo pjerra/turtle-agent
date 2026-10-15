@@ -33,14 +33,30 @@ type tuneExtra struct {
 	AggroGuard     float32       // careful walk: a hostile this near the next hop is pulled before it
 	AheadMaxDZ     float32       // careful walk: how far above or below the hop a hostile may stand to be pulled
 	MaxAheadPulls  int           // careful walk: pulls of hostiles near the way in one walk
+	GatherClear    float32       // careful walk: a hop's end (a gather spot) stays this far from a hostile no step of this leg owns
+	BigPack        int           // a pack of this many mobs gets one member crowd-controlled before the pull (remote_cc.go)
+	PatrolAggro    float32       // a patrol member this near a pull (its target or the lead bot) is a danger to it (remote_patrol.go)
+	PatrolWindow   time.Duration // ... within this long, along its path at its pace
+	PatrolWait     time.Duration // the longest wait of one pull group for its patrol to walk away
+	PatrolLocate   time.Duration // the longest look of one pull group for a patrol none of whose members is in view (the patrol's own round, at most)
+	PatrolPullYd   float32       // a patrol this near the lead bot, and patrol_aggro clear of the pack, is pulled alone first
+	MinMove        float32       // the shortest move the module carries out (a shorter one is sent as a step past)
 	PartyDownDead  int           // dead bots that stop the leg
 	RespawnSettle  time.Duration // pulltest: wait after `.respawn` for the pack to show
+	FleePct        int           // a fought mob at or below this health, moving away from the party, is a runner (remote_flee.go)
+	FleeWait       time.Duration // how long a pull waits for a runner that got away to come back
+	FleeNearYd     float32       // a runner last seen within this of the lead bot is waited for
+	ReviveSafeYd   float32       // a dead bot is raised in place only when no live hostile stands this near the bodies (remote_flee.go)
+	RejoinTPDist   float32       // a living bot this far from the lead bot (or on another map) is summoned to it by the commander (0: off; remote_rejoin.go)
+	RejoinGap      time.Duration // least time between two summons of the same bot
+	RezReach       float32       // a dead bot is left to a living caster only when its body lies this near the caster (else it is released at once)
 }
 
 func defaultTuneExtra() tuneExtra {
 	return tuneExtra{LookStandoff: LookStandoff, LookArrive: lookArrive, AttackHoldYd: attackHoldYd, TankBusyRounds: maxTankBusyRounds, AddOrders: maxAddOrders,
 		FallbackTries: objectFallbackTries, GatherNear: GatherNear, GatherProgress: gatherProgress, AggroGuard: AggroGuard, AheadMaxDZ: aheadMaxDZ,
-		MaxAheadPulls: maxAheadPulls, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
+		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PatrolAggro: PatrolAggro, PatrolWindow: patrolWindow, PatrolWait: patrolWait, PatrolLocate: patrolLocate, PatrolPullYd: patrolPullYd, MinMove: MinMove, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle,
+		FleePct: fleePct, FleeWait: fleeWait, FleeNearYd: fleeNearYd, ReviveSafeYd: reviveSafeYd, RejoinTPDist: rejoinTPDist, RejoinGap: rejoinGap, RezReach: rezReach}
 }
 
 // tuneTarget is what a tunable reads and writes.
@@ -116,6 +132,10 @@ var tuneSpecs = []tuneSpec{
 	secs("add_cooldown_s", 2, 60, "least time between two tank orders at the same loose add", func(t *tuneTarget) *time.Duration { return &t.opt.AddCooldown }),
 	secs("tank_busy_wait_s", 2, 60, "one wait of a pull the module refused as tank-busy", func(t *tuneTarget) *time.Duration { return &t.opt.TankBusyWait }),
 	secs("rez_wait_s", 5, 120, "how long a dead bot waits for a resurrection before it is released", func(t *tuneTarget) *time.Duration { return &t.opt.RezWait }),
+	yds("revive_safe_yd", 10, 80, "a dead bot is raised in place only when no live hostile stands this near the bodies; else it is released and runs back", func(t *tuneTarget) *float32 { return &t.x.ReviveSafeYd }),
+	ints("flee_pct", "pct", 5, 50, "a fought mob at or below this health that moves away from the party is a runner: it is killed first", func(t *tuneTarget) *int { return &t.x.FleePct }),
+	secs("flee_wait_s", 5, 120, "how long a pull waits for a runner that got away to come back", func(t *tuneTarget) *time.Duration { return &t.x.FleeWait }),
+	yds("flee_near_yd", 10, 80, "a runner last seen within this of the lead bot is waited for before the next pull", func(t *tuneTarget) *float32 { return &t.x.FleeNearYd }),
 	// Rest gates.
 	ints("rest_health_pct", "pct", 30, 100, "rested: every member's health at least this", func(t *tuneTarget) *int { return &t.cfg.RestHealthPct }),
 	ints("rest_mana_pct", "pct", 10, 100, "rested: every other mana user's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestManaPct }),
@@ -126,6 +146,7 @@ var tuneSpecs = []tuneSpec{
 	ints("rest_walk_health_pct", "pct", 10, 100, "health floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealthPct }),
 	ints("rest_walk_healer_mana_pct", "pct", 5, 100, "healer mana floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkHealerManaPct }),
 	ints("rest_walk_mana_pct", "pct", 5, 100, "mana floor for resting on a walk", func(t *tuneTarget) *int { return &t.cfg.RestWalkManaPct }),
+	ints("maintenance_every_legs", "count", 0, 20, "`.bot maintenance` for the whole party at the start of every Nth leg and after a recovered wipe (0: never)", func(t *tuneTarget) *int { return &t.cfg.MaintenanceEveryLegs }),
 	yds("gather_radius", 8, 80, "the rest gate before a pull also wants every living bot this near the lead bot", func(t *tuneTarget) *float32 { return &t.cfg.GatherRadius }),
 	// The careful walk (remote_gather.go: gather before a hop or a pull, pull what stands near the way) and the look at a pack.
 	yds("careful_hop", 5, 60, "the longest single move of a walk inside the dungeon", func(t *tuneTarget) *float32 { return &t.opt.CarefulHop }),
@@ -134,9 +155,21 @@ var tuneSpecs = []tuneSpec{
 	yds("gather_progress", 0.5, 10, "how much nearer a bot must have come during a gather's whole wait to be waited for again", func(t *tuneTarget) *float32 { return &t.x.GatherProgress }),
 	yds("aggro_guard", 8, 40, "a hostile this near the next hop is pulled before the hop", func(t *tuneTarget) *float32 { return &t.x.AggroGuard }),
 	yds("ahead_max_dz", 2, 30, "how far above or below the hop a hostile may stand to be pulled before it", func(t *tuneTarget) *float32 { return &t.x.AheadMaxDZ }),
+	yds("gather_clear", 10, 60, "a hop's end (where the party gathers) stays this far from a hostile no step of this leg owns", func(t *tuneTarget) *float32 { return &t.x.GatherClear }),
+	ints("big_pack", "count", 3, 20, "a pack of this many mobs gets one member crowd-controlled by the cc bot before the pull", func(t *tuneTarget) *int { return &t.x.BigPack }),
+	yds("patrol_aggro", 10, 50, "a patrol member this near a pull (its target or the lead bot) is a danger to it", func(t *tuneTarget) *float32 { return &t.x.PatrolAggro }),
+	secs("patrol_window_s", 5, 180, "a patrol is a danger to a pull when its path brings it within patrol_aggro this soon", func(t *tuneTarget) *time.Duration { return &t.x.PatrolWindow }),
+	secs("patrol_wait_s", 0, 180, "the longest wait of one pull group for its patrol to walk away", func(t *tuneTarget) *time.Duration { return &t.x.PatrolWait }),
+	secs("patrol_locate_s", 0, 300, "the longest look of one pull group for a patrol none of whose members is in view (0: none; at most the patrol's own round)", func(t *tuneTarget) *time.Duration { return &t.x.PatrolLocate }),
+	yds("patrol_pull_yd", 10, 60, "a patrol this near the lead bot, and patrol_aggro clear of the pack, is pulled alone first", func(t *tuneTarget) *float32 { return &t.x.PatrolPullYd }),
+	yds("min_move", 0, 10, "the shortest move the module carries out; a shorter last stretch is sent as a step to min_move+1 yd along the line", func(t *tuneTarget) *float32 { return &t.x.MinMove }),
 	ints("max_ahead_pulls", "count", 1, 30, "pulls of hostiles near the way, at most, in one walk", func(t *tuneTarget) *int { return &t.x.MaxAheadPulls }),
 	yds("look_arrive", 1, 10, "how near its stand point the lead bot must get to look at a pack", func(t *tuneTarget) *float32 { return &t.x.LookArrive }),
 	ints("party_down_dead", "count", 1, 5, "dead bots that stop the leg", func(t *tuneTarget) *int { return &t.x.PartyDownDead }),
+	yds("rez_reach_yd", 10, 100, "a dead bot is left to a living caster's resurrection only when its body lies this near the caster; a farther one is released at once", func(t *tuneTarget) *float32 { return &t.x.RezReach }),
+	// Rejoin (remote_rejoin.go).
+	yds("rejoin_tp_dist", 0, 500, "a living bot farther than this from the lead bot, or on another map, is brought to it by the commander (cmd summon, GM account); 0 turns it off", func(t *tuneTarget) *float32 { return &t.x.RejoinTPDist }),
+	secs("rejoin_tp_gap_s", 10, 600, "least time between two summons of the same bot", func(t *tuneTarget) *time.Duration { return &t.x.RejoinGap }),
 	// The pull test (pulltest.go).
 	secs("respawn_settle_s", 1, 30, "pulltest: wait after .respawn for the pack to show", func(t *tuneTarget) *time.Duration { return &t.x.RespawnSettle }),
 }

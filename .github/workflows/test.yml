@@ -1,8 +1,14 @@
 name: test
 
+# Gate for dev and main: every PR (to dev, main or a stacked feature branch) and every push runs the
+# job `test`; branch protection on dev and main requires it.
 on:
   push:
   pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -26,5 +32,10 @@ jobs:
       # The Makefile defaults to a Go under $HOME/.local/go; point it at the runner's Go.
       # fmt-check, vet and `go test -race` need no secrets: the tests use fakes and the
       # committed, scrubbed fixtures.
-      - name: fmt-check, vet, test
+      - name: gofmt, go vet, no-cgo build, go test -race
         run: make GOROOT_LOCAL="$(go env GOROOT)" fmt-check vet test
+
+      # `make test` builds the navmesh engine through cgo (the runner has g++) and runs the navmesh tests, which
+      # skip without mmaps. This builds the real binary with cgo explicitly.
+      - name: cgo build
+        run: CGO_ENABLED=1 make GOROOT_LOCAL="$(go env GOROOT)" build

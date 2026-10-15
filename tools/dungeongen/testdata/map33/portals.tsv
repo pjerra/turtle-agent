@@ -1,0 +1,2 @@
+target_map	id	name	required_level	outer_map	x	y	z	radius	box_x	box_y	box_z	target_x	target_y	target_z
+33	145	Shadowfang Keep - Entrance	10	0	-229.49	1576.35	78.8909	7	0	0	0	-228.191	2111.41	76.8904

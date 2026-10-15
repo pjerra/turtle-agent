@@ -1,6 +1,7 @@
 {
   "version": 1,
   "name": "zulfarrak",
+  "status": "live-checked",
   "map": 209,
   "entrance": {"x": 1212.7, "y": 842, "z": 8.9},
   "entrance_trigger": 924,
@@ -12,6 +13,15 @@
     "z": 10
   },
   "level_band": [44, 48],
+  "hire_composition": [
+    "warrior:tank",
+    "priest:healer",
+    "mage:dps",
+    "hunter:dps",
+    "warlock:dps"
+  ],
+  "cc_priority": [7246, 5650, 5648],
+  "cc_always": [7246],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. FIRST-RUN ROUTE: three legs, Antu'sul, Theka the Martyr, Hydromancer Velratha, 1470 yd of navmesh path from the entrance (checked by TestZulfarrakOnNavmesh). Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
     "Left out of this plan because the driver cannot do them yet (all listed in dungeons/zulfarrak-extra.json or here): (1) Witch Doctor Zum'rah (7271): faction 35 (friendly) until the area trigger 962 (at_zumrah, centre 1909.3 1015.1 11.5, radius 10) fires, and a trigger is only taken from a client packet; the TortoiseBots bots send CMSG_AREATRIGGER only when their master does, and the remote agent stays outside. dungeongen -check -strict would also flag a faction 35 boss. Needs an area_trigger step the agent takes while standing in the instance, or a bot-side order. (2) The stairs event (Sergeant Bly's crew in the cages at the top of the pyramid stairs, three waves of Sandfury trolls, wave 3 summons Nekrum Gutchewer 7796 and Shadowpriest Sezz'ziz 7275: they have NO spawn row, the instance script summons them) and (3) Chief Ukorz Sandscalp + Ruuzlu: Ukorz sits behind the End Door (146084), which only Weegli Blastfuse (7607) opens, through his gossip menu after the stairs event; the driver has no gossip/talk step, and a wait inside a step does not fight the waves. (4) Gahz'rilla (7273): summoned by the Gong of Zul'Farrak (141832, lock 459) which needs the Mallet of Zul'Farrak (item 9240, a quest item); skipped unless a Mallet is in the carrier's bags. (5) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here.",
@@ -22,7 +32,7 @@
   ],
   "legs": [
     {
-      "name": "antusul",
+      "name": "antusul_a",
       "to": {"x": 1252.3, "y": 836.4, "z": 9.1},
       "pull_groups": [
         {
@@ -41,8 +51,33 @@
             {"x": 1296.5, "y": 807.7, "z": 12.1},
             {"x": 1296.8, "y": 813, "z": 11.2}
           ],
-          "radius": 15
+          "radius": 30
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Groups 1-2 of the road. ZF-2 hires-2 (2026-10-14): the hop after group 2 from the lead bot's rest spot (1289.9 816.1 9.4) went by the agent's navmesh to a layer at z 20.4 above the road, which the server refused (unreachable eight times, runs 5 and 6); the next leg starts with direct hops instead. Groups 2 and 3 have a 30 yd radius (their Blood Drinkers walk)."
+      ]
+    },
+    {
+      "name": "antusul_a2",
+      "to": {"x": 1310, "y": 834.3, "z": 9.5},
+      "via": [
+        {"x": 1289.9, "y": 816.1, "z": 9.4},
+        {
+          "x": 1297.1,
+          "y": 827.9,
+          "z": 9.3,
+          "direct": true
         },
+        {
+          "x": 1310,
+          "y": 834.3,
+          "z": 9.5,
+          "direct": true
+        }
+      ],
+      "pull_groups": [
         {
           "entries": [5649, 5648, 5650],
           "positions": [
@@ -50,7 +85,7 @@
             {"x": 1325.7, "y": 843.4, "z": 11.8},
             {"x": 1327.7, "y": 838.2, "z": 9.2}
           ],
-          "radius": 15
+          "radius": 30
         },
         {
           "entries": [5649, 5649],
@@ -76,7 +111,38 @@
             {"x": 1430.5, "y": 795.1, "z": 12}
           ],
           "radius": 15
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Groups 3-6, entered by two direct hops along the road the party walked in ZF-2 run 4 (1289.9 816.1 -\u003e 1297.1 827.9 -\u003e 1310 834.3, z 9.3-9.5), so the walk never takes the z 20 layer at 1289.9 816.1 (ZF-2 runs 11-12 passed it)."
+      ]
+    },
+    {
+      "name": "antusul_a3",
+      "to": {"x": 1460.5, "y": 808.5, "z": 10.8},
+      "via": [
+        {"x": 1420.7, "y": 801.1, "z": 11},
+        {
+          "x": 1433.9,
+          "y": 804.7,
+          "z": 10.3,
+          "direct": true
         },
+        {
+          "x": 1442.5,
+          "y": 804.7,
+          "z": 12.7,
+          "direct": true
+        },
+        {
+          "x": 1450.1,
+          "y": 805.9,
+          "z": 12.9,
+          "direct": true
+        }
+      ],
+      "pull_groups": [
         {
           "entries": [5650, 5650, 5649],
           "positions": [
@@ -85,7 +151,17 @@
             {"x": 1495.2, "y": 834.3, "z": 8.9}
           ],
           "radius": 30
-        },
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Group 7, entered along the ledge the party walked in ZF-2 run 4 (1420.7 801.1 -\u003e 1433.9 804.7 -\u003e 1442.5 804.7 z 12.7 -\u003e 1450.1 805.9 -\u003e 1460.5 808.5 z 10.8): the agent's hop target 1446 809.3 z 10 is not reachable from the z 12 ledge (lead stuck at 1442.2 806.3, ZF-2 run 8), and the plain walk to 1426.1 801.8 stopped at 1420.7 801.1 (run 11), so the first via is where it stood."
+      ]
+    },
+    {
+      "name": "antusul_a4",
+      "to": {"x": 1506, "y": 844.9, "z": 10.2},
+      "pull_groups": [
         {
           "entries": [5648, 5648, 5648, 5648],
           "positions": [
@@ -95,7 +171,33 @@
             {"x": 1511.3, "y": 844.8, "z": 9.7}
           ],
           "radius": 15
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Group 8 (the four Shadowcasters at 1505 819-846), pulled from 1485.6 825.5 on the road, 20-27 yd from them (inside pull range, no approach walk). ZF-2 run 12: from the end of group 7 the approach to them (1501 852) went by the navmesh north over the ramp (1533 945) into the Farraki arena wing (62496-62499) and wiped; the walk on to x 1535 goes by direct hops in the next leg.",
+        "zf2-run3 (2026-10-14): the leg ends at 1506 844.9 z 10.2, where the Shadowcaster pull leaves the party; the walk back from there to 1485.6 825.5 went by the navmesh north over the ramp into the Farraki arena wing (wipe 23:14), so the next leg starts here and its first two vias (1485.6 825.5, 1498.7 829.9) are dropped."
+      ]
+    },
+    {
+      "name": "antusul",
+      "to": {"x": 1535, "y": 834, "z": 9},
+      "via": [
+        {"x": 1506, "y": 844.9, "z": 10.2},
+        {
+          "x": 1520,
+          "y": 840,
+          "z": 9.5,
+          "direct": true
         },
+        {
+          "x": 1535,
+          "y": 834,
+          "z": 9,
+          "direct": true
+        }
+      ],
+      "pull_groups": [
         {
           "entries": [5649, 5648, 5649, 5649],
           "positions": [
@@ -131,13 +233,138 @@
           "radius": 15
         },
         {
+          "entries": [5648, 7247],
+          "positions": [
+            {"x": 1642.1, "y": 902.1, "z": 9.5},
+            {"x": 1645.2, "y": 905.9, "z": 9.3}
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [7246],
+            "path": [
+              {"x": 1707.1, "y": 893, "z": 9},
+              {"x": 1707.2, "y": 899.4, "z": 9},
+              {"x": 1705.7, "y": 907.8, "z": 9},
+              {"x": 1702.2, "y": 911.8, "z": 9.1},
+              {"x": 1695.9, "y": 915.6, "z": 10.8},
+              {"x": 1690.2, "y": 917.7, "z": 11.8},
+              {"x": 1683, "y": 920.2, "z": 10.4},
+              {"x": 1674.1, "y": 923.5, "z": 10},
+              {"x": 1668.8, "y": 926.9, "z": 9.7},
+              {"x": 1661.1, "y": 929.7, "z": 9},
+              {"x": 1655.1, "y": 926.2, "z": 9},
+              {"x": 1652.6, "y": 919.4, "z": 9},
+              {"x": 1651.3, "y": 910.5, "z": 9},
+              {"x": 1647.6, "y": 904.8, "z": 9},
+              {"x": 1644.6, "y": 900.5, "z": 9.3},
+              {"x": 1643.3, "y": 893.3, "z": 9},
+              {"x": 1646.7, "y": 888.4, "z": 9},
+              {"x": 1652.9, "y": 885.5, "z": 9},
+              {"x": 1660.7, "y": 885.2, "z": 9.6},
+              {"x": 1666.7, "y": 886.1, "z": 10.8},
+              {"x": 1673.7, "y": 886.5, "z": 9.3},
+              {"x": 1681.5, "y": 881.3, "z": 9},
+              {"x": 1685.5, "y": 877.6, "z": 9},
+              {"x": 1691, "y": 874.3, "z": 9},
+              {"x": 1697.9, "y": 875.3, "z": 9},
+              {"x": 1701, "y": 884.6, "z": 9},
+              {"x": 1700.3, "y": 888.7, "z": 9},
+              {"x": 1697.7, "y": 894, "z": 9},
+              {"x": 1695.5, "y": 900, "z": 9},
+              {"x": 1691.5, "y": 905.2, "z": 9},
+              {"x": 1685.5, "y": 907.5, "z": 9},
+              {"x": 1676.9, "y": 912.3, "z": 9},
+              {"x": 1673, "y": 915.1, "z": 9},
+              {"x": 1663.2, "y": 918.3, "z": 9},
+              {"x": 1657.9, "y": 913, "z": 9},
+              {"x": 1655, "y": 905.3, "z": 9},
+              {"x": 1655.5, "y": 899.7, "z": 9},
+              {"x": 1659.6, "y": 895, "z": 9},
+              {"x": 1666.2, "y": 892.4, "z": 9},
+              {"x": 1671.2, "y": 893.2, "z": 9},
+              {"x": 1677.6, "y": 896.8, "z": 9},
+              {"x": 1682.1, "y": 897.2, "z": 9},
+              {"x": 1686.9, "y": 895, "z": 9},
+              {"x": 1691.2, "y": 891.9, "z": 9},
+              {"x": 1698.9, "y": 886.5, "z": 9}
+            ],
+            "period_s": 126,
+            "source": "creature_movement of spawn 155626 (Sandfury Shadowhunter, movement type 2, 45 points, 316 yd at 2.5 yd/s); its creature_groups members are the Shadowhunter 44170 and the rare Zerillis 10082 (skipped). Live: the pair (0xAC8A, 0x25FEA) walked 1684 920 -\u003e 1668 917 on the map walk and joined the pull of 1680 871 at 1651 911 (zf1-hires-3 run 4)."
+          }
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
+        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
+        "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it).",
+        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+      ]
+    },
+    {
+      "name": "antusul_c",
+      "to": {"x": 1633, "y": 868, "z": 10.5},
+      "pull_groups": [
+        {
           "entries": [5649, 5648, 5649],
           "positions": [
             {"x": 1680.8, "y": 871.5, "z": 9},
             {"x": 1688.4, "y": 868.6, "z": 9},
             {"x": 1685.9, "y": 888.8, "z": 9}
           ],
-          "radius": 20
+          "radius": 20,
+          "patrol": {
+            "entries": [7246],
+            "path": [
+              {"x": 1707.1, "y": 893, "z": 9},
+              {"x": 1707.2, "y": 899.4, "z": 9},
+              {"x": 1705.7, "y": 907.8, "z": 9},
+              {"x": 1702.2, "y": 911.8, "z": 9.1},
+              {"x": 1695.9, "y": 915.6, "z": 10.8},
+              {"x": 1690.2, "y": 917.7, "z": 11.8},
+              {"x": 1683, "y": 920.2, "z": 10.4},
+              {"x": 1674.1, "y": 923.5, "z": 10},
+              {"x": 1668.8, "y": 926.9, "z": 9.7},
+              {"x": 1661.1, "y": 929.7, "z": 9},
+              {"x": 1655.1, "y": 926.2, "z": 9},
+              {"x": 1652.6, "y": 919.4, "z": 9},
+              {"x": 1651.3, "y": 910.5, "z": 9},
+              {"x": 1647.6, "y": 904.8, "z": 9},
+              {"x": 1644.6, "y": 900.5, "z": 9.3},
+              {"x": 1643.3, "y": 893.3, "z": 9},
+              {"x": 1646.7, "y": 888.4, "z": 9},
+              {"x": 1652.9, "y": 885.5, "z": 9},
+              {"x": 1660.7, "y": 885.2, "z": 9.6},
+              {"x": 1666.7, "y": 886.1, "z": 10.8},
+              {"x": 1673.7, "y": 886.5, "z": 9.3},
+              {"x": 1681.5, "y": 881.3, "z": 9},
+              {"x": 1685.5, "y": 877.6, "z": 9},
+              {"x": 1691, "y": 874.3, "z": 9},
+              {"x": 1697.9, "y": 875.3, "z": 9},
+              {"x": 1701, "y": 884.6, "z": 9},
+              {"x": 1700.3, "y": 888.7, "z": 9},
+              {"x": 1697.7, "y": 894, "z": 9},
+              {"x": 1695.5, "y": 900, "z": 9},
+              {"x": 1691.5, "y": 905.2, "z": 9},
+              {"x": 1685.5, "y": 907.5, "z": 9},
+              {"x": 1676.9, "y": 912.3, "z": 9},
+              {"x": 1673, "y": 915.1, "z": 9},
+              {"x": 1663.2, "y": 918.3, "z": 9},
+              {"x": 1657.9, "y": 913, "z": 9},
+              {"x": 1655, "y": 905.3, "z": 9},
+              {"x": 1655.5, "y": 899.7, "z": 9},
+              {"x": 1659.6, "y": 895, "z": 9},
+              {"x": 1666.2, "y": 892.4, "z": 9},
+              {"x": 1671.2, "y": 893.2, "z": 9},
+              {"x": 1677.6, "y": 896.8, "z": 9},
+              {"x": 1682.1, "y": 897.2, "z": 9},
+              {"x": 1686.9, "y": 895, "z": 9},
+              {"x": 1691.2, "y": 891.9, "z": 9},
+              {"x": 1698.9, "y": 886.5, "z": 9}
+            ],
+            "period_s": 126,
+            "source": "creature_movement of spawn 155626 (Sandfury Shadowhunter, movement type 2, 45 points, 316 yd at 2.5 yd/s); its creature_groups members are the Shadowhunter 44170 and the rare Zerillis 10082 (skipped). Live: the pair (0xAC8A, 0x25FEA) walked 1684 920 -\u003e 1668 917 on the map walk and joined the pull of 1680 871 at 1651 911 (zf1-hires-3 run 4)."
+          }
         },
         {
           "entries": [5649],
@@ -152,7 +379,20 @@
             {"x": 1776.9, "y": 813.7, "z": 23.2}
           ],
           "radius": 15
-        },
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "zf1-run6 (2026-10-15 00:17): the walk from group 5 (1642 902) to group 6 (1680.8 871.5) went by the shortest navmesh line past the camp of four Shadowcasters at 1661 901 (22 yd), pulled it, the Shadowhunters joined and two bots died. This leg starts with the hop to 1633 868 (group 4 of the previous leg stood there), so the party reaches the pack along y 868-871, 30 yd south of the camp. Groups 6 to 8 of the old leg `antusul`; the Shadowhunters' patrol is on group 6 (and group 5 of the leg before)."
+      ]
+    },
+    {
+      "name": "antusul_b",
+      "to": {"x": 1787.8, "y": 790.6, "z": 17.7},
+      "via": [
+        {"x": 1769.03, "y": 802.98, "z": 24.04}
+      ],
+      "pull_groups": [
         {
           "entries": [5649],
           "positions": [
@@ -189,8 +429,7 @@
         }
       },
       "notes": [
-        "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
-        "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own."
+        "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals)."
       ]
     },
     {
@@ -217,7 +456,12 @@
     },
     {
       "name": "velratha",
-      "to": {"x": 1676.1, "y": 833.5, "z": 9.5},
+      "to": {"x": 1658.35, "y": 878.91, "z": 13.06},
+      "via": [
+        {"x": 1676.1, "y": 833.5, "z": 9.5},
+        {"x": 1678.48, "y": 856.47, "z": 8.95},
+        {"x": 1668.92, "y": 872.47, "z": 11.57}
+      ],
       "pull_groups": [
         {
           "entries": [5648, 5650, 5650, 5650],
@@ -271,13 +515,6 @@
           "radius": 30
         },
         {
-          "entries": [7246],
-          "positions": [
-            {"x": 1591, "y": 1047.7, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
           "entries": [5650, 7246, 7246, 8095, 5649],
           "positions": [
             {"x": 1576.2, "y": 1079.1, "z": 9},
@@ -308,13 +545,6 @@
             {"x": 1644.2, "y": 1107.4, "z": 9}
           ],
           "radius": 15
-        },
-        {
-          "entries": [7246],
-          "positions": [
-            {"x": 1626.5, "y": 1136, "z": 8.9}
-          ],
-          "radius": 30
         },
         {
           "entries": [5649, 5649, 5649],
@@ -356,6 +586,7 @@
         }
       },
       "notes": [
+        "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) must not be used (no Mallet); Gahz'rilla's pit is at 1664.7 1187.7 -2.9, off the navmesh.",
         "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152)."
       ]

@@ -21,7 +21,8 @@ func (d *RemoteDriver) doPull(ctx context.Context, a Action) error {
 	if skip, err := d.gatedLook(ctx, a); skip || err != nil {
 		return err
 	}
-	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{}}
+	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{},
+		patrol: a.Patrol, patrolSt: &patrolState{}}
 	// A group whose members in view are all stealthed cannot be pulled (the bots never attack what they cannot see); with none in
 	// view the plan's flag decides.
 	if cs := d.candidates(sp, sp.pick); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allHostilesStealthed(cs)) {
@@ -159,6 +160,13 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		if err := d.restGate(ctx, true); err != nil {
 			return err
 		}
+		if err := d.requireLiving(); err != nil {
+			return err
+		}
+		// A mob that ran off at low health in an earlier fight comes back with friends: no pull while it may (remote_flee.go).
+		if err := d.waitFled(ctx, label); err != nil {
+			return err
+		}
 		t, ok, err := d.pickTarget(ctx, sp)
 		if err != nil {
 			return err
@@ -215,6 +223,12 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		if sp.sneak && t.Stealthed() {
 			return d.sneakPast(ctx, label, sp)
+		}
+		// A patrol that would walk into the pull is waited for, or pulled alone first (remote_patrol.go); after a fight, pick again.
+		if fought, err := d.patrolGate(ctx, t, sp); err != nil {
+			return err
+		} else if fought {
+			continue
 		}
 		// The party gathers on the lead bot before the pull (remote_gather.go): a bot left behind is not the one the pack finds first.
 		if err := d.gather(ctx, "the pull of "+d.hostileName(t)); err != nil {
@@ -340,7 +354,10 @@ func (d *RemoteDriver) pickTarget(ctx context.Context, sp fightSpec) (tbm.Hostil
 	for look := 1; look <= looks; look++ {
 		if cs := d.candidates(sp, sp.pick); len(cs) > 0 {
 			cs = preferVisibleHostile(cs)
-			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool { _, cc := d.ccRule(h.Entry); return cc || d.ccd(h) }); len(rest) > 0 {
+			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool {
+				_, cc := d.ccRule(h.Entry)
+				return cc || d.ccd(h) || slices.Contains(d.plan.CCAlways, h.Entry)
+			}); len(rest) > 0 {
 				cs = rest
 			}
 			if c := cs[0]; distToLead(d, hostilePoint(c)) <= float64(d.cfg.PullRange) || look == looks {
@@ -419,6 +436,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		} else {
 			d.tf.init()
 			d.tf.ccHeld[h.GUID] = true // the party leaves it to the CC bot (tank-first rules)
+			d.ccOrdered[h.GUID] = d.clk.Now()
 		}
 	}
 	return nil
@@ -427,7 +445,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // sendPull sends the pull order for t and reads the answer. done is true when the pull is over with res (refused, lost); false when
 // the order went (or fell back to attack) and the fight is on.
 func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res fightResult, done bool, err error) {
-	busy, approaches := 0, 0
+	busy, approaches, tooFarWaited := 0, 0, 0
 	var tried []string
 	for try := 0; try < 3; try++ {
 		r, err := d.order(ctx, "pullback", tbm.GUIDArg(t.GUID))
@@ -462,6 +480,19 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 		case c == refDead || c == refNoTarget:
 			return fightResult{out: retarget, why: why}, true, nil
 		case ref.Code == "too-far":
+			// The tank (when it is not the lead bot) may be the one that is far: walking the lead bot at the mob takes it further.
+			if back, err := d.waitTankBack(ctx, t); err != nil {
+				return fightResult{}, true, err
+			} else if !back {
+				if len(d.fr.EngagedHostiles()) > 0 {
+					return fightResult{}, false, nil // a fight began meanwhile
+				}
+				return fightResult{out: refused, why: why + " (the tank did not come back to the party)"}, true, nil
+			} else if m, ok := d.fr.Member(d.tank); ok && d.tank != 0 && d.tank != d.fr.Lead && d.tankFarFrom(m, d.leadPointOr(m)) == "" && tooFarWaited == 0 {
+				tooFarWaited++
+				try-- // the tank was the cause and is back: a wait is not a failed pull
+				continue
+			}
 			if err := d.approach(ctx, hostilePoint(t), 20); err != nil {
 				return fightResult{}, true, err
 			}
@@ -502,6 +533,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	if err := d.ccFor(ctx, t, sp); err != nil {
 		return fightResult{}, err
 	}
+	if err := d.bigPackCC(ctx, t, sp); err != nil {
+		return fightResult{}, err
+	}
 	if res, done, err := d.sendPull(ctx, t); err != nil || done {
 		return res, err
 	}
@@ -529,6 +563,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	lastN := d.n
 	sawEvade := false
+	fledHere := 0 // tracked mobs that ran off alive
 	deadOf := func() []deadAt {
 		var out []deadAt
 		for g := range killed {
@@ -568,7 +603,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
 					// The pulled mob and its group's entries: gone after fighting is dead. A joiner of another entry (a boss) is dead only
 					// when it was nearly dead with a bot by (the ledger's rule): one chased out of view alive is no kill.
-					if fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])) {
+					switch {
+					case d.wasFled(g) || (fought[g] && d.isRunning(g)):
+						fledHere++ // it ran off alive (remote_flee.go): no kill, and the next pull waits for it
+					case fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])):
 						killed[g] = true
 					}
 					delete(tracked, g)
@@ -605,6 +643,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			if err := d.tankFirstTick(ctx, fightingMobs); err != nil {
 				return fightResult{}, err
 			}
+			if err := d.reactiveCC(ctx, t.GUID, fightingMobs); err != nil {
+				return fightResult{}, err
+			}
 		}
 		d.wd.fightSignal(len(killed), hostilesHP(fightingMobs))
 		if d.wdRepick.take() {
@@ -613,6 +654,12 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		switch {
 		case alive == 0 && len(killed) > 0:
 			d.ptKilled()
+			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
+		case alive == 0 && fledHere > 0:
+			// What stayed is dead and the rest ran off: the pull is won as far as the party got; the runners are waited for before the next one.
+			if len(killed) > 0 {
+				d.ptKilled()
+			}
 			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
 		case alive == 0 && sawEvade:
 			return fightResult{out: evaded}, nil
@@ -641,7 +688,7 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
 		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
-		if !fresh && !d.focusGone(mobs) {
+		if _, runner := d.runnerIn(mobs); !fresh && !d.focusGone(mobs) && !runner {
 			return nil
 		}
 	}
@@ -654,7 +701,8 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) {
+	_, runner := d.runnerIn(mobs)
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -679,6 +727,10 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 		return false, nil
 	}
 	d.tf.init()
+	// A mob running off at low health is killed before it is out of reach: the party is sent at it ahead of the threat order.
+	if taken, err := d.focusRunner(ctx, mobs); taken || err != nil {
+		return taken, err
+	}
 	cands := d.respectCC(mobs)
 	sorted := d.rankByTank(cands)
 	var pick *tbm.HostileRec
@@ -874,6 +926,9 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 			d.wd.mobHealth(hostilesHP(eng))
 			d.watchThreat(eng)
 			if err := d.tankFirstTick(ctx, eng); err != nil {
+				return err
+			}
+			if err := d.reactiveCC(ctx, 0, eng); err != nil {
 				return err
 			}
 			if err := d.assist(ctx, eng); err != nil {
