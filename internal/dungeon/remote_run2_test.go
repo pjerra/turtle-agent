@@ -286,6 +286,7 @@ func TestRemoteUnreachablePullFailsTheStep(t *testing.T) {
 }
 
 // Each unreachable move is logged with its target point.
+// The first refusal is answered with the step raised (the unreachable-step resend), so the second note names z 3.
 func TestRemoteUnreachableMovesAreLogged(t *testing.T) {
 	g := newFakeRemote(t)
 	g.moveErrs = []string{"unreachable", "unreachable"}
@@ -295,7 +296,7 @@ func TestRemoteUnreachableMovesAreLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	if rep.Remote.Unreachable != 2 || strings.Count(notesOf(rep), "unreachable move to 60.0 0.0 0.0") != 2 {
+	if rep.Remote.Unreachable != 2 || strings.Count(notesOf(rep), "unreachable move to 60.0 0.0 ") != 2 {
 		t.Fatalf("%+v\n%s", rep.Remote, notesOf(rep))
 	}
 }
