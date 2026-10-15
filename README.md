@@ -1652,14 +1652,18 @@ the first step in, and the agent stays **outside and ungrouped**. When a bot of 
      The agent's own character does not enter: alone it would be given an instance of its own, not the bots' group's.
    - **No walkable path to the portal (cmd and walk):** the hires spawn at the commander, wherever it stands (the first Ragefire start had them in
      Tanaris, the portal in Orgrimmar's Cleft of Shadow: "refused 8 times ... unreachable: The lead bot has no walkable path to that point"). The
-     walk now asks once, before it spends its tries. If the first move is refused `unreachable` (nothing was accepted before it), or the agent's
-     own navmesh path to the portal is longer than 300 yd, or the lead bot is on another map than the portal, a **GM account** (level 1, `.go xyz`)
-     moves the party: the commander goes to the portal point with `.go xyz`, the lead bot is brought with `.bot summon <lead>` and held with `cmd move`
-     (as the start phase does), the other bots with `cmd summon <bot>` (GM assists, `run_gm_assists`), one `cmd follow` puts them back on the lead
-     bot, and the phase waits until everyone stands within 15 yd of the portal ("enter: party moved to the portal by GM, N bots",
-     `remote.enter.party_moved`); then `cmd enter` goes as before. One GM move per run: a lead bot still refused there fails the phase. Without a
-     GM account an `unreachable` first move fails at once: "the lead bot has no walkable path to the portal ... hire the party near it or use a GM
-     account"; a long but walkable path is walked as before. A first move refused `off-mesh` or `too-far` still halves the leg and retries.
+     walk asks before it spends its tries. If the first move that is refused `unreachable` aimed at a point the agent's navmesh planned (or at the
+     portal itself) and nothing was accepted before it, or the agent's own measured navmesh path to the portal is longer than 300 yd, or the lead bot
+     is on another map than the portal, a **GM account** (level 1, `.go xyz`) moves the party: the commander goes to the portal point with `.go xyz`,
+     dead bots are revived with the run's revive, the lead bot is brought with `.bot summon <lead>` and held with `cmd move` (as the start phase
+     does), the other bots with `cmd summon <bot>` (GM assists, `run_gm_assists`), and every configured bot counts as apart until the feed shows it
+     alive within 15 yd of the portal (missing, dead or on another map: summoned again, 2 rounds, then the phase fails naming it). Then one `cmd follow`
+     must be acknowledged (busy, cancelled, in-combat or no answer: asked again, 3 tries; any other refusal fails the phase before `cmd enter`): the
+     summons made the commander the bots' master, and with the commander outside the instance they would be pulled out after the entry. Then
+     "enter: party moved to the portal by GM, N bots" (`remote.enter.party_moved`) and `cmd enter` as before. One GM move per run. A refusal of a
+     straight-line point (no planner or no tiles of the outer map) says nothing about the portal: those halve the leg and replan like `off-mesh` and
+     `too-far`, and only a whole budget of `unreachable` gives the portal up (GM move, else the failure). Without a GM account the failure is
+     "the lead bot has no walkable path to the portal ... hire the party near it or use a GM account"; a long but walkable path is walked as before.
    - **walk:** `cmd move` legs along the navmesh to the portal on the outer map, then a wait of 8 s for the lead bot to be taken in by the
      area trigger, then `cmd summon` for those still outside. A bot never sends `CMSG_AREATRIGGER` itself and the module takes a trigger only
      from the master, so this fails on a module without `cmd enter` (the run says so); it is what is left for a plan without `entrance_trigger`.
