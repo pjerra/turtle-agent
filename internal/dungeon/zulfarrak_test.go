@@ -218,11 +218,6 @@ func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {
 					continue
 				}
 				for k, at := range g.Positions {
-					// The two roaming members of the Velratha patrol group seen at 1565 1019 in 5 of 5 traces (route edit Z4, 2026-10-16): the
-					// export has no row there, the plan carries the observed place.
-					if observed := (g.Entries[k] == 7246 && at == (Point{1565, 1019, 9})) || (g.Entries[k] == 8095 && at == (Point{1564, 1016, 9})); observed {
-						continue
-					}
 					if !has(cs, g.Entries[k], at) {
 						t.Errorf("%s legs[%d].pull_groups[%d]: no spawn of %d at %v", p.Name, i, j, g.Entries[k], at)
 					}
