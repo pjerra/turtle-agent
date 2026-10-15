@@ -388,7 +388,24 @@ type LootObject struct {
 	ObjectRef
 	Stand      *Point   `json:"stand,omitempty"`
 	ExpectItem *ItemRef `json:"expect_item,omitempty"`
+	// Batch groups consecutive loot_object steps of one leg that are opened back to back (Zum'rah's graves): the party gathers at the
+	// batch's centre, the carrier opens every chest of the batch with no fight between the opens, then the party fights out everything
+	// that came out. A batch has BatchMinSize to BatchMaxSize steps, all within BatchRadius yards of the batch's centre. The run's
+	// graves_batch and graves_ramp settings regroup the same steps into batches of their own size (remote_batch.go). Empty: no batch.
+	Batch string `json:"batch,omitempty"`
 }
+
+// Limits of a loot_object batch in a plan (the run's graves_batch and graves_ramp are not bound by the size limits).
+const (
+	BatchMinSize = 3
+	BatchMaxSize = 6
+	// BatchRadius is how far from the batch's centre (the mean of its chests) a chest of a plan batch may lie: the summons of the batch
+	// stand close enough together for the party's area spells to hit them all.
+	BatchRadius = 15.0
+	// BatchWidenMax is the largest radius a run's own batch size (graves_batch, graves_ramp) may widen the cluster to; past it the batch is
+	// cut shorter. The real radius of each batch is logged.
+	BatchWidenMax = 30.0
+)
 
 // UseItem uses an item from the leader's bags (a right-click: CMSG_USE_ITEM) and waits for its effect. ExpectItem is the item the use
 // must put in the bags (the Gni'kiv Medallion's spell 9594 makes the Staff of Prehistoria); without it the step ends after the
@@ -643,6 +660,7 @@ type rawLoot struct {
 	rawRef
 	Stand      *rawPoint `json:"stand"`
 	ExpectItem *rawItem  `json:"expect_item"`
+	Batch      string    `json:"batch"`
 }
 
 type rawUseItem struct {
@@ -1041,6 +1059,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
+	c.batches(path, l.Steps)
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -1145,6 +1164,7 @@ func (c *checker) step(path string, r *rawStep) Step {
 			l.Stand = &p
 		}
 		l.ExpectItem = c.item(path+".loot_object.expect_item", r.LootObject.ExpectItem)
+		l.Batch = r.LootObject.Batch
 		s.LootObject = l
 	case r.UseItem != nil:
 		u := &UseItem{Entry: r.UseItem.Entry, Name: r.UseItem.Name}
@@ -1314,4 +1334,74 @@ func validState(s string) bool {
 		}
 	}
 	return false
+}
+
+// batchPoint is where a loot_object step's chest lies: its near position, else its stand.
+func batchPoint(l *LootObject) (Point, bool) {
+	switch {
+	case l.Near != nil:
+		return *l.Near, true
+	case l.Stand != nil:
+		return *l.Stand, true
+	}
+	return Point{}, false
+}
+
+// BatchCentre is the mean of the points.
+func BatchCentre(pts []Point) Point {
+	var c Point
+	for _, p := range pts {
+		c.X += p.X
+		c.Y += p.Y
+		c.Z += p.Z
+	}
+	if n := float32(len(pts)); n > 0 {
+		c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
+	}
+	return c
+}
+
+// BatchSpread is the largest distance (in the plane) from the points' centre to one of them.
+func BatchSpread(pts []Point) float64 {
+	c := BatchCentre(pts)
+	var worst float64
+	for _, p := range pts {
+		worst = max(worst, math.Hypot(float64(p.X-c.X), float64(p.Y-c.Y)))
+	}
+	return worst
+}
+
+// batches checks the loot_object batches of one step list: a batch is a run of consecutive steps with the same id, of BatchMinSize to
+// BatchMaxSize chests that all lie within BatchRadius yards of their centre; an id does not come back after another step.
+func (c *checker) batches(path string, steps []Step) {
+	closed := map[string]bool{}
+	for i := 0; i < len(steps); {
+		l := steps[i].LootObject
+		if l == nil || l.Batch == "" {
+			i++
+			continue
+		}
+		id, j := l.Batch, i
+		var pts []Point
+		for ; j < len(steps) && steps[j].LootObject != nil && steps[j].LootObject.Batch == id; j++ {
+			p, ok := batchPoint(steps[j].LootObject)
+			if !ok {
+				c.fail(fmt.Sprintf("%s.steps[%d].loot_object", path, j), "a batch step needs near or stand (the batch's centre is made of them)")
+			}
+			pts = append(pts, p)
+		}
+		bp := fmt.Sprintf("%s.steps[%d].loot_object.batch", path, i)
+		switch {
+		case closed[id]:
+			c.fail(bp, "batch %q comes back after other steps: the steps of one batch are next to each other", id)
+		case j-i < BatchMinSize || j-i > BatchMaxSize:
+			c.fail(bp, "batch %q has %d chests: a batch has %d to %d", id, j-i, BatchMinSize, BatchMaxSize)
+		default:
+			if w := BatchSpread(pts); w > BatchRadius {
+				c.fail(bp, "batch %q reaches %.1f yd from its centre: the chests of a batch lie within %.0f yd of it, so that the summons stack for area spells", id, w, BatchRadius)
+			}
+		}
+		closed[id] = true
+		i = j
+	}
 }

@@ -643,7 +643,11 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 		leave()
 		d.wd.progress("object step result: " + a.Label)
 	}()
-	if a.Kind == ActLoot && a.SpawnGUID != 0 {
+	if a.Kind == ActLoot && a.Batch != "" && d.batch == nil {
+		if err := d.batchBegin(ctx, a); err != nil {
+			return err
+		}
+	} else if a.Kind == ActLoot && a.SpawnGUID != 0 && a.Batch == "" {
 		// Whatever the party is still fighting (the last grave's mobs, a pack that came by) is fought out before the carrier walks to the next chest.
 		if err := d.fightEngagedOut(ctx, a.Label); err != nil {
 			return err
@@ -665,7 +669,7 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	switch a.Kind {
 	case ActLoot:
 		note, err = d.stepLoot(ctx, a, c.Name, rec)
-		if err == nil && note == "" && a.SpawnGUID != 0 {
+		if err == nil && note == "" && a.SpawnGUID != 0 && a.Batch == "" {
 			err = d.fightOut(ctx, a.Label) // what the chest brought (a grave's Zombie and Dead Hero) is fought out before the next step
 		}
 	case ActUse:
@@ -674,6 +678,9 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 		note, err = d.stepItem(ctx, a, c.Name, rec)
 	case ActRitual:
 		note, err = d.stepRitual(ctx, a, c, rec)
+	}
+	if err == nil && a.Kind == ActLoot && a.Batch != "" {
+		err = d.batchStepDone(ctx, a, note != "")
 	}
 	if err == nil && note != "carries it already" {
 		err = d.waitRejoin(ctx, c.Name)

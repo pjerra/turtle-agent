@@ -727,6 +727,14 @@ func (d *RemoteDriver) fightEngagedOut(ctx context.Context, label string) error 
 // until none has fought the party for AggroQuiet, then the loot wait and the stay spot (afterFight), and the rest gate runs when a rest
 // line is crossed (no fixed wait per chest). It looks first after fightOutSettle, so that the mobs a chest has just summoned are in the feed.
 func (d *RemoteDriver) fightOut(ctx context.Context, label string) error {
+	if err := d.fightOutOnly(ctx, label); err != nil {
+		return err
+	}
+	return d.restGate(ctx, false)
+}
+
+// fightOutOnly is fightOut without the rest gate at the end.
+func (d *RemoteDriver) fightOutOnly(ctx context.Context, label string) error {
 	if err := d.tick(ctx, fightOutSettle); err != nil {
 		return err
 	}
@@ -745,5 +753,5 @@ func (d *RemoteDriver) fightOut(ctx context.Context, label string) error {
 			return err
 		}
 	}
-	return d.restGate(ctx, false)
+	return nil
 }

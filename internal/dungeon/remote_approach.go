@@ -19,6 +19,8 @@ const (
 	objectStillFrames  = 3                // frames in a row at the same position that make the carrier "not moving"
 	objectStillEps     = 0.3              // yards of difference that still count as the same position
 	objectApproachWait = 20 * time.Second // the carrier gets this long to settle, then the order goes out anyway
+	graveNear          = 4.0              // yards from a batch's grave within which the carrier must be
+	graveNudge         = 4 * time.Second  // a carrier farther than graveNear after this long is sent to the stand point
 )
 
 // runEnded says whether err ends the run (a binding lost, a stalled feed, a wipe, the run's own context), as opposed to a failure of
@@ -105,6 +107,12 @@ func (d *RemoteDriver) approachObject(ctx context.Context, rec *objRec, carrier 
 		stayed = true
 	}
 	settled := d.clk.Now()
+	// A grave of a batch is opened from closer: the carrier must be within graveNear of it (the carrier stood 5-27 yd from the grave after
+	// the 20 s approach, live round 3), and a carrier that is not near after graveNudge is sent to the stand point with the party.
+	near, nudged := objectNear, false
+	if d.batch != nil {
+		near = graveNear
+	}
 	var prev Point
 	var lastN uint64
 	frames := 0 // frames in a row at prev
@@ -126,9 +134,16 @@ func (d *RemoteDriver) approachObject(ctx context.Context, rec *objRec, carrier 
 				prev, frames = pos, 1
 			}
 		}
-		if frames >= objectStillFrames && dist <= objectNear {
+		if frames >= objectStillFrames && dist <= near {
 			note("%s still %.1f yd from the object after %.1f s", carrier, dist, d.clk.Now().Sub(began).Seconds())
 			return stayed, nil
+		}
+		if d.batch != nil && !nudged && dist > near && d.clk.Now().Sub(settled) >= graveNudge {
+			nudged = true
+			if _, err := d.order(ctx, "move", moveArgs(to)...); err != nil {
+				return stayed, err
+			}
+			note("%s is %.1f yd from the grave after %.0f s: the party is sent to the stand point (%.1f %.1f %.1f)", carrier, dist, graveNudge.Seconds(), to.X, to.Y, to.Z)
 		}
 		if d.inCombat() {
 			note("a fight began while %s was %.1f yd from the object: the order goes out as it is", carrier, dist)

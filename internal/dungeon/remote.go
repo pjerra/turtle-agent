@@ -80,6 +80,10 @@ type RemoteOptions struct {
 	// Healer names the bot the healer mana target applies to (the feed carries no class). Empty: every caster is held to the healer target.
 	Healer string
 	CC     []CCRule
+	// GravesBatch is a fixed number of chests per batch for the loot_object steps that have a batch id, and GravesRamp a size that grows after
+	// each batch without a wipe (remote_batch.go). Both off (0, nil): the plan's own batches. GravesRamp wins when both are given.
+	GravesBatch int
+	GravesRamp  *GravesRamp
 	// CCBot names the bot that takes the big-pack CC mark (remote_cc.go: a pack of BigPack or more gets one member Polymorphed before the
 	// pull). A hired party sets it to its mage; empty: no big-pack CC.
 	CCBot string
@@ -341,6 +345,8 @@ type RemoteReport struct {
 	BigPacks        int `json:"big_packs"`        // pulls of a pack of big_pack or more mobs
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
+	// GraveBatches is one record per batch of chests opened back to back (remote_batch.go; the notes "graves-batch: ..." say the same).
+	GraveBatches []GraveBatch `json:"grave_batches,omitempty"`
 	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
 	// and marks put again on a mob whose CC lapsed while the fight went on.
 	ReactiveCC int `json:"reactive_cc"`
@@ -513,8 +519,10 @@ type RemoteDriver struct {
 	lastRevive     map[packet.GUID]time.Time
 	wipeRecover    int
 	wipeRecoverLeg map[int]int // recovered wipes per leg
-	healerCapped   int         // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
-	bossFight      bool        // a boss fight (doKill) is on
+	batch          *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
+	gb             gravesState
+	healerCapped   int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	bossFight      bool // a boss fight (doKill) is on
 	recoveries     int
 
 	tank        packet.GUID
@@ -926,6 +934,7 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 			d.remote(func(r *RemoteReport) { r.WipesAfterKill++ })
 			d.rep.note(fmt.Sprintf("wipe after the kill: the boss of leg %d is dead; recovering the party, the leg goes on (%v)", max(d.curLeg, 0), err))
 		}
+		d.batchWiped()
 		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down, "after_kill": after})
 		d.rep.note(err.Error())
 		// The cap counts per leg (MaxWipeRecoveries recoveries in one leg), with a run-wide ceiling of wipeRecoverRunFactor times that: a run
@@ -1328,6 +1337,7 @@ func (d *RemoteDriver) look() {
 		d.fr, d.n, d.haveFr = fr, n, true
 		d.noteLedger()
 		d.noteFleeing()
+		d.sampleBatch()
 		d.ptObserve()
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
@@ -1515,6 +1525,7 @@ func (d *RemoteDriver) endLeg(result string) {
 		return
 	}
 	d.maintLegEnd()
+	d.legAoEOn()
 	d.legLootOn()
 	d.curLeg = -1
 	var l LegReport
@@ -1798,7 +1809,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		if dist3(here, p) <= float64(arriveAt) {
 			return nil
 		}
-		if d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 {
+		if d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 && !d.batchOpening() {
 			if aggros++; aggros > maxWalkAggros {
 				return fmt.Errorf("walk to %.1f %.1f %.1f: the party was pulled into a fight %d times on the way", p.X, p.Y, p.Z, maxWalkAggros)
 			}

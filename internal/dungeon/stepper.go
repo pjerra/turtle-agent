@@ -92,9 +92,13 @@ type Action struct {
 	GUID      packet.GUID         // use (0 when the agent does not see the object: an entry-form action, see Entry)
 	// Entry and EntryAt are set when the World names objects by entry (EntryWorld): the order says `entry:<Entry>@EntryAt` and the server
 	// finds the object, so Object and GUID are only the agent's own copy, if it sees one (the fallback when the server finds nothing).
-	Entry        uint32
-	EntryAt      *Point
-	SpawnGUID    packet.GUID   // use_object, loot_object: the exact spawn (ObjectRef.Spawn as a GUID); 0 when the plan gives none
+	Entry     uint32
+	EntryAt   *Point
+	SpawnGUID packet.GUID // use_object, loot_object: the exact spawn (ObjectRef.Spawn as a GUID); 0 when the plan gives none
+	// Batch is the loot_object step's batch id (LootObject.Batch; "" when it has none) and Section the chests from this step on of the run
+	// of consecutive loot_object steps that have a batch, so that the driver can group them into batches of the run's own size.
+	Batch        string
+	Section      []BatchChest
 	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
@@ -316,6 +320,9 @@ func (s *Stepper) next() Action {
 			if advance {
 				s.nextStep()
 				continue
+			}
+			if a.Kind == ActLoot {
+				a.Batch, a.Section = batchSection(steps[s.idx:])
 			}
 			return a
 		case phBoss:
@@ -655,4 +662,27 @@ func (u UnitWait) radius() float32 {
 		return u.Radius
 	}
 	return DefaultUnitRadius
+}
+
+// BatchChest is one chest of a Section: the plan's batch id of its step and where it lies.
+type BatchChest struct {
+	ID string
+	At Point
+}
+
+// batchSection reads the section that starts at steps[0]: the run of loot_object steps with a batch id (any id) from there on.
+func batchSection(steps []Step) (string, []BatchChest) {
+	if len(steps) == 0 || steps[0].LootObject == nil || steps[0].LootObject.Batch == "" {
+		return "", nil
+	}
+	var out []BatchChest
+	for _, st := range steps {
+		l := st.LootObject
+		if l == nil || l.Batch == "" {
+			break
+		}
+		p, _ := batchPoint(l)
+		out = append(out, BatchChest{ID: l.Batch, At: p})
+	}
+	return steps[0].LootObject.Batch, out
 }
