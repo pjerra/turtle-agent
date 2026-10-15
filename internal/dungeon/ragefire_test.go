@@ -16,6 +16,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 )
 
+const voidwalkerMinion = 8996 // the Warlock's pet: the summon spell 12746's misc value, a level 13-15 hostile (faction 554), no spawn row
+
 const (
 	ragefirePlan = "../../dungeons/ragefire_chasm.json"
 	ragefireData = "../../tools/dungeongen/testdata/map389" // the world database export the plan was written from
@@ -48,19 +50,25 @@ func rfTSV(t *testing.T, name string) []map[string]string {
 // ragefireExemption is a spawn the route test lets stand within 20 yd of the route without a pull group. Settled is empty until the mapping
 // walk has decided it (the date of the walk and what it found); TestRagefireStatusNeedsSettledExemptions refuses a mapped or live-checked
 // status while any is open.
-type ragefireExemption struct{ Reason, Settled string }
+type ragefireExemption struct {
+	Reason, Settled string
+	Level           int // the live level seen on the 2026-10-15 walk; the aggro radius is 20 - (16 - Level) yd for a level-16 party
+}
 
 // The six mobs of the terrace below the cave's north-east ledge and the ramp to Oggleflint (z -57 to -59, 17-20 yd under the route). Their floor
-// joins the cave only by the south loop (the path to them from the tunnel is 378 yd, through the camps in the south of the cave), so a pull group
-// would drag the party through everything the route avoids. They may aggro as the party passes above and then come round the loop. Settle on the
-// walk: either it shows they do not aggro (they stay listed, Settled gets the walk's date and the finding) or the plan gets a controlled pull.
+// joins the cave only by the south loop (the path to them from the tunnel is 320-337 yd), so a pull group would drag the party through the
+// camps the route avoids. Settled on the mapping walk of 2026-10-15 (tests/walk-rfc/FINDINGS.txt): kept out of range by stand placement
+// (TestRagefireStandsKeepClear: every look point of the plan is 20 yd or more from all six), the route past the ledge as far as the floor allows.
+// A live aggro test with a visible character will confirm the line of sight (no RPC gives it).
+const ragefireSettled = "2026-10-15 walk: kept out of range by stand placement, measured; live aggro test pending"
+
 var ragefireExemptions = map[string]ragefireExemption{
-	"38050": {Reason: "terrace pack of the ledge (Trogg, with 48637)"},
-	"48637": {Reason: "terrace pack of the ledge (Shaman, with 38050)"},
-	"48638": {Reason: "terrace Trogg, south loop only"},
-	"38049": {Reason: "terrace pit under the Oggleflint ramp (Shaman)"},
-	"43580": {Reason: "terrace pit under the Oggleflint ramp (Shaman)"},
-	"43581": {Reason: "terrace pit under the Oggleflint ramp (Trogg)"},
+	"38050": {Level: 15, Reason: "terrace pack of the ledge (Trogg, with 48637): route closest 20.6 yd, aggro radius 19", Settled: ragefireSettled},
+	"48637": {Level: 13, Reason: "terrace pack of the ledge (Shaman, level 13, with 38050): route closest 18.4 yd, aggro radius 17", Settled: ragefireSettled},
+	"48638": {Level: 15, Reason: "terrace Trogg, south loop only: route closest 20.2 yd, aggro radius 19", Settled: ragefireSettled},
+	"38049": {Level: 13, Reason: "terrace pit under the Oggleflint ramp (Shaman): pull stand 20 yd or more away", Settled: ragefireSettled},
+	"43580": {Level: 15, Reason: "terrace pit under the Oggleflint ramp (Shaman): pull stand 20 yd or more away", Settled: ragefireSettled},
+	"43581": {Level: 13, Reason: "terrace pit under the Oggleflint ramp (Trogg, level 13): route closest 18.8 yd at the ramp foot, pull stand 25 yd", Settled: ragefireSettled},
 }
 
 // A plan that says mapped or live-checked has had its route corrected by a mapping walk (README "Dungeon plans"): while a terrace exemption is
@@ -87,28 +95,37 @@ func TestRagefireStatusNeedsSettledExemptions(t *testing.T) {
 	}
 }
 
-// While the plan is a draft, every patrol has period_estimate: true (the walk measures them), and the marker is on all six.
-func TestRagefirePatrolPeriodsAreMarkedEstimated(t *testing.T) {
+// The patrol periods were measured on the 2026-10-15 walk (1 Hz samples, tests/walk-rfc/patrol_*.jsonl): no patrol is marked period_estimate any
+// more, and each carries the measured round (the Molten Elemental walks at 4.0 yd/s, not 2.5: 63.5 s, not the calculated 98).
+func TestRagefirePatrolPeriodsAreMeasured(t *testing.T) {
 	p := loadPlan(t, ragefirePlan)
-	n := 0
+	measured := map[string]float32{"48648": 115.7, "48655": 66, "48675": 120, "48698": 63.5, "48696": 173.5, "48707": 74.5}
+	spawn := regexp.MustCompile(`creature_movement of spawn (\d+) `)
+	seen := map[string]bool{}
 	for _, l := range p.Legs {
 		for _, g := range l.PullGroups {
-			if g.Patrol != nil {
-				n++
-				if p.Status == DraftStatus && !g.Patrol.PeriodEstimate {
-					t.Errorf("%s: the patrol of %v is not marked period_estimate", l.Name, g.Patrol.Entries)
-				}
+			if g.Patrol == nil {
+				continue
+			}
+			m := spawn.FindStringSubmatch(g.Patrol.Source)
+			if m == nil || measured[m[1]] == 0 {
+				t.Errorf("%s: patrol of %v: source names no known spawn", l.Name, g.Patrol.Entries)
+				continue
+			}
+			seen[m[1]] = true
+			if g.Patrol.PeriodEstimate || g.Patrol.PeriodS != measured[m[1]] {
+				t.Errorf("%s: patrol of spawn %s: period_s %g estimate %v, measured %g", l.Name, m[1], g.Patrol.PeriodS, g.Patrol.PeriodEstimate, measured[m[1]])
 			}
 		}
 	}
-	if n != 6 {
-		t.Errorf("%d patrols", n)
+	if len(seen) != 6 {
+		t.Errorf("%d patrolling spawns carried, want 6", len(seen))
 	}
 }
 
 func TestRagefirePlanLoads(t *testing.T) {
 	p := loadPlan(t, ragefirePlan)
-	if p.Map != 389 || p.Name != "ragefire_chasm" || p.Status != DraftStatus || len(p.Legs) != 9 {
+	if p.Map != 389 || p.Name != "ragefire_chasm" || p.Status != "mapped (not live-checked)" || len(p.Legs) != 9 {
 		t.Fatalf("%s %q %d, %d legs", p.Name, p.Status, p.Map, len(p.Legs))
 	}
 	var names []string
@@ -180,10 +197,38 @@ func TestRagefirePlanMatchesTheWorldExport(t *testing.T) {
 	patrols := 0
 	for i, l := range p.Legs {
 		for j, g := range l.PullGroups {
+			warlocks := 0
 			for k, at := range g.Positions {
+				if g.Entries[k] == 11324 {
+					warlocks++
+				}
+				if g.Entries[k] == voidwalkerMinion {
+					// Summoned by the Warlock when it spawns (EventAI 1132402): no spawn row. Its place is the live sighting of the 2026-10-15 walk, 2-4 yd
+					// from a Searing Blade Warlock (11324) of the same group.
+					near := false
+					for q, e := range g.Entries {
+						if e == 11324 && dist3(g.Positions[q], at) <= 4.5 {
+							near = true
+						}
+					}
+					if !near {
+						t.Errorf("legs[%d].pull_groups[%d]: the Voidwalker Minion at %v is not within 4.5 yd of a Warlock of the group", i, j, at)
+					}
+					continue
+				}
 				if !has(g.Entries[k], at) {
 					t.Errorf("legs[%d].pull_groups[%d]: no spawn of %d at %v", i, j, g.Entries[k], at)
 				}
+			}
+			// Every Warlock of the route comes with its Voidwalker Minion (10 of 10 seen out before any combat on the walk).
+			voids := 0
+			for _, e := range g.Entries {
+				if e == voidwalkerMinion {
+					voids++
+				}
+			}
+			if warlocks != voids {
+				t.Errorf("legs[%d].pull_groups[%d]: %d Warlocks and %d Voidwalker Minions", i, j, warlocks, voids)
 			}
 			if g.Patrol == nil {
 				continue
@@ -244,8 +289,8 @@ func TestRagefirePlanMatchesTheWorldExport(t *testing.T) {
 			}
 		}
 	}
-	if patrols != 6 {
-		t.Errorf("%d patrols, want the six patrolling mobs of the route", patrols)
+	if patrols != 7 { // six patrolling spawns; 48648 is on two groups (the last tunnel Earthborer and the first pack of the cave)
+		t.Errorf("%d patrols, want the six patrolling mobs of the route (one on two groups)", patrols)
 	}
 }
 
@@ -422,6 +467,120 @@ func TestRagefireRouteHasNoUnplannedPack(t *testing.T) {
 					t.Errorf("legs[%d] (%s): %s %d (spawn row %s) at %.1f %.1f %.1f stands within %d yd of the route and is in no pull group", i, l.Name, m["name"], e64, m["guid"], x, y, z, routeAggro)
 				}
 			}
+		}
+	}
+}
+
+// ragefireLook is one look the plan check makes: where the lead bot stands to look at pack, and the route it walked there (the start of the
+// path up to the stand).
+type ragefireLook struct {
+	Pack, Stand Point
+	Route       []Point
+}
+
+// ragefireLooks runs the plan check with a look function that records every look point and the route to it.
+func ragefireLooks(t *testing.T, p *Plan, pl *navmesh.Planner) []ragefireLook {
+	t.Helper()
+	var out []ragefireLook
+	rec := func(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool) {
+		s, ok := LookPoint(path, pack, standoff, view, snap)
+		var route []Point
+		for k := 1; k < len(path); k++ {
+			route = append(route, path[k-1])
+			if distToSegment(s, path[k-1], path[k]) < 0.6 {
+				break
+			}
+		}
+		out = append(out, ragefireLook{pack, s, append(route, s)})
+		return s, ok
+	}
+	if _, err := checkPlan(p, pl, CheckOptions{}, rec); err != nil {
+		if errors.Is(err, navmesh.ErrNoEngine) {
+			t.Skip("built without cgo: no navmesh engine")
+		}
+		t.Fatal(err)
+	}
+	return out
+}
+
+func rfSpawn(t *testing.T, guid string) Point {
+	t.Helper()
+	for _, m := range rfTSV(t, "creatures.tsv") {
+		if m["guid"] == guid {
+			x, _ := strconv.ParseFloat(m["x"], 64)
+			y, _ := strconv.ParseFloat(m["y"], 64)
+			z, _ := strconv.ParseFloat(m["z"], 64)
+			return Point{float32(x), float32(y), float32(z)}
+		}
+	}
+	t.Fatalf("no spawn row %s", guid)
+	return Point{}
+}
+
+func minDistToRoute(r []Point, at Point) float64 {
+	best := math.MaxFloat64
+	for k := 1; k < len(r); k++ {
+		best = math.Min(best, distToSegment(at, r[k-1], r[k]))
+	}
+	return best
+}
+
+// The terrace exemptions are settled by where the party stands (README "The Ragefire Chasm plan"): measured on the 2026-10-15 walk, an
+// attacker's aggro radius is 20 - (party level - mob level) yd, 3-D, so 16-19 yd for a level-16 party and these mobs. Every look point of the
+// plan stays an aggro radius and 2 yd (19 yd for a level-13 mob, 21 for a level-15) from the six terrace mobs and from the south-west camp; the route past the cave opening is as far as the ledge
+// allows (the mobs are 16.6 to 18.3 yd below it: no lateral move gains the missing 1-2 yd); Bazzalan's left add is pulled from 29 yd or more.
+func TestRagefireStandsKeepClear(t *testing.T) {
+	dir := mapMmaps(389)
+	if dir == "" {
+		t.Skip("no map 389 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 389.mmap and the 389*.mmtile tiles")
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	p := loadPlan(t, ragefirePlan)
+	looks := ragefireLooks(t, p, pl)
+	if len(looks) < 60 {
+		t.Fatalf("only %d looks", len(looks))
+	}
+	var terrace, camp []Point
+	var terraceNeed []float64
+	for guid, e := range ragefireExemptions {
+		terrace = append(terrace, rfSpawn(t, guid))
+		terraceNeed = append(terraceNeed, float64(20-(16-e.Level)+2)) // its aggro radius and a 2 yd margin
+	}
+	for _, guid := range []string{"48665", "48667", "48671"} {
+		camp = append(camp, rfSpawn(t, guid))
+	}
+	bazzalan := rfSpawn(t, "48750")
+	for _, lk := range looks {
+		for k, q := range terrace {
+			if d := dist3(lk.Stand, q); d < terraceNeed[k] {
+				t.Errorf("the look point %v of the pack at %v is %.1f yd from the terrace mob at %v, want %.0f or more (its aggro radius and 2 yd)", lk.Stand, lk.Pack, d, q, terraceNeed[k])
+			}
+		}
+		for _, q := range camp {
+			if d := dist3(lk.Stand, q); d < 20 {
+				t.Errorf("the look point %v of the pack at %v is %.1f yd from the camp mob at %v", lk.Stand, lk.Pack, d, q)
+			}
+		}
+		if dist3(lk.Pack, rfSpawn(t, "48751")) < 0.5 {
+			if d := dist3(lk.Stand, bazzalan); d < 29 {
+				t.Errorf("the pull of Bazzalan's left add stands %.1f yd from him, want 29 or more", d)
+			}
+		}
+		t.Logf("pack %.1f %.1f %.1f from %.1f %.1f %.1f", lk.Pack.X, lk.Pack.Y, lk.Pack.Z, lk.Stand.X, lk.Stand.Y, lk.Stand.Z)
+	}
+	// The route's closest approach to each terrace mob (walk 2026-10-15, one walker on the line: 48637 18.4, 48638 20.2, 38050 20.6, pit Trogg
+	// 43581 18.8): the plan's route must not come nearer than the walk measured, less a yard.
+	want := map[string]float64{"48637": 17.4, "48638": 19.2, "38050": 19.6, "43581": 17.8, "38049": 19, "43580": 19}
+	for guid, min := range want {
+		at := rfSpawn(t, guid)
+		best := math.MaxFloat64
+		for _, lk := range looks {
+			best = math.Min(best, minDistToRoute(lk.Route, at))
+		}
+		t.Logf("route to terrace mob %s: closest %.1f yd (the walk measured %.1f)", guid, best, min+1)
+		if best < min {
+			t.Errorf("the route comes %.1f yd from the terrace mob %s, the walk measured %.1f", best, guid, min+1)
 		}
 	}
 }
