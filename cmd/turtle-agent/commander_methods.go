@@ -268,6 +268,18 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	return out, nil
 }
 
+// SnapToFloor implements dungeon.FloorSnapper: the navmesh floor point nearest p (within a few yards), false when there is none.
+func (g remoteGame) SnapToFloor(ctx context.Context, mapID uint32, p dungeon.Point) (dungeon.Point, bool) {
+	if g.c.planner == nil {
+		return p, false
+	}
+	n, ok, err := g.c.planner.Nearest(mapID, navmesh.Vec3{p.X, p.Y, p.Z})
+	if err != nil || !ok {
+		return p, false
+	}
+	return dungeon.Point{X: n[0], Y: n[1], Z: n[2]}, true
+}
+
 // The enter phase of a remote run (dungeon.Enterer): the agent's own character, which stays outside and ungrouped, and the one GM
 // command the phase sends.
 

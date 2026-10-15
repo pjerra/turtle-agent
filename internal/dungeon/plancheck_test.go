@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -94,7 +95,7 @@ func TestPlanCheckReasons(t *testing.T) {
 	})
 	// 8,0 is a needless direct hop (a straight path of the same length), 40,0 is 32 yd across: too far. Group 3's path ends 40 yd short of
 	// it. The boss stands off the mesh.
-	if got, want := issueReasons(res.Issues), "0/direct via 2/0/too far 0/pull group look/3/unreachable 0/boss look/0/off the mesh"; got != want {
+	if got, want := issueReasons(res.Issues), "0/direct via 2/0/too far 0/pull group look/3/too far 0/boss look/0/off the mesh"; got != want {
 		t.Errorf("issues %q, want %q", got, want)
 	}
 	if got, want := issueReasons(res.Warnings), "0/direct via 1/0/needless direct"; got != want {
@@ -334,7 +335,7 @@ func TestPlanCheckTunedLook(t *testing.T) {
 	for _, c := range []struct {
 		opt  CheckOptions
 		want string
-	}{{CheckOptions{}, ""}, {CheckOptions{LookArrive: 10}, "0/pull group look/1/unreachable"}, {CheckOptions{LookStandoff: 12}, "0/pull group look/1/unreachable"}} {
+	}{{CheckOptions{}, ""}, {CheckOptions{LookArrive: 10}, "0/pull group look/1/too far"}, {CheckOptions{LookStandoff: 12}, "0/pull group look/1/too far"}} {
 		res, err := CheckPlanWith(plan, nav, c.opt)
 		if err != nil {
 			t.Fatal(err)
@@ -359,7 +360,7 @@ func TestLookPointStaysWithinView(t *testing.T) {
 	if view != 21 {
 		t.Fatalf("view %v", view)
 	}
-	got, ok := LookPoint(path, pack, LookStandoff, view)
+	got, ok := LookPoint(path, pack, LookStandoff, view, nil)
 	// The lead bot may stop lookArrive short of the point and lookAt drops frames beyond ClearSeeRadius: the point leaves room for both.
 	if !ok || dist3(got, pack) > ClearSeeRadius-lookArrive || dist3(got, pack) < float64(view)-1 {
 		t.Errorf("the look point %v is %.1f yd from the pack (ok %v): want %v, at most %d", got, dist3(got, pack), ok, view, ClearSeeRadius-lookArrive)
@@ -369,20 +370,21 @@ func TestLookPointStaysWithinView(t *testing.T) {
 	}
 	// A pack on a complete path keeps the old standoff point; a look point already in view is left alone.
 	onPath := Point{1625.6, 1109.33, 9.6}
-	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, onPath, LookStandoff, view); return p }() != want {
+	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, onPath, LookStandoff, view, nil); return p }() != want {
 		t.Errorf("a pack at the path's end moved the look point")
 	}
 	near := Point{1622, 1108, 9.6}
-	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, near, LookStandoff, view); return p }() != want {
+	if want, _ := StandoffPoint(path, LookStandoff); func() Point { p, _ := LookPoint(path, near, LookStandoff, view, nil); return p }() != want {
 		t.Errorf("a look point in view moved")
 	}
-	// A path that never comes within view ends at its end; a short path does not move.
+	// A path that never comes within view gains nothing by moving: the old result, the standoff back from the path's end, with its ok.
 	far := Point{1700, 1300, 9}
-	if p, ok := LookPoint(path, far, LookStandoff, view); !ok || p != path[2] {
-		t.Errorf("out of view everywhere: %v %v", p, ok)
+	wantP, wantOK := StandoffPoint(path, LookStandoff)
+	if p, ok := LookPoint(path, far, LookStandoff, view, nil); ok != wantOK || p != wantP {
+		t.Errorf("out of view everywhere: %v %v, want the standoff point %v %v", p, ok, wantP, wantOK)
 	}
 	// A path shorter than the standoff leaves the lead bot where it is when the pack is in view from its start.
-	if _, ok := LookPoint(path[1:], Point{1622, 1108, 9.6}, 40, view); ok {
+	if _, ok := LookPoint(path[1:], Point{1622, 1108, 9.6}, 40, view, nil); ok {
 		t.Errorf("a path shorter than the standoff moved a lead bot that is in view")
 	}
 	// The tuned look: a longer arrival slack pulls the point nearer, a standoff under the margin stays the limit.
@@ -407,7 +409,7 @@ func TestLookPointMovesWhenTheShortPathLeavesTheLeadOutOfView(t *testing.T) {
 		if d := dist3(path[0], pack); d < 28 {
 			t.Fatalf("the lead bot is %.1f yd from %v", d, pack)
 		}
-		got, ok := LookPoint(path, pack, LookStandoff, view)
+		got, ok := LookPoint(path, pack, LookStandoff, view, nil)
 		if !ok || dist3(got, pack) > float64(view) {
 			t.Errorf("pack %v: look point %v (ok %v) is %.1f yd away, want within %v", pack, got, ok, dist3(got, pack), view)
 		}
@@ -418,7 +420,7 @@ func TestLookPointMovesWhenTheShortPathLeavesTheLeadOutOfView(t *testing.T) {
 }
 
 // oldLook is the look point before LookPoint: the standoff counted back from the path's end.
-func oldLook(path []Point, _ Point, standoff, _ float32) (Point, bool) {
+func oldLook(path []Point, _ Point, standoff, _ float32, _ func(Point) Point) (Point, bool) {
 	return StandoffPoint(path, standoff)
 }
 
@@ -576,4 +578,132 @@ func TestShippedPlansPassPlanCheck(t *testing.T) {
 		t.Skip("no navmesh files for any shipped plan's map here")
 	}
 	t.Logf("%d plans checked; known failing (planCheckKnownFailing, #187): %s; no navmesh files for %s", checked, strings.Join(failing, ", "), strings.Join(missing, ", "))
+}
+
+// shapeNav is a navmesh whose paths and floor the test shapes: path gives the corners from a point to a pack, floor the mesh floor under a
+// point (the way a path over stairs or a drop leaves the interpolated point floating); a goal in off has no path.
+type shapeNav struct {
+	path  func(from, to Point) []Point
+	floor func(Point) Point
+	off   map[Point]bool
+}
+
+func (s shapeNav) Plan(_ uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
+	f, g := Point{from[0], from[1], from[2]}, Point{to[0], to[1], to[2]}
+	if s.off[g] {
+		return navmesh.Path{Status: navmesh.NoPath, Reason: "goal is not on the navmesh", Points: []navmesh.Vec3{}}, nil
+	}
+	pts := s.path(f, g)
+	out := make([]navmesh.Vec3, len(pts))
+	for i, p := range pts {
+		out[i] = navmesh.Vec3{p.X, p.Y, p.Z}
+	}
+	return navmesh.Path{Status: navmesh.Complete, Points: out, Length: 1}, nil
+}
+
+func (s shapeNav) Raycast(uint32, navmesh.Vec3, navmesh.Vec3) (navmesh.Ray, error) {
+	return navmesh.Ray{Known: true, Clear: true}, nil
+}
+
+func (s shapeNav) Nearest(_ uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error) {
+	q := s.floor(Point{p[0], p[1], p[2]})
+	return navmesh.Vec3{q.X, q.Y, q.Z}, true, nil
+}
+
+// lookFake is a fakeRemote whose game also plans paths and snaps to the floor of a shapeNav.
+type lookFake struct {
+	*fakeRemote
+	nav shapeNav
+}
+
+func (g lookFake) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
+	return g.nav.path(from, to), nil
+}
+
+func (g lookFake) SnapToFloor(_ context.Context, _ uint32, p Point) (Point, bool) {
+	return g.nav.floor(p), true
+}
+
+func lookDriver(t *testing.T, nav shapeNav, anchors ...Point) (*RemoteDriver, lookFake, fightSpec) {
+	t.Helper()
+	g := lookFake{newFakeRemote(t), nav}
+	g.sight = 5
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: anchors}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	if err := d.begin(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	d.curLeg = 0
+	return d, g, fightSpec{pick: []uint32{299}, track: []uint32{299}, anchors: anchors}
+}
+
+// The driver walks the look point the plan check checks, snapped to the mesh floor by the same LookPoint: a path over stairs whose
+// interpolated points float 6 yd above the floor. The runtime target equals the From point of the check's next look.
+func TestLookTargetIsTheSameAtRuntimeAndInThePlanCheck(t *testing.T) {
+	packA, packB := Point{0, 30, 0}, Point{0, 500, 0}
+	nav := shapeNav{
+		floor: func(p Point) Point { return Point{p.X, p.Y, 0} },
+		off:   map[Point]bool{packB: true},
+		path: func(from, to Point) []Point {
+			if to == packA { // stairs: the straight path climbs 12 yd over 16 yd, the floor under it is flat
+				return []Point{from, {from.X, from.Y + 10, from.Z + 6}, {from.X, from.Y + 16, from.Z + 12}}
+			}
+			return []Point{from, to}
+		},
+	}
+	d, g, sp := lookDriver(t, nav, packA)
+	if _, _, err := d.confirmGone(context.Background(), sp, newClearing()); err != nil {
+		t.Logf("confirmGone: %v", err) // the fake lead bot sees nothing from there; the walk is what is under test
+	}
+	var run Point
+	for _, to := range g.moveOrderDest {
+		if to.Y > 1 {
+			run = to
+		}
+	}
+	if run == (Point{}) || run.Z != 0 {
+		t.Fatalf("the lead bot was sent to %v (all: %v): the look point should be on the floor (z 0)", run, g.moveOrderDest)
+	}
+	plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299, 299}, Positions: []Point{packA, packB}}}}}}
+	res, err := CheckPlanWith(plan, nav, CheckOptions{})
+	if err != nil || len(res.Issues) != 1 || res.Issues[0].Reason != ReasonOffMesh {
+		t.Fatalf("%v %v", err, res.Issues)
+	}
+	if from := res.Issues[0].From; dist3(from, run) > 1 {
+		t.Errorf("the check's look point %v is not the runtime target %v", from, run)
+	}
+}
+
+// A pack no point of the path gets within view of: the lead bot is not taken to the end of the path. The look point is the old one (the
+// standoff back from the path's end, or none when the path is shorter), and the check reports the pack as too far.
+func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
+	pack := Point{0, 100, 0}
+	for _, c := range []struct {
+		name string
+		end  float32
+		want []Point // the moves the lead bot gets
+	}{{"long path", 40, []Point{{0, 19, 0}}}, {"short path", 10, nil}} {
+		nav := shapeNav{floor: func(p Point) Point { return p }, path: func(from, to Point) []Point {
+			if to == pack {
+				return []Point{from, {from.X, from.Y + c.end, from.Z}}
+			}
+			return []Point{from, to}
+		}}
+		d, g, sp := lookDriver(t, nav, pack)
+		_, _, _ = d.confirmGone(context.Background(), sp, newClearing())
+		var got []Point
+		for _, to := range g.moveOrderDest {
+			if to.Y > 1 {
+				got = append(got, to)
+			}
+		}
+		if len(got) != len(c.want) || (len(got) == 1 && dist3(got[0], c.want[0]) > 0.5) {
+			t.Errorf("%s: the lead bot was sent to %v, want %v (not the path's end)", c.name, got, c.want)
+		}
+		plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{pack}}}}}}
+		res, err := CheckPlanWith(plan, nav, CheckOptions{})
+		if err != nil || issueReasons(res.Issues) != "0/pull group look/1/too far" {
+			t.Errorf("%s: %v %q", c.name, err, issueReasons(res.Issues))
+		}
+	}
 }

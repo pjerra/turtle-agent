@@ -713,7 +713,7 @@ has no doors, so `path_to` walks through a closed one: the door steps are checke
 ### Plan check
 
 `turtle-agent plan-check --mmaps DIR zulfarrak` (and the `plan_check` method) walks a plan on the navmesh before anything runs, in the order the driver goes, and prints
-every failing point; the exit status is 11 when a point fails. A `from_leg` or `from_pull_group` the plan does not have is an error.
+every failing point; the exit status is 11 when a point fails. A `from_leg` or `from_pull_group` the plan does not have is an error, and `from_pull_group` without `from_leg` is refused by the command and the method (`dungeon_run` takes it as leg 0, as documented for starting anywhere).
 
 **The gate.** `dungeon_run` in **commander** mode (`remote`) runs the same check first (from `from_leg` / `from_pull_group` on, on a scratch planner so a run going keeps its tiles,
 with the look of the run's tunables file). Leader (group) mode, observe mode and pull tests are not checked: the check models the commander driver's walks. What a finding does depends on the plan's `status`:
@@ -729,10 +729,10 @@ What it checks:
 - the walk from the previous leg's end to every `via` point and to `to`: mesh floor under it and a complete `path_to` (`off the mesh`, `unreachable`);
 - every `direct` hop: within the module's limits (25 yd across, 8 up or down: `too far`), ground under its end, and a clear walkability ray from its start (`no line of sight`:
   a direct step walks the straight line);
-- every pull group, numbered as `dungeon_status` shows it ("pull group 9 of 12"), and the boss: the path from where the party stands must reach it (a pack off the mesh must be
-  with a path that ends within the look view of it: `unreachable`), and the point the lead bot looks from must be within the view (`too far`). That look point is `LookPoint`: the
+- every pull group, numbered as `dungeon_status` shows it ("pull group 9 of 12"), and the boss: the path from where the party stands must reach it
+  (`unreachable` when there is no path), and the point the lead bot looks from must be within the view (`too far`; also when no point of the path gets within the view of the pack, because the driver does not chase a partial path toward a pack it cannot see). That look point is `LookPoint`: the
   standoff (`look_standoff`, 21 yd) back from the path's end, moved up the path to the first point within `min(standoff, 25 - look_arrive - 1)` of the pack (21 yd by default;
-  the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count; on a path shorter than the standoff the lead bot stays put when the pack is in view and otherwise moves up the path the same way). The positions of a group are looked at in order, each look starting where the one before ended, and the next group goes on from the last; a position within 25 yd of the party needs no look. No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
+  the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count; on a path shorter than the standoff the lead bot stays put when the pack is in view and otherwise moves up the path the same way; the moved point is put on the navmesh floor by the driver and the check alike). The positions of a group are looked at in order, each look starting where the one before ended, and the next group goes on from the last; a position within 25 yd of the party needs no look. No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
   called most packs blind that were pulled fine live. A pull group or boss gated to a `team` is checked like the rest (the commander driver looks at it before it skips the fight); its issues name the team;
 - a leg `to`, pull group or boss marked `needs_walk` (never snapped to the navmesh: its mapping walk is still to do) is a failing point (`needs a mapping walk`), not a silent skip; Zul'Farrak and Uldaman have none;
 - the `stand` points of `use_object`, `loot_object` and `ritual` steps (before the boss, and the `after_boss` ones), walked like `via` points.

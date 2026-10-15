@@ -2064,16 +2064,21 @@ func lookView(standoff, arrive float32) float32 {
 	return min(standoff, ClearSeeRadius-arrive-1)
 }
 
-// LookPoint is where the lead bot stands to look at a pack at `pack`: StandoffPoint(path, standoff), moved up the path to the first point
-// within view yards of the pack when that is farther (a pack off the mesh ends the path short of it, and the standoff counted back from
-// there leaves the look 30 yd away: Zul'Farrak's Velratha group 9). When no point of the path is within view it is the path's end. A path
-// shorter than the standoff leaves the lead bot where it is (ok false, as for StandoffPoint) when it is within view already; when it is
-// not, the lead bot moves up the path the same way (the look from the last stand of the group's earlier positions: group 9's positions 4
-// and 5, 29 yd from the lead bot on a 14 yd path).
-func LookPoint(path []Point, pack Point, standoff, view float32) (Point, bool) {
+// LookPoint is where the lead bot stands to look at a pack at `pack`: StandoffPoint(path, standoff) when that is within view yards of the
+// pack, else the first point up the path that is (a pack off the mesh ends the path short of it, and the standoff counted back from there
+// leaves the look 30 yd away: Zul'Farrak's Velratha group 9). A path shorter than the standoff leaves the lead bot where it is (ok false,
+// as for StandoffPoint) when it is within view already, and moves it up the path when it is not (group 9's positions 4 and 5, 29 yd from
+// the lead bot on a 14 yd path). When no point of the path is within view nothing is gained by moving (the lead bot would only be taken to
+// the end of a partial path toward a pack it cannot see): the result is the old one, StandoffPoint's, with its ok. snap, when not nil,
+// puts a point that was moved on the floor of the navmesh (a point interpolated along a path over stairs or a drop may float): the driver
+// and the plan check both pass theirs, so they stand at the same place.
+func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool) {
+	if snap == nil {
+		snap = func(p Point) Point { return p }
+	}
 	stand, ok := StandoffPoint(path, standoff)
 	if ok && dist3(stand, pack) <= float64(view) {
-		return stand, ok
+		return snap(stand), ok
 	}
 	if !ok && (len(path) == 0 || dist3(path[0], pack) <= float64(view)) {
 		return stand, false
@@ -2088,9 +2093,9 @@ func LookPoint(path []Point, pack Point, standoff, view float32) (Point, bool) {
 			f := t / seg
 			p := Point{X: a.X + float32(f)*(b.X-a.X), Y: a.Y + float32(f)*(b.Y-a.Y), Z: a.Z + float32(f)*(b.Z-a.Z)}
 			if dist3(p, pack) <= float64(view) {
-				return p, true
+				return snap(p), true
 			}
 		}
 	}
-	return path[len(path)-1], true
+	return stand, ok
 }

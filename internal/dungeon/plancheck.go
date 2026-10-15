@@ -199,7 +199,7 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 }
 
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
-type lookFunc func(path []Point, pack Point, standoff, view float32) (Point, bool)
+type lookFunc func(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool)
 
 // planPoints is GatherSpot's path function over the navmesh.
 func (c *planChecker) planPoints(from, to Point) []Point {
@@ -471,22 +471,27 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	}
 	end := pts[len(pts)-1]
 	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
-	// A pack off the mesh (on a ledge, in a pit) is looked at from the nearest reachable point: the path's end must be within the look view.
-	if path.Status != navmesh.Complete && dist3(end, at) > float64(view) {
-		c.fail(part, group, at, from, ReasonUnreachable, "path_to is %s: %s", path.Status, path.Reason)
-		return from, nil
+	var snapErr error
+	snap := func(p Point) Point { // the same floor snap the driver passes (FloorSnapper)
+		n, ok, err := c.nav.Nearest(c.p.Map, vec(p))
+		if err != nil {
+			snapErr = err
+		}
+		if !ok {
+			return p
+		}
+		return point(n)
 	}
-	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, view)
+	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, view, snap)
+	if snapErr != nil {
+		return from, snapErr
+	}
 	if !moved {
 		stand = from
-	} else if n, ok, err := c.nav.Nearest(c.p.Map, vec(stand)); err != nil {
-		return from, err
-	} else if ok {
-		stand = point(n) // a point interpolated along a path over stairs or a drop may float: the party stands on the mesh floor under it
 	}
 	// The lead bot may stop LookArrive short of the look point, and the view is ClearSeeRadius: the look point must leave room for both.
 	if d := dist3(stand, at); d > ClearSeeRadius-float64(c.opt.LookArrive) {
-		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd, less %g for the lead bot's stop): the path ends %.1f %.1f %.1f, %.1f yd short of it", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, c.opt.LookArrive, end.X, end.Y, end.Z, dist3(end, at))
+		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd, less %g for the lead bot's stop): no point of the path comes within the look view of the pack (it ends %.1f %.1f %.1f, %.1f yd short of it)", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, c.opt.LookArrive, end.X, end.Y, end.Z, dist3(end, at))
 	}
 	return stand, nil
 }

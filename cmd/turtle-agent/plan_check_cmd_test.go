@@ -324,3 +324,16 @@ func TestDungeonRunWithoutNavmeshNeedsForce(t *testing.T) {
 		t.Fatalf("leader mode: %v", out)
 	}
 }
+
+// A pull group number means nothing without its leg: the command and the method refuse it alone.
+func TestPlanCheckFromPullGroupNeedsFromLeg(t *testing.T) {
+	r := &dungeonRunner{dir: "../../dungeons"}
+	group := 0
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromPullGroup: &group}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "needs from_leg") {
+		t.Errorf("method: %v", err)
+	}
+	var out, errOut bytes.Buffer
+	if code := planCheckCmd([]string{"--dir", "../../dungeons", "--mmaps", t.TempDir(), "--from-pull-group", "0", "zulfarrak"}, &out, &errOut); code != exitUsage || !strings.Contains(errOut.String(), "needs --from-leg") {
+		t.Errorf("command: exit %d: %s", code, errOut.String())
+	}
+}

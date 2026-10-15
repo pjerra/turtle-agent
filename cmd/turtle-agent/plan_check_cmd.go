@@ -33,6 +33,12 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["from-pull-group"] && !given["from-leg"] {
+		fmt.Fprintln(stderr, "plan-check: --from-pull-group needs --from-leg (a pull group number means nothing without its leg)")
+		return exitUsage
+	}
 	if fs.NArg() == 0 || *mmaps == "" {
 		fmt.Fprintln(stderr, planCheckUsage)
 		return exitUsage
@@ -101,7 +107,7 @@ func planCheckUnavailable(err error) (string, bool) {
 type planCheckParams struct {
 	Name    string    `json:"name"`
 	FromLeg *legParam `json:"from_leg,omitempty"`
-	// FromPullGroup (0-based, with from_leg) checks from that pull group of the leg on.
+	// FromPullGroup (0-based; needs from_leg) checks from that pull group of the leg on.
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
 }
 
@@ -180,6 +186,9 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 	plan, err := dungeon.Load(planPath)
 	if err != nil {
 		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
+	}
+	if p.FromPullGroup != nil && p.FromLeg == nil {
+		return planCheckResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "from_pull_group needs from_leg (a pull group number means nothing without its leg)"}
 	}
 	from := 0
 	if p.FromLeg != nil {
