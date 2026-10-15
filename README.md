@@ -885,7 +885,14 @@ What the driver does for each action of the plan (the stepper decides which):
   (`.bot inv`, read afresh once per bot per leg) is under 3 (`low-drinks`), its drink nudge fired (`nudge`), or the feed says its last action was a drink that failed for want
   of one (`drink` `F` `no-item`: at once) or a drink that failed in two different frames within 10 s (`drink-failed`; TortoiseBots reports item-action failures as `drink,F,-`, with no reason), then reads `.bot inv` again and orders the party to rest anew. `remote.refills[]` has `bot`, `leg`, `why`, `before`, `after`
   (drinks, `-1`: not read) and `maintenance`; each is a `refill` trace event and a note, and `refills` is in the summary. With maintenance off on the server (the preflight's
-  `disabled`) or a game that cannot send `.bot` lines, none is sent. A dead member is
+  `disabled`) or a game that cannot send `.bot` lines, none is sent. **Automatic maintenance (remote mode):** the party also gets `.bot maintenance` on a schedule, so a long run keeps
+  its reagents, ammo and drinks. The tunable `maintenance_every_legs` (default 3; 0: off, 0-20) sends it to every bot at the start of legs N, 2N, ... (leg 0 is skipped: the preflight
+  just did it), before the leg's rest gate. Never in combat: when the party is in combat or a bot is dead at that moment, it is tried again at the next calm moment of the same leg
+  (the end of a rest gate, which runs before every pull) and given up when the leg ends. After every recovered wipe (`recover_wipe`) the party is maintained once as soon as
+  nobody is in combat and everyone is alive; this is apart from the per-leg slot (one round covers both when both are due). Each bot is asked with the preflight's 6 s ACK; the verdict
+  `disabled` turns it (and the refills) off for the rest of the run, like the preflight's. The refills above are unchanged. `remote.maintenance_runs` counts the rounds,
+  `remote.maintenance_skips` the rounds not done by reason (`combat`, `disabled`, `no bot lines`); each round or skip is a `maintenance` trace event (`leg`, `reasons`, `verdicts`) and a note.
+  A dead member is
   revived by GM (`.revive <name>`), flagged in the report, unless `no_shortcuts` is set or the leader is no GM (then the run fails,
   naming `recover_wipe`; with `recover_wipe` the member gets a minute for a healer's resurrection, then `.bot action release` and
   `.bot action corpse run`, and the gate waits for it up to 12 min). **Before any of that, a leader whose brain can resurrect gets up to 120 s**
@@ -1774,6 +1781,7 @@ with `ok: false`, once for that version of the file. A file that goes away chang
 | `rest_walk_health_pct` | pct | 10 to 100 | 70 | health floor for resting on a walk |
 | `rest_walk_healer_mana_pct` | pct | 5 to 100 | 40 | healer mana floor for resting on a walk |
 | `rest_walk_mana_pct` | pct | 5 to 100 | 25 | mana floor for resting on a walk |
+| `maintenance_every_legs` | count | 0 to 20 | 3 | `.bot maintenance` for the whole party at the start of every Nth leg and after a recovered wipe (0: never) |
 | `gather_radius` | yd | 8 to 80 | 40 | the rest gate before a pull also wants every living bot this near the lead bot |
 | `careful_hop` | yd | 5 to 60 | 25 | the longest single move of a walk inside the dungeon |
 | `gather_wait_s` | s | 1 to 60 | 12 | how long the party is waited for to gather before a hop or a pull |
