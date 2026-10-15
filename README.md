@@ -698,8 +698,8 @@ bosses in the usual clear order (`route` instead orders them by a nearest-neighb
 are no pack), `bbox` boxes for a map that holds several wings (Scarlet Monastery, Dire Maul, Maraudon, Stratholme, Blackrock Spire: packs outside the boxes are left out), the level `band` (default: the packs'
 median level - 2 up to their 90th percentile), `size` of a raid, the hired party, the teleports (`entrance_tele` and `outside_tele` are only written when the `game_tele` row lies within 80 yd of the entrance), `scripted` bosses (NPCs with
 `npc_flags` or faction 35 until a script or a dialogue makes them hostile: no `-check` warning) and `special`, what the instance needs besides killing (events, rituals, gossip, keys), which goes into the plan's notes as
-`Needs: ...` and into the table. Exports are `tools/dungeongen/testdata/map<id>` (`export.sh <map> <dir>` writes the four files, `portals.tsv` from `areatrigger_template`); `uldaman` and `zulfarrak` are
-hand-written and live-checked and are not regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
+`Needs: ...` and into the table. Exports are `tools/dungeongen/testdata/map<id>` (`export.sh <map> <dir>` writes the five files: `portals.tsv` from `areatrigger_template`, `movement.tsv` the `creature_movement` waypoints of the map's patrolling spawns); `uldaman` and `zulfarrak` are
+hand-written and live-checked and `ragefire_chasm` is hand-mapped (status `mapped`), none of them regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
 navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how many plan points are on the mesh for every map whose `<map>.mmap` and tiles are present and lists the maps that are not.
 
 `go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
@@ -784,6 +784,22 @@ ready/active/active_alt; `hostiles_gone` as `wait_clear`, centred on its `center
 `skip`, `rest`, `companions_loot` and `watchdog` are not carried over, as the guide says. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
 step without its entry) is refused here. The written SQL is read back and compared with the rows before the file is written. Uldaman exports 118 rows (14 legs, 103 steps); with its navmesh
 the 7 long hops are cut and it is 220 rows (205 steps).
+
+### The Ragefire Chasm plan
+
+`dungeons/ragefire_chasm.json` (Ragefire Chasm, map 389, level band 14-18) is **mapped, not live-checked** (`"status": "mapped (not live-checked)"`): written offline from the world export in
+`tools/dungeongen/testdata/map389` (`export.sh 389`; `movement.tsv` holds the patrol paths), the map 389 navmesh and the core's `creature_spells`, `creature_ai_events` and `creature_groups` tables (the core has no instance
+script for this map, and the map has no door, lever, key, gossip, item or event: no leg has a step). Nine legs, 55 pull groups of 85 mobs, 1541 yd of corridor from the entrance through the four bosses in the order the navmesh
+leads: `tunnel` and `tunnel_end` (Earthborers, one Molten Elemental), `trogg_cave` (the cave's north strip, first pass), `oggleflint` (a side cave up a ramp; the Shaman and the Trogg that stand with him are `boss.first`), `trogg_west`
+(second pass to the cave's south-west corner and up the long ramp), `molten_cave` (seven CC-immune Molten Elementals), `taragaman` (the Searing Blade wing, Taragaman over the lava), `jergosh` (corridor packs, Jergosh and his
+two Cultists) and `bazzalan` (the raised ledge and the hall, the last boss). Packs linked by `creature_groups` (flags 2, aggro together) are one pull group; the plan carries `fleers` (Ragefire Shaman 11319 and Searing Blade Warlock 11324
+flee at 15 %), `cc_priority`/`cc_always`/`kill_first` (Shaman, Warlock, Cultist), six `patrol`s (spawns 48648, 48655, 48675, 48698, 48696 and 48707, each on its own group with its path from `creature_movement`) and boss `tactics`
+(Jergosh's Immolate is dispelled, Taragaman's Fire Nova is moved out of). `entrance_trigger` 2230 (level 8), the `portal` and `entrance_tele` `rfc` (game_tele 209) enter it; `outside_tele` is `RagefireChasm`.
+Left out on purpose and named in the leg notes: three packs on a terrace that the cave joins only by a 378 yd loop through its southern camps (they may aggro as the party passes above and then come round), and the southern camps,
+which are 25 yd or more from the route. The tests (`TestRagefirePlanLoads`, `TestRagefirePlanMatchesTheWorldExport`, `TestRagefireOnNavmesh`, `TestRagefireRouteHasNoUnplannedPack`, and the plan check
+`TestShippedPlansPassPlanCheck`) need the map 389 tiles (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle389` or `~/tortoise-wow-server/data/mmaps`) and skip without them: every waypoint is on the mesh, the walk from the entrance
+through the bosses is one connected path, every pull member and boss is a spawn of the export at that place, every patrol path is the export's, and no mob within 20 yd (3-D) of the route is in no group (the route ends each pull
+at the look point 21 yd from the group's first position, as the driver does). Next: the GM-invisible mapping walk (patrol timings, the terrace packs, the points the navmesh and the server may disagree on), then three live runs.
 
 ### The Uldaman plan
 
