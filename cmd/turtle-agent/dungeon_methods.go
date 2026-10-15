@@ -403,6 +403,9 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "buffs need a GM account (.aura, developer level): with gm false run without buffs"}
 		}
 	}
+	if p.Pulltest != nil && !remote && p.Brain == "" {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest in leader mode scores the character: it needs a brain (mode \"leader\" picks the preset of its class)"}
+	}
 	var hook dungeon.Brain
 	brainName := p.Brain
 	if p.Brain != "" && !remote {
@@ -420,7 +423,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		hook = &driverBrain{ctl: r.brain, params: bp, runID: tcfg.RunID}
 	}
 	from := legIndex(plan, p.FromLeg)
-	if pt := p.Pulltest; pt != nil && remote {
+	if pt := p.Pulltest; pt != nil && (remote || p.Brain != "") {
 		if pt.Leg == nil || pt.PullGroup == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest needs leg (a number or a name) and pull_group"}
 		}
@@ -435,7 +438,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if from < 0 || from >= len(plan.Legs) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", names, len(plan.Legs)-1)}
 	}
-	if remote {
+	if remote || p.Pulltest != nil {
 		if err := checkStartParams(p, plan, from); err != nil {
 			return dungeonRunResult{}, err
 		}
@@ -464,6 +467,10 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		cfg.Watchdog = *p.Watchdog
 	}
 	cfg.Resume = p.Resume != nil && *p.Resume
+	if pt := p.Pulltest; pt != nil {
+		spec := dungeon.PulltestSpec{Leg: from, PullGroup: *pt.PullGroup, Tries: pt.Tries, Reset: pt.Reset}.Normalized()
+		cfg.Pulltest = &spec
+	}
 	leaderGM := "probe"
 	switch {
 	case p.GM == nil:

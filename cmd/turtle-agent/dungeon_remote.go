@@ -28,8 +28,11 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	switch mode {
 	case modeLeader:
-		if p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 {
-			return false, bad(`from_pull_group, start_here, have_items and pulltest go with mode "remote" (commander; leader and group mode have teleport)`)
+		if p.FromPullGroup != nil || p.StartHere || len(p.HaveItems) > 0 {
+			return false, bad(`from_pull_group, start_here and have_items go with mode "remote" (commander; leader and group mode have teleport)`)
+		}
+		if p.Pulltest != nil && (p.Teleport || p.Resume != nil) {
+			return false, bad(`pulltest in leader mode runs where the party stands, at the pack: leave teleport and resume out`)
 		}
 		if p.Tune != "" || p.LiveReload != nil {
 			return false, bad(`tune and live_reload go with mode "remote" (commander)`)

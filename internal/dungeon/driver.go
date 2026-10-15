@@ -151,6 +151,9 @@ type Config struct {
 	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
 	Brain     Brain
 	BrainName string
+	// Pulltest, when set, makes the run the leader-mode pull test (pulltest_leader.go): the plan's pack is pulled and killed Tries times by
+	// the party with the agent's own character playing, and each try is scored. The run's from_leg is the spec's leg.
+	Pulltest *PulltestSpec
 	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
 	Trace tracerun.Config
 	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
@@ -353,6 +356,11 @@ type Driver struct {
 	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	stopSampler func()
 
+	// What the leader-mode pull test reads (pulltest_leader.go): the kills of the fights, and the span from the first pull to the last
+	// fight's end since it was last cleared.
+	fightKills            int
+	fightFirst, fightLast time.Time
+
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
 	wd       *watchdog
 	wdRepick flagOnce // end the fight, to pick the target again
@@ -426,6 +434,9 @@ func ctxDone(err error) bool {
 }
 
 func (d *Driver) run(ctx context.Context, fromLeg int) error {
+	if d.cfg.Pulltest != nil {
+		return d.runPulltest(ctx)
+	}
 	if err := d.begin(ctx, fromLeg); err != nil {
 		return err
 	}

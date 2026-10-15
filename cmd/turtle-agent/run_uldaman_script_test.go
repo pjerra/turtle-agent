@@ -80,7 +80,7 @@ func TestRunUldamanScriptModes(t *testing.T) {
 		{[]string{"--mode", "observe", "--print-params"}, "run leader"},
 		{[]string{"--mode", "fly", "--print-params"}, "commander, observe or leader"},
 		{[]string{"--mode", "leader", "--hire", "--print-params"}, "commander options"},
-		{[]string{"--mode", "leader", "--pulltest", "0:0", "--print-params"}, "commander options"},
+		{[]string{"--mode", "leader", "--pull-group", "1", "--print-params"}, "commander options"},
 		{[]string{"--rotation", "frost_mage", "--print-params"}, "go with --mode leader"},
 		{[]string{"--mode", "leader", "--role", "bard", "--print-params"}, "dps, tank or healer"},
 	} {
@@ -90,6 +90,23 @@ func TestRunUldamanScriptModes(t *testing.T) {
 		if err := cmd.Run(); err == nil || !strings.Contains(stderr.String(), c.want) {
 			t.Errorf("%v: %v %q, want %q", c.args, err, stderr.String(), c.want)
 		}
+	}
+	// The pull test of a leader run: the params name the pull and no from_leg.
+	out, err = exec.Command(bash, "../../tools/run-uldaman.sh", "--mode", "leader", "--rotation", "frost_mage", "--pulltest", "0:0:4:respawn", "--print-params").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pt dungeonRunParams
+	dec = json.NewDecoder(bytes.NewReader(out))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&pt); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if remote, err := checkMode(pt); remote || err != nil {
+		t.Fatalf("checkMode %v %v", remote, err)
+	}
+	if pt.Pulltest == nil || pt.Pulltest.Tries != 4 || pt.Pulltest.Reset != "respawn" || pt.FromLeg != nil || pt.Rotation != "frost_mage" {
+		t.Errorf("%+v", pt)
 	}
 	// MODE= in the environment is the same option.
 	cmd := exec.Command(bash, "../../tools/run-uldaman.sh", "--print-params")
