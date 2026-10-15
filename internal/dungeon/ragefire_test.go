@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
@@ -44,9 +45,70 @@ func rfTSV(t *testing.T, name string) []map[string]string {
 	return out
 }
 
+// ragefireExemption is a spawn the route test lets stand within 20 yd of the route without a pull group. Settled is empty until the mapping
+// walk has decided it (the date of the walk and what it found); TestRagefireStatusNeedsSettledExemptions refuses a mapped or live-checked
+// status while any is open.
+type ragefireExemption struct{ Reason, Settled string }
+
+// The six mobs of the terrace below the cave's north-east ledge and the ramp to Oggleflint (z -57 to -59, 17-20 yd under the route). Their floor
+// joins the cave only by the south loop (the path to them from the tunnel is 378 yd, through the camps in the south of the cave), so a pull group
+// would drag the party through everything the route avoids. They may aggro as the party passes above and then come round the loop. Settle on the
+// walk: either it shows they do not aggro (they stay listed, Settled gets the walk's date and the finding) or the plan gets a controlled pull.
+var ragefireExemptions = map[string]ragefireExemption{
+	"38050": {Reason: "terrace pack of the ledge (Trogg, with 48637)"},
+	"48637": {Reason: "terrace pack of the ledge (Shaman, with 38050)"},
+	"48638": {Reason: "terrace Trogg, south loop only"},
+	"38049": {Reason: "terrace pit under the Oggleflint ramp (Shaman)"},
+	"43580": {Reason: "terrace pit under the Oggleflint ramp (Shaman)"},
+	"43581": {Reason: "terrace pit under the Oggleflint ramp (Trogg)"},
+}
+
+// A plan that says mapped or live-checked has had its route corrected by a mapping walk (README "Dungeon plans"): while a terrace exemption is
+// unsettled or a patrol's period is still the 2.5 yd/s estimate, the plan must stay a draft, so that dungeon_run refuses it without allow_draft.
+func TestRagefireStatusNeedsSettledExemptions(t *testing.T) {
+	p := loadPlan(t, ragefirePlan)
+	if p.Status != DraftStatus && !strings.HasPrefix(p.Status, "mapped") && !strings.HasPrefix(p.Status, "live-checked") {
+		t.Fatalf("status %q", p.Status)
+	}
+	if p.Status == DraftStatus {
+		return
+	}
+	for guid, e := range ragefireExemptions {
+		if e.Settled == "" {
+			t.Errorf("status %q but the exemption of spawn %s (%s) is not settled: record the walk's date and finding in Settled, or add a controlled pull", p.Status, guid, e.Reason)
+		}
+	}
+	for _, l := range p.Legs {
+		for _, g := range l.PullGroups {
+			if g.Patrol != nil && strings.Contains(g.Patrol.Source, "ESTIMATE") {
+				t.Errorf("status %q but the patrol of %v in %s still has an estimated period_s: measure it on the walk and drop ESTIMATE from its source", p.Status, g.Patrol.Entries, l.Name)
+			}
+		}
+	}
+}
+
+// While the plan is a draft, every patrol period is marked as an estimate (the walk measures them), and the marker is on all six.
+func TestRagefirePatrolPeriodsAreMarkedEstimated(t *testing.T) {
+	p := loadPlan(t, ragefirePlan)
+	n := 0
+	for _, l := range p.Legs {
+		for _, g := range l.PullGroups {
+			if g.Patrol != nil {
+				n++
+				if p.Status == DraftStatus && !strings.Contains(g.Patrol.Source, "ESTIMATE") {
+					t.Errorf("%s: the patrol of %v does not say its period_s is an estimate", l.Name, g.Patrol.Entries)
+				}
+			}
+		}
+	}
+	if n != 6 {
+		t.Errorf("%d patrols", n)
+	}
+}
+
 func TestRagefirePlanLoads(t *testing.T) {
 	p := loadPlan(t, ragefirePlan)
-	if p.Map != 389 || p.Name != "ragefire_chasm" || p.Status != "mapped (not live-checked)" || len(p.Legs) != 9 {
+	if p.Map != 389 || p.Name != "ragefire_chasm" || p.Status != DraftStatus || len(p.Legs) != 9 {
 		t.Fatalf("%s %q %d, %d legs", p.Name, p.Status, p.Map, len(p.Legs))
 	}
 	var names []string
@@ -268,14 +330,6 @@ func TestRagefireRouteHasNoUnplannedPack(t *testing.T) {
 		t.Skip("no map 389 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 389.mmap and the 389*.mmtile tiles")
 	}
 	const routeAggro = 20
-	// Left out on purpose: the two packs on the terrace below the cave's north-east ledge and the ramp to Oggleflint (z -57 to -59, 17-20 yd
-	// under the route). Their floor joins the cave only by the south loop (the path to them from the tunnel is 378 yd, through the camps in the
-	// south of the cave), so walking to them would drag the party through everything the route avoids. They may aggro as the party passes
-	// above and then come round the loop; the mapping walk says whether they do.
-	leftOut := map[string]string{
-		"38050": "terrace pack of the ledge", "48637": "terrace pack of the ledge", "48638": "terrace, south loop only",
-		"38049": "terrace pit under the Oggleflint ramp", "43580": "terrace pit under the Oggleflint ramp", "43581": "terrace pit under the Oggleflint ramp",
-	}
 	p := loadPlan(t, ragefirePlan)
 	planned := func(l Leg, entry uint32, at Point) bool {
 		for _, q := range p.Legs {
@@ -361,7 +415,7 @@ func TestRagefireRouteHasNoUnplannedPack(t *testing.T) {
 					y, _ := strconv.ParseFloat(m["y"], 64)
 					z, _ := strconv.ParseFloat(m["z"], 64)
 					at := Point{float32(x), float32(y), float32(z)}
-					if flagged[m["guid"]] || leftOut[m["guid"]] != "" || planned(l, uint32(e64), at) || distToSegment(at, a, b) > routeAggro {
+					if flagged[m["guid"]] || ragefireExemptions[m["guid"]].Reason != "" || planned(l, uint32(e64), at) || distToSegment(at, a, b) > routeAggro {
 						continue
 					}
 					flagged[m["guid"]] = true

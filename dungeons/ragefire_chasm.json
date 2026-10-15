@@ -2,7 +2,7 @@
   "version": 1,
   "name": "ragefire_chasm",
   "kind": "dungeon",
-  "status": "mapped (not live-checked)",
+  "status": "draft (not mapped, not live-checked)",
   "map": 389,
   "entrance": {"x": 0.797643, "y": -8.23429, "z": -15.5288},
   "entrance_trigger": 2230,
@@ -27,7 +27,7 @@
   "cc_always": [11319, 11324],
   "kill_first": [11319, 11324, 11322],
   "notes": [
-    "Ragefire Chasm (map 389), MAPPED OFFLINE, not live-checked: written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. The Wowhead Classic guide page is rendered by script and could not be read; the order and the boss areas come from the Warcraft Wiki page of Ragefire Chasm (Classic) and match the export (its map coordinates put Oggleflint east of the others, Taragaman at 40.8 57.6, Jergosh at 34.3 81.7, Bazzalan above Jergosh at 41.8 86.3). The mapping walk is still to do (slot 5, GM-invisible, nothing attacked): it settles the patrol timings, the terrace packs and the points marked below.",
+    "Ragefire Chasm (map 389), a DRAFT with an offline route, not mapped and not live-checked (status stays draft, so dungeon_run refuses it without allow_draft, until the GM-invisible mapping walk has corrected it and settled the open points below): written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. The Wowhead Classic guide page is rendered by script and could not be read; the order and the boss areas come from the Warcraft Wiki page of Ragefire Chasm (Classic) and match the export (its map coordinates put Oggleflint east of the others, Taragaman at 40.8 57.6, Jergosh at 34.3 81.7, Bazzalan above Jergosh at 41.8 86.3). The mapping walk is still to do (slot 5, GM-invisible, nothing attacked) and must settle two things before the status may become mapped (ragefire_test.go fails otherwise): the six terrace exemptions (do those packs aggro as the party passes above, or is a controlled pull needed) and the six patrol periods (period_s is an estimate at 2.5 yd/s, marked ESTIMATE in each patrol's source).",
     "Route, 1541 yd of navmesh corridor from the entrance through the four bosses: the entrance tunnel west (Earthborers, one Molten Elemental), the Ragefire trogg cave, Oggleflint in his side cave 40 yd north of the cave's north-east ramp (-152 6 -40), back through the cave to its south-west corner and the long ramp along the north wall (y 5 to 14) up to (-140 14 -21), north through the Molten Elemental caves into the Searing Blade wing, Taragaman on his platform over the lava (-244.7 150.1 -18.7), east and north along the wing to Jergosh (-376.8 209.2 -21.8), then the walkway up to Bazzalan (-384.9 146 7.8), the last boss. The boss order is the corridor's: the navmesh has no shorter way (Oggleflint 493 yd from the entrance, Taragaman +643, Jergosh +175, Bazzalan +230). Nine legs, 55 pull groups of 85 mobs and 4 bosses with their escorts (the plan check and TestRagefireRouteHasNoUnplannedPack: no hostile spawn within 20 yd of the route is in no group, bar the six terrace mobs named in the cave legs).",
     "Casters and healers (creature_spells, creature_ai_events): Ragefire Shaman 11319 casts Healing Wave and Lightning Bolt and flees at 15 % health; Searing Blade Warlock 11324 casts Shadow Bolt, comes with a Voidwalker (EventAI 1132402 casts Summon Voidwalker 12746 when it spawns, a pet that is not in the export) and flees at 15 %; Searing Blade Cultist 11322 casts Curse of Agony; Searing Blade Enforcer 11323 Shield Slam (stun); Ragefire Trogg 11318 Strike; Earthborer 11320 Earthborer Acid. cc_priority and cc_always put the mage's Polymorph on the Shaman, then the Warlock, then the Cultist (all humanoid); kill_first is the same order, the healer and the damage dealer before the curse. `fleers` makes the remote driver kill the two fleeing entries before they are out of reach and wait for one that got away. The Molten Elementals 11321 (spawn mechanic-immunity mask 646014751: charm, disorient, disarm, distract, fear, silence, sleep, snare, knockout, bleed, polymorph, horror, interrupt, daze, sap) cannot be crowd-controlled and carry a Fire Shield (EventAI 1132101/1132102, spell 18968): they are tanked and burned down, fire damage into them is wasted.",
     "Factions: every hostile is hostile to both teams (Troggs 59, Earthborers 16, Molten Elementals 834, Searing Blade 554), no team gate is needed. Maur Grimtotem (11834, faction 35, npc_flags 2, quest giver at -148.1 23.6 -38.6, 15 yd before Oggleflint) is friendly and in the Oggleflint leg's skip. The area trigger 2230 asks for level 8 (areatrigger_teleport); the mobs are level 13-15 (elite rank 1) and the bosses 16, so the hires are level 16 (band 14-18, the middle). Wowhead lists the dungeon as 15-21 and the Warcraft Wiki as 15-21 (minimum 10); the draft's 13 would hire level 15 into level-15 elites. Entering: `cmd enter 2230` at the portal (area trigger 2230 on map 1, box 21.7 x 11.8 x 21.2 at 1818.4 -4427.26 -10.45 in the Cleft of Shadow, Orgrimmar), or game_tele 209 `rfc` inside the instance.",
@@ -125,7 +125,7 @@
               {"x": -175.8, "y": -29.7, "z": -43.6}
             ],
             "period_s": 115,
-            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s); @p48648@"
+            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48648@"
           }
         },
         {
@@ -205,7 +205,7 @@
               {"x": -216.8, "y": -11.2, "z": -61.8}
             ],
             "period_s": 66,
-            "source": "creature_movement of spawn 48655 (Ragefire Trogg, movement type 2, 6 points, 165 yd at 2.5 yd/s); @p48655@"
+            "source": "creature_movement of spawn 48655 (Ragefire Trogg, movement type 2, 6 points, 165 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48655@"
           }
         },
         {
@@ -306,7 +306,7 @@
               {"x": -279.6, "y": 10.3, "z": -48.4}
             ],
             "period_s": 119,
-            "source": "creature_movement of spawn 48675 (Earthborer, movement type 2, 18 points, 298 yd at 2.5 yd/s); @p48675@"
+            "source": "creature_movement of spawn 48675 (Earthborer, movement type 2, 18 points, 298 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48675@"
           }
         },
         {
@@ -359,7 +359,7 @@
               {"x": -77.4, "y": 91.8, "z": -7.4}
             ],
             "period_s": 98,
-            "source": "creature_movement of spawn 48698 (Molten Elemental, movement type 2, 16 points, 246 yd at 2.5 yd/s); @p48698@"
+            "source": "creature_movement of spawn 48698 (Molten Elemental, movement type 2, 16 points, 246 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48698@"
           }
         },
         {
@@ -464,7 +464,7 @@
               {"x": -206.2, "y": 94.3, "z": -25.5}
             ],
             "period_s": 173,
-            "source": "creature_movement of spawn 48696 (Searing Blade Enforcer, movement type 2, 32 points, 432 yd at 2.5 yd/s); @p48696@"
+            "source": "creature_movement of spawn 48696 (Searing Blade Enforcer, movement type 2, 32 points, 432 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48696@"
           }
         },
         {
@@ -552,7 +552,7 @@
               {"x": -240.9, "y": 165, "z": -18.6}
             ],
             "period_s": 74,
-            "source": "creature_movement of spawn 48707 (Searing Blade Enforcer, movement type 2, 12 points, 186 yd at 2.5 yd/s); @p48707@"
+            "source": "creature_movement of spawn 48707 (Searing Blade Enforcer, movement type 2, 12 points, 186 yd; period_s is an ESTIMATE at 2.5 yd/s, not measured: the mapping walk measures it); @p48707@"
           }
         },
         {

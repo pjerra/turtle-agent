@@ -35,7 +35,7 @@ type PlanSpec struct {
 	Title string `json:"title"`
 	Map   uint32 `json:"map"`
 	Kind  string `json:"kind"` // dungeon or raid
-	// Handwritten marks a plan that was written and live-checked by hand (uldaman, zulfarrak) or mapped by hand from the export and the navmesh (ragefire_chasm, status "mapped"): the generator does not touch its file and
+	// Handwritten marks a plan that was written and live-checked by hand (uldaman, zulfarrak) or hand-written from the export and the navmesh with the status still draft (ragefire_chasm): the generator does not touch its file and
 	// the table reads its band and status from it.
 	Handwritten bool `json:"handwritten,omitempty"`
 	// Data is the folder under testdata that holds the map's export (creatures.tsv, gameobjects.tsv, entrances.tsv, portals.tsv).

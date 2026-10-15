@@ -699,7 +699,7 @@ are no pack), `bbox` boxes for a map that holds several wings (Scarlet Monastery
 median level - 2 up to their 90th percentile), `size` of a raid, the hired party, the teleports (`entrance_tele` and `outside_tele` are only written when the `game_tele` row lies within 80 yd of the entrance), `scripted` bosses (NPCs with
 `npc_flags` or faction 35 until a script or a dialogue makes them hostile: no `-check` warning) and `special`, what the instance needs besides killing (events, rituals, gossip, keys), which goes into the plan's notes as
 `Needs: ...` and into the table. Exports are `tools/dungeongen/testdata/map<id>` (`export.sh <map> <dir>` writes the five files: `portals.tsv` from `areatrigger_template`, `movement.tsv` the `creature_movement` waypoints of the map's patrolling spawns); `uldaman` and `zulfarrak` are
-hand-written and live-checked and `ragefire_chasm` is hand-mapped (status `mapped`), none of them regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
+hand-written and live-checked and `ragefire_chasm` is hand-written with an offline route but still a draft (not mapped), none of them regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
 navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how many plan points are on the mesh for every map whose `<map>.mmap` and tiles are present and lists the maps that are not.
 
 `go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
@@ -787,7 +787,7 @@ the 7 long hops are cut and it is 220 rows (205 steps).
 
 ### The Ragefire Chasm plan
 
-`dungeons/ragefire_chasm.json` (Ragefire Chasm, map 389, level band 14-18) is **mapped, not live-checked** (`"status": "mapped (not live-checked)"`): written offline from the world export in
+`dungeons/ragefire_chasm.json` (Ragefire Chasm, map 389, level band 14-18) has a hand-written offline route but is **still a draft** (`"status": "draft (not mapped, not live-checked)"`, so `dungeon_run` refuses it without `allow_draft`; it becomes `mapped` only after the GM-invisible mapping walk): written offline from the world export in
 `tools/dungeongen/testdata/map389` (`export.sh 389`; `movement.tsv` holds the patrol paths), the map 389 navmesh and the core's `creature_spells`, `creature_ai_events` and `creature_groups` tables (the core has no instance
 script for this map, and the map has no door, lever, key, gossip, item or event: no leg has a step). Nine legs, 55 pull groups of 85 mobs, 1541 yd of corridor from the entrance through the four bosses in the order the navmesh
 leads: `tunnel` and `tunnel_end` (Earthborers, one Molten Elemental), `trogg_cave` (the cave's north strip, first pass), `oggleflint` (a side cave up a ramp; the Shaman and the Trogg that stand with him are `boss.first`), `trogg_west`
@@ -799,7 +799,7 @@ Left out on purpose and named in the leg notes: three packs on a terrace that th
 which are 25 yd or more from the route. The tests (`TestRagefirePlanLoads`, `TestRagefirePlanMatchesTheWorldExport`, `TestRagefireOnNavmesh`, `TestRagefireRouteHasNoUnplannedPack`, and the plan check
 `TestShippedPlansPassPlanCheck`) need the map 389 tiles (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle389` or `~/tortoise-wow-server/data/mmaps`) and skip without them: every waypoint is on the mesh, the walk from the entrance
 through the bosses is one connected path, every pull member and boss is a spawn of the export at that place, every patrol path is the export's, and no mob within 20 yd (3-D) of the route is in no group (the route ends each pull
-at the look point 21 yd from the group's first position, as the driver does). Next: the GM-invisible mapping walk (patrol timings, the terrace packs, the points the navmesh and the server may disagree on), then three live runs.
+at the look point 21 yd from the group's first position, as the driver does). Two things the mapping walk must settle before the status may change, and `TestRagefireStatusNeedsSettledExemptions` fails if it does without: the six terrace exemptions (`ragefireExemptions` in `ragefire_test.go`: the walk shows the packs do not aggro, and the exemption gets the walk's date and finding, or the plan gets a controlled pull) and the six patrol periods (`period_s` is an estimate at 2.5 yd/s and each patrol's `source` says ESTIMATE; the walk measures them and drops the word). Then three live runs.
 
 ### The Uldaman plan
 

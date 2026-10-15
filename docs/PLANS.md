@@ -32,7 +32,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | Map | Plan | Level band | Legs | Status | mmaps on the VM | Needs besides killing |
 | --- | --- | --- | --- | --- | --- | --- |
 | 822 | `frostmane_hollow`: Frostmane Hollow | 13-18 | 4 | draft | yes | Frostmane ritual (SPELL_FROSTMANE_RITUAL) at Hailar the Frigid |
-| 389 | `ragefire_chasm`: Ragefire Chasm | 14-18 | 9 | mapped | yes | none: no door, event, gossip or item (no instance script); six patrolling mobs, and three terrace packs the plan leaves out (reached only by a 378 yd loop) |
+| 389 | `ragefire_chasm`: Ragefire Chasm | 14-18 | 9 | draft | yes | none: no door, event, gossip or item (no instance script); offline route, still a draft: the mapping walk settles six terrace mobs left out of the pulls and six estimated patrol periods |
 | 36 | `deadmines`: The Deadmines | 17-22 | 7 | draft | yes | Iron Clad Door: Defias Cannon (GO) fired with the door lever (go_door_lever_dm, gunpowder event) to reach the ship; Sneed (643) has no spawn row: he appears when Sneed's Shredder (642) dies; Mr. Smite's phase doors and chest (GO_SMITE_CHEST) |
 | 43 | `wailing_caverns`: Wailing Caverns | 18-23 | 7 | draft | yes | Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (escort, ritual waves) summons him; the Awakening of Naralex gossip with the Disciple (3678) |
 | 33 | `shadowfang_keep`: Shadowfang Keep | 19-25 | 8 | draft | yes | courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die; Arugal's summoning focus (GO_ARUGAL_FOCUS) |
