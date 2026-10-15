@@ -375,13 +375,31 @@ func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error
 	}
 }
 
-// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line with the selection repeated in the same
-// session step (GMOn).
+// gmSelectAttempts is how many times selectThenGM selects and confirms again when the selection changed after the confirmation.
+const gmSelectAttempts = 3
+
+// gmAfterConfirm is a test seam: it runs between the server's confirmation of the selection and the line, where another request (the target RPC,
+// the addon host) can select another unit.
+var gmAfterConfirm func()
+
+// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line as one session operation that sends NO
+// selection of its own (GMOnConfirmed): the line is sent only while the confirmed selection still stands. A selection sent right before a
+// chat line would not be in force when the line runs (the core handles the two on different threads). If another request changed the selection
+// after the confirmation, nothing is sent and the unit is selected and confirmed again, up to gmSelectAttempts times.
 func (g remoteGame) selectThenGM(ctx context.Context, guid packet.GUID, line string) error {
-	if err := g.selectConfirmed(ctx, guid); err != nil {
-		return err
+	var err error
+	for try := 0; try < gmSelectAttempts; try++ {
+		if err = g.selectConfirmed(ctx, guid); err != nil {
+			return err
+		}
+		if gmAfterConfirm != nil {
+			gmAfterConfirm()
+		}
+		if err = g.c.cur().GMOnConfirmed(ctx, guid, line); !errors.Is(err, session.ErrSelectionChanged) {
+			return err
+		}
 	}
-	return g.c.cur().GMOn(ctx, guid, line)
+	return fmt.Errorf("%w: it changed %d times between the server's confirmation and the line, which was not sent", err, gmSelectAttempts)
 }
 
 // UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
