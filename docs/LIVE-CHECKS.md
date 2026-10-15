@@ -969,7 +969,7 @@ meets them:
 
 ## Dungeon plan: Zul'Farrak (`dungeons/zulfarrak.json`, #130; written from the world data, walked by a GM invisible on 2026-10-14, not run as a party)
 
-Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. `dungeons/zulfarrak-extra.json` is a record of what the driver cannot do, not a plan to run. What the first live run has to settle, in the order it meets them:
+Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. The gong leg that `dungeons/zulfarrak-extra.json` once recorded is the optional `gahzrilla` leg of the plan since PR A (check 9). What the first live run has to settle, in the order it meets them:
 
 1. **Entry** (needs TortoiseBots #939). The run walks the party to the portal and sends `.bot cmd enter 924`: record the `TBM:ACTION_PENDING|cmd enter|party|<budget>|924` line, the final ACK (`entered`, n bots) or ERR code, the seconds, and that the lead bot lands on map 209 at 1212.7 842.0 and the others come by the same order or by `cmd summon`; the group must not change after that. On a module without the order the run must fail with "needs TortoiseBots #939" within about 15 s of arriving at the portal. `prepare.fresh` uses `outside_tele` `farrak` (partial match of game_tele 160): check that the bots and the agent land outside, map 1, near -6801 -2893.
 2. **The road to Antu'sul** (leg 0): the 15 pull groups come in the order of the plan; the four static Shadowcasters at 1505-1511 845 are their own group; the patrolling groups (radius 30) are found where they walk, not at their spawn rows. Count walk aggros and the time (about 807 yd).

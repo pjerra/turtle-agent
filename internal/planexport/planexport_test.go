@@ -1,7 +1,9 @@
 package planexport
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -267,10 +269,7 @@ func TestUldaman(t *testing.T) {
 // TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
 // ai_dungeon_plan), as comma lists like `entries`, in the column order of that migration, and they read back.
 func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
-	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	p := zulfarrakThroughZumrah(t)
 	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)
@@ -333,12 +332,94 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 	}
 }
 
-// The shipped Zul'Farrak plan, with the courtyard and Zum'rah legs, still exports: the area trigger is the walk into the zone.
-func TestZulfarrakWithZumrahExports(t *testing.T) {
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
+// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
+	t.Helper()
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i, l := range p.Legs {
+		if l.Name == "zumrah" {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatal("the plan has no zumrah leg")
+	return nil
+}
+
+// The whole shipped Zul'Farrak plan is exported up to the zumrah leg: the legs after it (the stairs event) use a unit wait and the gossip
+// step, which the run leader has no step for, so the export is cut before the first of them, with a note that names the leg and the step.
+func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole := buildWhole(t, zulfarrakThroughZumrah(t))
+	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	}
+	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "steps[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+		if !strings.Contains(res.Cut, want) {
+			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
+		}
+	}
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 11 (stairs)") {
+		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// buildWhole builds a plan that has to export whole.
+func buildWhole(t *testing.T, p *dungeon.Plan) Result {
+	t.Helper()
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
+	}
+	return res
+}
+
+// The cut: a step the run leader cannot do in a later leg ends the export before that leg (its rows, and the warnings it made, are gone); in
+// the first leg there is nothing to export, and the plan is refused.
+func TestCutBeforeTheFirstLegWithAStepTheRunLeaderCannotDo(t *testing.T) {
+	const walk = `{"name":"a","to":{"x":1,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":5,"y":0,"z":0}]}]}`
+	const talk = `{"name":"%s","to":{"x":10,"y":0,"z":0},"steps":[{"gossip":{"npc":7607,"near":{"x":12,"y":0,"z":0},"text":"blow","by":"tank"}}],"boss":{"entry":2,"position":{"x":14,"y":0,"z":0}}}`
+	plan := func(legs ...string) *dungeon.Plan {
+		return parsePlan(t, `{"version":1,"name":"cut","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[`+strings.Join(legs, ",")+`]}`)
+	}
+	res, err := Build(plan(walk, strings.Replace(talk, "%s", "b", 1), walk), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Legs) != 1 || res.Rows.Legs[0].Name != "a" || res.Cut == "" || !strings.Contains(res.Cut, "cut before leg 1 (b)") || !strings.Contains(res.Cut, "gossip (NPC 7607") || !strings.Contains(res.Cut, "1 after it") {
+		t.Fatalf("%d legs, cut %q", len(res.Rows.Legs), res.Cut)
+	}
+	for _, st := range res.Rows.Steps {
+		if st.Leg != 0 {
+			t.Errorf("a row of leg %d is left: %+v", st.Leg, st)
+		}
+	}
+	if _, err := Build(plan(strings.Replace(talk, "%s", "a", 1), walk), Options{Source: "test"}); err == nil || !errors.Is(err, ErrNoRunLeaderStep) || !strings.Contains(err.Error(), "leg 0 (a)") {
+		t.Fatalf("a first leg that cannot be exported: %v", err)
+	}
+}
+
+// The shipped Zul'Farrak plan, with the courtyard and Zum'rah legs, still exports: the area trigger is the walk into the zone.
+func TestZulfarrakWithZumrahExports(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
 	res, err := Build(p, Options{Source: "turtle-agent test dungeons/zulfarrak.json", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)
