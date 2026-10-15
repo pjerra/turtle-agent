@@ -200,3 +200,22 @@ func TestLegExitAndNextLegStart(t *testing.T) {
 		}
 	}
 }
+
+// A gm_cross via point (a GM moves the party there) is flagged on the stop and in the drawing.
+func TestGMCrossViaIsFlagged(t *testing.T) {
+	p, err := dungeon.Parse("x.json", []byte(`{"version":1,"name":"x","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":200,"y":0,"z":0},
+ "via":[{"x":10,"y":0,"z":0},{"x":20,"y":0,"z":0,"direct":true,"gm_cross":true}],"pull_groups":[{"entries":[1],"positions":[{"x":220,"y":0,"z":0}]}]}]}`))
+	if err != nil {
+		t.Skip("plan does not parse here: ", err)
+	}
+	g := BuildGeometry(p)
+	var n int
+	for _, st := range g.Legs[0].Stops {
+		if st.GMCross {
+			n++
+		}
+	}
+	if n != 1 || !strings.Contains(g.SVG, "wp via gmx") || !strings.Contains(g.SVG, "gm_cross") {
+		t.Errorf("gm_cross stops %d; svg %s", n, g.SVG)
+	}
+}

@@ -42,6 +42,8 @@ type GeoWaypoint struct {
 	// reason the plan exempts the hop to a via point from the plan check.
 	NeedsWalk bool   `json:"needs_walk,omitempty"`
 	CheckSkip string `json:"check_skip,omitempty"`
+	// GMCross: a GM moves the party to this via point instead of walking (Waypoint.GMCross); the route editor never moves or deletes it.
+	GMCross bool `json:"gm_cross,omitempty"`
 }
 
 // GeoLeg is the summary of one leg the page needs.
@@ -173,6 +175,7 @@ func LegStops(leg dungeon.Leg, i int, startX, startY float64, names map[string]s
 		x, y := Project(w.X, w.Y)
 		add(x, y, "via", "waypoint", w.Direct)
 		out[len(out)-1].CheckSkip = w.CheckSkip
+		out[len(out)-1].GMCross = w.GMCross
 	}
 	x, y := Project(leg.To.X, leg.To.Y)
 	add(x, y, "stage", "stage point of "+label+" (the party gathers here before the packs)", false)
@@ -560,6 +563,9 @@ func flagClasses(w GeoWaypoint) string {
 	if w.CheckSkip != "" {
 		c += " cskip"
 	}
+	if w.GMCross {
+		c += " gmx"
+	}
 	return c
 }
 
@@ -571,6 +577,9 @@ func flagText(w GeoWaypoint) string {
 	}
 	if w.CheckSkip != "" {
 		t += " [hop exempt from the plan check: " + w.CheckSkip + "]"
+	}
+	if w.GMCross {
+		t += " [gm_cross: a GM moves the party here]"
 	}
 	return t
 }
