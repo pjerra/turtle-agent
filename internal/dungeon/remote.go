@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -93,6 +94,9 @@ type RemoteOptions struct {
 	// points): a bound hire does not answer `who`, so the prepare step takes its class and level from here for the bots that are still
 	// in the standing binding.
 	HireMemory map[string]tbm.Who
+	// ClassMemory is the class (lower case) of every hire the agent has read in any earlier run, kept whether or not that run kept its
+	// binding (a class never changes): the cc bot of a run that names its party is the mage found here (remote_cc.go).
+	ClassMemory map[string]string
 	// Carrier names the bot that does the object steps (loot_object, a boss's loot_item, use_item, use_object): it walks to the chest or
 	// corpse, loots, opens and uses items on `cmd open|loot|use` orders (remote_objects.go). Empty: the first living bot that is neither
 	// the lead bot, the tank nor the healer.
@@ -330,6 +334,8 @@ type RemoteReport struct {
 	// ran out with the patrol still near (the pack was pulled with it counted in), and patrols pulled alone before their group.
 	PatrolWaits    int     `json:"patrol_waits"`
 	PatrolWaitS    float64 `json:"patrol_wait_s"`
+	PatrolLocates  int     `json:"patrol_locates"`  // looks for a patrol none of whose members was in view (remote_patrol.go)
+	PatrolLocateS  float64 `json:"patrol_locate_s"` // ... and the seconds they took
 	PatrolTimeouts int     `json:"patrol_timeouts"`
 	PatrolPulls    int     `json:"patrol_pulls"`
 	// TinyMoves are walks whose last stretch was shorter than min_move (the module ignores such a move): the order went to a point
@@ -479,6 +485,16 @@ type RemoteDriver struct {
 	rccLast    time.Time                  // the last reactive CC order (remote_patrol.go)
 	rccN       map[packet.GUID]int        // reactive CC orders per mob
 	patrolSeen map[packet.GUID]*patrolObs // units of patrol entries seen on a patrol path (remote_patrol.go)
+	// patrolWalkedAt is when a member of each patrol was last seen walking (the next group of the leg does not look for it again at once).
+	patrolWalkedAt map[*Patrol]time.Time
+	// wantParty is how many bots the party has when the run starts (the lead bot and the named bots; the feed's party when none are
+	// named); shortSince is when the feed first showed fewer, partyShort whether the stop has been said (remote_party.go).
+	ccLookAt   time.Time // the last look for the party's mage (ensureCCBot)
+	wantParty  int
+	shortSince time.Time
+	shortSaid  bool
+	// paused: Pause was called; the run ends stopped and keeps its binding (dungeon_pause).
+	paused     atomic.Bool
 	skipped    map[packet.GUID]string
 	lastAssist time.Time
 	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
@@ -521,7 +537,7 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d := &RemoteDriver{plan: plan, g: g, cfg: cfg.withDefaults(), opt: opt.withDefaults(), clk: clk, curLeg: -1,
 		prevDead: map[packet.GUID]bool{}, revived: map[packet.GUID]int{}, lastRevive: map[packet.GUID]time.Time{},
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
-		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, ccOrdered: map[packet.GUID]time.Time{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
+		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, ccOrdered: map[packet.GUID]time.Time{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}, patrolWalkedAt: map[*Patrol]time.Time{}}
 	d.tx = defaultTuneExtra()
 	d.initLive()
 	d.rep.init(plan, clk.Now)
@@ -580,6 +596,11 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	return err
 }
 
+// Pause marks the run as paused: the caller then cancels its context, and the run ends "stopped" with the bots stood still and the
+// binding kept (no `commander unbind`), so that a dungeon_run with resume re-enters the same group and instance. Without it a stopped
+// run unbinds, which returns the hires to the commander's raid and loses the instance (ZF-2 run 3b).
+func (d *RemoteDriver) Pause() { d.paused.Store(true) }
+
 // runRecovering is run with a panic turned into a failed run: the deferred unbind has run by the time the panic gets here, and the
 // report says what happened instead of the process going down with the binding half undone.
 func (d *RemoteDriver) runRecovering(ctx context.Context, fromLeg int) (err error) {
@@ -618,7 +639,10 @@ func (d *RemoteDriver) finish(err error) {
 
 func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	// Every way out: done, failed, stopped, a panic. Only a failed run with KeepOnFail keeps its binding (unbind).
-	defer func() { d.unbind(err != nil && !ctxDone(err) && d.opt.KeepOnFail) }()
+	// A paused run (dungeon_pause) is stopped on purpose to be resumed: it keeps its binding whatever keep_on_fail says.
+	defer func() {
+		d.unbind((err != nil && !ctxDone(err) && d.opt.KeepOnFail) || (d.paused.Load() && ctxDone(err)))
+	}()
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
@@ -998,6 +1022,11 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 			d.rep.note(fmt.Sprintf("tank %s is not in the party of the feed; the tank will be taken from the first pull", d.opt.Tank))
 		}
 	}
+	d.wantParty = max(len(d.opt.Bots)+1, 0)
+	if len(d.opt.Bots) == 0 {
+		d.wantParty = len(d.fr.Party)
+	}
+	d.resolveCCBot(ctx)
 	d.lootOnAtStart(ctx)
 	d.probeEntryTargets(ctx, fromLeg)
 	if err := d.preflight(ctx); err != nil {
@@ -1125,10 +1154,14 @@ func (d *RemoteDriver) unbind(keep bool) {
 		d.endStay(ctx)
 	}
 	if keep && d.opt.OnEnd != OnEndLogout {
+		why := "the run failed"
+		if d.paused.Load() {
+			why = "the run was paused"
+		}
 		d.remote(func(rr *RemoteReport) {
-			rr.UnbindVia = "kept (the run failed; a resume reuses the group and its instance)"
+			rr.UnbindVia = "kept (" + why + "; a resume reuses the group and its instance)"
 		})
-		d.rep.note("commander unbind: not sent, the run failed; the binding is kept so that a resume re-enters the same instance (dungeon_stop or a finished run unbinds)")
+		d.rep.note("commander unbind: not sent, " + why + "; the binding is kept so that a resume re-enters the same instance (dungeon_stop or a finished run unbinds)")
 		return
 	}
 	r, err := d.g.Command(ctx, "commander unbind")
@@ -1222,7 +1255,7 @@ func (d *RemoteDriver) check() error {
 	if n, all := d.partyDown(); n > 0 {
 		return fmt.Errorf("%w: %w: %d of %d bots are dead", errWipe, errPartyDown, n, all)
 	}
-	return nil
+	return d.partyIntact()
 }
 
 // partyDown reports, once, that three bots or more are dead inside the dungeon: the leg stops there as at a wipe (ZF-1: after
@@ -1584,6 +1617,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			return err
 		}
 		if err := d.ensureAlive(ctx); err != nil {
+			return err
+		}
+		if err := d.requireLiving(); err != nil {
 			return err
 		}
 		here, ok := d.leadPos()

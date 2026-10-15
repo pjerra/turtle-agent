@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -204,4 +205,81 @@ func (d *RemoteDriver) rebind(ctx context.Context, missing []string) error {
 		d.rep.note("commander view on refused: " + describeBindErr(vr.Err))
 	}
 	return d.waitFirstFrame(ctx)
+}
+
+// The party must stay whole (ZF-2 run 3b: the module dismissed the mage and the hunter from the group, "dismissed (removed from group)",
+// and the run walked on with three bots until the three-dead stop). A bot that leaves the group is gone from the feed's party: when the
+// feed shows fewer bots than the run started with for partyShortHold, the run stops there with the names, at the next calm moment (a
+// fight in progress is fought out first). And no step that moves the party or pulls goes on with a bot dead.
+
+// errPartyShort ends the leg: the party has fewer bots than the run started with, or one is dead where the run would walk or pull.
+var errPartyShort = errors.New("party short")
+
+// partyShortHold is how long the feed must show the party short before the run stops (a frame that lost a record for a moment is no
+// departure).
+const partyShortHold = 5 * time.Second
+
+// partyIntact checks, once per look, that the feed still shows the bots the run started with. It returns errPartyShort when the party
+// has been short for partyShortHold and is out of combat; in a fight it only says so, once.
+func (d *RemoteDriver) partyIntact() error {
+	if d.curLeg < 0 || !d.haveFr || d.wantParty <= 1 {
+		return nil
+	}
+	have := len(d.fr.Party)
+	if have >= d.wantParty {
+		d.shortSince, d.shortSaid = time.Time{}, false
+		return nil
+	}
+	now := d.clk.Now()
+	if d.shortSince.IsZero() {
+		d.shortSince = now
+	}
+	if now.Sub(d.shortSince) < partyShortHold {
+		return nil
+	}
+	if d.fr.PartyInCombat() {
+		if !d.shortSaid {
+			d.shortSaid = true
+			d.rep.note(fmt.Sprintf("leg %d: the party has %d of %d bots (%s); the run stops when the fight is over", d.curLeg, have, d.wantParty, d.missingNames()))
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: the party has %d of %d bots, %s left the group; the run stops here instead of walking on (the binding is kept with keep_on_fail: bring the bot back and resume)", errPartyShort, have, d.wantParty, d.missingNames())
+}
+
+// missingNames names the bots of the run that the feed's party does not list.
+func (d *RemoteDriver) missingNames() string {
+	var out []string
+	for _, n := range append([]string{d.opt.Lead}, d.opt.Bots...) {
+		if n == "" {
+			continue
+		}
+		if _, ok := d.memberByName(n); !ok {
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return "a bot"
+	}
+	return strings.Join(out, ", ")
+}
+
+// requireLiving refuses a step that walks or pulls while a bot of the party is dead: the rest gate revives the dead before a pull, so a
+// bot still dead here is one the run could not bring back, and the party must not go on without it.
+func (d *RemoteDriver) requireLiving() error {
+	if d.curLeg < 0 || !d.haveFr || d.wantParty <= 1 {
+		return nil
+	}
+	if d.fr.PartyInCombat() {
+		return nil
+	}
+	dead := d.deadMembers()
+	if len(dead) == 0 {
+		return nil
+	}
+	var names []string
+	for _, m := range dead {
+		names = append(names, m.Name)
+	}
+	return fmt.Errorf("%w: %d of %d bots are dead (%s); the run stops here instead of walking on without them", errPartyShort, len(dead), len(d.fr.Party), strings.Join(names, ", "))
 }

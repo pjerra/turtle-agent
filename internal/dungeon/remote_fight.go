@@ -160,6 +160,9 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		if err := d.restGate(ctx, true); err != nil {
 			return err
 		}
+		if err := d.requireLiving(); err != nil {
+			return err
+		}
 		t, ok, err := d.pickTarget(ctx, sp)
 		if err != nil {
 			return err

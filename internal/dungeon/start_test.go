@@ -119,7 +119,9 @@ func (g *startFake) GoXYZ(_ context.Context, mapID uint32, at Point) error {
 	return nil
 }
 func (g *startFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
-	g.botLines = append(g.botLines, command)
+	if command != "roster" { // read at the start of a run for its cc bot (resolveCCBot)
+		g.botLines = append(g.botLines, command)
+	}
 	if command == "summon "+g.lead().Name && !g.neverLead {
 		at := g.agent
 		g.leadTo, g.leadToAt = &at, g.now.Add(3*time.Second)

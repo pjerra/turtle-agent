@@ -38,6 +38,7 @@ type tuneExtra struct {
 	PatrolAggro    float32       // a patrol member this near a pull (its target or the lead bot) is a danger to it (remote_patrol.go)
 	PatrolWindow   time.Duration // ... within this long, along its path at its pace
 	PatrolWait     time.Duration // the longest wait of one pull group for its patrol to walk away
+	PatrolLocate   time.Duration // the longest look of one pull group for a patrol none of whose members is in view (the patrol's own round, at most)
 	PatrolPullYd   float32       // a patrol this near the lead bot, and patrol_aggro clear of the pack, is pulled alone first
 	MinMove        float32       // the shortest move the module carries out (a shorter one is sent as a step past)
 	PartyDownDead  int           // dead bots that stop the leg
@@ -47,7 +48,7 @@ type tuneExtra struct {
 func defaultTuneExtra() tuneExtra {
 	return tuneExtra{LookStandoff: LookStandoff, LookArrive: lookArrive, AttackHoldYd: attackHoldYd, TankBusyRounds: maxTankBusyRounds, AddOrders: maxAddOrders,
 		FallbackTries: objectFallbackTries, GatherNear: GatherNear, GatherProgress: gatherProgress, AggroGuard: AggroGuard, AheadMaxDZ: aheadMaxDZ,
-		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PatrolAggro: PatrolAggro, PatrolWindow: patrolWindow, PatrolWait: patrolWait, PatrolPullYd: patrolPullYd, MinMove: MinMove, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
+		MaxAheadPulls: maxAheadPulls, GatherClear: GatherClear, BigPack: BigPack, PatrolAggro: PatrolAggro, PatrolWindow: patrolWindow, PatrolWait: patrolWait, PatrolLocate: patrolLocate, PatrolPullYd: patrolPullYd, MinMove: MinMove, PartyDownDead: partyDownDead, RespawnSettle: respawnSettle}
 }
 
 // tuneTarget is what a tunable reads and writes.
@@ -146,6 +147,7 @@ var tuneSpecs = []tuneSpec{
 	yds("patrol_aggro", 10, 50, "a patrol member this near a pull (its target or the lead bot) is a danger to it", func(t *tuneTarget) *float32 { return &t.x.PatrolAggro }),
 	secs("patrol_window_s", 5, 180, "a patrol is a danger to a pull when its path brings it within patrol_aggro this soon", func(t *tuneTarget) *time.Duration { return &t.x.PatrolWindow }),
 	secs("patrol_wait_s", 0, 180, "the longest wait of one pull group for its patrol to walk away", func(t *tuneTarget) *time.Duration { return &t.x.PatrolWait }),
+	secs("patrol_locate_s", 0, 300, "the longest look of one pull group for a patrol none of whose members is in view (0: none; at most the patrol's own round)", func(t *tuneTarget) *time.Duration { return &t.x.PatrolLocate }),
 	yds("patrol_pull_yd", 10, 60, "a patrol this near the lead bot, and patrol_aggro clear of the pack, is pulled alone first", func(t *tuneTarget) *float32 { return &t.x.PatrolPullYd }),
 	yds("min_move", 0, 10, "the shortest move the module carries out; a shorter last stretch is sent as a step to min_move+1 yd along the line", func(t *tuneTarget) *float32 { return &t.x.MinMove }),
 	ints("max_ahead_pulls", "count", 1, 30, "pulls of hostiles near the way, at most, in one walk", func(t *tuneTarget) *int { return &t.x.MaxAheadPulls }),
