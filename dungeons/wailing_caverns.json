@@ -2,7 +2,7 @@
   "version": 1,
   "name": "wailing_caverns",
   "kind": "dungeon",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "mapped (not live-checked)",
   "map": 43,
   "entrance": {"x": -158.441, "y": 131.601, "z": -74.2552},
   "entrance_trigger": 228,
@@ -22,1361 +22,999 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [3840, 3674],
+  "cc_priority": [3840],
+  "kill_first": [3671],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 43 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Needs: Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (escort, ritual waves) summons him",
-    "Needs: the Awakening of Naralex gossip with the Disciple (3678)",
-    "Turtle adds Vangros (61965) and Zandara Windhoof (61968), rank-1 named mobs in no leg as bosses; they are pulled as packs."
+    "Wailing Caverns (map 43), written offline from the world database export of tortoise-wow (tools/dungeongen/testdata/map43, read with export.sh; re-exported 2026-10-15 and identical; movement.tsv holds the patrol paths), the instance script src/scripts/dungeons/wailing_caverns (instance_wailing_caverns.cpp, wailing_caverns.cpp), the core's creature_spells, creature_ai_events and spawn pool tables and the navmesh tiles of map 43 (~/tb-ci/mmaps-turtle043 on yulon-ubuntu2). MAPPING WALK (2026-10-15, a GM-invisible character, no bots, nothing attacked, tests/walk-wc in the audit folder): the whole route was walked, 401 walk_path calls, 12 legs, 0 replans, 0 stuck; every member of every pull group was found at its plan position (0 to 5 yd, 9 yd worst: one Python at Cobrahn), none missing except Lady Anacondra's three spots that were not up (she was up at spot 2, in the pack the plan has there); the patrol rounds were timed. The status is therefore 'mapped (not live-checked)': nobody has run it with a party and the hop below is still unsettled. Wowhead Classic (zone 718, the strategy guide 7843 and the npc pages with their comments, read from the raw page with tools/wowhead/wh.py) was read for the tips; it is data and the database and the script win: where they differ it is said below ('Wowhead differences').",
+    "ROUTE (about 5600 yd of navmesh path from the entrance to Verdan by the first member of each group, 6480 yd with every member position, 12 legs, 90 pull groups with 187 mobs, 8 patrols): the cave mouth and Lady Anacondra's four possible spots (anacondra_a, anacondra_b), north to Lord Cobrahn (cobrahn_a to cobrahn_c; 861 yd from the last Anacondra spot, a dead end), back through the cave mouth and down the south road to Lord Pythas (pythas_a to pythas_c), Skum in the far south-west (skum, a 372 yd dead end), the west column up to the foot of the ramp (west_column) and the hop onto it (serpentis: Lord Serpentis, then verdan: Verdan the Everliving). The order is the shortest of the ones tried (the four Fanglords all lie on dead-end branches; the other orders came to 6900 yd and more). The Disciple of Naralex event comes after Verdan and is in dungeons/wailing_caverns-extra.json, because the driver cannot do it yet.",
+    "The four Fanglords (Lady Anacondra 3671, Lord Cobrahn 3669, Lord Pythas 3670, Lord Serpentis 3673) unlock the Disciple event: instance_wailing_caverns.cpp opens the Disciple's second gossip menu (202, 'Let the event begin!') only when all four are DONE. Skum (3674), Verdan (5775) and Kresh (3653) are not part of it. Mutanus the Devourer (3654) has no spawn row; the escort script summons him. Wowhead comments: the escort can be tried once per reset (if the Disciple dies or the party wipes, the instance has to be reset and the four killed again), and a run split over two lockouts cannot start it.",
+    "Lady Anacondra has FOUR spawn rows (guids 27366, 1177978, 1177979, 1177980) in one spawn pool (pool_template 10004, max_limit 1): one of -67.8 122.6 -89.9, 46.5 184.0 -89.2, 15.3 297.2 -87.7 and -54.0 271.4 -92.8 is up per reset (Wowhead comments say 3 to 5 spots in the first big cave and that she is always somewhere; the database has four). A boss has one position and the plan has no way to say 'one of these', so each spot is a MEMBER of the pack that stands at it, last in that group's entries (group 9 of anacondra_a, group 4 of anacondra_b, group 9 of anacondra_b, group 2 of cobrahn_a): the member exists only while her pool spot is up, the group is the pack with her and the driver pulls it as one. Each of those packs stood 3 to 4 yd from her spawn (one Druid of the Fang stood on it) and would have been pulled with her anyway; a one-member group of her at each spot (the first version) pulled the trash with her without any boss handling. Her kill order is the plan's: kill_first has her (3671; the Druids of the Fang are cc_priority, and a kill_first entry is never crowd-controlled), the leg notes carry her interrupts. NOT tested live. The proper fix is a boss with alternative positions (see the pull request text).",
+    "Pull radii: a pull group's radius is the distance from one of its positions within which a unit of its entries counts as a member (default 25 yd). The generator cut each radius to stay short of the nearest hostile spawn that is not a member of the group (radius = that gap - 3.5 yd, 6 yd at least, 25 at most), so a neighbouring pack is not dragged in by the radius; tools/dungeongen's TestNoMobStandsInAPullGroupsRangeUnlisted fails for any hand-written plan with a mob (another pack's, a boss, a forgotten spawn) within a group's radius + 3 yd that the group does not list. The adds that stand with a boss are the boss's first, not a pull group (Cobrahn's three Pythons, Pythas's Shambler and Druid), because the boss would otherwise be inside the group's radius.",
+    "The hop (NOT walkable; the walk measured it): the navmesh of map 43 has two parts that do not touch. The big one holds everything from the cave mouth to Skum; the other (331 polygons, z -64 to -21) is the winding ramp up to the Serpentis hall with Serpentis and Verdan. The only place the two come near each other is the foot of the ramp, -293.3 0.5 -58.0 (main mesh, server floor -58.44) and -289.1 3.2 -64.1 (ramp, floor -64.25): between them the server's floor height (.gps FloorZ, 10 samples) is -105.5, so there is NO floor for about 3.9 yd (a gap with a 47 yd drop) and the far side is 6 yd lower. Going DOWN is a running jump across 4 yd that lands 6 yd lower (no fall damage under 14.6 yd), which matches the Wowhead comment 'jump down onto the ledge'; going back UP is a 6 yd climb that no player can make, and the navmesh has no link either way (path_to from the ramp back to the foot is partial, 7.9 yd short). A party that follows the mesh cannot cross at all; the walk crossed it only with the agent's walk_to, which has no collision (the server's anticheat took both positions). The plan therefore crosses it with a gm_cross waypoint (a direct via with \"gm_cross\": true, remote runs only): the party walks to the foot, then a GM account moves it to the ramp point (the commander's character `.go xyz`, `.bot summon` for the lead bot, `cmd summon` for the others, the run goes on when every living member is within 10 yd of the point); without a GM account the run is refused before anything is sent, and the group driver refuses the plan. The plan check does not walk to a gm_cross point (it must have mesh floor under it). Every other contact of the two mesh parts is 28 yd or more up or down.",
+    "No team gate is needed: every mob of the route is hostile to both teams (faction 270 Deviate, 14 Skum and the oozes). Left out of the pull groups on purpose: the level-1 Snakes (2914, 40 of them) and Biletoads (3835), Kresh (3653, the turtle that walks the river, faction 7, neutral, 'react 0' on Wowhead: he is never pulled and is in every leg's skip list), the rare Deviate Faerie Dragon (5912, skip), the Disciple of Naralex (3678) and Naralex (3679), faction 35. The walk found two packs within aggro of the route that the first version missed, and a test (every spawn within 15 yd of a walk point is in a group) found three more; they are pull groups now (88 groups in all):  four Deviate Lashers (5055) and a Druid at -332 to -342 -104 to -119 (west_column group 7, same floor, 22 to 26 yd from the road) and four Lashers at -179 to -192 -192 to -213 (the last group of the skum leg, on a ledge 12 to 14 yd off the road; the navmesh reaches the ledge only by a 336 yd loop and back 269 yd, which is most of the 640 yd the five added groups cost the route: the first run decides whether the party pulls them from the road instead); and a Druid at -353 43 (pythas_b), a Shambler and a Druid at -31 -270 (skum group 1 neighbours) and a Druid at -216 -321 (skum), each 12 to 14 yd from a walk point. Four packs that stand on a lower or higher floor the route only looks across (a walk of 165 to 234 yd from the road: crocolisks in the river at z -106 and a Shambler and a Venomwing pocket) are not in a group either; they stay asleep unless the party walks into them.",
+    "Left out because they are not on the way to a boss: the Turtle-added west wing (map x -400 to -550: Vangros 61965, Unnatural Overgrowth 61964, a Deviate Coiler Hatchling 61218; the navmesh holds it as a separate 7700-polygon part reached from the south-west) and the Turtle-added east spur (x 7 to 98, y -37 to 21: Kolkar Truthseeker 61966, Kolkar Explorer 61967 and Zandara Windhoof 61968 at 81.9 27.0 -66.8, 334 yd from Pythas), the giant pillar cavern at x -380 to -160, y 80 to 340 (its own mesh part, no spawn rows worth a route), the Kresh river. The rare Deviate Faerie Dragon (5912) stands at 2.7 -67.5 -65.9 with two Druids of the Fang and a Shambler 9 to 17 yd away, 107 yd from the nearest pull position: the Wowhead guide calls it 'a 4-mob pull of elites with two Druids of the Fang' and the database agrees; Wowhead comments put it near Skum or on the way to Serpentis, the database has one row, at this spot. The bonfires and chests of the export (Large Battered Chest 75293, the Mysterious Wailing Caverns Chest 180055 of the Fortune Awaits quest) are not used by the plan.",
+    "Entry: the portal is area trigger 228 (map 1, -753.6 -2212.8 21.5, radius 13, required level 10; the same trigger row sends to map 43 at -158.441 131.601 -74.2552, the plan's entrance). Unlike Zul'Farrak this dungeon has game_tele rows on both sides: 205 'wc' (map 43, -163.5 132.9 -73.7, inside, the plan's entrance_tele) and 130 'WailingCaverns' (map 1, -731.6 -2218.4 17.0, outside, outside_tele). A GM leader is put inside with `.tele name \u003cbot\u003e wc`; any other leader enters with `cmd enter 228` at the portal (TortoiseBots #939). Row 448 'path1' (137.2 254.0 -100.3) is a GM tele into Naralex's chamber, useful for testing the final event on its own. Wowhead comment: do not pull Lady Anacondra back to the portal, a Druid can get stuck behind it.",
+    "CC and kill order (plan fields): the Druids of the Fang (3840, humanoid, level 19-20, 1450-1550 hp) cast Druid's Slumber (8040: Wowhead says up to 15 s, it can hit the healer) and Sleep (700), Healing Touch (5187) and Lightning Bolt (9532), and run at 15 percent (EventAI 384001, 80 percent of the time; Serpent Form 8041 silences them, so a Druid that turned serpent casts no Slumber): they are cc_priority (the mage's Polymorph), fleers, and Lady Anacondra alone is kill_first (a kill_first entry is never crowd-controlled, so the Druids are not in it); the guide's rule is one Druid at a time, CC the others, burst the one you fight and interrupt Slumber. A Wowhead comment says they resist nature a lot (Earth Shock interrupts resisted). Sleep is a magic effect a priest or shaman removes; a Wowhead comment says paladins cannot before 42 (Cleanse takes poison and disease only). Skum (3674) also runs at 15 percent (EventAI 367402) and is immune to nature (a Wowhead comment: slow him before he gathers adds). Evolving Ectoplasm (3640, type 'not specified', walks as a patrol) cannot be crowd-controlled and becomes immune to a school for 10 s after it is hit by it (npc_evolving_ectoplasm: fire, frost, nature, shadow; a Wowhead comment: immune to roots and snares, and a new slime appears at low health, not in the script): change schools or use physical damage. Deviate Shamblers (5761, type elemental in the database) cast Wild Regeneration at 50 percent hp (kill them fast or interrupt), Deviate Dreadfangs (5056) Terrify (5s fear), Deviate Lashers (5055) Wide Slash, Deviate Adders (5048) poison on hit; the three Pythons at Cobrahn (8886) die to area damage.",
+    "Patrols: 8 patrols of the export (creature_movement waypoints, walking at 2.5 yd/s, closing the loop) are attached to the group they pass nearest (within 40 yd) as the group's patrol, the patrolling mob itself left out of the group's entries. Every period_s was timed on the live walk (full loops, two each, within 3 percent of the estimate at 2.5 yd/s except the Shambler of pythas_b, 82 s instead of 55: it waits at waypoints), so none carries period_estimate any more; the Ectoplasm of anacondra_a group 5 passes its first waypoint twice per loop (12.6 s and 40.9 s), so a phase taken from that waypoint alone is ambiguous. The other five patrols of the export (Kresh, a Deviate Shambler at 22.8 -150.8 off the south road, Kolkar Truthseeker 61966 and two Shamblers of the west wing) are not on the route. Wowhead comments warn of 'a druid and slime patrol that go across the entrance' (the database and the walk have Evolving Ectoplasm patrols and one Druid patrol at the first caves) and of 'one Druid of the Fang who patrols to Cobrahn': it does not exist live either (the only moving Druid with a long path is the one at the first caves, -62.6 288.4 to -50.9 263.8; Druids on the Cobrahn road wander 6 to 9 yd).",
+    "Wowhead differences (the database and the script win): the zone page says level 17-27 and the guide 15-25 (plan band 18-23 from the mobs, level 20-21 bosses); the guide says Serpentis needs no trash (the database has a Druid and a Venomwing 24 yd from him, as the comment about 'a druid and a serpent' says: group 5 of serpentis); the guide's second wave and Mutanus without a third wave (the script: three Moccasins, seven Nightmare Ectoplasm, then Mutanus; a comment counts five ectoplasm); a comment says killing the slimes too fast can stop Mutanus from spawning (the script summons him on a timer, 102 s after the Disciple arrives, unless something else gates it); the guide says Cobrahn's serpent form adds 50 damage and 43 percent attack speed (the script: below 30 percent hp, spell 7965); there is no Druid patrol to Cobrahn live (a comment says there is); Kresh's one ability is a daze (spell 13496, his spell lists are empty in the database).",
+    "RUNNING IT: never dungeon_stop between resumes. A stop (or a stopped run that was not paused) unbinds the party and the instance is lost: dungeon_pause keeps the binding, and a dungeon_run with resume re-enters the same group and instance. The instance and the four Fanglords killed in it are what the Disciple event needs (all four in one lockout; Wowhead comments say a run split over two lockouts cannot start the escort), and every new instance counts toward the account's limit of 5 per hour (the 6th is refused with TRANSFER_ABORT_TOO_MANY_INSTANCES). The first live run (2026-10-15, tests/wc-live-1, before the step-onto-the-floor fix) was clean through leg 4 (Anacondra and Cobrahn dead, no deaths) and stopped at the first step out of Cobrahn's room, -77 467 -67 to -54 477 -61, a 6 yd rise over 20 yd refused 8 times; the entry walk to the portal (the bots stood at z 15-17, the portal point is at z 21.5, the trigger's centre) was refused 'unreachable' 8 times too, which the GM move of the enter phase (a GM account moves the party to the portal) now covers.",
+    "Checks done offline: the plan check (`turtle-agent plan-check --mmaps ~/tb-ci/mmaps-turtle043 wailing_caverns`: every hop, pull look and boss walk on the navmesh; the one gm_cross is exempt from the walk; no warning left), TestWailingCavernsOnNavmesh (the whole route is complete navmesh paths, 6480 yd to every position, and the plan holds the four Fanglords, the four Anacondra spots and the hop), the pull-range test above and the generic plan tests. 107 yd of the road to Cobrahn and 308 yd of the road back are shallow-water polygons (wading, flag ground+water); the walk measured the water level against the ground every 12 yd (113 samples): shallow, max 0.95 yd, never over the knee, no swimming. Still to do: the first run with a party (the hop crossing, Lady Anacondra's other spots when they are up, the Lasher packs added after the walk, the radii of 6 to 10 yd)."
   ],
   "legs": [
     {
-      "name": "lady_anacondra",
-      "to": {"x": -35.4498, "y": 166.32, "z": -96.0822},
+      "name": "anacondra_a",
+      "to": {"x": -117.2, "y": 159.6, "z": -77.4},
       "pull_groups": [
-        {
-          "entries": [3840, 3636, 3637],
-          "positions": [
-            {"x": -35.4498, "y": 166.32, "z": -96.0822},
-            {"x": -33.1695, "y": 163.583, "z": -95.7797},
-            {"x": -32.5351, "y": 173.325, "z": -96.3111}
-          ]
-        },
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -20.5522, "y": 172.007, "z": -104.511}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -11.8997, "y": 158.706, "z": -106.162}
-          ]
-        },
         {
           "entries": [3637],
           "positions": [
-            {"x": 12.7715, "y": 160.489, "z": -87.9237}
-          ]
-        },
-        {
-          "entries": [3636],
-          "positions": [
-            {"x": 33.257, "y": 172.424, "z": -87.8203}
-          ]
-        },
-        {
-          "entries": [3636, 3840],
-          "positions": [
-            {"x": 42.1877, "y": 182.964, "z": -88.6387},
-            {"x": 43.24, "y": 183.35, "z": -88.6997}
-          ]
-        },
-        {
-          "entries": [3636, 3640],
-          "positions": [
-            {"x": 57.4801, "y": 203.98, "z": -90.922},
-            {"x": 60.6739, "y": 207.589, "z": -91.6738}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": 47.5856, "y": 211.85, "z": -88.3816}
-          ]
-        },
-        {
-          "entries": [3637, 3637],
-          "positions": [
-            {"x": 46.9926, "y": 230.126, "z": -88.1589},
-            {"x": 41.8001, "y": 240.641, "z": -88.0936}
-          ]
-        },
-        {
-          "entries": [3637],
-          "positions": [
-            {"x": 30.4972, "y": 269.419, "z": -87.2177}
-          ]
-        },
-        {
-          "entries": [3637, 3637, 3840],
-          "positions": [
-            {"x": 24.2294, "y": 282.763, "z": -87.8932},
-            {"x": 11.5657, "y": 290.13, "z": -87.2999},
-            {"x": 15.2579, "y": 297.216, "z": -87.7785}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -3.19711, "y": 295.743, "z": -85.7169}
-          ]
-        },
-        {
-          "entries": [3637],
-          "positions": [
-            {"x": -10.0511, "y": 307.838, "z": -88.5052}
-          ]
-        },
-        {
-          "entries": [3637],
-          "positions": [
-            {"x": 2.71343, "y": 312.168, "z": -88.8564}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -17.2637, "y": 252.039, "z": -105.43}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -6.12651, "y": 214.864, "z": -106.162}
-          ]
-        },
-        {
-          "entries": [3636, 3840, 3637, 3640, 2914],
-          "positions": [
-            {"x": 12.3886, "y": 212.464, "z": -84.301},
-            {"x": 9.77415, "y": 204.219, "z": -84.1178},
-            {"x": 11.754, "y": 224.16, "z": -84.0361},
-            {"x": 10.4424, "y": 198.408, "z": -84.13},
-            {"x": 20.6008, "y": 199.346, "z": -85.7522}
-          ]
-        },
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -34.6464, "y": 211.374, "z": -96.0663}
-          ]
-        },
-        {
-          "entries": [3636, 3637],
-          "positions": [
-            {"x": -35.0195, "y": 209.613, "z": -96.3626},
-            {"x": -35.1935, "y": 198.074, "z": -96.5795}
-          ]
-        },
-        {
-          "entries": [5048],
-          "positions": [
-            {"x": 23.539, "y": 398.061, "z": -59.4415}
-          ]
-        },
-        {
-          "entries": [8886, 8886, 3840, 2914],
-          "positions": [
-            {"x": 48.5716, "y": 398.164, "z": -62.0791},
-            {"x": 53.4507, "y": 398.248, "z": -63.1031},
-            {"x": 52.4842, "y": 406.466, "z": -63.5316},
-            {"x": 58.6517, "y": 403.444, "z": -63.6037}
-          ]
-        },
-        {
-          "entries": [5048],
-          "positions": [
-            {"x": 65.0605, "y": 436.912, "z": -64.3343}
-          ]
-        },
-        {
-          "entries": [3840, 8886, 8886],
-          "positions": [
-            {"x": 44.3566, "y": 475.754, "z": -65.7403},
-            {"x": 42.0807, "y": 474.962, "z": -65.9024},
-            {"x": 42.8985, "y": 478.459, "z": -65.8646}
-          ]
-        },
-        {
-          "entries": [5048],
-          "positions": [
-            {"x": 28.8139, "y": 454.43, "z": -86.1076}
-          ]
-        },
-        {
-          "entries": [5755, 5755, 2914, 3840],
-          "positions": [
-            {"x": 16.877, "y": 438.591, "z": -80.9217},
-            {"x": 7.16953, "y": 454.912, "z": -78.3128},
-            {"x": 12.5259, "y": 434.743, "z": -78.6792},
-            {"x": 4.95594, "y": 440.255, "z": -74.3418}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3671,
-        "position": {"x": 15.3449, "y": 297.176, "z": -87.7016}
-      }
-    },
-    {
-      "name": "lord_cobrahn",
-      "to": {"x": -63.8051, "y": 417.253, "z": -106.653},
-      "pull_groups": [
-        {
-          "entries": [3640, 2914],
-          "positions": [
-            {"x": -63.8051, "y": 417.253, "z": -106.653},
-            {"x": -75.3009, "y": 415.708, "z": -106.893}
-          ]
-        },
-        {
-          "entries": [5755, 3840, 2914, 8886, 8886, 3840, 3840],
-          "positions": [
-            {"x": -101.546, "y": 453.235, "z": -72.2217},
-            {"x": -102.843, "y": 452.376, "z": -72.3273},
-            {"x": -104.435, "y": 450.954, "z": -72.4535},
-            {"x": -111.757, "y": 444.064, "z": -72.7045},
-            {"x": -114.051, "y": 445.003, "z": -72.699},
-            {"x": -110.118, "y": 451.07, "z": -72.4256},
-            {"x": -113.844, "y": 458.776, "z": -72.0558}
-          ]
-        },
-        {
-          "entries": [5755, 5048, 3840],
-          "positions": [
-            {"x": -87.0938, "y": 468.034, "z": -68.8832},
-            {"x": -79.3177, "y": 471.603, "z": -67.0018},
-            {"x": -73.6613, "y": 475.053, "z": -64.7324}
-          ]
-        },
-        {
-          "entries": [8886, 8886, 8886, 5755, 3840, 2914, 5048],
-          "positions": [
-            {"x": -51.9698, "y": 473.398, "z": -56.9327},
-            {"x": -51.3009, "y": 474.147, "z": -56.7914},
-            {"x": -47.7198, "y": 475.81, "z": -56.0525},
-            {"x": -43.4145, "y": 480.182, "z": -55.1952},
-            {"x": -34.3162, "y": 475.541, "z": -53.8152},
-            {"x": -33.5553, "y": 481.313, "z": -53.8505},
-            {"x": -24.2469, "y": 478.76, "z": -55.1665}
-          ]
-        },
-        {
-          "entries": [5755],
-          "positions": [
-            {"x": -18.6326, "y": 493.574, "z": -54.9087}
-          ]
-        },
-        {
-          "entries": [5048],
-          "positions": [
-            {"x": -8.0912, "y": 470.257, "z": -93.0832}
-          ]
-        },
-        {
-          "entries": [3840, 2914],
-          "positions": [
-            {"x": 27.6848, "y": 504.008, "z": -60.1416},
-            {"x": 28.5456, "y": 506.084, "z": -59.7203}
-          ]
-        },
-        {
-          "entries": [3840, 5048, 5048, 3840],
-          "positions": [
-            {"x": 15.8027, "y": 514.992, "z": -57.204},
-            {"x": 24.8546, "y": 524.537, "z": -57.2604},
-            {"x": 14.5078, "y": 522.024, "z": -57.2001},
-            {"x": 25.1877, "y": 530.925, "z": -56.8843}
-          ]
-        },
-        {
-          "entries": [5048, 3840],
-          "positions": [
-            {"x": -123.674, "y": 412.583, "z": -72.7478},
-            {"x": -127.469, "y": 410.479, "z": -72.6419}
-          ]
-        },
-        {
-          "entries": [8886, 8886, 8886],
-          "positions": [
-            {"x": -149.036, "y": 415.907, "z": -72.7205},
-            {"x": -151.692, "y": 411.987, "z": -72.663},
-            {"x": -153.345, "y": 416.179, "z": -72.6853}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3669,
-        "position": {"x": -151.139, "y": 414.367, "z": -72.6294}
-      }
-    },
-    {
-      "name": "kresh",
-      "to": {"x": -67.8197, "y": 364.356, "z": -106.187},
-      "pull_groups": [
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -67.8197, "y": 364.356, "z": -106.187}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -71.5549, "y": 348.3, "z": -106.162}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -52.2503, "y": 309.452, "z": -106.412}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -55.2565, "y": 274.696, "z": -92.7608}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -50.9113, "y": 263.772, "z": -92.8438}
-          ]
-        },
-        {
-          "entries": [3636],
-          "positions": [
-            {"x": -47.7481, "y": 254.798, "z": -92.8443}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -41.2492, "y": 267.135, "z": -92.588}
-          ]
-        },
-        {
-          "entries": [3636, 2914, 3835, 3636],
-          "positions": [
-            {"x": -72.1507, "y": 214.795, "z": -93.6078},
-            {"x": -67.8561, "y": 207.422, "z": -93.4522},
-            {"x": -81.6378, "y": 202.29, "z": -93.2193},
-            {"x": -73.686, "y": 197.576, "z": -93.9035}
-          ]
-        },
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -79.921, "y": 184.606, "z": -92.4411}
-          ]
-        },
-        {
-          "entries": [3637],
-          "positions": [
-            {"x": -100.82, "y": 181.866, "z": -78.535}
-          ]
-        },
-        {
-          "entries": [3636, 2914, 3636],
-          "positions": [
-            {"x": -105.548, "y": 228.726, "z": -89.8854},
-            {"x": -101.905, "y": 232.8, "z": -91.5832},
-            {"x": -107.012, "y": 240.249, "z": -92.7921}
-          ]
-        },
-        {
-          "entries": [3840, 3840, 5755],
-          "positions": [
-            {"x": -49.5054, "y": 371.389, "z": -59.7145},
-            {"x": -41.1355, "y": 371.373, "z": -59.8345},
-            {"x": -48.7853, "y": 377, "z": -59.784}
-          ]
-        },
-        {
-          "entries": [3640, 2914, 5755, 3840],
-          "positions": [
-            {"x": -39.5612, "y": 400.958, "z": -59.6654},
-            {"x": -26.4563, "y": 405.076, "z": -59.8284},
-            {"x": -34.0201, "y": 411.064, "z": -60.2015},
-            {"x": -27.0351, "y": 420.647, "z": -61.0227}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -2.78621, "y": 419.959, "z": -66.4746}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3653,
-        "position": {"x": -64.4082, "y": 319.084, "z": -106.699}
-      }
-    },
-    {
-      "name": "lord_pythas",
-      "to": {"x": -75.6394, "y": -142.53, "z": -80.9427},
-      "pull_groups": [
-        {
-          "entries": [3640, 5761, 5761],
-          "positions": [
-            {"x": -75.6394, "y": -142.53, "z": -80.9427},
-            {"x": -69.5251, "y": -144.688, "z": -81.6552},
-            {"x": -61.5681, "y": -152.878, "z": -78.7219}
-          ]
-        },
-        {
-          "entries": [5761, 2914, 3840],
-          "positions": [
-            {"x": -49.4982, "y": -184.694, "z": -74.7432},
-            {"x": -43.1579, "y": -186.891, "z": -74.4734},
-            {"x": -35.9738, "y": -188.879, "z": -74.2266}
-          ]
-        },
-        {
-          "entries": [2914, 3840, 5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -5.53486, "y": -197.778, "z": -79.7883},
-            {"x": 2.6055, "y": -194.975, "z": -81.3621},
-            {"x": 7.3927, "y": -193.395, "z": -82.2454},
-            {"x": 4.87711, "y": -207.111, "z": -80.9956},
-            {"x": 10.7953, "y": -202.956, "z": -82.7098},
-            {"x": 14.3814, "y": -194.226, "z": -83.2436}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": 7.50551, "y": -239.335, "z": -74.897}
-          ]
-        },
-        {
-          "entries": [5761, 3840],
-          "positions": [
-            {"x": 22.7005, "y": -238.792, "z": -78.3185},
-            {"x": 30.8969, "y": -242.389, "z": -78.918}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5055, 3840, 3840],
-          "positions": [
-            {"x": 7.63465, "y": -261.772, "z": -69.1068},
-            {"x": 2.54921, "y": -262.221, "z": -68.645},
-            {"x": -4.82069, "y": -255.468, "z": -69.1817},
-            {"x": -3.3672, "y": -264.488, "z": -67.7827},
-            {"x": -11.4551, "y": -260.961, "z": -67.9703},
-            {"x": -17.6659, "y": -269.587, "z": -66.5163}
-          ]
-        },
-        {
-          "entries": [3840, 5761],
-          "positions": [
-            {"x": -29.1347, "y": -264.171, "z": -67.822},
-            {"x": -30.8356, "y": -270.358, "z": -67.4264}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -29.2057, "y": -249.163, "z": -68.4566}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -55.0802, "y": -249.599, "z": -68.6557}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -56.9424, "y": -236.043, "z": -68.8445}
-          ]
-        },
-        {
-          "entries": [3840, 3640],
-          "positions": [
-            {"x": -96.4884, "y": -262.309, "z": -58.1511},
-            {"x": -109.218, "y": -260.432, "z": -59.3047}
-          ]
-        },
-        {
-          "entries": [5756, 2914, 3840, 2914],
-          "positions": [
-            {"x": -123.356, "y": -246.826, "z": -62.0081},
-            {"x": -124.618, "y": -243.066, "z": -62.8639},
-            {"x": -124.628, "y": -240.457, "z": -63.182},
-            {"x": -130.906, "y": -244.259, "z": -64.7158}
-          ]
-        },
-        {
-          "entries": [5756, 3840, 3840],
-          "positions": [
-            {"x": -107.918, "y": -297.238, "z": -62.4053},
-            {"x": -104.047, "y": -305.083, "z": -62.8754},
-            {"x": -101.087, "y": -314.364, "z": -62.4039}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5761, 5055, 5761],
-          "positions": [
-            {"x": 30.3945, "y": -170.816, "z": -83.1614},
-            {"x": 31.7616, "y": -164.023, "z": -82.2103},
-            {"x": 30.6841, "y": -162.294, "z": -81.9008},
-            {"x": 26.621, "y": -155.963, "z": -80.0963},
-            {"x": 36.808, "y": -165.823, "z": -82.9689},
-            {"x": 36.9697, "y": -161.79, "z": -81.4813}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": 22.7648, "y": -150.782, "z": -75.5469}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3670,
-        "position": {"x": 36.8074, "y": -241.064, "z": -79.4989}
-      }
-    },
-    {
-      "name": "skum",
-      "to": {"x": -118.55, "y": -306.559, "z": -63.2057},
-      "pull_groups": [
-        {
-          "entries": [2914, 3840, 5056, 3840],
-          "positions": [
-            {"x": -118.55, "y": -306.559, "z": -63.2057},
-            {"x": -116.649, "y": -315.842, "z": -62.8369},
-            {"x": -126.095, "y": -310.862, "z": -63.1581},
-            {"x": -123.947, "y": -319.379, "z": -62.8578}
-          ]
-        },
-        {
-          "entries": [2914, 5055, 3840, 5055, 5055, 5055],
-          "positions": [
-            {"x": -152.102, "y": -303.074, "z": -64.2866},
-            {"x": -154.25, "y": -307.184, "z": -64.6329},
-            {"x": -154.099, "y": -304.537, "z": -64.4385},
-            {"x": -157.599, "y": -295.351, "z": -63.7677},
-            {"x": -159.93, "y": -293.499, "z": -63.302},
-            {"x": -160.949, "y": -285.363, "z": -62.9216}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -166.816, "y": -246.205, "z": -57.274}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -193.045, "y": -237.753, "z": -70.109}
-          ]
-        },
-        {
-          "entries": [5056, 3840, 2914],
-          "positions": [
-            {"x": -221.03, "y": -248.666, "z": -64.5097},
-            {"x": -229.202, "y": -252.465, "z": -64.517},
-            {"x": -233.259, "y": -253.283, "z": -64.4615}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 3840, 2914, 3840],
-          "positions": [
-            {"x": -220.485, "y": -290.92, "z": -68.8364},
-            {"x": -226.389, "y": -297.445, "z": -70.1544},
-            {"x": -219.849, "y": -301.134, "z": -70.3479},
-            {"x": -219.152, "y": -306.994, "z": -71.0566},
-            {"x": -215.97, "y": -313.343, "z": -72.2215},
-            {"x": -216.289, "y": -320.921, "z": -73.1538}
-          ]
-        },
-        {
-          "entries": [3840, 3840],
-          "positions": [
-            {"x": -264.547, "y": -301.761, "z": -68.3543},
-            {"x": -269.435, "y": -297.775, "z": -67.6666}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5055, 3840, 2914, 3840],
-          "positions": [
-            {"x": -292.851, "y": -245.813, "z": -64.2381},
-            {"x": -299.831, "y": -247.467, "z": -63.6049},
-            {"x": -298.504, "y": -246.468, "z": -63.7644},
-            {"x": -293.022, "y": -237.848, "z": -63.9754},
-            {"x": -307.06, "y": -240.658, "z": -63.1645},
-            {"x": -296.791, "y": -231.84, "z": -64.0705},
-            {"x": -307.049, "y": -232.158, "z": -63.1637}
-          ]
-        },
-        {
-          "entries": [3840, 5756, 5056, 3840],
-          "positions": [
-            {"x": -290.86, "y": -215.104, "z": -63.0903},
-            {"x": -281.583, "y": -219.059, "z": -64.0544},
-            {"x": -280.19, "y": -219.436, "z": -64.2073},
-            {"x": -275.804, "y": -213.695, "z": -63.6744}
-          ]
-        },
-        {
-          "entries": [5056, 3840],
-          "positions": [
-            {"x": -271.463, "y": -179.867, "z": -60.1505},
-            {"x": -264.5, "y": -182.806, "z": -60.4153}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -243.766, "y": -158.635, "z": -63.1701}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -209.561, "y": -195.677, "z": -62.2591}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -192.057, "y": -191.647, "z": -62.1711},
-            {"x": -188.013, "y": -194.516, "z": -61.1482},
-            {"x": -181.605, "y": -204.294, "z": -59.3739},
-            {"x": -179.348, "y": -213.459, "z": -57.1672}
-          ]
-        },
-        {
-          "entries": [5056, 2914, 5756],
-          "positions": [
-            {"x": -151.99, "y": -193.793, "z": -68.517},
-            {"x": -148.34, "y": -206.21, "z": -68.5827},
-            {"x": -144.266, "y": -195.181, "z": -67.9851}
-          ]
-        },
-        {
-          "entries": [2914, 5756, 5056],
-          "positions": [
-            {"x": -177.6, "y": -349.974, "z": -70.5783},
-            {"x": -185.886, "y": -351.144, "z": -71.0647},
-            {"x": -179.899, "y": -352.951, "z": -70.7235}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -300.887, "y": -160.161, "z": -60.5079}
-          ]
-        },
-        {
-          "entries": [5056],
-          "positions": [
-            {"x": -307.428, "y": -147.538, "z": -61.3452}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -322.382, "y": -133.973, "z": -62.2309}
-          ]
-        },
-        {
-          "entries": [3840, 5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -341.952, "y": -118.986, "z": -63.4724},
-            {"x": -339.096, "y": -114.678, "z": -63.547},
-            {"x": -331.749, "y": -106.76, "z": -64.7443},
-            {"x": -336.872, "y": -108.108, "z": -64.4868},
-            {"x": -338.916, "y": -104.232, "z": -64.975}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -350.451, "y": -127.514, "z": -64.1829}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -359.564, "y": -138.201, "z": -51.519}
-          ]
-        },
-        {
-          "entries": [5056],
-          "positions": [
-            {"x": -373.998, "y": -101.075, "z": -65.1572}
-          ]
-        },
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -387.02, "y": -97.69, "z": -63.97}
-          ]
-        },
-        {
-          "entries": [5761, 3640],
-          "positions": [
-            {"x": -390.723, "y": -66.3585, "z": -65.282},
-            {"x": -385.271, "y": -64.3783, "z": -65.0729}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -413.596, "y": -163.84, "z": -64.9069}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -383.478, "y": -189.682, "z": -63.1611}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -402.599, "y": -202.808, "z": -64.9023}
-          ]
-        },
-        {
-          "entries": [61218, 3835],
-          "positions": [
-            {"x": -392.745, "y": -216.297, "z": -64.102},
-            {"x": -400.222, "y": -224.873, "z": -65.2887}
-          ]
-        },
-        {
-          "entries": [61965, 5756, 5056, 5053, 3835],
-          "positions": [
-            {"x": -419.561, "y": -218.046, "z": -65.5732},
-            {"x": -422.862, "y": -226.809, "z": -65.5507},
-            {"x": -420.597, "y": -210.897, "z": -65.0571},
-            {"x": -417.628, "y": -201.897, "z": -66.2819},
-            {"x": -424.742, "y": -195.472, "z": -64.9612}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -436.733, "y": -214.257, "z": -65.1302}
-          ]
-        },
-        {
-          "entries": [61964, 61964, 61964],
-          "positions": [
-            {"x": -460.722, "y": -187.867, "z": -64.9744},
-            {"x": -459.403, "y": -181.059, "z": -64.8943},
-            {"x": -464.334, "y": -181.311, "z": -64.839}
-          ]
-        },
-        {
-          "entries": [5055],
-          "positions": [
-            {"x": -471.598, "y": -162.354, "z": -65.0802}
-          ]
-        },
-        {
-          "entries": [5055],
-          "positions": [
-            {"x": -486.23, "y": -177.218, "z": -65.2119}
-          ]
-        },
-        {
-          "entries": [61964],
-          "positions": [
-            {"x": -501.685, "y": -161.426, "z": -66.1228}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -495.334, "y": -149.092, "z": -66.1875}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -512.349, "y": -139.365, "z": -66.7747}
-          ]
-        },
-        {
-          "entries": [61964],
-          "positions": [
-            {"x": -525.864, "y": -140.352, "z": -66.7211}
-          ]
-        },
-        {
-          "entries": [3641, 3641],
-          "positions": [
-            {"x": -530.014, "y": -119.222, "z": -72.4943},
-            {"x": -518.865, "y": -119.183, "z": -71.9297}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -523.755, "y": -101.904, "z": -67.4382}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -530.141, "y": -99.3593, "z": -66.8329}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 61964, 5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -532.618, "y": -88.0268, "z": -67.2},
-            {"x": -526.112, "y": -87.5501, "z": -67.2355},
-            {"x": -525.373, "y": -81.7786, "z": -67.6859},
-            {"x": -532.349, "y": -81.0774, "z": -67.8132},
-            {"x": -520.935, "y": -82.426, "z": -67.6727},
-            {"x": -528.276, "y": -78.201, "z": -67.9312},
-            {"x": -523.821, "y": -78.0487, "z": -67.8399}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -531.607, "y": -53.6559, "z": -68.3973}
-          ]
-        },
-        {
-          "entries": [61964],
-          "positions": [
-            {"x": -499.267, "y": -33.9178, "z": -68.2893}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -510.31, "y": -22.1566, "z": -68.3097}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3674,
-        "position": {"x": -285.65, "y": -313.706, "z": -69.1692}
-      }
-    },
-    {
-      "name": "lord_serpentis",
-      "to": {"x": -229.071, "y": -148.309, "z": -62.7342},
-      "pull_groups": [
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -229.071, "y": -148.309, "z": -62.7342}
-          ]
-        },
-        {
-          "entries": [5761, 3840, 5761, 2914],
-          "positions": [
-            {"x": -172.206, "y": -91.6923, "z": -67.4046},
-            {"x": -174.366, "y": -87.5045, "z": -67.7942},
-            {"x": -172.858, "y": -82.2607, "z": -67.712},
-            {"x": -173.806, "y": -81.3373, "z": -67.728}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 3840, 5055],
-          "positions": [
-            {"x": -156.364, "y": -53.7249, "z": -76.8518},
-            {"x": -162.489, "y": -50.1081, "z": -77.0771},
-            {"x": -154.376, "y": -48.0688, "z": -78.6814},
-            {"x": -145.986, "y": -50.8781, "z": -78.394},
-            {"x": -155.75, "y": -42.8997, "z": -79.8168}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -133.477, "y": -31.7903, "z": -76.8896}
-          ]
-        },
-        {
-          "entries": [5055, 2914, 5055, 5055],
-          "positions": [
-            {"x": -146.264, "y": -10.8986, "z": -76.394},
-            {"x": -156.817, "y": -15.7387, "z": -78.3735},
-            {"x": -149.995, "y": -6.08904, "z": -75.9062},
-            {"x": -148.464, "y": 2.19205, "z": -74.6398}
-          ]
-        },
-        {
-          "entries": [3835, 5053],
-          "positions": [
-            {"x": -156.509, "y": 23.1453, "z": -106.709},
-            {"x": -153.236, "y": 23.7394, "z": -106.046}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -183.233, "y": -5.77217, "z": -106.29}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -203.663, "y": -5.26961, "z": -105.774}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -194.996, "y": 12.4077, "z": -105.238}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -235.916, "y": -9.51305, "z": -105.674}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -249.33, "y": -17.1887, "z": -105.661}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -251.568, "y": 4.82494, "z": -106.714}
-          ]
-        },
-        {
-          "entries": [3835, 5053],
-          "positions": [
-            {"x": -272.907, "y": -7.84298, "z": -106.515},
-            {"x": -273.694, "y": -7.56099, "z": -106.364}
-          ]
-        },
-        {
-          "entries": [5761, 3840],
-          "positions": [
-            {"x": -264.569, "y": 37.9848, "z": -87.4082},
-            {"x": -265.864, "y": 43.1378, "z": -87.6643}
-          ]
-        },
-        {
-          "entries": [3840, 5761, 3840, 2914],
-          "positions": [
-            {"x": -231.16, "y": 50.7519, "z": -82.7315},
-            {"x": -220.385, "y": 49.296, "z": -82.3229},
-            {"x": -218.568, "y": 44.9012, "z": -82.2887},
-            {"x": -217.94, "y": 40.5644, "z": -82.3352}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -218.221, "y": 51.4199, "z": -82.3402}
-          ]
-        },
-        {
-          "entries": [5756],
-          "positions": [
-            {"x": -219.854, "y": 58.6887, "z": -48.9416}
-          ]
-        },
-        {
-          "entries": [3640],
-          "positions": [
-            {"x": -206.648, "y": 58.6654, "z": -49.4123}
-          ]
-        },
-        {
-          "entries": [2914, 5055, 3840, 5055, 5055],
-          "positions": [
-            {"x": -192.926, "y": 60.6825, "z": -47.9713},
-            {"x": -193.302, "y": 63.3435, "z": -47.9201},
-            {"x": -191.842, "y": 61.3256, "z": -47.7267},
-            {"x": -190.234, "y": 66.342, "z": -47.4872},
-            {"x": -185.325, "y": 65.2722, "z": -46.2168}
-          ]
-        },
-        {
-          "entries": [5756, 3840],
-          "positions": [
-            {"x": -193.656, "y": 43.2439, "z": -47.9388},
-            {"x": -198.346, "y": 34.6839, "z": -49.1724}
-          ]
-        },
-        {
-          "entries": [5056],
-          "positions": [
-            {"x": -145.744, "y": 2.36266, "z": -28.5646}
-          ]
-        },
-        {
-          "entries": [5756, 3840],
-          "positions": [
-            {"x": -111.045, "y": -16.0654, "z": -28.4545},
-            {"x": -102.14, "y": -8.77391, "z": -29.1185}
-          ]
-        },
-        {
-          "entries": [3840, 3840, 5055, 5055, 5761, 5055],
-          "positions": [
-            {"x": -74.9697, "y": -39.5402, "z": -59.3461},
-            {"x": -63.3064, "y": -26.7975, "z": -59.5822},
-            {"x": -68.4069, "y": -39.3043, "z": -60.7368},
-            {"x": -61.7184, "y": -37.6639, "z": -61.8105},
-            {"x": -57.7861, "y": -31.1825, "z": -60.8841},
-            {"x": -60.5177, "y": -42.8552, "z": -62.6483}
-          ]
-        },
-        {
-          "entries": [5761, 3840],
-          "positions": [
-            {"x": -37.4441, "y": -48.2186, "z": -65.3351},
-            {"x": -32.1023, "y": -44.1422, "z": -64.9763}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -27.5634, "y": -67.0949, "z": -67.0457}
-          ]
-        },
-        {
-          "entries": [5761, 5055, 5055, 5055, 5055, 2914, 3840],
-          "positions": [
-            {"x": -34.1276, "y": -102.592, "z": -71.2142},
-            {"x": -35.6954, "y": -102.823, "z": -71.1393},
-            {"x": -35.1866, "y": -109.43, "z": -71.5824},
-            {"x": -40.8706, "y": -109.559, "z": -70.794},
-            {"x": -35.2855, "y": -115.286, "z": -71.646},
-            {"x": -42.2102, "y": -115.005, "z": -70.9481},
-            {"x": -39.2192, "y": -118.272, "z": -71.3657}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -57.3268, "y": -123.082, "z": -69.3712}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -102.971, "y": -160.908, "z": -67.5989}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -128.641, "y": -185.705, "z": -68.2838}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -140.355, "y": -181.34, "z": -68.152}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -120.675, "y": -129.028, "z": -66.9905}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -120.548, "y": -100.983, "z": -72.7718}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -102.949, "y": -62.0252, "z": -66.7835}
-          ]
-        },
-        {
-          "entries": [5056],
-          "positions": [
-            {"x": -304.704, "y": -104.276, "z": -63.8065}
-          ]
-        },
-        {
-          "entries": [3840, 5056, 2914],
-          "positions": [
-            {"x": -331.511, "y": -79.2574, "z": -65.6617},
-            {"x": -333.949, "y": -72.1648, "z": -65.4133},
-            {"x": -334.276, "y": -66.2257, "z": -65.0929}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -402.507, "y": -35.4831, "z": -65.1995},
-            {"x": -403.392, "y": -27.0454, "z": -65.1003},
-            {"x": -408.717, "y": -35.7006, "z": -65.4091},
-            {"x": -407.02, "y": -31.3419, "z": -65.2864},
-            {"x": -409.791, "y": -29.3127, "z": -65.3459}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 61964, 61964],
-          "positions": [
-            {"x": -425.113, "y": -1.1531, "z": -65.4219},
-            {"x": -423.156, "y": 2.50218, "z": -65.3012},
-            {"x": -426.682, "y": -0.173745, "z": -65.4587},
-            {"x": -424.005, "y": 4.47639, "z": -65.2978}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -453.209, "y": -1.26086, "z": -66.3524}
-          ]
-        },
-        {
-          "entries": [3835],
-          "positions": [
-            {"x": -459.255, "y": 14.5376, "z": -66.311}
-          ]
-        },
-        {
-          "entries": [5761],
-          "positions": [
-            {"x": -469.867, "y": -5.44443, "z": -66.9687}
-          ]
-        },
-        {
-          "entries": [3640, 3640],
-          "positions": [
-            {"x": -472.88, "y": -4.30502, "z": -67.0501},
-            {"x": -470.663, "y": -10.9263, "z": -67.0292}
-          ]
-        },
-        {
-          "entries": [3840, 5761, 3640],
-          "positions": [
-            {"x": -352.573, "y": 22.6263, "z": -100.832},
-            {"x": -345.685, "y": 22.6036, "z": -101.262},
-            {"x": -344.548, "y": 24.5073, "z": -101.101}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -338.159, "y": 35.1821, "z": -99.0124}
-          ]
-        },
-        {
-          "entries": [5761, 3840],
-          "positions": [
-            {"x": -335.412, "y": 50.9614, "z": -97.7736},
-            {"x": -343.81, "y": 51.4949, "z": -98.5811}
-          ]
-        },
-        {
-          "entries": [3840],
-          "positions": [
-            {"x": -352.826, "y": 43.2932, "z": -100.082}
-          ]
-        }
-      ],
-      "skip": [5912],
-      "boss": {
-        "entry": 3673,
-        "position": {"x": -120.163, "y": -24.624, "z": -28.5832}
-      }
-    },
-    {
-      "name": "verdan_the_everliving",
-      "to": {"x": -102.589, "y": 10.9208, "z": -30.5688},
-      "pull_groups": [
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -102.589, "y": 10.9208, "z": -30.5688}
-          ]
-        },
-        {
-          "entries": [5055, 5055, 5055, 5055],
-          "positions": [
-            {"x": -154.144, "y": 63.737, "z": -75.7394},
-            {"x": -154.607, "y": 68.7036, "z": -75.7838},
-            {"x": -160.308, "y": 70.941, "z": -75.8312},
-            {"x": -159.049, "y": 75.5833, "z": -75.9573}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -143.996, "y": 68.7025, "z": -106.276}
-          ]
-        },
-        {
-          "entries": [3835, 5053],
-          "positions": [
-            {"x": -152.71, "y": 50.6044, "z": -105.733},
-            {"x": -161.456, "y": 51.8247, "z": -106.014}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -107.206, "y": 68.6795, "z": -106.445}
-          ]
+            {"x": -100.8, "y": 181.9, "z": -78.5}
+          ],
+          "radius": 21.8
         },
         {
           "entries": [3636, 3636],
           "positions": [
-            {"x": -78.9073, "y": 103.428, "z": -91.1674},
-            {"x": -70.9806, "y": 106.58, "z": -89.0136}
-          ]
-        },
-        {
-          "entries": [3840, 3637],
-          "positions": [
-            {"x": -70.7889, "y": 120.073, "z": -89.6736},
-            {"x": -70.5127, "y": 129.642, "z": -90.603}
+            {"x": -105.5, "y": 228.7, "z": -89.9},
+            {"x": -107, "y": 240.2, "z": -92.8}
           ]
         },
         {
           "entries": [3636],
           "positions": [
-            {"x": -53.6357, "y": 119.14, "z": -89.5286}
-          ]
+            {"x": -72.2, "y": 214.8, "z": -93.6}
+          ],
+          "radius": 13.8
         },
         {
-          "entries": [2914, 3636],
+          "entries": [3636],
           "positions": [
-            {"x": -53.4452, "y": 135.758, "z": -90.9473},
-            {"x": -60.7857, "y": 138.19, "z": -91.5768}
-          ]
-        },
-        {
-          "entries": [5053],
-          "positions": [
-            {"x": -39.1155, "y": 113.401, "z": -106.162}
-          ]
+            {"x": -73.7, "y": 197.6, "z": -93.9}
+          ],
+          "radius": 13.8,
+          "patrol": {
+            "entries": [3640],
+            "path": [
+              {"x": -78.9, "y": 187.6, "z": -93.6},
+              {"x": -72, "y": 199.3, "z": -93.7},
+              {"x": -66.7, "y": 205, "z": -93.6},
+              {"x": -79.1, "y": 223.2, "z": -93.8},
+              {"x": -67.1, "y": 207, "z": -93.4},
+              {"x": -70.6, "y": 200.4, "z": -93.7}
+            ],
+            "period_s": 34,
+            "source": "creature_movement guid 26200 (entry 3640); period_s measured on the live walk 2026-10-15 (full loops: 34.4, 33.9 s)"
+          }
         },
         {
           "entries": [3637, 3636],
           "positions": [
-            {"x": -25.0021, "y": 97.1956, "z": -90.5906},
-            {"x": -27.8819, "y": 85.0184, "z": -91.3052}
-          ]
+            {"x": -35.2, "y": 198.1, "z": -96.6},
+            {"x": -35, "y": 209.6, "z": -96.4}
+          ],
+          "radius": 21.4,
+          "patrol": {
+            "entries": [3640],
+            "path": [
+              {"x": -34.6, "y": 211.4, "z": -96.1},
+              {"x": -34.6, "y": 211.4, "z": -96.1},
+              {"x": -36.7, "y": 249.3, "z": -93.3},
+              {"x": -30.9, "y": 227.6, "z": -95.1},
+              {"x": -47.9, "y": 205.5, "z": -96},
+              {"x": -37.2, "y": 213.2, "z": -96.2},
+              {"x": -32.3, "y": 228.2, "z": -95}
+            ],
+            "period_s": 54,
+            "source": "creature_movement guid 26229 (entry 3640); period_s measured on the live walk 2026-10-15 (full loops: 53.5 s)"
+          }
+        },
+        {
+          "entries": [3636, 3637, 3840],
+          "positions": [
+            {"x": -33.2, "y": 163.6, "z": -95.8},
+            {"x": -32.5, "y": 173.3, "z": -96.3},
+            {"x": -35.4, "y": 166.3, "z": -96.1}
+          ],
+          "radius": 11.1
+        },
+        {
+          "entries": [3636],
+          "positions": [
+            {"x": -60.8, "y": 138.2, "z": -91.6}
+          ],
+          "radius": 9.5
+        },
+        {
+          "entries": [3636],
+          "positions": [
+            {"x": -53.6, "y": 119.1, "z": -89.5}
+          ],
+          "radius": 11.1
+        },
+        {
+          "entries": [3840, 3637, 3671],
+          "positions": [
+            {"x": -70.8, "y": 120.1, "z": -89.7},
+            {"x": -70.5, "y": 129.6, "z": -90.6},
+            {"x": -67.8, "y": 122.6, "z": -89.9}
+          ],
+          "radius": 9.5
+        },
+        {
+          "entries": [3636, 3636],
+          "positions": [
+            {"x": -71, "y": 106.6, "z": -89},
+            {"x": -78.9, "y": 103.4, "z": -91.2}
+          ],
+          "radius": 10
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "Cave mouth to the first of Lady Anacondra's four spots: trash of Deviate Ravagers (3636, beasts), Guardians (3637) and Druids of the Fang, and two Evolving Ectoplasm patrols (groups 4 and 5). Group 9 is her spot 1 (-67.8 122.6 -89.9): the pack of a Druid of the Fang and a Guardian with her as a member when she is up there; Polymorph the Druid (cc_priority) and kill her first (kill_first), interrupt Sleep (700) and Lightning Bolt (9532) and Healing Touch (5187); Thorns Aura (8148) is not interruptible. The Disciple of Naralex (3678) stands 25 yd from the entrance point at -135 125.4 -78.1 (friendly, skip) and is not pulled: his gossip is the event after Verdan."
+      ]
+    },
+    {
+      "name": "anacondra_b",
+      "to": {"x": -50, "y": 117.3, "z": -88.5},
+      "pull_groups": [
+        {
+          "entries": [3637, 3636],
+          "positions": [
+            {"x": -25, "y": 97.2, "z": -90.6},
+            {"x": -27.9, "y": 85, "z": -91.3}
+          ],
+          "radius": 23
+        },
+        {
+          "entries": [3637],
+          "positions": [
+            {"x": 12.8, "y": 160.5, "z": -87.9}
+          ],
+          "radius": 20.2
+        },
+        {
+          "entries": [3636],
+          "positions": [
+            {"x": 33.3, "y": 172.4, "z": -87.8}
+          ],
+          "radius": 10.3
+        },
+        {
+          "entries": [3840, 3636, 3671],
+          "positions": [
+            {"x": 43.2, "y": 183.3, "z": -88.7},
+            {"x": 42.2, "y": 183, "z": -88.6},
+            {"x": 46.5, "y": 184, "z": -89.2}
+          ],
+          "radius": 10.3
+        },
+        {
+          "entries": [3636, 3640],
+          "positions": [
+            {"x": 57.5, "y": 204, "z": -90.9},
+            {"x": 60.7, "y": 207.6, "z": -91.7}
+          ],
+          "radius": 9.4
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": 47.6, "y": 211.8, "z": -88.4}
+          ],
+          "radius": 9.4
+        },
+        {
+          "entries": [3637, 3637],
+          "positions": [
+            {"x": 47, "y": 230.1, "z": -88.2},
+            {"x": 41.8, "y": 240.6, "z": -88.1}
+          ],
+          "radius": 14.8
+        },
+        {
+          "entries": [3637],
+          "positions": [
+            {"x": 30.5, "y": 269.4, "z": -87.2}
+          ],
+          "radius": 11.3
+        },
+        {
+          "entries": [3637, 3637, 3840, 3671],
+          "positions": [
+            {"x": 24.2, "y": 282.8, "z": -87.9},
+            {"x": 11.6, "y": 290.1, "z": -87.3},
+            {"x": 15.3, "y": 297.2, "z": -87.8},
+            {"x": 15.3, "y": 297.2, "z": -87.7}
+          ],
+          "radius": 11.3
+        },
+        {
+          "entries": [3637],
+          "positions": [
+            {"x": 2.7, "y": 312.2, "z": -88.9}
+          ],
+          "radius": 10
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "Spots 2 (group 4: 46.5 184.0, with a Druid and a Ravager) and 3 (group 9: 15.3 297.2, with a Druid sitting on her spawn and two Guardians) of Lady Anacondra. If she is up she is pulled with the pack. The guides say she calls every raptor within about 100 yd when pulled, so the trash before her spot is cleared first (not in the database's EventAI, which has only her yell and her Nature Channeling 13236 out of combat); a second Druid in the fight is CC'd at once ('one Sleep can be dealt with, two or more will wipe you'). Her spells: Thorns Aura 8148, Healing Touch 5187, Sleep 700 (interrupt it) and Lightning Bolt 9532."
+      ]
+    },
+    {
+      "name": "cobrahn_a",
+      "to": {"x": 12.3, "y": 297.5, "z": -87.3},
+      "pull_groups": [
+        {
+          "entries": [3637],
+          "positions": [
+            {"x": -10.1, "y": 307.8, "z": -88.5}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [3636, 3840, 3671],
+          "positions": [
+            {"x": -47.7, "y": 254.8, "z": -92.8},
+            {"x": -55.3, "y": 274.7, "z": -92.8},
+            {"x": -54, "y": 271.4, "z": -92.8}
+          ],
+          "patrol": {
+            "entries": [3840],
+            "path": [
+              {"x": -50.9, "y": 263.8, "z": -92.8},
+              {"x": -41, "y": 280, "z": -92.4},
+              {"x": -62.6, "y": 288.4, "z": -91},
+              {"x": -64.7, "y": 265.9, "z": -92.8}
+            ],
+            "period_s": 32,
+            "source": "creature_movement guid 26239 (entry 3840); period_s measured on the live walk 2026-10-15 (full loops: 33.0, 31.3 s)"
+          }
         },
         {
           "entries": [5053],
           "positions": [
-            {"x": -50.4928, "y": 81.6887, "z": -106.162}
+            {"x": -6.1, "y": 214.9, "z": -106.2}
+          ],
+          "patrol": {
+            "entries": [3640],
+            "path": [
+              {"x": -20.6, "y": 172, "z": -104.5},
+              {"x": -21.5, "y": 186, "z": -103.3},
+              {"x": -19, "y": 201.2, "z": -99.1},
+              {"x": -18.5, "y": 221.1, "z": -103.1},
+              {"x": -23.3, "y": 258.8, "z": -104.3},
+              {"x": -18.5, "y": 221.1, "z": -103.1},
+              {"x": -19, "y": 201.2, "z": -99.1},
+              {"x": -21.5, "y": 186, "z": -103.3}
+            ],
+            "period_s": 71,
+            "source": "creature_movement guid 26228 (entry 3640); period_s measured on the live walk 2026-10-15 (full loops: 70.6, 71.8 s)"
+          }
+        },
+        {
+          "entries": [5053],
+          "positions": [
+            {"x": -71.6, "y": 348.3, "z": -106.2}
           ]
         },
         {
-          "entries": [3835],
+          "entries": [3640],
           "positions": [
-            {"x": -40.737, "y": 41.8924, "z": -118.327}
+            {"x": -63.8, "y": 417.3, "z": -106.7}
           ]
         },
         {
-          "entries": [3835],
+          "entries": [5048],
           "positions": [
-            {"x": -25.7922, "y": 142.231, "z": -105.805}
+            {"x": -8.1, "y": 470.3, "z": -93.1}
+          ],
+          "radius": 22.7
+        },
+        {
+          "entries": [5048],
+          "positions": [
+            {"x": 28.8, "y": 454.4, "z": -86.1}
+          ],
+          "radius": 17
+        },
+        {
+          "entries": [5755],
+          "positions": [
+            {"x": 16.9, "y": 438.6, "z": -80.9}
+          ],
+          "radius": 10.2
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "Group 2 is spot 4 of Lady Anacondra (-54.0 271.4 -92.8; with a Ravager and the patrolling Druid's pack); the escort of the later event does its Cleansing there (the Disciple stops at -54 276.2 -92.8 and three vipers are summoned). From the ledge the way to Cobrahn drops to the river (z -106). Kresh the turtle (3653, neutral, guid 27368) walks a 526 yd loop in that river at -64 319 -106: skip, never pulled."
+      ]
+    },
+    {
+      "name": "cobrahn_b",
+      "to": {"x": 23.8, "y": 451.3, "z": -83.9},
+      "pull_groups": [
+        {
+          "entries": [3840, 5755],
+          "positions": [
+            {"x": 5, "y": 440.3, "z": -74.3},
+            {"x": 7.2, "y": 454.9, "z": -78.3}
+          ],
+          "radius": 10.2
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -2.8, "y": 420, "z": -66.5}
+          ],
+          "radius": 19.6
+        },
+        {
+          "entries": [5755, 3640, 3840],
+          "positions": [
+            {"x": -34, "y": 411.1, "z": -60.2},
+            {"x": -39.6, "y": 401, "z": -59.7},
+            {"x": -27, "y": 420.6, "z": -61}
+          ],
+          "radius": 21.4
+        },
+        {
+          "entries": [5048],
+          "positions": [
+            {"x": 23.5, "y": 398.1, "z": -59.4}
+          ],
+          "radius": 21.7
+        },
+        {
+          "entries": [8886, 8886, 3840],
+          "positions": [
+            {"x": 48.6, "y": 398.2, "z": -62.1},
+            {"x": 53.5, "y": 398.2, "z": -63.1},
+            {"x": 52.5, "y": 406.5, "z": -63.5}
+          ],
+          "radius": 21.7
+        },
+        {
+          "entries": [5048],
+          "positions": [
+            {"x": 65.1, "y": 436.9, "z": -64.3}
           ]
         },
         {
-          "entries": [2914],
+          "entries": [8886, 8886, 3840],
           "positions": [
-            {"x": -114.89, "y": 141.104, "z": -80.7141}
+            {"x": 42.9, "y": 478.5, "z": -65.9},
+            {"x": 42.1, "y": 475, "z": -65.9},
+            {"x": 44.4, "y": 475.8, "z": -65.7}
           ]
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "The road north climbs in a loop from the river at z -106 to z -54 (the plan check walks it): Deviate Adders (5048), Vipers (5755) and Pythons (8886) with Druids of the Fang (3840: Slumber and Sleep, kill or Polymorph first)."
+      ]
+    },
+    {
+      "name": "cobrahn_c",
+      "to": {"x": 34.8, "y": 473.7, "z": -66.3},
+      "pull_groups": [
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": 27.7, "y": 504, "z": -60.1}
+          ],
+          "radius": 12.9
         },
         {
-          "entries": [61967],
+          "entries": [3840, 5048, 3840, 5048],
           "positions": [
-            {"x": 7.02236, "y": -36.668, "z": -63.3573}
-          ]
+            {"x": 15.8, "y": 515, "z": -57.2},
+            {"x": 14.5, "y": 522, "z": -57.2},
+            {"x": 25.2, "y": 530.9, "z": -56.9},
+            {"x": 24.9, "y": 524.5, "z": -57.3}
+          ],
+          "radius": 12.9
         },
         {
-          "entries": [61966],
+          "entries": [5755],
           "positions": [
-            {"x": 13.9985, "y": -36.334, "z": -63.577}
-          ]
+            {"x": -18.6, "y": 493.6, "z": -54.9}
+          ],
+          "radius": 12.3
         },
         {
-          "entries": [61966],
+          "entries": [5755, 8886, 8886, 8886, 3840, 5048],
           "positions": [
-            {"x": 29.9702, "y": -36.0248, "z": -65.7584}
-          ]
+            {"x": -43.4, "y": 480.2, "z": -55.2},
+            {"x": -52, "y": 473.4, "z": -56.9},
+            {"x": -51.3, "y": 474.1, "z": -56.8},
+            {"x": -47.7, "y": 475.8, "z": -56.1},
+            {"x": -34.3, "y": 475.5, "z": -53.8},
+            {"x": -24.2, "y": 478.8, "z": -55.2}
+          ],
+          "radius": 12.3
         },
         {
-          "entries": [61967, 61967],
+          "entries": [3840, 5048, 5755],
           "positions": [
-            {"x": 27.6245, "y": -18.1297, "z": -65.744},
-            {"x": 37.1227, "y": -18.7537, "z": -65.9678}
-          ]
+            {"x": -73.7, "y": 475.1, "z": -64.7},
+            {"x": -79.3, "y": 471.6, "z": -67},
+            {"x": -87.1, "y": 468, "z": -68.9}
+          ],
+          "radius": 17.5
         },
         {
-          "entries": [61966],
+          "entries": [8886, 8886, 5755, 3840, 3840, 3840],
           "positions": [
-            {"x": 64.8156, "y": -6.74506, "z": -66.5144}
-          ]
+            {"x": -114.1, "y": 445, "z": -72.7},
+            {"x": -111.8, "y": 444.1, "z": -72.7},
+            {"x": -101.5, "y": 453.2, "z": -72.2},
+            {"x": -110.1, "y": 451.1, "z": -72.4},
+            {"x": -113.8, "y": 458.8, "z": -72.1},
+            {"x": -102.8, "y": 452.4, "z": -72.3}
+          ],
+          "radius": 17.5
         },
         {
-          "entries": [61966],
+          "entries": [5048, 3840],
           "positions": [
-            {"x": 74.2049, "y": 9.04894, "z": -66.6951}
-          ]
+            {"x": -123.7, "y": 412.6, "z": -72.7},
+            {"x": -127.5, "y": 410.5, "z": -72.6}
+          ],
+          "radius": 18.7
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "boss": {
+        "entry": 3669,
+        "position": {"x": -151.1, "y": 414.4, "z": -72.6},
+        "first": [8886],
+        "tactics": {
+          "interrupt": [8040, 9532, 5187]
+        }
+      },
+      "notes": [
+        "Lord Cobrahn (3669, -151.1 414.4 -72.6, humanoid druid, level 20, 4389 hp): his three Deviate Pythons (8886, level 18-19, not elite, 3 yd from him) are his first, so the party uses area damage on them before it turns to him; Cobrahn casts Druid's Slumber (8040, an 8 s sleep on one member; interrupt it first, especially when the target is the healer), Lightning Bolt (9532) and Healing Touch (5187), and below 30 percent hp changes into a serpent for a while (EventAI 366903, Cobrahn Serpent Form 7965: Wowhead says +50 damage and +43 percent attack speed) and then back. His gem is part of the Leaders of the Fang quest."
+      ]
+    },
+    {
+      "name": "pythas_a",
+      "to": {"x": -21.3, "y": 183.4, "z": -103.6},
+      "pull_groups": [
+        {
+          "entries": [5053],
+          "positions": [
+            {"x": -11.9, "y": 158.7, "z": -106.2}
+          ],
+          "radius": 12.5
         },
         {
-          "entries": [61968, 61967],
+          "entries": [5053],
           "positions": [
-            {"x": 81.8831, "y": 27.0326, "z": -66.8408},
-            {"x": 91.9622, "y": 21.06, "z": -67.0442}
-          ]
+            {"x": -50.5, "y": 81.7, "z": -106.2}
+          ],
+          "radius": 23.8
         },
         {
-          "entries": [61967, 3835],
+          "entries": [5053],
           "positions": [
-            {"x": 97.1138, "y": -3.38623, "z": -67.1581},
-            {"x": 99.5229, "y": -5.98956, "z": -67.2059}
-          ]
+            {"x": -107.2, "y": 68.7, "z": -106.4}
+          ],
+          "patrol": {
+            "entries": [5053],
+            "path": [
+              {"x": -144, "y": 68.7, "z": -106.3},
+              {"x": -99.1, "y": 68.7, "z": -106.2},
+              {"x": -61.2, "y": 72.8, "z": -106.2},
+              {"x": -99.1, "y": 68.7, "z": -106.2}
+            ],
+            "period_s": 66,
+            "source": "creature_movement guid 26197 (entry 5053); period_s measured on the live walk 2026-10-15 (full loops: 66.9, 65.5 s)"
+          }
         },
         {
-          "entries": [61967],
+          "entries": [5053],
           "positions": [
-            {"x": 98.0935, "y": -28.8217, "z": -67.1263}
-          ]
+            {"x": -161.5, "y": 51.8, "z": -106}
+          ],
+          "radius": 20.8
         },
         {
-          "entries": [3835],
+          "entries": [5053],
           "positions": [
-            {"x": 88.1056, "y": -35.7165, "z": -66.525}
-          ]
+            {"x": -203.7, "y": -5.3, "z": -105.8}
+          ],
+          "radius": 16.9
         },
         {
-          "entries": [61966],
+          "entries": [5053],
           "positions": [
-            {"x": 66.3422, "y": -30.5244, "z": -66.5545}
+            {"x": -249.3, "y": -17.2, "z": -105.7}
+          ],
+          "radius": 22.7
+        },
+        {
+          "entries": [5053],
+          "positions": [
+            {"x": -273.7, "y": -7.6, "z": -106.4}
+          ],
+          "radius": 22.7
+        },
+        {
+          "entries": [5761, 3840, 3640],
+          "positions": [
+            {"x": -345.7, "y": 22.6, "z": -101.3},
+            {"x": -352.6, "y": 22.6, "z": -100.8},
+            {"x": -344.5, "y": 24.5, "z": -101.1}
+          ],
+          "radius": 17.1
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "The long way back, 1300 yd from Cobrahn to the first group: seven lone Deviate Crocolisks (5053, beasts, one of them a patrol) stand in the river from the cave mouth to the west loop (about 300 yd of it is shallow water the party wades through), then the west loop with Shamblers and Druids (x -345 to -218)."
+      ]
+    },
+    {
+      "name": "pythas_b",
+      "to": {"x": -314.4, "y": 18.4, "z": -105.3},
+      "pull_groups": [
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -352.8, "y": 43.3, "z": -100.1}
+          ],
+          "radius": 8.8
+        },
+        {
+          "entries": [5761, 3840],
+          "positions": [
+            {"x": -335.4, "y": 51, "z": -97.8},
+            {"x": -343.8, "y": 51.5, "z": -98.6}
+          ],
+          "radius": 8.8
+        },
+        {
+          "entries": [3840, 5761],
+          "positions": [
+            {"x": -265.9, "y": 43.1, "z": -87.7},
+            {"x": -264.6, "y": 38, "z": -87.4}
           ]
         },
         {
           "entries": [3840, 3840, 5761],
           "positions": [
-            {"x": 1.87046, "y": -58.759, "z": -66.0505},
-            {"x": -6.64961, "y": -53.048, "z": -65.562},
-            {"x": -6.09599, "y": -60.787, "z": -67.2247}
+            {"x": -218.6, "y": 44.9, "z": -82.3},
+            {"x": -231.2, "y": 50.8, "z": -82.7},
+            {"x": -220.4, "y": 49.3, "z": -82.3}
+          ],
+          "patrol": {
+            "entries": [5761],
+            "path": [
+              {"x": -218.2, "y": 51.4, "z": -82.3},
+              {"x": -198.7, "y": 69.8, "z": -82.5},
+              {"x": -180.2, "y": 87.1, "z": -79.1},
+              {"x": -164.9, "y": 82.6, "z": -76},
+              {"x": -180.2, "y": 87.1, "z": -79.1},
+              {"x": -198.7, "y": 69.8, "z": -82.5}
+            ],
+            "period_s": 82,
+            "source": "creature_movement guid 38116 (entry 5761); period_s measured on the live walk 2026-10-15 (full loops: 83.0, 81.7 s)"
+          }
+        },
+        {
+          "entries": [5055, 5055, 5055, 5055],
+          "positions": [
+            {"x": -154.6, "y": 68.7, "z": -75.8},
+            {"x": -154.1, "y": 63.7, "z": -75.7},
+            {"x": -159, "y": 75.6, "z": -76},
+            {"x": -160.3, "y": 70.9, "z": -75.8}
           ]
+        },
+        {
+          "entries": [5055, 5055, 5055],
+          "positions": [
+            {"x": -148.5, "y": 2.2, "z": -74.6},
+            {"x": -150, "y": -6.1, "z": -75.9},
+            {"x": -146.3, "y": -10.9, "z": -76.4}
+          ],
+          "radius": 21
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -133.5, "y": -31.8, "z": -76.9}
+          ],
+          "radius": 19.4
+        },
+        {
+          "entries": [5055, 3840, 5055, 5055, 5055],
+          "positions": [
+            {"x": -155.8, "y": -42.9, "z": -79.8},
+            {"x": -146, "y": -50.9, "z": -78.4},
+            {"x": -154.4, "y": -48.1, "z": -78.7},
+            {"x": -162.5, "y": -50.1, "z": -77.1},
+            {"x": -156.4, "y": -53.7, "z": -76.9}
+          ],
+          "radius": 19.4
         }
       ],
-      "skip": [5912],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "The south road down the corridor at x -145 (Deviate Lashers, Dreadfangs and Druids of the Fang, then Shamblers) to the south hall."
+      ]
+    },
+    {
+      "name": "pythas_c",
+      "to": {"x": -158.7, "y": -55, "z": -75.9},
+      "pull_groups": [
+        {
+          "entries": [5761, 3840, 5761],
+          "positions": [
+            {"x": -172.9, "y": -82.3, "z": -67.7},
+            {"x": -174.4, "y": -87.5, "z": -67.8},
+            {"x": -172.2, "y": -91.7, "z": -67.4}
+          ]
+        },
+        {
+          "entries": [5761],
+          "positions": [
+            {"x": -120.5, "y": -101, "z": -72.8}
+          ]
+        },
+        {
+          "entries": [5761, 3640, 5761],
+          "positions": [
+            {"x": -69.5, "y": -144.7, "z": -81.7},
+            {"x": -75.6, "y": -142.5, "z": -80.9},
+            {"x": -61.6, "y": -152.9, "z": -78.7}
+          ],
+          "radius": 24.2
+        },
+        {
+          "entries": [3840, 5761],
+          "positions": [
+            {"x": -36, "y": -188.9, "z": -74.2},
+            {"x": -49.5, "y": -184.7, "z": -74.7}
+          ]
+        },
+        {
+          "entries": [3840, 5055, 5055, 5055, 5055],
+          "positions": [
+            {"x": 2.6, "y": -195, "z": -81.4},
+            {"x": 4.9, "y": -207.1, "z": -81},
+            {"x": 10.8, "y": -203, "z": -82.7},
+            {"x": 7.4, "y": -193.4, "z": -82.2},
+            {"x": 14.4, "y": -194.2, "z": -83.2}
+          ],
+          "radius": 24.9
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "boss": {
+        "entry": 3670,
+        "position": {"x": 36.8, "y": -241.1, "z": -79.5},
+        "first": [5761, 3840],
+        "tactics": {
+          "interrupt": [700, 5187, 9532]
+        }
+      },
+      "notes": [
+        "Lord Pythas (3670, 36.8 -241.1 -79.5, level 21, 5110 hp): his Shambler (5761) and a Druid of the Fang (3840) stand 14 to 17 yd from him and join: they are his first. Wowhead: burn the Shambler down before Pythas, CC the Druid, and keep the tank or one melee on Pythas so his Sleep (700) is interrupted; also Healing Touch (5187) and Lightning Bolt (9532). His table also holds Thunderclap (8147, an area slow around him): keep the party out of melee range of it."
+      ]
+    },
+    {
+      "name": "skum",
+      "to": {"x": 20.5, "y": -234.6, "z": -78.5},
+      "pull_groups": [
+        {
+          "entries": [3840, 3840, 5055, 5055, 5055, 5055],
+          "positions": [
+            {"x": -17.7, "y": -269.6, "z": -66.5},
+            {"x": -11.5, "y": -261, "z": -68},
+            {"x": -3.4, "y": -264.5, "z": -67.8},
+            {"x": -4.8, "y": -255.5, "z": -69.2},
+            {"x": 2.5, "y": -262.2, "z": -68.6},
+            {"x": 7.6, "y": -261.8, "z": -69.1}
+          ],
+          "radius": 9.3
+        },
+        {
+          "entries": [5761, 3840],
+          "positions": [
+            {"x": -30.8, "y": -270.4, "z": -67.4},
+            {"x": -29.1, "y": -264.2, "z": -67.8}
+          ],
+          "radius": 9.3
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -55.1, "y": -249.6, "z": -68.7}
+          ],
+          "radius": 10.2
+        },
+        {
+          "entries": [5761],
+          "positions": [
+            {"x": -56.9, "y": -236, "z": -68.8}
+          ],
+          "radius": 10.2
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -140.4, "y": -181.3, "z": -68.2}
+          ],
+          "radius": 10.9
+        },
+        {
+          "entries": [5756, 5056],
+          "positions": [
+            {"x": -144.3, "y": -195.2, "z": -68},
+            {"x": -152, "y": -193.8, "z": -68.5}
+          ],
+          "radius": 10.9
+        },
+        {
+          "entries": [5756],
+          "positions": [
+            {"x": -193, "y": -237.8, "z": -70.1}
+          ]
+        },
+        {
+          "entries": [5056, 3840],
+          "positions": [
+            {"x": -221, "y": -248.7, "z": -64.5},
+            {"x": -229.2, "y": -252.5, "z": -64.5}
+          ]
+        },
+        {
+          "entries": [5055, 5055, 5055, 3840],
+          "positions": [
+            {"x": -226.4, "y": -297.4, "z": -70.2},
+            {"x": -219.8, "y": -301.1, "z": -70.3},
+            {"x": -220.5, "y": -290.9, "z": -68.8},
+            {"x": -219.2, "y": -307, "z": -71.1}
+          ],
+          "radius": 10.9
+        },
+        {
+          "entries": [3840],
+          "positions": [
+            {"x": -216.3, "y": -320.9, "z": -73.2}
+          ],
+          "radius": 10.9
+        },
+        {
+          "entries": [3840, 3840],
+          "positions": [
+            {"x": -269.4, "y": -297.8, "z": -67.7},
+            {"x": -264.5, "y": -301.8, "z": -68.4}
+          ],
+          "radius": 19.3
+        },
+        {
+          "entries": [5055, 5055, 5055, 5055],
+          "positions": [
+            {"x": -179.3, "y": -213.5, "z": -57.2},
+            {"x": -181.6, "y": -204.3, "z": -59.4},
+            {"x": -188, "y": -194.5, "z": -61.1},
+            {"x": -192.1, "y": -191.6, "z": -62.2}
+          ],
+          "radius": 14.5,
+          "patrol": {
+            "entries": [3640],
+            "path": [
+              {"x": -235, "y": -157.4, "z": -62.6},
+              {"x": -237.4, "y": -169.2, "z": -63.2},
+              {"x": -235.3, "y": -181.3, "z": -62.9},
+              {"x": -229.4, "y": -189.7, "z": -62.2},
+              {"x": -220.2, "y": -195.4, "z": -61.7},
+              {"x": -209.3, "y": -195.1, "z": -62.4},
+              {"x": -198, "y": -194, "z": -62.9},
+              {"x": -189, "y": -198.2, "z": -61.6},
+              {"x": -182.7, "y": -206.1, "z": -59},
+              {"x": -179.1, "y": -214.9, "z": -57},
+              {"x": -182.8, "y": -206, "z": -59},
+              {"x": -189.7, "y": -197.5, "z": -61.9},
+              {"x": -198.4, "y": -194.1, "z": -62.9},
+              {"x": -209.1, "y": -195, "z": -62.4},
+              {"x": -220.3, "y": -195.6, "z": -61.7},
+              {"x": -229.3, "y": -189.9, "z": -62.1},
+              {"x": -235.5, "y": -181.3, "z": -62.8},
+              {"x": -237.8, "y": -169.1, "z": -63.2},
+              {"x": -235.3, "y": -156.9, "z": -62.6}
+            ],
+            "period_s": 80,
+            "source": "creature_movement guid 87115 (entry 3640); period_s measured on the live walk 2026-10-15 (full loops: 78.8, 80.9 s)"
+          }
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "boss": {
+        "entry": 3674,
+        "position": {"x": -285.6, "y": -313.7, "z": -69.2},
+        "tactics": {
+          "interrupt": [6254]
+        }
+      },
+      "notes": [
+        "Skum (3674, -285.7 -313.7 -69.2, level 21 beast, 6944 hp): immune to nature, casts Chained Bolt (6254, interruptible; it chains to up to three melee that stand close together, so the melee spread out), runs at 15 percent (fleers: the driver waits for him to come back with the next group; a Wowhead comment: slow him before he gathers adds). Optional in the game's quests and in the guide (his loot makes him worthwhile): the west column to Serpentis starts at his hall, 340 yd away."
+      ]
+    },
+    {
+      "name": "west_column",
+      "to": {"x": -270, "y": -267.8, "z": -63.6},
+      "pull_groups": [
+        {
+          "entries": [5055, 5055, 5055, 5055, 3840, 3840],
+          "positions": [
+            {"x": -292.9, "y": -245.8, "z": -64.2},
+            {"x": -293, "y": -237.8, "z": -64},
+            {"x": -298.5, "y": -246.5, "z": -63.8},
+            {"x": -299.8, "y": -247.5, "z": -63.6},
+            {"x": -307, "y": -232.2, "z": -63.2},
+            {"x": -307.1, "y": -240.7, "z": -63.2}
+          ],
+          "radius": 18.5
+        },
+        {
+          "entries": [3840, 5756, 5056, 3840],
+          "positions": [
+            {"x": -275.8, "y": -213.7, "z": -63.7},
+            {"x": -281.6, "y": -219.1, "z": -64.1},
+            {"x": -280.2, "y": -219.4, "z": -64.2},
+            {"x": -290.9, "y": -215.1, "z": -63.1}
+          ],
+          "radius": 18.5
+        },
+        {
+          "entries": [3840, 5056],
+          "positions": [
+            {"x": -264.5, "y": -182.8, "z": -60.4},
+            {"x": -271.5, "y": -179.9, "z": -60.2}
+          ]
+        },
+        {
+          "entries": [5056],
+          "positions": [
+            {"x": -307.4, "y": -147.5, "z": -61.3}
+          ],
+          "radius": 16.7
+        },
+        {
+          "entries": [5756],
+          "positions": [
+            {"x": -322.4, "y": -134, "z": -62.2}
+          ],
+          "radius": 16.7
+        },
+        {
+          "entries": [5056],
+          "positions": [
+            {"x": -304.7, "y": -104.3, "z": -63.8}
+          ],
+          "radius": 23.7
+        },
+        {
+          "entries": [5055, 5055, 3840, 5055, 5055],
+          "positions": [
+            {"x": -331.7, "y": -106.8, "z": -64.7},
+            {"x": -336.9, "y": -108.1, "z": -64.5},
+            {"x": -342, "y": -119, "z": -63.5},
+            {"x": -339.1, "y": -114.7, "z": -63.5},
+            {"x": -338.9, "y": -104.2, "z": -65}
+          ],
+          "radius": 21.2
+        },
+        {
+          "entries": [3840, 5056],
+          "positions": [
+            {"x": -331.5, "y": -79.3, "z": -65.7},
+            {"x": -333.9, "y": -72.2, "z": -65.4}
+          ],
+          "radius": 22.6
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "notes": [
+        "The west column from Skum's hall north to the foot of the Serpentis ramp (-293.3 0.5 -58.0). The last group is 90 yd short of it; the party gathers at the foot before the hop."
+      ]
+    },
+    {
+      "name": "serpentis",
+      "to": {"x": -244.6, "y": 52.7, "z": -51.7},
+      "via": [
+        {"x": -293.3, "y": 0.5, "z": -58},
+        {
+          "x": -289.1,
+          "y": 3.2,
+          "z": -64.1,
+          "direct": true,
+          "gm_cross": true
+        }
+      ],
+      "pull_groups": [
+        {
+          "entries": [5756],
+          "positions": [
+            {"x": -219.9, "y": 58.7, "z": -48.9}
+          ],
+          "radius": 9.7
+        },
+        {
+          "entries": [5756, 3840],
+          "positions": [
+            {"x": -193.7, "y": 43.2, "z": -47.9},
+            {"x": -198.3, "y": 34.7, "z": -49.2}
+          ],
+          "radius": 14.7
+        },
+        {
+          "entries": [5055, 5055, 5055, 3840],
+          "positions": [
+            {"x": -193.3, "y": 63.3, "z": -47.9},
+            {"x": -185.3, "y": 65.3, "z": -46.2},
+            {"x": -190.2, "y": 66.3, "z": -47.5},
+            {"x": -191.8, "y": 61.3, "z": -47.7}
+          ],
+          "radius": 14.7,
+          "patrol": {
+            "entries": [3640],
+            "path": [
+              {"x": -206.6, "y": 58.7, "z": -49.4},
+              {"x": -187.3, "y": 56.9, "z": -50},
+              {"x": -169.3, "y": 54, "z": -40.6},
+              {"x": -148, "y": 32, "z": -29.8},
+              {"x": -169.3, "y": 54, "z": -40.6},
+              {"x": -187.3, "y": 56.9, "z": -50}
+            ],
+            "period_s": 58,
+            "source": "creature_movement guid 38117 (entry 3640); period_s measured on the live walk 2026-10-15 (full loops: 58.4, 57.7 s)"
+          }
+        },
+        {
+          "entries": [5056],
+          "positions": [
+            {"x": -145.7, "y": 2.4, "z": -28.6}
+          ]
+        },
+        {
+          "entries": [3840, 5756],
+          "positions": [
+            {"x": -102.1, "y": -8.8, "z": -29.1},
+            {"x": -111, "y": -16.1, "z": -28.5}
+          ],
+          "radius": 9
+        }
+      ],
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
+      "boss": {
+        "entry": 3673,
+        "position": {"x": -120.2, "y": -24.6, "z": -28.6},
+        "tactics": {
+          "interrupt": [700, 6778, 9532]
+        }
+      },
+      "notes": [
+        "Starts with the hop from -293.3 0.5 -58.0 to -289.1 3.2 -64.1 (via 2, a gm_cross: a GM moves the party across the gap, see the plan notes; the move itself is not tried live), then up the ramp past Shamblers and Druids to Lord Serpentis (3673, -120.2 -24.6 -28.6, level 21, 4289 hp): Sleep (700), Healing Touch (6778), Lightning Bolt (9532); the guide says he needs no trash, the database has a Druid and a Venomwing 24 yd from him (group 5); he yells when the first of the other three Fanglords dies (SERPENTIS_YELL). Killing him completes the four that open the Disciple's menu."
+      ]
+    },
+    {
+      "name": "verdan",
+      "to": {"x": -85.3, "y": 21.3, "z": -31.1},
+      "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "boss": {
         "entry": 5775,
-        "position": {"x": -81.8554, "y": 32.2565, "z": -30.9939}
-      }
+        "position": {"x": -81.9, "y": 32.3, "z": -31}
+      },
+      "notes": [
+        "Verdan the Everliving (5775, -81.9 32.3 -31.0, level 21 elemental, 8099 hp, 69 yd from Serpentis): hits harder than anyone before him (Wowhead comments: 150 to 470 per hit, start healing the tank at once), Grasping Vines (8142, a root of 10 s on everyone within 10 yd and a 2 s knockdown with damage, not interruptible; ranged stay 10 yd off), no adds. Wowhead: always kill him, it opens the waterfall shortcut behind him, a hole that drops into the river near the entrance; a fall is no plan step, so the way back to the Disciple is the same 1700 yd, through the hop upwards (see dungeons/wailing_caverns-extra.json)."
+      ]
     }
   ]
 }
