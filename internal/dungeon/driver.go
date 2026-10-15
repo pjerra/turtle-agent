@@ -400,6 +400,9 @@ func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 	if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
+	if d.plan.HasGMCross(fromLeg) {
+		return fmt.Errorf("plan %s has a gm_cross waypoint (a GM moves the party across a gap no walk crosses): only a remote run can do it; nothing was sent", d.plan.Name)
+	}
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
 	d.wd.start()

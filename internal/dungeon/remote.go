@@ -405,6 +405,8 @@ type RemoteReport struct {
 	// RejoinTPs are the `cmd summon <bot>` orders the commander sent to bring a bot back to the lead bot (remote_rejoin.go); each is also a
 	// run_gm_assists.
 	RejoinTPs int `json:"rejoin_tps"`
+	// GMCrosses counts the gm_cross waypoints the run crossed with a GM move of the party (remote_gmcross.go).
+	GMCrosses int `json:"gm_crosses"`
 	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
 	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
 	DirectGathers        int     `json:"direct_gathers"`
@@ -581,6 +583,7 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	gmCrossing    bool                       // a gm_cross is being done: the start phase's helpers book their notes and GM lines as the crossing's (remote_gmcross.go)
 	rejoin        rejoinState                // bots brought back to the lead bot with cmd summon (remote_rejoin.go)
 	entry         entryState                 // object steps by entry and game-object waits on cmd state (remote_entry.go)
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
@@ -666,6 +669,9 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
 	}
 	if err := d.checkStart(fromLeg); err != nil {
+		return err
+	}
+	if err := d.checkGMCross(ctx, fromLeg); err != nil {
 		return err
 	}
 	d.rep.start(fromLeg)
@@ -849,7 +855,11 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		case ActWalk:
 			err = d.agentGoHome(ctx, false) // an agent left in a trigger's zone goes back before the party walks on
 			if err == nil {
-				err = d.tracedWalkAs(ctx, a.To, a.Direct)
+				if a.GMCross {
+					err = d.gmCross(ctx, a.To)
+				} else {
+					err = d.tracedWalkAs(ctx, a.To, a.Direct)
+				}
 			}
 			if err == nil {
 				d.obj.unchecked = ""     // the party walked on: whatever a wait passed unchecked let it through
