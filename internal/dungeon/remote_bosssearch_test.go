@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // A boss that patrols is not at his spot when the step looks (Theka, Velratha: "no living [7795] seen"): the step waits up to 60 s for him
@@ -15,18 +17,19 @@ func bossSearchPlan() *Plan {
 
 func TestRemoteBossWalksBackWithinTheWaitAndIsKilled(t *testing.T) {
 	g := newFakeRemote(t)
-	boss := g.addMob(777, Point{900, 0, 0}) // on his patrol, far from his spot
 	began := g.now
-	g.onTick = func(g *fakeRemote) {
-		if g.now.Sub(began) > 40*time.Second && boss.pos.X > 100 {
-			boss.pos = Point{60, 0, 0} // back at his spot
+	added := false
+	g.onTick = func(g *fakeRemote) { // out of the bots' sight on his patrol until 40 s in, then back at his spot
+		if !added && g.now.Sub(began) > 40*time.Second {
+			added = true
+			g.addMob(777, Point{60, 0, 0})
 		}
 	}
 	rep, err := runRemote(t, g, bossSearchPlan(), opts(), nil)
 	if err != nil || g.mobsKilled != 1 {
 		t.Fatalf("%v killed %d\n%s", err, g.mobsKilled, notesOf(rep))
 	}
-	if n := notesOf(rep); !strings.Contains(n, "boss 777 is not at his spot; waiting up to 60 s") || !strings.Contains(n, "boss 777 is back in range") {
+	if n := notesOf(rep); !strings.Contains(n, "boss 777 is not at his spot; waiting up to 60 s") || !strings.Contains(n, "boss 777 seen at") {
 		t.Fatalf("%s", n)
 	}
 	if rep.Remote.BossSearches != 1 {
@@ -35,8 +38,7 @@ func TestRemoteBossWalksBackWithinTheWaitAndIsKilled(t *testing.T) {
 }
 
 func TestRemoteBossThatNeverComesBackFailsAfterTheWait(t *testing.T) {
-	g := newFakeRemote(t)
-	g.addMob(777, Point{900, 0, 0})
+	g := newFakeRemote(t) // the boss is on no frame
 	began := g.now
 	rep, err := runRemote(t, g, bossSearchPlan(), opts(), nil)
 	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") {
@@ -59,5 +61,21 @@ func TestRemoteAbsentBossIsNeverCountedDead(t *testing.T) {
 	rep, err := runRemote(t, g, bossSearchPlan(), opts(), nil)
 	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") || strings.Contains(notesOf(rep), "is dead") {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+// The patrol takes the boss far from his spot (50 yd and more, beyond the anchor and the 80 yd of the lead bot): the search sees him in
+// the feed without the anchor filter, and the step approaches and pulls that exact unit.
+func TestRemoteBossSeenFarFromHisSpotIsApproachedAndPulled(t *testing.T) {
+	for _, at := range []Point{{60, 50, 0}, {60, 130, 0}, {400, 0, 0}} {
+		g := newFakeRemote(t)
+		boss := g.addMob(777, at)
+		rep, err := runRemote(t, g, bossSearchPlan(), opts(), nil)
+		if err != nil || g.mobsKilled != 1 {
+			t.Fatalf("boss at %v: %v killed %d\n%s", at, err, g.mobsKilled, notesOf(rep))
+		}
+		if got := g.ordersOf("cmd pullback " + tbm.GUIDArg(boss.guid)); len(got) != 1 {
+			t.Fatalf("boss at %v: pullbacks %v", at, g.orders)
+		}
 	}
 }

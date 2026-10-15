@@ -1618,10 +1618,11 @@ type fightSpec struct {
 	skip     []uint32
 	anchors  []Point // where the pack stands
 	limit    time.Duration
-	required bool    // not finding the target fails the run (a boss), else the fight is taken as already won
-	sneak    bool    // a target that turns out stealthed is walked past (sneakPast) instead of pulled
-	wide     bool    // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
-	radius   float32 // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
+	required bool        // not finding the target fails the run (a boss), else the fight is taken as already won
+	sneak    bool        // a target that turns out stealthed is walked past (sneakPast) instead of pulled
+	seen     packet.GUID // the boss the search found away from his spot (remote searchBoss): it is a candidate wherever it stands
+	wide     bool        // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
+	radius   float32     // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool

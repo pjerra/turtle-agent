@@ -110,6 +110,10 @@ type Plan struct {
 	// Greater Healing Ward 8179, the Witch Doctor 5650 and the Soul Eater 7247, the healers whose heals outlast the party). A summoned
 	// entry (the ward) is a kill target, never a CC target. Empty: the tank's order only (remote_fight.go).
 	KillFirst []uint32 `json:"kill_first,omitempty"`
+	// SummonedKillFirst names the kill_first entries that are summoned units (Zul'Farrak's Greater Healing Ward 8179): they fight nobody, so
+	// the remote driver takes one as part of a fight only with evidence that the fight is there (it stands within 10 yd of a hostile that
+	// fights the party), sends the party at it with no threat wait, and never crowd-controls it. Each must also be in kill_first.
+	SummonedKillFirst []uint32 `json:"summoned_kill_first,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
@@ -387,26 +391,27 @@ type rawPoint struct {
 }
 
 type rawPlan struct {
-	Version   *int              `json:"version"`
-	Name      string            `json:"name"`
-	Kind      string            `json:"kind"`
-	Status    string            `json:"status"`
-	Fleers    []uint32          `json:"fleers"`
-	Raid      *RaidSpec         `json:"raid"`
-	Map       *uint32           `json:"map"`
-	Entrance  *rawPoint         `json:"entrance"`
-	Trigger   uint32            `json:"entrance_trigger"`
-	Tele      string            `json:"entrance_tele"`
-	Outside   string            `json:"outside_tele"`
-	Portal    *rawPortal        `json:"portal"`
-	Band      []int             `json:"level_band"`
-	Hire      []string          `json:"hire_composition"`
-	CCPrio    []uint32          `json:"cc_priority"`
-	CCAlways  []uint32          `json:"cc_always"`
-	KillFirst []uint32          `json:"kill_first"`
-	Notes     []string          `json:"notes"`
-	Watchdog  *WatchdogConfig   `json:"watchdog"`
-	Legs      []json.RawMessage `json:"legs"`
+	Version    *int              `json:"version"`
+	Name       string            `json:"name"`
+	Kind       string            `json:"kind"`
+	Status     string            `json:"status"`
+	Fleers     []uint32          `json:"fleers"`
+	Raid       *RaidSpec         `json:"raid"`
+	Map        *uint32           `json:"map"`
+	Entrance   *rawPoint         `json:"entrance"`
+	Trigger    uint32            `json:"entrance_trigger"`
+	Tele       string            `json:"entrance_tele"`
+	Outside    string            `json:"outside_tele"`
+	Portal     *rawPortal        `json:"portal"`
+	Band       []int             `json:"level_band"`
+	Hire       []string          `json:"hire_composition"`
+	CCPrio     []uint32          `json:"cc_priority"`
+	CCAlways   []uint32          `json:"cc_always"`
+	KillFirst  []uint32          `json:"kill_first"`
+	SummonedKF []uint32          `json:"summoned_kill_first"`
+	Notes      []string          `json:"notes"`
+	Watchdog   *WatchdogConfig   `json:"watchdog"`
+	Legs       []json.RawMessage `json:"legs"`
 }
 
 type rawPortal struct {
@@ -626,6 +631,14 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	if len(rp.KillFirst) > 0 {
 		p.KillFirst = slices.Clone(rp.KillFirst)
+	}
+	for _, e := range rp.SummonedKF {
+		if !slices.Contains(rp.KillFirst, e) {
+			c.fail("summoned_kill_first", "%d is not in kill_first", e)
+		}
+	}
+	if len(rp.SummonedKF) > 0 {
+		p.SummonedKillFirst = slices.Clone(rp.SummonedKF)
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {

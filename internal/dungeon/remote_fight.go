@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -91,10 +92,10 @@ func (d *RemoteDriver) candidates(sp fightSpec, entries []uint32) []tbm.HostileR
 			continue
 		}
 		dl := distToLead(d, hostilePoint(h))
-		if dl <= 80 {
+		if dl <= 80 || h.GUID == sp.seen {
 			all = append(all, h)
 		}
-		isNear := d.nearAnchor(sp, h)
+		isNear := d.nearAnchor(sp, h) || h.GUID == sp.seen
 		if isNear {
 			near = append(near, h)
 		}
@@ -225,7 +226,8 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 					if dead {
 						return nil
 					}
-					if found {
+					if found != 0 {
+						sp.seen = found
 						continue
 					}
 				}
@@ -320,25 +322,45 @@ func entriesList(es []uint32) string {
 // searchBoss waits up to Config.BossSearch for a boss that is not at his spot (a patrolling boss: Theka, Velratha) to walk back into
 // range. found says a living unit of the step's entries is in range now (the pick goes on); dead says the run knows him dead (bossDead:
 // a kill, the ledger, or his corpse in view). Neither: he did not come within the wait, and the step fails. Absence is never a kill.
-func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpec) (found, dead bool, err error) {
+func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpec) (found packet.GUID, dead bool, err error) {
 	wait := d.cfg.BossSearch
 	began := d.clk.Now()
 	d.rep.note(fmt.Sprintf("%s: boss %s is not at his spot; waiting up to %.0f s for him to walk back into range", label, entriesList(sp.pick), wait.Seconds()))
 	d.remote(func(r *RemoteReport) { r.BossSearches++ })
 	for d.clk.Now().Sub(began) < wait {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return false, false, err
+			return 0, false, err
 		}
 		if ok, why := d.bossDead(sp); ok {
 			d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
-			return false, true, nil
+			return 0, true, nil
 		}
-		if len(d.candidates(sp, sp.pick)) > 0 {
-			d.rep.note(fmt.Sprintf("%s: boss %s is back in range after %.0f s", label, entriesList(sp.pick), d.clk.Now().Sub(began).Seconds()))
-			return true, false, nil
+		// Any living unit of the entries in the feed counts, wherever it stands (no anchor or 80 yd filter): the patrol took him far from
+		// his spot. That exact unit is then approached and pulled (fightSpec.seen).
+		for _, h := range d.fr.Hostiles {
+			if h.Entry == 0 || h.HPPct <= 0 || !slices.Contains(sp.pick, h.Entry) || slices.Contains(sp.skip, h.Entry) || sp.passed[h.GUID] {
+				continue
+			}
+			if _, refused := d.skipped[h.GUID]; refused {
+				continue
+			}
+			d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f after %.0f s (%.0f yd from his spot)", label, entriesList(sp.pick), h.X, h.Y, h.Z, d.clk.Now().Sub(began).Seconds(), nearestAnchorDist(sp, h)))
+			return h.GUID, false, nil
 		}
 	}
-	return false, false, nil
+	return 0, false, nil
+}
+
+// nearestAnchorDist is how far h stands from the nearest anchor of the step (0 without anchors).
+func nearestAnchorDist(sp fightSpec, h tbm.HostileRec) float64 {
+	best := math.MaxFloat64
+	for _, a := range sp.anchors {
+		best = min(best, dist3(a, hostilePoint(h)))
+	}
+	if best == math.MaxFloat64 {
+		return 0
+	}
+	return best
 }
 
 // passedDeadInLedger counts the mobs the pulls passed over when every one of them is dead in the kill ledger (seen fighting, then dead
@@ -878,8 +900,8 @@ func (d *RemoteDriver) threatAllows(h tbm.HostileRec) bool {
 	if _, ok := d.engagedAt[h.GUID]; !ok {
 		d.engagedAt[h.GUID] = now
 	}
-	if d.isKillFirst(h.Entry) && h.Target == 0 {
-		return true // a healing ward hits nobody: no threat to wait for, and each pulse heals the pack
+	if d.summonedKillFirst(h) && h.Target == 0 {
+		return true // a healing ward hits nobody: no threat to wait for, and each pulse heals the pack (a planned healer still waits)
 	}
 	holder, ok := d.fr.ThreatHolder(h.GUID)
 	held := ok && d.fr.IsMember(holder) && (h.Target == 0 || h.Target == holder)
