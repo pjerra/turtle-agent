@@ -420,7 +420,13 @@
       "skip": [7269, 10080, 10082],
       "boss": {
         "entry": 8127,
-        "position": {"x": 1815.8, "y": 670.4, "z": 15}
+        "position": {"x": 1815.8, "y": 670.4, "z": 15},
+        "tactics": {
+          "interrupt": [
+            "Flash Heal",
+            "Healing Wave of Antu'sul"
+          ]
+        }
       },
       "notes": [
         "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals)."
@@ -571,7 +577,13 @@
       "skip": [7269, 10080, 10082],
       "boss": {
         "entry": 7795,
-        "position": {"x": 1650.4, "y": 1161.4, "z": 9.9}
+        "position": {"x": 1650.4, "y": 1161.4, "z": 9.9},
+        "tactics": {
+          "interrupt": [
+            "Healing Wave",
+            "Shadow Bolt"
+          ]
+        }
       },
       "notes": [
         "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",

@@ -2,9 +2,18 @@
 # Run the remote Uldaman dungeon with one command: the agent binary of origin/main's SHA (built once on the test VM), the login (only
 # if the agent is not logged in already), dungeon_run with the prepare block, a poll every 30 s, and trace-score at the end.
 #
-#   tools/run-uldaman.sh [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
+#   tools/run-uldaman.sh [--mode commander|observe|leader] [--brain PRESET] [--rotation NAME] [--role ROLE]
+#                        [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
 #                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--logout] [--print-params]
 #
+#   --mode M       the run mode (README "Run modes"; or MODE=). commander (the default): the agent leads a bot group from outside it, everything
+#                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
+#                  --brain names one; the party is the one the character is in: none of the commander's options go with it, only --from-leg).
+#                  observe: a TortoiseBots run leader clears the dungeon and the agent watches; refused until TortoiseBots has phase P3.
+#   --brain P      leader mode: the brain preset that plays the character (frost_mage, arms_warrior, ...; default: by the character's class and --role)
+#   --rotation R   leader mode: a rotation file that takes the place of the preset's class rotation (README "Rotations as data"; `turtle-agent
+#                  rotation list`); the report names it with its file's digest, so two arms of an A/B test are told apart
+#   --role R       leader mode: dps (default), tank or healer
 #   --hire         the owner's rule: the party is five HIRED bots at the plan's level, the commander outside the group (prepare.party "hire",
 #                  README "Hired party"). The agent hires a warrior tank, a priest healer and three damage dealers (hunter, rogue, warlock),
 #                  checks each (level, gear not epic, key spells, talents, supplies, pets), fixes what `.bot autogear` and `.bot maintenance`
@@ -56,11 +65,16 @@ MAX_MIN=${MAX_MIN:-90}
 POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
+MODE=${MODE:-commander} BRAIN= ROTATION= ROLE=
 FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
 COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
   case $1 in
+    --mode) shift; MODE=${1:?--mode needs commander, observe or leader} ;;
+    --brain) shift; BRAIN=${1:?--brain needs a preset name} ;;
+    --rotation) shift; ROTATION=${1:?--rotation needs a rotation name} ;;
+    --role) shift; ROLE=${1:?--role needs dps, tank or healer} ;;
     --relogin) RELOGIN=1 ;;
     --no-fresh) FRESH=false ;;
     --hire) HIRE=1 ;;
@@ -81,6 +95,24 @@ done
 
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { say "ERROR: $*" >&2; exit 1; }
+
+# --- the mode
+case $MODE in
+  commander|remote) MODE=commander ;;
+  leader|group) MODE=leader ;;
+  observe) die "mode observe needs the TortoiseBots run leader (phase P3 of the dungeon-modes design): it does not exist yet. Use --mode commander or --mode leader" ;;
+  *) die "--mode is commander, observe or leader" ;;
+esac
+name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
+[ -z "$BRAIN" ] || name_word "$BRAIN" || die "--brain: a preset name (a-z, 0-9, _)"
+[ -z "$ROTATION" ] || name_word "$ROTATION" || die "--rotation: a rotation name (a-z, 0-9, _)"
+[ -z "$ROLE" ] || case $ROLE in dps|tank|healer) ;; *) die "--role is dps, tank or healer" ;; esac
+if [ "$MODE" = commander ]; then
+  [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in commander mode the bots fight)"
+else
+  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] ||
+    die "leader mode takes only --from-leg of the start options: --hire, --rehire, --level, --pulltest, --pull-group, --start-here, --have-items, --no-fresh and COMPOSITION are commander options"
+fi
 
 # --- the party: names are letters only (the agent checks too); they go into the JSON below as they are
 name_ok() { [[ $1 =~ ^[A-Za-z]{2,12}$ ]]; }
@@ -135,18 +167,26 @@ fi
 
 sha_label=${SHA8:-unknown}
 params() {
+  if [ "$MODE" = leader ]; then
+    printf '{"name":"uldaman","mode":"leader","from_leg":%s,' "$FROM_LEG"
+    [ -z "$BRAIN" ] || printf '"brain":"%s",' "$BRAIN"
+    [ -z "$ROTATION" ] || printf '"rotation":"%s",' "$ROTATION"
+    [ -z "$ROLE" ] || printf '"role":"%s",' "$ROLE"
+    printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","mode":"leader"}}' "$sha_label"
+    return
+  fi
   if [ "$HIRE" = 1 ]; then
     # The hired party names itself: no lead_bot, bots, tank or healer. fresh and online do not go with it.
     local hire="" sep=""
     [ "$REHIRE" = 0 ] || { hire+="${sep}\"rehire\":true"; sep=","; }
     [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
     [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
-    printf '{"name":"uldaman","mode":"remote",%s' "$start_json"
+    printf '{"name":"uldaman","mode":"commander",%s' "$start_json"
     printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
     printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
     return
   fi
-  printf '{"name":"uldaman","mode":"remote","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
+  printf '{"name":"uldaman","mode":"commander","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
   printf '"prepare":{"online":true,"fresh":%s,"gm_setup":["gm visible off"]},' "$FRESH"
   printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s"}}' "$sha_label"
 }

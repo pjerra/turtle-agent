@@ -1009,3 +1009,24 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
    `rest_s` against `rest_gates[]`. Then run the same pull twice with an unchanged build and see what the spread is: that is the noise `--compare` has to beat.
 10. **Equivalent packs** (`equiv` in a plan): none of the shipped plans marks any yet. Mark a pair of Uldaman packs of the same mobs on similar ground and check that the walk between them does
     not aggro a third pack (`walk_aggros`, `adds`).
+
+## Run modes, rotations as data and boss tactics (`mode`, `rotation`, `bosses[].tactics`; tested against fakes only, never run live)
+
+README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like character in a party with a tank bot and a healer bot inside the instance (leader mode has no hiring or binding yet),
+`mmaps_dir` set. What the first live use has to settle:
+
+1. **`mode: "leader"` without `brain`**: the preset of the character's class is taken (`brain` in the result and the report); a class or role without a default is refused with the list. `mode: "observe"` is refused
+   and nothing is sent. `commander` and `remote` behave as before (compare one `tools/run-uldaman.sh --print-params` with the last live run).
+2. **A rotation file in place of the Go strategy**: `brain_start {"strategies":["frost_mage"],"rotation":"frost_mage"}` in a fight: the `brain_decision` stream has the same action names as without the option
+   (`frostbolt`, `frost_nova`, `fire_blast`, `cone_of_cold`), `brain_state.strategies` has `rot:frost_mage` and not `mage_frost`, and `trace` header `options.rotation` carries the digest. Then `shadow_priest` and
+   `arms_warrior` (stance, `execute`, `overpower` after a dodge, `heroic_strike` once per swing, `battle_shout` at a rest gate).
+3. **The new specs, not played before**: `fire_mage` (Scorch stacks `Fire Vulnerability` to 5 at the start of a long fight: does the aura show under that name in `units`? Fireball is refused on a fire-immune mob and
+   Frostbolt takes over for the 5 s back-off; `fire_blast_moving` while walking), `arcane_mage` (`Arcane Rupture`, a Turtle talent: its aura and rhythm with Arcane Missiles are not read; does Missiles channel through to the end?).
+   Record time to kill, casts, mana at the end per fight and compare with the Go `frost_mage` on the same pack: `trace-score` on both traces. The pull test scores the party of a commander run, where the agent's character does not fight: **running it in
+   leader mode is the open step for a real A/B** (until then the arms are two leader-mode runs of the same leg, three or more each).
+4. **Boss tactics** (Uldaman, leader mode, a character with an interrupt - mage Counterspell, warrior Pummel in Battle or Berserker Stance): on Revelosh, `brain_state` `encounter` (`uldaman/revelosh`) when he is pulled, then `interrupt` on
+   `Chain Lightning` / `Lightning Bolt` before any other cast; on the Obsidian Sentinel the character attacks the Obsidian Shards (7209) first when they appear at 60/40/20 % (also 80 %?) and goes back to the boss; on Grimlok `Chain Bolt`.
+   `encounter_end` when the boss dies. Does the 1.12 client show the boss's cast (`Casting` on the unit) early enough for `interruptMinLeft` 350 ms?
+5. **`move_out`** has no shipped plan yet (needs the radius of a real cast, from the spell's `SpellRadius`): try `{"cast": "Fire Nova", "yards": 10}` on Galgann and a `ground` rule on a boss's ground effect; the character must leave on the navmesh and not
+   leave the tank (a tank ignores `cast` circles), and must not stand in the circle at the end of the cast.
+6. **`dispel`** with a healer preset on a real aura of a boss (Antu'sul's, Velratha's): dispelled before a slow, at 20 % mana.

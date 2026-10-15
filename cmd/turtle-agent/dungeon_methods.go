@@ -142,10 +142,19 @@ type dungeonRunParams struct {
 	Resume *bool `json:"resume,omitempty"`
 	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
 	WaitSickness bool `json:"wait_sickness,omitempty"`
-	// Mode is "group" (the default: the agent's character leads the party it is in) or "remote": the agent leads a bot group
-	// from outside it through the TortoiseBots remote commander (README "Remote leader"). Remote mode takes lead_bot, and
-	// optionally bots, tank and cc; its only GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level.
+	// Mode is the run mode (README "Run modes"): "commander" (the agent leads a bot group from outside it through the TortoiseBots remote
+	// commander, README "Remote leader"; the old name "remote" still works; it takes lead_bot, and optionally bots, tank and cc; its only
+	// GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level), "leader" (the agent's character
+	// is in the group, leads it and plays: the bot brain is on, with the preset of the character's class when brain is omitted) or "observe"
+	// (a TortoiseBots run leader clears the dungeon and the agent watches: not built yet, refused). Omitted: "group", the leader's older
+	// form without the brain (the old name "group" still works and is the default).
 	Mode string `json:"mode,omitempty"`
+	// Rotation names a rotation file (README "Rotations as data") that takes the place of the class rotation of the brain's preset: a
+	// built-in one or one from the settings' rotations_dir. Leader and group mode, with a brain. The run's report and trace name it with
+	// the digest of its file, so two arms of an A/B test are told apart.
+	Rotation string `json:"rotation,omitempty"`
+	// Role is the brain's role ("dps", "tank" or "healer") when the preset's own is not what the run wants. Leader and group mode, with a brain.
+	Role string `json:"role,omitempty"`
 	// LeadBot is the bot that walks in remote mode; bots are the other bots to bind with it (empty: its party as it is).
 	LeadBot string   `json:"lead_bot,omitempty"`
 	Bots    []string `json:"bots,omitempty"`
@@ -222,8 +231,10 @@ type dungeonRunResult struct {
 	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
 	// server at the start; the report's leader_gm has the answer).
 	LeaderGM string `json:"leader_gm"`
-	// Mode is "group" or "remote"; LeadBot is the remote run's lead bot.
+	// Mode is "group" or "remote" (the old names); RunMode is the run mode in the new ones, "leader" or "commander". LeadBot is the remote
+	// run's lead bot.
 	Mode    string `json:"mode"`
+	RunMode string `json:"run_mode"`
 	LeadBot string `json:"lead_bot,omitempty"`
 	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
 	RunID     string `json:"run_id"`
@@ -358,6 +369,17 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, err
 	}
+	if !remote && strings.EqualFold(strings.TrimSpace(p.Mode), modeLeader) && p.Brain == "" {
+		// Leader mode plays: the preset of the character's class (and role) when the run names none.
+		if st := r.cur().Status().State; st != session.StatusInWorld {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
+		}
+		preset, err := leaderPreset(r.selfClass(), p.Role)
+		if err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+		}
+		p.Brain = preset
+	}
 	if err := watchdogParam(plan, p); err != nil {
 		return dungeonRunResult{}, err
 	}
@@ -382,14 +404,20 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 		}
 	}
 	var hook dungeon.Brain
+	brainName := p.Brain
 	if p.Brain != "" && !remote {
 		if r.brain == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the bot brain is not available"}
 		}
-		if _, _, err := brain.Resolve([]string{p.Brain}); err != nil {
+		enc := planEncounters(plan)
+		bp := brain.Params{Strategies: []string{p.Brain}, Role: p.Role, Rotation: p.Rotation, Encounters: enc}
+		if err := brain.CheckParams(bp); err != nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "brain: " + err.Error()}
 		}
-		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}, runID: tcfg.RunID}
+		if brainName, err = brainLabel(p.Brain, p.Rotation); err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "rotation: " + err.Error()}
+		}
+		hook = &driverBrain{ctl: r.brain, params: bp, runID: tcfg.RunID}
 	}
 	from := legIndex(plan, p.FromLeg)
 	if pt := p.Pulltest; pt != nil && remote {
@@ -458,7 +486,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			r.lease.release()
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain that was started by hand is running: brain_stop it first"}
 		}
-		cfg.Brain, cfg.BrainName = hook, p.Brain
+		cfg.Brain, cfg.BrainName = hook, brainName
 	}
 	game := &sessionGame{cur: r.cur, probeWindow: r.probeWindow}
 	game.refusals.mark(r.cur().Log())
@@ -479,7 +507,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group"}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group", RunMode: modeLeader}, nil
 }
 
 func legNames(plan *dungeon.Plan) []string {

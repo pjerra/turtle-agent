@@ -59,6 +59,20 @@ func Strategies() (presetNames, strategyNames []string) {
 
 // Resolve expands presets and builds the strategies, the base strategy first. names returns what is active.
 func Resolve(want []string) (out []*Strategy, names []string, err error) {
+	return ResolveFor(want, ResolveOpts{})
+}
+
+// ResolveOpts are the options of a brain that change which strategies run.
+type ResolveOpts struct {
+	// Rotation names a rotation file (rotation.go): its strategy "rot:<name>" is added and the strategies it replaces are left out.
+	Rotation string
+	// Encounters says the brain plays a plan with boss tactics: the encounter strategy and avoid_ground (which leaves the places the
+	// tactics mark) are added.
+	Encounters bool
+}
+
+// ResolveFor is Resolve with options.
+func ResolveFor(want []string, o ResolveOpts) (out []*Strategy, names []string, err error) {
 	var flat []string
 	for _, w := range want {
 		w = strings.ToLower(strings.TrimSpace(w))
@@ -74,6 +88,18 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 	if len(flat) == 0 {
 		return nil, nil, fmt.Errorf("strategies: name at least one")
 	}
+	if o.Rotation != "" {
+		rot, err := rotationNamed(o.Rotation)
+		if err != nil {
+			return nil, nil, err
+		}
+		if flat, err = rot.apply(flat); err != nil {
+			return nil, nil, err
+		}
+	}
+	if o.Encounters {
+		flat = append(flat, "avoid_ground", "encounter")
+	}
 	flat = append([]string{"base"}, flat...)
 	seen := map[string]bool{}
 	for _, n := range flat {
@@ -81,6 +107,15 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 			continue
 		}
 		seen[n] = true
+		if strings.HasPrefix(n, "rot:") {
+			st, err := rotationStrategy(n)
+			if err != nil {
+				return nil, nil, err
+			}
+			out = append(out, st)
+			names = append(names, n)
+			continue
+		}
 		mk, ok := strategyBuilders[n]
 		if !ok {
 			pn, sn := Strategies()
@@ -88,6 +123,9 @@ func Resolve(want []string) (out []*Strategy, names []string, err error) {
 		}
 		out = append(out, mk())
 		names = append(names, n)
+	}
+	if err := checkRotationActions(out); err != nil {
+		return nil, nil, err
 	}
 	// The strategies must make a brain: no stub among them, and one role at most (so that dungeon_run's brain option is refused up
 	// front, not at the first rest gate).
@@ -157,16 +195,20 @@ var ValFight = &Value[Fight]{Name: "fight", Calc: func(c *Ctx) Fight {
 			break
 		}
 	}
+	if neverTarget(c, f.Mob) { // the plan's never_target: left alone, unless it attacks the player (the next step)
+		f.Mob, f.Source = nil, ""
+	}
 	if f.Mob == nil {
 		if u := ValMobOnMe.Get(c); u != nil {
 			f.Mob, f.Source = u, "self"
 		}
 	}
 	if f.Mob == nil {
-		if mob, ok := c.Unit(c.G.Selected()); ok && hostileMob(mob) && mob.InCombat {
+		if mob, ok := c.Unit(c.G.Selected()); ok && hostileMob(mob) && mob.InCombat && !neverTarget(c, mob) {
 			f.Mob, f.Source = mob, "selected"
 		}
 	}
+	applyTactics(c, &f)
 	m := c.mem
 	m.mu.Lock()
 	defer m.mu.Unlock()

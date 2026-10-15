@@ -20,6 +20,8 @@ type brainStartParams struct {
 	Role       string   `json:"role,omitempty"`
 	Tank       string   `json:"tank,omitempty"`
 	NoMove     bool     `json:"no_move,omitempty"`
+	// Rotation names a rotation file that takes the place of the class rotation of the preset (README "Rotations as data").
+	Rotation string `json:"rotation,omitempty"`
 	// RunID names the session (see dungeon_run's run_id); empty: generated. Trace false writes no trace file; TraceMeta is free text for
 	// the trace's header.
 	RunID     string            `json:"run_id,omitempty"`
@@ -45,7 +47,7 @@ func registerBrainMethods(srv *rpc.Server, cur func() *session.Session, tracesDi
 		if p.RunID != "" && !trace.ValidRunID(p.RunID) {
 			return brain.Status{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "run_id must be letters, digits, dot, underscore or dash, at most 64 characters"}
 		}
-		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank, NoMove: p.NoMove, RunID: p.RunID})
+		st, err := ctl.Start(brain.Params{Strategies: p.Strategies, Role: p.Role, Tank: p.Tank, NoMove: p.NoMove, RunID: p.RunID, Rotation: p.Rotation})
 		if err == nil {
 			sess := cur().Status()
 			bt.begin(st.RunID, p, sess.Character, uint64(sess.GUID), st)
@@ -117,9 +119,9 @@ func brainErr(err error) error {
 // driverBrain is the dungeon Driver's hold on the brain: it starts the brain for a run and stops only what it started,
 // so a brain the caller started by hand is not turned off by a leg ending.
 type driverBrain struct {
-	ctl        *brain.Controller
-	strategies []string
-	runID      string // the dungeon run's id: the brain's events and decisions join the run's trace
+	ctl    *brain.Controller
+	params brain.Params // the strategies, the role, the rotation and the plan's encounters; the run adds the rest
+	runID  string       // the dungeon run's id: the brain's events and decisions join the run's trace
 
 	started bool
 }
@@ -132,7 +134,9 @@ func (b *driverBrain) Start() error {
 		return errors.New("a brain was started by hand: the run leaves it alone")
 	}
 	// Movement is on: the brain positions the leader in fights, and the driver holds the move lock (HoldMove) around every walk it sends.
-	if _, err := b.ctl.Start(brain.Params{Strategies: b.strategies, RestGate: true, RunID: b.runID}); err != nil {
+	p := b.params
+	p.RestGate, p.RunID = true, b.runID
+	if _, err := b.ctl.Start(p); err != nil {
 		return err
 	}
 	b.started = true

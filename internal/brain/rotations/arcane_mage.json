@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "arcane_mage",
+  "class": "mage",
+  "spec": "arcane",
+  "replaces": ["mage_frost"],
+  "notes": "Arcane: Arcane Missiles is the filler (a channel, so only while standing), Arcane Rupture (Turtle talent) when it is ready, Frost Nova and Fire Blast on a mob in melee, Fireball when the mage must move and Missiles cannot channel. Not checked live; the Turtle talent's own aura is not read.",
+  "sources": [
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/ArcaneMageStrategy.cpp (Arcane Missiles as the filler; the Arcane Blast and Barrage rows are TBC and WotLK)",
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/GenericMageStrategy.cpp"
+  ],
+  "priorities": [
+    {"id": "frost_nova", "spell": "Frost Nova", "level": 10, "target": "self", "band": "high", "threat": "aoe",
+     "when": {"melee_mob": true, "no_mob_aura": ["Frost Nova"]}},
+    {"id": "fire_blast", "spell": "Fire Blast", "level": 6, "target": "melee_mob", "when": {"melee_mob": true}},
+    {"id": "arcane_rupture", "spell": "Arcane Rupture", "talent": true, "target": "fight", "when": {"moving": false}},
+    {"id": "arcane_missiles", "spell": "Arcane Missiles", "level": 8, "target": "fight", "when": {"moving": false}},
+    {"id": "fireball_moving", "spell": "Fireball", "level": 1, "target": "fight", "when": {"moving": true}}
+  ]
+}

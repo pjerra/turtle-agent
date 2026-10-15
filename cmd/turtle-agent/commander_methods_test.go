@@ -155,7 +155,7 @@ func TestBotViewMethod(t *testing.T) {
 func TestDungeonRunRemoteRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","mode":"fly"}`, `mode must be "group" or "remote"`},
+		{`{"name":"rig","mode":"fly"}`, `mode must be "commander", "observe" or "leader"`},
 		{`{"name":"rig","lead_bot":"Tanky"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tank y"}`, "needs lead_bot"},
@@ -179,7 +179,7 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
-		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "brain plays the agent's own character"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "play the agent's own character"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","gm":true}`, "no GM command"},
 		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
 		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},

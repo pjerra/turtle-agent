@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "fire_mage",
+  "class": "mage",
+  "spec": "fire",
+  "replaces": ["mage_frost"],
+  "notes": "Fire: Scorch stacks Fire Vulnerability at the start of a long fight, Fireball is the filler, Fire Blast while the mage moves or when a mob is on it, Frost Nova on a mob in melee. A target that is immune to fire makes the server refuse Fireball; the brain backs the refused spell off for 5 s and Frostbolt, the last entry, takes over until the back-off ends (the donor falls back to Frostbolt on a fire-immune target the same way). Not checked live.",
+  "sources": [
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/FireMageStrategy.cpp (default actions: Fireball, Frostbolt on a fire-immune target, Fire Blast while moving; Scorch to the Improved Scorch stacks)",
+    "mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/GenericMageStrategy.cpp"
+  ],
+  "priorities": [
+    {"id": "frost_nova", "spell": "Frost Nova", "level": 10, "target": "self", "band": "high", "threat": "aoe",
+     "when": {"melee_mob": true, "no_mob_aura": ["Frost Nova"]}},
+    {"id": "fire_blast_melee", "spell": "Fire Blast", "level": 6, "target": "melee_mob", "when": {"melee_mob": true}},
+    {"id": "scorch", "spell": "Scorch", "level": 22, "target": "fight",
+     "when": {"mob_hp_above": 70, "mob_stacks_below": {"aura": "Fire Vulnerability", "stacks": 5}, "moving": false}},
+    {"id": "fire_blast_moving", "spell": "Fire Blast", "level": 6, "target": "fight", "when": {"moving": true}},
+    {"id": "fireball", "spell": "Fireball", "level": 1, "target": "fight", "when": {"moving": false}},
+    {"id": "frostbolt", "spell": "Frostbolt", "level": 4, "target": "fight", "when": {"moving": false}}
+  ]
+}

@@ -56,7 +56,7 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `dungeons_dir` is the folder
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder
 `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)).
 
 Log a character in and keep it online with the RPC server running:
@@ -97,6 +97,7 @@ turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--a
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
+turtle-agent rotation list | show [--level N] <name|file.json> | check <file.json>...
 turtle-agent version
 ```
 
@@ -261,7 +262,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `allow_draft` (run a plan whose status is `draft`; refused without it, see [Dungeon plans](#dungeon-plans)), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (remote mode: `{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (`"group"`, the default, or `"remote"`: lead a bot group from outside it, see [Remote leader](#remote-leader)) with `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain`, `leader_gm` (`true`, `false` or `probe`), `mode`, `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `allow_draft` (run a plan whose status is `draft`; refused without it, see [Dungeon plans](#dungeon-plans)), `from_leg` (a leg number from 0 or its name), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; off by default), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (remote mode: `{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (the [run mode](#run-modes): `"commander"` (the older `"remote"`): lead a bot group from outside it, see [Remote leader](#remote-leader); `"leader"` (the older `"group"`, the default without a brain): the agent's character is in the group, leads it and plays; `"observe"`: refused until TortoiseBots has a run leader), `rotation` (leader and group mode: a [rotation file](#rotations-as-data) that takes the place of the brain preset's class rotation), `role` (leader and group mode: the brain's role, `dps`, `tank` or `healer`; with `mode: "leader"` and no `brain` it also picks the preset of the character's class) and, for commander mode, `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain` (with a rotation: `preset+rot:<name>@<digest of the file>`), `leader_gm` (`true`, `false` or `probe`), `mode` (`group` or `remote`), `run_mode` (`leader` or `commander`), `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -276,7 +277,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `dungeon_run` (live tuning) | `tune` (remote mode: the tunables file; default the login's `--tune`, else `<plan>.tune.json` beside the plan file, which may be absent; a named file must exist), `live_reload` (`false`: the run does not read the plan file and the tunables file again) | the report's `remote.tune_changes[]` and `remote.plan_reloads[]`; see [Live tuning](#live-tuning) |
 | `tune_set` | `key` (a tunable, see [Live tuning](#live-tuning)), `value` (a number, or `"default"` or `null` to put the key back) | `key`, `old` (the value now), `new`, `applies`. Refused at once as invalid params when the key is unknown, the value is outside its limits or a whole number is wanted, or it breaks a rule between two values; else taken, with the same `tune_change` event as a file's change, at the run's next leg start or pull-group start. Errors when no remote run goes |
 | `tune_list` | | `tunables[]`: `key`, `unit`, `min`, `max`, `default`, `base` (what the run was made with), `value` (now), `source` (`base`, `file`, `rpc`), `queued` (a `tune_set` waiting for the boundary), `doc` |
-| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
+| `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves), `rotation` (a [rotation file](#rotations-as-data) in place of the preset's class rotation) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
 | `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
 | `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
@@ -1262,6 +1263,23 @@ Summon Voidwalker (100%) is affordable at a few hundred mana whatever the maximu
 | `channel_end` | the player; `spell_id`. MSG_CHANNEL_UPDATE with nothing left |
 | `combo_points` | the player; `target` (the unit), `points`, `was` |
 | `spell_fail` | now also `reason_name` (`reason` stays the number, or `interrupted`) |
+
+## Run modes
+
+One option picks who plays the dungeon (`dungeon_run {"mode": ...}`, `tools/run-uldaman.sh --mode ...` or `MODE=`; design: TortoiseBots-audit
+DESIGN-DUNGEON-MODES, phase P2). The plan, `dungeon_run.prepare`, the report, the trace and `trace-score` are the same in every mode.
+
+| Mode | Who does what | State |
+| :--- | :--- | :--- |
+| `commander` (older name `remote`) | The agent stays outside the group and leads bots through the TortoiseBots remote commander ([Remote leader](#remote-leader)). The bots fight; the agent's own class does not matter. | as before; `lead_bot` or `prepare.party "hire"` required |
+| `leader` (older name `group`) | The agent's **character is in the party**, leads it by its plan (walks, pulls, rests, loots, as in [Dungeon runs](#dungeon-runs)) and **plays**: the [bot brain](#bot-brain) is on during the fights. Without `brain` the run takes the preset of the character's class, `role` `dps` unless it says `tank` or `healer`: warrior `arms_warrior`/`tank_warrior`, paladin `ret_paladin`/`holy_paladin`, hunter `marksman_hunter`, rogue `combat_rogue`, priest `shadow_priest`/`holy_priest`, shaman `enhancement_shaman`/`resto_shaman`, mage `frost_mage`, warlock `affliction_warlock`, druid `feral_cat_druid`/`bear_tank_druid`/`resto_druid`. `rotation` swaps the class rotation for a [rotation file](#rotations-as-data); the plan's [boss tactics](#boss-tactics) apply to the character. | the party is the one the character is in (no hiring or binding yet) |
+| `observe` | A TortoiseBots run leader clears the dungeon, the agent watches and scores it. | **refused**: "needs the TortoiseBots run leader (phase P3 of the dungeon-modes design)". Nothing is sent. |
+
+An omitted `mode` is the older group mode (the brain is optional there); `mode: "leader"` always plays. The options of one mode are refused in the
+other (`lead_bot`, `bots`, `prepare`, `pulltest`, `tune`... go with commander; `brain`, `rotation`, `role`, `teleport`, `buffs`, `gm` go with leader).
+The result has `run_mode` (`leader` or `commander`) next to the older `mode` (`group` or `remote`). `tools/run-uldaman.sh --mode leader
+[--brain PRESET] [--rotation NAME] [--role ROLE] [--from-leg N]` builds the leader run's params; its commander-only options are refused with it.
+Not checked live: a leader run in a party with bots (`docs/LIVE-CHECKS.md`, "Run modes, rotations and boss tactics").
 
 ## Remote leader
 
@@ -2619,6 +2637,81 @@ planner, so a floor query waits behind a plan's Detour search only, not its disk
 once (until the next `path_to`/`walk_path` plan). The 300 ms wait and the late fallback are tested against a planner
 that stalls for 3 s; they have not been seen live.
 
+## Rotations as data
+
+A class rotation of the [bot brain](#bot-brain) can be a **file** instead of Go: a priority list of one class and spec for the agent's own character.
+A file **replaces** the class strategy of a preset (`replaces`: `mage_frost`, or `warrior_melee` + `warrior_arms`...), so the same preset plays
+the Go rotation or the file, and two files can be switched between **by name**: `rotation` of `dungeon_run` and `brain_start`, `--rotation` of
+`tools/run-uldaman.sh`. The run's report and trace name the rotation with the digest of its file (`brain: "frost_mage+rot:frost_mage@32c7144315b5"`; the
+trace header's `options.rotation`), so two arms of an A/B test are told apart. Without the option nothing changes.
+
+Built in (`internal/brain/rotations/*.json`, `turtle-agent rotation list`): `frost_mage`, `fire_mage`, `arcane_mage`, `shadow_priest`, `arms_warrior`,
+`fury_warrior`, `tank_warrior`. `frost_mage`, `shadow_priest` and the three warriors are the **data twins** of the Go strategies (tests play both through the
+same scenes and compare the actions); `fire_mage` and `arcane_mage` exist only as files, with the presets of the same names (`brain: "fire_mage"`).
+Extra files: the settings' `rotations_dir` (every `*.json` in it is registered at login; a name that is taken, a built-in one too, is refused).
+Healer rotations stay Go: the healer triage (`heal.go`) is not a priority list.
+
+```json
+{"version": 1, "name": "frost_mage", "class": "mage", "spec": "frost", "replaces": ["mage_frost"],
+ "sources": ["mod-playerbots 79bd428 src/Ai/Class/Mage/Strategy/FrostMageStrategy.cpp"],
+ "priorities": [
+  {"id": "frost_nova", "spell": "Frost Nova", "level": 10, "target": "self", "band": "high", "threat": "aoe",
+   "when": {"melee_mob": true, "no_mob_aura": ["Frost Nova"]}},
+  {"id": "frostbolt", "spell": "Frostbolt", "level": 4, "target": "fight"}]}
+```
+
+The list is read **top to bottom**: within a band an earlier entry beats a later one (the engine casts the most relevant action that can run). Entry fields:
+`id` (the action's name in `brain_decision`), `kind` (`cast`, the default; `attack`, the auto attack at the fight's mob; `next_swing`, a spell that
+replaces the next swing and is sent once per swing; `stance`, back to a home stance from `stances`), `spell` (a name: the highest known rank is cast) or
+`spell_id`, `level` (the character level of the first rank, checked against the spell data; `talent: true` for a talent), `target` (`fight`, `melee_mob`, `self`), `band`
+(`low` 5, `normal` 10, `high` 20, `move` 30, `emergency` 43; the engine's relevance bands, so movement and interrupts still outrank a rotation), `threat`
+(`single`, `aoe`, `none`: an `aoe` entry is vetoed while a mob is loose), `harmful`, `alt` (other ids to try when this one cannot run), `when`.
+`when` is a closed set of conditions that all must hold, each a function of what the agent sees: `state` (`combat`, `rest`, `any`), `melee_mob`,
+`mob_in_reach`, `mobs_in_reach_min`, `mobs_in_cone_min`, `mob_distance_min`/`max`, `mob_on_me`, `tank_holds`, `feared`, `mob_fleeing`, `moving`, `in_combat`, `after`
+(`dodge`, `avoided`), `combo_points_min`, `stance`, `self_hp_below`/`above`, `power_below`/`above`, `mob_hp_below`/`above` (percent),
+`self_aura`, `no_self_aura`, `self_aura_missing` (absent or under a minute left), `mob_aura`, `no_mob_aura`, `mob_stacks_below`, `mobs_lacking_aura`. Unknown
+fields are refused. Costs, cooldowns, range and the global cooldown are the spell data's and the engine's, not the file's.
+
+**Checks.** `turtle-agent rotation check <file>...` reads files and checks every spell and aura name against the core's spell data, the level of the first
+rank, the ids, the bands and the conditions; `rotation show [--level N] <name|file>` prints the list with the rank cast at level N. The same checks run at load,
+and `make test` runs them on every built-in file. A rotation that replaces nothing of the preset (the wrong class) is refused, and so is an action id that another active
+strategy also uses.
+
+**Sources.** The files are reimplemented from an understanding of mod-playerbots' class strategies (GPL-2.0+; behaviour, ideas and thresholds only, no code
+copied or translated), each file names the donor files in `sources`: `src/Ai/Class/Mage/Strategy/{Frost,Fire,Arcane}MageStrategy.cpp` and
+`GenericMageStrategy.cpp`, `src/Ai/Class/Priest/Strategy/ShadowPriestStrategy.cpp` and `GenericPriestStrategy.cpp`,
+`src/Ai/Class/Warrior/Strategy/{Generic,Arms,Fury,Tank}WarriorStrategy.cpp`. The spells, levels and stances are the Turtle core's.
+
+**A/B.** The arm of a test is the name: run the same leg twice with `--rotation`, once per arm (or once with the preset's own Go rotation and once with its
+data twin), and compare the traces with `trace-score`. The pull test (`pulltest`, `--compare`) scores the **party** of a commander run, where the agent's own
+character does not fight, so it cannot yet score a rotation; running it in leader mode is the open step (see `docs/LIVE-CHECKS.md`).
+
+## Boss tactics
+
+A plan's boss can carry what a player does on that fight beyond the class rotation: `bosses[].tactics` in the plan, i.e. the leg's `boss.tactics`
+(`internal/tactics`; checked when the plan loads, so a spell name with a typo is a load error, not a rule that never fires):
+
+```json
+"boss": {"entry": 7023, "first": [4847, 4847], "tactics": {
+  "kill_first":   [7209],                          "creature entries to kill before anything else while the fight is on",
+  "never_target": [9001],                           "entries the character leaves alone (unless one attacks it)",
+  "interrupt":    ["Chain Lightning", 15801],      "enemy casts to interrupt first: a spell id or its name",
+  "dispel":       ["Fevered Plague"],              "auras a healer dispels first, at any mana",
+  "no_dispel":    ["Mutating Injection"],          "auras a healer leaves alone",
+  "move_out":     [{"cast": "Fire Nova", "yards": 12}, {"ground": 10132}]}}
+```
+
+(The explanations above are not part of the file.) **Leader mode only**: the brain gets the plan's bosses; while the boss, or one of the units in its `first`, is in
+view, hostile, alive and in combat, the encounter is ON (`brain_state` event with `state` `encounter` / `encounter_end` and `data.encounter`, `<plan>/<leg>`) and:
+- **kill_first** - the fight's mob is the nearest such unit within 40 yd, whoever the tank holds; **never_target** - the tank's or the selected mob is skipped (a mob that attacks the character is still fought);
+- **interrupt** - an enemy cast on the list is the first to interrupt (above heals and crowd control), with the class's own interrupt spell (Counterspell, Pummel...); a cast the spell data says cannot be interrupted still is not;
+- **dispel / no_dispel** - healer presets dispel the listed aura before anything else (also a slow, at 20% mana) and leave the listed ones alone;
+- **move_out** - `cast`: while an enemy casts the spell, a circle of `yards` (default 10) round the caster is a hazard and `avoid_ground` walks out of it (a tanking character holds its place); `ground`: a ground effect of that spell is a hazard whoever cast it.
+
+The `encounter` strategy and `avoid_ground` are added to the brain when the plan has any tactics. A **commander** run carries the block but does not use it
+(the bots are TortoiseBots'). Shipped: Uldaman Revelosh, Obsidian Sentinel (kill the Obsidian Shard 7209 first) and Grimlok, Zul'Farrak Antu'sul and Velratha
+(interrupts), with ids from the core's `creature_spells` and EventAI tables. Behaviour after mod-playerbots' dungeon and raid strategies (ideas only). Not checked live.
+
 ## Map images
 
 `turtle-agent map` draws a run as a top-down map from what the agent already records, so a run can be read at a glance
@@ -3126,7 +3219,8 @@ you set).
 | `internal/capture` | packet capture files and the secret scan |
 | `internal/dashboard` | the live dashboard (see [Live dashboard](#live-dashboard)): agent discovery, the read-only poller, the card model, the plan drawing, the secrets filter, the embedded page |
 | `internal/rpc`, `internal/netutil` | loopback JSON-RPC server |
-| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `dashboard`, `trace-score`, `pulltest`) |
+| `internal/tactics` | the `tactics` block of a plan's boss: the file format and its checks (see [Boss tactics](#boss-tactics)) |
+| `cmd/turtle-agent` | the CLI (`login`, `fleet`, capture tools including `capture events`, `map`, `dashboard`, `trace-score`, `pulltest`, `rotation`) |
 
 Parser tests: every SMSG parser in `internal/game` and `internal/objects` has a `Fuzz*` target (no panic, no hang
 within 5 s per input) seeded from the committed captures, a few literal packets copied from live m910q captures

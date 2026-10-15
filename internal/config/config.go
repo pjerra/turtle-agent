@@ -48,6 +48,9 @@ type Settings struct {
 	// DungeonsDir holds the dungeon plans dungeon_run reads (<name>.json; default "dungeons" under the
 	// working directory). A leading ~/ is the home folder.
 	DungeonsDir string `json:"dungeons_dir,omitempty"`
+	// RotationsDir holds extra rotation files (<name>.json, README "Rotations as data") that dungeon_run and brain_start can name as their
+	// `rotation`; the built-in ones need no folder. A leading ~/ is the home folder. A bad file stops the login.
+	RotationsDir string `json:"rotations_dir,omitempty"`
 	// TracesDir is where run traces and their summaries are written (<run_id>.jsonl, <run_id>.summary.json; default "traces"
 	// under the working directory). A leading ~/ is the home folder.
 	TracesDir string `json:"traces_dir,omitempty"`
@@ -104,7 +107,7 @@ func Load(path string) (Settings, error) {
 	if s.RPC == "" {
 		s.RPC = DefaultRPC
 	}
-	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir, &s.DungeonsDir, &s.TracesDir} {
+	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir, &s.DungeonsDir, &s.RotationsDir, &s.TracesDir} {
 		if rest, ok := strings.CutPrefix(*p, "~/"); ok {
 			if home, err := os.UserHomeDir(); err == nil {
 				*p = filepath.Join(home, rest)

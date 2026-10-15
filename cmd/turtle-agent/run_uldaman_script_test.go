@@ -51,6 +51,54 @@ func TestRunUldamanScriptParamsAreWhatDungeonRunTakes(t *testing.T) {
 	}
 }
 
+// The script's leader mode builds the params of a leader run, and refuses what only the commander does; observe is refused up front.
+func TestRunUldamanScriptModes(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	out, err := exec.Command(bash, "../../tools/run-uldaman.sh", "--mode", "leader", "--brain", "frost_mage", "--rotation", "frost_mage", "--role", "dps", "--from-leg", "2", "--print-params").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p dungeonRunParams
+	dec := json.NewDecoder(bytes.NewReader(out))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if remote, err := checkMode(p); remote || err != nil {
+		t.Fatalf("checkMode %v %v", remote, err)
+	}
+	if p.Mode != "leader" || p.Brain != "frost_mage" || p.Rotation != "frost_mage" || p.Role != "dps" || p.FromLeg == nil || p.FromLeg.index != 2 || p.LeadBot != "" {
+		t.Errorf("%+v", p)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--mode", "observe", "--print-params"}, "run leader"},
+		{[]string{"--mode", "fly", "--print-params"}, "commander, observe or leader"},
+		{[]string{"--mode", "leader", "--hire", "--print-params"}, "commander options"},
+		{[]string{"--mode", "leader", "--pulltest", "0:0", "--print-params"}, "commander options"},
+		{[]string{"--rotation", "frost_mage", "--print-params"}, "go with --mode leader"},
+		{[]string{"--mode", "leader", "--role", "bard", "--print-params"}, "dps, tank or healer"},
+	} {
+		cmd := exec.Command(bash, append([]string{"../../tools/run-uldaman.sh"}, c.args...)...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err == nil || !strings.Contains(stderr.String(), c.want) {
+			t.Errorf("%v: %v %q, want %q", c.args, err, stderr.String(), c.want)
+		}
+	}
+	// MODE= in the environment is the same option.
+	cmd := exec.Command(bash, "../../tools/run-uldaman.sh", "--print-params")
+	cmd.Env = append(os.Environ(), "MODE=leader")
+	if out, err := cmd.Output(); err != nil || !strings.Contains(string(out), `"mode":"leader"`) {
+		t.Errorf("MODE=leader: %s %v", out, err)
+	}
+}
+
 // The two replies of ".instance groupunbind all" (Commands.cpp, HandleInstanceGroupUnbindCommand; mangos_string 117) are told apart,
 // whatever else the server says meanwhile.
 func TestGroupUnbindReply(t *testing.T) {

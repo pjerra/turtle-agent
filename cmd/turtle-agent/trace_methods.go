@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,11 @@ func (b *brainTrace) begin(runID string, p brainStartParams, self string, selfGU
 	cfg := tracerun.Config{On: p.Trace == nil || *p.Trace, Dir: tracesDir(b.dir), RunID: runID, Meta: p.TraceMeta, Agent: trace.Agent{Version: version}}
 	rec, _ := tracerun.New(cfg, "brain", "", time.Now) // runID was checked by brain_start; an invalid one would only leave the session untraced
 	opts := map[string]any{"strategies": st.Strategies, "role": st.Role, "no_move": st.NoMove}
+	if p.Rotation != "" {
+		if label, err := brainLabel("", p.Rotation); err == nil {
+			opts["rotation"] = strings.TrimPrefix(label, "+rot:")
+		}
+	}
 	if st.Tank != "" {
 		opts["tank"] = st.Tank
 	}
@@ -112,7 +118,11 @@ func (b *brainTrace) event(e events.Event) {
 	}
 	if e.Kind == events.KindBrainState {
 		state, _ := e.Data["state"].(string)
-		rec.Event("brain_state", map[string]any{"state": state, "strategies": e.Data["strategies"], "role": e.Data["role"]})
+		bs := map[string]any{"state": state, "strategies": e.Data["strategies"], "role": e.Data["role"]}
+		if enc, ok := e.Data["encounter"]; ok {
+			bs["encounter"] = enc
+		}
+		rec.Event("brain_state", bs)
 		b.mu.Lock()
 		own := b.rec == rec
 		if own && state == "stopped" {

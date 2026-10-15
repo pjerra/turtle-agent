@@ -105,6 +105,14 @@ func TestDungeonsDir(t *testing.T) {
 	}
 }
 
+func TestRotationsDir(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"rotations_dir":"~/rot"}`))
+	home, _ := os.UserHomeDir()
+	if err != nil || s.RotationsDir != filepath.Join(home, "rot") {
+		t.Fatalf("%q %v", s.RotationsDir, err)
+	}
+}
+
 func TestMmapsDir(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Load(writeSettings(t, 0o600, fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"mmaps_dir":%q}`, dir)))
