@@ -21,6 +21,7 @@
     "rogue:dps",
     "warlock:dps"
   ],
+  "fleers": [4853, 4848, 4849, 7321],
   "notes": [
     "Uldaman (map 70) from the main entrance (areatrigger 286) to Archaedas, the last boss. Legs 0-3 (Baelog, Revelosh, Keystone, Ironaya) are the west wing and were run remotely end to end (remote run 5); legs 4-13 go on from Ironaya's room and were written from the world database of tortoise-wow 5d79486 (map 70 creature and game object spawns, templates, EventAI, the C++ scripts of src/scripts/dungeons/uldaman) and the map 70 navmesh, then compared with the live map walk of 2026-10-14 (a GM walker, nothing fought or used). They have NOT been run as a party: Obsidian Sentinel, Ancient Stone Keeper, Galgann, Grimlok, the Altar of the Keepers with its four Stone Keepers, Archaedas. Order of legs 0-3 follows docs/guides/dungeon-tactics.md section 8 of TortoiseBots (PR 859).",
     "Honest (non-GM) run: the baelog leg pulls its packs and loots Baelog's Chest; revelosh kills Revelosh, loots the Shaft of Tsol and makes the Staff of Prehistoria; keystone opens the Keystone with it. A Horde leader kills Baelog, Eric and Olaf (team: horde); for an Alliance leader the boss is skipped unless the lost dwarves show up hostile in the feed (remote run 2: they were hostile to an Alliance party and joined the pull of the last pack), then it is fought like a pull group. Pass criteria: docs/LIVE-CHECKS.md.",
@@ -426,6 +427,12 @@
         "entry": 7206,
         "position": {"x": -38.4, "y": 221.3, "z": -48.4}
       },
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "From the Sentinel south-west through the big central hall (x -110 to -40, y 200 to 340): the Earthen guards of the hall (Earthen Rocksmashers 7011, Sculptors 7012, faction 415, hostile to both teams, stationary or wandering 2-5 yd) in five groups, two Stone Stewards (4860, waypoint patrols: their spawn point is where the plan looks first). Packs are the spawns within 10 yd of the navmesh route (the older legs use 8), grouped by tools/dungeongen (12 yd, creature groups).",
         "Ancient Stone Keeper (7206, level 44, 8910 hp, faction 415, no script, one spell, 10132) stands alone at the south end of the central hall, a dead end off the way on: it is a mini boss, nothing opens behind it."
@@ -512,6 +519,12 @@
         "position": {"x": -10.4, "y": 414.7, "z": -46.9},
         "first": [7030, 7030]
       },
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "North out of the central hall's east side: Rocksmashers/Sculptors/a Steward, then the nest of ten Deadly Cleft Scorpids (7405, level 42-43, wander 1) 6.7 yd off the route at -21 331, then the two Shadowforge Sharpshooters (7290) at the foot of the ramp, then the two pairs of Darkcaster (4848) and Archaeologist (4849) that stand 10-12 yd off the approach to the Galgann room. The casters of the Shadowforge groups run at 15 % health (EventAI 'Flee at 15% HP'), so a wounded one can bring the next group.",
         "Galgann Firehammer (7291, level 45, 13302 hp, faction 54, EventAI) stands with two Shadowforge Geologists (7030) in one creature group (leader guid 27491): the plan kills the Geologists first (boss.first). He yells on aggro and casts Amplify Flames (9482); his spell list is 3356, 8053 and 11969. Turtle-custom data: none found (the entries are untouched by the database updates read)."
@@ -545,6 +558,14 @@
         {
           "entries": [4855, 4855, 4853],
           "positions": [
+            {"x": 78.9, "y": 404.9, "z": -38.2},
+            {"x": 85.5, "y": 403.7, "z": -38.2},
+            {"x": 85.3, "y": 397.1, "z": -38.2}
+          ]
+        },
+        {
+          "entries": [4855, 4855, 4853],
+          "positions": [
             {"x": 55.8, "y": 416.1, "z": -41},
             {"x": 49.8, "y": 418.5, "z": -41},
             {"x": 49.5, "y": 425.6, "z": -41}
@@ -563,8 +584,14 @@
         "position": {"x": 56.7, "y": 455.3, "z": -41},
         "first": [4855, 4853, 4863]
       },
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
-        "Back out of the Galgann room and east along the Stonevault corridor: Brawler (4855) + Geomancer (4853) pairs and trios (Geomancers flee at 15 % health), the patrolling Brawler near 57.9 374, then the group of three at 55 417.",
+        "Back out of the Galgann room and east along the Stonevault corridor: Brawler (4855) + Geomancer (4853) pairs and trios (Geomancers flee at 15 % health), the patrolling Brawler near 57.9 374, then the group of three at 55 417. The trio at 79-85 397-405 (Brawler, Brawler, Geomancer: guids 27512-27514, wander 2) stands 25 yd east of the group of three at 55 417 and 18 yd from the lead bot's way to it: it is its own pull group, taken first (Uldaman A run 6: the tank walked up to the group of three, the trio aggroed on the way, six mobs at once, the party wiped at pull group 4).",
         "Grimlok (4854, level 45, 7390 hp, faction 59, EventAI) is in one creature group (leader guid 27528) with a Stonevault Brawler, a Stonevault Geomancer and a Jadespine Basilisk (4863; script mob_jadespine_basilisk: Crystalline Slumber every 28 s on its target, which it then drops from its threat): boss.first kills them in that order. Grimlok yells on aggro and on a player kill, casts Bloodlust (6742) at 30 % health, and has the spells 11892, 8292, 8143 and 9532. The run's `cc` option can mark the Basilisk."
       ]
     },
@@ -640,6 +667,12 @@
           }
         }
       ],
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "Back along the corridor Grimlok's room opens into, then south down the Stonevault passage and the ramp room of the Stonevault Maulers (7320) and Flameweavers (7321; Fire Shield IV, flee at 15 %; Maulers frenzy at 50 %) to the foot of the ramp up to the Hall of the Keepers (z -26). The route is 260 yd; the packs of the way in (the trio at 55 417 and the three near 58 374) were pulled by the grimlok leg.",
         "The Temple Door (124368, 50.0 247.2 -26.5) closes the Hall of the Keepers: a plain door like the Echomok Door (type 0, lock 86, spawned closed, no script; same unverified lock). The step uses it from the west side (46.5 247.2)."
@@ -693,6 +726,12 @@
           }
         }
       ],
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "The Hall of the Keepers (z -26.5) is a large room with three squads of Earthen guards (four Stonebreakers 7396, a Stonecarver 7397 and a Stone Steward 4860 each, faction 415, level 44-45, wander 2): west of the altar on the route (73-89 / 251-269), east (112-130 / 244-264) and north (88-108 / 292-301), both 22 yd from the altar. All three are pulled BEFORE the ritual (radius 31 around the route, not the 10 of the other legs), because the Stone Keepers that the ritual wakes fight in the middle of the room and the squads would join. Four Stone Keepers (4857, faction 35, stoned) stand around the altar at 91-118 / 259-286 and are left alone until the altar.",
         "Altar of the Keepers (130511, 104.8 272.5 -26.5) is a summoning ritual (game object type 18) with three participants: gameobject_template data0 3, spell 11568, animation spell 11206, ritualPersistent 1, castersGrouped 1. GameObject::Use counts the different players of the first user's group that used it; each stands channelling the animation, a user who moves is taken out of the count; with the third the ritual spell sends the scripted event 2228 (event_awaken_stone_keeper), which wakes the first Stone Keeper. One bot using it is not enough: the ritual step orders cmd ritual for three bots, which walk to the altar, use it in turn and stand still until it is active and the ritual spell (5 s) has run; its final answer is the step's result. The altar itself reads ready again once the bots are let go (their movement ends the channel), so the plan does not wait for it to be active: the next leg waits for the door the Keepers' death opens. Core, read from GameObject::Use: the use that brings the count to three makes the object active and casts the spell, a participant that moves is taken out of the count again."
@@ -725,6 +764,12 @@
           }
         }
       ],
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "The Stone Keepers (4857, level 46, 5757 hp, EventAI, one spell: Trample 5568) wake one at a time (instance_uldaman.cpp, SetData STONE_KEEPERS IN_PROGRESS): the first one that is alive and not awake attacks the nearest player within 80 yd; when it dies it casts Self Destruct (9874) and wakes the next; when the fourth is dead the encounter is DONE and the Temple Door 124367 opens. A Stone Keeper that evades (no target: a wipe, everybody dead or out of range) sets the encounter to FAIL and all four stand up stoned again. Which one wakes first is the order the instance script saw the creatures in, not known from the data, hence one group of four with radius 30.",
         "The group is pulled as the Keepers wake (hostile in the feed); the leg's only gate is the wait for the door 124367 (137.7 288.1 -26.4) to be active, with the plan's longest ceiling (600 s): four 5757 hp mobs one after the other are a few minutes for a party that can fight. The Stone Keepers are friendly (faction 35) until woken, so a group of them is never in the feed before the ritual; `dungeongen -check` warns about them as friends unless `-awakened 4857,2748` says they are woken by script. After a FAIL the Altar of the Keepers keeps its active state (nothing in the world data or the scripts resets it with DATA_KEEPERS_ALTAR), so a second try would need a new instance: unverified, read from the code only."
@@ -781,6 +826,12 @@
           ]
         }
       ],
+      "rest": {
+        "health": 95,
+        "healer_mana": 90,
+        "mana": 70,
+        "max_s": 150
+      },
       "notes": [
         "Out through the Temple Door 124367 (open now) and down the long ramp that runs round the east side of the hall and the Vault: the squad east of the door (144-154 / 288-306), the patrolling Stone Steward at 165.6 261.4, the squad at the bend (118-132 / 220-230, z -42), the Steward patrol at 76 214 (z -55) and, in the room in front of Archaedas' door, the squad of seven (four Stonebreakers, two Stonecarvers, a Steward at 48-65 / 238-261, z -52). The two Vault Warders (10120) at 48.5 251.1 and 52 243.8 in that room are statues (faction 35, stoned) that Archaedas' script despawns at 33 % health; the plan leaves them.",
         "The way from the Keepers' hall to Archaedas is only this ramp: the navmesh has no other link between the Hall and the Vault level, and the ramp starts at the door 124367."

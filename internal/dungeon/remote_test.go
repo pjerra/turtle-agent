@@ -46,6 +46,18 @@ type rmob struct {
 	aggroed bool
 	// reaction and kind: the record's TortoiseBots #943 fields ("" leaves them out, as an older module does)
 	reaction, kind string
+	// the runner tests (remote_flee_test.go): at fleeAt percent health the mob runs from the lead bot at fleeSpeed yards a second (flag
+	// c) for fleeFor. Only an attack order sent at it after it started to run (hit) hurts it, and only within 12 yd of where it started
+	// to run: a mob nobody is sent after escapes. hideRun takes it out of the feed 2 s after it started to run. comesBack: after fleeFor
+	// it stands by the lead bot again (the tank has it) and its friends join the fight, next to the lead bot.
+	fleeAt, fleeSpeed  float64
+	fleeFor            time.Duration
+	hideRun, comesBack bool
+	friends            []*rmob
+	fleeing, back, hit bool
+	untouchable        bool // no order hurts it while it runs (it is out of reach or out of sight)
+	fleeStart, backAt  time.Time
+	fleeOrigin         Point
 	// ccUntil: a `cmd cc` at it holds it (flag c, no target) until then (fakeRemote.ccLasts)
 	ccUntil time.Time
 }
@@ -162,6 +174,12 @@ func newFakeRemote(t *testing.T) *fakeRemote {
 
 func (g *fakeRemote) lead() *tbm.PartyRec { return g.party[0] }
 
+// leadDist is how far the mob stands from the lead bot.
+func (g *fakeRemote) leadDist(m *rmob) float64 {
+	dx, dy := float64(m.pos.X-g.lead().X), float64(m.pos.Y-g.lead().Y)
+	return sqrt(dx*dx + dy*dy)
+}
+
 func (g *fakeRemote) clock() Clock {
 	return Clock{Now: func() time.Time { return g.now }, Sleep: func(ctx context.Context, d time.Duration) error {
 		if err := ctx.Err(); err != nil {
@@ -244,8 +262,29 @@ func (g *fakeRemote) advance(d time.Duration) {
 			if m.noTarget {
 				m.target = 0
 			}
-			anyEngaged = true
-			if m.attacked {
+			anyEngaged = anyEngaged || !m.fleeing
+			if m.fleeAt > 0 && !m.back {
+				if !m.fleeing && m.hp <= m.fleeAt {
+					m.fleeing, m.fleeStart, m.flags, m.hit, m.fleeOrigin = true, g.now, "c", false, m.pos
+				}
+				if m.fleeing && g.now.Sub(m.fleeStart) < m.fleeFor {
+					l := g.lead()
+					dx, dy := float64(m.pos.X-l.X), float64(m.pos.Y-l.Y)
+					if n := sqrt(dx*dx + dy*dy); n > 0 {
+						m.pos.X += float32(dx / n * m.fleeSpeed * sec)
+						m.pos.Y += float32(dy / n * m.fleeSpeed * sec)
+					}
+				} else if m.fleeing && m.comesBack {
+					l := g.lead()
+					m.fleeing, m.back, m.flags, m.backAt = false, true, "-", g.now
+					m.pos = Point{l.X + 6, l.Y, l.Z}
+					for _, f := range m.friends {
+						f.pos = Point{l.X + 8, l.Y + 3, l.Z}
+						f.pulled, f.pullAt, f.engaged = true, g.now, true
+					}
+				}
+			}
+			if m.attacked && (!m.fleeing || m.hit && !m.untouchable && dist3(m.pos, m.fleeOrigin) <= 12) {
 				m.hp -= g.killRate * sec
 			}
 		}
@@ -330,6 +369,9 @@ func (g *fakeRemote) publish() {
 	}
 	for _, m := range g.mobs {
 		if dx, dy := float64(m.pos.X-g.lead().X), float64(m.pos.Y-g.lead().Y); g.sight > 0 && !m.engaged && sqrt(dx*dx+dy*dy) > g.sight {
+			continue
+		}
+		if m.fleeing && m.hideRun && g.now.Sub(m.fleeStart) > 2*time.Second {
 			continue
 		}
 		h := tbm.HostileRec{GUID: m.guid, Entry: m.entry, X: m.pos.X, Y: m.pos.Y, Z: m.pos.Z, HPPct: int(m.hp), Target: m.target, Flags: m.flags, Reaction: m.reaction, Kind: m.kind}
@@ -538,6 +580,9 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		m := g.mobByArg(f[2])
 		if m == nil {
 			return errReply(intent, "dead-target"), nil
+		}
+		if m.fleeing && !(len(f) > 3 && strings.EqualFold(f[3], g.party[0].Name)) {
+			m.hit = true // a damage dealer is sent after the runner
 		}
 		if len(f) > 3 {
 			if g.tankTooFar > 0 {

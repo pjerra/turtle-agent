@@ -92,6 +92,11 @@ type Plan struct {
 	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
 	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
 	HireComposition []string `json:"hire_composition,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
 	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
 	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
 	CCPriority []uint32 `json:"cc_priority,omitempty"`
@@ -372,6 +377,7 @@ type rawPlan struct {
 	Name     string            `json:"name"`
 	Kind     string            `json:"kind"`
 	Status   string            `json:"status"`
+	Fleers   []uint32          `json:"fleers"`
 	Raid     *RaidSpec         `json:"raid"`
 	Map      *uint32           `json:"map"`
 	Entrance *rawPoint         `json:"entrance"`
@@ -648,6 +654,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
 		if rp.Kind == KindRaid {
 			c.fail("hire_composition", "a raid plan has a raid block instead")

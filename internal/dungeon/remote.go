@@ -357,12 +357,17 @@ type RemoteReport struct {
 	CCRespected       int     `json:"cc_respected"`
 	TargetSwitches    int     `json:"target_switches"`
 	// AttackResends are the attack orders sent again at the mob the party was already sent at (after AssistEvery, with the tank not holding it).
-	AttackResends  int `json:"attack_resends"`
-	RezWaits       int `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
-	Rezzed         int `json:"rezzed"`           // bots that got up during those waits
-	Rezzes         int `json:"rezzes"`           // the same count under the trace event's name (`rez`): bots a party caster raised instead of their releasing
-	PackLooks      int `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
-	PacksSeenEmpty int `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
+	AttackResends  int     `json:"attack_resends"`
+	UnsafeRezSkips int     `json:"unsafe_rez_skips"` // waits for a resurrection in place skipped for a live hostile near the bodies (remote_flee.go)
+	Fled           int     `json:"fled"`             // mobs that ran off at low health and left the feed alive
+	FleeOrders     int     `json:"flee_orders"`      // attack rounds at a running mob
+	FleeWaits      int     `json:"flee_waits"`       // pulls held for a mob that ran off
+	FleeWaitS      float64 `json:"flee_wait_s"`      // ... and the seconds they waited
+	RezWaits       int     `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
+	Rezzed         int     `json:"rezzed"`           // bots that got up during those waits
+	Rezzes         int     `json:"rezzes"`           // the same count under the trace event's name (`rez`): bots a party caster raised instead of their releasing
+	PackLooks      int     `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
+	PacksSeenEmpty int     `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
 	// The careful walk (remote_gather.go): waits for the party to gather on the lead bot before a pull or a hop, their seconds, the waits
 	// that ran out with a bot still away, and the hostiles near a hop that were pulled before it.
 	Gathers        int     `json:"gathers"`
@@ -538,6 +543,7 @@ type RemoteDriver struct {
 	wdObject   flagOnce // give up the carrier order's retries
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
+	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)
 	live liveTune  // live tuning: the tunables file, the plan file and tune_set (remote_tune.go)
 }
@@ -1220,6 +1226,7 @@ func (d *RemoteDriver) look() {
 	if !d.haveFr || n != d.n {
 		d.fr, d.n, d.haveFr = fr, n, true
 		d.noteLedger()
+		d.noteFleeing()
 		d.ptObserve()
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
@@ -2018,6 +2025,13 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 			return nil
 		}
 		now := d.clk.Now()
+		if near := d.hostilesNearCorpses(); len(near) > 0 {
+			// A resurrection in place next to mobs that have not reset puts the party back on the floor (Uldaman A, 2026-10-14): the dead
+			// are released and run back from the graveyard, which gives the mobs time to leave.
+			d.remote(func(r *RemoteReport) { r.UnsafeRezSkips++ })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots (%s); %s stands within %.0f yd of the bodies: no resurrection in place, releasing them (cmd revive: they run back from the graveyard)", max(d.curLeg, 0), len(dead), why, d.hostileName(near[0]), d.tx.ReviveSafeYd))
+			return nil
+		}
 		if len(d.resurrectors()) == 0 {
 			if noted {
 				d.rep.note(fmt.Sprintf("leg %d: no living caster out of combat to raise %d dead bots (%s); releasing them", max(d.curLeg, 0), len(dead), why))
