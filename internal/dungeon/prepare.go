@@ -28,6 +28,9 @@ import (
 //	          lead bot selected (every member is unbound, the group disbanded; the reply is checked), and they are bound again, checked
 //	          again. The binding stays for the run's own bind to reuse. The agent unbinds itself last.
 //	gm_setup: `.gm visible off|on` lines, and nothing else.
+//	give_items: (remote mode, account level 3) the run option give_items: `.additem <entry>` with the named bot selected, then the bag check
+//	          (`.bot inv`). It is how a test party gets an item no honest run has (the Mallet of Zul'Farrak that rings Zul'Farrak's gong);
+//	          the line is listed in setup_shortcuts as "additem <entry> on <bot> (test setup: <item name>)". It runs last, after the hire.
 //	party:    "hire" (hire.go): the party is five hired bots at the instance's level instead of the named bots. Hire, check, bind; sends no
 //	          GM line. The run takes the lead bot, tank and healer from it (lead_bot, bots, tank and healer stay empty).
 //
@@ -45,10 +48,26 @@ type PrepareSpec struct {
 	// Party is "" (the run's named bots) or "hire" (hire.go): the commander hires its party, checks it and binds it. Hire tunes it.
 	Party string    `json:"party,omitempty"`
 	Hire  *HireSpec `json:"hire,omitempty"`
+	// GiveItems is dungeon_run's give_items run option (the run copies it here; it is not a field of the prepare block's JSON).
+	GiveItems []GiveItem `json:"-"`
 }
 
+// GiveItem is one entry of dungeon_run's give_items: a GM `.additem` on a bot, for a test run whose plan has an optional leg that needs the item
+// (Leg.Optional). Bot is "lead" (the lead bot, also when empty), "carrier" (the run's carrier option, else the bot the object steps use) or a
+// bot's name. Name is the item's name for the setup_shortcuts line; empty takes the plan's own name for the item.
+type GiveItem struct {
+	Bot  string `json:"bot,omitempty"`
+	Item uint32 `json:"item"`
+	Name string `json:"name,omitempty"`
+}
+
+// maxGiveItems is the most entries give_items takes.
+const maxGiveItems = 4
+
 // Active says whether the block asks for anything.
-func (s PrepareSpec) Active() bool { return s.Online || s.Fresh || len(s.GMSetup) > 0 || s.Party != "" }
+func (s PrepareSpec) Active() bool {
+	return s.Online || s.Fresh || len(s.GMSetup) > 0 || s.Party != "" || len(s.GiveItems) > 0
+}
 
 // HiredParty says whether the party is hired (the run's bot names come from the prepare step).
 func (s PrepareSpec) HiredParty() bool { return strings.EqualFold(s.Party, PartyHire) }
@@ -106,8 +125,36 @@ func (s PrepareSpec) Validate(remote bool) error {
 			return err
 		}
 	}
+	return ValidateGiveItems(s.GiveItems)
+}
+
+// ValidateGiveItems checks the give_items run option.
+func ValidateGiveItems(gs []GiveItem) error {
+	if len(gs) > maxGiveItems {
+		return fmt.Errorf("give_items: at most %d entries", maxGiveItems)
+	}
+	for i, g := range gs {
+		switch b := strings.ToLower(strings.TrimSpace(g.Bot)); {
+		case g.Item == 0:
+			return fmt.Errorf("give_items[%d].item: required (the item entry)", i)
+		case g.Bot != strings.TrimSpace(g.Bot):
+			return fmt.Errorf("give_items[%d].bot: %q has spaces around it", i, g.Bot)
+		case b == "" || b == GiveLead || b == GiveCarrier || botNameRe.MatchString(g.Bot):
+		default:
+			return fmt.Errorf("give_items[%d].bot: %q is neither %q, %q nor a character name", i, g.Bot, GiveLead, GiveCarrier)
+		}
+		if len(g.Name) > 60 || strings.ContainsAny(g.Name, "\r\n") {
+			return fmt.Errorf("give_items[%d].name: at most 60 characters on one line", i)
+		}
+	}
 	return nil
 }
+
+// The two roles give_items names besides a bot's own name.
+const (
+	GiveLead    = "lead"
+	GiveCarrier = "carrier"
+)
 
 // ParseGMSetup reads a gm_setup line. It accepts ".gm visible off" and ".gm visible on" (case, spacing and the dot are free) and refuses
 // every other text: the prepare step sends no other GM setup line. text is the canonical form, on the value.
@@ -245,6 +292,9 @@ type prepEnv struct {
 	bound  bool
 	settle time.Duration
 
+	// tank, healer and carrier are the run's named roles (the hire step's own win): give_items resolves "carrier" the way the object steps do.
+	tank, healer, carrier string
+
 	onlineWait time.Duration // 0: DefaultOnlineWait
 	freshWait  time.Duration // 0: prepareFreshWait
 	poll       time.Duration // 0: preparePoll
@@ -289,6 +339,7 @@ func runPrepare(ctx context.Context, e *prepEnv) (*PrepareReport, error) {
 		{"online", e.spec.Online, e.online},
 		{"fresh", e.spec.Fresh, e.fresh},
 		{"gm_setup", len(e.spec.GMSetup) > 0, e.gmSetup},
+		{"give_items", len(e.spec.GiveItems) > 0, e.giveItems},
 	} {
 		if !s.on {
 			continue

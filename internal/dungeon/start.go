@@ -227,6 +227,9 @@ func (p *Plan) SkippedNeeds(from int, haveItems []uint32) error {
 	}
 	for li := from; li < len(p.Legs); li++ {
 		l := p.Legs[li]
+		if l.Optional != nil {
+			continue // run only when its item is in the bags (Leg.Optional); a start without it skips the leg
+		}
 		for _, group := range [][]Step{l.Steps, l.AfterBoss} {
 			for si, st := range group {
 				var needs []ItemRef

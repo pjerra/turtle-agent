@@ -101,6 +101,7 @@ type Action struct {
 	Section      []BatchChest
 	Trigger      *AreaTrigger  // area_trigger: the step
 	Participants int           // ritual: the number of bots that use the object
+	ViaItem      bool          // use: the Requires item is used on the object (UseObject.ViaItem)
 	Requires     *ItemRef      // use, use_item: the item a non-GM leader needs to carry (UseObject.RequiresItem, UseItem.RequiresItem)
 	Item         *ItemRef      // use_item: the item to use
 	Expect       *ItemRef      // loot_object, use_item: the item that must be in the bags afterwards
@@ -182,6 +183,14 @@ func (s *Stepper) enterLeg(i int) {
 
 // RestartLeg begins the current leg again from its first point: for a leg whose plan was reloaded before anything of it was done.
 func (s *Stepper) RestartLeg() { s.enterLeg(s.leg) }
+
+// SkipLeg gives up the current leg and goes on at the next one: the driver's way past an optional leg whose item is missing. It does nothing
+// on a plan that is done or failed.
+func (s *Stepper) SkipLeg() {
+	if s.ph != phDone && s.ph != phFailed {
+		s.enterLeg(s.leg + 1)
+	}
+}
 
 // Position reports where the stepper is, for logs and the driver's status: the leg, the phase name and the index in it.
 func (s *Stepper) Position() (leg int, phase string, index int) {
@@ -414,7 +423,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 				}
 			}
 			if st.UseObject != nil {
-				base.Requires = st.UseObject.RequiresItem
+				base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 			} else {
 				base.Expect = st.LootObject.ExpectItem
 			}
@@ -450,7 +459,7 @@ func (s *Stepper) stepOnce(st *Step) (a Action, advance bool) {
 		}
 		base.Kind, base.Object, base.GUID = kind, &o, o.GUID
 		if st.UseObject != nil {
-			base.Requires = st.UseObject.RequiresItem
+			base.Requires, base.ViaItem = st.UseObject.RequiresItem, st.UseObject.ViaItem
 		} else {
 			base.Expect = st.LootObject.ExpectItem
 		}

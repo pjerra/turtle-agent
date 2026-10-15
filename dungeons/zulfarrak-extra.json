@@ -13,31 +13,9 @@
     "z": 15.1
   },
   "notes": [
-    "The parts of Zul'Farrak that dungeons/zulfarrak.json leaves out because the driver cannot do them yet: the Gong and Gahz'rilla (needs the Mallet), the stairs event with Nekrum Gutchewer and Shadowpriest Sezz'ziz (waves, no step that fights or waits for the event), and Chief Ukorz Sandscalp + Ruuzlu (behind a door only Weegli's gossip opens). Do not run it as a plan: it is the record of the positions, entries and steps for the day the driver gets a talk/gossip step and an event wait. Witch Doctor Zum'rah is in neither file (see zulfarrak.json notes: faction 35 until area trigger 962). Checked live 2026-10-14 by a GM-invisible walk of the instance (tests/zf-map/MAP.md): positions of the objects below match the export; nothing was used."
+    "The parts of Zul'Farrak that dungeons/zulfarrak.json leaves out because the driver cannot do them yet (the Gong and Gahz'rilla are the optional gahzrilla leg of dungeons/zulfarrak.json since PR A): the stairs event with Nekrum Gutchewer and Shadowpriest Sezz'ziz (waves, no step that fights or waits for the event), and Chief Ukorz Sandscalp + Ruuzlu (behind a door only Weegli's gossip opens). Do not run it as a plan: it is the record of the positions, entries and steps for the day the driver gets a talk/gossip step and an event wait. Witch Doctor Zum'rah is in neither file (see zulfarrak.json notes: faction 35 until area trigger 962). Checked live 2026-10-14 by a GM-invisible walk of the instance (tests/zf-map/MAP.md): positions of the objects below match the export; nothing was used."
   ],
   "legs": [
-    {
-      "name": "gong",
-      "to": {"x": 1660, "y": 1160, "z": 10.5},
-      "skip": [7269, 10080, 10082, 15578],
-      "steps": [
-        {
-          "use_object": {
-            "entry": 141832,
-            "near": {"x": 1650.9, "y": 1171.9, "z": 10.9},
-            "stand": {"x": 1654.5, "y": 1166.5, "z": 10.3},
-            "requires_item": {"entry": 9240, "name": "Mallet of Zul'Farrak"}
-          }
-        }
-      ],
-      "boss": {
-        "entry": 7273,
-        "position": {"x": 1659.4, "y": 1193, "z": 9.2}
-      },
-      "notes": [
-        "Gahz'rilla (7273, faction 107, level 46) is summoned by the Gong of Zul'Farrak (goober 141832, lock 459, event 2488): event_scripts 2488 summons him in the pit at 1664.7 1187.7 -2.9 for 3600 s and despawns the gong object 209001; he has no spawn row, so the boss position is the nearest point of the navmesh (1659.4 1193.0 9.2, 14 yd from the pit), where he comes out. The Gong needs the Mallet of Zul'Farrak (item 9240, quest item 'Mallet of Zul'Farrak' from the Sacred Mallet chain): no honest run has one, so this leg stays out of the first run (the run checks the carrier's bags for requires_item at the start when this leg is from from_leg on). Event 2489 also pops six Sandfury trolls (entry 0, template summon) around the pit: not verified. Unverified in the driver: use_object on a goober with an item lock. Live: the Gong stood closed (state ready, flags 32, usable true as the client sees it; the lock is checked by the server) and Elder Wildmane (15578) was absent in a fresh instance."
-      ]
-    },
     {
       "name": "stairs",
       "to": {"x": 1887, "y": 1274, "z": 42},
