@@ -3112,6 +3112,38 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 
+**Route editor (`--edit`).** Off by default: without `--edit` the page is GET/HEAD only, exactly as above. With it, the one thing the
+page can write is a checked version of a plan's route, through `POST /api/edit/<plan>`:
+
+```
+turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dungeons --edit --mmaps-dir ~/turtle-agent-mmaps
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--edit` | off | turns the editor on |
+| `--mmaps-dir` | none, required | the navmesh folder of the server the plans are run on; every version records it (a check on another server's mesh proves nothing) |
+| `--edit-source` | the first `--plans-dir` | the folder whose plan files an edit starts from; the page draws and edits this copy |
+| `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json` (the whole plan, `dungeon.Marshal`), `vNNNN.meta.json` (who, when, base sha256 and git SHA, note, check result, ops, the plan diff) and `vNNNN.diff` (text diff). A refused edit keeps the record and the diff only |
+| `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | lines of `label token`, mode 0600, owned by you; the label is the recorded `who` |
+
+The request carries ops, never a plan (`{"base_sha256", "note", "ops": [{"leg", "kind": "move"|"insert"|"delete", "index", "x", "y"}]}`, game
+coordinates; index counts the leg's via points, then `to`). The server applies them to a copy of the base file it reads itself: only the
+position of a via point or of a leg's `to` changes, a plain via point is added or deleted; a `direct` or `check_skip` via point, pack
+positions, bosses, steps, and legs are locked. Each new point is put on the navmesh floor nearest its old height (a drag on a multi-level map
+stays on its level; more than one floor in range is reported as `floor_picked`), must lie within 200 yd of the plan's own points, and the
+result must still load as a plan. Then `dungeon.CheckPlan` runs on the whole plan: an edit is refused (HTTP 422, with a refused record) when
+it makes a plan check issue the base plan did not have; the issues the plan already had are listed and do not block it.
+
+Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
+application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
+created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, `O_EXCL` and `O_NOFOLLOW`, never overwritten.
+The commander run reloads its plan file at every leg, so anything written into a running slot's `dungeons_dir` would be taken by that run
+unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-dir` is, contains or lies inside any slot's `dungeons_dir`
+(read from `settings*.json`), or when `--edit-source` lies inside one. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
+`/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
+`/vNNNN/diff`.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
 `<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub

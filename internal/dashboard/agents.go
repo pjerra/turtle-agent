@@ -56,6 +56,28 @@ func expandHome(p string) string {
 	return p
 }
 
+// SlotDungeonDirs lists the dungeons_dir of every settings*.json in configDir (even a file with no rpc field): the folders the commander
+// runs of this machine read their plans from. A leading ~/ is made the home folder; a file that does not read is skipped, and an error is
+// returned for a configDir that cannot be listed.
+func SlotDungeonDirs(configDir string) ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(configDir, "settings*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var s settingsFields
+		if json.Unmarshal(data, &s) == nil && s.DungeonsDir != "" {
+			out = append(out, expandHome(s.DungeonsDir))
+		}
+	}
+	return out, nil
+}
+
 // DiscoverAgents lists the agents to watch. spec is "auto" (the "rpc" field of configDir/settings*.json), a comma list of
 // RPC addresses ("8765" or "127.0.0.1:8766"), or both ("auto,8770"). Every address must be loopback.
 func DiscoverAgents(configDir, spec string) ([]Agent, error) {
