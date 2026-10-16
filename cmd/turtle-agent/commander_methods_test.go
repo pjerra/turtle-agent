@@ -173,6 +173,8 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","object_fallback":"maybe"}`, "object_fallback:"},
 		{`{"name":"rig","object_fallback":"agent"}`, `go with mode "remote"`},
 		{`{"name":"rig","graves_batch":3}`, `go with mode "remote"`},
+		{`{"name":"rig","graves_open_by":"agent"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_open_by":"nobody"}`, "graves_open_by:"},
 		{`{"name":"rig","graves_ramp":{"start":2}}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_batch":21}`, "graves_batch:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_batch":3,"graves_ramp":{}}`, "give one"},

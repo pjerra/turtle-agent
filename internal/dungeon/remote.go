@@ -90,6 +90,9 @@ type RemoteOptions struct {
 	// each batch without a wipe (remote_batch.go). Both off (0, nil): the plan's own batches. GravesRamp wins when both are given.
 	GravesBatch int
 	GravesRamp  *GravesRamp
+	// GravesOpenBy is who opens a batch's chests: "carrier" (default; the module refuses its open order while the carrier is in combat) or "agent"
+	// (the agent's own GM character: `.go xyz` to each chest and its Opening cast, so that the opens go on while the summons fight).
+	GravesOpenBy string
 	// CCBot names the bot that takes the big-pack CC mark (remote_cc.go: a pack of BigPack or more gets one member Polymorphed before the
 	// pull). A hired party sets it to its mage; empty: no big-pack CC.
 	CCBot string
@@ -354,8 +357,10 @@ type RemoteReport struct {
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
 	// GraveBatches is one record per batch of chests opened back to back (remote_batch.go; the notes "graves-batch: ..." say the same).
-	GraveBatches  []GraveBatch `json:"grave_batches,omitempty"`
-	LeftoverPulls int          `json:"leftover_pulls,omitempty"` // idle summons pulled by the leftover sweeps
+	GraveBatches   []GraveBatch `json:"grave_batches,omitempty"`
+	LeftoverPulls  int          `json:"leftover_pulls,omitempty"`  // idle summons pulled by the leftover sweeps
+	LeftoverSweeps int          `json:"leftover_sweeps,omitempty"` // leftover sweeps run (each logs a note, also when it found nothing)
+	AgentOpens     int          `json:"agent_opens,omitempty"`     // chests the agent opened itself (graves_open_by agent)
 	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
 	// and marks put again on a mob whose CC lapsed while the fight went on.
 	ReactiveCC int `json:"reactive_cc"`
@@ -522,22 +527,24 @@ type RemoteDriver struct {
 	// aheadPassedLeg: hostiles a pull on the way passed over (no fight, evaded, refused), with the leg it happened in
 	aheadPassedLeg map[packet.GUID]int
 	// deadly is the avoid state (remote_avoid.go): the spots where bots died with no wound and the last frame of each living member.
-	deadly         deadlyState
-	endsAtBind     int
-	stats0         tbm.ViewStats
-	statsMu        sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
-	prevDead       map[packet.GUID]bool
-	deadSeen       bool
-	revived        map[packet.GUID]int
-	lastRevive     map[packet.GUID]time.Time
-	wipeRecover    int
-	wipeRecoverLeg map[int]int // recovered wipes per leg
-	batch          *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
-	gb             gravesState
-	sweepWiped     bool // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
-	healerCapped   int  // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
-	bossFight      bool // a boss fight (doKill) is on
-	recoveries     int
+	deadly           deadlyState
+	endsAtBind       int
+	stats0           tbm.ViewStats
+	statsMu          sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
+	prevDead         map[packet.GUID]bool
+	deadSeen         bool
+	revived          map[packet.GUID]int
+	lastRevive       map[packet.GUID]time.Time
+	wipeRecover      int
+	wipeRecoverLeg   map[int]int // recovered wipes per leg
+	batch            *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
+	gb               gravesState
+	lastFallbackTook bool       // the agent's last fallback loot took an item or money (a grave's open that took nothing is not counted as opened)
+	agentAway        *agentHome // where the agent goes back to after opening graves (graves_open_by agent); nil when it is at home
+	sweepWiped       bool       // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
+	healerCapped     int        // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	bossFight        bool       // a boss fight (doKill) is on
+	recoveries       int
 
 	tank        packet.GUID
 	engagedAt   map[packet.GUID]time.Time // when a mob was first seen fighting the party
@@ -673,6 +680,9 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	if err := d.checkStart(fromLeg); err != nil {
 		return err
 	}
+	if err := d.checkGravesOpenBy(ctx); err != nil {
+		return err
+	}
 	if err := d.checkGMCross(ctx, fromLeg); err != nil {
 		return err
 	}
@@ -740,6 +750,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	}()
 	// Declared after the unbind, so it runs before it: the bots' area spells that a grave batch turned off go back on while the binding lasts.
 	defer d.legAoEOn()
+	defer d.agentRestore(context.Background(), "at the end of the run")
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
@@ -957,13 +968,12 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 		after := d.legBossDead()
 		inBatch := d.batch != nil || d.sweepWiped // a wipe in a grave batch (batchWiped clears it) or in a leftover sweep
 		d.sweepWiped = false
+		// Every wipe event counts in Wipes (what dungeon_status, the dashboard and the end record read); PartyDowns says how many of them were
+		// stops at three dead bots, WipesAfterKill how many came after the boss's kill.
 		d.rep.update(func(r *Report) {
-			switch {
-			case after:
-			case down:
+			r.Wipes++
+			if down && !after {
 				r.PartyDowns++
-			default:
-				r.Wipes++
 			}
 		})
 		if after {

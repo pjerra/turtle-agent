@@ -2,12 +2,14 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -671,7 +673,7 @@ func TestLeftoverSweepOnlyTakesTheLegsEntries(t *testing.T) {
 	leg.LeftoverEntries = []uint32{7286}
 	m = g.addMob(299, Point{40, 30, 0})
 	o = runBatches(t, g, leg, gs, objOpts())
-	if o.err != nil || strings.Contains(notesOf(o.rep), "leftover sweep") || m.hp <= 0 {
+	if o.err != nil || strings.Contains(notesOf(o.rep), "pulling") || m.hp <= 0 {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
 	}
 }
@@ -829,4 +831,436 @@ func TestWipeInALeftoverSweepKeepsTheBossSlot(t *testing.T) {
 			t.Fatalf("%v recoveries %v\n%s", o.err, o.d.wipeRecoverLeg, notesOf(o.rep))
 		}
 	})
+}
+
+// ---- opens that did not open (zf-r4-s5) ----
+
+// A grave the server says is not on the map ("No game object with that GUID is on the bot's map") while the carrier is alive on the plan's map
+// is gone: it is skipped and counted as skipped, not as opened, and no agent fallback is tried for it.
+func TestInvalidTargetOnAGraveIsGoneNotOpened(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script = map[string][]tbm.OrderResult{"open": {errOrder("cmd open", "invalid-target"), errOrder("cmd open", "invalid-target")}}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || len(o.rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	b := o.rep.Remote.GraveBatches[0]
+	if b.Opened != 1 || b.Skipped != 2 || b.Size != 3 { // the two refused ones are gone, the third opens
+		t.Fatalf("%+v\n%s", b, notesOf(o.rep))
+	}
+	if !strings.Contains(notesOf(o.rep), "it is gone (opened and despawned, or not spawned); skipped, not counted as opened") || strings.Contains(notesOf(o.rep), "the agent takes over") {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+// An invalid-target while the carrier is not on the plan's map (a ghost outside) is not "gone": the usual fallback applies.
+func TestInvalidTargetWhileTheCarrierIsOutsideIsNotGone(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script = map[string][]tbm.OrderResult{"open": {errOrder("cmd open", "invalid-target"), errOrder("cmd open", "invalid-target")}}
+	g.memberMap = map[packet.GUID]uint32{gMage: 1} // Magey, the carrier, is on map 1
+	o := runBatches(t, g, leg, gs, objOpts())
+	if strings.Contains(notesOf(o.rep), "it is gone") {
+		t.Fatalf("%s", notesOf(o.rep))
+	}
+}
+
+// The agent's fallback opens a grave and takes nothing: the grave is not counted as opened.
+func TestAgentFallbackThatTakesNothingIsNotAnOpen(t *testing.T) {
+	g := newHandsGame(t, 3)
+	g.emptyChest = true
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g.script["open"] = openFails("failed", 2)
+	g.gobjs = []objects.GameObject{{GUID: gs[0].guid, Entry: 128403, X: gs[0].at.X, Y: gs[0].at.Y, Z: gs[0].at.Z, Distance: 10, State: "ready"}}
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	rep, err := handsRun(t, g, remotePlan(leg), nil)
+	if err != nil || len(rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if b := rep.Remote.GraveBatches[0]; b.Opened != 2 || b.Skipped != 1 {
+		t.Fatalf("%+v\n%s", b, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "the agent took nothing from the object") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// Every leftover sweep leaves a note, also when it found nothing, and is counted.
+func TestLeftoverSweepNotesAlsoWhenNothingIsIdle(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	leg.LeftoverEntries = []uint32{7286, 7276}
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || !strings.Contains(notesOf(o.rep), "leftover sweep before the batch: no idle summon of [7286 7276]") || !strings.Contains(notesOf(o.rep), "leftover sweep after the batch: no idle summon") {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	if o.rep.Remote.LeftoverSweeps != 4 { // before and after each of the two batches
+		t.Fatalf("sweeps %d", o.rep.Remote.LeftoverSweeps)
+	}
+}
+
+// One summary note ends the graves.
+func TestGravesSummaryNoteEndsTheSection(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(16, 3, func(i int) string { return "g1" })
+	opt := objOpts()
+	opt.GravesRamp = &GravesRamp{}
+	o := runBatches(t, g, leg, gs, opt, 8) // a wipe in the batch of 4
+	if o.err != nil {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	n := notesOf(o.rep)
+	if strings.Count(n, "graves-summary:") != 1 || !strings.Contains(n, "mode=ramp") || !strings.Contains(n, "max_clean_size=3") || !strings.Contains(n, "wiped_at_size=4") || !strings.Contains(n, "wipes=1") {
+		t.Fatalf("%s", n)
+	}
+	// It comes after the last batch's note.
+	if strings.Index(n, "graves-summary:") < strings.LastIndex(n, "graves-batch: n=") {
+		t.Fatalf("%s", n)
+	}
+}
+
+// ---- graves_open_by agent ----
+
+// agentHandsGame is a handsGame whose agent can `.go xyz`.
+type agentHandsGame struct {
+	*handsGame
+	teles   []Point
+	goCalls int
+	goFail  map[int]error // the nth GoXYZ call (from 1) fails with this error and does not move the agent
+	goCtx   []error       // ctx.Err() of each GoXYZ call that moved the agent
+}
+
+func (g *agentHandsGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
+	g.goCalls++
+	if err := g.goFail[g.goCalls]; err != nil {
+		return err
+	}
+	g.teles = append(g.teles, at)
+	g.goCtx = append(g.goCtx, ctx.Err())
+	g.agent = at
+	g.agentMap = mapID
+	g.log = append(g.log, fmt.Sprintf("go %.0f", at.X))
+	return nil
+}
+
+func agentGravesRun(t *testing.T, g *agentHandsGame, leg Leg, gs []*fakeGrave, level int, setup []string) (*RemoteDriver, Report, error) {
+	t.Helper()
+	return agentGravesRunCtx(t, context.Background(), g, leg, gs, level, setup)
+}
+
+func agentGravesRunCtx(t *testing.T, ctx context.Context, g *agentHandsGame, leg Leg, gs []*fakeGrave, level int, setup []string) (*RemoteDriver, Report, error) {
+	t.Helper()
+	g.level = level
+	plan := remotePlan(leg)
+	g.agentMap = plan.Map
+	g.agent = Point{-300, 0, 0}
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.RecoverWipe = true
+	cfg.Setup = setup
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	err := d.Run(ctx, 0)
+	rep, _ := d.Status()
+	return d, rep, err
+}
+
+// graves_open_by agent: the agent's own GM character opens every chest of a batch (`.go xyz` to each, its Opening cast), with no order to a
+// carrier, notes one GM assist per open, goes back out of the fight spot after the last, and the party fights afterwards.
+func TestAgentOpensAllChestsOfABatchWithoutCarrierOrders(t *testing.T) {
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	for i := 0; i < 3; i++ {
+		g.addMob(7286, Point{40 + float32(i), 30, 0})
+	}
+	g.onLoot = func(h *handsGame) {
+		h.addMob(7286, Point{36, 5, 0}) // what the grave brings
+	}
+	_, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if n := len(g.ordersOf("cmd open")); n != 0 {
+		t.Fatalf("%d cmd open orders in agent mode: %v", n, g.orders)
+	}
+	if g.loots != 3 || rep.Remote.AgentOpens != 3 {
+		t.Fatalf("loots %d agent opens %d\n%s", g.loots, rep.Remote.AgentOpens, notesOf(rep))
+	}
+	if len(rep.Remote.GraveBatches) != 1 {
+		t.Fatalf("%+v", rep.Remote.GraveBatches)
+	}
+	b := rep.Remote.GraveBatches[0]
+	if b.Opened != 3 || b.Skipped != 0 || b.OpenedBy != "agent" || !strings.Contains(notesOf(rep), "open_by=agent") {
+		t.Fatalf("%+v", b)
+	}
+	// One `.go xyz` per open, and one back out of the fight spot after the last, each a GM assist in setup_shortcuts and run_gm_assists.
+	goes := 0
+	for _, c := range rep.SetupShortcuts {
+		if strings.HasPrefix(c, ".go xyz") && strings.HasSuffix(c, "(GM assist during the run)") {
+			goes++
+		}
+	}
+	if goes != 4 || len(g.teles) != 4 {
+		t.Fatalf("go xyz %d / %d: %v", goes, len(g.teles), rep.SetupShortcuts)
+	}
+	if strings.Count(notesOf(rep), "a GM assist during the run (run_gm_assists; not counted in gm_commands)") < 4 {
+		t.Fatalf("%s", notesOf(rep))
+	}
+	// The opens come before the fight: the three loots happen before the log shows anything else but go xyz, and the last `.go` is the way back.
+	last := g.log[len(g.log)-1]
+	if !strings.HasPrefix(last, "go") {
+		// the last log entry may be a later GM line; the way back must still come after the last loot
+		lastLoot, lastGo := -1, -1
+		for i, e := range g.log {
+			if e == "loot" {
+				lastLoot = i
+			}
+			if strings.HasPrefix(e, "go") {
+				lastGo = i
+			}
+		}
+		if lastGo < lastLoot {
+			t.Fatalf("no .go xyz after the last loot: %v", g.log)
+		}
+	}
+}
+
+// graves_open_by agent is refused up front, before anything is sent, without a GM account, and without "gm visible off" in the setup.
+func TestAgentOpenIsRefusedWithoutGMOrInvisibility(t *testing.T) {
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	g := &agentHandsGame{handsGame: newHandsGame(t, 0)}
+	d, _, err := agentGravesRun(t, g, leg, gs, 0, nil)
+	if err == nil || !strings.Contains(err.Error(), "needs a GM account") || len(g.orders) != 0 || d == nil {
+		t.Fatalf("%v orders %v", err, g.orders)
+	}
+	g = &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	_, _, err = agentGravesRun(t, g, leg, gs, 3, nil)
+	if err == nil || !strings.Contains(err.Error(), `"gm visible off"`) || len(g.orders) != 0 {
+		t.Fatalf("%v orders %v", err, g.orders)
+	}
+	// A game without the agent's hands is refused too.
+	cg := carrierGame(t)
+	cg.graves = map[packet.GUID]*fakeGrave{}
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	dd := NewRemoteDriver(remotePlan(leg), cg, DefaultConfig(), o, cg.clock())
+	if err := dd.Run(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "no hands") || len(cg.orders) != 0 {
+		t.Fatalf("%v orders %v", err, cg.orders)
+	}
+	// The default (carrier) needs none of it.
+	g = &agentHandsGame{handsGame: newHandsGame(t, 0)}
+	if err := (&RemoteDriver{plan: remotePlan(leg), g: g, opt: objOpts()}).checkGravesOpenBy(context.Background()); err != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// ---- a pack out of view (zf-r4-s4) ----
+
+// shortPathFake plans a path that ends a few yards after its start whatever the goal (a pack off the mesh: the path stops short, and the
+// look point is the lead bot's own spot).
+type shortPathFake struct{ *fakeRemote }
+
+func (g shortPathFake) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
+	return []Point{from, lerp(from, to, 3/dist3(from, to))}, nil
+}
+
+// A pack the approach could not get a look point for (the path ends short of it, the lead bot far away) is walked toward, straight at it, before
+// it is given up on: the run does not fail "could not get a view of the pack" with no order sent.
+func TestPackOutOfViewIsWalkedTowardBeforeGivingUp(t *testing.T) {
+	g := shortPathFake{newFakeRemote(t)}
+	at := Point{91, 0, 0}
+	plan := remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{at}}}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	ctx := context.Background()
+	if err := d.begin(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	d.curLeg = 0
+	sp := fightSpec{pick: []uint32{299}, track: []uint32{299}, anchors: []Point{at}}
+	cleared, why, err := d.confirmGone(ctx, sp, newClearing())
+	if err != nil || !cleared {
+		t.Fatalf("cleared %v (%s) %v\n%s", cleared, why, err, strings.Join(d.Report().Notes, "\n"))
+	}
+	if l := g.lead(); dist3(Point{l.X, l.Y, l.Z}, at) > float64(ClearSeeRadius) {
+		t.Fatalf("the lead bot stands %.0f yd from the pack", dist3(Point{l.X, l.Y, l.Z}, at))
+	}
+	if !strings.Contains(strings.Join(d.Report().Notes, "\n"), "walking toward it") {
+		t.Fatalf("%v", d.Report().Notes)
+	}
+}
+
+// A healer that ends a batch nearly out of mana gets a mana gate before the next batch, with the rest gate's healer cap given back (the cap
+// used once in a leg switches the healer's mana wait off for the later gates: zf-r4-s4, three batches at 0 % mana).
+func TestHealerLowOnManaGetsAGateBeforeTheNextBatch(t *testing.T) {
+	g := carrierGame(t)
+	g.party[1].Power = 100 // Healy at 10 % mana, and it never rises
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || o.rep.State != "done" {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	n := notesOf(o.rep)
+	if strings.Count(n, "mana gate before the next batch") != 1 {
+		t.Fatalf("%s", n)
+	}
+	// The gate ran between the two batches: its own outcome note stands between the gate note and the second batch's begin.
+	i := strings.Index(n, "mana gate before the next batch")
+	j := strings.Index(n[i:], "graves-batch begin")
+	if i < 0 || j < 0 || !strings.Contains(n[i:i+j], "rest gate") {
+		t.Fatalf("no rest gate between the batches\n%s", n)
+	}
+}
+
+// A healer with mana is not waited for.
+func TestHealerWithManaGetsNoExtraGate(t *testing.T) {
+	g := carrierGame(t)
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || strings.Contains(notesOf(o.rep), "mana gate before the next batch") {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+}
+
+// ---- the agent goes home whatever way an open ends ----
+
+var agentHomeSpot = Point{-300, 0, 0} // where agentGravesRun starts the agent, on the plan's map: the home of a batch
+
+// A failed `.go xyz` to the grave, a failed Opening cast, a cancel and a wipe in the middle of a batch each end with the agent moved back to
+// where it stood before the batch.
+func TestAgentIsBroughtHomeWhenAnOpenFails(t *testing.T) {
+	boom := errors.New("boom")
+	cases := map[string]func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error){
+		"go xyz fails": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			g.goFail = map[int]error{1: boom} // the first move to a grave; the way back is call 2
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"the cast fails": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			g.lootErrs = []error{boom, boom, boom}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"a cancel mid-batch": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			ctx, cancel := context.WithCancel(context.Background())
+			n := 0
+			g.onLoot = func(h *handsGame) {
+				if n++; n == 2 { // the second chest's cast is cut by the cancel
+					cancel()
+					h.lootErrs = []error{context.Canceled, context.Canceled, context.Canceled}
+				}
+			}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRunCtx(t, ctx, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+		"a wipe mid-batch": func(t *testing.T) (*agentHandsGame, *RemoteDriver, Report, error) {
+			g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+			n := 0
+			g.onLoot = func(h *handsGame) {
+				if n++; n == 2 {
+					for _, p := range h.party {
+						p.Dead, p.HP = true, 0
+					}
+					h.lootErrs = []error{boom, boom, boom}
+				}
+			}
+			leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+			d, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+			return g, d, rep, err
+		},
+	}
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			g, d, rep, err := run(t)
+			_ = err
+			if len(g.teles) == 0 {
+				t.Fatalf("the agent never moved\n%s", notesOf(rep))
+			}
+			if last := g.teles[len(g.teles)-1]; last != agentHomeSpot {
+				t.Fatalf("the agent ends at %v, not home %v (moves %v)\n%s", last, agentHomeSpot, g.teles, notesOf(rep))
+			}
+			if g.agent != agentHomeSpot {
+				t.Fatalf("the agent stands at %v", g.agent)
+			}
+			if d.agentAway != nil {
+				t.Fatalf("the driver still thinks the agent is away: %+v", d.agentAway)
+			}
+			// The way back never runs on a cancelled context.
+			for i, e := range g.goCtx {
+				if e != nil && g.teles[i] == agentHomeSpot {
+					t.Fatalf("the way home ran with a cancelled context: %v", e)
+				}
+			}
+			// The first move home comes right away: after the one chest's move that worked (none when the move itself failed).
+			first := slices.Index(g.teles, agentHomeSpot)
+			if first < 0 || first > 2 {
+				t.Fatalf("the first way home is move %d: %v", first, g.teles)
+			}
+		})
+	}
+}
+
+// A way home that fails too is a degraded run, with where the agent was left.
+func TestAgentHomeThatFailsMakesTheRunDegraded(t *testing.T) {
+	boom := errors.New("boom")
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	g.lootErrs = []error{boom, boom, boom}
+	g.goFail = map[int]error{2: boom} // the move to the grave works, the way home does not
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	_, rep, _ := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if !strings.Contains(strings.Join(rep.Degraded, "|"), "agent left away from its home") {
+		t.Fatalf("degraded %v\n%s", rep.Degraded, notesOf(rep))
+	}
+}
+
+// Home is the spot the agent stood at before the batch when that is on the plan's map; when the agent started outside the instance it is the
+// party's safe spot, where the lead bot stood when the batch began (not the batch's centre, the fight spot).
+func TestAgentHomeIsThePreBatchSpot(t *testing.T) {
+	g := &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs := batchGraves(3, 3, func(i int) string { return "g1" })
+	_, rep, err := agentGravesRun(t, g, leg, gs, 3, []string{"gm visible off"})
+	if err != nil || len(g.teles) == 0 || g.teles[len(g.teles)-1] != agentHomeSpot || !strings.Contains(notesOf(rep), "where it stood before the batch") {
+		t.Fatalf("%v teles %v\n%s", err, g.teles, notesOf(rep))
+	}
+	// From outside the instance (another map): the lead bot's spot at the batch's start.
+	g = &agentHandsGame{handsGame: newHandsGame(t, 3)}
+	leg, gs = batchGraves(3, 3, func(i int) string { return "g1" })
+	g.onAppear = func(n *nearGame) { n.agentMap = 70 } // placeholder, replaced below
+	g.onAppear = nil
+	plan := remotePlan(leg)
+	g.level = 3
+	g.agent, g.agentMap = Point{-300, 0, 0}, 1 // outside
+	g.graves = map[packet.GUID]*fakeGrave{}
+	for _, gv := range gs {
+		g.graves[gv.guid] = gv
+	}
+	g.onAppear = func(n *nearGame) { n.agentMap = plan.Map } // the `.appear` puts it in the instance
+	cfg := DefaultConfig()
+	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
+	cfg.Setup = []string{"gm visible off"}
+	o := objOpts()
+	o.GravesOpenBy = GravesOpenAgent
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	rep2, _ := d.Status()
+	last := g.teles[len(g.teles)-1]
+	if !strings.Contains(notesOf(rep2), "the party's safe spot") || last.X >= 30 || last.X < 15 || dist3(last, Point{33, 0, 0}) < 5 {
+		t.Fatalf("home %v (the batch centre is 33 0 0)\n%s", last, notesOf(rep2))
+	}
 }
