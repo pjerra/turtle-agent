@@ -3,6 +3,7 @@ package dungeon
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -239,5 +240,60 @@ func TestParseFleers(t *testing.T) {
 	}
 	if p, err := Parse("t.json", []byte(base(``))); err != nil || len(p.Fleers) != 0 {
 		t.Fatalf("%v %v", err, p)
+	}
+}
+
+// TestApproachAndHoldAreRead: approach points and a hold are read, and their limits refused.
+func TestApproachAndHoldAreRead(t *testing.T) {
+	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+	 "pull_groups":[{"entries":[5],"positions":[{"x":50,"y":0,"z":0}]%s}]}]}`
+	p, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"approach":[{"x":20,"y":0,"z":0}],"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600,"entries":[6]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := p.Legs[0].PullGroups[0]
+	if len(g.Approach) != 1 || g.Approach[0].X != 20 || g.Hold == nil || g.Hold.Data != 1 || g.Hold.Spot.X != 40 || g.Hold.Radius != 30 || g.Hold.TimeoutS != 600 || len(g.Hold.Entries) != 1 {
+		t.Fatalf("%+v %+v", g, g.Hold)
+	}
+	for _, bad := range []string{
+		`,"approach":[{"x":1,"y":0,"z":0},{"x":2,"y":0,"z":0},{"x":3,"y":0,"z":0},{"x":4,"y":0,"z":0},{"x":5,"y":0,"z":0}]`,
+		`,"approach":[{"x":1,"y":0}]`,
+		`,"hold":{"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":0,"timeout_s":600}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":601}`,
+		`,"hold":{"instance_data":1,"radius":30,"timeout_s":600}`,
+	} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil {
+			t.Errorf("%s: accepted", bad)
+		}
+	}
+}
+
+// TestUldamanRunLeaderReach: from the scorpid cave on (legs 4-13, the part the run leader's live test of 2026-10-16 stopped in) every
+// pack and boss of Uldaman is within RunLeaderReachYd of the run leader's last move row, so the run leader needs none of its own hops.
+// Legs 0-3 ran live with the hops and keep them.
+func TestUldamanRunLeaderReach(t *testing.T) {
+	p, err := Load("../../dungeons/uldaman.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range p.RunLeaderReach(0) {
+		if w.Leg >= 4 {
+			t.Errorf("%s", w)
+		}
+	}
+	// Both Jadespine Basilisks of the route that the first export left out are pulled (world guids 30084 and 30089).
+	for _, want := range []Point{{X: -179.0, Y: 321.7, Z: -52.7}, {X: -125.9, Y: 266.9, Z: -45.7}} {
+		found := false
+		for _, l := range p.Legs {
+			for _, g := range l.PullGroups {
+				for _, at := range g.Positions {
+					found = found || (dist3(at, want) < 0.5 && slices.Contains(g.Entries, 4863))
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no pull group of the basilisk at %v", want)
+		}
 	}
 }

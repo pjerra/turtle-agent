@@ -194,6 +194,9 @@ type PlanCheck struct {
 	Warnings []PlanIssue `json:"warnings"`
 	// Exempt are the hops the plan exempts from the check (Waypoint.CheckSkip); Detail is the plan's reason.
 	Exempt []PlanIssue `json:"exempt"`
+	// RunLeader are the packs and bosses the TortoiseBots run leader would walk toward in navmesh hops of its own (Plan.RunLeaderReach,
+	// reason WarnRunLeaderHop): notes for plan-export, never a failure; the agent's own driver does not walk that way.
+	RunLeader []PlanIssue `json:"run_leader"`
 }
 
 // OK says the plan passed.
@@ -204,6 +207,9 @@ func (c *PlanCheck) Summary() string { return joinIssues(c.Issues) }
 
 // ExemptSummary is one line per hop the plan exempts.
 func (c *PlanCheck) ExemptSummary() string { return joinIssues(c.Exempt) }
+
+// RunLeaderSummary is one line per run leader hop.
+func (c *PlanCheck) RunLeaderSummary() string { return joinIssues(c.RunLeader) }
 
 // WarningSummary is one line per warning.
 func (c *PlanCheck) WarningSummary() string { return joinIssues(c.Warnings) }
@@ -272,7 +278,7 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 	if a, ok := nav.(AvoidSetter); ok {
 		a.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	}
-	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}}}
+	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}}
 	cur, group := p.Entrance, -1
 	switch {
 	case opt.FromPullGroup != nil:
@@ -293,7 +299,40 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 		}
 		group = -1
 	}
+	if err := c.runLeader(opt.FromLeg); err != nil {
+		return nil, err
+	}
 	return c.res, nil
+}
+
+// runLeader checks the points only the TortoiseBots run leader walks (a pull group's or a boss's approach points, a hold's spot): each
+// must be walked to from the run leader's point before it, as checkLeg walks a via point. It also warns of every pack or boss the run
+// leader would walk toward in navmesh hops of its own (Plan.RunLeaderReach), in PlanCheck.RunLeader.
+func (c *planChecker) runLeader(from int) error {
+	prev := c.p.Entrance
+	if from > 0 {
+		prev, _ = c.p.LegStart(from)
+	}
+	var err error
+	c.p.runLeaderWalk(from, func(m RunLeaderPoint) {
+		if err != nil {
+			return
+		}
+		if !strings.Contains(m.Part, "approach") && !strings.Contains(m.Part, "hold spot") {
+			prev = m.Point // checked by checkLeg already
+			return
+		}
+		c.leg, c.l = m.Leg, c.p.Legs[m.Leg]
+		var at Point
+		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil && at == m.Point {
+			prev = m.Point
+		}
+	}, func(int, string, Point, int, string) {})
+	if err != nil {
+		return err
+	}
+	c.res.RunLeader = append(c.res.RunLeader, c.p.RunLeaderReach(from)...)
+	return nil
 }
 
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.

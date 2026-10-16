@@ -31,6 +31,7 @@ const (
 	KindWaitClear  = "wait_clear"
 	KindRest       = "rest"
 	KindRitual     = "ritual"
+	KindHold       = "hold"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -38,6 +39,12 @@ const (
 	FlagAmbush   = 1
 	FlagAlliance = 2
 	FlagHorde    = 4
+	// FlagDoneData, FlagEncounter: a hold is done when instance data `entry` reads `param`, read as the core's encounter states
+	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
+	FlagDoneData  = 8
+	FlagEncounter = 32
+	// EncounterDone is the encounter state DONE: a hold's param.
+	EncounterDone = 3
 )
 
 // The limits of the module's loader (NormalizePlanStep) and of its column widths.
@@ -202,6 +209,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	if err := b.cutLongHops(); err != nil {
 		return Result{}, err
 	}
+	for _, w := range p.RunLeaderReach(0) {
+		if w.Leg < cutLeg || cut == "" {
+			b.warnings = append(b.warnings, w.String())
+		}
+	}
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
@@ -351,12 +363,43 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		flags |= FlagAmbush
 	}
 	c := fmt.Sprintf("pull group %d", gi)
+	for _, a := range g.Approach {
+		b.move(a, false, c+" approach")
+	}
+	if g.Hold != nil {
+		b.hold(g.Hold, uniq(g.Entries), c+" hold")
+		return nil
+	}
 	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Flags: flags, Entries: uniq(g.Entries), Comment: c})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	return nil
 }
 
+// hold writes a scripted event's hold row (dungeon.Hold): done when instance data h.Data reads DONE, read as encounter states. A move row
+// straight before it to the same spot is left out: the hold walks there itself, and a ritual followed straight by its hold keeps the
+// event's first fight (it starts with the ritual's cast) in the hold.
+func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
+	if n := len(b.rows.Steps); n > 0 {
+		prev := b.rows.Steps[n-1]
+		if prev.Leg == b.outLeg && prev.Kind == KindMove && dist3(dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, h.Spot) <= 1 {
+			b.rows.Steps = b.rows.Steps[:n-1]
+			b.seq--
+		}
+	}
+	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: EncounterDone,
+		Flags: FlagDoneData | FlagEncounter, TimeoutS: h.TimeoutS, Entries: entries,
+		Comment: clip(fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %d (DONE)", comment, h.Data, EncounterDone), MaxComment)})
+	b.last, b.haveLast = h.Spot, true
+}
+
 func (b *builder) boss(bs *dungeon.Boss) error {
+	for _, a := range bs.Approach {
+		b.move(a, false, "boss approach")
+	}
+	if bs.Hold != nil {
+		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
+		return nil
+	}
 	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Flags: teamFlags(bs.Team), Entries: uniq(bs.First), Comment: "boss"})
 	b.last, b.haveLast = bs.Position, true
 	if bs.LootItem != nil {
@@ -411,7 +454,8 @@ func (b *builder) step(st dungeon.Step) error {
 		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
-		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Comment: fmt.Sprintf("ritual of %d", r.Participants)})
+		// param: the participants, the bots the run leader sends to use the object (gameobject_template data0 of a summoning ritual).
+		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Param: uint32(r.Participants), Comment: fmt.Sprintf("ritual of %d", r.Participants)})
 	case st.Gossip != nil:
 		g := st.Gossip
 		return noStep("gossip (NPC %d, %s): the run leader's plan has no gossip step yet, so a plan with one cannot be exported until it has", g.NPC, g.OptionText())
@@ -436,7 +480,13 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 			return fmt.Errorf("wait_for.gameobject: state %q is none of %v", g.State, dungeon.ObjectStates)
 		}
 		x, y, z := refPoint(g.ObjectRef)
-		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), TimeoutS: timeout, Comment: clip(waitComment("wait for object "+strconv.Itoa(int(g.Entry))+" "+g.State, w), MaxComment)})
+		base := "wait for object " + strconv.Itoa(int(g.Entry)) + " " + g.State
+		if n := len(b.rows.Steps); n > 0 && b.rows.Steps[n-1].Leg == b.outLeg && b.rows.Steps[n-1].Kind == KindHold && (timeout == 0 || timeout > dungeon.HoldDoorWaitS) {
+			// The hold before it ended with the event DONE, which is what opens the door: no fight time to wait for.
+			timeout = dungeon.HoldDoorWaitS
+			base += fmt.Sprintf(" (at most %d s: the hold before it ends with the event done)", timeout)
+		}
+		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), TimeoutS: timeout, Comment: clip(waitComment(base, w), MaxComment)})
 	case w.HostilesGone != nil:
 		h := w.HostilesGone
 		// A wait with no centre is about the party's own spot: the last point the leg put it at.
@@ -510,6 +560,13 @@ func Validate(r Rows) error {
 			if s.Entry == 0 {
 				return bad("needs an entry")
 			}
+		case KindHold:
+			if s.Entry == 0 || s.Flags&FlagDoneData == 0 {
+				return bad("a hold needs its instance data (entry) and done flag")
+			}
+			if s.Param > 4 {
+				return bad("param %d is no encounter state (0-4)", s.Param)
+			}
 		case KindWaitClear:
 			if s.Radius <= 0 {
 				return bad("a wait_clear needs a radius")
@@ -535,6 +592,13 @@ func (b *builder) cutLongHops() error {
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
+		if (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && prev != nil {
+			// The party fought there (a pull or boss it saw from its move point, a hold on its spot): the next move's hop is measured
+			// from it, not from the move before the fight (a leg's first move after a boss would otherwise be walked back from the
+			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724).
+			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
+			prev = &cp
+		}
 		if s.Kind == KindMove || s.Kind == KindMoveDirect {
 			if prev != nil {
 				a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
