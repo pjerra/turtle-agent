@@ -406,12 +406,13 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 	default: // no new issue, but the plan had issues of its own: kept, never "checked"
 		meta.Status, reply.Status, reply.Message, planJSON = routeedit.StatusUnchecked, routeedit.StatusUnchecked, check.Unchecked(), editedJSON
 	}
-	// the folders again, just before the write: a swap during the plan check is not missed
-	if err := e.checkFolders(); err != nil {
+	// the folders are checked again once the version's number is claimed and before anything is in it, and after it is all written; when
+	// either fails the version's files are removed: a folder moved during the plan check, or during the write, does not keep a version
+	v, err := e.cfg.Store.SaveGuarded(plan, meta, planJSON, diff, e.checkFolders)
+	if errors.Is(err, routeedit.ErrGuard) {
 		jsonError(w, http.StatusServiceUnavailable, "%v", err)
 		return
 	}
-	v, err := e.cfg.Store.Save(plan, meta, planJSON, diff)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "the version could not be written: %v", err)
 		return

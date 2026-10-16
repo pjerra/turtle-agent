@@ -130,6 +130,16 @@ func (s *Store) dir(plan string, create bool) (*planDir, error) {
 // Save writes the next version of plan. meta.Version is set here; planJSON is the whole plan (nil for a refused edit, which keeps no plan).
 // It returns the version number.
 func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int, error) {
+	return s.SaveGuarded(plan, meta, planJSON, diff, nil)
+}
+
+// ErrGuard wraps the refusal of a Save's guard.
+var ErrGuard = errors.New("refused by the folder check")
+
+// SaveGuarded is Save with a guard (the editor's folder check) run twice: once the version's number is claimed and before any content is
+// written, and again after everything is written. When either run fails, the files this call made are removed and the error wraps ErrGuard:
+// a folder moved under a slot's plan folder while the version was written does not keep it there.
+func (s *Store) SaveGuarded(plan string, meta *Meta, planJSON []byte, diff string, guard func() error) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d, err := s.dir(plan, true)
@@ -162,6 +172,18 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 			}
 			return 0, err
 		}
+		check := func() error {
+			if guard == nil {
+				return nil
+			}
+			if err := guard(); err != nil {
+				return fmt.Errorf("%w: %w", ErrGuard, err)
+			}
+			return nil
+		}
+		if err := check(); err != nil {
+			return fail(err)
+		}
 		meta.Version, meta.Plan = n, plan
 		if planJSON != nil {
 			sum := sha256.Sum256(planJSON)
@@ -178,6 +200,9 @@ func (s *Store) Save(plan string, meta *Meta, planJSON []byte, diff string) (int
 			return fail(err)
 		}
 		if _, err := mf.Write(append(mb, '\n')); err != nil {
+			return fail(err)
+		}
+		if err := check(); err != nil {
 			return fail(err)
 		}
 		return n, mf.Close()

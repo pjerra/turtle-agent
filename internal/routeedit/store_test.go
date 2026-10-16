@@ -1,6 +1,7 @@
 package routeedit
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -269,5 +270,36 @@ func TestLatestSkipsRefusedAndUnchecked(t *testing.T) {
 	s.Save("p", &Meta{Status: StatusAccepted}, []byte("{}"), "d")
 	if v, _ := s.Latest("p"); v != 4 {
 		t.Errorf("latest %d, want the accepted one", v)
+	}
+}
+
+// A guard that fails before the content, or only after everything is written, leaves no file of the version behind.
+func TestSaveGuardedRemovesTheVersionWhenTheGuardFails(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, failOn := range []int{1, 2} {
+		calls := 0
+		guard := func() error {
+			calls++
+			if calls == failOn {
+				return errors.New("moved under a slot")
+			}
+			return nil
+		}
+		if _, err := s.SaveGuarded("zulfarrak", &Meta{Status: StatusChecked}, []byte(`{}`), "d", guard); !errors.Is(err, ErrGuard) {
+			t.Errorf("fail on call %d: %v", failOn, err)
+		}
+		if ms, _ := s.List("zulfarrak"); len(ms) != 0 {
+			t.Errorf("fail on call %d: %d versions kept", failOn, len(ms))
+		}
+		if b, err := s.PlanFile("zulfarrak", 1); err == nil {
+			t.Errorf("fail on call %d: plan file kept: %q", failOn, b)
+		}
+	}
+	if v, err := s.SaveGuarded("zulfarrak", &Meta{Status: StatusChecked}, []byte(`{}`), "d", func() error { return nil }); err != nil || v != 1 {
+		t.Errorf("a passing guard: %d %v", v, err)
 	}
 }
