@@ -2,10 +2,13 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +25,9 @@ const (
 type trustRig struct {
 	*editRig
 	h http.Handler
+	// the user a local caller's socket belongs to, and whether the kernel finds it (the real lookup is tested on its own)
+	uid   uint32
+	found bool
 }
 
 func newTrustRig(t *testing.T, on bool) *trustRig {
@@ -32,7 +38,12 @@ func newTrustRig(t *testing.T, on bool) *trustRig {
 		must(t, r.ed.EnableTrustLocal("owner", peers))
 	}
 	allow := []string{trustSelf, trustPeer, trustOther, "laptop.tail1234.ts.net", "192.168.1.5", "203.0.113.9"}
-	return &trustRig{r, HandlerWithEditor(r.p, "", allow, nil, r.ed)}
+	tr := &trustRig{editRig: r, uid: uint32(os.Getuid()), found: true}
+	if on {
+		r.ed.trust.owner = func(netip.AddrPort) (uint32, bool) { return tr.uid, tr.found }
+	}
+	tr.h = HandlerWithEditor(r.p, "", allow, nil, r.ed)
+	return tr
 }
 
 // as sends a request as if its TCP peer were remote, to Host host, with extra headers; the body is a valid edit of the test plan.
@@ -43,6 +54,9 @@ func (tr *trustRig) as(method, path, remote, host string, hdr map[string]string)
 	}
 	req := httptest.NewRequest(method, "http://"+host+path, bytes.NewReader(body))
 	req.RemoteAddr = remote
+	if h, _, err := net.SplitHostPort(host); err == nil && net.ParseIP(h) != nil { // the address the dashboard was reached on, as net/http records it
+		req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP(h), Port: 8790}))
+	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -94,6 +108,74 @@ func TestTrustLocalRejectsEveryoneElse(t *testing.T) {
 	}
 	if tree(t, tr.edits) != before {
 		t.Error("a refused request wrote")
+	}
+}
+
+// A caller on this machine is trusted only when its socket belongs to the dashboard's own user. A relay that runs as someone else, or a socket the
+// kernel does not show, is not; a tailnet peer on another machine has no local socket to check.
+func TestTrustLocalNeedsTheSameUserOnThisMachine(t *testing.T) {
+	for name, c := range map[string]struct {
+		remote, host string
+		uid          uint32
+		found        bool
+		want         int
+	}{
+		"loopback, same user":                   {"127.0.0.1:50000", "127.0.0.1:8790", uint32(os.Getuid()), true, http.StatusOK},
+		"loopback, another user":                {"127.0.0.1:50000", "127.0.0.1:8790", uint32(os.Getuid()) + 1, true, http.StatusUnauthorized},
+		"loopback, socket not found":            {"127.0.0.1:50000", "127.0.0.1:8790", uint32(os.Getuid()), false, http.StatusUnauthorized},
+		"own tailnet address, same user":        {trustSelf + ":50000", trustSelf + ":8790", uint32(os.Getuid()), true, http.StatusOK},
+		"own tailnet address, another user":     {trustSelf + ":50000", trustSelf + ":8790", uint32(os.Getuid()) + 1, true, http.StatusUnauthorized},
+		"own tailnet address, socket not found": {trustSelf + ":50000", trustSelf + ":8790", 0, false, http.StatusUnauthorized},
+		"a named peer needs no local socket":    {trustPeer + ":50000", trustSelf + ":8790", 0, false, http.StatusOK},
+		"a named peer is not asked whose it is": {trustPeer + ":50000", trustSelf + ":8790", uint32(os.Getuid()) + 1, true, http.StatusOK},
+	} {
+		tr := newTrustRig(t, true)
+		tr.uid, tr.found = c.uid, c.found
+		rec := tr.as(http.MethodPost, "/api/edit/edit1", c.remote, c.host, nil)
+		if rec.Code != c.want {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+// The real lookup, on a real connection: the kernel names this process's user as the owner of its own client socket, and the editor takes the
+// save; the same request from a stranger's address does not.
+func TestTrustLocalOnARealConnection(t *testing.T) {
+	if _, err := os.Stat("/proc/net/tcp"); err != nil {
+		t.Skip("no /proc/net/tcp")
+	}
+	r := newEditRig(t, nil)
+	must(t, r.ed.EnableTrustLocal("owner", nil))
+	srv := httptest.NewServer(HandlerWithEditor(r.p, "", nil, nil, r.ed))
+	defer srv.Close()
+	b, _ := json.Marshal(r.edit(move(0, 0, 21, 1)))
+	resp, err := http.Post(srv.URL+"/api/edit/edit1", "application/json", bytes.NewReader(b))
+	must(t, err)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a save from this process over loopback: %d", resp.StatusCode)
+	}
+	// and a socket that is not in the kernel's table (a made-up port) has no owner
+	if _, ok := socketOwner(netip.MustParseAddrPort("127.0.0.1:1")); ok {
+		t.Error("an owner was found for a socket that is not there")
+	}
+}
+
+func TestParseProcAddr(t *testing.T) {
+	for in, want := range map[string]string{
+		"0100007F:1F96":                         "127.0.0.1:8086",
+		"00000000000000000000000001000000:0050": "[::1]:80",
+		"0000000000000000FFFF00000100007F:0050": "127.0.0.1:80",
+	} {
+		got, ok := parseProcAddr(in)
+		if !ok || got.String() != want {
+			t.Errorf("%s: %v %v, want %s", in, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "zz:1", "0100007F", "0100007F:zz", "0100:1"} {
+		if _, ok := parseProcAddr(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
 	}
 }
 

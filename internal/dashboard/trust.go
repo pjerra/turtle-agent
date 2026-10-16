@@ -3,9 +3,11 @@ package dashboard
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -13,8 +15,11 @@ import (
 // --allow-host, is made with the owner's token, which the server holds, instead of one typed into the page. The token never leaves the
 // server: the page only learns (GET /api/edit/status "local_trusted") that it need not ask for one.
 //
-// What is trusted is the TCP peer address (r.RemoteAddr), never anything the client writes:
-//   - a loopback address (the browser on the dashboard's own machine), or
+// What is trusted is the TCP peer, never anything the client writes:
+//   - a connection from this machine (a loopback address, or the dashboard's own listen address) whose client socket belongs to the same user
+//     as the dashboard (the kernel's /proc/net/tcp says whose; Linux only, anywhere else this fails closed). A process of that user can read
+//     the token file anyway, so it gains nothing; another local user, and a relay that runs as another user (a headerless forwarder, a
+//     tunnel's sshd for someone else), is not trusted;
 //   - an exact address that is a literal Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48) in the --allow-host list or the address the
 //     dashboard listens on. WireGuard authenticates a tailnet source address, so it cannot be claimed by another device. A name in the list
 //     says how the page may be opened (the Host header), not who is calling, so it is never trusted; nor is a LAN or public address.
@@ -37,6 +42,8 @@ func IsTailnetAddr(a netip.Addr) bool {
 type localTrust struct {
 	label string
 	peers map[netip.Addr]bool
+	uid   uint32                                     // the user the dashboard runs as: a local caller's socket must be this user's
+	owner func(client netip.AddrPort) (uint32, bool) // the user a local TCP client socket belongs to (socketOwner; replaced in tests)
 }
 
 // TrustPeers picks, from the dashboard's allowed Host list (AllowedHosts), the entries that can be trusted as callers: the literal Tailscale
@@ -64,7 +71,7 @@ func (e *Editor) EnableTrustLocal(label string, peers []netip.Addr) error {
 	if !e.cfg.Tokens.Has(label) {
 		return fmt.Errorf("--edit-trust-label %q is not a label in the token file", label)
 	}
-	t := &localTrust{label: label, peers: map[netip.Addr]bool{}}
+	t := &localTrust{label: label, peers: map[netip.Addr]bool{}, uid: uint32(os.Getuid()), owner: socketOwner}
 	for _, p := range peers {
 		if !IsTailnetAddr(p) {
 			return errors.New("only Tailscale addresses can be trusted peers")
@@ -89,8 +96,18 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	a := ap.Addr().Unmap().WithZone("")
-	if !a.IsLoopback() && !t.peers[a] {
+	a := netip.AddrPortFrom(ap.Addr().Unmap().WithZone(""), ap.Port())
+	local := a.Addr().IsLoopback()
+	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && !local {
+		if lp, err := netip.ParseAddrPort(la.String()); err == nil && lp.Addr().Unmap().WithZone("") == a.Addr() {
+			local = true // the dashboard's own address: the caller is on this machine
+		}
+	}
+	if local {
+		if uid, ok := t.owner(a); !ok || uid != t.uid {
+			return false
+		}
+	} else if !t.peers[a.Addr()] {
 		return false
 	}
 	for _, k := range forwardingHeaders {

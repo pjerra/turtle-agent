@@ -3211,24 +3211,29 @@ version list has Diff, Load (put a version's edits on the map) and Revert (a new
 Hiding a leg hides its handles. The box says why editing is off when the map does not show the file edits start from (`--edit-source`).
 
 **No token typing on your own laptop (`--edit-trust-local`).** Off by default. With it, a save that sends **no** `Authorization` header is made
-as the `--edit-trust-label` token's owner when the request's TCP peer address is (a) loopback, or (b) a literal Tailscale address (100.64.0.0/10,
-fd7a:115c:a1e0::/48) that is in `--allow-host` or is the `--listen` address. `GET /api/edit/status` then answers `"local_trusted": true` and the
-page hides the token field. The token itself stays in the server: it is not in any answer, page, version record or log, and the browser never
-holds it. Threat model:
+as the `--edit-trust-label` token's owner when the request's TCP peer is (a) a connection from this machine (loopback, or the `--listen`
+address) whose client socket belongs to the **same user as the dashboard** (the kernel's `/proc/net/tcp` says whose; Linux only, elsewhere this
+never trusts), or (b) a literal Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) that is in `--allow-host`, from another machine.
+`GET /api/edit/status` then answers `"local_trusted": true` and the page hides the token field. The token itself stays in the server: it is not in
+any answer, page, version record or log, and the browser never holds it. Threat model:
 
 - *What is trusted is the peer address, never a header the caller writes.* A Tailscale source address is authenticated by WireGuard, so another
   device cannot claim it. A **name** in `--allow-host` says how the page may be opened (the Host header), not who is calling, so it is never
   trusted; nor is a LAN or public address (they are listed at start-up as "not trusted as callers").
 - *A remote viewer not on the list still needs the token*, exactly as before: the same token check, the same ten-failures lockout.
 - *A request that sends any `Authorization` header is judged by that token alone*, trusted address or not (a wrong token is not forgiven).
-- *No proxy in between.* A request carrying `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Via`, `Tailscale-User-*` or similar is never trusted:
-  a reverse proxy or `tailscale serve` on this machine would make every caller look like loopback.
+- *A local caller must be you.* A relay that connects from this machine (a reverse proxy, a port forward, another user's SSH tunnel) is a
+  local socket too, so it is trusted only if it runs as the dashboard's user (which could read the token file anyway); a relay of another user, or
+  one the kernel does not show, is not. Requests carrying `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Via`, `Tailscale-User-*` or similar are never
+  trusted either.
 - *No cross-site saves from the owner's own browser.* A trusted request that has an `Origin` must have the one equal to its Host, and a
   `Sec-Fetch-Site` must be `same-origin` or `none`; on top of that the unchanged guard demands `Content-Type: application/json` (a form cannot
   send it, a cross-site fetch must pre-flight and the guard answers every OPTIONS with 405) and the Host check (DNS rebinding sends a Host that is
   not listed).
-- *What it cannot do:* any local process or user on the machine can save, without reading the token file: that is the price of not typing it. A save is still only a checked version in `--edit-dir`; it never reaches a slot's plan folder.
-  Do not turn it on for a machine others log in to, or where a local proxy forwards other people's traffic without proxy headers.
+- *What it cannot do:* tell a forwarder run by you from you. Anything that runs as your user and relays strangers' requests to the dashboard
+  (a `socat` you left open, your own SSH tunnel handed to someone) is you, as far as the dashboard can see; it could also read the token file. A
+  save is still only a checked version in `--edit-dir`; it never reaches a slot's plan folder. If the browser reaches the dashboard through a relay
+  of another user (WSL's Windows forwarder may be one), nothing is trusted and the token field stays.
 
 Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
 application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
