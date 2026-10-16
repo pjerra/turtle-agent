@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
@@ -284,5 +285,39 @@ func TestPlanCopyFollowsTheFileTheRunReports(t *testing.T) {
 		if cp, _, _, _ := c.copyFor(a, "tiny", bad); cp.Reported {
 			t.Errorf("%+v must not be followed", bad)
 		}
+	}
+}
+
+// A run started with a route edit says so in its trace header (trace_meta.route_edit); the card carries the tag when it has the shape
+// `turtle-agent route-edits export` prints, and nothing else (the text is the caller's).
+func TestTraceHeaderCarriesTheRouteEditTag(t *testing.T) {
+	sha := strings.Repeat("ab", 32)
+	tag := "zulfarrak@v0007 sha256=" + sha
+	read := func(meta string) TraceSnapshot {
+		path := filepath.Join(t.TempDir(), "r.jsonl")
+		must(t, os.WriteFile(path, []byte(`{"v":1,"k":"header","run":"r","agent_sha":"abcdef0123456789","map":209,"plan":"zulfarrak","meta":`+meta+`}`+"\n"), 0o644))
+		s, err := NewTailer().Read(path, t0)
+		must(t, err)
+		return s
+	}
+	if s := read(`{"route_edit":"` + tag + `"}`); s.RouteEdit != tag || s.SHA != "abcdef012345" {
+		t.Errorf("%+v", s)
+	}
+	for _, bad := range []string{`{}`, `{"route_edit":"<script>alert(1)</script>"}`, `{"route_edit":"zulfarrak@v7 sha256=` + sha + `"}`, `{"route_edit":"` + tag + ` and more"}`, `{"route_edit":"../x@v0007 sha256=` + sha + `"}`, `{"route_edit":5}`} {
+		if s := read(bad); s.RouteEdit != "" {
+			t.Errorf("%s: kept %q", bad, s.RouteEdit)
+		}
+	}
+	in := Inputs{Agent: Agent{ID: "8765", Addr: "127.0.0.1:8765"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): pull group 2 of 3", 5*time.Second)),
+		Plan: tinyPlan(t), Trace: &TraceSnapshot{SHA: "c7775d5b9baf", RouteEdit: tag}}
+	c := BuildCard(in)
+	b, err := json.Marshal(c)
+	must(t, err)
+	if c.RouteEdit != tag || !strings.Contains(string(b), `"route_edit":"`+tag+`"`) {
+		t.Errorf("card: %q", c.RouteEdit)
+	}
+	in.Trace = &TraceSnapshot{SHA: "c7775d5b9baf"}
+	if b, _ := json.Marshal(BuildCard(in)); strings.Contains(string(b), "route_edit") {
+		t.Error("a run with no edit has no tag")
 	}
 }

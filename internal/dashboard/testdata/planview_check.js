@@ -67,6 +67,19 @@ assert.strictEqual(V.copyBadge({ dash: src("ffff0000") }).level, "warn");
 const chg = V.copyBadge({ run: src("2222cccc" + "0".repeat(56)), run_sha256: "1111bbbb" + "0".repeat(56), changed: true, same: true });
 assert.strictEqual(chg.level, "warn"); assert.ok(chg.text.includes("1111bbbb") && chg.text.includes("2222cccc"), chg.text);
 
+// ---- a run started with a route edit
+const sha = "ab".repeat(32);
+const tag = "zulfarrak@v0007 sha256=" + sha;
+assert.strictEqual(V.routeEditBadge("", { run_sha256: sha }), null);
+assert.strictEqual(V.routeEditBadge(undefined, null), null);
+for (const bad of ["zulfarrak@v7 sha256=" + sha, "zulfarrak v0007", "../x@v0007 sha256=" + sha, "zulfarrak@v0007 sha256=" + "z".repeat(64), tag + " extra", "<b>x</b>"]) assert.strictEqual(V.routeEditBadge(bad, { run_sha256: sha }), null, bad);
+assert.deepStrictEqual(V.routeEditBadge(tag, { run_sha256: sha }), { level: "ok", version: "v0007", text: "run uses route edit v0007" });
+assert.strictEqual(V.routeEditBadge(tag, { run: { sha256: sha } }).level, "ok", "the file as read now, when the run reports no hash");
+assert.strictEqual(V.routeEditBadge(tag, { run_sha256: "cd".repeat(32), run: { sha256: sha } }).level, "warn", "the run's own hash wins over the file on disk");
+const other = V.routeEditBadge(tag, { run_sha256: "cd".repeat(32) });
+assert.strictEqual(other.level, "warn"); assert.ok(other.text.includes("cdcdcdcd") && other.text.includes("v0007"));
+assert.strictEqual(V.routeEditBadge(tag, null).level, "info");
+
 // ---- the drawing must be the run's plan: the leg number and the leg name the run is in have to agree with it
 const named = { legs: [{ name: "entrance" }, { name: "hall" }, { name: "" }] };
 assert.strictEqual(V.planMismatch(named, { leg: 1, leg_name: "hall" }), "");

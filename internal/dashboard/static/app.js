@@ -320,10 +320,11 @@ function renderHead(c, rec) {
 
 // Which plan file the map draws and which one the run reads, in words, with the way into the plan view.
 function planCopyBlock(c) {
-  const pc = c.plan_copy, b = PV.copyBadge(pc);
-  return h("div", { class: "plancopy " + (b ? b.level : "") },
+  const pc = c.plan_copy, b = PV.copyBadge(pc), re = PV.routeEditBadge(c.route_edit, pc);
+  return h("div", { class: "plancopy " + (re && re.level === "warn" ? "warn" : b ? b.level : "") },
     h("h3", { text: "Plan file" }),
     h("div", { text: pc.text }),
+    re ? h("div", { class: re.level === "ok" ? "ok" : "", text: re.text + "." }) : null,
     h("div", { class: "muted" }, b ? b.text + ". " : "", h("a", { href: PV.planHash(c.label.plan), text: "Open this plan in the plan view" })));
 }
 

@@ -65,6 +65,7 @@ type Card struct {
 	LastError   string `json:"last_error,omitempty"`
 	LastRefusal string `json:"last_refusal,omitempty"`
 	SHA         string `json:"sha,omitempty"`
+	RouteEdit   string `json:"route_edit,omitempty"` // the route editor version the run was started with (trace_meta.route_edit), when it was
 	Links       []Link `json:"links"`
 
 	Feed      Feed         `json:"feed"`
@@ -438,6 +439,7 @@ func BuildCard(in Inputs) Card {
 	}
 	if in.Trace != nil {
 		c.SHA = in.Trace.SHA
+		c.RouteEdit = in.Trace.RouteEdit
 		c.Orders = append(c.Orders, in.Trace.Orders...)
 		for i := len(c.Orders) - 1; i >= 0; i-- {
 			if c.Orders[i].Reply == "ERR" {
