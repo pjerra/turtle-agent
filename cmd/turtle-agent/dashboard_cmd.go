@@ -19,7 +19,7 @@ import (
 )
 
 const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR] [--mmaps-dir DIR]\n" +
-	"                          [--edit [--edit-dir DIR] [--edit-source DIR] [--edit-tokens FILE] [--edit-allow-default-dir FILE[,FILE]]]\n" +
+	"                          [--edit [--edit-dir DIR] [--edit-source DIR] [--edit-tokens FILE] [--edit-allow-default-dir FILE[,FILE]] [--edit-trust-local [--edit-trust-label LABEL]]]\n" +
 	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command.\n" +
 	"  --edit turns on the route editor (README \"Route editor\"): the only thing the page can then write is a checked version of a plan's route"
 
@@ -51,6 +51,8 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	editSource := fs.String("edit-source", "", "with --edit: the folder whose plan files an edit starts from (default: the first --plans-dir); must not lie inside any slot's dungeons_dir")
 	editTokens := fs.String("edit-tokens", filepath.Join(home, ".config", "turtle-agent", "route-edit-tokens"), "with --edit: file of `label token` lines, mode 0600; the label is recorded as who made a version")
 	editAllow := fs.String("edit-allow-default-dir", "", "with --edit: settings files (by file name, comma separated) that have an rpc but no dungeons_dir, whose default plans folder (dungeons/ under the agent's working folder) you vouch is not the edits folder; any other such file stops the editor")
+	trustLocal := fs.Bool("edit-trust-local", false, "with --edit: a save from this machine (loopback) or from a Tailscale address in --allow-host / the --listen address needs no token typed: the server uses its own token for --edit-trust-label (the token never reaches the page); any other caller still needs the token. Off by default; read README \"Route editor\" first")
+	trustLabel := fs.String("edit-trust-label", "owner", "with --edit-trust-local: the label in the --edit-tokens file whose token the trusted saves are made as")
 	editMmaps := fs.String("mmaps-dir", "", "the navmesh folder of the server the plans are run on (a check on another server's mesh proves nothing): the plan view draws the real route on it (GET /api/plan/<name>/route); required with --edit")
 	cfgDir := fs.String("config-dir", dashboard.DefaultConfigDir(), "folder with settings*.json and the rpc-<port>.token files")
 	if err := fs.Parse(args); err != nil {
@@ -111,6 +113,10 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		p.SetNavmesh(planner, mm)
 		fmt.Fprintf(stderr, "dashboard: the plan view draws the real route on the navmesh in %s\n", mm)
 	}
+	if *trustLocal && !*edit {
+		fmt.Fprintln(stderr, "dashboard: --edit-trust-local needs --edit")
+		return exitUsage
+	}
 	if *edit {
 		src := expandHome(*editSource)
 		if src == "" && len(planDirs) > 0 {
@@ -123,6 +129,17 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}
 		defer planner.Close()
 		editor = ed
+		if *trustLocal {
+			peers, ignored := dashboard.TrustPeers(allow)
+			if err := ed.EnableTrustLocal(*trustLabel, peers); err != nil {
+				fmt.Fprintln(stderr, "dashboard: --edit-trust-local:", err)
+				return exitUsage
+			}
+			fmt.Fprintf(stderr, "dashboard: --edit-trust-local: saves from loopback and from %v need no token (made as %q)\n", peers, *trustLabel)
+			if len(ignored) > 0 {
+				fmt.Fprintf(stderr, "dashboard: --edit-trust-local: not trusted as callers (only literal Tailscale addresses are): %s\n", strings.Join(ignored, ", "))
+			}
+		}
 		fmt.Fprintf(stderr, "dashboard: route editing is ON: edits start from %s, versions go to %s, checked on the mesh in %s\n", src, expandHome(*editDir), expandHome(*editMmaps))
 	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", *listen)

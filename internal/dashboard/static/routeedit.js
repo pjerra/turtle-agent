@@ -11,7 +11,8 @@
   // A point is {x, y} in the drawing plane; a via point may be locked (a direct or check_skip hop: the server will not edit it).
   function buildModel(geo) {
     const legs = (geo && geo.legs ? geo.legs : []).map((l) => {
-      const m = { index: l.index, label: l.label || "", name: l.name || "", start: null, via: [], to: null, exitIsTo: !l.boss_at && !(l.packs && l.packs.length) };
+      const m = { index: l.index, label: l.label || "", name: l.name || "", start: null, via: [], to: null, exitIsTo: !l.boss_at && !(l.packs && l.packs.length),
+        packs: (l.packs || []).map((p) => ({ x: p.x, y: p.y, index: p.index, words: p.words || "", entries: p.entries || [], label: p.label || "" })), bossAt: l.boss_at ? { x: l.boss_at.x, y: l.boss_at.y } : null };
       for (const st of l.stops || []) {
         if (st.kind === "start") m.start = { x: st.x, y: st.y };
         else if (st.kind === "via") m.via.push({ x: st.x, y: st.y, locked: !!(st.direct || st.check_skip || st.gm_cross), why: st.gm_cross ? "a gm_cross point (a GM moves the party there)" : st.direct ? "a direct (straight-line) step" : st.check_skip ? "a hop the plan check skips (check_skip)" : "" });
@@ -145,6 +146,128 @@
     return q.toString();
   }
 
-  const api = { toGame, toDrawing, buildModel, checkOp, apply, routePoints, handles, midHandles, hitTest, moveOp, insertOp, deleteOp, history, push, undo, redo, compass, describeChanges, issueMarks, snapQuery };
+  // ---- plain-language labels and hover text ----
+  // Every point says what it is in words. A leg is called by its label ("Baelog"); a pack by the creatures in it ("Pack: 2 Stonevault Oracles"), a
+  // creature the plan does not name as "creature <entry>".
+  function legName(leg) { return (leg && leg.label) || "Section " + ((leg && leg.index) + 1); }
+  function packWords(pack) {
+    let w = pack && pack.words;
+    if (!w && pack && pack.entries && pack.entries.length) {
+      const order = [], n = new Map();
+      for (const e of pack.entries) { if (!n.has(e)) order.push(e); n.set(e, (n.get(e) || 0) + 1); }
+      w = order.map((e) => (n.get(e) > 1 ? n.get(e) + " x " : "") + "creature " + e).join(", ");
+    }
+    return "Pack: " + (w || (pack && pack.label) || "unknown creatures");
+  }
+  function pointWords(leg, p) {
+    const L = legName(leg);
+    if (p.kind === "start") return "Start of leg " + L;
+    if (p.kind === "via") return "Walk point " + (p.index + 1) + " of leg " + L;
+    return leg.exitIsTo ? "End of leg " + L : "Where the party gathers before " + L;
+  }
+  // What the bots do at a point, in a sentence.
+  function pointDoes(leg, p) {
+    if (p.kind === "start") return "The bots arrive here from the leg before.";
+    if (p.kind === "via") return "The bots walk to this point on the navmesh, then on to the next one." + (p.locked ? " It is locked: " + p.why + "; edit it in the plan file." : "");
+    if (leg.exitIsTo) return "The party walks on to the next leg from here.";
+    const next = leg.packs && leg.packs.length ? "the lead looks at the first pack (" + packWords(leg.packs[0]).replace(/^Pack: /, "") + ") and pulls it" : "the party goes for the boss";
+    return "The party gathers here, then " + next + ".";
+  }
+  // The route document's stop and walk at a spot of a leg (the doc is GET /api/plan/<name>/route, with the edits made so far while editing).
+  function docAt(doc, legIndex, x, y, tol) {
+    const t = tol == null ? 0.6 : tol, out = { stop: null, seg: null };
+    if (!doc || !Array.isArray(doc.stops)) return out;
+    out.stop = doc.stops.find((s) => s.leg === legIndex && (s.kind === "via" || s.kind === "stage") && Math.hypot(s.x - x, s.y - y) <= t) || null;
+    if (out.stop && Array.isArray(doc.segments)) out.seg = doc.segments.find((g) => g.stop === out.stop.seq) || null;
+    return out;
+  }
+  function redLines(info) {
+    const out = [];
+    if (info.seg && !info.seg.ok) out.push("RED: the planner finds no path to this point (" + (info.seg.reason || "unreachable") + ")" + (info.seg.detail ? ": " + info.seg.detail : "") + ".");
+    if (info.stop) for (const t of info.stop.issues || []) out.push("PLAN CHECK FAILS: " + t);
+    if (info.seg && info.seg.ok && info.seg.exempt) out.push("Not walked on the navmesh: the plan check skips this hop" + (info.seg.detail ? " (" + info.seg.detail + ")" : "") + ".");
+    if (info.stop) for (const t of info.stop.warnings || []) out.push("warning: " + t);
+    return out;
+  }
+  // The hover text of a point.
+  function pointTip(leg, p, doc) {
+    const info = docAt(doc, leg.index, p.x, p.y), lines = [pointWords(leg, p), pointDoes(leg, p)];
+    if (info.seg && info.seg.ok && !info.seg.exempt && info.seg.len) lines.push("The walk to it is " + Math.round(info.seg.len) + " yd.");
+    lines.push(...redLines(info));
+    if (p.kind !== "start" && !p.locked) lines.push("Drag to move" + (p.kind === "via" ? ", Delete to remove." : "."));
+    return lines.join("\n");
+  }
+  // The hover text of the stretch from point k to point k+1 of a leg's route points.
+  function segmentTip(leg, pts, k, doc) {
+    const a = pts[k], b = pts[k + 1], info = docAt(doc, leg.index, b.x, b.y);
+    const lines = ["From: " + pointWords(leg, a), "To: " + pointWords(leg, b)];
+    if (info.seg && info.seg.ok && !info.seg.exempt) lines.push("The bots walk this stretch on the navmesh (" + Math.round(info.seg.len) + " yd).");
+    else if (!info.seg) lines.push("The bots walk this stretch.");
+    lines.push(...redLines(info));
+    lines.push("Click to add a walk point here.");
+    return lines.join("\n");
+  }
+  function packTip(leg, pack) { return packWords(pack) + "\nThe lead looks at this pack from a computed spot, then the bots pull it. It is not moved on the map; edit it in the plan file."; }
+
+  // The segment of a leg's route nearest to a drawing point, within radiusPx pixels (scale: pixels per yard): {leg, index, k, x, y} with (x, y) the
+  // nearest point on it and index where a new via point goes (as midHandles), or null.
+  function segmentAt(leg, legIndex, x, y, scale, radiusPx) {
+    const pts = routePoints(leg), first = pts.length && pts[0].kind === "start" ? 0 : -1;
+    let best = null, bestD = Infinity;
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+      if (len2 < 1e-9) continue;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2)), px = a.x + t * dx, py = a.y + t * dy;
+      const d = Math.hypot(px - x, py - y) * scale;
+      if (d <= radiusPx && d < bestD) { bestD = d; best = { leg: legIndex, index: first === 0 ? k : k + 1, k, x: px, y: py }; }
+    }
+    return best;
+  }
+
+  // The help box: what the mouse and keys do, and what the colours mean.
+  const HELP = [
+    "Drag a point to move it.",
+    "Click a line to add a point there (or drag from the line to put it where you drop it).",
+    "Click a point, then press Delete to remove it.",
+    "Ctrl+Z undoes, Ctrl+Y redoes, Esc cancels a drag.",
+    "Hover a point or a line to see what the bots do there.",
+  ];
+  const KEY = [
+    ["yellow", "A walk point: the bots walk through it."],
+    ["orange", "Where the party gathers before the leg's packs or boss."],
+    ["grey", "Locked (a direct, gm_cross or skipped hop): edit it in the plan file."],
+    ["red dashed", "The planner finds no path: hover for the reason."],
+  ];
+
+  // ---- the unsaved draft ----
+  // The edits not yet saved are kept in the tab's session storage so a reload does not lose them. The storage is passed in (and every use is in a
+  // try/catch: a private window or blocked storage must not break the editor), and a draft is only taken back for the plan file it was made on.
+  const DRAFT_PREFIX = "routeedit.draft:", MAX_DRAFT_OPS = 500;
+  const draftKey = (plan) => DRAFT_PREFIX + String(plan);
+  const isInt = (v) => Number.isInteger(v) && v >= 0 && v < 1e6;
+  function validOp(op) {
+    if (!op || typeof op !== "object" || !isInt(op.leg) || !isInt(op.index)) return false;
+    if (op.kind === "delete") return true;
+    return (op.kind === "move" || op.kind === "insert") && Number.isFinite(op.x) && Number.isFinite(op.y);
+  }
+  function draftSave(storage, plan, base, ops, note) {
+    try {
+      if (!ops || !ops.length) { storage.removeItem(draftKey(plan)); return true; }
+      storage.setItem(draftKey(plan), JSON.stringify({ v: 1, base: base || "", ops, note: String(note || "").slice(0, 500), at: Date.now() }));
+      return true;
+    } catch (e) { return false; }
+  }
+  function draftLoad(storage, plan, base) {
+    try {
+      const raw = storage.getItem(draftKey(plan));
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (!d || d.v !== 1 || !base || d.base !== base || !Array.isArray(d.ops) || !d.ops.length || d.ops.length > MAX_DRAFT_OPS || !d.ops.every(validOp)) return null;
+      return { ops: d.ops, note: typeof d.note === "string" ? d.note.slice(0, 500) : "", at: Number(d.at) || 0 };
+    } catch (e) { return null; }
+  }
+  function draftClear(storage, plan) { try { storage.removeItem(draftKey(plan)); } catch (e) { /* ignore */ } }
+
+  const api = { legName, packWords, pointWords, pointDoes, docAt, pointTip, segmentTip, packTip, segmentAt, HELP, KEY, draftKey, draftSave, draftLoad, draftClear, toGame, toDrawing, buildModel, checkOp, apply, routePoints, handles, midHandles, hitTest, moveOp, insertOp, deleteOp, history, push, undo, redo, compass, describeChanges, issueMarks, snapQuery };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.RouteEdit = api;
 })(typeof self !== "undefined" ? self : this);

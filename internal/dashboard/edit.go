@@ -84,6 +84,7 @@ type Editor struct {
 	afterCheck func()
 	mu         sync.Mutex             // one edit at a time: a plan check takes a moment and versions are counted
 	recent     map[string][]time.Time // under mu: the times of each token label's saves in the last minute
+	trust      *localTrust            // --edit-trust-local (trust.go); nil: every save needs a token
 
 	gitMu  sync.Mutex
 	gitAt  time.Time
@@ -147,7 +148,12 @@ func (e *Editor) authorize(w http.ResponseWriter, r *http.Request) (*http.Reques
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	label, err := e.cfg.Tokens.Authenticate(r.Header.Get("Authorization"), host, e.cfg.Now())
+	var label string
+	if len(r.Header.Values("Authorization")) == 0 && e.trustedRequest(r) {
+		label, err = e.trust.label, nil // --edit-trust-local: the server's own token for this owner (trust.go); a request that sends any token is judged by it
+	} else {
+		label, err = e.cfg.Tokens.Authenticate(r.Header.Get("Authorization"), host, e.cfg.Now())
+	}
 	switch {
 	case errors.Is(err, routeedit.ErrTooMany):
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
@@ -199,7 +205,7 @@ func (e *Editor) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		jsonError(w, http.StatusNotFound, "no such edit path")
 	case len(seg) == 1 && seg[0] == "status":
-		writeAny(w, 200, map[string]any{"enabled": true, "source": e.cfg.Source, "edit_dir": e.cfg.Store.Root(), "mmaps": e.cfg.Mmaps})
+		writeAny(w, 200, map[string]any{"enabled": true, "source": e.cfg.Source, "edit_dir": e.cfg.Store.Root(), "mmaps": e.cfg.Mmaps, "local_trusted": e.trustedRequest(r)})
 	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "versions":
 		e.versions(w, seg[0])
 	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "snap":

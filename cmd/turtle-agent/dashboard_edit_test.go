@@ -70,8 +70,9 @@ func TestDashboardEditSetupRefusesWhatIsNotSafe(t *testing.T) {
 func TestDashboardEditFlagNeedsItsParts(t *testing.T) {
 	_, cfg, _, _, tokens, _ := editSetup(t)
 	for name, args := range map[string][]string{
-		"no mmaps":  {"--edit", "--config-dir", cfg, "--edit-tokens", tokens, "--listen", "127.0.0.1:0"},
-		"no tokens": {"--edit", "--config-dir", cfg, "--edit-tokens", filepath.Join(cfg, "none"), "--mmaps-dir", cfg, "--listen", "127.0.0.1:0"},
+		"no mmaps":                 {"--edit", "--config-dir", cfg, "--edit-tokens", tokens, "--listen", "127.0.0.1:0"},
+		"no tokens":                {"--edit", "--config-dir", cfg, "--edit-tokens", filepath.Join(cfg, "none"), "--mmaps-dir", cfg, "--listen", "127.0.0.1:0"},
+		"trust without the editor": {"--edit-trust-local", "--config-dir", cfg, "--listen", "127.0.0.1:0"},
 	} {
 		var out, errb bytes.Buffer
 		if code := dashboardCmd(context.Background(), args, &out, &errb); code != exitUsage || !strings.Contains(errb.String(), "--edit") {
@@ -80,5 +81,14 @@ func TestDashboardEditFlagNeedsItsParts(t *testing.T) {
 		if strings.Contains(errb.String(), strings.Repeat("k", 40)) || strings.Contains(out.String(), strings.Repeat("k", 40)) {
 			t.Errorf("%s: a token was printed", name)
 		}
+	}
+}
+
+func TestDashboardTrustLocalNeedsALabelInTheTokenFile(t *testing.T) {
+	_, cfg, src, edits, tokens, mmaps := editSetup(t)
+	var out, errb bytes.Buffer
+	args := []string{"--edit", "--edit-trust-local", "--edit-trust-label", "nobody", "--config-dir", cfg, "--edit-tokens", tokens, "--edit-source", src, "--edit-dir", edits, "--mmaps-dir", mmaps, "--agents", "auto", "--listen", "127.0.0.1:0"}
+	if code := dashboardCmd(context.Background(), args, &out, &errb); code != exitUsage || !strings.Contains(errb.String(), "--edit-trust-label") {
+		t.Errorf("exit %d: %s", code, errb.String())
 	}
 }

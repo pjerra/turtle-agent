@@ -105,6 +105,7 @@ type GeoGroup struct {
 	N       int        `json:"n"` // creatures listed
 	Ambush  bool       `json:"ambush,omitempty"`
 	Label   string     `json:"label"`
+	Words   string     `json:"words,omitempty"` // the creatures in plain words: "2 Stonevault Oracles, Geologist"
 	Entries []uint32   `json:"entries,omitempty"`
 	Points  []GeoXY    `json:"points,omitempty"`
 	Patrol  *GeoPatrol `json:"patrol,omitempty"`
@@ -159,6 +160,36 @@ func packLabel(k int, pg dungeon.PullGroup, names map[string]string) string {
 		seen = seen[:3]
 	}
 	return fmt.Sprintf("pack %d: %s", k+1, strings.Join(seen, ", "))
+}
+
+// packWords lists the creatures of a pull group in plain words, in the order they first appear: "2 Stonevault Oracles, Geologist". A creature
+// the plan's notes do not name is "creature <entry>".
+func packWords(pg dungeon.PullGroup, names map[string]string) string {
+	var order []uint32
+	count := map[uint32]int{}
+	for _, e := range pg.Entries {
+		if count[e] == 0 {
+			order = append(order, e)
+		}
+		count[e]++
+	}
+	var parts []string
+	for _, e := range order {
+		n, k := names[strconv.FormatUint(uint64(e), 10)], count[e]
+		switch {
+		case n == "" && k == 1:
+			parts = append(parts, fmt.Sprintf("creature %d", e))
+		case n == "":
+			parts = append(parts, fmt.Sprintf("%d x creature %d", k, e))
+		case k == 1:
+			parts = append(parts, n)
+		case strings.HasSuffix(n, "s"):
+			parts = append(parts, fmt.Sprintf("%d %s", k, n))
+		default:
+			parts = append(parts, fmt.Sprintf("%d %ss", k, n))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // LegStops is the planned route of leg i from (startX, startY), in the order the driver does it (plan.go Leg, plancheck.go checkLeg): the
@@ -339,7 +370,7 @@ func BuildGeometry(plan *dungeon.Plan) Geometry {
 				continue
 			}
 			x, y := Project(pg.Positions[0].X, pg.Positions[0].Y)
-			gg := GeoGroup{Index: k, X: round1(x), Y: round1(y), R: groupRadius(pg), N: len(pg.Entries), Ambush: pg.Ambush, Label: packLabel(k, pg, names), Entries: pg.Entries}
+			gg := GeoGroup{Index: k, X: round1(x), Y: round1(y), R: groupRadius(pg), N: len(pg.Entries), Ambush: pg.Ambush, Label: packLabel(k, pg, names), Words: packWords(pg, names), Entries: pg.Entries}
 			for _, pos := range pg.Positions {
 				px, py := Project(pos.X, pos.Y)
 				gg.Points = append(gg.Points, GeoXY{round1(px), round1(py)})

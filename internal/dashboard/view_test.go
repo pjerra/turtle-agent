@@ -115,6 +115,10 @@ func TestRealRoute(t *testing.T) { runCheck(t, "realroute_check.js", "realroute.
 
 func TestRouteEditModel(t *testing.T) { runCheck(t, "routeedit_check.js", "routeedit.js") }
 
+// TestRouteEditWordsAndDraft: the plain-language labels and hover text of the points and lines, the help box, the nearest line to a click, and the
+// unsaved draft kept in the session storage (also when the storage throws or holds junk).
+func TestRouteEditWordsAndDraft(t *testing.T) { runCheck(t, "routeedit_ux_check.js", "routeedit.js") }
+
 // The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.
 func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
 	html, err := os.ReadFile(filepath.Join("static", "index.html"))
@@ -130,5 +134,19 @@ func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
 		if !strings.Contains(string(css), "hide-"+k) {
 			t.Errorf("app.css has no rule for layer %s", k)
 		}
+	}
+}
+
+func TestPackWordsCountsAndNamesTheCreatures(t *testing.T) {
+	pg := dungeon.PullGroup{Entries: []uint32{4850, 4850, 5000, 7777, 7777, 5000, 5000}}
+	names := map[string]string{"4850": "Stonevault Oracle", "5000": "Geologist"}
+	if got, want := packWords(pg, names), "2 Stonevault Oracles, 3 Geologists, 2 x creature 7777"; got != want {
+		t.Errorf("%q != %q", got, want)
+	}
+	if got := packWords(dungeon.PullGroup{Entries: []uint32{9}}, nil); got != "creature 9" {
+		t.Error(got)
+	}
+	if got := packWords(dungeon.PullGroup{Entries: []uint32{1, 1}}, map[string]string{"1": "Mobs"}); got != "2 Mobs" {
+		t.Error(got)
 	}
 }
