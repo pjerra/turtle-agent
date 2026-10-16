@@ -30,6 +30,7 @@ type Poller struct {
 	tailer *Tailer
 	live   *Live
 	hist   *History
+	route  *routeService // the real route (route.go); nil without --mmaps-dir
 
 	mu       sync.RWMutex
 	state    []byte

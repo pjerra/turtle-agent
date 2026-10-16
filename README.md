@@ -3141,6 +3141,29 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 | `--minimap-dir` | `~/turtle-agent-minimaps` | the map images `minimap-extract` wrote; the map draws over the image of its map id when the folder has one (see Minimaps below) |
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
+| `--mmaps-dir` | none | the navmesh folder of the server the plans are run on. With it the plan view draws the real route (below); `--edit` needs it. Without it the page draws only the plan file's own straight lines |
+
+**Real route (`--mmaps-dir`).** The plan view (`#/plan/<name>`) draws the path the bots walk, not just the plan file's own points. `GET
+/api/plan/<name>/route[?agent=<id>]` (GET only, no `--edit` needed) runs the plan check's walk (`dungeon.TracePlan`: the same navmesh planner,
+the same look point as `plan-check`) and answers the stops in run order and the walk to each, as `{stops, segments, summary}` in the page's plane:
+
+- every walk between consecutive points, **including the walk from the end of one leg to the start of the next** (`link: true`) and each pull
+  group's walk from the previous stand to the computed look point (the path is cut at the look point; a pack already in view has no walk);
+- the stops numbered `1, 2, 3...` across the whole plan: via points, stage points (`to`), packs, steps that have a stand point, bosses;
+- a segment the planner cannot path (`ok: false`, with the plan check's reason: `unreachable`, `off the mesh`, `too far`, `no line of sight`)
+  is drawn dashed red from its start to its end, with the reason on hover. Each segment is judged from where the plan means the party to stand, so
+  one unreachable point does not turn the segments after it red (`plan-check` stays where it was and reports its own issues).
+  A `needs_walk` point or a stand outside its trigger zone has no segment of its own: its number turns red. `direct` hops are straight (amber dotted),
+  `check_skip` and `gm_cross` hops are dotted violet (not walked on the mesh).
+
+The route is traced once per version of the plan: the answer is cached by the plan file's sha256 and the mmaps folder (at most 48 kept; a
+second request for the same plan waits for the first instead of tracing again; one trace runs at a time). With `--edit`, `GET
+/api/edit/<plan>/route?ops=<JSON list of ops>` traces the plan with the editor's ops applied (like `snap`'s `prior`) and caches by the sha256
+of the edited plan; it writes nothing. The page asks for it after each edit, undo, redo or discarded edit, and draws the old route faded until
+the new one is there. A box on the map, "Route legend", has the toggles: **Real path**, **Straight lines (old)** (the plan file's own straight
+segments, dimmed while the real path is on), **Packs** and **Numbers**; they are the same choices as the Layers panel. In edit mode the yellow
+handles stay on the plan file's own via points and `to` (so the real path is the line and the handles are the dots). Without a navmesh the
+endpoint answers 503 and the box says to start the dashboard with `--mmaps-dir`. Run cards do not draw it yet.
 
 **Route editor (`--edit`).** Off by default: without `--edit` the page is GET/HEAD only, exactly as above. With it, the one thing the
 page can write is a checked version of a plan's route, through `POST /api/edit/<plan>`:
@@ -3152,7 +3175,7 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dunge
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--edit` | off | turns the editor on |
-| `--mmaps-dir` | none, required | the navmesh folder of the server the plans are run on; every version records it (a check on another server's mesh proves nothing) |
+| `--mmaps-dir` | none, required | the navmesh folder of the server the plans are run on; every version records it (a check on another server's mesh proves nothing); also the mesh of the real route above |
 | `--edit-source` | the first `--plans-dir` | the folder whose plan files an edit starts from; the page draws and edits this copy |
 | `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json` (the whole plan, `dungeon.Marshal`), `vNNNN.meta.json` (who, when, base sha256 and git SHA, note, check result, ops, the plan diff) and `vNNNN.diff` (text diff). A refused edit keeps the record and the diff only |
 | `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | lines of `label token`, mode 0600, owned by you; the label is the recorded `who` |
@@ -3194,8 +3217,8 @@ unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-d
 a missing config folder, `--agents` other than `auto`, or a slot (a file with an `rpc`) whose plan folder cannot be told (no `dungeons_dir`, or a
 relative one: its runs read `dungeons/` under the agent's working folder) stops the editor and each edit, saying which file. A settings file whose
 default folder you know is elsewhere is named with `--edit-allow-default-dir settings-3.json`. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
-`/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
-`/vNNNN/diff`.
+`/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/route?ops=` (the real
+route of the plan with the ops applied, writes nothing), `/api/edit/<plan>/vNNNN` and `/vNNNN/diff`.
 
 **Using the edits in a run (`route-edits`).** An agent reads one plain plan file, so an edit reaches a run by copy, never by overlay:
 

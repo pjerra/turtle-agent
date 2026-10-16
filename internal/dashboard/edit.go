@@ -113,6 +113,9 @@ func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
 		return nil, err
 	}
 	e := &Editor{cfg: cfg, p: p, src: src, recent: map[string][]time.Time{}}
+	if p.route == nil { // the real route is traced on the editor's navmesh unless the dashboard was given one already
+		p.SetNavmesh(cfg.Nav, cfg.Mmaps)
+	}
 	if err := e.checkFolders(); err != nil {
 		src.Close()
 		return nil, err
@@ -201,6 +204,8 @@ func (e *Editor) serve(w http.ResponseWriter, r *http.Request) {
 		e.versions(w, seg[0])
 	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "snap":
 		e.snap(w, r, seg[0])
+	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "route":
+		e.route(w, r, seg[0])
 	case len(seg) >= 2 && len(seg) <= 3 && routeedit.PlanName.MatchString(seg[0]):
 		v, ok := routeedit.ParseVersion(seg[1])
 		if !ok || (len(seg) == 3 && seg[2] != "diff") {
@@ -333,6 +338,42 @@ func (e *Editor) snap(w http.ResponseWriter, r *http.Request, plan string) {
 	writeAny(w, 200, map[string]any{"ok": true, "change": ch[len(ch)-1]})
 }
 
+// route traces the plan with the ops made so far applied (prior ops, as for snap: ?ops=<JSON list>) and answers the real route of the edited plan.
+// With no ops it is the route of the plan file itself. It writes nothing; the answer is cached by the sha256 of the edited plan, so the same
+// edit is traced once.
+func (e *Editor) route(w http.ResponseWriter, r *http.Request, plan string) {
+	base, info, err := e.baseOf(plan)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	var ops []routeedit.Op
+	if q := r.URL.Query().Get("ops"); q != "" {
+		if len(q) > maxSnapPrior || json.Unmarshal([]byte(q), &ops) != nil || len(ops) > routeedit.MaxOps {
+			jsonError(w, http.StatusBadRequest, "ops must be a JSON list of at most %d ops in at most %d bytes", routeedit.MaxOps, maxSnapPrior)
+			return
+		}
+	}
+	target, sha, edited := base, info.SHA256, false
+	if len(ops) > 0 {
+		if target, _, err = routeedit.Apply(base, ops, e.cfg.Nav); err != nil {
+			jsonError(w, http.StatusBadRequest, "%v", err)
+			return
+		}
+		if sha, err = canonicalSHA(target); err != nil {
+			jsonError(w, http.StatusInternalServerError, "%v", err)
+			return
+		}
+		edited = true
+	}
+	body, errText := e.p.route.get(target, sha, edited)
+	if body == nil {
+		jsonError(w, http.StatusBadGateway, "the route could not be traced: %s", errText)
+		return
+	}
+	writeJSON(w, body)
+}
+
 // EditRequest is the body of POST /api/edit/<plan>.
 type EditRequest struct {
 	BaseSHA256 string         `json:"base_sha256"`
@@ -437,7 +478,10 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 		jsonError(w, http.StatusBadRequest, "the ops change nothing")
 		return
 	}
+	rs := e.p.route
+	rs.run.Lock() // the plan check sets the plan's avoid boxes on the shared planner: not while a route is being traced on it
 	check := routeedit.Evaluate(base, edited, e.cfg.Nav)
+	rs.run.Unlock()
 	meta := &routeedit.Meta{Who: who, At: e.cfg.Now().UTC().Format(time.RFC3339), Note: cleanNote(req.Note), Base: info, Mmaps: e.cfg.Mmaps,
 		Check: check, Ops: req.Ops, Changes: changes, PlanDiff: dungeon.DiffPlans(base, edited)}
 	reply := EditReply{Who: who, Check: check, Changes: changes, Diff: diff}
