@@ -421,10 +421,11 @@ func TestGravesRampCountsTheLegsEarlierWipes(t *testing.T) {
 	_ = gs
 }
 
-// The loader's 15 yd holds for a size of the run's own: the batch is cut where the next chests are not within 15 yd of its centre, and says so.
+// A size of the run's own is held tighter than the loader's 15 yd (RunBatchRadius, 8 yd; zf-r5: a batch of 3 spread 12.3 yd wiped): the batch is
+// cut where the next chests are not within 8 yd of its centre, and says so. A plan's own batches keep the loader's 15 yd.
 func TestRunBatchSizeIsCutByTheRadius(t *testing.T) {
 	g := carrierGame(t)
-	leg, gs := batchGraves(8, 10, func(i int) string { return "g1" }) // 10 yd apart: 4 chests are 15 yd from their centre, 5 are 20
+	leg, gs := batchGraves(8, 10, func(i int) string { return "g1" }) // 10 yd apart: 2 chests are 5 yd from their centre, 3 are 10
 	opt := objOpts()
 	opt.GravesBatch = 8
 	o := runBatches(t, g, leg, gs, opt)
@@ -432,11 +433,27 @@ func TestRunBatchSizeIsCutByTheRadius(t *testing.T) {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
 	}
 	b := o.rep.Remote.GraveBatches[0]
-	if b.Wanted != 8 || b.Size != 4 || !b.CutByRadius || b.RadiusYd > BatchRadius+0.01 || !strings.Contains(b.Note, "wanted 8, only 4 chests lie within 15 yd") {
+	if b.Wanted != 8 || b.Size != 2 || !b.CutByRadius || b.RadiusYd > RunBatchRadius+0.01 || !strings.Contains(b.Note, "wanted 8, only 2 chests lie within 8 yd") {
 		t.Fatalf("%+v\n%s", b, notesOf(o.rep))
 	}
-	if fmt.Sprint(batchSizes(o.rep)) != "[4 4]" || !strings.Contains(notesOf(o.rep), "cut_by_radius=yes") {
+	if fmt.Sprint(batchSizes(o.rep)) != "[2 2 2 2]" || !strings.Contains(notesOf(o.rep), "cut_by_radius=yes") {
 		t.Fatalf("%v\n%s", batchSizes(o.rep), notesOf(o.rep))
+	}
+	// The ramp is cut the same way: 6 yd apart, 3 chests are 6 yd from their centre, 4 are 9.
+	g = carrierGame(t)
+	leg, gs = batchGraves(8, 6, func(i int) string { return "g1" })
+	opt = objOpts()
+	opt.GravesRamp = &GravesRamp{Start: 4, Step: 1}
+	o = runBatches(t, g, leg, gs, opt)
+	if b := o.rep.Remote.GraveBatches[0]; o.err != nil || b.Wanted != 4 || b.Size != 3 || !b.CutByRadius || b.RadiusYd > RunBatchRadius+0.01 {
+		t.Fatalf("%v %+v\n%s", o.err, b, notesOf(o.rep))
+	}
+	// A plan batch (no run setting) keeps the loader's 15 yd: 4 chests 10 yd apart are 15 yd from their centre.
+	g = carrierGame(t)
+	leg, gs = batchGraves(4, 10, func(i int) string { return "g1" })
+	o = runBatches(t, g, leg, gs, objOpts())
+	if b := o.rep.Remote.GraveBatches[0]; o.err != nil || b.Mode != "plan" || b.Size != 4 || b.CutByRadius {
+		t.Fatalf("%v %+v\n%s", o.err, b, notesOf(o.rep))
 	}
 	// Running out of chests is not a cut by radius.
 	g = carrierGame(t)
@@ -1127,6 +1144,62 @@ func TestHealerWithManaGetsNoExtraGate(t *testing.T) {
 	o := runBatches(t, g, leg, gs, objOpts())
 	if o.err != nil || strings.Contains(notesOf(o.rep), "mana gate before the next batch") {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+}
+
+// Zf-r5: the healer ended batch 2 at 10 % mana, the rest gate gave up on it and batch 3 began: it ended at 0 % and the party wiped. The next
+// batch now waits (cmd rest) until the healer has graves_healer_mana_pct (60) and says how long it took.
+func TestNextBatchWaitsForTheHealersMana(t *testing.T) {
+	g := carrierGame(t)
+	g.party[1].Power = 100 // Healy at 10 % mana
+	var from time.Time
+	g.onTick = func(f *fakeRemote) {
+		if from.IsZero() {
+			from = f.now
+		}
+		// 1 % mana every 2 s (a drink): 60 % takes about 100 s, longer than the rest gate's own 60 s timeout.
+		p := 100 + uint32(f.now.Sub(from).Seconds()*5)
+		f.party[1].Power = min(p, 1000)
+	}
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || o.rep.State != "done" {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	n := notesOf(o.rep)
+	i := strings.Index(n, "the next batch waits for it")
+	j := strings.Index(n, "the batch goes on")
+	k := strings.LastIndex(n, "graves-batch begin")
+	if i < 0 || j < i || k < j {
+		t.Fatalf("the wait is not between the batches\n%s", n)
+	}
+	// The second batch began with the healer at 60 % or more: it ended batch 2 above that (mana only rises in the fake).
+	if bs := o.rep.Remote.GraveBatches; len(bs) != 2 || bs[1].HealMana < 60 {
+		t.Fatalf("%+v", bs)
+	}
+}
+
+// A healer whose mana never rises is waited for at most healerManaWaitCap: then the batch goes on, with a note (a stuck run is worse).
+func TestHealerManaWaitGivesUpAfterTheCap(t *testing.T) {
+	g := carrierGame(t)
+	g.party[1].Power = 100
+	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
+	o := runBatches(t, g, leg, gs, objOpts())
+	if o.err != nil || o.rep.State != "done" {
+		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
+	}
+	if n := notesOf(o.rep); !strings.Contains(n, "still at 10% mana (under 60%) after 300 s: the batch goes on without it") {
+		t.Fatalf("%s", n)
+	}
+}
+
+// graves_healer_mana_pct is a tunable with the default 60.
+func TestHealerManaWaitIsTunable(t *testing.T) {
+	if DefaultConfig().GravesHealerManaPct != 60 {
+		t.Fatalf("%d", DefaultConfig().GravesHealerManaPct)
+	}
+	if _, ok := tuneIndex["graves_healer_mana_pct"]; !ok {
+		t.Fatal("no graves_healer_mana_pct tunable")
 	}
 }
 

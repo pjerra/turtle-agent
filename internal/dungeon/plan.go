@@ -1200,9 +1200,6 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				b.Tactics = r.Boss.Tactics
 			}
 		}
-		if r.CompanionsLoot != nil && !*r.CompanionsLoot && b.LootItem != nil {
-			c.fail(bp+".loot_item", "the leg has companions_loot false (every bot's looting off for the whole leg) and the leader must loot the boss's corpse for it: the two cannot be run together; use the boss's own companions_loot false instead")
-		}
 		l.Boss = &b
 	}
 	for i, rs := range r.Steps {

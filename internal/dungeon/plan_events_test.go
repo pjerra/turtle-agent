@@ -247,13 +247,19 @@ func TestPlanCheckAreaTrigger(t *testing.T) {
 	}
 }
 
-// A leg whose looting is off for every bot cannot also have the leader loot its boss for an item: refused when the plan loads.
-func TestLegCompanionsLootFalseRefusesABossLootItem(t *testing.T) {
+// A leg whose looting is off for every bot may have the carrier loot its boss for an item (zf-r5: the stairs leg's Executioner, whose
+// Executioner's Key opens the cage): the remote run's `cmd loot` is an explicit order, the leg's mute is not turned back on early by the
+// boss (doBoss), and the boss's own companions_loot false is not needed then.
+func TestLegCompanionsLootFalseAllowsABossLootItem(t *testing.T) {
 	const bossLeg = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"companions_loot":false,"boss":{"entry":4,"position":{"x":1,"y":0,"z":0},"loot_item":{"entry":9,"name":"x"}}}]}`
-	if _, err := Parse("t.json", []byte(bossLeg)); err == nil || !strings.Contains(err.Error(), "legs[0].boss.loot_item: the leg has companions_loot false") {
-		t.Fatalf("%v", err)
+	p, err := Parse("t.json", []byte(bossLeg))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The boss's own companions_loot false (the fight only) is the way for a boss whose item the plan takes.
+	if l := p.Legs[0]; l.CompanionsLoot == nil || *l.CompanionsLoot || l.Boss == nil || l.Boss.LootItem == nil {
+		t.Fatalf("%+v", l)
+	}
+	// The boss's own companions_loot false (the fight only) still loads.
 	ok := strings.Replace(strings.Replace(bossLeg, `"companions_loot":false,"boss"`, `"boss"`, 1), `"loot_item"`, `"companions_loot":false,"loot_item"`, 1)
 	if _, err := Parse("t.json", []byte(ok)); err != nil {
 		t.Fatal(err)

@@ -184,6 +184,9 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 			return err
 		}
 	}
+	if err := d.healerManaWait(ctx); err != nil {
+		return err
+	}
 	wanted := d.batchWanted(a)
 	size := min(wanted, len(a.Section))
 	size = max(size, 1)
@@ -195,7 +198,11 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 	// The loader's radius holds for a size of the run's own as well: the batch is cut where the next chests are not within BatchRadius of its
 	// centre, and the batch says so (cut_by_radius).
 	want := len(pts)
-	for len(pts) > 1 && BatchSpread(pts) > BatchRadius {
+	radius := BatchRadius
+	if mode != "plan" {
+		radius = RunBatchRadius // a size of the run's own is held tight (zf-r5: a batch of 3 spread 12.3 yd wiped)
+	}
+	for len(pts) > 1 && BatchSpread(pts) > radius {
 		pts = pts[:len(pts)-1]
 	}
 	size = len(pts)
@@ -209,7 +216,7 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 	}
 	b.rec.CutByRadius = cut
 	if cut {
-		b.rec.Note = fmt.Sprintf("wanted %d, only %d chests lie within %.0f yd of their centre", wanted, size, BatchRadius)
+		b.rec.Note = fmt.Sprintf("wanted %d, only %d chests lie within %.0f yd of their centre", wanted, size, radius)
 	}
 	d.rep.note(fmt.Sprintf("graves-batch begin: %d chest(s) around %.0f %.0f %.0f (%s mode, wanted %d, radius %.1f yd)%s", size, b.rec.Centre.X, b.rec.Centre.Y, b.rec.Centre.Z, mode, wanted, b.rec.RadiusYd, ifNote(b.rec.Note)))
 	if err := d.sweepLeftovers(ctx, "before the batch", b.rec.Centre); err != nil {
@@ -536,6 +543,68 @@ func (d *RemoteDriver) sampleBatchFrame(b *batchRun) {
 // between two chests goes on, the bots defend themselves); the fight is after the last chest.
 func (d *RemoteDriver) batchOpening() bool {
 	return d.batch != nil && d.batch.left > 0
+}
+
+// RunBatchRadius is how far from the batch's centre a chest may lie in a batch whose size is the run's own (graves_batch, graves_ramp):
+// tighter than the plan loader's BatchRadius, so that the summons stack and the area spells hit them all (zf-r5, Zum'rah: a batch of 3 spread
+// 12.3 yd wiped the party).
+const RunBatchRadius = 8.0
+
+// healerManaWaitCap is the longest the party waits before one batch for the healer's mana to reach Config.GravesHealerManaPct.
+const healerManaWaitCap = 300 * time.Second
+
+// healerManaWait holds the next grave batch while the healer's mana is under Config.GravesHealerManaPct (default 60): the party is told to
+// rest (drink) and a fight that breaks out is fought out first. The rest gate before it gives up on a healer-only mana wait after
+// healerManaCap, or at its own timeout, and passes a healer at 10 % (zf-r5: batch 3 began with the healer at 10 % and it ended at 0 %).
+// It gives up after healerManaWaitCap and says so.
+func (d *RemoteDriver) healerManaWait(ctx context.Context) error {
+	want := d.cfg.GravesHealerManaPct
+	if want <= 0 {
+		return nil
+	}
+	pct := func() (int, bool) {
+		p, ok := d.healerRec()
+		if !ok || p.Dead || p.MaxPower == 0 || p.PowerType != 0 {
+			return 0, false
+		}
+		return int(uint64(p.Power) * 100 / uint64(p.MaxPower)), true
+	}
+	began := d.clk.Now()
+	var lastRest time.Time
+	noted := false
+	for {
+		d.look()
+		cur, ok := pct()
+		if !ok || cur >= want {
+			if noted {
+				d.rep.note(fmt.Sprintf("graves-batch: the healer is at %d%% mana after %.0f s: the batch goes on", cur, d.clk.Now().Sub(began).Seconds()))
+			}
+			return nil
+		}
+		if d.clk.Now().Sub(began) > healerManaWaitCap {
+			d.rep.note(fmt.Sprintf("graves-batch: the healer is still at %d%% mana (under %d%%) after %.0f s: the batch goes on without it", cur, want, healerManaWaitCap.Seconds()))
+			return nil
+		}
+		if len(d.fr.EngagedHostiles()) > 0 {
+			if err := d.restGate(ctx, false); err != nil { // fights out what came, revives, rests
+				return err
+			}
+			continue
+		}
+		if !noted {
+			noted = true
+			d.rep.note(fmt.Sprintf("graves-batch: the healer is at %d%% mana (under %d%%): the next batch waits for it (cmd rest)", cur, want))
+		}
+		if lastRest.IsZero() || d.clk.Now().Sub(lastRest) > 45*time.Second {
+			lastRest = d.clk.Now()
+			if _, err := d.order(ctx, "rest"); err != nil {
+				return err
+			}
+		}
+		if err := d.tick(ctx, d.cfg.RestPoll); err != nil {
+			return err
+		}
+	}
 }
 
 // batchManaLowPct is the healer's mana (percent) under which the next batch waits for a mana gate.

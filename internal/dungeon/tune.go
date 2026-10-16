@@ -149,6 +149,7 @@ var tuneSpecs = []tuneSpec{
 	ints("rest_health_pct", "pct", 30, 100, "rested: every member's health at least this", func(t *tuneTarget) *int { return &t.cfg.RestHealthPct }),
 	ints("rest_mana_pct", "pct", 10, 100, "rested: every other mana user's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestManaPct }),
 	ints("rest_healer_mana_pct", "pct", 10, 100, "rested: every healer's mana at least this", func(t *tuneTarget) *int { return &t.cfg.RestHealerManaPct }),
+	ints("graves_healer_mana_pct", "pct", 10, 100, "the next grave batch waits while the healer's mana is under this", func(t *tuneTarget) *int { return &t.cfg.GravesHealerManaPct }),
 	secs("rest_timeout_s", 5, 300, "longest rest gate", func(t *tuneTarget) *time.Duration { return &t.cfg.RestTimeout }),
 	ints("rest_min_health_pct", "pct", 20, 100, "after the timeout the run goes on only with this health (at most rest_health_pct)", func(t *tuneTarget) *int { return &t.cfg.RestMinHealth }),
 	yds("rest_walk_yd", 10, 500, "the walk length from which the start gate lets the party rest while it walks", func(t *tuneTarget) *float32 { return &t.cfg.RestWalkYd }),
