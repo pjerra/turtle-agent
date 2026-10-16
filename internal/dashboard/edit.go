@@ -413,7 +413,7 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 		jsonError(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	if r, ok := e.sameAsLatest(plan, history, info.SHA256, req.Ops, who); ok {
+	if r, ok := e.sameAsLatest(plan, history, info.SHA256, req.Ops, cleanNote(req.Note)); ok {
 		writeAny(w, http.StatusOK, r)
 		return
 	}
@@ -457,6 +457,10 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 	}
 	// the folders are checked again once the version's number is claimed and before anything is in it, and after it is all written; when
 	// either fails the version's files are removed: a folder moved during the plan check, or during the write, does not keep a version
+	if code, msg := e.diskFloor(meta, planJSON, diff); code != 0 {
+		jsonError(w, code, "%s", msg)
+		return
+	}
 	v, err := e.cfg.Store.SaveGuarded(plan, meta, planJSON, diff, e.checkFolders)
 	if errors.Is(err, routeedit.ErrGuard) {
 		jsonError(w, http.StatusServiceUnavailable, "%v", err)
@@ -471,19 +475,19 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 	writeAny(w, code, reply)
 }
 
-// sameAsLatest answers a resubmit (a retry after a lost reply, or the same edit twice) with the latest version when its base and ops are
+// sameAsLatest answers a resubmit (a retry after a lost reply, or the same edit twice) with the latest version when its base, ops and note are
 // the request's, so that it takes no new number.
-func (e *Editor) sameAsLatest(plan string, history []routeedit.Meta, baseSHA string, ops []routeedit.Op, who string) (EditReply, bool) {
+func (e *Editor) sameAsLatest(plan string, history []routeedit.Meta, baseSHA string, ops []routeedit.Op, note string) (EditReply, bool) {
 	if len(history) == 0 {
 		return EditReply{}, false
 	}
 	m := history[len(history)-1]
 	a, err1 := json.Marshal(m.Ops)
 	b, err2 := json.Marshal(ops)
-	if err1 != nil || err2 != nil || m.Base.SHA256 != baseSHA || string(a) != string(b) {
+	if err1 != nil || err2 != nil || m.Base.SHA256 != baseSHA || m.Note != note || string(a) != string(b) {
 		return EditReply{}, false
 	}
-	r := EditReply{Status: m.Status, Version: m.Version, Name: routeedit.Name(m.Version), Who: who, Check: m.Check, Changes: m.Changes, Unchanged: true,
+	r := EditReply{Status: m.Status, Version: m.Version, Name: routeedit.Name(m.Version), Who: m.Who, Check: m.Check, Changes: m.Changes, Unchanged: true,
 		Message: "the same base and ops as the latest version: no new version was written"}
 	if d, err := e.cfg.Store.Diff(plan, m.Version); err == nil {
 		if len(d) > maxDiffReturned {
@@ -494,8 +498,8 @@ func (e *Editor) sameAsLatest(plan string, history []routeedit.Meta, baseSHA str
 	return r, true
 }
 
-// overBounds is the abuse bound on a save: per token label per minute (429), per plan per 24 h counted from the store's records (429), and
-// the free space of the store's filesystem (507). It returns 0 when the save may go on.
+// overBounds is the rate bound on a save: per token label per minute (429), per plan per 24 h counted from the store's records (429). It
+// returns 0 when the save may go on.
 func (e *Editor) overBounds(who string, history []routeedit.Meta) (int, string) {
 	now := e.cfg.Now()
 	kept := e.recent[who][:0]
@@ -517,12 +521,26 @@ func (e *Editor) overBounds(who string, history []routeedit.Meta) (int, string) 
 	if day >= e.cfg.MaxPerDay {
 		return http.StatusTooManyRequests, fmt.Sprintf("this plan has had %d saves in the last 24 hours, the most allowed", day)
 	}
+	return 0, ""
+}
+
+// fileSlack is added per file a version writes: the block its last bytes round up to, and the record's fields set at the write.
+const fileSlack = 8 << 10
+
+// diskFloor refuses a save (507) unless the store's filesystem keeps MinFree after the version's files: the plan, the diff and the record,
+// each counted with fileSlack.
+func (e *Editor) diskFloor(meta *routeedit.Meta, planJSON []byte, diff string) (int, string) {
+	mb, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+	need := uint64(len(planJSON)+len(diff)+len(mb)) + 3*fileSlack
 	free, err := e.cfg.Store.FreeBytes()
 	if err != nil {
 		return http.StatusInsufficientStorage, "the free space of the edits folder cannot be told: " + err.Error()
 	}
-	if free < e.cfg.MinFree {
-		return http.StatusInsufficientStorage, fmt.Sprintf("the edits folder's filesystem has %d MB free, under the %d MB kept free", free>>20, e.cfg.MinFree>>20)
+	if free < e.cfg.MinFree+need {
+		return http.StatusInsufficientStorage, fmt.Sprintf("the edits folder's filesystem has %d MB free: a save of %d KB would leave under the %d MB kept free", free>>20, need>>10, e.cfg.MinFree>>20)
 	}
 	return 0, ""
 }

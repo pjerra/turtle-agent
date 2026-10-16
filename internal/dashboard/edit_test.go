@@ -839,8 +839,21 @@ func TestResubmitReturnsTheLatestVersion(t *testing.T) {
 	if tree(t, r.edits) != before {
 		t.Error("a resubmit wrote")
 	}
+	// another token holder resubmitting: the stored author is named, not the caller
+	again = r.post("edit1", r.edit(move(0, 0, 21, 1)), strings.Repeat("h", 40))
+	rep = EditReply{}
+	must(t, json.Unmarshal([]byte(again.body), &rep))
+	if again.code != http.StatusOK || !rep.Unchanged || rep.Who != "owner" {
+		t.Errorf("resubmit by another holder: %d %s", again.code, again.body)
+	}
+	// another note is a new version
+	req := r.edit(move(0, 0, 21, 1))
+	req["note"] = "corrected"
+	if got := r.post("edit1", req, editToken); got.code != http.StatusOK || strings.Contains(got.body, `"unchanged"`) || !strings.Contains(got.body, `"version":2`) {
+		t.Errorf("new note: %d %s", got.code, got.body)
+	}
 	// other ops are a new version
-	if got := r.post("edit1", r.edit(move(0, 0, 22, 1)), editToken); got.code != http.StatusOK || strings.Contains(got.body, `"unchanged"`) || !strings.Contains(got.body, `"version":2`) {
+	if got := r.post("edit1", r.edit(move(0, 0, 22, 1)), editToken); got.code != http.StatusOK || strings.Contains(got.body, `"unchanged"`) || !strings.Contains(got.body, `"version":3`) {
 		t.Errorf("new ops: %d %s", got.code, got.body)
 	}
 }
@@ -892,6 +905,21 @@ func TestSavesAreBounded(t *testing.T) {
 		}
 		if tree(t, r.edits) != before {
 			t.Error("wrote under the floor")
+		}
+	})
+	t.Run("disk floor counts the save", func(t *testing.T) {
+		// free space just above the floor, but not by the size of the version: refused
+		r := rigWith(t, func(c *EditConfig) {
+			free, err := c.Store.FreeBytes()
+			must(t, err)
+			c.MinFree = free - 4096
+		})
+		before := tree(t, r.edits)
+		if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusInsufficientStorage || !strings.Contains(got.body, "would leave") {
+			t.Errorf("a save that would cross the floor: %d %s", got.code, got.body)
+		}
+		if tree(t, r.edits) != before {
+			t.Error("wrote across the floor")
 		}
 	})
 }
