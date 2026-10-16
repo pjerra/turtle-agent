@@ -744,3 +744,64 @@ func TestVouchingNeverCoversARelativeDungeonsDir(t *testing.T) {
 		t.Error("an edit was written after the slot's folder became unknown")
 	}
 }
+
+// A plan file, or a folder on the way to the source, swapped for a link to a folder outside after the editor checked its folders and
+// before it reads the plan: the read stays in the held folder or is refused, and nothing is written.
+func TestSourceSwappedForALinkBetweenCheckAndRead(t *testing.T) {
+	outside := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(outside, "source"), 0o755))
+	must(t, os.WriteFile(filepath.Join(outside, "source", "edit1.json"), []byte(editPlan), 0o644)) // same bytes: only the place differs
+
+	t.Run("plan file", func(t *testing.T) {
+		r := newEditRig(t, nil)
+		r.ed.afterCheck = func() {
+			must(t, os.Rename(filepath.Join(r.src, "edit1.json"), filepath.Join(r.src, "edit1.json.old")))
+			must(t, os.Symlink(filepath.Join(outside, "source", "edit1.json"), filepath.Join(r.src, "edit1.json")))
+		}
+		before := tree(t, r.edits)
+		got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken)
+		if got.code == http.StatusOK || !strings.Contains(got.body, "link") {
+			t.Errorf("a plan file swapped for a link was read: %d %s", got.code, got.body)
+		}
+		if tree(t, r.edits) != before {
+			t.Error("wrote")
+		}
+	})
+
+	t.Run("folder on the way", func(t *testing.T) {
+		r := newEditRig(t, nil)
+		root := t.TempDir()
+		mid := filepath.Join(root, "mid")
+		src := filepath.Join(mid, "source")
+		must(t, os.MkdirAll(src, 0o755))
+		must(t, os.WriteFile(filepath.Join(src, "edit1.json"), []byte(editPlan), 0o644))
+		tk, _ := routeedit.LoadTokens(r.tokens)
+		ed, err := NewEditor(r.p, EditConfig{Source: src, Store: r.ed.cfg.Store, Tokens: tk, Nav: testNav{}, Mmaps: "/m"})
+		must(t, err)
+		t.Cleanup(ed.Close)
+		srv := httptest.NewServer(HandlerWithEditor(r.p, "", nil, nil, ed))
+		t.Cleanup(srv.Close)
+		r.srv, r.ed = srv, ed
+		swapped := false
+		ed.afterCheck = func() {
+			if swapped {
+				return
+			}
+			swapped = true
+			must(t, os.Rename(mid, filepath.Join(root, "mid.old")))
+			must(t, os.Symlink(outside, mid))
+		}
+		before := tree(t, r.edits)
+		got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken)
+		if got.code == http.StatusOK || !strings.Contains(got.body, "no longer the folder") {
+			t.Errorf("a source reached through a swapped folder was used: %d %s", got.code, got.body)
+		}
+		if tree(t, r.edits) != before {
+			t.Error("wrote")
+		}
+		// and it stays refused: the folder checks see the swap too
+		if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusServiceUnavailable {
+			t.Errorf("after the swap: %d %s", got.code, got.body)
+		}
+	})
+}

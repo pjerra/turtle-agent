@@ -9,8 +9,8 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,8 +66,11 @@ type EditConfig struct {
 // Editor serves /api/edit/*.
 type Editor struct {
 	cfg EditConfig
+	src *routeedit.Source // the source folder, held open from the start (O_DIRECTORY|O_NOFOLLOW); plans are read relative to it
 	p   *Poller
-	mu  sync.Mutex // one edit at a time: a plan check takes a moment and versions are counted
+	// afterCheck, when set (tests), runs between the folder check and the read of the base plan: the window a swap would use.
+	afterCheck func()
+	mu         sync.Mutex // one edit at a time: a plan check takes a moment and versions are counted
 
 	gitMu  sync.Mutex
 	gitAt  time.Time
@@ -83,15 +86,20 @@ func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if err := routeedit.CheckSource(cfg.Source); err != nil {
+	src, err := routeedit.OpenSource(cfg.Source)
+	if err != nil {
 		return nil, err
 	}
-	e := &Editor{cfg: cfg, p: p}
+	e := &Editor{cfg: cfg, p: p, src: src}
 	if err := e.checkFolders(); err != nil {
+		src.Close()
 		return nil, err
 	}
 	return e, nil
 }
+
+// Close lets go of the source folder.
+func (e *Editor) Close() { e.src.Close() }
 
 func (e *Editor) checkFolders() error {
 	if a := strings.TrimSpace(e.p.opt.Agents); a != "auto" {
@@ -101,7 +109,8 @@ func (e *Editor) checkFolders() error {
 	if err != nil {
 		return fmt.Errorf("the slots' plan folders cannot all be told, so the edits folder cannot be checked against them: %w", err)
 	}
-	return routeedit.CheckFolders(e.cfg.Store.Root(), e.cfg.Source, dirs)
+	// by the identities of the held folders, not their path strings; it also fails when a held folder's path no longer names it
+	return routeedit.CheckHeld(e.cfg.Store, e.src, dirs)
 }
 
 type whoKey struct{}
@@ -198,20 +207,20 @@ func (e *Editor) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// baseOf reads the base plan of an edit: the file in the source folder (no link out of it), its bytes' sha256 and the parsed plan.
+// baseOf reads the base plan of an edit, its bytes' sha256 and the parsed plan. The file is opened relative to the held source descriptor
+// (openat, O_NOFOLLOW) and must be a regular file (fstat); afterwards the source's path must still name the held folder.
 func (e *Editor) baseOf(plan string) (*dungeon.Plan, routeedit.BaseInfo, error) {
-	full, err := SafeJoin(e.cfg.Source, plan+".json")
-	if err != nil {
-		return nil, routeedit.BaseInfo{}, fmt.Errorf("no plan file %s.json in the editable source", plan)
+	if e.afterCheck != nil {
+		e.afterCheck()
 	}
-	st, err := os.Stat(full)
-	if err != nil || st.Size() > maxBaseFile {
-		return nil, routeedit.BaseInfo{}, fmt.Errorf("the plan file %s.json cannot be read", plan)
-	}
-	data, err := os.ReadFile(full)
+	data, err := e.src.ReadPlan(plan, maxBaseFile)
 	if err != nil {
+		return nil, routeedit.BaseInfo{}, fmt.Errorf("the plan file %s.json cannot be read from the editable source: %v", plan, err)
+	}
+	if err := e.src.Verify(); err != nil {
 		return nil, routeedit.BaseInfo{}, err
 	}
+	full := filepath.Join(e.src.Path(), plan+".json")
 	p, err := dungeon.Parse(full, data)
 	if err != nil {
 		return nil, routeedit.BaseInfo{}, fmt.Errorf("the plan file does not load: %s", firstLine(err.Error()))
@@ -408,6 +417,11 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 		meta.Status, reply.Status, planJSON = routeedit.StatusChecked, routeedit.StatusChecked, editedJSON
 	default: // no new issue, but the plan had issues of its own: kept, never "checked"
 		meta.Status, reply.Status, reply.Message, planJSON = routeedit.StatusUnchecked, routeedit.StatusUnchecked, check.Unchecked(), editedJSON
+	}
+	// the folders again, just before the write: a swap during the plan check is not missed
+	if err := e.checkFolders(); err != nil {
+		jsonError(w, http.StatusServiceUnavailable, "%v", err)
+		return
 	}
 	v, err := e.cfg.Store.Save(plan, meta, planJSON, diff)
 	if err != nil {
