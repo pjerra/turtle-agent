@@ -3167,6 +3167,17 @@ it makes a plan check issue the base plan did not have, or cannot be checked. A 
 issue at all (exempt `check_skip` hops aside). An edit that adds none to a plan that has issues of its own is kept as "unchecked" (the plan file is
 kept, so work can go on from it) and is never picked by `latest`, `export` or `promote`.
 
+**The page.** With `--edit` the plan view (`#/plan/<name>`) has a "Route editor" box. "Edit route" puts yellow handles on the map: drag a
+via point or a leg's stage point (`to`, orange); click the pale circle in the middle of a segment to add a point there (or drag it to put the
+point where you drop it); click a point and press Delete (or the button) to remove it. Grey points are locked (direct and check_skip hops). Each
+drop asks the server where the point lands (`/snap`): a floor picked among several is marked purple, a point off the mesh is refused on the
+spot. Undo and redo (Ctrl+Z, Ctrl+Y) step through the edits; the edits are one list of ops against the plan file, so saving always sends all
+of them. "Save version" asks for the editing token (kept in this browser tab's `sessionStorage` only, sent in the `Authorization` header
+only), sends the ops, and shows the result: checked or refused, the new plan check issues (red marks on the map, the reason on hover), the
+changes in words ("leg 3 (theka): via 2 moved 6.1 yd east"), and the text diff. The version list has Diff, Load (put a version's edits on the
+map) and Revert (a new version equal to an older one; versions are never overwritten). Hiding a leg hides its handles. The box says why
+editing is off when the map does not show the file edits start from (`--edit-source`).
+
 Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
 application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
 created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, never overwritten, and every path step is made

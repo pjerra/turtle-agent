@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -534,6 +535,34 @@ func TestEditOnARealNavmesh(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(r.ed.cfg.Store.Root(), "edit1", routeedit.Name(rep.Version)+".json")); err == nil {
 		t.Error("a refused edit wrote a plan file")
+	}
+}
+
+// A snap check names a place as the edits before it left the leg (prior): after a point is inserted at the front, index 1 is the old first point.
+func TestSnapTakesTheEditsBeforeIt(t *testing.T) {
+	r := newEditRig(t, nil)
+	// edit1's leg 0 has via 0 (plain), via 1 (plain), via 2 (direct): index 2 is the locked one
+	q := func(prior string) reply {
+		v := "/api/edit/edit1/snap?kind=move&leg=0&index=2&x=61&y=1"
+		if prior != "" {
+			v += "&prior=" + url.QueryEscape(prior)
+		}
+		return r.do(http.MethodGet, v, nil, nil)
+	}
+	if got := q(""); !strings.Contains(got.body, `"ok":false`) || !strings.Contains(got.body, "locked") {
+		t.Errorf("without prior: %s", got.body)
+	}
+	if got := q(`[{"leg":0,"kind":"insert","index":0,"x":10,"y":0},{"leg":0,"kind":"insert","index":0,"x":5,"y":0}]`); !strings.Contains(got.body, `"ok":true`) {
+		t.Errorf("after two inserts index 2 is the old via 0: %s", got.body)
+	}
+	for name, prior := range map[string]string{"not json": `nope`, "not a list": `{"leg":0}`, "too long": `[` + strings.Repeat(`{"leg":0,"kind":"insert","index":0,"x":1,"y":1},`, 800) + `{"leg":0,"kind":"insert","index":0,"x":1,"y":1}]`} {
+		if got := q(prior); got.code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, got.code)
+		}
+	}
+	if got := q(`[{"leg":0,"kind":"delete","index":9}]`); !strings.Contains(got.body, `"ok":false`) {
+		t.Errorf("a prior op that cannot apply: %s", got.body)
+
 	}
 }
 

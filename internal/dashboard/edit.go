@@ -38,6 +38,9 @@ const maxEditBody = 64 << 10
 // maxBaseFile bounds the plan file read as the base of an edit.
 const maxBaseFile = 4 << 20
 
+// maxSnapPrior bounds the ops a snap request carries as the edits before the one tested.
+const maxSnapPrior = 24 << 10
+
 // maxDiffReturned bounds the text diff sent back in a reply (the whole diff is in the store).
 const maxDiffReturned = 48 << 10
 
@@ -313,12 +316,21 @@ func (e *Editor) snap(w http.ResponseWriter, r *http.Request, plan string) {
 		jsonError(w, http.StatusNotFound, "%v", err)
 		return
 	}
-	_, ch, err := routeedit.Apply(base, []routeedit.Op{{Leg: int(leg), Kind: kind, Index: int(idx), X: x, Y: y}}, e.cfg.Nav)
+	// the ops already made come first (prior): an op names a place in the leg as the ops before it left it
+	var ops []routeedit.Op
+	if prior := q.Get("prior"); prior != "" {
+		if len(prior) > maxSnapPrior || json.Unmarshal([]byte(prior), &ops) != nil || len(ops) >= routeedit.MaxOps {
+			jsonError(w, http.StatusBadRequest, "prior must be a JSON list of at most %d ops in at most %d bytes", routeedit.MaxOps-1, maxSnapPrior)
+			return
+		}
+	}
+	ops = append(ops, routeedit.Op{Leg: int(leg), Kind: kind, Index: int(idx), X: x, Y: y})
+	_, ch, err := routeedit.Apply(base, ops, e.cfg.Nav)
 	if err != nil {
 		writeAny(w, 200, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
-	writeAny(w, 200, map[string]any{"ok": true, "change": ch[0]})
+	writeAny(w, 200, map[string]any{"ok": true, "change": ch[len(ch)-1]})
 }
 
 // EditRequest is the body of POST /api/edit/<plan>.
