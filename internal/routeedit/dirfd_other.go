@@ -34,3 +34,4 @@ func (*Source) ReadPlan(string, int64) ([]byte, error) { return nil, errNeedsLin
 func (*Source) Verify() error                          { return errNeedsLinux }
 func (*Store) Verify() error                           { return errNeedsLinux }
 func CheckHeld(*Store, *Source, []string) error        { return errNeedsLinux }
+func (*Store) FreeBytes() (uint64, error)              { return 0, errNeedsLinux }

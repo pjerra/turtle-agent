@@ -224,3 +224,12 @@ func CheckHeld(store *Store, src *Source, slotDirs []string) error {
 	}
 	return nil
 }
+
+// FreeBytes is the space free to the user on the store's filesystem (fstatfs of the held folder).
+func (s *Store) FreeBytes() (uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Fstatfs(s.rd.fd, &st); err != nil {
+		return 0, err
+	}
+	return st.Bavail * uint64(st.Bsize), nil //nolint:unconvert
+}

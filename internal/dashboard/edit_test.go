@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
@@ -773,6 +774,95 @@ func TestSourceSwappedForALinkBetweenCheckAndRead(t *testing.T) {
 		// and it stays refused: the folder checks see the swap too
 		if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusServiceUnavailable {
 			t.Errorf("after the swap: %d %s", got.code, got.body)
+		}
+	})
+}
+
+// rigWith makes a rig whose editor has the given bounds.
+func rigWith(t *testing.T, set func(*EditConfig)) *editRig {
+	r := newEditRig(t, nil)
+	tk, _ := routeedit.LoadTokens(r.tokens)
+	cfg := EditConfig{Source: r.src, Store: r.ed.cfg.Store, Tokens: tk, Nav: testNav{}, Mmaps: "/m"}
+	set(&cfg)
+	ed, err := NewEditor(r.p, cfg)
+	must(t, err)
+	t.Cleanup(ed.Close)
+	srv := httptest.NewServer(HandlerWithEditor(r.p, "", nil, nil, ed))
+	t.Cleanup(srv.Close)
+	r.srv, r.ed = srv, ed
+	return r
+}
+
+// The same base and ops as the latest version return that version: no new number, nothing written.
+func TestResubmitReturnsTheLatestVersion(t *testing.T) {
+	r := newEditRig(t, nil)
+	first := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken)
+	if first.code != http.StatusOK {
+		t.Fatalf("%d %s", first.code, first.body)
+	}
+	before := tree(t, r.edits)
+	again := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken)
+	var rep EditReply
+	must(t, json.Unmarshal([]byte(again.body), &rep))
+	if again.code != http.StatusOK || !rep.Unchanged || rep.Version != 1 || rep.Status != routeedit.StatusChecked || rep.Diff == "" {
+		t.Errorf("resubmit: %d %s", again.code, again.body)
+	}
+	if tree(t, r.edits) != before {
+		t.Error("a resubmit wrote")
+	}
+	// other ops are a new version
+	if got := r.post("edit1", r.edit(move(0, 0, 22, 1)), editToken); got.code != http.StatusOK || strings.Contains(got.body, `"unchanged"`) || !strings.Contains(got.body, `"version":2`) {
+		t.Errorf("new ops: %d %s", got.code, got.body)
+	}
+}
+
+func TestSavesAreBounded(t *testing.T) {
+	t.Run("per token per minute", func(t *testing.T) {
+		now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+		r := rigWith(t, func(c *EditConfig) { c.MaxPerMinute = 3; c.Now = func() time.Time { return now } })
+		for i := 0; i < 3; i++ {
+			if got := r.post("edit1", r.edit(move(0, 0, float64(21+i), 1)), editToken); got.code != http.StatusOK {
+				t.Fatalf("save %d: %d %s", i, got.code, got.body)
+			}
+		}
+		before := tree(t, r.edits)
+		if got := r.post("edit1", r.edit(move(0, 0, 30, 1)), editToken); got.code != http.StatusTooManyRequests {
+			t.Errorf("over the minute: %d %s", got.code, got.body)
+		}
+		if tree(t, r.edits) != before {
+			t.Error("wrote over the bound")
+		}
+		now = now.Add(61 * time.Second)
+		if got := r.post("edit1", r.edit(move(0, 0, 30, 1)), editToken); got.code != http.StatusOK {
+			t.Errorf("a minute later: %d %s", got.code, got.body)
+		}
+	})
+	t.Run("per plan per day", func(t *testing.T) {
+		now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+		r := rigWith(t, func(c *EditConfig) { c.MaxPerDay = 2; c.Now = func() time.Time { return now } })
+		for i := 0; i < 2; i++ {
+			now = now.Add(2 * time.Minute)
+			if got := r.post("edit1", r.edit(move(0, 0, float64(21+i), 1)), editToken); got.code != http.StatusOK {
+				t.Fatalf("save %d: %d %s", i, got.code, got.body)
+			}
+		}
+		now = now.Add(2 * time.Minute)
+		if got := r.post("edit1", r.edit(move(0, 0, 30, 1)), editToken); got.code != http.StatusTooManyRequests || !strings.Contains(got.body, "24 hours") {
+			t.Errorf("over the day: %d %s", got.code, got.body)
+		}
+		now = now.Add(24 * time.Hour)
+		if got := r.post("edit1", r.edit(move(0, 0, 30, 1)), editToken); got.code != http.StatusOK {
+			t.Errorf("a day later: %d %s", got.code, got.body)
+		}
+	})
+	t.Run("disk floor", func(t *testing.T) {
+		r := rigWith(t, func(c *EditConfig) { c.MinFree = 1 << 62 })
+		before := tree(t, r.edits)
+		if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusInsufficientStorage {
+			t.Errorf("under the floor: %d %s", got.code, got.body)
+		}
+		if tree(t, r.edits) != before {
+			t.Error("wrote under the floor")
 		}
 	})
 }

@@ -58,7 +58,19 @@ type EditConfig struct {
 	// elsewhere than the edits folder; every other such file stops the editor (SlotFolders).
 	AllowDefaultDir []string
 	Now             func() time.Time
+	// Abuse bounds on saves (0 = the default): per token label per minute, per plan per 24 h (counted from the store's records), and the
+	// free space the store's filesystem must keep.
+	MaxPerMinute int
+	MaxPerDay    int
+	MinFree      uint64
 }
+
+// The default abuse bounds.
+const (
+	defaultMaxPerMinute = 30
+	defaultMaxPerDay    = 500
+	defaultMinFree      = 200 << 20
+)
 
 // Editor serves /api/edit/*.
 type Editor struct {
@@ -67,7 +79,8 @@ type Editor struct {
 	p   *Poller
 	// afterCheck, when set (tests), runs between the folder check and the read of the base plan: the window a swap would use.
 	afterCheck func()
-	mu         sync.Mutex // one edit at a time: a plan check takes a moment and versions are counted
+	mu         sync.Mutex             // one edit at a time: a plan check takes a moment and versions are counted
+	recent     map[string][]time.Time // under mu: the times of each token label's saves in the last minute
 
 	gitMu  sync.Mutex
 	gitAt  time.Time
@@ -83,11 +96,20 @@ func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.MaxPerMinute <= 0 {
+		cfg.MaxPerMinute = defaultMaxPerMinute
+	}
+	if cfg.MaxPerDay <= 0 {
+		cfg.MaxPerDay = defaultMaxPerDay
+	}
+	if cfg.MinFree == 0 {
+		cfg.MinFree = defaultMinFree
+	}
 	src, err := routeedit.OpenSource(cfg.Source)
 	if err != nil {
 		return nil, err
 	}
-	e := &Editor{cfg: cfg, p: p, src: src}
+	e := &Editor{cfg: cfg, p: p, src: src, recent: map[string][]time.Time{}}
 	if err := e.checkFolders(); err != nil {
 		src.Close()
 		return nil, err
@@ -316,6 +338,8 @@ type EditReply struct {
 	Check   routeedit.CheckResult `json:"check"`
 	Changes []routeedit.Change    `json:"changes"`
 	Diff    string                `json:"diff"`
+	// Unchanged: the same base and ops as the latest version, which is returned instead of a new one.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 // cleanNote keeps the owner's note short and printable.
@@ -372,6 +396,19 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 		jsonError(w, http.StatusConflict, "the plan changed under you (the file is %s, the edit started from %s): reload the plan and edit again", info.SHA256[:8], shortSHA(req.BaseSHA256))
 		return
 	}
+	history, err := e.cfg.Store.List(plan)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	if r, ok := e.sameAsLatest(plan, history, info.SHA256, req.Ops, who); ok {
+		writeAny(w, http.StatusOK, r)
+		return
+	}
+	if code, msg := e.overBounds(who, history); code != 0 {
+		jsonError(w, code, "%s", msg)
+		return
+	}
 	edited, changes, err := routeedit.Apply(base, req.Ops, e.cfg.Nav)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "%v", err)
@@ -417,6 +454,63 @@ func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
 		jsonError(w, http.StatusInternalServerError, "the version could not be written: %v", err)
 		return
 	}
+	e.recent[who] = append(e.recent[who], e.cfg.Now())
 	reply.Version, reply.Name = v, routeedit.Name(v)
 	writeAny(w, code, reply)
+}
+
+// sameAsLatest answers a resubmit (a retry after a lost reply, or the same edit twice) with the latest version when its base and ops are
+// the request's, so that it takes no new number.
+func (e *Editor) sameAsLatest(plan string, history []routeedit.Meta, baseSHA string, ops []routeedit.Op, who string) (EditReply, bool) {
+	if len(history) == 0 {
+		return EditReply{}, false
+	}
+	m := history[len(history)-1]
+	a, err1 := json.Marshal(m.Ops)
+	b, err2 := json.Marshal(ops)
+	if err1 != nil || err2 != nil || m.Base.SHA256 != baseSHA || string(a) != string(b) {
+		return EditReply{}, false
+	}
+	r := EditReply{Status: m.Status, Version: m.Version, Name: routeedit.Name(m.Version), Who: who, Check: m.Check, Changes: m.Changes, Unchanged: true,
+		Message: "the same base and ops as the latest version: no new version was written"}
+	if d, err := e.cfg.Store.Diff(plan, m.Version); err == nil {
+		if len(d) > maxDiffReturned {
+			d = d[:maxDiffReturned] + "\n... (cut: the whole diff is in the version's .diff file)\n"
+		}
+		r.Diff = d
+	}
+	return r, true
+}
+
+// overBounds is the abuse bound on a save: per token label per minute (429), per plan per 24 h counted from the store's records (429), and
+// the free space of the store's filesystem (507). It returns 0 when the save may go on.
+func (e *Editor) overBounds(who string, history []routeedit.Meta) (int, string) {
+	now := e.cfg.Now()
+	kept := e.recent[who][:0]
+	for _, t := range e.recent[who] {
+		if now.Sub(t) < time.Minute {
+			kept = append(kept, t)
+		}
+	}
+	e.recent[who] = kept
+	if len(kept) >= e.cfg.MaxPerMinute {
+		return http.StatusTooManyRequests, fmt.Sprintf("at most %d saves a minute per token: wait a moment", e.cfg.MaxPerMinute)
+	}
+	day := 0
+	for _, m := range history {
+		if t, err := time.Parse(time.RFC3339, m.At); err == nil && now.Sub(t) < 24*time.Hour {
+			day++
+		}
+	}
+	if day >= e.cfg.MaxPerDay {
+		return http.StatusTooManyRequests, fmt.Sprintf("this plan has had %d saves in the last 24 hours, the most allowed", day)
+	}
+	free, err := e.cfg.Store.FreeBytes()
+	if err != nil {
+		return http.StatusInsufficientStorage, "the free space of the edits folder cannot be told: " + err.Error()
+	}
+	if free < e.cfg.MinFree {
+		return http.StatusInsufficientStorage, fmt.Sprintf("the edits folder's filesystem has %d MB free, under the %d MB kept free", free>>20, e.cfg.MinFree>>20)
+	}
+	return 0, ""
 }
