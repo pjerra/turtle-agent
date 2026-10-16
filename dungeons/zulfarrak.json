@@ -58,6 +58,12 @@
         }
       ],
       "skip": [7269, 10080, 10082],
+      "rest": {
+        "health": 80,
+        "healer_mana": 40,
+        "mana": 30,
+        "max_s": 15
+      },
       "notes": [
         "Groups 1-2 of the road. ZF-2 hires-2 (2026-10-14): the hop after group 2 from the lead bot's rest spot (1289.9 816.1 9.4) went by the agent's navmesh to a layer at z 20.4 above the road, which the server refused (unreachable eight times, runs 5 and 6); the next leg starts with direct hops instead. Groups 2 and 3 have a 30 yd radius (their Blood Drinkers walk)."
       ]
@@ -648,13 +654,6 @@
       "to": {"x": 1822, "y": 1177, "z": 9.1},
       "pull_groups": [
         {
-          "entries": [7247],
-          "positions": [
-            {"x": 1757.16, "y": 1141.25, "z": 9.1}
-          ],
-          "radius": 30
-        },
-        {
           "entries": [7247, 5649],
           "positions": [
             {"x": 1821.7, "y": 1177, "z": 9},
@@ -683,13 +682,6 @@
             {"x": 1899.6, "y": 1136.85, "z": 9.1},
             {"x": 1911.82, "y": 1153.47, "z": 9.6},
             {"x": 1900.33, "y": 1166.45, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
-          "entries": [5650],
-          "positions": [
-            {"x": 1926.08, "y": 1131.13, "z": 10.8}
           ],
           "radius": 15
         },

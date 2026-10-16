@@ -515,6 +515,10 @@ func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
 					if entry == 7246 && ((math.Abs(x-1591) < 0.2 && math.Abs(y-1047.7) < 0.2) || (math.Abs(x-1626.5) < 0.2 && math.Abs(y-1136) < 0.2)) {
 						continue
 					}
+					// The lone patrolling Soul Eater of the courtyard (spawn row 81550) is left out too (route edit Z10, 2026-10-16): it aggroes on the walk.
+					if entry == 7247 && math.Abs(x-1757.16) < 0.2 && math.Abs(y-1141.25) < 0.2 {
+						continue
+					}
 					if flagged[m["guid"]] || slicesContains(l.Skip, entry) || distToSegment(at, a, b) > routeAggro || planned(entry, at) {
 						continue
 					}
@@ -536,7 +540,7 @@ func slicesContains(s []uint32, v uint32) bool {
 }
 
 // The courtyard leg (PR B): the pull groups of the pyramid courtyard after Velratha. TestZulfarrakPlansMatchTheWorldExport checks every
-// member against its spawn row; this pins the groups themselves (the design's list, with the one lone Soul Eater the route test found) and
+// member against its spawn row; this pins the groups themselves (the design's list minus group 6 at 1926 1131, 52 yd off the route, and the lone patrolling Soul Eater at 1757 1141, met on the walk: route edits Z6 and Z10 of 2026-10-16) and
 // that the patrolling members' groups have the road packs' 30 yd radius.
 func TestZulfarrakCourtyardGroups(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
@@ -557,12 +561,10 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 		at      Point // the first position
 		radius  float32
 	}{
-		{"[7247]", Point{1757.16, 1141.25, 9.1}, 30},
 		{"[7247 5649]", Point{1821.7, 1177, 9}, 30},
 		{"[5650]", Point{1863.11, 1199.95, 9}, 15},
 		{"[7246]", Point{1878.71, 1159.65, 9.6}, 15},
 		{"[5649 5649 5650 5649]", Point{1903.87, 1133.99, 9}, 15},
-		{"[5650]", Point{1926.08, 1131.13, 10.8}, 15},
 		{"[7246 8095 7246 5650]", Point{1865.24, 1118.27, 10.9}, 30},
 		{"[5650 5650 7246]", Point{1913.5, 1199.53, 9}, 15},
 		{"[7247 7246 5649]", Point{1899.24, 1214.72, 9}, 15},
