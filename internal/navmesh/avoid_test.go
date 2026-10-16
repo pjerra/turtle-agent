@@ -3,6 +3,7 @@
 package navmesh
 
 import (
+	"math"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
@@ -72,5 +73,37 @@ func TestScratchKeepsTheAvoidBoxes(t *testing.T) {
 	path, err := s.Plan(fixtureMap, Vec3{12, 12, 0}, Vec3{30, 48, 0})
 	if err != nil || path.Status != Complete || path.Length < 80 {
 		t.Fatalf("scratch planner: %+v %v (want the long way round)", path, err)
+	}
+}
+
+// A box that crosses a polygon without holding any of its corners marks it when it covers enough of it: the polygon is clipped by the
+// box, not tested by its corners (Codex review of #211).
+func TestAvoidBoxCrossingAnEdgeMarksThePolygon(t *testing.T) {
+	p := planner(t, []navfixture.Poly{navfixture.Square(0, 0, 40, 10, 0)})
+	// x 10 to 30 of 0 to 40: half the polygon, and no corner of it inside.
+	p.SetAvoid(fixtureMap, []Box{{Min: Vec3{10, -2, -1}, Max: Vec3{30, 12, 1}}})
+	fl, err := p.Floors(fixtureMap, 5, 5, -5, 5)
+	if err != nil || len(fl) != 1 || fl[0].Flags&NavMagma == 0 {
+		t.Fatalf("floors %+v %v: the polygon the box crosses is not marked", fl, err)
+	}
+	// The same box a floor band above the polygon leaves it alone.
+	p.SetAvoid(fixtureMap, []Box{{Min: Vec3{10, -2, 3}, Max: Vec3{30, 12, 5}}})
+	if fl, err := p.Floors(fixtureMap, 5, 5, -5, 5); err != nil || len(fl) != 1 || fl[0].Flags&NavMagma != 0 {
+		t.Fatalf("floors %+v %v: a box above the floor marked it", fl, err)
+	}
+}
+
+// A box that only touches a corner of a one-cell-wide corridor (a ramp, a doorway) does not cut it: the cells it clips are mostly outside.
+func TestAvoidBoxTouchingACornerKeepsTheCorridor(t *testing.T) {
+	p := planner(t, navfixture.LCorridor(0))
+	from, to := Vec3{12, 12, 0}, Vec3{48, 48, 0}
+	before, err := p.Plan(fixtureMap, from, to)
+	if err != nil || before.Status != Complete {
+		t.Fatalf("%+v %v", before, err)
+	}
+	p.SetAvoid(fixtureMap, []Box{{Min: Vec3{45, 13, -1}, Max: Vec3{47, 15, 1}}}) // round the inner corner (46, 14)
+	after, err := p.Plan(fixtureMap, from, to)
+	if err != nil || after.Status != Complete || math.Abs(float64(after.Length-before.Length)) > 0.01 {
+		t.Fatalf("the corridor was cut: %+v %v (before %.1f yd)", after, err, before.Length)
 	}
 }

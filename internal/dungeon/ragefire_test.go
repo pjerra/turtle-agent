@@ -619,7 +619,7 @@ func TestRagefireLavaBoxHoldsTheDeaths(t *testing.T) {
 
 // On the map's navmesh the planner, told the plan's avoid box, keeps out of the basin: the walk from the south rim back to the ramp's foot
 // (rfc-live-1e: planned straight over the basin floor, cmd move -207.8 -56.1 -65.5, three bots dead) goes round by the west, no lava death
-// spot has a walkable point within 5 yd, and leg 3's stand is reached.
+// spot has a walkable point under the lava within 5 yd, and leg 3's stand is reached.
 func TestRagefirePlannerKeepsOutOfTheLava(t *testing.T) {
 	dir := mapMmaps(389)
 	if dir == "" {
@@ -652,10 +652,15 @@ func TestRagefirePlannerKeepsOutOfTheLava(t *testing.T) {
 	if err != nil || after.Status != navmesh.Complete || inLava(after) != 0 {
 		t.Fatalf("with the box: %v %s, %d points in the box: %v", err, after.Status, inLava(after), after.Points)
 	}
+	// No death spot keeps a walkable floor under the magma surface (z -64.5, plus the 0.1 yd the core still counts as in it) near it.
 	for _, at := range ragefireLavaDeaths {
-		if n, ok, err := pl.Nearest(p.Map, vec(at)); err != nil || (ok && dist3(point(n), at) < 5) {
-			t.Errorf("a walkable point %v %v within 5 yd of the lava death at %v", n, ok, at)
+		if n, ok, err := pl.Nearest(p.Map, vec(at)); err != nil || (ok && dist3(point(n), at) < 5 && n[2] < -64.4) {
+			t.Errorf("a walkable point %v %v under the lava within 5 yd of the death at %v", n, ok, at)
 		}
+	}
+	// Every leg of the plan stays reachable with the box set: the plan check (which sets it) passes.
+	if res, err := CheckPlan(p, pl, 0); err != nil || !res.OK() {
+		t.Fatalf("plan check with the avoid box: %v\n%s", err, res.Summary())
 	}
 	stand := p.Legs[3].To
 	if path, err := pl.Plan(p.Map, vec(Point{-183.39, 2.8, -56.81}), vec(stand)); err != nil || path.Status != navmesh.Complete || path.Length > 20 {

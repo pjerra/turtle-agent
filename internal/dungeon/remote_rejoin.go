@@ -116,7 +116,7 @@ func rejoinText(bs []rejoinBot) string {
 // branch owns that; it is called again after). Its error is the run's.
 func (d *RemoteDriver) rejoinFar(ctx context.Context) error {
 	yd := float64(d.tx.RejoinTPDist)
-	if yd <= 0 || d.curLeg < 0 || d.outside != nil {
+	if yd <= 0 || d.curLeg < 0 || d.outside != nil || d.deadly.falling {
 		return nil
 	}
 	d.look()

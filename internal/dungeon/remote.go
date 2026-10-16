@@ -1526,6 +1526,7 @@ func (d *RemoteDriver) countDeaths() bool {
 		}
 		d.prevDead[p.GUID] = p.Dead
 	}
+	d.deadlyFrame()
 	return d.fr.AllDead()
 }
 

@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -12,10 +13,10 @@ import (
 
 // The remote driver's side of the avoid boxes (avoid.go): the planner is told the plan's boxes, a hop never takes a straight line over
 // one, a summon never lands on one, a body in one is not raised in place, and a hostile the party could only reach across one is not
-// pulled on the way. A box has to be found first; a bot that dies at full health with no fight on it (the feed carries no environmental
-// damage: lava, slime and falls kill without a line in it) marks its spot as deadly for the rest of the run, so that the rejoin (the wipe's
-// recovery included) does not summon the party onto the spot that has just killed it (rfc-live-1e r1: the lead bot stood in the lava and the summoned bots
-// died there within 2 s, three times).
+// pulled on the way. Ground no box marks yet is caught from the deaths: a bot that dies out of combat at full health from one frame to the
+// next (the feed carries no environmental damage: lava, slime and falls kill without a line in it) is a silent death, and two within 6 yd
+// make a deadly spot that gets no summon for 5 min (rfc-live-1e r1: the lead bot stood in the lava and the summoned bots died there within
+// 2 s, three times). A lead bot on deadly ground is moved off it before a summon, and walked to the plan's last safe stand when it cannot be.
 
 // AvoidMarker is the optional part of a RemoteGame that marks a plan's avoid boxes on the navmesh its PathPlanner and FloorSnapper use, so
 // that the paths and the floor snaps keep out of them (navmesh.Planner.SetAvoid). Without it the boxes still hold for the plan check, the
@@ -25,26 +26,40 @@ type AvoidMarker interface {
 }
 
 const (
-	// deadlyFullPct and deadlyFrameGap: a death is silent when the bot's last living frame, at most deadlyFrameGap before it, showed
-	// deadlyFullPct of its health or more, or showed it out of combat. Lava deals 605-610 a tick (rfc-live-1e: 532 of 532 to dead in one frame).
+	// deadlyFullPct and deadlyFrameGap: a death is silent when the bot's last living frame, at most deadlyFrameGap before it (one feed
+	// frame), showed it out of combat with deadlyFullPct of its health or more. Lava deals 605-610 a tick (rfc-live-1e: 532 of 532 to dead in
+	// one frame).
 	deadlyFullPct  = 80
-	deadlyFrameGap = 3 * time.Second
-	// deadlySpotYd and deadlySpotDZ: how near a silent death's spot (across, and up or down) a summon, a resurrection or a stand is refused.
+	deadlyFrameGap = 2500 * time.Millisecond
+	// deadlySpotYd and deadlySpotDZ: how near (across, and up or down) two silent deaths make a deadly spot, and how near a deadly spot a
+	// summon is refused. One silent death is no spot: it takes a second within this distance, or the plan's avoid box.
 	deadlySpotYd = 6.0
 	deadlySpotDZ = 4.0
-	// leadOffYd is the farthest the lead bot is moved off a deadly spot before a summon (to the nearest safe floor).
-	leadOffYd = 20.0
+	// deadlySpotTTL: a deadly spot (and a lone silent death waiting for a second) is forgotten this long after its last death.
+	deadlySpotTTL = 5 * time.Minute
+	// deadlyProbeYd and deadlyProbe: a living member that stands within deadlyProbeYd of a deadly spot for deadlyProbe and lives clears it.
+	deadlyProbeYd = 3.0
+	deadlyProbe   = 5 * time.Second
+	// leadOffYd is the farthest the lead bot is moved off deadly ground before a summon (to the nearest safe floor); leadOffTries such
+	// moves are made before the fallback walk to the plan's last safe stand, which must lie fallbackClearYd or more outside every box and spot.
+	leadOffYd       = 20.0
+	leadOffTries    = 2
+	fallbackClearYd = 10.0
 )
 
 // deadlyState is the driver's memory of the deadly spots and of the members' last living frames.
 type deadlyState struct {
 	last  map[packet.GUID]aliveFrame
-	spots []deadlySpot
+	spots []deadlySpot // two silent deaths within deadlySpotYd: summons refused near it
+	lone  []deadlySpot // a silent death with no second one yet
 	// safeLead is the lead bot's last position on safe ground (not in an avoid box, not on a deadly spot), and its map.
 	safeLead    Point
 	safeLeadMap uint32
 	haveSafe    bool
-	noted       map[string]bool
+	// leadTries counts the moves off deadly ground since the lead bot last stood on safe ground; falling is set while the fallback walk runs.
+	leadTries int
+	falling   bool
+	noted     map[string]bool
 }
 
 type aliveFrame struct {
@@ -54,9 +69,11 @@ type aliveFrame struct {
 }
 
 type deadlySpot struct {
-	at   Point
-	mapI uint32
-	who  string
+	at    Point
+	mapI  uint32
+	who   string
+	last  time.Time // the last death there
+	probe time.Time // since when a living member stands on it (zero: none)
 }
 
 func (s *deadlyState) once(key string) bool {
@@ -99,8 +116,10 @@ func (d *RemoteDriver) stepAvoid() []AvoidBox {
 	return d.plan.Avoid
 }
 
-// observeDeadly records a member's frame: its last living one, and, when it has just died (died), whether the death was silent, in which
-// case its spot is deadly from now on. It also keeps the lead bot's last safe position.
+// observeDeadly records a member's frame: its last living one, and, when it has just died (died), whether the death was silent (out of
+// combat, at deadlyFullPct of its health or more one frame before). A silent death inside a plan's avoid box is only noted (the box holds
+// already); one outside waits for a second within deadlySpotYd, which makes the spot deadly for summons. It also keeps the lead bot's last
+// safe position.
 func (d *RemoteDriver) observeDeadly(p tbm.PartyRec, died bool) {
 	st := &d.deadly
 	if st.last == nil {
@@ -111,7 +130,7 @@ func (d *RemoteDriver) observeDeadly(p tbm.PartyRec, died bool) {
 		st.last[p.GUID] = aliveFrame{hp: p.HP, max: p.MaxHP, combat: p.InCombat(), at: now}
 		if p.GUID == d.fr.Lead {
 			if _, bad := d.deadlyAt(partyPoint(p), p.Map); !bad {
-				st.safeLead, st.safeLeadMap, st.haveSafe = partyPoint(p), p.Map, true
+				st.safeLead, st.safeLeadMap, st.haveSafe, st.leadTries = partyPoint(p), p.Map, true, 0
 			}
 		}
 		return
@@ -120,26 +139,76 @@ func (d *RemoteDriver) observeDeadly(p tbm.PartyRec, died bool) {
 		return
 	}
 	lf, ok := st.last[p.GUID]
-	if !ok || now.Sub(lf.at) > deadlyFrameGap {
-		return
-	}
-	full := lf.max > 0 && uint64(lf.hp)*100 >= uint64(lf.max)*deadlyFullPct
-	if !full && lf.combat {
-		return // a death in a fight that had worn the bot down: the fight killed it
+	if !ok || now.Sub(lf.at) > deadlyFrameGap || lf.combat || lf.max == 0 || uint64(lf.hp)*100 < uint64(lf.max)*deadlyFullPct {
+		return // a death in a fight, or from low health: the feed shows what killed it, or nothing says the ground did
 	}
 	at := partyPoint(p)
-	st.spots = append(st.spots, deadlySpot{at: at, mapI: p.Map, who: p.Name})
-	why := "out of combat"
-	if full {
-		why = fmt.Sprintf("at %d%% health one frame before", pctOf32(lf.hp, lf.max))
+	ev := map[string]any{"name": p.Name, "leg": d.curLeg, "x": at.X, "y": at.Y, "z": at.Z, "map": p.Map, "hp_pct": pctOf32(lf.hp, lf.max)}
+	head := fmt.Sprintf("leg %d: %s died at %.1f %.1f %.1f out of combat, at %d%% health one frame before (the feed has no line for lava, slime or a fall)", d.curLeg, p.Name, at.X, at.Y, at.Z, pctOf32(lf.hp, lf.max))
+	if b, in := d.plan.InAvoid(at); in && p.Map == d.plan.Map {
+		ev["spot"] = "avoid_box"
+		d.tr.Event("silent_death", ev)
+		d.rep.note(fmt.Sprintf("%s, in the plan's avoid box %q", head, b.Name))
+		return
 	}
-	inBox := ""
-	if b, ok := d.plan.InAvoid(at); ok && p.Map == d.plan.Map {
-		inBox = fmt.Sprintf(" (in the plan's avoid box %q)", b.Name)
+	for i, l := range st.lone {
+		if l.mapI == p.Map && hdist(l.at, at) <= deadlySpotYd && math.Abs(float64(l.at.Z-at.Z)) <= deadlySpotDZ {
+			st.lone = append(st.lone[:i], st.lone[i+1:]...)
+			st.spots = append(st.spots, deadlySpot{at: at, mapI: p.Map, who: l.who + " and " + p.Name, last: now})
+			ev["spot"] = "deadly"
+			d.tr.Event("silent_death", ev)
+			d.rep.note(fmt.Sprintf("%s, %.0f yd from where %s died the same way: a deadly spot; no bot is summoned to the lead bot within %.0f yd of it for %.0f min (or until a bot stands on it %.0f s and lives)",
+				head, hdist(l.at, at), l.who, deadlySpotYd, deadlySpotTTL.Minutes(), deadlyProbe.Seconds()))
+			return
+		}
 	}
-	d.tr.Event("silent_death", map[string]any{"name": p.Name, "leg": d.curLeg, "x": at.X, "y": at.Y, "z": at.Z, "map": p.Map, "full": full, "combat": lf.combat})
-	d.rep.note(fmt.Sprintf("leg %d: %s died at %.1f %.1f %.1f %s with no fight wearing it down%s: ground that kills without a line in the feed (lava, slime, a fall); no bot is summoned to the lead bot within %.0f yd of it for the rest of the run",
-		d.curLeg, p.Name, at.X, at.Y, at.Z, why, inBox, deadlySpotYd))
+	st.lone = append(st.lone, deadlySpot{at: at, mapI: p.Map, who: p.Name, last: now})
+	ev["spot"] = "lone"
+	d.tr.Event("silent_death", ev)
+	d.rep.note(head + "; one such death is no evidence yet: a second within 6 yd makes the spot deadly for summons")
+}
+
+// deadlyFrame runs once per frame after the members are observed: it forgets the spots and lone deaths older than deadlySpotTTL, and clears a
+// spot a living member has stood on for deadlyProbe.
+func (d *RemoteDriver) deadlyFrame() {
+	st := &d.deadly
+	now := d.clk.Now()
+	keep := func(ss []deadlySpot) []deadlySpot {
+		out := ss[:0]
+		for _, s := range ss {
+			if now.Sub(s.last) < deadlySpotTTL {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	st.lone = keep(st.lone)
+	n := len(st.spots)
+	st.spots = keep(st.spots)
+	if len(st.spots) < n {
+		d.rep.note(fmt.Sprintf("leg %d: %d deadly spot(s) forgotten %.0f min after their last death", d.curLeg, n-len(st.spots), deadlySpotTTL.Minutes()))
+	}
+	out := st.spots[:0]
+	for _, s := range st.spots {
+		on := ""
+		for _, p := range d.fr.Party {
+			if !p.Dead && p.Map == s.mapI && hdist(partyPoint(p), s.at) <= deadlyProbeYd && math.Abs(float64(p.Z-s.at.Z)) <= deadlySpotDZ/2 {
+				on = p.Name
+				break
+			}
+		}
+		switch {
+		case on == "":
+			s.probe = time.Time{}
+		case s.probe.IsZero():
+			s.probe = now
+		case now.Sub(s.probe) >= deadlyProbe:
+			d.rep.note(fmt.Sprintf("leg %d: %s has stood on the deadly spot at %.1f %.1f %.1f for %.0f s and lives: the spot is cleared", d.curLeg, on, s.at.X, s.at.Y, s.at.Z, now.Sub(s.probe).Seconds()))
+			continue
+		}
+		out = append(out, s)
+	}
+	st.spots = out
 }
 
 func pctOf32(v, m uint32) int {
@@ -158,7 +227,7 @@ func (d *RemoteDriver) deadlyAt(pt Point, m uint32) (string, bool) {
 	}
 	for _, s := range d.deadly.spots {
 		if s.mapI == m && hdist(s.at, pt) <= deadlySpotYd && math.Abs(float64(s.at.Z-pt.Z)) <= deadlySpotDZ {
-			return fmt.Sprintf("%.0f yd from where %s died with no wound", hdist(s.at, pt), s.who), true
+			return fmt.Sprintf("%.0f yd from the deadly spot where %s died with no wound", hdist(s.at, pt), s.who), true
 		}
 	}
 	return "", false
@@ -175,46 +244,125 @@ func (d *RemoteDriver) overshootDeadly(ctx context.Context, here, wp Point, dd f
 	return bad
 }
 
-// leadSafeForSummon makes sure the lead bot does not stand on deadly ground before a summon brings a bot to it: a lead bot on such ground is
-// sent to the nearest safe floor (the planner's floor snap, which keeps out of the avoid boxes) or back to its last safe position, and the summon
-// waits until it stands there. It reports whether the lead bot stands on safe ground; false means no summon is to be sent now.
+// leadSafeForSummon makes sure the lead bot does not stand on deadly ground before a summon brings a bot to it. A lead bot on such ground is
+// sent to the nearest safe floor (the planner's floor snap, which keeps out of the avoid boxes, or its last safe position), up to
+// leadOffTries times; after that it walks to the plan's last safe stand (fallbackStand), fallbackClearYd or more outside every box and spot,
+// so the recovery never waits on a lead bot that cannot get out. It reports whether the lead bot stands on safe ground; false means no
+// summon now (the call after tries again).
 func (d *RemoteDriver) leadSafeForSummon(ctx context.Context) (bool, error) {
 	l, ok := d.fr.LeadRec()
 	if !ok {
 		return false, nil
 	}
+	st := &d.deadly
 	here := partyPoint(l)
 	why, bad := d.deadlyAt(here, l.Map)
 	if !bad {
+		st.leadTries = 0
 		return true, nil
 	}
+	if st.leadTries >= leadOffTries {
+		return d.leadFallback(ctx, here, why)
+	}
+	st.leadTries++
 	target, found := d.safeFloorNear(ctx, here, l.Map)
-	key := fmt.Sprintf("lead-%d-%.0f-%.0f", d.curLeg, here.X, here.Y)
 	if !found {
-		if d.deadly.once(key) {
-			d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s, and no safe floor is known near it: no bot is summoned onto it", d.curLeg, here.X, here.Y, here.Z, why))
-		}
+		d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s, and no safe floor is known near it: no bot is summoned onto it (try %d of %d before the walk to the last safe stand)", d.curLeg, here.X, here.Y, here.Z, why, st.leadTries, leadOffTries))
 		return false, nil
 	}
-	if d.deadly.once(key) {
-		d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s; it is moved to %.1f %.1f %.1f before any bot is summoned to it", d.curLeg, here.X, here.Y, here.Z, why, target.X, target.Y, target.Z))
-	}
-	d.tr.Event("lead_off_deadly", map[string]any{"leg": d.curLeg, "x": here.X, "y": here.Y, "z": here.Z, "to_x": target.X, "to_y": target.Y, "to_z": target.Z, "why": why})
+	d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s; it is moved to %.1f %.1f %.1f before any bot is summoned to it (try %d of %d)", d.curLeg, here.X, here.Y, here.Z, why, target.X, target.Y, target.Z, st.leadTries, leadOffTries))
+	d.tr.Event("lead_off_deadly", map[string]any{"leg": d.curLeg, "x": here.X, "y": here.Y, "z": here.Z, "to_x": target.X, "to_y": target.Y, "to_z": target.Z, "why": why, "try": st.leadTries})
 	if _, err := d.order(ctx, "move", moveArgs(target)...); err != nil {
 		return false, err
 	}
-	until := d.clk.Now().Add(rejoinLand)
+	return d.waitLeadSafe(ctx, rejoinLand)
+}
+
+// waitLeadSafe waits up to dur for the lead bot to stand on safe ground.
+func (d *RemoteDriver) waitLeadSafe(ctx context.Context, dur time.Duration) (bool, error) {
+	until := d.clk.Now().Add(dur)
 	for d.clk.Now().Before(until) {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
 			return false, err
 		}
 		if l, ok := d.fr.LeadRec(); ok {
 			if _, bad := d.deadlyAt(partyPoint(l), l.Map); !bad {
+				d.deadly.leadTries = 0
 				return true, nil
 			}
 		}
 	}
 	return false, nil
+}
+
+// leadFallback walks the lead bot to the plan's last safe stand after the moves off deadly ground failed. The walk is the run's own (the
+// planner's path, which keeps out of the boxes); the rejoin is held while it runs. A walk that fails for another reason than the run's end
+// is noted and the tries start over.
+func (d *RemoteDriver) leadFallback(ctx context.Context, here Point, why string) (bool, error) {
+	st := &d.deadly
+	st.leadTries = 0
+	target, ok := d.fallbackStand()
+	if !ok {
+		d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s, and the plan has no stand %.0f yd clear of every avoid box and deadly spot: no summon", d.curLeg, here.X, here.Y, here.Z, why, fallbackClearYd))
+		return false, nil
+	}
+	d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot did not get off deadly ground (%s) in %d tries; it walks to the plan's last safe stand %.1f %.1f %.1f, then the party is summoned there", d.curLeg, why, leadOffTries, target.X, target.Y, target.Z))
+	d.tr.Event("lead_off_deadly", map[string]any{"leg": d.curLeg, "x": here.X, "y": here.Y, "z": here.Z, "to_x": target.X, "to_y": target.Y, "to_z": target.Z, "why": why, "fallback": true})
+	st.falling = true
+	err := d.walkArrive(ctx, target, d.opt.MoveArrive)
+	st.falling = false
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, errWipe) || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) {
+			return false, err
+		}
+		d.rep.note(fmt.Sprintf("leg %d: rejoin: the walk to the last safe stand failed: %v", d.curLeg, err))
+		return false, nil
+	}
+	d.look()
+	if l, ok := d.fr.LeadRec(); ok {
+		if _, bad := d.deadlyAt(partyPoint(l), l.Map); !bad {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// fallbackStand is the plan's last safe stand for the lead bot: the current leg's `to` and via points, then those of the legs before it,
+// back to the entrance, the first that lies fallbackClearYd or more outside every avoid box and deadly spot.
+func (d *RemoteDriver) fallbackStand() (Point, bool) {
+	var cands []Point
+	for i := min(max(d.curLeg, 0), len(d.plan.Legs)-1); i >= 0; i-- {
+		l := d.plan.Legs[i]
+		cands = append(cands, l.To)
+		for k := len(l.Via) - 1; k >= 0; k-- {
+			if !l.Via[k].GMCross {
+				cands = append(cands, l.Via[k].Point)
+			}
+		}
+	}
+	cands = append(cands, d.plan.Entrance)
+	for _, c := range cands {
+		if d.clearOfDeadly(c, fallbackClearYd) {
+			return c, true
+		}
+	}
+	return Point{}, false
+}
+
+// clearOfDeadly says whether p lies yd or more outside every avoid box (across; within its height band widened by yd) and every deadly spot.
+func (d *RemoteDriver) clearOfDeadly(p Point, yd float64) bool {
+	m := float32(yd)
+	for _, b := range d.plan.Avoid {
+		if p.X >= b.Min.X-m && p.X <= b.Max.X+m && p.Y >= b.Min.Y-m && p.Y <= b.Max.Y+m && p.Z >= b.Min.Z-m && p.Z <= b.Max.Z+m {
+			return false
+		}
+	}
+	for _, s := range d.deadly.spots {
+		if s.mapI == d.plan.Map && hdist(s.at, p) < deadlySpotYd+yd && math.Abs(float64(s.at.Z-p.Z)) <= deadlySpotDZ+yd {
+			return false
+		}
+	}
+	return true
 }
 
 // safeFloorNear is a safe point near p for the lead bot: the planner's nearest floor (which keeps out of the avoid boxes it was told) when it

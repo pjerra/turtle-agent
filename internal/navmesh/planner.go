@@ -92,6 +92,13 @@ type mapMesh struct {
 	avoid   []Box // the map's avoid boxes, marked NavMagma on each tile load
 }
 
+// AvoidShare is the share of a polygon's (x, y) area that must lie inside an avoid box (the polygon clipped by the box, heights
+// included) for SetAvoid to mark it: a box that only clips a corner of a corridor polygon (a ramp, a doorway) leaves it walkable.
+// Half was too much on Ragefire's basin rim: four lava death spots of rfc-live-1e kept a walkable floor under the magma surface
+// within half a yard (rim polygons that slope from the strip down into the lava, a third of their area under it); a quarter marks
+// them and keeps every leg of the plan connected.
+const AvoidShare = 0.25
+
 // Box is a region of a map, WoW (x, y, z) from Min to Max, inclusive.
 type Box struct {
 	Min, Max Vec3
@@ -107,7 +114,7 @@ func (b Box) Contains(p Vec3) bool {
 	return true
 }
 
-// SetAvoid marks the polygons of a map whose centre or any corner lies inside one of boxes as NavMagma, on the tiles loaded now and on each
+// SetAvoid marks the polygons of a map that lie mostly (AvoidShare of their area) inside one of boxes as NavMagma, on the tiles loaded now and on each
 // one loaded later, so every query (Plan, Nearest, Raycast) keeps out of them as it keeps out of the lava the tiles flag. It is for ground the
 // tiles call plain ground although it kills (Ragefire Chasm's lava basin: the mmap generator flags a liquid only where it is at least the
 // agent's height deep, and the lava there is under a yard deep). Floors still lists those floors (with the flag). Calling it again with the same
@@ -588,7 +595,7 @@ func (p *Planner) load(m *mapMesh, want []string, data map[string][]byte) error 
 		m.tiles[n] = &loaded{ref: ref, used: m.tick}
 		// Mark the avoid boxes on the new tile (a box over tiles loaded before marks them again: the flag is only added).
 		for _, b := range m.avoid {
-			m.eng.markBox(b, NavMagma)
+			m.eng.markBox(b, NavMagma, AvoidShare)
 		}
 	}
 	return nil

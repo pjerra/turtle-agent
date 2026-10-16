@@ -34,6 +34,8 @@ const (
 
 	// ReasonAvoid is a point the party would stand on inside one of the plan's avoid boxes (deadly ground the navmesh calls plain ground).
 	ReasonAvoid = "in an avoid box"
+	// ReasonAvoidCut is a point the navmesh reaches only through one of the plan's avoid boxes: the box cuts the plan's route.
+	ReasonAvoidCut = "cut by an avoid box"
 
 	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
 	ReasonSkipped = "skipped"
@@ -76,6 +78,53 @@ func (c *planChecker) avoided(part string, group int, at, from Point) bool {
 	}
 	c.fail(part, group, at, from, ReasonAvoid, "%q (%s): ground that kills although the navmesh calls it ground", b.Name, boxText(b))
 	return true
+}
+
+// cutByAvoid says whether a path the navmesh does not find with the plan's avoid boxes set is found without them, and names the boxes
+// that path crosses (all of them when it crosses none: the marks took a polygon the path needs). Only for a navmesh that takes the boxes.
+func (c *planChecker) cutByAvoid(from, to Point) (string, bool, error) {
+	a, ok := c.nav.(AvoidSetter)
+	if !ok || len(c.p.Avoid) == 0 {
+		return "", false, nil
+	}
+	a.SetAvoid(c.p.Map, nil)
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
+	a.SetAvoid(c.p.Map, NavBoxes(c.p.Avoid))
+	if err != nil || path.Status != navmesh.Complete {
+		return "", false, err
+	}
+	var names []string
+	for _, b := range c.p.Avoid {
+		hit := false
+		for _, seg := range append([][]navmesh.Vec3{path.Points}, path.Ground...) {
+			for _, q := range seg {
+				hit = hit || b.Contains(point(q))
+			}
+		}
+		if hit {
+			names = append(names, fmt.Sprintf("%q", b.Name))
+		}
+	}
+	if len(names) == 0 {
+		for _, b := range c.p.Avoid {
+			names = append(names, fmt.Sprintf("%q", b.Name))
+		}
+	}
+	return strings.Join(names, ", "), true, nil
+}
+
+// failPath records a path that is not complete: as cut by an avoid box when the navmesh finds it without the boxes, else as pathReason says.
+func (c *planChecker) failPath(part string, group int, at, from Point, path navmesh.Path) error {
+	names, cut, err := c.cutByAvoid(from, at)
+	if err != nil {
+		return err
+	}
+	if cut {
+		c.fail(part, group, at, from, ReasonAvoidCut, "path_to is %s with the avoid boxes kept out of and complete without them: avoid box %s cuts the route (move the box's edge, or the point)", path.Status, names)
+		return nil
+	}
+	c.fail(part, group, at, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+	return nil
 }
 
 // A pull group is a detour when it stands within pullDetourNear yards in a line and the path to it is longer than pullDetourFactor times that
@@ -487,8 +536,7 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	if path.Status != navmesh.Complete {
-		c.fail(part, 0, to, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
-		return from, nil
+		return from, c.failPath(part, 0, to, from, path)
 	}
 	return to, nil
 }
@@ -588,7 +636,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	}
 	if len(path.Points) < 2 {
 		if path.Status != navmesh.Complete { // complete with one point: the party is at the pack already
-			c.fail(part, group, at, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+			return from, c.failPath(part, group, at, from, path)
 		}
 		return from, nil
 	}

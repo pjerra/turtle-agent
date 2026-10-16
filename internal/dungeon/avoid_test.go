@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -56,9 +57,36 @@ type avoidNav struct {
 	fakeNav
 	boxes []navmesh.Box
 	set   int
+	cutAt *Point
 }
 
 func (a *avoidNav) SetAvoid(_ uint32, boxes []navmesh.Box) { a.boxes, a.set = boxes, a.set+1 }
+
+// Plan finds no path to cutAt while boxes are set: the marks took the only way there.
+func (a *avoidNav) Plan(m uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
+	if len(a.boxes) > 0 && a.cutAt != nil && (Point{to[0], to[1], to[2]}) == *a.cutAt {
+		return navmesh.Path{Status: navmesh.NoPath, Reason: "Detour found no path", Points: []navmesh.Vec3{}}, nil
+	}
+	return a.fakeNav.Plan(m, from, to)
+}
+
+// A leg the navmesh reaches only through an avoid box fails the check as cut by the box, naming it, instead of as a plain unreachable
+// point: the box's edge took a polygon the route needs.
+func TestPlanCheckNamesTheBoxThatCutsALeg(t *testing.T) {
+	nav := &avoidNav{cutAt: &Point{40, 0, -60}}
+	p := &Plan{Name: "t", Map: 389, Avoid: []AvoidBox{{Name: "lava", Min: Point{-10, -10, -70}, Max: Point{10, 10, -64.2}}}, Entrance: Point{50, 0, -60},
+		Legs: []Leg{{Name: "a", To: Point{20, 0, -60}}, {Name: "b", To: Point{40, 0, -60}}}}
+	res, err := CheckPlan(p, nav, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := issueReasons(res.Issues), "1/to/0/cut by an avoid box"; got != want || !strings.Contains(res.Issues[0].Detail, `avoid box "lava" cuts the route`) {
+		t.Fatalf("issues %q (want %q): %+v", got, want, res.Issues)
+	}
+	if len(nav.boxes) != 1 {
+		t.Fatalf("the boxes were not set again after the check without them: %v", nav.boxes)
+	}
+}
 
 // The plan check tells a navmesh that can take them the plan's boxes, and fails a point on the magma (a plan built by hand: Parse
 // refuses it already).
@@ -203,57 +231,153 @@ func TestRejoinMovesTheLeadOffTheLavaFirst(t *testing.T) {
 	}
 }
 
-// A bot that dies at full health from one frame to the next, or out of combat, marks its spot as deadly (the feed has no line for lava
-// damage): no summon onto it. A bot worn down in a fight does not. A body in an avoid box is not raised in place.
-func TestSilentDeathMarksTheSpot(t *testing.T) {
+// silentRig is a driver fed hand-made frames: frame observes the party as countDeaths does and moves the clock a second.
+type silentRig struct {
+	t *testing.T
+	g *fakeRemote
+	d *RemoteDriver
+}
+
+func newSilentRig(t *testing.T) *silentRig {
 	g := newFakeRemote(t)
 	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{150, 0, 0}}), g, DefaultConfig(), opts(), g.clock())
 	d.curLeg = 0
-	frame := func(ps ...tbm.PartyRec) {
-		d.fr = tbm.ViewFrame{Lead: gTank, Party: ps}
-		for _, p := range ps {
-			d.observeDeadly(p, p.Dead && !d.prevDead[p.GUID])
-			d.prevDead[p.GUID] = p.Dead
-		}
-		g.advance(time.Second)
+	return &silentRig{t: t, g: g, d: d}
+}
+
+func (r *silentRig) frame(ps ...tbm.PartyRec) {
+	r.d.fr = tbm.ViewFrame{Lead: gTank, Party: ps}
+	for _, p := range ps {
+		r.d.observeDeadly(p, p.Dead && !r.d.prevDead[p.GUID])
+		r.d.prevDead[p.GUID] = p.Dead
 	}
+	r.d.deadlyFrame()
+	r.g.advance(time.Second)
+}
+
+func member(g packet.GUID, name string, hp uint32, state string, at Point) tbm.PartyRec {
+	return tbm.PartyRec{GUID: g, Name: name, HP: hp, MaxHP: 500, State: state, X: at.X, Y: at.Y, Z: at.Z}
+}
+
+func dead(p tbm.PartyRec, at Point) tbm.PartyRec {
+	p.Dead, p.HP, p.State, p.X, p.Y, p.Z = true, 0, "d", at.X, at.Y, at.Z
+	return p
+}
+
+// A low-health death, an in-combat death and one lone full-health death out of a box mark nothing: one such death is no evidence (Codex
+// review of #211). A second full-health death out of combat within 6 yd makes the spot deadly for summons; it is forgotten after 5 min.
+func TestSilentDeathNeedsStrongEvidence(t *testing.T) {
+	r := newSilentRig(t)
 	lava := Point{-204.6, -25.2, -64.9}
-	full := tbm.PartyRec{GUID: gMage, Name: "Magey", HP: 532, MaxHP: 532, State: "n", X: -209.3, Y: -17.3, Z: -60.9}
-	worn := tbm.PartyRec{GUID: gHealer, Name: "Healy", HP: 100, MaxHP: 900, State: "c", X: 50, Y: 50, Z: 0}
-	lead := tbm.PartyRec{GUID: gTank, Name: "Tanky", HP: 900, MaxHP: 900, State: "c", X: 40, Y: 40, Z: 0}
-	frame(lead, full, worn)
-	deadMage := full
-	deadMage.Dead, deadMage.HP, deadMage.State, deadMage.X, deadMage.Y, deadMage.Z = true, 0, "d", lava.X, lava.Y, lava.Z
-	deadHealer := worn
-	deadHealer.Dead, deadHealer.HP, deadHealer.State = true, 0, "d"
-	frame(lead, deadMage, deadHealer)
-	if why, bad := d.deadlyAt(Point{-202.2, -23.6, -64.8}, 0); !bad || !strings.Contains(why, "Magey died with no wound") {
-		t.Fatalf("near the mage's body: %q %v", why, bad)
+	lead := member(gTank, "Tanky", 500, "n", Point{40, 40, 0})
+	low := member(gHealer, "Healy", 100, "n", Point{-205, -24, -64.9}) // 20 %, out of combat
+	fight := member(gMage, "Magey", 500, "c", Point{-203, -26, -64.9}) // full, in combat
+	r.frame(lead, low, fight)
+	r.frame(lead, dead(low, Point{-205, -24, -64.9}), dead(fight, Point{-203, -26, -64.9}))
+	if _, bad := r.d.deadlyAt(lava, 0); bad || len(r.d.deadly.lone) != 0 {
+		t.Fatalf("a low-health or in-combat death marked the spot: lone %v spots %v", r.d.deadly.lone, r.d.deadly.spots)
 	}
-	if _, bad := d.deadlyAt(Point{-204.6, -25.2, -58}, 0); bad {
-		t.Fatal("the ledge 7 yd above the spot is not deadly")
+	// One full-health death out of combat: a lone one, still no deadly spot.
+	m1 := member(gHealer+100, "Mali", 500, "n", Point{-209.3, -17.3, -60.9})
+	r.frame(lead, m1)
+	r.frame(lead, dead(m1, lava))
+	if _, bad := r.d.deadlyAt(lava, 0); bad || len(r.d.deadly.lone) != 1 {
+		t.Fatalf("one isolated death made a deadly spot: %v", r.d.deadly.spots)
 	}
-	if _, bad := d.deadlyAt(Point{50, 50, 0}, 0); bad {
-		t.Fatal("the healer died worn down in a fight: its spot is not deadly")
-	}
-	// A body is raised in place unless it lies in an avoid box: the spot alone stops summons only.
-	if got := d.corpsesOnDeadly([]tbm.PartyRec{deadMage, deadHealer}); len(got) != 0 {
-		t.Fatalf("corpses on deadly ground without a box: %v", got)
-	}
-	d.plan.Avoid = []AvoidBox{{Name: "lava", Min: Point{-226, -64, -72}, Max: Point{-142, 6, -64.2}}}
-	if got := d.corpsesOnDeadly([]tbm.PartyRec{deadMage, deadHealer}); len(got) != 1 || got[0] != `Magey in the avoid box "lava"` {
-		t.Fatalf("corpses in the box: %v", got)
-	}
-	d.plan.Avoid = nil
-	if !strings.Contains(notesOf(d.Report()), "Magey died at -204.6 -25.2 -64.9 at 100% health one frame before with no fight wearing it down") {
-		t.Fatalf("notes\n%s", notesOf(d.Report()))
+	// A second within 6 yd: the spot is deadly.
+	m2 := member(gHealer+101, "Gorka", 500, "n", Point{-21, -40, -21})
+	r.frame(lead, m2)
+	r.frame(lead, dead(m2, Point{-206.6, -27.4, -65}))
+	if why, bad := r.d.deadlyAt(Point{-202.2, -23.6, -64.8}, 0); !bad || !strings.Contains(why, "Mali and Gorka") {
+		t.Fatalf("two deaths: %q %v", why, bad)
 	}
 	// The lead bot on the spot: no summon goes out.
 	onSpot := lead
 	onSpot.X, onSpot.Y, onSpot.Z = lava.X, lava.Y, lava.Z
-	d.fr = tbm.ViewFrame{Lead: gTank, Party: []tbm.PartyRec{onSpot, deadMage}}
-	if d.rejoinSummon(context.Background(), rejoinBot{guid: gHealer, name: "Healy", dist: 100}) || len(g.summoned) != 0 {
-		t.Fatalf("summoned onto the spot: %v", g.orders)
+	r.d.fr = tbm.ViewFrame{Lead: gTank, Party: []tbm.PartyRec{onSpot}}
+	if r.d.rejoinSummon(context.Background(), rejoinBot{guid: gHealer, name: "Healy", dist: 100}) || len(r.g.summoned) != 0 {
+		t.Fatalf("summoned onto the spot: %v", r.g.orders)
+	}
+	// A body is raised in place unless it lies in an avoid box: the spot alone stops summons only.
+	if got := r.d.corpsesOnDeadly([]tbm.PartyRec{dead(m1, lava)}); len(got) != 0 {
+		t.Fatalf("corpses on deadly ground without a box: %v", got)
+	}
+	r.d.plan.Avoid = []AvoidBox{{Name: "lava", Min: Point{-226, -64, -72}, Max: Point{-142, 6, -64.2}}}
+	if got := r.d.corpsesOnDeadly([]tbm.PartyRec{dead(m1, lava)}); len(got) != 1 || got[0] != `Mali in the avoid box "lava"` {
+		t.Fatalf("corpses in the box: %v", got)
+	}
+	r.d.plan.Avoid = nil
+	// Five minutes on, the spot is forgotten.
+	r.g.advance(deadlySpotTTL)
+	r.frame(lead)
+	if _, bad := r.d.deadlyAt(lava, 0); bad {
+		t.Fatal("the spot outlived its 5 min")
+	}
+	n := notesOf(r.d.Report())
+	for _, want := range []string{"one such death is no evidence yet", "a deadly spot; no bot is summoned", "deadly spot(s) forgotten"} {
+		if !strings.Contains(n, want) {
+			t.Fatalf("no note %q:\n%s", want, n)
+		}
+	}
+}
+
+// A living member that stands on a deadly spot for 5 s and lives clears it.
+func TestDeadlySpotIsClearedByABotThatLivesOnIt(t *testing.T) {
+	r := newSilentRig(t)
+	spot := Point{100, 100, 0}
+	lead := member(gTank, "Tanky", 500, "n", Point{0, 0, 0})
+	a := member(gHealer, "Healy", 500, "n", Point{90, 90, 0})
+	b := member(gMage, "Magey", 500, "n", Point{90, 90, 0})
+	r.frame(lead, a, b)
+	r.frame(lead, dead(a, spot), dead(b, Point{102, 100, 0}))
+	if _, bad := r.d.deadlyAt(spot, 0); !bad {
+		t.Fatal("no deadly spot")
+	}
+	lead.X, lead.Y = 101, 100
+	for range 7 {
+		r.frame(lead, dead(a, spot), dead(b, Point{102, 100, 0}))
+	}
+	if _, bad := r.d.deadlyAt(spot, 0); bad || !strings.Contains(notesOf(r.d.Report()), "and lives: the spot is cleared") {
+		t.Fatalf("the spot stays after a bot lived on it: %v\n%s", r.d.deadly.spots, notesOf(r.d.Report()))
+	}
+}
+
+// stuckGame is a nearGame whose floor snap finds only lava: the lead bot cannot be moved off it nearby.
+type stuckGame struct{ *nearGame }
+
+func (s *stuckGame) SnapToFloor(_ context.Context, _ uint32, p Point) (Point, bool) {
+	return Point{1, 1, 0}, true
+}
+
+// A lead bot stuck on deadly ground still gets the party summoned: after two failed tries it walks to the plan's last safe stand, 10 yd or
+// more clear of every box, and the far bot is summoned there (the recovery never waits on it forever).
+func TestStuckLeadFallsBackToTheLastSafeStand(t *testing.T) {
+	g := &stuckGame{nearGame: newNearGame(t, 3)}
+	g.agent = Point{0, 0, 0}
+	farMage(g.fakeRemote, -100)
+	plan := remotePlan(Leg{Name: "a", To: Point{40, 0, 0}})
+	plan.Avoid = lavaAtStart()
+	cfg := DefaultConfig()
+	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
+	d.curLeg = 0
+	ctx := context.Background()
+	for range 6 { // the feed's first frames, and the 4 s of calm the rejoin waits for
+		if err := d.tick(ctx, time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3 && len(g.summoned) == 0; i++ {
+		if err := d.rejoinFar(ctx); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	l := g.lead()
+	if len(g.summoned) != 1 || dist3(Point{l.X, l.Y, l.Z}, Point{40, 0, 0}) > 6 {
+		t.Fatalf("summoned %v, lead at %.0f %.0f; orders %v\n%s", g.summoned, l.X, l.Y, g.orders, notesOf(d.Report()))
+	}
+	n := notesOf(d.Report())
+	if strings.Count(n, "no safe floor is known near it") != 2 || !strings.Contains(n, "it walks to the plan's last safe stand 40.0 0.0 0.0") {
+		t.Fatalf("notes\n%s", n)
 	}
 }
 

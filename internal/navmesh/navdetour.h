@@ -37,11 +37,11 @@ int nd_floors(void* h, const float* p, float lo, float hi, float* z, unsigned sh
 // NULL with max 0 to ask the size). -1 when Detour has no mesh.
 int nd_polys(void* h, const float* box, float* out, int max);
 
-// Adds flag to the polygon flags of every loaded polygon whose centre (the mean of its corners) or any corner lies inside
-// box = {x0, y0, z0, x1, y1, z1} (WoW; x0 <= x1, y0 <= y1, z0 <= z1): the plan's avoid boxes mark ground the tiles do not
-// flag (shallow lava the mmap generator leaves as ground) as NAV_MAGMA, so the walk filter keeps out of it. Returns the
+// Adds flag to the polygon flags of every loaded polygon whose part inside box = {x0, y0, z0, x1, y1, z1} (WoW; x0 <= x1, y0 <= y1,
+// z0 <= z1; the polygon clipped by the box's planes) covers at least share (0 to 1) of its (x, y) area: the plan's avoid boxes mark ground
+// the tiles do not flag (shallow lava the mmap generator leaves as ground) as NAV_MAGMA, so the walk filter keeps out of it. Returns the
 // count of polygons it marked, -1 when Detour has no mesh.
-int nd_mark_box(void* h, const float* box, unsigned short flag);
+int nd_mark_box(void* h, const float* box, unsigned short flag, float share);
 
 // A walkability ray along the mesh surface from start to end (WoW x, y, z; the height of end is ignored, the ray runs
 // over the polygons). 0 done: *t = the fraction of the way from start to end at which the ray meets the mesh's edge
