@@ -20,9 +20,10 @@ import (
 //     as the dashboard (the kernel's /proc/net/tcp says whose; Linux only, anywhere else this fails closed). A process of that user can read
 //     the token file anyway, so it gains nothing; another local user, and a relay that runs as another user (a headerless forwarder, a
 //     tunnel's sshd for someone else), is not trusted;
-//   - an exact address that is a literal Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48) in the --allow-host list or the address the
-//     dashboard listens on. WireGuard authenticates a tailnet source address, so it cannot be claimed by another device. A name in the list
-//     says how the page may be opened (the Host header), not who is calling, so it is never trusted; nor is a LAN or public address.
+//   - from another machine, an exact address that is a literal Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48) in the --allow-host
+//     list, and only when the connection was accepted on a Tailscale address of the dashboard's own (WireGuard authenticates a tailnet source
+//     address, so another device cannot claim it; a listener that is also open on a LAN or a wildcard gives that address no such meaning). A name
+//     in the list says how the page may be opened (the Host header), not who is calling, so it is never trusted; nor is a LAN or public address.
 //
 // On top of the peer address, a trusted request must look like it was made by the dashboard's own page, so that a web page the owner has open in
 // another tab cannot save through the owner's browser (CSRF): no proxy headers (a reverse proxy on this machine would make every caller
@@ -97,17 +98,20 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 		return false
 	}
 	a := netip.AddrPortFrom(ap.Addr().Unmap().WithZone(""), ap.Port())
-	local := a.Addr().IsLoopback()
-	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && !local {
-		if lp, err := netip.ParseAddrPort(la.String()); err == nil && lp.Addr().Unmap().WithZone("") == a.Addr() {
-			local = true // the dashboard's own address: the caller is on this machine
+	// the address the connection was accepted on, as net/http records it
+	var onto netip.Addr
+	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+		if lp, err := netip.ParseAddrPort(la.String()); err == nil {
+			onto = lp.Addr().Unmap().WithZone("")
 		}
 	}
-	if local {
+	if a.Addr().IsLoopback() || (onto.IsValid() && onto == a.Addr()) { // the caller is on this machine
 		if uid, ok := t.owner(a); !ok || uid != t.uid {
 			return false
 		}
-	} else if !t.peers[a.Addr()] {
+	} else if !t.peers[a.Addr()] || !onto.IsValid() || !IsTailnetAddr(onto) {
+		// another machine: trusted only by a named Tailscale address, and only when it reached us over Tailscale (the connection was accepted
+		// on a Tailscale address of ours), so a listener that is also open on a LAN or a wildcard does not turn the address into a claim
 		return false
 	}
 	for _, k := range forwardingHeaders {

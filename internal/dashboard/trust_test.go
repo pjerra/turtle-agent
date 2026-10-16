@@ -106,6 +106,22 @@ func TestTrustLocalRejectsEveryoneElse(t *testing.T) {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
 		}
 	}
+	// a named peer that reaches the dashboard other than over Tailscale (a LAN or public address of the machine, or no recorded local address) is
+	// not a Tailscale peer
+	for name, host := range map[string]string{"a LAN address": "192.168.1.5:8790", "a public address": "203.0.113.9:8790"} {
+		if rec := tr.as(http.MethodPost, "/api/edit/edit1", trustPeer+":50000", host, nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("peer reaching %s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	b, _ := json.Marshal(tr.edit(move(0, 0, 21, 1)))
+	req := httptest.NewRequest(http.MethodPost, "http://"+trustSelf+":8790/api/edit/edit1", bytes.NewReader(b))
+	req.RemoteAddr = trustPeer + ":50000"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	tr.h.ServeHTTP(rec, req) // no local address in the context
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("peer with no recorded local address: %d", rec.Code)
+	}
 	if tree(t, tr.edits) != before {
 		t.Error("a refused request wrote")
 	}

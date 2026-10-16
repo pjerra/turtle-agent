@@ -3213,12 +3213,13 @@ Hiding a leg hides its handles. The box says why editing is off when the map doe
 **No token typing on your own laptop (`--edit-trust-local`).** Off by default. With it, a save that sends **no** `Authorization` header is made
 as the `--edit-trust-label` token's owner when the request's TCP peer is (a) a connection from this machine (loopback, or the `--listen`
 address) whose client socket belongs to the **same user as the dashboard** (the kernel's `/proc/net/tcp` says whose; Linux only, elsewhere this
-never trusts), or (b) a literal Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) that is in `--allow-host`, from another machine.
+never trusts), or (b) a literal Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) that is in `--allow-host`, from another machine, **and** only when the
+connection reached a Tailscale address of the dashboard (not a LAN, public or wildcard-listener path that happens to carry that source address).
 `GET /api/edit/status` then answers `"local_trusted": true` and the page hides the token field. The token itself stays in the server: it is not in
 any answer, page, version record or log, and the browser never holds it. Threat model:
 
-- *What is trusted is the peer address, never a header the caller writes.* A Tailscale source address is authenticated by WireGuard, so another
-  device cannot claim it. A **name** in `--allow-host` says how the page may be opened (the Host header), not who is calling, so it is never
+- *What is trusted is the peer address, never a header the caller writes.* A Tailscale source address arriving on the dashboard's Tailscale address is authenticated by
+  WireGuard, so another device cannot claim it. A **name** in `--allow-host` says how the page may be opened (the Host header), not who is calling, so it is never
   trusted; nor is a LAN or public address (they are listed at start-up as "not trusted as callers").
 - *A remote viewer not on the list still needs the token*, exactly as before: the same token check, the same ten-failures lockout.
 - *A request that sends any `Authorization` header is judged by that token alone*, trusted address or not (a wrong token is not forgiven).
