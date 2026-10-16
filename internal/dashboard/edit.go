@@ -1,0 +1,534 @@
+package dashboard
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net"
+	"net/http"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	"crypto/sha256"
+	"encoding/hex"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/routeedit"
+)
+
+// The route editor's write side (README "Route editor"). It is off unless the dashboard is started with --edit; this file is all of it that is
+// reachable from the network, so it is kept small:
+//   - the guard (server.go) lets only POST /api/edit/* through besides GET and HEAD, and only with a valid Bearer token (authorize);
+//   - a request carries ops, never a plan: routeedit.Apply changes nothing but the position of a via point or a leg's `to`, adds a plain via
+//     point or deletes one, on a copy of the base plan the server reads itself;
+//   - the edit is checked on the navmesh (routeedit.Evaluate), and written as a new numbered version into --edit-dir with names the server
+//     makes (routeedit.Store); nothing else is written, and a slot's plan folder is never touched.
+
+// maxEditBody bounds the body of an edit request.
+const maxEditBody = 64 << 10
+
+// maxBaseFile bounds the plan file read as the base of an edit.
+const maxBaseFile = 4 << 20
+
+// maxDiffReturned bounds the text diff sent back in a reply (the whole diff is in the store).
+const maxDiffReturned = 48 << 10
+
+// Nav is what the editor asks of the navmesh: the plan check's questions and the floors under a point. navmesh.Planner is one.
+type Nav interface {
+	dungeon.Navmesh
+	routeedit.Floorer
+}
+
+// EditConfig is the editor's setup.
+type EditConfig struct {
+	Source string // the folder whose plan files are the base of an edit
+	Store  *routeedit.Store
+	Tokens *routeedit.Tokens
+	Nav    Nav
+	Mmaps  string // the navmesh folder Nav reads, recorded with every version
+	// AllowDefaultDir names settings files (by file name) with an rpc but no dungeons_dir that the operator vouches read a default plan folder
+	// elsewhere than the edits folder; every other such file stops the editor (SlotFolders).
+	AllowDefaultDir []string
+	Now             func() time.Time
+	// Abuse bounds on saves (0 = the default): per token label per minute, per plan per 24 h (counted from the store's records), and the
+	// free space the store's filesystem must keep.
+	MaxPerMinute int
+	MaxPerDay    int
+	MinFree      uint64
+}
+
+// The default abuse bounds.
+const (
+	defaultMaxPerMinute = 30
+	defaultMaxPerDay    = 500
+	defaultMinFree      = 200 << 20
+)
+
+// Editor serves /api/edit/*.
+type Editor struct {
+	cfg EditConfig
+	src *routeedit.Source // the source folder, held open from the start (O_DIRECTORY|O_NOFOLLOW); plans are read relative to it
+	p   *Poller
+	// afterCheck, when set (tests), runs between the folder check and the read of the base plan: the window a swap would use.
+	afterCheck func()
+	mu         sync.Mutex             // one edit at a time: a plan check takes a moment and versions are counted
+	recent     map[string][]time.Time // under mu: the times of each token label's saves in the last minute
+
+	gitMu  sync.Mutex
+	gitAt  time.Time
+	gitSHA string
+}
+
+// NewEditor makes the editor. It refuses a setup whose folders touch a slot's plan folder (see routeedit.CheckFolders); the check is made
+// again at every edit, since agents appear later.
+func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
+	if cfg.Store == nil || cfg.Tokens == nil || cfg.Nav == nil || cfg.Source == "" || cfg.Mmaps == "" {
+		return nil, errors.New("editor: source, store, tokens, navmesh and mmaps folder are all needed")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.MaxPerMinute <= 0 {
+		cfg.MaxPerMinute = defaultMaxPerMinute
+	}
+	if cfg.MaxPerDay <= 0 {
+		cfg.MaxPerDay = defaultMaxPerDay
+	}
+	if cfg.MinFree == 0 {
+		cfg.MinFree = defaultMinFree
+	}
+	src, err := routeedit.OpenSource(cfg.Source)
+	if err != nil {
+		return nil, err
+	}
+	e := &Editor{cfg: cfg, p: p, src: src, recent: map[string][]time.Time{}}
+	if err := e.checkFolders(); err != nil {
+		src.Close()
+		return nil, err
+	}
+	return e, nil
+}
+
+// Close lets go of the source folder.
+func (e *Editor) Close() { e.src.Close() }
+
+func (e *Editor) checkFolders() error {
+	if a := strings.TrimSpace(e.p.opt.Agents); a != "auto" {
+		return errors.New("--edit needs --agents auto: an agent given by address has no settings file, so the folder its runs read is unknown")
+	}
+	dirs, err := SlotFolders(e.p.opt.ConfigDir, e.cfg.AllowDefaultDir)
+	if err != nil {
+		return fmt.Errorf("the slots' plan folders cannot all be told, so the edits folder cannot be checked against them: %w", err)
+	}
+	// by the identities of the held folders, not their path strings; it also fails when a held folder's path no longer names it
+	return routeedit.CheckHeld(e.cfg.Store, e.src, dirs)
+}
+
+type whoKey struct{}
+
+// authorize is the guard's gate for an edit request: a valid Bearer token, a JSON body of at most maxEditBody bytes. On failure it has
+// answered and returns false. The label of the token is put in the request's context.
+func (e *Editor) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	label, err := e.cfg.Tokens.Authenticate(r.Header.Get("Authorization"), host, e.cfg.Now())
+	switch {
+	case errors.Is(err, routeedit.ErrTooMany):
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return r, false
+	case err != nil:
+		w.Header().Set("WWW-Authenticate", `Bearer realm="route editor"`)
+		http.Error(w, "an edit needs the editing token (Authorization: Bearer ...)", http.StatusUnauthorized)
+		return r, false
+	}
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return r, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxEditBody)
+	return r.WithContext(context.WithValue(r.Context(), whoKey{}, label)), true
+}
+
+// routes registers the editor's paths under /api/edit/.
+func (e *Editor) routes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/edit/", e.serve)
+}
+
+func jsonError(w http.ResponseWriter, code int, format string, a ...any) {
+	b, _ := json.Marshal(map[string]any{"status": "error", "message": fmt.Sprintf(format, a...)})
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	_, _ = w.Write(b)
+}
+
+func writeAny(w http.ResponseWriter, code int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	_, _ = w.Write(b)
+}
+
+// serve routes /api/edit/<rest>: GET status, <plan>/versions, <plan>/snap, <plan>/vNNNN, <plan>/vNNNN/diff, and POST <plan>.
+func (e *Editor) serve(w http.ResponseWriter, r *http.Request) {
+	seg := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/edit/"), "/")
+	switch {
+	case r.Method == http.MethodPost && len(seg) == 1 && routeedit.PlanName.MatchString(seg[0]):
+		e.submit(w, r, seg[0])
+	case r.Method == http.MethodPost:
+		jsonError(w, http.StatusNotFound, "no such edit path")
+	case len(seg) == 1 && seg[0] == "status":
+		writeAny(w, 200, map[string]any{"enabled": true, "source": e.cfg.Source, "edit_dir": e.cfg.Store.Root(), "mmaps": e.cfg.Mmaps})
+	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "versions":
+		e.versions(w, seg[0])
+	case len(seg) == 2 && routeedit.PlanName.MatchString(seg[0]) && seg[1] == "snap":
+		e.snap(w, r, seg[0])
+	case len(seg) >= 2 && len(seg) <= 3 && routeedit.PlanName.MatchString(seg[0]):
+		v, ok := routeedit.ParseVersion(seg[1])
+		if !ok || (len(seg) == 3 && seg[2] != "diff") {
+			jsonError(w, http.StatusNotFound, "no such version")
+			return
+		}
+		if len(seg) == 3 {
+			d, err := e.cfg.Store.Diff(seg[0], v)
+			if err != nil {
+				jsonError(w, http.StatusNotFound, "no such version")
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = io.WriteString(w, d)
+			return
+		}
+		m, err := e.cfg.Store.Meta(seg[0], v)
+		if err != nil {
+			jsonError(w, http.StatusNotFound, "no such version")
+			return
+		}
+		writeAny(w, 200, m)
+	default:
+		jsonError(w, http.StatusNotFound, "no such edit path")
+	}
+}
+
+// baseOf reads the base plan of an edit, its bytes' sha256 and the parsed plan. The file is opened relative to the held source descriptor
+// (openat, O_NOFOLLOW) and must be a regular file (fstat); afterwards the source's path must still name the held folder.
+func (e *Editor) baseOf(plan string) (*dungeon.Plan, routeedit.BaseInfo, error) {
+	if e.afterCheck != nil {
+		e.afterCheck()
+	}
+	data, err := e.src.ReadPlan(plan, maxBaseFile)
+	if err != nil {
+		return nil, routeedit.BaseInfo{}, fmt.Errorf("the plan file %s.json cannot be read from the editable source: %v", plan, err)
+	}
+	if err := e.src.Verify(); err != nil {
+		return nil, routeedit.BaseInfo{}, err
+	}
+	full := filepath.Join(e.src.Path(), plan+".json")
+	p, err := dungeon.Parse(full, data)
+	if err != nil {
+		return nil, routeedit.BaseInfo{}, fmt.Errorf("the plan file does not load: %s", firstLine(err.Error()))
+	}
+	sum := sha256.Sum256(data)
+	return p, routeedit.BaseInfo{Source: full, SHA256: hex.EncodeToString(sum[:]), GitSHA: e.gitHead()}, nil
+}
+
+// gitHead is HEAD of the repo the source folder is in, "" when it is in none; asked at most every 30 s.
+func (e *Editor) gitHead() string {
+	e.gitMu.Lock()
+	defer e.gitMu.Unlock()
+	if e.cfg.Now().Sub(e.gitAt) < 30*time.Second {
+		return e.gitSHA
+	}
+	e.gitAt, e.gitSHA = e.cfg.Now(), gitHeadOf(e.cfg.Source)
+	return e.gitSHA
+}
+
+// gitHeadOf runs git on the operator's own --edit-source folder.
+func gitHeadOf(dir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	if len(s) < 7 || len(s) > 64 || strings.Trim(s, "0123456789abcdef") != "" {
+		return ""
+	}
+	return s
+}
+
+func (e *Editor) versions(w http.ResponseWriter, plan string) {
+	ms, err := e.cfg.Store.List(plan)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	out := map[string]any{"plan": plan, "versions": ms}
+	if _, base, err := e.baseOf(plan); err == nil {
+		out["base"] = base
+	} else {
+		out["base_error"] = err.Error()
+	}
+	writeAny(w, 200, out)
+}
+
+// snap tries one op on the base plan and says where the point would land: the floor picked, and whether there was a choice. It writes nothing.
+func (e *Editor) snap(w http.ResponseWriter, r *http.Request, plan string) {
+	q := r.URL.Query()
+	num := func(k string) (float64, bool) {
+		f, err := strconv.ParseFloat(q.Get(k), 64)
+		return f, err == nil
+	}
+	leg, ok1 := num("leg")
+	idx, ok2 := num("index")
+	x, ok3 := num("x")
+	y, ok4 := num("y")
+	kind := q.Get("kind")
+	if kind == "" {
+		kind = routeedit.KindMove
+	}
+	if !ok1 || !ok2 || !ok3 || !ok4 || kind == routeedit.KindDelete {
+		jsonError(w, http.StatusBadRequest, "snap takes kind (move or insert), leg, index, x and y")
+		return
+	}
+	base, _, err := e.baseOf(plan)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	_, ch, err := routeedit.Apply(base, []routeedit.Op{{Leg: int(leg), Kind: kind, Index: int(idx), X: x, Y: y}}, e.cfg.Nav)
+	if err != nil {
+		writeAny(w, 200, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	writeAny(w, 200, map[string]any{"ok": true, "change": ch[0]})
+}
+
+// EditRequest is the body of POST /api/edit/<plan>.
+type EditRequest struct {
+	BaseSHA256 string         `json:"base_sha256"`
+	Note       string         `json:"note"`
+	Ops        []routeedit.Op `json:"ops"`
+}
+
+// EditReply is the answer to an edit: the version written (checked, unchecked, or a refused record) and why.
+type EditReply struct {
+	Status  string                `json:"status"` // checked, unchecked or refused
+	Version int                   `json:"version"`
+	Name    string                `json:"name"`
+	Message string                `json:"message,omitempty"`
+	Who     string                `json:"who"`
+	Check   routeedit.CheckResult `json:"check"`
+	Changes []routeedit.Change    `json:"changes"`
+	Diff    string                `json:"diff"`
+	// Unchanged: the same base and ops as the latest version, which is returned instead of a new one.
+	Unchanged bool `json:"unchanged,omitempty"`
+}
+
+// cleanNote keeps the owner's note short and printable.
+func cleanNote(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if n >= 500 {
+			break
+		}
+		if unicode.IsControl(r) {
+			r = ' '
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (e *Editor) submit(w http.ResponseWriter, r *http.Request, plan string) {
+	who, _ := r.Context().Value(whoKey{}).(string)
+	var req EditRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			jsonError(w, http.StatusRequestEntityTooLarge, "the request is larger than %d bytes", maxEditBody)
+			return
+		}
+		jsonError(w, http.StatusBadRequest, "the request is not the expected JSON: %v", err)
+		return
+	}
+	if dec.More() {
+		jsonError(w, http.StatusBadRequest, "one JSON object, nothing after it")
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.checkFolders(); err != nil {
+		jsonError(w, http.StatusServiceUnavailable, "%v", err)
+		return
+	}
+	base, info, err := e.baseOf(plan)
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	if req.BaseSHA256 == "" {
+		jsonError(w, http.StatusBadRequest, "base_sha256 is needed: the sha256 of the plan file the edit started from")
+		return
+	}
+	if req.BaseSHA256 != info.SHA256 {
+		jsonError(w, http.StatusConflict, "the plan changed under you (the file is %s, the edit started from %s): reload the plan and edit again", info.SHA256[:8], shortSHA(req.BaseSHA256))
+		return
+	}
+	history, err := e.cfg.Store.List(plan)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	if r, ok := e.sameAsLatest(plan, history, info.SHA256, req.Ops, cleanNote(req.Note)); ok {
+		writeAny(w, http.StatusOK, r)
+		return
+	}
+	if code, msg := e.overBounds(who, history); code != 0 {
+		jsonError(w, code, "%s", msg)
+		return
+	}
+	edited, changes, err := routeedit.Apply(base, req.Ops, e.cfg.Nav)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	baseJSON, _ := dungeon.Marshal(base)
+	editedJSON, err := dungeon.Marshal(edited)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	diff := routeedit.UnifiedDiff(plan+".json (base "+info.SHA256[:8]+")", plan+".json (edit)", string(baseJSON), string(editedJSON))
+	if diff == "" {
+		jsonError(w, http.StatusBadRequest, "the ops change nothing")
+		return
+	}
+	check := routeedit.Evaluate(base, edited, e.cfg.Nav)
+	meta := &routeedit.Meta{Who: who, At: e.cfg.Now().UTC().Format(time.RFC3339), Note: cleanNote(req.Note), Base: info, Mmaps: e.cfg.Mmaps,
+		Check: check, Ops: req.Ops, Changes: changes, PlanDiff: dungeon.DiffPlans(base, edited)}
+	reply := EditReply{Who: who, Check: check, Changes: changes, Diff: diff}
+	if len(reply.Diff) > maxDiffReturned {
+		reply.Diff = reply.Diff[:maxDiffReturned] + "\n... (cut: the whole diff is in the version's .diff file)\n"
+	}
+	code := http.StatusOK
+	var planJSON []byte
+	switch {
+	case !check.Checked || !check.Accepted:
+		meta.Status, reply.Status, reply.Message = routeedit.StatusRefused, routeedit.StatusRefused, check.Refusal()
+		code = http.StatusUnprocessableEntity
+	case check.OK:
+		meta.Status, reply.Status, planJSON = routeedit.StatusChecked, routeedit.StatusChecked, editedJSON
+	default: // no new issue, but the plan had issues of its own: kept, never "checked"
+		meta.Status, reply.Status, reply.Message, planJSON = routeedit.StatusUnchecked, routeedit.StatusUnchecked, check.Unchecked(), editedJSON
+	}
+	// the folders are checked again once the version's number is claimed and before anything is in it, and after it is all written; when
+	// either fails the version's files are removed: a folder moved during the plan check, or during the write, does not keep a version
+	if code, msg := e.diskFloor(meta, planJSON, diff); code != 0 {
+		jsonError(w, code, "%s", msg)
+		return
+	}
+	v, err := e.cfg.Store.SaveGuarded(plan, meta, planJSON, diff, e.checkFolders)
+	if errors.Is(err, routeedit.ErrGuard) {
+		jsonError(w, http.StatusServiceUnavailable, "%v", err)
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "the version could not be written: %v", err)
+		return
+	}
+	e.recent[who] = append(e.recent[who], e.cfg.Now())
+	reply.Version, reply.Name = v, routeedit.Name(v)
+	writeAny(w, code, reply)
+}
+
+// sameAsLatest answers a resubmit (a retry after a lost reply, or the same edit twice) with the latest version when its base, ops and note are
+// the request's, so that it takes no new number.
+func (e *Editor) sameAsLatest(plan string, history []routeedit.Meta, baseSHA string, ops []routeedit.Op, note string) (EditReply, bool) {
+	if len(history) == 0 {
+		return EditReply{}, false
+	}
+	m := history[len(history)-1]
+	a, err1 := json.Marshal(m.Ops)
+	b, err2 := json.Marshal(ops)
+	if err1 != nil || err2 != nil || m.Base.SHA256 != baseSHA || m.Note != note || string(a) != string(b) {
+		return EditReply{}, false
+	}
+	r := EditReply{Status: m.Status, Version: m.Version, Name: routeedit.Name(m.Version), Who: m.Who, Check: m.Check, Changes: m.Changes, Unchanged: true,
+		Message: "the same base and ops as the latest version: no new version was written"}
+	if d, err := e.cfg.Store.Diff(plan, m.Version); err == nil {
+		if len(d) > maxDiffReturned {
+			d = d[:maxDiffReturned] + "\n... (cut: the whole diff is in the version's .diff file)\n"
+		}
+		r.Diff = d
+	}
+	return r, true
+}
+
+// overBounds is the rate bound on a save: per token label per minute (429), per plan per 24 h counted from the store's records (429). It
+// returns 0 when the save may go on.
+func (e *Editor) overBounds(who string, history []routeedit.Meta) (int, string) {
+	now := e.cfg.Now()
+	kept := e.recent[who][:0]
+	for _, t := range e.recent[who] {
+		if now.Sub(t) < time.Minute {
+			kept = append(kept, t)
+		}
+	}
+	e.recent[who] = kept
+	if len(kept) >= e.cfg.MaxPerMinute {
+		return http.StatusTooManyRequests, fmt.Sprintf("at most %d saves a minute per token: wait a moment", e.cfg.MaxPerMinute)
+	}
+	day := 0
+	for _, m := range history {
+		if t, err := time.Parse(time.RFC3339, m.At); err == nil && now.Sub(t) < 24*time.Hour {
+			day++
+		}
+	}
+	if day >= e.cfg.MaxPerDay {
+		return http.StatusTooManyRequests, fmt.Sprintf("this plan has had %d saves in the last 24 hours, the most allowed", day)
+	}
+	return 0, ""
+}
+
+// fileSlack is added per file a version writes: the block its last bytes round up to, and the record's fields set at the write.
+const fileSlack = 8 << 10
+
+// diskFloor refuses a save (507) unless the store's filesystem keeps MinFree after the version's files: the plan, the diff and the record,
+// each counted with fileSlack.
+func (e *Editor) diskFloor(meta *routeedit.Meta, planJSON []byte, diff string) (int, string) {
+	mb, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+	need := uint64(len(planJSON)+len(diff)+len(mb)) + 3*fileSlack
+	free, err := e.cfg.Store.FreeBytes()
+	if err != nil {
+		return http.StatusInsufficientStorage, "the free space of the edits folder cannot be told: " + err.Error()
+	}
+	if free < e.cfg.MinFree+need {
+		return http.StatusInsufficientStorage, fmt.Sprintf("the edits folder's filesystem has %d MB free: a save of %d KB would leave under the %d MB kept free", free>>20, need>>10, e.cfg.MinFree>>20)
+	}
+	return 0, ""
+}

@@ -3142,6 +3142,50 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 
+**Route editor (`--edit`).** Off by default: without `--edit` the page is GET/HEAD only, exactly as above. With it, the one thing the
+page can write is a checked version of a plan's route, through `POST /api/edit/<plan>`:
+
+```
+turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dungeons --edit --mmaps-dir ~/turtle-agent-mmaps
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--edit` | off | turns the editor on |
+| `--mmaps-dir` | none, required | the navmesh folder of the server the plans are run on; every version records it (a check on another server's mesh proves nothing) |
+| `--edit-source` | the first `--plans-dir` | the folder whose plan files an edit starts from; the page draws and edits this copy |
+| `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json` (the whole plan, `dungeon.Marshal`), `vNNNN.meta.json` (who, when, base sha256 and git SHA, note, check result, ops, the plan diff) and `vNNNN.diff` (text diff). A refused edit keeps the record and the diff only |
+| `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | lines of `label token`, mode 0600, owned by you; the label is the recorded `who` |
+
+The request carries ops, never a plan (`{"base_sha256", "note", "ops": [{"leg", "kind": "move"|"insert"|"delete", "index", "x", "y"}]}`, game
+coordinates; index counts the leg's via points, then `to`). The server applies them to a copy of the base file it reads itself: only the
+position of a via point or of a leg's `to` changes, a plain via point is added or deleted; a `direct` or `check_skip` via point, pack
+positions, bosses, steps, and legs are locked (so is a `gm_cross` via point). Each new point is put on the navmesh floor nearest its old height (a drag on a multi-level map
+stays on its level; more than one floor in range is reported as `floor_picked`), must lie within 200 yd of the plan's own points, and the
+result must still load as a plan. Then `dungeon.CheckPlan` runs on the whole plan: an edit is refused (HTTP 422, with a refused record) when
+it makes a plan check issue the base plan did not have, or cannot be checked. A version is "checked" only when the edited plan has **no** plan check
+issue at all (exempt `check_skip` hops aside). An edit that adds none to a plan that has issues of its own is kept as "unchecked" (the plan file is
+kept, so work can go on from it) and is never picked by `latest`, `export` or `promote`.
+
+Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
+application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
+created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, never overwritten, and every path step is made
+relative to a directory descriptor opened with `O_NOFOLLOW` (the edits folder once at start, each plan folder per call), so a folder swapped for a
+link cannot redirect a write (Linux; the store does not run elsewhere).
+`--edit-source` is held the same way: opened once at start, each plan read with `openat(..., O_NOFOLLOW)` and accepted only as a regular
+file; the folder checks compare the held folders' identities (device, inode), run again around the write (a failed one removes the version),
+and stop the editor when a held folder's path no longer names it. A save with the same base, ops and note as the latest version returns that
+version (`"unchanged": true`, no new number, its stored author). Saves are bounded: 30 a minute per token label and 500 per plan per 24 hours (HTTP 429), and
+none that would leave the edits folder's filesystem under 200 MB free, the version's files counted (HTTP 507).
+The commander run reloads its plan file at every leg, so anything written into a running slot's `dungeons_dir` would be taken by that run
+unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-dir` is, contains or lies inside any slot's `dungeons_dir`
+(read from `settings*.json`), or when `--edit-source` lies inside one. The guard fails closed: a settings file that cannot be read or decoded,
+a missing config folder, `--agents` other than `auto`, or a slot (a file with an `rpc`) whose plan folder cannot be told (no `dungeons_dir`, or a
+relative one: its runs read `dungeons/` under the agent's working folder) stops the editor and each edit, saying which file. A settings file whose
+default folder you know is elsewhere is named with `--edit-allow-default-dir settings-3.json`. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
+`/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
+`/vNNNN/diff`.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
 `<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub

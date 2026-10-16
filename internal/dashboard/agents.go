@@ -56,6 +56,58 @@ func expandHome(p string) string {
 	return p
 }
 
+// SlotFolders lists the folder every settings*.json of configDir has its runs read plans from (dungeons_dir, a leading ~/ made the home folder).
+// It fails closed, for the editor's guard: an error when configDir is not a folder, when a settings file cannot be read or decoded, or when a
+// slot (a file with an rpc field: an agent that can be sent a dungeon_run) has no folder that can be told: an empty dungeons_dir, or a relative
+// one, means dungeons/ under the agent's working folder, which is not known here. A settings file named in allowDefault (by file name) with an EMPTY
+// dungeons_dir is vouched for by the operator, who says its default folder is elsewhere; it is left out of the list. A relative dungeons_dir is
+// never vouched for.
+func SlotFolders(configDir string, allowDefault []string) ([]string, error) {
+	if st, err := os.Stat(configDir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("the config folder %s cannot be read, so the slots' plan folders are unknown", configDir)
+	}
+	files, err := filepath.Glob(filepath.Join(configDir, "settings*.json"))
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{}
+	for _, a := range allowDefault {
+		allowed[a] = true
+	}
+	var out []string
+	var problems []string
+	for _, f := range files {
+		name := filepath.Base(f)
+		data, err := os.ReadFile(f)
+		if err != nil {
+			problems = append(problems, name+" cannot be read: "+err.Error())
+			continue
+		}
+		var s settingsFields
+		if err := json.Unmarshal(data, &s); err != nil {
+			problems = append(problems, name+" is not a settings file that can be decoded: "+firstLine(err.Error()))
+			continue
+		}
+		dir := expandHome(s.DungeonsDir)
+		switch {
+		case dir != "" && filepath.IsAbs(dir):
+			out = append(out, dir)
+		case s.RPC == "":
+			// not an agent that can be commanded
+		case dir == "" && allowed[name]:
+			// no dungeons_dir: the operator vouches that the default folder (dungeons/ under the agent's working folder) is elsewhere
+		case dir == "":
+			problems = append(problems, name+" names no dungeons_dir, so its runs read dungeons/ under the agent's working folder, which cannot be checked (set dungeons_dir, or pass --edit-allow-default-dir "+name+")")
+		default:
+			problems = append(problems, name+" has the relative dungeons_dir "+s.DungeonsDir+", which depends on the agent's working folder (use an absolute path; --edit-allow-default-dir does not cover a relative dungeons_dir)")
+		}
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "; "))
+	}
+	return out, nil
+}
+
 // DiscoverAgents lists the agents to watch. spec is "auto" (the "rpc" field of configDir/settings*.json), a comma list of
 // RPC addresses ("8765" or "127.0.0.1:8766"), or both ("auto,8770"). Every address must be loopback.
 func DiscoverAgents(configDir, spec string) ([]Agent, error) {
