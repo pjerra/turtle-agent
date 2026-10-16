@@ -482,16 +482,18 @@ func TestZulfarrakPlanCheck(t *testing.T) {
 		if p.Name == "zulfarrak" && res.Points < 100 {
 			t.Errorf("only %d points checked", res.Points)
 		}
-		// A run from a pull group starts at its gather spot: the same plan passes from Velratha's group 9 (of 11) and from a leg start.
+		// A run from a pull group starts at its gather spot: the same plan passes from the groups of the Velratha legs (legs 7 and 8, split at
+		// the pack of five at 1636 1105 by the route edits of 2026-10-16) and from a leg start.
 		if p.Name == "zulfarrak" {
-			for _, g := range []int{0, 8, 10} {
-				res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: 8, FromPullGroup: &g})
+			for _, from := range []struct{ leg, group int }{{7, 0}, {7, 5}, {8, 0}, {8, 2}} {
+				g := from.group
+				res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: from.leg, FromPullGroup: &g})
 				if err != nil || !res.OK() {
-					t.Errorf("from leg 8 pull group %d: %v\n%s", g, err, res.Summary())
+					t.Errorf("from leg %d pull group %d: %v\n%s", from.leg, g, err, res.Summary())
 				}
 			}
-			if res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: 4}); err != nil || !res.OK() {
-				t.Errorf("from leg 4: %v\n%s", err, res.Summary())
+			if res, err := CheckPlanWith(p, pl, CheckOptions{FromLeg: 3}); err != nil || !res.OK() {
+				t.Errorf("from leg 3: %v\n%s", err, res.Summary())
 			}
 		}
 	}
