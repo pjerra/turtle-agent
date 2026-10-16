@@ -3212,7 +3212,7 @@ Hiding a leg hides its handles. The box says why editing is off when the map doe
 
 **No token typing on your own laptop (`--edit-trust-local`).** Off by default. With it, a save that sends **no** `Authorization` header is made
 as the `--edit-trust-label` token's owner when the request's TCP peer is (a) a connection from this machine (loopback, or the `--listen`
-address) whose client socket belongs to the **same user as the dashboard** (the kernel's `/proc/net/tcp` says whose; Linux only, elsewhere this
+address, **and the request's Host is that literal address**: a host name never counts as local) whose client socket belongs to the **same user as the dashboard** (the kernel's `/proc/net/tcp` says whose; Linux only, elsewhere this
 never trusts), or (b) a literal Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) that is in `--allow-host`, from another machine, **and** only when the
 connection reached a Tailscale address of the dashboard (not a LAN, public or wildcard-listener path that happens to carry that source address).
 `GET /api/edit/status` then answers `"local_trusted": true` and the page hides the token field. The token itself stays in the server: it is not in
@@ -3227,6 +3227,12 @@ any answer, page, version record or log, and the browser never holds it. Threat 
   local socket too, so it is trusted only if it runs as the dashboard's user (which could read the token file anyway); a relay of another user, or
   one the kernel does not show, is not. Requests carrying `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Via`, `Tailscale-User-*` or similar are never
   trusted either.
+- *DNS rebinding.* A name in `--allow-host` that someone else controls can be rebound to 127.0.0.1 and then serves a same-origin page that talks to a
+  local socket of your user. So a same-machine caller is trusted only when its Host is a literal loopback address or the literal address the
+  connection was accepted on; by name, only the remote Tailscale branch applies (the owner on another device opening the page by its Tailscale name).
+- *A page capability.* `GET /api/edit/status` gives a trusted caller a random per-process nonce (`trust_nonce`, not derived from any token) and a
+  trusted save must echo it in `X-Route-Edit-Nonce` (a custom header, so a cross-site request needs a pre-flight the guard refuses); a missing or
+  wrong nonce is a 401. A save with the real token needs none.
 - *No cross-site saves from the owner's own browser.* A trusted request that has an `Origin` must have the one equal to its Host, and a
   `Sec-Fetch-Site` must be `same-origin` or `none`; on top of that the unchanged guard demands `Content-Type: application/json` (a form cannot
   send it, a cross-site fetch must pre-flight and the guard answers every OPTIONS with 405) and the Host check (DNS rebinding sends a Host that is

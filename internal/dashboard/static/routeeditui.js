@@ -11,6 +11,7 @@
     const { h, s, MV } = env;
     const states = new Map();
     let enabled = null, enabledAsked = false; // null: not known yet
+    let nonce = ""; // the page's capability the server gives a trusted caller; a trusted save echoes it (it is not a token)
     let trusted = false; // the server saves this browser's edits with its own token (--edit-trust-local): no token is asked for
 
     const sess = {
@@ -54,7 +55,7 @@
     function ensureEnabled() {
       if (enabledAsked) return;
       enabledAsked = true;
-      jget("/api/edit/status").then((r) => { enabled = r.ok && r.json && r.json.enabled === true; trusted = !!(enabled && r.json.local_trusted === true); env.rerender(); });
+      jget("/api/edit/status").then((r) => { enabled = r.ok && r.json && r.json.enabled === true; trusted = !!(enabled && r.json.local_trusted === true && typeof r.json.trust_nonce === "string" && r.json.trust_nonce); nonce = trusted ? r.json.trust_nonce : ""; env.rerender(); });
     }
 
     function loadInfo(st) {
@@ -230,7 +231,7 @@
       let r;
       try {
         r = await fetch("/api/edit/" + encodeURIComponent(st.name), { method: "POST", cache: "no-store",
-          headers: token ? { "Content-Type": "application/json", Authorization: "Bearer " + token } : { "Content-Type": "application/json" },
+          headers: token ? { "Content-Type": "application/json", Authorization: "Bearer " + token } : { "Content-Type": "application/json", "X-Route-Edit-Nonce": nonce },
           body: JSON.stringify({ base_sha256: st.info.base.sha256, note: note != null ? note : st.note.value, ops: st.hist.ops }) });
       } catch (e) { st.busy = false; st.msg = "Could not reach the dashboard: " + e; refresh(st); return; }
       let json = null;

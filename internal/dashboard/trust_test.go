@@ -48,20 +48,36 @@ func newTrustRig(t *testing.T, on bool) *trustRig {
 
 // as sends a request as if its TCP peer were remote, to Host host, with extra headers; the body is a valid edit of the test plan.
 func (tr *trustRig) as(method, path, remote, host string, hdr map[string]string) *httptest.ResponseRecorder {
+	return tr.asOn(method, path, remote, host, "", hdr)
+}
+
+// asOn is as with the address the connection was accepted on given (local, "" = the Host when that is an address). The page's nonce is sent unless
+// hdr names the header with an empty value (left out) or another one.
+func (tr *trustRig) asOn(method, path, remote, host, local string, hdr map[string]string) *httptest.ResponseRecorder {
 	var body []byte
 	if method == http.MethodPost {
 		body, _ = json.Marshal(tr.edit(move(0, 0, 21, 1)))
 	}
 	req := httptest.NewRequest(method, "http://"+host+path, bytes.NewReader(body))
 	req.RemoteAddr = remote
-	if h, _, err := net.SplitHostPort(host); err == nil && net.ParseIP(h) != nil { // the address the dashboard was reached on, as net/http records it
-		req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP(h), Port: 8790}))
+	if local == "" {
+		local, _, _ = net.SplitHostPort(host)
+	}
+	if ip := net.ParseIP(strings.Trim(local, "[]")); ip != nil { // the address the dashboard was reached on, as net/http records it
+		req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: ip, Port: 8790}))
+	}
+	if tr.ed.trust != nil {
+		req.Header.Set(nonceHeader, tr.ed.trust.nonce)
 	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range hdr {
-		req.Header.Set(k, v)
+		if v == "" {
+			req.Header.Del(k)
+		} else {
+			req.Header.Set(k, v)
+		}
 	}
 	rec := httptest.NewRecorder()
 	tr.h.ServeHTTP(rec, req)
@@ -72,8 +88,8 @@ func TestTrustLocalAcceptsTheLocalHostAndTheNamedTailnetPeers(t *testing.T) {
 	tr := newTrustRig(t, true)
 	for name, c := range map[string]struct{ remote, host string }{
 		"loopback v4":                 {"127.0.0.1:50000", "127.0.0.1:8790"},
-		"loopback v6":                 {"[::1]:50000", "localhost:8790"},
-		"loopback mapped":             {"[::ffff:127.0.0.1]:50000", "localhost:8790"},
+		"loopback v6":                 {"[::1]:50000", "[::1]:8790"},
+		"loopback mapped":             {"[::ffff:127.0.0.1]:50000", "127.0.0.1:8790"},
 		"the dashboard's own tailnet": {trustSelf + ":50000", trustSelf + ":8790"},
 		"a named tailnet peer":        {trustPeer + ":50000", trustSelf + ":8790"},
 	} {
@@ -165,11 +181,33 @@ func TestTrustLocalOnARealConnection(t *testing.T) {
 	srv := httptest.NewServer(HandlerWithEditor(r.p, "", nil, nil, r.ed))
 	defer srv.Close()
 	b, _ := json.Marshal(r.edit(move(0, 0, 21, 1)))
-	resp, err := http.Post(srv.URL+"/api/edit/edit1", "application/json", bytes.NewReader(b))
+	post := func(nonce string) int {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/edit/edit1", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		if nonce != "" {
+			req.Header.Set(nonceHeader, nonce)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		must(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	// the nonce comes from the status answer, which is only given to a trusted caller
+	resp, err := http.Get(srv.URL + "/api/edit/status")
 	must(t, err)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a save from this process over loopback: %d", resp.StatusCode)
+	var st struct {
+		Nonce string `json:"trust_nonce"`
+	}
+	must(t, json.NewDecoder(resp.Body).Decode(&st))
+	resp.Body.Close()
+	if st.Nonce == "" {
+		t.Fatal("no nonce for a local caller")
+	}
+	if c := post(""); c != http.StatusUnauthorized {
+		t.Errorf("no nonce: %d", c)
+	}
+	if c := post(st.Nonce); c != http.StatusOK {
+		t.Fatalf("a save from this process over loopback: %d", c)
 	}
 	// and a socket that is not in the kernel's table (a made-up port) has no owner
 	if _, ok := socketOwner(netip.MustParseAddrPort("127.0.0.1:1")); ok {
@@ -191,6 +229,106 @@ func TestParseProcAddr(t *testing.T) {
 	for _, bad := range []string{"", "zz:1", "0100007F", "0100007F:zz", "0100:1"} {
 		if _, ok := parseProcAddr(bad); ok {
 			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+// DNS rebinding: a name that is allowed (--allow-host) and that an attacker controls can be rebound to 127.0.0.1 or to the machine's own address.
+// The page it serves is then same-origin with a socket of the owner's user: Host, Origin and Sec-Fetch-Site all agree. A name never makes a caller
+// local, so none of these is trusted.
+func TestTrustLocalIgnoresAHostNameOnThisMachine(t *testing.T) {
+	const rebind = "laptop.tail1234.ts.net:8790" // allowed by name, as the owner may have listed it
+	same := map[string]string{"Origin": "http://" + rebind, "Sec-Fetch-Site": "same-origin"}
+	for name, c := range map[string]struct{ remote, local string }{
+		"rebound to loopback":                  {"127.0.0.1:50000", "127.0.0.1"},
+		"rebound to loopback v6":               {"[::1]:50000", "::1"},
+		"rebound to the machine's own address": {trustSelf + ":50000", trustSelf},
+	} {
+		tr := newTrustRig(t, true)
+		before := tree(t, tr.edits)
+		if rec := tr.asOn(http.MethodPost, "/api/edit/edit1", c.remote, rebind, c.local, same); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+		st := tr.asOn(http.MethodGet, "/api/edit/status", c.remote, rebind, c.local, nil)
+		if !strings.Contains(st.Body.String(), `"local_trusted":false`) || strings.Contains(st.Body.String(), tr.ed.trust.nonce) {
+			t.Errorf("%s: status %s", name, st.Body)
+		}
+		if tree(t, tr.edits) != before {
+			t.Errorf("%s wrote", name)
+		}
+	}
+	// a literal address that is not this connection's own address is no better
+	tr := newTrustRig(t, true)
+	if rec := tr.asOn(http.MethodPost, "/api/edit/edit1", "127.0.0.1:50000", "192.168.1.5:8790", "127.0.0.1", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("a literal LAN Host on a loopback connection: %d", rec.Code)
+	}
+}
+
+// The remote branch is by the peer's Tailscale address and works for a Host that is a name (the owner opens the page by its Tailscale name).
+func TestTrustLocalAPeerByTheTailscaleName(t *testing.T) {
+	tr := newTrustRig(t, true)
+	const host = "laptop.tail1234.ts.net:8790"
+	st := tr.asOn(http.MethodGet, "/api/edit/status", trustPeer+":50000", host, trustSelf, nil)
+	var got struct {
+		Trusted bool   `json:"local_trusted"`
+		Nonce   string `json:"trust_nonce"`
+	}
+	must(t, json.Unmarshal(st.Body.Bytes(), &got))
+	if !got.Trusted || got.Nonce == "" || got.Nonce != tr.ed.trust.nonce {
+		t.Fatalf("status: %s", st.Body)
+	}
+	hdr := map[string]string{nonceHeader: got.Nonce, "Origin": "http://" + host, "Sec-Fetch-Site": "same-origin"}
+	if rec := tr.asOn(http.MethodPost, "/api/edit/edit1", trustPeer+":50000", host, trustSelf, hdr); rec.Code != http.StatusOK {
+		t.Errorf("a save with the nonce: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A trusted save must echo the page's nonce. The real token needs none.
+func TestTrustLocalSaveNeedsThePageNonce(t *testing.T) {
+	for name, hdr := range map[string]map[string]string{
+		"no nonce":        {nonceHeader: ""},
+		"a wrong nonce":   {nonceHeader: strings.Repeat("0", 64)},
+		"a truncated one": {nonceHeader: "abc"},
+	} {
+		for who, remote := range map[string]string{"local": "127.0.0.1:50000", "a tailnet peer": trustPeer + ":50000"} {
+			tr := newTrustRig(t, true)
+			host, local := "127.0.0.1:8790", ""
+			if who != "local" {
+				host, local = trustSelf+":8790", trustSelf
+			}
+			before := tree(t, tr.edits)
+			if rec := tr.asOn(http.MethodPost, "/api/edit/edit1", remote, host, local, hdr); rec.Code != http.StatusUnauthorized {
+				t.Errorf("%s, %s: %d %s", name, who, rec.Code, rec.Body)
+			}
+			if tree(t, tr.edits) != before {
+				t.Errorf("%s, %s wrote", name, who)
+			}
+		}
+	}
+	// two nonce headers are none
+	tr := newTrustRig(t, true)
+	b, _ := json.Marshal(tr.edit(move(0, 0, 21, 1)))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8790/api/edit/edit1", bytes.NewReader(b))
+	req.RemoteAddr = "127.0.0.1:50000"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Add(nonceHeader, tr.ed.trust.nonce)
+	req.Header.Add(nonceHeader, tr.ed.trust.nonce)
+	rec := httptest.NewRecorder()
+	tr.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("two nonces: %d", rec.Code)
+	}
+	// the real token needs no nonce, and an untrusted caller is never given one
+	if rec := tr.asOn(http.MethodPost, "/api/edit/edit1", "198.51.100.7:1", "127.0.0.1:8790", "", map[string]string{nonceHeader: "", "Authorization": "Bearer " + editToken}); rec.Code != http.StatusOK {
+		t.Errorf("token without nonce: %d %s", rec.Code, rec.Body)
+	}
+	if st := tr.asOn(http.MethodGet, "/api/edit/status", "198.51.100.7:1", "127.0.0.1:8790", "", nil); strings.Contains(st.Body.String(), "trust_nonce") {
+		t.Errorf("a stranger was given the nonce: %s", st.Body)
+	}
+	// the nonce is not derived from a token
+	for _, tok := range []string{editToken, strings.Repeat("h", 40)} {
+		if strings.Contains(tr.ed.trust.nonce, tok) || len(tr.ed.trust.nonce) != 64 {
+			t.Error("nonce shape")
 		}
 	}
 }
@@ -244,6 +382,7 @@ func TestTrustLocalIsNotFooledByTheRequest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8790/api/edit/edit1", strings.NewReader("a=b"))
 	req.RemoteAddr = local
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(nonceHeader, tr.ed.trust.nonce)
 	rec := httptest.NewRecorder()
 	tr.h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnsupportedMediaType {

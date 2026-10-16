@@ -1,6 +1,9 @@
 package dashboard
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -43,6 +46,7 @@ func IsTailnetAddr(a netip.Addr) bool {
 type localTrust struct {
 	label string
 	peers map[netip.Addr]bool
+	nonce string                                     // the page's CSRF capability: a trusted save must echo it in nonceHeader (random per process, never derived from a token)
 	uid   uint32                                     // the user the dashboard runs as: a local caller's socket must be this user's
 	owner func(client netip.AddrPort) (uint32, bool) // the user a local TCP client socket belongs to (socketOwner; replaced in tests)
 }
@@ -72,7 +76,11 @@ func (e *Editor) EnableTrustLocal(label string, peers []netip.Addr) error {
 	if !e.cfg.Tokens.Has(label) {
 		return fmt.Errorf("--edit-trust-label %q is not a label in the token file", label)
 	}
-	t := &localTrust{label: label, peers: map[netip.Addr]bool{}, uid: uint32(os.Getuid()), owner: socketOwner}
+	nb := make([]byte, 32)
+	if _, err := rand.Read(nb); err != nil {
+		return err
+	}
+	t := &localTrust{nonce: hex.EncodeToString(nb), label: label, peers: map[netip.Addr]bool{}, uid: uint32(os.Getuid()), owner: socketOwner}
 	for _, p := range peers {
 		if !IsTailnetAddr(p) {
 			return errors.New("only Tailscale addresses can be trusted peers")
@@ -106,6 +114,12 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 		}
 	}
 	if a.Addr().IsLoopback() || (onto.IsValid() && onto == a.Addr()) { // the caller is on this machine
+		// Same-machine trust needs a Host that is a literal address: a loopback one, or the very address the connection was accepted on. A host
+		// NAME never counts as local, whoever the name is allowed for: a name an attacker controls can be rebound to 127.0.0.1 and then has a
+		// same-origin page talking to a local socket of the owner's user.
+		if h, ok := literalHost(r.Host); !ok || !(h.IsLoopback() || (onto.IsValid() && h == onto)) {
+			return false
+		}
 		if uid, ok := t.owner(a); !ok || uid != t.uid {
 			return false
 		}
@@ -126,6 +140,32 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// nonceHeader carries the page's capability on a trusted save.
+const nonceHeader = "X-Route-Edit-Nonce"
+
+// trustedSave is trustedRequest plus the page's capability: the nonce GET /api/edit/status hands to a trusted caller must come back in the header.
+func (e *Editor) trustedSave(r *http.Request) bool {
+	if !e.trustedRequest(r) {
+		return false
+	}
+	got := r.Header.Values(nonceHeader)
+	return len(got) == 1 && subtle.ConstantTimeCompare([]byte(got[0]), []byte(e.trust.nonce)) == 1
+}
+
+// literalHost parses a Host header that is a literal IP address (with or without a port, an IPv6 one in brackets), unmapped.
+func literalHost(host string) (netip.Addr, bool) {
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+	a, err := netip.ParseAddr(h)
+	if err != nil || a.Zone() != "" {
+		return netip.Addr{}, false
+	}
+	return a.Unmap(), true
 }
 
 // sameOrigin reports whether an Origin header names the host the request was made to.
