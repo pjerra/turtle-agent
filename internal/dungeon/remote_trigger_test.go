@@ -63,6 +63,8 @@ func (g *triggerGame) fire() {
 
 // GoXYZ is the GM `.go xyz` the agent's return falls back on after the boss is dead.
 func (g *triggerGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
+	g.agentMu.Lock()
+	defer g.agentMu.Unlock()
 	g.teles = append(g.teles, at)
 	if g.teleErr != nil {
 		return g.teleErr
@@ -74,6 +76,8 @@ func (g *triggerGame) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
 }
 
 func (g *triggerGame) AreaTrigger(ctx context.Context, id uint32) error {
+	g.agentMu.Lock()
+	defer g.agentMu.Unlock()
 	g.sent = append(g.sent, id)
 	g.sentFrom = append(g.sentFrom, g.agent)
 	g.sentAt, g.movesBefore = g.now, len(g.moveOrderDest)
