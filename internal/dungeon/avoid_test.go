@@ -2,6 +2,8 @@ package dungeon
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -342,79 +344,102 @@ func TestDeadlySpotIsClearedByABotThatLivesOnIt(t *testing.T) {
 	}
 }
 
-// stuckGame is a nearGame whose floor snap finds only lava: the lead bot cannot be moved off it nearby.
+// stuckGame is a nearGame whose floor snap finds only lava (the lead bot cannot be moved off it nearby) and whose planner plans straight lines.
 type stuckGame struct{ *nearGame }
 
 func (s *stuckGame) SnapToFloor(_ context.Context, _ uint32, p Point) (Point, bool) {
 	return Point{1, 1, 0}, true
 }
+func (s *stuckGame) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
+	return []Point{from, to}, nil
+}
 
-// A lead bot stuck on deadly ground still gets the party summoned: after two failed tries it walks to the plan's last safe stand, 10 yd or
-// more clear of every box, and the far bot is summoned there (the recovery never waits on it forever).
-func TestStuckLeadFallsBackToTheLastSafeStand(t *testing.T) {
+// stuckRig: the lead bot stands at (25, 0, 0) (beyond the 20 yd a move off may go) for a few frames (its history), then is put in the lava box at the origin; Magey is 100 yd
+// off. The plan's leg goes to (60, 0, 0), ahead, never walked.
+func stuckRig(t *testing.T) (*stuckGame, *RemoteDriver) {
 	g := &stuckGame{nearGame: newNearGame(t, 3)}
 	g.agent = Point{0, 0, 0}
 	farMage(g.fakeRemote, -100)
-	plan := remotePlan(Leg{Name: "a", To: Point{40, 0, 0}})
+	g.lead().X = 25
+	plan := remotePlan(Leg{Name: "a", To: Point{60, 0, 0}})
 	plan.Avoid = lavaAtStart()
-	cfg := DefaultConfig()
-	d := NewRemoteDriver(plan, g, cfg, objOpts(), g.clock())
+	d := NewRemoteDriver(plan, g, DefaultConfig(), objOpts(), g.clock())
 	d.curLeg = 0
-	ctx := context.Background()
-	for range 6 { // the feed's first frames, and the 4 s of calm the rejoin waits for
-		if err := d.tick(ctx, time.Second); err != nil {
+	for range 6 { // the feed's first frames (the lead bot's history at 20 0 0), and the calm the rejoin waits for
+		if err := d.tick(context.Background(), time.Second); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for i := 0; i < 3 && len(g.summoned) == 0; i++ {
+	g.lead().X = 0
+	return g, d
+}
+
+// A lead bot stuck on deadly ground still gets the party summoned: after two failed tries it walks back to where it last stood and lived
+// (25 0 0, from its history), not to the leg's `to` ahead (60 0 0, past packs not cleared), and the far bot is summoned there.
+func TestStuckLeadWalksBackToWhereItLived(t *testing.T) {
+	g, d := stuckRig(t)
+	ctx := context.Background()
+	// The first call still has the frame from before the lead bot was put in the box: its summon is refused at the lead bot's new place.
+	for i := 0; i < 4 && len(g.summoned) == 0; i++ {
 		if err := d.rejoinFar(ctx); err != nil {
-			t.Fatalf("call %d: %v", i, err)
+			t.Fatalf("call %d: %v\n%s", i, err, notesOf(d.Report()))
 		}
 	}
 	l := g.lead()
-	if len(g.summoned) != 1 || dist3(Point{l.X, l.Y, l.Z}, Point{40, 0, 0}) > 6 {
+	if len(g.summoned) != 1 || dist3(Point{l.X, l.Y, l.Z}, Point{25, 0, 0}) > 6 {
 		t.Fatalf("summoned %v, lead at %.0f %.0f; orders %v\n%s", g.summoned, l.X, l.Y, g.orders, notesOf(d.Report()))
 	}
+	for _, o := range g.orders {
+		if strings.HasPrefix(o, "cmd move 6") || strings.HasPrefix(o, "cmd move 5") {
+			t.Fatalf("the lead bot was sent ahead: %v", g.orders)
+		}
+	}
 	n := notesOf(d.Report())
-	if strings.Count(n, "no safe floor is known near it") != 2 || !strings.Contains(n, "it walks to the plan's last safe stand 40.0 0.0 0.0") {
+	if strings.Count(n, "no safe floor is known near it") != 2 || !strings.Contains(n, "it walks back to 25.0 0.0 0.0, where it stood and lived") {
 		t.Fatalf("notes\n%s", n)
 	}
 }
 
-// pathGame is a fakeRemote that plans a given path (a detour round the box) to one point and straight lines to the rest.
-type pathGame struct {
-	*fakeRemote
-	round Point
-	via   []Point
+// The fallback is bounded: a walk back that fails ends the step with errLeadStuck, and so does any later need in the leg, instead of two
+// more tries and another walk every rejoin.
+func TestStuckLeadFallbackIsBounded(t *testing.T) {
+	g, d := stuckRig(t)
+	g.moveErrs = slices.Repeat([]string{"no-path"}, 200)
+	ctx := context.Background()
+	var err error
+	calls := 0
+	for ; calls < 10 && err == nil; calls++ {
+		err = d.rejoinFar(ctx)
+	}
+	if !errors.Is(err, errLeadStuck) || calls != 4 || !strings.Contains(err.Error(), "the walk back to 25.0 0.0 0.0 failed") {
+		t.Fatalf("after %d calls: %v", calls, err)
+	}
+	if err := d.rejoinFar(ctx); !errors.Is(err, errLeadStuck) || !strings.Contains(err.Error(), "used already") {
+		t.Fatalf("the next call: %v", err)
+	}
+	if len(g.summoned) != 0 {
+		t.Fatalf("summoned %v onto the lava", g.summoned)
+	}
 }
 
-func (p *pathGame) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
-	if to == p.round {
-		return append(append([]Point{from}, p.via...), to), nil
+// The fallback stand comes from the lead bot's history, newest first, and its route must keep out of deadly spots: a route whose middle
+// passes a spot is refused for an older place reached clear of it; with no clear route the recovery gives up with the reason.
+func TestFallbackStandRouteAvoidsDeadlySpots(t *testing.T) {
+	g := &stuckGame{nearGame: newNearGame(t, 3)}
+	plan := remotePlan(Leg{Name: "a", To: Point{60, 0, 0}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), objOpts(), g.clock())
+	d.deadly.history = []histPoint{{at: Point{0, 30, 0}}, {at: Point{30, 0, 0}}}
+	d.deadly.spots = []deadlySpot{{at: Point{12, 1, 0}, who: "Mali and Gorka", last: g.now}}
+	at, why, ok := d.fallbackStand(context.Background(), Point{0, 0, 0})
+	if !ok || at != (Point{0, 30, 0}) {
+		t.Fatalf("got %v %q %v, want the older place reached clear of the spot", at, why, ok)
 	}
-	return []Point{from, to}, nil
-}
-
-// A hostile near the next hop that the party reaches only round an avoid box is not pulled on the way: the tank would take the server's
-// straight way to it, across the box (rfc-live-1e: the terrace pair under the ramp, 358 yd round, 41 in a line).
-func TestHostileReachedOnlyRoundTheBoxIsNotPulledAhead(t *testing.T) {
-	g := &pathGame{fakeRemote: newFakeRemote(t)}
-	terrace := Point{-157.8, -21.5, -56.6}
-	camp := Point{-199.0, -70.0, -62.5}
-	g.round, g.via = terrace, []Point{{-286, -40, -60}, {-285, -84, -61}, {-152, -62, -58}}
-	plan := remotePlan(Leg{Name: "a", To: Point{-170.8, 2.5, -50.8}})
-	plan.Avoid = []AvoidBox{{Name: "lava", Min: Point{-226, -64, -72}, Max: Point{-142, 6, -64.2}}}
-	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
-	d.curLeg = 0
-	here := Point{-192, 0, -59.5}
-	if !d.aheadAcrossAvoid(here, terrace) {
-		t.Fatal("the terrace pair, reached only round the basin, would be pulled")
+	d.deadly.spots = append(d.deadly.spots, deadlySpot{at: Point{1, 8, 0}, who: "Wiline and Gargha", last: g.now})
+	if at, why, ok := d.fallbackStand(context.Background(), Point{0, 0, 0}); ok || !strings.Contains(why, "no safe route") {
+		t.Fatalf("both routes cross a spot: %v %q %v", at, why, ok)
 	}
-	if d.aheadAcrossAvoid(here, camp) {
-		t.Fatal("a pack the planner reaches in a line (off the lava) is pulled as before")
-	}
-	plan.Avoid = nil
-	if d.aheadAcrossAvoid(here, terrace) {
-		t.Fatal("without avoid boxes nothing changes")
+	d.deadly.history = nil
+	if _, why, ok := d.fallbackStand(context.Background(), Point{0, 0, 0}); ok || !strings.Contains(why, "no safe ground") {
+		t.Fatalf("no history: %q %v (the leg's to ahead is never taken)", why, ok)
 	}
 }

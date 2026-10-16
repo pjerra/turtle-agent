@@ -45,6 +45,10 @@ const (
 	leadOffYd       = 20.0
 	leadOffTries    = 2
 	fallbackClearYd = 10.0
+	// maxLeadFallbacks is how many fallback walks a leg may make; historyStep and historyMax shape the lead bot's history.
+	maxLeadFallbacks = 1
+	historyStep      = 5.0
+	historyMax       = 400
 )
 
 // deadlyState is the driver's memory of the deadly spots and of the members' last living frames.
@@ -59,7 +63,16 @@ type deadlyState struct {
 	// leadTries counts the moves off deadly ground since the lead bot last stood on safe ground; falling is set while the fallback walk runs.
 	leadTries int
 	falling   bool
+	// history is where the lead bot stood alive on safe ground, oldest first, a point every historyStep yards (at most historyMax);
+	// fallbacks counts the fallback walks per leg.
+	history   []histPoint
+	fallbacks map[int]int
 	noted     map[string]bool
+}
+
+type histPoint struct {
+	at Point
+	m  uint32
 }
 
 type aliveFrame struct {
@@ -131,6 +144,12 @@ func (d *RemoteDriver) observeDeadly(p tbm.PartyRec, died bool) {
 		if p.GUID == d.fr.Lead {
 			if _, bad := d.deadlyAt(partyPoint(p), p.Map); !bad {
 				st.safeLead, st.safeLeadMap, st.haveSafe, st.leadTries = partyPoint(p), p.Map, true, 0
+				if n := len(st.history); n == 0 || st.history[n-1].m != p.Map || dist3(st.history[n-1].at, partyPoint(p)) >= historyStep {
+					st.history = append(st.history, histPoint{at: partyPoint(p), m: p.Map})
+					if len(st.history) > historyMax {
+						st.history = st.history[len(st.history)-historyMax:]
+					}
+				}
 			}
 		}
 		return
@@ -246,8 +265,8 @@ func (d *RemoteDriver) overshootDeadly(ctx context.Context, here, wp Point, dd f
 
 // leadSafeForSummon makes sure the lead bot does not stand on deadly ground before a summon brings a bot to it. A lead bot on such ground is
 // sent to the nearest safe floor (the planner's floor snap, which keeps out of the avoid boxes, or its last safe position), up to
-// leadOffTries times; after that it walks to the plan's last safe stand (fallbackStand), fallbackClearYd or more outside every box and spot,
-// so the recovery never waits on a lead bot that cannot get out. It reports whether the lead bot stands on safe ground; false means no
+// leadOffTries times; after that it walks back to where it last stood and lived (leadFallback, once per leg), and when that cannot be
+// done the step fails with errLeadStuck: the recovery never loops on a lead bot that cannot get out. It reports whether the lead bot stands on safe ground; false means no
 // summon now (the call after tries again).
 func (d *RemoteDriver) leadSafeForSummon(ctx context.Context) (bool, error) {
 	l, ok := d.fr.LeadRec()
@@ -295,18 +314,27 @@ func (d *RemoteDriver) waitLeadSafe(ctx context.Context, dur time.Duration) (boo
 	return false, nil
 }
 
-// leadFallback walks the lead bot to the plan's last safe stand after the moves off deadly ground failed. The walk is the run's own (the
-// planner's path, which keeps out of the boxes); the rejoin is held while it runs. A walk that fails for another reason than the run's end
-// is noted and the tries start over.
+// errLeadStuck is the end of a recovery whose lead bot stands on deadly ground and cannot be brought off it: no safe stand with a safe
+// route, or the one fallback walk of the leg failed. The step fails with it (the run's normal failure path) instead of looping.
+var errLeadStuck = errors.New("the lead bot is stuck on deadly ground")
+
+// leadFallback walks the lead bot to the last place it stood and lived (fallbackStand: fallbackClearYd clear of every box and spot, by a
+// route that crosses none), once per leg. A second need in the same leg, no such place, or a walk that does not end on safe ground fails
+// the step with errLeadStuck.
 func (d *RemoteDriver) leadFallback(ctx context.Context, here Point, why string) (bool, error) {
 	st := &d.deadly
-	st.leadTries = 0
-	target, ok := d.fallbackStand()
-	if !ok {
-		d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot stands at %.1f %.1f %.1f, %s, and the plan has no stand %.0f yd clear of every avoid box and deadly spot: no summon", d.curLeg, here.X, here.Y, here.Z, why, fallbackClearYd))
-		return false, nil
+	if st.fallbacks == nil {
+		st.fallbacks = map[int]int{}
 	}
-	d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot did not get off deadly ground (%s) in %d tries; it walks to the plan's last safe stand %.1f %.1f %.1f, then the party is summoned there", d.curLeg, why, leadOffTries, target.X, target.Y, target.Z))
+	if st.fallbacks[d.curLeg] >= maxLeadFallbacks {
+		return false, fmt.Errorf("%w: at %.1f %.1f %.1f (%s), and leg %d's walk to a safe stand was used already", errLeadStuck, here.X, here.Y, here.Z, why, d.curLeg)
+	}
+	st.fallbacks[d.curLeg]++
+	target, reason, ok := d.fallbackStand(ctx, here)
+	if !ok {
+		return false, fmt.Errorf("%w: at %.1f %.1f %.1f (%s), and %s", errLeadStuck, here.X, here.Y, here.Z, why, reason)
+	}
+	d.rep.note(fmt.Sprintf("leg %d: rejoin: the lead bot did not get off deadly ground (%s) in %d tries; it walks back to %.1f %.1f %.1f, where it stood and lived, by a route clear of every avoid box and deadly spot, then the party is summoned there", d.curLeg, why, leadOffTries, target.X, target.Y, target.Z))
 	d.tr.Event("lead_off_deadly", map[string]any{"leg": d.curLeg, "x": here.X, "y": here.Y, "z": here.Z, "to_x": target.X, "to_y": target.Y, "to_z": target.Z, "why": why, "fallback": true})
 	st.falling = true
 	err := d.walkArrive(ctx, target, d.opt.MoveArrive)
@@ -315,38 +343,74 @@ func (d *RemoteDriver) leadFallback(ctx context.Context, here Point, why string)
 		if ctx.Err() != nil || errors.Is(err, errWipe) || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) {
 			return false, err
 		}
-		d.rep.note(fmt.Sprintf("leg %d: rejoin: the walk to the last safe stand failed: %v", d.curLeg, err))
-		return false, nil
+		return false, fmt.Errorf("%w: the walk back to %.1f %.1f %.1f failed: %v", errLeadStuck, target.X, target.Y, target.Z, err)
 	}
 	d.look()
 	if l, ok := d.fr.LeadRec(); ok {
 		if _, bad := d.deadlyAt(partyPoint(l), l.Map); !bad {
+			st.leadTries = 0
 			return true, nil
 		}
 	}
-	return false, nil
+	return false, fmt.Errorf("%w: the walk back to %.1f %.1f %.1f did not leave the lead bot on safe ground", errLeadStuck, target.X, target.Y, target.Z)
 }
 
-// fallbackStand is the plan's last safe stand for the lead bot: the current leg's `to` and via points, then those of the legs before it,
-// back to the entrance, the first that lies fallbackClearYd or more outside every avoid box and deadly spot.
-func (d *RemoteDriver) fallbackStand() (Point, bool) {
-	var cands []Point
-	for i := min(max(d.curLeg, 0), len(d.plan.Legs)-1); i >= 0; i-- {
-		l := d.plan.Legs[i]
-		cands = append(cands, l.To)
-		for k := len(l.Via) - 1; k >= 0; k-- {
-			if !l.Via[k].GMCross {
-				cands = append(cands, l.Via[k].Point)
+// fallbackStand is where the stuck lead bot goes: the most recent place in its history (positions it stood on alive, safe at the time,
+// behind the run's progress: never a point ahead past packs not yet cleared) that lies fallbackClearYd or more clear of every avoid box and
+// deadly spot, and to which the planner's route (which keeps out of the boxes) is complete and passes no deadly spot and no box. Without a
+// planner the straight line must. reason says why there is none.
+func (d *RemoteDriver) fallbackStand(ctx context.Context, from Point) (Point, string, bool) {
+	hist := d.deadly.history
+	if len(hist) == 0 {
+		return Point{}, "it has stood on no safe ground in this run", false
+	}
+	clear := 0
+	for i := len(hist) - 1; i >= 0; i-- {
+		c := hist[i]
+		if c.m != d.plan.Map || !d.clearOfDeadly(c.at, fallbackClearYd) {
+			continue
+		}
+		clear++
+		route := []Point{from, c.at}
+		if pl, ok := d.g.(PathPlanner); ok {
+			pts, err := pl.PlanPath(ctx, d.plan.Map, from, c.at)
+			if err != nil || len(pts) < 2 || dist3(pts[len(pts)-1], c.at) > 5 {
+				continue
+			}
+			route = pts
+		}
+		if d.routeSafe(route) {
+			return c.at, "", true
+		}
+	}
+	if clear == 0 {
+		return Point{}, fmt.Sprintf("none of the %d places it stood on is %.0f yd clear of the avoid boxes and deadly spots", len(hist), fallbackClearYd), false
+	}
+	return Point{}, fmt.Sprintf("no safe route leads to any of the %d places it stood on that are clear (each crosses an avoid box or a deadly spot, or has no path)", clear), false
+}
+
+// routeSafe says whether a route keeps out of every avoid box (sampled every yard) and stays deadlySpotYd or more from every deadly spot
+// (each segment's distance to it).
+func (d *RemoteDriver) routeSafe(route []Point) bool {
+	for i := 1; i < len(route); i++ {
+		a, b := route[i-1], route[i]
+		for _, s := range d.deadly.spots {
+			if s.mapI == d.plan.Map && distToSegment(s.at, a, b) < deadlySpotYd {
+				return false
+			}
+		}
+		n := int(math.Ceil(dist3(a, b))) + 1
+		for k := 0; k <= n; k++ {
+			p := lerp(a, b, float64(k)/float64(n))
+			if i == 1 && dist3(p, a) < leadOffYd/4 {
+				continue // the first yards leave the lead bot's own deadly ground
+			}
+			if _, in := d.plan.InAvoid(p); in {
+				return false
 			}
 		}
 	}
-	cands = append(cands, d.plan.Entrance)
-	for _, c := range cands {
-		if d.clearOfDeadly(c, fallbackClearYd) {
-			return c, true
-		}
-	}
-	return Point{}, false
+	return true
 }
 
 // clearOfDeadly says whether p lies yd or more outside every avoid box (across; within its height band widened by yd) and every deadly spot.

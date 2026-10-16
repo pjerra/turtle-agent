@@ -612,8 +612,10 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   line would pass over a box (the server walks each `move` on its own navmesh); does not pull on the way a hostile the party reaches only
   round a box (path longer than twice the straight line plus 25 yd); summons no bot onto a lead bot standing in a box or on a **deadly
   spot**; and raises no body lying in a box in place (it releases it). Before a summon a lead bot on such ground is moved to the nearest
-  safe floor (up to 20 yd), twice at most; then it walks to the plan's last safe stand (the current leg's `to` or via points, then the
-  earlier legs', then the entrance: the first 10 yd or more clear of every box and spot) and the party is summoned there. A **silent
+  safe floor (up to 20 yd), twice at most; then, once per leg, it walks back to the most recent place it stood on alive and safe in this run
+  (its history, never a point ahead) that is 10 yd or more clear of every box and spot and reached by a route that crosses no box and passes
+  no spot within 6 yd, and the party is summoned there. No such place, a failed walk back, or a second need in the leg fails the step
+  (`the lead bot is stuck on deadly ground`): the recovery never loops. A **silent
   death** is a bot that died out of combat at 80% health or more one frame before (the feed has no line for lava, slime or a fall):
   inside a box it is only noted; outside, one alone is noted and a second within 6 yd makes a deadly spot. A spot is forgotten 5 min
   after its last death, or once a living bot has stood on it 5 s. Each silent death is a `silent_death` trace event.
@@ -1321,7 +1323,7 @@ Events (`ev`; fields beside `ev`, a field named like an envelope field is writte
 | `rez` | remote: a dead bot was left to a living caster's resurrection: `leg`, `bot`, `raised`, `seconds`, `why` |
 | `rejoin_tp` | remote: the commander sent `cmd summon <bot>` to bring a far bot to the lead bot: `leg`, `bot`, `reply`, `other_map`, `dist` (yd), `code` when refused |
 | `silent_death` | remote: a bot died out of combat at 80% health or more one frame before (lava, slime, a fall: the feed has no line for it): `name`, `leg`, `x y z`, `map`, `hp_pct`, `spot` (`avoid_box`, `lone` or `deadly`: a second such death within 6 yd made a deadly spot, no summon near it for 5 min) |
-| `lead_off_deadly` | remote: before a summon, the lead bot stood in an avoid box or on a deadly spot and was sent to a safe floor (`try` 1-2) or, after two tries, walked to the plan's last safe stand (`fallback`): `leg`, `x y z`, `to_x to_y to_z`, `why` |
+| `lead_off_deadly` | remote: before a summon, the lead bot stood in an avoid box or on a deadly spot and was sent to a safe floor (`try` 1-2) or, after two tries, walked back to where it last stood and lived (`fallback`): `leg`, `x y z`, `to_x to_y to_z`, `why` |
 | `feed_stall` | remote: no new feed frame for the stale limit |
 | `roster` | remote: the party names in the first feed frame |
 | `note` | the report's notes, as they are made |
