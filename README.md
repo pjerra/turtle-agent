@@ -3161,9 +3161,9 @@ relative to a directory descriptor opened with `O_NOFOLLOW` (the edits folder on
 link cannot redirect a write (Linux; the store does not run elsewhere).
 `--edit-source` is held the same way: opened once at start, each plan read with `openat(..., O_NOFOLLOW)` and accepted only as a regular
 file; the folder checks compare the held folders' identities (device, inode), run again around the write (a failed one removes the version),
-and stop the editor when a held folder's path no longer names it. A save with the same base and ops as the latest version returns that
-version (`"unchanged": true`, no new number). Saves are bounded: 30 a minute per token label and 500 per plan per 24 hours (HTTP 429), and
-none while the edits folder's filesystem has under 200 MB free (HTTP 507).
+and stop the editor when a held folder's path no longer names it. A save with the same base, ops and note as the latest version returns that
+version (`"unchanged": true`, no new number, its stored author). Saves are bounded: 30 a minute per token label and 500 per plan per 24 hours (HTTP 429), and
+none that would leave the edits folder's filesystem under 200 MB free, the version's files counted (HTTP 507).
 The commander run reloads its plan file at every leg, so anything written into a running slot's `dungeons_dir` would be taken by that run
 unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-dir` is, contains or lies inside any slot's `dungeons_dir`
 (read from `settings*.json`), or when `--edit-source` lies inside one. The guard fails closed: a settings file that cannot be read or decoded,
