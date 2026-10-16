@@ -67,12 +67,18 @@ type deadlyState struct {
 	// fallbacks counts the fallback walks per leg.
 	history   []histPoint
 	fallbacks map[int]int
+	// progress is the run's place in the plan: leg*progressLeg plus the count of distinct actions taken in the leg (setProgress). progLeg
+	// and progLabel are the action it was last set from.
+	progress  int
+	progLeg   int
+	progLabel string
 	noted     map[string]bool
 }
 
 type histPoint struct {
-	at Point
-	m  uint32
+	at       Point
+	m        uint32
+	progress int // the run's progress when the lead bot stood there (setProgress)
 }
 
 type aliveFrame struct {
@@ -145,7 +151,7 @@ func (d *RemoteDriver) observeDeadly(p tbm.PartyRec, died bool) {
 			if _, bad := d.deadlyAt(partyPoint(p), p.Map); !bad {
 				st.safeLead, st.safeLeadMap, st.haveSafe, st.leadTries = partyPoint(p), p.Map, true, 0
 				if n := len(st.history); n == 0 || st.history[n-1].m != p.Map || dist3(st.history[n-1].at, partyPoint(p)) >= historyStep {
-					st.history = append(st.history, histPoint{at: partyPoint(p), m: p.Map})
+					st.history = append(st.history, histPoint{at: partyPoint(p), m: p.Map, progress: st.progress})
 					if len(st.history) > historyMax {
 						st.history = st.history[len(st.history)-historyMax:]
 					}
@@ -314,6 +320,58 @@ func (d *RemoteDriver) waitLeadSafe(ctx context.Context, dur time.Duration) (boo
 	return false, nil
 }
 
+// progressLeg separates the legs in deadlyState.progress.
+const progressLeg = 1_000_000
+
+// setProgress records the run's place from the action the run loop takes: a new leg starts at its own count, a new action of the leg
+// counts one more, the same action again (a retry) does not. A place behind the last one (the run was put back) drops the history ahead of it.
+func (d *RemoteDriver) setProgress(a Action) {
+	st := &d.deadly
+	if a.Kind == ActFailed || a.Kind == ActWait || a.Kind == ActDone {
+		return
+	}
+	n := 0
+	switch {
+	case a.Leg != st.progLeg || st.progLabel == "":
+		n = 0
+	case a.Label != st.progLabel:
+		n = st.progress%progressLeg + 1
+	default:
+		return
+	}
+	p := a.Leg*progressLeg + n
+	st.progLeg, st.progLabel = a.Leg, a.Label
+	if p < st.progress {
+		d.dropHistory(func(h histPoint) bool { return h.progress > p }, "the run went back")
+	}
+	st.progress = p
+}
+
+// rollbackHistory drops the places the lead bot stood on during the step now under way: the step ended in a wipe, so the ground it reached
+// in it is not known safe (the pack that killed the party may stand there).
+func (d *RemoteDriver) rollbackHistory() {
+	p := d.deadly.progress
+	d.dropHistory(func(h histPoint) bool { return h.progress >= p }, "the step under way ended in a wipe")
+}
+
+func (d *RemoteDriver) dropHistory(drop func(histPoint) bool, why string) {
+	st := &d.deadly
+	keep := st.history[:0]
+	n := 0
+	for _, h := range st.history {
+		if drop(h) {
+			n++
+			continue
+		}
+		keep = append(keep, h)
+	}
+	st.history = keep
+	if n > 0 {
+		st.haveSafe = false // the last safe position may be one of them
+		d.rep.note(fmt.Sprintf("leg %d: %d place(s) of the lead bot's safe history dropped: %s", d.curLeg, n, why))
+	}
+}
+
 // errLeadStuck is the end of a recovery whose lead bot stands on deadly ground and cannot be brought off it: no safe stand with a safe
 // route, or the one fallback walk of the leg failed. The step fails with it (the run's normal failure path) instead of looping.
 var errLeadStuck = errors.New("the lead bot is stuck on deadly ground")
@@ -367,6 +425,9 @@ func (d *RemoteDriver) fallbackStand(ctx context.Context, from Point) (Point, st
 	clear := 0
 	for i := len(hist) - 1; i >= 0; i-- {
 		c := hist[i]
+		if c.progress > d.deadly.progress {
+			continue // ahead of where the run is now (it was put back): the ground past it is not known safe
+		}
 		if c.m != d.plan.Map || !d.clearOfDeadly(c.at, fallbackClearYd) {
 			continue
 		}
@@ -389,28 +450,84 @@ func (d *RemoteDriver) fallbackStand(ctx context.Context, from Point) (Point, st
 	return Point{}, fmt.Sprintf("no safe route leads to any of the %d places it stood on that are clear (each crosses an avoid box or a deadly spot, or has no path)", clear), false
 }
 
-// routeSafe says whether a route keeps out of every avoid box (sampled every yard) and stays deadlySpotYd or more from every deadly spot
-// (each segment's distance to it).
+// routeSafe says whether a route keeps out of every avoid box and every deadly spot, exactly: each segment is tested against each box
+// (segmentBox, the slab test) and against each spot (its distance to the spot's centre, deadlySpotYd). The route's first segment may start
+// on the deadly ground the lead bot stands on, but only to leave it: out of a box without going deeper into it (leavesBox), away from a
+// spot's centre, and never into another box or spot.
 func (d *RemoteDriver) routeSafe(route []Point) bool {
 	for i := 1; i < len(route); i++ {
 		a, b := route[i-1], route[i]
 		for _, s := range d.deadly.spots {
-			if s.mapI == d.plan.Map && distToSegment(s.at, a, b) < deadlySpotYd {
-				return false
+			if s.mapI != d.plan.Map || distToSegment(s.at, a, b) >= deadlySpotYd {
+				continue
 			}
+			// Starting on the spot: allowed only straight away from its centre (the distance then only grows).
+			if i == 1 && hdist(s.at, a) < deadlySpotYd && math.Abs(float64(s.at.Z-a.Z)) <= deadlySpotDZ &&
+				float64(b.X-a.X)*float64(a.X-s.at.X)+float64(b.Y-a.Y)*float64(a.Y-s.at.Y) >= 0 {
+				continue
+			}
+			return false
 		}
-		n := int(math.Ceil(dist3(a, b))) + 1
-		for k := 0; k <= n; k++ {
-			p := lerp(a, b, float64(k)/float64(n))
-			if i == 1 && dist3(p, a) < leadOffYd/4 {
-				continue // the first yards leave the lead bot's own deadly ground
+		for _, bx := range d.plan.Avoid {
+			if _, _, hit := segmentBox(a, b, bx); !hit {
+				continue
 			}
-			if _, in := d.plan.InAvoid(p); in {
-				return false
+			if i == 1 && bx.Contains(a) && leavesBox(a, b, bx) {
+				continue
 			}
+			return false
 		}
 	}
 	return true
+}
+
+// segmentBox is the slab test of the segment a-b against the box: whether it meets it, and the fractions of the way where it enters and
+// leaves (clipped to 0..1).
+func segmentBox(a, b Point, bx AvoidBox) (enter, exit float64, hit bool) {
+	enter, exit = 0, 1
+	for _, ax := range [3]struct{ a, b, lo, hi float32 }{{a.X, b.X, bx.Min.X, bx.Max.X}, {a.Y, b.Y, bx.Min.Y, bx.Max.Y}, {a.Z, b.Z, bx.Min.Z, bx.Max.Z}} {
+		d := float64(ax.b - ax.a)
+		if d == 0 {
+			if ax.a < ax.lo || ax.a > ax.hi {
+				return 0, 0, false
+			}
+			continue
+		}
+		t1, t2 := float64(ax.lo-ax.a)/d, float64(ax.hi-ax.a)/d
+		if t1 > t2 {
+			t1, t2 = t2, t1
+		}
+		enter, exit = max(enter, t1), min(exit, t2)
+		if enter > exit {
+			return 0, 0, false
+		}
+	}
+	return enter, exit, true
+}
+
+// leavesBox says whether a segment that starts inside the box only leaves it: it gets out within leadOffYd, and its depth across the box
+// (the distance to the nearest side, in x and y) never grows on the way out. The depth is the least of four linear functions along the
+// segment, so it never grows once it does not grow at the start.
+func leavesBox(a, b Point, bx AvoidBox) bool {
+	_, exit, hit := segmentBox(a, b, bx)
+	if !hit || exit >= 1 || exit*dist3(a, b) > leadOffYd {
+		return false // the route ends in the box, or stays in it too long
+	}
+	dx, dy := float64(b.X-a.X), float64(b.Y-a.Y)
+	sides := [4]struct{ dist, rate float64 }{
+		{float64(a.X - bx.Min.X), dx}, {float64(bx.Max.X - a.X), -dx}, {float64(a.Y - bx.Min.Y), dy}, {float64(bx.Max.Y - a.Y), -dy},
+	}
+	least := math.Inf(1)
+	for _, s := range sides {
+		least = math.Min(least, s.dist)
+	}
+	rate := math.Inf(1) // the depth's rate at the start: the least rate among the nearest sides
+	for _, s := range sides {
+		if s.dist <= least+1e-3 {
+			rate = math.Min(rate, s.rate)
+		}
+	}
+	return rate < 0
 }
 
 // clearOfDeadly says whether p lies yd or more outside every avoid box (across; within its height band widened by yd) and every deadly spot.

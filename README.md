@@ -613,8 +613,10 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   round a box (path longer than twice the straight line plus 25 yd); summons no bot onto a lead bot standing in a box or on a **deadly
   spot**; and raises no body lying in a box in place (it releases it). Before a summon a lead bot on such ground is moved to the nearest
   safe floor (up to 20 yd), twice at most; then, once per leg, it walks back to the most recent place it stood on alive and safe in this run
-  (its history, never a point ahead) that is 10 yd or more clear of every box and spot and reached by a route that crosses no box and passes
-  no spot within 6 yd, and the party is summoned there. No such place, a failed walk back, or a second need in the leg fails the step
+  (its history, each place tagged with the run's progress: never one ahead of where the run is now; a run put back, and a wipe, drop the
+  places past it or of the step under way) that is 10 yd or more clear of every box and spot and reached by a route that crosses no box
+  (each segment tested exactly against each box; the first may only leave the box the lead bot stands in, never deeper) and passes no spot
+  within 6 yd, and the party is summoned there. No such place, a failed walk back, or a second need in the leg fails the step
   (`the lead bot is stuck on deadly ground`): the recovery never loops. A **silent
   death** is a bot that died out of combat at 80% health or more one frame before (the feed has no line for lava, slime or a fall):
   inside a box it is only noted; outside, one alone is noted and a second within 6 yd makes a deadly spot. A spot is forgotten 5 min

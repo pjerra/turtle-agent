@@ -800,6 +800,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		}
 		d.objectTouched = false
 		a := d.liveStep(d.st.Next()) // a leg start or a pull-group start: the tunables and the plan are read again (remote_tune.go)
+		d.setProgress(a)
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		d.wd.setStep(a.Label)
@@ -2414,6 +2415,7 @@ func (d *RemoteDriver) deadMembers() []tbm.PartyRec {
 // runs when the step goes on. It needs RecoverWipe.
 func (d *RemoteDriver) recoverWipe(ctx context.Context) error {
 	d.rep.note(fmt.Sprintf("wipe %d: reviving the party with .bot cmd revive (recover_wipe)", d.wipeRecover))
+	d.rollbackHistory()
 	// The wipe is being recovered from: the deaths already counted stay counted.
 	if err := d.reviveDead(ctx, "the party wiped"); err != nil {
 		return err

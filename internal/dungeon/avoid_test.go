@@ -443,3 +443,80 @@ func TestFallbackStandRouteAvoidsDeadlySpots(t *testing.T) {
 		t.Fatalf("no history: %q %v (the leg's to ahead is never taken)", why, ok)
 	}
 }
+
+// The history is progress-aware: a place the lead bot stood on further on in the plan is never a fallback once the run was put back behind
+// it, and a wipe drops the places of the step it ended (Codex review of #211, round 3).
+func TestFallbackHistoryFollowsTheRunsProgress(t *testing.T) {
+	g := &stuckGame{nearGame: newNearGame(t, 3)}
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{60, 0, 0}}, Leg{Name: "b", To: Point{90, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	ctx := context.Background()
+	d.setProgress(Action{Kind: ActWalk, Leg: 0, Label: "leg 0 walk"})
+	d.deadly.history = append(d.deadly.history, histPoint{at: Point{0, 30, 0}, progress: d.deadly.progress})
+	d.setProgress(Action{Kind: ActWalk, Leg: 1, Label: "leg 1 walk"})
+	d.deadly.history = append(d.deadly.history, histPoint{at: Point{30, 0, 0}, progress: d.deadly.progress})
+	if at, _, ok := d.fallbackStand(ctx, Point{0, 0, 0}); !ok || at != (Point{30, 0, 0}) {
+		t.Fatalf("at the forward place: %v %v", at, ok)
+	}
+	// An entry ahead of the progress is never taken, even before it is dropped.
+	d.deadly.progress = 0
+	if at, _, ok := d.fallbackStand(ctx, Point{0, 0, 0}); !ok || at != (Point{0, 30, 0}) {
+		t.Fatalf("an entry ahead of the progress was taken: %v %v", at, ok)
+	}
+	// The run put back to leg 0: the forward place is dropped.
+	d.deadly.progress = 1 * progressLeg
+	d.setProgress(Action{Kind: ActWalk, Leg: 0, Label: "leg 0 walk"})
+	if len(d.deadly.history) != 1 || d.deadly.history[0].at != (Point{0, 30, 0}) {
+		t.Fatalf("history after the roll back: %v", d.deadly.history)
+	}
+	// A wipe drops the places of the step under way, not the ones before it.
+	d.setProgress(Action{Kind: ActPull, Leg: 0, Label: "leg 0 pull group 1"})
+	d.deadly.history = append(d.deadly.history, histPoint{at: Point{0, 40, 0}, progress: d.deadly.progress})
+	d.rollbackHistory()
+	if len(d.deadly.history) != 1 || d.deadly.history[0].at != (Point{0, 30, 0}) {
+		t.Fatalf("history after the wipe: %v", d.deadly.history)
+	}
+	if !strings.Contains(notesOf(d.Report()), "the run went back") || !strings.Contains(notesOf(d.Report()), "ended in a wipe") {
+		t.Fatalf("notes\n%s", notesOf(d.Report()))
+	}
+}
+
+// routeSafe tests every segment against every box exactly: a corner clipped for under a yard and a box thinner than a yard between
+// whole-yard samples are both refused; a route that starts inside a box may only leave it, not go deeper (round 3).
+func TestRouteSafeIsExact(t *testing.T) {
+	g := &stuckGame{nearGame: newNearGame(t, 3)}
+	plan := remotePlan(Leg{Name: "a", To: Point{60, 0, 0}})
+	d := NewRemoteDriver(plan, g, DefaultConfig(), objOpts(), g.clock())
+	corner := AvoidBox{Name: "corner", Min: Point{5, 0, -1}, Max: Point{6, 1, 1}}
+	plan.Avoid = []AvoidBox{corner}
+	clip := []Point{{0, -4.6, 0}, {10, 5.4, 0}} // through the box's corner, about 0.85 yd inside
+	if en, ex, hit := segmentBox(clip[0], clip[1], corner); !hit || (ex-en)*dist3(clip[0], clip[1]) > 1 {
+		t.Fatalf("segmentBox %v %v %v", en, ex, hit)
+	}
+	if d.routeSafe(clip) {
+		t.Fatal("a corner clipped for under a yard was let through")
+	}
+	plan.Avoid = []AvoidBox{{Name: "thin", Min: Point{5.3, -1, -1}, Max: Point{5.6, 1, 1}}}
+	if d.routeSafe([]Point{{0, 0, 0}, {10, 0, 0}}) {
+		t.Fatal("a box 0.3 yd thick between the whole-yard samples was let through")
+	}
+	if !d.routeSafe([]Point{{0, 2, 0}, {10, 2, 0}}) {
+		t.Fatal("a route beside the box was refused")
+	}
+	big := AvoidBox{Name: "lava", Min: Point{-10, -10, -1}, Max: Point{10, 10, 1}}
+	plan.Avoid = []AvoidBox{big}
+	if d.routeSafe([]Point{{8, 0, 0}, {-12, 0, 0}}) {
+		t.Fatal("a route from inside the box that goes deeper for 8 yd was let through")
+	}
+	if !d.routeSafe([]Point{{8, 0, 0}, {15, 0, 0}, {30, 0, 0}}) {
+		t.Fatal("a route straight out of the box was refused")
+	}
+	if d.routeSafe([]Point{{8, 0, 0}, {15, 0, 0}, {0, 15, 0}, {0, 30, 0}}) {
+		t.Fatal("a route that leaves the box and comes back in was let through")
+	}
+	// A deadly spot: starting on it, only straight away from its centre.
+	plan.Avoid = nil
+	d.deadly.spots = []deadlySpot{{at: Point{0, 0, 0}, who: "Mali and Gorka", last: g.now}}
+	if !d.routeSafe([]Point{{2, 0, 0}, {20, 0, 0}}) || d.routeSafe([]Point{{2, 0, 0}, {-20, 0, 0}}) {
+		t.Fatal("leaving a spot: away from its centre allowed, across it refused")
+	}
+}
