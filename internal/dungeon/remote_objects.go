@@ -683,6 +683,9 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 			return err
 		}
 	}
+	if a.Kind == ActLoot && a.Batch != "" && d.gravesOpenBy() == GravesOpenAgent {
+		return d.doGraveByAgent(ctx, a)
+	}
 	if _, err := d.keepNear(ctx); err != nil {
 		return err
 	}
@@ -769,8 +772,21 @@ func (d *RemoteDriver) stepLoot(ctx context.Context, a Action, carrier string, r
 		return err
 	})
 	if err != nil {
+		// An exact spawn the server says is not on the carrier's map, while the carrier stands alive on the plan's map, is not there: opened
+		// and despawned, or never spawned (live, zf-r4-s5: three graves of a batch, "No game object with that GUID is on the bot's map", then
+		// the agent "took nothing" and the step counted as opened). No fallback can open it; it is skipped and not counted as opened.
+		if a.SpawnGUID != 0 && res.Code() == "invalid-target" && d.aliveOnPlanMap(carrier) {
+			d.rep.note(fmt.Sprintf("%s: the object %s is not on the map for %s, who is alive on the plan's map: it is gone (opened and despawned, or not spawned); skipped, not counted as opened", a.Label, tbm.GUIDArg(a.SpawnGUID), carrier))
+			return "the object is gone (invalid-target)", nil
+		}
 		if failed {
-			return "", d.fallbackLoot(ctx, a, carrier, rec, err)
+			d.lastFallbackTook = false
+			ferr := d.fallbackLoot(ctx, a, carrier, rec, err)
+			if ferr == nil && a.SpawnGUID != 0 && !d.lastFallbackTook {
+				d.rep.note(fmt.Sprintf("%s: the agent took nothing from the object %s; not counted as opened", a.Label, tbm.GUIDArg(a.SpawnGUID)))
+				return "the agent took nothing", nil
+			}
+			return "", ferr
 		}
 		return "", err
 	}
@@ -1116,4 +1132,32 @@ func (d *RemoteDriver) lootBossItem(ctx context.Context, a Action, carrier strin
 	}
 	rec.gained(fmt.Sprintf("%d x1", it.Entry))
 	return "", nil
+}
+
+// aliveOnPlanMap says whether the bot is alive in the feed on the plan's map.
+func (d *RemoteDriver) aliveOnPlanMap(name string) bool {
+	d.look()
+	m, ok := d.memberByName(name)
+	return ok && !m.Dead && m.Map == d.plan.Map
+}
+
+// doGraveByAgent is a batch's loot_object step done by the agent's own character (graves_open_by agent), with the same record and the same
+// batch accounting as the carrier's.
+func (d *RemoteDriver) doGraveByAgent(ctx context.Context, a Action) error {
+	rec := d.newObjRec(a.Leg, a.Label, "loot_object", "agent")
+	note, err := d.stepLootByAgent(ctx, a, rec)
+	if err == nil {
+		err = d.batchStepDone(ctx, a, note != "")
+	}
+	if err != nil {
+		rec.finish("failed", err, note)
+		d.emit(events.KindDungeonStep, a.Label+": "+err.Error(), map[string]any{"leg": a.Leg, "carrier": "agent", "ok": false, "mode": "remote"})
+		return fmt.Errorf("%s: %w", a.Label, err)
+	}
+	result := "done"
+	if note != "" {
+		result = "skipped"
+	}
+	rec.finish(result, nil, note)
+	return nil
 }

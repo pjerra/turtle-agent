@@ -181,9 +181,31 @@ func (d *RemoteDriver) confirmGone(ctx context.Context, sp fightSpec, cl *cleari
 		if found {
 			return false, "", nil
 		}
+		for try := 1; !seen && try <= lookWalkTries; try++ {
+			// The approach left the lead bot where it was (a path that ends short of a pack off the mesh gives no look point: live, zf-r4-s4,
+			// Velratha group 11 at 1712 1188, the lead bot 91 yd away and not one order sent): walk toward the position itself, straight at it
+			// from where the lead bot is, then look again, before the pack is given up on.
+			here, ok := d.leadPos()
+			if !ok || dist3(here, at) <= float64(ClearSeeRadius) {
+				break
+			}
+			stand := lerp(here, at, (dist3(here, at)-float64(d.tx.LookStandoff))/dist3(here, at))
+			d.rep.note(fmt.Sprintf("leg %d: no view of the pack at %.0f %.0f %.0f from %.0f yd; walking toward it to %.0f %.0f %.0f (try %d of %d)", d.curLeg, at.X, at.Y, at.Z, dist3(here, at), stand.X, stand.Y, stand.Z, try, lookWalkTries))
+			if werr := d.walkArrive(ctx, stand, d.tx.LookArrive); werr != nil {
+				if runEnded(ctx, werr) {
+					return false, "", werr
+				}
+				d.rep.note(fmt.Sprintf("leg %d: the walk toward the pack at %.0f %.0f %.0f failed: %v", d.curLeg, at.X, at.Y, at.Z, werr))
+			}
+			if found, seen, err = d.lookAt(ctx, sp, i); err != nil {
+				return false, "", err
+			} else if found {
+				return false, "", nil
+			}
+		}
 		if !seen {
 			here, _ := d.leadPos()
-			return false, "", fmt.Errorf("could not get a view of the pack at %.0f %.0f %.0f (the lead bot is %.0f yd away): not counting it as cleared", at.X, at.Y, at.Z, dist3(here, at))
+			return false, "", fmt.Errorf("could not get a view of the pack at %.0f %.0f %.0f (the lead bot is %.0f yd away, after %d walks toward it): not counting it as cleared", at.X, at.Y, at.Z, dist3(here, at), lookWalkTries)
 		}
 		cl.looked[i] = true
 		byLooking = true
@@ -194,6 +216,9 @@ func (d *RemoteDriver) confirmGone(ctx context.Context, sp fightSpec, cl *cleari
 	}
 	return true, strings.Join(dedupe(reasons), "; "), nil
 }
+
+// lookWalkTries is how often the lead bot is walked straight toward a pack it has no view of before the pack is given up on.
+const lookWalkTries = 3
 
 // lookAt waits at position i for two whole frames that list nothing the step can pick, with the lead bot within ClearSeeRadius of it.
 // found is true when a hostile of those entries showed up (pickTarget can then pick it); seen when the two frames came.

@@ -124,7 +124,7 @@ func TestRemoteHalfThePartyDeadStopsTheLeg(t *testing.T) {
 	o := opts()
 	o.Bots = append(o.Bots, "Roguey", "Huntey")
 	rep, err := runRemote(t, g, plan, o, nil)
-	if err == nil || !strings.Contains(err.Error(), "wipe") || rep.PartyDowns != 1 || rep.Wipes != 0 {
+	if err == nil || !strings.Contains(err.Error(), "wipe") || rep.PartyDowns != 1 || rep.Wipes != 1 {
 		t.Fatalf("%v wipes %d party downs %d\n%s", err, rep.Wipes, rep.PartyDowns, notesOf(rep))
 	}
 	if !strings.Contains(notesOf(rep), "3 of 5 bots are dead") {
@@ -159,7 +159,7 @@ func TestRemoteHalfThePartyDeadIsRecoveredWithRecoverWipe(t *testing.T) {
 	o.Bots = append(o.Bots, "Roguey", "Huntey")
 	o.RezWait = -1
 	rep, err := runRemote(t, g, plan, o, func(c *Config) { c.RecoverWipe = true })
-	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || rep.Wipes != 0 || len(g.revived) != 3 {
+	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || rep.Wipes != 1 || len(g.revived) != 3 {
 		t.Fatalf("%v %s wipes %d revived %v\n%s", err, rep.State, rep.Wipes, g.revived, notesOf(rep))
 	}
 }

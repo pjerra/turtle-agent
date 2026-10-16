@@ -196,6 +196,10 @@ type dungeonRunParams struct {
 	// plan's own batches (3 to 6 chests). Each batch is noted as "graves-batch: ..." and listed in the report's remote.grave_batches.
 	GravesBatch int                 `json:"graves_batch,omitempty"`
 	GravesRamp  *dungeon.GravesRamp `json:"graves_ramp,omitempty"`
+	// GravesOpenBy is who opens a batch's graves: "carrier" (default: the carrier bot's `cmd open`, which the module refuses while the carrier is
+	// in combat) or "agent" (the agent's own GM character opens them with .go xyz and its Opening cast, so that the opens go on while the summons
+	// fight; needs a GM account and "gm visible off" in setup, refused up front otherwise).
+	GravesOpenBy string `json:"graves_open_by,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the

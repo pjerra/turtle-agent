@@ -20,6 +20,7 @@ type handsGame struct {
 	*nearGame
 	mine        map[uint32]uint32 // the agent's own bags
 	chestHas    []ItemCount       // what the agent's Opening cast takes out of the chest
+	emptyChest  bool              // the Opening cast takes nothing: no items and no money
 	lootErrs    []error           // answers of the next LootObject calls
 	loots       int
 	useObjs     int
@@ -52,6 +53,9 @@ func (g *handsGame) LootObject(ctx context.Context, guid packet.GUID) (Looted, e
 		return Looted{}, err
 	}
 	g.advance(5 * time.Second) // the Opening cast
+	if g.emptyChest {
+		return Looted{}, nil
+	}
 	for _, it := range g.chestHas {
 		g.mine[it.Entry] += it.Count
 	}
