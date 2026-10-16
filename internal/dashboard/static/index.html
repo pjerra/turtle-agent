@@ -9,6 +9,7 @@
 <body>
 <header>
   <h1>Commanders</h1>
+  <select id="route" aria-label="Page: the live runs, or the plan view of a plan"><option value="">Runs (live)</option></select>
   <span id="summary" class="muted"></span>
   <span class="spacer"></span>
   <span id="updated" class="muted"></span>
@@ -19,13 +20,14 @@
 </header>
 <nav id="tabs" hidden></nav>
 <main id="cards"><p class="muted" id="empty">Looking for agents...</p></main>
-<footer class="muted" id="foot">Read-only: this page only reads the agents' status. It never sends a command.</footer>
+<footer class="muted" id="foot">Read-only: this page only reads the agents' status and the plan files. It never sends a command.</footer>
 <script src="view.js"></script>
 <script src="text.js"></script>
 <script src="layers.js"></script>
 <script src="paths.js"></script>
 <script src="pathdraw.js"></script>
 <script src="unitinfo.js"></script>
+<script src="planview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

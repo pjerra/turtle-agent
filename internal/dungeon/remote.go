@@ -2,9 +2,12 @@ package dungeon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -456,6 +459,12 @@ type RemoteReport struct {
 	// and new. `turtle-agent tune-diff <trace>` turns them into a patch for the tunables file and the plan file.
 	TuneChanges []TuneChange `json:"tune_changes"`
 	PlanReloads []PlanReload `json:"plan_reloads"`
+
+	// PlanFile is the plan file the run was loaded from and PlanSHA256 the sha256 (hex) of the last version of it the run read (at the start,
+	// then at each live reload that found the file changed): the live dashboard draws exactly this file and tells when the file on disk has
+	// moved on. Empty when the run was made from a plan that has no file.
+	PlanFile   string `json:"plan_file,omitempty"`
+	PlanSHA256 string `json:"plan_sha256,omitempty"`
 }
 
 func (r *RemoteReport) clone() *RemoteReport {
@@ -637,6 +646,13 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	}
 	d.rep.r.Remote = &RemoteReport{Mode: mode, LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
 		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, MaintenanceSkips: map[string]int{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
+	if opt.PlanPath != "" {
+		d.rep.r.Remote.PlanFile = opt.PlanPath
+		if data, err := os.ReadFile(opt.PlanPath); err == nil {
+			sum := sha256.Sum256(data)
+			d.rep.r.Remote.PlanSHA256 = hex.EncodeToString(sum[:])
+		}
+	}
 	d.initTrace()
 	return d
 }

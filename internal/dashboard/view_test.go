@@ -43,7 +43,7 @@ func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -106,17 +106,20 @@ func TestPathDraw(t *testing.T) { runCheck(t, "pathdraw_check.js", "pathdraw.js"
 
 func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js") }
 
+// TestPlanView: the plan view's address, its leg switches and the words about which copy of a plan is drawn.
+func TestPlanView(t *testing.T) { runCheck(t, "planview_check.js", "planview.js") }
+
 // The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.
 func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
 	html, err := os.ReadFile(filepath.Join("static", "index.html"))
-	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) {
-		t.Fatalf("index.html must load unitinfo.js: %v", err)
+	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) || !strings.Contains(string(html), `src="planview.js"`) {
+		t.Fatalf("index.html must load unitinfo.js and planview.js: %v", err)
 	}
 	css, err := os.ReadFile(filepath.Join("static", "app.css"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"bossmark", "hpbars", "statusicons", "threatcolors", "events", "hostilenames"} {
+	for _, k := range []string{"bossmark", "hpbars", "statusicons", "threatcolors", "events", "hostilenames", "looks", "standmarks", "flags"} {
 		if !strings.Contains(string(css), "hide-"+k) {
 			t.Errorf("app.css has no rule for layer %s", k)
 		}

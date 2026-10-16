@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -42,12 +43,32 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 		writeJSON(w, b)
 	})
 	mux.HandleFunc("/api/plan/", func(w http.ResponseWriter, r *http.Request) {
-		geo, errText := p.Geometry(strings.TrimPrefix(r.URL.Path, "/api/plan/"))
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan/")
+		var geo []byte
+		var errText string
+		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {
+			geo, errText = p.GeometryFor(name, id) // the copy that agent's runs read
+		} else {
+			geo, errText = p.Geometry(name)
+		}
 		if geo == nil {
 			http.Error(w, errText, http.StatusNotFound)
 			return
 		}
 		writeJSON(w, geo)
+	})
+	mux.HandleFunc("/api/plans", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(p.Plans())
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/plan-copies/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan-copies/")
+		if !planName.MatchString(name) {
+			http.NotFound(w, r)
+			return
+		}
+		b, _ := json.Marshal(p.PlanCopies(name))
+		writeJSON(w, b)
 	})
 	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
