@@ -231,6 +231,15 @@ func (d *RemoteDriver) hostileAhead(here, wp Point) (tbm.HostileRec, bool) {
 		if (distToSegment(p, here, wp) > float64(d.tx.AggroGuard) && dist3(p, wp) > float64(d.tx.GatherClear)) || p.Z < min(here.Z, wp.Z)-d.tx.AheadMaxDZ || p.Z > max(here.Z, wp.Z)+d.tx.AheadMaxDZ {
 			continue
 		}
+		if d.aheadAcrossAvoid(here, p) {
+			// Not pulled: the tank would take the server's straight way to it, through the avoid box (remote_avoid.go).
+			if d.aheadPassedLeg == nil {
+				d.aheadPassedLeg = map[packet.GUID]int{}
+			}
+			d.aheadPassedLeg[h.GUID] = d.curLeg
+			d.rep.note(fmt.Sprintf("leg %d: %s at %.0f %.0f %.0f stands near the walk's next hop, but the way to it keeps out of the plan's avoid box only by a detour: it is not pulled on the way (the tank would cut through the box)", d.curLeg, d.hostileName(h), h.X, h.Y, h.Z))
+			continue
+		}
 		if dd := dist3(p, here); dd < bestD {
 			best, bestD = h, dd
 		}

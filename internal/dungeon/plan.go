@@ -125,7 +125,11 @@ type Plan struct {
 	Notes []string  `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
-	Legs     []Leg           `json:"legs"`
+	// Avoid are the regions of the map the party must never stand in or walk through: ground that kills although the navmesh calls it
+	// plain ground (Ragefire Chasm's lava basin, see AvoidBox). The planner keeps out of them, no point of the plan may lie in one, and
+	// the remote driver neither summons a bot onto nor raises a body in one. Empty: none.
+	Avoid []AvoidBox `json:"avoid,omitempty"`
+	Legs  []Leg      `json:"legs"`
 }
 
 // Band is the plan's level band, low and high; 0, 0 when it gives none.
@@ -657,6 +661,7 @@ type rawPlan struct {
 	SummonedKF []uint32          `json:"summoned_kill_first"`
 	Notes      []string          `json:"notes"`
 	Watchdog   *WatchdogConfig   `json:"watchdog"`
+	Avoid      []rawAvoid        `json:"avoid"`
 	Legs       []json.RawMessage `json:"legs"`
 }
 
@@ -976,6 +981,8 @@ func Parse(name string, data []byte) (*Plan, error) {
 		}
 		p.Legs = append(p.Legs, c.leg(path, &l))
 	}
+	p.Avoid = c.avoid(rp.Avoid)
+	c.offAvoid(p)
 	if len(c.errs) > 0 {
 		return nil, errors.Join(c.errs...)
 	}

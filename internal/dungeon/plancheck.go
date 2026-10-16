@@ -32,6 +32,11 @@ const (
 	// ReasonNeedsWalk is a point the plan marks needs_walk: it was never snapped to the navmesh and its mapping walk is still to do.
 	ReasonNeedsWalk = "needs a mapping walk"
 
+	// ReasonAvoid is a point the party would stand on inside one of the plan's avoid boxes (deadly ground the navmesh calls plain ground).
+	ReasonAvoid = "in an avoid box"
+	// ReasonAvoidCut is a point the navmesh reaches only through one of the plan's avoid boxes: the box cuts the plan's route.
+	ReasonAvoidCut = "cut by an avoid box"
+
 	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
 	ReasonSkipped = "skipped"
 
@@ -46,6 +51,80 @@ type Navmesh interface {
 	Plan(mapID uint32, from, to navmesh.Vec3) (navmesh.Path, error)
 	Raycast(mapID uint32, from, to navmesh.Vec3) (navmesh.Ray, error)
 	Nearest(mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error)
+}
+
+// AvoidSetter is the optional part of a Navmesh that keeps out of avoid boxes (navmesh.Planner.SetAvoid).
+type AvoidSetter interface {
+	SetAvoid(mapID uint32, boxes []navmesh.Box)
+}
+
+// NavBoxes is the plan's avoid boxes as the navmesh takes them.
+func NavBoxes(bs []AvoidBox) []navmesh.Box {
+	if len(bs) == 0 {
+		return nil
+	}
+	out := make([]navmesh.Box, len(bs))
+	for i, b := range bs {
+		out[i] = navmesh.Box{Min: vec(b.Min), Max: vec(b.Max)}
+	}
+	return out
+}
+
+// avoided fails a point the party would stand on inside an avoid box, and says whether it did.
+func (c *planChecker) avoided(part string, group int, at, from Point) bool {
+	b, ok := c.p.InAvoid(at)
+	if !ok {
+		return false
+	}
+	c.fail(part, group, at, from, ReasonAvoid, "%q (%s): ground that kills although the navmesh calls it ground", b.Name, boxText(b))
+	return true
+}
+
+// cutByAvoid says whether a path the navmesh does not find with the plan's avoid boxes set is found without them, and names the boxes
+// that path crosses (all of them when it crosses none: the marks took a polygon the path needs). Only for a navmesh that takes the boxes.
+func (c *planChecker) cutByAvoid(from, to Point) (string, bool, error) {
+	a, ok := c.nav.(AvoidSetter)
+	if !ok || len(c.p.Avoid) == 0 {
+		return "", false, nil
+	}
+	a.SetAvoid(c.p.Map, nil)
+	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
+	a.SetAvoid(c.p.Map, NavBoxes(c.p.Avoid))
+	if err != nil || path.Status != navmesh.Complete {
+		return "", false, err
+	}
+	var names []string
+	for _, b := range c.p.Avoid {
+		hit := false
+		for _, seg := range append([][]navmesh.Vec3{path.Points}, path.Ground...) {
+			for _, q := range seg {
+				hit = hit || b.Contains(point(q))
+			}
+		}
+		if hit {
+			names = append(names, fmt.Sprintf("%q", b.Name))
+		}
+	}
+	if len(names) == 0 {
+		for _, b := range c.p.Avoid {
+			names = append(names, fmt.Sprintf("%q", b.Name))
+		}
+	}
+	return strings.Join(names, ", "), true, nil
+}
+
+// failPath records a path that is not complete: as cut by an avoid box when the navmesh finds it without the boxes, else as pathReason says.
+func (c *planChecker) failPath(part string, group int, at, from Point, path navmesh.Path) error {
+	names, cut, err := c.cutByAvoid(from, at)
+	if err != nil {
+		return err
+	}
+	if cut {
+		c.fail(part, group, at, from, ReasonAvoidCut, "path_to is %s with the avoid boxes kept out of and complete without them: avoid box %s cuts the route (move the box's edge, or the point)", path.Status, names)
+		return nil
+	}
+	c.fail(part, group, at, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+	return nil
 }
 
 // A pull group is a detour when it stands within pullDetourNear yards in a line and the path to it is longer than pullDetourFactor times that
@@ -188,6 +267,10 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 	}
 	if opt.LookArrive <= 0 {
 		opt.LookArrive = lookArrive
+	}
+	// The navmesh keeps out of the plan's avoid boxes, as the run's planner does (RemoteDriver.markAvoid).
+	if a, ok := nav.(AvoidSetter); ok {
+		a.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	}
 	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}}}
 	cur, group := p.Entrance, -1
@@ -433,6 +516,9 @@ func (c *planChecker) count() {
 // walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
+	if c.avoided(part, 0, to, from) {
+		return from, nil
+	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
 	if err != nil {
 		return from, err
@@ -450,8 +536,7 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	if path.Status != navmesh.Complete {
-		c.fail(part, 0, to, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
-		return from, nil
+		return from, c.failPath(part, 0, to, from, path)
 	}
 	return to, nil
 }
@@ -468,6 +553,9 @@ func pathReason(p navmesh.Path) string {
 // point before it: a GM moves the party, so it is listed as exempt from the walk (ReasonSkipped), with what the move is.
 func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 	c.count()
+	if c.avoided(part, 0, to, from) {
+		return to, nil
+	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
 	if err != nil {
 		return from, err
@@ -487,6 +575,9 @@ func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 // direct checks a direct via: a step within the limits of the module (DirectStepOK), ground under its end and a clear line over the mesh.
 func (c *planChecker) direct(part string, to, from Point) (Point, error) {
 	c.count()
+	if c.avoided(part, 0, to, from) {
+		return to, nil
+	}
 	if !DirectStepOK(from, to) {
 		c.fail(part, 0, to, from, ReasonTooFar, "%.1f yd across and %.1f up or down: the limits are %g and %g", hdist(from, to), math.Abs(float64(to.Z-from.Z)), DirectMaxDistance, DirectMaxVertical)
 		return to, nil
@@ -545,7 +636,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	}
 	if len(path.Points) < 2 {
 		if path.Status != navmesh.Complete { // complete with one point: the party is at the pack already
-			c.fail(part, group, at, from, pathReason(path), "path_to is %s: %s", path.Status, path.Reason)
+			return from, c.failPath(part, group, at, from, path)
 		}
 		return from, nil
 	}
@@ -579,6 +670,9 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	}
 	if !moved {
 		stand = from
+	}
+	if b, ok := c.p.InAvoid(stand); ok {
+		c.fail(part, group, at, from, ReasonAvoid, "the look point %.1f %.1f %.1f lies in avoid box %q (%s)", stand.X, stand.Y, stand.Z, b.Name, boxText(b))
 	}
 	// The lead bot may stop LookArrive short of the look point, and the view is ClearSeeRadius: the look point must leave room for both.
 	if d := dist3(stand, at); d > ClearSeeRadius-float64(c.opt.LookArrive) {

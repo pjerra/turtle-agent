@@ -599,6 +599,28 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   [7785, 8179, 5650, 7247] (Zum'rah's Ward, the Greater Healing Ward the Witch Doctor's Healing Ward summons, the Witch Doctor, the Soul Eater), `summoned_kill_first` [7785, 8179].
 - `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
   the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
+- `avoid` (optional, at most 32) lists regions of the map that kill although the navmesh calls them ground:
+  `{"name": "lava basin of the trogg cave", "min": {"x":..,"y":..,"z":..}, "max": {..}, "why": ".."}`, a box from `min` to `max` (a floor
+  band: its top just above the deadly surface, so ledges above it stay walkable). The mmap generator flags a liquid only where it is at
+  least the agent's height deep, so shallow lava (Ragefire Chasm's basin, under a yard deep, 605-610 damage a tick) is plain ground to both
+  the agent's planner and the server's. The loader refuses a box with `min` not below `max`, wider than 400 yd, and any plan point in a box
+  (entrance, `via`, `to`, pull group positions, boss, step stands); [Plan check](#plan-check) fails a look point in one, and a point the
+  navmesh reaches only without the boxes fails as `cut by an avoid box`, naming the box. The agent's planner marks every navmesh polygon
+  whose part inside a box (the polygon clipped by the box, heights included) covers a quarter of its area or more as lava
+  (`navmesh.Planner.SetAvoid`, `navmesh.AvoidShare`), so paths, floor snaps and walkability rays keep out of it while a box that only clips
+  a corner of a ramp or doorway polygon leaves it walkable. The remote driver also: cuts a walk's hop at a path corner when its straight
+  line would pass over a box (the server walks each `move` on its own navmesh); does not pull on the way a hostile the party reaches only
+  round a box (path longer than twice the straight line plus 25 yd); summons no bot onto a lead bot standing in a box or on a **deadly
+  spot**; and raises no body lying in a box in place (it releases it). Before a summon a lead bot on such ground is moved to the nearest
+  safe floor (up to 20 yd), twice at most; then, once per leg, it walks back to the most recent place it stood on alive and safe in this run
+  (its history, each place tagged with the run's progress: never one ahead of where the run is now; a run put back, and a wipe, drop the
+  places past it or of the step under way) that is 10 yd or more clear of every box and spot and reached by a route that crosses no box
+  (each segment tested exactly against each box; the first may only leave the box the lead bot stands in, never deeper) and passes no spot
+  within 6 yd, and the party is summoned there. No such place, a failed walk back, or a second need in the leg fails the step
+  (`the lead bot is stuck on deadly ground`): the recovery never loops. A **silent
+  death** is a bot that died out of combat at 80% health or more one frame before (the feed has no line for lava, slime or a fall):
+  inside a box it is only noted; outside, one alone is noted and a second within 6 yd makes a deadly spot. A spot is forgotten 5 min
+  after its last death, or once a living bot has stood on it 5 s. Each silent death is a `silent_death` trace event.
 - `via` (optional, per leg) lists waypoints walked in order before `to`: `{"x":..,"y":..,"z":..}` is a plain walk on the navmesh; with `"direct": true` the step is a straight line, for a gap the
   navmesh does not bridge (Uldaman's scorpid-pit ramp; [Plan check](#plan-check) warns of a direct hop the navmesh already joins). The remote driver sends it as `.bot cmd move x y z direct` (TortoiseBots #942: every bot walks the line; each must be within 25 yd
   across and 8 yd up or down of the point, and the point needs ground within 3 yd of its height). The loader refuses a direct step without a via point before it (where the party gathers) or longer than
@@ -1302,6 +1324,8 @@ Events (`ev`; fields beside `ev`, a field named like an envelope field is writte
 | `stuck`, `unstuck` | a member that should be moving stood still for 5 s, with its position (`a`, `name`, `x y z`, `seconds`, `lead`, `dist_lead`); it moved again or stopped being expected to move (`seconds` is the total) |
 | `rez` | remote: a dead bot was left to a living caster's resurrection: `leg`, `bot`, `raised`, `seconds`, `why` |
 | `rejoin_tp` | remote: the commander sent `cmd summon <bot>` to bring a far bot to the lead bot: `leg`, `bot`, `reply`, `other_map`, `dist` (yd), `code` when refused |
+| `silent_death` | remote: a bot died out of combat at 80% health or more one frame before (lava, slime, a fall: the feed has no line for it): `name`, `leg`, `x y z`, `map`, `hp_pct`, `spot` (`avoid_box`, `lone` or `deadly`: a second such death within 6 yd made a deadly spot, no summon near it for 5 min) |
+| `lead_off_deadly` | remote: before a summon, the lead bot stood in an avoid box or on a deadly spot and was sent to a safe floor (`try` 1-2) or, after two tries, walked back to where it last stood and lived (`fallback`): `leg`, `x y z`, `to_x to_y to_z`, `why` |
 | `feed_stall` | remote: no new feed frame for the stale limit |
 | `roster` | remote: the party names in the first feed frame |
 | `note` | the report's notes, as they are made |

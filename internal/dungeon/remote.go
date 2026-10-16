@@ -525,7 +525,9 @@ type RemoteDriver struct {
 	downSaid      bool      // partyDown has stopped the leg for this round of deaths
 	gatherSt      gatherState
 	// aheadPassedLeg: hostiles a pull on the way passed over (no fight, evaded, refused), with the leg it happened in
-	aheadPassedLeg   map[packet.GUID]int
+	aheadPassedLeg map[packet.GUID]int
+	// deadly is the avoid state (remote_avoid.go): the spots where bots died with no wound and the last frame of each living member.
+	deadly           deadlyState
 	endsAtBind       int
 	stats0           tbm.ViewStats
 	statsMu          sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
@@ -684,6 +686,7 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	if err := d.checkGMCross(ctx, fromLeg); err != nil {
 		return err
 	}
+	d.markAvoid()
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
 	d.wd.start()
@@ -808,6 +811,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		}
 		d.objectTouched = false
 		a := d.liveStep(d.st.Next()) // a leg start or a pull-group start: the tunables and the plan are read again (remote_tune.go)
+		d.setProgress(a)
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		d.wd.setStep(a.Label)
@@ -1521,6 +1525,7 @@ func (d *RemoteDriver) countDeaths() bool {
 		d.observeInit()
 	}
 	for _, p := range d.fr.Party {
+		d.observeDeadly(p, p.Dead && !d.prevDead[p.GUID])
 		if p.Dead && !d.prevDead[p.GUID] {
 			d.rep.update(func(r *Report) {
 				r.Deaths = append(r.Deaths, Death{Name: p.Name, Leg: d.curLeg, At: d.clk.Now()})
@@ -1532,6 +1537,7 @@ func (d *RemoteDriver) countDeaths() bool {
 		}
 		d.prevDead[p.GUID] = p.Dead
 	}
+	d.deadlyFrame()
 	return d.fr.AllDead()
 }
 
@@ -1729,7 +1735,11 @@ func (d *RemoteDriver) waypointSrc(ctx context.Context, from, to Point, leg floa
 	}
 	if pl, ok := d.g.(PathPlanner); ok {
 		if pts, err := pl.PlanPath(ctx, d.stepMap(), from, to); err == nil && len(pts) >= 2 {
-			if p, ok := alongPath(pts, from, leg); ok {
+			along := alongPath
+			if boxes := d.stepAvoid(); len(boxes) > 0 {
+				along = func(pts []Point, from Point, leg float32) (Point, bool) { return alongPathAvoid(pts, from, leg, boxes) }
+			}
+			if p, ok := along(pts, from, leg); ok {
 				lo, hi := from.Z, from.Z
 				for i := 1; i < len(pts); i++ {
 					lo, hi = min(lo, pts[i].Z), max(hi, pts[i].Z)
@@ -2008,7 +2018,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		// the walk). Such a stretch is sent as a move to min_move+1 yd along the same line: the lead bot walks through the point and stops
 		// just past it, and the arrival counts within that overshoot.
 		tiny := 0.0
-		if dd := dist3(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) {
+		if dd := dist3(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) && !d.overshootDeadly(ctx, here, wp, dd) {
 			past := d.onFloor(ctx, lerp(here, wp, (float64(d.tx.MinMove)+1)/dd), min(here.Z, wp.Z), max(here.Z, wp.Z))
 			args = moveArgs(past)
 			tiny = float64(d.tx.MinMove) + 1 - dd
@@ -2349,6 +2359,12 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 			return nil
 		}
 		now := d.clk.Now()
+		if bad := d.corpsesOnDeadly(dead); len(bad) > 0 {
+			// A body on ground that kills is raised into it (rfc-live-1e: the bodies lay in the lava): release them to run back instead.
+			d.remote(func(r *RemoteReport) { r.UnsafeRezSkips++ })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots (%s); bodies on deadly ground (%s): no resurrection in place, releasing them (cmd revive: they run back from the graveyard)", max(d.curLeg, 0), len(dead), why, strings.Join(bad, "; ")))
+			return nil
+		}
 		if near := d.hostilesNearCorpses(); len(near) > 0 {
 			// A resurrection in place next to mobs that have not reset puts the party back on the floor (Uldaman A, 2026-10-14): the dead
 			// are released and run back from the graveyard, which gives the mobs time to leave.
@@ -2409,6 +2425,7 @@ func (d *RemoteDriver) deadMembers() []tbm.PartyRec {
 // runs when the step goes on. It needs RecoverWipe.
 func (d *RemoteDriver) recoverWipe(ctx context.Context) error {
 	d.rep.note(fmt.Sprintf("wipe %d: reviving the party with .bot cmd revive (recover_wipe)", d.wipeRecover))
+	d.rollbackHistory()
 	// The wipe is being recovered from: the deaths already counted stay counted.
 	if err := d.reviveDead(ctx, "the party wiped"); err != nil {
 		return err

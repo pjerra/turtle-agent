@@ -434,6 +434,7 @@ func mergeReload(cur, next *Plan, leg int, started bool, group int) (*Plan, []st
 	}
 	merged := *cur
 	merged.Notes = next.Notes
+	merged.Avoid = slices.Clone(next.Avoid) // the map's deadly ground is no part of a leg: a new box holds from now on
 	merged.Legs = slices.Clone(cur.Legs)
 	for i := range merged.Legs {
 		switch {

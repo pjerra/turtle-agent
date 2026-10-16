@@ -118,6 +118,13 @@ func (e *engine) polys(box [4]float32) ([]Polygon, error) {
 	return out, nil
 }
 
+// markBox adds flag to the polygons of the loaded tiles whose part inside b covers at least share of their area; it returns how many
+// it marked.
+func (e *engine) markBox(b Box, flag uint16, share float32) int {
+	box := [6]float32{b.Min[0], b.Min[1], b.Min[2], b.Max[0], b.Max[1], b.Max[2]}
+	return int(C.nd_mark_box(e.h, (*C.float)(unsafe.Pointer(&box[0])), C.ushort(flag), C.float(share)))
+}
+
 // findPath returns Detour's verdict (0 complete, 1 partial, 2 partial with the goal over
 // 7 yd from the mesh, -1 start off the mesh, -2 goal off the mesh, -3 failure), the
 // straight path between the floor points, and the floor point found for the goal.
