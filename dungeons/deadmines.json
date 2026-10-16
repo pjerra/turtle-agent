@@ -7,13 +7,14 @@
   "entrance": {"x": -14.5732, "y": -385.475, "z": 62.4561},
   "entrance_trigger": 78,
   "entrance_tele": "deadmines",
+  "outside_tele": "TheDeadmines",
   "portal": {
     "map": 0,
     "x": -11208.5,
     "y": 1685.34,
     "z": 25.7612
   },
-  "level_band": [17, 22],
+  "level_band": [18, 22],
   "hire_composition": [
     "warrior:tank",
     "priest:healer",
@@ -21,782 +22,1312 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [598, 622, 634, 1725, 1729, 1731, 1732, 3947, 4418],
+  "cc_priority": [4418, 1729, 1732],
+  "kill_first": [636, 622],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 36 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Needs: Iron Clad Door: Defias Cannon (GO) fired with the door lever (go_door_lever_dm, gunpowder event) to reach the ship",
-    "Needs: Sneed (643) has no spawn row: he appears when Sneed's Shredder (642) dies",
-    "Needs: Mr. Smite's phase doors and chest (GO_SMITE_CHEST)",
-    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement; Jared Voss (61961) and Cookie (645) are named mobs, not legs."
+    "The Deadmines (map 36), written from the world database export of tortoise-wow (tools/dungeongen/testdata/map36, read with export.sh; creature_movement of the patrols in movement.tsv), the instance script (src/scripts/dungeons/deadmines: instance_deadmines.cpp, deadmines.cpp, boss_mr_smite.cpp), the EventAI and creature_spells rows, Lock.dbc, and the map 36 navmesh (every route point is a point of a path_to route; TestDeadminesOnNavmesh). Wowhead Classic (the instance page zone=1581, the strategy guide 7786 and the npc pages with their comments, fetched with tools/wowhead/wh.py) was read for the kill order, the trash to watch and the boss tips; where it differs from the database or the script the plan follows the server and the README section lists the differences. Status stays draft (not mapped, not live-checked) until the GM-invisible walk (step 2) has checked the route, the doors and the patrols in the instance; dungeon_run refuses it without allow_draft. The patrol periods are estimates (path length at 2.5 yd/s plus the waits), not timed.",
+    "Mapping walk 2026-10-15 (GM, invisible, nothing attacked; tests/walk-dm/FINDINGS.txt in the audit folder): entered by area_trigger 78, all 16 legs walked (206 paths complete, 5112 yd, 0 stuck), 249 of 252 spawns seen at the export's places with no entry mismatch, Smite, VanCleef and the Blackguards to 0.1 yd, gunpowder radius 45 holds exactly the 15 spawns of cannon_a and cannon. The two clicked Heavy Doors (26183, 26184) open with one click (flags 32 to 33) and stay open for 50 minutes; they start shut. The walk cannot prove the doors that scripted deaths open: the navmesh and the GM walk go through shut doors. 25 patrol periods were timed (24 within 3 % of the estimate, the miner 79144 at 1.65 yd/s, the Wizard pack of hall at 130.5 s on its own path); nine Defias Companions (3450, level 14-15, hostile, server-made pets 2.3 to 4.8 yd from Pirates) stand with eight planned Pirates and Greenskin's and are members of those groups (no spawn row); the Pirate 79341's Companion is left out with its pack (stern, on no leg). Still open: the three catwalk Overseers, which the route passes 6.6 to 10.8 yd below (so the plan stays a draft), and one live run.",
+    "Route (1611 yd of navmesh path, 16 legs, 130 pull groups, 7 bosses): mine_a and rhahk_zor along the upper mine to Rhahk'Zor (644, opens the Factory Door 13965 by dying); factory and the Heavy Door 17153 at -262.7 -482.4; sneed (Sneed's Shredder 642, then Sneed 643, whose death opens the Heavy Door at -290.3 -537.0); west_area and the Heavy Door 17154 at -243.0 -578.6; hall and harvester (Masterpiece Harvester 61963 on the z 51 plateau, a side branch the navmesh reaches before the foundry); gilnid (down the spiral ramp to Gilnid 1763, whose death opens the Heavy Door 26182 at -168.5 -579.9); cannon_a and cannon (Defias Gunpowder 17155, Defias Cannon 16398, the Iron Clad Door 16397); dock and mr_smite (Mr. Smite 646); deck_a, deck_b and captain_greenskin (647); edwin_vancleef (639). Cookie (645), Miner Johnson (3586), Jared Voss (61961) and the laboratory are named mobs on no leg.",
+    "Doors, from the instance script and the gameobject_scripts rows: Rhahk'Zor's death opens 13965 (state active); Sneed's death opens spawn 26185 (17153 at -290.3 -537.0); Gilnid's death opens spawn 26182 (17153 at -168.5 -579.9); the cannon sets 16397 to active_alt. The levers 101831, 101832, 101834 (gameobject_scripts 26188, 26197, 26192) open the same three doors for 15 s from the far side and are not used; the lever 101833 does something only once the Iron Clad Door is open. Spawns 26183 (-262.7 -482.4) and 26184 (-243.0 -578.6) have no script and no lever: the plan clicks them (use_object, wait_for active), which is what their lock 86 (Quick Open, no key) allows; NOT VERIFIED, the walk must try both.",
+    "Mechanics the plan cannot express (the step types do not exist): killing a unit that has no spawn row (Sneed 643, the Defias Overseer the gunpowder summons) is done by a wait_for hostiles_gone, not by a step that names it; a trigger that waits for a door to be shut again; the alarm event after the cannon; picking the Smite phases (nothing to do but heal and survive the 6 s swaps). See the README section on the Deadmines plan.",
+    "The CC lists come from the spell lists and Wowhead's guide, not from a run: cc_priority the Wizard (4418: Chains of Ice, Fireball), the Evoker (1729: Flamestrike) and the Squallshaper (1732: Frost Nova, which Wowhead calls the most annoying and which is also the one to keep sheeped at Greenskin); kill_first the Blackguards (636, before Smite's 66 % and VanCleef's adds) and the Goblin Engineer (622: Summon Remote-Controlled Golem, stun the cast or kill the goblin first, the golem goes with it). Wowhead also names Melt Ore (the Craftsman's slowing fire DoT). fleers are the entries whose EventAI flees at 15 % health (command 47)."
   ],
   "legs": [
     {
-      "name": "rhahk'zor",
-      "to": {"x": -13.3427, "y": -376.707, "z": 60.7323},
+      "name": "mine_a",
+      "to": {"x": -17.3, "y": -383.7, "z": 62.4},
       "pull_groups": [
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -13.3427, "y": -376.707, "z": 60.7323}
-          ]
-        },
         {
           "entries": [598],
           "positions": [
             {"x": -36.196, "y": -371.06, "z": 58.1}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -52.6469, "y": -368.032, "z": 55.5931}
-          ]
-        },
-        {
-          "entries": [598, 598],
-          "positions": [
-            {"x": -66.8609, "y": -364.098, "z": 54.8182},
-            {"x": -72.5348, "y": -370.202, "z": 55.6576}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -79.0664, "y": -382.136, "z": 55.3884}
-          ]
-        },
-        {
-          "entries": [1729],
-          "positions": [
-            {"x": -91.77, "y": -376.14, "z": 57.83}
-          ]
-        },
-        {
-          "entries": [598, 598],
-          "positions": [
-            {"x": -100.509, "y": -372.996, "z": 59.22},
-            {"x": -98.282, "y": -383.228, "z": 59.2963}
-          ]
-        },
-        {
-          "entries": [1729, 634, 598, 4075, 4416],
-          "positions": [
-            {"x": -93.0234, "y": -400.3, "z": 58.0467},
-            {"x": -90.571, "y": -400.149, "z": 58.4755},
-            {"x": -83.0129, "y": -396.353, "z": 59.0941},
-            {"x": -94.0732, "y": -403.819, "z": 57.5726},
-            {"x": -87.4821, "y": -404.357, "z": 59.0401}
-          ]
-        },
-        {
-          "entries": [634],
-          "positions": [
-            {"x": -94.3284, "y": -402.581, "z": 57.4746}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -87.3985, "y": -421.766, "z": 56.0572}
-          ]
-        },
-        {
-          "entries": [598, 598],
-          "positions": [
-            {"x": -100.262, "y": -430.704, "z": 56.005},
-            {"x": -104.389, "y": -426.736, "z": 55.9882}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -96.4333, "y": -442.155, "z": 55.8174}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -83.9959, "y": -445.069, "z": 56.0449}
-          ]
-        },
-        {
-          "entries": [61960],
-          "positions": [
-            {"x": -76.5884, "y": -435.058, "z": 56.718}
-          ]
-        },
-        {
-          "entries": [634],
-          "positions": [
-            {"x": -72.0739, "y": -411.361, "z": 55.0383}
-          ]
-        },
-        {
-          "entries": [598, 598],
-          "positions": [
-            {"x": -73.1336, "y": -407.03, "z": 54.9728},
-            {"x": -70.8896, "y": -395.711, "z": 55.8013}
-          ]
-        },
-        {
-          "entries": [1729],
-          "positions": [
-            {"x": -58.9532, "y": -390.73, "z": 53.9482}
-          ]
+          ],
+          "radius": 13
         },
         {
           "entries": [1729],
           "positions": [
             {"x": -49.1843, "y": -392.156, "z": 55.9103}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [598, 598],
           "positions": [
             {"x": -50.2651, "y": -401.198, "z": 55.6811},
             {"x": -57.0594, "y": -406.745, "z": 55.1336}
-          ]
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [598],
+            "path": [
+              {"x": -49.1, "y": -380.2, "z": 54.9},
+              {"x": -44, "y": -383.4, "z": 55.5},
+              {"x": -48, "y": -391.3, "z": 55.9},
+              {"x": -52.5, "y": -401, "z": 55.6},
+              {"x": -59.2, "y": -403.2, "z": 54},
+              {"x": -69.1, "y": -401.6, "z": 54.7},
+              {"x": -68.7, "y": -397.9, "z": 55.1},
+              {"x": -58.5, "y": -392.7, "z": 54.1},
+              {"x": -53.7, "y": -382.1, "z": 54.7},
+              {"x": -49.8, "y": -373.6, "z": 55.3},
+              {"x": -57.1, "y": -367.6, "z": 55.3},
+              {"x": -62.9, "y": -358.6, "z": 54.3},
+              {"x": -62.8, "y": -349.7, "z": 56},
+              {"x": -63.6, "y": -358.6, "z": 54.3},
+              {"x": -63.7, "y": -366.9, "z": 55.1},
+              {"x": -68.8, "y": -369.2, "z": 55.7},
+              {"x": -75.2, "y": -373.7, "z": 55},
+              {"x": -76.8, "y": -378.6, "z": 55.2},
+              {"x": -67.5, "y": -383.8, "z": 53.7},
+              {"x": -60.7, "y": -384.7, "z": 53.7},
+              {"x": -53.5, "y": -377.2, "z": 54.3}
+            ],
+            "period_s": 107.5,
+            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
-          "entries": [598, 598, 4075],
+          "entries": [598],
           "positions": [
-            {"x": -108.016, "y": -403.976, "z": 60.0188},
-            {"x": -116.78, "y": -411.297, "z": 58.8569},
-            {"x": -122.287, "y": -414.488, "z": 58.311}
-          ]
+            {"x": -52.6469, "y": -368.032, "z": 55.5931}
+          ],
+          "radius": 20,
+          "patrol": {
+            "entries": [598],
+            "path": [
+              {"x": -49.1, "y": -380.2, "z": 54.9},
+              {"x": -44, "y": -383.4, "z": 55.5},
+              {"x": -48, "y": -391.3, "z": 55.9},
+              {"x": -52.5, "y": -401, "z": 55.6},
+              {"x": -59.2, "y": -403.2, "z": 54},
+              {"x": -69.1, "y": -401.6, "z": 54.7},
+              {"x": -68.7, "y": -397.9, "z": 55.1},
+              {"x": -58.5, "y": -392.7, "z": 54.1},
+              {"x": -53.7, "y": -382.1, "z": 54.7},
+              {"x": -49.8, "y": -373.6, "z": 55.3},
+              {"x": -57.1, "y": -367.6, "z": 55.3},
+              {"x": -62.9, "y": -358.6, "z": 54.3},
+              {"x": -62.8, "y": -349.7, "z": 56},
+              {"x": -63.6, "y": -358.6, "z": 54.3},
+              {"x": -63.7, "y": -366.9, "z": 55.1},
+              {"x": -68.8, "y": -369.2, "z": 55.7},
+              {"x": -75.2, "y": -373.7, "z": 55},
+              {"x": -76.8, "y": -378.6, "z": 55.2},
+              {"x": -67.5, "y": -383.8, "z": 53.7},
+              {"x": -60.7, "y": -384.7, "z": 53.7},
+              {"x": -53.5, "y": -377.2, "z": 54.3}
+            ],
+            "period_s": 107.5,
+            "source": "creature_movement of spawn 79144 (Defias Miner, 21 points, 178 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
-          "entries": [634],
+          "entries": [1729],
           "positions": [
-            {"x": -116.45, "y": -406.916, "z": 59.5309}
-          ]
+            {"x": -58.9532, "y": -390.73, "z": 53.9482}
+          ],
+          "radius": 7
         },
         {
-          "entries": [598, 598, 598, 598, 598],
+          "entries": [598, 598],
           "positions": [
-            {"x": -130.811, "y": -394.411, "z": 59.4243},
-            {"x": -139.342, "y": -412.573, "z": 58.9302},
-            {"x": -139.803, "y": -399.804, "z": 58.4387},
-            {"x": -128.305, "y": -384.093, "z": 59.1888},
+            {"x": -66.8609, "y": -364.098, "z": 54.8182},
+            {"x": -72.5348, "y": -370.202, "z": 55.6576}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -70.8896, "y": -395.711, "z": 55.8013}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [1729],
+            "path": [
+              {"x": -51.3, "y": -396.9, "z": 55.8},
+              {"x": -57.3, "y": -404.1, "z": 54.2},
+              {"x": -65.4, "y": -400.4, "z": 54.1},
+              {"x": -64.6, "y": -389.8, "z": 53.3},
+              {"x": -57.5, "y": -372.7, "z": 54.7},
+              {"x": -57.5, "y": -373.3, "z": 54.6},
+              {"x": -55.1, "y": -379.2, "z": 54.2},
+              {"x": -45.4, "y": -382.3, "z": 55.4}
+            ],
+            "period_s": 33,
+            "source": "creature_movement of spawn 79138 (Defias Evoker, 8 points, 81 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [634, 598],
+          "positions": [
+            {"x": -72.0739, "y": -411.361, "z": 55.0383},
+            {"x": -73.1336, "y": -407.03, "z": 54.9728}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -72.1, "y": -411.4, "z": 55},
+              {"x": -87.9, "y": -442.1, "z": 55.7},
+              {"x": -96.9, "y": -453.7, "z": 55.1},
+              {"x": -90.7, "y": -475.7, "z": 55.6},
+              {"x": -97.2, "y": -451.5, "z": 55.4},
+              {"x": -88, "y": -442.3, "z": 55.6}
+            ],
+            "period_s": 58,
+            "source": "creature_movement of spawn 2583011 (Defias Overseer, 6 points, 145 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -79.0664, "y": -382.136, "z": 55.3884}
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [1729, 634],
+            "path": [
+              {"x": -105.9, "y": -386.1, "z": 57},
+              {"x": -99.2, "y": -380, "z": 58.7},
+              {"x": -90.7, "y": -377.5, "z": 58.2},
+              {"x": -81.9, "y": -378, "z": 56.2},
+              {"x": -72, "y": -382.1, "z": 55},
+              {"x": -61.5, "y": -383.7, "z": 53.7},
+              {"x": -52.6, "y": -380.7, "z": 54.7},
+              {"x": -44.9, "y": -379.5, "z": 55.6},
+              {"x": -53.3, "y": -379.2, "z": 54.4},
+              {"x": -61.5, "y": -381.7, "z": 53.9},
+              {"x": -70.3, "y": -380.6, "z": 54.2},
+              {"x": -81.8, "y": -375.5, "z": 56},
+              {"x": -91.6, "y": -375.2, "z": 58},
+              {"x": -100.6, "y": -378.5, "z": 58.1},
+              {"x": -107.2, "y": -385.3, "z": 57},
+              {"x": -111.2, "y": -390.3, "z": 56.9},
+              {"x": -118.9, "y": -396.4, "z": 57.1},
+              {"x": -126.7, "y": -402.7, "z": 58.7},
+              {"x": -131.9, "y": -405.9, "z": 57.5},
+              {"x": -124.9, "y": -404.5, "z": 58.8},
+              {"x": -117.3, "y": -397.7, "z": 57.3},
+              {"x": -109.4, "y": -391.6, "z": 57.2}
+            ],
+            "period_s": 81,
+            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -83.0129, "y": -396.353, "z": 59.0941}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [1729],
+          "positions": [
+            {"x": -91.77, "y": -376.14, "z": 57.83}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [4416, 634, 1729, 634],
+          "positions": [
+            {"x": -87.4821, "y": -404.357, "z": 59.0401},
+            {"x": -90.571, "y": -400.149, "z": 58.4755},
+            {"x": -93.0234, "y": -400.3, "z": 58.0467},
+            {"x": -94.3284, "y": -402.581, "z": 57.4746}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -94.8, "y": -396.2, "z": 58.9},
+              {"x": -103.3, "y": -389.3, "z": 57.3},
+              {"x": -107.6, "y": -382.6, "z": 57},
+              {"x": -122.8, "y": -383.2, "z": 59.3},
+              {"x": -125.4, "y": -390.5, "z": 58.9},
+              {"x": -130, "y": -398.7, "z": 59.2},
+              {"x": -125.5, "y": -403.1, "z": 58.6},
+              {"x": -116.1, "y": -397.3, "z": 57.2},
+              {"x": -105.9, "y": -394.8, "z": 57.6},
+              {"x": -100.4, "y": -398.9, "z": 58.6},
+              {"x": -98.5, "y": -399.1, "z": 58.4}
+            ],
+            "period_s": 37.5,
+            "source": "creature_movement of spawn 79189 (Defias Overseer, 11 points, 93 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -100.509, "y": -372.996, "z": 59.22}
+          ],
+          "radius": 7,
+          "patrol": {
+            "entries": [1729],
+            "path": [
+              {"x": -66.4, "y": -374.2, "z": 55.1},
+              {"x": -49.8, "y": -380.8, "z": 54.9},
+              {"x": -67, "y": -374, "z": 55.1},
+              {"x": -90.4, "y": -376, "z": 57.9},
+              {"x": -106, "y": -381.9, "z": 57},
+              {"x": -96.2, "y": -401.3, "z": 57.9},
+              {"x": -109.4, "y": -385.6, "z": 56.9},
+              {"x": -98.4, "y": -378.1, "z": 58.3},
+              {"x": -90.1, "y": -375.9, "z": 57.9}
+            ],
+            "period_s": 66.5,
+            "source": "creature_movement of spawn 79147 (Defias Evoker, 9 points, 165 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -98.282, "y": -383.228, "z": 59.2963}
+          ],
+          "radius": 7,
+          "patrol": {
+            "entries": [1729, 634],
+            "path": [
+              {"x": -105.9, "y": -386.1, "z": 57},
+              {"x": -99.2, "y": -380, "z": 58.7},
+              {"x": -90.7, "y": -377.5, "z": 58.2},
+              {"x": -81.9, "y": -378, "z": 56.2},
+              {"x": -72, "y": -382.1, "z": 55},
+              {"x": -61.5, "y": -383.7, "z": 53.7},
+              {"x": -52.6, "y": -380.7, "z": 54.7},
+              {"x": -44.9, "y": -379.5, "z": 55.6},
+              {"x": -53.3, "y": -379.2, "z": 54.4},
+              {"x": -61.5, "y": -381.7, "z": 53.9},
+              {"x": -70.3, "y": -380.6, "z": 54.2},
+              {"x": -81.8, "y": -375.5, "z": 56},
+              {"x": -91.6, "y": -375.2, "z": 58},
+              {"x": -100.6, "y": -378.5, "z": 58.1},
+              {"x": -107.2, "y": -385.3, "z": 57},
+              {"x": -111.2, "y": -390.3, "z": 56.9},
+              {"x": -118.9, "y": -396.4, "z": 57.1},
+              {"x": -126.7, "y": -402.7, "z": 58.7},
+              {"x": -131.9, "y": -405.9, "z": 57.5},
+              {"x": -124.9, "y": -404.5, "z": 58.8},
+              {"x": -117.3, "y": -397.7, "z": 57.3},
+              {"x": -109.4, "y": -391.6, "z": 57.2}
+            ],
+            "period_s": 81,
+            "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rhahk_zor",
+      "to": {"x": -113.3, "y": -386.7, "z": 57.2},
+      "pull_groups": [
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -108.016, "y": -403.976, "z": 60.0188}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -108.4, "y": -401.1, "z": 59.7},
+              {"x": -118.8, "y": -408, "z": 59.2},
+              {"x": -120.5, "y": -414.9, "z": 58.2},
+              {"x": -115.3, "y": -424.6, "z": 55.4},
+              {"x": -107.5, "y": -431.7, "z": 55.2},
+              {"x": -114.3, "y": -441.8, "z": 55},
+              {"x": -119.9, "y": -438.6, "z": 54.7},
+              {"x": -116.7, "y": -430, "z": 54.9},
+              {"x": -118.3, "y": -422.8, "z": 55.9},
+              {"x": -124.2, "y": -418.2, "z": 57.6},
+              {"x": -131.9, "y": -410.7, "z": 57.9},
+              {"x": -125.2, "y": -405.2, "z": 58.6},
+              {"x": -119.1, "y": -408.5, "z": 59}
+            ],
+            "period_s": 49.5,
+            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [634, 598],
+          "positions": [
+            {"x": -116.45, "y": -406.916, "z": 59.5309},
+            {"x": -116.78, "y": -411.297, "z": 58.8569}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -108.4, "y": -401.1, "z": 59.7},
+              {"x": -118.8, "y": -408, "z": 59.2},
+              {"x": -120.5, "y": -414.9, "z": 58.2},
+              {"x": -115.3, "y": -424.6, "z": 55.4},
+              {"x": -107.5, "y": -431.7, "z": 55.2},
+              {"x": -114.3, "y": -441.8, "z": 55},
+              {"x": -119.9, "y": -438.6, "z": 54.7},
+              {"x": -116.7, "y": -430, "z": 54.9},
+              {"x": -118.3, "y": -422.8, "z": 55.9},
+              {"x": -124.2, "y": -418.2, "z": 57.6},
+              {"x": -131.9, "y": -410.7, "z": 57.9},
+              {"x": -125.2, "y": -405.2, "z": 58.6},
+              {"x": -119.1, "y": -408.5, "z": 59}
+            ],
+            "period_s": 49.5,
+            "source": "creature_movement of spawn 79152 (Defias Overseer, 13 points, 124 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -128.305, "y": -384.093, "z": 59.1888}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -130.811, "y": -394.411, "z": 59.4243}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -139.803, "y": -399.804, "z": 58.4387}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -139.342, "y": -412.573, "z": 58.9302}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [598],
+          "positions": [
             {"x": -147.793, "y": -407.295, "z": 57.7768}
-          ]
+          ],
+          "radius": 7
         },
         {
           "entries": [598],
           "positions": [
             {"x": -153.941, "y": -395.623, "z": 57.0007}
-          ]
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [1729, 634],
+            "path": [
+              {"x": -164.6, "y": -400.4, "z": 56.8},
+              {"x": -158.3, "y": -399.6, "z": 56.3},
+              {"x": -149.1, "y": -402.9, "z": 57},
+              {"x": -151.2, "y": -399.2, "z": 56.8},
+              {"x": -160.3, "y": -396.6, "z": 56.7},
+              {"x": -167.2, "y": -398.4, "z": 57.3},
+              {"x": -174.9, "y": -405.6, "z": 56.5},
+              {"x": -182.1, "y": -415.8, "z": 55},
+              {"x": -188.3, "y": -426.1, "z": 54},
+              {"x": -193.2, "y": -434.6, "z": 53.4},
+              {"x": -194.3, "y": -445.2, "z": 54.1},
+              {"x": -192.3, "y": -459.3, "z": 54.6},
+              {"x": -189.8, "y": -472.6, "z": 54},
+              {"x": -189.8, "y": -478.6, "z": 54},
+              {"x": -187.2, "y": -472.4, "z": 54},
+              {"x": -189.9, "y": -459.2, "z": 54.6},
+              {"x": -192.2, "y": -444.9, "z": 54.1},
+              {"x": -191.3, "y": -435.3, "z": 53.3},
+              {"x": -186.5, "y": -426.3, "z": 54},
+              {"x": -180, "y": -416.8, "z": 54.9},
+              {"x": -171.4, "y": -405.6, "z": 56.9}
+            ],
+            "period_s": 86.5,
+            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
-          "entries": [598, 634, 1729, 598, 598],
+          "entries": [598, 598, 634, 1729, 598],
           "positions": [
             {"x": -165.125, "y": -403.208, "z": 57.3258},
+            {"x": -169.962, "y": -409.583, "z": 57.6959},
             {"x": -170.144, "y": -403.045, "z": 57.0869},
             {"x": -173.48, "y": -402.487, "z": 57.1029},
-            {"x": -169.962, "y": -409.583, "z": 57.6959},
             {"x": -175.251, "y": -400.119, "z": 57.5643}
-          ]
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [1729, 634],
+            "path": [
+              {"x": -164.6, "y": -400.4, "z": 56.8},
+              {"x": -158.3, "y": -399.6, "z": 56.3},
+              {"x": -149.1, "y": -402.9, "z": 57},
+              {"x": -151.2, "y": -399.2, "z": 56.8},
+              {"x": -160.3, "y": -396.6, "z": 56.7},
+              {"x": -167.2, "y": -398.4, "z": 57.3},
+              {"x": -174.9, "y": -405.6, "z": 56.5},
+              {"x": -182.1, "y": -415.8, "z": 55},
+              {"x": -188.3, "y": -426.1, "z": 54},
+              {"x": -193.2, "y": -434.6, "z": 53.4},
+              {"x": -194.3, "y": -445.2, "z": 54.1},
+              {"x": -192.3, "y": -459.3, "z": 54.6},
+              {"x": -189.8, "y": -472.6, "z": 54},
+              {"x": -189.8, "y": -478.6, "z": 54},
+              {"x": -187.2, "y": -472.4, "z": 54},
+              {"x": -189.9, "y": -459.2, "z": 54.6},
+              {"x": -192.2, "y": -444.9, "z": 54.1},
+              {"x": -191.3, "y": -435.3, "z": 53.3},
+              {"x": -186.5, "y": -426.3, "z": 54},
+              {"x": -180, "y": -416.8, "z": 54.9},
+              {"x": -171.4, "y": -405.6, "z": 56.9}
+            ],
+            "period_s": 86.5,
+            "source": "creature_movement of spawn 79374 (Defias Evoker, 21 points, 215 yd at 2.5 yd/s) with its formation members 79373; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [598],
           "positions": [
             {"x": -182.302, "y": -410.296, "z": 55.6153}
-          ]
-        },
+          ],
+          "radius": 8
+        }
+      ],
+      "boss": {
+        "entry": 644,
+        "position": {"x": -192.915, "y": -448.211, "z": 54.4339},
+        "first": [1725, 1725]
+      },
+      "after_boss": [
         {
-          "entries": [4075, 1725],
-          "positions": [
-            {"x": -183.257, "y": -440.667, "z": 54.201},
-            {"x": -183.731, "y": -450.034, "z": 54.6475}
-          ]
-        },
+          "wait_for": {
+            "gameobject": {
+              "entry": 13965,
+              "near": {"x": -191.414, "y": -457.446, "z": 54.4391},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "Rhahk'Zor's death opens the Factory Door (13965; instance_deadmines OnCreatureDeath NPC_RHAHKZOR)."
+          }
+        }
+      ],
+      "notes": [
+        "Rhahk'Zor (644) stands at the Factory Door with two Defias Watchmen (1725) 10 yd to each side (Shoot); the Watchmen are killed first (boss.first), the boss has Rhahk'Zor Slam. His death opens the Factory Door 13965 (instance script). The Door Lever 101831 at -188.1 -460.3 behind the door also opens it for 15 s (gameobject_scripts 26188) and is not used. Wowhead: pull the Watchmen separately if possible, crowd-control one of them, and watch for patrolling elites (Defias Overseers and Evokers walk the mine on creature_movement) that join the pull or come from behind after the kill."
+      ]
+    },
+    {
+      "name": "factory",
+      "to": {"x": -192.4, "y": -458.9, "z": 54.3},
+      "pull_groups": [
         {
-          "entries": [1725],
+          "entries": [1729, 634, 1729],
           "positions": [
-            {"x": -202.166, "y": -453.277, "z": 54.2891}
-          ]
-        },
-        {
-          "entries": [4075, 1729, 634],
-          "positions": [
-            {"x": -195.525, "y": -476.929, "z": 54.1321},
             {"x": -189.848, "y": -479.181, "z": 54.045},
-            {"x": -191.73, "y": -483.36, "z": 54.0413}
-          ]
+            {"x": -191.73, "y": -483.36, "z": 54.0413},
+            {"x": -188.074, "y": -486.698, "z": 54.044}
+          ],
+          "radius": 6
         },
         {
-          "entries": [1729],
+          "entries": [598],
           "positions": [
-            {"x": -188.074, "y": -486.698, "z": 54.044}
-          ]
+            {"x": -176.814, "y": -487.945, "z": 54.2515}
+          ],
+          "radius": 8
         },
         {
           "entries": [598],
           "positions": [
             {"x": -197.438, "y": -490.739, "z": 54.0243}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [598],
           "positions": [
-            {"x": -207.559, "y": -499.156, "z": 51.04}
-          ]
+            {"x": -176.345, "y": -499.359, "z": 54.2337}
+          ],
+          "radius": 8
         },
         {
-          "entries": [598, 598, 598],
+          "entries": [598, 598],
           "positions": [
-            {"x": -206.619, "y": -512.06, "z": 51.5749},
-            {"x": -198.654, "y": -510.057, "z": 53.4681},
-            {"x": -214.18, "y": -516.23, "z": 51.4912}
-          ]
+            {"x": -157.933, "y": -506.575, "z": 53.4426},
+            {"x": -158.652, "y": -513.984, "z": 52.7541}
+          ],
+          "radius": 7,
+          "patrol": {
+            "entries": [1729],
+            "path": [
+              {"x": -154, "y": -517.1, "z": 52.5},
+              {"x": -158.2, "y": -508.7, "z": 53.4},
+              {"x": -171.3, "y": -505.7, "z": 53.8},
+              {"x": -182.3, "y": -499.9, "z": 53.5},
+              {"x": -188.8, "y": -484.8, "z": 54},
+              {"x": -189.5, "y": -497.1, "z": 53.4},
+              {"x": -195.5, "y": -504.2, "z": 53.1},
+              {"x": -209.6, "y": -506, "z": 51.3},
+              {"x": -222.6, "y": -490.6, "z": 48.3},
+              {"x": -234.4, "y": -483.5, "z": 49},
+              {"x": -250.9, "y": -482.9, "z": 49.4},
+              {"x": -229.5, "y": -486.1, "z": 48.7},
+              {"x": -218.5, "y": -496.6, "z": 48.9},
+              {"x": -205.7, "y": -505.4, "z": 52},
+              {"x": -187.6, "y": -497.1, "z": 53.4},
+              {"x": -188.1, "y": -483.9, "z": 54},
+              {"x": -181.3, "y": -500.8, "z": 53.5},
+              {"x": -170, "y": -506.5, "z": 53.6},
+              {"x": -156.8, "y": -509, "z": 53.4},
+              {"x": -153.8, "y": -518.7, "z": 52.5}
+            ],
+            "period_s": 112.5,
+            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [598],
           "positions": [
-            {"x": -222.039, "y": -500.223, "z": 49.6132}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -219.438, "y": -485.815, "z": 49.4967}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -233.461, "y": -490.313, "z": 49.5979}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -231.309, "y": -476.99, "z": 49.3445}
-          ]
+            {"x": -170.745, "y": -509.416, "z": 53.7236}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [1729],
+            "path": [
+              {"x": -154, "y": -517.1, "z": 52.5},
+              {"x": -158.2, "y": -508.7, "z": 53.4},
+              {"x": -171.3, "y": -505.7, "z": 53.8},
+              {"x": -182.3, "y": -499.9, "z": 53.5},
+              {"x": -188.8, "y": -484.8, "z": 54},
+              {"x": -189.5, "y": -497.1, "z": 53.4},
+              {"x": -195.5, "y": -504.2, "z": 53.1},
+              {"x": -209.6, "y": -506, "z": 51.3},
+              {"x": -222.6, "y": -490.6, "z": 48.3},
+              {"x": -234.4, "y": -483.5, "z": 49},
+              {"x": -250.9, "y": -482.9, "z": 49.4},
+              {"x": -229.5, "y": -486.1, "z": 48.7},
+              {"x": -218.5, "y": -496.6, "z": 48.9},
+              {"x": -205.7, "y": -505.4, "z": 52},
+              {"x": -187.6, "y": -497.1, "z": 53.4},
+              {"x": -188.1, "y": -483.9, "z": 54},
+              {"x": -181.3, "y": -500.8, "z": 53.5},
+              {"x": -170, "y": -506.5, "z": 53.6},
+              {"x": -156.8, "y": -509, "z": 53.4},
+              {"x": -153.8, "y": -518.7, "z": 52.5}
+            ],
+            "period_s": 112.5,
+            "source": "creature_movement of spawn 79171 (Defias Evoker, 20 points, 280 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [598],
           "positions": [
             {"x": -186.472, "y": -506.314, "z": 53.3956}
-          ]
+          ],
+          "radius": 9
         },
         {
           "entries": [598, 598, 598],
           "positions": [
-            {"x": -176.345, "y": -499.359, "z": 54.2337},
-            {"x": -170.745, "y": -509.416, "z": 53.7236},
-            {"x": -176.814, "y": -487.945, "z": 54.2515}
-          ]
+            {"x": -159.594, "y": -529.266, "z": 52.2688},
+            {"x": -146.345, "y": -528.773, "z": 52.1728},
+            {"x": -152.496, "y": -532.116, "z": 49.5965}
+          ],
+          "radius": 6
         },
         {
           "entries": [598],
           "positions": [
-            {"x": -121.005, "y": -489.494, "z": 53.7982}
-          ]
+            {"x": -149.5, "y": -519.485, "z": 53.0869}
+          ],
+          "radius": 6
         },
         {
-          "entries": [598, 598],
+          "entries": [598, 598, 598],
           "positions": [
-            {"x": -102.796, "y": -477.032, "z": 54.4928},
-            {"x": -98.4166, "y": -469.802, "z": 56.2318}
-          ]
-        },
-        {
-          "entries": [598],
-          "positions": [
-            {"x": -91.2473, "y": -459.754, "z": 56.0719}
-          ]
+            {"x": -198.654, "y": -510.057, "z": 53.4681},
+            {"x": -206.619, "y": -512.06, "z": 51.5749},
+            {"x": -214.18, "y": -516.23, "z": 51.4912}
+          ],
+          "radius": 9
         },
         {
           "entries": [598],
           "positions": [
-            {"x": -114.904, "y": -450.414, "z": 56.424}
-          ]
+            {"x": -207.559, "y": -499.156, "z": 51.04}
+          ],
+          "radius": 9,
+          "patrol": {
+            "entries": [634, 1729],
+            "path": [
+              {"x": -190.1, "y": -480.9, "z": 54},
+              {"x": -187.5, "y": -492.9, "z": 53.6},
+              {"x": -194, "y": -504.1, "z": 53.1},
+              {"x": -209.7, "y": -506.3, "z": 51.3},
+              {"x": -220.8, "y": -492.1, "z": 48.2},
+              {"x": -235.9, "y": -483.6, "z": 49},
+              {"x": -244.6, "y": -482, "z": 48.9},
+              {"x": -229.8, "y": -484.6, "z": 48.8},
+              {"x": -217.8, "y": -497.9, "z": 49.2},
+              {"x": -206.1, "y": -505.6, "z": 51.9},
+              {"x": -191.2, "y": -503, "z": 52.9},
+              {"x": -187.3, "y": -492.5, "z": 53.6},
+              {"x": -189.2, "y": -483.4, "z": 54}
+            ],
+            "period_s": 70,
+            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
-          "entries": [598, 4075],
+          "entries": [598],
           "positions": [
-            {"x": -126.517, "y": -441.77, "z": 55.5907},
-            {"x": -121.662, "y": -435.93, "z": 54.643}
-          ]
+            {"x": -222.039, "y": -500.223, "z": 49.6132}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -219.438, "y": -485.815, "z": 49.4967}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -233.461, "y": -490.313, "z": 49.5979}
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [634, 1729],
+            "path": [
+              {"x": -190.1, "y": -480.9, "z": 54},
+              {"x": -187.5, "y": -492.9, "z": 53.6},
+              {"x": -194, "y": -504.1, "z": 53.1},
+              {"x": -209.7, "y": -506.3, "z": 51.3},
+              {"x": -220.8, "y": -492.1, "z": 48.2},
+              {"x": -235.9, "y": -483.6, "z": 49},
+              {"x": -244.6, "y": -482, "z": 48.9},
+              {"x": -229.8, "y": -484.6, "z": 48.8},
+              {"x": -217.8, "y": -497.9, "z": 49.2},
+              {"x": -206.1, "y": -505.6, "z": 51.9},
+              {"x": -191.2, "y": -503, "z": 52.9},
+              {"x": -187.3, "y": -492.5, "z": 53.6},
+              {"x": -189.2, "y": -483.4, "z": 54}
+            ],
+            "period_s": 70,
+            "source": "creature_movement of spawn 79170 (Defias Overseer, 13 points, 171 yd at 2.5 yd/s) with its formation members 79177; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -231.309, "y": -476.99, "z": 49.3445}
+          ],
+          "radius": 10
         }
       ],
-      "boss": {
-        "entry": 644,
-        "position": {"x": -192.915, "y": -448.211, "z": 54.4339}
-      },
+      "skip": [3586],
+      "steps": [
+        {
+          "use_object": {
+            "entry": 17153,
+            "near": {"x": -262.714, "y": -482.361, "z": 49.4353},
+            "stand": {"x": -261.1, "y": -485.6, "z": 49.5}
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 17153,
+              "near": {"x": -262.714, "y": -482.361, "z": 49.4353},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "The Heavy Door at -262.7 -482.4 (spawn 26183) has no instance script and no lever: it is a plain door (lock 86, no key) that a player clicks open. If it does not open, the mapping walk must find what opens it."
+          }
+        }
+      ],
       "notes": [
-        "button \"Door Lever\" entry 101831 at -188.1 -460.3 54.6",
-        "door \"Factory Door\" entry 13965 at -191.4 -457.4 54.4"
+        "The Heavy Door 17153 at -262.7 -482.4 (spawn 26183, lock 86 = Quick Open, no key, no script, no lever) is the way to Sneed's Shredder: the plan clicks it. Not verified live: the walk (step 2) must try it, and see whether it stays open."
       ]
     },
     {
-      "name": "sneed's_shredder",
-      "to": {"x": -277.256, "y": -494.085, "z": 49.5858},
+      "name": "sneed",
+      "to": {"x": -261.1, "y": -485.6, "z": 49.5},
       "pull_groups": [
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -277.256, "y": -494.085, "z": 49.5858}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -281.279, "y": -502.013, "z": 49.3831}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -294.264, "y": -506.217, "z": 49.2678}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -273.85, "y": -518.121, "z": 49.6849}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -295.528, "y": -530.023, "z": 49.3874}
-          ]
-        },
-        {
-          "entries": [4417],
-          "positions": [
-            {"x": -290.57, "y": -561.45, "z": 48.85}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -283.229, "y": -560.001, "z": 49.514}
-          ]
-        },
-        {
-          "entries": [4075, 4416, 4416, 4416],
-          "positions": [
-            {"x": -289.323, "y": -574.988, "z": 49.0583},
-            {"x": -297.79, "y": -567.185, "z": 50.0666},
-            {"x": -287.618, "y": -576.586, "z": 49.2788},
-            {"x": -294.312, "y": -584.521, "z": 49.7644}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -305.659, "y": -579.786, "z": 48.8363}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -313.123, "y": -592.62, "z": 48.5652}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -292.775, "y": -608.236, "z": 47.7036}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -281.691, "y": -601.383, "z": 50.8434}
-          ]
-        },
-        {
-          "entries": [4416, 4416, 4075, 4416],
-          "positions": [
-            {"x": -280.811, "y": -588.13, "z": 51.0407},
-            {"x": -272.938, "y": -589.211, "z": 50.9034},
-            {"x": -274.531, "y": -578.467, "z": 50.2194},
-            {"x": -275.491, "y": -574.469, "z": 50.5192}
-          ]
-        },
-        {
-          "entries": [4418],
-          "positions": [
-            {"x": -272.331, "y": -583.156, "z": 50.1907}
-          ]
-        },
-        {
-          "entries": [4417],
-          "positions": [
-            {"x": -263.805, "y": -578.193, "z": 50.5558}
-          ]
-        },
-        {
-          "entries": [641],
-          "positions": [
-            {"x": -263.514, "y": -571.289, "z": 51.0459}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -259.328, "y": -587.667, "z": 51.0296}
-          ]
-        },
         {
           "entries": [641, 641],
           "positions": [
             {"x": -284.672, "y": -480.893, "z": 49.2836},
             {"x": -291.981, "y": -477.763, "z": 49.2735}
-          ]
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -277.256, "y": -494.085, "z": 49.5858}
+          ],
+          "radius": 19,
+          "patrol": {
+            "entries": [641],
+            "path": [
+              {"x": -283.2, "y": -513.2, "z": 49.1},
+              {"x": -284.2, "y": -531.1, "z": 49.2},
+              {"x": -290.9, "y": -533.8, "z": 49.5},
+              {"x": -290.7, "y": -504.7, "z": 50},
+              {"x": -271.2, "y": -482.4, "z": 48.9},
+              {"x": -282.8, "y": -496, "z": 49.3}
+            ],
+            "period_s": 47.5,
+            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -281.279, "y": -502.013, "z": 49.3831}
+          ],
+          "radius": 5
         },
         {
           "entries": [641],
           "positions": [
             {"x": -308.87, "y": -485.281, "z": 49.802}
-          ]
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -294.264, "y": -506.217, "z": 49.2678}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [641],
+            "path": [
+              {"x": -283.2, "y": -513.2, "z": 49.1},
+              {"x": -284.2, "y": -531.1, "z": 49.2},
+              {"x": -290.9, "y": -533.8, "z": 49.5},
+              {"x": -290.7, "y": -504.7, "z": 50},
+              {"x": -271.2, "y": -482.4, "z": 48.9},
+              {"x": -282.8, "y": -496, "z": 49.3}
+            ],
+            "period_s": 47.5,
+            "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -273.85, "y": -518.121, "z": 49.6849}
+          ],
+          "radius": 13
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -295.528, "y": -530.023, "z": 49.3874}
+          ],
+          "radius": 15
         }
       ],
       "boss": {
         "entry": 642,
         "position": {"x": -289.453, "y": -513.009, "z": 49.6785}
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 30,
+              "center": {"x": -289.453, "y": -513.009, "z": 49.6785}
+            },
+            "timeout_s": 90,
+            "fail_text": "Killing Sneed's Shredder (642) ejects Sneed (643; spell 5141 'Eject Sneed', no spawn row): he must be killed too, his death opens the Heavy Door at -290.3 -537.0 (OnCreatureDeath NPC_SNEED)."
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 17153,
+              "near": {"x": -290.294, "y": -536.96, "z": 49.4353},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "Sneed's death opens the Heavy Door at -290.3 -537.0 (spawn 26185); the lever 101832 at -287.3 -539.9 beyond it opens it for 15 s as well."
+          }
+        }
+      ],
       "notes": [
-        "button \"Door Lever\" entry 101832 at -287.3 -539.9 49.4",
-        "door \"Heavy Door\" entry 17153 at -262.7 -482.4 49.4",
-        "door \"Heavy Door\" entry 17153 at -290.3 -537.0 49.4",
-        "door \"Heavy Door\" entry 17154 at -243.0 -578.6 51.1"
+        "Sneed's Shredder (642, spawn 79223) walks a 15-point loop around its room (x -310.6 to -289.4, y -532.6 to -499.4; 134 yd, 72.0 s a lap with two 8 s waits, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt); a boss fight searches 80 yd). When it dies, Eject Sneed (5141) puts Sneed (643, 3128 hp, Disarm 6430) in its place with a fresh threat table: he has no spawn row, so no plan field can name him; the wait for hostiles to be gone after the boss is what kills him. The Shredder casts Terrify (7399, instant) and Distracting Pain (3603). The Goblin Woodcarvers (641) Axe Toss (6466). Wowhead's guide and the DB agree that the whole room must be cleared of Woodcarvers first: Terrify sends a feared player into them (the leg pulls every Woodcarver within 45 yd of the Shredder)."
       ]
     },
     {
-      "name": "gilnid",
-      "to": {"x": -226.034, "y": -555.927, "z": 19.3065},
+      "name": "west_area",
+      "to": {"x": -292.5, "y": -538.8, "z": 49.3},
       "pull_groups": [
         {
-          "entries": [1731, 622],
+          "entries": [641],
           "positions": [
-            {"x": -226.034, "y": -555.927, "z": 19.3065},
-            {"x": -226.113, "y": -563.705, "z": 19.3065}
-          ]
+            {"x": -283.229, "y": -560.001, "z": 49.514}
+          ],
+          "radius": 4
+        },
+        {
+          "entries": [4417],
+          "positions": [
+            {"x": -290.57, "y": -561.45, "z": 48.85}
+          ],
+          "radius": 4
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -297.79, "y": -567.185, "z": 50.0666}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4418],
+            "path": [
+              {"x": -280.1, "y": -594.3, "z": 50.7},
+              {"x": -289.9, "y": -600.3, "z": 47.8},
+              {"x": -296.9, "y": -600.8, "z": 47.6},
+              {"x": -302.1, "y": -598.6, "z": 48.1},
+              {"x": -304.5, "y": -594.7, "z": 48},
+              {"x": -305.5, "y": -590.5, "z": 47.6},
+              {"x": -304.4, "y": -587, "z": 47.8},
+              {"x": -293.2, "y": -571.9, "z": 48.8},
+              {"x": -290.8, "y": -557.9, "z": 48.8},
+              {"x": -295.1, "y": -572.7, "z": 48.6},
+              {"x": -294, "y": -572.3, "z": 48.7},
+              {"x": -304.1, "y": -588.2, "z": 47.5},
+              {"x": -304.1, "y": -588.2, "z": 47.5},
+              {"x": -306.1, "y": -591, "z": 47.5},
+              {"x": -304.4, "y": -594.9, "z": 48},
+              {"x": -302.1, "y": -597.9, "z": 48.2},
+              {"x": -297.5, "y": -600.9, "z": 47.6},
+              {"x": -290, "y": -600.1, "z": 47.8}
+            ],
+            "period_s": 57.5,
+            "source": "creature_movement of spawn 79229 (Defias Wizard, 18 points, 142 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -287.618, "y": -576.586, "z": 49.2788}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -305.659, "y": -579.786, "z": 48.8363}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -294.312, "y": -584.521, "z": 49.7644}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -313.123, "y": -592.62, "z": 48.5652}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -292.775, "y": -608.236, "z": 47.7036}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -281.691, "y": -601.383, "z": 50.8434}
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -292.8, "y": -571.7, "z": 48.8},
+              {"x": -305, "y": -587.4, "z": 47.7},
+              {"x": -305.6, "y": -590.7, "z": 47.6},
+              {"x": -304.8, "y": -594.9, "z": 48},
+              {"x": -302.4, "y": -598.5, "z": 48.2},
+              {"x": -297.2, "y": -601, "z": 47.6},
+              {"x": -290.3, "y": -600.6, "z": 47.8},
+              {"x": -280.3, "y": -594.8, "z": 50.7},
+              {"x": -271.9, "y": -580.7, "z": 49.9},
+              {"x": -280.6, "y": -594.8, "z": 50.6},
+              {"x": -289.7, "y": -601, "z": 47.9},
+              {"x": -296.8, "y": -601.4, "z": 47.5},
+              {"x": -302, "y": -598.9, "z": 48.1},
+              {"x": -304.6, "y": -595.2, "z": 48.1},
+              {"x": -305.9, "y": -591, "z": 47.5},
+              {"x": -304.7, "y": -587.7, "z": 47.6},
+              {"x": -293.2, "y": -572.5, "z": 48.8},
+              {"x": -291.1, "y": -559.3, "z": 48.8}
+            ],
+            "period_s": 69.5,
+            "source": "creature_movement of spawn 79246 (Defias Taskmaster, 18 points, 171 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416, 4416],
+          "positions": [
+            {"x": -280.811, "y": -588.13, "z": 51.0407},
+            {"x": -272.938, "y": -589.211, "z": 50.9034}
+          ],
+          "radius": 3,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -270.3, "y": -583.6, "z": 50},
+              {"x": -275.5, "y": -592.5, "z": 51.3},
+              {"x": -278.7, "y": -592.4, "z": 50.9},
+              {"x": -279.3, "y": -588.7, "z": 50.8},
+              {"x": -275.3, "y": -581.1, "z": 50.3},
+              {"x": -269.3, "y": -575.1, "z": 50.3},
+              {"x": -258.2, "y": -574.3, "z": 51.2},
+              {"x": -252.4, "y": -579.8, "z": 51.1},
+              {"x": -261.2, "y": -582.2, "z": 50.7}
+            ],
+            "period_s": 29,
+            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -275.491, "y": -574.469, "z": 50.5192}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -259.328, "y": -587.667, "z": 51.0296}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4417],
+          "positions": [
+            {"x": -263.805, "y": -578.193, "z": 50.5558}
+          ],
+          "radius": 3
+        },
+        {
+          "entries": [641],
+          "positions": [
+            {"x": -263.514, "y": -571.289, "z": 51.0459}
+          ],
+          "radius": 9,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -270.3, "y": -583.6, "z": 50},
+              {"x": -275.5, "y": -592.5, "z": 51.3},
+              {"x": -278.7, "y": -592.4, "z": 50.9},
+              {"x": -279.3, "y": -588.7, "z": 50.8},
+              {"x": -275.3, "y": -581.1, "z": 50.3},
+              {"x": -269.3, "y": -575.1, "z": 50.3},
+              {"x": -258.2, "y": -574.3, "z": 51.2},
+              {"x": -252.4, "y": -579.8, "z": 51.1},
+              {"x": -261.2, "y": -582.2, "z": 50.7}
+            ],
+            "period_s": 29,
+            "source": "creature_movement of spawn 79233 (Defias Taskmaster, 9 points, 72 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "use_object": {
+            "entry": 17154,
+            "near": {"x": -242.965, "y": -578.561, "z": 51.1366},
+            "stand": {"x": -245.5, "y": -575.8, "z": 51.3}
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 17154,
+              "near": {"x": -242.965, "y": -578.561, "z": 51.1366},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "The Heavy Door 17154 at -243.0 -578.6 (spawn 26184) has no instance script and no lever: a plain door (lock 86) that a player clicks open. If it does not open, the mapping walk must find what opens it."
+          }
+        }
+      ],
+      "notes": [
+        "Beyond the Heavy Door 26185 (opened by Sneed's death) the way turns west and south through the Defias Strip Miner cave, then east to the Heavy Door 17154 at -243.0 -578.6 (spawn 26184, no script and no lever, clicked open like the first one). Defias Taskmasters (4417) run away from their target and shoot (Piercing Shot 6685); the Wizard (4418) casts Chains of Ice 113 and Fireball 9053. The Wizard 79229 is no pull group of his own: he patrols 18 points (57.5 s) from his spawn point and is the patrol of west_area:2."
+      ]
+    },
+    {
+      "name": "hall",
+      "to": {"x": -245.5, "y": -575.8, "z": 51.2},
+      "pull_groups": [
+        {
+          "entries": [634, 634],
+          "positions": [
+            {"x": -209.76, "y": -548.723, "z": 51.2297},
+            {"x": -200.859, "y": -548.916, "z": 51.2297}
+          ],
+          "radius": 15,
+          "patrol": {
+            "entries": [4418, 4417, 4417],
+            "path": [
+              {"x": -228.812, "y": -569.757, "z": 51.2314},
+              {"x": -225.332, "y": -562.401, "z": 51.23},
+              {"x": -220.089, "y": -556.916, "z": 51.23},
+              {"x": -211.182, "y": -553.736, "z": 51.23},
+              {"x": -203.248, "y": -553.507, "z": 51.23},
+              {"x": -194.853, "y": -555.999, "z": 51.23},
+              {"x": -187.356, "y": -561.157, "z": 51.23},
+              {"x": -182.826, "y": -567.105, "z": 51.072},
+              {"x": -179.251, "y": -573.939, "z": 48.0013},
+              {"x": -179.25, "y": -581.854, "z": 45.0103},
+              {"x": -180.508, "y": -588.861, "z": 42.1844},
+              {"x": -185.547, "y": -596.173, "z": 38.7453},
+              {"x": -193.62, "y": -601.311, "z": 34.4809},
+              {"x": -202.36, "y": -605.164, "z": 30.8329},
+              {"x": -212.195, "y": -603.824, "z": 26.463},
+              {"x": -219.832, "y": -602.784, "z": 23.3996},
+              {"x": -226.192, "y": -596.772, "z": 20.6368},
+              {"x": -228.849, "y": -592.655, "z": 19.4674},
+              {"x": -222.017, "y": -602.068, "z": 22.7777},
+              {"x": -215.955, "y": -606.225, "z": 25.5062},
+              {"x": -206.392, "y": -607.716, "z": 28.9385},
+              {"x": -195.975, "y": -605.079, "z": 33.3159},
+              {"x": -190.92, "y": -602.234, "z": 35.448},
+              {"x": -186.186, "y": -599.686, "z": 37.3745},
+              {"x": -181.845, "y": -593.462, "z": 40.1753},
+              {"x": -179.362, "y": -585.189, "z": 43.6891},
+              {"x": -180.207, "y": -574.755, "z": 47.8364},
+              {"x": -183.317, "y": -567.58, "z": 51.0124},
+              {"x": -188.935, "y": -559.687, "z": 51.2296},
+              {"x": -195.706, "y": -554.703, "z": 51.2296},
+              {"x": -204.469, "y": -552.705, "z": 51.2296},
+              {"x": -213.906, "y": -554.141, "z": 51.2296},
+              {"x": -222.241, "y": -558.84, "z": 51.2296},
+              {"x": -227.752, "y": -566.248, "z": 51.2296},
+              {"x": -230.554, "y": -574.552, "z": 51.223},
+              {"x": -230.624, "y": -583.197, "z": 51.2233}
+            ],
+            "period_s": 130.5,
+            "source": "creature_movement of spawn 79284 (Defias Wizard, 36 points, 324 yd) with its formation members 79283, 79285; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -205.669, "y": -531.166, "z": 51.2296}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [4418, 4417, 4417],
+            "path": [
+              {"x": -228.812, "y": -569.757, "z": 51.2314},
+              {"x": -225.332, "y": -562.401, "z": 51.23},
+              {"x": -220.089, "y": -556.916, "z": 51.23},
+              {"x": -211.182, "y": -553.736, "z": 51.23},
+              {"x": -203.248, "y": -553.507, "z": 51.23},
+              {"x": -194.853, "y": -555.999, "z": 51.23},
+              {"x": -187.356, "y": -561.157, "z": 51.23},
+              {"x": -182.826, "y": -567.105, "z": 51.072},
+              {"x": -179.251, "y": -573.939, "z": 48.0013},
+              {"x": -179.25, "y": -581.854, "z": 45.0103},
+              {"x": -180.508, "y": -588.861, "z": 42.1844},
+              {"x": -185.547, "y": -596.173, "z": 38.7453},
+              {"x": -193.62, "y": -601.311, "z": 34.4809},
+              {"x": -202.36, "y": -605.164, "z": 30.8329},
+              {"x": -212.195, "y": -603.824, "z": 26.463},
+              {"x": -219.832, "y": -602.784, "z": 23.3996},
+              {"x": -226.192, "y": -596.772, "z": 20.6368},
+              {"x": -228.849, "y": -592.655, "z": 19.4674},
+              {"x": -222.017, "y": -602.068, "z": 22.7777},
+              {"x": -215.955, "y": -606.225, "z": 25.5062},
+              {"x": -206.392, "y": -607.716, "z": 28.9385},
+              {"x": -195.975, "y": -605.079, "z": 33.3159},
+              {"x": -190.92, "y": -602.234, "z": 35.448},
+              {"x": -186.186, "y": -599.686, "z": 37.3745},
+              {"x": -181.845, "y": -593.462, "z": 40.1753},
+              {"x": -179.362, "y": -585.189, "z": 43.6891},
+              {"x": -180.207, "y": -574.755, "z": 47.8364},
+              {"x": -183.317, "y": -567.58, "z": 51.0124},
+              {"x": -188.935, "y": -559.687, "z": 51.2296},
+              {"x": -195.706, "y": -554.703, "z": 51.2296},
+              {"x": -204.469, "y": -552.705, "z": 51.2296},
+              {"x": -213.906, "y": -554.141, "z": 51.2296},
+              {"x": -222.241, "y": -558.84, "z": 51.2296},
+              {"x": -227.752, "y": -566.248, "z": 51.2296},
+              {"x": -230.554, "y": -574.552, "z": 51.223},
+              {"x": -230.624, "y": -583.197, "z": 51.2233}
+            ],
+            "period_s": 130.5,
+            "source": "creature_movement of spawn 79284 (Defias Wizard, 36 points, 324 yd) with its formation members 79283, 79285; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [61962, 61962],
+          "positions": [
+            {"x": -188.011, "y": -532.936, "z": 51.2296},
+            {"x": -183.968, "y": -528.749, "z": 51.3159}
+          ],
+          "radius": 12,
+          "patrol": {
+            "entries": [61962],
+            "path": [
+              {"x": -184, "y": -528.7, "z": 51.3},
+              {"x": -168.9, "y": -550.9, "z": 51.2},
+              {"x": -147.8, "y": -567.8, "z": 51.2},
+              {"x": -124, "y": -568.9, "z": 51.2},
+              {"x": -147.7, "y": -568, "z": 51.2},
+              {"x": -169.2, "y": -549.8, "z": 51.2}
+            ],
+            "period_s": 62,
+            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [622],
           "positions": [
-            {"x": -232.502, "y": -569.785, "z": 19.3065}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -234.991, "y": -575.816, "z": 19.3065}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -209.573, "y": -568.15, "z": 20.9768}
-          ]
-        },
-        {
-          "entries": [1731, 622],
-          "positions": [
-            {"x": -210.095, "y": -552.754, "z": 19.3065},
-            {"x": -207.133, "y": -551.25, "z": 19.3065}
-          ]
-        },
-        {
-          "entries": [622, 1731],
-          "positions": [
-            {"x": -187.23, "y": -549.39, "z": 19.3},
-            {"x": -186.878, "y": -553.565, "z": 19.3065}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -178.397, "y": -565.429, "z": 19.3065}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -178.319, "y": -581.496, "z": 19.3112}
-          ]
-        },
-        {
-          "entries": [622, 622],
-          "positions": [
-            {"x": -197.997, "y": -582.979, "z": 20.9769},
-            {"x": -207.48, "y": -585.729, "z": 20.9768}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -198.926, "y": -603.779, "z": 19.3022}
-          ]
-        },
-        {
-          "entries": [1731, 1731],
-          "positions": [
-            {"x": -203.274, "y": -602.657, "z": 30.3561},
-            {"x": -208.324, "y": -606.89, "z": 28.3691}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -188.734, "y": -600.466, "z": 36.5784}
-          ]
-        },
-        {
-          "entries": [1731, 1731],
-          "positions": [
-            {"x": -182.394, "y": -567.021, "z": 51.0262},
-            {"x": -183.209, "y": -564.577, "z": 51.2296}
-          ]
+            {"x": -170.372, "y": -535.159, "z": 51.2296}
+          ],
+          "radius": 9
         },
         {
           "entries": [622, 1731],
           "positions": [
             {"x": -163.582, "y": -552.5, "z": 51.2296},
             {"x": -160.796, "y": -558.182, "z": 51.2296}
-          ]
-        },
+          ],
+          "radius": 11,
+          "patrol": {
+            "entries": [61962],
+            "path": [
+              {"x": -184, "y": -528.7, "z": 51.3},
+              {"x": -168.9, "y": -550.9, "z": 51.2},
+              {"x": -147.8, "y": -567.8, "z": 51.2},
+              {"x": -124, "y": -568.9, "z": 51.2},
+              {"x": -147.7, "y": -568, "z": 51.2},
+              {"x": -169.2, "y": -549.8, "z": 51.2}
+            ],
+            "period_s": 62,
+            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        }
+      ],
+      "skip": [3586],
+      "notes": [
+        "The goblin hall (z 51.2). Three Defias Overseers (634) stand on a catwalk at z 57.8 (spawn rows 2583051, 2583058, 2583061; the first PATROLS two points along y -584, x -92.5 to -64.5, see the harvester leg) with no mesh link to the floor: not pulled, 6.6 to 10.8 yd above the route in 3-D (walk 2026-10-15); whether they aggro cannot be seen from an invisible GM, so it stays a risk. Miner Johnson (3586, faction 14, rare, 7-day respawn) stands at -152.5 -532.1 and is skipped. Jared Voss (61961, poison) and the Defias Chemists and Mixologists (61959, 61960) stand in the laboratory at x -85 to -110, y -489 to -526, which no leg walks.",
+        "The pack of Wizard 79284 (Wizard 4418 with two Taskmasters 4417: spawns 79284, 79283, 79285) walks a 36-point, 312 yd path in 130.5 s (timed on the 2026-10-15 walk; the plan had the path of the follower 79283, 51 s). It is no pull group of its own: it is the patrol of hall:1 and hall:2. hall:1 lists two Defias Overseers (2583026, 2583027), static guards; the Taskmasters in its patrol block are that patrol, not members of the group, which is how patrol blocks are meant."
+      ]
+    },
+    {
+      "name": "harvester",
+      "to": {"x": -151.5, "y": -560, "z": 51.3},
+      "pull_groups": [
         {
           "entries": [622],
           "positions": [
             {"x": -152.739, "y": -570.464, "z": 51.2296}
-          ]
+          ],
+          "radius": 11
         },
         {
-          "entries": [4417],
+          "entries": [1731, 61962],
           "positions": [
-            {"x": -149.151, "y": -580.585, "z": 19.3131}
-          ]
+            {"x": -119.83, "y": -564.627, "z": 51.2296},
+            {"x": -116.304, "y": -556.871, "z": 51.2296}
+          ],
+          "radius": 7
         },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -152.997, "y": -590.709, "z": 19.0535}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -131.691, "y": -578.845, "z": 18.6522}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -139.828, "y": -569.442, "z": 19.7906}
-          ]
-        },
-        {
-          "entries": [4416, 4416, 4416, 4416, 4416, 4416, 4075, 4075, 4416],
-          "positions": [
-            {"x": -135.128, "y": -593.666, "z": 17.8968},
-            {"x": -126.252, "y": -596.364, "z": 17.8088},
-            {"x": -138.003, "y": -602.398, "z": 16.1097},
-            {"x": -127.414, "y": -607.545, "z": 15.174},
-            {"x": -138.051, "y": -613.235, "z": 15.3036},
-            {"x": -137.649, "y": -622.887, "z": 15.0423},
-            {"x": -137.489, "y": -625.4, "z": 14.8722},
-            {"x": -137.611, "y": -627.141, "z": 14.8801},
-            {"x": -132.504, "y": -637.781, "z": 14.3308}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -118.393, "y": -635.202, "z": 12.197}
-          ]
-        },
-        {
-          "entries": [4418],
-          "positions": [
-            {"x": -119.498, "y": -639.309, "z": 11.4469}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -115.421, "y": -651.487, "z": 8.16425}
-          ]
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -123.156, "y": -681.324, "z": 10.5616}
-          ]
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -188.781, "y": -702.69, "z": 8.85784}
-          ]
-        },
-        {
-          "entries": [4418, 4417, 4417],
-          "positions": [
-            {"x": -229.584, "y": -578.362, "z": 51.2588},
-            {"x": -228.095, "y": -576.564, "z": 51.2145},
-            {"x": -239.833, "y": -578.879, "z": 51.1657}
-          ]
-        },
-        {
-          "entries": [634, 634],
-          "positions": [
-            {"x": -209.76, "y": -548.723, "z": 51.2297},
-            {"x": -200.859, "y": -548.916, "z": 51.2297}
-          ]
-        },
-        {
-          "entries": [1731],
-          "positions": [
-            {"x": -205.669, "y": -531.166, "z": 51.2296}
-          ]
-        },
-        {
-          "entries": [61962],
-          "positions": [
-            {"x": -188.011, "y": -532.936, "z": 51.2296}
-          ]
-        },
-        {
-          "entries": [61962],
-          "positions": [
-            {"x": -183.968, "y": -528.749, "z": 51.3159}
-          ]
-        },
-        {
-          "entries": [622],
-          "positions": [
-            {"x": -170.372, "y": -535.159, "z": 51.2296}
-          ]
-        },
-        {
-          "entries": [598, 3586, 598, 598, 598, 598, 598],
-          "positions": [
-            {"x": -159.594, "y": -529.266, "z": 52.2688},
-            {"x": -152.496, "y": -532.116, "z": 49.5965},
-            {"x": -152.496, "y": -532.116, "z": 49.5965},
-            {"x": -158.652, "y": -513.984, "z": 52.7541},
-            {"x": -146.345, "y": -528.773, "z": 52.1728},
-            {"x": -149.5, "y": -519.485, "z": 53.0869},
-            {"x": -157.933, "y": -506.575, "z": 53.4426}
-          ]
-        }
-      ],
-      "boss": {
-        "entry": 1763,
-        "position": {"x": -177.362, "y": -574.458, "z": 19.3113}
-      },
-      "notes": [
-        "button \"Door Lever\" entry 101834 at -165.4 -576.9 19.3",
-        "door \"Heavy Door\" entry 17153 at -168.5 -579.9 19.3",
-        "door \"Heavy Door\" entry 17154 at -243.0 -578.6 51.1",
-        "goober \"Defias Cannon\" entry 16398 at -107.6 -659.7 7.2"
-      ]
-    },
-    {
-      "name": "masterpiece_harvester",
-      "to": {"x": -114.435, "y": -581.135, "z": 51.2296},
-      "pull_groups": [
         {
           "entries": [61962, 622],
           "positions": [
             {"x": -114.435, "y": -581.135, "z": 51.2296},
             {"x": -112.874, "y": -580.601, "z": 51.2297}
-          ]
+          ],
+          "radius": 14
         },
         {
           "entries": [4417],
           "positions": [
             {"x": -95.9344, "y": -569.47, "z": 51.2296}
-          ]
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [634],
+            "path": [
+              {"x": -92.5058, "y": -583.909, "z": 57.8392},
+              {"x": -64.5507, "y": -584.832, "z": 57.8392}
+            ],
+            "period_s": 22,
+            "period_estimate": true,
+            "source": "creature_movement of spawn 2583051 (Defias Overseer on the z 57.8 catwalk, 2 points, 56 yd round trip); period_s is an estimate, calculated and not timed (out of range of every sampling spot of the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)); the catwalk has no mesh link to the floor"
+          }
+        },
+        {
+          "entries": [1731, 622, 61962],
+          "positions": [
+            {"x": -92.5465, "y": -578.331, "z": 51.2296},
+            {"x": -88.1863, "y": -579.469, "z": 51.2296},
+            {"x": -81.7283, "y": -583.432, "z": 51.2296}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -95.9, "y": -569.5, "z": 51.2},
+              {"x": -75.3, "y": -569.8, "z": 51.2}
+            ],
+            "period_s": 16.5,
+            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [622],
           "positions": [
             {"x": -92.2286, "y": -559.99, "z": 51.2296}
-          ]
+          ],
+          "radius": 9,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -95.9, "y": -569.5, "z": 51.2},
+              {"x": -75.3, "y": -569.8, "z": 51.2}
+            ],
+            "period_s": 16.5,
+            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [61962],
           "positions": [
             {"x": -81.0237, "y": -555.554, "z": 51.2296}
-          ]
+          ],
+          "radius": 9
         },
         {
-          "entries": [634, 622],
+          "entries": [622],
           "positions": [
-            {"x": -68.4434, "y": -556.349, "z": 57.8391},
             {"x": -63.7934, "y": -559.285, "z": 51.2297}
-          ]
-        },
-        {
-          "entries": [61962, 622, 1731],
-          "positions": [
-            {"x": -81.7283, "y": -583.432, "z": 51.2296},
-            {"x": -88.1863, "y": -579.469, "z": 51.2296},
-            {"x": -92.5465, "y": -578.331, "z": 51.2296}
-          ]
-        },
-        {
-          "entries": [634],
-          "positions": [
-            {"x": -92.5058, "y": -583.909, "z": 57.8392}
-          ]
-        },
-        {
-          "entries": [634, 1731, 61962],
-          "positions": [
-            {"x": -107.638, "y": -556.652, "z": 57.839},
-            {"x": -119.83, "y": -564.627, "z": 51.2296},
-            {"x": -116.304, "y": -556.871, "z": 51.2296}
-          ]
-        },
-        {
-          "entries": [61960, 4075, 61959],
-          "positions": [
-            {"x": -99.9165, "y": -521.855, "z": 54.1195},
-            {"x": -97.7515, "y": -521.889, "z": 54.1669},
-            {"x": -98.7702, "y": -514.548, "z": 54.1626}
-          ]
-        },
-        {
-          "entries": [61961],
-          "positions": [
-            {"x": -85.063, "y": -525.839, "z": 54.4025}
-          ]
-        },
-        {
-          "entries": [61959, 61960, 61960, 4075, 4075, 61959, 61960, 598],
-          "positions": [
-            {"x": -90.491, "y": -505.258, "z": 54.3517},
-            {"x": -86.7989, "y": -503.043, "z": 54.4325},
-            {"x": -108.696, "y": -506.088, "z": 53.9933},
-            {"x": -89.0536, "y": -494.947, "z": 54.399},
-            {"x": -82.0417, "y": -494.258, "z": 54.5501},
-            {"x": -101.098, "y": -497.095, "z": 54.8054},
-            {"x": -97.2543, "y": -489.712, "z": 54.2621},
-            {"x": -82.5628, "y": -484.323, "z": 54.5806}
-          ]
-        },
-        {
-          "entries": [4416, 4416, 4416],
-          "positions": [
-            {"x": -106.13, "y": -613.612, "z": 14.3938},
-            {"x": -104.417, "y": -620.566, "z": 14.5019},
-            {"x": -115.187, "y": -621.201, "z": 14.1127}
-          ]
-        },
-        {
-          "entries": [4416],
-          "positions": [
-            {"x": -104.376, "y": -640.789, "z": 8.76665}
-          ]
+          ],
+          "radius": 5
         }
       ],
       "boss": {
@@ -804,56 +1335,641 @@
         "position": {"x": -66.8989, "y": -570.032, "z": 51.2299}
       },
       "notes": [
-        "goober \"Defias Cannon\" entry 16398 at -107.6 -659.7 7.2"
+        "Masterpiece Harvester (61963) is Turtle's replacement for the Foe Reaper: 4918 hp, no spell list, only a say on aggro and on death (EventAI 2200054, 2200055). The Manufactured Golems (61962) Cleave and are immune to most CC (mechanic_immune_mask 42693394)."
       ]
     },
     {
-      "name": "mr._smite",
-      "to": {"x": -49.5123, "y": -685.08, "z": 3.89985},
+      "name": "gilnid",
+      "to": {"x": -199.7, "y": -551.4, "z": 51.3},
+      "pull_groups": [
+        {
+          "entries": [1731, 1731],
+          "positions": [
+            {"x": -183.209, "y": -564.577, "z": 51.2296},
+            {"x": -182.394, "y": -567.021, "z": 51.0262}
+          ],
+          "radius": 20
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -188.734, "y": -600.466, "z": 36.5784}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [1731, 1731],
+          "positions": [
+            {"x": -203.274, "y": -602.657, "z": 30.3561},
+            {"x": -208.324, "y": -606.89, "z": 28.3691}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -198.926, "y": -603.779, "z": 19.3022}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -234.991, "y": -575.816, "z": 19.3065}
+          ],
+          "radius": 18,
+          "patrol": {
+            "entries": [622],
+            "path": [
+              {"x": -234.4, "y": -589.6, "z": 19.3},
+              {"x": -235.6, "y": -576, "z": 19.3},
+              {"x": -230, "y": -563.7, "z": 19.3},
+              {"x": -220.8, "y": -555.8, "z": 19.3},
+              {"x": -210.3, "y": -552.7, "z": 19.3},
+              {"x": -198.9, "y": -552.1, "z": 19.3},
+              {"x": -188.2, "y": -556.4, "z": 19.3},
+              {"x": -180, "y": -566.5, "z": 19.3},
+              {"x": -177.2, "y": -586.1, "z": 19.3},
+              {"x": -177.5, "y": -584.1, "z": 19.3},
+              {"x": -178.3, "y": -584, "z": 19.3},
+              {"x": -179.9, "y": -567, "z": 19.3},
+              {"x": -189.4, "y": -555.2, "z": 19.3},
+              {"x": -197.5, "y": -551.9, "z": 19.3},
+              {"x": -210, "y": -552.6, "z": 19.3},
+              {"x": -220.5, "y": -555.8, "z": 19.3},
+              {"x": -229.2, "y": -563, "z": 19.3},
+              {"x": -234.7, "y": -575.3, "z": 19.3},
+              {"x": -233.7, "y": -588.7, "z": 19.3}
+            ],
+            "period_s": 85,
+            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [622],
+          "positions": [
+            {"x": -207.48, "y": -585.729, "z": 20.9768}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [622],
+          "positions": [
+            {"x": -232.502, "y": -569.785, "z": 19.3065}
+          ],
+          "radius": 3
+        },
+        {
+          "entries": [1731, 622],
+          "positions": [
+            {"x": -226.034, "y": -555.927, "z": 19.3065},
+            {"x": -226.113, "y": -563.705, "z": 19.3065}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -209.573, "y": -568.15, "z": 20.9768}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [622],
+          "positions": [
+            {"x": -197.997, "y": -582.979, "z": 20.9769}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -178.397, "y": -565.429, "z": 19.3065}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [622],
+            "path": [
+              {"x": -234.4, "y": -589.6, "z": 19.3},
+              {"x": -235.6, "y": -576, "z": 19.3},
+              {"x": -230, "y": -563.7, "z": 19.3},
+              {"x": -220.8, "y": -555.8, "z": 19.3},
+              {"x": -210.3, "y": -552.7, "z": 19.3},
+              {"x": -198.9, "y": -552.1, "z": 19.3},
+              {"x": -188.2, "y": -556.4, "z": 19.3},
+              {"x": -180, "y": -566.5, "z": 19.3},
+              {"x": -177.2, "y": -586.1, "z": 19.3},
+              {"x": -177.5, "y": -584.1, "z": 19.3},
+              {"x": -178.3, "y": -584, "z": 19.3},
+              {"x": -179.9, "y": -567, "z": 19.3},
+              {"x": -189.4, "y": -555.2, "z": 19.3},
+              {"x": -197.5, "y": -551.9, "z": 19.3},
+              {"x": -210, "y": -552.6, "z": 19.3},
+              {"x": -220.5, "y": -555.8, "z": 19.3},
+              {"x": -229.2, "y": -563, "z": 19.3},
+              {"x": -234.7, "y": -575.3, "z": 19.3},
+              {"x": -233.7, "y": -588.7, "z": 19.3}
+            ],
+            "period_s": 85,
+            "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        }
+      ],
+      "boss": {
+        "entry": 1763,
+        "position": {"x": -177.362, "y": -574.458, "z": 19.3113},
+        "first": [1731]
+      },
+      "after_boss": [
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 17153,
+              "near": {"x": -168.514, "y": -579.861, "z": 19.3159},
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "Gilnid's death opens the Heavy Door at -168.5 -579.9 (spawn 26182, OnCreatureDeath NPC_GILDNID); the lever 101834 at -165.4 -576.9 beyond it opens it for 15 s as well."
+          }
+        }
+      ],
+      "notes": [
+        "The leg first walks back from the Harvester to the top of the foundry ramp (-186.9 -569.9 z 51), then down the spiral (z 51 to 19) round the pit to Gilnid at -177.4 -574.5 z 19.3. Gilnid (1763) casts Molten Metal (list 17630), a debuff that cuts the tank's threat: the healer keeps the tank up while it lasts. His Goblin Craftsman (1731, spawn 79211) is killed first (Wowhead's guide says an Engineer stands beside him: the database has a Craftsman, so the plan follows the database). Keep the pull to Gilnid and that one add: more goblins join if the room is not cleared first, and an Engineer's golem (Summon Remote-Controlled Golem, 3605) is stopped by a stun in the cast or by killing the Engineer. His death opens the Heavy Door 26182 east of him, the way to the gunpowder and the cannon."
+      ]
+    },
+    {
+      "name": "cannon_a",
+      "to": {"x": -177.4, "y": -574.5, "z": 19.4},
+      "pull_groups": [
+        {
+          "entries": [622, 1731],
+          "positions": [
+            {"x": -187.23, "y": -549.39, "z": 19.3},
+            {"x": -186.878, "y": -553.565, "z": 19.3065}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -152.997, "y": -590.709, "z": 19.0535}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4417],
+          "positions": [
+            {"x": -149.151, "y": -580.585, "z": 19.3131}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -139.828, "y": -569.442, "z": 19.7906}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -131.691, "y": -578.845, "z": 18.6522}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -135.128, "y": -593.666, "z": 17.8968}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -141.4, "y": -579.4, "z": 18.7},
+              {"x": -131.9, "y": -592.7, "z": 17.8},
+              {"x": -132.5, "y": -608.4, "z": 14.1},
+              {"x": -130.7, "y": -623.2, "z": 13.1},
+              {"x": -125.6, "y": -636.3, "z": 12.8},
+              {"x": -108.7, "y": -645, "z": 8.2},
+              {"x": -126.7, "y": -635.7, "z": 12.9},
+              {"x": -131.1, "y": -621.2, "z": 13.1}
+            ],
+            "period_s": 65,
+            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -138.003, "y": -602.398, "z": 16.1097}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -141.4, "y": -579.4, "z": 18.7},
+              {"x": -131.9, "y": -592.7, "z": 17.8},
+              {"x": -132.5, "y": -608.4, "z": 14.1},
+              {"x": -130.7, "y": -623.2, "z": 13.1},
+              {"x": -125.6, "y": -636.3, "z": 12.8},
+              {"x": -108.7, "y": -645, "z": 8.2},
+              {"x": -126.7, "y": -635.7, "z": 12.9},
+              {"x": -131.1, "y": -621.2, "z": 13.1}
+            ],
+            "period_s": 65,
+            "source": "creature_movement of spawn 79214 (Defias Taskmaster, 8 points, 160 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -126.252, "y": -596.364, "z": 17.8088}
+          ],
+          "radius": 6
+        }
+      ]
+    },
+    {
+      "name": "cannon",
+      "to": {"x": -128, "y": -597.3, "z": 17.2},
+      "pull_groups": [
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -127.414, "y": -607.545, "z": 15.174}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [4418],
+            "path": [
+              {"x": -132.4, "y": -624.1, "z": 13.3},
+              {"x": -132.2, "y": -589.3, "z": 18.4},
+              {"x": -141.5, "y": -578.9, "z": 18.7},
+              {"x": -132.8, "y": -588.3, "z": 18.4},
+              {"x": -131, "y": -628.7, "z": 13.2},
+              {"x": -123.9, "y": -637.7, "z": 12.8}
+            ],
+            "period_s": 52.5,
+            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -138.051, "y": -613.235, "z": 15.3036}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [4416, 4416],
+          "positions": [
+            {"x": -106.13, "y": -613.612, "z": 14.3938},
+            {"x": -104.417, "y": -620.566, "z": 14.5019}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -115.187, "y": -621.201, "z": 14.1127}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -137.649, "y": -622.887, "z": 15.0423}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4418],
+            "path": [
+              {"x": -132.4, "y": -624.1, "z": 13.3},
+              {"x": -132.2, "y": -589.3, "z": 18.4},
+              {"x": -141.5, "y": -578.9, "z": 18.7},
+              {"x": -132.8, "y": -588.3, "z": 18.4},
+              {"x": -131, "y": -628.7, "z": 13.2},
+              {"x": -123.9, "y": -637.7, "z": 12.8}
+            ],
+            "period_s": 52.5,
+            "source": "creature_movement of spawn 79260 (Defias Wizard, 6 points, 130 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -132.504, "y": -637.781, "z": 14.3308}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [4416, 4418],
+          "positions": [
+            {"x": -118.393, "y": -635.202, "z": 12.197},
+            {"x": -119.498, "y": -639.309, "z": 11.4469}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -104.376, "y": -640.789, "z": 8.76665}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [4416],
+          "positions": [
+            {"x": -115.421, "y": -651.487, "z": 8.16425}
+          ],
+          "radius": 10
+        }
+      ],
+      "steps": [
+        {
+          "loot_object": {
+            "entry": 17155,
+            "near": {"x": -106.409, "y": -617.284, "z": 13.8495},
+            "stand": {"x": -110, "y": -616.4, "z": 14.3},
+            "expect_item": {"entry": 5397, "name": "Defias Gunpowder"}
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 45,
+              "center": {"x": -106.409, "y": -617.284, "z": 13.8495}
+            },
+            "timeout_s": 90,
+            "fail_text": "Looting the Defias Gunpowder (17155) summons one Defias Overseer (634) that runs to -115.3 -617.4: kill him (and anything else within 45 yd) before the cannon."
+          }
+        },
+        {
+          "use_object": {
+            "entry": 16398,
+            "near": {"x": -107.562, "y": -659.674, "z": 7.21211},
+            "stand": {"x": -109.7, "y": -655.5, "z": 8.2},
+            "requires_item": {"entry": 5397, "name": "Defias Gunpowder"}
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 16397,
+              "near": {"x": -100.502, "y": -668.771, "z": 7.41049},
+              "state": "active_alt"
+            },
+            "timeout_s": 60,
+            "fail_text": "The Defias Cannon (16398) needs the Defias Gunpowder (item 5397, lock 83); its use sets the Iron Clad Door (16397) to the alternative open state (instance_deadmines SetData TYPE_DEFIAS_ENDDOOR)."
+          }
+        }
+      ],
+      "notes": [
+        "The Iron Clad Door (16397) at -100.5 -668.8 is the way to the ship. The Defias Gunpowder (17155, a chest, lock 57, loot 17155 = Defias Gunpowder item 5397, 100 %) at -106.4 -617.3 z 13.8 summons one Defias Overseer (634) from -131.3 -591.2 that runs to -115.3 -617.4 (go_defias_gunpowder, once per instance reset). The Defias Cannon (16398, goober, lock 83 = item 5397) at -107.6 -659.7: using it sets the Iron Clad Door to ACTIVE_ALTERNATIVE (state 2), the wait_for says active_alt. The Door Lever 101833 at -96.9 -670.6 (go_door_lever_dm) works only once the door is open (it then keeps the door open 300 s) and is not used. Mr. Smite says his alarm text 3 s after the cannon. The two Defias Strip Miners 3.7 and 3.9 yd from the chest (spawns 79255 and 79257) are the first group of this leg (cannon:2), pulled before the steps: they are dead before the loot."
+      ]
+    },
+    {
+      "name": "dock",
+      "to": {"x": -109.2, "y": -656.5, "z": 7.1},
       "pull_groups": [
         {
           "entries": [3947],
           "positions": [
-            {"x": -49.5123, "y": -685.08, "z": 3.89985}
-          ]
+            {"x": -123.156, "y": -681.324, "z": 10.5616}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [657],
+            "path": [
+              {"x": -103.1, "y": -689.9, "z": 8.1},
+              {"x": -102.6, "y": -697, "z": 8.8},
+              {"x": -102.6, "y": -704.9, "z": 9.3},
+              {"x": -102.6, "y": -713.1, "z": 8.9},
+              {"x": -103.3, "y": -721.4, "z": 8.6},
+              {"x": -103.1, "y": -715.9, "z": 8.8},
+              {"x": -102.8, "y": -708.6, "z": 9.1},
+              {"x": -102.5, "y": -702.8, "z": 9.3}
+            ],
+            "period_s": 25,
+            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [3947],
           "positions": [
-            {"x": -34.375, "y": -692.709, "z": 4.52485}
-          ]
+            {"x": -121.645, "y": -698.163, "z": 8.68659}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [657],
+            "path": [
+              {"x": -103.1, "y": -689.9, "z": 8.1},
+              {"x": -102.6, "y": -697, "z": 8.8},
+              {"x": -102.6, "y": -704.9, "z": 9.3},
+              {"x": -102.6, "y": -713.1, "z": 8.9},
+              {"x": -103.3, "y": -721.4, "z": 8.6},
+              {"x": -103.1, "y": -715.9, "z": 8.8},
+              {"x": -102.8, "y": -708.6, "z": 9.1},
+              {"x": -102.5, "y": -702.8, "z": 9.3}
+            ],
+            "period_s": 25,
+            "source": "creature_movement of spawn 79289 (Defias Pirate, 8 points, 63 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
-          "entries": [1732, 657, 1732],
+          "entries": [657],
           "positions": [
-            {"x": -50.1355, "y": -723.342, "z": 9.07696},
-            {"x": -31.3801, "y": -727.911, "z": 8.47387},
-            {"x": -42.2427, "y": -732.088, "z": 9.04105}
-          ]
+            {"x": -89.7001, "y": -691.332, "z": 8.24514}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -102.521, "y": -697.942, "z": 8.84454}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [657, 3450],
+          "positions": [
+            {"x": -95.1414, "y": -722.4, "z": 8.48278},
+            {"x": -92.74, "y": -722.4, "z": 8.48}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -79.9682, "y": -729.441, "z": 8.94915}
+          ],
+          "radius": 16,
+          "patrol": {
+            "entries": [657],
+            "path": [
+              {"x": -89.7, "y": -691.3, "z": 8.2},
+              {"x": -89.8, "y": -687, "z": 7.9},
+              {"x": -89.3, "y": -695.1, "z": 8.5},
+              {"x": -88.9, "y": -701.9, "z": 8.9},
+              {"x": -89.1, "y": -708.2, "z": 8.9},
+              {"x": -89, "y": -718, "z": 8.6},
+              {"x": -89.2, "y": -708.1, "z": 8.9},
+              {"x": -89, "y": -699.7, "z": 8.8}
+            ],
+            "period_s": 25,
+            "source": "creature_movement of spawn 79290 (Defias Pirate, 8 points, 62 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [1732],
           "positions": [
             {"x": -60.2403, "y": -731.372, "z": 8.81632}
-          ]
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [1732],
+          "positions": [
+            {"x": -50.1355, "y": -723.342, "z": 9.07696}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [1732],
+          "positions": [
+            {"x": -42.2427, "y": -732.088, "z": 9.04105}
+          ],
+          "radius": 8,
+          "patrol": {
+            "entries": [1732],
+            "path": [
+              {"x": -74.2, "y": -730.1, "z": 8.7},
+              {"x": -77.2, "y": -729.5, "z": 9},
+              {"x": -69, "y": -731.8, "z": 8.1},
+              {"x": -58.8, "y": -731.5, "z": 9},
+              {"x": -46.9, "y": -729.3, "z": 9.1},
+              {"x": -36, "y": -729.3, "z": 8.8},
+              {"x": -23.5, "y": -732.3, "z": 8.4},
+              {"x": -16.3, "y": -736.5, "z": 8.7},
+              {"x": -9.6, "y": -743.5, "z": 9},
+              {"x": -3, "y": -752.8, "z": 8.8},
+              {"x": -12.4, "y": -740.9, "z": 9.1},
+              {"x": -22.1, "y": -731.9, "z": 8.4},
+              {"x": -31, "y": -727.8, "z": 8.5},
+              {"x": -43.2, "y": -727, "z": 8.9},
+              {"x": -53.4, "y": -729.1, "z": 9.3},
+              {"x": -61.1, "y": -731.6, "z": 8.8}
+            ],
+            "period_s": 68,
+            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -31.3801, "y": -727.911, "z": 8.47387}
+          ],
+          "radius": 13,
+          "patrol": {
+            "entries": [1732],
+            "path": [
+              {"x": -74.2, "y": -730.1, "z": 8.7},
+              {"x": -77.2, "y": -729.5, "z": 9},
+              {"x": -69, "y": -731.8, "z": 8.1},
+              {"x": -58.8, "y": -731.5, "z": 9},
+              {"x": -46.9, "y": -729.3, "z": 9.1},
+              {"x": -36, "y": -729.3, "z": 8.8},
+              {"x": -23.5, "y": -732.3, "z": 8.4},
+              {"x": -16.3, "y": -736.5, "z": 8.7},
+              {"x": -9.6, "y": -743.5, "z": 9},
+              {"x": -3, "y": -752.8, "z": 8.8},
+              {"x": -12.4, "y": -740.9, "z": 9.1},
+              {"x": -22.1, "y": -731.9, "z": 8.4},
+              {"x": -31, "y": -727.8, "z": 8.5},
+              {"x": -43.2, "y": -727, "z": 8.9},
+              {"x": -53.4, "y": -729.1, "z": 9.3},
+              {"x": -61.1, "y": -731.6, "z": 8.8}
+            ],
+            "period_s": 68,
+            "source": "creature_movement of spawn 79302 (Defias Squallshaper, 16 points, 169 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mr_smite",
+      "to": {"x": -28.8, "y": -733.1, "z": 8.3},
+      "pull_groups": [
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -15.0055, "y": -724.655, "z": 7.91381}
+          ],
+          "radius": 10
         },
         {
           "entries": [1732],
           "positions": [
             {"x": -22.5682, "y": -736.14, "z": 8.63019}
-          ]
+          ],
+          "radius": 9
         },
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -15.0055, "y": -724.655, "z": 7.91381}
-          ]
+            {"x": -9.25067, "y": -740.91, "z": 8.91751},
+            {"x": -7.03, "y": -740.33, "z": 8.84}
+          ],
+          "radius": 11
         },
         {
-          "entries": [657],
+          "entries": [657, 3947],
           "positions": [
-            {"x": -9.25067, "y": -740.91, "z": 8.91751}
-          ]
+            {"x": -41.5834, "y": -788.566, "z": 18.7949},
+            {"x": -45.3096, "y": -787.028, "z": 18.452}
+          ],
+          "radius": 17,
+          "patrol": {
+            "entries": [1732],
+            "path": [
+              {"x": -47, "y": -783.4, "z": 18.4},
+              {"x": -57.6, "y": -781, "z": 18},
+              {"x": -67.9, "y": -780, "z": 17.7},
+              {"x": -78.7, "y": -780.8, "z": 17.4},
+              {"x": -88, "y": -783.3, "z": 17.2},
+              {"x": -99.8, "y": -787.7, "z": 17},
+              {"x": -117.3, "y": -795.7, "z": 16.8},
+              {"x": -121.2, "y": -790.9, "z": 17.1},
+              {"x": -128.6, "y": -793.8, "z": 17.2},
+              {"x": -123.1, "y": -796.6, "z": 16.8},
+              {"x": -120.1, "y": -799.2, "z": 16.8},
+              {"x": -107.5, "y": -791.9, "z": 16.9},
+              {"x": -98.2, "y": -786.1, "z": 17},
+              {"x": -90.2, "y": -783.2, "z": 17.2},
+              {"x": -82.6, "y": -782.1, "z": 17.3},
+              {"x": -76, "y": -780.1, "z": 17.5},
+              {"x": -63.7, "y": -780.9, "z": 17.8},
+              {"x": -56.1, "y": -782.5, "z": 18.1}
+            ],
+            "period_s": 71.5,
+            "source": "creature_movement of spawn 79313 (Defias Squallshaper, 18 points, 176 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [657, 1732],
+          "positions": [
+            {"x": -21.874, "y": -802.941, "z": 19.7633},
+            {"x": -28.8178, "y": -795.674, "z": 19.3963}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [1732],
+          "positions": [
+            {"x": -57.0502, "y": -782.479, "z": 18.0147}
+          ],
+          "radius": 9
         },
         {
           "entries": [636, 636],
@@ -861,265 +1977,296 @@
             {"x": -3.98715, "y": -777.068, "z": 9.86787},
             {"x": 0.077364, "y": -781.616, "z": 9.97179}
           ],
-          "ambush": true
-        },
-        {
-          "entries": [657, 1732],
-          "positions": [
-            {"x": -21.874, "y": -802.941, "z": 19.7633},
-            {"x": -28.8178, "y": -795.674, "z": 19.3963}
-          ]
-        },
-        {
-          "entries": [657, 3947],
-          "positions": [
-            {"x": -41.5834, "y": -788.566, "z": 18.7949},
-            {"x": -45.3096, "y": -787.028, "z": 18.452}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -40.2788, "y": -797.973, "z": 39.3257}
-          ]
-        },
-        {
-          "entries": [657, 657, 657],
-          "positions": [
-            {"x": -19.0468, "y": -830.344, "z": 19.7522},
-            {"x": -20.9408, "y": -835.917, "z": 19.6528},
-            {"x": -30.3766, "y": -843.213, "z": 19.1693}
-          ]
+          "ambush": true,
+          "radius": 26
         }
       ],
       "boss": {
         "entry": 646,
         "position": {"x": -22.8471, "y": -797.283, "z": 20.3745}
-      }
+      },
+      "notes": [
+        "Mr. Smite (646, 5398 hp, script boss_mr_smite) stands on the main deck at -22.8 -797.3 z 20.4 and starts with Nimble Reflexes. Phase 1 to 66 % hp: Smite Stomp (6432) then he walks to Smite's Chest 144111 (2.7 -781.6) to swap to two axes: phase 2 with Thrash (3391, every 1.5-4 s); at 33 % Smite Stomp again, a hammer, and Smite Slam (6435, every 11 s). He does not fight for about 6 s at each swap. His two Defias Blackguards (636, stealth aura 1785, spawns 79345, 79346) stand at the foot of the gangway at -4.0 -777.1 and 0.1 -781.6 (z 10), 20 yd from him: an ambush group before him. Wowhead agrees: the two Blackguards sit at both ends of the bridge to the ship and attack when it is crossed; kill them before he reaches 66 % (Smite Stomp stuns the party for about 10 s while he runs to the chest, the Blackguards go on hitting). The plan's kill_first has the Blackguards (636) first. A stun on Smite just before 66 % (a paladin's Hammer of Justice) makes him fetch the weapon without stunning the party."
+      ]
     },
     {
-      "name": "captain_greenskin",
-      "to": {"x": -52.9977, "y": -791.268, "z": 38.6091},
+      "name": "deck_a",
+      "to": {"x": -59.4, "y": -786.3, "z": 18.2},
       "pull_groups": [
         {
-          "entries": [657],
+          "entries": [657, 3450],
           "positions": [
-            {"x": -52.9977, "y": -791.268, "z": 38.6091}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -65.9172, "y": -794.401, "z": 39.4002}
-          ]
-        },
-        {
-          "entries": [1732, 3947],
-          "positions": [
-            {"x": -78.3783, "y": -796.849, "z": 38.3719},
-            {"x": -79.5762, "y": -788.13, "z": 38.823}
-          ]
-        },
-        {
-          "entries": [3947, 657, 657, 657],
-          "positions": [
-            {"x": -83.4978, "y": -791.166, "z": 25.8501},
-            {"x": -74.8631, "y": -783.376, "z": 26.2465},
-            {"x": -93.3125, "y": -785.65, "z": 27.2112},
-            {"x": -83.5081, "y": -776.182, "z": 26.7952}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -79.6583, "y": -782.438, "z": 17.965}
-          ]
-        },
-        {
-          "entries": [1732],
-          "positions": [
-            {"x": -57.0502, "y": -782.479, "z": 18.0147}
-          ]
-        },
-        {
-          "entries": [1732, 657],
-          "positions": [
-            {"x": -67.348, "y": -807.229, "z": 40.899},
-            {"x": -67.3954, "y": -808.868, "z": 40.904}
-          ]
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -43.2699, "y": -852.248, "z": 18.5989}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -79.9682, "y": -729.441, "z": 8.94915}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -95.1414, "y": -722.4, "z": 8.48278}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -102.521, "y": -697.942, "z": 8.84454}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -89.7001, "y": -691.332, "z": 8.24514}
-          ]
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -121.645, "y": -698.163, "z": 8.68659}
-          ]
-        }
-      ],
-      "boss": {
-        "entry": 647,
-        "position": {"x": -68.9846, "y": -807.998, "z": 40.7529}
-      }
-    },
-    {
-      "name": "edwin_vancleef",
-      "to": {"x": -80.9795, "y": -816.703, "z": 39.6913},
-      "pull_groups": [
-        {
-          "entries": [636, 636],
-          "positions": [
-            {"x": -80.9795, "y": -816.703, "z": 39.6913},
-            {"x": -79.5699, "y": -823.472, "z": 39.8176}
+            {"x": -79.6583, "y": -782.438, "z": 17.965},
+            {"x": -79.43, "y": -780.15, "z": 17.43}
           ],
-          "ambush": true
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -97.6529, "y": -805.56, "z": 30.683}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -106.433, "y": -793.287, "z": 28.1631}
-          ]
-        },
-        {
-          "entries": [657],
-          "positions": [
-            {"x": -114.177, "y": -796.366, "z": 16.8931}
-          ]
-        },
-        {
-          "entries": [3947],
-          "positions": [
-            {"x": -122.837, "y": -806.022, "z": 16.8947}
-          ]
-        },
-        {
-          "entries": [3947, 4075, 657],
-          "positions": [
-            {"x": -123.739, "y": -788.672, "z": 17.3131},
-            {"x": -134.399, "y": -792.648, "z": 17.47},
-            {"x": -131.098, "y": -789.196, "z": 17.4008}
-          ]
-        },
-        {
-          "entries": [3947, 3947],
-          "positions": [
-            {"x": -132.915, "y": -766.251, "z": 3.86817},
-            {"x": -140.013, "y": -762.128, "z": 4.58898}
-          ]
-        },
-        {
-          "entries": [1732],
-          "positions": [
-            {"x": -99.9396, "y": -778.266, "z": 22.3395}
-          ]
+          "radius": 6,
+          "patrol": {
+            "entries": [1732],
+            "path": [
+              {"x": -79.8, "y": -783.4, "z": 26.5},
+              {"x": -84.7, "y": -787, "z": 26.2},
+              {"x": -98.4, "y": -791, "z": 27.8},
+              {"x": -104, "y": -792.6, "z": 28.2},
+              {"x": -92.1, "y": -786.3, "z": 27.1},
+              {"x": -83.4, "y": -782.9, "z": 26.5},
+              {"x": -84.1, "y": -776.5, "z": 26.8},
+              {"x": -88.6, "y": -777, "z": 26.4},
+              {"x": -97.1, "y": -778.5, "z": 22.3},
+              {"x": -102.9, "y": -781.5, "z": 22.1},
+              {"x": -112.9, "y": -786.5, "z": 17.3},
+              {"x": -118.5, "y": -790.7, "z": 17.2},
+              {"x": -109.9, "y": -784.4, "z": 18.4},
+              {"x": -102.7, "y": -780.8, "z": 22.2},
+              {"x": -95.9, "y": -778.5, "z": 22.3},
+              {"x": -86.3, "y": -776.9, "z": 26.8},
+              {"x": -82.7, "y": -776.5, "z": 26.8}
+            ],
+            "period_s": 58,
+            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [3947],
           "positions": [
             {"x": -94.1737, "y": -787.372, "z": 17.1116}
-          ]
+          ],
+          "radius": 7,
+          "patrol": {
+            "entries": [1732],
+            "path": [
+              {"x": -79.8, "y": -783.4, "z": 26.5},
+              {"x": -84.7, "y": -787, "z": 26.2},
+              {"x": -98.4, "y": -791, "z": 27.8},
+              {"x": -104, "y": -792.6, "z": 28.2},
+              {"x": -92.1, "y": -786.3, "z": 27.1},
+              {"x": -83.4, "y": -782.9, "z": 26.5},
+              {"x": -84.1, "y": -776.5, "z": 26.8},
+              {"x": -88.6, "y": -777, "z": 26.4},
+              {"x": -97.1, "y": -778.5, "z": 22.3},
+              {"x": -102.9, "y": -781.5, "z": 22.1},
+              {"x": -112.9, "y": -786.5, "z": 17.3},
+              {"x": -118.5, "y": -790.7, "z": 17.2},
+              {"x": -109.9, "y": -784.4, "z": 18.4},
+              {"x": -102.7, "y": -780.8, "z": 22.2},
+              {"x": -95.9, "y": -778.5, "z": 22.3},
+              {"x": -86.3, "y": -776.9, "z": 26.8},
+              {"x": -82.7, "y": -776.5, "z": 26.8}
+            ],
+            "period_s": 58,
+            "source": "creature_movement of spawn 79310 (Defias Squallshaper, 17 points, 144 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [1732],
+          "positions": [
+            {"x": -99.9396, "y": -778.266, "z": 22.3395}
+          ],
+          "radius": 8
+        }
+      ]
+    },
+    {
+      "name": "deck_b",
+      "to": {"x": -106.7, "y": -787.5, "z": 17.3},
+      "pull_groups": [
+        {
+          "entries": [3947, 657],
+          "positions": [
+            {"x": -123.739, "y": -788.672, "z": 17.3131},
+            {"x": -131.098, "y": -789.196, "z": 17.4008}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [657],
+            "path": [
+              {"x": -120.6, "y": -803.3, "z": 16.9},
+              {"x": -109, "y": -794.6, "z": 16.9},
+              {"x": -98.7, "y": -790, "z": 17.1},
+              {"x": -87.9, "y": -787.1, "z": 17.2},
+              {"x": -76, "y": -785.2, "z": 17.5},
+              {"x": -64.6, "y": -783.8, "z": 17.8},
+              {"x": -54, "y": -784.9, "z": 18.1},
+              {"x": -46.2, "y": -784.5, "z": 18.4},
+              {"x": -38.5, "y": -787.7, "z": 18.8},
+              {"x": -31.5, "y": -795.9, "z": 19.1},
+              {"x": -40.4, "y": -786.5, "z": 18.7},
+              {"x": -47.9, "y": -784.1, "z": 18.4},
+              {"x": -57.4, "y": -784.7, "z": 18},
+              {"x": -67.8, "y": -782.5, "z": 17.7},
+              {"x": -84.9, "y": -784.8, "z": 17.3},
+              {"x": -99.9, "y": -789.3, "z": 17},
+              {"x": -111.1, "y": -795.2, "z": 16.9}
+            ],
+            "period_s": 80,
+            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [3947],
+          "positions": [
+            {"x": -122.837, "y": -806.022, "z": 16.8947}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [657],
+            "path": [
+              {"x": -120.6, "y": -803.3, "z": 16.9},
+              {"x": -109, "y": -794.6, "z": 16.9},
+              {"x": -98.7, "y": -790, "z": 17.1},
+              {"x": -87.9, "y": -787.1, "z": 17.2},
+              {"x": -76, "y": -785.2, "z": 17.5},
+              {"x": -64.6, "y": -783.8, "z": 17.8},
+              {"x": -54, "y": -784.9, "z": 18.1},
+              {"x": -46.2, "y": -784.5, "z": 18.4},
+              {"x": -38.5, "y": -787.7, "z": 18.8},
+              {"x": -31.5, "y": -795.9, "z": 19.1},
+              {"x": -40.4, "y": -786.5, "z": 18.7},
+              {"x": -47.9, "y": -784.1, "z": 18.4},
+              {"x": -57.4, "y": -784.7, "z": 18},
+              {"x": -67.8, "y": -782.5, "z": 17.7},
+              {"x": -84.9, "y": -784.8, "z": 17.3},
+              {"x": -99.9, "y": -789.3, "z": 17},
+              {"x": -111.1, "y": -795.2, "z": 16.9}
+            ],
+            "period_s": 80,
+            "source": "creature_movement of spawn 79322 (Defias Pirate, 17 points, 197 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
+        },
+        {
+          "entries": [657, 3450],
+          "positions": [
+            {"x": -114.177, "y": -796.366, "z": 16.8931},
+            {"x": -111.78, "y": -796.37, "z": 16.89}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -83.5081, "y": -776.182, "z": 26.7952}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [657, 3450],
+          "positions": [
+            {"x": -74.8631, "y": -783.376, "z": 26.2465},
+            {"x": -76.8, "y": -784.78, "z": 26.38}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [3947],
+          "positions": [
+            {"x": -83.4978, "y": -791.166, "z": 25.8501}
+          ],
+          "radius": 8
+        },
+        {
+          "entries": [657],
+          "positions": [
+            {"x": -93.3125, "y": -785.65, "z": 27.2112}
+          ],
+          "radius": 7
         },
         {
           "entries": [3947],
           "positions": [
             {"x": -122.586, "y": -823.971, "z": 16.9447}
-          ]
-        },
+          ],
+          "radius": 9
+        }
+      ],
+      "skip": [645],
+      "notes": [
+        "Cookie (645, Cookie's Cooking 5174 heals him, Acid Splash) patrols the lower deck at -67.6 -853.7 z 17 and is skipped (optional; he flees at 15 %)."
+      ]
+    },
+    {
+      "name": "captain_greenskin",
+      "to": {"x": -96.8, "y": -800, "z": 32.1},
+      "pull_groups": [
         {
-          "entries": [1732],
+          "entries": [3947],
           "positions": [
-            {"x": -119.086, "y": -836.376, "z": 16.9153}
-          ]
-        },
-        {
-          "entries": [1732],
-          "positions": [
-            {"x": -117.719, "y": -837.953, "z": 16.9124}
-          ]
-        },
-        {
-          "entries": [1732],
-          "positions": [
-            {"x": -107.142, "y": -847.412, "z": 16.9525}
-          ]
-        },
-        {
-          "entries": [657, 657],
-          "positions": [
-            {"x": -89.5684, "y": -854.834, "z": 17.2142},
-            {"x": -85.9117, "y": -856.569, "z": 17.2837}
-          ]
-        },
-        {
-          "entries": [645],
-          "positions": [
-            {"x": -67.5844, "y": -853.749, "z": 17.075}
-          ]
-        },
-        {
-          "entries": [1732],
-          "positions": [
-            {"x": -142.771, "y": -873.765, "z": 2.37754}
-          ]
+            {"x": -97.6529, "y": -805.56, "z": 30.683}
+          ],
+          "radius": 12
         },
         {
           "entries": [657],
           "positions": [
-            {"x": -154.996, "y": -891.815, "z": 5.64332}
-          ]
+            {"x": -106.433, "y": -793.287, "z": 28.1631}
+          ],
+          "radius": 11
         },
         {
-          "entries": [1732, 657],
+          "entries": [3947, 1732],
           "positions": [
-            {"x": -146.141, "y": -906.036, "z": 8.17895},
-            {"x": -153.182, "y": -909, "z": 8.72719}
-          ]
+            {"x": -79.5762, "y": -788.13, "z": 38.823},
+            {"x": -78.3783, "y": -796.849, "z": 38.3719}
+          ],
+          "radius": 9
         },
         {
-          "entries": [1732],
+          "entries": [657],
           "positions": [
-            {"x": -147.674, "y": -919.162, "z": 12.5437}
-          ]
+            {"x": -65.9172, "y": -794.401, "z": 39.4002}
+          ],
+          "radius": 9
+        },
+        {
+          "entries": [657, 3450],
+          "positions": [
+            {"x": -52.9977, "y": -791.268, "z": 38.6091},
+            {"x": -57.62, "y": -790.28, "z": 39.63}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [657, 3450],
+          "positions": [
+            {"x": -40.2788, "y": -797.973, "z": 39.3257},
+            {"x": -40.59, "y": -795.6, "z": 39.41}
+          ],
+          "radius": 10
         }
       ],
+      "skip": [645],
+      "boss": {
+        "entry": 647,
+        "position": {"x": -68.9846, "y": -807.998, "z": 40.7529},
+        "first": [3450, 657],
+        "tactics": {
+          "interrupt": [5208]
+        }
+      },
+      "notes": [
+        "Captain Greenskin (647, spawn 79333) walks a 9-point loop on the upper deck (x -101.2 to -57.9, y -832.7 to -807.9, z 38.2 to 41.8; 120 yd, 48.0 s a lap, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)) with a Defias Pirate (657) and a Squallshaper (1732) (creature_groups 79333 formation, flags 15), at -69.0 -808.0 z 40.8: the Pirate is boss.first (it summons a Defias Companion 3450, a non-elite: kill it, then the Pirate, then Greenskin, with the Squallshaper crowd-controlled and killed last; the Squallshaper is not boss.first for that reason). He casts Cleave (face him away from the party) and Poisoned Harpoon (5208, 2.5 s), which the party interrupts. He is easy to pull by accident from the stairs: the packs of the lower decks join (Wowhead: pull from above, one pack at a time). His loop passes the stair Shipbuilders (captain_greenskin:0, -97.7 -805.6 z 30.7) at 4.0 yd on the ground and 8.8 yd in 3-D, and VanCleef's two Blackguards at 8.7 to 8.9 yd; the lower-deck packs stay 21.6 yd or more away in 3-D. Pull the stair pack when he is on the far end of his lap, more than 40 yd away. The Pirate, Squallshaper and a Defias Companion (3450) follow him."
+      ]
+    },
+    {
+      "name": "edwin_vancleef",
+      "to": {"x": -87.4, "y": -819.9, "z": 39.4},
+      "pull_groups": [
+        {
+          "entries": [636, 636],
+          "positions": [
+            {"x": -79.5699, "y": -823.472, "z": 39.8176},
+            {"x": -80.9795, "y": -816.703, "z": 39.6913}
+          ],
+          "ambush": true,
+          "radius": 4
+        }
+      ],
+      "skip": [645],
       "boss": {
         "entry": 639,
         "position": {"x": -87.369, "y": -819.895, "z": 39.3004}
-      }
+      },
+      "notes": [
+        "Edwin VanCleef (639, 4959 hp) at -87.4 -819.9 z 39.3 with two stealthed Defias Blackguards (636, spawns 79368, 79383), an ambush group. Thrash (3417); at 75, 50, 35 and 10 % he says a line, and at 50-36 % he casts VanCleef's Allies (5200) which summons two more Blackguards (636): crowd-control or burn them, do not chase them. Wowhead: send the tank up, kill the two Blackguards first (crowd-control one, mark the other), then VanCleef, who does by far the most damage; his adds at 50 % come in twos. Wowhead's comments say 50 % and 25 %; the EventAI has the cast once, at 50 to 36 %. No chest and no door: the dungeon ends here."
+      ]
     }
   ]
 }

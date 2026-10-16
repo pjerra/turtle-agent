@@ -9,18 +9,9 @@
    "title": "Ragefire Chasm",
    "map": 389,
    "kind": "dungeon",
-   "data": "map389",
-   "trigger": 2230,
-   "bosses": [
-    11517,
-    11520,
-    11518,
-    11519
-   ],
-   "entrance_tele": "rfc",
-   "outside_tele": "RagefireChasm",
-   "notes": [
-    "Boss order is the usual one (Oggleflint, Taragaman, Jergosh, Bazzalan); the map has no instance script in the core."
+   "handwritten": true,
+   "special": [
+    "none: no door, event, gossip or item (no instance script); walked 2026-10-15 (patrol periods measured); six terrace mobs left out of the pulls, kept out of aggro range by where the party stands"
    ]
   },
   {
@@ -28,25 +19,11 @@
    "title": "Wailing Caverns",
    "map": 43,
    "kind": "dungeon",
-   "data": "map43",
-   "trigger": 228,
-   "bosses": [
-    3671,
-    3669,
-    3653,
-    3670,
-    3674,
-    3673,
-    5775
-   ],
-   "entrance_tele": "wc",
-   "outside_tele": "WailingCaverns",
+   "handwritten": true,
    "special": [
-    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (escort, ritual waves) summons him",
-    "the Awakening of Naralex gossip with the Disciple (3678)"
-   ],
-   "notes": [
-    "Turtle adds Vangros (61965) and Zandara Windhoof (61968), rank-1 named mobs in no leg as bosses; they are pulled as packs."
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
+    "Lady Anacondra has four spawn rows in one pool (one up per reset)",
+    "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a gm_cross waypoint (a GM moves the party)"
    ]
   },
   {
@@ -54,25 +31,12 @@
    "title": "The Deadmines",
    "map": 36,
    "kind": "dungeon",
-   "data": "map36",
-   "trigger": 78,
-   "bosses": [
-    644,
-    642,
-    1763,
-    61963,
-    646,
-    647,
-    639
-   ],
-   "entrance_tele": "deadmines",
+   "handwritten": true,
    "special": [
-    "Iron Clad Door: Defias Cannon (GO) fired with the door lever (go_door_lever_dm, gunpowder event) to reach the ship",
-    "Sneed (643) has no spawn row: he appears when Sneed's Shredder (642) dies",
-    "Mr. Smite's phase doors and chest (GO_SMITE_CHEST)"
-   ],
-   "notes": [
-    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement; Jared Voss (61961) and Cookie (645) are named mobs, not legs."
+    "Factory Door (13965) opens when Rhahk'Zor dies; Heavy Doors at -262.7 -482.4 and -243.0 -578.6 have no script (clicked open, not verified); Sneed's death (643, ejected by the Shredder 642) and Gilnid's death open the other two",
+    "Iron Clad Door: loot the Defias Gunpowder (17155, item 5397, summons an Overseer), fire the Defias Cannon (16398) with it, the door goes to active_alt",
+    "Mr. Smite: three phases, stealthed Blackguards (ambush group); Captain Greenskin walks a loop; VanCleef's Allies at 50 %",
+    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement on the z 51 plateau (side branch); Jared Voss (61961) and Cookie (645) are named mobs, not legs"
    ]
   },
   {

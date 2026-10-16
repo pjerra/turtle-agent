@@ -210,6 +210,30 @@ type Waypoint struct {
 	// CheckSkip exempts the hop from the plan check (plancheck.go) and says why: a hop the navmesh cannot judge on purpose (Uldaman's scorpid
 	// pit, a gap the mesh does not link). The check lists it as skipped with this text instead of failing it. Empty: checked.
 	CheckSkip string `json:"check_skip,omitempty"`
+	// GMCross says the party does not walk to this point: a GM account moves it there (remote driver, gmCross): the commander's own
+	// character goes to the point (`.appear <lead bot>` when it is not near, then `.go xyz`), `.bot summon <lead bot>` brings the lead
+	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
+	// It is for a gap no walk crosses (Wailing Caverns: a 3.9 yd chasm, a jump down and no way up). It is a direct waypoint (the file says
+	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
+	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account that may .go xyz (level 1 and up, read with `.account`): without
+	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
+	// {"x": -289.1, "y": 3.2, "z": -64.1, "direct": true, "gm_cross": true}.
+	GMCross bool `json:"gm_cross,omitempty"`
+}
+
+// GMCrossRadius is the yards within which every living member must stand of a gm_cross point before the run goes on.
+const GMCrossRadius = 10.0
+
+// HasGMCross says whether a leg of the plan from leg `from` on has a gm_cross waypoint.
+func (p *Plan) HasGMCross(from int) bool {
+	for i := max(from, 0); i < len(p.Legs); i++ {
+		for _, w := range p.Legs[i].Via {
+			if w.GMCross {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -264,6 +288,10 @@ type Patrol struct {
 	Entries []uint32 `json:"entries"`
 	Path    []Point  `json:"path"`
 	PeriodS float32  `json:"period_s"`
+	// PeriodEstimate says PeriodS is an estimate (the path's length at 2.5 yd/s, not a measured round): the driver then does not predict where
+	// the patrol will be (it takes no phase from the period): it locates a member and waits until the patrol is past the pull, see
+	// patrolDanger. The mapping walk measures the round and drops the flag. The plan check warns for each such patrol.
+	PeriodEstimate bool `json:"period_estimate,omitempty"`
 	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
 	Source string `json:"source,omitempty"`
 }
@@ -641,6 +669,7 @@ type rawWaypoint struct {
 	X, Y, Z   *float32
 	Direct    bool   `json:"direct"`
 	CheckSkip string `json:"check_skip"`
+	GMCross   bool   `json:"gm_cross"`
 }
 
 type rawLeg struct {
@@ -676,7 +705,9 @@ type rawPatrol struct {
 	Entries []uint32   `json:"entries"`
 	Path    []rawPoint `json:"path"`
 	PeriodS float32    `json:"period_s"`
-	Source  string     `json:"source"`
+	// PeriodEstimate is Patrol.PeriodEstimate.
+	PeriodEstimate bool   `json:"period_estimate"`
+	Source         string `json:"source"`
 }
 
 type rawBoss struct {
@@ -1068,7 +1099,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
+		if w.GMCross {
+			if !w.Direct {
+				c.fail(wp, "gm_cross is a direct waypoint: add \"direct\": true")
+			}
+			continue // a GM moves the party: no gathering point before it and no direct limits
+		}
 		if !w.Direct {
 			continue
 		}
@@ -1102,7 +1139,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if rp := g.Patrol; rp != nil {
 			pp := gp + ".patrol"
-			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, Source: rp.Source}
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, PeriodEstimate: rp.PeriodEstimate, Source: rp.Source}
 			c.entries(pp+".entries", rp.Entries, true)
 			if len(rp.Path) < 2 {
 				c.fail(pp+".path", "needs at least two points")

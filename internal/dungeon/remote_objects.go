@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -435,10 +436,17 @@ var orderHints = map[string]string{
 	"failed":         "see the message",
 }
 
+// spellCheckRe finds the core's cast check number in a refusal message ("The cast failed (spell check 10)").
+var spellCheckRe = regexp.MustCompile(`spell check (\d+)`)
+
 func orderError(res tbm.OrderResult) error {
 	switch {
 	case res.Err != nil:
-		if h := orderHints[res.Err.Code]; h != "" {
+		h := orderHints[res.Err.Code]
+		if m := spellCheckRe.FindStringSubmatch(res.Err.Message); m != nil && res.Err.Code == "invalid-target" {
+			h = "the cast was refused (spell check " + m[1] + "), not a missing corpse or object"
+		}
+		if h != "" {
 			return fmt.Errorf("%s refused: %s (%s): %s", res.Intent, res.Err.Code, res.Err.Message, h)
 		}
 		return fmt.Errorf("%s refused: %s (%s)", res.Intent, res.Err.Code, res.Err.Message)

@@ -370,6 +370,19 @@ func TestCarrierOrderErrors(t *testing.T) {
 	}
 }
 
+func TestOrderErrorInvalidTargetWithCastCheck(t *testing.T) {
+	res := errOrder("cmd use", "invalid-target")
+	res.Err.Message = "The cast failed (spell check 10)."
+	err := orderError(res)
+	if err == nil || !strings.Contains(err.Error(), "the cast was refused (spell check 10)") || strings.Contains(err.Error(), "no such corpse or object") {
+		t.Fatalf("%v", err)
+	}
+	res.Err.Message = "no such object"
+	if err := orderError(res); err == nil || !strings.Contains(err.Error(), "no such corpse or object") {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestCarrierBusyAndCancelledAreRetried(t *testing.T) {
 	g := carrierGame(t)
 	g.script["open"] = []tbm.OrderResult{errOrder("cmd open", "busy"), errOrder("cmd open", "busy"), errOrder("cmd open", "cancelled")}

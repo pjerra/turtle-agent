@@ -37,6 +37,8 @@ const (
 
 	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
 	WarnNeedlessDirect = "needless direct"
+	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
+	WarnEstimatedPatrol = "estimated patrol period"
 )
 
 // Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
@@ -276,6 +278,8 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 		for vi, w := range l.Via {
 			var err error
 			switch {
+			case w.GMCross:
+				cur, err = c.gmCross(fmt.Sprintf("gm_cross via %d", vi), w.Point, cur)
 			case w.CheckSkip != "":
 				c.skip(fmt.Sprintf("via %d", vi), w.Point, cur, w.CheckSkip)
 				cur = w.Point
@@ -301,6 +305,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	}
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
+		if g.Patrol != nil && g.Patrol.PeriodEstimate {
+			c.warn("patrol", g.Positions[0], cur, WarnEstimatedPatrol, "pull group %d: the patrol of %v has only an estimated period_s (%.0f s): the driver does not predict its phase, it locates the patrol and waits until it is past; the walk measures the round", gi+1, g.Patrol.Entries, g.Patrol.PeriodS)
+		}
 		if g.NeedsWalk {
 			c.needsWalk("pull group look", gi+1, g.Team, g.Positions[0], cur)
 			continue
@@ -455,6 +462,26 @@ func pathReason(p navmesh.Path) string {
 		return ReasonOffMesh
 	}
 	return ReasonUnreachable
+}
+
+// gmCross checks a gm_cross via: the point needs mesh floor under it (the party is put there and walks on from it), but no path from the
+// point before it: a GM moves the party, so it is listed as exempt from the walk (ReasonSkipped), with what the move is.
+func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
+	c.count()
+	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
+	if err != nil {
+		return from, err
+	}
+	if dz, dh := math.Abs(float64(n[2]-to.Z)), math.Hypot(float64(n[0]-to.X), float64(n[1]-to.Y)); !ok || dz > checkWalkDZ || dh > checkWalkDH {
+		if ok {
+			c.fail(part, 0, to, from, ReasonOffMesh, "the nearest floor %.1f %.1f %.1f is %.1f yd above or below it and %.1f yd off", n[0], n[1], n[2], dz, dh)
+		} else {
+			c.fail(part, 0, to, from, ReasonOffMesh, "no walkable polygon within 4 yd")
+		}
+		return to, nil
+	}
+	c.skip(part, to, from, fmt.Sprintf("gm_cross: a GM moves the party here (%.0f yd from the point before it); the walk starts from it", dist3(from, to)))
+	return to, nil
 }
 
 // direct checks a direct via: a step within the limits of the module (DirectStepOK), ground under its end and a clear line over the mesh.
