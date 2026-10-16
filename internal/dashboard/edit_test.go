@@ -694,3 +694,53 @@ func TestEditsAreRefusedWhenASlotsFolderCannotBeTold(t *testing.T) {
 		t.Errorf("explicit agents: %d %s", got.code, got.body)
 	}
 }
+
+// The vouching (--edit-allow-default-dir) covers a settings file with NO dungeons_dir, never a relative one, at start and at every edit.
+func TestVouchingNeverCoversARelativeDungeonsDir(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) { must(t, os.WriteFile(filepath.Join(dir, "settings-3.json"), []byte(body), 0o600)) }
+	vouch := []string{"settings-3.json"}
+	for _, rel := range []string{"dungeons", "./dungeons", "../x/dungeons", "ta/dungeons"} {
+		write(`{"rpc":"127.0.0.1:8767","dungeons_dir":` + string(mustJSON(t, rel)) + `}`)
+		if got, err := SlotFolders(dir, vouch); err == nil || !strings.Contains(err.Error(), "relative") {
+			t.Errorf("%q vouched: %v %v", rel, got, err)
+		}
+	}
+	write(`{"rpc":"127.0.0.1:8767"}`)
+	if _, err := SlotFolders(dir, vouch); err != nil {
+		t.Errorf("an empty dungeons_dir, vouched: %v", err)
+	}
+
+	// at start: the editor does not come up on a vouched file with a relative dir
+	r := newEditRig(t, nil)
+	tk, _ := routeedit.LoadTokens(r.tokens)
+	store, _ := routeedit.NewStore(filepath.Join(t.TempDir(), "e"))
+	cfg := EditConfig{Source: r.src, Store: store, Tokens: tk, Nav: testNav{}, Mmaps: "/m", AllowDefaultDir: vouch}
+	settings := filepath.Join(r.cfg, "settings-3.json")
+	must(t, os.WriteFile(settings, []byte(`{"rpc":"127.0.0.1:8767","dungeons_dir":"dungeons"}`), 0o600))
+	if _, err := NewEditor(r.p, cfg); err == nil {
+		t.Fatal("started with a vouched file whose dungeons_dir is relative")
+	}
+	// the vouched file with no dungeons_dir starts; then it changes to a relative dir: the next edit is refused and nothing is written
+	must(t, os.WriteFile(settings, []byte(`{"rpc":"127.0.0.1:8767"}`), 0o600))
+	ed, err := NewEditor(r.p, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(HandlerWithEditor(r.p, "", nil, nil, ed))
+	defer srv.Close()
+	r.srv = srv
+	r.ed = ed
+	if got := r.post("edit1", r.edit(move(0, 0, 21, 1)), editToken); got.code != http.StatusOK {
+		t.Fatalf("before the change: %d %s", got.code, got.body)
+	}
+	before := tree(t, store.Root())
+	must(t, os.WriteFile(settings, []byte(`{"rpc":"127.0.0.1:8767","dungeons_dir":"dungeons"}`), 0o600))
+	got := r.post("edit1", r.edit(move(0, 0, 22, 1)), editToken)
+	if got.code != http.StatusServiceUnavailable || !strings.Contains(got.body, "relative") {
+		t.Errorf("after the change: %d %s", got.code, got.body)
+	}
+	if tree(t, store.Root()) != before {
+		t.Error("an edit was written after the slot's folder became unknown")
+	}
+}

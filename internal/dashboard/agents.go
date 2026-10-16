@@ -59,8 +59,9 @@ func expandHome(p string) string {
 // SlotFolders lists the folder every settings*.json of configDir has its runs read plans from (dungeons_dir, a leading ~/ made the home folder).
 // It fails closed, for the editor's guard: an error when configDir is not a folder, when a settings file cannot be read or decoded, or when a
 // slot (a file with an rpc field: an agent that can be sent a dungeon_run) has no folder that can be told: an empty dungeons_dir, or a relative
-// one, means dungeons/ under the agent's working folder, which is not known here. A settings file named in allowDefault (by file name) is
-// vouched for by the operator, who says its default folder is elsewhere; it is left out of the list.
+// one, means dungeons/ under the agent's working folder, which is not known here. A settings file named in allowDefault (by file name) with an EMPTY
+// dungeons_dir is vouched for by the operator, who says its default folder is elsewhere; it is left out of the list. A relative dungeons_dir is
+// never vouched for.
 func SlotFolders(configDir string, allowDefault []string) ([]string, error) {
 	if st, err := os.Stat(configDir); err != nil || !st.IsDir() {
 		return nil, fmt.Errorf("the config folder %s cannot be read, so the slots' plan folders are unknown", configDir)
@@ -91,12 +92,14 @@ func SlotFolders(configDir string, allowDefault []string) ([]string, error) {
 		switch {
 		case dir != "" && filepath.IsAbs(dir):
 			out = append(out, dir)
-		case s.RPC == "" || allowed[name]:
-			// not an agent that can be commanded, or the operator vouches for its default folder
+		case s.RPC == "":
+			// not an agent that can be commanded
+		case dir == "" && allowed[name]:
+			// no dungeons_dir: the operator vouches that the default folder (dungeons/ under the agent's working folder) is elsewhere
 		case dir == "":
 			problems = append(problems, name+" names no dungeons_dir, so its runs read dungeons/ under the agent's working folder, which cannot be checked (set dungeons_dir, or pass --edit-allow-default-dir "+name+")")
 		default:
-			problems = append(problems, name+" has the relative dungeons_dir "+s.DungeonsDir+", which depends on the agent's working folder (use an absolute path, or pass --edit-allow-default-dir "+name+")")
+			problems = append(problems, name+" has the relative dungeons_dir "+s.DungeonsDir+", which depends on the agent's working folder (use an absolute path; --edit-allow-default-dir does not cover a relative dungeons_dir)")
 		}
 	}
 	if len(problems) > 0 {
