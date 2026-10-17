@@ -397,15 +397,17 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 }
 
 // sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
-// (where the leg before it ends, the scorpid pit), a direct step to -161.1 284.5 on the pit floor (the last navmesh point before the ramp)
-// and a direct step up the ramp to -158.4 283.7, the first point of the east mesh.
+// (where the leg before it ends, the scorpid pit), a plain move to -161.1 284.5 on the pit floor (the last navmesh point before the ramp,
+// a complete navmesh path from the lip) and a direct step up the ramp to -158.4 283.7, the first point of the east mesh.
 const sentinelLeg = 5
 
 // pitFloor is the first direct step's end since 2026-10-17 (live run uldaman-events-2): the old point under the rock overhang,
 // -162.8 294.8 -51.2, was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the next direct step summoned it.
 // This one is on the mesh with a complete path from the lip (17.0 yd), and the step up the ramp from it is 4.2 yd. Its sight lines were
 // checked on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70): clear 1.5, 2 and 2.5 yd up, to the ramp top both ways and
-// from the lip; vmap floor -52.32.
+// from the lip; vmap floor -52.32. Since the live run uldaman-events-4 (2026-10-17) it is a plain move, not a direct step: the walk to it
+// is on the mesh, and every direct step is a gather the run leader's walk back must pass (both pauses of that run were "the point of
+// step 40 refused 4 times (too-far: <bot> is not with Bonky ...)" on the walk back after the lead bot died).
 var pitFloor = Point{X: -161.1, Y: 284.5, Z: -52.1}
 
 // holeFloor are plan points inside the navmesh hole at the scorpid pit, between two direct steps: no mesh floor stands in for the
@@ -736,7 +738,7 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 	t.Logf("%d plan points on the map 70 navmesh in %s", checked, dir)
 }
 
-// The plan crosses the scorpid pit's navmesh hole with two direct steps (`cmd move ... direct`), and a direct step is short: within the
+// The plan crosses the scorpid pit's navmesh hole with one direct step (`cmd move ... direct`) up the ramp, and a direct step is short: within the
 // limits TortoiseBots enforces (25 yd across, 8 up or down) of the via point before it, which is where the party gathers. Without the
 // navmesh files only the lengths are checked; with them, both ends have navmesh floor (the server's own check is the map height within
 // 3 yd, which the mesh floor stands in for here). The east end is also the leg's `to`, so the walk to `to` after the step is no walk.
@@ -794,13 +796,13 @@ func TestUldamanDirectSteps(t *testing.T) {
 			}
 		}
 	}
-	if found != 2 {
-		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (to the pit floor, then up the ramp to the east mesh)", found)
+	if found != 1 {
+		t.Fatalf("the plan has %d direct steps, want the one across the scorpid pit's hole (up the ramp from the pit floor to the east mesh)", found)
 	}
-	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || !v[1].Direct || !v[2].Direct {
-		t.Fatalf("legs[%d] via %v: want the lip, then the two direct steps", sentinelLeg, v)
+	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || v[1].Direct || !v[2].Direct {
+		t.Fatalf("legs[%d] via %v: want the lip, the pit floor (a plain move), then the direct step up the ramp", sentinelLeg, v)
 	} else if v[1].Point != pitFloor {
-		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked pit floor point %v (pitFloor)", sentinelLeg, v[1].Point, pitFloor)
+		t.Errorf("legs[%d] via[1] %v: the pit floor move should end on the vmap-checked pit floor point %v (pitFloor)", sentinelLeg, v[1].Point, pitFloor)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
