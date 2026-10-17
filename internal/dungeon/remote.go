@@ -552,6 +552,7 @@ type RemoteDriver struct {
 	agentAway        *agentHome // where the agent goes back to after opening graves (graves_open_by agent); nil when it is at home
 	sweepWiped       bool       // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
 	healerCapped     int        // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	floorCapped      int        // leg+1 of the leg whose rest gates stopped waiting for the pull floors (Config.RestPullExtra ran out)
 	bossFight        bool       // a boss fight (doKill) is on
 	recoveries       int
 
@@ -2032,12 +2033,14 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		}
 		// The module carries out no move shorter than about 6 yd (ZF-1 run 4: a last stretch of 5.2 yd was ignored five times and failed
 		// the walk). Such a stretch is sent as a move to min_move+1 yd along the same line: the lead bot walks through the point and stops
-		// just past it, and the arrival counts within that overshoot.
+		// just past it, and the arrival counts within that overshoot. The module measures the stretch on the ground plane (the stay
+		// position's distance value is GetDistance2d), so the hop's length here is too: rfc-live-2's hop of 6.3 yd on a slope (5.3 yd flat)
+		// was acked three times and never walked, and the walk failed.
 		tiny := 0.0
-		if dd := dist3(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) && !d.overshootDeadly(ctx, here, wp, dd) {
+		if dd := hdist(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) && !d.overshootDeadly(ctx, here, wp, dd) {
 			past := d.onFloor(ctx, lerp(here, wp, (float64(d.tx.MinMove)+1)/dd), min(here.Z, wp.Z), max(here.Z, wp.Z))
 			args = moveArgs(past)
-			tiny = float64(d.tx.MinMove) + 1 - dd
+			tiny = dist3(past, wp)
 			d.remote(func(r *RemoteReport) { r.TinyMoves++ })
 		}
 		if err := d.moveGap(ctx); err != nil {
@@ -2291,24 +2294,62 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 					continue
 				}
 			}
-			if d.revived[m.GUID] >= 3 {
-				return fmt.Errorf("%s is still dead after %d revive orders", m.Name, d.revived[m.GUID])
-			}
-			d.revived[m.GUID]++
-			d.lastRevive[m.GUID] = d.clk.Now()
-			d.remote(func(r *RemoteReport) { r.Revives++ })
-			r, err := d.order(ctx, "revive", m.Name)
-			if err != nil {
+			if err := d.sendRevive(ctx, m); err != nil {
 				return err
-			}
-			if ref, bad := refusedOf(r); bad && ref.Code != "not-dead" {
-				return fmt.Errorf("%s is dead and the revive order was refused: %s (%s)", m.Name, ref.Code, ref.Message)
 			}
 		}
 		if err := d.tick(ctx, d.cfg.Poll*3); err != nil && !errors.Is(err, errWipe) {
 			return err
 		}
 	}
+}
+
+// sendRevive sends `cmd revive` for one dead bot: the module has it release its spirit and run back (or revives it at once for a GM). A bot
+// that stays dead after three orders fails the run; a refused order does too, except "not-dead".
+func (d *RemoteDriver) sendRevive(ctx context.Context, m tbm.PartyRec) error {
+	if d.revived[m.GUID] >= 3 {
+		return fmt.Errorf("%s is still dead after %d revive orders", m.Name, d.revived[m.GUID])
+	}
+	d.revived[m.GUID]++
+	d.lastRevive[m.GUID] = d.clk.Now()
+	d.remote(func(r *RemoteReport) { r.Revives++ })
+	r, err := d.order(ctx, "revive", m.Name)
+	if err != nil {
+		return err
+	}
+	if ref, bad := refusedOf(r); bad && ref.Code != "not-dead" {
+		return fmt.Errorf("%s is dead and the revive order was refused: %s (%s)", m.Name, ref.Code, ref.Message)
+	}
+	return nil
+}
+
+// lateCorpseWait is how long a bot that died after the wipe's revive orders (alone against the mobs that had not reset: rfc-live-2, the
+// rogue 20 s after the others) is left lying before its corpse is released anyway, when no mob stands near it.
+const lateCorpseWait = 20 * time.Second
+
+// releaseLateDead releases the corpses of bots that died while the recovery waited for the others to come back: nobody sent them a revive
+// order (reviveDead had returned already), so they lay there until the bound ran out and the recovery failed ("still dead"). A corpse with a
+// live hostile near its own body is released at once (a resurrection in place would put the healer back on the floor); another after lateCorpseWait,
+// which leaves a living healer the time to raise it in place. A bot already ordered in the last 20 s is left to run back. since holds when each
+// bot was first seen dead during this wait.
+func (d *RemoteDriver) releaseLateDead(ctx context.Context, dead []tbm.PartyRec, since map[packet.GUID]time.Time) error {
+	now := d.clk.Now()
+	for _, m := range dead {
+		if _, ok := since[m.GUID]; !ok {
+			since[m.GUID] = now
+		}
+		if last, ok := d.lastRevive[m.GUID]; ok && now.Sub(last) < 20*time.Second {
+			continue
+		}
+		if len(d.hostilesNearPoint(partyPoint(m))) == 0 && now.Sub(since[m.GUID]) < lateCorpseWait {
+			continue
+		}
+		d.rep.note(fmt.Sprintf("recovery: %s is dead again (%.0f s); releasing the corpse (cmd revive: it runs back from the graveyard)", m.Name, now.Sub(since[m.GUID]).Seconds()))
+		if err := d.sendRevive(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resurrectors are the living bots out of combat that may raise a dead one: the named healer, else any bot that uses mana (the feed
@@ -2463,6 +2504,7 @@ const revivedRejoinWait = 120 * time.Second
 func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
 	until := d.clk.Now().Add(revivedRejoinWait)
 	noted := false
+	deadSince := map[packet.GUID]time.Time{}
 	for {
 		d.look()
 		missing := d.awayFromLead(float64(d.tx.GatherNear))
@@ -2472,6 +2514,11 @@ func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
 				d.rep.note(fmt.Sprintf("recovery: every member is alive and with the lead bot again (%.0f s after the revives)", d.clk.Now().Sub(until.Add(-revivedRejoinWait)).Seconds()))
 			}
 			return nil
+		}
+		if len(dead) > 0 && d.clk.Now().Before(until) {
+			if err := d.releaseLateDead(ctx, dead, deadSince); err != nil {
+				return err
+			}
 		}
 		if !d.clk.Now().Before(until) {
 			var names, deadNames []string
@@ -2614,7 +2661,7 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 	defer ft.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
-	var lastRest, healerFrom time.Time
+	var lastRest, healerFrom, blockedSince time.Time
 	calm := began
 	var fightBegan time.Time
 	rw := newRestWatch(tgt)
@@ -2672,7 +2719,28 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 				return nil
 			}
 		}
-		if st.ok {
+		// The pull floors (the tank's health, the healer's mana): a pass that would leave them short (a caster that does not drink, the
+		// healer cap, the gate's cap) is held for them up to RestPullExtra from the moment it would have passed (rfc-live-2: a pull began
+		// with the tank hurt). Once that wait ran out in a leg, the later gates of the leg do not hold for the floors again.
+		floorShort := d.pullFloorShort(tgt)
+		floorBlocks := func() bool {
+			if len(floorShort) == 0 || d.floorCapped == d.curLeg+1 {
+				return false
+			}
+			now := d.clk.Now()
+			if blockedSince.IsZero() {
+				blockedSince = now
+				rec.g.PullFloorWait = true
+				d.rep.note(fmt.Sprintf("leg %d: rest gate keeps waiting for the pull floors (%s); up to %.0f s more", d.curLeg, strings.Join(floorShort, ", "), d.cfg.RestPullExtra.Seconds()))
+			}
+			if now.Sub(blockedSince) <= d.cfg.RestPullExtra {
+				return true
+			}
+			d.floorCapped = d.curLeg + 1
+			d.rep.note(fmt.Sprintf("leg %d: rest gate stops waiting for the pull floors after %.0f s (%s); the later gates of this leg do not wait for them", d.curLeg, d.cfg.RestPullExtra.Seconds(), strings.Join(floorShort, ", ")))
+			return false
+		}
+		if st.ok && !(len(st.stalled) > 0 && floorBlocks()) {
 			rec.g.Skipped = !held
 			if len(st.stalled) > 0 {
 				rec.g.Result = "stalled"
@@ -2706,7 +2774,7 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 			}
 			// Once the cap was hit in a leg, the later gates of that leg do not wait for the healer's mana at all (three gates of 120 s each
 			// would be the same 360 s).
-			if (d.healerCapped == d.curLeg+1 || d.clk.Now().Sub(healerFrom) > healerManaCap) && st.minHealth >= d.cfg.RestMinHealth {
+			if (d.healerCapped == d.curLeg+1 || d.clk.Now().Sub(healerFrom) > healerManaCap) && st.minHealth >= d.cfg.RestMinHealth && !floorBlocks() {
 				d.healerCapped = d.curLeg + 1
 				rec.g.Result = "gave_up"
 				d.rep.note(fmt.Sprintf("leg %d: rest gate does not wait for the healer's mana any longer in this leg (%.0f s cap: %s); went on with at least %d%% health", d.curLeg, healerManaCap.Seconds(), st.why, st.minHealth))
@@ -2717,11 +2785,14 @@ func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkR
 		}
 		if d.clk.Now().Sub(calm) > tgt.max {
 			if st.minHealth >= d.cfg.RestMinHealth {
-				rec.g.Result = "gave_up"
-				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
-				return nil
+				if !floorBlocks() {
+					rec.g.Result = "gave_up"
+					d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
+					return nil
+				}
+			} else {
+				return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
 			}
-			return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
 		}
 		if !ordered || d.clk.Now().Sub(lastRest) > 45*time.Second {
 			ordered, lastRest = true, d.clk.Now()
