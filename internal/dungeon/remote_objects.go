@@ -953,6 +953,21 @@ func (d *RemoteDriver) doBoss(ctx context.Context, a Action) error {
 		return nil
 	}
 	rec := d.newObjRec(a.Leg, a.Label, "boss loot_item", c.Name)
+	// A leg with its looting off muted the carrier too, and nothing says that `cmd loot` ignores the behaviour: the carrier alone is turned on
+	// for its loot and muted again after (the other bots stay off).
+	if slices.Contains(d.legMuted, c.Name) && og != nil {
+		if r, err := og.Behavior(ctx, c.Name, "loot", true); err != nil || r.Kind != tbm.KindAck {
+			d.rep.note(fmt.Sprintf("%s: could not turn %s's looting on for the boss loot: %s; the loot order goes out anyway", a.Label, c.Name, behaviorWhy(r, err)))
+		} else {
+			defer func() {
+				rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+				defer cancel()
+				if r, err := og.Behavior(rctx, c.Name, "loot", false); err != nil || r.Kind != tbm.KindAck {
+					d.rep.note(fmt.Sprintf("%s: could not turn %s's looting off again after the boss loot: %s", a.Label, c.Name, behaviorWhy(r, err)))
+				}
+			}()
+		}
+	}
 	note, err := d.lootBossItem(ctx, a, c.Name, rec)
 	if err == nil && note == "" {
 		err = d.waitRejoin(ctx, c.Name)

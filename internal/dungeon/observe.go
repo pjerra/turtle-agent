@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -234,8 +236,11 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	})
 	// Whatever way the watch ends, a run still alive on the server is stopped: the agent leaves the party idle, not half-led.
 	defer func() {
-		why := ""
+		why, reason := "", ""
+		var ceiling *runCeilingError
 		switch {
+		case errors.As(err, &ceiling):
+			why, reason = err.Error(), ceiling.reason()
 		case err == nil:
 			why = "done"
 		case ctxDone(err):
@@ -249,7 +254,7 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 			}
 		})
 		if o.started && !o.serverEnd {
-			d.stopRunLeader(why)
+			d.stopRunLeader(why, reason)
 		}
 	}()
 
@@ -315,11 +320,34 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	return nil
 }
 
-// stopRunLeader sends `.bot run stop` with a context of its own (the watch may have been cancelled).
-func (d *RemoteDriver) stopRunLeader(why string) {
+// runCeilingError is the watch ending at the run ceiling (ObserveSpec.MaxRun, observe.max_run_s).
+type runCeilingError struct {
+	max time.Duration
+	msg string
+}
+
+func (e *runCeilingError) Error() string { return e.msg }
+
+// reason is the text `.bot run stop` carries (TortoiseBots #1070 logs it as the stop reason instead of "stopped by .bot run stop"):
+// "time limit reached (3h)", the hours with up to two decimals.
+func (e *runCeilingError) reason() string {
+	return "time limit reached (" + strconv.FormatFloat(math.Round(e.max.Hours()*100)/100, 'f', -1, 64) + "h)"
+}
+
+// stopRunLeader sends `.bot run stop` with a context of its own (the watch may have been cancelled). A non-empty reason goes with it as
+// the stop's argument; the other endings send the plain line.
+func (d *RemoteDriver) stopRunLeader(why, reason string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), d.opt.UnbindWait+5*time.Second)
 	defer cancel()
-	r, err := d.g.Command(ctx, "run stop")
+	line := "run stop"
+	if reason != "" {
+		line += " " + reason
+	}
+	r, err := d.g.Command(ctx, line)
+	if reason != "" && err == nil && r.Err != nil && r.Err.Code == "invalid" {
+		// A module from before TortoiseBots #1070 reads no argument: the plain line still stops the run.
+		r, err = d.g.Command(ctx, "run stop")
+	}
 	ans := "no answer"
 	switch {
 	case err != nil:
@@ -503,7 +531,7 @@ func (d *RemoteDriver) runVerdict() (done bool, err error) {
 	case o.haveLast && st.State == tbm.RunNone && now.Sub(o.startedAt) > observeGone:
 		return true, errors.New("the run is gone: the server's run leader has no run (the binding ended, or someone stopped it)")
 	case now.Sub(o.startedAt) > o.spec.MaxRun:
-		return true, fmt.Errorf("the run leader took longer than %s (at step %d/%d, %s)", o.spec.MaxRun, st.Step, st.Steps, st.Text())
+		return true, &runCeilingError{max: o.spec.MaxRun, msg: fmt.Sprintf("the run leader took longer than %s (at step %d/%d, %s)", o.spec.MaxRun, st.Step, st.Steps, st.Text())}
 	case o.haveLast && st.State == tbm.RunPaused && !o.pausedAt.IsZero() && now.Sub(o.pausedAt) > o.spec.PausedWait:
 		return true, fmt.Errorf("the run leader has been paused for %s without a resume at step %d/%d (%s): %s", o.spec.PausedWait, st.Step, st.Steps, st.Leg, nonEmpty(st.Note, "no reason given"))
 	case o.haveLast && st.State == tbm.RunRunning && now.Sub(o.lastAt) > o.spec.Stall:

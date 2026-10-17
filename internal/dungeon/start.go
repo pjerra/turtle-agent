@@ -465,6 +465,9 @@ func (d *RemoteDriver) partyInLeg(leg int) bool {
 			}
 		}
 	}
+	for _, g := range l.PullGroups {
+		pts = append(pts, g.Positions...) // a party mid-leg stands by one of its packs, not by its `to`
+	}
 	if l.Boss != nil {
 		pts = append(pts, l.Boss.Position)
 	}
@@ -472,6 +475,26 @@ func (d *RemoteDriver) partyInLeg(leg int) bool {
 	for _, p := range pts {
 		if dist3(lead, p) <= legRoomYd {
 			near = true
+		}
+	}
+	// A resume (Config.Resume) takes the party for inside the leg when it stands within ResumeMaxOff of the leg's route, as the stepper's
+	// ResumeAt does: rfc-live-2 resumed leg 4 with the party 68 yd from the leg's `to` and in the middle of it, and the start sent it back
+	// to the leg's first point (127 s, a new summon) before the stepper could skip anything.
+	if !near && d.cfg.Resume {
+		route := []Point{legStart(d.plan, leg), l.To}
+		for _, g := range l.PullGroups {
+			if len(g.Positions) > 0 {
+				route = append(route, g.Positions[0])
+			}
+		}
+		if l.Boss != nil {
+			route = append(route, l.Boss.Position)
+		}
+		for i := 0; i+1 < len(route); i++ {
+			if dd, _ := segDist(lead, route[i], route[i+1]); dd <= ResumeMaxOff {
+				near = true
+				break
+			}
 		}
 	}
 	return near && len(d.apart(lead)) == 0

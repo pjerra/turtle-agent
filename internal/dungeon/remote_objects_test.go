@@ -708,6 +708,44 @@ func TestCarrierLootsTheBossItem(t *testing.T) {
 	}
 }
 
+// A leg with companions_loot false mutes the carrier too: for the boss's loot_item the carrier alone is turned on before its `cmd loot` and
+// muted again after it; the other bots stay off.
+func TestCarrierIsUnmutedForABossLootOnAMutedLeg(t *testing.T) {
+	g := carrierGame(t)
+	g.recipe = combineRecipe(g)
+	g.bag("Magey")[itMedallion] = 1
+	boss := g.addMob(6910, Point{50, 0, 0})
+	off := false
+	plan := bossPlan(false)
+	plan.Legs[0].CompanionsLoot = &off
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	want := fmt.Sprintf("cmd loot %s Magey %d", tbm.GUIDArg(boss.guid), itShaft)
+	loot := g.indexOf(want)
+	// Magey: muted by the leg (off), turned on after that and before the loot, muted again after the loot; the others get no `on` in between.
+	muteAt, onAt, offAgain := -1, -1, -1
+	for i, o := range g.orders {
+		switch {
+		case o == ".bot behavior Magey loot off" && i < loot && muteAt < 0:
+			muteAt = i
+		case o == ".bot behavior Magey loot on" && i < loot && muteAt >= 0:
+			onAt = i
+		case o == ".bot behavior Magey loot off" && i > loot:
+			offAgain = i
+		case i > muteAt && muteAt >= 0 && i < loot && (o == ".bot behavior Tanky loot on" || o == ".bot behavior Healy loot on"):
+			t.Errorf("%s before the loot", o)
+		}
+	}
+	if loot < 0 || muteAt < 0 || onAt < muteAt || offAgain < loot {
+		t.Fatalf("loot %d mute %d on %d off again %d\n%v", loot, muteAt, onAt, offAgain, g.orders)
+	}
+	if g.bag("Magey")[itStaff] != 1 {
+		t.Fatalf("%v", g.bag("Magey"))
+	}
+}
+
 func TestCarrierBossItemFailures(t *testing.T) {
 	// The item comes out of the order, but the order says failed (round robin hid it): the hint names the cause.
 	g := carrierGame(t)
