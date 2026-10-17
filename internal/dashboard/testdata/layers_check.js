@@ -15,9 +15,11 @@ wasOn.forEach((k) => assert.strictEqual(def[k], true, k));
 wasOff.forEach((k) => assert.strictEqual(def[k], false, k));
 const newOn = ["bossmark", "hpbars", "waypoints", "pullstate", "restgather"]; // the owner's upgrades of 2026-10-15: the boss mark, the health bars, the waypoints, the pull-group states and the rest and gather spots start on, everything else new is off
 newOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
-const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0);
-assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "combat", "critter", "deathheat", "events", "feed", "ghost", "grid", "healring", "heading", "hostilenames", "objects", "packrings", "patrols", "refusals", "runinfo", "scale", "stalls", "statusicons", "threat", "threatcolors", "trail_members", "trailtime", "zonenames"].sort());
+const flagOn = ["flags"]; // the plan view's flags (needs_walk, check_skip) start on: they only draw when the plan flags a point, and a route with one is not to be trusted unseen
+const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0 && flagOn.indexOf(k) < 0);
+assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "combat", "critter", "deathheat", "events", "feed", "ghost", "grid", "healring", "heading", "hostilenames", "looks", "objects", "packrings", "patrols", "refusals", "runinfo", "scale", "stalls", "standmarks", "statusicons", "threat", "threatcolors", "trail_members", "trailtime", "zonenames"].sort());
 added.forEach((k) => assert.strictEqual(def[k], false, k + " starts off"));
+flagOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
 L.DEFS.forEach((d) => { assert.ok(d.label && d.group, d.key); assert.ok(!d.needs || d.why, d.key + " needs a reason"); });
 
 // ---- one choice for every map: a single key, read back identically by any card

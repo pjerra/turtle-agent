@@ -39,6 +39,8 @@ type Poller struct {
 	trails   map[string]*Trail
 	events   map[string]*EventLog
 	agents   []Agent
+	runPlans map[string]reportedPlan // agent id -> the plan file its run reports, for the handlers
+	known    []Agent                 // the agents of the last discovery, for the handlers (agents itself belongs to Tick)
 	lastDis  time.Time
 	livePath map[string]string // agent id -> the trace file of its run, for the path layers
 }
@@ -117,10 +119,13 @@ func (p *Poller) Tick(ctx context.Context) {
 	raws := map[string][]byte{}
 	plans := map[string]bool{}
 	p.mu.Lock()
+	p.known = agents
+	p.runPlans = map[string]reportedPlan{}
 	for i, a := range agents {
 		c := res[i].card
 		if c.Online {
 			p.livePath[a.ID] = c.tracePath
+			p.runPlans[a.ID] = c.runPlan
 			p.alive[a.ID] = true
 			p.trackTrail(a.ID, &c)
 			p.trackEvents(a.ID, &c, now)
@@ -236,15 +241,26 @@ func (p *Poller) pollOne(ctx context.Context, cl *Client, now time.Time) (Card, 
 	call("bot_view", &in.View)
 	wg.Wait()
 	tracePath := ""
+	var runPlan reportedPlan
 	var ds struct {
 		Report *struct {
 			Plan      string `json:"plan"`
 			TraceFile string `json:"trace_file"`
+			Remote    *struct {
+				PlanFile   string `json:"plan_file"`
+				PlanSHA256 string `json:"plan_sha256"`
+			} `json:"remote"`
 		} `json:"report"`
 	}
 	if json.Unmarshal(in.Dungeon, &ds) == nil && ds.Report != nil {
 		if ds.Report.Plan != "" {
-			in.Plan, _, in.PlanErr = p.plans.get(ds.Report.Plan)
+			rp := reportedPlan{Plan: ds.Report.Plan}
+			if ds.Report.Remote != nil {
+				rp.File, rp.SHA = ds.Report.Remote.PlanFile, ds.Report.Remote.PlanSHA256
+			}
+			cp, plan, _, perr := p.plans.copyFor(cl.Agent, ds.Report.Plan, rp)
+			in.Plan, in.PlanErr, in.PlanCopy = plan, perr, &cp
+			runPlan = rp
 		}
 		if path, link, folder, ok := p.resolveTrace(ds.Report.TraceFile); ok {
 			if snap, err := p.tailer.Read(path, now); err == nil {
@@ -258,6 +274,7 @@ func (p *Poller) pollOne(ctx context.Context, cl *Client, now time.Time) (Card, 
 	}
 	card := BuildCard(in)
 	card.tracePath = tracePath
+	card.runPlan = runPlan
 	raw, _ := json.Marshal(map[string]json.RawMessage{"status": orNull(in.Status), "dungeon_status": orNull(in.Dungeon), "tune_list": orNull(in.Tune)})
 	raw, err = Scrub(raw, cl.Token())
 	if err != nil {
@@ -332,6 +349,68 @@ func (p *Poller) Raw(id string) ([]byte, bool) {
 func (p *Poller) Geometry(name string) ([]byte, string) {
 	_, geo, errText := p.plans.get(name)
 	return geo, errText
+}
+
+// GeometryFor is the drawing of a plan as the agent with this id reads it (its dungeons_dir copy when it has the file, else the dashboard's).
+func (p *Poller) GeometryFor(name, agentID string) ([]byte, string) {
+	a, ok := p.agentByID(agentID)
+	if !ok {
+		return p.Geometry(name)
+	}
+	_, plan, geo, errText := p.plans.copyFor(a, name, p.runPlanOf(agentID))
+	if plan == nil {
+		return nil, errText
+	}
+	b, err := json.Marshal(geo)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return b, ""
+}
+
+func (p *Poller) runPlanOf(id string) reportedPlan {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.runPlans[id]
+}
+
+func (p *Poller) agentByID(id string) (Agent, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, a := range p.known {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return Agent{}, false
+}
+
+// Plans lists the plans the dashboard can draw, with the file each comes from.
+func (p *Poller) Plans() []PlanInfo { return p.plans.list() }
+
+// CopyRow is what one agent's slot holds of a plan: the file its runs read, and whether it is the dashboard's copy.
+type CopyRow struct {
+	Agent       string      `json:"agent"`
+	DungeonsDir string      `json:"dungeons_dir,omitempty"`
+	Run         *PlanSource `json:"run,omitempty"`
+	Same        bool        `json:"same"`
+	Text        string      `json:"text"`
+}
+
+// PlanCopies lists, for every agent, which copy of the plan its runs read.
+func (p *Poller) PlanCopies(name string) []CopyRow {
+	p.mu.RLock()
+	agents := append([]Agent(nil), p.known...)
+	p.mu.RUnlock()
+	rows := []CopyRow{}
+	if !planName.MatchString(name) {
+		return rows
+	}
+	for _, a := range agents {
+		cp, _, _, _ := p.plans.copyFor(a, name, p.runPlanOf(a.ID))
+		rows = append(rows, CopyRow{Agent: a.ID, DungeonsDir: a.DungeonsDir, Run: cp.Run, Same: cp.Same, Text: cp.Text})
+	}
+	return rows
 }
 
 // links are the files of a run the page can link to: the trace, its summary and the capture folder's report, as far as they exist

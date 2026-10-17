@@ -2,6 +2,8 @@ package dungeon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -495,6 +497,11 @@ func TestLivePlanReloadAtLegStart(t *testing.T) {
 	pl := rep.Remote.PlanReloads
 	if len(pl) != 1 || !pl[0].OK || pl[0].Boundary != boundaryLeg || pl[0].Leg != 1 {
 		t.Fatalf("%+v", pl)
+	}
+	// the report names the file and the version of it the run read last: the edited one
+	edited, _ := os.ReadFile(r.planPath)
+	if sum := sha256.Sum256(edited); rep.Remote.PlanFile != r.planPath || rep.Remote.PlanSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("plan file %q sha %q after the reload", rep.Remote.PlanFile, rep.Remote.PlanSHA256)
 	}
 	paths := []string{}
 	for _, op := range pl[0].Ops {

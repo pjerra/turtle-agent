@@ -39,7 +39,11 @@ func newNearGame(t *testing.T, level int) *nearGame {
 	return &nearGame{fakeCarrier: newFakeCarrier(t), level: level, known: true}
 }
 
-func (n *nearGame) AgentPlace() (Point, uint32, bool) { return n.agent, n.agentMap, true }
+func (n *nearGame) AgentPlace() (Point, uint32, bool) {
+	n.agentMu.Lock()
+	defer n.agentMu.Unlock()
+	return n.agent, n.agentMap, true
+}
 
 func (n *nearGame) AccountLevel(ctx context.Context) (int, bool, error) {
 	n.probes++
@@ -47,6 +51,8 @@ func (n *nearGame) AccountLevel(ctx context.Context) (int, bool, error) {
 }
 
 func (n *nearGame) Appear(ctx context.Context, player string) error {
+	n.agentMu.Lock()
+	defer n.agentMu.Unlock()
 	n.appears = append(n.appears, player)
 	if len(n.appearErr) > 0 {
 		err := n.appearErr[0]
@@ -62,13 +68,16 @@ func (n *nearGame) Appear(ctx context.Context, player string) error {
 }
 
 func (n *nearGame) WalkSelf(ctx context.Context, to Point) (WalkResult, error) {
+	n.agentMu.Lock()
 	n.walks = append(n.walks, to)
 	if n.blockWalk {
+		n.agentMu.Unlock()
 		n.walking.Store(true)
 		<-ctx.Done()
 		n.walking.Store(false)
 		return WalkResult{Result: "partial"}, ctx.Err()
 	}
+	defer n.agentMu.Unlock()
 	if n.walkErr != nil {
 		return WalkResult{}, n.walkErr
 	}

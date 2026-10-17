@@ -548,7 +548,7 @@ leaving range is not reported either.
 A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
 opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
 that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one (all of Uldaman, see
-[The Uldaman plan](#the-uldaman-plan)). `dungeons/zulfarrak.json` (Zul'Farrak, map 209) is the second: eighteen legs (the road to Antu'sul in seven: `antusul_a`, `antusul_a2`, `antusul_a3`, `antusul_a4`, `antusul`, `antusul_c`, which starts with the hop to 1633 868 so that the walk to the pack at 1680 871 passes 30 yd south of the Shadowcaster camp, and `antusul_b`, which starts over the ledge 1769 803 and ends with Antu'sul; then Theka the Martyr and Hydromancer Velratha, whose walk ends on the bridge at 1658.35 878.91; then the optional `gahzrilla` leg (the Gong with the Mallet of Zul'Farrak, see [Zul'Farrak events](#zulfarrak-events-gahzrilla-the-courtyard-and-zumrah)), then, PR B, the `courtyard` after it and `zumrah`, the Witch Doctor behind an `area_trigger` step, then six legs written from the instance script, [the stairs event](#zulfarrak-the-stairs-event-bly-and-ukorz): `stairs`, `stairs_top`, `stairs_base`, `weegli_door`, `bly` and `ukorz`), written from the world database export in `tools/dungeongen/testdata/zulfarrak`; it has no `entrance_tele` (the game has no teleport inside the instance) and a remote run enters by `cmd enter 924` at the `portal` (TortoiseBots #939; on a module without that order the entry fails and the run says so: the module takes an area trigger only from the master's `CMSG_AREATRIGGER`, `PlayerbotAI.cpp:304`, `TeleportAction.cpp:41-47`, a headless bot never sends one, `.tele name` takes `game_tele` names only and `.go xyz` moves only the caller). The plan's `entrance_trigger` 924 targets map 209 at the plan's `entrance`. The plan holds every part of the instance but the Turtle-custom Farraki Arena wing: the Gong is the optional `gahzrilla` leg, Witch Doctor Zum'rah (faction 35 until area trigger 962 fires) is in it since PR B, and the stairs event, Bly's crew, the End Door and Ukorz with Ruuzlu were moved into it from the retired `zulfarrak-extra.json` when the `gossip` step and the unit waits made them runnable. The positions were checked live on 2026-10-14 by a GM-invisible walk of the whole instance (about 3130 yd, nothing attacked): static spawns match the export, Theka and Velratha patrol (the plan meets them on their patrol, boss fights search 80 yd), the End Door is shut and no leg routes through it, the graveyard of trapped Shallow Grave chests is avoided (the `zumrah` leg goes in and the `stairs` leg out, both with the bots' looting off). The six legs after Zum'rah have not run live. The tests (`TestZulfarrakOnNavmesh`; map 209 mmaps in `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle209` or `~/tortoise-wow-server/data/mmaps`) put every waypoint on the map 209 navmesh.
+[The Uldaman plan](#the-uldaman-plan)). `dungeons/zulfarrak.json` (Zul'Farrak, map 209) is the second: eighteen legs (the road to Antu'sul in six: `antusul_a`, `antusul_a2`, `antusul_a3`, `antusul`, `antusul_c`, which starts with the hop to 1633 868 so that the walk to the pack at 1680 871 passes 30 yd south of the Shadowcaster camp, and `antusul_b`, which starts over the ledge 1769 803 and ends with Antu'sul; then Theka the Martyr and Hydromancer Velratha in two legs, `velratha` (the west road, ending at the pack of four at 1601-1610 1104-1111) and `velratha_b` (starting at the north stand 1645 1144, with the pack of five at 1636 1105, which is walled off from the west, then Velratha); then the optional `gahzrilla` leg (the Gong with the Mallet of Zul'Farrak, see [Zul'Farrak events](#zulfarrak-events-gahzrilla-the-courtyard-and-zumrah)), then, PR B, the `courtyard` after it and `zumrah`, the Witch Doctor behind an `area_trigger` step, then six legs written from the instance script, [the stairs event](#zulfarrak-the-stairs-event-bly-and-ukorz): `stairs`, `stairs_top`, `stairs_base`, `weegli_door`, `bly` and `ukorz`), written from the world database export in `tools/dungeongen/testdata/zulfarrak`; it has no `entrance_tele` (the game has no teleport inside the instance) and a remote run enters by `cmd enter 924` at the `portal` (TortoiseBots #939; on a module without that order the entry fails and the run says so: the module takes an area trigger only from the master's `CMSG_AREATRIGGER`, `PlayerbotAI.cpp:304`, `TeleportAction.cpp:41-47`, a headless bot never sends one, `.tele name` takes `game_tele` names only and `.go xyz` moves only the caller). The plan's `entrance_trigger` 924 targets map 209 at the plan's `entrance`. The plan holds every part of the instance but the Turtle-custom Farraki Arena wing: the Gong is the optional `gahzrilla` leg, Witch Doctor Zum'rah (faction 35 until area trigger 962 fires) is in it since PR B, and the stairs event, Bly's crew, the End Door and Ukorz with Ruuzlu were moved into it from the retired `zulfarrak-extra.json` when the `gossip` step and the unit waits made them runnable. The positions were checked live on 2026-10-14 by a GM-invisible walk of the whole instance (about 3130 yd, nothing attacked): static spawns match the export, Theka and Velratha patrol (the plan meets them on their patrol, boss fights search 80 yd), the End Door is shut and no leg routes through it, the graveyard of trapped Shallow Grave chests is avoided (the `zumrah` leg goes in and the `stairs` leg out, both with the bots' looting off). The six legs after Zum'rah have not run live. The tests (`TestZulfarrakOnNavmesh`; map 209 mmaps in `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle209` or `~/tortoise-wow-server/data/mmaps`) put every waypoint on the map 209 navmesh.
 
 ```json
 {
@@ -871,10 +871,10 @@ of them holds); with its approach points and the hop measured from the last figh
 `dungeons/ragefire_chasm.json` (Ragefire Chasm, map 389, level band 13-18) is **mapped, not live-checked** (`"status": "mapped (not live-checked)"`): written offline from the world export in
 `tools/dungeongen/testdata/map389` (`export.sh 389`; `movement.tsv` holds the patrol paths), the map 389 navmesh and the core's `creature_spells`, `creature_ai_events` and `creature_groups` tables, then corrected by a GM-invisible mapping walk on 2026-10-15 (slot 5, nothing attacked; `tests/walk-rfc/FINDINGS.txt` in the audit folder: the portal and trigger 2230 land at the entrance, every leg and pack and boss reached by `walk_path` with 0 replans, every static mob within 3 yd of the plan, the four bosses stationary where the plan has them, the patrol periods measured) (the core has no instance
 script for this map, and the map has no door, lever, key, gossip, item or event: no leg has a step). Nine legs, 55 pull groups of 86 mobs, 1541 yd of corridor from the entrance through the four bosses in the order the navmesh
-leads: `tunnel` and `tunnel_end` (Earthborers, one Molten Elemental), `trogg_cave` (the cave's north strip, first pass), `oggleflint` (a side cave up a ramp; the Shaman and the Trogg that stand with him are `boss.first`), `trogg_west`
+leads: `tunnel` and `tunnel_end` (Earthborers, one Molten Elemental), `trogg_cave` (the cave's north strip, first pass), `oggleflint` (a side cave up a ramp; the Shaman and the Trogg that stand with him join his pull through `creature_groups`; every boss's `boss.first` is empty, since a `first` entry is matched by id anywhere in view and drew a pull of a terrace Shaman after the boss group was dead), `trogg_west`
 (second pass to the cave's south-west corner and up the long ramp), `molten_cave` (seven CC-immune Molten Elementals), `taragaman` (the Searing Blade wing, Taragaman over the lava), `jergosh` (corridor packs, Jergosh and his
 two Cultists) and `bazzalan` (the raised ledge and the hall, the last boss; the add on his left is the last pull group, pulled from a stand 30 yd from him). The pull radii are the largest that keep every other pack's mob out of range (`tools/dungeongen` `TestNoMobStandsInAPullGroupsRangeUnlisted`; the patrolling Enforcer 48696 is listed in the first Searing Blade pack it stands in). Packs linked by `creature_groups` (flags 2, aggro together) are one pull group; the plan carries `fleers` (Ragefire Shaman 11319 and Searing Blade Warlock 11324
-flee at 15 %), `cc_priority`/`cc_always` (Shaman, Warlock, Cultist; no `kill_first`: an entry of it is never crowd-controlled), six `patrol`s (spawns 48648, 48655, 48675, 48698, 48696 and 48707, with their `creature_movement` paths and the periods measured on the walk: the Molten Elemental 48698 walks at 4.0 yd/s and its round is 63.5 s, not the 98 s the walk speed would give; the Trogg 48648 walks the ledge of the cave opening and is on the last tunnel Earthborer's group and the cave's first pack; the Shaman 48669 patrols the south camps, 109 s, and touches no pull), the Voidwalker Minion 8996 (same level, 2 to 4 yd from its Warlock, seen out before combat on the walk) as a member of each of the seven Warlock groups and boss `tactics`
+flee at 15 %), `cc_priority`/`cc_always` (Shaman, Warlock, Cultist; no `kill_first`: an entry of it is never crowd-controlled), six `patrol`s (spawns 48648, 48655, 48675, 48698, 48696 and 48707, with their `creature_movement` paths and the periods measured on the walk: the Molten Elemental 48698 walks at 4.0 yd/s and its round is 63.5 s, not the 98 s the walk speed would give; the Trogg 48648 walks the ledge of the cave opening and is on the cave's first pack (the last tunnel Earthborer carried it too until the 2026-10-16 route edits: the trogg was never in view there and the party waited 30 s for it); the Shaman 48669 patrols the south camps, 109 s, and touches no pull), the Voidwalker Minion 8996 (same level, 2 to 4 yd from its Warlock, seen out before combat on the walk) as a member of each of the seven Warlock groups and boss `tactics`
 (Jergosh's Immolate is dispelled, Taragaman's Fire Nova is moved out of). `entrance_trigger` 2230 (level 8), the `portal` and `entrance_tele` `rfc` (game_tele 209) enter it; `outside_tele` is `RagefireChasm`.
 Left out on purpose and named in the leg notes: the six mobs of the terrace (reached only by a 320 yd loop through the southern camps), settled by stand placement (below), and the southern camps, 25 yd or more from the route; the camp of Shaman 48671 and Troggs 48665 and 48667 is 14.7 to 17.7 yd from the position of the south-west Shaman 48670 and stays asleep because that pull stands 32 yd from it (the alternative, one four-mob pull with two Shamans, was left: riskier). The tests (`TestRagefirePlanLoads`, `TestRagefirePlanMatchesTheWorldExport`, `TestRagefireOnNavmesh`, `TestRagefireRouteHasNoUnplannedPack`, and the plan check
 `TestShippedPlansPassPlanCheck`) need the map 389 tiles (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle389` or `~/tortoise-wow-server/data/mmaps`) and skip without them: every waypoint is on the mesh, the walk from the entrance
@@ -883,9 +883,11 @@ at the look point 21 yd from the group's first position, as the driver does), an
 
 The terrace exemptions (`ragefireExemptions` in `ragefire_test.go`, settled with the walk's date) are kept out of range by stand placement, measured on the walk: the route past the cave opening comes within 18.4 yd of the level-13 Shaman 48637 (aggro radius 17), 20.2 of the Trogg 48638 and 20.6 of the Trogg 38050 (radius 19) and cannot be moved away (the ledge is 16 to 18 yd above them), and the pit Trogg 43581 is 18.8 yd from the ramp foot and 15.9 yd from the position of Shaman 43582, so the pack at the ramp foot is pulled from (-166 3 -48), 25 yd from all three pit mobs. A party spread of 3 yd would put two of the opening mobs in range, and line of sight is not known (no RPC gives it): a live aggro test with a visible character at the opening (-165.7 -33 -40.7) and the ramp top is the next check, then three live runs.
 
+**Route edits of 2026-10-16** (from the round-3 traces; the evidence is in the plan notes of each leg): `antusul_a4` is gone, its Shadowcasters are the last group of `antusul_a3`, and a Shadowcaster at 1465 834 and the linked pack of three at 1613-1619 892-897 are groups of their own; the Shadowcaster camp at 1660 901 and the pack at 1662 930 are pulled in `antusul`, before the pair at 1642 902; `velratha` is split at the pack of five at 1636 1105 into `velratha` and `velratha_b` (north stand 1645 1144); `theka` starts by two vias at 1812 700 and 1812 716; the Witch Doctor at 1759 730 with the Shadowhunter beside it is a group of `antusul_b`. Not done: the Shadowhunter / Sandcrawler pair at 1565 1019 (its look point passes within 20 yd of a static pack off the mesh, see the `velratha` notes), the roaming single mobs without a spawn row near 1675 848, 1712 812 and 1710 1157, and the packs seen at 1811-1816 940-947 and 1820 910 in the graveyard leg.
+
 ### Zul'Farrak events: Gahz'rilla, the courtyard and Zum'rah
 
-**Gahz'rilla (PR A, stacked on PR B).** The optional `gahzrilla` leg sits between `velratha` and `courtyard`: it walks to the gong stand (1652.84 1168.99 10.67, 3.5 yd from the gong), pulls the eight packs on and near the walk Gahz'rilla takes out of his pool, then the `use_object` step with `via_item` rings the
+**Gahz'rilla (PR A, stacked on PR B).** The optional `gahzrilla` leg sits between `velratha_b` and `courtyard`: it walks to the gong stand (1652.84 1168.99 10.67, 3.5 yd from the gong), pulls the eight packs on and near the walk Gahz'rilla takes out of his pool, then the `use_object` step with `via_item` rings the
 Gong of Zul'Farrak (141832, spawn row 27140 at 1650.91 1171.88 10.9, lock 459): a bot that carries the Mallet of Zul'Farrak (9240) gets `cmd use 9240 <bot> entry:141832@1650.9,1171.9,10.9` (the Mallet is used ON the gong: its on-use spell 11434 is an open-lock effect aimed at a game object; round 3 of the live test sent `cmd open` of the gong, which did nothing and answered nothing); a `wait_for` waits up to 30 s for a living Gahz'rilla (7273) in the bots' view, and the boss fight kills him at 1702.58 1224.19 8.88. Without a Mallet in the lead bot's or the carrier's bags the leg is skipped (see `optional` above); a test gives it with `give_items`.
 What the world database says (tortoise-wow-cbspin 4f133ab): the gong is a goober with lock 459 and event 2488, the client shows it usable, so the Mallet is checked on the server when it is used. Event 2488 respawns the other gong object (guid 209001) and 2 s later summons Gahz'rilla (7273, level 46, faction 107, no spawn row)
 at 1664.65 1187.67 -2.89 for 3600 s: the pit under the pool, 22 yd from the stand. His AI casts spell 33007, which fires event 2489: six moves one second apart, 1672.66 1195.93, 1681.74 1204.13, 1686.09 1207.3, 1690.54 1211.53, 1692.57 1213.66 and, 6 s after the summon, 1702.58 1224.19 8.88, which is where he stands (event 2489 has no summon: the "six trolls" of the first draft were those six rows).
@@ -893,10 +895,10 @@ The packs: the Velratha leg clears only the strip (and the pack of five at 1712-
 [5649] 1699.8 1233.8, [5650 7246] at 1700.3 1248.3 and 1713.2 1247.8 and [5649] 1714.4 1218.6 (the one the tank found no firing position for twice in the Velratha leg's batch-2 runs). The four casters at 1662-1667 1254-1260 (47 yd from the walk) are left out; the design list had them as two Shadowhunters and a Witch Doctor, the export has three Shadowhunters (rows 81594, 81592, 81595) and the Witch Doctor 81590.
 The gong stand, every pack position and the boss position are on the navmesh and reachable (`TestZulfarrakOnNavmesh`, `TestZulfarrakPlanCheck`, `TestZulfarrakRouteHasNoUnplannedPack`). **Not yet run live with the Mallet.**
 
-PR B of the Zul'Farrak events design ([TortoiseBots #984](https://github.com/Sagiroth/TortoiseBots/issues/984)): the two legs after Velratha, so that a commander run kills Witch Doctor Zum'rah (7271) too. `courtyard` is nine pull groups east
-of the gong strip (the pyramid courtyard, `to` 1822 1177): one lone patrolling Soul Eater (spawn row 81550, 1757 1141, which the design list did not have: it stands 6 yd from the way to `to`), the Soul Eater patrol and the Blood Drinker at 1821-1849, a Witch Doctor at 1863 1200, a Shadowhunter at
-1878.7 1159.7, the four at 1900-1912 1134-1166, a Witch Doctor at 1926 1131, the Shadowhunter / Sandcrawler / Witch Doctor group at 1865-1879 1110-1120 (two patrollers, radius 30), the three at 1913-1920 1194-1199 and the three at 1885-1899 1211-1222. Every member is an
-export spawn to the decimal (`TestZulfarrakPlansMatchTheWorldExport`), and the patrolling members' groups have the road packs' 30 yd radius (no patrol path: the export has none for these three). `zumrah` goes by 1859 1058 to 1885 1012, 27 yd west of him, with `companions_loot: false`,
+PR B of the Zul'Farrak events design ([TortoiseBots #984](https://github.com/Sagiroth/TortoiseBots/issues/984)): the two legs after Velratha, so that a commander run kills Witch Doctor Zum'rah (7271) too. `courtyard` is seven pull groups east
+of the gong strip (the pyramid courtyard, `to` 1822 1177): the Soul Eater patrol and the Blood Drinker at 1821-1849, a Witch Doctor at 1863 1200, a Shadowhunter at
+1878.7 1159.7, the four at 1900-1912 1134-1166, the Shadowhunter / Sandcrawler / Witch Doctor group at 1865-1879 1110-1120 (two patrollers, radius 30), the three at 1913-1920 1194-1199 and the three at 1885-1899 1211-1222. Every member is an
+export spawn to the decimal (`TestZulfarrakPlansMatchTheWorldExport`), and the patrolling members' groups have the road packs' 30 yd radius (no patrol path: the export has none for these three). Two groups of the first cut are dropped (route edits Z6 and Z10, 2026-10-16, from the round-3 traces): the Witch Doctor at 1926 1131 was 52 yd off the route and a ~90 yd round trip of 23-25 s each run, and the lone Soul Eater at 1757 1141 aggroes on the walk and the look for it cost 26 s. `zumrah` goes by 1859 1058 to 1885 1012, 27 yd west of him, with `companions_loot: false`,
 the `area_trigger` step above (trigger 962, centre 1909.27 1015.11 11.5, radius 10, `stand` 1903 1014 11.8: 6.4 yd from the centre, 9 yd from him and clear of the Campfire that a stand on the centre would be in, `by` `auto`, `expect` `unit 7271 hostile`) and the boss
 with the ward 7785 in the **plan's** `kill_first` and `summoned_kill_first` (the design of #190: the ward is taken as part of a fight only with encounter evidence), and in the boss's `tactics.kill_first` for a leader-mode brain. Live 2026-10-15 (the audit folder's `tests/zf-probe-events` and `zf-probe-zumrah`): trigger 962 sent from 1909.3 1015.1 turns him from faction 35 to 37 and he yells; he keeps `UNIT_FLAG_IMMUNE_TO_PLAYER` (0x100) until combat, but aggroes a bot at 27 yd within about 2 s on his own and
 the flag clears in combat; in combat he summons Zombies (7286), Dead Heroes (7276) and a Ward (7785). The route from the courtyard to him walks through the graveyard of Shallow Graves (the leg's `companions_loot` is why the bots do not loot the chests). The straight line from 1859 1058 to 1885 1012 passes 0.3 and 0.8 yd
@@ -3159,16 +3161,98 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --allow-host <machine>.<tai
 | `--embed-from` | none | extra origins (`http://host:port`, comma separated) that may show the page in a frame, on top of loopback pages (see below) |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 
+**Route editor (`--edit`).** Off by default: without `--edit` the page is GET/HEAD only, exactly as above. With it, the one thing the
+page can write is a checked version of a plan's route, through `POST /api/edit/<plan>`:
+
+```
+turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dungeons --edit --mmaps-dir ~/turtle-agent-mmaps
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--edit` | off | turns the editor on |
+| `--mmaps-dir` | none, required | the navmesh folder of the server the plans are run on; every version records it (a check on another server's mesh proves nothing) |
+| `--edit-source` | the first `--plans-dir` | the folder whose plan files an edit starts from; the page draws and edits this copy |
+| `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json` (the whole plan, `dungeon.Marshal`), `vNNNN.meta.json` (who, when, base sha256 and git SHA, note, check result, ops, the plan diff) and `vNNNN.diff` (text diff). A refused edit keeps the record and the diff only |
+| `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | lines of `label token`, mode 0600, owned by you; the label is the recorded `who` |
+
+The request carries ops, never a plan (`{"base_sha256", "note", "ops": [{"leg", "kind": "move"|"insert"|"delete", "index", "x", "y"}]}`, game
+coordinates; index counts the leg's via points, then `to`). The server applies them to a copy of the base file it reads itself: only the
+position of a via point or of a leg's `to` changes, a plain via point is added or deleted; a `direct` or `check_skip` via point, pack
+positions, bosses, steps, and legs are locked (so is a `gm_cross` via point). Each new point is put on the navmesh floor nearest its old height (a drag on a multi-level map
+stays on its level; more than one floor in range is reported as `floor_picked`), must lie within 200 yd of the plan's own points, and the
+result must still load as a plan. Then `dungeon.CheckPlan` runs on the whole plan: an edit is refused (HTTP 422, with a refused record) when
+it makes a plan check issue the base plan did not have, or cannot be checked. A version is "checked" only when the edited plan has **no** plan check
+issue at all (exempt `check_skip` hops aside). An edit that adds none to a plan that has issues of its own is kept as "unchecked" (the plan file is
+kept, so work can go on from it) and is never picked by `latest`, `export` or `promote`.
+
+**The page.** With `--edit` the plan view (`#/plan/<name>`) has a "Route editor" box. "Edit route" puts yellow handles on the map: drag a
+via point or a leg's stage point (`to`, orange); click the pale circle in the middle of a segment to add a point there (or drag it to put the
+point where you drop it); click a point and press Delete (or the button) to remove it. Grey points are locked (direct and check_skip hops). Each
+drop asks the server where the point lands (`/snap`): a floor picked among several is marked purple, a point off the mesh is refused on the
+spot. Undo and redo (Ctrl+Z, Ctrl+Y) step through the edits; the edits are one list of ops against the plan file, so saving always sends all
+of them. "Save version" asks for the editing token (kept in this browser tab's `sessionStorage` only, sent in the `Authorization` header
+only), sends the ops, and shows the result: checked or refused, the new plan check issues (red marks on the map, the reason on hover), the
+changes in words ("leg 3 (theka): via 2 moved 6.1 yd east"), and the text diff. The version list has Diff, Load (put a version's edits on the
+map) and Revert (a new version equal to an older one; versions are never overwritten). Hiding a leg hides its handles. The box says why
+editing is off when the map does not show the file edits start from (`--edit-source`).
+
+Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
+application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
+created with names the server builds from the plan name (`a-z0-9_-`) and a counted version, never overwritten, and every path step is made
+relative to a directory descriptor opened with `O_NOFOLLOW` (the edits folder once at start, each plan folder per call), so a folder swapped for a
+link cannot redirect a write (Linux; the store does not run elsewhere).
+`--edit-source` is held the same way: opened once at start, each plan read with `openat(..., O_NOFOLLOW)` and accepted only as a regular
+file; the folder checks compare the held folders' identities (device, inode), run again around the write (a failed one removes the version),
+and stop the editor when a held folder's path no longer names it. A save with the same base, ops and note as the latest version returns that
+version (`"unchanged": true`, no new number, its stored author). Saves are bounded: 30 a minute per token label and 500 per plan per 24 hours (HTTP 429), and
+none that would leave the edits folder's filesystem under 200 MB free, the version's files counted (HTTP 507).
+The commander run reloads its plan file at every leg, so anything written into a running slot's `dungeons_dir` would be taken by that run
+unchecked: the dashboard refuses to start, and refuses each edit, when `--edit-dir` is, contains or lies inside any slot's `dungeons_dir`
+(read from `settings*.json`), or when `--edit-source` lies inside one. The guard fails closed: a settings file that cannot be read or decoded,
+a missing config folder, `--agents` other than `auto`, or a slot (a file with an `rpc`) whose plan folder cannot be told (no `dungeons_dir`, or a
+relative one: its runs read `dungeons/` under the agent's working folder) stops the editor and each edit, saying which file. A settings file whose
+default folder you know is elsewhere is named with `--edit-allow-default-dir settings-3.json`. Also: `GET /api/edit/status`, `/api/edit/<plan>/versions`,
+`/api/edit/<plan>/snap?kind=move&leg=&index=&x=&y=` (where a dropped point would land, writes nothing), `/api/edit/<plan>/vNNNN` and
+`/vNNNN/diff`.
+
+**Using the edits in a run (`route-edits`).** An agent reads one plain plan file, so an edit reaches a run by copy, never by overlay:
+
+```
+turtle-agent route-edits list [<plan>]                        # versions, status, who, when, the check result
+turtle-agent route-edits export --to ~/ta-new/dungeons zulfarrak [v0007|latest]
+turtle-agent route-edits promote --worktree ~/wt-ta-x zulfarrak v0007
+```
+
+`export` copies the newest checked version (or the named one) as `<plan>.json` into a fresh folder (it must not exist or be empty) and prints
+`route_edit=<plan>@v0007 sha256=<hex>`. It refuses a refused version (a refused edit has no plan file), an unchecked one (the plan has issues of its own), a file that was changed after it was
+written (the record's sha256), and a folder that is, holds or lies inside the `dungeons_dir` of an agent that reports a run in progress (or
+whose state cannot be read), since that run reloads its plan file at every leg; it warns when a slot that reads the folder has another
+`mmaps_dir` than the one the version was checked on. Point a stopped slot's `dungeons_dir` at the folder and start the run with
+`trace_meta: {"route_edit": "<plan>@v0007 sha256=<hex>"}` in `dungeon_run`: the run's trace then names the edit, and the run card says "run uses
+route edit v0007" (or warns when the file the run read is another version). `promote` writes the version over `dungeons/<plan>.json` of a
+worktree for a PR and prints the commit message (who, when, what moved, what it was checked on); it refuses when the worktree's file is no
+longer the one the edit started from. The brief rule for the lead: before copying plans for a run, `route-edits list <plan>`; when a checked
+version is newer than the golden or worktree copy, export it into the slot's fresh `dungeons_dir` instead.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
 `<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
 and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
 
-**What it reads.** From a settings file only the `rpc` field (accounts, passwords and every other field are skipped by the
+**What it reads.** From a settings file only the `rpc` and `dungeons_dir` fields (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
 agent gets the four calls in parallel with a 2 s bound; the answer is built into a card and cached as JSON, so a page
 request does no work. The trace of the run (the path in `dungeon_status`'s `report.trace_file`) is followed from the byte it
 was last read to, so a poll costs the new lines only.
+
+**Plan view and plan copies.** The select at the top opens `#/plan/<name>`: a plan drawn with no run (every plan of `--plans-dir`
+and of the binary), with a checkbox per leg, "only" per leg and, while a run is on the plan, "Current leg + next". The layers
+add the computed look and gather points of the packs (straight lines, not the navmesh), area triggers, gossip NPCs and stand
+points, and the plan's `needs_walk` points and `check_skip` hops. A run reads its plan from the `dungeons_dir` of its settings
+file, which is usually not the file in `--plans-dir`; so a run card draws the slot's own copy when the file is there, and says in
+words which file is drawn, which file the run reads, and whether they are the same bytes (sha256). The plan view lists the same
+for every agent. `/api/plans`, `/api/plan/<name>[?agent=<port>]` and `/api/plan-copies/<name>` serve this; all are GET.
 
 **The page.** A card per commander (a grid, or tabs with the Grid/Tabs switch; the choice is remembered in the browser):
 
