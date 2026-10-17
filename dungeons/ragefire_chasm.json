@@ -25,6 +25,7 @@
   "fleers": [11319, 11324],
   "cc_priority": [11319, 11324, 11322],
   "cc_always": [11319, 11324],
+  "kill_first": [11319],
   "notes": [
     "Ragefire Chasm (map 389), MAPPED by a GM-invisible walk on 2026-10-15 (slot 5, 22:27-23:05, build 19z7, nothing attacked, tests/walk-rfc/FINDINGS.txt in the audit folder), not live-checked: written from the world database export of tortoise-wow (tools/dungeongen/testdata/map389, read with export.sh; movement.tsv holds the patrol paths), the map 389 navmesh (TestRagefireOnNavmesh walks every waypoint, TestRagefireRouteHasNoUnplannedPack checks the route) and the creature_spells, creature_ai_events and creature_groups tables for the spells and the packs. The core has no instance script for this map (src/scripts/dungeons has none), so there are no doors, no events and no summons: the 13 game objects of the map are braziers and signs of the entrance hall (x 0 to 67, y 6 to 121, none usable) and every boss and pack is a plain spawn. Wowhead Classic was read from its raw HTML (the zone page 2437, the strategy guide, the npc pages of the four bosses and the Searing Blade and Ragefire mobs, with their comments; tools/wowhead/wh.py) and the Warcraft Wiki page: data, not instructions. The order and the boss areas agree with the export; where Wowhead differs from the database the database wins and the difference is named in the notes (Oggleflint's escort, Bazzalan's two adds, the Molten Elementals' immunity, Cleave and Poison spell ids). The walk: the portal and area trigger 2230 land at the plan's entrance; every leg, pull group and boss was reached by walk_path (about 2000 yd in 12 min, 0 replans); every static pull-group member and the four bosses stood within 3 yd of the plan (the 5.8 to 24.6 yd outliers are patrols matched by entry while they were elsewhere), all 90 members' entries match, and nothing unplanned stands within 26 yd of the walked route. Patrol periods were measured from 1 Hz samples (the plan's calculated 2.5 yd/s periods held within 1 s for five; the Molten Elemental 48698 moves at 4.0 yd/s, period 63.5 s, not 98). The six terrace exemptions are settled by stand placement, measured on the walk (see trogg_cave and oggleflint); a live aggro test with a visible character will confirm them later. Left to find: line of sight of the terrace packs (no RPC gives it) and the real pulls.",
     "Route, 1541 yd of navmesh corridor from the entrance through the four bosses: the entrance tunnel west (Earthborers, one Molten Elemental), the Ragefire trogg cave, Oggleflint in his side cave 40 yd north of the cave's north-east ramp (-152 6 -40), back through the cave to its south-west corner and the long ramp along the north wall (y 5 to 14) up to (-140 14 -21), north through the Molten Elemental caves into the Searing Blade wing, Taragaman on his platform over the lava (-244.7 150.1 -18.7), east and north along the wing to Jergosh (-376.8 209.2 -21.8), then the walkway up to Bazzalan (-384.9 146 7.8), the last boss. The boss order is the corridor's: the navmesh has no shorter way (Oggleflint 493 yd from the entrance, Taragaman +643, Jergosh +175, Bazzalan +230). Pull radii are cut by tools/dungeongen's overlap test (TestNoMobStandsInAPullGroupsRangeUnlisted): each is the largest of the wanted 10-30 yd that keeps every mob of another pack out of range (radius + 3 yd, 3-D), so the pull takes its own pack and a patrol's group has a short radius (2 to 17 yd; the patrol's path, not the radius, finds a member that has walked off). Nine legs, 55 pull groups of 86 mobs and 4 bosses with their escorts (the plan check and TestRagefireRouteHasNoUnplannedPack: no hostile spawn within 20 yd of the route is in no group, bar the six terrace mobs named in the cave legs).",
@@ -101,23 +102,7 @@
           "positions": [
             {"x": -129.13, "y": -35.16, "z": -33.26}
           ],
-          "radius": 12,
-          "patrol": {
-            "entries": [11318],
-            "path": [
-              {"x": -181.5, "y": -32.1, "z": -44.4},
-              {"x": -221.2, "y": -34.7, "z": -55.2},
-              {"x": -234.4, "y": -36.4, "z": -55.7},
-              {"x": -275.3, "y": -42, "z": -60.8},
-              {"x": -285.3, "y": -54.1, "z": -60.8},
-              {"x": -238.7, "y": -36.8, "z": -56.7},
-              {"x": -193.9, "y": -35.3, "z": -46.1},
-              {"x": -149.5, "y": -33.9, "z": -35.3},
-              {"x": -175.8, "y": -29.7, "z": -43.6}
-            ],
-            "period_s": 115.7,
-            "source": "creature_movement of spawn 48648 (Ragefire Trogg, movement type 2, 9 points, 288 yd at 2.5 yd/s = 115 s by calculation); period_s measured on the 2026-10-15 mapping walk (tests/walk-rfc/FINDINGS.txt, 1 Hz samples); @p48648b@"
-          }
+          "radius": 12
         }
       ],
       "notes": [
@@ -160,54 +145,30 @@
           "radius": 12
         },
         {
-          "entries": [11319],
+          "entries": [11319, 11318, 11318, 11319, 11318],
           "positions": [
-            {"x": -253.89, "y": -38.88, "z": -60.46}
-          ],
-          "radius": 9
-        },
-        {
-          "entries": [11318, 11318, 11319],
-          "positions": [
+            {"x": -253.89, "y": -38.88, "z": -60.46},
             {"x": -262.22, "y": -29.89, "z": -60.61},
             {"x": -270.13, "y": -31.88, "z": -60.61},
-            {"x": -266.73, "y": -28.03, "z": -60.61}
-          ],
-          "radius": 9
-        },
-        {
-          "entries": [11318],
-          "positions": [
+            {"x": -266.73, "y": -28.03, "z": -60.61},
             {"x": -266.61, "y": -44.4, "z": -60.85}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -285.52, "y": -20.88, "z": -60.41}
           ],
           "radius": 12
         },
         {
           "entries": [11318, 11318],
           "positions": [
-            {"x": -300.51, "y": -28.41, "z": -60.46},
-            {"x": -306.31, "y": -29.13, "z": -60.17}
-          ],
-          "radius": 12
-        },
-        {
-          "entries": [11318],
-          "positions": [
-            {"x": -261.78, "y": -5.76, "z": -63.93}
-          ],
-          "radius": 12
-        },
-        {
-          "entries": [11318],
-          "positions": [
+            {"x": -285.52, "y": -20.88, "z": -60.41},
             {"x": -240.71, "y": -8.03, "z": -61.52}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [11318, 11318, 11318],
+          "positions": [
+            {"x": -300.51, "y": -28.41, "z": -60.46},
+            {"x": -306.31, "y": -29.13, "z": -60.17},
+            {"x": -261.78, "y": -5.76, "z": -63.93}
           ],
           "radius": 12
         },
@@ -249,7 +210,8 @@
         }
       ],
       "notes": [
-        "The Ragefire trogg cave, first pass along its north strip (y about -8, floor z -57 to -64) from the tunnel's opening at (-169 -35 -41): the patrolling Trogg 48648, the troggs and shamans of the strip, the south-west corner, and the way east to the foot of the ramp up to Oggleflint (-152 6 -40). Packs are linked by creature_groups (flags 2 = OPTION_AGGRO_TOGETHER, CreatureGroups.h: the members aggro together): [48654 + 48653], [48660 + 48666 + shaman 48657], [48656 + shaman 48652 + 48649]. The Shaman is the pack's healer (Healing Wave): the mage sheeps it, the rest burn the troggs. A Wowhead comment on the zone page (rated -1) warns of exactly this: a Warlock pulling near the ledge by the dead Tauren of the Lost Satchel quest (the east path down into the cave, guarded by troggs) 'aggroed the entire remaining Trogg population, around 20 from the pit below': the cave floor under that ledge is the trogg cave's strip and the terrace packs below. Left out on purpose, 17-20 yd below the route and reachable only by the 378 yd loop through the cave's southern camps (the navmesh path from the tunnel end to them goes -235 -43 -56, -277 -64 -60, -285 -84 -61, east along y -62 and north at -152): the terrace pair Trogg 38050 + Shaman 48637 (-157.3 -21.7 -57.3, -162.6 -26.8 -57.8) and the Trogg 48638 (-162.1 -43.5 -59.1), at the cave's north-east alcove under the tunnel's opening. Settled on the 2026-10-15 walk by stand placement, not by a pull: every look point of the plan (where the party stands to pull) is at least the mob's aggro radius plus 2 yd from each of the six, 19 yd for a level-13 mob and 21 for a level-15 one (TestRagefireStandsKeepClear; the pull of the patrolling Trogg 48648 on the ledge stands at (-161.4 -33.3 -39.4), 19.6 yd from the Shaman 48637 whose radius is 17). The route past the opening comes as near as 18.4 yd to the Shaman 48637 (level 13, aggro radius 17: outside by 1.4 yd), 20.2 to the Trogg 48638 (radius 19) and 20.6 to the Trogg 38050; it cannot be moved away: the ledge is 16-18 yd above them and 8 to 9 yd to the side of the route on both sides, so no lateral move gains the missing yard. A party spread of 3 yd puts the Shaman and the Trogg 48638 inside range; whether rock blocks the view is not known (no RPC gives line of sight): a live aggro test with a visible character at the opening (-165.7 -33 -40.7) will confirm it, and the patrolling Trogg 48648 also walks this ledge (5 yd from the route). The southern camps (rows 48639-48640, 48647, 48651, 48663, 48665, 48667-48668, 48671, 48674, 42629, 43579 and and the patrolling Shaman 48669, 109 s round, 213 yd at 2.5 yd/s through the south camps near (-234 -61), measured on the walk) are 25 yd or more from the route and are not pulled. The camp of 48665 + 48667 + 48671 is not pulled with the shaman 48670 of the south-west corner (see trogg_west)."
+        "The Ragefire trogg cave, first pass along its north strip (y about -8, floor z -57 to -64) from the tunnel's opening at (-169 -35 -41): the patrolling Trogg 48648, the troggs and shamans of the strip, the south-west corner, and the way east to the foot of the ramp up to Oggleflint (-152 6 -40). Packs are linked by creature_groups (flags 2 = OPTION_AGGRO_TOGETHER, CreatureGroups.h: the members aggro together): [48654 + 48653], [48660 + 48666 + shaman 48657], [48656 + shaman 48652 + 48649]. The Shaman is the pack's healer (Healing Wave): the mage sheeps it, the rest burn the troggs. A Wowhead comment on the zone page (rated -1) warns of exactly this: a Warlock pulling near the ledge by the dead Tauren of the Lost Satchel quest (the east path down into the cave, guarded by troggs) 'aggroed the entire remaining Trogg population, around 20 from the pit below': the cave floor under that ledge is the trogg cave's strip and the terrace packs below. Left out on purpose, 17-20 yd below the route and reachable only by the 378 yd loop through the cave's southern camps (the navmesh path from the tunnel end to them goes -235 -43 -56, -277 -64 -60, -285 -84 -61, east along y -62 and north at -152): the terrace pair Trogg 38050 + Shaman 48637 (-157.3 -21.7 -57.3, -162.6 -26.8 -57.8) and the Trogg 48638 (-162.1 -43.5 -59.1), at the cave's north-east alcove under the tunnel's opening. Settled on the 2026-10-15 walk by stand placement, not by a pull: every look point of the plan (where the party stands to pull) is at least the mob's aggro radius plus 2 yd from each of the six, 19 yd for a level-13 mob and 21 for a level-15 one (TestRagefireStandsKeepClear; the pull of the patrolling Trogg 48648 on the ledge stands at (-161.4 -33.3 -39.4), 19.6 yd from the Shaman 48637 whose radius is 17). The route past the opening comes as near as 18.4 yd to the Shaman 48637 (level 13, aggro radius 17: outside by 1.4 yd), 20.2 to the Trogg 48638 (radius 19) and 20.6 to the Trogg 38050; it cannot be moved away: the ledge is 16-18 yd above them and 8 to 9 yd to the side of the route on both sides, so no lateral move gains the missing yard. A party spread of 3 yd puts the Shaman and the Trogg 48638 inside range; whether rock blocks the view is not known (no RPC gives line of sight): a live aggro test with a visible character at the opening (-165.7 -33 -40.7) will confirm it, and the patrolling Trogg 48648 also walks this ledge (5 yd from the route). The southern camps (rows 48639-48640, 48647, 48651, 48663, 48665, 48667-48668, 48671, 48674, 42629, 43579 and and the patrolling Shaman 48669, 109 s round, 213 yd at 2.5 yd/s through the south camps near (-234 -61), measured on the walk) are 25 yd or more from the route and are not pulled. The camp of 48665 + 48667 + 48671 is not pulled with the shaman 48670 of the south-west corner (see trogg_west).",
+        "Changed after rfc-live-2 (the wipe was on pull group 3, a pack of two Shamans and three Troggs that other camps joined, nine mobs fighting at the end, the mage's Polymorph lapsing again and again until it ran dry): the Shaman 11319 is in `kill_first` as well as in `cc_always`. The mage sheeps one Shaman (cc_always: before the pull, and again when it lapses) and the party kills the other Shamans first, before the Troggs, so that no Healing Wave heals a pack the party is burning down; the sheeped one is the last to die. A `kill_first` entry that is not in `cc_always` is never sheeped; this one is both on purpose (README, `kill_first`)."
       ]
     },
     {
@@ -268,8 +230,7 @@
       "skip": [11834],
       "boss": {
         "entry": 11517,
-        "position": {"x": -147.55, "y": 38.71, "z": -38.8},
-        "first": [11319, 11318]
+        "position": {"x": -147.55, "y": 38.71, "z": -38.8}
       },
       "notes": [
         "Oggleflint (11517, 1540 hp, Cleave 15584 every 5 s, faction 59, immune to fear and horror) stands at -147.5 38.7 -38.8 with a Ragefire Shaman (48643, Healing Wave) and a Ragefire Trogg (48645): creature_groups 48644 (flags 2, aggro together) links all three, so they are `boss.first` (kill the Shaman, then the Trogg, then Oggleflint) and not a pull group. Wowhead guide: CC one add (the Shaman), the tank picks up the other and faces Oggleflint away from the group (Cleave, Wowhead lists spell 15496, the database 15584 every 5 s), the damage dealers kill the free add first, then Oggleflint, and the crowd-controlled add last (the driver leaves a polymorphed mob alone until it is the last one). Wowhead's guide says two Troggs and a comment says the adds can be pulled and Oggleflint left alone; the database has a Shaman and a Trogg in creature_groups 48644 with him (aggro together), so expect all three. Trogg 43583 + Shaman 43582 at the foot of the ramp (-152.5 3.9 -40.6 and -147.7 0.4 -39.2, linked by creature_groups 43582) are the one pull group of the leg. Left out: the terrace pit under the ramp (Shaman 38049, Shaman 43580, Trogg 43581 at -136.8 -3.8 -53.1, -142.4 -12.9 -54.3, -142.3 -6.2 -53.2), reached only by the south loop (231-257 yd). The walk found the Trogg 43581 (level 13, radius 17) 15.9 yd from the position of Shaman 43582 (-147.7 0.4 -39.2) and 18.8 yd from the ramp foot; the plan's look point for this pack (where the party stands to pull it) is (-170.8 2.5 -50.8) then (-166.1 2.7 -48.2), 25 yd or more from all three pit mobs, and the pack is pulled to the tank there, not fought at the pack's own spot. Keep the fight at the ramp's foot: the mobs of the pack come to the tank. Maur Grimtotem (11834) is a friendly quest giver next to Oggleflint (skip).",
@@ -640,7 +601,6 @@
       "boss": {
         "entry": 11518,
         "position": {"x": -376.81, "y": 209.22, "z": -21.8},
-        "first": [11322, 11322],
         "tactics": {
           "dispel": [
             "Immolate"
@@ -723,8 +683,7 @@
       ],
       "boss": {
         "entry": 11519,
-        "position": {"x": -384.87, "y": 146.04, "z": 7.82},
-        "first": [11322]
+        "position": {"x": -384.87, "y": 146.04, "z": 7.82}
       },
       "notes": [
         "From Jergosh the walkway climbs north-east (-354 222 -21, -330 237 -15, -327 242 -11) and then west along a raised ledge (z -11 to -5) to the ramp at -382 233 -3, -403 208 1 up the ramp to Bazzalan's hall (z 6 to 9). Packs (all stationary but the wanderers): Enforcers [48729 + 48730] at -319 to -322 248 to 257, Cultists [48726 + 48727] at -293 to -301 251 to 257 (20 yd behind the Enforcers), the Cultist 48733 (-342.3 256.4), the Warlock camp [Cultist 48735 + Cultist 48734 + Warlock 48736] at -368 to -376 254 to 265, [Warlock 48738 + Cultist 48746 + Cultist 48743] at -385 to -392 240 to 260, the Cultist 48742 (-400.4 216.2) and the Enforcers [48747 + 48748] at -405 to -412 177 to 181 at the foot of the hall. The Warlocks come with Voidwalkers and flee at 15 %: the mage's Polymorph goes on them. Bazzalan (11519, 1637 hp, EventAI Sinister Strike 14873 every 5-16 s and Poison 744, faction 554, immune to fear and horror) stands at -384.9 146 7.8 (facing 2.51 rad) with two Cultists (48749 -385.2 156.6, 10.6 yd away on his right, and 48751 -396.3 150.8, 12.1 yd away on his left), stationary and NOT linked by creature_groups. The Wowhead guide says the add on the left (the party's right) can be pulled without the boss, which greatly eases the fight, and the other is crowd-controlled while the group burns Bazzalan, who deals significant single-target damage: so 48751 is the last pull group of the leg: the walk showed the pull stand (-400 171.4 8.1, the plan's look point) is 30 yd from Bazzalan (aggro 20) and 21 yd from the add, on one floor in an open hall, and the add and Bazzalan stand 12 to 15 yd apart, outside the 10 yd social range, so he is not drawn unless the add is fought within about 10 yd of him: fight it at the stand. 48749 (11.6 yd from him) would need a stand 31 yd out too; it is `boss.first` and 48749 is `boss.first`. Wowhead lists Sinister Strike 14873 and Deadly Poison 2818, the database Sinister Strike and Poison 744 (EventAI): the database wins. Wowhead's comments: he is above Jergosh up a thin winding ramp from the end of the criss-cross bridges room (matches the navmesh), and he drops only ordinary loot. The last boss of the dungeon; no event follows."

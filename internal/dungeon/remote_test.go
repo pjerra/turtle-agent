@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,11 +69,14 @@ type rmob struct {
 // `cmd move`, a `cmd pullback` brings the mob onto the tank after a delay, `cmd attack` kills it, `cmd rest` heals the party. Every
 // sleep publishes a frame, as the module does about once a second.
 type fakeRemote struct {
-	t     *testing.T
-	now   time.Time
-	n     uint64
-	party []*tbm.PartyRec
-	mobs  []*rmob
+	// agentMu orders the fake's state between the driver's goroutine and agentWalk's walk goroutine (which runs Follower.WalkSelf while
+	// the driver keeps ticking): the clock's advance and every fake Follower/trigger method that touches agent, walks or the party hold it.
+	agentMu sync.Mutex
+	t       *testing.T
+	now     time.Time
+	n       uint64
+	party   []*tbm.PartyRec
+	mobs    []*rmob
 	// the lead bot
 	moveTo *Point
 	speed  float64
@@ -188,7 +192,9 @@ func (g *fakeRemote) clock() Clock {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		g.agentMu.Lock()
 		g.advance(d)
+		g.agentMu.Unlock()
 		return nil
 	}}
 }
