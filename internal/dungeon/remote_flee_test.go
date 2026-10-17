@@ -231,14 +231,25 @@ func TestRemoteBystandersAreNoDangerToABody(t *testing.T) {
 
 // ---- runners that die between two frames ----
 
-// fleeFrames puts frames in the driver as look() does (ledger first, then the runners): the tank at the origin and the mage at 2 yd,
-// the mage's target set to mageOn. A mob listed in a frame stands where the frame says.
-func fleeFrames(d *RemoteDriver, mageOn packet.GUID, frames ...[]tbm.HostileRec) {
-	for _, hs := range frames {
-		d.n++
+// flf is one feed frame for the runner tests: the mage's target and the runner (nil: not in the frame). skip leaves out that many feed
+// frames before it (the driver missed them).
+type flf struct {
+	mageOn packet.GUID
+	mob    *tbm.HostileRec
+	skip   uint64
+}
+
+// fleeFrames puts frames in the driver as look() does (ledger first, then the runners): the tank at the origin and the mage at 2 yd.
+func fleeFrames(d *RemoteDriver, frames ...flf) {
+	for _, f := range frames {
+		d.n += 1 + f.skip
+		var hs []tbm.HostileRec
+		if f.mob != nil {
+			hs = append(hs, *f.mob)
+		}
 		d.fr = tbm.ViewFrame{Seq: d.n, Lead: gTank, Party: []tbm.PartyRec{
 			{GUID: gTank, Name: "Tanky", HP: 100, MaxHP: 100},
-			{GUID: gMage, Name: "Magey", HP: 100, MaxHP: 100, X: 2, Target: mageOn},
+			{GUID: gMage, Name: "Magey", HP: 100, MaxHP: 100, X: 2, Target: f.mageOn},
 		}, Hostiles: hs}
 		d.haveFr = true
 		d.noteLedger()
@@ -248,39 +259,64 @@ func fleeFrames(d *RemoteDriver, mageOn packet.GUID, frames ...[]tbm.HostileRec)
 
 // Uldaman run 3 (19z12, observe mode): Stonevault Geomancers and Shadowforge casters ran at 6-16 % with bots on them, 1-24 yd from the
 // party, and were gone from the feed between two frames. The feed lists only living units and every bot's target, so such a mob died:
-// it is not a fled mob, nothing waits for it, and the ledger counts it dead. The same runner that no bot had as its target when the
-// feed last showed it, or that was last seen far from the party, still counts as fled.
+// it is not a fled mob, and the ledger counts it dead. A runner that no bot targeted in its last frame (the target dropped first), one
+// healthier than fleeHeldDiedPct, one far from the party, or one that went while the driver missed a frame, still counts as fled.
 func TestRemoteRunnerGoneWhileABotHitsItDied(t *testing.T) {
 	const g = packet.GUID(0xF1300012F0006B61)
-	mob := func(x float32, hp int, flags string) tbm.HostileRec {
-		return tbm.HostileRec{GUID: g, Entry: 4848, X: x, HPPct: hp, Target: gTank, Flags: flags}
+	mob := func(x float32, hp int, flags string) *tbm.HostileRec {
+		return &tbm.HostileRec{GUID: g, Entry: 4848, X: x, HPPct: hp, Target: gTank, Flags: flags}
+	}
+	// at hp: 26 % at 3 yd, then hp and moving away (a runner), last seen at x.
+	run := func(on packet.GUID, x float32, hp int) []flf {
+		return []flf{{on, mob(3, 26, "-"), 0}, {on, mob(x-2, hp, "c"), 0}, {on, mob(x, hp, "c"), 0}}
 	}
 	cases := []struct {
 		name   string
-		mageOn packet.GUID
-		at     float32 // where the runner is last seen
+		fleers bool
+		frames []flf
 		fled   bool
 	}{
-		{"targeted, near: died", g, 8, false},
-		{"targeted, 24 yd off: died", g, 26, false},
-		{"untargeted: ran off", 0, 8, true},
-		{"targeted, out of chase range: ran off", g, 60, true},
+		{"targeted, near: died", false, append(run(g, 8, 16), flf{}, flf{}), false},
+		{"targeted, 24 yd off: died", false, append(run(g, 26, 16), flf{}, flf{}), false},
+		{"untargeted: ran off", false, append(run(0, 8, 16), flf{}, flf{}), true},
+		{"targeted, 25 yd off, target dropped before it went: ran off", false, append(run(g, 27, 16), flf{0, mob(29, 16, "c"), 0}, flf{}, flf{}), true},
+		{"targeted, out of chase range: ran off", false, append(run(g, 60, 16), flf{}, flf{}), true},
+		{"targeted, a frame missed: ran off", false, append(run(g, 8, 16), flf{0, nil, 1}, flf{}), true},
+		{"targeted known fleer at 33 %: ran off", true, append(run(g, 8, 33), flf{}, flf{}), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			d := ledgerDriver(t)
-			// 26 % at 3 yd; 16 % and moving away (a runner); then gone for two whole frames.
-			fleeFrames(d, c.mageOn, []tbm.HostileRec{mob(3, 26, "-")}, []tbm.HostileRec{mob(c.at-2, 16, "c")}, []tbm.HostileRec{mob(c.at, 16, "c")})
+			if c.fleers {
+				d.plan.Fleers = []uint32{4848}
+			}
+			fleeFrames(d, c.frames[:3]...)
 			if !d.isRunning(g) {
-				t.Fatalf("%s: not taken for a runner", c.name)
+				t.Fatalf("not taken for a runner")
 			}
-			fleeFrames(d, 0, nil, nil)
+			fleeFrames(d, c.frames[3:]...)
 			if d.wasFled(g) != c.fled {
-				t.Fatalf("%s: fled %v, want %v\n%s", c.name, d.wasFled(g), c.fled, strings.Join(d.rep.r.Notes, "\n"))
+				t.Fatalf("fled %v, want %v\n%s", d.wasFled(g), c.fled, strings.Join(d.rep.r.Notes, "\n"))
 			}
-			if dead := d.ledgerDead([]uint32{4848}); dead == c.fled && c.at <= ledgerSeeRadius+2 {
-				t.Fatalf("%s: ledger dead %v", c.name, dead)
+			if c.fled && d.ledgerDead([]uint32{4848}) {
+				t.Fatal("a mob that ran off is on the ledger as dead")
+			}
+			if !c.fled && !d.ledgerDead([]uint32{4848}) {
+				t.Fatal("a runner that died in the bots' hands is not on the ledger")
 			}
 		})
+	}
+}
+
+// A mob at half health that a bot targets and that leaves the feed is no runner and no kill.
+func TestRemoteTargetedHealthyMobGoneIsNotDead(t *testing.T) {
+	const g = packet.GUID(0xF1300012F0006B62)
+	m := &tbm.HostileRec{GUID: g, Entry: 4848, X: 8, HPPct: 50, Target: gTank, Flags: "-"}
+	m2 := *m
+	m2.X = 12
+	d := ledgerDriver(t)
+	fleeFrames(d, flf{g, m, 0}, flf{g, &m2, 0}, flf{}, flf{}, flf{})
+	if d.wasFled(g) || d.ledgerDead([]uint32{4848}) {
+		t.Fatalf("fled %v, ledger dead %v", d.wasFled(g), d.ledgerDead([]uint32{4848}))
 	}
 }

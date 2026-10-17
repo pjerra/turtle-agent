@@ -46,6 +46,7 @@ const (
 	fleeRateAge     = 1500 * time.Millisecond // a drop of health this old still says how fast the party was killing it
 	fleeAbsent      = 2                       // frames in a row a runner is out of the feed before it counts as fled
 	fleeHardCap     = 90 * time.Second        // the longest a wait for runners goes on, fights with what comes back included
+	fleeHeldDiedPct = 30                      // percent: a runner a bot was hitting, gone at this health or less, died (TortoiseBots' runner finish line)
 )
 
 // fleeSeen is where a mob stood in the frame before and how far from the nearest living bot.
@@ -78,12 +79,14 @@ type fleeState struct {
 	orderAt map[packet.GUID]time.Time
 	orderN  map[packet.GUID]int
 	noted   map[packet.GUID]bool
+	gone    map[packet.GUID]uint64 // the frame a runner was first missing from (a whole frame)
 }
 
 func (f *fleeState) init() {
 	if f.prev == nil {
 		f.prev, f.running, f.absent = map[packet.GUID]fleeSeen{}, map[packet.GUID]tbm.HostileRec{}, map[packet.GUID]int{}
 		f.fled, f.orderAt, f.orderN, f.noted = map[packet.GUID]*fledMob{}, map[packet.GUID]time.Time{}, map[packet.GUID]int{}, map[packet.GUID]bool{}
+		f.gone = map[packet.GUID]uint64{}
 	}
 }
 
@@ -156,6 +159,7 @@ func (d *RemoteDriver) noteFleeing() {
 		}
 		f.prev[h.GUID] = cur
 		f.absent[h.GUID] = 0
+		delete(f.gone, h.GUID)
 		moving := had && away >= 0 && prev.away >= 0 && away-prev.away >= fleeStepYd && dist3(p, prev.at) >= fleeStepYd
 		_, was := f.running[h.GUID]
 		switch {
@@ -185,6 +189,9 @@ func (d *RemoteDriver) noteFleeing() {
 		if seen[g] {
 			continue
 		}
+		if f.absent[g] == 0 {
+			f.gone[g] = d.n
+		}
 		if f.absent[g]++; f.absent[g] < fleeAbsent {
 			continue
 		}
@@ -206,18 +213,21 @@ func (d *RemoteDriver) noteFleeing() {
 	}
 }
 
-// diedInView says whether a runner that is gone from the feed died, not escaped: a living bot had it as its target in the last frame
-// that showed it, within fleeChaseYd of a living bot now; or it was nearly dead when the feed last showed it (a few percent, or no more
-// than it lost in a second and a half), with the party's hands on it: a damage dealer ordered at it a moment ago and a living bot within
-// spell range, or a bot within reach. A mob that is out of the feed at more health than that, untargeted, or with nobody near, ran off
-// alive.
+// diedInView says whether a runner that is gone from the feed died, not escaped: a living bot had it as its target in the frame right
+// before the first one without it, at fleeHeldDiedPct or less and within fleeChaseYd of a living bot in that frame; or it was nearly
+// dead when the feed last showed it (a few percent, or no more than it lost in a second and a half), with the party's hands on it: a
+// damage dealer ordered at it a moment ago and a living bot within spell range, or a bot within reach. A mob that is out of the feed at
+// more health than that, untargeted, or with nobody near, ran off alive.
 func (d *RemoteDriver) diedInView(h tbm.HostileRec) bool {
 	// In the bots' hands: the feed lists only living units, and it lists every bot's target wherever the bot sees it (and every mob on
-	// the bots' attacker lists). A runner a bot was hitting when the feed last showed it, close to the party, cannot get out of the feed
-	// alive within two frames: it went because it died. Uldaman run 3 (19z12): all 37 runners died in the bots' hands, 5 of them between
-	// two frames at 6-16 % and were noted "ran off ... not counted" because they lost more than the last drop showed.
+	// the bots' attacker lists). A runner a bot was hitting in the frame right before the first one without it (no frame missed in
+	// between), at fleeHeldDiedPct or less, within fleeChaseYd of a living bot in that frame, went because it died. Uldaman run 3
+	// (19z12): all 37 runners died in the bots' hands, 5 of them between two frames at 6-16 % and were noted "ran off ... not counted"
+	// because they lost more than the last drop showed. A healthier mob, one nobody targeted, or one that went while a frame was
+	// missed, is judged by the rules below.
 	seen := d.fl.prev[h.GUID]
-	if seen.held && d.botNear(hostilePoint(h), fleeChaseYd) {
+	if gone, ok := d.fl.gone[h.GUID]; ok && seen.held && gone == seen.n+1 && seen.hp <= fleeHeldDiedPct &&
+		seen.away >= 0 && seen.away <= fleeChaseYd {
 		return true
 	}
 	// Nearly dead: at most fleeDyingPct, or what it was losing a second (at its last drop, seen within fleeRateAge of its last frame)
