@@ -156,7 +156,8 @@ func TestRagefirePlanLoads(t *testing.T) {
 		t.Errorf("trigger %d tele %q outside %q portal %+v", p.EntranceTrigger, p.EntranceTele, p.OutsideTele, p.Portal)
 	}
 	// The healers and casters: Ragefire Shaman 11319 (Healing Wave) and Searing Blade Warlock 11324 flee at 15 % (EventAI 1131901, 1132401).
-	if fmt.Sprint(p.Fleers) != "[11319 11324]" || fmt.Sprint(p.CCPriority) != "[11319 11324 11322]" || fmt.Sprint(p.CCAlways) != "[11319 11324]" || len(p.KillFirst) != 0 {
+	// The Shaman is in kill_first too (rfc-live-2, leg 2 group 3): one is sheeped (cc_always), the others are killed first.
+	if fmt.Sprint(p.Fleers) != "[11319 11324]" || fmt.Sprint(p.CCPriority) != "[11319 11324 11322]" || fmt.Sprint(p.CCAlways) != "[11319 11324]" || fmt.Sprint(p.KillFirst) != "[11319]" {
 		t.Errorf("fleers %v cc_priority %v cc_always %v kill_first %v", p.Fleers, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	if lo, hi := p.Band(); lo != 13 || hi != 18 {
