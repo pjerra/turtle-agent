@@ -299,6 +299,10 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 		}
 		group = -1
 	}
+	// A keyed object or an item need that nothing in the plan provides (plan_keys.go): the run would be refused "no-item" at the step.
+	for _, g := range p.KeyGaps(opt.FromLeg) {
+		c.res.Issues = append(c.res.Issues, PlanIssue{Leg: g.Leg, LegName: g.LegName, Part: g.Path, Point: g.At, Reason: "key", Detail: g.Why})
+	}
 	if err := c.runLeader(opt.FromLeg); err != nil {
 		return nil, err
 	}
