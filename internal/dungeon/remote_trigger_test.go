@@ -1409,7 +1409,7 @@ func TestRecoveryOfAPartyThatStaysDeadFailsOnceAndCountsTheWipeOnce(t *testing.T
 	}
 }
 
-// A rest gate that waits only for the healer's mana (nothing else under its line) gives up after 120 s even when the leg lets gates run for 10 minutes.
+// A rest gate that waits only for the healer's mana (nothing else under its line) gives up after 120 s even when the leg lets gates run for 10 minutes (and RestPullExtra more for the pull floor, once per leg).
 func TestRestGateCapsAHealerOnlyManaWait(t *testing.T) {
 	g := newFakeRemote(t)
 	g.party[1].Power = 100 // Healy at 10 % mana, and it never rises
@@ -1420,7 +1420,7 @@ func TestRestGateCapsAHealerOnlyManaWait(t *testing.T) {
 	if err != nil || rep.State != "done" || !strings.Contains(notesOf(rep), "rest gate does not wait for the healer's mana any longer in this leg (120 s cap") {
 		t.Fatalf("%v %s\\n%s", err, rep.State, notesOf(rep))
 	}
-	if took := g.now.Sub(start); took < 120*time.Second || took > 200*time.Second {
+	if took := g.now.Sub(start); took < 120*time.Second || took > 120*time.Second+DefaultConfig().RestPullExtra+80*time.Second {
 		t.Fatalf("took %v", took)
 	}
 }
@@ -1454,5 +1454,72 @@ func TestLeadAloneOutsideTheDungeonIsPartyDown(t *testing.T) {
 	var asMap map[string]any
 	if merr != nil || json.Unmarshal(raw, &asMap) != nil || asMap["wipes"] != float64(1) || asMap["party_downs"] != float64(1) || summaryBase(rep)["wipes"] != 1 || summaryBase(rep)["wipes_whole_party"] != 0 {
 		t.Fatalf("status json wipes %v party_downs %v, end record %v / %v (%v)", asMap["wipes"], asMap["party_downs"], summaryBase(rep)["wipes"], summaryBase(rep)["wipes_whole_party"], merr)
+	}
+}
+
+// rfc-live-2: a bot that dies while the recovery waits for the others (alone against the mobs that had not reset, 20 s after the wipe's
+// revive orders) is released too: with a mob near its body at once, else after lateCorpseWait. It used to lie there until the 120 s bound ran
+// out and fail the recovery ("Daggerward still dead").
+func TestRecoveryReleasesACorpseThatDiedAfterTheReviveOrders(t *testing.T) {
+	run := func(mobNear bool) (time.Duration, *fakeRemote, Report, error) {
+		g := newFakeRemote(t)
+		g.advance(time.Second)
+		if mobNear {
+			g.addMob(299, Point{g.lead().X + 10, g.lead().Y, g.lead().Z}) // a pack that has not reset, 10 yd from the bodies
+		}
+		g.party[2].Dead, g.party[2].HP = true, 0
+		g.advance(time.Second) // the frame shows it
+		d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+		d.look()
+		start := g.now
+		err := d.waitRevivedRejoin(context.Background())
+		return g.now.Sub(start), g, d.rep.snapshot(), err
+	}
+	took, g, rep, err := run(true)
+	if err != nil || fmt.Sprint(g.revived) != "[Magey]" || took > 20*time.Second {
+		t.Fatalf("mob near: %v revived %v took %v\n%s", err, g.revived, took, notesOf(rep))
+	}
+	took, g, rep, err = run(false)
+	if err != nil || fmt.Sprint(g.revived) != "[Magey]" || took < lateCorpseWait || took > lateCorpseWait+20*time.Second {
+		t.Fatalf("no mob: %v revived %v took %v\n%s", err, g.revived, took, notesOf(rep))
+	}
+	if !strings.Contains(notesOf(rep), "Magey is dead again") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// The mob test is per corpse: of two bots dead in the wait, the one with a mob near its body is released at once, the one lying far from every
+// mob is left the lateCorpseWait (a healer may still raise it in place).
+func TestRecoveryReleasesOnlyTheCorpseNearMobsAtOnce(t *testing.T) {
+	g := newFakeRemote(t)
+	g.advance(time.Second)
+	g.party[1].X, g.party[1].Y = 0, 0     // Healy, dead, a mob 10 yd from it
+	g.party[2].X, g.party[2].Y = 300, 300 // Magey, dead, far from every mob
+	g.addMob(299, Point{10, 0, 0})
+	for _, i := range []int{1, 2} {
+		g.party[i].Dead, g.party[i].HP = true, 0
+	}
+	g.lagUntil = map[packet.GUID]time.Time{gHealer: g.now.Add(time.Hour), gMage: g.now.Add(time.Hour)} // the fake keeps followers on the lead bot otherwise
+	g.advance(time.Second)
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	d.look()
+	dead := d.deadMembers()
+	if len(dead) != 2 {
+		t.Fatalf("dead %v", dead)
+	}
+	since := map[packet.GUID]time.Time{}
+	if err := d.releaseLateDead(context.Background(), dead, since); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(g.revived) != "[Healy]" {
+		t.Fatalf("at once: revived %v", g.revived)
+	}
+	g.advance(lateCorpseWait + time.Second)
+	d.look()
+	if err := d.releaseLateDead(context.Background(), d.deadMembers(), since); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(g.revived) != "[Healy Magey]" {
+		t.Fatalf("after the wait: revived %v", g.revived)
 	}
 }

@@ -282,16 +282,19 @@ func TestPlanCheckObjectStandWithinUseRange(t *testing.T) {
 	}
 }
 
-// A kill_first entry is never crowd-controlled: the loader refuses one that is also in cc_priority or cc_always.
+// A kill_first entry is never crowd-controlled: the loader refuses one that is also in cc_priority, unless cc_always has it too (Ragefire's
+// Shamans: one is sheeped, the others are killed first).
 func TestPlanRefusesAKillFirstEntryInTheCCLists(t *testing.T) {
 	const tmpl = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"cc_priority":%s,"cc_always":%s,"kill_first":[5650,7247],"legs":[{"to":{"x":0,"y":0,"z":0},"steps":[{"wait_for":{"hostiles_gone":{"radius":5}}}]}]}`
-	for _, c := range [][2]string{{"[7246,7247]", "[]"}, {"[7246]", "[5650]"}} {
-		if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, c[0], c[1]))); err == nil || !strings.Contains(err.Error(), "is also in cc_priority or cc_always") {
+	for _, c := range [][2]string{{"[7246,7247]", "[]"}, {"[7246,7247]", "[7246]"}} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, c[0], c[1]))); err == nil || !strings.Contains(err.Error(), "is also in cc_priority") {
 			t.Errorf("%v: %v", c, err)
 		}
 	}
-	if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, "[7246]", "[7246]"))); err != nil {
-		t.Fatal(err)
+	for _, c := range [][2]string{{"[7246]", "[7246]"}, {"[5650,7246]", "[5650]"}, {"[]", "[5650]"}} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(tmpl, c[0], c[1]))); err != nil {
+			t.Errorf("%v: %v", c, err)
+		}
 	}
 }
 

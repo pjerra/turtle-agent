@@ -199,21 +199,28 @@ type Config struct {
 	// MaintenanceEveryLegs: remote mode sends `.bot maintenance` to every bot at the start of legs N, 2N, ... (0: never, also not after a
 	// recovered wipe; the default is 3; remote_maint.go). Unlike the fields above a zero here is not filled with the default.
 	MaintenanceEveryLegs int
-	RestMinHealth        int           // after RestTimeout the run goes on only if everyone has at least this health
-	GatherRadius         float32       // yards: rested also asks every living member to be this close
-	WaitPoll             time.Duration // time between two looks at a wait step
-	Poll                 time.Duration // time between two looks at a fight
-	ArriveTimeout        time.Duration // the party's walk to the leader after a teleport
-	ManaStall            time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
-	ManaStallPct         int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
-	HealerManaMin        int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
-	ReviveWait           time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
-	AggroQuiet           time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
-	AmbushPause          time.Duration // how long the party stands at each position of a stealthed pack
-	WalkWatch            time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
-	BuffGap              time.Duration // wait between two .aura commands (the server throttles chat)
-	BuffViewWait         time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
-	BuffMaxDist          float32       // yards: a companion farther than this from the leader is not selected for a buff
+	RestMinHealth        int // after RestTimeout the run goes on only if everyone has at least this health
+	// RestPullTankPct and RestPullHealerManaPct are the pull floors of the remote driver's rest gates (a leg's own lower rest targets
+	// lower them): a gate that would let the party go on short of its targets (the cap, the healer-mana cap, a caster that does not
+	// drink) keeps waiting for the tank to reach RestPullTankPct health and the healer RestPullHealerManaPct mana, for RestPullExtra
+	// more after the cap, before it gives up (rfc-live-2: a wipe pull began with the tank hurt and the healer low).
+	RestPullTankPct       int
+	RestPullHealerManaPct int
+	RestPullExtra         time.Duration
+	GatherRadius          float32       // yards: rested also asks every living member to be this close
+	WaitPoll              time.Duration // time between two looks at a wait step
+	Poll                  time.Duration // time between two looks at a fight
+	ArriveTimeout         time.Duration // the party's walk to the leader after a teleport
+	ManaStall             time.Duration // a rest gate stops waiting for a caster whose mana has not risen this long (not drinking)
+	ManaStallPct          int           // "has risen" means by at least this percent of the caster's maximum mana in ManaStall
+	HealerManaMin         int           // a healer is let pass for not drinking only with at least this percent mana (else it waits the gate out)
+	ReviveWait            time.Duration // longest look for the dead flag to clear after a GM revive, before judging it
+	AggroQuiet            time.Duration // a fight that came up on a walk is over when nothing has hit the party this long
+	AmbushPause           time.Duration // how long the party stands at each position of a stealthed pack
+	WalkWatch             time.Duration // real time between two looks for combat during a walk (it is stopped when one starts)
+	BuffGap               time.Duration // wait between two .aura commands (the server throttles chat)
+	BuffViewWait          time.Duration // longest wait for a companion out of the leader's view before its buffs go on (and to show them after)
+	BuffMaxDist           float32       // yards: a companion farther than this from the leader is not selected for a buff
 
 	// The leader's death.
 	BrainRezWait       time.Duration // at a rest gate, how long the leader's brain is given to resurrect dead members before a GM revive or the corpse runs (RezBrain)
@@ -234,7 +241,7 @@ func DefaultConfig() Config {
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, BossSearch: 60 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
-		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, GravesHealerManaPct: 60, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
+		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 60, GravesHealerManaPct: 60, RestPullTankPct: 80, RestPullHealerManaPct: 60, RestPullExtra: 90 * time.Second, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
 		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
@@ -296,6 +303,9 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestWalkHealerManaPct, d.RestWalkHealerManaPct)
 	fillInt(&c.RestWalkManaPct, d.RestWalkManaPct)
 	fillInt(&c.RestMinHealth, d.RestMinHealth)
+	fillInt(&c.RestPullTankPct, d.RestPullTankPct)
+	fillInt(&c.RestPullHealerManaPct, d.RestPullHealerManaPct)
+	fill(&c.RestPullExtra, d.RestPullExtra)
 	fillF(&c.GatherRadius, d.GatherRadius)
 	fill(&c.WaitPoll, d.WaitPoll)
 	fill(&c.Poll, d.Poll)

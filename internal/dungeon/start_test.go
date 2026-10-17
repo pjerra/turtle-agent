@@ -555,3 +555,59 @@ func TestSkippedLegsAreNotInTheLegsTotal(t *testing.T) {
 		t.Fatalf("legs %d, counters %v, summary %v", len(rep.Legs), traceCounters(rep)["legs"], summaryBase(rep)["legs"])
 	}
 }
+
+// rfc-live-2: a resume into a leg whose party stands in the middle of it (by one of its packs, or on the way to its `to`) must not send the
+// party back to the leg's first point and summon it again. The pack positions count as the leg's own ground, and with Config.Resume the
+// leg's route does within ResumeMaxOff.
+func TestStartResumeInsideALegDoesNotMoveOrSummonTheParty(t *testing.T) {
+	plan := func() *Plan {
+		return remotePlan(
+			Leg{Name: "first", To: Point{100, 0, 0}},
+			Leg{Name: "second", To: Point{200, 0, 0}, PullGroups: []PullGroup{
+				{Entries: []uint32{300}, Positions: []Point{{260, 30, 0}}},
+				{Entries: []uint32{301}, Positions: []Point{{320, 30, 0}}},
+			}})
+	}
+	run := func(resume bool, x, y float32) (*startFake, Report, error) {
+		g := newStartFake(t)
+		g.lead().X, g.lead().Y = x, y
+		for _, p := range g.party[1:] {
+			p.X, p.Y = x, y
+		}
+		cfg := DefaultConfig()
+		cfg.PostFight, cfg.AddsWait, cfg.Resume = 2*time.Second, 4*time.Second, resume
+		d := NewRemoteDriver(plan(), g, cfg, startOpts(), g.clock())
+		err := d.Run(context.Background(), 1)
+		rep, _ := d.Status()
+		return g, rep, err
+	}
+	untouched := func(name string, g *startFake, rep Report, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, notesOf(rep))
+		}
+		if len(g.appears)+len(g.gos)+len(g.botLines)+len(g.summonsLog) != 0 || rep.Remote.GMCommands != 0 {
+			t.Fatalf("%s: appears %v gos %v lines %v summons %v", name, g.appears, g.gos, g.botLines, g.summonsLog)
+		}
+		if rep.Start == nil || rep.Start.Method != "already in the leg" {
+			t.Fatalf("%s: start %+v\n%s", name, rep.Start, notesOf(rep))
+		}
+	}
+	// By the second pack, 100 yd from the leg's `to` (more than legRoomYd): in the leg through the pack's position, resume or not.
+	for _, resume := range []bool{false, true} {
+		g, rep, err := run(resume, 305, 25)
+		untouched(fmt.Sprintf("by a pack, resume %v", resume), g, rep, err)
+	}
+	// On the way between the previous leg's end and the `to`, 64 yd from the `to`: in the leg for a resume only.
+	g, rep, err := run(true, 150, 40)
+	untouched("on the route", g, rep, err)
+	g, rep, err = run(false, 150, 40)
+	if err != nil || rep.Start == nil || rep.Start.Method != "gm" || len(g.gos) != 1 {
+		t.Fatalf("no resume: %v start %+v gos %v", err, rep.Start, g.gos)
+	}
+	// Far off the route even a resume is sent to the start point.
+	g, rep, err = run(true, 150, 400)
+	if err != nil || rep.Start == nil || rep.Start.Method != "gm" || len(g.gos) != 1 {
+		t.Fatalf("far off: %v start %+v gos %v", err, rep.Start, g.gos)
+	}
+}

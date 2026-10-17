@@ -179,7 +179,7 @@ func (d *RemoteDriver) batchBegin(ctx context.Context, a Action) error {
 		// healer-only mana wait after healerManaCap, once per leg, and then no later gate waits for it: this gate gets its cap back and waits
 		// for the healer before the next chests are opened.
 		d.rep.note(fmt.Sprintf("graves-batch: the healer ended the last batch at %d%% mana (under %d%%): mana gate before the next batch", gb.healMana, batchManaLowPct))
-		d.healerCapped = 0
+		d.healerCapped, d.floorCapped = 0, 0
 		if err := d.restGate(ctx, false); err != nil {
 			return err
 		}

@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -232,5 +233,38 @@ func TestRemoteReactiveCCSkipsTheWard(t *testing.T) {
 	}
 	if rep.Remote.ReactiveCC != 0 || g.indexOf("cmd cc moon "+tbm.GUIDArg(ward.guid)) >= 0 {
 		t.Fatalf("the ward was CCed: %+v %v", rep.Remote, g.orders)
+	}
+}
+
+// rfc-live-2: a kill_first entry that is cc_always too (Ragefire's Shaman 11319) gets the CC, one at a time, and the others are killed
+// first; a kill_first entry that is not cc_always stays out of the CC.
+func TestKillFirstThatIsCCAlwaysIsSheepedOnceAndTheOthersKilledFirst(t *testing.T) {
+	d := ledgerDriver(t)
+	d.plan = loadPlan(t, "../../dungeons/ragefire_chasm.json")
+	if !slices.Contains(d.plan.KillFirst, 11319) || !slices.Contains(d.plan.CCAlways, 11319) {
+		t.Fatalf("Ragefire: kill_first %v cc_always %v", d.plan.KillFirst, d.plan.CCAlways)
+	}
+	mk := func(guid uint64, entry uint32) tbm.HostileRec {
+		return tbm.HostileRec{GUID: packet.GUID(0xF130000000000000 | guid), Entry: entry, HPPct: 100, Flags: "-"}
+	}
+	trogg1, trogg2, shamanA, shamanB := mk(1, 11318), mk(2, 11318), mk(3, 11319), mk(4, 11319)
+	if !d.ccAllowed(shamanA) || !d.ccAllowed(trogg1) {
+		t.Fatal("the Shaman and the Trogg may be crowd-controlled")
+	}
+	// The pack CC takes a Shaman (cc_always first), never the pull target's Trogg when a Shaman is there.
+	pick, ok := d.ccPick(trogg1, []tbm.HostileRec{trogg1, trogg2, shamanA, shamanB}, true)
+	if !ok || pick.Entry != 11319 {
+		t.Fatalf("pick %+v %v", pick, ok)
+	}
+	// The sheeped Shaman is left alone; the other is killed before the Troggs.
+	d.tf.init()
+	d.tf.ccHeld[shamanA.GUID] = true
+	if got := entriesOf(d.killFirstFirst([]tbm.HostileRec{trogg1, shamanA, trogg2, shamanB})); got != "[11319 11318 11319 11318]" {
+		t.Fatalf("order %s", got)
+	}
+	// Not cc_always: never sheeped.
+	d.plan.CCAlways = nil
+	if d.ccAllowed(shamanA) {
+		t.Fatal("a kill_first entry outside cc_always was sheeped")
 	}
 }
