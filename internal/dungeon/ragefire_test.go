@@ -673,3 +673,38 @@ func TestRagefirePlannerKeepsOutOfTheLava(t *testing.T) {
 		t.Fatalf("leg 3's stand from leg 2's end: %v %+v", err, path)
 	}
 }
+
+// rfc-observe-1 (2026-10-17) paused twice at step 13: the five-pack (trogg_cave pull group 2) was 95 yd from the party's stand and the run
+// leader's own hops were undone by its gather back to the last point it had walked to. Pull groups 1 and 2 of the cave carry the stand the
+// party walks to before each pull: in the run leader's view of the pack (60 yd), outside the aggro range of every member, outside the avoid box.
+func TestRagefireTroggCavePullsHaveApproachStands(t *testing.T) {
+	p := loadPlan(t, ragefirePlan)
+	var cave *Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "trogg_cave" {
+			cave = &p.Legs[i]
+		}
+	}
+	if cave == nil {
+		t.Fatal("no trogg_cave leg")
+	}
+	for gi, want := range map[int]Point{1: {-205, -34, -49.9}, 2: {-221.2, -34.7, -54.7}} {
+		g := cave.PullGroups[gi]
+		if len(g.Approach) != 1 || g.Approach[0] != want {
+			t.Errorf("trogg_cave pull group %d: approach %v, want [%v]", gi, g.Approach, want)
+			continue
+		}
+		a := g.Approach[0]
+		if b, in := p.InAvoid(a); in {
+			t.Errorf("trogg_cave pull group %d: approach %v lies in the avoid box %q", gi, a, b.Name)
+		}
+		nearest, farthest := math.MaxFloat64, 0.0
+		for _, m := range g.Positions {
+			d := math.Hypot(float64(a.X-m.X), float64(a.Y-m.Y))
+			nearest, farthest = math.Min(nearest, d), math.Max(farthest, d)
+		}
+		if nearest < 25 || farthest > 50 {
+			t.Errorf("trogg_cave pull group %d: approach %v stands %.1f to %.1f yd from the pack, want 25 to 50", gi, a, nearest, farthest)
+		}
+	}
+}

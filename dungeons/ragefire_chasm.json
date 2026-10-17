@@ -142,7 +142,10 @@
             {"x": -238.66, "y": -31.56, "z": -56.62},
             {"x": -237.99, "y": -40.35, "z": -56.27}
           ],
-          "radius": 12
+          "radius": 12,
+          "approach": [
+            {"x": -205, "y": -34, "z": -49.9}
+          ]
         },
         {
           "entries": [11319, 11318, 11318, 11319, 11318],
@@ -153,7 +156,10 @@
             {"x": -266.73, "y": -28.03, "z": -60.61},
             {"x": -266.61, "y": -44.4, "z": -60.85}
           ],
-          "radius": 12
+          "radius": 12,
+          "approach": [
+            {"x": -221.2, "y": -34.7, "z": -54.7}
+          ]
         },
         {
           "entries": [11318, 11318],
@@ -211,7 +217,8 @@
       ],
       "notes": [
         "The Ragefire trogg cave, first pass along its north strip (y about -8, floor z -57 to -64) from the tunnel's opening at (-169 -35 -41): the patrolling Trogg 48648, the troggs and shamans of the strip, the south-west corner, and the way east to the foot of the ramp up to Oggleflint (-152 6 -40). Packs are linked by creature_groups (flags 2 = OPTION_AGGRO_TOGETHER, CreatureGroups.h: the members aggro together): [48654 + 48653], [48660 + 48666 + shaman 48657], [48656 + shaman 48652 + 48649]. The Shaman is the pack's healer (Healing Wave): the mage sheeps it, the rest burn the troggs. A Wowhead comment on the zone page (rated -1) warns of exactly this: a Warlock pulling near the ledge by the dead Tauren of the Lost Satchel quest (the east path down into the cave, guarded by troggs) 'aggroed the entire remaining Trogg population, around 20 from the pit below': the cave floor under that ledge is the trogg cave's strip and the terrace packs below. Left out on purpose, 17-20 yd below the route and reachable only by the 378 yd loop through the cave's southern camps (the navmesh path from the tunnel end to them goes -235 -43 -56, -277 -64 -60, -285 -84 -61, east along y -62 and north at -152): the terrace pair Trogg 38050 + Shaman 48637 (-157.3 -21.7 -57.3, -162.6 -26.8 -57.8) and the Trogg 48638 (-162.1 -43.5 -59.1), at the cave's north-east alcove under the tunnel's opening. Settled on the 2026-10-15 walk by stand placement, not by a pull: every look point of the plan (where the party stands to pull) is at least the mob's aggro radius plus 2 yd from each of the six, 19 yd for a level-13 mob and 21 for a level-15 one (TestRagefireStandsKeepClear; the pull of the patrolling Trogg 48648 on the ledge stands at (-161.4 -33.3 -39.4), 19.6 yd from the Shaman 48637 whose radius is 17). The route past the opening comes as near as 18.4 yd to the Shaman 48637 (level 13, aggro radius 17: outside by 1.4 yd), 20.2 to the Trogg 48638 (radius 19) and 20.6 to the Trogg 38050; it cannot be moved away: the ledge is 16-18 yd above them and 8 to 9 yd to the side of the route on both sides, so no lateral move gains the missing yard. A party spread of 3 yd puts the Shaman and the Trogg 48638 inside range; whether rock blocks the view is not known (no RPC gives line of sight): a live aggro test with a visible character at the opening (-165.7 -33 -40.7) will confirm it, and the patrolling Trogg 48648 also walks this ledge (5 yd from the route). The southern camps (rows 48639-48640, 48647, 48651, 48663, 48665, 48667-48668, 48671, 48674, 42629, 43579 and and the patrolling Shaman 48669, 109 s round, 213 yd at 2.5 yd/s through the south camps near (-234 -61), measured on the walk) are 25 yd or more from the route and are not pulled. The camp of 48665 + 48667 + 48671 is not pulled with the shaman 48670 of the south-west corner (see trogg_west).",
-        "Changed after rfc-live-2 (the wipe was on pull group 3, a pack of two Shamans and three Troggs that other camps joined, nine mobs fighting at the end, the mage's Polymorph lapsing again and again until it ran dry): the Shaman 11319 is in `kill_first` as well as in `cc_always`. The mage sheeps one Shaman (cc_always: before the pull, and again when it lapses) and the party kills the other Shamans first, before the Troggs, so that no Healing Wave heals a pack the party is burning down; the sheeped one is the last to die. A `kill_first` entry that is not in `cc_always` is never sheeped; this one is both on purpose (README, `kill_first`)."
+        "Changed after rfc-live-2 (the wipe was on pull group 3, a pack of two Shamans and three Troggs that other camps joined, nine mobs fighting at the end, the mage's Polymorph lapsing again and again until it ran dry): the Shaman 11319 is in `kill_first` as well as in `cc_always`. The mage sheeps one Shaman (cc_always: before the pull, and again when it lapses) and the party kills the other Shamans first, before the Troggs, so that no Healing Wave heals a pack the party is burning down; the sheeped one is the last to die. A `kill_first` entry that is not in `cc_always` is never sheeped; this one is both on purpose (README, `kill_first`).",
+        "Approach points for pull groups 2 and 3 (the Trogg pair at -238 -36 and the five-pack at -264 -35), added after rfc-observe-1 (2026-10-17 13:21, the run leader, TortoiseBots #1063 rows): the run paused twice at step 13 with \"8 approach hops did not bring the party within 60 yd of the pack\". The party stands about 20 yd short of each pack, 57 and 25 yd apart, so the run leader walked the cave ramp in hops of its own, and every hop was undone by its gather back to the last point it had walked to (-169.1 -34.9 -40.9), 9 yd above the stand the fight had left it on. A move row before each pull gives the gather a point on the stand itself (the hop logic in TortoiseBots stays to be fixed). Pair: (-205 -34 -49.9), the ramp point a manual `cmd move -205 -34 -52` walked the party to (the floor there is -49.86; the lava floor at -65.4 lies below it), 33 yd from the pair. Five-pack: (-221.2 -34.7 -54.7), the patrolling Trogg 48648's own waypoint (floor -54.68), 33 yd from its nearest member, 49 yd from its farthest and 33 yd from the next pair (-240.7 -8.0). Both are on the navmesh with the lava box applied, and the paths between them (24, 17 and 33 yd) are straight along the ramp. The five-pack is not split: its Shamans stand 17 yd apart (-253.9 -38.9 and -266.7 -28.0) and the second has a Trogg 5 yd away, so no member can be pulled alone from a stand that sees the rest."
       ]
     },
     {
