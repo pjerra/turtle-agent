@@ -233,7 +233,7 @@ func TestUldaman(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := res.Rows
-	pulls, bosses, rituals, legsWithBoss := 0, 0, 0, 0
+	pulls, bosses, rituals, holds, legsWithBoss := 0, 0, 0, 0, 0
 	for _, l := range p.Legs {
 		pulls += len(l.PullGroups)
 		if l.Boss != nil {
@@ -248,10 +248,30 @@ func TestUldaman(t *testing.T) {
 			bosses++
 		case KindRitual:
 			rituals++
+			if s.Param != 3 {
+				t.Errorf("ritual %d: param %d, want its 3 participants", s.Entry, s.Param)
+			}
+		case KindHold:
+			holds++
 		}
 	}
-	if pulls != 0 || bosses != legsWithBoss || rituals != 2 || len(r.Legs) != len(p.Legs) || r.Plan.Plan != "uldaman" || r.Plan.Map != 70 {
-		t.Fatalf("pulls left %d, bosses %d (want %d), rituals %d, legs %d", pulls, bosses, legsWithBoss, rituals, len(r.Legs))
+	// The Stone Keepers' group and Archaedas are the run leader's two event holds (TortoiseBots #1041): instance data 1 and 2, DONE,
+	// flags 40, the rows that migration set by hand.
+	if pulls != 1 || bosses != legsWithBoss-1 || holds != 2 || rituals != 2 || len(r.Legs) != len(p.Legs) || r.Plan.Plan != "uldaman" || r.Plan.Map != 70 {
+		t.Fatalf("pulls left %d (want the keepers' 1), bosses %d (want %d), holds %d, rituals %d, legs %d", pulls, bosses, legsWithBoss-1, holds, rituals, len(r.Legs))
+	}
+	var got []string
+	for _, s := range r.Steps {
+		if s.Kind == KindHold || (s.Kind == KindWaitObject && s.Leg == 11) {
+			got = append(got, fmt.Sprintf("%d/%d %s %d %g %g %g r%g p%d f%d t%d %v", s.Leg, s.Seq, s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
+		}
+	}
+	if want := []string{
+		"11/0 hold 1 101.5 271.2 -26.5 r30 p3 f40 t600 [4857]",
+		"11/1 wait_object 124367 137.7 288.1 -26.4 r0 p1 f0 t60 []",
+		"13/4 hold 2 94 267.8 -52 r45 p3 f40 t600 [2748 7309 7077 7076 10120]",
+	}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("event rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	back, err := Parse(WriteSQL([]Rows{r}))
 	if err != nil {
@@ -533,5 +553,176 @@ func TestGMCrossIsRefused(t *testing.T) {
 	p := parsePlan(t, strings.Replace(small, `{"x":10,"y":0,"z":0,"direct":true}`, `{"x":10,"y":0,"z":0,"direct":true,"gm_cross":true}`, 1))
 	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "gm_cross") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// TestGMCrossDirect: with GMCrossDirect a gm_cross waypoint is a move_direct row whose comment says it is not tried live, and a warning.
+func TestGMCrossDirect(t *testing.T) {
+	p := parsePlan(t, strings.Replace(small, `{"x":10,"y":0,"z":0,"direct":true}`, `{"x":10,"y":0,"z":0,"direct":true,"gm_cross":true}`, 1))
+	res, err := Build(p, Options{Source: "test", GMCrossDirect: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Leg == 0 && s.X == 10 {
+			got = &res.Rows.Steps[i]
+		}
+	}
+	if got == nil || got.Kind != KindMoveDirect || !strings.Contains(got.Comment, "gm_cross") {
+		t.Fatalf("%+v", got)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "gm_cross") || !strings.Contains(w, "not tried live") {
+		t.Fatalf("warnings: %q", w)
+	}
+}
+
+// TestApproachHops: with ApproachHops a pull more than 50 yd from the anchor before it gets the cutter's points as move rows before it,
+// without the ones within 25 yd of the pack; the hop after a fight is measured from the fight; without the option nothing is cut.
+func TestApproachHops(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},{"entries":[101],"positions":[{"x":120,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		var out []dungeon.Point
+		for x := a.X + 40; x < b.X; x += 40 {
+			out = append(out, dungeon.Point{X: x})
+		}
+		return out, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 -> 100: points at 50 and 90; 90 is within 25 yd of the pack at 100 and goes; 100 -> 120 is 20 yd, nothing to cut.
+	if got := strings.Join(kinds(res.Rows, 0), " "); got != "move move pull pull" {
+		t.Fatalf("%s", got)
+	}
+	if s := res.Rows.Steps[1]; s.X != 50 || s.Comment != "approach path" {
+		t.Fatalf("%+v", s)
+	}
+	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
+	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull pull" {
+		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
+	}
+}
+
+// TestRouteAroundAvoid: a plan with an avoid box asks Route for every hop between anchors (the entrance, moves, pulls) and puts the
+// points it returns in as move rows; an error from Route fails the export; a plan without a box never calls it.
+func TestRouteAroundAvoid(t *testing.T) {
+	const js = `{"version":1,"name":"lava","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
+ "avoid":[{"name":"basin","min":{"x":20,"y":-5,"z":-9},"max":{"x":30,"y":5,"z":-1},"why":"lava"}],
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":40,"y":20,"z":0}]}]}]}`
+	var calls [][2]dungeon.Point
+	route := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		calls = append(calls, [2]dungeon.Point{a, b})
+		if b.X == 40 {
+			return []dungeon.Point{{X: 25, Y: 20, Z: 0}}, nil
+		}
+		return nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(kinds(res.Rows, 0), " "); got != "move move pull" {
+		t.Fatalf("%s", got)
+	}
+	if len(calls) != 2 || calls[1][0].X != 10 {
+		t.Fatalf("calls %+v", calls)
+	}
+	if s := res.Rows.Steps[1]; s.X != 25 || s.Seq != 1 || !strings.Contains(s.Comment, "avoid box") {
+		t.Fatalf("%+v", s)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "1 via points added") {
+		t.Fatalf("warnings: %q", w)
+	}
+	if _, err := Build(parsePlan(t, js), Options{Source: "test", Route: func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+		return nil, errors.New("no safe path")
+	}}); err == nil || !strings.Contains(err.Error(), "no safe path") {
+		t.Fatalf("%v", err)
+	}
+	n := 0
+	if _, err := Build(parsePlan(t, strings.Replace(js, `"avoid":[{"name":"basin","min":{"x":20,"y":-5,"z":-9},"max":{"x":30,"y":5,"z":-1},"why":"lava"}],`, ``, 1)), Options{Source: "test", Route: func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) { n++; return nil, nil }}); err != nil || n != 0 {
+		t.Fatalf("%v, %d calls", err, n)
+	}
+}
+
+// TestApproachAndHold: a pull group's and a boss's approach points are move rows before their row; a hold is a hold row in place of the
+// pull or boss (instance data, DONE, flags 40, the event's entries), the move straight before it to its spot is left out, the game object
+// wait straight after it waits at most 60 s, and a ritual's row carries its participants.
+func TestApproachAndHold(t *testing.T) {
+	js := `{"version":1,"name":"events","status":"live-checked","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"a","to":{"x":10,"y":0,"z":0},
+	  "pull_groups":[{"entries":[5],"positions":[{"x":50,"y":0,"z":0}],"approach":[{"x":20,"y":0,"z":0},{"x":25,"y":1,"z":0}]}],
+	  "steps":[{"ritual":{"entry":130511,"position":{"x":30,"y":0,"z":0},"participants":3,"stand":{"x":29,"y":0,"z":0}}}]},
+	 {"name":"b","to":{"x":40,"y":0,"z":0},
+	  "pull_groups":[{"entries":[4857,4857],"positions":[{"x":41,"y":2,"z":0},{"x":45,"y":0,"z":0}],"radius":30,
+	   "hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600}}],
+	  "steps":[{"wait_for":{"gameobject":{"entry":124367,"near":{"x":60,"y":0,"z":0},"state":"active"},"timeout_s":600}}]},
+	 {"name":"c","to":{"x":60,"y":0,"z":0},
+	  "boss":{"entry":2748,"position":{"x":70,"y":0,"z":0},"approach":[{"x":62,"y":0,"z":0}],
+	   "hold":{"instance_data":2,"spot":{"x":66,"y":0,"z":0},"radius":45,"timeout_s":600,"entries":[7309,7077,7076,10120]}}}]}`
+	r := build(t, parsePlan(t, js))
+	if got := strings.Join(kinds(r, 0), " "); got != "move move move pull ritual" {
+		t.Fatalf("leg 0 %s", got)
+	}
+	if s := r.Steps[1]; s.X != 20 || s.Comment != "pull group 0 approach" {
+		t.Fatalf("approach row %+v", s)
+	}
+	if s := r.Steps[4]; s.Kind != KindRitual || s.Param != 3 {
+		t.Fatalf("ritual row %+v", s)
+	}
+	if got := strings.Join(kinds(r, 1), " "); got != "hold wait_object" {
+		t.Fatalf("leg 1 %s (the move to the hold's own spot is left out)", got)
+	}
+	var hold, wait, boss StepRow
+	for _, s := range r.Steps {
+		switch {
+		case s.Leg == 1 && s.Kind == KindHold:
+			hold = s
+		case s.Leg == 1 && s.Kind == KindWaitObject:
+			wait = s
+		case s.Leg == 2 && s.Kind == KindHold:
+			boss = s
+		}
+	}
+	if hold.Seq != 0 || hold.Entry != 1 || hold.Param != 3 || hold.Flags != 40 || hold.TimeoutS != 600 || hold.Radius != 30 || fmt.Sprint(hold.Entries) != "[4857]" || hold.X != 40 {
+		t.Fatalf("keepers hold %+v", hold)
+	}
+	if wait.TimeoutS != 60 || wait.Seq != 1 {
+		t.Fatalf("door wait after the hold %+v", wait)
+	}
+	if got := strings.Join(kinds(r, 2), " "); got != "move move hold" {
+		t.Fatalf("leg 2 %s", got)
+	}
+	if boss.Entry != 2 || boss.Flags != 40 || boss.Radius != 45 || fmt.Sprint(boss.Entries) != "[2748 7309 7077 7076 10120]" || boss.X != 66 {
+		t.Fatalf("boss hold %+v", boss)
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLongHopStartsAtTheLastFight: the hop to a leg's first move is measured from the boss (or pack) the party fought last, not from the
+// last move before that fight: Uldaman's export of dd05724 walked the party from the scorpid pit to the Sentinel's hall and back because
+// leg 6's `to` was measured from leg 5's ramp top.
+func TestLongHopStartsAtTheLastFight(t *testing.T) {
+	js := `{"version":1,"name":"back","status":"live-checked","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[3],"positions":[{"x":40,"y":0,"z":0}],"approach":[{"x":30,"y":0,"z":0}]}],
+	  "boss":{"entry":1,"position":{"x":100,"y":0,"z":0},"approach":[{"x":60,"y":0,"z":0}]}},
+	 {"name":"b","to":{"x":110,"y":0,"z":0},"boss":{"entry":2,"position":{"x":120,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Cut: func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+		t.Fatalf("cut from %v to %v: the boss at 100 is 10 yd from the next move", from, to)
+		return nil, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(kinds(res.Rows, 1), " "); got != "move boss" {
+		t.Fatalf("leg 1 %s", got)
 	}
 }

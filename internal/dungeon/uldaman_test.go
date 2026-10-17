@@ -174,8 +174,8 @@ func TestUldamanFullPlan(t *testing.T) {
 	if f := sen.Boss.First; len(f) != 0 {
 		t.Errorf("sentinel first %v", f)
 	}
-	if n := len(sen.PullGroups); n != 4 {
-		t.Errorf("sentinel has %d pull groups, want 4 (bat, scorpids, basilisk, the camp)", n)
+	if n := len(sen.PullGroups); n != 5 {
+		t.Errorf("sentinel has %d pull groups, want 5 (scorpid, basilisk, scorpids, basilisk, the camp)", n)
 	} else if camp := sen.PullGroups[n-1]; fmt.Sprint(camp.Entries) != "[4847 4847 4847 4847 4847 7030]" || len(camp.Positions) != 6 {
 		t.Errorf("sentinel camp: %+v", camp)
 	}
@@ -343,6 +343,9 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 	}
 	add(l.To, false)
 	for _, g := range l.PullGroups {
+		for _, a := range g.Approach {
+			add(a, false)
+		}
 		for _, gp := range g.Positions {
 			add(gp, false)
 		}
@@ -378,17 +381,31 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 }
 
 // sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
-// (where the leg before it ends, the scorpid pit), a direct step under the rock overhang to -162.8 294.8 (in the hole) and a direct step
-// up the ramp to -158.4 283.7, the first point of the east mesh.
+// (where the leg before it ends, the scorpid pit), a direct step to -161.1 284.5 on the pit floor (the last navmesh point before the ramp)
+// and a direct step up the ramp to -158.4 283.7, the first point of the east mesh.
 const sentinelLeg = 5
+
+// pitFloor is the first direct step's end since 2026-10-17 (live run uldaman-events-2): the old point under the rock overhang,
+// -162.8 294.8 -51.2, was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the next direct step summoned it.
+// This one is on the mesh with a complete path from the lip (17.0 yd), and the step up the ramp from it is 4.2 yd. Its sight lines were
+// checked on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70): clear 1.5, 2 and 2.5 yd up, to the ramp top both ways and
+// from the lip; vmap floor -52.32.
+var pitFloor = Point{X: -161.1, Y: 284.5, Z: -52.1}
 
 // holeFloor are plan points inside the navmesh hole at the scorpid pit, between two direct steps: no mesh floor stands in for the
 // server's ground check there, so it was checked on the live map 70 vmap with the core's own VMapManager2::getHeight and
 // isInLineOfSight (lostool on the test VM, ~/tb-ci/vmaps70, 2026-10-14): floor -51.25 and 3.1 yd clear above it, in sight (2 yd up,
 // both ways) of the lip and of the ramp top from every floor point within 1 yd of them. A hole point must be followed by a direct step.
-var holeFloor = map[Point]string{
-	{X: -162.8, Y: 294.8, Z: -51.2}: "under the high side of the rock overhang south of the pit lip",
+// Since 2026-10-17 the plan has none (pitFloor is on the mesh); the map stays for a later point that needs it.
+var holeFloor = map[Point]string{}
+
+// shelfPacks are pack positions on a navmesh island next to the route: no path reaches them, the pack is pulled from its group's approach
+// point (it comes down to the party), and the walk goes on from there. The path toward one must end within shelfReach of it.
+var shelfPacks = map[Point]string{
+	{X: -179.0, Y: 321.7, Z: -52.7}: "Jadespine Basilisk 30084 on the shelf north of the scorpid pit: the pit's path ends 12.4 yd short, at -173.9 310.7 -50.0",
 }
+
+const shelfReach = 15
 
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
@@ -429,6 +446,14 @@ func TestUldamanOnNavmesh(t *testing.T) {
 				from = to
 				checked++
 				continue
+			}
+			if _, shelf := shelfPacks[w]; shelf && len(path.Points) > 0 {
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("legs[%d] waypoint %d: the path toward the shelf pack %v ends %.1f yd from it", i, j, w, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
 			}
 			if path.Status != navmesh.Complete {
 				t.Errorf("legs[%d] (%s) waypoint %d %v from %v: %s %s", i, l.Name, j, w, from, path.Status, path.Reason)
@@ -587,6 +612,9 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 	}
 	add("to", l.To)
 	for gi, g := range l.PullGroups {
+		for ai, a := range g.Approach {
+			add(fmt.Sprintf("pull_groups[%d].approach[%d]", gi, ai), a)
+		}
 		for pi, p := range g.Positions {
 			add(fmt.Sprintf("pull_groups[%d].positions[%d]", gi, pi), p)
 		}
@@ -658,6 +686,17 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 			path, err := pl.Plan(p.Map, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{w.X, w.Y, w.Z})
 			if err != nil {
 				t.Fatalf("%s: %v", where, err)
+			}
+			if _, shelf := shelfPacks[w]; shelf {
+				if len(path.Points) == 0 {
+					t.Fatalf("%s: no path toward the shelf pack", where)
+				}
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("%s: the path toward the shelf pack ends %.1f yd from it", where, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
 			}
 			switch {
 			case path.Status == navmesh.Complete:
@@ -740,12 +779,12 @@ func TestUldamanDirectSteps(t *testing.T) {
 		}
 	}
 	if found != 2 {
-		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (under the overhang, then up the ramp to the east mesh)", found)
+		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (to the pit floor, then up the ramp to the east mesh)", found)
 	}
 	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || !v[1].Direct || !v[2].Direct {
 		t.Fatalf("legs[%d] via %v: want the lip, then the two direct steps", sentinelLeg, v)
-	} else if _, hole := holeFloor[v[1].Point]; !hole {
-		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked point under the overhang (holeFloor)", sentinelLeg, v[1].Point)
+	} else if v[1].Point != pitFloor {
+		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked pit floor point %v (pitFloor)", sentinelLeg, v[1].Point, pitFloor)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
