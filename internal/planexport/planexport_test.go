@@ -385,7 +385,7 @@ func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
 	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
 		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
 	}
-	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "steps[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "after_boss[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
 		if !strings.Contains(res.Cut, want) {
 			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
 		}

@@ -58,6 +58,12 @@
         }
       ],
       "skip": [7269, 10080, 10082],
+      "rest": {
+        "health": 80,
+        "healer_mana": 40,
+        "mana": 30,
+        "max_s": 15
+      },
       "notes": [
         "Groups 1-2 of the road. ZF-2 hires-2 (2026-10-14): the hop after group 2 from the lead bot's rest spot (1289.9 816.1 9.4) went by the agent's navmesh to a layer at z 20.4 above the road, which the server refused (unreachable eight times, runs 5 and 6); the next leg starts with direct hops instead. Groups 2 and 3 have a 30 yd radius (their Blood Drinkers walk)."
       ]
@@ -121,6 +127,13 @@
       ],
       "pull_groups": [
         {
+          "entries": [5648],
+          "positions": [
+            {"x": 1465.17, "y": 833.569, "z": 10.0631}
+          ],
+          "radius": 15
+        },
+        {
           "entries": [5650, 5650, 5649],
           "positions": [
             {"x": 1488.5, "y": 816.1, "z": 9.2},
@@ -128,17 +141,7 @@
             {"x": 1495.2, "y": 834.3, "z": 8.9}
           ],
           "radius": 30
-        }
-      ],
-      "skip": [7269, 10080, 10082],
-      "notes": [
-        "Group 7, entered along the ledge the party walked in ZF-2 run 4 (1420.7 801.1 -\u003e 1433.9 804.7 -\u003e 1442.5 804.7 z 12.7 -\u003e 1450.1 805.9 -\u003e 1460.5 808.5 z 10.8): the agent's hop target 1446 809.3 z 10 is not reachable from the z 12 ledge (lead stuck at 1442.2 806.3, ZF-2 run 8), and the plain walk to 1426.1 801.8 stopped at 1420.7 801.1 (run 11), so the first via is where it stood. Plan check (#187): the navmesh joins the four hops with complete paths (14, 9, 8 and 11 yd), so they are plain waypoints now; a direct hop needs the lead bot at its start, and a fight leaves it elsewhere."
-      ]
-    },
-    {
-      "name": "antusul_a4",
-      "to": {"x": 1506, "y": 844.9, "z": 10.2},
-      "pull_groups": [
+        },
         {
           "entries": [5648, 5648, 5648, 5648],
           "positions": [
@@ -152,8 +155,8 @@
       ],
       "skip": [7269, 10080, 10082],
       "notes": [
-        "Group 8 (the four Shadowcasters at 1505 819-846), pulled from 1485.6 825.5 on the road, 20-27 yd from them (inside pull range, no approach walk). ZF-2 run 12: from the end of group 7 the approach to them (1501 852) went by the navmesh north over the ramp (1533 945) into the Farraki arena wing (62496-62499) and wiped; the walk on to x 1535 goes by direct hops in the next leg.",
-        "zf2-run3 (2026-10-14): the leg ends at 1506 844.9 z 10.2, where the Shadowcaster pull leaves the party; the walk back from there to 1485.6 825.5 went by the navmesh north over the ramp into the Farraki arena wing (wipe 23:14), so the next leg starts here and its first two vias (1485.6 825.5, 1498.7 829.9) are dropped."
+        "Group 7, entered along the ledge the party walked in ZF-2 run 4 (1420.7 801.1 -\u003e 1433.9 804.7 -\u003e 1442.5 804.7 z 12.7 -\u003e 1450.1 805.9 -\u003e 1460.5 808.5 z 10.8): the agent's hop target 1446 809.3 z 10 is not reachable from the z 12 ledge (lead stuck at 1442.2 806.3, ZF-2 run 8), and the plain walk to 1426.1 801.8 stopped at 1420.7 801.1 (run 11), so the first via is where it stood. Plan check (#187): the navmesh joins the four hops with complete paths (14, 9, 8 and 11 yd), so they are plain waypoints now; a direct hop needs the lead bot at its start, and a fight leaves it elsewhere.",
+        "Route edits Z7 and Z9 (2026-10-16, from the round-3 traces): the old leg antusul_a4 (four Shadowcasters at 1505 819-846, pulled last) is group 3 here, because in all three runs it was already dead from the last pull of this leg (the leg cost 14-46 s, 12-25 s of it stuck at 1483.8 822.4 and 1497.2 837.1); the first via of the `antusul` leg (1506 844.9) is the hop that leg started with. The Shadowcaster 42596 (1465.2 833.6) is group 1: it joined a pull of this leg in all three runs."
       ]
     },
     {
@@ -192,9 +195,38 @@
           "radius": 15
         },
         {
+          "entries": [5650, 5648, 5649],
+          "positions": [
+            {"x": 1613.04, "y": 892.271, "z": 9.0397},
+            {"x": 1614.61, "y": 897.026, "z": 9.75628},
+            {"x": 1619.14, "y": 893.287, "z": 9.35544}
+          ],
+          "radius": 12
+        },
+        {
           "entries": [5650],
           "positions": [
             {"x": 1633.3, "y": 868.3, "z": 10.5}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [5648, 5650, 5650, 5650],
+          "positions": [
+            {"x": 1660.7, "y": 901.2, "z": 8.9},
+            {"x": 1664.1, "y": 911.3, "z": 9},
+            {"x": 1669.7, "y": 896.5, "z": 9},
+            {"x": 1672.6, "y": 906.4, "z": 9}
+          ],
+          "radius": 15
+        },
+        {
+          "entries": [7246, 5648, 5648, 5649],
+          "positions": [
+            {"x": 1662.3, "y": 929.7, "z": 9.1},
+            {"x": 1661.9, "y": 938.5, "z": 9.2},
+            {"x": 1660.8, "y": 937.6, "z": 9.2},
+            {"x": 1656.8, "y": 943, "z": 9.1}
           ],
           "radius": 15
         },
@@ -264,7 +296,8 @@
         "Eighteen pull groups on the road (patrolling ones with a 30 yd radius; the Blood Drinker pair 1246199/1246200 of 1405 813 with 60, the most a group takes: ZF-1 met it 77 yd west, at 1328 825, by the pack of 1325 840) from the entrance east (Sandfury Shadowcasters 5648, Blood Drinkers 5649, Witch Doctors 5650, Soul Eater 7247, the Sul'lithuz Sandcrawler 8095 on the ramp; the pack of spawn rows 38009-38011 at 1320-1328 837-843, south of the road between the second and third groups, was missing from the first draft and ZF-1 walked into it) to Antu'sul (8127, faction 107) in the south-east corner. Antu'sul summons two Sul'lithuz Broodlings (8138, 120 s) on aggro, casts Earthgrab Totem / Healing Ward, heals itself at 20%/60% and calls Antu'sul's Minion at 75% and 25% (creature_ai_events 812701-812709). The three Sul'lithuz Hatchlings (8130, faction 16) stand 8-12 yd from it and are the last pull group. Live: Antu'sul stood at his spawn (1815.8 670.4 15.0), hostile, with a campfire trap 2061 and the Pickled Sludge focus object 92426 at 1810.1 673.2: keep the party off them; the hatchlings read hostile:false to the invisible GM (faction 16) but are mobs. Four static Shadowcasters (5648; spawn rows 42599, 42605, 42607 at 1505-1511 845 and 42600 at 1504.9 818.6, live cluster centre 1507.4 842.1) stand 10-15 yd off the road between the packs at 1489 820 and 1522 826 and are a pull group of their own. The lone patrolling Blood Drinker (5649, spawn 1793.5 753.4) was seen live 44 yd out at 1801.2 797.1, by the start of the Theka leg, so its radius is 50.",
         "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
         "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it). Plan check (#187): the hops to 1520 840 and 1535 834 are plain waypoints now (complete straight paths of 15 and 16 yd); the second was refused no-los when a fight begun by the pack at 1535 826 had dragged the lead bot onto the ledge at 1534 815. 1535 834 is the leg's `to`, so it is not a via of its own.",
-        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it."
+        "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it.",
+        "Route edit Z3 (2026-10-16, test it in one group): the Shadowcaster camp of four at 1660 901 and the pack at 1662 930 (Shadowhunter, two Shadowcasters, Blood Drinker) were groups 1 and 2 of the `velratha` leg and are groups 6 and 7 here, pulled before the Shadowcaster / Soul Eater pair at 1642 902 (the last group, with the Shadowhunters' patrol), from the west stand at 1620 880. In round 3 the pull of the pair drew the camp and the Shadowhunter pack with it: 7 mobs in 118 s (s2b), 11 mobs in 172 s with 7 deaths and a wipe (s4-b), the same bot twice in s1b. The linked pack of three at 1613-1619 892-897 (Witch Doctor 42633, Shadowcaster 43695, Blood Drinker 43697) is group 4: it stands at that stand and joined the 62 s fight of the pair in all three runs (Z9). The `velratha` leg keeps the pair as its group 1, killed earlier in the run when the Antu'sul leg took it."
       ]
     },
     {
@@ -367,6 +400,14 @@
           "radius": 50
         },
         {
+          "entries": [5650, 7246],
+          "positions": [
+            {"x": 1759.63, "y": 730.254, "z": 17.6822},
+            {"x": 1752.93, "y": 718.564, "z": 21.2051}
+          ],
+          "radius": 10
+        },
+        {
           "entries": [8095],
           "positions": [
             {"x": 1802.2, "y": 738.7, "z": 14.5}
@@ -387,12 +428,17 @@
       },
       "notes": [
         "The three Sul'lithuz Hatchlings (8130, faction 16, at 1812-1820 667-678, spawn rows by Antu'sul) cannot be attacked by the bots (\"The group cannot attack that target\": TortoiseBots side, live 2026-10-15): they are no pull group any more and the leg skips the entry, so no pull waits for them. Antu'sul's own fight does not need them dead.",
-        "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals)."
+        "Groups 9-11 and Antu'sul, split from the antusul leg (zf1-run5, 2026-10-14 22:58): the walk from group 8 on the ledge (1777 814 z 23) to the look point of group 9 (1787.8 790.6 17.7) was refused unreachable eight times at 1772-1781 795-801 z 20-23 (the module and the agent mesh disagree on the ledge). The hop the module takes is 1769.03 802.98 24.04, and from there 1787.79 790.55 17.72 is reached directly (moved by hand; first run took the same hop after three refusals).",
+        "Route edit Z9 (2026-10-16): the patrolling Witch Doctor 81482 (spawn 1759.6 730.3, wanders 1761-1802 730) was met by the party in all three runs; it is group 2 with the Shadowhunter 81517 that stands 13 yd from it (1752.9 718.6, which the look walk would otherwise pass within 20 yd), before the Sandcrawler at 1802 739."
       ]
     },
     {
       "name": "theka",
       "to": {"x": 1807.2, "y": 798.5, "z": 13.9},
+      "via": [
+        {"x": 1812, "y": 700, "z": 15},
+        {"x": 1812, "y": 716, "z": 15}
+      ],
       "pull_groups": [
         {
           "entries": [5649, 7247],
@@ -409,7 +455,8 @@
         "position": {"x": 1778, "y": 859.7, "z": 8.9}
       },
       "notes": [
-        "Theka the Martyr (7272) PATROLS (movement type 2, wander 5): live he walked a loop of about 45 yd east and north-east of his table (1778 859.7): seen at 1783 858, 1792 854, 1798 852, 1820 875, 1822 885 and 1790 889. The boss position is his spawn point; a boss fight looks for the entry within 80 yd of the lead bot, so the loop is inside it. At 30% health he casts Theka Transform (11089) and goes on fighting; the Tablet of Theka (142715, 1800.8 857.6) is a quest object. The pair next to him (Soul Eater 7247 + Blood Drinker 5649, patrolling) is the one pull group, radius 30. The scarabs around him are skipped (7269). The patrolling Blood Drinker of the Antu'sul leg (5649, radius 50) may still be alive near this leg's start (1807 798); a pull in the Antu'sul leg catches it, else walk aggro does."
+        "Theka the Martyr (7272) PATROLS (movement type 2, wander 5): live he walked a loop of about 45 yd east and north-east of his table (1778 859.7): seen at 1783 858, 1792 854, 1798 852, 1820 875, 1822 885 and 1790 889. The boss position is his spawn point; a boss fight looks for the entry within 80 yd of the lead bot, so the loop is inside it. At 30% health he casts Theka Transform (11089) and goes on fighting; the Tablet of Theka (142715, 1800.8 857.6) is a quest object. The pair next to him (Soul Eater 7247 + Blood Drinker 5649, patrolling) is the one pull group, radius 30. The scarabs around him are skipped (7269). The patrolling Blood Drinker of the Antu'sul leg (5649, radius 50) may still be alive near this leg's start (1807 798); a pull in the Antu'sul leg catches it, else walk aggro does.",
+        "Route edit Z8 (2026-10-16, test it in one group): two vias on the way out of Antu'sul's room, where the lead stood before it got stuck at (1814 698) and (1809.5 728) for 5-14 s in four traces (127 s summed): the first hop is 15 yd instead of 47."
       ]
     },
     {
@@ -421,26 +468,6 @@
         {"x": 1668.92, "y": 872.47, "z": 11.57}
       ],
       "pull_groups": [
-        {
-          "entries": [5648, 5650, 5650, 5650],
-          "positions": [
-            {"x": 1660.7, "y": 901.2, "z": 8.9},
-            {"x": 1664.1, "y": 911.3, "z": 9},
-            {"x": 1669.7, "y": 896.5, "z": 9},
-            {"x": 1672.6, "y": 906.4, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
-          "entries": [7246, 5648, 5648, 5649],
-          "positions": [
-            {"x": 1662.3, "y": 929.7, "z": 9.1},
-            {"x": 1661.9, "y": 938.5, "z": 9.2},
-            {"x": 1660.8, "y": 937.6, "z": 9.2},
-            {"x": 1656.8, "y": 943, "z": 9.1}
-          ],
-          "radius": 15
-        },
         {
           "entries": [5648, 7247],
           "positions": [
@@ -492,7 +519,19 @@
             {"x": 1610.4, "y": 1108.3, "z": 9}
           ],
           "radius": 15
-        },
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "notes": [
+        "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
+        "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152).",
+        "Route edit Z4 NOT applied (2026-10-16): a planned group for the Shadowhunter / Sandcrawler pair at 1565 1019 (the export has no spawn row there: they are roaming members of the patrol group at 1576-1590 1079-1092) puts the look point 21 yd off it within 20 yd of the static pack of two Witch Doctors and a Shadowhunter at 1545-1556 995-1007 (81618, 81619, 81624), which stands in a pit 4 yd below the mesh, off the navmesh and out of any pull (TestZulfarrakRouteHasNoUnplannedPack fails). The pair is still met on the way and the walk's pull takes it."
+      ]
+    },
+    {
+      "name": "velratha_b",
+      "to": {"x": 1633.6, "y": 1130.7, "z": 9.9},
+      "pull_groups": [
         {
           "entries": [5649, 5649, 5649, 5650, 7246],
           "positions": [
@@ -537,9 +576,8 @@
         }
       },
       "notes": [
-        "zf1-run6 (2026-10-15): two lone Shadowhunter groups are dropped. 1591 1047.7 (7246): three pulls drew no fight (the tank stood 0.7 yd from it and targeted it, the mob stayed at 100 % out of combat, the hunter and the warlock reported out of range); the same Shadowhunter fought as part of the pack at 1576 1079. 1626.5 1136 (7246): nothing of it in view and the look walk to 21 yd of it was not reachable (lead 37 yd away). The run finished without either.",
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) is not used by this leg: the optional gahzrilla leg after it rings it, with a Mallet (PR A); Gahz'rilla's pit is at 1664.7 1187.7 -2.9. The lone Blood Drinker at 1714.4 1218.6 (5649) is no pull group of this leg: the plan check passes it, but live the tank found no firing position for it (a server refusal) in two batch-2 runs, both finished without it, and it lies beyond the boss; the gahzrilla leg pulls it last, where it stands 13 yd from Gahz'rilla's end point.",
-        "TestZulfarrakRouteHasNoUnplannedPack (2026-10-14) found three mobs within 20 yd of this leg's route in no pull group: the Shadowhunter 44177 (1662.3 929.7) with the pack of rows 81440/81443/81444 behind it (1657-1662 938-943; a group of its own after the first), the patrolling Shadowcaster 1246219 (1589.4 985.4, a group of its own) and the Blood Drinker 81575 (1632.5 1166.8, 19 yd from Velratha's spot, added to the group at 1648 1152)."
+        "Route edit Z2 (2026-10-16, test it in one group): the leg is split at the pack of five at 1636 1105 (group 1 here) so that it is pulled from the north stand 1645 1144 (82-85 yd of navmesh), not from the west stand 1585 1075, where the pack is walled off (154 yd of navmesh for 40 yd of line). Every pull from the west failed in round 3: evaded after 109 s in s2b, 25 s no_engage and 74 s evaded in s4-b, an error and an evade (172 s) in s1e; the north pull won each time (103-125 s). Velratha (1650 1161, 18 yd from the stand) joined the pull of the pack in s2b and s1e: expect her in the fight and keep the Healing Ward in kill_first. The `velratha` leg now ends at the pack of four at 1601-1610 1104-1111 (stand 1585 1075, 92 yd of navmesh from the north stand). ZF round 5 (2026-10-17, trace zf-r5): the north stand 1645 1144 is 16.6 yd from the strip Velratha patrols ((1658.6 1153.6) to (1636.5 1174.7)), so the pull of the pack of five opened the fight with Velratha (7795) and her Healing Ward adds on top: nine mobs, the healer took the threat (three threat waits of 10 s ran out with the tank not on top), and the party wiped at 23:32. The stand is now 1633.6 1130.7 (a vertex of the navmesh path from the north stand to the pack): 33.9 yd from the strip, 24 yd from the pack, which is outside the aggro range of both (the pack is pulled from there, pull_range 45). The route from the west stand goes by (1636.5 1138.4), 26 yd from the strip, and ends 16 yd short of the old stand. If she still joins, give the run a tune file with threat_wait_s 15 and opener_delay_s 4 so that the party waits for the tank's threat lead before it engages."
       ]
     },
     {
@@ -648,13 +686,6 @@
       "to": {"x": 1822, "y": 1177, "z": 9.1},
       "pull_groups": [
         {
-          "entries": [7247],
-          "positions": [
-            {"x": 1757.16, "y": 1141.25, "z": 9.1}
-          ],
-          "radius": 30
-        },
-        {
           "entries": [7247, 5649],
           "positions": [
             {"x": 1821.7, "y": 1177, "z": 9},
@@ -683,13 +714,6 @@
             {"x": 1899.6, "y": 1136.85, "z": 9.1},
             {"x": 1911.82, "y": 1153.47, "z": 9.6},
             {"x": 1900.33, "y": 1166.45, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
-          "entries": [5650],
-          "positions": [
-            {"x": 1926.08, "y": 1131.13, "z": 10.8}
           ],
           "radius": 15
         },
@@ -1082,22 +1106,20 @@
       "via": [
         {"x": 1892.3, "y": 1198.4, "z": 8.9}
       ],
-      "pull_groups": [
-        {
-          "entries": [7274],
-          "positions": [
-            {"x": 1886.8, "y": 1286.8, "z": 44.2}
-          ],
-          "radius": 15
-        }
-      ],
       "skip": [7604, 7605, 7606, 7607, 7608, 7269],
-      "steps": [
+      "boss": {
+        "entry": 7274,
+        "position": {"x": 1886.8, "y": 1286.8, "z": 44.2},
+        "loot_item": {"entry": 8444, "name": "Executioner's Key"}
+      },
+      "companions_loot": false,
+      "after_boss": [
         {
           "use_object": {
             "entry": 141073,
             "near": {"x": 1886.9, "y": 1298.9, "z": 48.2},
-            "stand": {"x": 1886.9, "y": 1295.4, "z": 48.3}
+            "stand": {"x": 1886.9, "y": 1295.4, "z": 48.3},
+            "requires_item": {"entry": 8444, "name": "Executioner's Key"}
           }
         },
         {
@@ -1113,9 +1135,8 @@
           }
         }
       ],
-      "companions_loot": false,
       "notes": [
-        "NEEDS A LIVE RUN. Leg 1 of 3 of the stairs event (instance_zulfarrak.cpp, zulfarrak.cpp go_troll_cage): the Sandfury Executioner (7274, spawn row 81552 at 1886.79 1286.76 44.19) is the one pack at the cages; then any of the five Troll Cages (141070-141074; the plan uses 141073 at 1886.88 1298.94 48.2) is used: its script frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608) (faction 250, hostile to trolls, friendly to the party) and sends them to the top of the stairs (1883-1891 1263-1273 z 41-42). When Weegli reaches 1883.9 1263.5 the event is PYRAMID_ARRIVED_AT_STAIR and the next instance update spawns wave 1: the wait ends when he is in view near there. The stand is 3.6 yd from the cage on the platform at z 48.3 (a use is refused beyond about 5 yd). The leg also has the bots' looting off from its start to its end (companions_loot false, the zumrah leg's rule): the shortest walk from Zum'rah's spot (1912.2 1016.1) to the courtyard crosses the graveyard (TestZulfarrakOnNavmesh: 1904 1018, 1899 1019, 1859 1058), where the three graves left to him (1887.9 1029.1, 1892.6 1006.4, 1891.6 1023.1) may still be shut, and a bot that loots opens a Shallow Grave chest and wakes what lies in it. The cost is that the Executioner's corpse is not looted by the bots."
+        "NEEDS A LIVE RUN. Leg 1 of 3 of the stairs event (instance_zulfarrak.cpp, zulfarrak.cpp go_troll_cage): the Sandfury Executioner (7274, spawn row 81552 at 1886.79 1286.76 44.19) is the one pack at the cages; then any of the five Troll Cages (141070-141074; the plan uses 141073 at 1886.88 1298.94 48.2) is used: its script frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608) (faction 250, hostile to trolls, friendly to the party) and sends them to the top of the stairs (1883-1891 1263-1273 z 41-42). When Weegli reaches 1883.9 1263.5 the event is PYRAMID_ARRIVED_AT_STAIR and the next instance update spawns wave 1: the wait ends when he is in view near there. The stand is 3.6 yd from the cage on the platform at z 48.3 (a use is refused beyond about 5 yd). The leg also has the bots' looting off from its start to its end (companions_loot false, the zumrah leg's rule): the shortest walk from Zum'rah's spot (1912.2 1016.1) to the courtyard crosses the graveyard (TestZulfarrakOnNavmesh: 1904 1018, 1899 1019, 1859 1058), where the three graves left to him (1887.9 1029.1, 1892.6 1006.4, 1891.6 1023.1) may still be shut, and a bot that loots opens a Shallow Grave chest and wakes what lies in it. The Executioner is the leg's boss (zf-r5, round 5: the cage open was refused \"no-item\" because nothing looted him): the carrier takes his Executioner's Key (8444, 100% drop, creature_loot_template) with cmd loot after the kill, and the cage (lock 420, which needs that key) is used in after_boss. The leg's mute stays on for the walk; the loader accepts it together with the boss's loot_item."
       ]
     },
     {

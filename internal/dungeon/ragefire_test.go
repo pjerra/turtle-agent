@@ -156,7 +156,8 @@ func TestRagefirePlanLoads(t *testing.T) {
 		t.Errorf("trigger %d tele %q outside %q portal %+v", p.EntranceTrigger, p.EntranceTele, p.OutsideTele, p.Portal)
 	}
 	// The healers and casters: Ragefire Shaman 11319 (Healing Wave) and Searing Blade Warlock 11324 flee at 15 % (EventAI 1131901, 1132401).
-	if fmt.Sprint(p.Fleers) != "[11319 11324]" || fmt.Sprint(p.CCPriority) != "[11319 11324 11322]" || fmt.Sprint(p.CCAlways) != "[11319 11324]" || len(p.KillFirst) != 0 {
+	// The Shaman is in kill_first too (rfc-live-2, leg 2 group 3): one is sheeped (cc_always), the others are killed first.
+	if fmt.Sprint(p.Fleers) != "[11319 11324]" || fmt.Sprint(p.CCPriority) != "[11319 11324 11322]" || fmt.Sprint(p.CCAlways) != "[11319 11324]" || fmt.Sprint(p.KillFirst) != "[11319]" {
 		t.Errorf("fleers %v cc_priority %v cc_always %v kill_first %v", p.Fleers, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	if lo, hi := p.Band(); lo != 13 || hi != 18 {
@@ -289,8 +290,8 @@ func TestRagefirePlanMatchesTheWorldExport(t *testing.T) {
 			}
 		}
 	}
-	if patrols != 7 { // six patrolling spawns; 48648 is on two groups (the last tunnel Earthborer and the first pack of the cave)
-		t.Errorf("%d patrols, want the six patrolling mobs of the route (one on two groups)", patrols)
+	if patrols != 6 { // six patrolling spawns, one group each: 48648's patrol block stays on the first pack of the cave only (route edit R2, 2026-10-16: the tunnel Earthborer never met it)
+		t.Errorf("%d patrols, want the six patrolling mobs of the route", patrols)
 	}
 }
 
@@ -366,6 +367,11 @@ func TestRagefireOnNavmesh(t *testing.T) {
 	t.Logf("%d waypoints on the map 389 navmesh in %s, %.0f yd of corridor from the entrance through the four bosses", checked, dir, total)
 }
 
+// The mobs that stand with a boss and join his pull through creature_groups (flags 2). The plan's boss.first lists are empty since the
+// 2026-10-16 route edits (a first entry is matched by id anywhere in view, and Oggleflint's drew a pull of a terrace Shaman); the route test
+// still counts these as planned.
+var ragefireBossEscort = map[uint32][]uint32{11517: {11319, 11318}, 11518: {11322}, 11519: {11322}}
+
 // No hostile spawn of the export stands near the route without being in the plan: every mob within routeAggro yd (3-D, as the core's aggro
 // check measures) of the navmesh path the lead bot walks from the entrance through the waypoints of each leg, in order, is a pull group
 // member or a boss of the plan, a boss's escort (boss.first), or a skipped entry; the mobs the plan leaves out on purpose are listed here
@@ -390,7 +396,7 @@ func TestRagefireRouteHasNoUnplannedPack(t *testing.T) {
 				if q.Boss.Entry == entry && dist3(q.Boss.Position, at) < 1 {
 					return true
 				}
-				for _, e := range q.Boss.First {
+				for _, e := range append(append([]uint32{}, q.Boss.First...), ragefireBossEscort[q.Boss.Entry]...) {
 					if e == entry && dist3(q.Boss.Position, at) < 25 {
 						return true
 					}

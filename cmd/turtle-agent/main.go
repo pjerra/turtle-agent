@@ -90,6 +90,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return planExportCmd(args[1:], stdout, stderr)
 	case "plan-check":
 		return planCheckCmd(args[1:], stdout, stderr)
+	case "route-edits":
+		return routeEditsCmd(ctx, args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -111,9 +113,10 @@ func usage(w io.Writer) {
   turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
   turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
   turtle-agent rotation list | show [--level N] <name|file> | check <file>...
-  turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]]
+  turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--edit --mmaps-dir DIR]
   turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR] [--list]
   turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+  turtle-agent route-edits list [--edit-dir DIR] [--json] [<plan>] | export [--edit-dir DIR] [--config-dir DIR] --to DIR <plan> [vN|latest] | promote [--edit-dir DIR] --worktree PATH <plan> vN
   turtle-agent version`)
 }
