@@ -114,7 +114,8 @@ type Plan struct {
 	NoCC []uint32 `json:"no_cc,omitempty"`
 	// KillFirst lists, best first, the entries the party kills before the rest of a fight, unless one is crowd-controlled (Zul'Farrak's
 	// Greater Healing Ward 8179, the Witch Doctor 5650 and the Soul Eater 7247, the healers whose heals outlast the party). A summoned
-	// entry (the ward) is a kill target, never a CC target. Empty: the tank's order only (remote_fight.go).
+	// entry (the ward) is a kill target, never a CC target. An entry that is in cc_always too (Ragefire's Shaman 11319) is sheeped once, by
+	// the pack CC, and the others of it are killed first. Empty: the tank's order only (remote_fight.go).
 	KillFirst []uint32 `json:"kill_first,omitempty"`
 	// SummonedKillFirst names the kill_first entries that are summoned units (Zul'Farrak's Greater Healing Ward 8179): they fight nobody, so
 	// the remote driver takes one as part of a fight only with evidence that the fight is there (it stands within 10 yd of a hostile that
@@ -975,9 +976,10 @@ func Parse(name string, data []byte) (*Plan, error) {
 	if len(rp.CCAlways) > 0 {
 		p.CCAlways = slices.Clone(rp.CCAlways)
 	}
-	for _, e := range append(slices.Clone(rp.CCPrio), rp.CCAlways...) {
-		if slices.Contains(rp.KillFirst, e) {
-			c.fail("kill_first", "%d is also in cc_priority or cc_always: a kill_first entry is killed first and never crowd-controlled; take it out of the CC lists", e)
+	for _, e := range rp.CCPrio {
+		// An entry in both kill_first and cc_always is deliberate (Ragefire's Shamans): the cc bot sheeps one, the others are killed first.
+		if slices.Contains(rp.KillFirst, e) && !slices.Contains(rp.CCAlways, e) {
+			c.fail("kill_first", "%d is also in cc_priority: a kill_first entry is killed first and never crowd-controlled, unless it is in cc_always too (one is sheeped, the others are killed first); take it out of cc_priority", e)
 		}
 	}
 	c.entries("no_cc", rp.NoCC, false)
@@ -1261,9 +1263,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
-		if r.CompanionsLoot != nil && !*r.CompanionsLoot && b.LootItem != nil {
-			c.fail(bp+".loot_item", "the leg has companions_loot false (every bot's looting off for the whole leg) and the leader must loot the boss's corpse for it: the two cannot be run together; use the boss's own companions_loot false instead")
-		}
+
 		l.Boss = &b
 	}
 	for i, rs := range r.Steps {

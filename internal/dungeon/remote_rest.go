@@ -211,3 +211,28 @@ func (d *RemoteDriver) walkAhead(next Action) *walkRest {
 	}
 	return &w
 }
+
+// pullFloorShort lists what is under the pull floors: the tank's health under Config.RestPullTankPct and the healer's mana under
+// Config.RestPullHealerManaPct, each floor held down to the gate's own target (a leg whose rest.* lowers a target lowers the floor with it).
+// The tank is the named or learned one, else the lead bot; the healer is the bot RemoteOptions.Healer names (without one only the
+// casters' own mana target applies, and no floor is checked). A dead member is the gate's other business.
+func (d *RemoteDriver) pullFloorShort(tgt restTarget) []string {
+	var out []string
+	tank, ok := d.memberByGUID(d.tank)
+	if d.tank == 0 || !ok {
+		tank, ok = d.fr.LeadRec()
+	}
+	if ok && !tank.Dead {
+		if h := tank.HPPct(); h < min(d.cfg.RestPullTankPct, tgt.health) {
+			out = append(out, fmt.Sprintf("%s health %d%%", tank.Name, h))
+		}
+	}
+	if d.opt.Healer != "" {
+		if m, ok := d.memberByName(d.opt.Healer); ok && !m.Dead && m.UsesMana() {
+			if p := m.PowerPct(); p < min(d.cfg.RestPullHealerManaPct, tgt.healerMana) {
+				out = append(out, fmt.Sprintf("%s mana %d%%", m.Name, p))
+			}
+		}
+	}
+	return out
+}

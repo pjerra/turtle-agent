@@ -79,7 +79,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
 		}
-		if (len(l.Steps) != 0 && !zfStepLegs[l.Name] && l.Name != "gahzrilla") || (len(l.AfterBoss) != 0 && l.Name != "stairs_base") {
+		if (len(l.Steps) != 0 && !zfStepLegs[l.Name] && l.Name != "gahzrilla") || (len(l.AfterBoss) != 0 && l.Name != "stairs_base" && l.Name != "stairs") {
 			t.Errorf("the plan has steps only in the Zum'rah leg and the stairs event's legs and the gong: %s", l.Name)
 		}
 		for _, g := range l.PullGroups {
@@ -88,7 +88,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul_a4 antusul antusul_c antusul_b theka velratha gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7275 7604 7267]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul antusul_c antusul_b theka velratha velratha_b gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7274 7275 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -515,6 +515,10 @@ func TestZulfarrakRouteHasNoUnplannedPack(t *testing.T) {
 					if entry == 7246 && ((math.Abs(x-1591) < 0.2 && math.Abs(y-1047.7) < 0.2) || (math.Abs(x-1626.5) < 0.2 && math.Abs(y-1136) < 0.2)) {
 						continue
 					}
+					// The lone patrolling Soul Eater of the courtyard (spawn row 81550) is left out too (route edit Z10, 2026-10-16): it aggroes on the walk.
+					if entry == 7247 && math.Abs(x-1757.16) < 0.2 && math.Abs(y-1141.25) < 0.2 {
+						continue
+					}
 					if flagged[m["guid"]] || slicesContains(l.Skip, entry) || distToSegment(at, a, b) > routeAggro || planned(entry, at) {
 						continue
 					}
@@ -536,7 +540,7 @@ func slicesContains(s []uint32, v uint32) bool {
 }
 
 // The courtyard leg (PR B): the pull groups of the pyramid courtyard after Velratha. TestZulfarrakPlansMatchTheWorldExport checks every
-// member against its spawn row; this pins the groups themselves (the design's list, with the one lone Soul Eater the route test found) and
+// member against its spawn row; this pins the groups themselves (the design's list minus group 6 at 1926 1131, 52 yd off the route, and the lone patrolling Soul Eater at 1757 1141, met on the walk: route edits Z6 and Z10 of 2026-10-16) and
 // that the patrolling members' groups have the road packs' 30 yd radius.
 func TestZulfarrakCourtyardGroups(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
@@ -546,7 +550,7 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 			l = x
 		}
 	}
-	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "gahzrilla" || p.Legs[len(p.Legs)-10].Name != "velratha" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
+	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "gahzrilla" || p.Legs[len(p.Legs)-10].Name != "velratha_b" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
 		t.Fatalf("the courtyard leg follows the gahzrilla leg, which follows Velratha's")
 	}
 	if l.To != (Point{1822, 1177, 9.1}) || l.Boss != nil || len(l.Steps) != 0 || l.CompanionsLoot != nil {
@@ -557,12 +561,10 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 		at      Point // the first position
 		radius  float32
 	}{
-		{"[7247]", Point{1757.16, 1141.25, 9.1}, 30},
 		{"[7247 5649]", Point{1821.7, 1177, 9}, 30},
 		{"[5650]", Point{1863.11, 1199.95, 9}, 15},
 		{"[7246]", Point{1878.71, 1159.65, 9.6}, 15},
 		{"[5649 5649 5650 5649]", Point{1903.87, 1133.99, 9}, 15},
-		{"[5650]", Point{1926.08, 1131.13, 10.8}, 15},
 		{"[7246 8095 7246 5650]", Point{1865.24, 1118.27, 10.9}, 30},
 		{"[5650 5650 7246]", Point{1913.5, 1199.53, 9}, 15},
 		{"[7247 7246 5649]", Point{1899.24, 1214.72, 9}, 15},
@@ -801,7 +803,7 @@ func TestZulfarrakGahzrillaLeg(t *testing.T) {
 			l, idx = x, i
 		}
 	}
-	if idx != 9 || p.Legs[idx-1].Name != "velratha" || p.Legs[idx+1].Name != "courtyard" {
+	if idx != 9 || p.Legs[idx-1].Name != "velratha_b" || p.Legs[idx+1].Name != "courtyard" {
 		t.Fatalf("the leg is at %d", idx)
 	}
 	if l.Optional == nil || l.Optional.Item != 9240 || l.Optional.Name != "Mallet of Zul'Farrak" {

@@ -224,7 +224,7 @@ func (d *RemoteDriver) ccStillOn(h tbm.HostileRec) bool {
 }
 
 // ccAllowed says whether the pack and reactive CC may take h: never a boss of the plan (the bosses' own entries; a boss is not sheeped: live, 8 orders at Velratha, none
-// landed), an entry of the plan's kill_first (the healers and wards that are killed first, never sheeped: the Witch Doctor 5650 was sheeped ten
+// landed), an entry of the plan's kill_first that is not cc_always too (the healers and wards that are killed first, never sheeped: the Witch Doctor 5650 was sheeped ten
 // times against the plan), an entry of no_cc (undead: nine orders at Zombies and Dead Heroes, one cast), or a unit with a pet's GUID.
 func (d *RemoteDriver) ccAllowed(h tbm.HostileRec) bool {
 	if h.GUID.High() == packet.HighPet { // a Polymorph at a pet's GUID lands nowhere
@@ -233,8 +233,8 @@ func (d *RemoteDriver) ccAllowed(h tbm.HostileRec) bool {
 	if d.plan == nil {
 		return true
 	}
-	if slices.Contains(d.plan.KillFirst, h.Entry) || slices.Contains(d.plan.NoCC, h.Entry) {
-		return false
+	if (slices.Contains(d.plan.KillFirst, h.Entry) && !slices.Contains(d.plan.CCAlways, h.Entry)) || slices.Contains(d.plan.NoCC, h.Entry) {
+		return false // a kill_first entry that is cc_always too is sheeped (one at a time: the cc bot holds one CC) and the others killed first
 	}
 	for _, l := range d.plan.Legs {
 		if b := l.Boss; b != nil && b.Entry == h.Entry { // the bosses' own entries only: a boss's `first` add may stand in a pack that gets its CC (Uldaman's Grimlok and Galgann)

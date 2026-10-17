@@ -3,6 +3,7 @@ package dungeon
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -392,6 +393,7 @@ func (d *RemoteDriver) reloadPlan(b liveBoundary) bool {
 		return false
 	}
 	lt.planHash = h
+	d.remote(func(r *RemoteReport) { r.PlanSHA256 = hex.EncodeToString(h[:]) })
 	next, err := Parse(path, data)
 	if err != nil {
 		d.planRefused(b, path, err)
