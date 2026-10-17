@@ -167,17 +167,33 @@ func TestUldamanFullPlan(t *testing.T) {
 			t.Errorf("%s: no ritual step of 3 with a stand point for altar %d: %+v", name, altar, l.Steps)
 		}
 	}
-	// The Sentinel's room: the Relic Hunter camp (five Hunters and a Geologist, the two ledge Hunters among them 23-24 yd from the Sentinel)
-	// is one pack that a pull wakes together with the Sentinel (hires-3 wipe): one pull group of six, so that the big-pack CC counts it all,
-	// and no boss.first, the camp is cleared before the boss.
+	// The Sentinel's room: the Relic Hunter camp (five Hunters and a Geologist, the two ledge Hunters among them 23-24 yd from the Sentinel).
+	// One group of six (hires-3: the engage loop pulled the whole camp with the Sentinel) was a pull of radius 31.9 around (-145.3 378.6),
+	// 15.7 yd from the Sentinel (aggro 20 yd): the tank walked toward the west Hunters to reach it and pulled six mobs with the boss
+	// (uldaman-events-4, near wipe). Now: the lone Hunter on the route, the east trio (radius 6, 24 yd from the Sentinel), and the two west
+	// ledge Hunters as the boss step's first entries.
 	sen := leg("sentinel")
-	if f := sen.Boss.First; len(f) != 0 {
-		t.Errorf("sentinel first %v", f)
+	if f := sen.Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+		t.Errorf("sentinel first %v, want the two west ledge Hunters", f)
 	}
-	if n := len(sen.PullGroups); n != 5 {
-		t.Errorf("sentinel has %d pull groups, want 5 (scorpid, basilisk, scorpids, basilisk, the camp)", n)
-	} else if camp := sen.PullGroups[n-1]; fmt.Sprint(camp.Entries) != "[4847 4847 4847 4847 4847 7030]" || len(camp.Positions) != 6 {
-		t.Errorf("sentinel camp: %+v", camp)
+	if n := len(sen.PullGroups); n != 6 {
+		t.Errorf("sentinel has %d pull groups, want 6 (scorpid, basilisk, scorpids, basilisk, the lone Hunter, the east trio)", n)
+	} else {
+		lone, trio := sen.PullGroups[n-2], sen.PullGroups[n-1]
+		if fmt.Sprint(lone.Entries) != "[4847]" || len(lone.Positions) != 1 {
+			t.Errorf("sentinel lone Hunter: %+v", lone)
+		}
+		if fmt.Sprint(trio.Entries) != "[4847 4847 7030]" || len(trio.Positions) != 3 || trio.Radius != 6 {
+			t.Errorf("sentinel east trio: %+v", trio)
+		}
+		var cx, cy float64
+		for _, p := range trio.Positions {
+			cx, cy = cx+float64(p.X)/3, cy+float64(p.Y)/3
+		}
+		boss := sen.Boss.Position
+		if d := math.Hypot(cx-float64(boss.X), cy-float64(boss.Y)); d < 22 {
+			t.Errorf("the east trio's pull point is %.1f yd from the Sentinel, inside its aggro range with the party's reach", d)
+		}
 	}
 	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
 	a := leg("archaedas")
