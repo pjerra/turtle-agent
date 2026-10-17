@@ -3151,7 +3151,8 @@ except through the movement packets it sent; and there are no textures or models
 the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
 **read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
 `log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
-is embedded in the binary (no CDN, no build step).
+is embedded in the binary (no CDN, no build step). The header's "Refresh every" picker (1 / 2 / 5 / 10 / 30 s / paused, default 2 s —
+saved per browser) sets how often the page polls; "paused" freezes the map for a close look.
 
 ```
 turtle-agent dashboard                                  # http://127.0.0.1:8790/, every agent found in the settings files

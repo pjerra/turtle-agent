@@ -3,7 +3,7 @@
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
 const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit, RR = window.RealRoute; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
-const POLL_MS = 1500;
+const RF = window.RefreshRate; // refresh.js (the refresh-rate picker: how often the page polls)
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
 const plans = new Map(); // name -> geometry | "loading" | null
@@ -1067,15 +1067,58 @@ async function pollPlans() {
   }
 }
 
-async function poll() {
+let polling = false; // an in-flight poll: a slow answer never overlaps the next tick at 1 s
+let pollGen = 0;     // bumped on pause/rate change so a stale in-flight response cannot redraw the frozen map
+let pendingPoll = false; // a poll turned away by the in-flight guard; rerun once the request it met settles, if that one went stale
+function pollFresh(force, gen) { return gen === pollGen && (force || !refresh.paused()); }
+
+async function poll(force) {
+  if (!force && refresh.paused()) return; // paused: the map is frozen for a close look; nothing is fetched
+  if (polling) { pendingPoll = true; return; } // never overlap; a resume or rate change during a slow request is not lost
+  polling = true;
+  const gen = ++pollGen;
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
-    if (r.ok) render(await r.json());
+    if (!pollFresh(force, gen)) return; // stale response after pause/rate change
+    const body = r.ok ? await r.json() : null;
+    if (!pollFresh(force, gen)) return; // went stale while the body was decoding: no render, plans or debug updates
+    if (body) render(body);
     pollPlans();
     // an open debug panel follows its agent
     for (const [id, rec] of cards) if (rec.parts.debug.open) loadRaw(id, rec.parts);
-  } catch (e) { $("updated").textContent = "dashboard not reachable: " + e; }
+    // a boot-time paused fetch fills the page and then freezes it
+    if (force && refresh.paused()) $("updated").textContent = "paused: the map is frozen; pick a rate to resume";
+  } catch (e) { if (pollFresh(force, gen)) $("updated").textContent = "dashboard not reachable: " + e; }
+  finally {
+    polling = false;
+    // The answer we waited on was invalidated by a pause/rate change, so the poll that change asked for (turned away
+    // above) runs now instead of after the next interval. A plain tick that met a current request is still dropped.
+    const again = pendingPoll && gen !== pollGen;
+    pendingPoll = false;
+    if (again) poll(false); // poll itself re-checks paused
+  }
 }
+// How often the page polls: Refresh every 1 / 2 / 5 / 10 / 30 s / paused, saved per browser (default 2 s, the server
+// emit). Paused freezes the map; the server emit stays at 2 s. Even asking for the storage is guarded (a private
+// window throws).
+const refreshStore = (() => { try { return window.localStorage; } catch (e) { return null; } })();
+const refresh = RF.createRefresh(poll);
+function paintRefresh() {
+  const sel = $("refresh");
+  sel.replaceChildren(...RF.OPTIONS.map((s) => { const o = document.createElement("option"); o.value = String(s); o.textContent = RF.label(s); return o; }));
+  sel.value = String(refresh.sec());
+}
+function setRefresh(v) {
+  RF.save(refreshStore, v);
+  pollGen++; // any in-flight response from before the change is now stale
+  const was = refresh.sec();
+  refresh.set(v);
+  paintRefresh(); // after set: the select shows the rate now in force, not the one before
+  if (refresh.paused()) $("updated").textContent = "paused: the map is frozen; pick a rate to resume";
+  else if (was === 0) $("updated").textContent = "";
+}
+$("refresh").addEventListener("change", () => setRefresh($("refresh").value));
 paintRouteSelect();
-poll();
-setInterval(poll, POLL_MS);
+refresh.boot(RF.load(refreshStore));
+paintRefresh(); // after boot: the select shows the saved rate
+// boot-time paused pages fetch once via poll(true) and then show the paused message inside poll.

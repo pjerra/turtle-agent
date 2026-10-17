@@ -41,9 +41,30 @@ func TestViewMath(t *testing.T) { runCheck(t, "view_check.js", "view.js") }
 // TestPlainText: the player-language formatting of states, counters, orders and party rows.
 func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
+// TestRefreshRate: the refresh-rate picker's options, labels, normalization and the choice saved per browser.
+func TestRefreshRate(t *testing.T) { runCheck(t, "refresh_check.js", "refresh.js") }
+
+// TestPagePolling: boot-paused fetches once, pausing ignores a stale in-flight response, the in-flight guard clears
+// after a failed fetch, and a resume or rate change during a slow request fetches as soon as the stale request settles.
+func TestPagePolling(t *testing.T) {
+	node := nodeOrSkip(t)
+	appPath, err := filepath.Abs(filepath.Join("static", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshPath, err := filepath.Abs(filepath.Join("static", "refresh.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, filepath.Join("testdata", "app_poll_check.js"), appPath, refreshPath).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "ok") {
+		t.Fatalf("app_poll_check.js: %v\n%s", err, out)
+	}
+}
+
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "realroute.js", "routeedit.js", "routeeditui.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "realroute.js", "routeedit.js", "routeeditui.js", "refresh.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -137,6 +158,34 @@ func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
 	}
 }
 
+// The page offers the refresh-rate picker: refresh.js loads before app.js, the header has the select, and app.js routes
+// polling through the saved choice (no fixed poll timer left).
+func TestPageHasRefreshPicker(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := string(html)
+	if !strings.Contains(h, `src="refresh.js"`) || strings.Index(h, `src="refresh.js"`) > strings.Index(h, `src="app.js"`) {
+		t.Error("index.html must load refresh.js before app.js")
+	}
+	if !strings.Contains(h, `id="refresh"`) {
+		t.Error("index.html has no refresh picker")
+	}
+	js, err := os.ReadFile(filepath.Join("static", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	for _, want := range []string{"window.RefreshRate", "RF.createRefresh(poll)", "refresh.boot(RF.load(refreshStore))", "if (!force && refresh.paused()) return;", "if (polling) { pendingPoll = true; return; }", "polling = true", "paused: the map is frozen"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("app.js does not route polling through the picker: no %q", want)
+		}
+	}
+	if strings.Contains(s, "POLL_MS") || strings.Contains(s, "setInterval(poll,") {
+		t.Error("app.js still polls on a fixed timer")
+	}
+}
 func TestPackWordsCountsAndNamesTheCreatures(t *testing.T) {
 	pg := dungeon.PullGroup{Entries: []uint32{4850, 4850, 5000, 7777, 7777, 5000, 5000}}
 	names := map[string]string{"4850": "Stonevault Oracle", "5000": "Geologist"}
