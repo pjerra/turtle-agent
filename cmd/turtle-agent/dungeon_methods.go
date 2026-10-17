@@ -133,6 +133,10 @@ type dungeonRunParams struct {
 	// checked (no navmesh planner or files for the map, an error in the check). A plan of any other status (draft, mapped) is run anyway,
 	// with the failing points in the result's plan_check.
 	Force bool `json:"force,omitempty"`
+	// ForceStart runs a commander-mode from_leg / from_pull_group / pulltest start that the unsafe-start gate refuses: its start point is
+	// under 30 yd from a pack or boss of a skipped step in a fresh instance (README "Start anywhere"). Force does not pass that gate and
+	// ForceStart does not pass the plan check: a start that needs both passes both.
+	ForceStart bool `json:"force_start,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
 	HaveItems []uint32 `json:"have_items,omitempty"`
 	// GiveItems puts items in bots' bags at the prepare step with the GM line `.additem <entry>` on each named bot (remote mode, GM account of

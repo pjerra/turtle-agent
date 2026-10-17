@@ -4,7 +4,7 @@
 #
 #   tools/run-uldaman.sh [--mode commander|observe|leader] [--brain PRESET] [--rotation NAME] [--role ROLE]
 #                        [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
-#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--logout] [--print-params]
+#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--force-start] [--logout] [--print-params]
 #
 #   --mode M       the run mode (README "Run modes"; or MODE=). commander (the default): the agent leads a bot group from outside it, everything
 #                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
@@ -38,6 +38,9 @@
 #   --pulltest LEG:GROUP[:TRIES[:RESET]]
 #                  the pull-test scenario instead of the dungeon: pull that one pack TRIES times (default 3; RESET auto, equivalent, respawn or none, default
 #                  auto), score each try, print the table and save pulltest.json in OUT; compare two with `turtle-agent pulltest --compare a.json b.json`
+#   --force-start  pass force_start: run a --from-leg / --pull-group / --pulltest start that is under 30 yd from a live pack or boss of a
+#                  skipped step. The script asks for a fresh instance (unless --no-fresh; a hired party counts as fresh), where such a start
+#                  is refused; from a leg past a boss it always is, the boss stands on the start point (README "Start anywhere")
 #   --logout       log the agent out after the run (default: it stays online, so the next run needs no login)
 #   --print-params print the dungeon_run params and exit (nothing is sent, no login, no build)
 #
@@ -70,7 +73,7 @@ POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
 MODE=${MODE:-commander} BRAIN= ROTATION= ROLE=
-FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
+FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= FORCE_START=0 RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
 COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
@@ -89,6 +92,7 @@ while [ $# -gt 0 ]; do
     --start-here) START_HERE=1 ;;
     --have-items) shift; HAVE_ITEMS=${1:?--have-items needs a comma list of item entries} ;;
     --pulltest) shift; PULLTEST=${1:?--pulltest needs LEG:GROUP[:TRIES[:RESET]]} ;;
+    --force-start) FORCE_START=1 ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
     -h|--help) sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
@@ -113,11 +117,11 @@ name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
 [ -z "$ROLE" ] || case $ROLE in dps|tank|healer) ;; *) die "--role is dps, tank or healer" ;; esac
 if [ "$MODE" != leader ]; then
   [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in $MODE mode the bots fight)"
-  [ "$MODE" != observe ] || { [ "$FROM_LEG" = 0 ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ]; } ||
-    die "observe mode starts at the plan's first step: --from-leg, --pull-group, --start-here, --have-items and --pulltest are commander options"
+  [ "$MODE" != observe ] || { [ "$FROM_LEG" = 0 ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FORCE_START" = 0 ]; } ||
+    die "observe mode starts at the plan's first step: --from-leg, --pull-group, --start-here, --have-items, --pulltest and --force-start are commander options"
 else
-  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] ||
-    die "leader mode takes only --from-leg and --pulltest of the start options: --hire, --rehire, --level, --pull-group, --start-here, --have-items, --no-fresh and COMPOSITION are commander options"
+  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] && [ "$FORCE_START" = 0 ] ||
+    die "leader mode takes only --from-leg and --pulltest of the start options: --hire, --rehire, --level, --pull-group, --start-here, --have-items, --no-fresh, --force-start and COMPOSITION are commander options"
 fi
 
 # --- the party: names are letters only (the agent checks too); they go into the JSON below as they are
@@ -172,6 +176,7 @@ else
   [ "$START_HERE" = 0 ] || start_json+="\"start_here\":true,"
   [ -z "$HAVE_ITEMS" ] || start_json+="\"have_items\":[$HAVE_ITEMS],"
 fi
+[ "$FORCE_START" = 0 ] || [ "$MODE" = observe ] || start_json+="\"force_start\":true,"
 
 sha_label=${SHA8:-unknown}
 params() {
@@ -318,7 +323,11 @@ while :; do
 done
 
 # --- the result
-say "result: state=$STATE error=$(field result.report.error <<<"$ST")"
+RUN_ERR=$(field result.report.error <<<"$ST")
+say "result: state=$STATE error=$RUN_ERR"
+case $RUN_ERR in
+  *"pass force_start"*) say "the start was refused before anything was sent (a live pack or boss at the start point of a fresh instance): run again with --force-start to start there anyway, or start at a safer --pull-group, or --no-fresh in an instance that is cleared" ;;
+esac
 say "setup_s=$(field result.report.setup_s <<<"$ST") prepare=$(field result.report.prepare <<<"$ST")"
 if [ "$HIRE" = 1 ]; then
   say "ready: party=$(field result.report.ready.party <<<"$ST") level=$(field result.report.ready.level <<<"$ST") ok=$(field result.report.ready.ready <<<"$ST") hire_s=$(field result.report.ready.seconds <<<"$ST") setup_s=$(field result.report.ready.setup_s <<<"$ST") hired=$(field result.report.ready.hired <<<"$ST") reused=$(field result.report.ready.reused <<<"$ST") note=$(field result.report.ready.level_note <<<"$ST")"

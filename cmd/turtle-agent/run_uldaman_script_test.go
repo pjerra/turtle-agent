@@ -81,6 +81,8 @@ func TestRunUldamanScriptModes(t *testing.T) {
 		{[]string{"--mode", "observe", "--brain", "frost_mage", "--print-params"}, "go with --mode leader"},
 		{[]string{"--mode", "fly", "--print-params"}, "commander, observe or leader"},
 		{[]string{"--mode", "leader", "--hire", "--print-params"}, "commander options"},
+		{[]string{"--mode", "leader", "--force-start", "--print-params"}, "commander options"},
+		{[]string{"--mode", "observe", "--force-start", "--print-params"}, "commander options"},
 		{[]string{"--mode", "leader", "--pull-group", "1", "--print-params"}, "commander options"},
 		{[]string{"--rotation", "frost_mage", "--print-params"}, "go with --mode leader"},
 		{[]string{"--mode", "leader", "--role", "bard", "--print-params"}, "dps, tank or healer"},
@@ -280,14 +282,17 @@ func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
 		pullGroup int // -1: none
 		startHere bool
 		pulltest  string
+		force     bool // --force-start: force_start
 	}{
-		{[]string{"--from-leg", "3", "--print-params"}, 3, -1, false, ""},
-		{[]string{"--from-leg", "1", "--pull-group", "0", "--print-params"}, 1, 0, false, ""},
-		{[]string{"--from-leg", "4", "--start-here", "--print-params"}, 4, -1, true, ""},
-		{[]string{"--from-leg", "2", "--have-items", "7733,7740", "--print-params"}, 2, -1, false, ""},
-		{[]string{"--hire", "--from-leg", "1", "--pull-group", "1", "--print-params"}, 1, 1, false, ""},
-		{[]string{"--pulltest", "1:0", "--print-params"}, 1, 0, false, "1:0:0:"},
-		{[]string{"--pulltest", "1:1:5:respawn", "--hire", "--print-params"}, 1, 1, false, "1:1:5:respawn"},
+		{[]string{"--from-leg", "3", "--print-params"}, 3, -1, false, "", false},
+		{[]string{"--from-leg", "3", "--force-start", "--print-params"}, 3, -1, false, "", true},
+		{[]string{"--from-leg", "1", "--pull-group", "0", "--print-params"}, 1, 0, false, "", false},
+		{[]string{"--from-leg", "4", "--start-here", "--print-params"}, 4, -1, true, "", false},
+		{[]string{"--from-leg", "2", "--have-items", "7733,7740", "--print-params"}, 2, -1, false, "", false},
+		{[]string{"--hire", "--from-leg", "1", "--pull-group", "1", "--print-params"}, 1, 1, false, "", false},
+		{[]string{"--hire", "--from-leg", "2", "--force-start", "--print-params"}, 2, -1, false, "", true},
+		{[]string{"--pulltest", "1:0", "--print-params"}, 1, 0, false, "1:0:0:", false},
+		{[]string{"--pulltest", "1:1:5:respawn", "--hire", "--force-start", "--print-params"}, 1, 1, false, "1:1:5:respawn", true},
 	} {
 		out, err := exec.Command(bash, append([]string{"../../tools/run-uldaman.sh"}, c.args...)...).Output()
 		if err != nil {
@@ -301,6 +306,9 @@ func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
 		}
 		if remote, err := checkMode(p); !remote || err != nil {
 			t.Fatalf("%v: checkMode %v %v", c.args, remote, err)
+		}
+		if p.ForceStart != c.force || p.Force {
+			t.Errorf("%v: force_start %v force %v", c.args, p.ForceStart, p.Force)
 		}
 		if c.pulltest == "" {
 			if p.Pulltest != nil || p.FromLeg == nil || p.FromLeg.index != c.fromLeg || p.StartHere != c.startHere || (p.FromPullGroup == nil) != (c.pullGroup < 0) || (p.FromPullGroup != nil && *p.FromPullGroup != c.pullGroup) {

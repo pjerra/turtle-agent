@@ -151,6 +151,10 @@ type RemoteOptions struct {
 	// RunMeta names the AI driver of the run (model, effort, run label): it goes into the trace header and the run report, and with
 	// RunMeta.ServerTrace (opt-in) to the server's run record (`.bot trace start ... driver=<model>:<effort>:<run>`). Zero: nothing is sent.
 	RunMeta RunMeta
+	// ForceStart runs a from_leg / from_pull_group / pulltest start that the unsafe-start gate refuses: its start point is
+	// under the safe distance from a pack or boss of a skipped step in a fresh instance (checkStartSafety, start.go).
+	// dungeon_run's force_start; dungeon_run's force is the plan check's and never reaches the driver.
+	ForceStart bool
 	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
 	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
 	Observe *ObserveSpec
@@ -711,7 +715,12 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
 	d.wd.start()
-	err := d.runRecovering(ctx, fromLeg)
+	// The unsafe-start gate goes before the prepare step, the bind and the enter phase (begin): a refused start sends
+	// nothing at all. It reads the navmesh path after markAvoid, as startAnywhere does, and fails the run in the report.
+	err := d.checkStartSafety(ctx, fromLeg)
+	if err == nil {
+		err = d.runRecovering(ctx, fromLeg)
+	}
 	d.finish(err)
 	return err
 }

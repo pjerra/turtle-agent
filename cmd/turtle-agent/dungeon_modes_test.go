@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -213,5 +214,24 @@ func TestRemoteGameGiveItemRefusesBadArguments(t *testing.T) {
 		if err := g.GiveItem(context.Background(), c.who, c.guid, c.item); err == nil || !strings.Contains(err.Error(), "additem") {
 			t.Errorf("%+v: %v", c, err)
 		}
+	}
+}
+
+// force_start is the unsafe-start gate's, which only a commander run has: leader and observe mode refuse it instead of
+// accepting an override that does nothing; commander mode takes it.
+func TestCheckModeForceStartIsCommanderOnly(t *testing.T) {
+	for _, p := range []dungeonRunParams{
+		{ForceStart: true},
+		{Mode: "leader", ForceStart: true},
+		{Mode: "observe", LeadBot: "Tanky", ForceStart: true},
+	} {
+		_, err := checkMode(p)
+		var re *rpc.Error
+		if !errors.As(err, &re) || re.Code != rpc.CodeInvalidParams || !strings.Contains(re.Message, "force_start") || !strings.Contains(re.Message, "commander mode only") {
+			t.Errorf("mode %q: %v", p.Mode, err)
+		}
+	}
+	if remote, err := checkMode(dungeonRunParams{Mode: "commander", LeadBot: "Tanky", ForceStart: true}); !remote || err != nil {
+		t.Errorf("commander: %v %v", remote, err)
 	}
 }

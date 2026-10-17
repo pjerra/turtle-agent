@@ -1000,7 +1000,7 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
    the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
 4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
 5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
-   start `skipped (from_leg)`, and that nothing of them was pulled or walked. A pack of those legs that is still alive near the start point (a fresh instance) will aggro: write down which.
+   start `skipped (from_leg)`, and that nothing of them was pulled or walked. In a fresh instance a start under 30 yd from a live pack or boss of those legs is refused before anything is sent (README "Start anywhere"; `--force-start` runs it); in a kept or cleared one it only warns (`start: warning:` notes): write down whether such a pack aggroed.
 6. **Gather spots** (`from_pull_group`): 55 yd short of the pack on the navmesh path from the leg's `to`. Check on Uldaman that the spot is on the mesh, out of sight of other packs, not in a
    pit (`start.warning`), and that the first pull from it needs no more than one approach (`pack_looks`, the walk after the rest gate).
 7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
