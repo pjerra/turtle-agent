@@ -123,6 +123,19 @@ type Options struct {
 	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
 	// graveyard chests). Without this option such a plan is refused.
 	DropCompanionsLoot bool
+	// ApproachHops, with Cut, also cuts the hop to a pull, boss or hold row that is more than the run leader's reach (50 yd) from the
+	// anchor before it (the move, or the fight, the party stood at) into move rows along the planned path, the last of them at least
+	// 25 yd short of the target. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd
+	// short), which a plan of long corridors (Wailing Caverns: up to 363 yd) outruns.
+	ApproachHops bool
+	// GMCrossDirect exports a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan: the
+	// run leader has no GM move. Only right where the gap is a drop the straight line crosses (Wailing Caverns' ramp to Lord Serpentis,
+	// 6 yd down over a 3.9 yd gap); the row's comment and a warning say it is not tried live.
+	GMCrossDirect bool
+	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
+	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
+	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
+	Route func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
 }
 
 // ErrCompanionsLoot is the refusal of a plan with a leg whose companions_loot is false (see Options.DropCompanionsLoot).
@@ -209,6 +222,9 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	if err := b.cutLongHops(); err != nil {
 		return Result{}, err
 	}
+	if err := b.routeAroundAvoid(); err != nil {
+		return Result{}, err
+	}
 	for _, w := range p.RunLeaderReach(0) {
 		if w.Leg < cutLeg || cut == "" {
 			b.warnings = append(b.warnings, w.String())
@@ -273,6 +289,11 @@ func (b *builder) leg(li int) error {
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for _, w := range l.Via {
+		if w.GMCross && b.opt.GMCrossDirect {
+			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): via %.1f %.1f %.1f is a gm_cross; exported as a move_direct (a straight walk to the landing point), not tried live: the run leader has no GM move", li, l.Name, w.X, w.Y, w.Z))
+			b.move(w.Point, true, "via (gm_cross in the plan; move_direct, not tried live)")
+			continue
+		}
 		if w.GMCross {
 			return fmt.Errorf("via %.1f %.1f %.1f is a gm_cross: a GM moves the party there in a remote run, and the TortoiseBots run leader has no such step", w.X, w.Y, w.Z)
 		}
@@ -592,6 +613,21 @@ func (b *builder) cutLongHops() error {
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
+		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) {
+			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
+			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
+				via, err := b.opt.Cut(b.plan.Map, a, c)
+				if err != nil {
+					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s is %.0f yd from the anchor before it and the approach could not be cut: %v", s.Leg, s.Seq, s.Kind, d, err))
+				}
+				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
+					via = via[:len(via)-1]
+				}
+				for _, v := range via {
+					out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "approach path"})
+				}
+			}
+		}
 		if (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && prev != nil {
 			// The party fought there (a pull or boss it saw from its move point, a hold on its spot): the next move's hop is measured
 			// from it, not from the move before the fight (a leg's first move after a boss would otherwise be walked back from the
@@ -630,6 +666,60 @@ func (b *builder) cutLongHops() error {
 	b.rows.Steps = out
 	return nil
 }
+
+// routeAroundAvoid puts via points between two anchors (move, pull, boss, hold rows, in the order of the plan, from the entrance) whose
+// run leader path would cross an avoid box of the plan. The run leader walks to a pull or boss in hops of the lead bot's own navmesh
+// path, which does not know the boxes (ai_dungeon_step has no column for one): only the rows can keep it out of the lava. Route returns
+// the points; a hop it cannot make safe fails the export.
+func (b *builder) routeAroundAvoid() error {
+	if b.opt.Route == nil || len(b.plan.Avoid) == 0 {
+		return nil
+	}
+	var out []StepRow
+	prev := b.plan.Entrance
+	added := map[int]int{}
+	for _, s := range b.rows.Steps {
+		switch s.Kind {
+		case KindMove, KindMoveDirect, KindPull, KindBoss, KindHold:
+		default:
+			out = append(out, s)
+			continue
+		}
+		to := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
+		if s.Kind != KindMoveDirect {
+			via, err := b.opt.Route(b.plan.Map, prev, to)
+			if err != nil {
+				return fmt.Errorf("leg %d step %d (%s): %w", s.Leg, s.Seq, s.Kind, err)
+			}
+			for _, v := range via {
+				out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "path (keeps out of an avoid box)"})
+			}
+			added[s.Leg] += len(via)
+		}
+		out = append(out, s)
+		prev = to
+	}
+	renumber := map[int]int{}
+	for i := range out {
+		out[i].Seq = renumber[out[i].Leg]
+		renumber[out[i].Leg]++
+	}
+	b.rows.Steps = out
+	legs := make([]int, 0, len(added))
+	for l, n := range added {
+		if n > 0 {
+			legs = append(legs, l)
+		}
+	}
+	slices.Sort(legs)
+	for _, l := range legs {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d: %d via points added so that the run leader's own path keeps out of the plan's avoid boxes (the run leader does not know them)", l, added[l]))
+	}
+	return nil
+}
+
+// approachStandoffYd is how near the pack a cut approach path's last point may be (the party is not walked onto the pack).
+const approachStandoffYd = 25
 
 func dist3(a, b dungeon.Point) float64 {
 	return math.Sqrt(sq(float64(a.X-b.X)) + sq(float64(a.Y-b.Y)) + sq(float64(a.Z-b.Z)))

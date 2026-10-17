@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--gm-cross-direct] [--approach-hops] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -38,6 +38,8 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	rev := fs.String("rev", "", "the turtle-agent commit named in ai_dungeon_plan.source (default: git rev-parse of the plan folder, if it is a checkout)")
 	stamp := fs.String("stamp", "", "the migration's timestamp, YYYYMMDDHHMMSS (default: now, UTC)")
 	dropLoot := fs.Bool("drop-companions-loot", false, "export a plan with a leg whose companions_loot is false anyway, without it (the rows cannot carry it: the run leader's bots loot; refused without)")
+	gmCrossDirect := fs.Bool("gm-cross-direct", false, "export a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan; only for a gap that is a drop the line crosses, and not tried live")
+	approach := fs.Bool("approach-hops", false, "with --mmaps, also cut the hop to a pull, boss or hold that is more than 50 yd from the anchor before it into move rows along the navmesh path (the run leader's own hops are at most 8 of 40 yd)")
 	force := fs.Bool("force", false, "let --out replace an existing file (never edit a migration that is applied)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -98,11 +100,15 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		return fail("%s exists: a migration that is applied is never edited; export to a new name, or pass --force", target)
 	}
 	var planner *navmesh.Planner
-	opt := planexport.Options{DropCompanionsLoot: *dropLoot}
+	opt := planexport.Options{DropCompanionsLoot: *dropLoot, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach}
+	var naive *navmesh.Planner
 	if *mmaps != "" {
 		planner = navmesh.NewPlanner(*mmaps)
 		defer planner.Close()
 		opt.Cut = cutWith(planner)
+		// What the run leader's bots walk: the server's navmesh, which does not know a plan's avoid boxes.
+		naive = navmesh.NewPlanner(*mmaps)
+		defer naive.Close()
 	}
 	revision := *rev
 	if revision == "" {
@@ -123,6 +129,14 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 			return fail("%s", msg)
 		}
 		o := opt
+		if planner != nil {
+			// The cutter keeps out of the plan's avoid boxes; the rows must keep the run leader's own path out of them as well.
+			boxes := dungeon.NavBoxes(p.Avoid)
+			planner.SetAvoid(p.Map, boxes)
+			if len(boxes) > 0 {
+				o.Route = routeAround(naive, planner, boxes)
+			}
+		}
 		o.Source = "turtle-agent"
 		if revision != "" {
 			o.Source += " " + revision
@@ -211,4 +225,88 @@ func gitRev(dir string) string {
 		rev += "+local"
 	}
 	return rev
+}
+
+// routeAround returns the via points that keep the run leader's own path from a to b out of the avoid boxes: none when the path on the
+// plain navmesh (naive: the server's) stays clear of them, else the corners of the avoid-aware path (aware), cut to hops of at most
+// routeGapYd, refined until the plain path of every hop is clear too.
+func routeAround(naive, aware *navmesh.Planner, boxes []navmesh.Box) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+	vec := func(p dungeon.Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
+	pt := func(v navmesh.Vec3) dungeon.Point { return dungeon.Point{X: v[0], Y: v[1], Z: v[2]} }
+	plain := func(m uint32, a, b dungeon.Point) []navmesh.Vec3 {
+		path, err := naive.Plan(m, vec(a), vec(b))
+		if err != nil || path.Status != navmesh.Complete || len(path.Points) < 2 {
+			return nil // no server path either: the plan check reports it, a via point would not help
+		}
+		return path.Points
+	}
+	var fix func(m uint32, a, b dungeon.Point, gap float64, depth int) ([]dungeon.Point, error)
+	fix = func(m uint32, a, b dungeon.Point, gap float64, depth int) ([]dungeon.Point, error) {
+		if !pathHitsBox(plain(m, a, b), boxes) {
+			return nil, nil
+		}
+		if depth > 3 {
+			return nil, fmt.Errorf("the run leader's path from %.1f %.1f %.1f to %.1f %.1f %.1f crosses an avoid box and no via point makes it safe", a.X, a.Y, a.Z, b.X, b.Y, b.Z)
+		}
+		ap, err := aware.Plan(m, vec(a), vec(b))
+		if err != nil || ap.Status != navmesh.Complete || len(ap.Points) < 2 {
+			return nil, fmt.Errorf("the run leader's path from %.1f %.1f %.1f to %.1f %.1f %.1f crosses an avoid box and the avoid-aware navmesh has no path (%v)", a.X, a.Y, a.Z, b.X, b.Y, b.Z, err)
+		}
+		// The chain a, <aware path cut to gap yd hops>, b.
+		chain := []dungeon.Point{a}
+		prev := ap.Points[0]
+		for i := 1; i < len(ap.Points); i++ {
+			p := ap.Points[i]
+			d := math.Sqrt(float64(sq32(p[0]-prev[0]) + sq32(p[1]-prev[1]) + sq32(p[2]-prev[2])))
+			for k := 1; float64(k)*gap < d; k++ {
+				f := float32(float64(k) * gap / d)
+				chain = append(chain, dungeon.Point{X: prev[0] + (p[0]-prev[0])*f, Y: prev[1] + (p[1]-prev[1])*f, Z: prev[2] + (p[2]-prev[2])*f})
+			}
+			if i < len(ap.Points)-1 {
+				chain = append(chain, pt(p))
+			}
+			prev = p
+		}
+		chain = append(chain, b)
+		var via []dungeon.Point
+		for i := 0; i+1 < len(chain); i++ {
+			sub, err := fix(m, chain[i], chain[i+1], gap/2, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			if i > 0 {
+				via = append(via, chain[i])
+			}
+			via = append(via, sub...)
+		}
+		return via, nil
+	}
+	return func(m uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return fix(m, a, b, routeGapYd, 0)
+	}
+}
+
+// routeGapYd is the longest hop between the via points routeAround puts in (the run leader's own hops are at most 40 yd).
+const routeGapYd = 25
+
+// pathHitsBox says whether the polyline passes through a box (sampled every yard, heights interpolated).
+func pathHitsBox(pts []navmesh.Vec3, boxes []navmesh.Box) bool {
+	for i := 0; i+1 < len(pts); i++ {
+		a, b := pts[i], pts[i+1]
+		d := math.Sqrt(float64(sq32(b[0]-a[0]) + sq32(b[1]-a[1]) + sq32(b[2]-a[2])))
+		n := int(math.Ceil(d))
+		for k := 0; k <= n; k++ {
+			f := float32(0)
+			if n > 0 {
+				f = float32(k) / float32(n)
+			}
+			p := navmesh.Vec3{a[0] + (b[0]-a[0])*f, a[1] + (b[1]-a[1])*f, a[2] + (b[2]-a[2])*f}
+			for _, bx := range boxes {
+				if bx.Contains(p) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
