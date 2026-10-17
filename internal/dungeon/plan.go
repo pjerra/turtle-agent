@@ -284,7 +284,45 @@ type PullGroup struct {
 	Patrol *Patrol `json:"patrol,omitempty"`
 	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Approach is where the TortoiseBots run leader's party walks before it pulls the group, in order: the last point is where it stands to
+	// engage (within RunLeaderSeeYd of the pack, so the run leader sees it and pulls it from there). plan-export writes each as a move row
+	// before the pull row; the plan check walks them. Without it the run leader approaches a pack it cannot see from its last move point
+	// in navmesh hops of its own, which fail where the path is long or ends under a ledge (Uldaman, live 2026-10-16). The agent's own
+	// driver looks at the pack from its path (LookPoint) and does not walk these points.
+	Approach []Point `json:"approach,omitempty"`
+	// Hold makes the run leader's row for the group a scripted event's hold (see Hold) instead of a pull; nil: a pull.
+	Hold *Hold `json:"hold,omitempty"`
 }
+
+// Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
+// stands on Spot and fights what the event sends within Radius until the instance data Data reads DONE (the core's encounter state 3;
+// FAIL or a reset is a failed event), or TimeoutS runs out. plan-export writes it in place of the group's pull row (or the boss's row):
+// entry Data, param 3, flags 40 (done by instance data 8 + read as encounter states 32), the group's entries (a boss: its entry, its
+// first and Entries) as the event's mobs. A move row straight before it to the same spot is left out (the hold walks there itself), and
+// a game object wait straight after it waits at most HoldDoorWaitS (the event's DONE is what opens the door). The agent's own driver
+// does not read it: it fights the group (or the boss) and waits for the steps as written.
+type Hold struct {
+	Data     uint32  `json:"instance_data"`
+	Spot     Point   `json:"spot"`
+	Radius   float32 `json:"radius"`
+	TimeoutS int     `json:"timeout_s"`
+	// Entries are more creature entries of the event (a boss's waking statues and guardians); a group's own entries are always in.
+	Entries []uint32 `json:"entries,omitempty"`
+}
+
+// The limits of a Hold and of Approach.
+const (
+	// HoldDoorWaitS is the most a game object wait straight after a hold waits in the run leader's rows.
+	HoldDoorWaitS = 60
+	// MaxApproach is the most approach points a pull group or boss has.
+	MaxApproach = 4
+	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
+	// farther, it walks toward it in navmesh hops of its own.
+	RunLeaderSeeYd = 60
+	// RunLeaderReachYd is how far from the run leader's last move point the plan check wants a pack, a boss or the next move point: the
+	// see range less the 3 yd a walk stops short and some room for a pack's wander.
+	RunLeaderReachYd = 50
+)
 
 // Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
 // waypoints in the order it walks them (it goes on from the last to the first, as the core's waypoint movement does), PeriodS how long
@@ -331,6 +369,10 @@ type Boss struct {
 	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
+	Approach []Point `json:"approach,omitempty"`
+	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
+	Hold *Hold `json:"hold,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -705,6 +747,16 @@ type rawPullGroup struct {
 	Equiv     string     `json:"equiv"`
 	NeedsWalk bool       `json:"needs_walk"`
 	Patrol    *rawPatrol `json:"patrol"`
+	Approach  []rawPoint `json:"approach"`
+	Hold      *rawHold   `json:"hold"`
+}
+
+type rawHold struct {
+	Data     uint32    `json:"instance_data"`
+	Spot     *rawPoint `json:"spot"`
+	Radius   float32   `json:"radius"`
+	TimeoutS int       `json:"timeout_s"`
+	Entries  []uint32  `json:"entries"`
 }
 
 type rawPatrol struct {
@@ -727,6 +779,8 @@ type rawBoss struct {
 	// Tactics is Boss.Tactics.
 	Tactics   *tactics.Tactics `json:"tactics"`
 	NeedsWalk bool             `json:"needs_walk"`
+	Approach  []rawPoint       `json:"approach"`
+	Hold      *rawHold         `json:"hold"`
 }
 
 type rawStep struct {
@@ -1161,6 +1215,8 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			}
 			pg.Patrol = pat
 		}
+		pg.Approach = c.approach(gp+".approach", g.Approach)
+		pg.Hold = c.hold(gp+".hold", g.Hold)
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	c.entries(path+".skip", r.Skip, false)
@@ -1202,6 +1258,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				b.Tactics = r.Boss.Tactics
 			}
 		}
+		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold)
+		if b.Hold != nil && b.LootItem != nil {
+			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
+		}
+
 		l.Boss = &b
 	}
 	for i, rs := range r.Steps {
@@ -1250,6 +1312,38 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		c.fail(path, "has no pull_groups, steps, boss or after_boss: it would only walk to \"to\"; fold it into the next leg or add one")
 	}
 	return l
+}
+
+// approach reads a pull group's or a boss's approach points.
+func (c *checker) approach(path string, ps []rawPoint) []Point {
+	if len(ps) > MaxApproach {
+		c.fail(path, "%d points: at most %d", len(ps), MaxApproach)
+	}
+	var out []Point
+	for i := range ps {
+		out = append(out, c.point(fmt.Sprintf("%s[%d]", path, i), &ps[i]))
+	}
+	return out
+}
+
+// hold reads a pull group's or a boss's hold.
+func (c *checker) hold(path string, r *rawHold) *Hold {
+	if r == nil {
+		return nil
+	}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries}
+	h.Spot = c.point(path+".spot", r.Spot)
+	if r.Data == 0 {
+		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
+	}
+	if r.Radius <= 0 || r.Radius > 100 {
+		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
+	}
+	if r.TimeoutS <= 0 || r.TimeoutS > MaxTimeoutS {
+		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
+	}
+	c.entries(path+".entries", r.Entries, false)
+	return h
 }
 
 func (c *checker) ref(path string, r *rawRef) ObjectRef {

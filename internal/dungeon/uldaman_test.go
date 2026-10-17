@@ -174,8 +174,8 @@ func TestUldamanFullPlan(t *testing.T) {
 	if f := sen.Boss.First; len(f) != 0 {
 		t.Errorf("sentinel first %v", f)
 	}
-	if n := len(sen.PullGroups); n != 4 {
-		t.Errorf("sentinel has %d pull groups, want 4 (bat, scorpids, basilisk, the camp)", n)
+	if n := len(sen.PullGroups); n != 5 {
+		t.Errorf("sentinel has %d pull groups, want 5 (scorpid, basilisk, scorpids, basilisk, the camp)", n)
 	} else if camp := sen.PullGroups[n-1]; fmt.Sprint(camp.Entries) != "[4847 4847 4847 4847 4847 7030]" || len(camp.Positions) != 6 {
 		t.Errorf("sentinel camp: %+v", camp)
 	}
@@ -343,6 +343,9 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 	}
 	add(l.To, false)
 	for _, g := range l.PullGroups {
+		for _, a := range g.Approach {
+			add(a, false)
+		}
 		for _, gp := range g.Positions {
 			add(gp, false)
 		}
@@ -390,6 +393,14 @@ var holeFloor = map[Point]string{
 	{X: -162.8, Y: 294.8, Z: -51.2}: "under the high side of the rock overhang south of the pit lip",
 }
 
+// shelfPacks are pack positions on a navmesh island next to the route: no path reaches them, the pack is pulled from its group's approach
+// point (it comes down to the party), and the walk goes on from there. The path toward one must end within shelfReach of it.
+var shelfPacks = map[Point]string{
+	{X: -179.0, Y: 321.7, Z: -52.7}: "Jadespine Basilisk 30084 on the shelf north of the scorpid pit: the pit's path ends 12.4 yd short, at -173.9 310.7 -50.0",
+}
+
+const shelfReach = 15
+
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
 func TestUldamanOnNavmesh(t *testing.T) {
@@ -429,6 +440,14 @@ func TestUldamanOnNavmesh(t *testing.T) {
 				from = to
 				checked++
 				continue
+			}
+			if _, shelf := shelfPacks[w]; shelf && len(path.Points) > 0 {
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("legs[%d] waypoint %d: the path toward the shelf pack %v ends %.1f yd from it", i, j, w, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
 			}
 			if path.Status != navmesh.Complete {
 				t.Errorf("legs[%d] (%s) waypoint %d %v from %v: %s %s", i, l.Name, j, w, from, path.Status, path.Reason)
@@ -587,6 +606,9 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 	}
 	add("to", l.To)
 	for gi, g := range l.PullGroups {
+		for ai, a := range g.Approach {
+			add(fmt.Sprintf("pull_groups[%d].approach[%d]", gi, ai), a)
+		}
 		for pi, p := range g.Positions {
 			add(fmt.Sprintf("pull_groups[%d].positions[%d]", gi, pi), p)
 		}
@@ -658,6 +680,17 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 			path, err := pl.Plan(p.Map, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{w.X, w.Y, w.Z})
 			if err != nil {
 				t.Fatalf("%s: %v", where, err)
+			}
+			if _, shelf := shelfPacks[w]; shelf {
+				if len(path.Points) == 0 {
+					t.Fatalf("%s: no path toward the shelf pack", where)
+				}
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("%s: the path toward the shelf pack ends %.1f yd from it", where, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
 			}
 			switch {
 			case path.Status == navmesh.Complete:
