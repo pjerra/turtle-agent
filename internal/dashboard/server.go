@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -27,6 +28,12 @@ var staticFS embed.FS
 // Handler serves the page, the cached state and the files of the tests folder. Every route is GET or HEAD; nothing in it sends
 // anything to an agent. allowHosts are the Host names the guard accepts besides the loopback names (see AllowedHosts).
 func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...string) http.Handler {
+	return HandlerWithEditor(p, testsDir, allowHosts, embedFrom, nil)
+}
+
+// HandlerWithEditor is Handler with the route editor on when ed is not nil: then, and only then, POST /api/edit/* is let through the
+// guard, and only with the editing token.
+func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []string, ed *Editor) http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	static := http.FileServer(http.FS(sub))
 	mux := http.NewServeMux()
@@ -42,12 +49,32 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 		writeJSON(w, b)
 	})
 	mux.HandleFunc("/api/plan/", func(w http.ResponseWriter, r *http.Request) {
-		geo, errText := p.Geometry(strings.TrimPrefix(r.URL.Path, "/api/plan/"))
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan/")
+		var geo []byte
+		var errText string
+		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {
+			geo, errText = p.GeometryFor(name, id) // the copy that agent's runs read
+		} else {
+			geo, errText = p.Geometry(name)
+		}
 		if geo == nil {
 			http.Error(w, errText, http.StatusNotFound)
 			return
 		}
 		writeJSON(w, geo)
+	})
+	mux.HandleFunc("/api/plans", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(p.Plans())
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/plan-copies/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan-copies/")
+		if !planName.MatchString(name) {
+			http.NotFound(w, r)
+			return
+		}
+		b, _ := json.Marshal(p.PlanCopies(name))
+		writeJSON(w, b)
 	})
 	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
@@ -90,8 +117,11 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 	mux.HandleFunc("/files/", func(w http.ResponseWriter, r *http.Request) {
 		serveTestFile(w, r, testsDir)
 	})
+	if ed != nil {
+		ed.routes(mux)
+	}
 	mux.Handle("/", static)
-	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts))
+	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts), ed)
 }
 
 func writeJSON(w http.ResponseWriter, b []byte) {
@@ -188,11 +218,13 @@ func hostSet(names []string) map[string]bool {
 	return set
 }
 
-// guard refuses what a read-only local page has no use for: other methods, and requests whose Host is neither a loopback name
+// guard refuses what a read-only local page has no use for: other methods (but for the editor's POST /api/edit/*, when the editor is on, which
+// then needs the editing token), and requests whose Host is neither a loopback name
 // nor one of allowed (a page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1: its Host is the name).
-func guard(next http.Handler, ancestors string, allowed map[string]bool) http.Handler {
+func guard(next http.Handler, ancestors string, allowed map[string]bool, ed *Editor) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		editPost := ed != nil && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/edit/")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !editPost {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
@@ -210,6 +242,12 @@ func guard(next http.Handler, ancestors string, allowed map[string]bool) http.Ha
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors "+ancestors)
+		if editPost {
+			var ok bool
+			if r, ok = ed.authorize(w, r); !ok {
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

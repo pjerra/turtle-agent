@@ -21,11 +21,12 @@ type leaderStep struct {
 // TBM:RUN statuses plays while the run runs (a paused run does not advance).
 type fakeLeader struct {
 	*fakeRemote
-	plan     string // the plan the server has
-	listText string // the answer of `run list`; empty: the server has no run leader and says nothing
-	startErr string // the code `run start` is refused with
-	script   []leaderStep
-	pushOff  bool // the feed does not deliver the pushed lines: only `run status` shows them
+	plan         string // the plan the server has
+	listText     string // the answer of `run list`; empty: the server has no run leader and says nothing
+	startErr     string // the code `run start` is refused with
+	script       []leaderStep
+	noStopReason bool // a module from before TortoiseBots #1070: `run stop <reason>` is invalid
+	pushOff      bool // the feed does not deliver the pushed lines: only `run status` shows them
 
 	running, paused bool
 	progress        time.Duration
@@ -153,6 +154,9 @@ func (l *fakeLeader) Command(ctx context.Context, command string) (tbm.Reply, er
 		r.Lines = l.statusLines()
 		return r, nil
 	case "stop":
+		if len(f) > 2 && l.noStopReason {
+			return errReply(intent, "invalid"), nil
+		}
 		if !l.running {
 			return errReply(intent, "no-run"), nil
 		}
@@ -379,6 +383,41 @@ func TestObserveHasACeilingOnTheWholeRun(t *testing.T) {
 	_, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{MaxRun: s(600)}), nil)
 	if err == nil || !strings.Contains(err.Error(), "took longer than 10m0s") || g.stopped != 1 {
 		t.Fatalf("%v stopped %d", err, g.stopped)
+	}
+}
+
+// The ceiling's stop says why: `run stop time limit reached (<N>h)` (TortoiseBots #1070 logs it as the stop reason); max_run_s sets the ceiling
+// and the other endings send the plain line.
+func TestObserveCeilingStopCarriesTheReason(t *testing.T) {
+	run := func(max time.Duration) *fakeLeader {
+		steps := []leaderStep{{0, rs("running", 1, 5, "first", "move", "walk", "walking")}}
+		for i := 1; i <= 400; i++ {
+			steps = append(steps, leaderStep{s(i * 30), rs("running", 1, 5, "first", "pull", "pull", fmt.Sprintf("fight %d", i))})
+		}
+		g := newFakeLeader(t, steps...)
+		_, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{MaxRun: max}), nil)
+		if err == nil || g.stopped != 1 {
+			t.Fatalf("%v stopped %d", err, g.stopped)
+		}
+		return g
+	}
+	if g := run(3 * time.Hour); g.indexOf("run stop time limit reached (3h)") < 0 || len(g.ordersOf("run stop")) != 1 {
+		t.Fatalf("3 h ceiling: %v", g.orders)
+	}
+	// A longer ceiling (observe.max_run_s) names its hours, a short one its fraction of one.
+	if g := run(90 * time.Minute); g.indexOf("run stop time limit reached (1.5h)") < 0 {
+		t.Fatalf("1.5 h ceiling: %v", g.orders)
+	}
+	// A module that reads no reason refuses the line as invalid: the plain stop follows and the run is stopped.
+	old := newFakeLeader(t, leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")}, leaderStep{s(700), rs("running", 1, 5, "first", "pull", "pull", "fight")})
+	old.noStopReason = true
+	if _, err := runRemote(t, old, observePlan(), observeOpts(ObserveSpec{MaxRun: s(600)}), nil); err == nil || old.stopped != 1 || old.indexOf("run stop time limit") < 0 {
+		t.Fatalf("%v stopped %d %v", err, old.stopped, old.orders)
+	}
+	// A stall stops the run with the plain line.
+	g := newFakeLeader(t, leaderStep{0, rs("running", 1, 5, "first", "pull", "pull", "pulling 299")})
+	if _, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil); err == nil || len(g.ordersOf("run stop")) != 1 || g.indexOf("run stop time limit") >= 0 || g.indexOf("run stop ") >= 0 {
+		t.Fatalf("%v %v", err, g.orders)
 	}
 }
 

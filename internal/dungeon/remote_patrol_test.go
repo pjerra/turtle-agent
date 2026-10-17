@@ -235,6 +235,21 @@ func TestRemoteTinyMoveStepsPast(t *testing.T) {
 	}
 }
 
+// rfc-live-2, leg 4: a hop of 6.3 yd in a line but 5.3 yd on the ground (a slope) was acked three times and never walked: the module measures
+// a move on the ground plane. The tiny-move rule measures the same way, so the hop goes as a step past.
+func TestRemoteTinyMoveOnASlopeIsMeasuredOnTheGround(t *testing.T) {
+	g := newFakeRemote(t)
+	g.minMove = 6
+	plan := remotePlan(Leg{Name: "a", To: Point{5.3, 0, 3.4}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	if rep.Remote.TinyMoves < 1 || len(g.moveOrderDest) == 0 || g.moveOrderDest[0].X < 6.9 || g.moveOrderDest[0].X > 7.1 || rep.Remote.MoveStalls != 0 {
+		t.Fatalf("%+v %v", rep.Remote, g.moveOrderDest)
+	}
+}
+
 func TestPlanPatrolIsChecked(t *testing.T) {
 	base := `{"version":1,"name":"p","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
 "pull_groups":[{"entries":[1],"positions":[{"x":1,"y":1,"z":0}],"patrol":%s}]}]}`

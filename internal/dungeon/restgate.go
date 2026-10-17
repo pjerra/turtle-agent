@@ -150,6 +150,9 @@ type RestGate struct {
 	// Skipped marks a gate that cost nothing: everyone was at the targets on its first frame (Result "rested"), or the next step was a
 	// long walk and everyone was above the walking floors (Result "walking": the party rests on the way, the next pull gate waits).
 	Skipped bool `json:"skipped,omitempty"`
+	// PullFloorWait says the gate kept waiting past a point where it would have passed, for the tank's health or the healer's mana
+	// (Config.RestPullTankPct, RestPullHealerManaPct, RestPullExtra).
+	PullFloorWait bool `json:"pull_floor_wait,omitempty"`
 	// Refills names the bots `.bot maintenance` was sent to again during this gate (remote mode).
 	Refills []string `json:"refills,omitempty"`
 }

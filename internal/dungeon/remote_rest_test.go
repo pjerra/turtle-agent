@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/tbm"
 	"github.com/pjerra/turtle-agent/internal/trace"
 	"github.com/pjerra/turtle-agent/internal/tracecheck"
 	"github.com/pjerra/turtle-agent/internal/tracerun"
@@ -308,7 +309,7 @@ func TestRemoteWalkingRestThenHeldPullGate(t *testing.T) {
 	if first.Result != "walking" || !first.Skipped || first.Seconds > 1 || rep.RestWalkPasses != 1 {
 		t.Fatalf("%+v", first)
 	}
-	if pull.Result == "walking" || pull.Skipped || pull.Seconds < 15 || !slices.Equal(pull.Short, []string{"Healy mana 45%"}) {
+	if pull.Result == "walking" || pull.Skipped || pull.Seconds < 15 || !strings.Contains(strings.Join(pull.Short, " "), "Healy") || !strings.Contains(strings.Join(pull.Short, " "), "45%") {
 		t.Fatalf("the pull gate did not hold: %+v", pull)
 	}
 	if rep.RestSeconds < 15 {
@@ -327,5 +328,112 @@ func TestPlanRestWalkValidation(t *testing.T) {
 		if _, err := Parse("t.json", []byte(mk(in))); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", in, err, want)
 		}
+	}
+}
+
+// pullFloorRun runs one pull with the tank at tankHP/1000 (and the healer at healerPower/1000 mana), nobody regenerating but by regen,
+// which sets the values over time. It returns the report, how long after the start the pull began and the tank's health (per mille) and
+// the healer's mana at that moment.
+func pullFloorRun(t *testing.T, tankHP, healerPower uint32, regen func(g *fakeRemote, since time.Duration)) (Report, time.Duration, uint32, uint32) {
+	t.Helper()
+	g := newFakeRemote(t)
+	g.healRate = 0
+	g.party[0].HP, g.party[1].Power = tankHP, healerPower
+	g.addMob(299, Point{40, 0, 0})
+	start := g.now
+	var pulledAt time.Duration
+	var tankAt, manaAt uint32
+	g.onTick = func(g *fakeRemote) {
+		since := g.now.Sub(start)
+		if regen != nil {
+			regen(g, since)
+		}
+		for _, m := range g.mobs {
+			if m.pulled && pulledAt == 0 {
+				pulledAt, tankAt, manaAt = since, g.party[0].HP, g.party[1].Power
+			}
+		}
+	}
+	plan := remotePlan(Leg{Name: "p", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 0, 0}}}}})
+	o := objOpts()
+	o.Healer = "Healy"
+	rep, err := runRemote(t, g, plan, o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	return rep, pulledAt, tankAt, manaAt
+}
+
+// rfc-live-2: a pull must not begin with the tank hurt. The tank at 65 % (target 90, give-up health 50) used to pass the gate at its 60 s
+// cap and pull; now the gate keeps waiting for the pull floor (80 %), up to RestPullExtra past the cap, and the pull begins once the tank is
+// above it.
+func TestRestGateWaitsPastTheCapForTheTankToReachThePullFloor(t *testing.T) {
+	rep, at, tank, _ := pullFloorRun(t, 650, 1000, func(g *fakeRemote, since time.Duration) {
+		if since >= 100*time.Second {
+			g.party[0].HP = 850 // 85 %: under the 90 % target, over the 80 % floor
+		}
+	})
+	if at < 100*time.Second || tank < 800 {
+		t.Fatalf("the pull began at %v with the tank at %d/1000\n%s", at, tank, notesOf(rep))
+	}
+	if g := rep.RestGates[0]; !g.PullFloorWait || g.Seconds < 95 {
+		t.Fatalf("gate %+v", g)
+	}
+	if !strings.Contains(notesOf(rep), "keeps waiting for the pull floors (Tanky health 65%)") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// The wait is bounded: a tank that never rises past the floor holds the gate for the cap plus RestPullExtra, then the run goes on (health
+// over rest_min_health_pct) as before.
+func TestRestGatePullFloorWaitIsBounded(t *testing.T) {
+	cfg := DefaultConfig()
+	rep, at, _, _ := pullFloorRun(t, 650, 1000, nil)
+	limit := cfg.RestTimeout + cfg.RestPullExtra
+	if at < limit {
+		t.Fatalf("the pull began at %v, before the cap and the extra wait (%v)\n%s", at, limit, notesOf(rep))
+	}
+	// The first gate holds for the floors the extra time; once that ran out, the later gates of the leg give up at the plain cap.
+	first := rep.RestGates[0]
+	if first.Result != "gave_up" || !first.PullFloorWait || first.Seconds < limit.Seconds()-1 || first.Seconds > limit.Seconds()+10 {
+		t.Fatalf("first gate %+v: want %v", first, limit)
+	}
+	for i, g := range rep.RestGates[1:] {
+		if g.PullFloorWait || g.Seconds > cfg.RestTimeout.Seconds()+10 {
+			t.Fatalf("gate %d %+v: the later gates of the leg wait for the floors again", i+1, g)
+		}
+	}
+	if !strings.Contains(notesOf(rep), "stops waiting for the pull floors after 90 s") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// A healer under its mana floor whose mana does not rise is no longer let pass as "not drinking" at once: the gate waits for the floor
+// (60 %) too, and passes when it is reached.
+func TestRestGateWaitsForTheHealerManaFloorOfAStalledCaster(t *testing.T) {
+	rep, at, _, mana := pullFloorRun(t, 1000, 550, func(g *fakeRemote, since time.Duration) {
+		if since >= 70*time.Second {
+			g.party[1].Power = 700
+		}
+	})
+	if at < 70*time.Second || mana < 600 {
+		t.Fatalf("the pull began at %v with the healer at %d/1000 mana\n%s", at, mana, notesOf(rep))
+	}
+	if g := rep.RestGates[0]; !g.PullFloorWait {
+		t.Fatalf("gate %+v", g)
+	}
+}
+
+// A leg whose own rest targets are lower keeps the lower floors: the pull floors never ask for more than the gate's target.
+func TestRestPullFloorsAreHeldDownByTheLegsTargets(t *testing.T) {
+	g := newFakeRemote(t)
+	g.party[0].HP = 700
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	d.fr.Lead, d.fr.Party = gTank, []tbm.PartyRec{*g.party[0], *g.party[1]}
+	if s := d.pullFloorShort(restTarget{health: 90, healerMana: 60}); len(s) != 1 || s[0] != "Tanky health 70%" {
+		t.Fatalf("%v", s)
+	}
+	if s := d.pullFloorShort(restTarget{health: 65, healerMana: 60}); len(s) != 0 {
+		t.Fatalf("%v", s)
 	}
 }

@@ -30,10 +30,10 @@ func runRest(t *testing.T, g *fakeGame, plan string, cfg Config) *Driver {
 	return d
 }
 
-// The healer is held to 50% mana, anyone else to 35%: a mage at 36% and a healer at 50% pass at once.
+// The healer is held to 60% mana, anyone else to 35%: a mage at 36% and a healer at 60% pass at once.
 func TestRestGateTargetsHealerAndOthers(t *testing.T) {
 	g := restFake()
-	g.party[1].Power = 200 // healer 50%
+	g.party[1].Power = 240 // healer 60%
 	g.party[2].Power = 144 // mage 36%
 	d := runRest(t, g, restPlan, Config{})
 	for _, gate := range d.Report().RestGates {
@@ -42,12 +42,12 @@ func TestRestGateTargetsHealerAndOthers(t *testing.T) {
 		}
 	}
 
-	// A healer at 49% holds the gate (and drinks it to the target); a mage at 34% does too.
+	// A healer at 59% holds the gate (and drinks it to the target); a mage at 34% does too.
 	for _, tc := range []struct {
 		name  string
 		which int
 		power uint32
-	}{{"Heal", 1, 196}, {"Mage", 2, 136}} {
+	}{{"Heal", 1, 236}, {"Mage", 2, 136}} {
 		g = restFake()
 		g.healOnRest = true
 		g.party[tc.which].Power = tc.power
@@ -210,7 +210,7 @@ func TestPlanRestValidation(t *testing.T) {
 	}
 }
 
-// Remote mode: the gate takes the same targets from the feed. The healer named in the options is held to 50%, the others to 35%;
+// Remote mode: the gate takes the same targets from the feed. The healer named in the options is held to 60%, the others to 35%;
 // a member whose mana does not rise gets `cmd rest` once more after DrinkNudge; the cap is 60 s.
 func TestRemoteRestGateTargetsAndNudge(t *testing.T) {
 	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}})
@@ -218,19 +218,19 @@ func TestRemoteRestGateTargetsAndNudge(t *testing.T) {
 	o.Healer = "Healy"
 
 	g := newFakeRemote(t)
-	g.party[1].Power = 500 // Healy 50%: rested
+	g.party[1].Power = 600 // Healy 60%: rested
 	g.party[2].Power = 360 // Magey 36%: rested
 	rep, err := runRemote(t, g, plan, o, nil)
 	if err != nil || rep.RestGates[0].Seconds > 1 || rep.RestGates[0].Result != "rested" || len(g.ordersOf("cmd rest")) != 0 {
 		t.Fatalf("%v %+v %v", err, rep.RestGates, g.orders)
 	}
 
-	// Healy at 29% is below HealerManaMin: the gate waits for her to its cap, here 40 s.
+	// Healy at 29% is below HealerManaMin: the gate waits for her to its cap, here 40 s, and 90 s more for the pull floor (RestPullExtra).
 	g = newFakeRemote(t)
 	g.party[1].Power = 290
 	rep, err = runRemote(t, g, plan, o, func(c *Config) { c.RestTimeout = 40 * time.Second })
 	gate := rep.RestGates[0]
-	if err != nil || gate.Result != "gave_up" || gate.Seconds < 40 || gate.Seconds > 46 || !slices.Equal(gate.Short, []string{"Healy mana 29%"}) {
+	if err != nil || gate.Result != "gave_up" || gate.Seconds < 130 || gate.Seconds > 136 || !gate.PullFloorWait || !slices.Equal(gate.Short, []string{"Healy mana 29%"}) {
 		t.Fatalf("%v %+v", err, gate)
 	}
 
@@ -251,15 +251,15 @@ func TestRemoteRestGateTargetsAndNudge(t *testing.T) {
 		t.Fatalf("%v %+v", err, rep.RestGates)
 	}
 
-	// The default cap is 60 s; the nudge is a second `cmd rest` at 15 s (the first went out at the start), recorded and counted once.
+	// The default cap is 60 s (and 90 s more for a healer under the pull floor); the nudge is a second `cmd rest` at 15 s (the first went out at the start), recorded and counted once.
 	g = newFakeRemote(t)
 	g.party[1].Power = 290
 	rep, err = runRemote(t, g, plan, o, nil)
 	gate = rep.RestGates[0]
-	if err != nil || gate.Seconds < 60 || gate.Seconds > 66 || gate.MaxS != 60 || !gate.DrinkOrderSent || !slices.Equal(gate.DrinkOrders, []string{"Healy"}) {
+	if err != nil || gate.Seconds < 150 || gate.Seconds > 160 || gate.MaxS != 60 || !gate.DrinkOrderSent || !slices.Equal(gate.DrinkOrders, []string{"Healy"}) {
 		t.Fatalf("%v %+v", err, gate)
 	}
-	if n := len(g.ordersOf("cmd rest")); n != 2 {
+	if n := len(g.ordersOf("cmd rest")); n < 2 { // the start and the nudge, then one every 45 s of the longer wait
 		t.Fatalf("cmd rest sent %d times: %v", n, g.orders)
 	}
 	if rep.RestSeconds < 60 || rep.RestSeconds != rep.Legs[0].RestSeconds {
