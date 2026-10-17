@@ -79,6 +79,9 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 		if len(res.Exempt) > 0 {
 			fmt.Fprintf(stdout, "%s: %d hops exempted by the plan (check_skip)\n%s\n", n, len(res.Exempt), res.ExemptSummary())
 		}
+		if len(res.RunLeader) > 0 {
+			fmt.Fprintf(stdout, "%s: %d packs or bosses the TortoiseBots run leader walks toward in hops of its own (give them approach points)\n%s\n", n, len(res.RunLeader), res.RunLeaderSummary())
+		}
 		if len(res.Warnings) > 0 {
 			fmt.Fprintf(stdout, "%s: %d warnings\n%s\n", n, len(res.Warnings), res.WarningSummary())
 		}
@@ -211,6 +214,9 @@ func (r *dungeonRunner) planCheck(p planCheckParams) (planCheckResult, error) {
 	}
 	if res.Exempt == nil {
 		res.Exempt = []dungeon.PlanIssue{}
+	}
+	if res.RunLeader == nil {
+		res.RunLeader = []dungeon.PlanIssue{}
 	}
 	return res, nil
 }
