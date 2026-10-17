@@ -80,6 +80,16 @@ func LoadTokens(path string) (*Tokens, error) {
 	return t, nil
 }
 
+// Has reports whether the file has a token with this label.
+func (t *Tokens) Has(label string) bool {
+	for _, e := range t.list {
+		if e.label == label {
+			return true
+		}
+	}
+	return false
+}
+
 // Failure limit: a host that fails this many times in the window is answered 429 without its token being looked at.
 const (
 	maxFails   = 10

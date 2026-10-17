@@ -306,7 +306,22 @@ svg .edh.to .vis { fill: #fb923c; }
 svg .edh.lock .vis { fill: #9aa3b2; cursor: not-allowed; }
 svg .edh.sel .vis { stroke: #fff; stroke-width: 3.5; }
 svg .edh.picked .vis { stroke: #a78bfa; stroke-width: 3.5; }
+svg .edh.red .vis { stroke: #ef4444; stroke-width: 3.5; }
 svg .edm { cursor: copy; }
+/* always-on editing: the handles show when the mouse is on the leg's line or a point, or a point is selected (on a touch screen: always) */
+svg.editing .edleg .edh .vis, svg.editing .edleg .edm .vis { opacity: 0; transition: opacity .12s; }
+svg.editing .edleg:hover .edh .vis, svg.editing .edleg:hover .edm .vis, svg.editing .edleg .edh.sel .vis, svg.editing .edleg .edm.tmp .vis { opacity: 1; }
+@media (hover: none) { svg.editing .edleg .edh .vis, svg.editing .edleg .edm .vis { opacity: 1; } }
+svg .ed-hit { fill: none; stroke: transparent; stroke-width: 14; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: copy; }
+svg .edpack .hit { fill: transparent; stroke: none; pointer-events: all; }
+.editbox .unsavedbar { position: sticky; top: 0; z-index: 2; display: grid; gap: 4px; padding: 6px 8px; border: 2px solid var(--warn); border-radius: 6px; background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
+.editbox .unsavedbar .mb { justify-self: start; }
+.editbox .edhelp ul { margin: 2px 0 2px 16px; padding: 0; }
+.editbox .edkey { list-style: none; margin-left: 4px; }
+.editbox .edkey li { display: flex; align-items: center; gap: 6px; }
+.editbox .ks { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #000; flex: none; }
+.editbox .ks.yellow { background: #fde047; } .editbox .ks.orange { background: #fb923c; } .editbox .ks.grey { background: #9aa3b2; }
+.editbox .ks.red { background: transparent; border: 2px dashed #ef4444; }
 svg .edm .vis { fill: rgba(253, 224, 71, .25); stroke: #fde047; stroke-width: 1.5; }
 svg .edissue path { fill: none; stroke: #9aa3b2; stroke-width: 3; }
 svg .edissue.new path { stroke: #ff3b3b; stroke-width: 4; }

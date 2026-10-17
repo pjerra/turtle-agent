@@ -38,7 +38,7 @@ function legSelFor(name, n) {
 }
 function setLegSel(name, sel) { legSel.set(name, sel); store("legsel:" + name, JSON.stringify(sel)); }
 // The route editor (routeeditui.js): the panel of the plan view and the handles on its map. It is there only when the dashboard was started with --edit.
-const EU = window.RouteEditUI.create({ h, s, MV, rerender: () => scheduleRender(), applyViewBox: (rec) => applyViewBox(rec), geoOf: (name) => { const g = plans.get(name); return g && g.legs ? g : null; }, currentPlan: () => (route.kind === "plan" ? route.plan : "") });
+const EU = window.RouteEditUI.create({ h, s, MV, rerender: () => scheduleRender(), applyViewBox: (rec) => applyViewBox(rec), geoOf: (name) => { const g = plans.get(name); return g && g.legs ? g : null; }, currentPlan: () => (route.kind === "plan" ? route.plan : ""), routeDoc: (name) => { const r = routes.get(name); return r && r.doc ? r.doc : null; } });
 // The real route (realroute.js): the navmesh walk of a plan, traced by the dashboard (GET /api/plan/<name>/route). plan name -> {key, doc, state, msg, at}; state is
 // loading, refreshing (the drawing is the last route, the new one is on its way), ok, off (the dashboard has no --mmaps-dir) or error. While the editor is
 // on, the route is asked with the edits made so far (the editor's route), so it follows each drop.

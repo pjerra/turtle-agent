@@ -3208,6 +3208,8 @@ turtle-agent dashboard --listen 100.101.102.103:8790 --plans-dir ~/wt-ta-x/dunge
 | `--edit-source` | the first `--plans-dir` | the folder whose plan files an edit starts from; the page draws and edits this copy |
 | `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json` (the whole plan, `dungeon.Marshal`), `vNNNN.meta.json` (who, when, base sha256 and git SHA, note, check result, ops, the plan diff) and `vNNNN.diff` (text diff). A refused edit keeps the record and the diff only |
 | `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | lines of `label token`, mode 0600, owned by you; the label is the recorded `who` |
+| `--edit-trust-local` | off | saves from this machine, or from a Tailscale address you named, need no token typed: the server uses its own (below). Needs `--edit` |
+| `--edit-trust-label` | `owner` | with `--edit-trust-local`: the label in the token file the trusted saves are made as (startup fails when it is not there) |
 
 The request carries ops, never a plan (`{"base_sha256", "note", "ops": [{"leg", "kind": "move"|"insert"|"delete", "index", "x", "y"}]}`, game
 coordinates; index counts the leg's via points, then `to`). The server applies them to a copy of the base file it reads itself: only the
@@ -3219,16 +3221,55 @@ it makes a plan check issue the base plan did not have, or cannot be checked. A 
 issue at all (exempt `check_skip` hops aside). An edit that adds none to a plan that has issues of its own is kept as "unchecked" (the plan file is
 kept, so work can go on from it) and is never picked by `latest`, `export` or `promote`.
 
-**The page.** With `--edit` the plan view (`#/plan/<name>`) has a "Route editor" box. "Edit route" puts yellow handles on the map: drag a
-via point or a leg's stage point (`to`, orange); click the pale circle in the middle of a segment to add a point there (or drag it to put the
-point where you drop it); click a point and press Delete (or the button) to remove it. Grey points are locked (direct and check_skip hops). Each
-drop asks the server where the point lands (`/snap`): a floor picked among several is marked purple, a point off the mesh is refused on the
-spot. Undo and redo (Ctrl+Z, Ctrl+Y) step through the edits; the edits are one list of ops against the plan file, so saving always sends all
-of them. "Save version" asks for the editing token (kept in this browser tab's `sessionStorage` only, sent in the `Authorization` header
-only), sends the ops, and shows the result: checked or refused, the new plan check issues (red marks on the map, the reason on hover), the
-changes in words ("leg 3 (theka): via 2 moved 6.1 yd east"), and the text diff. The version list has Diff, Load (put a version's edits on the
-map) and Revert (a new version equal to an older one; versions are never overwritten). Hiding a leg hides its handles. The box says why
-editing is off when the map does not show the file edits start from (`--edit-source`).
+**The page.** With `--edit` the route is editable as soon as the plan view (`#/plan/<name>`) opens: there is no Edit button. Hover a leg's line
+and its points appear (always, on a touch screen); a selected point stays visible. Drag a point to move it (a via point, or the leg's stage
+point, orange, where the party gathers); click a line, or drag from it, to add a point there; click a point and press Delete to remove it;
+Ctrl+Z / Ctrl+Y undo and redo; Esc cancels a drag. Grey points are locked (direct and check_skip hops). A "How to edit" box says this and what
+the colours mean. Every point and line says what it is in words ("Walk point 3 of leg Baelog", "Where the party gathers before Baelog",
+"Pack: 2 Stonevault Oracles"; a creature the plan's notes do not name is "creature <entry>") and, on hover, what the bots do there, the walk
+length, and the reason when it is red (the planner finds no path, or a plan check issue). Each drop asks the server where the point lands
+(`/snap`): a floor picked among several is marked purple, a point off the mesh is refused on the spot. The edits are one list of ops against the
+plan file, so saving always sends all of them.
+
+Unsaved work is never silent: an "Unsaved changes" bar (with Save and Discard) is at the top of the box while the edits differ from the last
+save, the browser asks before a reload or close, and the edits and note are kept as a draft in the tab's `sessionStorage` (and taken back after a
+reload, only on the same plan file; a blocked or full storage just means no draft). Save asks for the editing token (kept in this tab's
+`sessionStorage` only, sent in the `Authorization` header only), sends the ops, and shows the result: checked or refused, the new plan check
+issues (red marks on the map, the reason on hover), the changes in words ("leg 3 (theka): via 2 moved 6.1 yd east"), and the text diff. The
+version list has Diff, Load (put a version's edits on the map) and Revert (a new version equal to an older one; versions are never overwritten).
+Hiding a leg hides its handles. The box says why editing is off when the map does not show the file edits start from (`--edit-source`).
+
+**No token typing on your own laptop (`--edit-trust-local`).** Off by default. With it, a save that sends **no** `Authorization` header is made
+as the `--edit-trust-label` token's owner when the request's TCP peer is (a) a connection from this machine (loopback, or the `--listen`
+address, **and the request's Host is that literal address**: a host name never counts as local) whose client socket belongs to the **same user as the dashboard** (the kernel's `/proc/net/tcp` says whose; Linux only, elsewhere this
+never trusts), or (b) a literal Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) that is in `--allow-host`, from another machine, **and** only when the
+connection reached a Tailscale address of the dashboard (not a LAN, public or wildcard-listener path that happens to carry that source address).
+`GET /api/edit/status` then answers `"local_trusted": true` and the page hides the token field. The token itself stays in the server: it is not in
+any answer, page, version record or log, and the browser never holds it. Threat model:
+
+- *What is trusted is the peer address, never a header the caller writes.* A Tailscale source address arriving on the dashboard's Tailscale address is authenticated by
+  WireGuard, so another device cannot claim it. A **name** in `--allow-host` says how the page may be opened (the Host header), not who is calling, so it is never
+  trusted; nor is a LAN or public address (they are listed at start-up as "not trusted as callers").
+- *A remote viewer not on the list still needs the token*, exactly as before: the same token check, the same ten-failures lockout.
+- *A request that sends any `Authorization` header is judged by that token alone*, trusted address or not (a wrong token is not forgiven).
+- *A local caller must be you.* A relay that connects from this machine (a reverse proxy, a port forward, another user's SSH tunnel) is a
+  local socket too, so it is trusted only if it runs as the dashboard's user (which could read the token file anyway); a relay of another user, or
+  one the kernel does not show, is not. Requests carrying `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `Via`, `Tailscale-User-*` or similar are never
+  trusted either.
+- *DNS rebinding.* A name in `--allow-host` that someone else controls can be rebound to 127.0.0.1 and then serves a same-origin page that talks to a
+  local socket of your user. So a same-machine caller is trusted only when its Host is a literal loopback address or the literal address the
+  connection was accepted on; by name, only the remote Tailscale branch applies (the owner on another device opening the page by its Tailscale name).
+- *A page capability.* `GET /api/edit/status` gives a trusted caller a random per-process nonce (`trust_nonce`, not derived from any token) and a
+  trusted save must echo it in `X-Route-Edit-Nonce` (a custom header, so a cross-site request needs a pre-flight the guard refuses); a missing or
+  wrong nonce is a 401. A save with the real token needs none.
+- *No cross-site saves from the owner's own browser.* A trusted request that has an `Origin` must have the one equal to its Host, and a
+  `Sec-Fetch-Site` must be `same-origin` or `none`; on top of that the unchanged guard demands `Content-Type: application/json` (a form cannot
+  send it, a cross-site fetch must pre-flight and the guard answers every OPTIONS with 405) and the Host check (DNS rebinding sends a Host that is
+  not listed).
+- *What it cannot do:* tell a forwarder run by you from you. Anything that runs as your user and relays strangers' requests to the dashboard
+  (a `socat` you left open, your own SSH tunnel handed to someone) is you, as far as the dashboard can see; it could also read the token file. A
+  save is still only a checked version in `--edit-dir`; it never reaches a slot's plan folder. If the browser reaches the dashboard through a relay
+  of another user (WSL's Windows forwarder may be one), nothing is trusted and the token field stays.
 
 Safety: every POST needs `Authorization: Bearer <token>` (a header, so a form on another site cannot send one), `Content-Type:
 application/json` and at most 64 KiB; ten wrong tokens from one address lock it out for a minute; the Host check is unchanged. Files are
