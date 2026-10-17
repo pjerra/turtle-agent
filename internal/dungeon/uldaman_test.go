@@ -381,17 +381,23 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 }
 
 // sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
-// (where the leg before it ends, the scorpid pit), a direct step under the rock overhang to -162.8 294.8 (in the hole) and a direct step
-// up the ramp to -158.4 283.7, the first point of the east mesh.
+// (where the leg before it ends, the scorpid pit), a direct step to -161.1 284.5 on the pit floor (the last navmesh point before the ramp)
+// and a direct step up the ramp to -158.4 283.7, the first point of the east mesh.
 const sentinelLeg = 5
+
+// pitFloor is the first direct step's end since 2026-10-17 (live run uldaman-events-2): the old point under the rock overhang,
+// -162.8 294.8 -51.2, was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the next direct step summoned it.
+// This one is on the mesh with a complete path from the lip (17.0 yd), and the step up the ramp from it is 4.2 yd. Its sight lines were
+// checked on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70): clear 1.5, 2 and 2.5 yd up, to the ramp top both ways and
+// from the lip; vmap floor -52.32.
+var pitFloor = Point{X: -161.1, Y: 284.5, Z: -52.1}
 
 // holeFloor are plan points inside the navmesh hole at the scorpid pit, between two direct steps: no mesh floor stands in for the
 // server's ground check there, so it was checked on the live map 70 vmap with the core's own VMapManager2::getHeight and
 // isInLineOfSight (lostool on the test VM, ~/tb-ci/vmaps70, 2026-10-14): floor -51.25 and 3.1 yd clear above it, in sight (2 yd up,
 // both ways) of the lip and of the ramp top from every floor point within 1 yd of them. A hole point must be followed by a direct step.
-var holeFloor = map[Point]string{
-	{X: -162.8, Y: 294.8, Z: -51.2}: "under the high side of the rock overhang south of the pit lip",
-}
+// Since 2026-10-17 the plan has none (pitFloor is on the mesh); the map stays for a later point that needs it.
+var holeFloor = map[Point]string{}
 
 // shelfPacks are pack positions on a navmesh island next to the route: no path reaches them, the pack is pulled from its group's approach
 // point (it comes down to the party), and the walk goes on from there. The path toward one must end within shelfReach of it.
@@ -773,12 +779,12 @@ func TestUldamanDirectSteps(t *testing.T) {
 		}
 	}
 	if found != 2 {
-		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (under the overhang, then up the ramp to the east mesh)", found)
+		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (to the pit floor, then up the ramp to the east mesh)", found)
 	}
 	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || !v[1].Direct || !v[2].Direct {
 		t.Fatalf("legs[%d] via %v: want the lip, then the two direct steps", sentinelLeg, v)
-	} else if _, hole := holeFloor[v[1].Point]; !hole {
-		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked point under the overhang (holeFloor)", sentinelLeg, v[1].Point)
+	} else if v[1].Point != pitFloor {
+		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked pit floor point %v (pitFloor)", sentinelLeg, v[1].Point, pitFloor)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
