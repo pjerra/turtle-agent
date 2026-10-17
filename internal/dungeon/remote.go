@@ -2509,6 +2509,14 @@ func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
 		d.look()
 		missing := d.awayFromLead(float64(d.tx.GatherNear))
 		dead := d.deadMembers()
+		if len(dead) == 0 && len(d.offMapMembers()) > 0 {
+			// Alive but outside the dungeon (a party released to a graveyard on another map: zf-r5): near the lead bot is not back. The lead
+			// bot goes in first (bringPartyIn), the others to it.
+			if err := d.bringPartyIn(ctx); err != nil {
+				return err
+			}
+			continue
+		}
 		if len(missing) == 0 && len(dead) == 0 {
 			if noted {
 				d.rep.note(fmt.Sprintf("recovery: every member is alive and with the lead bot again (%.0f s after the revives)", d.clk.Now().Sub(until.Add(-revivedRejoinWait)).Seconds()))

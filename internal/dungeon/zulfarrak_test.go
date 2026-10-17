@@ -79,7 +79,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
 		}
-		if (len(l.Steps) != 0 && !zfStepLegs[l.Name] && l.Name != "gahzrilla") || (len(l.AfterBoss) != 0 && l.Name != "stairs_base") {
+		if (len(l.Steps) != 0 && !zfStepLegs[l.Name] && l.Name != "gahzrilla") || (len(l.AfterBoss) != 0 && l.Name != "stairs_base" && l.Name != "stairs") {
 			t.Errorf("the plan has steps only in the Zum'rah leg and the stairs event's legs and the gong: %s", l.Name)
 		}
 		for _, g := range l.PullGroups {
@@ -88,7 +88,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul antusul_c antusul_b theka velratha velratha_b gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7275 7604 7267]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul antusul_c antusul_b theka velratha velratha_b gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7274 7275 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the

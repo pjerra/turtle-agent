@@ -568,6 +568,13 @@ func (d *RemoteDriver) bringPartyIn(ctx context.Context) error {
 	gm := isF && d.agentGM(ctx, f)
 	if d.leadOutside() {
 		l, _ := d.fr.LeadRec()
+		if gm {
+			if _, am, here := f.AgentPlace(); here && am != d.plan.Map {
+				// The agent's own character stands outside too (a `cmd enter` run: it stays at the door): no `.summon` into the instance; the
+				// bots are summoned to the commander and enter again (remote_outside.go).
+				return d.reenterFromOutside(ctx, f)
+			}
+		}
 		sb, canSummon := d.g.(BotSummoner)
 		if !gm || !canSummon {
 			return d.waitPartyIn(ctx, fmt.Sprintf("the lead bot %s stands on map %d, outside the dungeon, and no GM account can summon it in", l.Name, l.Map))

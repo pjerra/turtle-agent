@@ -183,6 +183,8 @@ type Config struct {
 	// RestHealerManaPct is the healer's mana target (a leg's rest.healer_mana overrides it). In remote mode the feed carries no class:
 	// the bot named by RemoteOptions.Healer has it, and without one every caster does.
 	RestHealerManaPct int
+	// GravesHealerManaPct is the healer's mana (percent) under which the next grave batch waits (remote_batch.go healerManaWait; default 60).
+	GravesHealerManaPct int
 	// DrinkNudge is how long a member short of mana may show no rise at all before it gets one drink order of its own.
 	DrinkNudge time.Duration
 	// RestWalkYd is how far (yards) the walk that follows a leg's start gate must be for the gate to let the party rest while it walks
@@ -239,7 +241,7 @@ func DefaultConfig() Config {
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
 		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, BossSearch: 60 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
-		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 60, RestPullTankPct: 80, RestPullHealerManaPct: 60, RestPullExtra: 90 * time.Second, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
+		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 60, GravesHealerManaPct: 60, RestPullTankPct: 80, RestPullHealerManaPct: 60, RestPullExtra: 90 * time.Second, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
 		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
@@ -289,6 +291,7 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestHealthPct, d.RestHealthPct)
 	fillInt(&c.RestManaPct, d.RestManaPct)
 	fillInt(&c.RestHealerManaPct, d.RestHealerManaPct)
+	fillInt(&c.GravesHealerManaPct, d.GravesHealerManaPct)
 	fill(&c.DrinkNudge, d.DrinkNudge)
 	if c.RestWalkYd == 0 {
 		c.RestWalkYd = d.RestWalkYd

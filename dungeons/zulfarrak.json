@@ -530,7 +530,7 @@
     },
     {
       "name": "velratha_b",
-      "to": {"x": 1645, "y": 1144, "z": 9.2},
+      "to": {"x": 1633.6, "y": 1130.7, "z": 9.9},
       "pull_groups": [
         {
           "entries": [5649, 5649, 5649, 5650, 7246],
@@ -577,7 +577,7 @@
       },
       "notes": [
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) is not used by this leg: the optional gahzrilla leg after it rings it, with a Mallet (PR A); Gahz'rilla's pit is at 1664.7 1187.7 -2.9. The lone Blood Drinker at 1714.4 1218.6 (5649) is no pull group of this leg: the plan check passes it, but live the tank found no firing position for it (a server refusal) in two batch-2 runs, both finished without it, and it lies beyond the boss; the gahzrilla leg pulls it last, where it stands 13 yd from Gahz'rilla's end point.",
-        "Route edit Z2 (2026-10-16, test it in one group): the leg is split at the pack of five at 1636 1105 (group 1 here) so that it is pulled from the north stand 1645 1144 (82-85 yd of navmesh), not from the west stand 1585 1075, where the pack is walled off (154 yd of navmesh for 40 yd of line). Every pull from the west failed in round 3: evaded after 109 s in s2b, 25 s no_engage and 74 s evaded in s4-b, an error and an evade (172 s) in s1e; the north pull won each time (103-125 s). Velratha (1650 1161, 18 yd from the stand) joined the pull of the pack in s2b and s1e: expect her in the fight and keep the Healing Ward in kill_first. The `velratha` leg now ends at the pack of four at 1601-1610 1104-1111 (stand 1585 1075, 92 yd of navmesh from the north stand)."
+        "Route edit Z2 (2026-10-16, test it in one group): the leg is split at the pack of five at 1636 1105 (group 1 here) so that it is pulled from the north stand 1645 1144 (82-85 yd of navmesh), not from the west stand 1585 1075, where the pack is walled off (154 yd of navmesh for 40 yd of line). Every pull from the west failed in round 3: evaded after 109 s in s2b, 25 s no_engage and 74 s evaded in s4-b, an error and an evade (172 s) in s1e; the north pull won each time (103-125 s). Velratha (1650 1161, 18 yd from the stand) joined the pull of the pack in s2b and s1e: expect her in the fight and keep the Healing Ward in kill_first. The `velratha` leg now ends at the pack of four at 1601-1610 1104-1111 (stand 1585 1075, 92 yd of navmesh from the north stand). ZF round 5 (2026-10-17, trace zf-r5): the north stand 1645 1144 is 16.6 yd from the strip Velratha patrols ((1658.6 1153.6) to (1636.5 1174.7)), so the pull of the pack of five opened the fight with Velratha (7795) and her Healing Ward adds on top: nine mobs, the healer took the threat (three threat waits of 10 s ran out with the tank not on top), and the party wiped at 23:32. The stand is now 1633.6 1130.7 (a vertex of the navmesh path from the north stand to the pack): 33.9 yd from the strip, 24 yd from the pack, which is outside the aggro range of both (the pack is pulled from there, pull_range 45). The route from the west stand goes by (1636.5 1138.4), 26 yd from the strip, and ends 16 yd short of the old stand. If she still joins, give the run a tune file with threat_wait_s 15 and opener_delay_s 4 so that the party waits for the tank's threat lead before it engages."
       ]
     },
     {
@@ -1106,22 +1106,20 @@
       "via": [
         {"x": 1892.3, "y": 1198.4, "z": 8.9}
       ],
-      "pull_groups": [
-        {
-          "entries": [7274],
-          "positions": [
-            {"x": 1886.8, "y": 1286.8, "z": 44.2}
-          ],
-          "radius": 15
-        }
-      ],
       "skip": [7604, 7605, 7606, 7607, 7608, 7269],
-      "steps": [
+      "boss": {
+        "entry": 7274,
+        "position": {"x": 1886.8, "y": 1286.8, "z": 44.2},
+        "loot_item": {"entry": 8444, "name": "Executioner's Key"}
+      },
+      "companions_loot": false,
+      "after_boss": [
         {
           "use_object": {
             "entry": 141073,
             "near": {"x": 1886.9, "y": 1298.9, "z": 48.2},
-            "stand": {"x": 1886.9, "y": 1295.4, "z": 48.3}
+            "stand": {"x": 1886.9, "y": 1295.4, "z": 48.3},
+            "requires_item": {"entry": 8444, "name": "Executioner's Key"}
           }
         },
         {
@@ -1137,9 +1135,8 @@
           }
         }
       ],
-      "companions_loot": false,
       "notes": [
-        "NEEDS A LIVE RUN. Leg 1 of 3 of the stairs event (instance_zulfarrak.cpp, zulfarrak.cpp go_troll_cage): the Sandfury Executioner (7274, spawn row 81552 at 1886.79 1286.76 44.19) is the one pack at the cages; then any of the five Troll Cages (141070-141074; the plan uses 141073 at 1886.88 1298.94 48.2) is used: its script frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608) (faction 250, hostile to trolls, friendly to the party) and sends them to the top of the stairs (1883-1891 1263-1273 z 41-42). When Weegli reaches 1883.9 1263.5 the event is PYRAMID_ARRIVED_AT_STAIR and the next instance update spawns wave 1: the wait ends when he is in view near there. The stand is 3.6 yd from the cage on the platform at z 48.3 (a use is refused beyond about 5 yd). The leg also has the bots' looting off from its start to its end (companions_loot false, the zumrah leg's rule): the shortest walk from Zum'rah's spot (1912.2 1016.1) to the courtyard crosses the graveyard (TestZulfarrakOnNavmesh: 1904 1018, 1899 1019, 1859 1058), where the three graves left to him (1887.9 1029.1, 1892.6 1006.4, 1891.6 1023.1) may still be shut, and a bot that loots opens a Shallow Grave chest and wakes what lies in it. The cost is that the Executioner's corpse is not looted by the bots."
+        "NEEDS A LIVE RUN. Leg 1 of 3 of the stairs event (instance_zulfarrak.cpp, zulfarrak.cpp go_troll_cage): the Sandfury Executioner (7274, spawn row 81552 at 1886.79 1286.76 44.19) is the one pack at the cages; then any of the five Troll Cages (141070-141074; the plan uses 141073 at 1886.88 1298.94 48.2) is used: its script frees Sergeant Bly (7604), Raven (7605), Oro Eyegouge (7606), Weegli Blastfuse (7607) and Murta Grimgut (7608) (faction 250, hostile to trolls, friendly to the party) and sends them to the top of the stairs (1883-1891 1263-1273 z 41-42). When Weegli reaches 1883.9 1263.5 the event is PYRAMID_ARRIVED_AT_STAIR and the next instance update spawns wave 1: the wait ends when he is in view near there. The stand is 3.6 yd from the cage on the platform at z 48.3 (a use is refused beyond about 5 yd). The leg also has the bots' looting off from its start to its end (companions_loot false, the zumrah leg's rule): the shortest walk from Zum'rah's spot (1912.2 1016.1) to the courtyard crosses the graveyard (TestZulfarrakOnNavmesh: 1904 1018, 1899 1019, 1859 1058), where the three graves left to him (1887.9 1029.1, 1892.6 1006.4, 1891.6 1023.1) may still be shut, and a bot that loots opens a Shallow Grave chest and wakes what lies in it. The Executioner is the leg's boss (zf-r5, round 5: the cage open was refused \"no-item\" because nothing looted him): the carrier takes his Executioner's Key (8444, 100% drop, creature_loot_template) with cmd loot after the kill, and the cage (lock 420, which needs that key) is used in after_boss. The leg's mute stays on for the walk; the loader accepts it together with the boss's loot_item."
       ]
     },
     {
