@@ -556,6 +556,97 @@ func TestGMCrossIsRefused(t *testing.T) {
 	}
 }
 
+// TestGMCrossDirect: with GMCrossDirect a gm_cross waypoint is a move_direct row whose comment says it is not tried live, and a warning.
+func TestGMCrossDirect(t *testing.T) {
+	p := parsePlan(t, strings.Replace(small, `{"x":10,"y":0,"z":0,"direct":true}`, `{"x":10,"y":0,"z":0,"direct":true,"gm_cross":true}`, 1))
+	res, err := Build(p, Options{Source: "test", GMCrossDirect: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Leg == 0 && s.X == 10 {
+			got = &res.Rows.Steps[i]
+		}
+	}
+	if got == nil || got.Kind != KindMoveDirect || !strings.Contains(got.Comment, "gm_cross") {
+		t.Fatalf("%+v", got)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "gm_cross") || !strings.Contains(w, "not tried live") {
+		t.Fatalf("warnings: %q", w)
+	}
+}
+
+// TestApproachHops: with ApproachHops a pull more than 50 yd from the anchor before it gets the cutter's points as move rows before it,
+// without the ones within 25 yd of the pack; the hop after a fight is measured from the fight; without the option nothing is cut.
+func TestApproachHops(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},{"entries":[101],"positions":[{"x":120,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		var out []dungeon.Point
+		for x := a.X + 40; x < b.X; x += 40 {
+			out = append(out, dungeon.Point{X: x})
+		}
+		return out, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 -> 100: points at 50 and 90; 90 is within 25 yd of the pack at 100 and goes; 100 -> 120 is 20 yd, nothing to cut.
+	if got := strings.Join(kinds(res.Rows, 0), " "); got != "move move pull pull" {
+		t.Fatalf("%s", got)
+	}
+	if s := res.Rows.Steps[1]; s.X != 50 || s.Comment != "approach path" {
+		t.Fatalf("%+v", s)
+	}
+	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
+	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull pull" {
+		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
+	}
+}
+
+// TestRouteAroundAvoid: a plan with an avoid box asks Route for every hop between anchors (the entrance, moves, pulls) and puts the
+// points it returns in as move rows; an error from Route fails the export; a plan without a box never calls it.
+func TestRouteAroundAvoid(t *testing.T) {
+	const js = `{"version":1,"name":"lava","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
+ "avoid":[{"name":"basin","min":{"x":20,"y":-5,"z":-9},"max":{"x":30,"y":5,"z":-1},"why":"lava"}],
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":40,"y":20,"z":0}]}]}]}`
+	var calls [][2]dungeon.Point
+	route := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		calls = append(calls, [2]dungeon.Point{a, b})
+		if b.X == 40 {
+			return []dungeon.Point{{X: 25, Y: 20, Z: 0}}, nil
+		}
+		return nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(kinds(res.Rows, 0), " "); got != "move move pull" {
+		t.Fatalf("%s", got)
+	}
+	if len(calls) != 2 || calls[1][0].X != 10 {
+		t.Fatalf("calls %+v", calls)
+	}
+	if s := res.Rows.Steps[1]; s.X != 25 || s.Seq != 1 || !strings.Contains(s.Comment, "avoid box") {
+		t.Fatalf("%+v", s)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "1 via points added") {
+		t.Fatalf("warnings: %q", w)
+	}
+	if _, err := Build(parsePlan(t, js), Options{Source: "test", Route: func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+		return nil, errors.New("no safe path")
+	}}); err == nil || !strings.Contains(err.Error(), "no safe path") {
+		t.Fatalf("%v", err)
+	}
+	n := 0
+	if _, err := Build(parsePlan(t, strings.Replace(js, `"avoid":[{"name":"basin","min":{"x":20,"y":-5,"z":-9},"max":{"x":30,"y":5,"z":-1},"why":"lava"}],`, ``, 1)), Options{Source: "test", Route: func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) { n++; return nil, nil }}); err != nil || n != 0 {
+		t.Fatalf("%v, %d calls", err, n)
+	}
+}
+
 // TestApproachAndHold: a pull group's and a boss's approach points are move rows before their row; a hold is a hold row in place of the
 // pull or boss (instance data, DONE, flags 40, the event's entries), the move straight before it to its spot is left out, the game object
 // wait straight after it waits at most 60 s, and a ritual's row carries its participants.
