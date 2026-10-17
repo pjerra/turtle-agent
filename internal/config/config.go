@@ -57,6 +57,10 @@ type Settings struct {
 	// Addons overrides the addon list sent at world login (default: a stock 1.12.1 client's
 	// Blizzard_* set). It must include the four fingerprint addons, see worldconn.StockAddons.
 	Addons []string `json:"addons,omitempty"`
+	// RunMeta is the default AI driver of the slot's runs (model, effort, run label): dungeon_run's run_meta wins when it
+	// names one. Only with server_trace (off by default) does a remote run send `.bot trace start <run_id> ...
+	// driver=<model>:<effort>:<run>` and stop that trace at the end (a group run never sends it).
+	RunMeta RunMeta `json:"run_meta,omitempty"`
 	// SharedFingerprint makes every account present one addon fingerprint (one file, as for
 	// one real PC). Off by default: the core's anticheat bans by a hash of fingerprint and IP,
 	// so a shared print marked on one account would reach all of them.
@@ -121,6 +125,48 @@ func Load(path string) (Settings, error) {
 	return s, nil
 }
 
+// RunMeta is the settings file's run_meta default (dungeon.RunMeta: the same keys). Unknown keys are refused by the
+// decoder.
+type RunMeta struct {
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"`
+	Run         string `json:"run,omitempty"`
+	ServerTrace bool   `json:"server_trace,omitempty"`
+}
+
+// checkRunMeta refuses a run_meta default the server's driver= field cannot carry: model, effort and run, each at most
+// 64 letters, digits and . _ - + (no colon: it joins the driver value), and the joined driver=<model>:<effort>:<run> at
+// most 96 characters; server_trace needs a driver to send.
+func checkRunMeta(r RunMeta) error {
+	m := map[string]string{"model": r.Model, "effort": r.Effort, "run": r.Run}
+	if r.ServerTrace && r.Model == "" && r.Effort == "" && r.Run == "" {
+		return errors.New(`"run_meta.server_trace" needs run_meta's model, effort or run: the server trace sends the driver`)
+	}
+	for _, k := range []string{"model", "effort", "run"} {
+		v := m[k]
+		if len(v) > 64 {
+			return fmt.Errorf(`"run_meta.%s" is longer than 64 characters`, k)
+		}
+		for _, c := range v {
+			ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+				c == '.' || c == '_' || c == '-' || c == '+'
+			if !ok {
+				return fmt.Errorf(`"run_meta.%s" takes letters, digits and . _ - + only (no colon: it joins the driver value)`, k)
+			}
+		}
+	}
+	dash := func(s string) string {
+		if s == "" {
+			return "-"
+		}
+		return s
+	}
+	if driver := dash(m["model"]) + ":" + dash(m["effort"]) + ":" + dash(m["run"]); len(driver) > 96 {
+		return fmt.Errorf(`"run_meta": the driver value %q is longer than 96 characters (the server's limit)`, driver)
+	}
+	return nil
+}
+
 func (s Settings) validate() error {
 	if host, port, err := net.SplitHostPort(s.Realmd); err != nil || host == "" || port == "" {
 		return errors.New(`"realmd" must be host:port (RealmServerPort from the server's realmd.conf)`)
@@ -163,6 +209,9 @@ func (s Settings) validate() error {
 	}
 	if len(s.Accounts) == 0 {
 		return errors.New(`"accounts" must map at least one account name to its password`)
+	}
+	if err := checkRunMeta(s.RunMeta); err != nil {
+		return err
 	}
 	for name, pw := range s.Accounts {
 		if name == "" || pw == "" {

@@ -104,6 +104,10 @@ func (l *fakeLeader) Command(ctx context.Context, command string) (tbm.Reply, er
 	g := l.fakeRemote
 	g.orders = append(g.orders, command)
 	g.orderAt = append(g.orderAt, g.now)
+	if g.panicOn != "" && strings.HasPrefix(command, g.panicOn) {
+		g.panicOn = ""
+		panic("boom")
+	}
 	intent := f[0] + " " + f[1]
 	if l.listText == "" && f[1] == "list" {
 		return tbm.Reply{Kind: tbm.KindTimeout, Lines: []string{}}, nil // an older server: .bot run is not a command

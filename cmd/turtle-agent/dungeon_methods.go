@@ -108,6 +108,16 @@ func recoverWipeOn(v *bool, commander bool) bool {
 	return commander
 }
 
+// resolveRunMeta is the run's AI driver: dungeon_run's run_meta when it names a driver, else the slot's settings default.
+// Zero when neither names one: nothing is sent to the server then. An explicit but empty run_meta ({}) counts as absent,
+// so it does not switch the slot default off.
+func resolveRunMeta(p *dungeon.RunMeta, def dungeon.RunMeta) dungeon.RunMeta {
+	if p != nil && p.Set() {
+		return *p
+	}
+	return def
+}
+
 type dungeonRunParams struct {
 	Name string `json:"name"`
 	// AllowDraft lets the run take a plan whose status is "draft": a skeleton from the world database that has not had its mapping walk
@@ -235,6 +245,11 @@ type dungeonRunParams struct {
 	// header (the server build, the TortoiseBots SHA, a scenario name): at most 16 entries.
 	Trace     *bool             `json:"trace,omitempty"`
 	TraceMeta map[string]string `json:"trace_meta,omitempty"`
+	// RunMeta names the AI driver of the run (model, effort, run label): every run writes it into the trace header and the
+	// run report. With server_trace (opt-in) a remote run also sends `.bot trace start <run_id> ... driver=<model>:<effort>:<run>`
+	// so the server's summary and the agent's trace join on the run id, and stops that trace at the end (a group run never
+	// sends it). Omitted: the settings file's run_meta, when it names one; a call's run_meta replaces it whole.
+	RunMeta *dungeon.RunMeta `json:"run_meta,omitempty"`
 	// Watchdog sets the progress watchdog's stall levels in seconds without progress (README "Run watchdog"): warn_s (a stall event and a
 	// note), recover_s (one recovery attempt suited to the phase), fail_s (the run stops with "stalled: ..."). Defaults 120/240/420; a zero
 	// field takes the plan's own or the default, a negative one turns that level off. It wins field by field over the plan's "watchdog".
@@ -314,6 +329,8 @@ type dungeonRunner struct {
 	remote *commanderService
 	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
 	tracesDir string
+	// runMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
+	runMeta dungeon.RunMeta
 	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
 	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.
@@ -589,6 +606,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
+	cfg.RunMeta = resolveRunMeta(p.RunMeta, r.runMeta)
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
 	cfg.RecoverWipe, cfg.WaitSickness = recoverWipeOn(p.RecoverWipe, false), p.WaitSickness
 	if p.Watchdog != nil {

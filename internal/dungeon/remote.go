@@ -148,6 +148,9 @@ type RemoteOptions struct {
 	GiveItems []GiveItem
 	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
 	Pulltest *PulltestSpec
+	// RunMeta names the AI driver of the run (model, effort, run label): it goes into the trace header and the run report, and with
+	// RunMeta.ServerTrace (opt-in) to the server's run record (`.bot trace start ... driver=<model>:<effort>:<run>`). Zero: nothing is sent.
+	RunMeta RunMeta
 	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
 	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
 	Observe *ObserveSpec
@@ -522,8 +525,9 @@ type RemoteDriver struct {
 	nAt     time.Time // when the driver saw n change
 	stalled bool
 
-	bound     bool
-	unbinding bool
+	bound       bool
+	unbinding   bool
+	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
 	entryRecorded bool      // the instance the lead bot entered is in the ledger
@@ -755,6 +759,11 @@ func (d *RemoteDriver) finish(err error) {
 		data["degraded"] = deg
 	}
 	d.emit(kind, text, data)
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), d.opt.UnbindWait+serverTraceStopWait)
+	if why := d.stopServerTrace(stopCtx); why != "" {
+		d.rep.note(why + ": the server trace may still be running: stop it by hand (.bot trace stop)")
+	}
+	stopCancel()
 	d.traceEnd(state, errText, at)
 	d.rep.end(state, errText, at)
 }
@@ -788,6 +797,14 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	})
 	if err != nil {
 		return err
+	}
+	if d.serverTrace {
+		// The server's run trace was started and acknowledged (begin, right before this): whatever way this run
+		// ends — done, failed, stopped or a panic — it is stopped, and one stop succeeds. This deferred stop runs on
+		// every return of run, a panic's unwind too (before the unbind; it lets the panic go on), with its own context
+		// bounded by serverTraceStopWait: the run's may be cancelled already. finish, which runs after runRecovering,
+		// tries again only while the run still owns the trace (no stop answered yet).
+		defer d.stopServerTraceDeferred()
 	}
 	d.resolveTeam()
 	if d.observing() {
@@ -1219,6 +1236,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if len(d.fr.Party) == 0 {
 		return errors.New("the first frame has an empty party")
 	}
+	d.startServerTrace(ctx)
 	d.observeInit()
 	if d.opt.Tank != "" {
 		if m, ok := d.memberByName(d.opt.Tank); ok {
@@ -1238,6 +1256,131 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 		return err
 	}
 	return d.startAnywhere(ctx, fromLeg)
+}
+
+// startServerTrace tells the server's run recorder who drives this run (`.bot trace start <run_id> ...
+// driver=<model>:<effort>:<run>`, TortoiseBots #986), so the server's summary and the agent's trace join on the run id. Only
+// when run_meta is given; a refusal or silence is noted, never fatal (an older server has no `trace start driver=` yet).
+// A start with no answer (a transport error, a cancel, a timeout) may still have been applied: the run does not own a
+// trace it cannot prove it started, so it sends no stop for it (a blind `trace stop` would end a trace someone started
+// by hand: the server's stop is not scoped to a run id) and the report says the server's trace state is unknown.
+func (d *RemoteDriver) startServerTrace(ctx context.Context) {
+	if !d.opt.RunMeta.Set() || !d.opt.RunMeta.ServerTrace {
+		return
+	}
+	cmd := "trace start " + d.tr.ID() + " driver=" + d.opt.RunMeta.Driver()
+	r, err := d.g.Command(ctx, cmd)
+	switch {
+	case err != nil:
+		d.rep.note("trace start: " + err.Error())
+		d.rep.note(serverTraceUnknownNote)
+	case r.Kind == tbm.KindErr && r.Err != nil:
+		d.rep.note("trace start refused: " + r.Err.Code)
+	case r.Kind != tbm.KindAck:
+		d.rep.note("trace start: no answer (the server may have no run trace recorder yet)")
+		d.rep.note(serverTraceUnknownNote)
+	default:
+		d.serverTrace = true
+	}
+}
+
+// serverTraceUnknownNote is the report's note for a trace start that got no answer: it may have been applied.
+const serverTraceUnknownNote = "server trace state unknown (start not acknowledged): stop it by hand if one is running"
+
+// The bounds of the server trace stop. serverTraceStopWait bounds the deferred stop as a whole: the run's own context may
+// be cancelled or gone when the panic that unwinds the run reaches the defer, and the stop still has to go out (the
+// server records one trace at a time: the next run's start is refused until this one's trace ends), but the unwind
+// must not wait on it for longer. Each try waits at most serverTraceStopTry for its answer; tries are
+// serverTraceStopGap, then twice that, apart. Variables only so the tests can shorten them.
+var (
+	serverTraceStopWait  = 5 * time.Second
+	serverTraceStopTry   = 1500 * time.Millisecond
+	serverTraceStopGap   = 100 * time.Millisecond
+	serverTraceStopTries = 3
+)
+
+// stopServerTrace ends the server's run trace (`.bot trace stop`), so the next run's start is not refused. Only while
+// the run owns it (an acknowledged start, serverTrace): the run keeps owning it until the server answers the stop. An
+// ack or one of the server's terminal refusals (not-running, forbidden: trying again changes nothing) ends the
+// ownership; any other refusal, a transport error or no answer is tried again, up to serverTraceStopTries times within ctx. The server's stop takes no run id (it stops
+// whatever trace runs), and a stop with no answer may have been applied, so every try after the first asks `trace
+// status` first and sends the stop only while the trace running is still this run's own (its run id): idle, or
+// another run's trace, means ours has ended, and nothing more is sent. It returns why the last try failed when the
+// run still owns the trace (the caller notes it), "" otherwise. finish and the deferred stop armed after the acked
+// start both call it: after a stop the server answered, neither sends another.
+func (d *RemoteDriver) stopServerTrace(ctx context.Context) string {
+	why := ""
+	for try := 0; d.serverTrace && try < serverTraceStopTries; try++ {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return why
+			case <-time.After(serverTraceStopGap * time.Duration(try)):
+			}
+			ours, w := d.serverTraceOurs(ctx)
+			if w != "" {
+				why = w
+				continue
+			}
+			if !ours {
+				d.serverTrace = false
+				return ""
+			}
+		}
+		if ctx.Err() != nil {
+			return "trace stop: " + ctx.Err().Error()
+		}
+		tctx, cancel := context.WithTimeout(ctx, serverTraceStopTry)
+		r, err := d.g.Command(tctx, "trace stop")
+		cancel()
+		switch {
+		case err != nil:
+			why = "trace stop: " + err.Error()
+		case r.Kind == tbm.KindAck:
+			d.serverTrace = false
+		case r.Kind == tbm.KindErr && r.Err != nil && (r.Err.Code == "not-running" || r.Err.Code == "forbidden"):
+			d.serverTrace = false
+			d.rep.note("trace stop refused: " + r.Err.Code)
+		case r.Kind == tbm.KindErr && r.Err != nil:
+			why = "trace stop refused: " + r.Err.Code // not one of the server's terminal codes: the trace may still run
+		default:
+			why = "trace stop: no answer"
+		}
+	}
+	if !d.serverTrace {
+		return ""
+	}
+	return why
+}
+
+// serverTraceOurs asks the server (`trace status`) whether the trace running is this run's own: the ack's scope is
+// running and its detail is the run id (the server shows the id to the player who started the trace). why is set when
+// the status got no usable answer.
+func (d *RemoteDriver) serverTraceOurs(ctx context.Context) (ours bool, why string) {
+	tctx, cancel := context.WithTimeout(ctx, serverTraceStopTry)
+	defer cancel()
+	r, err := d.g.Command(tctx, "trace status")
+	switch {
+	case err != nil:
+		return false, "trace status: " + err.Error()
+	case r.Kind == tbm.KindAck && r.Ack != nil:
+		return r.Ack.Scope == "running" && r.Ack.Executor == d.tr.ID(), ""
+	case r.Kind == tbm.KindErr && r.Err != nil:
+		return false, "trace status refused: " + r.Err.Code
+	default:
+		return false, "trace status: no answer"
+	}
+}
+
+// stopServerTraceDeferred is the deferred end of the server's run trace, armed in run right after the run's own start
+// was acknowledged: it stops the trace only while the run still owns it (stopServerTrace), with its own context bounded
+// by serverTraceStopWait (the run's may be cancelled already). It is a plain defer, no recover: a panic it runs under
+// goes on (runRecovering turns it into a failed run). When its tries all fail the run still owns the trace, and finish
+// tries again and notes it if that fails too.
+func (d *RemoteDriver) stopServerTraceDeferred() {
+	ctx, cancel := context.WithTimeout(context.Background(), serverTraceStopWait)
+	defer cancel()
+	d.stopServerTrace(ctx)
 }
 
 // adoptBinding answers a bind refused as already-bound: the binding the account holds is reused when it is this run's own (the same lead
