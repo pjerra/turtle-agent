@@ -57,6 +57,7 @@ type fleeSeen struct {
 	when time.Time
 	rate float64   // percent of health lost per second at the last drop it showed
 	drop time.Time // ... and when that drop was seen
+	held bool      // a living bot of the party had it as its target in that frame
 }
 
 // fledMob is a runner that left the feed alive.
@@ -146,7 +147,7 @@ func (d *RemoteDriver) noteFleeing() {
 		away := d.nearestBotYd(p)
 		prev, had := f.prev[h.GUID]
 		now := d.clk.Now()
-		cur := fleeSeen{at: p, away: away, n: d.n, hp: h.HPPct, when: now}
+		cur := fleeSeen{at: p, away: away, n: d.n, hp: h.HPPct, when: now, held: d.botTargets(h.GUID)}
 		if had {
 			cur.rate, cur.drop = prev.rate, prev.drop // the last drop it showed stays for fleeRateAge
 			if prev.hp > h.HPPct && now.After(prev.when) {
@@ -205,13 +206,22 @@ func (d *RemoteDriver) noteFleeing() {
 	}
 }
 
-// diedInView says whether a runner that is gone from the feed died, not escaped: it was nearly dead when the feed last showed it (a few
-// percent, or no more than it lost in a second and a half), with the party's hands on it: a damage dealer ordered at it a moment ago and a living bot within spell range, or a bot within reach. A mob
-// that is out of the feed at more health than that, or with nobody near, ran off alive.
+// diedInView says whether a runner that is gone from the feed died, not escaped: a living bot had it as its target in the last frame
+// that showed it, within fleeChaseYd of a living bot now; or it was nearly dead when the feed last showed it (a few percent, or no more
+// than it lost in a second and a half), with the party's hands on it: a damage dealer ordered at it a moment ago and a living bot within
+// spell range, or a bot within reach. A mob that is out of the feed at more health than that, untargeted, or with nobody near, ran off
+// alive.
 func (d *RemoteDriver) diedInView(h tbm.HostileRec) bool {
+	// In the bots' hands: the feed lists only living units, and it lists every bot's target wherever the bot sees it (and every mob on
+	// the bots' attacker lists). A runner a bot was hitting when the feed last showed it, close to the party, cannot get out of the feed
+	// alive within two frames: it went because it died. Uldaman run 3 (19z12): all 37 runners died in the bots' hands, 5 of them between
+	// two frames at 6-16 % and were noted "ran off ... not counted" because they lost more than the last drop showed.
+	seen := d.fl.prev[h.GUID]
+	if seen.held && d.botNear(hostilePoint(h), fleeChaseYd) {
+		return true
+	}
 	// Nearly dead: at most fleeDyingPct, or what it was losing a second (at its last drop, seen within fleeRateAge of its last frame)
 	// takes it in a second and a half.
-	seen := d.fl.prev[h.GUID]
 	rate := 0.0
 	if !seen.drop.IsZero() && seen.when.Sub(seen.drop) <= fleeRateAge {
 		rate = seen.rate
@@ -224,6 +234,16 @@ func (d *RemoteDriver) diedInView(h tbm.HostileRec) bool {
 		return true
 	}
 	return d.botNear(p, fleeReachYd)
+}
+
+// botTargets says whether a living bot of the newest frame has g as its target (or victim).
+func (d *RemoteDriver) botTargets(g packet.GUID) bool {
+	for _, m := range d.fr.Party {
+		if !m.Dead && m.Target == g {
+			return true
+		}
+	}
+	return false
 }
 
 // isRunning says whether the mob was a runner when the feed last showed it.
