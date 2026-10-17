@@ -1162,7 +1162,8 @@ func TestNextBatchWaitsForTheHealersMana(t *testing.T) {
 		f.party[1].Power = min(p, 1000)
 	}
 	leg, gs := batchGraves(6, 3, func(i int) string { return fmt.Sprintf("g%d", i/3+1) })
-	o := runBatches(t, g, leg, gs, objOpts())
+	// The rest gates are set to pass a healer at 10 %: the wait before the batch is what is under test, not the gates' own.
+	o := runBatchesCfg(t, g, leg, gs, objOpts(), func(c *Config) { c.RestHealerManaPct, c.RestPullHealerManaPct = 10, 10 })
 	if o.err != nil || o.rep.State != "done" {
 		t.Fatalf("%v\n%s", o.err, notesOf(o.rep))
 	}
