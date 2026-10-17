@@ -2,7 +2,7 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit, RR = window.RealRoute; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const POLL_MS = 1500;
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
@@ -39,6 +39,74 @@ function legSelFor(name, n) {
 function setLegSel(name, sel) { legSel.set(name, sel); store("legsel:" + name, JSON.stringify(sel)); }
 // The route editor (routeeditui.js): the panel of the plan view and the handles on its map. It is there only when the dashboard was started with --edit.
 const EU = window.RouteEditUI.create({ h, s, MV, rerender: () => scheduleRender(), applyViewBox: (rec) => applyViewBox(rec), geoOf: (name) => { const g = plans.get(name); return g && g.legs ? g : null; }, currentPlan: () => (route.kind === "plan" ? route.plan : "") });
+// The real route (realroute.js): the navmesh walk of a plan, traced by the dashboard (GET /api/plan/<name>/route). plan name -> {key, doc, state, msg, at}; state is
+// loading, refreshing (the drawing is the last route, the new one is on its way), ok, off (the dashboard has no --mmaps-dir) or error. While the editor is
+// on, the route is asked with the edits made so far (the editor's route), so it follows each drop.
+const routes = new Map();
+const ROUTE_RETRY_MS = 20000;
+function routeFor(name, geo) {
+  const ops = EU.ops(name), opsKey = ops.length ? JSON.stringify(ops) : "";
+  const key = (geo.source ? geo.source.sha256 : "") + "|" + opsKey;
+  let st = routes.get(name);
+  if (!st) { st = { key: "", doc: null, state: "loading", msg: "", at: 0 }; routes.set(name, st); }
+  if (st.key === key && !(st.state === "error" && Date.now() - st.at > ROUTE_RETRY_MS)) return st;
+  st.key = key; st.at = Date.now(); st.state = st.doc ? "refreshing" : "loading";
+  fetch(RR.routeUrl(name, { ops }), { cache: "no-store" })
+    .then(async (r) => { let j = null; try { j = await r.json(); } catch (e) { /* not JSON */ } return { r, j }; })
+    .then(({ r, j }) => {
+      if (st.key !== key) return; // a newer route was asked for in the meantime
+      const doc = r.ok ? RR.parseDoc(j) : null;
+      if (doc) { st.doc = doc; st.state = "ok"; st.msg = ""; }
+      else { st.state = r.status === 503 ? "off" : "error"; st.msg = (j && j.message) || "HTTP " + r.status; if (!opsKey) st.doc = null; }
+      scheduleRender();
+    })
+    .catch((e) => { if (st.key === key) { st.state = "error"; st.msg = String(e); st.at = Date.now(); scheduleRender(); } });
+  return st;
+}
+// The real route of the plan view into the svg: lines and numbers, redrawn only when the route, the edits or the legs shown change.
+function drawRealRoute(rec, svg, name, geo, vis) {
+  const st = routeFor(name, geo), g = svg.querySelector("g.realg");
+  svg.classList.toggle("hasreal", !!st.doc);
+  svg.classList.toggle("stale", st.state === "refreshing");
+  if (!g) return st;
+  const key = (st.doc ? st.doc.sha256 + (st.doc.edited ? "e" : "") : "none") + "|" + vis.join(",");
+  if (g.dataset.k !== key) {
+    g.dataset.k = key;
+    if (st.doc) { const b = RR.build(s, st.doc, vis); g.replaceChildren(...b.lines, ...b.marks); } else g.replaceChildren();
+  }
+  g.style.opacity = String(styleState.realpath.opacity / 100);
+  g.style.setProperty("--rw", String(styleState.realpath.width));
+  return st;
+}
+// The legend box of the plan view: the four toggles of the route (the same choices as the Layers panel), what the colours mean, and the route's size.
+function renderRouteLegend(rec, c, st) {
+  const el = rec.parts.rlegend;
+  el.hidden = !c.synthetic;
+  if (!c.synthetic) return;
+  const have = !!(st && st.doc);
+  const key = JSON.stringify([layerState.realpath, layerState.route, layerState.packs, layerState.runorder, have, st && st.state, st && st.msg, have ? st.doc.sha256 : ""]);
+  if (el.dataset.k === key) return;
+  el.dataset.k = key;
+  const row = (k, label, sample, needsRoute) => {
+    const cb = h("input", { type: "checkbox", "aria-label": label });
+    cb.checked = !!layerState[k]; cb.disabled = needsRoute && !have;
+    cb.addEventListener("change", () => { layerState = ML.set(layerState, k, cb.checked); ML.save(window.localStorage, layerState); syncLayers(); });
+    return h("label", { class: "rlrow" }, cb, sample, h("span", { text: label }));
+  };
+  const status = !st || st.state === "loading" ? "Tracing the route on the navmesh..."
+    : st.state === "off" ? "No navmesh: start the dashboard with --mmaps-dir to draw the real path."
+    : st.state === "error" ? "The route could not be traced: " + st.msg
+    : RR.summaryText(st.doc) + (st.state === "refreshing" ? " · updating..." : "");
+  const red = have && st.doc.summary.failed > 0;
+  el.replaceChildren(h("details", { open: "open" }, h("summary", { text: "Route legend" }),
+    row("realpath", "Real path", h("i", { class: "rs real" }), true),
+    row("route", "Straight lines (old)", h("i", { class: "rs old" }), false),
+    row("packs", "Packs", h("i", { class: "rs pk" }), false),
+    row("runorder", "Numbers (run order)", h("i", { class: "rs nm", text: "1" }), true),
+    h("div", { class: "rlrow" }, h("i", { class: "rs bad" }), h("span", { text: "Dashed red: the planner finds no path (hover for why)" })),
+    h("div", { class: "rlstatus" + (red || (st && st.state === "error") ? " bad" : ""), text: status })));
+}
+
 // The leg a live run on this plan is in (-1 when none runs it).
 function liveLegOf(name) {
   const a = ((last && last.agents) || []).find((x) => x.online && x.label.plan === name && x.run.state === "running");
@@ -152,7 +220,8 @@ function makeCard(c) {
   parts.runinfo = h("div", { class: "runinfo", hidden: true });
   parts.feed = h("div", { class: "evfeed", hidden: true, "aria-label": "events of the run" });
   parts.tip = h("div", { class: "unittip", hidden: true, role: "tooltip" });
-  parts.map.append(parts.bar, parts.runinfo, parts.stage, parts.scale, parts.feed, parts.tip);
+  parts.rlegend = h("div", { class: "rlegend", hidden: true });
+  parts.map.append(parts.bar, parts.runinfo, parts.stage, parts.scale, parts.feed, parts.tip, parts.rlegend);
   const swatches = [["dot", "#2f80ff", "tank"], ["dot", "#22c55e", "healer"], ["dot", "#ff9f1c", "damage"], ["dot", "#c084fc", "commander"], ["dot", "#ff3b3b", "hostile creature"],
     ["dot", "#9aa3b2", "neutral"], ["ring", "#ffd400", "pack to pull"], ["dia", "#ff2fd6", "boss"], ["sq", "#ffffff", "door or object"], ["line", "#00e5ff", "planned route"], ["dash", "#00e5ff", "route still to do"],
     ["trail", "#ff6ec7", "path walked (fades with age)"], ["arrow", "#ffffff", "next stop"]];
@@ -591,7 +660,7 @@ function ensureSvg(rec, geo) {
   const svg = s("svg", { preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": "map of the run: route, packs, bosses and the party" });
   const stat = s("g", { class: "static" });
   stat.innerHTML = geo.svg; // built by the server from the plan file, text escaped
-  svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "dyn" }), s("g", { class: "editg" }));
+  svg.append(s("g", { class: "gridg" }), stat, s("g", { class: "realg" }), s("g", { class: "dyn" }), s("g", { class: "editg" }));
   rec.parts.stage.replaceChildren(svg);
   rec.svg = svg; rec.geoName = geo.plan; rec.geoSha = sha; rec.layerApplied = null; rec.geo = geo;
   if (!rec.viewLoaded) { rec.viewLoaded = true; loadView(rec); }
@@ -742,7 +811,7 @@ function renderMap(c, rec) {
   rec.card = c;
   if (c.synthetic) { const pi = planList.get(name); c.want_sha = pi && pi.source ? pi.source.sha256 : ""; }
   const geo = name ? ensurePlan(c) : null;
-  const msg = (t) => { rec.svg = null; stage.replaceChildren(h("div", { class: "nomap", text: t })); rec.parts.bar.hidden = true; rec.parts.runinfo.hidden = true; rec.parts.feed.hidden = true; hideTip(rec); };
+  const msg = (t) => { rec.svg = null; stage.replaceChildren(h("div", { class: "nomap", text: t })); rec.parts.bar.hidden = true; rec.parts.runinfo.hidden = true; rec.parts.feed.hidden = true; rec.parts.rlegend.hidden = true; hideTip(rec); };
   if (geo && geo.error) { msg("Plan " + name + ": " + geo.error); return; }
   if (!geo || geo === "loading") { msg(name ? "Loading the plan " + name + "..." : "No run, so there is no plan to draw."); return; }
   const mismatch = c.synthetic ? "" : PV.planMismatch(geo, c.run);
@@ -769,7 +838,9 @@ function renderMap(c, rec) {
     g.classList.toggle("done", run.leg >= 0 && i < run.leg);
     g.classList.toggle("legoff", !!vis && !vis.includes(i));
   });
-  if (c.synthetic) EU.overlay(rec, name, geo, vis || []);
+  let rst = null;
+  if (c.synthetic) { rst = drawRealRoute(rec, svg, name, geo, vis || []); EU.overlay(rec, name, geo, vis || []); }
+  renderRouteLegend(rec, c, rst);
   svg.querySelectorAll(".pull, .pin").forEach((e) => {
     const i = +e.dataset.leg, gi = +e.dataset.group;
     const cleared = run.leg >= 0 && i === run.leg && run.group > 0 && gi < run.group - 1;
@@ -911,7 +982,7 @@ function renderMap(c, rec) {
     hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,
     bossmob: c.mobs.some((m) => m.boss), hpunits: c.bots.some((b) => b.known) || c.mobs.length > 0, status: anyStatus, threatcolor: anyThreat,
     events: (c.events || []).length > 0, runinfo: !!prog,
-    looks: has(".look"), standmarks: has(".trg, .gossip, .stand"), flags: has(".nw, .cskip"),
+    looks: has(".look"), standmarks: has(".trg, .gossip, .stand"), flags: has(".nw, .cskip"), realpath: !!(rst && rst.doc), runorder: !!(rst && rst.doc),
     ...pd.avail,
   });
   paintLayerUi(rec);

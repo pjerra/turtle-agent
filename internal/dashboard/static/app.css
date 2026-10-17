@@ -310,3 +310,39 @@ svg .edm { cursor: copy; }
 svg .edm .vis { fill: rgba(253, 224, 71, .25); stroke: #fde047; stroke-width: 1.5; }
 svg .edissue path { fill: none; stroke: #9aa3b2; stroke-width: 3; }
 svg .edissue.new path { stroke: #ff3b3b; stroke-width: 4; }
+
+/* the real route (realroute.js): the navmesh walk, the numbered stops and the legend box of the plan view */
+svg .rhalo { fill: none; stroke: #000; stroke-width: calc(var(--rw, 3.5) * 1px + 3px); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .75; pointer-events: none; }
+svg .rline { fill: none; stroke: #4ade80; stroke-width: calc(var(--rw, 3.5) * 1px); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .rhit { fill: none; stroke: transparent; stroke-width: 12px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+svg .rseg.link .rline { stroke: #86efac; }
+svg .rseg.k-direct .rline { stroke: #fbbf24; stroke-dasharray: 2 5; }
+svg .rseg.exempt .rline, svg .rseg.k-gmcross .rline { stroke: #c4b5fd; stroke-dasharray: 2 5; }
+svg .rseg.bad .rline { stroke: #ef4444; stroke-dasharray: 9 6; stroke-linecap: butt; }
+svg .rseg.bad .rhalo { opacity: .9; }
+svg.stale .realg { opacity: .55 !important; }
+svg .rnum .rc { fill: #0f172a; stroke: #4ade80; stroke-width: 2; }
+svg .rnum .rt { fill: #fff; text-anchor: middle; font: 700 10px system-ui, sans-serif; pointer-events: none; }
+svg .rnum.k-pack .rc { fill: #3b2a00; stroke: #ffd400; }
+svg .rnum.k-boss .rc { fill: #4a0d3d; stroke: #ff2fd6; }
+svg .rnum.k-step .rc { fill: #3a1d05; stroke: #fb923c; }
+svg .rnum.warn .rc { stroke-dasharray: 3 2; }
+svg .rnum.bad .rc { fill: #7f1d1d; stroke: #ef4444; stroke-width: 3; }
+svg.hide-realpath .rseg { display: none; }
+svg.hide-runorder .rnum { display: none; }
+/* with the real path on, the plan's own straight lines are the old, dim ones */
+svg.hasreal:not(.hide-realpath) .leg .route, svg.hasreal:not(.hide-realpath) .leg .direct { opacity: .3; }
+svg.hasreal:not(.hide-realpath) .ed-route { opacity: .4; stroke-width: 1.5; }
+.rlegend { position: absolute; left: 10px; top: 52px; z-index: 5; max-width: min(300px, calc(100% - 20px)); background: rgba(14, 18, 26, .9); color: #e5e9f0; border: 1px solid #3b4455; border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.rlegend[hidden] { display: none; }
+.rlegend summary { cursor: pointer; font-weight: 600; }
+.rlegend .rlrow { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.rlegend .rlrow input { margin: 0; }
+.rlegend .rlrow input:disabled + i, .rlegend .rlrow input:disabled ~ span { opacity: .5; }
+.rlegend .rlstatus { margin-top: 3px; color: #98a2b3; overflow-wrap: anywhere; }
+.rlegend .rlstatus.bad { color: #fca5a5; }
+.rlegend i.rs { display: inline-block; flex: none; width: 22px; height: 0; border-top: 4px solid #4ade80; box-sizing: border-box; }
+.rlegend i.rs.old { border-top: 3px dashed #00e5ff; opacity: .6; }
+.rlegend i.rs.bad { border-top: 4px dashed #ef4444; }
+.rlegend i.rs.pk { width: 14px; height: 14px; margin: 0 4px; border: 2px dashed #ffd400; border-radius: 50%; }
+.rlegend i.rs.nm { width: 16px; height: 16px; margin: 0 3px; border: 2px solid #4ade80; border-radius: 50%; background: #0f172a; color: #fff; font: 700 9px/12px system-ui, sans-serif; text-align: center; font-style: normal; }

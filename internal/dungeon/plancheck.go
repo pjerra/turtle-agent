@@ -265,6 +265,11 @@ func CheckPlanWith(p *Plan, nav Navmesh, opt CheckOptions) (*PlanCheck, error) {
 
 // checkPlan is CheckPlanWith with the look point function given (the tests run the old one, StandoffPoint alone, on the old plan).
 func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanCheck, error) {
+	return checkPlanRec(p, nav, opt, look, nil)
+}
+
+// checkPlanRec is checkPlan that also keeps the stops and paths in rec (nil: it keeps nothing); TracePlan is its caller.
+func checkPlanRec(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc, rec *routeRec) (*PlanCheck, error) {
 	if err := opt.Validate(p); err != nil {
 		return nil, err
 	}
@@ -278,7 +283,7 @@ func checkPlan(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc) (*PlanChec
 	if a, ok := nav.(AvoidSetter); ok {
 		a.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	}
-	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}}
+	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, rec: rec, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}}
 	cur, group := p.Entrance, -1
 	switch {
 	case opt.FromPullGroup != nil:
@@ -367,9 +372,11 @@ type planChecker struct {
 	pathErr error
 	// team is the team of the pack or boss being looked at (set on its issues).
 	team string
-	res  *PlanCheck
-	leg  int
-	l    Leg
+	// rec keeps the stops and paths of a route trace (nil for a plain check).
+	rec *routeRec
+	res *PlanCheck
+	leg int
+	l   Leg
 }
 
 func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
@@ -388,21 +395,27 @@ func (c *planChecker) issue(part string, group int, at, from Point, reason, form
 
 // fail records a failing point of the current leg.
 func (c *planChecker) fail(part string, group int, at, from Point, reason, format string, a ...any) {
-	c.res.Issues = append(c.res.Issues, c.issue(part, group, at, from, reason, format, a...))
+	is := c.issue(part, group, at, from, reason, format, a...)
+	c.res.Issues = append(c.res.Issues, is)
+	c.rec.fail(is)
 }
 
 // warn records a warning of the current leg.
 func (c *planChecker) warn(part string, at, from Point, reason, format string, a ...any) {
-	c.res.Warnings = append(c.res.Warnings, c.issue(part, 0, at, from, reason, format, a...))
+	is := c.issue(part, 0, at, from, reason, format, a...)
+	c.res.Warnings = append(c.res.Warnings, is)
+	c.rec.warn(is)
 }
 
 // checkLeg walks one leg from cur and returns where the party stands at its end. A leg the run enters at a pull group (group 0 or more)
 // starts at that group: the leg's own via points and `to` and the groups before it are not walked.
 func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	c.l = l
+	c.rec.startLeg(c.leg)
 	if group < 0 {
 		for vi, w := range l.Via {
 			var err error
+			c.rec.stop("via", fmt.Sprintf("via %d", vi), 0, w.Point, "")
 			switch {
 			case w.GMCross:
 				cur, err = c.gmCross(fmt.Sprintf("gm_cross via %d", vi), w.Point, cur)
@@ -418,6 +431,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 				return cur, err
 			}
 		}
+		c.rec.stop("stage", "to", 0, l.To, "")
 		if !l.NeedsWalk {
 			var err error
 			if cur, err = c.walk("to", l.To, cur); err != nil {
@@ -431,6 +445,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	}
 	for gi := group; gi < len(l.PullGroups); gi++ {
 		g := l.PullGroups[gi]
+		if len(g.Positions) > 0 {
+			c.rec.stop("pack", "pull group look", gi+1, g.Positions[0], g.Team)
+		}
 		if g.Patrol != nil && g.Patrol.PeriodEstimate {
 			c.warn("patrol", g.Positions[0], cur, WarnEstimatedPatrol, "pull group %d: the patrol of %v has only an estimated period_s (%.0f s): the driver does not predict its phase, it locates the patrol and waits until it is past; the walk measures the round", gi+1, g.Patrol.Entries, g.Patrol.PeriodS)
 		}
@@ -444,6 +461,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 		for _, at := range g.Positions {
 			if dist3(cur, at) <= ClearSeeRadius {
 				c.count()
+				c.rec.note("a position %.0f yd from where the party stands is in view already: no walk", dist3(cur, at))
 				continue
 			}
 			stand, err := c.look("pull group look", gi+1, g.Team, at, cur)
@@ -456,6 +474,9 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	var err error
 	if cur, err = c.steps("steps", l.Steps, cur); err != nil {
 		return cur, err
+	}
+	if b := l.Boss; b != nil {
+		c.rec.stop("boss", "boss look", 0, b.Position, b.Team)
 	}
 	if b := l.Boss; b != nil && b.NeedsWalk {
 		c.needsWalk("boss look", 0, b.Team, b.Position, cur)
@@ -499,33 +520,37 @@ func (c *planChecker) useRange(part string, ref ObjectRef, stand *Point, from Po
 func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error) {
 	for si, st := range steps {
 		var stand *Point
+		what := ""
 		label := fmt.Sprintf("%s[%d].", kind, si)
+		c.rec.stop("step", label, 0, Point{}, "") // the checks below may fail the step itself; the stop gets its place and name once they are known
 		switch {
 		case st.UseObject != nil:
-			stand, label = st.UseObject.Stand, label+"use_object.stand"
+			stand, label, what = st.UseObject.Stand, label+"use_object.stand", fmt.Sprintf("use game object %d", st.UseObject.Entry)
 			if st.UseObject.ViaItem { // the item's spell is cast at the object from the stand: it has a short range
 				c.useRange(label, st.UseObject.ObjectRef, stand, cur)
 			}
 		case st.LootObject != nil:
-			stand, label = st.LootObject.Stand, label+"loot_object.stand"
+			stand, label, what = st.LootObject.Stand, label+"loot_object.stand", fmt.Sprintf("loot game object %d", st.LootObject.Entry)
 			c.useRange(label, st.LootObject.ObjectRef, stand, cur)
 		case st.Ritual != nil:
-			stand, label = st.Ritual.Stand, label+"ritual.stand"
+			stand, label, what = st.Ritual.Stand, label+"ritual.stand", fmt.Sprintf("ritual at game object %d", st.Ritual.Entry)
 		case st.AreaTrigger != nil:
 			t := st.AreaTrigger
-			stand, label = &t.Stand, label+"area_trigger.stand"
+			stand, label, what = &t.Stand, label+"area_trigger.stand", fmt.Sprintf("take area trigger %d", t.ID)
 			c.trigger(label, t, cur)
 		case st.Gossip != nil:
 			g := st.Gossip
-			stand, label = g.Stand, label+"gossip.stand"
+			stand, label, what = g.Stand, label+"gossip.stand", fmt.Sprintf("talk to NPC %d", g.NPC)
 			if stand != nil && dist3(*stand, g.Near) > GossipRange {
 				c.count()
 				c.fail(label, 0, *stand, cur, ReasonTooFar, "%.1f yd from the NPC's spawn %.1f %.1f %.1f: the server answers a gossip hello only within %g yd", dist3(*stand, g.Near), g.Near.X, g.Near.Y, g.Near.Z, GossipRange)
 			}
 		}
 		if stand == nil {
+			c.rec.dropStop()
 			continue
 		}
+		c.rec.placeStop(label, *stand, what)
 		prev := cur
 		var err error
 		if cur, err = c.walk(label, *stand, cur); err != nil {
@@ -548,7 +573,9 @@ func (c *planChecker) needsWalk(part string, group int, team string, at, from Po
 
 // skip records a hop the plan exempts from the check.
 func (c *planChecker) skip(part string, at, from Point, why string) {
-	c.res.Exempt = append(c.res.Exempt, c.issue(part, 0, at, from, ReasonSkipped, "%s", why))
+	is := c.issue(part, 0, at, from, ReasonSkipped, "%s", why)
+	c.res.Exempt = append(c.res.Exempt, is)
+	c.rec.skip(is)
 }
 
 // count counts a checked point (only those of the run's part of the plan).
@@ -559,6 +586,8 @@ func (c *planChecker) count() {
 // walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
+	c.rec.begin("", part, from, to)
+	defer c.rec.end()
 	if c.avoided(part, 0, to, from) {
 		return from, nil
 	}
@@ -578,8 +607,15 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	if err != nil {
 		return from, err
 	}
+	c.rec.path(path)
 	if path.Status != navmesh.Complete {
-		return from, c.failPath(part, 0, to, from, path)
+		err := c.failPath(part, 0, to, from, path)
+		if c.rec != nil && err == nil && pathReason(path) == ReasonUnreachable {
+			// A route trace judges each segment from where the plan means the party to stand: the point is on the mesh, so the next segment
+			// starts at it and one unreachable point does not turn the segments after it red. (The plain check stays where it was.)
+			return to, nil
+		}
+		return from, err
 	}
 	return to, nil
 }
@@ -596,6 +632,9 @@ func pathReason(p navmesh.Path) string {
 // point before it: a GM moves the party, so it is listed as exempt from the walk (ReasonSkipped), with what the move is.
 func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 	c.count()
+	c.rec.begin("gmcross", part, from, to)
+	c.rec.straight()
+	defer c.rec.end()
 	if c.avoided(part, 0, to, from) {
 		return to, nil
 	}
@@ -618,6 +657,9 @@ func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 // direct checks a direct via: a step within the limits of the module (DirectStepOK), ground under its end and a clear line over the mesh.
 func (c *planChecker) direct(part string, to, from Point) (Point, error) {
 	c.count()
+	c.rec.begin("direct", part, from, to)
+	c.rec.straight()
+	defer c.rec.end()
 	if c.avoided(part, 0, to, from) {
 		return to, nil
 	}
@@ -671,6 +713,9 @@ func (c *planChecker) line(from, to Point) (clear bool, hit float64, err error) 
 // `from` when the path is shorter than the standoff, as the driver does not move then).
 func (c *planChecker) look(part string, group int, team string, at, from Point) (Point, error) {
 	c.count()
+	c.rec.begin("", part, from, at)
+	c.rec.straight() // the chord a failing look is drawn with; a path the planner answers replaces it
+	defer c.rec.end()
 	c.team = team
 	defer func() { c.team = "" }()
 	path, err := c.nav.Plan(c.p.Map, vec(from), vec(at))
@@ -681,6 +726,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		if path.Status != navmesh.Complete { // complete with one point: the party is at the pack already
 			return from, c.failPath(part, group, at, from, path)
 		}
+		c.rec.lookPath(nil, from, false)
 		return from, nil
 	}
 	pts := make([]Point, len(path.Points))
@@ -692,7 +738,9 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	// within the ranged pull range: it answers unreachable. Only pull group looks (a boss is walked to).
 	if part == "pull group look" && path.Status == navmesh.Complete {
 		if straight := dist3(from, at); straight <= pullDetourNear && float64(path.Length) > pullDetourFactor*straight+pullDetourSlack {
-			c.res.Warnings = append(c.res.Warnings, c.issue(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length))
+			is := c.issue(part, group, at, from, ReasonDetour, "the pack is %.0f yd away but the way to it is %.0f yd: the tank finds no firing position within the ranged pull range (it answers unreachable); stand the party on the pack's own layer", straight, path.Length)
+			c.res.Warnings = append(c.res.Warnings, is)
+			c.rec.warn(is)
 		}
 	}
 	view := lookView(c.opt.LookStandoff, c.opt.LookArrive)
@@ -714,6 +762,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	if !moved {
 		stand = from
 	}
+	c.rec.lookPath(pts, stand, moved)
 	if b, ok := c.p.InAvoid(stand); ok {
 		c.fail(part, group, at, from, ReasonAvoid, "the look point %.1f %.1f %.1f lies in avoid box %q (%s)", stand.X, stand.Y, stand.Z, b.Name, boxText(b))
 	}

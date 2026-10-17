@@ -50,6 +50,10 @@ func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []strin
 	})
 	mux.HandleFunc("/api/plan/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/api/plan/")
+		if n, ok := strings.CutSuffix(name, "/route"); ok {
+			serveRoute(w, r, p, n)
+			return
+		}
 		var geo []byte
 		var errText string
 		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {

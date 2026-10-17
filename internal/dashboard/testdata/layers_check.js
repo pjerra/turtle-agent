@@ -16,7 +16,9 @@ wasOff.forEach((k) => assert.strictEqual(def[k], false, k));
 const newOn = ["bossmark", "hpbars", "waypoints", "pullstate", "restgather"]; // the owner's upgrades of 2026-10-15: the boss mark, the health bars, the waypoints, the pull-group states and the rest and gather spots start on, everything else new is off
 newOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
 const flagOn = ["flags"]; // the plan view's flags (needs_walk, check_skip) start on: they only draw when the plan flags a point, and a route with one is not to be trusted unseen
-const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0 && flagOn.indexOf(k) < 0);
+const routeOn = ["realpath", "runorder"]; // the real route of the plan view (owner's route editor request of 2026-10-17): the point of the plan view, drawn only where the dashboard traced a route
+routeOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
+const added = L.keys().filter((k) => wasOn.indexOf(k) < 0 && wasOff.indexOf(k) < 0 && newOn.indexOf(k) < 0 && flagOn.indexOf(k) < 0 && routeOn.indexOf(k) < 0);
 assert.deepStrictEqual(added.sort(), ["aggro", "bottarget", "cmdline", "combat", "critter", "deathheat", "events", "feed", "ghost", "grid", "healring", "heading", "hostilenames", "looks", "objects", "packrings", "patrols", "refusals", "runinfo", "scale", "stalls", "standmarks", "statusicons", "threat", "threatcolors", "trail_members", "trailtime", "zonenames"].sort());
 added.forEach((k) => assert.strictEqual(def[k], false, k + " starts off"));
 flagOn.forEach((k) => assert.strictEqual(def[k], true, k + " starts on"));
@@ -122,7 +124,7 @@ assert.deepStrictEqual(Object.keys(sd).sort(), Object.keys(L.STYLES).sort());
 Object.keys(L.STYLES).forEach((k) => assert.ok(L.keys().indexOf(k) >= 0, k + " is a layer"));
 Object.keys(L.STYLES).forEach((k) => assert.ok("opacity" in L.STYLES[k], k + " has an opacity slider"));
 // the layers that draw lines have a thickness slider, the trails also the minutes
-["trail", "trail_members", "waypoints", "ghost", "patrols", "packrings", "combat"].forEach((k) => assert.ok("width" in L.STYLES[k], k + " has a thickness"));
+["trail", "trail_members", "waypoints", "ghost", "patrols", "packrings", "combat", "realpath"].forEach((k) => assert.ok("width" in L.STYLES[k], k + " has a thickness"));
 ["trail", "trail_members"].forEach((k) => assert.ok("minutes" in L.STYLES[k], k + " has minutes"));
 Object.keys(L.STYLES).forEach((k) => Object.keys(L.STYLES[k]).forEach((p) => { const v = L.STYLES[k][p], r = L.SLIDERS[p]; assert.ok(v >= r.min && v <= r.max, k + "." + p); }));
 assert.strictEqual(L.trailMinutes(sd, "trail"), null);            // the lead's trail starts as the whole run, as it always was

@@ -18,8 +18,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
-const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]\n" +
-	"                          [--edit --mmaps-dir DIR [--edit-dir DIR] [--edit-source DIR] [--edit-tokens FILE] [--edit-allow-default-dir FILE[,FILE]]]\n" +
+const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR] [--mmaps-dir DIR]\n" +
+	"                          [--edit [--edit-dir DIR] [--edit-source DIR] [--edit-tokens FILE] [--edit-allow-default-dir FILE[,FILE]]]\n" +
 	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command.\n" +
 	"  --edit turns on the route editor (README \"Route editor\"): the only thing the page can then write is a checked version of a plan's route"
 
@@ -51,7 +51,7 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	editSource := fs.String("edit-source", "", "with --edit: the folder whose plan files an edit starts from (default: the first --plans-dir); must not lie inside any slot's dungeons_dir")
 	editTokens := fs.String("edit-tokens", filepath.Join(home, ".config", "turtle-agent", "route-edit-tokens"), "with --edit: file of `label token` lines, mode 0600; the label is recorded as who made a version")
 	editAllow := fs.String("edit-allow-default-dir", "", "with --edit: settings files (by file name, comma separated) that have an rpc but no dungeons_dir, whose default plans folder (dungeons/ under the agent's working folder) you vouch is not the edits folder; any other such file stops the editor")
-	editMmaps := fs.String("mmaps-dir", "", "with --edit: the navmesh folder of the server the plans are run on (a check on another server's mesh proves nothing); required")
+	editMmaps := fs.String("mmaps-dir", "", "the navmesh folder of the server the plans are run on (a check on another server's mesh proves nothing): the plan view draws the real route on it (GET /api/plan/<name>/route); required with --edit")
 	cfgDir := fs.String("config-dir", dashboard.DefaultConfigDir(), "folder with settings*.json and the rpc-<port>.token files")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -100,6 +100,17 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	p := dashboard.NewPoller(dashboard.Options{ConfigDir: expandHome(*cfgDir), Agents: *agents, TestsDir: testsDir, TracesDir: expandHome(*traces), PlansDirs: planDirs, MinimapDir: minimapDir(expandHome(*minimaps), stderr)})
 	var editor *dashboard.Editor
+	if *editMmaps != "" && !*edit { // the real route needs the navmesh, not the editor
+		mm := expandHome(*editMmaps)
+		if st, err := os.Stat(mm); err != nil || !st.IsDir() {
+			fmt.Fprintf(stderr, "dashboard: --mmaps-dir %s is not a folder\n", mm)
+			return exitUsage
+		}
+		planner := navmesh.NewPlanner(mm)
+		defer planner.Close()
+		p.SetNavmesh(planner, mm)
+		fmt.Fprintf(stderr, "dashboard: the plan view draws the real route on the navmesh in %s\n", mm)
+	}
 	if *edit {
 		src := expandHome(*editSource)
 		if src == "" && len(planDirs) > 0 {

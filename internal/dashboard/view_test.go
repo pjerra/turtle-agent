@@ -43,7 +43,7 @@ func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "routeedit.js", "routeeditui.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "realroute.js", "routeedit.js", "routeeditui.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -110,6 +110,9 @@ func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js"
 func TestPlanView(t *testing.T) { runCheck(t, "planview_check.js", "planview.js") }
 
 // TestRouteEditModel: the route editor's ops, the route with ops applied, handles, undo and redo, and the words for a change.
+// TestRealRoute: the address of the route, the legs shown, the lines and numbers of the real path and what they say.
+func TestRealRoute(t *testing.T) { runCheck(t, "realroute_check.js", "realroute.js") }
+
 func TestRouteEditModel(t *testing.T) { runCheck(t, "routeedit_check.js", "routeedit.js") }
 
 // The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.

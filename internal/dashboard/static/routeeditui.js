@@ -313,6 +313,8 @@
         drawOverlay(rec, st, geo, visible);
       },
       active(name) { const st = states.get(name); return !!(st && st.active); },
+      // The edits made so far on a plan being edited ([] when it is not being edited): the real route is traced with them applied.
+      ops(name) { const st = states.get(name); return st && st.active ? st.hist.ops.slice() : []; },
     };
 
     function refreshModel(st, geo) {
