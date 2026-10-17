@@ -1487,3 +1487,39 @@ func TestRecoveryReleasesACorpseThatDiedAfterTheReviveOrders(t *testing.T) {
 		t.Fatalf("%s", notesOf(rep))
 	}
 }
+
+// The mob test is per corpse: of two bots dead in the wait, the one with a mob near its body is released at once, the one lying far from every
+// mob is left the lateCorpseWait (a healer may still raise it in place).
+func TestRecoveryReleasesOnlyTheCorpseNearMobsAtOnce(t *testing.T) {
+	g := newFakeRemote(t)
+	g.advance(time.Second)
+	g.party[1].X, g.party[1].Y = 0, 0     // Healy, dead, a mob 10 yd from it
+	g.party[2].X, g.party[2].Y = 300, 300 // Magey, dead, far from every mob
+	g.addMob(299, Point{10, 0, 0})
+	for _, i := range []int{1, 2} {
+		g.party[i].Dead, g.party[i].HP = true, 0
+	}
+	g.lagUntil = map[packet.GUID]time.Time{gHealer: g.now.Add(time.Hour), gMage: g.now.Add(time.Hour)} // the fake keeps followers on the lead bot otherwise
+	g.advance(time.Second)
+	d := NewRemoteDriver(remotePlan(Leg{Name: "a", To: Point{10, 0, 0}}), g, DefaultConfig(), objOpts(), g.clock())
+	d.look()
+	dead := d.deadMembers()
+	if len(dead) != 2 {
+		t.Fatalf("dead %v", dead)
+	}
+	since := map[packet.GUID]time.Time{}
+	if err := d.releaseLateDead(context.Background(), dead, since); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(g.revived) != "[Healy]" {
+		t.Fatalf("at once: revived %v", g.revived)
+	}
+	g.advance(lateCorpseWait + time.Second)
+	d.look()
+	if err := d.releaseLateDead(context.Background(), d.deadMembers(), since); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(g.revived) != "[Healy Magey]" {
+		t.Fatalf("after the wait: revived %v", g.revived)
+	}
+}

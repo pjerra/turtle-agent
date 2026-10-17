@@ -2329,12 +2329,11 @@ const lateCorpseWait = 20 * time.Second
 
 // releaseLateDead releases the corpses of bots that died while the recovery waited for the others to come back: nobody sent them a revive
 // order (reviveDead had returned already), so they lay there until the bound ran out and the recovery failed ("still dead"). A corpse with a
-// live hostile near it is released at once (a resurrection in place would put the healer back on the floor); another after lateCorpseWait,
+// live hostile near its own body is released at once (a resurrection in place would put the healer back on the floor); another after lateCorpseWait,
 // which leaves a living healer the time to raise it in place. A bot already ordered in the last 20 s is left to run back. since holds when each
 // bot was first seen dead during this wait.
 func (d *RemoteDriver) releaseLateDead(ctx context.Context, dead []tbm.PartyRec, since map[packet.GUID]time.Time) error {
 	now := d.clk.Now()
-	near := d.hostilesNearCorpses()
 	for _, m := range dead {
 		if _, ok := since[m.GUID]; !ok {
 			since[m.GUID] = now
@@ -2342,7 +2341,7 @@ func (d *RemoteDriver) releaseLateDead(ctx context.Context, dead []tbm.PartyRec,
 		if last, ok := d.lastRevive[m.GUID]; ok && now.Sub(last) < 20*time.Second {
 			continue
 		}
-		if len(near) == 0 && now.Sub(since[m.GUID]) < lateCorpseWait {
+		if len(d.hostilesNearPoint(partyPoint(m))) == 0 && now.Sub(since[m.GUID]) < lateCorpseWait {
 			continue
 		}
 		d.rep.note(fmt.Sprintf("recovery: %s is dead again (%.0f s); releasing the corpse (cmd revive: it runs back from the graveyard)", m.Name, now.Sub(since[m.GUID]).Seconds()))

@@ -409,3 +409,17 @@ func (d *RemoteDriver) hostilesNearCorpses() []tbm.HostileRec {
 	}
 	return out
 }
+
+// hostilesNearPoint is hostilesNearCorpses for one body: the live hostiles within ReviveSafeYd of p.
+func (d *RemoteDriver) hostilesNearPoint(p Point) []tbm.HostileRec {
+	var out []tbm.HostileRec
+	for _, h := range d.fr.Hostiles {
+		if h.Entry == 0 || h.HPPct <= 0 || !h.Hostile() || h.Bystander() {
+			continue
+		}
+		if dist3(hostilePoint(h), p) < float64(d.tx.ReviveSafeYd) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
