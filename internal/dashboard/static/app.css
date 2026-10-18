@@ -255,6 +255,7 @@ svg .stallm text.g, svg .rg text.g, svg .objst text.g { pointer-events: none; }
 
 /* the plan view and the plan file label */
 select#route { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); max-width: 260px; }
+select#refresh { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .plancopy { font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere; }
 .plancopy h3 { margin: 0 0 2px; }
 .plancopy.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
