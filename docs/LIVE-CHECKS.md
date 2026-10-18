@@ -1055,3 +1055,59 @@ README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Nee
 6. **The module pauses itself.** At 3 dead the status is `paused` with the note; the watch waits `paused_wait_s` (10 min) and then stops the run with that note as the failure. Is 10 minutes the right wait, and does a person's `.bot run resume` on the server end the wait (the next status line is `running`)?
 7. **Legs and the dashboard card.** The report has one leg entry per leg name the module sent (`legs[]` with seconds), and the card of `turtle-agent dashboard` reads "Run leader: <leg> · <kind> n/m · <phase>". Does the `phase` word `pull` cover both the approach and the fight well enough for the card?
 8. **`ritual` steps.** The run leader pauses on Uldaman's two `ritual` steps (not run yet): the observed run ends `failed` after `paused_wait_s` unless a person does the ritual by hand (`.bot cmd ritual`), then `.bot run skip` and `resume`. Record how a run through the altars goes and whether `dungeon_skip` is enough.
+
+## A pull that drew no fight: an experiment (wc-live-3 A3, 2026-10-18), off by default
+
+Written from the traces of run A3 (commander mode, `tests/wc-live-3/a3/`; tested against the fake driver only, never run live since). Five pull
+groups failed with `3 pulls of [...] failed (no fight, or the mobs evaded)` and cost four of the run's six resumes (each one re-walks the leg,
+2-3 min): leg 1 pull group 2 (entry 3637), leg 4 Cobrahn twice, leg 5 pull groups 5 and 7 (entry 5053).
+
+**What the frames show** (leg 1 pull group 2, `cmd pullback 0xF130000E35006693` acked at 11:14:30; t is seconds after the order):
+
+| t | tank | yd to mob | act | feed `tg` | mob |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| 0.0 | `-10.4 130.6 -89.5` | 38.0 | `stay` | - | 100 %, cb=false |
+| 3.1 | `-6.0 136.4 -89.3` | 30.7 | `reach pull` | - | 100 %, cb=false |
+| 4.1 | `-3.9 139.2 -89.2` | 27.2 | `bloodrage` | the mob | 100 %, cb=false |
+| 6.1-15.1 | `-0.6 143.6 -89.1` | **22.2** | `bloodrage` | the mob | 100 %, cb=false |
+| 16.1-21.1 | walks back | 24.0 → 38.0 | `move to position`, then `stay` | the mob | 100 %, cb=false |
+
+So the tank's own walk-in reaches a **hard floor of 20.0-23.7 yd within 3-6 s** and stands there (act `bloodrage`, the mob selected, the tank
+in combat) for about 9 s while the mob stays idle at 100 %; the 25 s driver window then ends `no_engage`. The shape is not rare: 57 of the
+run's 137 pull commands ended with nothing engaged and the tank 16.6-24.5 yd out, while the 80 that engaged had the tank at 0.0-6.2 yd in all
+but three (15.2, 22.2 and 29.6 yd, mobs that engaged from where they stood). The tank's *hold* distance (its spot after the pull's own
+`move to position` and the driver's `cmd follow`) is 33-38 yd, i.e. the stand the driver parked it at (`pull_standoff` 38).
+
+**What the change does** (`internal/dungeon/remote_fight.go`, `closeInPull`), and why it is an experiment: after a `no_engage` pull in which
+nothing engaged and the module did not turn the pull down (so not `tank-busy`), the driver walks the lead bot to `pull_close_in` yards of the
+mob - the same `cmd move` lever `unreachable` already uses - and sends the pull again from there; that try does not count. Once per mob (per
+GUID, so every mob of a group gets its own), and the mob's one walk-in is spent **when the party walks in**: `remote.pull_close_ins` counts
+every walk that was made, and a walk whose checks then reject the retry (or a pull that fails from there) still ends as a counted failed try,
+with no second walk at the next try. `pull_close_in` is **0 by default (off)** and `0` in the value really is off: the tunable stores what it
+is given. The field is trimmed to `pull_standoff` when the Config is built and at use, so the party is never walked away from the mob.
+
+The checks run before the walk and again on the newest frame after it, and each of them skips the retry with a note while the try counts as a
+failure: the feed is not quiet and the mob is still in it, alive, not walking home, not already fighting the party, and not displaced more
+than 5 yd from where its pull was made (the pull's own record, so a mob that moved while the party walked in is caught); the way to it has a
+stand point; and no other living hostile stands within 25 yd of that stand, nor is any hostile fighting the party anywhere - the party does
+not walk into a second pack, and not into one that turns up while it walks.
+
+**Why it may do nothing:** a stand at 20 yd is about where the tank already stood (the floor above), so the diagnosis "the walk-in stopped
+short" is **not proven**. 12 yd was the tested value because it is clearly nearer than the floor. What the tank stops at is module-side and
+invisible to the agent: line of sight, the pull ability, the range the module works out. Every one of the run's 137 pull commands was acked
+with a plain executor detail, and by TortoiseBots #975 (`PullStrategy::GetPullActionName`: a commanded pull opens from range unless it asks
+otherwise) that means the commanded pull opened *from range*: the tank walks to a firing position and shoots, and the shot is what did not
+land. Checks for the next run:
+
+1. **Does the walk-in change anything?** With `pull_close_in` 12 on, a `no_engage` pull should show a `cmd move` to about 12 yd of the mob
+   between the two `cmd pullback` orders, `pull_close_ins` 1, and the mob engaged after the second order. If the pull stalls again from 12 yd,
+   the walk-in is not the answer and this experiment should be dropped (or the module is the place to fix it).
+2. **The module's own reason, per pull.** Record the ack detail of every `cmd pullback` (the executor field: plain, `X body-pull`, a
+   `PullRangedBlocker` note) and whether the module answers `unreachable` ("could not start moving to a firing position"), which the driver
+   reads as a refusal; and try a pullback ordered with `no ranged` / a plain `.bot action pull` (a melee engagement) by hand on a stalled
+   pack: does the tank then walk into melee and aggro the mob? That tells whether the floor is the ranged path (firing position, LoS, ammo,
+   weapon skill) or the walk itself.
+3. **The cost.** With the walk-in on, a group that never comes spends at most one walk-in per mob (three failed tries + up to three walk-ins
+   for a three-mob group) and the run must stay inside its time budget; `pull_close_in` 0 is the control arm (the behaviour shipped).
+4. **The tune.** `pull_close_in` in a tunables file and by `tune_set` (0 = off) is taken at the next leg or pull-group start; a value above
+   `pull_standoff` is trimmed at use, not refused.

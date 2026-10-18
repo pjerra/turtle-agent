@@ -171,6 +171,7 @@ type Config struct {
 	PullAttempts   int           // tries to start one fight before the run fails
 	PullRange      float32       // yards: a target farther than this is approached first
 	PullStandoff   float32       // yards from the target the leader stops at when it approaches
+	PullCloseIn    float32       // remote, experimental: yards from the mob the leader is walked to when a pull drew no fight and it stood farther (0, the default: off; never more than PullStandoff)
 	PackRadius     float32       // yards around a pull position that a pack member may stand
 	EngageTimeout  time.Duration // a pull that draws no fight in this long has failed
 	EvadeGrace     time.Duration // a fight with nobody in combat for this long is over (evaded)
@@ -279,6 +280,12 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.PullAttempts, d.PullAttempts)
 	fillF(&c.PullRange, d.PullRange)
 	fillF(&c.PullStandoff, d.PullStandoff)
+	// The walk-in of a pull that drew no fight is off unless it is asked for (PullCloseIn 0, the default: it is an experiment, see
+	// remote_fight.go closeInPull), and it is never farther out than the stand the party already waits at: a value above it would walk
+	// the party away from the mob. A negative is off too and is left as it is.
+	if c.PullCloseIn > c.PullStandoff {
+		c.PullCloseIn = c.PullStandoff
+	}
 	fillF(&c.PackRadius, d.PackRadius)
 	fill(&c.EngageTimeout, d.EngageTimeout)
 	fill(&c.EvadeGrace, d.EvadeGrace)
@@ -1741,7 +1748,7 @@ const (
 type fightResult struct {
 	out   outcome
 	kills int
-	why   string // the refusal that ended the pull
+	why   string // the refusal that ended the pull: a noEngage with a why is a pull the module turned down (tank-busy), not one that drew no fight
 	// unreachable (remote): the tank answered "unreachable" to the pull from every approach point tried; the mob is alive and the party
 	// could not get at it, so its group is not cleared.
 	unreachable bool

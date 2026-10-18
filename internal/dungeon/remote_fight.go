@@ -158,6 +158,9 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		sp.passed = map[packet.GUID]bool{}
 	}
 	kills, retargets := 0, 0
+	// closeIn: the mobs of this group whose pull already got its one walk-in to a nearer stand (per GUID, so a group of several mobs gives
+	// each of them its own chance). closeRetry: whether the pull about to go out follows a walk-in.
+	closeIn, closeRetry := map[packet.GUID]bool{}, false
 	cl := newClearing()
 	searched := false
 	var gaveUp []passedOver
@@ -266,10 +269,11 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		d.legStat(func(l *LegReport) {
 			l.Pulls++
-			if attempt > 1 {
+			if attempt > 1 || closeRetry { // this pull retries one that drew no fight: a walk-in's pull, or a counted retry
 				l.PullRetries++
 			}
 		})
+		closeRetry = false
 		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
 			// A wipe that comes after the kills (the adds a boss left) must not lose them: the ledger of kills is what tells that the boss is dead.
@@ -291,6 +295,28 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 			retargets++
 			d.rep.note(fmt.Sprintf("%s: the bots could not take %s (%s); picking again", label, d.hostileName(t), res.why))
 			continue
+		}
+		// A pull that drew no fight may have stopped short of its own reach: the tank's walk-in stopped at a floor around 20-24 yd with
+		// the mob selected and the mob idle (wc-live-3 A3: five groups lost, the tank 20.0-23.7 yd out through all three tries each, 4 of
+		// the run's 6 resumes). Walking the party in to PullCloseIn - well inside that floor - and pulling again is an experiment, off by
+		// default (PullCloseIn 0), because a stand at 20 yd is about where the tank already stood and what the module does there is not
+		// proven (see closeInPull). One walk-in per mob (per GUID): the try it retries does not count, but a second failed try on the same
+		// mob gets no second walk. res.why is set only when the pull was turned down (tank-busy): then the tank is fighting, and walking
+		// the party up to the mob is what that rule is there to avoid.
+		if res.out == noEngage && res.kills == 0 && res.why == "" && !closeIn[t.GUID] {
+			attempted, retry, err := d.closeInPull(ctx, label, t)
+			if err != nil {
+				return err
+			}
+			if attempted {
+				// The mob's one walk-in is spent as soon as the party walks in, whether or not the pull is sent again from there: a walk
+				// that ran and then failed its own checks must not be walked again at the next try (the try counts as it always did).
+				closeIn[t.GUID] = true
+			}
+			if retry {
+				closeRetry = true
+				continue
+			}
 		}
 		where := fmt.Sprintf("%s at %.0f %.0f", d.hostileName(t), t.X, t.Y)
 		why := map[outcome]string{noEngage: "drew no fight", evaded: "evaded", refused: "was refused (" + res.why + ")", retarget: "was lost (" + res.why + ")"}[res.out]
@@ -640,6 +666,157 @@ func (d *RemoteDriver) approachView(ctx context.Context, p Point, standoff, arri
 		return nil
 	}
 	return d.walkArrive(ctx, stand, arrive)
+}
+
+// closeInPull is the experiment of retrying a pull that drew no fight from a stand nearer the mob: it walks the lead bot (the driver's
+// only lever - `cmd move` goes to the lead bot, the tank in commander mode, and it is the same walk-in sendPull takes for an
+// `unreachable` answer) to a point PullCloseIn yards from the mob. attempted reports that the walk was made (the caller then spends the
+// mob's one walk-in and counts it whatever follows); retry reports that the pull may go again from there without counting the try.
+//
+// It is off by default (PullCloseIn 0). The diagnosis it rests on is NOT proven: in wc-live-3 A3 (2026-10-18) the tank's own walk-in
+// reached a hard floor of 20.0-23.7 yd from the mob within 3-6 s of the order and stood there with the mob selected (feed `tg`, cb=true)
+// while the mob stayed cb=false at 100% through the whole 25 s window, five groups failing that way and costing 4 of the run's 6 resumes;
+// a stand at 20 yd is about where the tank already stood, so the 12 yd this is used with is an experiment to tell whether closing in
+// changes anything at all. Why the tank stops there is module-side and not visible to the agent: LoS, the pull ability, or the range the
+// module works out (every one of the run's 137 pull commands was acked with a plain executor detail, which by TortoiseBots #975 means
+// the commanded pull opened *from range*: it walks to a firing position and shoots). Only a live run with the module's own reason (the
+// ack detail, a `no ranged` order) can settle it.
+//
+// The mob is re-read from the newest frame before the walk and again after it, and the pull is only sent again from nearer when that
+// still is the mob the party meant to pull: same GUID, alive, not walking home, not already fighting someone else, not displaced from
+// where the pull was made (the pull's own record, so a mob that moved while the party walked in is caught too). The stand must be clear
+// both times: the party does not walk into a second pack on a recovery walk, and not into one that turns up while it walks.
+func (d *RemoteDriver) closeInPull(ctx context.Context, label string, t tbm.HostileRec) (attempted, retry bool, err error) {
+	if d.cfg.PullCloseIn <= 0 {
+		return false, false, nil
+	}
+	h, why := d.closeInStop(t)
+	if why != "" {
+		d.closeInSkip(label, t, why)
+		return false, false, nil
+	}
+	// Never farther out than the stand the party already waits at (a tuned PullCloseIn above it would walk the party away from the mob).
+	close := min(float64(d.cfg.PullCloseIn), float64(d.cfg.PullStandoff))
+	before := distToLead(d, hostilePoint(h))
+	if before <= close {
+		return false, false, nil // already that near: another walk-in would be the same pull from the same place
+	}
+	stand, ok := d.standPoint(ctx, hostilePoint(h), float32(close))
+	if !ok {
+		d.closeInSkip(label, t, "the way to it has no stand point")
+		return false, false, nil
+	}
+	if who, at := d.hostileNearStand(stand, t.GUID); who != "" {
+		d.closeInSkip(label, t, fmt.Sprintf("a hostile stands %.0f yd from the stand (%.0f %.0f %.0f): %s", at, stand.X, stand.Y, stand.Z, who))
+		return false, false, nil
+	}
+	// The walk is made: it is counted, and the caller spends the mob's one walk-in on it, whatever the checks after it say (a party that
+	// walked in and then did not pull again still walked in once).
+	d.remote(func(r *RemoteReport) { r.PullCloseIns++ })
+	d.rep.note(fmt.Sprintf("%s: pull of %s drew no fight with the tank %.0f yd from it; walking the party to %.0f yd of it and pulling again (experiment: pull_close_in)",
+		label, d.hostileName(t), before, close))
+	attempted = true
+	if err := d.walkArrive(ctx, stand, d.opt.MoveArrive); err != nil {
+		return true, false, err
+	}
+	// The same checks on the newest frame: the mob may have started walking home, joined a fight or moved while the party walked in, and
+	// another hostile may have come into the stand's area on the way. Any of those and the pull is not sent again from there.
+	h2, why := d.closeInStop(t)
+	if why != "" {
+		d.closeInSkip(label, t, why)
+		return true, false, nil
+	}
+	if who, at := d.hostileNearStand(stand, t.GUID); who != "" {
+		d.closeInSkip(label, t, fmt.Sprintf("a hostile came within %.0f yd of the stand while the party walked in: %s", at, who))
+		return true, false, nil
+	}
+	if after := distToLead(d, hostilePoint(h2)); before-after < float64(d.opt.MoveArrive) {
+		d.closeInSkip(label, t, fmt.Sprintf("the walk to %.0f yd of it got the party no nearer (%.0f yd)", close, after))
+		return true, false, nil
+	}
+	return true, true, nil
+}
+
+// closeInStop says why the mob t is no longer one to walk in on from the frame the driver has now ("" when it still is), with the mob as
+// the feed shows it: it is re-read by GUID, so a mob that left the feed, died, walked home, joined a fight, or is not where its pull was
+// made is caught. t stays the pull's own record of the mob (its position at the start of the pull), so a mob that moved while the party
+// walked in is caught too.
+func (d *RemoteDriver) closeInStop(t tbm.HostileRec) (tbm.HostileRec, string) {
+	if d.stale() {
+		return tbm.HostileRec{}, "the feed is quiet: its position is not known"
+	}
+	h, ok := d.fr.Hostile(t.GUID)
+	switch {
+	case !ok:
+		return h, "it is not in the feed any more"
+	case h.HPPct <= 0:
+		return h, "it is dead"
+	case h.Evading():
+		return h, "it is walking home"
+	case d.engagedWith(h):
+		return h, "it is already fighting the party"
+	}
+	if moved := dist3(hostilePoint(h), hostilePoint(t)); moved > closeInMovedYd {
+		return h, fmt.Sprintf("it moved %.0f yd from where the pull was made", moved)
+	}
+	return h, ""
+}
+
+// closeInMovedYd is how far the mob may have moved from where its pull was made and still be walked in on: the pull was about that spot.
+const closeInMovedYd = 5
+
+// closeInClearYd is how far from the stand of a walk-in any hostile the party is not pulling must stand: a recovery walk must not take
+// the party into a second pack.
+const closeInClearYd = 25
+
+// closeInSkip notes a pull that is not tried again from a nearer stand, and why: the try counts as a failed one as it always did. It is
+// used for a walk-in that is not attempted at all and for a walk that ran and did not end in a retry.
+func (d *RemoteDriver) closeInSkip(label string, t tbm.HostileRec, why string) {
+	d.rep.note(fmt.Sprintf("%s: pull of %s is not tried again from a nearer stand: %s (the pull counts as failed)", label, d.hostileName(t), why))
+}
+
+// hostileNearStand names a hostile that keeps the party off a walk-in stand, with its distance from the stand, or "" when the stand is
+// clear: any living hostile but the pull's own target within closeInClearYd of the stand, and any hostile fighting the party wherever it
+// stands (a recovery walk must not join a fight the driver did not pick).
+func (d *RemoteDriver) hostileNearStand(stand Point, target packet.GUID) (string, float64) {
+	var who string
+	at := math.MaxFloat64
+	for _, h := range d.fr.Hostiles {
+		if h.GUID == target || h.Entry == 0 || h.HPPct <= 0 {
+			continue
+		}
+		away := dist3(hostilePoint(h), stand)
+		switch {
+		case away <= closeInClearYd:
+			if away < at {
+				who, at = d.hostileName(h), away
+			}
+		case d.engagedWith(h):
+			if at == math.MaxFloat64 {
+				who, at = d.hostileName(h)+" (in a fight)", away
+			}
+		}
+	}
+	return who, at
+}
+
+// standPoint is where a walk that stops standoff yards short of p stands: the point at that distance along the navmesh path from the lead
+// bot (the straight line without a planner). ok is false when the path has no such point (or the lead bot's place is not known).
+func (d *RemoteDriver) standPoint(ctx context.Context, p Point, standoff float32) (Point, bool) {
+	here, ok := d.leadPos()
+	if !ok {
+		return Point{}, false
+	}
+	if pl, ok := d.g.(PathPlanner); ok {
+		if pts, err := pl.PlanPath(ctx, d.plan.Map, here, p); err == nil {
+			return StandoffPoint(pts, standoff)
+		}
+	}
+	if dist := dist3(here, p); dist <= float64(standoff) {
+		return here, true
+	} else {
+		return lerp(here, p, (dist-float64(standoff))/dist), true
+	}
 }
 
 // ccFor puts the CC marks on the hostiles around the target that a rule names, before the pull.

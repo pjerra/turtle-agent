@@ -112,6 +112,9 @@ var tuneSpecs = []tuneSpec{
 	// Pulls and fights.
 	yds("pull_range", 10, 80, "a target farther than this from the lead bot is approached first", func(t *tuneTarget) *float32 { return &t.cfg.PullRange }),
 	yds("pull_standoff", 5, 70, "how far from the target the lead bot stops when it approaches (at most pull_range)", func(t *tuneTarget) *float32 { return &t.cfg.PullStandoff }),
+	{Key: "pull_close_in", Unit: "yd", Min: 0, Max: 70, Doc: "a pull that drew no fight with the lead bot farther than this is tried again from this near the mob (0: off, the default; never farther than pull_standoff)",
+		get: func(t *tuneTarget) float64 { return math.Max(0, float64(t.cfg.PullCloseIn)) },
+		set: func(t *tuneTarget, v float64) { t.cfg.PullCloseIn = float32(v) }},
 	yds("pack_radius", 5, 60, "how far from a pull position a pack member may stand (a group's radius wins)", func(t *tuneTarget) *float32 { return &t.cfg.PackRadius }),
 	ints("pull_attempts", "count", 1, 6, "failed pulls of one group before the run fails", func(t *tuneTarget) *int { return &t.cfg.PullAttempts }),
 	secs("engage_timeout_s", 5, 90, "a pull that draws no fight in this long has failed", func(t *tuneTarget) *time.Duration { return &t.cfg.EngageTimeout }),

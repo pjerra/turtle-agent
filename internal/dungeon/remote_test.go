@@ -44,6 +44,9 @@ type rmob struct {
 	tankPct  int
 	// inert: a pull at it is acknowledged and does nothing (the mob never comes: no fight)
 	inert bool
+	// pullRange: a `cmd pullback` at it only brings it while the lead bot stands within this many yards (else it is acknowledged and
+	// nothing comes: the module's own walk-in stopped short of the pull's reach; live wc-live-3 A3). 0: any distance, as before.
+	pullRange float64
 	// aggroed: it came at the party because a bot walked within the fake's aggro range of it (not by a pull)
 	aggroed bool
 	// reaction and kind: the record's TortoiseBots #943 fields ("" leaves them out, as an older module does)
@@ -642,7 +645,7 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 		if m == nil {
 			return errReply(intent, "invalid-target"), nil
 		}
-		if m.inert {
+		if m.inert || (m.pullRange > 0 && g.leadDist(m) > m.pullRange) {
 			return ack(intent), nil
 		}
 		m.pulled, m.pullAt = true, g.now

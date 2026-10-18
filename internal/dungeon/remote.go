@@ -362,6 +362,7 @@ type RemoteReport struct {
 	ThreatWarnings  int `json:"threat_warnings"`  // bots that came within ThreatWarnPct of the tank's threat on a mob
 	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
 	TankBusyWaits   int `json:"tank_busy_waits"`  // pulls the module refused as tank-busy that waited for the tank, then pulled again
+	PullCloseIns    int `json:"pull_close_ins"`   // pulls that drew no fight with the lead bot far off, walked nearer and pulled again (PullCloseIn)
 	CCOrders        int `json:"cc_orders"`        // crowd-control orders
 	BigPacks        int `json:"big_packs"`        // pulls of a pack of big_pack or more mobs
 	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
