@@ -43,6 +43,10 @@ const (
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
 	FlagDoneData  = 8
 	FlagEncounter = 32
+	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
+	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
+	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
+	FlagExact = 64
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -230,6 +234,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 			b.warnings = append(b.warnings, w.String())
 		}
 	}
+	upto := len(p.Legs)
+	if cut != "" {
+		upto = cutLeg
+	}
+	b.warnings = append(b.warnings, unexpressed(p, opt, upto)...)
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
@@ -296,6 +305,13 @@ func (b *builder) leg(li int) error {
 		}
 		if w.GMCross {
 			return fmt.Errorf("via %.1f %.1f %.1f is a gm_cross: a GM moves the party there in a remote run, and the TortoiseBots run leader has no such step", w.X, w.Y, w.Z)
+		}
+		if w.Exact {
+			// The plan allows exact only on a plain via whose next via is a direct step (dungeon.Parse refuses any other), so this row is
+			// always followed by its move_direct; Validate checks the rows keep it so.
+			b.add(StepRow{Kind: KindMove, X: w.X, Y: w.Y, Z: w.Z, Flags: FlagExact, Comment: "via (exact: the direct step's launch point)"})
+			b.last, b.haveLast = w.Point, true
+			continue
 		}
 		b.move(w.Point, w.Direct, "via")
 	}
@@ -559,7 +575,7 @@ func nameOr(a, b string) string {
 
 // Validate checks rows the way the module's loader would, so that a row it would skip is a refusal here.
 func Validate(r Rows) error {
-	for _, s := range r.Steps {
+	for i, s := range r.Steps {
 		where := fmt.Sprintf("plan %s leg %d step %d (%s)", s.Plan, s.Leg, s.Seq, s.Kind)
 		bad := func(format string, a ...any) error { return fmt.Errorf("%s: %s", where, fmt.Sprintf(format, a...)) }
 		if s.Radius < 0 || s.Radius > MaxRadius {
@@ -597,6 +613,14 @@ func Validate(r Rows) error {
 		}
 		if s.Kind == KindWaitObject && s.Param > 2 {
 			return bad("param %d is above 2", s.Param)
+		}
+		if s.Flags&FlagExact != 0 {
+			if s.Kind != KindMove {
+				return bad("the exact flag is for a move row (the loader refuses it on a %s)", s.Kind)
+			}
+			if i+1 >= len(r.Steps) || r.Steps[i+1].Plan != s.Plan || r.Steps[i+1].Leg != s.Leg || r.Steps[i+1].Kind != KindMoveDirect {
+				return bad("an exact move must be followed by the move_direct it launches (a row came between them, or there is none)")
+			}
 		}
 		if len(s.Comment) > MaxComment {
 			return bad("comment longer than %d", MaxComment)
