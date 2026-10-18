@@ -561,20 +561,28 @@ func druidCat() *Strategy {
 	shred := catAction("shred", "Shred", func(c *Ctx) bool { return behindMob(c, fightMob(c)) }, func(c *Ctx) bool { return cp(c) < catBiteCP })
 	shred.Alt = []string{"claw"}
 	claw := catAction("claw", "Claw", nil, func(c *Ctx) bool { return cp(c) < catBiteCP })
-	rip := catAction("rip", "Rip", func(c *Ctx) bool { return cp(c) >= catRipCP }, func(c *Ctx) bool {
+	ripReady := func(c *Ctx) bool { return cp(c) >= catRipCP }
+	biteReady := func(c *Ctx) bool {
+		return cp(c) >= catBiteCP || (cp(c) >= catBiteFinishCP && mobPct(c) <= catBiteFinish)
+	}
+	rip := catAction("rip", "Rip", ripReady, func(c *Ctx) bool {
 		return !HasAura(fightMob(c), "Rip") && mobPct(c) > catRipMinPct
 	})
-	bite := catAction("ferocious_bite", "Ferocious Bite", func(c *Ctx) bool {
-		return cp(c) >= catBiteCP || (cp(c) >= catBiteFinishCP && mobPct(c) <= catBiteFinish)
-	}, nil)
+	bite := catAction("ferocious_bite", "Ferocious Bite", biteReady, nil)
 	return &Strategy{
 		Name:    "druid_cat",
 		Actions: []*Action{swingAction("auto_attack", fightMob), faerie, fury, rake, shred, claw, rip, bite},
 		Rules: []Rule{
 			{Trigger: Trigger{Name: "mob_in_reach", Active: mobInReach}, Do: []Next{{"auto_attack", RelNormal + 9}}},
+			// The finishers are asked for only with the combo points that let them run: a Rip or a Bite short of them is no decision the
+			// tick could make, and it is the refused candidate the report names every 3 s on an idle tick.
+			{Trigger: Trigger{Name: "cat_finish_rip", Active: func(c *Ctx) bool { return inForm(c, formCat) && mobInReach(c) && ripReady(c) }},
+				Do: []Next{{"rip", RelNormal + 8}}},
+			{Trigger: Trigger{Name: "cat_finish_bite", Active: func(c *Ctx) bool { return inForm(c, formCat) && mobInReach(c) && biteReady(c) }},
+				Do: []Next{{"ferocious_bite", RelNormal + 7}}},
 			{Trigger: Trigger{Name: "cat_fight", Active: func(c *Ctx) bool { return inForm(c, formCat) && mobInReach(c) }},
-				Do: []Next{{"rip", RelNormal + 8}, {"ferocious_bite", RelNormal + 7}, {"faerie_fire_feral", RelNormal + 6},
-					{"tigers_fury", RelNormal + 5}, {"rake", RelNormal + 4}, {"shred", RelNormal + 3}, {"claw", RelNormal + 2}}},
+				Do: []Next{{"faerie_fire_feral", RelNormal + 6}, {"tigers_fury", RelNormal + 5}, {"rake", RelNormal + 4},
+					{"shred", RelNormal + 3}, {"claw", RelNormal + 2}}},
 		},
 	}
 }

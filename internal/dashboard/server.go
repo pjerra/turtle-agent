@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -9,9 +10,16 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/netutil"
+)
+
+var (
+	agentID = regexp.MustCompile(`^\d{1,6}$`)
+	runID   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
 
 //go:embed static
@@ -20,6 +28,12 @@ var staticFS embed.FS
 // Handler serves the page, the cached state and the files of the tests folder. Every route is GET or HEAD; nothing in it sends
 // anything to an agent. allowHosts are the Host names the guard accepts besides the loopback names (see AllowedHosts).
 func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...string) http.Handler {
+	return HandlerWithEditor(p, testsDir, allowHosts, embedFrom, nil)
+}
+
+// HandlerWithEditor is Handler with the route editor on when ed is not nil: then, and only then, POST /api/edit/* is let through the
+// guard, and only with the editing token.
+func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []string, ed *Editor) http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	static := http.FileServer(http.FS(sub))
 	mux := http.NewServeMux()
@@ -35,12 +49,68 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 		writeJSON(w, b)
 	})
 	mux.HandleFunc("/api/plan/", func(w http.ResponseWriter, r *http.Request) {
-		geo, errText := p.Geometry(strings.TrimPrefix(r.URL.Path, "/api/plan/"))
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan/")
+		if n, ok := strings.CutSuffix(name, "/route"); ok {
+			serveRoute(w, r, p, n)
+			return
+		}
+		var geo []byte
+		var errText string
+		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {
+			geo, errText = p.GeometryFor(name, id) // the copy that agent's runs read
+		} else {
+			geo, errText = p.Geometry(name)
+		}
 		if geo == nil {
 			http.Error(w, errText, http.StatusNotFound)
 			return
 		}
 		writeJSON(w, geo)
+	})
+	mux.HandleFunc("/api/plans", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(p.Plans())
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/plan-copies/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/plan-copies/")
+		if !planName.MatchString(name) {
+			http.NotFound(w, r)
+			return
+		}
+		b, _ := json.Marshal(p.PlanCopies(name))
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
+		if !agentID.MatchString(id) {
+			http.NotFound(w, r)
+			return
+		}
+		minutes, _ := strconv.Atoi(r.URL.Query().Get("min"))
+		b, ok := p.LiveJSON(id, minutes)
+		if !ok {
+			http.Error(w, "no readable trace for this agent's run", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, b)
+	})
+	mux.HandleFunc("/api/ghost/", func(w http.ResponseWriter, r *http.Request) {
+		plan := strings.TrimPrefix(r.URL.Path, "/api/ghost/")
+		exclude := r.URL.Query().Get("exclude")
+		if !planName.MatchString(plan) || (exclude != "" && !runID.MatchString(exclude)) {
+			http.NotFound(w, r)
+			return
+		}
+		legs, _ := strconv.Atoi(r.URL.Query().Get("legs"))
+		writeJSON(w, p.Ghost(plan, exclude, min(max(legs, 0), 200)))
+	})
+	mux.HandleFunc("/api/heat/", func(w http.ResponseWriter, r *http.Request) {
+		plan := strings.TrimPrefix(r.URL.Path, "/api/heat/")
+		if !planName.MatchString(plan) {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, p.Heat(plan))
 	})
 	mux.HandleFunc("/api/minimap/", func(w http.ResponseWriter, r *http.Request) {
 		serveMinimapLayers(w, r, p.opt.MinimapDir)
@@ -51,8 +121,11 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 	mux.HandleFunc("/files/", func(w http.ResponseWriter, r *http.Request) {
 		serveTestFile(w, r, testsDir)
 	})
+	if ed != nil {
+		ed.routes(mux)
+	}
 	mux.Handle("/", static)
-	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts))
+	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts), ed)
 }
 
 func writeJSON(w http.ResponseWriter, b []byte) {
@@ -149,11 +222,13 @@ func hostSet(names []string) map[string]bool {
 	return set
 }
 
-// guard refuses what a read-only local page has no use for: other methods, and requests whose Host is neither a loopback name
+// guard refuses what a read-only local page has no use for: other methods (but for the editor's POST /api/edit/*, when the editor is on, which
+// then needs the editing token), and requests whose Host is neither a loopback name
 // nor one of allowed (a page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1: its Host is the name).
-func guard(next http.Handler, ancestors string, allowed map[string]bool) http.Handler {
+func guard(next http.Handler, ancestors string, allowed map[string]bool, ed *Editor) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		editPost := ed != nil && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/edit/")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !editPost {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
@@ -171,6 +246,12 @@ func guard(next http.Handler, ancestors string, allowed map[string]bool) http.Ha
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors "+ancestors)
+		if editPost {
+			var ok bool
+			if r, ok = ed.authorize(w, r); !ok {
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

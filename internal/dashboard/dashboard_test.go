@@ -48,7 +48,8 @@ const viewJSON = `{"have":true,"n":20,"age_ms":700,"stats":{"frames":20},"frame"
  "hostiles":[
   {"guid":"0xF130001C4E00AC91","entry":7001,"x":1002,"y":805,"hp_pct":80,"flags":"-","reaction":"h","kind":"-","target":"0x00000000000002DC"},
   {"guid":"0xF130001C4E00AC92","entry":9999,"x":1100,"y":900,"hp_pct":100,"flags":"c","reaction":"n","kind":"-"},
-  {"guid":"0xF130001C4E00AC93","entry":8001,"x":1010,"y":805,"hp_pct":100,"flags":"-","reaction":"h","kind":"-"}]}}`
+  {"guid":"0xF130001C4E00AC93","entry":8001,"x":1010,"y":805,"hp_pct":100,"flags":"-","reaction":"h","kind":"-"},
+  {"guid":"0xF130001C4E00AC94","entry":1234,"x":1020,"y":810,"hp_pct":100,"flags":"-","reaction":"n","kind":"k","target":"0x0000000000000000"}]}}`
 
 // tinyPlan has one leg with a pull group (entry 7001), a second pull group (entry 8001) and a boss.
 func tinyPlan(t *testing.T) *dungeon.Plan {
@@ -113,7 +114,7 @@ func TestBuildCardFromStatus(t *testing.T) {
 		t.Fatalf("dead bot: %+v", dead)
 	}
 	// mobs: reaction n is neutral, group 1 of leg 0 is behind group 2 (cleared), group 2 is the current one
-	if len(c.Mobs) != 3 {
+	if len(c.Mobs) != 4 {
 		t.Fatalf("mobs: %+v", c.Mobs)
 	}
 	m0, m1, m2 := c.Mobs[0], c.Mobs[1], c.Mobs[2]
@@ -125,6 +126,16 @@ func TestBuildCardFromStatus(t *testing.T) {
 	}
 	if m2.Kind != "hostile" || m2.Group != 1 || m2.Cleared {
 		t.Fatalf("mob 2: %+v", m2)
+	}
+	// a critter is its own kind; a target is named by guid for the page's threat and target lines (none for an all-zero guid)
+	if c.Mobs[3].Kind != "critter" || c.Mobs[3].TargetGUID != "" {
+		t.Fatalf("critter: %+v", c.Mobs[3])
+	}
+	if m0.TargetGUID != "0x00000000000002DC" || m1.TargetGUID != "" {
+		t.Fatalf("mob targets: %q %q", m0.TargetGUID, m1.TargetGUID)
+	}
+	if tank.GUID != "0x00000000000002DC" || tank.TargetGUID != "0xF130001C4E00AC91" || healer.GUID != "0x00000000000002DD" || healer.TargetGUID != "0x00000000000002DC" || dead.TargetGUID != "" {
+		t.Fatalf("bot guids: %+v %+v %+v", tank, healer, dead)
 	}
 	if !c.Feed.Have || c.Feed.Stale || c.Feed.AgeMS != 700 {
 		t.Fatalf("feed: %+v", c.Feed)
@@ -536,7 +547,7 @@ func TestDiscoverAgents(t *testing.T) {
 
 func TestClientIsReadOnly(t *testing.T) {
 	cl := NewClient(Agent{ID: "1", Addr: "127.0.0.1:1"}, time.Second)
-	for _, m := range []string{"chat", "gm", "logout", "teleport", "commander", "tune_set", "dungeon_run", "dungeon_stop", "brain_start", "walk_to", "cast", "invite", ""} {
+	for _, m := range []string{"chat", "gm", "logout", "teleport", "commander", "tune_set", "dungeon_run", "dungeon_stop", "dungeon_pause", "brain_start", "walk_to", "cast", "invite", ""} {
 		if _, err := cl.Call(context.Background(), m); err != ErrNotAllowed {
 			t.Errorf("%q: %v, want ErrNotAllowed", m, err)
 		}

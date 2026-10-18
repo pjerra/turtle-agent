@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -155,7 +156,7 @@ func TestBotViewMethod(t *testing.T) {
 func TestDungeonRunRemoteRefusals(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
-		{`{"name":"rig","mode":"fly"}`, `mode must be "group" or "remote"`},
+		{`{"name":"rig","mode":"fly"}`, `mode must be "commander", "observe" or "leader"`},
 		{`{"name":"rig","lead_bot":"Tanky"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"remote"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tank y"}`, "needs lead_bot"},
@@ -171,6 +172,14 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","loot_restore":"ffa"}`, "loot_restore:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","object_fallback":"maybe"}`, "object_fallback:"},
 		{`{"name":"rig","object_fallback":"agent"}`, `go with mode "remote"`},
+		{`{"name":"rig","graves_batch":3}`, `go with mode "remote"`},
+		{`{"name":"rig","graves_open_by":"agent"}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_open_by":"nobody"}`, "graves_open_by:"},
+		{`{"name":"rig","graves_ramp":{"start":2}}`, `go with mode "remote"`},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_batch":21}`, "graves_batch:"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_batch":3,"graves_ramp":{}}`, "give one"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_ramp":{"start":6,"max":4}}`, "start 6 is above max 4"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","graves_ramp":{"step":11}}`, "graves_ramp:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","team":"orcs"}`, "team:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","preflight":"maybe"}`, "preflight:"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","on_end":"dance"}`, "on_end:"},
@@ -179,12 +188,12 @@ func TestDungeonRunRemoteRefusals(t *testing.T) {
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","cc":[{"entry":1,"mark":"banana"}]}`, "cc: each rule"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","teleport":true}`, "teleport is a GM command"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","buffs":"world"}`, "buffs are GM commands"},
-		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "brain plays the agent's own character"},
+		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","brain":"frost_mage"}`, "play the agent's own character"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","gm":true}`, "no GM command"},
 		// Starting anywhere and the pull test (README "Start anywhere", "Pull test").
 		{`{"name":"rig","from_pull_group":0}`, `go with mode "remote"`},
 		{`{"name":"rig","start_here":true}`, `go with mode "remote"`},
-		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, `go with mode "remote"`},
+		{`{"name":"rig","pulltest":{"leg":0,"pull_group":0}}`, "scores the character: it needs a brain"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_pull_group":3}`, "from_pull_group 3: leg 0 (first) has 1 pull groups"},
 		{`{"name":"rig","mode":"remote","lead_bot":"Tanky","from_leg":"second","from_pull_group":-1}`, "from_pull_group -1: leg 1 (second)"},
 		{`{"name":"rig","have_items":[7733]}`, `go with mode "remote"`},
@@ -229,6 +238,9 @@ func TestDungeonRunRemoteEndToEnd(t *testing.T) {
 	r.system(viewFrame(1, false)...)
 	// The run turns corpse looting on for the bound bots first (a run that ended in a crash may have left it off), then the pre-run kit
 	// check: maintenance, then the bags (plain `.bot` lines, answered by system messages).
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot maintenance Tanky"))
@@ -287,6 +299,9 @@ func TestDungeonRunRemoteEntersByTele(t *testing.T) {
 	inside := viewFrame(2, false)
 	inside[1] = strings.Replace(inside[1], ",1.50,0,0,", ",1.50,70,0,", 1)
 	r.system(inside...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
@@ -337,6 +352,9 @@ func TestDungeonRunRemotePrepareOverTheSession(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|1|on")
 	r.system(viewFrame(1, false)...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot cmd stay"))
@@ -543,6 +561,9 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 	r.expectBody(opcode.CMSGMessagechat, say(".bot commander view on"))
 	r.system("TBM:ACTION_ACK|commander view|party|1|on")
 	r.system(viewFrame(1, false)...)
+	// The run reads the roster for its cc bot (resolveCCBot) before anything else is sent.
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|42|Tanky|1|online|1|Dun Morogh", "TBM:ROSTER_END")
 	r.expectBody(opcode.CMSGMessagechat, say(".bot behavior Tanky loot on"))
 	r.system("TBM:ACTION_ACK|behavior loot|bot:Tanky|1|on")
 	r.expectBody(opcode.CMSGMessagechat, say(".account"))
@@ -568,5 +589,52 @@ func TestDungeonRunRemoteStartNeedsAGM(t *testing.T) {
 	sr, _ := rep["start"].(map[string]any)
 	if rem["gm_commands"].(float64) != 0 || rem["unbound"] != true || sr == nil || sr["kind"] != "pull_gather" || sr["pull_group"] != float64(0) || len(sr["gm_commands"].([]any)) != 0 {
 		t.Fatalf("remote %v start %v", rem, sr)
+	}
+}
+
+// recover_wipe is on by default in a commander run, off in a group run, and the caller's word wins either way.
+func TestRecoverWipeDefaultsOnForCommanderRuns(t *testing.T) {
+	parse := func(js string) dungeonRunParams {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(js), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct {
+		params    string
+		commander bool
+		want      bool
+	}{
+		{`{"name":"x"}`, true, true},
+		{`{"name":"x"}`, false, false},
+		{`{"name":"x","recover_wipe":false}`, true, false},
+		{`{"name":"x","recover_wipe":true}`, true, true},
+		{`{"name":"x","recover_wipe":true}`, false, true},
+	} {
+		if got := recoverWipeOn(parse(c.params).RecoverWipe, c.commander); got != c.want {
+			t.Errorf("%s commander %v: %v, want %v", c.params, c.commander, got, c.want)
+		}
+	}
+}
+
+// An observed run steers nothing: its recover_wipe is off (the trace options say so), a commander run's is on, the legacy "remote" too.
+func TestRemoteRecoverWipeIsOffForObservedRuns(t *testing.T) {
+	for mode, want := range map[string]bool{"commander": true, "remote": true, "": true, "observe": false} {
+		var p dungeonRunParams
+		if err := json.Unmarshal([]byte(`{"name":"x","mode":"`+mode+`"}`), &p); err != nil {
+			t.Fatal(err)
+		}
+		if got := remoteRecoverWipe(p); got != want {
+			t.Errorf("mode %q: %v, want %v", mode, got, want)
+		}
+	}
+	// observe refuses any recover_wipe value, false included.
+	r := dungeonRig(t)
+	for _, v := range []string{"true", "false"} {
+		out := r.call("dungeon_run", `{"name":"rig","mode":"observe","lead_bot":"Tanky","recover_wipe":`+v+`}`)
+		if errCode(out) != rpc.CodeInvalidParams || !strings.Contains(out["error"].(map[string]any)["message"].(string), "recover_wipe") {
+			t.Errorf("recover_wipe %s: %v", v, out["error"])
+		}
 	}
 }

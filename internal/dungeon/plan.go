@@ -14,7 +14,13 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/pjerra/turtle-agent/internal/tactics"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // Version is the plan format this package reads and writes.
@@ -89,15 +95,42 @@ type Plan struct {
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
 	LevelBand []int `json:"level_band,omitempty"`
-	// HireComposition is the party the plan wants hired, "class:role" each (see HireSpec.Composition): the prepare step takes it when its own
-	// hire block gives none. Dungeon plans only.
+	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
+	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
 	HireComposition []string `json:"hire_composition,omitempty"`
+	// Fleers are the creature entries that run from the fight at low health (EventAI "flee at 15 % HP": Uldaman's Stonevault Geomancers,
+	// Shadowforge casters, Flameweavers) and come back with the next group. The remote driver kills such a mob before it is out of reach
+	// and waits for one that got away before it pulls on (remote_flee.go); any other mob is taken for a runner only when the feed shows it
+	// at low health, moving away from the party.
+	Fleers []uint32 `json:"fleers,omitempty"`
+	// CCPriority lists, best first, the entries the pack CC (remote_cc.go) puts its mark on: the healers and casters of the dungeon
+	// that the mage's Polymorph takes. Empty: any pack member but the pull target, the farthest from it first.
+	CCPriority []uint32 `json:"cc_priority,omitempty"`
+	// CCAlways lists entries that get the CC in any pack they are in, below big_pack too (Zul'Farrak's Sandfury Shadowhunter, whose
+	// Hex takes the tank out; owner rule 2026-10-14). They are not picked as the pull target while another member is there.
+	CCAlways []uint32 `json:"cc_always,omitempty"`
+	// NoCC lists entries the pack and reactive CC never take, besides the plan's bosses and kill_first entries (which are never crowd-controlled
+	// either): the undead and the others a Polymorph does not land on (Zul'Farrak's Zombie 7286 and Dead Hero 7276: nine orders, one cast).
+	NoCC []uint32 `json:"no_cc,omitempty"`
+	// KillFirst lists, best first, the entries the party kills before the rest of a fight, unless one is crowd-controlled (Zul'Farrak's
+	// Greater Healing Ward 8179, the Witch Doctor 5650 and the Soul Eater 7247, the healers whose heals outlast the party). A summoned
+	// entry (the ward) is a kill target, never a CC target. An entry that is in cc_always too (Ragefire's Shaman 11319) is sheeped once, by
+	// the pack CC, and the others of it are killed first. Empty: the tank's order only (remote_fight.go).
+	KillFirst []uint32 `json:"kill_first,omitempty"`
+	// SummonedKillFirst names the kill_first entries that are summoned units (Zul'Farrak's Greater Healing Ward 8179): they fight nobody, so
+	// the remote driver takes one as part of a fight only with evidence that the fight is there (it stands within 10 yd of a hostile that
+	// fights the party), sends the party at it with no threat wait, and never crowd-controls it. Each must also be in kill_first.
+	SummonedKillFirst []uint32 `json:"summoned_kill_first,omitempty"`
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
-	Legs     []Leg           `json:"legs"`
+	// Avoid are the regions of the map the party must never stand in or walk through: ground that kills although the navmesh calls it
+	// plain ground (Ragefire Chasm's lava basin, see AvoidBox). The planner keeps out of them, no point of the plan may lie in one, and
+	// the remote driver neither summons a bot onto nor raises a body in one. Empty: none.
+	Avoid []AvoidBox `json:"avoid,omitempty"`
+	Legs  []Leg      `json:"legs"`
 }
 
 // Band is the plan's level band, low and high; 0, 0 when it gives none.
@@ -119,6 +152,10 @@ type Portal struct {
 type Leg struct {
 	Name string `json:"name,omitempty"`
 	To   Point  `json:"to"`
+	// Optional marks a leg that needs an item no honest run carries (Zul'Farrak's gong needs the Mallet of Zul'Farrak): at the leg's start the
+	// run looks for the item in the lead bot's and the carrier's bags and, when neither has it, skips the whole leg (the leg's result says
+	// so) instead of failing. The run-start check for a step's requires_item leaves such a leg out.
+	Optional *OptionalLeg `json:"optional,omitempty"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
 	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
@@ -129,6 +166,16 @@ type Leg struct {
 	Skip  []uint32 `json:"skip,omitempty"`
 	Steps []Step   `json:"steps,omitempty"`
 	Boss  *Boss    `json:"boss,omitempty"`
+	// CompanionsLoot false has the driver order the party's corpse and object looting off (".bot behavior <bot> loot off") from the start
+	// of the leg to its end, and on again after: the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes
+	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
+	// Absent or true leaves the companions as they are.
+	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// LeftoverEntries are summoned creatures a step of the leg leaves standing idle (Zul'Farrak's Zombies 7286 and Dead Heroes 7276 that a grave
+	// brings: round 3, 11 of them stood idle after step 16 and all aggroed at once when the carrier went to the next grave). The remote driver
+	// pulls the ones within LeftoverRadius of the next batch of chests and fights them before the chests are opened, after each batch, and
+	// before an area trigger (remote_batch.go). Empty: no sweep.
+	LeftoverEntries []uint32 `json:"leftover_entries,omitempty"`
 	// NeedsWalk marks a To that is not on the navmesh and could not be snapped to it (no walkable floor within a few yards: a scripted
 	// area, a platform): the mapping walk has to find the real waypoint. The same flag on a pull group or the boss says the same of its position.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
@@ -139,6 +186,15 @@ type Leg struct {
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
 }
+
+// OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
+type OptionalLeg struct {
+	Item uint32 `json:"item"`
+	Name string `json:"name,omitempty"`
+}
+
+// Ref is the item as an ItemRef.
+func (o OptionalLeg) Ref() ItemRef { return ItemRef{Entry: o.Item, Name: o.Name} }
 
 // The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
@@ -156,6 +212,33 @@ const (
 type Waypoint struct {
 	Point
 	Direct bool `json:"direct,omitempty"`
+	// CheckSkip exempts the hop from the plan check (plancheck.go) and says why: a hop the navmesh cannot judge on purpose (Uldaman's scorpid
+	// pit, a gap the mesh does not link). The check lists it as skipped with this text instead of failing it. Empty: checked.
+	CheckSkip string `json:"check_skip,omitempty"`
+	// GMCross says the party does not walk to this point: a GM account moves it there (remote driver, gmCross): the commander's own
+	// character goes to the point (`.appear <lead bot>` when it is not near, then `.go xyz`), `.bot summon <lead bot>` brings the lead
+	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
+	// It is for a gap no walk crosses (Wailing Caverns: a 3.9 yd chasm, a jump down and no way up). It is a direct waypoint (the file says
+	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
+	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account that may .go xyz (level 1 and up, read with `.account`): without
+	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
+	// {"x": -289.1, "y": 3.2, "z": -64.1, "direct": true, "gm_cross": true}.
+	GMCross bool `json:"gm_cross,omitempty"`
+}
+
+// GMCrossRadius is the yards within which every living member must stand of a gm_cross point before the run goes on.
+const GMCrossRadius = 10.0
+
+// HasGMCross says whether a leg of the plan from leg `from` on has a gm_cross waypoint.
+func (p *Plan) HasGMCross(from int) bool {
+	for i := max(from, 0); i < len(p.Legs); i++ {
+		for _, w := range p.Legs[i].Via {
+			if w.GMCross {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RestSpec is a leg's say over its rest gates. A zero field keeps the driver's default (health 90, healer_mana 50, mana 35,
@@ -195,9 +278,69 @@ type PullGroup struct {
 	// Equiv names a set of equivalent packs of the leg (same mobs, same kind of ground): the pull-test scenario (dungeon_run pulltest)
 	// pulls the next pack of the set for its next try instead of waiting for the first to respawn. Empty: the pack has no equivalent.
 	Equiv string `json:"equiv,omitempty"`
+	// Patrol is a patrol that walks near the group (remote_patrol.go): before the group is pulled the driver waits until it is out of
+	// patrol_aggro of the pull, or pulls it alone first when it passes the party away from the pack, and counts it in the pack while
+	// it stands within patrol_aggro of the pull. Nil: no patrol comes by.
+	Patrol *Patrol `json:"patrol,omitempty"`
 	// NeedsWalk: the positions are not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Approach is where the TortoiseBots run leader's party walks before it pulls the group, in order: the last point is where it stands to
+	// engage (within RunLeaderSeeYd of the pack, so the run leader sees it and pulls it from there). plan-export writes each as a move row
+	// before the pull row; the plan check walks them. Without it the run leader approaches a pack it cannot see from its last move point
+	// in navmesh hops of its own, which fail where the path is long or ends under a ledge (Uldaman, live 2026-10-16). The agent's own
+	// driver looks at the pack from its path (LookPoint) and does not walk these points.
+	Approach []Point `json:"approach,omitempty"`
+	// Hold makes the run leader's row for the group a scripted event's hold (see Hold) instead of a pull; nil: a pull.
+	Hold *Hold `json:"hold,omitempty"`
 }
+
+// Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
+// stands on Spot and fights what the event sends within Radius until the instance data Data reads DONE (the core's encounter state 3;
+// FAIL or a reset is a failed event), or TimeoutS runs out. plan-export writes it in place of the group's pull row (or the boss's row):
+// entry Data, param 3, flags 40 (done by instance data 8 + read as encounter states 32), the group's entries (a boss: its entry, its
+// first and Entries) as the event's mobs. A move row straight before it to the same spot is left out (the hold walks there itself), and
+// a game object wait straight after it waits at most HoldDoorWaitS (the event's DONE is what opens the door). The agent's own driver
+// does not read it: it fights the group (or the boss) and waits for the steps as written.
+type Hold struct {
+	Data     uint32  `json:"instance_data"`
+	Spot     Point   `json:"spot"`
+	Radius   float32 `json:"radius"`
+	TimeoutS int     `json:"timeout_s"`
+	// Entries are more creature entries of the event (a boss's waking statues and guardians); a group's own entries are always in.
+	Entries []uint32 `json:"entries,omitempty"`
+}
+
+// The limits of a Hold and of Approach.
+const (
+	// HoldDoorWaitS is the most a game object wait straight after a hold waits in the run leader's rows.
+	HoldDoorWaitS = 60
+	// MaxApproach is the most approach points a pull group or boss has.
+	MaxApproach = 4
+	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
+	// farther, it walks toward it in navmesh hops of its own.
+	RunLeaderSeeYd = 60
+	// RunLeaderReachYd is how far from the run leader's last move point the plan check wants a pack, a boss or the next move point: the
+	// see range less the 3 yd a walk stops short and some room for a pack's wander.
+	RunLeaderReachYd = 50
+)
+
+// Patrol is a group of mobs that walks a path (creature_movement waypoints, movement type 2): Entries are its members, Path the
+// waypoints in the order it walks them (it goes on from the last to the first, as the core's waypoint movement does), PeriodS how long
+// one round takes, in seconds (the path's length at the mobs' walk speed, 2.5 yd/s for speed_walk 1).
+type Patrol struct {
+	Entries []uint32 `json:"entries"`
+	Path    []Point  `json:"path"`
+	PeriodS float32  `json:"period_s"`
+	// PeriodEstimate says PeriodS is an estimate (the path's length at 2.5 yd/s, not a measured round): the driver then does not predict where
+	// the patrol will be (it takes no phase from the period): it locates a member and waits until the patrol is past the pull, see
+	// patrolDanger. The mapping walk measures the round and drops the flag. The plan check warns for each such patrol.
+	PeriodEstimate bool `json:"period_estimate,omitempty"`
+	// Source says where the path comes from (the world export's spawn guid, a live sighting), for people.
+	Source string `json:"source,omitempty"`
+}
+
+// maxPatrolPeriod bounds a patrol's round (seconds).
+const maxPatrolPeriod = 900
 
 // MaxEquivLen is the longest Equiv label.
 const MaxEquivLen = 40
@@ -219,8 +362,17 @@ type Boss struct {
 	// the leader has looted. The companions loot their kills and, under round-robin or group loot, the item goes to whoever takes it first: a
 	// boss whose drop the plan needs (LootItem) should have this off. Absent or true leaves the companions as they are.
 	CompanionsLoot *bool `json:"companions_loot,omitempty"`
+	// Tactics is what a player does on this fight beyond the class rotation: kill an add first, interrupt a cast, dispel an aura, leave the
+	// place of a cast (internal/tactics). The bot brain acts on it for the agent's own character when the agent leads and plays (mode
+	// leader, README "Boss tactics"); a commander run carries it in the plan and does not use it (the bots are TortoiseBots'), except for
+	// kill_first: the remote driver sends the party at those entries before anything else while the boss fight is on (README "Boss tactics").
+	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
+	Approach []Point `json:"approach,omitempty"`
+	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
+	Hold *Hold `json:"hold,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -236,6 +388,48 @@ type Step struct {
 	LootObject *LootObject `json:"loot_object,omitempty"`
 	UseItem    *UseItem    `json:"use_item,omitempty"`
 	Ritual     *Ritual     `json:"ritual,omitempty"`
+	Gossip     *Gossip     `json:"gossip,omitempty"`
+	// AreaTrigger takes an area trigger the way a player's client does (CMSG_AREATRIGGER): see AreaTrigger.
+	AreaTrigger *AreaTrigger `json:"area_trigger,omitempty"`
+}
+
+// The ways an area_trigger step is taken (AreaTrigger.By).
+const (
+	TriggerAuto  = "auto"  // the lead bot walks into the zone first; when Expect does not happen in TriggerBotWait, the agent's own character does it
+	TriggerBot   = "bot"   // the lead bot only (the module's AiPlayerbot.BotAreaTriggers lists the trigger)
+	TriggerAgent = "agent" // the agent's own character only
+)
+
+// TriggerBotWait is how long an auto area_trigger waits for Expect after the lead bot has walked into the zone, before the agent takes over.
+const TriggerBotWait = 5 * time.Second
+
+// TriggerMaxStandToBoss is the most a boss of the leg may stand from the area_trigger's stand point (yards): the plan check
+// (plancheck.go) wants the trigger and the fight in one place.
+const TriggerMaxStandToBoss = 30.0
+
+// AreaTrigger takes the area trigger ID: the player steps into its zone (a sphere of Radius yards round Center) and the client sends
+// CMSG_AREATRIGGER, whose handler runs the trigger's script. Zul'Farrak's Witch Doctor Zum'rah (7271) is friendly (faction 35) until area
+// trigger 962 fires, and a trigger is taken only from a client packet, so a run that must kill him has someone step into the zone.
+//
+// By "auto" (the default) lets the lead bot walk to Stand first (TortoiseBots' AiPlayerbot.BotAreaTriggers lists the triggers a bot takes
+// by itself on entering the zone); when Expect does not hold within TriggerBotWait the agent's own character does it: `.appear <lead bot>`
+// when it is far (a GM assist the run already uses), a walk to Stand, the packet, a walk back. "bot" and "agent" take one of the two
+// only. The step fails with the reason when Expect never comes, and is never retried: one attempt by each, then it ends the plan.
+//
+// Expect is what must be true afterwards, "unit <entry>[,<entry>...] <state>" (UnitWait; states seen, hostile, dead, gone): "unit 7271
+// hostile". TimeoutS (default DefaultTimeoutS) bounds the wait for it after the agent's packet (and after the lead bot's, for by "bot").
+// Stand must lie within Radius of Center, and a boss of the leg within TriggerMaxStandToBoss of Stand (the plan check says so).
+type AreaTrigger struct {
+	ID     uint32  `json:"id"`
+	Center Point   `json:"center"`
+	Radius float32 `json:"radius"`
+	// Stand is where the one who takes the trigger stands: inside the zone.
+	Stand    Point  `json:"stand"`
+	By       string `json:"by"`
+	Expect   string `json:"expect"`
+	TimeoutS int    `json:"timeout_s"`
+	// ExpectUnit is Expect parsed.
+	ExpectUnit *UnitWait `json:"-"`
 }
 
 // Limits of a ritual step's party.
@@ -258,11 +452,75 @@ type Ritual struct {
 	Stand *Point `json:"stand,omitempty"`
 }
 
+// Who talks to the NPC in a gossip step.
+const (
+	GossipByAgent   = "agent"   // the agent's own character (the default)
+	GossipByCarrier = "carrier" // the carrier bot: `.bot cmd gossip <npc> <bot> <option>` (TortoiseBots)
+	GossipByTank    = "tank"    // the tank bot, the same order
+)
+
+// Limits of a gossip step.
+const (
+	DefaultGossipRetryS = 15  // seconds a menu that lacks the option is looked at again
+	MaxGossipRetryS     = 120 // the most retry_s may say
+	GossipRange         = 5.0 // yards: the core answers a gossip hello only within INTERACTION_DISTANCE; the stand must lie inside
+	MaxGossipOption     = 99  // the highest option index a plan may name
+	MaxGossipText       = 80  // characters of a text option
+)
+
+// Gossip talks to an NPC and picks one option of its menu (CMSG_GOSSIP_HELLO, then CMSG_GOSSIP_SELECT_OPTION): Weegli Blastfuse blows
+// Zul'Farrak's End Door and Sergeant Bly starts his fight this way. NPC is the creature entry and Near where it stands (its spawn): the
+// NPC is the one of that entry nearest to Near. The option is Option (the menu's index) or Text (case-insensitive substring of the line),
+// exactly one of them. By says who talks: "agent" (the default; the agent's own character goes within 5 yd of the NPC, with `.appear
+// <lead bot>` as a GM assist when it is far, remote runs), or "carrier" and "tank" (the bot sends the order `cmd gossip <npc> <bot>
+// <option>`; a module that does not know the verb makes the agent take the step once). Stand is where the talker stands (within
+// GossipRange of Near), the NPC's own place when absent. A menu that lacks the option (the phase lags one update behind the event that
+// adds it) is asked again for RetryS seconds, then the step fails with the menu id it saw. The step ends at SMSG_GOSSIP_COMPLETE (or the
+// order's ACK): what happens next is for the following wait_for to check. FailText is added to the failure.
+type Gossip struct {
+	NPC      uint32  `json:"npc"`
+	Near     Point   `json:"near"`
+	Option   *uint32 `json:"option,omitempty"`
+	Text     string  `json:"text,omitempty"`
+	By       string  `json:"by,omitempty"`
+	Stand    *Point  `json:"stand,omitempty"`
+	RetryS   int     `json:"retry_s,omitempty"`
+	FailText string  `json:"fail_text,omitempty"`
+}
+
+// Talker is who talks, By or its default.
+func (g *Gossip) Talker() string {
+	if g.By == "" {
+		return GossipByAgent
+	}
+	return g.By
+}
+
+// Retry is how long a menu that lacks the option is asked again.
+func (g *Gossip) Retry() time.Duration {
+	if g.RetryS <= 0 {
+		return DefaultGossipRetryS * time.Second
+	}
+	return time.Duration(g.RetryS) * time.Second
+}
+
+// OptionText says which option the step picks, for logs: "option 1" or `"text"`.
+func (g *Gossip) OptionText() string {
+	if g.Option != nil {
+		return fmt.Sprintf("option %d", *g.Option)
+	}
+	return fmt.Sprintf("%q", g.Text)
+}
+
 // ObjectRef picks a game object: by entry, by position, or both (the nearest object of that entry to Near).
 type ObjectRef struct {
 	Entry uint32  `json:"entry,omitempty"`
 	Near  *Point  `json:"near,omitempty"`
 	Range float32 `json:"range,omitempty"` // yards around Near; DefaultObjectRange when 0
+	// Spawn is the object's spawn GUID in the world database (gameobject.guid): with Entry it names that exact object. A remote run asks
+	// `cmd state` for it before a loot_object step and skips one that is opened already or gone (a resumed run goes on at the first unopened
+	// grave), and opens it by GUID, so that a neighbour of the same entry is never opened in its place. 0: not given.
+	Spawn uint32 `json:"spawn,omitempty"`
 }
 
 // UseObject uses a game object (right-click). Stand is where to stand to do it; without it the driver walks next
@@ -275,6 +533,12 @@ type UseObject struct {
 	// leader's bags before the run and before the step and fails with this item's name. Only a leader the caller says is a GM
 	// (gm: true) is not checked: the core lets a GM through a lock in GM mode only.
 	RequiresItem *ItemRef `json:"requires_item,omitempty"`
+	// ViaItem says the required item is USED ON the object instead of the object being used: the remote driver orders `cmd use <item> <bot>
+	// entry:<object>@<point>` (TortoiseBots walks the bot to the object and casts the item's spell on it). Zul'Farrak's Gong of Zul'Farrak is
+	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
+	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
+	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
+	ViaItem bool `json:"via_item,omitempty"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -285,7 +549,23 @@ type LootObject struct {
 	ObjectRef
 	Stand      *Point   `json:"stand,omitempty"`
 	ExpectItem *ItemRef `json:"expect_item,omitempty"`
+	// Batch groups consecutive loot_object steps of one leg that are opened back to back (Zum'rah's graves): the party gathers at the
+	// batch's centre, the carrier opens every chest of the batch with no fight between the opens, then the party fights out everything
+	// that came out. A batch has BatchMinSize to BatchMaxSize steps, all within BatchRadius yards of the batch's centre. The run's
+	// graves_batch and graves_ramp settings regroup the same steps into batches of their own size (remote_batch.go). Empty: no batch.
+	Batch string `json:"batch,omitempty"`
 }
+
+// Limits of a loot_object batch in a plan (the run's graves_batch and graves_ramp are not bound by the size limits).
+const (
+	BatchMinSize = 3
+	BatchMaxSize = 6
+	// BatchRadius is how far from the batch's centre (the mean of its chests) a chest of a plan batch may lie: the summons of the batch
+	// stand close enough together for the party's area spells to hit them all.
+	BatchRadius = 15.0
+	// LeftoverRadius is how far from a batch's centre (or the trigger's stand point) an idle summon of the leg's leftover_entries is swept.
+	LeftoverRadius = 35.0
+)
 
 // UseItem uses an item from the leader's bags (a right-click: CMSG_USE_ITEM) and waits for its effect. ExpectItem is the item the use
 // must put in the bags (the Gni'kiv Medallion's spell 9594 makes the Staff of Prehistoria); without it the step ends after the
@@ -313,10 +593,11 @@ func (i ItemRef) String() string {
 }
 
 // WaitFor waits for a condition, up to TimeoutS seconds, and fails the plan when it does not come. Exactly one of
-// GameObject and HostilesGone is set.
+// GameObject, HostilesGone and Unit is set.
 type WaitFor struct {
 	GameObject   *ObjectState  `json:"gameobject,omitempty"`
 	HostilesGone *HostilesGone `json:"hostiles_gone,omitempty"`
+	Unit         *UnitWait     `json:"unit,omitempty"`
 	TimeoutS     int           `json:"timeout_s,omitempty"`
 	// FailText is added to the failure when the wait times out: the reason a person should read (Uldaman's altar waits say that the
 	// ritual needs three participants).
@@ -335,6 +616,64 @@ type HostilesGone struct {
 	Center *Point  `json:"center,omitempty"`
 }
 
+// UnitWait waits for a creature: a living or dead unit of one of Entries, in the bots' feed or in the agent's own view (its object store,
+// when the agent stands near). The states:
+//
+//	seen     a living unit of the entries is in view (any reaction)
+//	hostile  a living unit of the entries is in view and hostile to the party (the feed lists it hostile, or the agent's store does)
+//	dead     a unit of the entries is dead (a corpse in view, or the kill ledger saw it die), and none of them is alive in view
+//	gone     no unit of the entries is in view (despawned, or never there)
+//
+// Near and Radius narrow it to units within Radius yards of Near (DefaultUnitRadius without a radius); without Near a unit anywhere in view
+// counts. In the file, from a wait_for: {"unit": {"entries": [7271], "near": {..}, "radius": 40, "state": "hostile"}}.
+type UnitWait struct {
+	Entries []uint32 `json:"entries"`
+	Near    *Point   `json:"near,omitempty"`
+	Radius  float32  `json:"radius,omitempty"`
+	State   string   `json:"state"`
+}
+
+// The states of a UnitWait, and the radius round Near when none is given.
+const (
+	UnitSeen          = "seen"
+	UnitHostile       = "hostile"
+	UnitDead          = "dead"
+	UnitGone          = "gone"
+	DefaultUnitRadius = 50
+)
+
+// UnitStates are the values of UnitWait.State.
+var UnitStates = []string{UnitSeen, UnitHostile, UnitDead, UnitGone}
+
+// String is the unit wait as an expect text: "unit 7271 hostile".
+func (u UnitWait) String() string {
+	es := make([]string, len(u.Entries))
+	for i, e := range u.Entries {
+		es[i] = strconv.FormatUint(uint64(e), 10)
+	}
+	return "unit " + strings.Join(es, ",") + " " + u.State
+}
+
+// parseExpect reads "unit <entry>[,<entry>...] <state>".
+func parseExpect(s string) (*UnitWait, error) {
+	f := strings.Fields(s)
+	if len(f) != 3 || f[0] != "unit" {
+		return nil, fmt.Errorf("%q: write it as \"unit <entry>[,<entry>...] <state>\" (states %s)", s, strings.Join(UnitStates, ", "))
+	}
+	u := &UnitWait{State: f[2]}
+	for _, e := range strings.Split(f[1], ",") {
+		n, err := strconv.ParseUint(e, 10, 32)
+		if err != nil || n == 0 {
+			return nil, fmt.Errorf("%q: %q is no creature entry", s, e)
+		}
+		u.Entries = append(u.Entries, uint32(n))
+	}
+	if !slices.Contains(UnitStates, u.State) {
+		return nil, fmt.Errorf("%q: %q is none of %s", s, u.State, strings.Join(UnitStates, ", "))
+	}
+	return u, nil
+}
+
 // ObjectStates are the values of ObjectState.State.
 var ObjectStates = []string{"ready", "active", "active_alt"}
 
@@ -344,22 +683,29 @@ type rawPoint struct {
 }
 
 type rawPlan struct {
-	Version  *int              `json:"version"`
-	Name     string            `json:"name"`
-	Kind     string            `json:"kind"`
-	Status   string            `json:"status"`
-	Hire     []string          `json:"hire_composition"`
-	Raid     *RaidSpec         `json:"raid"`
-	Map      *uint32           `json:"map"`
-	Entrance *rawPoint         `json:"entrance"`
-	Trigger  uint32            `json:"entrance_trigger"`
-	Tele     string            `json:"entrance_tele"`
-	Outside  string            `json:"outside_tele"`
-	Portal   *rawPortal        `json:"portal"`
-	Band     []int             `json:"level_band"`
-	Notes    []string          `json:"notes"`
-	Watchdog *WatchdogConfig   `json:"watchdog"`
-	Legs     []json.RawMessage `json:"legs"`
+	Version    *int              `json:"version"`
+	Name       string            `json:"name"`
+	Kind       string            `json:"kind"`
+	Status     string            `json:"status"`
+	Fleers     []uint32          `json:"fleers"`
+	Raid       *RaidSpec         `json:"raid"`
+	Map        *uint32           `json:"map"`
+	Entrance   *rawPoint         `json:"entrance"`
+	Trigger    uint32            `json:"entrance_trigger"`
+	Tele       string            `json:"entrance_tele"`
+	Outside    string            `json:"outside_tele"`
+	Portal     *rawPortal        `json:"portal"`
+	Band       []int             `json:"level_band"`
+	Hire       []string          `json:"hire_composition"`
+	CCPrio     []uint32          `json:"cc_priority"`
+	CCAlways   []uint32          `json:"cc_always"`
+	NoCC       []uint32          `json:"no_cc"`
+	KillFirst  []uint32          `json:"kill_first"`
+	SummonedKF []uint32          `json:"summoned_kill_first"`
+	Notes      []string          `json:"notes"`
+	Watchdog   *WatchdogConfig   `json:"watchdog"`
+	Avoid      []rawAvoid        `json:"avoid"`
+	Legs       []json.RawMessage `json:"legs"`
 }
 
 type rawPortal struct {
@@ -368,8 +714,10 @@ type rawPortal struct {
 }
 
 type rawWaypoint struct {
-	X, Y, Z *float32
-	Direct  bool `json:"direct"`
+	X, Y, Z   *float32
+	Direct    bool   `json:"direct"`
+	CheckSkip string `json:"check_skip"`
+	GMCross   bool   `json:"gm_cross"`
 }
 
 type rawLeg struct {
@@ -381,9 +729,13 @@ type rawLeg struct {
 	Steps      []json.RawMessage `json:"steps"`
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
-	Rest       *RestSpec         `json:"rest"`
-	Notes      []string          `json:"notes"`
-	NeedsWalk  bool              `json:"needs_walk"`
+	// CompanionsLoot is Leg.CompanionsLoot.
+	CompanionsLoot *bool        `json:"companions_loot"`
+	Leftover       []uint32     `json:"leftover_entries"`
+	Optional       *OptionalLeg `json:"optional"`
+	Rest           *RestSpec    `json:"rest"`
+	Notes          []string     `json:"notes"`
+	NeedsWalk      bool         `json:"needs_walk"`
 }
 
 type rawPullGroup struct {
@@ -394,6 +746,26 @@ type rawPullGroup struct {
 	Team      string     `json:"team"`
 	Equiv     string     `json:"equiv"`
 	NeedsWalk bool       `json:"needs_walk"`
+	Patrol    *rawPatrol `json:"patrol"`
+	Approach  []rawPoint `json:"approach"`
+	Hold      *rawHold   `json:"hold"`
+}
+
+type rawHold struct {
+	Data     uint32    `json:"instance_data"`
+	Spot     *rawPoint `json:"spot"`
+	Radius   float32   `json:"radius"`
+	TimeoutS int       `json:"timeout_s"`
+	Entries  []uint32  `json:"entries"`
+}
+
+type rawPatrol struct {
+	Entries []uint32   `json:"entries"`
+	Path    []rawPoint `json:"path"`
+	PeriodS float32    `json:"period_s"`
+	// PeriodEstimate is Patrol.PeriodEstimate.
+	PeriodEstimate bool   `json:"period_estimate"`
+	Source         string `json:"source"`
 }
 
 type rawBoss struct {
@@ -404,15 +776,49 @@ type rawBoss struct {
 	LootItem *rawItem  `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
-	NeedsWalk      bool  `json:"needs_walk"`
+	// Tactics is Boss.Tactics.
+	Tactics   *tactics.Tactics `json:"tactics"`
+	NeedsWalk bool             `json:"needs_walk"`
+	Approach  []rawPoint       `json:"approach"`
+	Hold      *rawHold         `json:"hold"`
 }
 
 type rawStep struct {
-	UseObject  *rawUse     `json:"use_object"`
-	WaitFor    *rawWait    `json:"wait_for"`
-	LootObject *rawLoot    `json:"loot_object"`
-	UseItem    *rawUseItem `json:"use_item"`
-	Ritual     *rawRitual  `json:"ritual"`
+	UseObject   *rawUse     `json:"use_object"`
+	WaitFor     *rawWait    `json:"wait_for"`
+	LootObject  *rawLoot    `json:"loot_object"`
+	UseItem     *rawUseItem `json:"use_item"`
+	Ritual      *rawRitual  `json:"ritual"`
+	AreaTrigger *rawTrigger `json:"area_trigger"`
+	Gossip      *rawGossip  `json:"gossip"`
+}
+
+type rawTrigger struct {
+	ID       uint32    `json:"id"`
+	Center   *rawPoint `json:"center"`
+	Radius   *float32  `json:"radius"`
+	Stand    *rawPoint `json:"stand"`
+	By       string    `json:"by"`
+	Expect   string    `json:"expect"`
+	TimeoutS *int      `json:"timeout_s"`
+}
+
+type rawGossip struct {
+	NPC      uint32    `json:"npc"`
+	Near     *rawPoint `json:"near"`
+	Option   *int      `json:"option"`
+	Text     string    `json:"text"`
+	By       string    `json:"by"`
+	Stand    *rawPoint `json:"stand"`
+	RetryS   *int      `json:"retry_s"`
+	FailText string    `json:"fail_text"`
+}
+
+type rawUnitWait struct {
+	Entries []uint32  `json:"entries"`
+	Near    *rawPoint `json:"near"`
+	Radius  *float32  `json:"radius"`
+	State   string    `json:"state"`
 }
 
 type rawRitual struct {
@@ -444,6 +850,7 @@ type rawLoot struct {
 	rawRef
 	Stand      *rawPoint `json:"stand"`
 	ExpectItem *rawItem  `json:"expect_item"`
+	Batch      string    `json:"batch"`
 }
 
 type rawUseItem struct {
@@ -457,12 +864,14 @@ type rawRef struct {
 	Entry uint32    `json:"entry"`
 	Near  *rawPoint `json:"near"`
 	Range *float32  `json:"range"`
+	Spawn uint32    `json:"spawn"`
 }
 
 type rawUse struct {
 	rawRef
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
+	ViaItem      bool      `json:"via_item"`
 }
 
 type rawItem struct {
@@ -473,6 +882,7 @@ type rawItem struct {
 type rawWait struct {
 	GameObject   *rawObjState `json:"gameobject"`
 	HostilesGone *rawHostiles `json:"hostiles_gone"`
+	Unit         *rawUnitWait `json:"unit"`
 	TimeoutS     *int         `json:"timeout_s"`
 	FailText     string       `json:"fail_text"`
 }
@@ -560,6 +970,47 @@ func Parse(name string, data []byte) (*Plan, error) {
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
 	}
+	if len(rp.CCPrio) > 0 {
+		p.CCPriority = slices.Clone(rp.CCPrio)
+	}
+	if len(rp.CCAlways) > 0 {
+		p.CCAlways = slices.Clone(rp.CCAlways)
+	}
+	for _, e := range rp.CCPrio {
+		// An entry in both kill_first and cc_always is deliberate (Ragefire's Shamans): the cc bot sheeps one, the others are killed first.
+		if slices.Contains(rp.KillFirst, e) && !slices.Contains(rp.CCAlways, e) {
+			c.fail("kill_first", "%d is also in cc_priority: a kill_first entry is killed first and never crowd-controlled, unless it is in cc_always too (one is sheeped, the others are killed first); take it out of cc_priority", e)
+		}
+	}
+	c.entries("no_cc", rp.NoCC, false)
+	if len(rp.NoCC) > 0 {
+		p.NoCC = slices.Clone(rp.NoCC)
+	}
+	if len(rp.KillFirst) > 0 {
+		p.KillFirst = slices.Clone(rp.KillFirst)
+	}
+	for _, l := range []struct {
+		name string
+		es   []uint32
+	}{{"kill_first", rp.KillFirst}, {"summoned_kill_first", rp.SummonedKF}} {
+		seen := map[uint32]bool{}
+		for _, e := range l.es {
+			if e == 0 {
+				c.fail(l.name, "0 is not a creature entry")
+			} else if seen[e] {
+				c.fail(l.name, "%d is listed twice", e)
+			}
+			seen[e] = true
+		}
+	}
+	for _, e := range rp.SummonedKF {
+		if !slices.Contains(rp.KillFirst, e) {
+			c.fail("summoned_kill_first", "%d is not in kill_first", e)
+		}
+	}
+	if len(rp.SummonedKF) > 0 {
+		p.SummonedKillFirst = slices.Clone(rp.SummonedKF)
+	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
 			c.fail("portal.map", "required (the outer map id)")
@@ -586,6 +1037,8 @@ func Parse(name string, data []byte) (*Plan, error) {
 		}
 		p.Legs = append(p.Legs, c.leg(path, &l))
 	}
+	p.Avoid = c.avoid(rp.Avoid)
+	c.offAvoid(p)
 	if len(c.errs) > 0 {
 		return nil, errors.Join(c.errs...)
 	}
@@ -608,6 +1061,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.entries("fleers", rp.Fleers, false)
+	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
 		if rp.Kind == KindRaid {
 			c.fail("hire_composition", "a raid plan has a raid block instead")
@@ -691,12 +1146,29 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover}
+	for i, e := range r.Leftover {
+		if e == 0 {
+			c.fail(fmt.Sprintf("%s.leftover_entries[%d]", path, i), "0 is not a creature entry")
+		}
+	}
 	l.To = c.point(path+".to", r.To)
+	if o := r.Optional; o != nil {
+		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
+		if o.Item == 0 {
+			c.fail(path+".optional.item", "required (the item entry the leg needs)")
+		}
+	}
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
+		if w.GMCross {
+			if !w.Direct {
+				c.fail(wp, "gm_cross is a direct waypoint: add \"direct\": true")
+			}
+			continue // a GM moves the party: no gathering point before it and no direct limits
+		}
 		if !w.Direct {
 			continue
 		}
@@ -728,6 +1200,23 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		for j := range g.Positions {
 			pg.Positions = append(pg.Positions, c.point(fmt.Sprintf("%s.positions[%d]", gp, j), &g.Positions[j]))
 		}
+		if rp := g.Patrol; rp != nil {
+			pp := gp + ".patrol"
+			pat := &Patrol{Entries: rp.Entries, PeriodS: rp.PeriodS, PeriodEstimate: rp.PeriodEstimate, Source: rp.Source}
+			c.entries(pp+".entries", rp.Entries, true)
+			if len(rp.Path) < 2 {
+				c.fail(pp+".path", "needs at least two points")
+			}
+			for j := range rp.Path {
+				pat.Path = append(pat.Path, c.point(fmt.Sprintf("%s.path[%d]", pp, j), &rp.Path[j]))
+			}
+			if rp.PeriodS <= 0 || rp.PeriodS > maxPatrolPeriod {
+				c.fail(pp+".period_s", "%g: one round of the path takes 1-%d seconds", rp.PeriodS, maxPatrolPeriod)
+			}
+			pg.Patrol = pat
+		}
+		pg.Approach = c.approach(gp+".approach", g.Approach)
+		pg.Hold = c.hold(gp+".hold", g.Hold)
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	c.entries(path+".skip", r.Skip, false)
@@ -761,6 +1250,20 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				c.fail(fmt.Sprintf("%s.skip[%d]", path, i), "skips the boss (%d)", e)
 			}
 		}
+		if r.Boss.Tactics != nil {
+			if err := r.Boss.Tactics.Validate(spells.HasName); err != nil {
+				c.fail(bp+".tactics", "%v", err)
+			}
+			if !r.Boss.Tactics.Empty() {
+				b.Tactics = r.Boss.Tactics
+			}
+		}
+		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold)
+		if b.Hold != nil && b.LootItem != nil {
+			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
+		}
+
 		l.Boss = &b
 	}
 	for i, rs := range r.Steps {
@@ -772,6 +1275,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
+	c.batches(path, l.Steps)
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -780,6 +1284,11 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			continue
 		}
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
+	}
+	if o := l.Optional; o != nil && o.Item != 0 && !slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
+		return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item
+	}) {
+		c.fail(path+".optional.item", "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", o.Item)
 	}
 	if rs := r.Rest; rs != nil {
 		for _, f := range []struct {
@@ -805,8 +1314,43 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	return l
 }
 
+// approach reads a pull group's or a boss's approach points.
+func (c *checker) approach(path string, ps []rawPoint) []Point {
+	if len(ps) > MaxApproach {
+		c.fail(path, "%d points: at most %d", len(ps), MaxApproach)
+	}
+	var out []Point
+	for i := range ps {
+		out = append(out, c.point(fmt.Sprintf("%s[%d]", path, i), &ps[i]))
+	}
+	return out
+}
+
+// hold reads a pull group's or a boss's hold.
+func (c *checker) hold(path string, r *rawHold) *Hold {
+	if r == nil {
+		return nil
+	}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries}
+	h.Spot = c.point(path+".spot", r.Spot)
+	if r.Data == 0 {
+		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
+	}
+	if r.Radius <= 0 || r.Radius > 100 {
+		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
+	}
+	if r.TimeoutS <= 0 || r.TimeoutS > MaxTimeoutS {
+		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
+	}
+	c.entries(path+".entries", r.Entries, false)
+	return h
+}
+
 func (c *checker) ref(path string, r *rawRef) ObjectRef {
-	o := ObjectRef{Entry: r.Entry}
+	o := ObjectRef{Entry: r.Entry, Spawn: r.Spawn}
+	if r.Spawn != 0 && r.Entry == 0 {
+		c.fail(path+".spawn", "needs the entry as well (the spawn guid is of an object of that entry)")
+	}
 	if r.Near != nil {
 		p := c.point(path+".near", r.Near)
 		o.Near = &p
@@ -848,16 +1392,16 @@ func (c *checker) item(path string, r *rawItem) *ItemRef {
 func (c *checker) step(path string, r *rawStep) Step {
 	var s Step
 	n := 0
-	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil} {
+	for _, set := range []bool{r.UseObject != nil, r.WaitFor != nil, r.LootObject != nil, r.UseItem != nil, r.Ritual != nil, r.AreaTrigger != nil, r.Gossip != nil} {
 		if set {
 			n++
 		}
 	}
 	switch {
 	case n > 1:
-		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item and ritual: one step does one thing")
+		c.fail(path, "has more than one of use_object, wait_for, loot_object, use_item, ritual, area_trigger and gossip: one step does one thing")
 	case n == 0:
-		c.fail(path, "needs use_object, wait_for, loot_object, use_item or ritual")
+		c.fail(path, "needs use_object, wait_for, loot_object, use_item, ritual, area_trigger or gossip")
 	case r.UseObject != nil:
 		u := &UseObject{ObjectRef: c.ref(path+".use_object", &r.UseObject.rawRef)}
 		if r.UseObject.Stand != nil {
@@ -865,6 +1409,16 @@ func (c *checker) step(path string, r *rawStep) Step {
 			u.Stand = &p
 		}
 		u.RequiresItem = c.item(path+".use_object.requires_item", r.UseObject.RequiresItem)
+		if u.ViaItem = r.UseObject.ViaItem; u.ViaItem {
+			switch {
+			case u.RequiresItem == nil:
+				c.fail(path+".use_object.via_item", "needs requires_item: the item that is used on the object")
+			case u.Stand == nil || u.Near == nil:
+				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
+			case dist3(*u.Stand, *u.Near) > UseRange:
+				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
 		s.UseObject = u
 	case r.LootObject != nil:
 		l := &LootObject{ObjectRef: c.ref(path+".loot_object", &r.LootObject.rawRef)}
@@ -873,6 +1427,7 @@ func (c *checker) step(path string, r *rawStep) Step {
 			l.Stand = &p
 		}
 		l.ExpectItem = c.item(path+".loot_object.expect_item", r.LootObject.ExpectItem)
+		l.Batch = r.LootObject.Batch
 		s.LootObject = l
 	case r.UseItem != nil:
 		u := &UseItem{Entry: r.UseItem.Entry, Name: r.UseItem.Name}
@@ -884,10 +1439,59 @@ func (c *checker) step(path string, r *rawStep) Step {
 		s.UseItem = u
 	case r.Ritual != nil:
 		s.Ritual = c.ritual(path+".ritual", r.Ritual)
+	case r.AreaTrigger != nil:
+		s.AreaTrigger = c.trigger(path+".area_trigger", r.AreaTrigger)
+	case r.Gossip != nil:
+		s.Gossip = c.gossip(path+".gossip", r.Gossip)
 	default:
 		s.WaitFor = c.wait(path+".wait_for", r.WaitFor)
 	}
 	return s
+}
+
+func (c *checker) trigger(path string, r *rawTrigger) *AreaTrigger {
+	t := &AreaTrigger{ID: r.ID, By: r.By, TimeoutS: DefaultTimeoutS}
+	if r.ID == 0 {
+		c.fail(path+".id", "required (the area trigger's id, as in areatrigger_teleport or the script's table)")
+	}
+	t.Center = c.point(path+".center", r.Center)
+	t.Stand = c.point(path+".stand", r.Stand)
+	switch {
+	case r.Radius == nil:
+		c.fail(path+".radius", "required (yards)")
+	case *r.Radius <= 0 || *r.Radius > MaxRadius:
+		c.fail(path+".radius", "%v yards is outside 0-%d", *r.Radius, MaxRadius)
+	default:
+		t.Radius = *r.Radius
+	}
+	switch r.By {
+	case "":
+		t.By = TriggerAuto
+	case TriggerAuto, TriggerBot, TriggerAgent:
+	default:
+		c.fail(path+".by", "%q is none of %s, %s, %s", r.By, TriggerAuto, TriggerBot, TriggerAgent)
+	}
+	if r.Expect == "" {
+		c.fail(path+".expect", "required (what the trigger changes, so that the step can tell it worked: \"unit 7271 hostile\")")
+	} else if u, err := parseExpect(r.Expect); err != nil {
+		c.fail(path+".expect", "%v", err)
+	} else {
+		t.Expect, t.ExpectUnit = u.String(), u
+	}
+	if r.TimeoutS != nil {
+		if *r.TimeoutS <= 0 || *r.TimeoutS > MaxTimeoutS {
+			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, MaxTimeoutS)
+		} else {
+			t.TimeoutS = *r.TimeoutS
+		}
+	}
+	// A stand point outside the zone takes nothing: the loader can say so from the numbers alone.
+	if t.Radius > 0 && r.Center != nil && r.Stand != nil {
+		if d := dist3(t.Stand, t.Center); d > float64(t.Radius) {
+			c.fail(path+".stand", "is %.1f yd from the centre, outside the radius %g: standing there takes no trigger", d, t.Radius)
+		}
+	}
+	return t
 }
 
 func (c *checker) ritual(path string, r *rawRitual) *Ritual {
@@ -915,6 +1519,68 @@ func (c *checker) ritual(path string, r *rawRitual) *Ritual {
 	return out
 }
 
+func (c *checker) gossip(path string, r *rawGossip) *Gossip {
+	out := &Gossip{NPC: r.NPC, By: r.By}
+	if r.NPC == 0 {
+		c.fail(path+".npc", "required (the entry of the creature to talk to)")
+	}
+	if r.Near == nil {
+		c.fail(path+".near", "required ({\"x\":..,\"y\":..,\"z\":..}: where the NPC stands; the one of that entry nearest to it is talked to)")
+	} else {
+		out.Near = c.point(path+".near", r.Near)
+	}
+	switch {
+	case r.Option != nil && r.Text != "":
+		c.fail(path, "has both option and text: one step picks one option")
+	case r.Option == nil && r.Text == "":
+		c.fail(path, "needs option (the menu's index) or text (a part of the option's line)")
+	case r.Option != nil:
+		if *r.Option < 0 || *r.Option > MaxGossipOption {
+			c.fail(path+".option", "%d is outside 0-%d", *r.Option, MaxGossipOption)
+		} else {
+			o := uint32(*r.Option)
+			out.Option = &o
+		}
+	default:
+		if len(r.Text) > MaxGossipText || strings.TrimSpace(r.Text) != r.Text || strings.ContainsAny(r.Text, "\r\n\t") {
+			c.fail(path+".text", "is longer than %d characters, has a line break, or has spaces around it", MaxGossipText)
+		} else {
+			out.Text = r.Text
+		}
+	}
+	switch r.By {
+	case "", GossipByAgent:
+	case GossipByCarrier, GossipByTank:
+		// The order is one command line: every word of a text option must be one argument the commander accepts.
+		if out.Text != "" {
+			if bad := tbm.BadOrderWords(out.Text); bad != "" {
+				c.fail(path+".text", "%q cannot be carried in the order `cmd gossip` (by %s): %s; use option (the index) or by \"agent\"", out.Text, r.By, bad)
+			} else if strings.Trim(out.Text, "0123456789") == "" {
+				c.fail(path+".text", "%q is a number: the order `cmd gossip` would read it as the option's index; use option", out.Text)
+			}
+		}
+	default:
+		c.fail(path+".by", "%q: use %q, %q or %q", r.By, GossipByAgent, GossipByCarrier, GossipByTank)
+	}
+	if r.Stand != nil {
+		p := c.point(path+".stand", r.Stand)
+		out.Stand = &p
+	}
+	if r.RetryS != nil {
+		if *r.RetryS <= 0 || *r.RetryS > MaxGossipRetryS {
+			c.fail(path+".retry_s", "%d s is outside 1-%d (omit it for %d)", *r.RetryS, MaxGossipRetryS, DefaultGossipRetryS)
+		} else {
+			out.RetryS = *r.RetryS
+		}
+	}
+	if len(r.FailText) > MaxFailText || strings.ContainsAny(r.FailText, "\r\n\t") {
+		c.fail(path+".fail_text", "is longer than %d characters or has a line break", MaxFailText)
+	} else {
+		out.FailText = r.FailText
+	}
+	return out
+}
+
 func (c *checker) wait(path string, r *rawWait) *WaitFor {
 	w := &WaitFor{TimeoutS: DefaultTimeoutS}
 	if len(r.FailText) > MaxFailText || strings.ContainsAny(r.FailText, "\r\n\t") {
@@ -932,8 +1598,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 	switch {
 	case r.GameObject != nil && r.HostilesGone != nil:
 		c.fail(path, "has both gameobject and hostiles_gone: one wait waits for one thing")
-	case r.GameObject == nil && r.HostilesGone == nil:
-		c.fail(path, "needs gameobject or hostiles_gone")
+	case r.Unit != nil && (r.GameObject != nil || r.HostilesGone != nil):
+		c.fail(path, "has unit and another condition: one wait waits for one thing")
+	case r.GameObject == nil && r.HostilesGone == nil && r.Unit == nil:
+		c.fail(path, "needs gameobject, hostiles_gone or unit")
+	case r.Unit != nil:
+		w.Unit = c.unitWait(path+".unit", r.Unit)
 	case r.GameObject != nil:
 		gp := path + ".gameobject"
 		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State}
@@ -961,6 +1631,29 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 	return w
 }
 
+func (c *checker) unitWait(path string, r *rawUnitWait) *UnitWait {
+	u := &UnitWait{Entries: r.Entries, State: r.State}
+	c.entries(path+".entries", r.Entries, true)
+	if !slices.Contains(UnitStates, r.State) {
+		c.fail(path+".state", "%q is none of %s", r.State, strings.Join(UnitStates, ", "))
+	}
+	if r.Near != nil {
+		p := c.point(path+".near", r.Near)
+		u.Near = &p
+	}
+	if r.Radius != nil {
+		switch {
+		case r.Near == nil:
+			c.fail(path+".radius", "only means something with near")
+		case *r.Radius <= 0 || *r.Radius > MaxRadius:
+			c.fail(path+".radius", "%v yards is outside 0-%d", *r.Radius, MaxRadius)
+		default:
+			u.Radius = *r.Radius
+		}
+	}
+	return u
+}
+
 func validState(s string) bool {
 	for _, v := range ObjectStates {
 		if v == s {
@@ -968,4 +1661,74 @@ func validState(s string) bool {
 		}
 	}
 	return false
+}
+
+// batchPoint is where a loot_object step's chest lies: its near position, else its stand.
+func batchPoint(l *LootObject) (Point, bool) {
+	switch {
+	case l.Near != nil:
+		return *l.Near, true
+	case l.Stand != nil:
+		return *l.Stand, true
+	}
+	return Point{}, false
+}
+
+// BatchCentre is the mean of the points.
+func BatchCentre(pts []Point) Point {
+	var c Point
+	for _, p := range pts {
+		c.X += p.X
+		c.Y += p.Y
+		c.Z += p.Z
+	}
+	if n := float32(len(pts)); n > 0 {
+		c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
+	}
+	return c
+}
+
+// BatchSpread is the largest distance (in the plane) from the points' centre to one of them.
+func BatchSpread(pts []Point) float64 {
+	c := BatchCentre(pts)
+	var worst float64
+	for _, p := range pts {
+		worst = max(worst, math.Hypot(float64(p.X-c.X), float64(p.Y-c.Y)))
+	}
+	return worst
+}
+
+// batches checks the loot_object batches of one step list: a batch is a run of consecutive steps with the same id, of BatchMinSize to
+// BatchMaxSize chests that all lie within BatchRadius yards of their centre; an id does not come back after another step.
+func (c *checker) batches(path string, steps []Step) {
+	closed := map[string]bool{}
+	for i := 0; i < len(steps); {
+		l := steps[i].LootObject
+		if l == nil || l.Batch == "" {
+			i++
+			continue
+		}
+		id, j := l.Batch, i
+		var pts []Point
+		for ; j < len(steps) && steps[j].LootObject != nil && steps[j].LootObject.Batch == id; j++ {
+			p, ok := batchPoint(steps[j].LootObject)
+			if !ok {
+				c.fail(fmt.Sprintf("%s.steps[%d].loot_object", path, j), "a batch step needs near or stand (the batch's centre is made of them)")
+			}
+			pts = append(pts, p)
+		}
+		bp := fmt.Sprintf("%s.steps[%d].loot_object.batch", path, i)
+		switch {
+		case closed[id]:
+			c.fail(bp, "batch %q comes back after other steps: the steps of one batch are next to each other", id)
+		case j-i < BatchMinSize || j-i > BatchMaxSize:
+			c.fail(bp, "batch %q has %d chests: a batch has %d to %d", id, j-i, BatchMinSize, BatchMaxSize)
+		default:
+			if w := BatchSpread(pts); w > BatchRadius {
+				c.fail(bp, "batch %q reaches %.1f yd from its centre: the chests of a batch lie within %.0f yd of it, so that the summons stack for area spells", id, w, BatchRadius)
+			}
+		}
+		closed[id] = true
+		i = j
+	}
 }

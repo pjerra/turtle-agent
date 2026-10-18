@@ -230,7 +230,7 @@ func TestDriverBrainAnswersCanRez(t *testing.T) {
 	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
 	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
 	defer ctl.Close()
-	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+	d := &driverBrain{ctl: ctl, params: brain.Params{Strategies: []string{"frost_mage"}}}
 	if d.CanRez() {
 		t.Fatal("not started")
 	}
@@ -248,7 +248,7 @@ func TestDriverBrainStartsAndStopsOnlyWhatItStarted(t *testing.T) {
 	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
 	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
 	defer ctl.Close()
-	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+	d := &driverBrain{ctl: ctl, params: brain.Params{Strategies: []string{"frost_mage"}}}
 
 	d.Rest(true) // not started: ignored
 	if ctl.Running() {
@@ -315,7 +315,7 @@ func TestDriverBrainMovesAndOffersTheMoveLock(t *testing.T) {
 	cfg := brain.Config{NewTicker: func(time.Duration) (<-chan time.Time, func()) { return make(chan time.Time), func() {} }}
 	ctl := brain.NewController(context.Background(), &sessionBrainGame{cur: func() *session.Session { return r.s }}, cfg)
 	defer ctl.Close()
-	d := &driverBrain{ctl: ctl, strategies: []string{"frost_mage"}}
+	d := &driverBrain{ctl: ctl, params: brain.Params{Strategies: []string{"frost_mage"}}}
 	release, err := d.HoldMove(context.Background()) // before the brain runs: a free lock
 	if err != nil || !ctl.Status().MoveHeld {
 		t.Fatalf("%v %+v", err, ctl.Status())

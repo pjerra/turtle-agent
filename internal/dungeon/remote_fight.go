@@ -3,8 +3,10 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +23,8 @@ func (d *RemoteDriver) doPull(ctx context.Context, a Action) error {
 	if skip, err := d.gatedLook(ctx, a); skip || err != nil {
 		return err
 	}
-	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{}}
+	sp := fightSpec{pick: a.Entries, track: a.Entries, skip: a.Skip, anchors: a.Positions, limit: d.cfg.FightTimeout, sneak: true, radius: a.Radius, passed: map[packet.GUID]bool{},
+		patrol: a.Patrol, patrolSt: &patrolState{}}
 	// A group whose members in view are all stealthed cannot be pulled (the bots never attack what they cannot see); with none in
 	// view the plan's flag decides.
 	if cs := d.candidates(sp, sp.pick); (len(cs) == 0 && a.Ambush) || (len(cs) > 0 && allHostilesStealthed(cs)) {
@@ -42,6 +45,8 @@ func allHostilesStealthed(hs []tbm.HostileRec) bool {
 // doKill kills Boss.First in order, then the boss.
 func (d *RemoteDriver) doKill(ctx context.Context, a Action) error {
 	b := a.Boss
+	d.bossFight = true // the attack order is sent again after bossResendWait, not the pack fights' longer wait (attackAllowed)
+	defer func() { d.bossFight = false }()
 	enc := append(slices.Clone(b.First), b.Entry)
 	for _, e := range enc {
 		spec := fightSpec{pick: []uint32{e}, track: enc, skip: a.Skip, anchors: []Point{b.Position}, limit: d.cfg.BossTimeout, required: e == b.Entry, wide: true}
@@ -89,10 +94,10 @@ func (d *RemoteDriver) candidates(sp fightSpec, entries []uint32) []tbm.HostileR
 			continue
 		}
 		dl := distToLead(d, hostilePoint(h))
-		if dl <= 80 {
+		if dl <= 80 || h.GUID == sp.seen {
 			all = append(all, h)
 		}
-		isNear := d.nearAnchor(sp, h)
+		isNear := d.nearAnchor(sp, h) || h.GUID == sp.seen
 		if isNear {
 			near = append(near, h)
 		}
@@ -154,9 +159,17 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 	}
 	kills, retargets := 0, 0
 	cl := newClearing()
+	searched := false
 	var gaveUp []passedOver
 	for attempt, loops := 1, 0; attempt <= d.cfg.PullAttempts && loops < 4*d.cfg.PullAttempts+12; loops++ {
 		if err := d.restGate(ctx, true); err != nil {
+			return err
+		}
+		if err := d.requireLiving(); err != nil {
+			return err
+		}
+		// A mob that ran off at low health in an earlier fight comes back with friends: no pull while it may (remote_flee.go).
+		if err := d.waitFled(ctx, label); err != nil {
 			return err
 		}
 		t, ok, err := d.pickTarget(ctx, sp)
@@ -204,7 +217,32 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 				d.rep.note(fmt.Sprintf("%s: %d mob(s) given up on were killed in a fight no pull tracked (kill ledger)", label, n))
 			}
 			if sp.required {
-				return fmt.Errorf("%s: no living %v seen by the bots (%s)", label, sp.pick, why)
+				// A boss that patrols is away from his spot: wait for him to walk back into range before giving up (once per step). He is
+				// never taken for dead because he is absent: only a kill, the ledger or his corpse says so (bossDead).
+				// No search (boss_search_s 0), none when the run began inside this leg from a later start (from_leg, from_pull_group,
+				// start_here, a resume: the boss may have been killed before this run, and his absence is then expected), and none when
+				// bossDead already said so above (the ledger, a kill, a corpse): that returned before this point.
+				if !searched && d.cfg.BossSearch > 0 && !(d.midStart && d.midStartLeg == d.curLeg) {
+					searched = true
+					found, dead, err := d.searchBoss(ctx, label, sp)
+					if err != nil {
+						return err
+					}
+					if dead {
+						return nil
+					}
+					if found != 0 {
+						// Walk to him along the path that was checked, re-checking it at every hop (a change stops the walk).
+						if why, err := d.walkToBoss(ctx, label, sp, found); err != nil {
+							return err
+						} else if why != "" {
+							return fmt.Errorf("%s: boss %s not found: the way to him was blocked on the walk: %s", label, entriesList(sp.pick), why)
+						}
+						sp.seen = found
+						continue
+					}
+				}
+				return fmt.Errorf("%s: boss %s not found: no living %v seen by the bots (%s)", label, entriesList(sp.pick), sp.pick, why)
 			}
 			if kills > 0 {
 				d.rep.note(fmt.Sprintf("%s: %d kills; nothing more of %v at its positions: %s", label, kills, sp.pick, why))
@@ -215,6 +253,12 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 		if sp.sneak && t.Stealthed() {
 			return d.sneakPast(ctx, label, sp)
+		}
+		// A patrol that would walk into the pull is waited for, or pulled alone first (remote_patrol.go); after a fight, pick again.
+		if fought, err := d.patrolGate(ctx, t, sp); err != nil {
+			return err
+		} else if fought {
+			continue
 		}
 		// The party gathers on the lead bot before the pull (remote_gather.go): a bot left behind is not the one the pack finds first.
 		if err := d.gather(ctx, "the pull of "+d.hostileName(t)); err != nil {
@@ -228,6 +272,10 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		})
 		res, err := d.tracedFight(ctx, t, sp)
 		if err != nil {
+			// A wipe that comes after the kills (the adds a boss left) must not lose them: the ledger of kills is what tells that the boss is dead.
+			if res.kills > 0 {
+				d.noteKilled(res)
+			}
 			return err
 		}
 		kills += res.kills
@@ -275,6 +323,176 @@ func (d *RemoteDriver) engage(ctx context.Context, label string, sp fightSpec) e
 		}
 	}
 	return d.leftOver(label, sp, kills, gaveUp, cl)
+}
+
+// entriesList writes entries as the report does: one as a number, several comma-separated.
+func entriesList(es []uint32) string {
+	parts := make([]string, len(es))
+	for i, e := range es {
+		parts[i] = strconv.FormatUint(uint64(e), 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+// searchBoss waits up to Config.BossSearch for a boss that is not at his spot (a patrolling boss: Theka, Velratha) to walk back into
+// range. found says a living unit of the step's entries is in range now (the pick goes on); dead says the run knows him dead (bossDead:
+// a kill, the ledger, or his corpse in view). Neither: he did not come within the wait, and the step fails. Absence is never a kill.
+func (d *RemoteDriver) searchBoss(ctx context.Context, label string, sp fightSpec) (found packet.GUID, dead bool, err error) {
+	wait := d.cfg.BossSearch
+	began := d.clk.Now()
+	d.rep.note(fmt.Sprintf("%s: boss %s is not at his spot; waiting up to %.0f s for him to walk back into range", label, entriesList(sp.pick), wait.Seconds()))
+	d.remote(func(r *RemoteReport) { r.BossSearches++ })
+	noted := map[packet.GUID]bool{}
+	for d.clk.Now().Sub(began) < wait {
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return 0, false, err
+		}
+		if ok, why := d.bossDead(sp); ok {
+			d.rep.note(fmt.Sprintf("%s: %v is dead (%s)", label, sp.pick, why))
+			return 0, true, nil
+		}
+		// A living unit of the entries in the feed counts when he stands within bossSearchRangeYd of his spot and the way to him is a complete
+		// navmesh path that passes no pull group of a later leg (a pull on the way would drag the party through uncleared packs); there is
+		// no anchor or 80 yd filter beyond that, since the patrol took him away from his spot. That exact unit is then approached and
+		// pulled (fightSpec.seen). A unit that does not qualify is noted once and the wait goes on.
+		for _, h := range d.fr.Hostiles {
+			if h.Entry == 0 || h.HPPct <= 0 || !slices.Contains(sp.pick, h.Entry) || slices.Contains(sp.skip, h.Entry) || sp.passed[h.GUID] {
+				continue
+			}
+			if _, refused := d.skipped[h.GUID]; refused {
+				continue
+			}
+			away := nearestAnchorDist(sp, h)
+			if _, why := d.bossWay(ctx, sp, h, away); why != "" {
+				if !noted[h.GUID] {
+					noted[h.GUID] = true
+					d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f (%.0f yd from his spot) but not taken: %s; waiting on", label, entriesList(sp.pick), h.X, h.Y, h.Z, away, why))
+				}
+				continue
+			}
+			d.rep.note(fmt.Sprintf("%s: boss %s seen at %.0f %.0f %.0f after %.0f s (%.0f yd from his spot)", label, entriesList(sp.pick), h.X, h.Y, h.Z, d.clk.Now().Sub(began).Seconds(), away))
+			return h.GUID, false, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// bossSearchRangeYd is how far from his plan spot a boss found by the search may stand and still be approached.
+const bossSearchRangeYd = 120
+
+// bossWay is the checked way to the boss unit h found by the search: the navmesh path from the lead bot to him, or why the party
+// should not go (why is "" when it may). He must be within bossSearchRangeYd of his spot (away), the path must be complete (a game
+// without a planner is judged on the straight line), and it must pass no uncleared pull group: any group of a later leg, and any group of
+// the current leg that still shows a living member of its entries (the feed). A pull on the way would drag the party through uncleared packs.
+func (d *RemoteDriver) bossWay(ctx context.Context, sp fightSpec, h tbm.HostileRec, away float64) (path []Point, why string) {
+	if len(sp.anchors) > 0 && away > bossSearchRangeYd {
+		return nil, fmt.Sprintf("%.0f yd from his spot, more than %d", away, bossSearchRangeYd)
+	}
+	here, ok := d.leadPos()
+	if !ok {
+		return nil, "the lead bot's place is not known"
+	}
+	to := hostilePoint(h)
+	path = []Point{here, to}
+	if pl, ok := d.g.(PathPlanner); ok {
+		pts, err := pl.PlanPath(ctx, d.plan.Map, here, to)
+		if err != nil || len(pts) < 2 || dist3(pts[len(pts)-1], to) > bossPathEndYd {
+			return nil, "no complete navmesh path to him"
+		}
+		path = pts
+	}
+	for li := max(d.curLeg, 0); li < len(d.plan.Legs); li++ {
+		for gi, g := range d.plan.Legs[li].PullGroups {
+			r := g.Radius
+			if r <= 0 {
+				r = d.cfg.PackRadius
+			}
+			if li == d.curLeg && !d.packStands(g, r) {
+				continue // a group of this leg is cleared unless the feed still shows one of it
+			}
+			for _, at := range g.Positions {
+				for k := 1; k < len(path); k++ {
+					if distToSegment(at, path[k-1], path[k]) <= float64(r) {
+						return nil, fmt.Sprintf("the way passes pull group %d of leg %d (%s), not cleared", gi, li, d.plan.Legs[li].Name)
+					}
+				}
+			}
+		}
+	}
+	return path, ""
+}
+
+// packStands says whether the feed shows a living unit of the group's entries within r of one of its positions.
+func (d *RemoteDriver) packStands(g PullGroup, r float32) bool {
+	for _, h := range d.fr.Hostiles {
+		if h.Entry == 0 || h.HPPct <= 0 || !slices.Contains(g.Entries, h.Entry) {
+			continue
+		}
+		for _, at := range g.Positions {
+			if dist3(hostilePoint(h), at) <= float64(r) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bossWalkHops bounds the walk to a boss found by the search.
+var bossWalkHops = 60 // a variable for the tests
+
+// walkToBoss walks the lead bot to the boss unit guid along the checked way, hop by hop: before each hop the way is checked again (bossWay,
+// from where the lead bot stands now), so a path that changed, a pack that came into it or a boss that went away stops the walk. It
+// returns why it stopped, or "" when the lead bot is within PullRange of him (the pull follows, with the pull's own checks).
+func (d *RemoteDriver) walkToBoss(ctx context.Context, label string, sp fightSpec, guid packet.GUID) (string, error) {
+	// Success is only the lead bot within PullRange of the boss's current position, seen at the top of a hop or after the last one. Every
+	// other way out (no stand point, an unknown lead position, a stand point reached short of the range, the hops used up) is a failure
+	// with its reason: the step must not hand the boss to the normal pull without the per-hop checks.
+	for hop := 0; ; hop++ {
+		h, ok := d.fr.Hostile(guid)
+		if !ok || h.HPPct <= 0 {
+			return "he is not in the feed any more", nil
+		}
+		if distToLead(d, hostilePoint(h)) <= float64(d.cfg.PullRange) {
+			return "", nil
+		}
+		if hop >= bossWalkHops {
+			return fmt.Sprintf("not within %.0f yd of him after %d hops", d.cfg.PullRange, bossWalkHops), nil
+		}
+		here, known := d.leadPos()
+		if !known {
+			return "the lead bot's place is not known", nil
+		}
+		path, why := d.bossWay(ctx, sp, h, nearestAnchorDist(sp, h))
+		if why != "" {
+			return why, nil
+		}
+		stand, ok := StandoffPoint(path, d.cfg.PullStandoff)
+		if !ok {
+			return "the path to him has no stand point", nil
+		}
+		if dist3(here, stand) <= float64(d.opt.MoveArrive) {
+			return fmt.Sprintf("at the stand point but %.0f yd from him, more than the pull range %.0f", distToLead(d, hostilePoint(h)), d.cfg.PullRange), nil
+		}
+		wp := d.waypoint(ctx, here, stand, d.opt.MoveLeg)
+		if err := d.walkArrive(ctx, wp, d.opt.MoveArrive); err != nil {
+			return "", err
+		}
+	}
+}
+
+// bossPathEndYd is how near the boss a path must end to be taken as complete (a partial path stops short of its goal).
+const bossPathEndYd = 8
+
+// nearestAnchorDist is how far h stands from the nearest anchor of the step (0 without anchors).
+func nearestAnchorDist(sp fightSpec, h tbm.HostileRec) float64 {
+	best := math.MaxFloat64
+	for _, a := range sp.anchors {
+		best = min(best, dist3(a, hostilePoint(h)))
+	}
+	if best == math.MaxFloat64 {
+		return 0
+	}
+	return best
 }
 
 // passedDeadInLedger counts the mobs the pulls passed over when every one of them is dead in the kill ledger (seen fighting, then dead
@@ -340,7 +558,10 @@ func (d *RemoteDriver) pickTarget(ctx context.Context, sp fightSpec) (tbm.Hostil
 	for look := 1; look <= looks; look++ {
 		if cs := d.candidates(sp, sp.pick); len(cs) > 0 {
 			cs = preferVisibleHostile(cs)
-			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool { _, cc := d.ccRule(h.Entry); return cc || d.ccd(h) }); len(rest) > 0 {
+			if rest := slices.DeleteFunc(slices.Clone(cs), func(h tbm.HostileRec) bool {
+				_, cc := d.ccRule(h.Entry)
+				return cc || d.ccd(h) || slices.Contains(d.plan.CCAlways, h.Entry)
+			}); len(rest) > 0 {
 				cs = rest
 			}
 			if c := cs[0]; distToLead(d, hostilePoint(c)) <= float64(d.cfg.PullRange) || look == looks {
@@ -370,6 +591,26 @@ func (d *RemoteDriver) approach(ctx context.Context, p Point, standoff float32) 
 
 // approachArrive is approach with its own arrival distance.
 func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, arrive float32) error {
+	return d.approachView(ctx, p, standoff, arrive, 0)
+}
+
+// floorSnap is LookPoint's snap over the game's navmesh, if it has one (FloorSnapper); nil otherwise.
+func (d *RemoteDriver) floorSnap(ctx context.Context) func(Point) Point {
+	fs, ok := d.g.(FloorSnapper)
+	if !ok {
+		return nil
+	}
+	return func(p Point) Point {
+		if q, ok := fs.SnapToFloor(ctx, d.plan.Map, p); ok {
+			return q
+		}
+		return p
+	}
+}
+
+// approachView is approachArrive for a look at p: with view above 0 the stand point is LookPoint's, within view yards of p where the
+// path allows, instead of the plain standoff.
+func (d *RemoteDriver) approachView(ctx context.Context, p Point, standoff, arrive, view float32) error {
 	here, ok := d.leadPos()
 	if !ok {
 		return nil
@@ -377,7 +618,11 @@ func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, ar
 	var stand Point
 	if pl, ok := d.g.(PathPlanner); ok {
 		if pts, err := pl.PlanPath(ctx, d.plan.Map, here, p); err == nil {
-			if s, ok := StandoffPoint(pts, standoff); ok {
+			s, ok := StandoffPoint(pts, standoff)
+			if view > 0 {
+				s, ok = LookPoint(pts, p, standoff, view, d.floorSnap(ctx))
+			}
+			if ok {
 				stand = s
 			} else {
 				return nil
@@ -419,6 +664,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		} else {
 			d.tf.init()
 			d.tf.ccHeld[h.GUID] = true // the party leaves it to the CC bot (tank-first rules)
+			d.ccOrdered[h.GUID] = d.clk.Now()
 		}
 	}
 	return nil
@@ -427,7 +673,7 @@ func (d *RemoteDriver) ccFor(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // sendPull sends the pull order for t and reads the answer. done is true when the pull is over with res (refused, lost); false when
 // the order went (or fell back to attack) and the fight is on.
 func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res fightResult, done bool, err error) {
-	busy, approaches := 0, 0
+	busy, approaches, tooFarWaited := 0, 0, 0
 	var tried []string
 	for try := 0; try < 3; try++ {
 		r, err := d.order(ctx, "pullback", tbm.GUIDArg(t.GUID))
@@ -462,6 +708,19 @@ func (d *RemoteDriver) sendPull(ctx context.Context, t tbm.HostileRec) (res figh
 		case c == refDead || c == refNoTarget:
 			return fightResult{out: retarget, why: why}, true, nil
 		case ref.Code == "too-far":
+			// The tank (when it is not the lead bot) may be the one that is far: walking the lead bot at the mob takes it further.
+			if back, err := d.waitTankBack(ctx, t); err != nil {
+				return fightResult{}, true, err
+			} else if !back {
+				if len(d.fr.EngagedHostiles()) > 0 {
+					return fightResult{}, false, nil // a fight began meanwhile
+				}
+				return fightResult{out: refused, why: why + " (the tank did not come back to the party)"}, true, nil
+			} else if m, ok := d.fr.Member(d.tank); ok && d.tank != 0 && d.tank != d.fr.Lead && d.tankFarFrom(m, d.leadPointOr(m)) == "" && tooFarWaited == 0 {
+				tooFarWaited++
+				try-- // the tank was the cause and is back: a wait is not a failed pull
+				continue
+			}
 			if err := d.approach(ctx, hostilePoint(t), 20); err != nil {
 				return fightResult{}, true, err
 			}
@@ -502,6 +761,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	if err := d.ccFor(ctx, t, sp); err != nil {
 		return fightResult{}, err
 	}
+	if err := d.bigPackCC(ctx, t, sp); err != nil {
+		return fightResult{}, err
+	}
 	if res, done, err := d.sendPull(ctx, t); err != nil || done {
 		return res, err
 	}
@@ -529,6 +791,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	lastN := d.n
 	sawEvade := false
+	fledHere := 0 // tracked mobs that ran off alive
 	deadOf := func() []deadAt {
 		var out []deadAt
 		for g := range killed {
@@ -538,7 +801,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 	}
 	for {
 		if err := d.tick(ctx, d.cfg.Poll); err != nil {
-			return fightResult{}, err
+			return fightResult{kills: len(killed), dead: deadOf()}, err // the kills so far are kept: a wipe after the boss died must not lose him
 		}
 		if d.stale() {
 			lastCombat = d.clk.Now() // a quiet feed proves nothing about the fight
@@ -548,7 +811,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		for _, h := range d.fr.Hostiles {
 			// Anything that joins the fight is part of it, the step's own entries or not: a boss that comes into a group's fight and
 			// dies there is that fight's kill (a unit of another entry used to be left untracked, and its death went unrecorded).
-			if h.HPPct > 0 && h.Entry != 0 && d.engagedWith(h) && !slices.Contains(sp.skip, h.Entry) {
+			if h.HPPct > 0 && h.Entry != 0 && d.inFight(h) && !slices.Contains(sp.skip, h.Entry) {
 				if !tracked[h.GUID] && !slices.Contains(sp.track, h.Entry) {
 					limit = max(limit, d.cfg.BossTimeout) // a boss's fight can be longer than a pack's
 				}
@@ -568,7 +831,10 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				if absent[g] >= 2 { // out of the bots' sight for two whole frames: dead if it was in the fight, else gone
 					// The pulled mob and its group's entries: gone after fighting is dead. A joiner of another entry (a boss) is dead only
 					// when it was nearly dead with a bot by (the ledger's rule): one chased out of view alive is no kill.
-					if fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])) {
+					switch {
+					case d.wasFled(g) || (fought[g] && d.isRunning(g)):
+						fledHere++ // it ran off alive (remote_flee.go): no kill, and the next pull waits for it
+					case fought[g] && (slices.Contains(sp.track, last[g].Entry) || d.goneMeansDead(last[g])):
 						killed[g] = true
 					}
 					delete(tracked, g)
@@ -583,7 +849,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				delete(tracked, g)
 				continue
 			}
-			if d.engagedWith(h) || h.HPPct < 100 {
+			if d.inFight(h) || h.HPPct < 100 {
 				fought[g] = true
 			}
 			if h.Evading() && !d.engagedWith(h) {
@@ -594,7 +860,7 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 				continue // a stealthed member that has not joined is not fought (it aggros on the walk after)
 			}
 			alive++
-			if d.engagedWith(h) || h.HPPct < 100 {
+			if d.inFight(h) || h.HPPct < 100 {
 				fighting = true
 				fightingMobs = append(fightingMobs, h)
 			}
@@ -605,6 +871,9 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 			if err := d.tankFirstTick(ctx, fightingMobs); err != nil {
 				return fightResult{}, err
 			}
+			if err := d.reactiveCC(ctx, t.GUID, fightingMobs); err != nil {
+				return fightResult{}, err
+			}
 		}
 		d.wd.fightSignal(len(killed), hostilesHP(fightingMobs))
 		if d.wdRepick.take() {
@@ -613,6 +882,12 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 		switch {
 		case alive == 0 && len(killed) > 0:
 			d.ptKilled()
+			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
+		case alive == 0 && fledHere > 0:
+			// What stayed is dead and the rest ran off: the pull is won as far as the party got; the runners are waited for before the next one.
+			if len(killed) > 0 {
+				d.ptKilled()
+			}
 			return fightResult{out: won, kills: len(killed), dead: deadOf()}, d.afterFight(ctx)
 		case alive == 0 && sawEvade:
 			return fightResult{out: evaded}, nil
@@ -637,11 +912,11 @@ func (d *RemoteDriver) fight(ctx context.Context, t tbm.HostileRec, sp fightSpec
 // assistEvery sends the party at the nearest of mobs, the first time at once (when the threat allows) and then every AssistEvery.
 func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, last *time.Time) error {
 	now := d.clk.Now()
-	if !last.IsZero() && now.Sub(*last) < d.cfg.AssistEvery {
+	if !last.IsZero() && now.Sub(*last) < d.assistGap() {
 		// A mob not yet attacked is looked at every tick: the threat gate may open. So is a fight whose mob died: the party is sent at
 		// the next one the tank holds at once, not left to pick its own.
 		fresh := slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] })
-		if !fresh && !d.focusGone(mobs) {
+		if _, runner := d.runnerIn(mobs); !fresh && !d.focusGone(mobs) && !runner {
 			return nil
 		}
 	}
@@ -654,7 +929,8 @@ func (d *RemoteDriver) assistEvery(ctx context.Context, mobs []tbm.HostileRec, l
 
 // assist is the one-shot form for the rest gate and the walks: send the party at the nearest mob, once per AssistEvery.
 func (d *RemoteDriver) assist(ctx context.Context, mobs []tbm.HostileRec) error {
-	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.cfg.AssistEvery || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) {
+	_, runner := d.runnerIn(mobs)
+	if d.lastAssist.IsZero() || d.clk.Now().Sub(d.lastAssist) >= d.assistGap() || slices.ContainsFunc(mobs, func(h tbm.HostileRec) bool { return !d.attacked[h.GUID] }) || d.focusGone(mobs) || runner {
 		sent, err := d.assistSend(ctx, mobs)
 		if sent {
 			d.lastAssist = d.clk.Now()
@@ -679,8 +955,12 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 		return false, nil
 	}
 	d.tf.init()
+	// A mob running off at low health is killed before it is out of reach: the party is sent at it ahead of the threat order.
+	if taken, err := d.focusRunner(ctx, mobs); taken || err != nil {
+		return taken, err
+	}
 	cands := d.respectCC(mobs)
-	sorted := d.rankByTank(cands)
+	sorted := d.killFirstFirst(d.rankByTank(cands))
 	var pick *tbm.HostileRec
 	for i := range sorted {
 		h := sorted[i]
@@ -712,6 +992,17 @@ func (d *RemoteDriver) assistSend(ctx context.Context, mobs []tbm.HostileRec) (b
 	return true, nil
 }
 
+// assistGap is how often the party is sent at the nearest mob again: AssistEvery, or bossResendWait in a boss fight.
+func (d *RemoteDriver) assistGap() time.Duration {
+	if d.bossFight {
+		return min(d.cfg.AssistEvery, bossResendWait)
+	}
+	return d.cfg.AssistEvery
+}
+
+// bossResendWait is how long after an attack order at a boss the order is sent again while the tank does not hold him.
+const bossResendWait = 3 * time.Second
+
 // attackHoldYd is how near the mob the tank must be for its threat to count as holding it.
 const attackHoldYd = 45
 
@@ -726,6 +1017,9 @@ func (d *RemoteDriver) attackAllowed(h tbm.HostileRec) bool {
 		return true
 	}
 	wait := max(d.cfg.AssistEvery, 5*time.Second)
+	if d.bossFight {
+		wait = bossResendWait // live (zum2): the tank held Zum'rah in 1 of 4 fights; the order goes to the tank again within 3 s
+	}
 	now := d.clk.Now()
 	if now.Sub(d.tf.sentAt) < wait {
 		return false
@@ -751,6 +1045,9 @@ func (d *RemoteDriver) threatAllows(h tbm.HostileRec) bool {
 	now := d.clk.Now()
 	if _, ok := d.engagedAt[h.GUID]; !ok {
 		d.engagedAt[h.GUID] = now
+	}
+	if d.summonedKillFirst(h) {
+		return true // a healing ward hits nobody (whatever its target field says: live, zum2, the ward 7785 was held 10 s "not on the tank yet"): no threat to wait for, and each pulse heals the pack (a planned healer still waits)
 	}
 	holder, ok := d.fr.ThreatHolder(h.GUID)
 	held := ok && d.fr.IsMember(holder) && (h.Target == 0 || h.Target == holder)
@@ -876,6 +1173,9 @@ func (d *RemoteDriver) fightEngaged(ctx context.Context) error {
 			if err := d.tankFirstTick(ctx, eng); err != nil {
 				return err
 			}
+			if err := d.reactiveCC(ctx, 0, eng); err != nil {
+				return err
+			}
 			if err := d.assist(ctx, eng); err != nil {
 				return err
 			}
@@ -985,24 +1285,30 @@ const holdSpotYd = 3.0
 
 // holdHere makes the lead bot's "stay" spot the place it stands, once a fight is over (see afterFight). `cmd move` sets that spot to its point
 // (BotCommands.cpp, CommanderMove), and after a fight the bot's "return to stay position" walks it back to the last point it was sent
-// to: the party would run back, rest there, and run forward again. A move to its own position costs nothing and ends that. A refusal
-// (the module may not take a move to where the bot already stands) is counted by order() and otherwise ignored.
+// to: the party would run back, rest there, and run forward again. A refusal is counted by order() and otherwise ignored.
 //
 // A lead bot that stands within holdSpotYd of the point of its last move already has its stay spot here (the module's return trigger
-// fires only beyond the follow range), and a move to where a bot stands is one the server cannot path (`unreachable`: about 23
-// refusals in a Uldaman run, hires-1 2026-10-14): none is sent then. (A run that has sent no move yet still sends it.)
+// fires only beyond the follow range). Otherwise the move does not go to the lead bot's own position: the server cannot build a path of no
+// length (PathFinder NOPATH, answered `unreachable`: 229 of the 230 "no walkable path" refusals of the Zul'Farrak runs, and about 23 in a
+// Uldaman run, hires-1 2026-10-14), so the stay spot is set holdStepYd yards from the lead bot toward the point of its last move: ground it
+// came over, on the mesh, and close enough that the party does not run back. Without a last move there is no such ground known and no hold
+// is sent (a lead bot that has been sent nowhere has no stay spot to walk back to). `cmd stay` would stay every bot and is not used.
 func (d *RemoteDriver) holdHere(ctx context.Context) {
 	here, ok := d.leadPos()
-	if !ok || d.stale() {
+	if !ok || d.stale() || !d.haveMoveTo {
 		return
 	}
-	if d.haveMoveTo && dist3(here, d.moveTo) <= holdSpotYd {
+	if dist3(here, d.moveTo) <= holdSpotYd {
 		return
+	}
+	spot := lerp(here, d.moveTo, holdStepYd/dist3(here, d.moveTo))
+	if dist3(spot, here) < holdMinYd {
+		return // never a move to where the lead bot stands
 	}
 	if d.moveGap(ctx) != nil {
 		return
 	}
-	r, err := d.order(ctx, "move", moveArgs(here)...)
+	r, err := d.order(ctx, "move", moveArgs(spot)...)
 	if err != nil {
 		return
 	}
@@ -1010,6 +1316,13 @@ func (d *RemoteDriver) holdHere(ctx context.Context) {
 		d.remote(func(rr *RemoteReport) { rr.FightHolds++ })
 	}
 }
+
+// holdStepYd is how far from the lead bot toward its last move point holdHere sets the stay spot; holdMinYd is the least a hold move may
+// differ from the lead bot's position.
+const (
+	holdStepYd = 2.0
+	holdMinYd  = 1.5
+)
 
 // unreachableStandoffs are the distances (yards from the mob) the party is walked to, one after the other, when the tank answers a pull
 // with "unreachable"; the pull is sent again from each. Run 2 gave up on such packs and counted them cleared with their mobs alive.

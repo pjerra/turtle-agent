@@ -37,6 +37,24 @@ type BotLiner interface {
 	BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) (lines []string, settled bool, err error)
 }
 
+// BotLineRequest is one command of BotLinesAll.
+type BotLineRequest struct {
+	Command string
+	Done    func(line string) bool
+}
+
+// BotLinesAller is the optional part of a BotLiner that sends several `.bot` lines at once and reads all their answers in one wait: the
+// preflight's talents check asks every bot together (the answers of a bot that does not reply cost one wait for the party, not one each).
+// It returns, per request in order, the lines read and whether Done ended them.
+type BotLinesAller interface {
+	BotLinesAll(ctx context.Context, reqs []BotLineRequest, wait time.Duration) (lines [][]string, settled []bool, err error)
+}
+
+// preflightTalentsWait is how long the talents check waits for the whole party's answers together. A bot that answers does so within a
+// second (the 2026-10-15 ZF traces: 40-80 ms); one that has not by now is not going to (the same query waited 6 s per bot, one after
+// another, and ran 31 s of nothing at every start).
+const preflightTalentsWait = 5 * time.Second
+
 // PreflightBot is one bot's part of the check.
 type PreflightBot struct {
 	Name string `json:"name"`
@@ -149,8 +167,8 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		}
 		pf.Bots = append(pf.Bots, b)
 	}
+	d.checkAllTalents(ctx, bl, pf)
 	for i, m := range d.fr.Party {
-		d.checkTalents(ctx, bl, pf, &pf.Bots[i], m)
 		d.checkKit(ctx, bl, pf, &pf.Bots[i], m)
 		if err := ctx.Err(); err != nil {
 			return err
@@ -193,6 +211,51 @@ func (d *RemoteDriver) maintain(ctx context.Context, bl BotLiner, name string) s
 	return verdict
 }
 
+// checkAllTalents asks every bot of the first frame for its talents at once and reads the answers in one wait of preflightTalentsWait.
+// A game that cannot send several lines at once is asked bot by bot, as before.
+func (d *RemoteDriver) checkAllTalents(ctx context.Context, bl BotLiner, pf *Preflight) {
+	multi, ok := bl.(BotLinesAller)
+	if !ok {
+		for i, m := range d.fr.Party {
+			d.checkTalents(ctx, bl, pf, &pf.Bots[i], m)
+		}
+		return
+	}
+	got := make([]tbm.Talents, len(d.fr.Party))
+	reqs := make([]BotLineRequest, len(d.fr.Party))
+	for i, m := range d.fr.Party {
+		reqs[i] = BotLineRequest{Command: "command " + m.Name + " talents", Done: func(line string) bool {
+			t, ok := tbm.ParseTalents([]string{line})
+			if ok {
+				got[i] = t
+			}
+			return ok
+		}}
+	}
+	_, settled, err := multi.BotLinesAll(ctx, reqs, preflightTalentsWait)
+	for i, m := range d.fr.Party {
+		b := &pf.Bots[i]
+		switch {
+		case err != nil:
+			b.Talents = "error: " + err.Error()
+		case i >= len(settled) || !settled[i]:
+			b.Talents = "no answer"
+		default:
+			d.talentsVerdict(pf, b, m, got[i])
+			continue
+		}
+		pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: talents: %s", m.Name, b.Talents))
+	}
+}
+
+// talentsVerdict records the points an answer gave and flags a bot with none spent.
+func (d *RemoteDriver) talentsVerdict(pf *Preflight, b *PreflightBot, m tbm.PartyRec, got tbm.Talents) {
+	b.Talents = fmt.Sprintf("%d/%d/%d", got.Trees[0], got.Trees[1], got.Trees[2])
+	if got.Total == 0 {
+		pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: no talent points spent (%s): a reset spec?", m.Name, b.Talents))
+	}
+}
+
 // checkTalents reads the bot's spent talent points (`.bot command <bot> talents`, whose answer is the bot's whisper "My current talent
 // spec is: ... (a/b/c)") and flags a bot with none spent: a respec that was reset and never applied again leaves a 0/0/0 tank.
 func (d *RemoteDriver) checkTalents(ctx context.Context, bl BotLiner, pf *Preflight, b *PreflightBot, m tbm.PartyRec) {
@@ -210,10 +273,7 @@ func (d *RemoteDriver) checkTalents(ctx context.Context, bl BotLiner, pf *Prefli
 	case !settled:
 		b.Talents = "no answer"
 	default:
-		b.Talents = fmt.Sprintf("%d/%d/%d", got.Trees[0], got.Trees[1], got.Trees[2])
-		if got.Total == 0 {
-			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: no talent points spent (%s): a reset spec?", m.Name, b.Talents))
-		}
+		d.talentsVerdict(pf, b, m, got)
 		return
 	}
 	pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: talents: %s", m.Name, b.Talents))

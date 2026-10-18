@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -125,8 +126,12 @@ type methodOptions struct {
 	TunePath string
 	// TracesDir is where run traces go (settings traces_dir); empty means "traces".
 	TracesDir string
+	// RunMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
+	RunMeta dungeon.RunMeta
 	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
 	Planner *navmesh.Planner
+	// PlanCheckNav makes the navmesh dungeon_run's plan check walks, and closes it (nil: a scratch copy of Planner). Tests give a fake.
+	PlanCheckNav func() (dungeon.Navmesh, func(), error)
 	// AccountProbeWindow is how long a dungeon run waits for the server's answer to its ".account" probe; 0 means 2 s. The
 	// tests shorten it: their server never answers, and the wait would race their own.
 	AccountProbeWindow time.Duration
@@ -257,7 +262,9 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner, opts.EntryLedgerPath, opts.AccountProbeWindow)
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	dungeonRun.tracesDir = opts.TracesDir
+	dungeonRun.runMeta = opts.RunMeta
 	dungeonRun.tunePath = opts.TunePath
+	dungeonRun.checkNav = opts.PlanCheckNav
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	return func() {
 		stopMap()

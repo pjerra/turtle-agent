@@ -385,6 +385,7 @@ func (d *RemoteDriver) fallbackLoot(ctx context.Context, a Action, carrier strin
 			return fmt.Errorf("the agent's own Opening cast at game object %s: %w", guid, err)
 		}
 		d.rep.note(fmt.Sprintf("%s: the agent took %s", rec.label(), describeLooted(got)))
+		d.lastFallbackTook = len(got.Items) > 0 || got.Money > 0
 		var hand []ItemCount
 		for _, it := range got.Items {
 			label := fmt.Sprintf("%d x%d", it.Entry, it.Count)

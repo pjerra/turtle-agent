@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,6 +43,18 @@ type fakeCarrier struct {
 	recipe    func(bot string) string // after a `use`: what happened to the bags ("" nothing)
 	invErr    bool
 	cut       map[string]bool
+	noMute    map[string]bool            // bots that refuse `behavior loot off`
+	graves    map[packet.GUID]*fakeGrave // exact spawns the module answers `cmd state <guid>` for and opens by GUID
+	onGrave   func(g *fakeCarrier, gv *fakeGrave)
+	noUnmute  map[string]int // bots that refuse the next n `behavior loot on` orders after they were turned off (-1: all)
+}
+
+// fakeGrave is a chest of an exact spawn: state "ready" until it is opened, "active" after; gone: despawned.
+type fakeGrave struct {
+	guid  packet.GUID
+	at    Point
+	state string
+	gone  bool
 }
 
 func newFakeCarrier(t *testing.T) *fakeCarrier {
@@ -111,9 +124,37 @@ func (g *fakeCarrier) Order(ctx context.Context, command string) (tbm.OrderResul
 		g.method = f[2]
 		g.methods = append(g.methods, f[2])
 		return okOrder(command, "x", f[2]+":2"), nil
+	case "state":
+		if g.graves == nil { // the module of the older tests knows no cmd state
+			return errOrder(command, "invalid"), nil
+		}
+		if strings.HasPrefix(f[2], "entry:") { // the probe at the start of a run: the module knows the verb
+			r := okOrder(command, "x", "state")
+			r.State = &tbm.GOState{State: "ready"}
+			return r, nil
+		}
+		id, _ := packet.ParseGUID(f[2])
+		gv := g.graves[id]
+		if gv == nil || gv.gone {
+			return errOrder(command, "not-found"), nil
+		}
+		r := okOrder(command, "x", "state")
+		r.State = &tbm.GOState{GUID: gv.guid, State: gv.state}
+		return r, nil
 	case "open":
 		bot := f[3]
 		g.advance(5 * time.Second)
+		if id, err := packet.ParseGUID(f[2]); err == nil && g.graves[id] != nil {
+			gv := g.graves[id]
+			if gv.gone || gv.state != "ready" {
+				return errOrder(command, "not-found"), nil
+			}
+			gv.state = "active"
+			if g.onGrave != nil {
+				g.onGrave(g, gv)
+			}
+			return okOrder(command, bot, "opened"), nil
+		}
 		if f[2] == tbm.GUIDArg(chestGUID) {
 			if g.loseLoot {
 				return okOrder(command, bot, "-"), nil
@@ -153,6 +194,15 @@ func (g *fakeCarrier) Behavior(ctx context.Context, bot, key string, on bool) (t
 	}
 	g.orders = append(g.orders, ".bot behavior "+bot+" "+key+" "+state)
 	g.orderAt = append(g.orderAt, g.now)
+	if key == "loot" && on && g.noUnmute[bot] != 0 && slices.Contains(g.behaviors, bot+" loot false") {
+		if g.noUnmute[bot] > 0 {
+			g.noUnmute[bot]--
+		}
+		return errReply("behavior "+key, "refused"), nil
+	}
+	if g.noMute[bot] && key == "loot" && !on {
+		return errReply("behavior "+key, "refused"), nil
+	}
 	a := tbm.Ack{Intent: "behavior " + key, Scope: "bot:" + bot, Count: 1, Executor: "off"}
 	return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}, nil
 }
@@ -317,6 +367,19 @@ func TestCarrierOrderErrors(t *testing.T) {
 		if rep.Remote.Refused["open:"+tc.code] != 1 {
 			t.Fatalf("%s: %+v", tc.code, rep.Remote.Refused)
 		}
+	}
+}
+
+func TestOrderErrorInvalidTargetWithCastCheck(t *testing.T) {
+	res := errOrder("cmd use", "invalid-target")
+	res.Err.Message = "The cast failed (spell check 10)."
+	err := orderError(res)
+	if err == nil || !strings.Contains(err.Error(), "the cast was refused (spell check 10)") || strings.Contains(err.Error(), "no such corpse or object") {
+		t.Fatalf("%v", err)
+	}
+	res.Err.Message = "no such object"
+	if err := orderError(res); err == nil || !strings.Contains(err.Error(), "no such corpse or object") {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -642,6 +705,44 @@ func TestCarrierLootsTheBossItem(t *testing.T) {
 	}
 	if fmt.Sprint(kinds) != "[boss loot_item:done:[7741 x1] use_item:done:[7733 x1]]" {
 		t.Fatalf("%v", kinds)
+	}
+}
+
+// A leg with companions_loot false mutes the carrier too: for the boss's loot_item the carrier alone is turned on before its `cmd loot` and
+// muted again after it; the other bots stay off.
+func TestCarrierIsUnmutedForABossLootOnAMutedLeg(t *testing.T) {
+	g := carrierGame(t)
+	g.recipe = combineRecipe(g)
+	g.bag("Magey")[itMedallion] = 1
+	boss := g.addMob(6910, Point{50, 0, 0})
+	off := false
+	plan := bossPlan(false)
+	plan.Legs[0].CompanionsLoot = &off
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	want := fmt.Sprintf("cmd loot %s Magey %d", tbm.GUIDArg(boss.guid), itShaft)
+	loot := g.indexOf(want)
+	// Magey: muted by the leg (off), turned on after that and before the loot, muted again after the loot; the others get no `on` in between.
+	muteAt, onAt, offAgain := -1, -1, -1
+	for i, o := range g.orders {
+		switch {
+		case o == ".bot behavior Magey loot off" && i < loot && muteAt < 0:
+			muteAt = i
+		case o == ".bot behavior Magey loot on" && i < loot && muteAt >= 0:
+			onAt = i
+		case o == ".bot behavior Magey loot off" && i > loot:
+			offAgain = i
+		case i > muteAt && muteAt >= 0 && i < loot && (o == ".bot behavior Tanky loot on" || o == ".bot behavior Healy loot on"):
+			t.Errorf("%s before the loot", o)
+		}
+	}
+	if loot < 0 || muteAt < 0 || onAt < muteAt || offAgain < loot {
+		t.Fatalf("loot %d mute %d on %d off again %d\n%v", loot, muteAt, onAt, offAgain, g.orders)
+	}
+	if g.bag("Magey")[itStaff] != 1 {
+		t.Fatalf("%v", g.bag("Magey"))
 	}
 }
 

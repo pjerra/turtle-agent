@@ -88,6 +88,9 @@ const (
 // goneMeansDead says whether a mob last seen as h, now out of the feed for two whole frames, is taken as dead: nearly dead, not walking
 // home, with a living bot near where it stood.
 func (d *RemoteDriver) goneMeansDead(h tbm.HostileRec) bool {
+	if d.isRunning(h.GUID) && !d.diedInView(h) {
+		return false // it ran: out of the feed alive, to come back with friends (remote_flee.go)
+	}
 	return h.HPPct <= ledgerDyingPct && !h.Evading() && d.botNear(hostilePoint(h), ledgerSeeRadius)
 }
 

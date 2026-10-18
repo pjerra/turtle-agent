@@ -147,7 +147,7 @@ svg circle.other { stroke: #000; stroke-width: 1.5; }
 .layers > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
 .layers > summary::-webkit-details-marker { display: none; }
 .layers[open] > summary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(260px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
+.lpanel { position: absolute; top: 46px; right: 8px; z-index: 5; width: min(310px, calc(100% - 16px)); max-height: min(60vh, 460px); overflow: auto; background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, .35); display: grid; gap: 2px; }
 .lrow { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 13px; cursor: pointer; }
 .lrow input { width: 18px; height: 18px; }
@@ -168,3 +168,197 @@ svg.hide-botnames .botname { display: none; }
 svg.hide-commander .c { display: none; }
 svg.hide-sections .legname { display: none; }
 svg.hide-steps .stepn { display: none; }
+/* newer layers */
+svg .gridl { stroke: rgba(255, 255, 255, .16); stroke-width: 1; vector-effect: non-scaling-stroke; }
+svg .range { fill: none; stroke-width: 2; stroke-dasharray: 8 6; vector-effect: non-scaling-stroke; }
+svg .range.heal { stroke: #22c55e; fill: rgba(34, 197, 94, .07); }
+svg .range.aggro { stroke: #ff3b3b; fill: rgba(255, 59, 59, .06); }
+svg .tline, svg .btline, svg .cmdline { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+svg .tline { stroke: #ff3b3b; stroke-width: 2; stroke-dasharray: 4 4; }
+svg .btline { stroke: #ffd400; stroke-width: 1.5; }
+svg .cmdline { stroke: #c084fc; stroke-width: 1.5; stroke-dasharray: 2 5; }
+svg polygon.heading { fill: #fff; stroke: #000; stroke-width: 1.5; stroke-linejoin: round; }
+svg .tsdot { fill: #fff; stroke: #000; stroke-width: 1.5; }
+svg .tslbl .lbg { fill: rgba(0, 0, 0, .78); }
+svg .mob.critter { fill: #9aa3b2; }
+svg.hide-grid .gridg, svg.hide-trailtime .ts, svg.hide-heading .hd, svg.hide-healring .range.heal, svg.hide-aggro .range.aggro,
+svg.hide-threat .tline, svg.hide-bottarget .btline, svg.hide-cmdline .cmdline, svg.hide-critter .m.critter { display: none; }
+.scalebar { position: absolute; left: 10px; bottom: 10px; display: flex; flex-direction: column; font-size: 11px; color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
+.scalebar[hidden] { display: none; }
+.scalebar i { display: block; height: 5px; border: 2px solid #fff; border-top: 0; box-shadow: 0 1px 2px #000; }
+.lgroup { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 6px; }
+.lnote { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.lrow.off { opacity: .5; cursor: default; }
+.lrow .why { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-left: 22px; }
+.lrow .why:empty { display: none; }
+.lrow { flex-wrap: wrap; }
+.lpanel .mb { margin-top: 6px; }
+
+/* unit marks: health bars, status icons, threat rings, boss marks, names of hostile mobs, event pins */
+svg .hit { fill: transparent; stroke: none; pointer-events: all; }
+svg .hpb rect.bg { fill: rgba(0, 0, 0, .8); } svg .hpb rect.fg { stroke: none; }
+svg .sti { font: 700 13px system-ui, "Segoe UI Symbol", sans-serif; fill: #fff; stroke: #000; stroke-width: 2.5px; paint-order: stroke; pointer-events: none; }
+svg .thr { fill: none; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .thr.tank { stroke: #2f80ff; stroke-width: 4; } svg .thr.other { stroke: #ff3b3b; stroke-width: 4; }
+svg .thr.tgt { stroke: #fff; stroke-width: 2.5; } svg .thr.pull { stroke: #ffd400; stroke-width: 2.5; stroke-dasharray: 4 3; }
+svg .bossmk .ring { fill: none; stroke: #ffd400; stroke-width: 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .bossmk .crown { fill: #ffd400; stroke: #000; stroke-width: 1.5; stroke-linejoin: round; pointer-events: none; }
+svg .bossmk .lbg { fill: rgba(60, 0, 50, .85); }
+svg .hname { display: none; }
+svg:not(.hide-hostilenames) .hname { display: inline; }
+svg .evpin circle { fill: #111; stroke: #fff; stroke-width: 2; }
+svg .evpin.death circle, svg .evpin.wipe circle { fill: #7a1f1f; } svg .evpin.boss circle { fill: #6b2a8f; } svg .evpin.open circle, svg .evpin.use circle, svg .evpin.loot circle { fill: #1f4f7a; }
+svg .evpin text.g { fill: #fff; text-anchor: middle; font-size: 12px; pointer-events: none; }
+svg.hide-bossmark .bossmk, svg.hide-hpbars .hpb, svg.hide-statusicons .sti, svg.hide-threatcolors .thr, svg.hide-events .evpin { display: none; }
+.unittip { position: absolute; z-index: 6; max-width: min(280px, calc(100% - 16px)); background: rgba(14, 18, 26, .95); color: #f2f4f8; border: 1px solid #5a6578; border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); pointer-events: none; }
+.unittip[hidden] { display: none; }
+.unittip b { font-size: 13px; } .unittip .badge { margin-left: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #ffd400; }
+.unittip dl { margin: 4px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; }
+.unittip dt { color: #98a2b3; } .unittip dd { margin: 0; overflow-wrap: anywhere; }
+.runinfo { padding: 5px 12px; font-size: 13px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; }
+.runinfo[hidden], .evfeed[hidden] { display: none; }
+.runinfo .boxes { font-weight: 400; color: var(--muted); }
+.runinfo .boxes .ok { color: var(--ok); }
+.evfeed { padding: 4px 12px 6px; font: 12px/1.45 ui-monospace, monospace; background: var(--panel); border-top: 1px solid var(--line); max-height: 9.5em; overflow: auto; }
+.evfeed div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.evfeed .t { color: var(--muted); margin-right: 6px; } .evfeed .g { display: inline-block; width: 1.3em; text-align: center; }
+.evfeed .death .g, .evfeed .wipe .g { color: var(--bad); } .evfeed .boss .g { color: #8a3fb8; }
+.lpanel details.lgd { border: 0; padding: 4px 0 0; } .lpanel details.lgd summary { cursor: pointer; font-size: 13px; }
+.lgd .lgrow { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+.lgd .lgs { flex: none; min-width: 30px; text-align: center; font-size: 14px; background: #0b0e13; color: #fff; border-radius: 4px; padding: 1px 4px; box-sizing: border-box; }
+.lgd .lgs.ring { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--c); box-sizing: border-box; min-width: 0; }
+.lgd .lgs.dash { border-style: dashed; border-width: 2px; }
+.lgd .lgs.hps { width: 28px; height: 5px; border-radius: 2px; background: linear-gradient(90deg, #ff4d4d 30%, #ffb020 30% 60%, #3ddc84 60%); margin: 0; }
+.td-doing { max-width: 14em; }
+svg:not(.hide-bossmark) .m.boss .hname { display: none; }
+
+/* path layers: sliders under a layer, pull groups recoloured by state, the ghost line in the run line */
+.lstyle { margin: 0 0 4px 22px; padding: 2px 0 4px; }
+.lstyle[hidden] { display: none; }
+.srow { display: grid; grid-template-columns: 6.2em 1fr 4.6em; align-items: center; gap: 6px; font-size: 12px; min-height: 28px; }
+.srow .sl { color: var(--muted); } .srow .sv { text-align: right; font-variant-numeric: tabular-nums; }
+.srow input[type=range] { width: 100%; min-width: 0; height: 24px; margin: 0; }
+svg.ps-on .pin.ps-cleared circle { fill: #22c55e; } svg.ps-on .pull.ps-cleared { stroke: #22c55e; fill: rgba(34, 197, 94, .12); }
+svg.ps-on .pin.ps-next circle { fill: #ffd400; } svg.ps-on .pull.ps-next { stroke: #ffd400; fill: rgba(255, 212, 0, .26); stroke-width: 3.5; }
+svg.ps-on .pin.ps-skipped circle { fill: #9aa3b2; } svg.ps-on .pull.ps-skipped { stroke: #9aa3b2; fill: rgba(154, 163, 178, .1); }
+svg.ps-on .pin.ps-failed circle { fill: #ff3b3b; } svg.ps-on .pull.ps-failed { stroke: #ff3b3b; fill: rgba(255, 59, 59, .14); }
+svg.ps-on .pin.ps-pending circle { fill: #1f2937; stroke: #fff; } svg.ps-on .pin.ps-pending text.num { fill: #fff; }
+svg.ps-on .pull.ps-pending { stroke: #e5e7eb; }
+svg .psm .hit, svg .wpv .hit { pointer-events: all; }
+svg .bossst text.g { pointer-events: none; font-weight: 700; }
+svg .stallm text.g, svg .rg text.g, svg .objst text.g { pointer-events: none; }
+.runinfo .ghostline { color: #6b21a8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .runinfo .ghostline { color: #e9d5ff; } }
+:root[data-theme="dark"] .runinfo .ghostline { color: #e9d5ff; }
+@media (max-width: 600px) { .srow { grid-template-columns: 5.2em 1fr 4.2em; } .lrow { padding: 6px 0; } }
+
+/* the plan view and the plan file label */
+select#route { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); max-width: 260px; }
+select#refresh { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.plancopy { font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere; }
+.plancopy h3 { margin: 0 0 2px; }
+.plancopy.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.plancopy.ok { border-color: var(--ok); }
+.info table tr.diff td { color: var(--warn); }
+.legtools { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+.legs { display: grid; gap: 1px; max-height: 320px; overflow: auto; }
+.legrow { display: flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 0; cursor: pointer; }
+.legrow.now { font-weight: 600; }
+.legrow input { width: 16px; height: 16px; }
+.legrow .mini { margin-left: auto; padding: 0 6px; font-size: 11px; }
+svg .leg.legoff { display: none; }
+/* computed look and gather points, triggers, gossip NPCs, stand points; the plan's flags */
+svg .lookline { fill: none; stroke: #a78bfa; stroke-width: 1.2; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+svg .lookpt rect { fill: #a78bfa; stroke: #000; stroke-width: 1.5; }
+svg .gatherpt polygon { fill: #fbbf24; stroke: #000; stroke-width: 1.5; }
+svg .trg { fill: rgba(251, 146, 60, .12); stroke: #fb923c; stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+svg .trgmk path { fill: #fb923c; stroke: #000; stroke-width: 1.5; }
+svg .standline { fill: none; stroke: #fff; stroke-opacity: .55; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+svg .stand path { fill: none; stroke: #fff; stroke-width: 2.5; }
+svg .gossip circle { fill: #38bdf8; stroke: #000; stroke-width: 1.5; }
+svg .gossip text.num { fill: #000; text-anchor: middle; font: 700 9px system-ui, sans-serif; }
+svg .gossip .lab, svg .trgmk .lab { display: none; }
+svg.zoomed .gossip .lab, svg.zoomed .trgmk .lab, svg .gossip:hover .lab, svg .trgmk:hover .lab { display: inline; }
+svg .nw circle, svg .nw polygon { stroke: #ff3b3b; stroke-width: 3.5; }
+svg .cskip circle { stroke: #ffb020; stroke-width: 3.5; stroke-dasharray: 2 2; }
+svg.hide-looks .look, svg.hide-looks .gatherpt { display: none; }
+svg.hide-standmarks .trg, svg.hide-standmarks .trgmk, svg.hide-standmarks .gossip, svg.hide-standmarks .stand, svg.hide-standmarks .standline { display: none; }
+svg.hide-flags .nw circle, svg.hide-flags .nw polygon, svg.hide-flags .cskip circle { stroke: #000; stroke-width: 1.5; stroke-dasharray: none; }
+
+/* the route editor */
+.editbox { border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; font-size: 12px; display: grid; gap: 4px; }
+.editbox h3 { margin: 0; }
+.editbox .saveform { display: grid; gap: 4px; }
+.editbox input[type="text"], .editbox input[type="password"] { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); width: 100%; }
+.editbox .warnline { color: var(--warn); font-weight: 600; }
+.editbox .editmsg { overflow-wrap: anywhere; }
+.editbox .editresult { display: grid; gap: 2px; border-top: 1px solid var(--line); padding-top: 4px; overflow-wrap: anywhere; }
+.editbox .editdiff pre { max-height: 260px; overflow: auto; font-size: 11px; margin: 4px 0 0; padding: 4px; background: color-mix(in srgb, var(--ink) 6%, transparent); white-space: pre; }
+.editbox .verrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 0; border-top: 1px solid var(--line); }
+.editbox .verrow.refused { color: var(--bad); }
+.editbox .verrow .mb { padding: 0 6px; font-size: 11px; }
+svg.editing .leg .route, svg.editing .leg .direct { opacity: .35; }
+svg .ed-route { fill: none; stroke: #fde047; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .edh { cursor: grab; } svg .edh:active { cursor: grabbing; }
+svg .edh .hit, svg .edm .hit { fill: transparent; stroke: none; pointer-events: all; }
+svg .edh .vis { fill: #fde047; stroke: #000; stroke-width: 2; }
+svg .edh.to .vis { fill: #fb923c; }
+svg .edh.lock .vis { fill: #9aa3b2; cursor: not-allowed; }
+svg .edh.sel .vis { stroke: #fff; stroke-width: 3.5; }
+svg .edh.picked .vis { stroke: #a78bfa; stroke-width: 3.5; }
+svg .edh.red .vis { stroke: #ef4444; stroke-width: 3.5; }
+svg .edm { cursor: copy; }
+/* always-on editing: the handles show when the mouse is on the leg's line or a point, or a point is selected (on a touch screen: always) */
+svg.editing .edleg .edh .vis, svg.editing .edleg .edm .vis { opacity: 0; transition: opacity .12s; }
+svg.editing .edleg:hover .edh .vis, svg.editing .edleg:hover .edm .vis, svg.editing .edleg .edh.sel .vis, svg.editing .edleg .edm.tmp .vis { opacity: 1; }
+@media (hover: none) { svg.editing .edleg .edh .vis, svg.editing .edleg .edm .vis { opacity: 1; } }
+svg .ed-hit { fill: none; stroke: transparent; stroke-width: 14; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: copy; }
+svg .edpack .hit { fill: transparent; stroke: none; pointer-events: all; }
+.editbox .unsavedbar { position: sticky; top: 0; z-index: 2; display: grid; gap: 4px; padding: 6px 8px; border: 2px solid var(--warn); border-radius: 6px; background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
+.editbox .unsavedbar .mb { justify-self: start; }
+.editbox .edhelp ul { margin: 2px 0 2px 16px; padding: 0; }
+.editbox .edkey { list-style: none; margin-left: 4px; }
+.editbox .edkey li { display: flex; align-items: center; gap: 6px; }
+.editbox .ks { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #000; flex: none; }
+.editbox .ks.yellow { background: #fde047; } .editbox .ks.orange { background: #fb923c; } .editbox .ks.grey { background: #9aa3b2; }
+.editbox .ks.red { background: transparent; border: 2px dashed #ef4444; }
+svg .edm .vis { fill: rgba(253, 224, 71, .25); stroke: #fde047; stroke-width: 1.5; }
+svg .edissue path { fill: none; stroke: #9aa3b2; stroke-width: 3; }
+svg .edissue.new path { stroke: #ff3b3b; stroke-width: 4; }
+
+/* the real route (realroute.js): the navmesh walk, the numbered stops and the legend box of the plan view */
+svg .rhalo { fill: none; stroke: #000; stroke-width: calc(var(--rw, 3.5) * 1px + 3px); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .75; pointer-events: none; }
+svg .rline { fill: none; stroke: #4ade80; stroke-width: calc(var(--rw, 3.5) * 1px); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+svg .rhit { fill: none; stroke: transparent; stroke-width: 12px; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+svg .rseg.link .rline { stroke: #86efac; }
+svg .rseg.k-direct .rline { stroke: #fbbf24; stroke-dasharray: 2 5; }
+svg .rseg.exempt .rline, svg .rseg.k-gmcross .rline { stroke: #c4b5fd; stroke-dasharray: 2 5; }
+svg .rseg.bad .rline { stroke: #ef4444; stroke-dasharray: 9 6; stroke-linecap: butt; }
+svg .rseg.bad .rhalo { opacity: .9; }
+svg.stale .realg { opacity: .55 !important; }
+svg .rnum .rc { fill: #0f172a; stroke: #4ade80; stroke-width: 2; }
+svg .rnum .rt { fill: #fff; text-anchor: middle; font: 700 10px system-ui, sans-serif; pointer-events: none; }
+svg .rnum.k-pack .rc { fill: #3b2a00; stroke: #ffd400; }
+svg .rnum.k-boss .rc { fill: #4a0d3d; stroke: #ff2fd6; }
+svg .rnum.k-step .rc { fill: #3a1d05; stroke: #fb923c; }
+svg .rnum.warn .rc { stroke-dasharray: 3 2; }
+svg .rnum.bad .rc { fill: #7f1d1d; stroke: #ef4444; stroke-width: 3; }
+svg.hide-realpath .rseg { display: none; }
+svg.hide-runorder .rnum { display: none; }
+/* with the real path on, the plan's own straight lines are the old, dim ones */
+svg.hasreal:not(.hide-realpath) .leg .route, svg.hasreal:not(.hide-realpath) .leg .direct { opacity: .3; }
+svg.hasreal:not(.hide-realpath) .ed-route { opacity: .4; stroke-width: 1.5; }
+.rlegend { position: absolute; left: 10px; top: 52px; z-index: 5; max-width: min(300px, calc(100% - 20px)); background: rgba(14, 18, 26, .9); color: #e5e9f0; border: 1px solid #3b4455; border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.rlegend[hidden] { display: none; }
+.rlegend summary { cursor: pointer; font-weight: 600; }
+.rlegend .rlrow { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.rlegend .rlrow input { margin: 0; }
+.rlegend .rlrow input:disabled + i, .rlegend .rlrow input:disabled ~ span { opacity: .5; }
+.rlegend .rlstatus { margin-top: 3px; color: #98a2b3; overflow-wrap: anywhere; }
+.rlegend .rlstatus.bad { color: #fca5a5; }
+.rlegend i.rs { display: inline-block; flex: none; width: 22px; height: 0; border-top: 4px solid #4ade80; box-sizing: border-box; }
+.rlegend i.rs.old { border-top: 3px dashed #00e5ff; opacity: .6; }
+.rlegend i.rs.bad { border-top: 4px dashed #ef4444; }
+.rlegend i.rs.pk { width: 14px; height: 14px; margin: 0 4px; border: 2px dashed #ffd400; border-radius: 50%; }
+.rlegend i.rs.nm { width: 16px; height: 16px; margin: 0 3px; border: 2px solid #4ade80; border-radius: 50%; background: #0f172a; color: #fff; font: 700 9px/12px system-ui, sans-serif; text-align: center; font-style: normal; }

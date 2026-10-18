@@ -41,9 +41,30 @@ func TestViewMath(t *testing.T) { runCheck(t, "view_check.js", "view.js") }
 // TestPlainText: the player-language formatting of states, counters, orders and party rows.
 func TestPlainText(t *testing.T) { runCheck(t, "text_check.js", "text.js") }
 
+// TestRefreshRate: the refresh-rate picker's options, labels, normalization and the choice saved per browser.
+func TestRefreshRate(t *testing.T) { runCheck(t, "refresh_check.js", "refresh.js") }
+
+// TestPagePolling: boot-paused fetches once, pausing ignores a stale in-flight response, the in-flight guard clears
+// after a failed fetch, and a resume or rate change during a slow request fetches as soon as the stale request settles.
+func TestPagePolling(t *testing.T) {
+	node := nodeOrSkip(t)
+	appPath, err := filepath.Abs(filepath.Join("static", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshPath, err := filepath.Abs(filepath.Join("static", "refresh.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, filepath.Join("testdata", "app_poll_check.js"), appPath, refreshPath).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "ok") {
+		t.Fatalf("app_poll_check.js: %v\n%s", err, out)
+	}
+}
+
 func TestPageScriptsParse(t *testing.T) {
 	node := nodeOrSkip(t)
-	for _, f := range []string{"app.js", "view.js", "text.js"} {
+	for _, f := range []string{"app.js", "view.js", "text.js", "layers.js", "paths.js", "pathdraw.js", "unitinfo.js", "planview.js", "realroute.js", "routeedit.js", "routeeditui.js", "refresh.js"} {
 		src, err := os.ReadFile(filepath.Join("static", f))
 		if err != nil {
 			t.Fatal(err)
@@ -91,5 +112,90 @@ func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
 	}
 	if !strings.Contains(string(css), "rect.ic") {
 		t.Error("the door icon rect must be styled by its own class")
+	}
+}
+
+// TestMapLayers: the layer defaults, the one global saved choice, availability and the geometry of the newer layers.
+func TestMapLayers(t *testing.T) { runCheck(t, "layers_check.js", "layers.js") }
+
+// TestUnitInfo: what a character is doing, the hover box, status icons, threat colours, the event feed and the run progress.
+// TestPathMath: trails, planned vs walked, pull-group states, objects, aggro rings, patrols, combat lines, the ghost and the heat bins.
+func TestPathMath(t *testing.T) { runCheck(t, "paths_check.js", "paths.js") }
+
+// TestPathDraw: the path layers on a fake SVG.
+func TestPathDraw(t *testing.T) { runCheck(t, "pathdraw_check.js", "pathdraw.js") }
+
+func TestUnitInfo(t *testing.T) { runCheck(t, "unitinfo_check.js", "unitinfo.js") }
+
+// TestPlanView: the plan view's address, its leg switches and the words about which copy of a plan is drawn.
+func TestPlanView(t *testing.T) { runCheck(t, "planview_check.js", "planview.js") }
+
+// TestRouteEditModel: the route editor's ops, the route with ops applied, handles, undo and redo, and the words for a change.
+// TestRealRoute: the address of the route, the legs shown, the lines and numbers of the real path and what they say.
+func TestRealRoute(t *testing.T) { runCheck(t, "realroute_check.js", "realroute.js") }
+
+func TestRouteEditModel(t *testing.T) { runCheck(t, "routeedit_check.js", "routeedit.js") }
+
+// TestRouteEditWordsAndDraft: the plain-language labels and hover text of the points and lines, the help box, the nearest line to a click, and the
+// unsaved draft kept in the session storage (also when the storage throws or holds junk).
+func TestRouteEditWordsAndDraft(t *testing.T) { runCheck(t, "routeedit_ux_check.js", "routeedit.js") }
+
+// The page loads the script that holds the new marks, and every layer has a hide rule or a drawing condition in the stylesheet.
+func TestPageLoadsUnitInfoAndStylesNewLayers(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil || !strings.Contains(string(html), `src="unitinfo.js"`) || !strings.Contains(string(html), `src="planview.js"`) ||
+		!strings.Contains(string(html), `src="routeedit.js"`) || strings.Index(string(html), `src="routeeditui.js"`) > strings.Index(string(html), `src="app.js"`) || !strings.Contains(string(html), `src="routeeditui.js"`) {
+		t.Fatalf("index.html must load unitinfo.js and planview.js: %v", err)
+	}
+	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"bossmark", "hpbars", "statusicons", "threatcolors", "events", "hostilenames", "looks", "standmarks", "flags"} {
+		if !strings.Contains(string(css), "hide-"+k) {
+			t.Errorf("app.css has no rule for layer %s", k)
+		}
+	}
+}
+
+// The page offers the refresh-rate picker: refresh.js loads before app.js, the header has the select, and app.js routes
+// polling through the saved choice (no fixed poll timer left).
+func TestPageHasRefreshPicker(t *testing.T) {
+	html, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := string(html)
+	if !strings.Contains(h, `src="refresh.js"`) || strings.Index(h, `src="refresh.js"`) > strings.Index(h, `src="app.js"`) {
+		t.Error("index.html must load refresh.js before app.js")
+	}
+	if !strings.Contains(h, `id="refresh"`) {
+		t.Error("index.html has no refresh picker")
+	}
+	js, err := os.ReadFile(filepath.Join("static", "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	for _, want := range []string{"window.RefreshRate", "RF.createRefresh(poll)", "refresh.boot(RF.load(refreshStore))", "if (!force && refresh.paused()) return;", "if (polling) { pendingPoll = true; return; }", "polling = true", "paused: the map is frozen"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("app.js does not route polling through the picker: no %q", want)
+		}
+	}
+	if strings.Contains(s, "POLL_MS") || strings.Contains(s, "setInterval(poll,") {
+		t.Error("app.js still polls on a fixed timer")
+	}
+}
+func TestPackWordsCountsAndNamesTheCreatures(t *testing.T) {
+	pg := dungeon.PullGroup{Entries: []uint32{4850, 4850, 5000, 7777, 7777, 5000, 5000}}
+	names := map[string]string{"4850": "Stonevault Oracle", "5000": "Geologist"}
+	if got, want := packWords(pg, names), "2 Stonevault Oracles, 3 Geologists, 2 x creature 7777"; got != want {
+		t.Errorf("%q != %q", got, want)
+	}
+	if got := packWords(dungeon.PullGroup{Entries: []uint32{9}}, nil); got != "creature 9" {
+		t.Error(got)
+	}
+	if got := packWords(dungeon.PullGroup{Entries: []uint32{1, 1}}, map[string]string{"1": "Mobs"}); got != "2 Mobs" {
+		t.Error(got)
 	}
 }

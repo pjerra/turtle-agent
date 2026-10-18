@@ -2,14 +2,18 @@ package dungeon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -57,6 +61,18 @@ type PathPlanner interface {
 	PlanPath(ctx context.Context, mapID uint32, from, to Point) ([]Point, error)
 }
 
+// FloorSnapper is the optional part of a RemoteGame that puts a point on the navmesh floor under it (false: there is none near): the look
+// point of a pack (LookPoint) is snapped with it, as the plan check snaps its own.
+type FloorSnapper interface {
+	SnapToFloor(ctx context.Context, mapID uint32, p Point) (Point, bool)
+}
+
+// FloorLister is the optional part of a RemoteGame that lists the walkable floors of the navmesh under (x, y) near height z, highest
+// first (false: no planner or no tile there). The walk puts each step on the floor nearest its height with it.
+type FloorLister interface {
+	FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool)
+}
+
 // CCRule asks for a mob entry to be crowd-controlled in a fight: `.bot cmd cc <mark> <guid> [bot]` before the pull.
 type CCRule struct {
 	Entry uint32 `json:"entry"`
@@ -73,6 +89,16 @@ type RemoteOptions struct {
 	// Healer names the bot the healer mana target applies to (the feed carries no class). Empty: every caster is held to the healer target.
 	Healer string
 	CC     []CCRule
+	// GravesBatch is a fixed number of chests per batch for the loot_object steps that have a batch id, and GravesRamp a size that grows after
+	// each batch without a wipe (remote_batch.go). Both off (0, nil): the plan's own batches. GravesRamp wins when both are given.
+	GravesBatch int
+	GravesRamp  *GravesRamp
+	// GravesOpenBy is who opens a batch's chests: "carrier" (default; the module refuses its open order while the carrier is in combat) or "agent"
+	// (the agent's own GM character: `.go xyz` to each chest and its Opening cast, so that the opens go on while the summons fight).
+	GravesOpenBy string
+	// CCBot names the bot that takes the big-pack CC mark (remote_cc.go: a pack of BigPack or more gets one member Polymorphed before the
+	// pull). A hired party sets it to its mage; empty: no big-pack CC.
+	CCBot string
 	// Team is the party's team for the team gate (Boss.Team, PullGroup.Team): "alliance" or "horde". Empty: the game's (the agent's own
 	// race, as the feed carries none), which is right when the bots share the agent's account faction.
 	Team string
@@ -90,6 +116,9 @@ type RemoteOptions struct {
 	// points): a bound hire does not answer `who`, so the prepare step takes its class and level from here for the bots that are still
 	// in the standing binding.
 	HireMemory map[string]tbm.Who
+	// ClassMemory is the class (lower case) of every hire the agent has read in any earlier run, kept whether or not that run kept its
+	// binding (a class never changes): the cc bot of a run that names its party is the mage found here (remote_cc.go).
+	ClassMemory map[string]string
 	// Carrier names the bot that does the object steps (loot_object, a boss's loot_item, use_item, use_object): it walks to the chest or
 	// corpse, loots, opens and uses items on `cmd open|loot|use` orders (remote_objects.go). Empty: the first living bot that is neither
 	// the lead bot, the tank nor the healer.
@@ -115,8 +144,20 @@ type RemoteOptions struct {
 	StartWait     time.Duration
 	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
 	HaveItems []uint32
+	// GiveItems is the give_items run option: GM `.additem` lines on named bots at the prepare step (prepare_give.go).
+	GiveItems []GiveItem
 	// Pulltest runs one pull group as a scenario instead of the plan (pulltest.go); it implies FromPullGroup at its group.
 	Pulltest *PulltestSpec
+	// RunMeta names the AI driver of the run (model, effort, run label): it goes into the trace header and the run report, and with
+	// RunMeta.ServerTrace (opt-in) to the server's run record (`.bot trace start ... driver=<model>:<effort>:<run>`). Zero: nothing is sent.
+	RunMeta RunMeta
+	// ForceStart runs a from_leg / from_pull_group / pulltest start that the unsafe-start gate refuses: its start point is
+	// under the safe distance from a pack or boss of a skipped step in a fresh instance (checkStartSafety, start.go).
+	// dungeon_run's force_start; dungeon_run's force is the plan check's and never reaches the driver.
+	ForceStart bool
+	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
+	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
+	Observe *ObserveSpec
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -277,6 +318,12 @@ type RemoteReport struct {
 	Preflight *Preflight `json:"preflight,omitempty"`
 	// Refills are the `.bot maintenance` orders sent again at rest gates to casters who ran short of drinks (remote_rest.go).
 	Refills []Refill `json:"refills"`
+	// MaintenanceRuns are the automatic `.bot maintenance` rounds of the whole party during the run (every maintenance_every_legs legs and
+	// after a recovered wipe; remote_maint.go; the preflight's is not counted). MaintenanceSkips counts the rounds not done, by reason:
+	// "combat" (a leg's slot that never found a calm moment, or a round cut short by a fight), "disabled" (maintenance is off on the
+	// server) and "no bot lines" (the game cannot send them).
+	MaintenanceRuns  int            `json:"maintenance_runs"`
+	MaintenanceSkips map[string]int `json:"maintenance_skips"`
 	// EndedByModule is the reason the module gave when it ended the binding itself (lead bot gone, party disbanded, a player joined).
 	EndedByModule string `json:"ended_by_module,omitempty"`
 	// GMCommands is the GM commands the run sent: 0, or 1 when the enter phase teleported the lead bot (`.tele name`). The run sends no
@@ -316,7 +363,29 @@ type RemoteReport struct {
 	PullFallbacks   int `json:"pull_fallbacks"`   // pulls done as an attack order because the module found no tank
 	TankBusyWaits   int `json:"tank_busy_waits"`  // pulls the module refused as tank-busy that waited for the tank, then pulled again
 	CCOrders        int `json:"cc_orders"`        // crowd-control orders
+	BigPacks        int `json:"big_packs"`        // pulls of a pack of big_pack or more mobs
+	BigPackCC       int `json:"big_pack_cc"`      // big-pack CC marks the module accepted
 	Revives         int `json:"revives"`          // `.bot cmd revive` orders
+	// GraveBatches is one record per batch of chests opened back to back (remote_batch.go; the notes "graves-batch: ..." say the same).
+	GraveBatches   []GraveBatch `json:"grave_batches,omitempty"`
+	LeftoverPulls  int          `json:"leftover_pulls,omitempty"`  // idle summons pulled by the leftover sweeps
+	LeftoverSweeps int          `json:"leftover_sweeps,omitempty"` // leftover sweeps run (each logs a note, also when it found nothing)
+	AgentOpens     int          `json:"agent_opens,omitempty"`     // chests the agent opened itself (graves_open_by agent)
+	// Reactive CC (remote_patrol.go): marks put during a fight on a mob that joined it (a cc_always entry, or the fight grew to big_pack),
+	// and marks put again on a mob whose CC lapsed while the fight went on.
+	ReactiveCC int `json:"reactive_cc"`
+	CCRenews   int `json:"cc_renews"`
+	// Patrols (PullGroup.Patrol): pulls that waited for a patrol to walk out of patrol_aggro, the seconds of those waits, the waits that
+	// ran out with the patrol still near (the pack was pulled with it counted in), and patrols pulled alone before their group.
+	PatrolWaits    int     `json:"patrol_waits"`
+	PatrolWaitS    float64 `json:"patrol_wait_s"`
+	PatrolLocates  int     `json:"patrol_locates"`  // looks for a patrol none of whose members was in view (remote_patrol.go)
+	PatrolLocateS  float64 `json:"patrol_locate_s"` // ... and the seconds they took
+	PatrolTimeouts int     `json:"patrol_timeouts"`
+	PatrolPulls    int     `json:"patrol_pulls"`
+	// TinyMoves are walks whose last stretch was shorter than min_move (the module ignores such a move): the order went to a point
+	// min_move+1 yd along the line instead.
+	TinyMoves int `json:"tiny_moves"`
 	// Tank first (README "Tank first"): TankThreatShare is the mean share of the top threat the tank held on the mobs of the fight, in
 	// percent (100: top of every list, 0: not among the top three), over TankThreatSamples frames of fighting; LooseAddOrders are the
 	// tank orders at a mob that hit a bot that was not the tank; CCRespected the crowd-controlled mobs the party was not sent at
@@ -327,11 +396,17 @@ type RemoteReport struct {
 	CCRespected       int     `json:"cc_respected"`
 	TargetSwitches    int     `json:"target_switches"`
 	// AttackResends are the attack orders sent again at the mob the party was already sent at (after AssistEvery, with the tank not holding it).
-	AttackResends  int `json:"attack_resends"`
-	RezWaits       int `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
-	Rezzed         int `json:"rezzed"`           // bots that got up during those waits
-	PackLooks      int `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
-	PacksSeenEmpty int `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
+	AttackResends  int     `json:"attack_resends"`
+	UnsafeRezSkips int     `json:"unsafe_rez_skips"` // waits for a resurrection in place skipped for a live hostile near the bodies (remote_flee.go)
+	Fled           int     `json:"fled"`             // mobs that ran off at low health and left the feed alive
+	FleeOrders     int     `json:"flee_orders"`      // attack rounds at a running mob
+	FleeWaits      int     `json:"flee_waits"`       // pulls held for a mob that ran off
+	FleeWaitS      float64 `json:"flee_wait_s"`      // ... and the seconds they waited
+	RezWaits       int     `json:"rez_waits"`        // times dead bots were left to a living caster's resurrection before a release
+	Rezzed         int     `json:"rezzed"`           // bots that got up during those waits
+	Rezzes         int     `json:"rezzes"`           // the same count under the trace event's name (`rez`): bots a party caster raised instead of their releasing
+	PackLooks      int     `json:"pack_looks"`       // pack positions the lead bot walked to because the bots saw nothing of the pack from afar
+	PacksSeenEmpty int     `json:"packs_seen_empty"` // pull groups counted as cleared because the party stood at every position and saw no hostile
 	// The careful walk (remote_gather.go): waits for the party to gather on the lead bot before a pull or a hop, their seconds, the waits
 	// that ran out with a bot still away, and the hostiles near a hop that were pulled before it.
 	Gathers        int     `json:"gathers"`
@@ -339,7 +414,25 @@ type RemoteReport struct {
 	GatherTimeouts int     `json:"gather_timeouts"`
 	GatherGaveUp   int     `json:"gather_gave_up"` // bots a gather stopped waiting for in their leg (no closer during a whole wait)
 	AheadPulls     int     `json:"ahead_pulls"`
-	Unreachable    int     `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
+	AheadBigPulls  int     `json:"ahead_big_pulls"` // ... of which pulled a pack of big_pack or more mobs, or one with a cc_always member (they get the pack CC)
+	// BossSearches counts the kill-boss steps that found no boss at his spot and waited for him to walk back (remote_fight.go searchBoss).
+	BossSearches int `json:"boss_searches"`
+	// RejoinTPs are the `cmd summon <bot>` orders the commander sent to bring a bot back to the lead bot (remote_rejoin.go); each is also a
+	// run_gm_assists.
+	RejoinTPs int `json:"rejoin_tps"`
+	// GMCrosses counts the gm_cross waypoints the run crossed with a GM move of the party (remote_gmcross.go).
+	GMCrosses int `json:"gm_crosses"`
+	// The gathers around direct steps (remote_gather_direct.go): waits for every bot to stand on the lead bot, their seconds, the waits that
+	// ran out, the `cmd move` to the lead bot's spot (never a summon) and the `cmd stay` that holds the party there.
+	DirectGathers        int     `json:"direct_gathers"`
+	DirectGatherWaitS    float64 `json:"direct_gather_wait_s"`
+	DirectGatherTimeouts int     `json:"direct_gather_timeouts"`
+	DirectGatherMoves    int     `json:"direct_gather_moves"`
+	DirectGatherStays    int     `json:"direct_gather_stays"`
+	// Tank orders and pulls held back while the tank is dead, released or far from the mob / the lead bot (remote_tank.go).
+	TankOrdersHeld int `json:"tank_orders_held"`
+	TankAwayWaits  int `json:"tank_away_waits"`
+	Unreachable    int `json:"unreachable"` // pulls and moves the bots answered "unreachable" (each is in the notes and the trace with its point)
 	// The walks: WalkStops counts the times the lead bot stood still in the middle of a walk (after it had moved, before the walk's end),
 	// WalkStoppedS the seconds it stood, LookAheadMoves the `move` orders sent while the bot was still on its way to the last
 	// one, and FightHolds the "stay here" moves sent when a fight ended.
@@ -358,10 +451,27 @@ type RemoteReport struct {
 	EntryTargets string `json:"entry_targets,omitempty"`
 	StatePolls   int    `json:"state_polls,omitempty"`
 
+	// AreaTriggers are the area_trigger steps the run took and who took each (remote_trigger.go); AgentTriggers counts the CMSG_AREATRIGGER
+	// packets the agent's own character sent (each is a step the lead bot could not take).
+	AreaTriggers []TriggerReport `json:"area_triggers,omitempty"`
+	// WipesAfterKill counts the wipes that came after the leg's boss was dead (the adds he left killed the party): recovered, not counted in
+	// wipes or party_downs, and no failure of the boss step.
+	WipesAfterKill int `json:"wipes_after_kill,omitempty"`
+	AgentTriggers  int `json:"agent_triggers,omitempty"`
+
+	// Observe is the run leader watch of an observed run (observe.go); absent in a driven run.
+	Observe *ObserveReport `json:"observe,omitempty"`
+
 	// Live tuning (tune.go, remote_tune.go): the tunables changed during the run and the reloads of the plan file, each with when, old
 	// and new. `turtle-agent tune-diff <trace>` turns them into a patch for the tunables file and the plan file.
 	TuneChanges []TuneChange `json:"tune_changes"`
 	PlanReloads []PlanReload `json:"plan_reloads"`
+
+	// PlanFile is the plan file the run was loaded from and PlanSHA256 the sha256 (hex) of the last version of it the run read (at the start,
+	// then at each live reload that found the file changed): the live dashboard draws exactly this file and tells when the file on disk has
+	// moved on. Empty when the run was made from a plan that has no file.
+	PlanFile   string `json:"plan_file,omitempty"`
+	PlanSHA256 string `json:"plan_sha256,omitempty"`
 }
 
 func (r *RemoteReport) clone() *RemoteReport {
@@ -373,10 +483,13 @@ func (r *RemoteReport) clone() *RemoteReport {
 	c.LoggedOut = slices.Clone(r.LoggedOut)
 	c.Preflight = r.Preflight.clone()
 	c.Refills = slices.Clone(r.Refills)
+	c.MaintenanceSkips = cloneMap(r.MaintenanceSkips)
 	c.TuneChanges = slices.Clone(r.TuneChanges)
 	c.PlanReloads = slices.Clone(r.PlanReloads)
 	c.Enter = r.Enter.clone()
+	c.Observe = r.Observe.clone()
 	c.ObjectSteps = cloneObjectSteps(r.ObjectSteps)
+	c.AreaTriggers = r.cloneTriggers()
 	c.Orders = cloneMap(r.Orders)
 	c.Refused = cloneMap(r.Refused)
 	return &c
@@ -416,8 +529,9 @@ type RemoteDriver struct {
 	nAt     time.Time // when the driver saw n change
 	stalled bool
 
-	bound     bool
-	unbinding bool
+	bound       bool
+	unbinding   bool
+	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
 	entryRecorded bool      // the instance the lead bot entered is in the ledger
@@ -429,30 +543,66 @@ type RemoteDriver struct {
 	gatherSt      gatherState
 	// aheadPassedLeg: hostiles a pull on the way passed over (no fight, evaded, refused), with the leg it happened in
 	aheadPassedLeg map[packet.GUID]int
-	endsAtBind     int
-	stats0         tbm.ViewStats
-	statsMu        sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
-	prevDead       map[packet.GUID]bool
-	deadSeen       bool
-	revived        map[packet.GUID]int
-	lastRevive     map[packet.GUID]time.Time
-	wipeRecover    int
-	recoveries     int
+	// deadly is the avoid state (remote_avoid.go): the spots where bots died with no wound and the last frame of each living member.
+	deadly           deadlyState
+	endsAtBind       int
+	stats0           tbm.ViewStats
+	statsMu          sync.Mutex // guards stats0: Status reads it from another goroutine while begin writes it
+	prevDead         map[packet.GUID]bool
+	deadSeen         bool
+	revived          map[packet.GUID]int
+	lastRevive       map[packet.GUID]time.Time
+	wipeRecover      int
+	wipeRecoverLeg   map[int]int // recovered wipes per leg
+	batch            *batchRun   // the grave batch that is being opened and fought (remote_batch.go)
+	gb               gravesState
+	lastFallbackTook bool       // the agent's last fallback loot took an item or money (a grave's open that took nothing is not counted as opened)
+	agentAway        *agentHome // where the agent goes back to after opening graves (graves_open_by agent); nil when it is at home
+	sweepWiped       bool       // a wipe ended a leftover sweep (sweepErr); stepFailedRecover reads and clears it
+	healerCapped     int        // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
+	floorCapped      int        // leg+1 of the leg whose rest gates stopped waiting for the pull floors (Config.RestPullExtra ran out)
+	bossFight        bool       // a boss fight (doKill) is on
+	recoveries       int
 
-	tank       packet.GUID
-	engagedAt  map[packet.GUID]time.Time // when a mob was first seen fighting the party
-	attacked   map[packet.GUID]bool      // mobs the party was sent at
-	heldNoted  map[packet.GUID]bool
-	waitNoted  map[packet.GUID]bool
-	warned     map[string]bool
-	ccDone     map[packet.GUID]bool
-	skipped    map[packet.GUID]string
-	lastAssist time.Time
-	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
-	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
-	haveMoveTo bool
-	tf         tankFirst // the tank-first state of the fights (remote_tank.go)
-	kit        restKit   // the bots' drink counts and refills (remote_rest.go)
+	tank        packet.GUID
+	engagedAt   map[packet.GUID]time.Time // when a mob was first seen fighting the party
+	attacked    map[packet.GUID]bool      // mobs the party was sent at
+	heldNoted   map[packet.GUID]bool
+	waitNoted   map[packet.GUID]bool
+	warned      map[string]bool
+	ccDone      map[packet.GUID]bool
+	ccOrdered   map[packet.GUID]time.Time  // when a big-pack CC order went out for a mob (remote_cc.go)
+	rccLast     time.Time                  // the last reactive CC order (remote_patrol.go)
+	midStart    bool                       // the run began mid-plan (from_leg, from_pull_group, start_here, resume) ...
+	midStartLeg int                        // ... in this leg
+	rccN        map[packet.GUID]int        // reactive CC orders per mob
+	patrolSeen  map[packet.GUID]*patrolObs // units of patrol entries seen on a patrol path (remote_patrol.go)
+	// patrolWalkedAt is when a member of each patrol was last seen walking (the next group of the leg does not look for it again at once).
+	patrolWalkedAt map[*Patrol]time.Time
+	// wantParty is how many bots the party has when the run starts (the lead bot and the named bots; the feed's party when none are
+	// named); shortSince is when the feed first showed fewer, partyShort whether the stop has been said (remote_party.go).
+	ccLookAt   time.Time // the last look for the party's mage (ensureCCBot)
+	wantParty  int
+	shortSince time.Time
+	shortSaid  bool
+	// paused: Pause was called; the run ends stopped and keeps its binding (dungeon_pause).
+	paused       atomic.Bool
+	skipped      map[packet.GUID]string
+	lastAssist   time.Time
+	lastMove     time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
+	moveTo       Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
+	haveMoveTo   bool
+	tf           tankFirst                 // the tank-first state of the fights (remote_tank.go)
+	outSince     map[packet.GUID]time.Time // since when each living member stands on another map than the plan's (outsideAlive)
+	offSince     map[packet.GUID]time.Time // when a bot dead outside the dungeon was first left to run back (no GM account)
+	gmRevived    map[packet.GUID]int       // `.revive` lines sent for a bot dead outside the dungeon (reviveOffMap)
+	lastGMRevive map[packet.GUID]time.Time //
+	unitMem      map[*UnitWait]*unitMemory // what each "gone" unit wait has seen (remote_trigger.go)
+	home         *agentHome                // the agent's safe point after an area trigger it took itself (remote_trigger.go)
+	legLoot      bool                      // the leg under way has companions_loot false and it was turned off (legMuted: for whom)
+	legMuted     []string                  // the bots whose looting the leg's companions_loot false turned off (remote_trigger.go)
+	kit          restKit                   // the bots' drink counts and refills (remote_rest.go)
+	maint        maintState                // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
 	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
@@ -460,6 +610,8 @@ type RemoteDriver struct {
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
 	near          nearState                  // the agent kept near the party (remote_near.go)
+	gmCrossing    bool                       // a gm_cross is being done: the start phase's helpers book their notes and GM lines as the crossing's (remote_gmcross.go)
+	rejoin        rejoinState                // bots brought back to the lead bot with cmd summon (remote_rejoin.go)
 	entry         entryState                 // object steps by entry and game-object waits on cmd state (remote_entry.go)
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
@@ -476,6 +628,9 @@ type RemoteDriver struct {
 	wdObject   flagOnce // give up the carrier order's retries
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
+	obs *observeState // the run leader watch of an observed run (observe.go); nil otherwise
+
+	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)
 	live liveTune  // live tuning: the tunables file, the plan file and tune_set (remote_tune.go)
 }
@@ -488,14 +643,25 @@ func NewRemoteDriver(plan *Plan, g RemoteGame, cfg Config, opt RemoteOptions, cl
 	d := &RemoteDriver{plan: plan, g: g, cfg: cfg.withDefaults(), opt: opt.withDefaults(), clk: clk, curLeg: -1,
 		prevDead: map[packet.GUID]bool{}, revived: map[packet.GUID]int{}, lastRevive: map[packet.GUID]time.Time{},
 		engagedAt: map[packet.GUID]time.Time{}, attacked: map[packet.GUID]bool{}, heldNoted: map[packet.GUID]bool{}, waitNoted: map[packet.GUID]bool{},
-		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}}
+		warned: map[string]bool{}, ccDone: map[packet.GUID]bool{}, ccOrdered: map[packet.GUID]time.Time{}, skipped: map[packet.GUID]string{}, killedAt: map[uint32][]Point{}, patrolWalkedAt: map[*Patrol]time.Time{}}
 	d.tx = defaultTuneExtra()
 	d.initLive()
 	d.rep.init(plan, clk.Now)
 	d.initWatchdog()
 	d.rep.r.SetupShortcuts = slices.Clone(cfg.Setup)
-	d.rep.r.Remote = &RemoteReport{Mode: "remote", LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
-		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
+	mode := "remote"
+	if opt.Observe != nil {
+		mode = "observe"
+	}
+	d.rep.r.Remote = &RemoteReport{Mode: mode, LeadBot: opt.Lead, Bots: slices.Clone(opt.Bots), Tank: opt.Tank,
+		Orders: map[string]int{}, Refused: map[string]int{}, Refills: []Refill{}, MaintenanceSkips: map[string]int{}, TuneChanges: []TuneChange{}, PlanReloads: []PlanReload{}}
+	if opt.PlanPath != "" {
+		d.rep.r.Remote.PlanFile = opt.PlanPath
+		if data, err := os.ReadFile(opt.PlanPath); err == nil {
+			sum := sha256.Sum256(data)
+			d.rep.r.Remote.PlanSHA256 = hex.EncodeToString(sum[:])
+		}
+	}
 	d.initTrace()
 	return d
 }
@@ -539,13 +705,30 @@ func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	if err := d.checkStart(fromLeg); err != nil {
 		return err
 	}
+	if err := d.checkGravesOpenBy(ctx); err != nil {
+		return err
+	}
+	if err := d.checkGMCross(ctx, fromLeg); err != nil {
+		return err
+	}
+	d.markAvoid()
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
 	d.wd.start()
-	err := d.runRecovering(ctx, fromLeg)
+	// The unsafe-start gate goes before the prepare step, the bind and the enter phase (begin): a refused start sends
+	// nothing at all. It reads the navmesh path after markAvoid, as startAnywhere does, and fails the run in the report.
+	err := d.checkStartSafety(ctx, fromLeg)
+	if err == nil {
+		err = d.runRecovering(ctx, fromLeg)
+	}
 	d.finish(err)
 	return err
 }
+
+// Pause marks the run as paused: the caller then cancels its context, and the run ends "stopped" with the bots stood still and the
+// binding kept (no `commander unbind`), so that a dungeon_run with resume re-enters the same group and instance. Without it a stopped
+// run unbinds, which returns the hires to the commander's raid and loses the instance (ZF-2 run 3b).
+func (d *RemoteDriver) Pause() { d.paused.Store(true) }
 
 // runRecovering is run with a panic turned into a failed run: the deferred unbind has run by the time the panic gets here, and the
 // report says what happened instead of the process going down with the binding half undone.
@@ -566,6 +749,9 @@ func (d *RemoteDriver) finish(err error) {
 	switch {
 	case err == nil:
 		state, kind, text = "done", events.KindDungeonDone, "dungeon "+d.plan.Name+" done (remote)"
+		if deg := d.rep.snapshot().Degraded; len(deg) > 0 {
+			text += " (degraded: " + strings.Join(deg, "; ") + ")"
+		}
 	case ctxDone(err):
 		state, errText, kind, text = "stopped", "stopped", events.KindDungeonFailed, "dungeon "+d.plan.Name+" stopped (remote)"
 	default:
@@ -578,18 +764,38 @@ func (d *RemoteDriver) finish(err error) {
 	if err != nil {
 		data["error"], data["leg"] = errText, leg
 	}
+	if deg := d.rep.snapshot().Degraded; len(deg) > 0 {
+		data["degraded"] = deg
+	}
 	d.emit(kind, text, data)
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), d.opt.UnbindWait+serverTraceStopWait)
+	if why := d.stopServerTrace(stopCtx); why != "" {
+		d.rep.note(why + ": the server trace may still be running: stop it by hand (.bot trace stop)")
+	}
+	stopCancel()
 	d.traceEnd(state, errText, at)
 	d.rep.end(state, errText, at)
 }
 
 func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	// Every way out: done, failed, stopped, a panic. Only a failed run with KeepOnFail keeps its binding (unbind).
-	defer func() { d.unbind(err != nil && !ctxDone(err) && d.opt.KeepOnFail) }()
+	// A paused run (dungeon_pause) is stopped on purpose to be resumed: it keeps its binding whatever keep_on_fail says.
+	defer func() {
+		d.unbind((err != nil && !ctxDone(err) && d.opt.KeepOnFail) || (d.paused.Load() && ctxDone(err)))
+	}()
+	// Declared after the unbind, so it runs before it: the bots' area spells that a grave batch turned off go back on while the binding lasts.
+	defer d.legAoEOn()
+	defer d.agentRestore(context.Background(), "at the end of the run")
 	// The tunables file (and tune_set requests made already) count from the start: the entry walk and the preflight read them too. The
 	// plan is not read again here, it was loaded a moment ago.
 	d.applyTunables(liveBoundary{leg: fromLeg, kind: boundaryRun})
 	setupAt := d.clk.Now()
+	if d.observing() {
+		// A server without the run leader (or without the plan) is refused before a single bot is hired.
+		if err = d.probeRunLeader(ctx); err != nil {
+			return err
+		}
+	}
 	err = d.begin(ctx, fromLeg)
 	setupS := d.clk.Now().Sub(setupAt).Seconds()
 	d.rep.update(func(r *Report) {
@@ -601,7 +807,18 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	if err != nil {
 		return err
 	}
+	if d.serverTrace {
+		// The server's run trace was started and acknowledged (begin, right before this): whatever way this run
+		// ends — done, failed, stopped or a panic — it is stopped, and one stop succeeds. This deferred stop runs on
+		// every return of run, a panic's unwind too (before the unbind; it lets the panic go on), with its own context
+		// bounded by serverTraceStopWait: the run's may be cancelled already. finish, which runs after runRecovering,
+		// tries again only while the run still owns the trace (no stop answered yet).
+		defer d.stopServerTraceDeferred()
+	}
 	d.resolveTeam()
+	if d.observing() {
+		return d.observe(ctx)
+	}
 	d.st = NewStepperAt(d.plan, remoteWorld{d}, d.clk.Now, fromLeg)
 	if g := d.startGroup(); g >= 0 {
 		d.st = NewStepperAtGroup(d.plan, remoteWorld{d}, d.clk.Now, fromLeg, g)
@@ -609,16 +826,27 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 	if d.opt.Pulltest != nil {
 		return d.runPulltest(ctx)
 	}
+	resumed := false
 	if d.cfg.Resume {
 		if r, ok := d.st.ResumeAt(); ok {
+			resumed = true
 			d.rep.update(func(rp *Report) { rp.Resumed = &r })
 			d.rep.note(r.String())
 		}
 	}
+	if step, ok := d.st.SkipToFiredTrigger(); ok {
+		resumed = true
+		d.rep.note(fmt.Sprintf("resume: the area trigger of leg %d (step %d) was taken already: the party is in the room, the walk, the pulls and the steps before it are not run again", d.st.leg, step))
+	}
+	d.midStart, d.midStartLeg = fromLeg > 0 || d.opt.StartHere || d.opt.FromPullGroup != nil || resumed, fromLeg
 	waiting := [2]int{-1, -1}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if err := d.legLootSync(ctx); err != nil {
+			d.stepFailedRecover(ctx, err)
+			continue
 		}
 		if err := d.nearBeforeObjectStep(ctx); err != nil {
 			d.stepFailedRecover(ctx, err)
@@ -626,6 +854,7 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		}
 		d.objectTouched = false
 		a := d.liveStep(d.st.Next()) // a leg start or a pull-group start: the tunables and the plan are read again (remote_tune.go)
+		d.setProgress(a)
 		d.noteSkipped()
 		d.rep.setCurrent(a.Label)
 		d.wd.setStep(a.Label)
@@ -640,6 +869,12 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
+				if skipped, err := d.skipOptionalLeg(ctx, a.Leg); err != nil {
+					d.stepFailedRecover(ctx, err)
+					continue
+				} else if skipped {
+					continue
+				}
 				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					if d.stepFailedRecover(ctx, err) {
 						continue
@@ -676,7 +911,15 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		leave := d.wd.enter(wdPhaseName(a.Kind), a.Label, d.wdRecoverStep(a.Kind))
 		switch a.Kind {
 		case ActWalk:
-			if err = d.tracedWalkAs(ctx, a.To, a.Direct); err == nil {
+			err = d.agentGoHome(ctx, false) // an agent left in a trigger's zone goes back before the party walks on
+			if err == nil {
+				if a.GMCross {
+					err = d.gmCross(ctx, a.To)
+				} else {
+					err = d.tracedWalkAs(ctx, a.To, a.Direct)
+				}
+			}
+			if err == nil {
 				d.obj.unchecked = ""     // the party walked on: whatever a wait passed unchecked let it through
 				_, err = d.keepNear(ctx) // the leg's walk is over: bring the agent up
 			} else if d.obj.unchecked != "" {
@@ -686,8 +929,18 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 			err = d.doPull(ctx, a)
 		case ActKill:
 			err = d.doBoss(ctx, a)
+			if err == nil {
+				err = d.fightEngagedOut(ctx, a.Label) // the adds the boss left are fought before the leg ends or anyone rests
+			}
+			if err == nil {
+				err = d.agentGoHome(ctx, true) // the boss (Zum'rah) is dead: the agent leaves the zone it stayed in; a failed walk is no failure now
+			}
 		case ActLoot, ActUse, ActItem, ActRitual:
 			err = d.doObjectStep(ctx, a)
+		case ActTrigger:
+			err = d.doAreaTrigger(ctx, a)
+		case ActGossip:
+			err = d.doGossip(ctx, a)
 		default:
 			err = fmt.Errorf("remote mode cannot do %q", a.Kind)
 		}
@@ -752,19 +1005,48 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	if errors.Is(err, errWipe) {
 		d.ledgerClearAbsences()
 		down := errors.Is(err, errPartyDown)
+		// A wipe in a leg whose boss is dead already (the party died to the adds the boss left: Zum'rah's zombies and Dead Heroes) is no
+		// failure of the boss step: it is recovered like any wipe (also with recover_wipe off: the boss is down) and the leg goes on, and the
+		// report counts it apart ("wipe after the kill").
+		after := d.legBossDead()
+		inBatch := d.batch != nil || d.sweepWiped // a wipe in a grave batch (batchWiped clears it) or in a leftover sweep
+		d.sweepWiped = false
+		// Every wipe event counts in Wipes (what dungeon_status, the dashboard and the end record read); PartyDowns says how many of them were
+		// stops at three dead bots, WipesAfterKill how many came after the boss's kill.
 		d.rep.update(func(r *Report) {
-			if down {
+			r.Wipes++
+			if down && !after {
 				r.PartyDowns++
-			} else {
-				r.Wipes++
 			}
 		})
-		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down})
+		if after {
+			d.remote(func(r *RemoteReport) { r.WipesAfterKill++ })
+			d.rep.note(fmt.Sprintf("wipe after the kill: the boss of leg %d is dead; recovering the party, the leg goes on (%v)", max(d.curLeg, 0), err))
+		}
+		d.batchWiped()
+		d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": err.Error(), "party_down": down, "after_kill": after})
 		d.rep.note(err.Error())
-		if d.cfg.RecoverWipe && d.wipeRecover < d.cfg.MaxWipeRecoveries && ctx.Err() == nil {
+		// The cap counts per leg (MaxWipeRecoveries recoveries in one leg), with a run-wide ceiling of wipeRecoverRunFactor times that: a run
+		// with a wipe in each of several legs recovers each of them (live, zf-zum2-s2: wipes in legs 5 and 8 recovered, the third, in the
+		// Zum'rah leg, hit the run-wide cap of 2 and failed "wipe").
+		if d.wipeRecoverLeg == nil {
+			d.wipeRecoverLeg = map[int]int{}
+		}
+		if inBatch && !after && d.slotReserved() {
+			// The leg's last recovery slot is kept for the boss: a wipe in the graves that would use it is not recovered. The party is dead and
+			// cannot go on to the boss without a recovery, so the run ends here; a run started again at this leg has a cap of its own, and the
+			// graves already opened are skipped (cmd state).
+			d.rep.note(fmt.Sprintf("wipe in the grave batches or a leftover sweep with %d of %d recovery slot(s) of the leg left: the last slot is kept for the boss, so this wipe is not recovered and the run stops here", d.recoverySlotsLeft(), d.cfg.MaxWipeRecoveries))
+			d.st.Fail("wipe in the graves: not recovered, the last recovery slot of the leg is kept for the boss")
+			return false
+		}
+		if (d.cfg.RecoverWipe || after) && d.wipeRecoverLeg[d.curLeg] < d.cfg.MaxWipeRecoveries && d.wipeRecover < d.cfg.MaxWipeRecoveries*wipeRecoverRunFactor && ctx.Err() == nil {
 			d.wipeRecover++
+			d.wipeRecoverLeg[d.curLeg]++
 			if rerr := d.recoverWipe(ctx); rerr == nil {
-				d.obj.waitAt = time.Time{} // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
+				d.rep.update(func(r *Report) { r.WipeRecoveries++ })
+				_ = d.maintWipeRecovered(ctx) // once the party is calm; a context error ends the run at the next look
+				d.obj.waitAt = time.Time{}    // the step comes back to its game-object wait: the settle time starts again (remote_objects.go)
 				return true
 			} else {
 				d.st.Fail("wipe: " + rerr.Error())
@@ -777,6 +1059,9 @@ func (d *RemoteDriver) stepFailedRecover(ctx context.Context, err error) bool {
 	d.st.Fail(err.Error())
 	return false
 }
+
+// wipeRecoverRunFactor times MaxWipeRecoveries is the run-wide ceiling of recovered wipes (the cap itself counts per leg).
+const wipeRecoverRunFactor = 5
 
 // remoteWorld is the Stepper's World over the feed: the lead bot's position and the hostiles the bots see. It has no game
 // objects: the agent does not see the dungeon.
@@ -884,6 +1169,9 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if strings.TrimSpace(d.opt.Lead) == "" && !d.opt.Prepare.HiredParty() {
 		return errors.New("remote mode needs a lead_bot")
 	}
+	if err := RemoteAbilities(d.g, d.opt, d.plan); err != nil {
+		return err
+	}
 	if err := d.prepare(ctx); err != nil {
 		return err
 	}
@@ -957,6 +1245,7 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	if len(d.fr.Party) == 0 {
 		return errors.New("the first frame has an empty party")
 	}
+	d.startServerTrace(ctx)
 	d.observeInit()
 	if d.opt.Tank != "" {
 		if m, ok := d.memberByName(d.opt.Tank); ok {
@@ -965,12 +1254,142 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 			d.rep.note(fmt.Sprintf("tank %s is not in the party of the feed; the tank will be taken from the first pull", d.opt.Tank))
 		}
 	}
+	d.wantParty = max(len(d.opt.Bots)+1, 0)
+	if len(d.opt.Bots) == 0 {
+		d.wantParty = len(d.fr.Party)
+	}
+	d.resolveCCBot(ctx)
 	d.lootOnAtStart(ctx)
 	d.probeEntryTargets(ctx, fromLeg)
 	if err := d.preflight(ctx); err != nil {
 		return err
 	}
 	return d.startAnywhere(ctx, fromLeg)
+}
+
+// startServerTrace tells the server's run recorder who drives this run (`.bot trace start <run_id> ...
+// driver=<model>:<effort>:<run>`, TortoiseBots #986), so the server's summary and the agent's trace join on the run id. Only
+// when run_meta is given; a refusal or silence is noted, never fatal (an older server has no `trace start driver=` yet).
+// A start with no answer (a transport error, a cancel, a timeout) may still have been applied: the run does not own a
+// trace it cannot prove it started, so it sends no stop for it (a blind `trace stop` would end a trace someone started
+// by hand: the server's stop is not scoped to a run id) and the report says the server's trace state is unknown.
+func (d *RemoteDriver) startServerTrace(ctx context.Context) {
+	if !d.opt.RunMeta.Set() || !d.opt.RunMeta.ServerTrace {
+		return
+	}
+	cmd := "trace start " + d.tr.ID() + " driver=" + d.opt.RunMeta.Driver()
+	r, err := d.g.Command(ctx, cmd)
+	switch {
+	case err != nil:
+		d.rep.note("trace start: " + err.Error())
+		d.rep.note(serverTraceUnknownNote)
+	case r.Kind == tbm.KindErr && r.Err != nil:
+		d.rep.note("trace start refused: " + r.Err.Code)
+	case r.Kind != tbm.KindAck:
+		d.rep.note("trace start: no answer (the server may have no run trace recorder yet)")
+		d.rep.note(serverTraceUnknownNote)
+	default:
+		d.serverTrace = true
+	}
+}
+
+// serverTraceUnknownNote is the report's note for a trace start that got no answer: it may have been applied.
+const serverTraceUnknownNote = "server trace state unknown (start not acknowledged): stop it by hand if one is running"
+
+// The bounds of the server trace stop. serverTraceStopWait bounds the deferred stop as a whole: the run's own context may
+// be cancelled or gone when the panic that unwinds the run reaches the defer, and the stop still has to go out (the
+// server records one trace at a time: the next run's start is refused until this one's trace ends), but the unwind
+// must not wait on it for longer. Each try waits at most serverTraceStopTry for its answer; tries are
+// serverTraceStopGap, then twice that, apart. Variables only so the tests can shorten them.
+var (
+	serverTraceStopWait  = 5 * time.Second
+	serverTraceStopTry   = 1500 * time.Millisecond
+	serverTraceStopGap   = 100 * time.Millisecond
+	serverTraceStopTries = 3
+)
+
+// stopServerTrace ends the server's run trace (`.bot trace stop`), so the next run's start is not refused. Only while
+// the run owns it (an acknowledged start, serverTrace): the run keeps owning it until the server answers the stop. An
+// ack or one of the server's terminal refusals (not-running, forbidden: trying again changes nothing) ends the
+// ownership; any other refusal, a transport error or no answer is tried again, up to serverTraceStopTries times within ctx. The server's stop takes no run id (it stops
+// whatever trace runs), and a stop with no answer may have been applied, so every try after the first asks `trace
+// status` first and sends the stop only while the trace running is still this run's own (its run id): idle, or
+// another run's trace, means ours has ended, and nothing more is sent. It returns why the last try failed when the
+// run still owns the trace (the caller notes it), "" otherwise. finish and the deferred stop armed after the acked
+// start both call it: after a stop the server answered, neither sends another.
+func (d *RemoteDriver) stopServerTrace(ctx context.Context) string {
+	why := ""
+	for try := 0; d.serverTrace && try < serverTraceStopTries; try++ {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return why
+			case <-time.After(serverTraceStopGap * time.Duration(try)):
+			}
+			ours, w := d.serverTraceOurs(ctx)
+			if w != "" {
+				why = w
+				continue
+			}
+			if !ours {
+				d.serverTrace = false
+				return ""
+			}
+		}
+		if ctx.Err() != nil {
+			return "trace stop: " + ctx.Err().Error()
+		}
+		tctx, cancel := context.WithTimeout(ctx, serverTraceStopTry)
+		r, err := d.g.Command(tctx, "trace stop")
+		cancel()
+		switch {
+		case err != nil:
+			why = "trace stop: " + err.Error()
+		case r.Kind == tbm.KindAck:
+			d.serverTrace = false
+		case r.Kind == tbm.KindErr && r.Err != nil && (r.Err.Code == "not-running" || r.Err.Code == "forbidden"):
+			d.serverTrace = false
+			d.rep.note("trace stop refused: " + r.Err.Code)
+		case r.Kind == tbm.KindErr && r.Err != nil:
+			why = "trace stop refused: " + r.Err.Code // not one of the server's terminal codes: the trace may still run
+		default:
+			why = "trace stop: no answer"
+		}
+	}
+	if !d.serverTrace {
+		return ""
+	}
+	return why
+}
+
+// serverTraceOurs asks the server (`trace status`) whether the trace running is this run's own: the ack's scope is
+// running and its detail is the run id (the server shows the id to the player who started the trace). why is set when
+// the status got no usable answer.
+func (d *RemoteDriver) serverTraceOurs(ctx context.Context) (ours bool, why string) {
+	tctx, cancel := context.WithTimeout(ctx, serverTraceStopTry)
+	defer cancel()
+	r, err := d.g.Command(tctx, "trace status")
+	switch {
+	case err != nil:
+		return false, "trace status: " + err.Error()
+	case r.Kind == tbm.KindAck && r.Ack != nil:
+		return r.Ack.Scope == "running" && r.Ack.Executor == d.tr.ID(), ""
+	case r.Kind == tbm.KindErr && r.Err != nil:
+		return false, "trace status refused: " + r.Err.Code
+	default:
+		return false, "trace status: no answer"
+	}
+}
+
+// stopServerTraceDeferred is the deferred end of the server's run trace, armed in run right after the run's own start
+// was acknowledged: it stops the trace only while the run still owns it (stopServerTrace), with its own context bounded
+// by serverTraceStopWait (the run's may be cancelled already). It is a plain defer, no recover: a panic it runs under
+// goes on (runRecovering turns it into a failed run). When its tries all fail the run still owns the trace, and finish
+// tries again and notes it if that fails too.
+func (d *RemoteDriver) stopServerTraceDeferred() {
+	ctx, cancel := context.WithTimeout(context.Background(), serverTraceStopWait)
+	defer cancel()
+	d.stopServerTrace(ctx)
 }
 
 // adoptBinding answers a bind refused as already-bound: the binding the account holds is reused when it is this run's own (the same lead
@@ -1092,10 +1511,14 @@ func (d *RemoteDriver) unbind(keep bool) {
 		d.endStay(ctx)
 	}
 	if keep && d.opt.OnEnd != OnEndLogout {
+		why := "the run failed"
+		if d.paused.Load() {
+			why = "the run was paused"
+		}
 		d.remote(func(rr *RemoteReport) {
-			rr.UnbindVia = "kept (the run failed; a resume reuses the group and its instance)"
+			rr.UnbindVia = "kept (" + why + "; a resume reuses the group and its instance)"
 		})
-		d.rep.note("commander unbind: not sent, the run failed; the binding is kept so that a resume re-enters the same instance (dungeon_stop or a finished run unbinds)")
+		d.rep.note("commander unbind: not sent, " + why + "; the binding is kept so that a resume re-enters the same instance (dungeon_stop or a finished run unbinds)")
 		return
 	}
 	r, err := d.g.Command(ctx, "commander unbind")
@@ -1140,6 +1563,8 @@ func (d *RemoteDriver) look() {
 	if !d.haveFr || n != d.n {
 		d.fr, d.n, d.haveFr = fr, n, true
 		d.noteLedger()
+		d.noteFleeing()
+		d.sampleBatch()
 		d.ptObserve()
 		if d.stalled {
 			d.remote(func(r *RemoteReport) { r.FeedStalls++ })
@@ -1187,9 +1612,9 @@ func (d *RemoteDriver) check() error {
 		return fmt.Errorf("%w: the whole party is dead", errWipe)
 	}
 	if n, all := d.partyDown(); n > 0 {
-		return fmt.Errorf("%w: %w: %d of %d bots are dead", errWipe, errPartyDown, n, all)
+		return fmt.Errorf("%w: %w: %d of %d bots are dead or outside the dungeon", errWipe, errPartyDown, n, all)
 	}
-	return nil
+	return d.partyIntact()
 }
 
 // partyDown reports, once, that three bots or more are dead inside the dungeon: the leg stops there as at a wipe (ZF-1: after
@@ -1207,7 +1632,9 @@ func (d *RemoteDriver) partyDown() (dead, all int) {
 		return 0, 0
 	}
 	all = len(d.fr.Party)
-	dead = len(d.deadMembers())
+	// Dead in the instance, and alive on another map: a party that released to a graveyard outside and was spirit-healed there (live,
+	// Antu'sul: all alive on map 1, the in-instance count never fired) is down as much as a dead one.
+	dead = len(d.deadMembers()) + d.outsideAlive()
 	if dead < d.tx.PartyDownDead {
 		d.downSaid = false
 		return 0, all
@@ -1217,6 +1644,38 @@ func (d *RemoteDriver) partyDown() (dead, all int) {
 	}
 	d.downSaid = true
 	return dead, all
+}
+
+// outsideGrace is how long a living member must stand on another map than the plan's before it counts as outside (a bot that is taking
+// the portal, or arriving after a summon, is for a moment on the old map).
+const outsideGrace = 8 * time.Second
+
+// outsideAlive counts the living members that have stood on another map than the plan's for outsideGrace, inside a leg.
+func (d *RemoteDriver) outsideAlive() int {
+	n := 0
+	now := d.clk.Now()
+	if d.outSince == nil {
+		d.outSince = map[packet.GUID]time.Time{}
+	}
+	for _, p := range d.fr.Party {
+		if p.Dead || p.Map == d.plan.Map || d.curLeg < 0 {
+			delete(d.outSince, p.GUID)
+			continue
+		}
+		since, ok := d.outSince[p.GUID]
+		if !ok {
+			d.outSince[p.GUID] = now
+			continue
+		}
+		if now.Sub(since) >= outsideGrace {
+			if p.GUID == d.fr.Lead {
+				n += d.tx.PartyDownDead // a lead outside cannot walk the party anywhere: it is party down by itself (live, zum2-s1: the walk was refused 8 times)
+			} else {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func (d *RemoteDriver) observeInit() {
@@ -1235,6 +1694,7 @@ func (d *RemoteDriver) countDeaths() bool {
 		d.observeInit()
 	}
 	for _, p := range d.fr.Party {
+		d.observeDeadly(p, p.Dead && !d.prevDead[p.GUID])
 		if p.Dead && !d.prevDead[p.GUID] {
 			d.rep.update(func(r *Report) {
 				r.Deaths = append(r.Deaths, Death{Name: p.Name, Leg: d.curLeg, At: d.clk.Now()})
@@ -1246,6 +1706,7 @@ func (d *RemoteDriver) countDeaths() bool {
 		}
 		d.prevDead[p.GUID] = p.Dead
 	}
+	d.deadlyFrame()
 	return d.fr.AllDead()
 }
 
@@ -1274,6 +1735,14 @@ func (d *RemoteDriver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start", "mode": "remote"})
+	// companions_loot false: off from here to the leg's end; a leg that cannot have it does not start (before the walk, the rest gate, anything).
+	if err := d.legLootOff(ctx, i); err != nil {
+		return err
+	}
+	// Every few legs the bots get `.bot maintenance` again (remote_maint.go), before the gate so that the gate sees the full bags.
+	if err := d.maintLegStart(ctx, i); err != nil {
+		return err
+	}
 	// The gate at a leg's start waits for health and mana but not for the followers: they catch up on the walk, and the gate before a
 	// pull gathers them. When a long walk comes first, the party may rest on the way (walkAhead).
 	return d.restGateWalk(ctx, false, d.walkAhead(next))
@@ -1284,6 +1753,9 @@ func (d *RemoteDriver) endLeg(result string) {
 	if i < 0 {
 		return
 	}
+	d.maintLegEnd()
+	d.legAoEOn()
+	d.legLootOn()
 	d.curLeg = -1
 	var l LegReport
 	d.rep.update(func(r *Report) {
@@ -1415,24 +1887,113 @@ func moveArgsPoint(args []string) (Point, bool) {
 }
 
 // waypoint is the point to send the lead bot to on its way from `from` to `to`: `to` itself when within MoveLeg, else a point on
-// the navmesh path (when the game plans one), else on the straight line.
+// the navmesh path (when the game plans one), else on the straight line. A point cut out of a segment is put on the navmesh floor
+// under it (onFloor), among the floors in the height band of the part of the path being cut: the server drops a floor more than 3 yd
+// above the asked point, and in a sloping tunnel the segment's own height runs under the floor.
 func (d *RemoteDriver) waypoint(ctx context.Context, from, to Point, leg float32) Point {
+	p, _ := d.waypointSrc(ctx, from, to, leg)
+	return p
+}
+
+// waypointSrc is waypoint with the source of the point: real is true when it is `to` itself or a point of a path the game's navmesh planned,
+// false for the straight-line fallback (no planner, no tiles, a planner error): a module refusal of a straight-line point says nothing about
+// the target (the enter phase's unreachable portal, remote_portalgm.go).
+func (d *RemoteDriver) waypointSrc(ctx context.Context, from, to Point, leg float32) (p Point, real bool) {
 	if dist3(from, to) <= float64(leg) {
-		return to
+		return to, true
 	}
 	if pl, ok := d.g.(PathPlanner); ok {
-		mapID := d.plan.Map
-		if d.outside != nil {
-			mapID = *d.outside
-		}
-		if pts, err := pl.PlanPath(ctx, mapID, from, to); err == nil && len(pts) >= 2 {
-			if p, ok := alongPath(pts, from, leg); ok {
-				return p
+		if pts, err := pl.PlanPath(ctx, d.stepMap(), from, to); err == nil && len(pts) >= 2 {
+			along := alongPath
+			if boxes := d.stepAvoid(); len(boxes) > 0 {
+				along = func(pts []Point, from Point, leg float32) (Point, bool) { return alongPathAvoid(pts, from, leg, boxes) }
+			}
+			if p, ok := along(pts, from, leg); ok {
+				lo, hi := from.Z, from.Z
+				for i := 1; i < len(pts); i++ {
+					lo, hi = min(lo, pts[i].Z), max(hi, pts[i].Z)
+					if dist3(from, pts[i]) > float64(leg) {
+						break
+					}
+				}
+				return d.onFloor(ctx, p, lo, hi), true
 			}
 		}
 	}
-	return alongLine(from, to, float64(leg))
+	return d.onFloor(ctx, alongLine(from, to, float64(leg)), min(from.Z, to.Z), max(from.Z, to.Z)), false
 }
+
+// stepMap is the map the lead bot walks on.
+func (d *RemoteDriver) stepMap() uint32 {
+	if d.outside != nil {
+		return *d.outside
+	}
+	return d.plan.Map
+}
+
+// floorBand is how far (yd) outside the heights of the path being cut a navmesh floor may lie and still be the floor under a step: a floor
+// farther off is another level (a deck below, a bridge above) that the path does not go to.
+const floorBand = 3
+
+// floorWindow is how far (yd) from a refused step's height a floor counts as the one it missed (the live refusals were 3.1 to 5.5 under).
+const floorWindow = 8
+
+// nearestFloor is the floor of zs nearest z within [lo, hi]; on a tie the one above.
+func nearestFloor(zs []float32, z, lo, hi float32) (float32, bool) {
+	best, found := float32(0), false
+	for _, f := range zs {
+		if f < lo || f > hi {
+			continue
+		}
+		df, db := math.Abs(float64(f-z)), math.Abs(float64(best-z))
+		if !found || df < db-0.01 || (df < db+0.01 && f > best) {
+			best, found = f, true
+		}
+	}
+	return best, found
+}
+
+// StepOnFloor is p with the height of the navmesh floor at its x, y nearest p's height among those between lo-floorBand and hi+floorBand
+// (the heights of the path being cut); p itself when fl lists no floors (no planner, no tile) or none lies in the band.
+func StepOnFloor(ctx context.Context, fl FloorLister, mapID uint32, p Point, lo, hi float32) Point {
+	zs, ok := fl.FloorsAt(ctx, mapID, p.X, p.Y, p.Z)
+	if !ok {
+		return p
+	}
+	if z, ok := nearestFloor(zs, p.Z, lo-floorBand, hi+floorBand); ok {
+		p.Z = z
+	}
+	return p
+}
+
+// onFloor is StepOnFloor for the game of the run, when it lists floors at all.
+func (d *RemoteDriver) onFloor(ctx context.Context, p Point, lo, hi float32) Point {
+	if fl, ok := d.g.(FloorLister); ok {
+		return StepOnFloor(ctx, fl, d.stepMap(), p, lo, hi)
+	}
+	return p
+}
+
+// refusedStepFix is the point to send again for a step the server answered `unreachable`, same x and y: at the height of the floor the
+// step missed by more than 2.5 yd (the server accepts a floor up to 3 yd above the asked point), or, when the game knows no floor there at
+// all, raised floorRaise yd. false when the step is on a floor already: it is refused for another reason and only a shorter leg may help.
+func (d *RemoteDriver) refusedStepFix(ctx context.Context, sent Point) (Point, bool) {
+	fl, ok := d.g.(FloorLister)
+	if !ok {
+		return Point{sent.X, sent.Y, sent.Z + floorRaise}, true
+	}
+	zs, ok := fl.FloorsAt(ctx, d.stepMap(), sent.X, sent.Y, sent.Z)
+	if !ok || len(zs) == 0 {
+		return Point{sent.X, sent.Y, sent.Z + floorRaise}, true
+	}
+	z, ok := nearestFloor(zs, sent.Z, sent.Z-floorWindow, sent.Z+floorWindow)
+	if !ok || math.Abs(float64(z-sent.Z)) <= 2.5 {
+		return Point{}, false
+	}
+	return Point{sent.X, sent.Y, z}, true
+}
+
+const floorRaise = 3
 
 // alongPath is the farthest point of the path within leg yards of from, following the corners in order.
 func alongPath(pts []Point, from Point, leg float32) (Point, bool) {
@@ -1539,9 +2100,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		arriveAt = min(arriveAt, directArrive)
 	}
 	refusals, stalls, aggros, aheads := 0, 0, 0, 0
+	var resend *Point // the step to send again, put on the floor, after the server called it unreachable
+	fixed := false    // the unreachable step has had its resend (until a move is taken)
 	leg := d.opt.MoveLeg
 	var last string
 	var meter walkMeter
+	named, regathered, gaveUp := "", false, false // a bot the module's too-far named: brought at once, once per step; a gather that ran out
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1552,8 +2116,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		if err := d.ensureAlive(ctx); err != nil {
 			return err
 		}
+		if err := d.requireLiving(); err != nil {
+			return err
+		}
 		here, ok := d.leadPos()
 		if !ok {
+			resend = nil
 			if err := d.tick(ctx, d.cfg.Poll); err != nil {
 				return err
 			}
@@ -1562,7 +2130,8 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		if dist3(here, p) <= float64(arriveAt) {
 			return nil
 		}
-		if d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 {
+		if d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 && !d.batchOpening() {
+			resend = nil
 			if aggros++; aggros > maxWalkAggros {
 				return fmt.Errorf("walk to %.1f %.1f %.1f: the party was pulled into a fight %d times on the way", p.X, p.Y, p.Z, maxWalkAggros)
 			}
@@ -1572,12 +2141,18 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			meter = walkMeter{} // the fight is not a stop of the walk
 			continue
 		}
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		careful := d.careful()
 		hop := leg
 		if careful {
 			hop = min(leg, d.opt.CarefulHop)
 		}
 		wp := d.waypoint(ctx, here, p, hop)
+		if resend != nil && !direct {
+			wp, resend = *resend, nil
+		}
 		args := moveArgs(wp)
 		if direct {
 			wp, args = p, directMoveArgs(p) // one step, never hops
@@ -1597,6 +2172,29 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 				return err
 			}
 		}
+		if direct && (!gaveUp || named != "") {
+			// The module takes the step only with every follower on the lead bot (#948): the party stands on it first.
+			fight, timedOut, err := d.gatherDirect(ctx, "a direct step", named)
+			if err != nil {
+				return err
+			}
+			named, gaveUp = "", gaveUp || timedOut
+			if fight {
+				continue // the loop's combat branch takes it
+			}
+		}
+		// The module carries out no move shorter than about 6 yd (ZF-1 run 4: a last stretch of 5.2 yd was ignored five times and failed
+		// the walk). Such a stretch is sent as a move to min_move+1 yd along the same line: the lead bot walks through the point and stops
+		// just past it, and the arrival counts within that overshoot. The module measures the stretch on the ground plane (the stay
+		// position's distance value is GetDistance2d), so the hop's length here is too: rfc-live-2's hop of 6.3 yd on a slope (5.3 yd flat)
+		// was acked three times and never walked, and the walk failed.
+		tiny := 0.0
+		if dd := hdist(here, wp); !direct && d.tx.MinMove > 0 && dd > 0.1 && dd < float64(d.tx.MinMove) && !d.overshootDeadly(ctx, here, wp, dd) {
+			past := d.onFloor(ctx, lerp(here, wp, (float64(d.tx.MinMove)+1)/dd), min(here.Z, wp.Z), max(here.Z, wp.Z))
+			args = moveArgs(past)
+			tiny = dist3(past, wp)
+			d.remote(func(r *RemoteReport) { r.TinyMoves++ })
+		}
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
@@ -1610,6 +2208,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 				if ref.Code == "invalid" {
 					return errDirectUnsupported(p, ref)
 				}
+				if bot := farBotName(ref.Message); ref.Code == "too-far" && bot != "" && !regathered {
+					// A follower fell behind after the gather: bring that bot (follow, then summon), and send the step again.
+					regathered, named = true, bot
+					d.rep.note(fmt.Sprintf("direct step to %.1f %.1f %.1f: %s; regathering %s", p.X, p.Y, p.Z, last, bot))
+					continue
+				}
 				if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries || ref.Code == "no-ground" || ref.Code == "no-los" {
 					return fmt.Errorf("direct step to %.1f %.1f %.1f: the lead bot was refused (%s)", p.X, p.Y, p.Z, last)
 				}
@@ -1618,23 +2222,39 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 				}
 				continue
 			}
+			if ref.Code == "unreachable" {
+				d.noteUnreachable("move", wp, fmt.Sprintf("walk to %.1f %.1f %.1f, leg of %.0f yd from %.1f %.1f %.1f", p.X, p.Y, p.Z, leg, here.X, here.Y, here.Z))
+				// A step under its floor is the usual cause (the server drops a floor more than 3 yd above the asked point): the same
+				// step on its floor goes first, and a refusal the resend cures is not counted. Never the plan's own end point.
+				if sent, ok := moveArgsPoint(args); ok && !fixed && wp != p {
+					if q, ok := d.refusedStepFix(ctx, sent); ok {
+						fixed, resend = true, &q
+						d.rep.note(fmt.Sprintf("walk to %.1f %.1f %.1f: step %.1f %.1f %.1f unreachable; sent again at z %.1f", p.X, p.Y, p.Z, sent.X, sent.Y, sent.Z, q.Z))
+						if err := d.tick(ctx, d.cfg.WalkRetryDelay); err != nil {
+							return err
+						}
+						continue
+					}
+				}
+			}
 			if refusals++; refusals > d.cfg.WalkAttempts+d.opt.MoveRetries {
 				return fmt.Errorf("walk to %.1f %.1f %.1f: the lead bot was refused %d times (%s)", p.X, p.Y, p.Z, refusals, last)
 			}
-			if ref.Code == "unreachable" {
-				d.noteUnreachable("move", wp, fmt.Sprintf("walk to %.1f %.1f %.1f, leg of %.0f yd from %.1f %.1f %.1f", p.X, p.Y, p.Z, leg, here.X, here.Y, here.Z))
-			}
 			if ref.Code == "too-far" || ref.Code == "off-mesh" || ref.Code == "unreachable" {
-				leg = max(leg/2, 15) // a shorter leg: closer, and nearer the mesh
+				leg = max(min(leg, hop)/2, 15) // a shorter step, actually: closer, and nearer the mesh
 			}
 			if err := d.tick(ctx, d.cfg.WalkRetryDelay); err != nil {
 				return err
 			}
 			continue
 		}
+		fixed = false
 		arrive := arriveAt
 		if wp != p {
 			arrive = max(arrive, 8)
+		}
+		if tiny > 0 {
+			arrive = max(arrive, float32(tiny)+0.5)
 		}
 		ahead := wp != p && d.opt.LookAhead > 0
 		res, err := d.waitArrival(ctx, wp, arrive, ahead, &meter)
@@ -1647,6 +2267,12 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			d.remote(func(r *RemoteReport) { r.LookAheadMoves++ })
 		case arrivedAt:
 			if wp == p {
+				if direct {
+					// The next step (or the pull after the crossing) starts with the party up: wait for the followers now.
+					if _, _, err := d.gatherDirect(ctx, "the next step", ""); err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 		case stalledAt:
@@ -1797,6 +2423,9 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 	for {
 		dead := d.deadMembers()
 		if len(dead) == 0 {
+			if len(d.gmRevived) > 0 || len(d.offSince) > 0 || len(d.offMapMembers()) > 0 {
+				return d.bringPartyIn(ctx) // the lead into the instance first, the others to it; every member on the plan's map
+			}
 			return nil
 		}
 		if d.clk.Now().After(deadline) {
@@ -1806,18 +2435,19 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 			if last, ok := d.lastRevive[m.GUID]; ok && d.clk.Now().Sub(last) < 20*time.Second {
 				continue
 			}
-			if d.revived[m.GUID] >= 3 {
-				return fmt.Errorf("%s is still dead after %d revive orders", m.Name, d.revived[m.GUID])
+			// A bot that released to a graveyard outside the dungeon (another map than the plan's) does not come back by `cmd revive`: the
+			// module acknowledges it and the ghost stays out (live 2026-10-15, Velratha group 9 wipe: "still dead after 3 revive orders").
+			// A GM account revives it where it is (`.revive`; the next rejoin summons it into the instance); any other account leaves it to
+			// run back through the entrance, for as long as the recovery's own limit.
+			if m.Map != d.plan.Map && d.revived[m.GUID] >= 1 {
+				if handled, err := d.reviveOffMap(ctx, m); err != nil {
+					return err
+				} else if handled {
+					continue
+				}
 			}
-			d.revived[m.GUID]++
-			d.lastRevive[m.GUID] = d.clk.Now()
-			d.remote(func(r *RemoteReport) { r.Revives++ })
-			r, err := d.order(ctx, "revive", m.Name)
-			if err != nil {
+			if err := d.sendRevive(ctx, m); err != nil {
 				return err
-			}
-			if ref, bad := refusedOf(r); bad && ref.Code != "not-dead" {
-				return fmt.Errorf("%s is dead and the revive order was refused: %s (%s)", m.Name, ref.Code, ref.Message)
 			}
 		}
 		if err := d.tick(ctx, d.cfg.Poll*3); err != nil && !errors.Is(err, errWipe) {
@@ -1826,15 +2456,72 @@ func (d *RemoteDriver) reviveDead(ctx context.Context, why string) error {
 	}
 }
 
+// sendRevive sends `cmd revive` for one dead bot: the module has it release its spirit and run back (or revives it at once for a GM). A bot
+// that stays dead after three orders fails the run; a refused order does too, except "not-dead".
+func (d *RemoteDriver) sendRevive(ctx context.Context, m tbm.PartyRec) error {
+	if d.revived[m.GUID] >= 3 {
+		return fmt.Errorf("%s is still dead after %d revive orders", m.Name, d.revived[m.GUID])
+	}
+	d.revived[m.GUID]++
+	d.lastRevive[m.GUID] = d.clk.Now()
+	d.remote(func(r *RemoteReport) { r.Revives++ })
+	r, err := d.order(ctx, "revive", m.Name)
+	if err != nil {
+		return err
+	}
+	if ref, bad := refusedOf(r); bad && ref.Code != "not-dead" {
+		return fmt.Errorf("%s is dead and the revive order was refused: %s (%s)", m.Name, ref.Code, ref.Message)
+	}
+	return nil
+}
+
+// lateCorpseWait is how long a bot that died after the wipe's revive orders (alone against the mobs that had not reset: rfc-live-2, the
+// rogue 20 s after the others) is left lying before its corpse is released anyway, when no mob stands near it.
+const lateCorpseWait = 20 * time.Second
+
+// releaseLateDead releases the corpses of bots that died while the recovery waited for the others to come back: nobody sent them a revive
+// order (reviveDead had returned already), so they lay there until the bound ran out and the recovery failed ("still dead"). A corpse with a
+// live hostile near its own body is released at once (a resurrection in place would put the healer back on the floor); another after lateCorpseWait,
+// which leaves a living healer the time to raise it in place. A bot already ordered in the last 20 s is left to run back. since holds when each
+// bot was first seen dead during this wait.
+func (d *RemoteDriver) releaseLateDead(ctx context.Context, dead []tbm.PartyRec, since map[packet.GUID]time.Time) error {
+	now := d.clk.Now()
+	for _, m := range dead {
+		if _, ok := since[m.GUID]; !ok {
+			since[m.GUID] = now
+		}
+		if last, ok := d.lastRevive[m.GUID]; ok && now.Sub(last) < 20*time.Second {
+			continue
+		}
+		if len(d.hostilesNearPoint(partyPoint(m))) == 0 && now.Sub(since[m.GUID]) < lateCorpseWait {
+			continue
+		}
+		d.rep.note(fmt.Sprintf("recovery: %s is dead again (%.0f s); releasing the corpse (cmd revive: it runs back from the graveyard)", m.Name, now.Sub(since[m.GUID]).Seconds()))
+		if err := d.sendRevive(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // resurrectors are the living bots out of combat that may raise a dead one: the named healer, else any bot that uses mana (the feed
-// carries no class, so a mage counts; the wait is bounded and a mage's absence of a resurrection costs RezWait at most).
+// carries no class, so a mage counts; the wait is bounded and a mage's absence of a resurrection costs RezWait at most). The module's own
+// AI raises a dead party member out of combat (priest Resurrection, paladin Redemption, shaman Ancestral Spirit; the commander has no
+// cast order, `cmd` verbs are listed in tbm.CmdVerbs), so the driver only leaves it the time. A caster counts only with a dead body within
+// RezReach yards of it (rez_reach_yd; a corpse farther off is released at once), or on the same map as it.
 func (d *RemoteDriver) resurrectors() []tbm.PartyRec {
 	var out []tbm.PartyRec
+	dead := d.deadMembers()
 	for _, p := range d.fr.Party {
 		if p.Dead || !p.UsesMana() || p.InCombat() {
 			continue
 		}
 		if d.opt.Healer != "" && !strings.EqualFold(d.opt.Healer, p.Name) {
+			continue
+		}
+		if !slices.ContainsFunc(dead, func(m tbm.PartyRec) bool {
+			return m.Map == p.Map && dist3(partyPoint(m), partyPoint(p)) <= float64(d.tx.RezReach)
+		}) {
 			continue
 		}
 		out = append(out, p)
@@ -1862,8 +2549,13 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 				raised++
 			}
 		}
+		for g := range seenDead {
+			if m, ok := d.fr.Member(g); ok {
+				d.tr.Event("rez", map[string]any{"leg": max(d.curLeg, 0), "bot": m.Name, "raised": !m.Dead, "seconds": d.clk.Now().Sub(began).Seconds(), "why": why})
+			}
+		}
 		if raised > 0 {
-			d.remote(func(r *RemoteReport) { r.Rezzed += raised })
+			d.remote(func(r *RemoteReport) { r.Rezzed += raised; r.Rezzes += raised })
 			d.rep.note(fmt.Sprintf("leg %d: %d dead bots were raised within %.0f s of waiting", max(d.curLeg, 0), raised, d.clk.Now().Sub(began).Seconds()))
 		}
 	}()
@@ -1876,6 +2568,19 @@ func (d *RemoteDriver) waitForRez(ctx context.Context, why string) error {
 			return nil
 		}
 		now := d.clk.Now()
+		if bad := d.corpsesOnDeadly(dead); len(bad) > 0 {
+			// A body on ground that kills is raised into it (rfc-live-1e: the bodies lay in the lava): release them to run back instead.
+			d.remote(func(r *RemoteReport) { r.UnsafeRezSkips++ })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots (%s); bodies on deadly ground (%s): no resurrection in place, releasing them (cmd revive: they run back from the graveyard)", max(d.curLeg, 0), len(dead), why, strings.Join(bad, "; ")))
+			return nil
+		}
+		if near := d.hostilesNearCorpses(); len(near) > 0 {
+			// A resurrection in place next to mobs that have not reset puts the party back on the floor (Uldaman A, 2026-10-14): the dead
+			// are released and run back from the graveyard, which gives the mobs time to leave.
+			d.remote(func(r *RemoteReport) { r.UnsafeRezSkips++ })
+			d.rep.note(fmt.Sprintf("leg %d: %d dead bots (%s); %s stands within %.0f yd of the bodies: no resurrection in place, releasing them (cmd revive: they run back from the graveyard)", max(d.curLeg, 0), len(dead), why, d.hostileName(near[0]), d.tx.ReviveSafeYd))
+			return nil
+		}
 		if len(d.resurrectors()) == 0 {
 			if noted {
 				d.rep.note(fmt.Sprintf("leg %d: no living caster out of combat to raise %d dead bots (%s); releasing them", max(d.curLeg, 0), len(dead), why))
@@ -1929,11 +2634,84 @@ func (d *RemoteDriver) deadMembers() []tbm.PartyRec {
 // runs when the step goes on. It needs RecoverWipe.
 func (d *RemoteDriver) recoverWipe(ctx context.Context) error {
 	d.rep.note(fmt.Sprintf("wipe %d: reviving the party with .bot cmd revive (recover_wipe)", d.wipeRecover))
+	d.rollbackHistory()
 	// The wipe is being recovered from: the deaths already counted stay counted.
 	if err := d.reviveDead(ctx, "the party wiped"); err != nil {
 		return err
 	}
-	return nil
+	return d.waitRevivedRejoin(ctx)
+}
+
+// healerManaCap is the most a rest gate waits when the healer's mana is the only thing under its line.
+const healerManaCap = 120 * time.Second
+
+// revivedRejoinWait bounds waitRevivedRejoin.
+const revivedRejoinWait = 120 * time.Second
+
+// waitRevivedRejoin waits, after a wipe's revives, until every member is alive and within GatherNear of the lead bot (a revived bot runs back
+// from the graveyard), summoning the far ones when the agent is a GM (the rejoin), so that the next pull is not made with dead or distant
+// bots (live, zum2-s1: three packs pulled with dead bots, four more bots lost in the 6 minutes after a wipe). Past the bound a member that is
+// still dead fails the recovery (one error, so one wipe uses one recovery slot); members that are alive but far give a degraded success.
+// A wipe seen during the wait (the revived bots dying again) is the same unresolved wipe: it is not counted again, the wait runs to its bound.
+func (d *RemoteDriver) waitRevivedRejoin(ctx context.Context) error {
+	until := d.clk.Now().Add(revivedRejoinWait)
+	noted := false
+	deadSince := map[packet.GUID]time.Time{}
+	for {
+		d.look()
+		missing := d.awayFromLead(float64(d.tx.GatherNear))
+		dead := d.deadMembers()
+		if len(dead) == 0 && len(d.offMapMembers()) > 0 {
+			// Alive but outside the dungeon (a party released to a graveyard on another map: zf-r5): near the lead bot is not back. The lead
+			// bot goes in first (bringPartyIn), the others to it.
+			if err := d.bringPartyIn(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(missing) == 0 && len(dead) == 0 {
+			if noted {
+				d.rep.note(fmt.Sprintf("recovery: every member is alive and with the lead bot again (%.0f s after the revives)", d.clk.Now().Sub(until.Add(-revivedRejoinWait)).Seconds()))
+			}
+			return nil
+		}
+		if len(dead) > 0 && d.clk.Now().Before(until) {
+			if err := d.releaseLateDead(ctx, dead, deadSince); err != nil {
+				return err
+			}
+		}
+		if !d.clk.Now().Before(until) {
+			var names, deadNames []string
+			for _, b := range missing {
+				names = append(names, fmt.Sprintf("%s %.0f yd", b.name, b.dist))
+			}
+			for _, m := range dead {
+				names = append(names, m.Name+" dead")
+				deadNames = append(deadNames, m.Name)
+			}
+			note := fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s", strings.Join(names, ", "), revivedRejoinWait.Seconds())
+			if len(dead) > 0 {
+				// A member that is dead at the bound is an unresolved wipe: going on would retry the step, and the next party check would count
+				// the same wipe again and use up the leg's recovery cap without a second wipe. The recovery fails once here instead.
+				d.rep.note(note + "; the wipe is not recovered")
+				return fmt.Errorf("the wipe is not recovered: %s still dead %.0f s after the revives", strings.Join(deadNames, ", "), revivedRejoinWait.Seconds())
+			}
+			// Alive but far from the lead bot: the run goes on with fewer bots at hand, and the report says so.
+			d.rep.note(note + "; going on")
+			d.degrade(fmt.Sprintf("recovery: %s not back with the lead bot after %.0f s", strings.Join(names, ", "), revivedRejoinWait.Seconds()))
+			return nil
+		}
+		if !noted {
+			noted = true
+			d.rep.note(fmt.Sprintf("recovery: waiting for %d revived bot(s) to be alive and with the lead bot before the next pull", len(missing)+len(dead)))
+		}
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
+		if err := d.tick(ctx, d.cfg.Poll*2); err != nil && !errors.Is(err, errWipe) {
+			return err
+		}
+	}
 }
 
 // ---- resting ----------------------------------------------------------------------------------------------------------
@@ -2017,11 +2795,19 @@ func (d *RemoteDriver) restGate(ctx context.Context, gather bool) error {
 	return d.restGateWalk(ctx, gather, nil)
 }
 
+// restGateWalk is the gate below followed by the automatic maintenance that may be due: a gate that passed is a calm moment.
+func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walkRest) error {
+	if err := d.restGateRun(ctx, gather, walk); err != nil {
+		return err
+	}
+	return d.maintainIfDue(ctx)
+}
+
 // restGateWalk is restGate with the walking-rest rule of the gate that opens a leg: when the party is not at the targets on the gate's
 // first frame but everyone is above walk's floors, the gate does not hold (Result "walking"); the party rests on the way and the
 // gate before the first pull waits for the targets. A gate that finds everyone at the targets on its first frame is counted as
 // skipped (it costs no time).
-func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walkRest) (err error) {
+func (d *RemoteDriver) restGateRun(ctx context.Context, gather bool, walk *walkRest) (err error) {
 	defer d.traceRest(d.clk.Now())
 	began := d.clk.Now()
 	tgt := restTargetFor(d.cfg, d.plan, d.curLeg)
@@ -2035,7 +2821,7 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 	defer ft.set(false)
 	ordered := false
 	held := false // the gate has waited for something (a fight, a revive, the party): its first frame did not pass it
-	var lastRest time.Time
+	var lastRest, healerFrom, blockedSince time.Time
 	calm := began
 	var fightBegan time.Time
 	rw := newRestWatch(tgt)
@@ -2073,6 +2859,9 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 		fightBegan = time.Time{}
 		ft.set(false)
 		gh.set(true)
+		if err := d.rejoinFar(ctx); err != nil {
+			return err
+		}
 		st := d.restState(rw)
 		rec.g.Short = st.short
 		if len(st.dead) > 0 {
@@ -2090,7 +2879,28 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 				return nil
 			}
 		}
-		if st.ok {
+		// The pull floors (the tank's health, the healer's mana): a pass that would leave them short (a caster that does not drink, the
+		// healer cap, the gate's cap) is held for them up to RestPullExtra from the moment it would have passed (rfc-live-2: a pull began
+		// with the tank hurt). Once that wait ran out in a leg, the later gates of the leg do not hold for the floors again.
+		floorShort := d.pullFloorShort(tgt)
+		floorBlocks := func() bool {
+			if len(floorShort) == 0 || d.floorCapped == d.curLeg+1 {
+				return false
+			}
+			now := d.clk.Now()
+			if blockedSince.IsZero() {
+				blockedSince = now
+				rec.g.PullFloorWait = true
+				d.rep.note(fmt.Sprintf("leg %d: rest gate keeps waiting for the pull floors (%s); up to %.0f s more", d.curLeg, strings.Join(floorShort, ", "), d.cfg.RestPullExtra.Seconds()))
+			}
+			if now.Sub(blockedSince) <= d.cfg.RestPullExtra {
+				return true
+			}
+			d.floorCapped = d.curLeg + 1
+			d.rep.note(fmt.Sprintf("leg %d: rest gate stops waiting for the pull floors after %.0f s (%s); the later gates of this leg do not wait for them", d.curLeg, d.cfg.RestPullExtra.Seconds(), strings.Join(floorShort, ", ")))
+			return false
+		}
+		if st.ok && !(len(st.stalled) > 0 && floorBlocks()) {
 			rec.g.Skipped = !held
 			if len(st.stalled) > 0 {
 				rec.g.Result = "stalled"
@@ -2116,13 +2926,33 @@ func (d *RemoteDriver) restGateWalk(ctx context.Context, gather bool, walk *walk
 			}
 			d.rep.note(fmt.Sprintf("leg %d: %s mana %d%% did not rise in %.0f s; sent cmd rest again (%s)", d.curLeg, fresh[0].Name, fresh[0].Pct, d.cfg.DrinkNudge.Seconds(), replyText(r)))
 		}
-		if d.clk.Now().Sub(calm) > tgt.max {
-			if st.minHealth >= d.cfg.RestMinHealth {
+		// The healer alone under its mana line is waited for healerManaCap at most (live, zum2-s1: a gate sat 359 s for a healer at 23-24 % mana
+		// that did not rise); the others' lines and every health line keep the gate's own cap.
+		if len(st.short) == 1 && d.opt.Healer != "" && strings.HasPrefix(st.short[0], d.opt.Healer+" mana ") {
+			if healerFrom.IsZero() {
+				healerFrom = d.clk.Now()
+			}
+			// Once the cap was hit in a leg, the later gates of that leg do not wait for the healer's mana at all (three gates of 120 s each
+			// would be the same 360 s).
+			if (d.healerCapped == d.curLeg+1 || d.clk.Now().Sub(healerFrom) > healerManaCap) && st.minHealth >= d.cfg.RestMinHealth && !floorBlocks() {
+				d.healerCapped = d.curLeg + 1
 				rec.g.Result = "gave_up"
-				d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
+				d.rep.note(fmt.Sprintf("leg %d: rest gate does not wait for the healer's mana any longer in this leg (%.0f s cap: %s); went on with at least %d%% health", d.curLeg, healerManaCap.Seconds(), st.why, st.minHealth))
 				return nil
 			}
-			return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
+		} else {
+			healerFrom = time.Time{}
+		}
+		if d.clk.Now().Sub(calm) > tgt.max {
+			if st.minHealth >= d.cfg.RestMinHealth {
+				if !floorBlocks() {
+					rec.g.Result = "gave_up"
+					d.rep.note(fmt.Sprintf("leg %d: rest gate gave up after %.0f s (%s); went on with at least %d%% health", d.curLeg, tgt.max.Seconds(), st.why, st.minHealth))
+					return nil
+				}
+			} else {
+				return fmt.Errorf("the party is not rested after %.0f s: %s", tgt.max.Seconds(), st.why)
+			}
 		}
 		if !ordered || d.clk.Now().Sub(lastRest) > 45*time.Second {
 			ordered, lastRest = true, d.clk.Now()
@@ -2157,4 +2987,17 @@ func distToLead(d *RemoteDriver, p Point) float64 {
 		return math.MaxFloat64
 	}
 	return dist3(l, p)
+}
+
+// legBossDead says whether the leg under way has a boss and the run knows him dead (a kill, the ledger, or his corpse in view).
+func (d *RemoteDriver) legBossDead() bool {
+	if d.curLeg < 0 || d.curLeg >= len(d.plan.Legs) {
+		return false
+	}
+	b := d.plan.Legs[d.curLeg].Boss
+	if b == nil {
+		return false
+	}
+	dead, _ := d.bossDead(fightSpec{pick: []uint32{b.Entry}, wide: true})
+	return dead
 }

@@ -1,7 +1,9 @@
 package dungeon
 
 import (
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -83,14 +85,14 @@ func TestParseErrors(t *testing.T) {
 		{"skip holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[4],"boss":{"entry":4,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: skips the boss (4)"},
 		{"skip also pulled", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[1],"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].skip[0]: 1 is also in pull_groups[0].entries"},
 		{"skip also first", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[3],"boss":{"entry":4,"first":[3],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: 3 is also in boss.first"},
-		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object, wait_for, loot_object, use_item or ritual"},
-		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has more than one of use_object, wait_for, loot_object, use_item and ritual"},
+		{"empty step", step(`{}`), "legs[0].steps[0]: needs use_object, wait_for, loot_object, use_item, ritual, area_trigger or gossip"},
+		{"two things", step(`{"use_object":{"entry":1},"wait_for":{"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0]: has more than one of use_object, wait_for, loot_object, use_item, ritual, area_trigger and gossip"},
 		{"unknown step field", step(`{"click":{"entry":1}}`), `legs[0].steps[0]: json: unknown field "click"`},
 		{"use nothing", step(`{"use_object":{}}`), "legs[0].steps[0].use_object: needs an entry, a near position, or both"},
 		{"range without near", step(`{"use_object":{"entry":1,"range":5}}`), "legs[0].steps[0].use_object.range: only means something with near"},
 		{"range too big", step(`{"use_object":{"near":{"x":0,"y":0,"z":0},"range":5000}}`), "legs[0].steps[0].use_object.range: 5000 yards is outside"},
 		{"bad stand", step(`{"use_object":{"entry":1,"stand":{"x":0,"y":0}}}`), "legs[0].steps[0].use_object.stand.z: required"},
-		{"wait nothing", step(`{"wait_for":{}}`), "legs[0].steps[0].wait_for: needs gameobject or hostiles_gone"},
+		{"wait nothing", step(`{"wait_for":{}}`), "legs[0].steps[0].wait_for: needs gameobject, hostiles_gone or unit"},
 		{"wait both", step(`{"wait_for":{"gameobject":{"entry":1,"state":"active"},"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for: has both gameobject and hostiles_gone"},
 		{"bad state", step(`{"wait_for":{"gameobject":{"entry":1,"state":"open"}}}`), `legs[0].steps[0].wait_for.gameobject.state: "open" is none of ready, active, active_alt`},
 		{"no state", step(`{"wait_for":{"gameobject":{"entry":1}}}`), `wait_for.gameobject.state: "" is none of`},
@@ -221,5 +223,77 @@ func TestParseAfterBoss(t *testing.T) {
 	b, _ := Marshal(p)
 	if q, err := Parse("t.json", b); err != nil || len(q.Legs[0].AfterBoss) != 2 {
 		t.Fatalf("%v", err)
+	}
+}
+
+// `fleers` lists creature entries that run at low health; an entry of 0 is refused like any other.
+func TestParseFleers(t *testing.T) {
+	base := func(f string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},` + f + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+	}
+	p, err := Parse("t.json", []byte(base(`"fleers":[4853,7321],`)))
+	if err != nil || fmt.Sprint(p.Fleers) != "[4853 7321]" {
+		t.Fatalf("%v %v", err, p)
+	}
+	if _, err := Parse("t.json", []byte(base(`"fleers":[4853,0],`))); err == nil || !strings.Contains(err.Error(), "fleers[1]: 0 is no creature entry") {
+		t.Fatalf("%v", err)
+	}
+	if p, err := Parse("t.json", []byte(base(``))); err != nil || len(p.Fleers) != 0 {
+		t.Fatalf("%v %v", err, p)
+	}
+}
+
+// TestApproachAndHoldAreRead: approach points and a hold are read, and their limits refused.
+func TestApproachAndHoldAreRead(t *testing.T) {
+	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+	 "pull_groups":[{"entries":[5],"positions":[{"x":50,"y":0,"z":0}]%s}]}]}`
+	p, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"approach":[{"x":20,"y":0,"z":0}],"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600,"entries":[6]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := p.Legs[0].PullGroups[0]
+	if len(g.Approach) != 1 || g.Approach[0].X != 20 || g.Hold == nil || g.Hold.Data != 1 || g.Hold.Spot.X != 40 || g.Hold.Radius != 30 || g.Hold.TimeoutS != 600 || len(g.Hold.Entries) != 1 {
+		t.Fatalf("%+v %+v", g, g.Hold)
+	}
+	for _, bad := range []string{
+		`,"approach":[{"x":1,"y":0,"z":0},{"x":2,"y":0,"z":0},{"x":3,"y":0,"z":0},{"x":4,"y":0,"z":0},{"x":5,"y":0,"z":0}]`,
+		`,"approach":[{"x":1,"y":0}]`,
+		`,"hold":{"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":0,"timeout_s":600}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":601}`,
+		`,"hold":{"instance_data":1,"radius":30,"timeout_s":600}`,
+	} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil {
+			t.Errorf("%s: accepted", bad)
+		}
+	}
+}
+
+// TestUldamanRunLeaderReach: from the scorpid cave on (legs 4-13, the part the run leader's live test of 2026-10-16 stopped in) every
+// pack and boss of Uldaman is within RunLeaderReachYd of the run leader's last move row, so the run leader needs none of its own hops.
+// Legs 0-3 ran live with the hops and keep them.
+func TestUldamanRunLeaderReach(t *testing.T) {
+	p, err := Load("../../dungeons/uldaman.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range p.RunLeaderReach(0) {
+		if w.Leg >= 4 {
+			t.Errorf("%s", w)
+		}
+	}
+	// Both Jadespine Basilisks of the route that the first export left out are pulled (world guids 30084 and 30089).
+	for _, want := range []Point{{X: -179.0, Y: 321.7, Z: -52.7}, {X: -125.9, Y: 266.9, Z: -45.7}} {
+		found := false
+		for _, l := range p.Legs {
+			for _, g := range l.PullGroups {
+				for _, at := range g.Positions {
+					found = found || (dist3(at, want) < 0.5 && slices.Contains(g.Entries, 4863))
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no pull group of the basilisk at %v", want)
+		}
 	}
 }

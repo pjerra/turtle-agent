@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "shadow_priest",
+  "class": "priest",
+  "spec": "shadow",
+  "replaces": ["priest_shadow"],
+  "notes": "The data twin of the Go strategy priest_shadow: Shadowform in a fight, a shield on the priest when a mob has picked it, Vampiric Embrace and Shadow Word: Pain on a mob that will live, Mind Blast on cooldown, Mind Flay as the filler, Smite when Mind Flay is not known and the priest is not in Shadowform (Holy spells are barred in the form). The Go version also spaces shields by 6 s; the data version relies on the Weakened Soul aura.",
+  "sources": [
+    "mod-playerbots 79bd428 src/Ai/Class/Priest/Strategy/ShadowPriestStrategy.cpp (Shadowform, Vampiric Embrace, Shadow Word: Pain, Mind Blast, Mind Flay)",
+    "mod-playerbots 79bd428 src/Ai/Class/Priest/Strategy/GenericPriestStrategy.cpp (the shield when attacked)"
+  ],
+  "priorities": [
+    {"id": "shield_self", "spell": "Power Word: Shield", "level": 6, "target": "self", "band": "high",
+     "when": {"mob_on_me": true, "self_hp_below": 80, "no_self_aura": ["Power Word: Shield", "Weakened Soul", "Shadowform"]}},
+    {"id": "shadowform", "spell_id": 15473, "talent": true, "target": "self", "when": {"state": "combat", "no_self_aura": ["Shadowform"]}},
+    {"id": "vampiric_embrace", "spell": "Vampiric Embrace", "talent": true, "target": "fight",
+     "when": {"no_mob_aura": ["Vampiric Embrace"], "mob_hp_above": 30}},
+    {"id": "shadow_word_pain", "spell": "Shadow Word: Pain", "level": 4, "target": "fight",
+     "when": {"no_mob_aura": ["Shadow Word: Pain"], "mob_hp_above": 25}},
+    {"id": "mind_blast", "spell": "Mind Blast", "level": 10, "target": "fight"},
+    {"id": "mind_flay", "spell": "Mind Flay", "talent": true, "target": "fight", "alt": ["smite"], "when": {"moving": false}},
+    {"id": "smite", "spell": "Smite", "level": 1, "target": "fight", "when": {"moving": false, "no_self_aura": ["Shadowform"]}}
+  ]
+}

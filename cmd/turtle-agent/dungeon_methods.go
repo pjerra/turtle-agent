@@ -99,6 +99,25 @@ func (b *buffsParam) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// recoverWipeOn is the recover_wipe setting of a run: the caller's word when it gave one, else on in a commander run and off in a group run
+// (a wipe ended the run and needed a person: 42 of the 56 ZF traces of 2026-10-15 had it off).
+func recoverWipeOn(v *bool, commander bool) bool {
+	if v != nil {
+		return *v
+	}
+	return commander
+}
+
+// resolveRunMeta is the run's AI driver: dungeon_run's run_meta when it names a driver, else the slot's settings default.
+// Zero when neither names one: nothing is sent to the server then. An explicit but empty run_meta ({}) counts as absent,
+// so it does not switch the slot default off.
+func resolveRunMeta(p *dungeon.RunMeta, def dungeon.RunMeta) dungeon.RunMeta {
+	if p != nil && p.Set() {
+		return *p
+	}
+	return def
+}
+
 type dungeonRunParams struct {
 	Name string `json:"name"`
 	// AllowDraft lets the run take a plan whose status is "draft": a skeleton from the world database that has not had its mapping walk
@@ -110,11 +129,22 @@ type dungeonRunParams struct {
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
 	FromPullGroup *int `json:"from_pull_group,omitempty"`
 	StartHere     bool `json:"start_here,omitempty"`
+	// Force runs a commander-mode plan the plan check (plan_check) refuses: a live-checked plan with a failing point, or one that could not be
+	// checked (no navmesh planner or files for the map, an error in the check). A plan of any other status (draft, mapped) is run anyway,
+	// with the failing points in the result's plan_check.
+	Force bool `json:"force,omitempty"`
+	// ForceStart runs a commander-mode from_leg / from_pull_group / pulltest start that the unsafe-start gate refuses: its start point is
+	// under 30 yd from a pack or boss of a skipped step in a fresh instance (README "Start anywhere"). Force does not pass that gate and
+	// ForceStart does not pass the plan check: a start that needs both passes both.
+	ForceStart bool `json:"force_start,omitempty"`
 	// HaveItems are item entries the party already carries, for a start past the leg that makes them (remote mode; README "Start anywhere").
-	HaveItems   []uint32       `json:"have_items,omitempty"`
-	Pulltest    *pulltestParam `json:"pulltest,omitempty"`
-	Teleport    bool           `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
-	NoShortcuts bool           `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
+	HaveItems []uint32 `json:"have_items,omitempty"`
+	// GiveItems puts items in bots' bags at the prepare step with the GM line `.additem <entry>` on each named bot (remote mode, GM account of
+	// level 3; README "Give items"): [{"bot": "lead" | "carrier" | <name>, "item": 9240}]. It is test setup, listed in setup_shortcuts.
+	GiveItems   []dungeon.GiveItem `json:"give_items,omitempty"`
+	Pulltest    *pulltestParam     `json:"pulltest,omitempty"`
+	Teleport    bool               `json:"teleport,omitempty"`     // GM-teleport the leader to the start and summon the party (flagged in the report)
+	NoShortcuts bool               `json:"no_shortcuts,omitempty"` // no GM revive of a dead companion at a rest gate
 	// Setup lists the GM commands the caller ran to set the run up ("go entrance", "levelup -15"); they are copied
 	// into the report's setup_shortcuts. The run sends none of them.
 	Setup []string `json:"setup,omitempty"`
@@ -135,17 +165,28 @@ type dungeonRunParams struct {
 	// 3 developer and above: also revive and buffs). Only with gm true.
 	GMLevel *int `json:"gm_level,omitempty"`
 	// RecoverWipe lets the party, when it is all dead, release and run back to its corpses and the run go on from the
-	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way.
-	RecoverWipe bool `json:"recover_wipe,omitempty"`
+	// current step (else a wipe ends the run). Dead members at a rest gate with no GM revive are recovered the same way. Omitted: on in a
+	// commander run (the bots are revived with `.bot cmd revive`; a wipe needed a person otherwise), off in a group run. false turns it off.
+	RecoverWipe *bool `json:"recover_wipe,omitempty"`
 	// Resume true skips what the leader has already passed when it stands further along from_leg's route than its first point: the walk to
 	// the leg's first point and the pull groups behind it that a party member stands near and sees empty. Off by default (not yet checked live).
 	Resume *bool `json:"resume,omitempty"`
 	// WaitSickness waits resurrection sickness out after the leader's corpse run (up to 11 min); else it is noted.
 	WaitSickness bool `json:"wait_sickness,omitempty"`
-	// Mode is "group" (the default: the agent's character leads the party it is in) or "remote": the agent leads a bot group
-	// from outside it through the TortoiseBots remote commander (README "Remote leader"). Remote mode takes lead_bot, and
-	// optionally bots, tank and cc; its only GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level.
+	// Mode is the run mode (README "Run modes"): "commander" (the agent leads a bot group from outside it through the TortoiseBots remote
+	// commander, README "Remote leader"; the old name "remote" still works; it takes lead_bot, and optionally bots, tank and cc; its only
+	// GM command is the enter phase's `.tele name`, and it refuses teleport, buffs, brain, gm and gm_level), "leader" (the agent's character
+	// is in the group, leads it and plays: the bot brain is on, with the preset of the character's class when brain is omitted) or "observe"
+	// (a TortoiseBots run leader clears the dungeon and the agent watches: the prepare, bind and enter of "commander", then `.bot run start`
+	// and no order after it; README "Observe mode"). Omitted: "group", the leader's older
+	// form without the brain (the old name "group" still works and is the default).
 	Mode string `json:"mode,omitempty"`
+	// Rotation names a rotation file (README "Rotations as data") that takes the place of the class rotation of the brain's preset: a
+	// built-in one or one from the settings' rotations_dir. Leader and group mode, with a brain. The run's report and trace name it with
+	// the digest of its file, so two arms of an A/B test are told apart.
+	Rotation string `json:"rotation,omitempty"`
+	// Role is the brain's role ("dps", "tank" or "healer") when the preset's own is not what the run wants. Leader and group mode, with a brain.
+	Role string `json:"role,omitempty"`
 	// LeadBot is the bot that walks in remote mode; bots are the other bots to bind with it (empty: its party as it is).
 	LeadBot string   `json:"lead_bot,omitempty"`
 	Bots    []string `json:"bots,omitempty"`
@@ -156,11 +197,23 @@ type dungeonRunParams struct {
 	// Carrier names the bot that does the object steps in remote mode (loot_object, a boss's loot_item, use_item, use_object): it loots,
 	// opens and uses items on `cmd` orders. Empty: the first living bot that is not the lead bot, the tank or the healer.
 	Carrier string `json:"carrier,omitempty"`
+	// CCBot names the bot that takes the big-pack CC mark (README "big packs"); a hired party sets its mage.
+	CCBot string `json:"cc_bot,omitempty"`
 	// LootRestore is the loot method put back after the carrier's free-for-all loot (remote mode): group (default), rr, master or nbg.
 	LootRestore string `json:"loot_restore,omitempty"`
 	// ObjectFallback is what an object step does when the carrier's order fails twice (remote mode): "agent" (the default) lets the
 	// agent's own character open the object and trade the item to the carrier, "off" fails the step.
 	ObjectFallback string `json:"object_fallback,omitempty"`
+	// GravesBatch is how many chests of a plan's batched loot_object steps (Zum'rah's graves) are opened back to back before the party fights
+	// what came out (remote mode): a fixed size, 1 to 20. GravesRamp instead starts at start (default 2) and adds step (default 1) after each
+	// batch without a wipe, up to max (0: no limit but the chests that lie together), and stops growing at the first wipe. Neither: the
+	// plan's own batches (3 to 6 chests). Each batch is noted as "graves-batch: ..." and listed in the report's remote.grave_batches.
+	GravesBatch int                 `json:"graves_batch,omitempty"`
+	GravesRamp  *dungeon.GravesRamp `json:"graves_ramp,omitempty"`
+	// GravesOpenBy is who opens a batch's graves: "carrier" (default: the carrier bot's `cmd open`, which the module refuses while the carrier is
+	// in combat) or "agent" (the agent's own GM character opens them with .go xyz and its Opening cast, so that the opens go on while the summons
+	// fight; needs a GM account and "gm visible off" in setup, refused up front otherwise).
+	GravesOpenBy string `json:"graves_open_by,omitempty"`
 	// CC puts crowd-control marks on mobs of an entry before a pull (remote mode): [{"entry": 4863, "mark": "moon"}].
 	CC []dungeon.CCRule `json:"cc,omitempty"`
 	// Team is the party's team for the team gate (remote mode): "alliance" or "horde". Omitted: the agent's own (the owned bots share the
@@ -174,7 +227,8 @@ type dungeonRunParams struct {
 	// unbind, then `.bot logout` for each) or "none" (the unbind only: the bots go back to following the agent).
 	OnEnd string `json:"on_end,omitempty"`
 	// KeepOnFail (remote mode): a FAILED run keeps its binding and the party in its instance, so that a resume re-enters the same
-	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding.
+	// instance. Off by default (the group is always unbound at the end); dungeon_stop with no run going unbinds a kept binding. dungeon_pause
+	// halts a running run with the binding kept, keep_on_fail or not.
 	KeepOnFail bool `json:"keep_on_fail,omitempty"`
 	// Enter is how a remote run gets a party that is not inside the plan's map in (README "Remote leader"): "auto" (the default: the lead bot
 	// is teleported with `.tele name` when the account is a developer-level GM and the plan names a tele, else walked into the portal),
@@ -195,6 +249,11 @@ type dungeonRunParams struct {
 	// header (the server build, the TortoiseBots SHA, a scenario name): at most 16 entries.
 	Trace     *bool             `json:"trace,omitempty"`
 	TraceMeta map[string]string `json:"trace_meta,omitempty"`
+	// RunMeta names the AI driver of the run (model, effort, run label): every run writes it into the trace header and the
+	// run report. With server_trace (opt-in) a remote run also sends `.bot trace start <run_id> ... driver=<model>:<effort>:<run>`
+	// so the server's summary and the agent's trace join on the run id, and stops that trace at the end (a group run never
+	// sends it). Omitted: the settings file's run_meta, when it names one; a call's run_meta replaces it whole.
+	RunMeta *dungeon.RunMeta `json:"run_meta,omitempty"`
 	// Watchdog sets the progress watchdog's stall levels in seconds without progress (README "Run watchdog"): warn_s (a stall event and a
 	// note), recover_s (one recovery attempt suited to the phase), fail_s (the run stops with "stalled: ..."). Defaults 120/240/420; a zero
 	// field takes the plan's own or the default, a negative one turns that level off. It wins field by field over the plan's "watchdog".
@@ -204,6 +263,21 @@ type dungeonRunParams struct {
 	// tunables file again at leg and pull-group starts (tune_set still works).
 	Tune       string `json:"tune,omitempty"`
 	LiveReload *bool  `json:"live_reload,omitempty"`
+	// Observe tunes mode "observe" (README "Observe mode"); all of it is optional.
+	Observe *observeParam `json:"observe,omitempty"`
+}
+
+// observeParam are the choices of an observed run, in seconds (0: the default).
+type observeParam struct {
+	// Plan is the plan's name on the server (ai_dungeon_plan.plan); omitted: the plan file's name.
+	Plan string `json:"plan,omitempty"`
+	// PollS is how often `.bot run status` is asked besides the lines the run leader pushes (15 s).
+	PollS float64 `json:"poll_s,omitempty"`
+	// MaxRunS is the ceiling of the whole run (3 h); StallS how long a running run may show the same status (10 min); PausedWaitS how
+	// long a paused run waits for a resume before the watch stops it (10 min). Past a ceiling the run is stopped and the run fails.
+	MaxRunS     float64 `json:"max_run_s,omitempty"`
+	StallS      float64 `json:"stall_s,omitempty"`
+	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
 }
 
 type dungeonRunResult struct {
@@ -219,12 +293,16 @@ type dungeonRunResult struct {
 	// LeaderGM is "true" (the run takes the leader for a GM), "false" (it sends no GM command) or "probe" (it asks the
 	// server at the start; the report's leader_gm has the answer).
 	LeaderGM string `json:"leader_gm"`
-	// Mode is "group" or "remote"; LeadBot is the remote run's lead bot.
+	// Mode is "group" or "remote" (the old names); RunMode is the run mode in the new ones, "leader" or "commander". LeadBot is the remote
+	// run's lead bot.
 	Mode    string `json:"mode"`
+	RunMode string `json:"run_mode"`
 	LeadBot string `json:"lead_bot,omitempty"`
 	// RunID names the run; TraceFile is where its trace goes (absent when tracing is off).
 	RunID     string `json:"run_id"`
 	TraceFile string `json:"trace_file,omitempty"`
+	// PlanCheck is what the plan check said: "passed: ..." or "forced past ..." (force: failing points, a check error, or no navmesh to check on).
+	PlanCheck string `json:"plan_check,omitempty"`
 }
 
 type dungeonStatusResult struct {
@@ -255,6 +333,10 @@ type dungeonRunner struct {
 	remote *commanderService
 	// tracesDir is where run traces go (settings traces_dir); empty means "traces".
 	tracesDir string
+	// runMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
+	runMeta dungeon.RunMeta
+	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
+	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.
 	tunePath string
 
@@ -262,9 +344,12 @@ type dungeonRunner struct {
 	drv dungeon.Runner
 	// kept is the hires of a binding the last run kept (keep_on_fail): dungeon_stop unbinds it, the next run's prepare takes their class
 	// and level from it (a bound hire does not answer `who`).
-	kept   map[string]tbm.Who
-	cancel context.CancelFunc
-	done   chan struct{}
+	kept map[string]tbm.Who
+	// classes is the class of every hire any run of this process has read (name, lower case): a hire's class never changes, so it is
+	// kept whatever became of the binding, and a later run that names its party finds its mage here (RemoteOptions.ClassMemory).
+	classes map[string]string
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
@@ -286,17 +371,36 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 		}
 		return res, err
 	}))
+	srv.Register("plan_check", rpc.Typed(func(ctx context.Context, p planCheckParams) (planCheckResult, error) {
+		return r.planCheck(p)
+	}))
 	srv.Register("dungeon_status", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.status(), nil
 	}))
 	srv.Register("dungeon_stop", rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
 		return r.stop(), nil
 	}))
+	// dungeon_pause, dungeon_resume and dungeon_skip act on the active run, by its mode (control): an observed run (mode observe) passes them to the
+	// TortoiseBots run leader (`.bot run pause|resume|skip`); a commander run (mode remote) has dungeon_pause only, which keeps its binding.
+	for _, verb := range []string{"pause", "resume", "skip"} {
+		verb := verb
+		srv.Register("dungeon_"+verb, rpc.Typed(func(ctx context.Context, _ empty) (dungeonStatusResult, error) {
+			return r.control(verb)
+		}))
+	}
 	registerTuneMethods(srv, r)
 	return func() {
 		cancel()
 		r.wait(10 * time.Second)
 	}, r
+}
+
+// planCheckApplies says whether dungeon_run checks the plan: only a commander run (the driver whose look and gather walks the check
+// models), and not a pull test (it runs one pack). Leader mode walks the plan with the agent's own movement, and an observed run is walked
+// by the server.
+func planCheckApplies(p dungeonRunParams) bool {
+	mode, _, _ := runMode(p.Mode)
+	return p.Pulltest == nil && mode == modeCommander
 }
 
 // planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
@@ -311,6 +415,55 @@ func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
 	return ""
 }
 
+// runControl sends pause, resume or skip to the run leader of an observed run; the watch sends it on its next look.
+func (r *dungeonRunner) runControl(verb string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.running() {
+		return &rpc.Error{Code: rpc.CodeGame, Message: "no dungeon run is going"}
+	}
+	c, ok := r.drv.(interface{ RunControl(string) error })
+	if !ok {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server pauses and resumes); stop it with dungeon_stop"}
+	}
+	if err := c.RunControl(verb); err != nil {
+		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+	}
+	return nil
+}
+
+// control is dungeon_pause, dungeon_resume and dungeon_skip: one set of commands that acts on the active run by its mode. An observed run
+// sends the verb to the run leader on the server (runControl); a commander run pauses with its binding kept (pause) and has no resume or
+// skip (the next dungeon_run with resume does that); with no run going pause changes nothing and the others are refused.
+func (r *dungeonRunner) control(verb string) (dungeonStatusResult, error) {
+	r.mu.Lock()
+	drv, running := r.drv, r.running()
+	r.mu.Unlock()
+	if o, ok := drv.(interface{ Observing() bool }); ok && running && o.Observing() {
+		if err := r.runControl(verb); err != nil {
+			return dungeonStatusResult{}, err
+		}
+		return r.status(), nil
+	}
+	if verb == "pause" {
+		return r.pause()
+	}
+	if !running {
+		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_" + verb + ": no dungeon run is going"}
+	}
+	return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon_" + verb + " is for a run in mode observe (the run leader on the server resumes and skips); a paused commander run goes on with dungeon_run (resume, from_leg)"}
+}
+
+// busy is the refusal of a run asked for while one is going (nil when none is).
+func (r *dungeonRunner) busy() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running() {
+		return &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
+	}
+	return nil
+}
+
 func (r *dungeonRunner) running() bool {
 	if r.done == nil {
 		return false
@@ -323,7 +476,7 @@ func (r *dungeonRunner) running() bool {
 	}
 }
 
-func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
+func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error) {
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
@@ -349,6 +502,17 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if err != nil {
 		return dungeonRunResult{}, err
 	}
+	if !remote && strings.EqualFold(strings.TrimSpace(p.Mode), modeLeader) && p.Brain == "" {
+		// Leader mode plays: the preset of the character's class (and role) when the run names none.
+		if st := r.cur().Status().State; st != session.StatusInWorld {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
+		}
+		preset, err := leaderPreset(r.selfClass(), p.Role)
+		if err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+		}
+		p.Brain = preset
+	}
 	if err := watchdogParam(plan, p); err != nil {
 		return dungeonRunResult{}, err
 	}
@@ -372,18 +536,27 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "buffs need a GM account (.aura, developer level): with gm false run without buffs"}
 		}
 	}
+	if p.Pulltest != nil && !remote && p.Brain == "" {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest in leader mode scores the character: it needs a brain (mode \"leader\" picks the preset of its class)"}
+	}
 	var hook dungeon.Brain
+	brainName := p.Brain
 	if p.Brain != "" && !remote {
 		if r.brain == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the bot brain is not available"}
 		}
-		if _, _, err := brain.Resolve([]string{p.Brain}); err != nil {
+		enc := planEncounters(plan)
+		bp := brain.Params{Strategies: []string{p.Brain}, Role: p.Role, Rotation: p.Rotation, Encounters: enc}
+		if err := brain.CheckParams(bp); err != nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "brain: " + err.Error()}
 		}
-		hook = &driverBrain{ctl: r.brain, strategies: []string{p.Brain}, runID: tcfg.RunID}
+		if brainName, err = brainLabel(p.Brain, p.Rotation); err != nil {
+			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "rotation: " + err.Error()}
+		}
+		hook = &driverBrain{ctl: r.brain, params: bp, runID: tcfg.RunID}
 	}
 	from := legIndex(plan, p.FromLeg)
-	if pt := p.Pulltest; pt != nil && remote {
+	if pt := p.Pulltest; pt != nil && (remote || p.Brain != "") {
 		if pt.Leg == nil || pt.PullGroup == nil {
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pulltest needs leg (a number or a name) and pull_group"}
 		}
@@ -398,13 +571,29 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	if from < 0 || from >= len(plan.Legs) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf("from_leg: the plan has legs %v (numbers 0-%d)", names, len(plan.Legs)-1)}
 	}
-	if remote {
+	if remote || p.Pulltest != nil {
 		if err := checkStartParams(p, plan, from); err != nil {
 			return dungeonRunResult{}, err
 		}
 	}
 	if st := r.cur().Status().State; st != session.StatusInWorld {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeNotInWorld, Message: "dungeon_run needs the character in the world (state " + string(st) + ")"}
+	}
+	// A second run is refused before it pays for a plan check; the check itself follows.
+	if err := r.busy(); err != nil {
+		return dungeonRunResult{}, err
+	}
+	// The plan check walks the plan on the navmesh first, from where the run starts, with the look the run is tuned to.
+	if planCheckApplies(p) {
+		note, err := r.checkForRun(plan, r.checkOptions(planPath, p.Tune, remote, from, p.FromPullGroup), p.Force)
+		if err != nil {
+			return dungeonRunResult{}, err
+		}
+		defer func() {
+			if res.Started {
+				res.PlanCheck = note
+			}
+		}()
 	}
 
 	r.mu.Lock()
@@ -421,12 +610,17 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
+	cfg.RunMeta = resolveRunMeta(p.RunMeta, r.runMeta)
 	cfg.Teleport, cfg.Shortcuts, cfg.Setup, cfg.Buffs = p.Teleport, !p.NoShortcuts, setup, buffs
-	cfg.RecoverWipe, cfg.WaitSickness = p.RecoverWipe, p.WaitSickness
+	cfg.RecoverWipe, cfg.WaitSickness = recoverWipeOn(p.RecoverWipe, false), p.WaitSickness
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
 	cfg.Resume = p.Resume != nil && *p.Resume
+	if pt := p.Pulltest; pt != nil {
+		spec := dungeon.PulltestSpec{Leg: from, PullGroup: *pt.PullGroup, Tries: pt.Tries, Reset: pt.Reset}.Normalized()
+		cfg.Pulltest = &spec
+	}
 	leaderGM := "probe"
 	switch {
 	case p.GM == nil:
@@ -449,7 +643,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 			r.lease.release()
 			return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a bot brain that was started by hand is running: brain_stop it first"}
 		}
-		cfg.Brain, cfg.BrainName = hook, p.Brain
+		cfg.Brain, cfg.BrainName = hook, brainName
 	}
 	game := &sessionGame{cur: r.cur, probeWindow: r.probeWindow}
 	game.refusals.mark(r.cur().Log())
@@ -470,7 +664,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (dungeonRunResult, error) {
 	for _, b := range buffs {
 		buffNames = append(buffNames, b.String())
 	}
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group"}, nil
+	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, Legs: names, Buffs: buffNames, Brain: cfg.BrainName, LeaderGM: leaderGM, Mode: "group", RunMode: modeLeader}, nil
 }
 
 func legNames(plan *dungeon.Plan) []string {
@@ -596,10 +790,43 @@ func (r *dungeonRunner) stop() dungeonStatusResult {
 	return r.status()
 }
 
+// pause halts a remote run so that it can be resumed: the run ends "stopped" with the bots stood still and the commander binding KEPT,
+// so the next dungeon_run (resume, from_leg) re-enters the same group and instance. dungeon_stop unbinds, which returns the hires to the
+// commander's raid and loses the instance. With no run going it changes nothing (a kept binding stays kept). Group-mode runs have no
+// binding: pause is refused for them.
+func (r *dungeonRunner) pause() (dungeonStatusResult, error) {
+	r.mu.Lock()
+	cancel, drv, running := r.cancel, r.drv, r.running()
+	r.mu.Unlock()
+	if !running {
+		return r.status(), nil
+	}
+	p, ok := drv.(interface{ Pause() })
+	if !ok {
+		return dungeonStatusResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "dungeon_pause: the run is a group-mode run with no commander binding to keep; dungeon_stop ends it"}
+	}
+	p.Pause()
+	if cancel != nil {
+		cancel()
+		r.wait(10 * time.Second)
+	}
+	return r.status(), nil
+}
+
 // keptFrom notes the hires of the binding a finished run kept (keep_on_fail), from its report; nothing when it unbound.
 func (r *dungeonRunner) keptFrom(rep dungeon.Report) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if rep.Ready != nil {
+		for _, b := range rep.Ready.Bots {
+			if b.Class != "" {
+				if r.classes == nil {
+					r.classes = map[string]string{}
+				}
+				r.classes[strings.ToLower(b.Name)] = strings.ToLower(b.Class)
+			}
+		}
+	}
 	r.kept = nil
 	if rep.Remote == nil || !strings.HasPrefix(rep.Remote.UnbindVia, "kept") {
 		return

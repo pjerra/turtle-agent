@@ -78,7 +78,7 @@ func guidText(g packet.GUID) string {
 
 // traceCounters are the run's totals for the end record and the summary.
 func traceCounters(r Report) map[string]float64 {
-	c := map[string]float64{"seconds": r.Seconds, "legs": float64(r.runLegs()), "deaths": float64(len(r.Deaths)), "wipes": float64(r.Wipes),
+	c := map[string]float64{"seconds": r.Seconds, "legs": float64(r.runLegs()), "deaths": float64(len(r.Deaths)), "wipes": float64(r.AllWipes()), "wipe_recoveries": float64(r.WipeRecoveries),
 		"gm_shortcuts": float64(len(r.Shortcuts)), "setup_shortcuts": float64(len(r.SetupShortcuts)), "leader_deaths": float64(r.LeaderDeaths),
 		"resurrections": float64(r.Resurrections), "corpse_runs": float64(r.CorpseRuns), "seconds_dead": r.SecondsDead}
 	var pulls, retries, aggros int
@@ -106,6 +106,35 @@ func traceCounters(r Report) map[string]float64 {
 	return c
 }
 
+// runMetaHeader merges the caller's trace meta with the run's driver (model, effort, run label): the server's run record joins
+// on the same run id. Nil when neither is set. A trace_meta key the caller set keeps its value: the driver's keys never
+// overwrite what the caller wrote.
+func runMetaHeader(meta map[string]string, m RunMeta) map[string]string {
+	if len(meta) == 0 && !m.Set() {
+		return nil
+	}
+	out := make(map[string]string, len(meta)+3)
+	for k, v := range meta {
+		out[k] = v
+	}
+	if m.Model != "" {
+		if _, ok := out["run_model"]; !ok {
+			out["run_model"] = m.Model
+		}
+	}
+	if m.Effort != "" {
+		if _, ok := out["run_effort"]; !ok {
+			out["run_effort"] = m.Effort
+		}
+	}
+	if m.Run != "" {
+		if _, ok := out["run_label"]; !ok {
+			out["run_label"] = m.Run
+		}
+	}
+	return out
+}
+
 // ---- group mode ----
 
 func (d *Driver) initTrace() {
@@ -115,6 +144,15 @@ func (d *Driver) initTrace() {
 		d.rep.note("trace: " + err.Error())
 	}
 	d.rep.r.RunID = d.tr.ID()
+	if d.cfg.RunMeta.Set() {
+		d.rep.r.RunMeta = &d.cfg.RunMeta
+	}
+	if d.cfg.RunMeta.Set() && d.cfg.RunMeta.ServerTrace {
+		// Group runs send no trace start, server_trace or not: party chat carries no answer, so a start the server
+		// refused (a trace someone started by hand is running: the server records one at a time) would look sent,
+		// and the run's stop could end that other trace. The meta still goes into the trace header and the report.
+		d.rep.note("server trace not sent in group mode")
+	}
 	d.rep.r.TraceFile = d.tr.Path()
 	d.rep.onNote = func(s string) { d.tr.Event("note", map[string]any{"text": s}) }
 }
@@ -174,7 +212,7 @@ func (d *Driver) traceBegin(fromLeg int) {
 	// The group run reads positions, facing and movement from the object store of the members in view, and hp and power from the
 	// party list.
 	caps := []string{trace.CapFacing, trace.CapMoving, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
-	d.tr.Begin(trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: self.Name, Brain: d.cfg.BrainName, Party: party, Options: opts, Caps: caps})
+	d.tr.Begin(trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: self.Name, Brain: d.cfg.BrainName, Party: party, Options: opts, Caps: caps, Meta: runMetaHeader(d.cfg.Trace.Meta, d.cfg.RunMeta)})
 	if !d.tr.On() { // the file could not be made: the report's trace.error says why
 		d.rep.update(func(r *Report) { r.TraceFile = "" })
 	} else {
@@ -296,7 +334,12 @@ func (d *Driver) tracedFight(ctx context.Context, t objects.Unit, sp fightSpec) 
 		err := d.chat(ctx, ".bot action follow")
 		return "told the party to follow and ended the fight to pick the target again", err
 	})
+	if d.fightFirst.IsZero() {
+		d.fightFirst = began
+	}
 	res, err := d.fight(ctx, t, sp)
+	d.fightKills += res.kills
+	d.fightLast = d.clk.Now()
 	leave()
 	d.wd.softProgress("pull ended: " + outcomeName(res.out))
 	end := map[string]any{"leg": d.curLeg, "outcome": outcomeName(res.out), "kills": res.kills, "seconds": d.clk.Now().Sub(began).Seconds()}
@@ -322,6 +365,9 @@ func (d *RemoteDriver) initTrace() {
 		d.rep.note("trace: " + err.Error())
 	}
 	d.rep.r.RunID = d.tr.ID()
+	if d.opt.RunMeta.Set() {
+		d.rep.r.RunMeta = &d.opt.RunMeta
+	}
 	d.rep.r.TraceFile = d.tr.Path()
 	d.rep.onNote = func(s string) { d.tr.Event("note", map[string]any{"text": s}) }
 }
@@ -347,7 +393,9 @@ func (d *RemoteDriver) traceBegin(fromLeg int) {
 	}
 	// The feed has facing and the bot's target but no movement flag or class, and it has threat lists.
 	caps := []string{trace.CapFacing, trace.CapThreat, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
-	d.tr.Begin(trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: d.opt.Tank, Options: opts, Caps: caps})
+	hdr := trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: d.opt.Tank, Options: opts, Caps: caps}
+	hdr.Meta = runMetaHeader(d.cfg.Trace.Meta, d.opt.RunMeta)
+	d.tr.Begin(hdr)
 	if !d.tr.On() {
 		d.rep.update(func(r *Report) { r.TraceFile = "" })
 	}

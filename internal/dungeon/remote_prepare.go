@@ -12,6 +12,9 @@ import (
 // prepare runs the run's prepare block, if it has one, before the bind (prepare.go). The report gets the steps with their seconds; the GM
 // lines the steps sent are setup shortcuts.
 func (d *RemoteDriver) prepare(ctx context.Context) error {
+	if len(d.opt.GiveItems) > 0 {
+		d.opt.Prepare.GiveItems = slices.Clone(d.opt.GiveItems)
+	}
 	if !d.opt.Prepare.Active() {
 		return nil
 	}
@@ -22,7 +25,8 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 	d.rep.setCurrent("prepare")
 	env := &prepEnv{g: pg, plan: d.plan, spec: d.opt.Prepare, bots: append([]string{d.opt.Lead}, d.opt.Bots...), remote: true, memory: d.opt.HireMemory,
 		now: d.clk.Now, sleep: d.clk.Sleep, note: d.rep.note, shortcut: d.prepShortcut,
-		progress: func(s string) { d.rep.setCurrent(s); d.wd.progress(s) }, command: d.g.Command, settle: d.opt.BindSettle}
+		progress: func(s string) { d.rep.setCurrent(s); d.wd.progress(s) }, command: d.g.Command, settle: d.opt.BindSettle,
+		tank: d.opt.Tank, healer: d.opt.Healer, carrier: d.opt.Carrier}
 	if d.opt.Prepare.Fresh && !d.opt.IgnoreEntryLimit {
 		env.entryOK = d.freshEntryOK
 	}
@@ -49,6 +53,9 @@ func (d *RemoteDriver) prepare(ctx context.Context) error {
 // adoptHired takes the lead bot, the other bots, the tank and the healer from the hire step: the run was started without names.
 func (d *RemoteDriver) adoptHired(h *HiredParty) {
 	d.opt.Lead, d.opt.Bots, d.opt.Tank, d.opt.Healer = h.Lead, slices.Clone(h.Bots), h.Tank, h.Healer
+	if h.CC != "" && d.opt.CCBot == "" {
+		d.opt.CCBot = h.CC
+	}
 	d.remote(func(r *RemoteReport) { r.LeadBot, r.Bots, r.Tank = h.Lead, slices.Clone(h.Bots), h.Tank })
 	d.rep.note(fmt.Sprintf("hired party: lead bot %s%s, tank %s, healer %s", h.Lead, botsSuffix(h.Bots), h.Tank, h.Healer))
 	d.tr.Event("hired_party", map[string]any{"lead_bot": h.Lead, "bots": slices.Clone(h.Bots), "tank": h.Tank, "healer": h.Healer})

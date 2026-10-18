@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/auth"
+	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/capture"
 	"github.com/pjerra/turtle-agent/internal/config"
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/netutil"
@@ -134,6 +136,12 @@ func fingerprintPath(st config.Settings, account string) string {
 	return filepath.Join(st.FingerprintDir, "addon-fingerprint-"+hex.EncodeToString(sum[:6]))
 }
 
+// runMetaOf reads the slot's run_meta default (settings run_meta): the settings file is already validated, so unknown
+// shapes cannot reach here.
+func runMetaOf(st config.Settings) dungeon.RunMeta {
+	return dungeon.RunMeta{Model: st.RunMeta.Model, Effort: st.RunMeta.Effort, Run: st.RunMeta.Run, ServerTrace: st.RunMeta.ServerTrace}
+}
+
 // ledgerPath is the file of the instance entries of account's last hour, next to the settings file (named by a hash, like the
 // addon fingerprint, so the account name stays out of the folder listing); empty when the settings folder is not known.
 func ledgerPath(st config.Settings, account string) string {
@@ -215,6 +223,14 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if err != nil {
 		fmt.Fprintln(stderr, "config:", err)
 		return exitUsage
+	}
+	if st.RotationsDir != "" {
+		names, err := brain.LoadRotationDir(st.RotationsDir)
+		if err != nil {
+			fmt.Fprintln(stderr, "rotations_dir:", err)
+			return exitUsage
+		}
+		fmt.Fprintf(stderr, "rotations: %d from %s\n", len(names), st.RotationsDir)
 	}
 	// With one argument the account is the settings file's only one, which keeps the name
 	// out of ps and shell history (ruling P10).
@@ -365,7 +381,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, RunMeta: runMetaOf(st), Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()

@@ -63,7 +63,8 @@ const (
 	hireSpellWait    = 3 * time.Second        // the first line of one `spells <filter>` answer
 	hireSpellQuiet   = 400 * time.Millisecond // its burst of lines ends when none came for this long
 	hireItemWait     = 3 * time.Second
-	hirePetWait      = 40 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short)
+	hirePetWait      = 60 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short; 40 s was too short once more in the 2026-10-15 live run)
+	hirePetNudge     = 20 * time.Second // a bot with no pet this long after it showed is told once to summon one
 	hireOutOfGroup   = 10 * time.Second // the commander leaves the group after a bind
 	maxHireComposite = 5
 )
@@ -281,6 +282,8 @@ type HiredParty struct {
 	Bots   []string // the others, lead left out
 	Tank   string
 	Healer string
+	// CC is the hire that takes the big-pack CC mark (remote_cc.go): the first mage of the party; empty without one.
+	CC string
 }
 
 // ---- the hire command's answers ----
@@ -372,6 +375,7 @@ type hireFlow struct {
 	dropped []string
 	problem []string
 	who     map[string]tbm.Who // the bots' own `who` answers
+	kept    map[string]bool    // the hires (lower case) of a kept binding: bound bots answer no `.bot` line (taken from the memory of the run that left it)
 }
 
 func (f *hireFlow) over() error {
@@ -398,8 +402,8 @@ func (e *prepEnv) hire(ctx context.Context) (string, error) {
 	if e.spec.Hire != nil {
 		spec = *e.spec.Hire
 	}
-	if len(spec.Composition) == 0 {
-		spec.Composition = e.plan.HireComposition // the plan's own party, if it names one
+	if len(spec.Composition) == 0 && e.plan != nil {
+		spec.Composition = slices.Clone(e.plan.HireComposition) // the plan's party; empty keeps the default
 	}
 	slots, err := spec.slots()
 	if err != nil {
@@ -505,13 +509,16 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 	for i, b := range f.bots {
 		names[i] = b.name
 	}
-	tank, healer := "", ""
+	tank, healer, cc := "", "", ""
 	for _, b := range f.bots {
 		switch b.slot.Role {
 		case "tank":
 			tank = b.name
 		case "healer":
 			healer = b.name
+		}
+		if b.slot.Class == "mage" && cc == "" {
+			cc = b.name
 		}
 	}
 	e.bots = append([]string{tank}, slices.DeleteFunc(slices.Clone(names), func(n string) bool { return n == tank })...)
@@ -524,7 +531,7 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 	if err := f.commanderOutside(ctx); err != nil {
 		return "", err
 	}
-	e.hired = &HiredParty{Lead: e.bots[0], Bots: slices.Clone(e.bots[1:]), Tank: tank, Healer: healer}
+	e.hired = &HiredParty{Lead: e.bots[0], Bots: slices.Clone(e.bots[1:]), Tank: tank, Healer: healer, CC: cc}
 	f.rdy.Ready = true
 	return fmt.Sprintf("%d hires at level %d bound (%d hired, %d kept, %d dismissed), commander outside the group", len(f.bots), f.level, len(f.rdy.Hired), len(f.rdy.Reused), len(f.rdy.Dismissed)), nil
 }
@@ -593,6 +600,10 @@ func (f *hireFlow) currentHires(ctx context.Context) ([]*heldHire, error) {
 				f.who = map[string]tbm.Who{}
 			}
 			f.who[strings.ToLower(h.name)] = w
+			if f.kept == nil {
+				f.kept = map[string]bool{}
+			}
+			f.kept[strings.ToLower(h.name)] = true
 			f.note("%s: a bound hire of a kept binding does not answer who; taken as level %d %s from the run that left it", h.name, w.Level, w.Class)
 		}
 		w, why := f.readWho(ctx, h.name)

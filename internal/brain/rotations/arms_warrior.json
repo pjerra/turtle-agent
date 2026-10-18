@@ -1,0 +1,192 @@
+{
+ "version": 1,
+ "name": "arms_warrior",
+ "class": "warrior",
+ "spec": "arms",
+ "replaces": [
+  "warrior_melee",
+  "warrior_arms"
+ ],
+ "notes": "The data twin of the Go strategies warrior_melee + warrior_arms: Battle Stance, Execute below 20%, Overpower after a dodge, Mortal Strike on cooldown, Sweeping Strikes and Cleave with two mobs, Rend on a mob that will live, Heroic Strike as the rage dump from 50 rage, Battle Shout and Bloodrage. Charge only into a fight a tank holds.",
+ "sources": [
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/GenericWarriorStrategy.cpp (rage dump, Battle Shout, Bloodrage, Execute, Hamstring)",
+  "mod-playerbots 79bd428 src/Ai/Class/Warrior/Strategy/ArmsWarriorStrategy.cpp"
+ ],
+ "priorities": [
+  {
+   "id": "charge",
+   "spell": "Charge",
+   "level": 4,
+   "target": "fight",
+   "band": "move",
+   "when": {
+    "in_combat": false,
+    "stance": [
+     "Battle Stance"
+    ],
+    "mob_distance_min": 8,
+    "mob_distance_max": 25,
+    "tank_holds": true
+   }
+  },
+  {
+   "id": "auto_attack",
+   "kind": "attack"
+  },
+  {
+   "id": "execute",
+   "spell": "Execute",
+   "level": 24,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "mob_hp_below": 20,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "overpower",
+   "spell": "Overpower",
+   "level": 12,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "after": "dodge",
+    "stance": [
+     "Battle Stance"
+    ]
+   }
+  },
+  {
+   "id": "mortal_strike",
+   "spell": "Mortal Strike",
+   "talent": true,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true
+   }
+  },
+  {
+   "id": "sweeping_strikes",
+   "spell": "Sweeping Strikes",
+   "talent": true,
+   "target": "self",
+   "harmful": true,
+   "threat": "aoe",
+   "when": {
+    "mobs_in_reach_min": 2,
+    "stance": [
+     "Battle Stance"
+    ],
+    "no_self_aura": [
+     "Sweeping Strikes"
+    ]
+   }
+  },
+  {
+   "id": "rend",
+   "spell": "Rend",
+   "level": 4,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "no_mob_aura": [
+     "Rend"
+    ],
+    "mob_hp_above": 35,
+    "stance": [
+     "Battle Stance",
+     "Defensive Stance"
+    ]
+   }
+  },
+  {
+   "id": "bloodrage",
+   "spell": "Bloodrage",
+   "level": 10,
+   "target": "self",
+   "when": {
+    "state": "combat",
+    "mob_distance_max": 12,
+    "power_below": 20,
+    "self_hp_above": 50,
+    "no_self_aura": [
+     "Bloodrage"
+    ]
+   }
+  },
+  {
+   "id": "hamstring",
+   "spell": "Hamstring",
+   "level": 8,
+   "target": "fight",
+   "when": {
+    "mob_fleeing": true,
+    "stance": [
+     "Battle Stance",
+     "Berserker Stance"
+    ]
+   }
+  },
+  {
+   "id": "cleave",
+   "kind": "next_swing",
+   "spell": "Cleave",
+   "level": 20,
+   "target": "fight",
+   "threat": "aoe",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49,
+    "mobs_in_reach_min": 2
+   }
+  },
+  {
+   "id": "heroic_strike",
+   "kind": "next_swing",
+   "spell": "Heroic Strike",
+   "level": 1,
+   "target": "fight",
+   "when": {
+    "mob_in_reach": true,
+    "power_above": 49
+   }
+  },
+  {
+   "id": "stance_arms",
+   "kind": "stance",
+   "stances": [
+    "Battle Stance"
+   ]
+  },
+  {
+   "id": "battle_shout_rest",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "when": {
+    "state": "rest",
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  },
+  {
+   "id": "battle_shout",
+   "spell": "Battle Shout",
+   "level": 1,
+   "target": "self",
+   "band": "low",
+   "when": {
+    "state": "any",
+    "in_combat": true,
+    "self_aura_missing": [
+     "Battle Shout"
+    ]
+   }
+  }
+ ]
+}

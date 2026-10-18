@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 // Intents of the commander commands (the first two words of the command).
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
-	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state"}
+	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state", "gossip"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.
@@ -29,6 +30,21 @@ var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond"
 // argRe is what one argument of a command may be: names, numbers, a GUID, a mark, an object by entry (entry:<id>@x,y,z). No spaces, no control characters, no way to
 // put a second command on the line.
 var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
+
+// BadOrderWords says why a text cannot be the tail of one command line: every whitespace-separated word has to be an argument the
+// commander accepts (argRe). It returns "" for a text that can, else the first word that cannot, with the reason.
+func BadOrderWords(text string) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return "it is empty"
+	}
+	for _, w := range words {
+		if !argRe.MatchString(w) {
+			return fmt.Sprintf("the word %q is not an argument (letters, digits and _ . , : + - only)", w)
+		}
+	}
+	return ""
+}
 
 // Link is the commander's way to the game: the say chat the commands go out on, and the event log the replies come back in.
 type Link interface {
@@ -63,7 +79,7 @@ func Intent(command string) string {
 	return strings.ToLower(f[0] + " " + f[1])
 }
 
-// CheckCommand refuses a command that is not a commander command or carries an unsafe argument. command is the line without
+// CheckCommand refuses a command that is not a commander command (commander, cmd or run) or carries an unsafe argument. command is the line without
 // ".bot " ("cmd move 1 2 3").
 func CheckCommand(command string) error {
 	for _, r := range command {
@@ -82,8 +98,10 @@ func CheckCommand(command string) error {
 		verbs = CommanderVerbs
 	case "cmd":
 		verbs = CmdVerbs
+	case "run":
+		verbs = RunVerbs
 	default:
-		return fmt.Errorf("%q is not a commander command: use commander or cmd", f[0])
+		return fmt.Errorf("%q is not a commander command: use commander, cmd or run", f[0])
 	}
 	found := false
 	for _, v := range verbs {
@@ -149,6 +167,10 @@ func ReadReply(ctx context.Context, log *events.Log, since uint64, intent string
 				r.Kind, r.OK, r.Line, r.Ack = KindAck, true, line, &a
 				return r
 			}
+			if a, ok := parseLooseAck(line); ok && strings.EqualFold(a.Intent, intent) {
+				r.Kind, r.OK, r.Line, r.Ack = KindAck, true, line, &a
+				return r
+			}
 			if er, ok := ParseErr(line); ok && strings.EqualFold(er.Intent, intent) {
 				r.Kind, r.Line, r.Err = KindErr, line, &er
 				return r
@@ -163,6 +185,28 @@ func ReadReply(ctx context.Context, log *events.Log, since uint64, intent string
 			return r
 		}
 	}
+}
+
+// parseLooseAck reads an ACTION_ACK whose scope is neither party nor bot:<name> (`.bot run list` answers with the scope "plans"): the
+// addon would drop it, but the line is still the answer to its command.
+func parseLooseAck(line string) (Ack, bool) {
+	rest, ok := strings.CutPrefix(line, "TBM:ACTION_ACK|")
+	if !ok {
+		return Ack{}, false
+	}
+	f := strings.Split(rest, "|")
+	if len(f) < 3 || len(f) > 4 || strings.TrimSpace(f[0]) == "" || strings.TrimSpace(f[1]) == "" {
+		return Ack{}, false
+	}
+	n, err := strconv.Atoi(f[2])
+	if err != nil || n < 0 {
+		return Ack{}, false
+	}
+	a := Ack{Intent: f[0], Scope: f[1], Count: n, Executor: "-"}
+	if len(f) == 4 && strings.TrimSpace(f[3]) != "" {
+		a.Executor = f[3]
+	}
+	return a, true
 }
 
 // LineOf is the TBM: line or system line an event carries. A system message that is no TBM line is returned as its text (the
@@ -238,6 +282,8 @@ type ViewFeed struct {
 
 	mu      sync.Mutex
 	asm     *ViewAssembler
+	run     RunStatus // the newest TBM:RUN line
+	runN    uint64    // TBM:RUN lines read
 	latest  ViewFrame
 	have    bool
 	n       uint64 // frames published since the feed started (a Reset does not zero it)
@@ -309,6 +355,13 @@ func (f *ViewFeed) ProcessLine(line string) {
 		f.mu.Unlock()
 		return
 	}
+	if st, ok := ParseRunLine(line); ok {
+		f.mu.Lock()
+		f.run, f.runN = st, f.runN+1
+		f.wake()
+		f.mu.Unlock()
+		return
+	}
 	if !strings.HasPrefix(line, ViewPrefix) {
 		return
 	}
@@ -338,6 +391,13 @@ func (f *ViewFeed) Latest() (fr ViewFrame, n uint64, ok bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.latest, f.n, f.have
+}
+
+// RunLatest is the newest TBM:RUN line and how many the feed has read; ok is false before the first.
+func (f *ViewFeed) RunLatest() (st RunStatus, n uint64, ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.run, f.runN, f.runN > 0
 }
 
 // Stats are the assembler's counters.

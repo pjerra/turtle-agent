@@ -108,13 +108,13 @@ func harmfulArea(c *Ctx, d objects.DynamicObject) bool {
 
 // hazards lists the harmful ground effects in view with a position and a radius.
 func hazards(c *Ctx) []Hazard {
+	out := tacticCastHazards(c)
 	g := groundOf(c)
 	if g == nil {
-		return nil
+		return out
 	}
-	var out []Hazard
 	for _, d := range g.DynamicObjects() {
-		if d.Distance < 0 || d.Radius <= 0 || !harmfulArea(c, d) {
+		if d.Distance < 0 || d.Radius <= 0 || !(harmfulArea(c, d) || tacticGround(c, d.Spell)) {
 			continue
 		}
 		out = append(out, Hazard{Center: Vec3{d.X, d.Y, d.Z}, Radius: d.Radius, Spell: d.Spell})

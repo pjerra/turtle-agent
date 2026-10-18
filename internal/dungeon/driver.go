@@ -151,6 +151,13 @@ type Config struct {
 	// Brain, when set, plays the leader's character during fights (the agent's bot brain). BrainName is shown in the report.
 	Brain     Brain
 	BrainName string
+	// Pulltest, when set, makes the run the leader-mode pull test (pulltest_leader.go): the plan's pack is pulled and killed Tries times by
+	// the party with the agent's own character playing, and each try is scored. The run's from_leg is the spec's leg.
+	Pulltest *PulltestSpec
+	// RunMeta names the AI driver of the run (model, effort, run label): it goes into the trace header and the run report. A group
+	// run never sends it to the server, server_trace or not (party chat carries no answer; the report notes it when server_trace
+	// was asked for). Zero: nothing is written.
+	RunMeta RunMeta
 	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
 	Trace tracerun.Config
 	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
@@ -170,6 +177,7 @@ type Config struct {
 	AssistEvery    time.Duration // how often the leader re-orders the party onto the nearest pack member
 	FightTimeout   time.Duration // one pull group
 	BossTimeout    time.Duration // one boss fight
+	BossSearch     time.Duration // remote: how long a kill-boss step waits for a boss that is not at his spot to walk back into range; 0: 60 s, below 0: no search (boss_search_s 0)
 	PostFight      time.Duration // wait after the last pack member died (loot, last hits)
 	AddsWait       time.Duration // longest wait for loose hostile units to be dealt with after a fight
 	RestTimeout    time.Duration // longest rest gate (a leg's rest.max_s overrides it)
@@ -179,6 +187,8 @@ type Config struct {
 	// RestHealerManaPct is the healer's mana target (a leg's rest.healer_mana overrides it). In remote mode the feed carries no class:
 	// the bot named by RemoteOptions.Healer has it, and without one every caster does.
 	RestHealerManaPct int
+	// GravesHealerManaPct is the healer's mana (percent) under which the next grave batch waits (remote_batch.go healerManaWait; default 60).
+	GravesHealerManaPct int
 	// DrinkNudge is how long a member short of mana may show no rise at all before it gets one drink order of its own.
 	DrinkNudge time.Duration
 	// RestWalkYd is how far (yards) the walk that follows a leg's start gate must be for the gate to let the party rest while it walks
@@ -190,7 +200,17 @@ type Config struct {
 	RestWalkHealerManaPct int
 	RestWalkManaPct       int
 	RefillBelow           int
-	RestMinHealth         int           // after RestTimeout the run goes on only if everyone has at least this health
+	// MaintenanceEveryLegs: remote mode sends `.bot maintenance` to every bot at the start of legs N, 2N, ... (0: never, also not after a
+	// recovered wipe; the default is 3; remote_maint.go). Unlike the fields above a zero here is not filled with the default.
+	MaintenanceEveryLegs int
+	RestMinHealth        int // after RestTimeout the run goes on only if everyone has at least this health
+	// RestPullTankPct and RestPullHealerManaPct are the pull floors of the remote driver's rest gates (a leg's own lower rest targets
+	// lower them): a gate that would let the party go on short of its targets (the cap, the healer-mana cap, a caster that does not
+	// drink) keeps waiting for the tank to reach RestPullTankPct health and the healer RestPullHealerManaPct mana, for RestPullExtra
+	// more after the cap, before it gives up (rfc-live-2: a wipe pull began with the tank hurt and the healer low).
+	RestPullTankPct       int
+	RestPullHealerManaPct int
+	RestPullExtra         time.Duration
 	GatherRadius          float32       // yards: rested also asks every living member to be this close
 	WaitPoll              time.Duration // time between two looks at a wait step
 	Poll                  time.Duration // time between two looks at a fight
@@ -224,9 +244,9 @@ func DefaultConfig() Config {
 		WalkAttempts: 3, WalkRetryDelay: 2 * time.Second, UseSettle: 1500 * time.Millisecond, ItemsWait: 3 * time.Second,
 		PullAttempts: 3, PullRange: 45, PullStandoff: 38, PackRadius: 25,
 		EngageTimeout: 25 * time.Second, EvadeGrace: 12 * time.Second, AssistEvery: 10 * time.Second,
-		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
-		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 50, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
-		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3,
+		FightTimeout: 300 * time.Second, BossTimeout: 600 * time.Second, BossSearch: 60 * time.Second, PostFight: 4 * time.Second, AddsWait: 15 * time.Second,
+		RestTimeout: 60 * time.Second, RestPoll: 3 * time.Second, RestHealthPct: 90, RestManaPct: 35, RestHealerManaPct: 60, GravesHealerManaPct: 60, RestPullTankPct: 80, RestPullHealerManaPct: 60, RestPullExtra: 90 * time.Second, DrinkNudge: 15 * time.Second, RestMinHealth: 50, GatherRadius: 40,
+		RestWalkYd: 60, RestWalkHealthPct: 70, RestWalkHealerManaPct: 40, RestWalkManaPct: 25, RefillBelow: 3, MaintenanceEveryLegs: 3,
 		WaitPoll: 2 * time.Second, Poll: time.Second, ArriveTimeout: 60 * time.Second,
 		ManaStall: 30 * time.Second, ManaStallPct: 5, HealerManaMin: 30, ReviveWait: 5 * time.Second, AggroQuiet: 3 * time.Second,
 		AmbushPause: 6 * time.Second, WalkWatch: 500 * time.Millisecond, BuffGap: 300 * time.Millisecond, BuffViewWait: 10 * time.Second, BuffMaxDist: 80,
@@ -265,6 +285,9 @@ func (c Config) withDefaults() Config {
 	fill(&c.AssistEvery, d.AssistEvery)
 	fill(&c.FightTimeout, d.FightTimeout)
 	fill(&c.BossTimeout, d.BossTimeout)
+	if c.BossSearch == 0 {
+		c.BossSearch = d.BossSearch
+	}
 	fill(&c.PostFight, d.PostFight)
 	fill(&c.AddsWait, d.AddsWait)
 	fill(&c.RestTimeout, d.RestTimeout)
@@ -272,6 +295,7 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestHealthPct, d.RestHealthPct)
 	fillInt(&c.RestManaPct, d.RestManaPct)
 	fillInt(&c.RestHealerManaPct, d.RestHealerManaPct)
+	fillInt(&c.GravesHealerManaPct, d.GravesHealerManaPct)
 	fill(&c.DrinkNudge, d.DrinkNudge)
 	if c.RestWalkYd == 0 {
 		c.RestWalkYd = d.RestWalkYd
@@ -283,6 +307,9 @@ func (c Config) withDefaults() Config {
 	fillInt(&c.RestWalkHealerManaPct, d.RestWalkHealerManaPct)
 	fillInt(&c.RestWalkManaPct, d.RestWalkManaPct)
 	fillInt(&c.RestMinHealth, d.RestMinHealth)
+	fillInt(&c.RestPullTankPct, d.RestPullTankPct)
+	fillInt(&c.RestPullHealerManaPct, d.RestPullHealerManaPct)
+	fill(&c.RestPullExtra, d.RestPullExtra)
 	fillF(&c.GatherRadius, d.GatherRadius)
 	fill(&c.WaitPoll, d.WaitPoll)
 	fill(&c.Poll, d.Poll)
@@ -350,7 +377,13 @@ type Driver struct {
 	tr          *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
 	stopSampler func()
 
+	// What the leader-mode pull test reads (pulltest_leader.go): the kills of the fights, and the span from the first pull to the last
+	// fight's end since it was last cleared.
+	fightKills            int
+	fightFirst, fightLast time.Time
+
 	// The progress watchdog and the requests its recoveries leave for the loops they interrupt.
+	unitSeen map[*UnitWait]bool // the "gone" unit waits that saw a matching unit alive (UnitHolds)
 	wd       *watchdog
 	wdRepick flagOnce // end the fight, to pick the target again
 	wdObject flagOnce // give up the wait of the object step
@@ -383,6 +416,9 @@ func (d *Driver) Status() (rep Report, ended bool) { return d.rep.snapshotEnded(
 func (d *Driver) Run(ctx context.Context, fromLeg int) error {
 	if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
 		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
+	}
+	if d.plan.HasGMCross(fromLeg) {
+		return fmt.Errorf("plan %s has a gm_cross waypoint (a GM moves the party across a gap no walk crosses): only a remote run can do it; nothing was sent", d.plan.Name)
 	}
 	d.rep.start(fromLeg)
 	d.traceBegin(fromLeg)
@@ -423,6 +459,9 @@ func ctxDone(err error) bool {
 }
 
 func (d *Driver) run(ctx context.Context, fromLeg int) error {
+	if d.cfg.Pulltest != nil {
+		return d.runPulltest(ctx)
+	}
 	if err := d.begin(ctx, fromLeg); err != nil {
 		return err
 	}
@@ -440,6 +479,12 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 		if a.Kind != ActFailed && a.Leg != d.curLeg {
 			d.endLeg("done")
 			if a.Kind != ActDone {
+				if skipped, err := d.skipOptionalLeg(ctx, a.Leg); err != nil {
+					d.st.Fail(err.Error())
+					continue
+				} else if skipped {
+					continue
+				}
 				if err := d.startLeg(ctx, a.Leg, a); err != nil {
 					d.st.Fail(err.Error())
 					d.countWipe(err)
@@ -483,6 +528,10 @@ func (d *Driver) run(ctx context.Context, fromLeg int) error {
 			err = d.doLoot(ctx, a)
 		case ActItem:
 			err = d.doUseItem(ctx, a)
+		case ActTrigger:
+			err = d.doAreaTrigger(ctx, a)
+		case ActGossip:
+			err = d.doGossip(ctx, a)
 		case ActRitual:
 			err = errors.New("a ritual step needs several bots using the object: it runs in remote mode only (dungeon_run with a bound commander party), not with the agent's own companions yet")
 		default:
@@ -718,6 +767,11 @@ func (d *Driver) startLeg(ctx context.Context, i int, next Action) error {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: d.clk.Now(), Result: "running"})
 	})
 	d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", i, name), map[string]any{"leg": i, "name": name, "phase": "start"})
+	// The group driver has no way to keep its companions from looting a whole leg (it orders looting off only around a boss fight:
+	// Boss.CompanionsLoot): a leg that needs it off is not started.
+	if cl := d.plan.Legs[i].CompanionsLoot; cl != nil && !*cl {
+		return fmt.Errorf("leg %d (%s): companions_loot is false, which only a remote (commander) run can enforce for a whole leg: group mode would let its companions loot the leg's chests; the leg is not started", i, name)
+	}
 	if err := d.topUpBuffs(ctx); err != nil {
 		return err
 	}
@@ -860,6 +914,60 @@ func (w stepWorld) HostilesWithin(c Point, r float32) int {
 		}
 	}
 	return n
+}
+
+// UnitHolds makes the group driver's world a UnitWorld: the creatures of the agent's own object store.
+func (w stepWorld) UnitHolds(u *UnitWait) bool {
+	sights := storeSights(w.d.g.Units(), nil)
+	if u.State != UnitGone {
+		return u.holds(sights, false)
+	}
+	// "gone" needs a unit that was seen alive first: an empty store proves nothing.
+	if w.d.unitSeen == nil {
+		w.d.unitSeen = map[*UnitWait]bool{}
+	}
+	if (&UnitWait{Entries: u.Entries, Near: u.Near, Radius: u.Radius, State: UnitSeen}).holds(sights, false) {
+		w.d.unitSeen[u] = true
+	}
+	return w.d.unitSeen[u] && u.holds(sights, false)
+}
+
+// doAreaTrigger is the area_trigger step of the group driver: the leader is the agent's own character, so it is the one that takes the
+// trigger (a lead bot exists only in remote mode, and by "bot" fails). It walks to the step's stand point inside the zone, sends the packet
+// as a client does and waits for Expect up to the step's timeout. The companions follow the leader; nothing is sent twice.
+func (d *Driver) doAreaTrigger(ctx context.Context, a Action) error {
+	t := a.Trigger
+	if t.By == TriggerBot {
+		return fmt.Errorf("%s: by \"bot\" needs a lead bot: it runs in remote mode only; use \"auto\" or \"agent\"", a.Label)
+	}
+	uw := func() bool { return t.ExpectUnit.holds(storeSights(d.g.Units(), nil), false) }
+	if uw() {
+		d.rep.note(fmt.Sprintf("%s: %s already: the trigger is not sent", a.Label, t.ExpectUnit.describe()))
+		return nil
+	}
+	if dead := (&UnitWait{Entries: t.ExpectUnit.Entries, Near: t.ExpectUnit.Near, Radius: t.ExpectUnit.Radius, State: UnitDead}); dead.holds(storeSights(d.g.Units(), nil), false) {
+		d.rep.note(fmt.Sprintf("%s: %s is dead already: the trigger is not sent", a.Label, t.ExpectUnit.String()))
+		return nil
+	}
+	if dist3(d.g.Position(), t.Center) > float64(t.Radius) {
+		if err := d.doWalk(ctx, t.Stand); err != nil {
+			return fmt.Errorf("%s: %w", a.Label, err)
+		}
+	}
+	if err := d.areaTrigger(ctx, t.ID); err != nil {
+		return fmt.Errorf("%s: sending area trigger %d: %w", a.Label, t.ID, err)
+	}
+	d.rep.note(fmt.Sprintf("%s: sent area trigger %d from %.1f %.1f %.1f", a.Label, t.ID, d.g.Position().X, d.g.Position().Y, d.g.Position().Z))
+	until := d.clk.Now().Add(time.Duration(t.TimeoutS) * time.Second)
+	for !uw() {
+		if !d.clk.Now().Before(until) {
+			return fmt.Errorf("%s: area trigger %d was sent and %s did not hold within %d s", a.Label, t.ID, t.ExpectUnit.describe(), t.TimeoutS)
+		}
+		if err := d.sleep(ctx, d.cfg.WaitPoll); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // doWalk walks to p, trying up to WalkAttempts times: walk_path replans by itself, a second try covers a walk it
@@ -1131,6 +1239,9 @@ func (d *Driver) order(ctx context.Context, intent string) error {
 // between the use and the world's answer. The waits under the lock do not look at the party (sleepHeld); the look (check) is made after
 // the lock is let go, so a leader that died meanwhile is brought back without the lock held.
 func (d *Driver) doUse(ctx context.Context, a Action) error {
+	if a.ViaItem {
+		return fmt.Errorf("%s: use_object with via_item uses %s ON the object (a carrier bot's `cmd use <item> <bot> <object>`), which only a remote (commander) run can do", a.Label, a.Requires)
+	}
 	if err := d.checkUseItem(ctx, a.Requires); err != nil {
 		return err
 	}
@@ -1602,13 +1713,17 @@ type fightSpec struct {
 	skip     []uint32
 	anchors  []Point // where the pack stands
 	limit    time.Duration
-	required bool    // not finding the target fails the run (a boss), else the fight is taken as already won
-	sneak    bool    // a target that turns out stealthed is walked past (sneakPast) instead of pulled
-	wide     bool    // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
-	radius   float32 // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
+	required bool        // not finding the target fails the run (a boss), else the fight is taken as already won
+	sneak    bool        // a target that turns out stealthed is walked past (sneakPast) instead of pulled
+	seen     packet.GUID // the boss the search found away from his spot (remote searchBoss): it is a candidate wherever it stands
+	wide     bool        // a boss encounter: with none of the entries near the anchors, any within 80 yd counts
+	radius   float32     // yards a member may stand from an anchor (PullGroup.Radius); 0: PackRadius
 	// passed are the mobs this group's pulls passed over (they drew no fight or evaded, nothing died): not picked again
 	// by this group, and not by another one (unlike the refused ones, which the whole run leaves alone).
 	passed map[packet.GUID]bool
+	// patrol is the group's patrol (PullGroup.Patrol, remote mode only), and patrolSt what its gate has done for this group so far.
+	patrol   *Patrol
+	patrolSt *patrolState
 }
 
 type outcome int
@@ -2039,4 +2154,50 @@ func StandoffPoint(path []Point, standoff float32) (Point, bool) {
 		left -= seg
 	}
 	return Point{}, false
+}
+
+// lookView is how near a pack the look point must be: the standoff, and no more than the view less the look's arrival slack (the lead bot
+// may stop that far short of the point, and lookAt drops frames from beyond ClearSeeRadius) less a yard.
+func lookView(standoff, arrive float32) float32 {
+	return min(standoff, ClearSeeRadius-arrive-1)
+}
+
+// LookPoint is where the lead bot stands to look at a pack at `pack`: StandoffPoint(path, standoff) when that is within view yards of the
+// pack, else the first point up the path that is (a pack off the mesh ends the path short of it, and the standoff counted back from there
+// leaves the look 30 yd away: Zul'Farrak's Velratha group 9). A path shorter than the standoff leaves the lead bot where it is (ok false,
+// as for StandoffPoint) when it is within view already, and moves it up the path when it is not (group 9's positions 4 and 5, 29 yd from
+// the lead bot on a 14 yd path). When no point of the path is within view nothing is gained by moving (the lead bot would only be taken to
+// the end of a partial path toward a pack it cannot see): the result is the old one, StandoffPoint's, with its ok. snap, when not nil,
+// puts a point that was moved on the floor of the navmesh (a point interpolated along a path over stairs or a drop may float): the driver
+// and the plan check both pass theirs, so they stand at the same place.
+func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool) {
+	if snap == nil {
+		snap = func(p Point) Point { return p }
+	}
+	stand, ok := StandoffPoint(path, standoff)
+	if ok && dist3(stand, pack) <= float64(view) {
+		return snap(stand), ok
+	}
+	if !ok && (len(path) == 0 || dist3(path[0], pack) <= float64(view)) {
+		return stand, false
+	}
+	for i := 1; i < len(path); i++ {
+		a, b := path[i-1], path[i]
+		seg := dist3(a, b)
+		if seg == 0 {
+			continue
+		}
+		for t := 0.0; ; t += 0.5 {
+			t = min(t, seg) // the last sample is the segment's end, whatever its length
+			f := t / seg
+			p := Point{X: a.X + float32(f)*(b.X-a.X), Y: a.Y + float32(f)*(b.Y-a.Y), Z: a.Z + float32(f)*(b.Z-a.Z)}
+			if dist3(p, pack) <= float64(view) {
+				return snap(p), true
+			}
+			if t >= seg {
+				break
+			}
+		}
+	}
+	return stand, ok
 }

@@ -32,11 +32,11 @@ func loadSpecT(t *testing.T) *SpecFile {
 	return sf
 }
 
-// Every instance map has at least one plan, and the spec names every plan file in dungeons/ (bar zulfarrak-extra, a record).
+// Every instance map has at least one plan, and the spec names every plan file in dungeons/ (bar wailing_caverns-extra, a record).
 func TestSpecCoversEveryInstanceMapAndFile(t *testing.T) {
 	sf := loadSpecT(t)
 	have := map[uint32]bool{}
-	named := map[string]bool{"zulfarrak-extra": true}
+	named := map[string]bool{"wailing_caverns-extra": true}
 	for _, ps := range sf.Plans {
 		have[ps.Map] = true
 		named[ps.Name] = true
@@ -53,7 +53,7 @@ func TestSpecCoversEveryInstanceMapAndFile(t *testing.T) {
 		}
 	}
 	if len(files) != len(sf.Plans)+1 {
-		t.Errorf("%d plan files for %d spec plans (+ zulfarrak-extra)", len(files), len(sf.Plans))
+		t.Errorf("%d plan files for %d spec plans (+ wailing_caverns-extra)", len(files), len(sf.Plans))
 	}
 }
 

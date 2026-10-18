@@ -969,7 +969,7 @@ meets them:
 
 ## Dungeon plan: Zul'Farrak (`dungeons/zulfarrak.json`, #130; written from the world data, walked by a GM invisible on 2026-10-14, not run as a party)
 
-Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. `dungeons/zulfarrak-extra.json` is a record of what the driver cannot do, not a plan to run. What the first live run has to settle, in the order it meets them:
+Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull groups. The gong leg that `dungeons/zulfarrak-extra.json` once recorded is the optional `gahzrilla` leg of the plan since PR A (check 9). What the first live run has to settle, in the order it meets them:
 
 1. **Entry** (needs TortoiseBots #939). The run walks the party to the portal and sends `.bot cmd enter 924`: record the `TBM:ACTION_PENDING|cmd enter|party|<budget>|924` line, the final ACK (`entered`, n bots) or ERR code, the seconds, and that the lead bot lands on map 209 at 1212.7 842.0 and the others come by the same order or by `cmd summon`; the group must not change after that. On a module without the order the run must fail with "needs TortoiseBots #939" within about 15 s of arriving at the portal. `prepare.fresh` uses `outside_tele` `farrak` (partial match of game_tele 160): check that the bots and the agent land outside, map 1, near -6801 -2893.
 2. **The road to Antu'sul** (leg 0): the 15 pull groups come in the order of the plan; the four static Shadowcasters at 1505-1511 845 are their own group; the patrolling groups (radius 30) are found where they walk, not at their spawn rows. Count walk aggros and the time (about 807 yd).
@@ -977,8 +977,12 @@ Three legs (Antu'sul, Theka the Martyr, Hydromancer Velratha), 1470 yd, 28 pull 
 4. **Theka** patrols a ~45 yd loop from (1778 860): the boss fight must find him (it looks within 80 yd of the lead bot); the 30% transform must not end the fight early; the scarabs (7269) are skipped, not waited for.
 5. **The way to Velratha** goes by the west road (junction 1645 909), NOT through the End Door: check that no bot is ever at 1854.5 1142.9 and that nothing opened the door (`gameobjects` entry 146084 stays `ready`).
 6. **The grave field** (x 1832-1898, y 967-1054, about 70 trapped Shallow Grave chests) is never entered by a bot (botwatch positions), and no chest 128308 / 128403 was used.
-7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears.
+7. **Velratha at the gong strip** (1658 1153 to 1636 1175): she is met there, not at her pool spawn (1698 1211); the Blood Drinker pair of the strip may join her. The Gong (141832) is not used and no Gahz'rilla appears (a run without a Mallet skips the optional gahzrilla leg: `legs[]` says `skipped: no Mallet of Zul'Farrak ...`; check 9).
 8. Record `seconds` per leg, the watchdog stalls, deaths, and any pack that was believed cleared without evidence.
+9. **Gahz'rilla (the optional `gahzrilla` leg, PR A; first run with the Mallet, a GM account of level 3)**: start with `"give_items": [{"bot": "lead", "item": 9240}]` and a fresh instance. Record: the setup line `additem 9240 on <lead> (test setup: Mallet of Zul'Farrak)` in `setup_shortcuts` and the
+   `.bot inv` that shows the item; the eight pull groups of the pool ring one by one (the Blood Drinker at 1714.4 1218.6 is the one the tank found no firing position for in the Velratha leg's runs); the lead bot walking to the stand (1652.84 1168.99) and ringing the gong: the `cmd use 9240 <lead> entry:141832@1650.9,1171.9,10.9`
+   order (the Mallet used ON the gong; the trace event `object_order` has its ACK with `spell:11434`, or the ERR code: `failed` with a cast check number is the server refusing the cast) and whether event 2488 ran; the 30 s wait: when Gahz'rilla (7273) appears in the feed and where (the pit 1664.65 1187.67 -2.89, then the walk 1672.7 1195.9 -> 1681.7 1204.1 -> 1686.1 1207.3 -> 1690.5 1211.5 -> 1692.6 1213.7 -> 1702.6 1224.2, one point per second);
+   whether he comes at the party on his own or waits at 1702.6 1224.2; any troll or other add at the pit; the kill time, his spells (11836 Freeze Solid, 11902, 11131), deaths. Then a run **without** the item: the leg is skipped with its reason and the run goes on to the courtyard.
 
 ## Start anywhere and the pull test (`from_leg`, `from_pull_group`, `dungeon_run.pulltest`)
 
@@ -996,7 +1000,7 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
    the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
 4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
 5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
-   start `skipped (from_leg)`, and that nothing of them was pulled or walked. A pack of those legs that is still alive near the start point (a fresh instance) will aggro: write down which.
+   start `skipped (from_leg)`, and that nothing of them was pulled or walked. In a fresh instance a start under 30 yd from a live pack or boss of those legs is refused before anything is sent (README "Start anywhere"; `--force-start` runs it); in a kept or cleared one it only warns (`start: warning:` notes): write down whether such a pack aggroed.
 6. **Gather spots** (`from_pull_group`): 55 yd short of the pack on the navmesh path from the leg's `to`. Check on Uldaman that the spot is on the mesh, out of sight of other packs, not in a
    pit (`start.warning`), and that the first pull from it needs no more than one approach (`pack_looks`, the walk after the rest gate).
 7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
@@ -1009,3 +1013,45 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
    `rest_s` against `rest_gates[]`. Then run the same pull twice with an unchanged build and see what the spread is: that is the noise `--compare` has to beat.
 10. **Equivalent packs** (`equiv` in a plan): none of the shipped plans marks any yet. Mark a pair of Uldaman packs of the same mobs on similar ground and check that the walk between them does
     not aggro a third pack (`walk_aggros`, `adds`).
+
+## Run modes, rotations as data and boss tactics (`mode`, `rotation`, `bosses[].tactics`; tested against fakes only, never run live)
+
+README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like character in a party with a tank bot and a healer bot inside the instance (leader mode has no hiring or binding yet),
+`mmaps_dir` set. What the first live use has to settle:
+
+1. **`mode: "leader"` without `brain`**: the preset of the character's class is taken (`brain` in the result and the report); a class or role without a default is refused with the list. `mode: "observe"` is the observe mode, see
+   "Observe mode" at the end of this file. `commander` and `remote` behave as before (compare one `tools/run-uldaman.sh --print-params` with the last live run).
+2. **A rotation file in place of the Go strategy**: `brain_start {"strategies":["frost_mage"],"rotation":"frost_mage"}` in a fight: the `brain_decision` stream has the same action names as without the option
+   (`frostbolt`, `frost_nova`, `fire_blast`, `cone_of_cold`), `brain_state.strategies` has `rot:frost_mage` and not `mage_frost`, and `trace` header `options.rotation` carries the digest. Then `shadow_priest` and
+   `arms_warrior` (stance, `execute`, `overpower` after a dodge, `heroic_strike` once per swing, `battle_shout` at a rest gate).
+3. **The new specs, not played before**: `fire_mage` (Scorch stacks `Fire Vulnerability` to 5 at the start of a long fight: does the aura show under that name in `units`? Fireball is refused on a fire-immune mob and
+   Frostbolt takes over for the 5 s back-off; `fire_blast_moving` while walking), `arcane_mage` (`Arcane Rupture`, a Turtle talent: its aura and rhythm with Arcane Missiles are not read; does Missiles channel through to the end?).
+   Record time to kill, casts, mana at the end per fight and compare with the Go `frost_mage` on the same pack: the leader-mode pull test below.
+4. **Boss tactics** (Uldaman, leader mode, a character with an interrupt - mage Counterspell, warrior Pummel in Battle or Berserker Stance): on Revelosh, `brain_state` `encounter` (`uldaman/revelosh`) when he is pulled, then `interrupt` on
+   `Chain Lightning` / `Lightning Bolt` before any other cast; on the Obsidian Sentinel the character attacks the Obsidian Shards (7209) first when they appear at 60/40/20 % (also 80 %?) and goes back to the boss; on Grimlok `Chain Bolt`.
+   `encounter_end` when the boss dies. Does the 1.12 client show the boss's cast (`Casting` on the unit) early enough for `interruptMinLeft` 350 ms?
+5. **`move_out`** has no shipped plan yet (needs the radius of a real cast, from the spell's `SpellRadius`): try `{"cast": "Fire Nova", "yards": 10}` on Galgann and a `ground` rule on a boss's ground effect; the character must leave on the navmesh and not
+   leave the tank (a tank ignores `cast` circles), and must not stand in the circle at the end of the cast.
+6. **`dispel`** with a healer preset on a real aura of a boss (Antu'sul's, Velratha's): dispelled before a slow, at 20 % mana.
+7. **The pull test in leader mode** (`mode: "leader"`, `pulltest`; README "Pull test in leader mode"): hired or named party and the character in the instance at an Uldaman pack (leg 0, the Baelog
+   trash is cheap), `gm: true` for `.respawn`. `tools/run-uldaman.sh --mode leader --pulltest 0:0:3 --rotation frost_mage`, then the same with no `--rotation` and `turtle-agent pulltest --compare`. Check: the three tries kill the pack and the
+   pack comes back (`reset` `respawn`, `gm_commands` `.respawn`, within 80 yd of the pack; the selection is cleared first); `time_to_kill_s` against the trace's `pull_start`/`pull_end`;
+   `damage_done` against the sum of the `spell_damage`/`melee` events with the character as the source (and that a wand shot, a pet's damage and a DoT tick are or are not in it);
+   `power_spent` against the mana the unit rows show; `casts_failed_by_reason` against the `spell_failed` events; `idle_pct` against a watched fight; `mobs_on_me` against who the mobs target in `units`.
+   Run the same arm twice: the spread is the noise `--compare` has to beat (it says "the noise" when both sides name the same brain).
+
+## Observe mode: the agent watches a TortoiseBots run leader (`mode: "observe"`, `plan-export`; tested against fakes only, never run live)
+
+README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Needs a server build with TortoiseBots PRs #962 and #963 (the run leader and the plan tables),
+`AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteCommander = 1`, and a GM commander account as for a commander run. What the first live use has to settle:
+
+1. **The export applies.** `turtle-agent plan-export --mmaps <dir> --out <TortoiseBots>/data/sql/world/ uldaman` (the stamp must sort after `20261014150000`), restart the server: the log has no
+   `ai_dungeon_step: plan ... skipped` line, `.bot run list` names `uldaman` with its steps and how many are "not supported yet" (the two `ritual` steps). Compare the step count with the export's.
+2. **The probe.** `dungeon_run {"mode":"observe", ...}` on a server without the run leader (an older build) fails in about 4 s with "needs the TortoiseBots run leader" and the log shows no hire and no bind; with the plan missing it names the plans the server has.
+3. **No order after the start.** Run Uldaman from leg 0 (`tools/run-uldaman.sh --mode observe --hire`). The run leader must never show `paused ... paused by .bot cmd ...`: the agent's `commander view`, `.bot run status` polls and `cmd stay` at the end are the only things sent after `run start`.
+   Check the trace: `run_leader` events follow the module's `TBM:RUN` lines one for one (step, leg, kind, phase, note) and `report.remote.orders` holds only `stay`.
+4. **The status feed.** Are `TBM:RUN` lines pushed to the commander on the system chat (the feed reads them there) or only on the addon channel? `report.remote.observe.lines` against `polls` tells: lines with no poll answering them means the push works.
+5. **Pause, resume, stop.** `dungeon_pause` during a pull: the run leader pauses (`paused by .bot run pause`) and the bots hold; `dungeon_resume` goes on at the same step; `dungeon_stop` sends `.bot run stop` before the unbind and leaves the party still bound for the stay and unbind.
+6. **The module pauses itself.** At 3 dead the status is `paused` with the note; the watch waits `paused_wait_s` (10 min) and then stops the run with that note as the failure. Is 10 minutes the right wait, and does a person's `.bot run resume` on the server end the wait (the next status line is `running`)?
+7. **Legs and the dashboard card.** The report has one leg entry per leg name the module sent (`legs[]` with seconds), and the card of `turtle-agent dashboard` reads "Run leader: <leg> · <kind> n/m · <phase>". Does the `phase` word `pull` cover both the approach and the fight well enough for the card?
+8. **`ritual` steps.** The run leader pauses on Uldaman's two `ritual` steps (not run yet): the observed run ends `failed` after `paused_wait_s` unless a person does the ritual by hand (`.bot cmd ritual`), then `.bot run skip` and `resume`. Record how a run through the altars goes and whether `dungeon_skip` is enough.

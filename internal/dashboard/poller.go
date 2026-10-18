@@ -28,15 +28,22 @@ type Poller struct {
 	opt    Options
 	plans  *planCache
 	tailer *Tailer
+	live   *Live
+	hist   *History
+	route  *routeService // the real route (route.go); nil without --mmaps-dir
 
-	mu      sync.RWMutex
-	state   []byte
-	raw     map[string][]byte
-	clients map[string]*Client
-	alive   map[string]bool // agents that have answered since the start
-	trails  map[string]*Trail
-	agents  []Agent
-	lastDis time.Time
+	mu       sync.RWMutex
+	state    []byte
+	raw      map[string][]byte
+	clients  map[string]*Client
+	alive    map[string]bool // agents that have answered since the start
+	trails   map[string]*Trail
+	events   map[string]*EventLog
+	agents   []Agent
+	runPlans map[string]reportedPlan // agent id -> the plan file its run reports, for the handlers
+	known    []Agent                 // the agents of the last discovery, for the handlers (agents itself belongs to Tick)
+	lastDis  time.Time
+	livePath map[string]string // agent id -> the trace file of its run, for the path layers
 }
 
 // NewPoller applies the defaults.
@@ -56,7 +63,7 @@ func NewPoller(o Options) *Poller {
 	if o.Agents == "" {
 		o.Agents = "auto"
 	}
-	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}}
+	p := &Poller{opt: o, plans: newPlanCache(o.PlansDirs), tailer: NewTailer(), live: NewLive(), hist: NewHistory(o.Now, o.TestsDir, o.TracesDir), livePath: map[string]string{}, raw: map[string][]byte{}, clients: map[string]*Client{}, alive: map[string]bool{}, trails: map[string]*Trail{}, events: map[string]*EventLog{}}
 	p.state = []byte(`{"agents":[],"offline":[]}`)
 	return p
 }
@@ -113,11 +120,16 @@ func (p *Poller) Tick(ctx context.Context) {
 	raws := map[string][]byte{}
 	plans := map[string]bool{}
 	p.mu.Lock()
+	p.known = agents
+	p.runPlans = map[string]reportedPlan{}
 	for i, a := range agents {
 		c := res[i].card
 		if c.Online {
+			p.livePath[a.ID] = c.tracePath
+			p.runPlans[a.ID] = c.runPlan
 			p.alive[a.ID] = true
 			p.trackTrail(a.ID, &c)
+			p.trackEvents(a.ID, &c, now)
 		}
 		switch {
 		case c.Online:
@@ -167,6 +179,17 @@ func (p *Poller) trackTrail(id string, c *Card) {
 		}
 	}
 	c.Trail = t.Points()
+	c.TrailT = t.Times()
+}
+
+// trackEvents puts the run's events on the card. The caller holds p.mu.
+func (p *Poller) trackEvents(id string, c *Card, now time.Time) {
+	l := p.events[id]
+	if l == nil {
+		l = &EventLog{}
+		p.events[id] = l
+	}
+	c.Events = l.Observe(c, now)
 }
 
 func (p *Poller) client(a Agent) *Client {
@@ -218,25 +241,41 @@ func (p *Poller) pollOne(ctx context.Context, cl *Client, now time.Time) (Card, 
 	call("tune_list", &in.Tune)
 	call("bot_view", &in.View)
 	wg.Wait()
+	tracePath := ""
+	var runPlan reportedPlan
 	var ds struct {
 		Report *struct {
 			Plan      string `json:"plan"`
 			TraceFile string `json:"trace_file"`
+			Remote    *struct {
+				PlanFile   string `json:"plan_file"`
+				PlanSHA256 string `json:"plan_sha256"`
+			} `json:"remote"`
 		} `json:"report"`
 	}
 	if json.Unmarshal(in.Dungeon, &ds) == nil && ds.Report != nil {
 		if ds.Report.Plan != "" {
-			in.Plan, _, in.PlanErr = p.plans.get(ds.Report.Plan)
+			rp := reportedPlan{Plan: ds.Report.Plan}
+			if ds.Report.Remote != nil {
+				rp.File, rp.SHA = ds.Report.Remote.PlanFile, ds.Report.Remote.PlanSHA256
+			}
+			cp, plan, _, perr := p.plans.copyFor(cl.Agent, ds.Report.Plan, rp)
+			in.Plan, in.PlanErr, in.PlanCopy = plan, perr, &cp
+			runPlan = rp
 		}
 		if path, link, folder, ok := p.resolveTrace(ds.Report.TraceFile); ok {
 			if snap, err := p.tailer.Read(path, now); err == nil {
 				in.Trace = &snap
+				tracePath = path
+				p.live.Advance(path, now)
 				in.Folder = folder
 				in.Links = p.links(link)
 			}
 		}
 	}
 	card := BuildCard(in)
+	card.tracePath = tracePath
+	card.runPlan = runPlan
 	raw, _ := json.Marshal(map[string]json.RawMessage{"status": orNull(in.Status), "dungeon_status": orNull(in.Dungeon), "tune_list": orNull(in.Tune)})
 	raw, err = Scrub(raw, cl.Token())
 	if err != nil {
@@ -313,6 +352,68 @@ func (p *Poller) Geometry(name string) ([]byte, string) {
 	return geo, errText
 }
 
+// GeometryFor is the drawing of a plan as the agent with this id reads it (its dungeons_dir copy when it has the file, else the dashboard's).
+func (p *Poller) GeometryFor(name, agentID string) ([]byte, string) {
+	a, ok := p.agentByID(agentID)
+	if !ok {
+		return p.Geometry(name)
+	}
+	_, plan, geo, errText := p.plans.copyFor(a, name, p.runPlanOf(agentID))
+	if plan == nil {
+		return nil, errText
+	}
+	b, err := json.Marshal(geo)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return b, ""
+}
+
+func (p *Poller) runPlanOf(id string) reportedPlan {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.runPlans[id]
+}
+
+func (p *Poller) agentByID(id string) (Agent, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, a := range p.known {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return Agent{}, false
+}
+
+// Plans lists the plans the dashboard can draw, with the file each comes from.
+func (p *Poller) Plans() []PlanInfo { return p.plans.list() }
+
+// CopyRow is what one agent's slot holds of a plan: the file its runs read, and whether it is the dashboard's copy.
+type CopyRow struct {
+	Agent       string      `json:"agent"`
+	DungeonsDir string      `json:"dungeons_dir,omitempty"`
+	Run         *PlanSource `json:"run,omitempty"`
+	Same        bool        `json:"same"`
+	Text        string      `json:"text"`
+}
+
+// PlanCopies lists, for every agent, which copy of the plan its runs read.
+func (p *Poller) PlanCopies(name string) []CopyRow {
+	p.mu.RLock()
+	agents := append([]Agent(nil), p.known...)
+	p.mu.RUnlock()
+	rows := []CopyRow{}
+	if !planName.MatchString(name) {
+		return rows
+	}
+	for _, a := range agents {
+		cp, _, _, _ := p.plans.copyFor(a, name, p.runPlanOf(a.ID))
+		rows = append(rows, CopyRow{Agent: a.ID, DungeonsDir: a.DungeonsDir, Run: cp.Run, Same: cp.Same, Text: cp.Text})
+	}
+	return rows
+}
+
 // links are the files of a run the page can link to: the trace, its summary and the capture folder's report, as far as they exist
 // under the tests folder.
 func (p *Poller) links(trace string) []Link {
@@ -332,3 +433,27 @@ func (p *Poller) links(trace string) []Link {
 	}
 	return out
 }
+
+// LiveJSON is the digest of the run an agent is on (its walks cut to the last minutes), or false when the agent has no readable trace.
+func (p *Poller) LiveJSON(id string, minutes int) ([]byte, bool) {
+	p.mu.RLock()
+	path := p.livePath[id]
+	p.mu.RUnlock()
+	if path == "" {
+		return nil, false
+	}
+	b, ok := p.live.JSON(path, minutes)
+	if !ok {
+		return nil, false
+	}
+	b, err := Scrub(b, p.secrets()...)
+	return b, err == nil
+}
+
+// Ghost is the best earlier run of a plan as JSON (see History.Ghost).
+func (p *Poller) Ghost(plan, exclude string, planLegs int) []byte {
+	return p.hist.Ghost(plan, exclude, planLegs)
+}
+
+// Heat is the places parties died in the latest runs of a plan as JSON (see History.Heat).
+func (p *Poller) Heat(plan string) []byte { return p.hist.Heat(plan) }

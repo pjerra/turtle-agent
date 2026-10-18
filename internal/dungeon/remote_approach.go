@@ -24,7 +24,7 @@ const (
 // runEnded says whether err ends the run (a binding lost, a stalled feed, a wipe, the run's own context), as opposed to a failure of
 // one part that the caller can note and go on from.
 func runEnded(ctx context.Context, err error) bool {
-	return err != nil && (ctx.Err() != nil || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) || errors.Is(err, errStalled) || errors.Is(err, errWipe) ||
+	return err != nil && (ctx.Err() != nil || errors.Is(err, errBindingLost) || errors.Is(err, errFeedLost) || errors.Is(err, errStalled) || errors.Is(err, errWipe) || errors.Is(err, errPartyShort) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
@@ -73,6 +73,14 @@ func (d *RemoteDriver) standoffFrom(ctx context.Context, from, to Point, standof
 // that failed or a carrier that does not settle is noted and the order goes out anyway.
 func (d *RemoteDriver) approachObject(ctx context.Context, rec *objRec, carrier string, at, stand *Point) (stayed bool, err error) {
 	if at == nil {
+		return false, nil
+	}
+	if d.batch != nil {
+		// A grave of a batch: the party stands at the batch's centre throughout (batchBegin held it there) and only the carrier walks, with its
+		// own open order; no walk of the party, no stay and no follow per chest, and no wait: the summons of the chests already opened fight on.
+		rec.update(func(s *ObjectStepReport) {
+			s.Approach = "batch: the party stays at the batch centre, the carrier walks with its open order"
+		})
 		return false, nil
 	}
 	began := d.clk.Now()

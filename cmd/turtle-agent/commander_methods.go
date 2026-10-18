@@ -83,11 +83,11 @@ func (c *commanderService) intercept(e events.Event) bool {
 }
 
 type commanderParams struct {
-	Op      string   `json:"op"`                 // bind, unbind, status, view or cmd
+	Op      string   `json:"op"`                 // bind, unbind, status, view, cmd or run
 	LeadBot string   `json:"lead_bot,omitempty"` // bind: the lead bot
 	Bots    []string `json:"bots,omitempty"`     // bind: the other bots
 	On      *bool    `json:"on,omitempty"`       // view: on or off
-	Verb    string   `json:"verb,omitempty"`     // cmd: attack, pull, pullback, cc, focus, move, stay, follow, rest, revive or summon
+	Verb    string   `json:"verb,omitempty"`     // cmd: attack, pull, ... ; run: start, pause, resume, skip, stop, status or list
 	Args    []string `json:"args,omitempty"`     // cmd: the arguments of the verb (a GUID is "0x" + hex)
 	WaitMS  int      `json:"wait_ms,omitempty"`  // how long to wait for the reply; default 4000
 }
@@ -119,13 +119,18 @@ func (c *commanderService) do(ctx context.Context, p commanderParams) (commander
 		if *p.On {
 			command = "commander view on"
 		}
+	case "run":
+		if p.Verb == "" {
+			return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "run needs a verb: " + strings.Join(tbm.RunVerbs, ", ")}
+		}
+		command = strings.Join(append([]string{"run", p.Verb}, p.Args...), " ")
 	case "cmd":
 		if p.Verb == "" {
 			return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "cmd needs a verb: " + strings.Join(tbm.CmdVerbs, ", ")}
 		}
 		command = strings.Join(append([]string{"cmd", p.Verb}, p.Args...), " ")
 	default:
-		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "op must be bind, unbind, status, view or cmd"}
+		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "op must be bind, unbind, status, view, cmd or run"}
 	}
 	if err := tbm.CheckCommand(command); err != nil {
 		return commanderResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
@@ -223,9 +228,12 @@ func (g remoteGame) GameObjects() []objects.GameObject {
 }
 
 func (g remoteGame) Frame() (tbm.ViewFrame, uint64, bool) { return g.c.feed.Latest() }
-func (g remoteGame) ResetView()                           { g.c.feed.Reset() }
-func (g remoteGame) BindingEnds() []tbm.BindingEnd        { return g.c.feed.Ends() }
-func (g remoteGame) ViewStats() tbm.ViewStats             { return g.c.feed.Stats() }
+
+// RunStatus is the newest TBM:RUN line the feed read (dungeon.RunLeaderWatcher).
+func (g remoteGame) RunStatus() (tbm.RunStatus, uint64, bool) { return g.c.feed.RunLatest() }
+func (g remoteGame) ResetView()                               { g.c.feed.Reset() }
+func (g remoteGame) BindingEnds() []tbm.BindingEnd            { return g.c.feed.Ends() }
+func (g remoteGame) ViewStats() tbm.ViewStats                 { return g.c.feed.Stats() }
 
 // Team is the agent's own side (dungeon.TeamSource): the feed carries no race, and the owned bots share the account's faction.
 func (g remoteGame) Team() string { return g.c.cur().Team() }
@@ -233,6 +241,20 @@ func (g remoteGame) Team() string { return g.c.cur().Team() }
 // BotLines implements dungeon.BotLiner: a plain `.bot maintenance|inv|logout <bot>` and the lines it was answered with.
 func (g remoteGame) BotLines(ctx context.Context, command string, wait time.Duration, done func(line string) bool) ([]string, bool, error) {
 	return g.c.cmdr.Lines(ctx, command, wait, done)
+}
+
+// BotLinesAll implements dungeon.BotLinesAller: several `.bot` lines sent together and answered in one wait.
+func (g remoteGame) BotLinesAll(ctx context.Context, reqs []dungeon.BotLineRequest, wait time.Duration) ([][]string, []bool, error) {
+	rs := make([]tbm.LineRequest, len(reqs))
+	for i, r := range reqs {
+		rs[i] = tbm.LineRequest{Command: r.Command, Done: r.Done}
+	}
+	res, err := g.c.cmdr.LinesAll(ctx, rs, wait)
+	lines, settled := make([][]string, len(res)), make([]bool, len(res))
+	for i, r := range res {
+		lines[i], settled[i] = r.Lines, r.Settled
+	}
+	return lines, settled, err
 }
 
 func (g remoteGame) Emit(kind, text string, data map[string]any) {
@@ -258,6 +280,48 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 		out[i] = dungeon.Point{X: v[0], Y: v[1], Z: v[2]}
 	}
 	return out, nil
+}
+
+var _ dungeon.AvoidMarker = remoteGame{}
+
+// MarkAvoid implements dungeon.AvoidMarker: the plan's avoid boxes are marked on the agent's planner, so its paths and floor snaps keep
+// out of them (the session's own walks too: it is the same planner).
+func (g remoteGame) MarkAvoid(mapID uint32, boxes []dungeon.AvoidBox) {
+	if g.c.planner == nil {
+		return
+	}
+	g.c.planner.SetAvoid(mapID, dungeon.NavBoxes(boxes))
+}
+
+// SnapToFloor implements dungeon.FloorSnapper: the navmesh floor point nearest p (within a few yards), false when there is none.
+func (g remoteGame) SnapToFloor(ctx context.Context, mapID uint32, p dungeon.Point) (dungeon.Point, bool) {
+	if g.c.planner == nil {
+		return p, false
+	}
+	n, ok, err := g.c.planner.Nearest(mapID, navmesh.Vec3{p.X, p.Y, p.Z})
+	if err != nil || !ok {
+		return p, false
+	}
+	return dungeon.Point{X: n[0], Y: n[1], Z: n[2]}, true
+}
+
+// FloorsAt implements dungeon.FloorLister: the walkable ground floors of the navmesh under (x, y) within 12 yd of z, highest first;
+// false when there is no planner, the tile is missing or the lookup fails.
+func (g remoteGame) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
+	if g.c.planner == nil {
+		return nil, false
+	}
+	fl, err := g.c.planner.Floors(mapID, x, y, z-12, z+12)
+	if err != nil || len(fl) == 0 {
+		return nil, false
+	}
+	var out []float32
+	for _, f := range fl {
+		if f.Flags&navmesh.NavGround != 0 {
+			out = append(out, f.Z)
+		}
+	}
+	return out, len(out) > 0
 }
 
 // The enter phase of a remote run (dungeon.Enterer): the agent's own character, which stays outside and ungrouped, and the one GM
@@ -341,13 +405,31 @@ func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error
 	}
 }
 
-// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line with the selection repeated in the same
-// session step (GMOn).
+// gmSelectAttempts is how many times selectThenGM selects and confirms again when the selection changed after the confirmation.
+const gmSelectAttempts = 3
+
+// gmAfterConfirm is a test seam: it runs between the server's confirmation of the selection and the line, where another request (the target RPC,
+// the addon host) can select another unit.
+var gmAfterConfirm func()
+
+// selectThenGM selects the unit, waits for the server to show the selection, and sends the GM line as one session operation that sends NO
+// selection of its own (GMOnConfirmed): the line is sent only while the confirmed selection still stands. A selection sent right before a
+// chat line would not be in force when the line runs (the core handles the two on different threads). If another request changed the selection
+// after the confirmation, nothing is sent and the unit is selected and confirmed again, up to gmSelectAttempts times.
 func (g remoteGame) selectThenGM(ctx context.Context, guid packet.GUID, line string) error {
-	if err := g.selectConfirmed(ctx, guid); err != nil {
-		return err
+	var err error
+	for try := 0; try < gmSelectAttempts; try++ {
+		if err = g.selectConfirmed(ctx, guid); err != nil {
+			return err
+		}
+		if gmAfterConfirm != nil {
+			gmAfterConfirm()
+		}
+		if err = g.c.cur().GMOnConfirmed(ctx, guid, line); !errors.Is(err, session.ErrSelectionChanged) {
+			return err
+		}
 	}
-	return g.c.cur().GMOn(ctx, guid, line)
+	return fmt.Errorf("%w: it changed %d times between the server's confirmation and the line, which was not sent", err, gmSelectAttempts)
 }
 
 // UnbindInstances selects the player with the GUID and sends ".instance unbind all" as one operation of the session (GMOn): the core
@@ -358,6 +440,16 @@ func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet
 		return fmt.Errorf("instance unbind: %q (%v) is not a character name and a GUID", who, guid)
 	}
 	return g.selectThenGM(ctx, guid, ".instance unbind all")
+}
+
+// GiveItem implements dungeon.ItemGiver: it selects the bot by GUID, waits until the server shows that selection, and sends ".additem <entry>"
+// as one operation of the session (GMOn), so the line acts on that bot and never on whatever the agent had selected. The core runs it on the
+// selected player (HandleAddItemCommand), from account level 3; the caller checks the level and the bag afterwards.
+func (g remoteGame) GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32) error {
+	if !botName.MatchString(who) || guid == 0 || entry == 0 {
+		return fmt.Errorf("additem: %q (%v) item %d is not a character name, a GUID and an item entry", who, guid, entry)
+	}
+	return g.selectThenGM(ctx, guid, fmt.Sprintf(".additem %d", entry))
 }
 
 // GroupUnbind selects the player with the GUID, waits for the server to show the selection, sends ".instance groupunbind all" as one

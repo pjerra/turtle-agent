@@ -2,9 +2,22 @@
 # Run the remote Uldaman dungeon with one command: the agent binary of origin/main's SHA (built once on the test VM), the login (only
 # if the agent is not logged in already), dungeon_run with the prepare block, a poll every 30 s, and trace-score at the end.
 #
-#   tools/run-uldaman.sh [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
-#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--logout] [--print-params]
+#   tools/run-uldaman.sh [--mode commander|observe|leader] [--brain PRESET] [--rotation NAME] [--role ROLE]
+#                        [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
+#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--force-start] [--logout] [--print-params]
 #
+#   --mode M       the run mode (README "Run modes"; or MODE=). commander (the default): the agent leads a bot group from outside it, everything
+#                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
+#                  --brain names one; the party is the one the character is in: none of the commander's options go with it, only --from-leg).
+#                  observe: a TortoiseBots run leader (`.bot run`) clears the dungeon and the agent watches (README "Observe mode"): the commander
+#                  options below (--hire, --no-fresh, LEAD/BOTS) prepare the party, but no start option and no TANK/HEALER go with it.
+#                  With --pulltest, leader mode runs the pull test on the character (README "Pull test in leader mode"): the party stands at the pack, the
+#                  character plays with the brain, and the result scores it (dps, casts failed by reason, idle in combat...). A/B two rotations:
+#                  run it twice with --rotation A and --rotation B (3 or more tries each), then `turtle-agent pulltest --compare a.json b.json`.
+#   --brain P      leader mode: the brain preset that plays the character (frost_mage, arms_warrior, ...; default: by the character's class and --role)
+#   --rotation R   leader mode: a rotation file that takes the place of the preset's class rotation (README "Rotations as data"; `turtle-agent
+#                  rotation list`); the report names it with its file's digest, so two arms of an A/B test are told apart
+#   --role R       leader mode: dps (default), tank or healer
 #   --hire         the owner's rule: the party is five HIRED bots at the plan's level, the commander outside the group (prepare.party "hire",
 #                  README "Hired party"). The agent hires a warrior tank, a priest healer and three damage dealers (hunter, rogue, warlock),
 #                  checks each (level, gear not epic, key spells, talents, supplies, pets), fixes what `.bot autogear` and `.bot maintenance`
@@ -25,6 +38,9 @@
 #   --pulltest LEG:GROUP[:TRIES[:RESET]]
 #                  the pull-test scenario instead of the dungeon: pull that one pack TRIES times (default 3; RESET auto, equivalent, respawn or none, default
 #                  auto), score each try, print the table and save pulltest.json in OUT; compare two with `turtle-agent pulltest --compare a.json b.json`
+#   --force-start  pass force_start: run a --from-leg / --pull-group / --pulltest start that is under 30 yd from a live pack or boss of a
+#                  skipped step. The script asks for a fresh instance (unless --no-fresh; a hired party counts as fresh), where such a start
+#                  is refused; from a leg past a boss it always is, the boss stands on the start point (README "Start anywhere")
 #   --logout       log the agent out after the run (default: it stays online, so the next run needs no login)
 #   --print-params print the dungeon_run params and exit (nothing is sent, no login, no build)
 #
@@ -56,11 +72,16 @@ MAX_MIN=${MAX_MIN:-90}
 POLL_S=${POLL_S:-30}
 VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
-FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
+MODE=${MODE:-commander} BRAIN= ROTATION= ROLE=
+FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= FORCE_START=0 RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
 COMPOSITION=${COMPOSITION:-}
 
 while [ $# -gt 0 ]; do
   case $1 in
+    --mode) shift; MODE=${1:?--mode needs commander, observe or leader} ;;
+    --brain) shift; BRAIN=${1:?--brain needs a preset name} ;;
+    --rotation) shift; ROTATION=${1:?--rotation needs a rotation name} ;;
+    --role) shift; ROLE=${1:?--role needs dps, tank or healer} ;;
     --relogin) RELOGIN=1 ;;
     --no-fresh) FRESH=false ;;
     --hire) HIRE=1 ;;
@@ -71,6 +92,7 @@ while [ $# -gt 0 ]; do
     --start-here) START_HERE=1 ;;
     --have-items) shift; HAVE_ITEMS=${1:?--have-items needs a comma list of item entries} ;;
     --pulltest) shift; PULLTEST=${1:?--pulltest needs LEG:GROUP[:TRIES[:RESET]]} ;;
+    --force-start) FORCE_START=1 ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
     -h|--help) sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
@@ -81,6 +103,26 @@ done
 
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { say "ERROR: $*" >&2; exit 1; }
+
+# --- the mode
+case $MODE in
+  commander|remote) MODE=commander ;;
+  leader|group) MODE=leader ;;
+  observe) ;;
+  *) die "--mode is commander, observe or leader" ;;
+esac
+name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
+[ -z "$BRAIN" ] || name_word "$BRAIN" || die "--brain: a preset name (a-z, 0-9, _)"
+[ -z "$ROTATION" ] || name_word "$ROTATION" || die "--rotation: a rotation name (a-z, 0-9, _)"
+[ -z "$ROLE" ] || case $ROLE in dps|tank|healer) ;; *) die "--role is dps, tank or healer" ;; esac
+if [ "$MODE" != leader ]; then
+  [ -z "$BRAIN$ROTATION$ROLE" ] || die "--brain, --rotation and --role go with --mode leader (in $MODE mode the bots fight)"
+  [ "$MODE" != observe ] || { [ "$FROM_LEG" = 0 ] && [ -z "$PULLTEST" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FORCE_START" = 0 ]; } ||
+    die "observe mode starts at the plan's first step: --from-leg, --pull-group, --start-here, --have-items, --pulltest and --force-start are commander options"
+else
+  [ "$HIRE" = 0 ] && [ "$REHIRE" = 0 ] && [ -z "$LEVEL" ] && [ -z "$PULL_GROUP" ] && [ "$START_HERE" = 0 ] && [ -z "$HAVE_ITEMS" ] && [ "$FRESH" = true ] && [ -z "$COMPOSITION" ] && [ "$FORCE_START" = 0 ] ||
+    die "leader mode takes only --from-leg and --pulltest of the start options: --hire, --rehire, --level, --pull-group, --start-here, --have-items, --no-fresh, --force-start and COMPOSITION are commander options"
+fi
 
 # --- the party: names are letters only (the agent checks too); they go into the JSON below as they are
 name_ok() { [[ $1 =~ ^[A-Za-z]{2,12}$ ]]; }
@@ -125,28 +167,44 @@ bots_json="[${bots_json%,}]"
 
 # The start of the run: the pull test names its own, else from_leg with the optional pull group and start_here.
 start_json="\"from_leg\":$FROM_LEG,"
-if [ -n "$pulltest_json" ]; then
+if [ "$MODE" = observe ]; then
+  start_json=""
+elif [ -n "$pulltest_json" ]; then
   start_json=$pulltest_json
 else
   [ -z "$PULL_GROUP" ] || start_json+="\"from_pull_group\":$PULL_GROUP,"
   [ "$START_HERE" = 0 ] || start_json+="\"start_here\":true,"
   [ -z "$HAVE_ITEMS" ] || start_json+="\"have_items\":[$HAVE_ITEMS],"
 fi
+[ "$FORCE_START" = 0 ] || [ "$MODE" = observe ] || start_json+="\"force_start\":true,"
 
 sha_label=${SHA8:-unknown}
 params() {
+  if [ "$MODE" = leader ]; then
+    printf '{"name":"uldaman","mode":"leader",'
+    if [ -n "$pulltest_json" ]; then printf '%s' "$pulltest_json"; else printf '"from_leg":%s,' "$FROM_LEG"; fi
+    [ -z "$BRAIN" ] || printf '"brain":"%s",' "$BRAIN"
+    [ -z "$ROTATION" ] || printf '"rotation":"%s",' "$ROTATION"
+    [ -z "$ROLE" ] || printf '"role":"%s",' "$ROLE"
+    printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","mode":"leader"}}' "$sha_label"
+    return
+  fi
   if [ "$HIRE" = 1 ]; then
     # The hired party names itself: no lead_bot, bots, tank or healer. fresh and online do not go with it.
     local hire="" sep=""
     [ "$REHIRE" = 0 ] || { hire+="${sep}\"rehire\":true"; sep=","; }
     [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
     [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
-    printf '{"name":"uldaman","mode":"remote",%s' "$start_json"
+    printf '{"name":"uldaman","mode":"%s",%s' "$MODE" "$start_json"
     printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
     printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
     return
   fi
-  printf '{"name":"uldaman","mode":"remote","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
+  if [ "$MODE" = observe ]; then
+    printf '{"name":"uldaman","mode":"observe","lead_bot":"%s","bots":%s,' "$LEAD" "$bots_json"
+  else
+    printf '{"name":"uldaman","mode":"commander","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
+  fi
   printf '"prepare":{"online":true,"fresh":%s,"gm_setup":["gm visible off"]},' "$FRESH"
   printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s"}}' "$sha_label"
 }
@@ -265,7 +323,11 @@ while :; do
 done
 
 # --- the result
-say "result: state=$STATE error=$(field result.report.error <<<"$ST")"
+RUN_ERR=$(field result.report.error <<<"$ST")
+say "result: state=$STATE error=$RUN_ERR"
+case $RUN_ERR in
+  *"pass force_start"*) say "the start was refused before anything was sent (a live pack or boss at the start point of a fresh instance): run again with --force-start to start there anyway, or start at a safer --pull-group, or --no-fresh in an instance that is cleared" ;;
+esac
 say "setup_s=$(field result.report.setup_s <<<"$ST") prepare=$(field result.report.prepare <<<"$ST")"
 if [ "$HIRE" = 1 ]; then
   say "ready: party=$(field result.report.ready.party <<<"$ST") level=$(field result.report.ready.level <<<"$ST") ok=$(field result.report.ready.ready <<<"$ST") hire_s=$(field result.report.ready.seconds <<<"$ST") setup_s=$(field result.report.ready.setup_s <<<"$ST") hired=$(field result.report.ready.hired <<<"$ST") reused=$(field result.report.ready.reused <<<"$ST") note=$(field result.report.ready.level_note <<<"$ST")"

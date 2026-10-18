@@ -20,8 +20,12 @@ type Report struct {
 	Current string     `json:"current,omitempty"` // the action in progress
 	Error   string     `json:"error,omitempty"`
 	Wipes   int        `json:"wipes"`
-	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead (counted apart from Wipes).
+	// PartyDowns are the remote run's stops at three dead bots inside the dungeon, the party not all dead: part of Wipes, not extra to it (a run
+	// with five recovered party downs said wipes 0 before Wipes counted every wipe, zf-r4-s4).
 	PartyDowns int `json:"party_downs,omitempty"`
+	// WipeRecoveries are the wipes the remote run recovered from (a whole-party wipe, a party down or a wipe after the boss's kill alike: each one
+	// revived the party and went on).
+	WipeRecoveries int `json:"wipe_recoveries,omitempty"`
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`
@@ -41,6 +45,10 @@ type Report struct {
 	// summon), as dungeon_run's setup parameter gave them: the run did not make them, but a run that needed any is
 	// not one a player could have started either.
 	SetupShortcuts []string `json:"setup_shortcuts"`
+	// Degraded lists what a run that ended "done" could not put right at its end: looting left off on bots after a companions_loot false
+	// leg, the agent not back at its safe point after an area trigger. The state stays "done" (the plan was cleared); the dungeon_done
+	// event and the report carry it, and the run's final text says "(degraded: ...)".
+	Degraded []string `json:"degraded,omitempty"`
 	// Buffs are the spells the run was asked to put on the companions (GM .aura); each application is also a "buff"
 	// entry in gm_shortcuts, so a buffed run is never mistaken for a player's.
 	Buffs []Buff `json:"buffs"`
@@ -70,6 +78,9 @@ type Report struct {
 	TankFirst *TankFirstReport `json:"tank_first,omitempty"`
 	// RunID names the run: it is in every dungeon event (data.run_id) and in the trace file's header.
 	RunID string `json:"run_id"`
+	// RunMeta names the AI driver of the run (model, effort, run label, server_trace): it is written into the trace header, and
+	// with server_trace a remote run also sends it to the server's run record at run start. Absent when the run named none.
+	RunMeta *RunMeta `json:"run_meta,omitempty"`
 	// Trace says where the run's trace went and how it scored (README "Run traces and checks"); set when the run ends.
 	Trace *tracerun.Info `json:"trace,omitempty"`
 	// TraceFile is the trace's path while the run goes (empty when tracing is off or the file could not be made).
@@ -201,6 +212,7 @@ func (p *reporter) snapshot() Report {
 	r.Deaths = append([]Death{}, p.r.Deaths...)
 	r.Shortcuts = append([]Shortcut{}, p.r.Shortcuts...)
 	r.SetupShortcuts = append([]string{}, p.r.SetupShortcuts...)
+	r.Degraded = append([]string(nil), p.r.Degraded...)
 	r.Buffs = append([]Buff{}, p.r.Buffs...)
 	r.Legs = append([]LegReport{}, p.r.Legs...)
 	r.Notes = append([]string{}, p.r.Notes...)
@@ -258,9 +270,22 @@ func summaryOf(r Report) map[string]any {
 	return m
 }
 
+// AllWipes is every wipe the run met: the whole-party ones, the stops at three dead bots (party downs) and the wipes after a boss's kill. Wipes
+// counts them all (dungeon_status reads it); AllWipes is kept for the callers that named it.
+func (r Report) AllWipes() int { return r.Wipes }
+
+// wholePartyWipes are the wipes that were neither a stop at three dead bots nor after a boss's kill.
+func (r Report) wholePartyWipes() int {
+	n := r.Wipes - r.PartyDowns
+	if r.Remote != nil {
+		n -= r.Remote.WipesAfterKill
+	}
+	return max(n, 0)
+}
+
 func summaryBase(r Report) map[string]any {
 	return map[string]any{"plan": r.Plan, "state": r.State, "seconds": r.Seconds, "legs": r.runLegs(), "deaths": len(r.Deaths),
-		"wipes": r.Wipes, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
+		"wipes": r.AllWipes(), "wipes_whole_party": r.wholePartyWipes(), "party_downs": r.PartyDowns, "wipe_recoveries": r.WipeRecoveries, "gm_shortcuts": len(r.Shortcuts), "setup_shortcuts": len(r.SetupShortcuts), "buffs": buffNames(r.Buffs),
 		"leader_gm": r.LeaderGM, "gm_caps": r.GMCaps, "leader_deaths": r.LeaderDeaths, "resurrections": r.Resurrections, "corpse_runs": r.CorpseRuns, "seconds_dead": r.SecondsDead, "rest_seconds": r.RestSeconds,
 		"rest_share": r.RestShare, "rest_gates_skipped": r.RestGatesSkipped}
 }

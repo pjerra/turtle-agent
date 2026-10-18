@@ -35,6 +35,9 @@ func castPriority(c *Ctx, caster *objects.Unit, cast *objects.Cast) int {
 	if cast.EndsInMS != nil && time.Duration(*cast.EndsInMS)*time.Millisecond < interruptMinLeft {
 		return 0
 	}
+	if tacticInterrupt(c, cast.SpellID) {
+		return 4 // the plan names this cast: before a heal or a crowd-control spell
+	}
 	if known {
 		if meta.Flags.Has(spells.FlagHeal) || ccMechanics[meta.Mechanic] {
 			return 3

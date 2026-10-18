@@ -68,6 +68,12 @@ type Params struct {
 	// RunID names the brain session: it is in the status, in every brain event (data.run_id) and in the trace's header. Empty:
 	// Start makes one (a dungeon run passes its own, so that both share it).
 	RunID string `json:"run_id,omitempty"`
+	// Rotation names a rotation file (rotation.go) that replaces the class rotation of the preset: its priority list is played instead of
+	// the strategy the file says it replaces. Empty: the preset as it is. An unknown name is refused.
+	Rotation string `json:"rotation,omitempty"`
+	// Encounters are the plan's bosses with their tactics (encounter.go); set by dungeon_run in leader mode. With at least one, the
+	// encounter and avoid_ground strategies are added.
+	Encounters []Encounter `json:"-"`
 }
 
 // Config holds the engine's timings. A zero field takes the default of DefaultConfig.
@@ -145,12 +151,16 @@ type memory struct {
 	idleAt      time.Time
 	idle        string
 	lastErr     string
-	ext         memExt  // positioning, line of sight, interrupts, items (world.go)
-	mel         melMem  // auto attack and stance changes (melee.go)
-	heal        healMem // health history, shields, dispels and the last friendly cast (heal.go)
-	sham        shamMem // the shaman's totems and weapon imbue (shaman.go)
-	dru         druMem  // the druid's refused Mark of the Wild casts (druid.go)
-	rez         rezMem  // resurrections sent and the moment one could be cast last (rez.go)
+	ext         memExt   // positioning, line of sight, interrupts, items (world.go)
+	mel         melMem   // auto attack and stance changes (melee.go)
+	heal        healMem  // health history, shields, dispels and the last friendly cast (heal.go)
+	sham        shamMem  // the shaman's totems and weapon imbue (shaman.go)
+	dru         druMem   // the druid's refused Mark of the Wild casts (druid.go)
+	rez         rezMem   // resurrections sent and the moment one could be cast last (rez.go)
+	encounter   string   // the encounter that is on (encounter.go), "" for none
+	stat        statsMem // the counters of the character's own play (stats.go)
+
+	drink drinkMem // rest_drink's "no drink" line, once per rest (heal.go)
 
 	// lastCastTarget is the target of the last cast sent (Ctx.cast); a refusal says which spell, not at whom.
 	lastCastTarget packet.GUID
@@ -241,11 +251,22 @@ type Brain struct {
 // New builds a brain on the game for p. It refuses an unknown strategy or role, and strategies whose rules or
 // chains name an action no active strategy defines.
 func New(g Game, cfg Config, p Params) (*Brain, error) {
-	strats, names, err := Resolve(p.Strategies)
+	strats, names, err := ResolveFor(p.Strategies, ResolveOpts{Rotation: p.Rotation, Encounters: len(p.Encounters) > 0})
 	if err != nil {
 		return nil, err
 	}
 	return assemble(g, cfg, p, strats, names)
+}
+
+// CheckParams reports what New would refuse about the strategies, the role and the rotation of p, without building a brain. A dungeon run
+// uses it to refuse a bad option at the call instead of at the first rest gate.
+func CheckParams(p Params) error {
+	strats, names, err := ResolveFor(p.Strategies, ResolveOpts{Rotation: p.Rotation, Encounters: len(p.Encounters) > 0})
+	if err != nil {
+		return err
+	}
+	_, err = resolveRole(p.Role, strats, names)
+	return err
 }
 
 // assemble builds a brain from strategies already in hand (the tests give their own).
@@ -260,6 +281,7 @@ func assemble(g Game, cfg Config, p Params, strats []*Strategy, names []string) 
 	}
 	b := &Brain{g: g, cfg: cfg.withDefaults(), p: p, strategies: strats, names: names, actions: map[string]*Action{},
 		mem: &memory{holds: map[uint32]hold{}, aholds: map[string]hold{}, eholds: map[uint32]time.Time{}}, vals: valueCache{}, restOK: func() bool { return true }, lock: NewMoveLock()}
+	b.mem.stat.reset()
 	for _, s := range strats {
 		for _, a := range s.Actions {
 			b.actions[a.Name] = a
@@ -364,6 +386,8 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 			continue
 		}
 		if ok, d := b.try(ctx, c, cd.a, cd.trigger, cd.rel, "", map[string]bool{}, 0); ok {
+			b.statDecision(d)
+			b.statTick(c, true)
 			b.record(d)
 			b.emitDecision(d)
 			b.mem.mu.Lock()
@@ -373,6 +397,7 @@ func (b *Brain) Tick(ctx context.Context) (done *Decision) {
 			return &d
 		}
 	}
+	b.statTick(c, false)
 	b.report(c, cands)
 	return nil
 }
@@ -515,6 +540,9 @@ func (b *Brain) observeFailures(c *Ctx) {
 		return
 	}
 	f := cs.LastFailure
+	if cs.Failures > seen {
+		b.statRefused(f.ReasonName, cs.Failures-seen)
+	}
 	d, ok := holdFor[f.ReasonName]
 	if !ok {
 		d = defaultHold

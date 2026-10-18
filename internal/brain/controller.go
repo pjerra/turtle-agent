@@ -186,5 +186,26 @@ func (c *Controller) statusLocked() Status {
 	return st
 }
 
+// Stats is the counters of the character's play of the brain that runs, or of the last one (zero values without one).
+func (c *Controller) Stats() Stats {
+	c.mu.Lock()
+	b := c.b
+	c.mu.Unlock()
+	if b == nil {
+		return Stats{Actions: map[string]int{}, CastFailed: map[string]int{}, MinPowerPct: -1}
+	}
+	return b.mem.stat.snapshot()
+}
+
+// ResetStats starts a new window of counters (the pull test does it before every try). It does nothing without a brain.
+func (c *Controller) ResetStats() {
+	c.mu.Lock()
+	b := c.b
+	c.mu.Unlock()
+	if b != nil {
+		b.mem.stat.reset()
+	}
+}
+
 // Close stops the brain; call it before the process ends.
 func (c *Controller) Close() { c.Stop() }

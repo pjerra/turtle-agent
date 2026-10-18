@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -30,7 +31,9 @@ type botFake struct {
 }
 
 func (g *botFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
-	g.lines = append(g.lines, command)
+	if command != "roster" { // the start of a run reads the roster for its cc bot (resolveCCBot); what these tests count are the other lines
+		g.lines = append(g.lines, command)
+	}
 	var got []string
 	for _, l := range g.replies[command] {
 		got = append(got, l)
@@ -216,13 +219,32 @@ func TestRemoteRezWaitLetsTheHealerRaise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v %v", err, rep.Notes)
 	}
-	if len(g.ordersOf("cmd revive")) != 0 || rep.Remote.Revives != 0 || rep.Remote.RezWaits != 1 || rep.Remote.Rezzed != 1 {
+	if len(g.ordersOf("cmd revive")) != 0 || rep.Remote.Revives != 0 || rep.Remote.RezWaits != 1 || rep.Remote.Rezzed != 1 || rep.Remote.Rezzes != 1 {
 		t.Fatalf("orders %v %+v\n%s", g.ordersOf("cmd revive"), rep.Remote, notesOf(rep))
 	}
 }
 
 func plan1() *Plan {
 	return remotePlan(Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 0, 0}}}}})
+}
+
+// A body lying far from every living caster (rez_reach_yd) is not waited for: the caster would have to run to it, and the existing revive
+// path takes it at once. A body near the caster is left to it (the test above).
+func TestRemoteRezWaitSkippedForAFarCorpse(t *testing.T) {
+	g := newFakeRemote(t)
+	g.addMob(299, Point{30, 0, 0})
+	g.party[2].Dead, g.party[2].HP, g.party[2].State = true, 0, "d"
+	g.party[2].X = -100 // its body lies 100 yd from the healer
+	g.lagUntil = map[packet.GUID]time.Time{gMage: g.now.Add(time.Hour)}
+	o := opts()
+	o.Healer = "Healy"
+	rep, err := runRemote(t, g, plan1(), o, nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	if len(g.ordersOf("cmd revive")) != 1 || rep.Remote.RezWaits != 0 || rep.Remote.Rezzes != 0 {
+		t.Fatalf("%v %+v", g.orders, rep.Remote)
+	}
 }
 
 // G8: no caster left to raise it (the dead bot is the only one with mana besides none): released at once, no wait.
@@ -339,7 +361,7 @@ func TestRemotePreflightReportsWhatIsMissing(t *testing.T) {
 		t.Fatalf("%v", g.lines)
 	}
 	// Maintenance goes out before any inventory is read, and before the first order of the run.
-	if g.lines[0] != "maintenance Tanky" || g.lines[3] != "command Tanky talents" || g.lines[4] != "inv Tanky" {
+	if g.lines[0] != "maintenance Tanky" || g.lines[3] != "command Tanky talents" || g.lines[5] != "command Magey talents" || g.lines[6] != "inv Tanky" {
 		t.Fatalf("%v", g.lines)
 	}
 }
@@ -697,5 +719,99 @@ func TestRemoteBossKilledInItsAddsPull(t *testing.T) {
 	}
 	if !strings.Contains(notesOf(rep), "[777] is dead (killed in this run)") {
 		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// multiFake answers BotLinesAll too (the real game does, tbm.Commander.LinesAll): one call for the party's talents, its wait recorded.
+type multiFake struct {
+	*botFake
+	calls   int
+	waits   []time.Duration
+	silent  map[string]bool // bots that never answer `talents`
+	allCmds []string
+}
+
+func (g *multiFake) BotLinesAll(_ context.Context, reqs []BotLineRequest, wait time.Duration) ([][]string, []bool, error) {
+	g.calls++
+	g.waits = append(g.waits, wait)
+	lines, settled := make([][]string, len(reqs)), make([]bool, len(reqs))
+	for i, r := range reqs {
+		g.allCmds = append(g.allCmds, r.Command)
+		for _, l := range g.replies[r.Command] {
+			if g.silent[strings.Fields(r.Command)[1]] && strings.Contains(l, "talent spec") {
+				continue
+			}
+			lines[i] = append(lines[i], l)
+			if r.Done(l) {
+				settled[i] = true
+				break
+			}
+		}
+	}
+	return lines, settled, nil
+}
+
+// The talents of the whole party are asked together and read in one wait of at most 7 s (it was 6 s per bot, one after another: 31 s per
+// start in the 2026-10-15 ZF runs); a bot that does not answer is "no answer" and a warning, the others are read.
+func TestRemotePreflightTalentsAreAskedTogether(t *testing.T) {
+	g := &multiFake{botFake: kitFake(t), silent: map[string]bool{"Healy": true}}
+	rep, err := runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	if g.calls != 1 || len(g.waits) != 1 || g.waits[0] > 7*time.Second || len(g.allCmds) != 3 {
+		t.Fatalf("calls %d waits %v commands %v", g.calls, g.waits, g.allCmds)
+	}
+	if got := g.sent("command"); len(got) != 0 {
+		t.Fatalf("talents were also asked one by one: %v", got)
+	}
+	pf := rep.Remote.Preflight
+	talents := map[string]string{}
+	for _, b := range pf.Bots {
+		talents[b.Name] = b.Talents
+	}
+	if talents["Tanky"] != "0/5/31" || talents["Magey"] != "0/5/31" || talents["Healy"] != "no answer" {
+		t.Fatalf("talents %v", talents)
+	}
+	if all := strings.Join(pf.Warnings, "\n"); !strings.Contains(all, "Healy: talents: no answer") || strings.Contains(all, "Tanky: talents") {
+		t.Fatalf("warnings %v", pf.Warnings)
+	}
+}
+
+func TestRemotePreflightTalentsAllAnswered(t *testing.T) {
+	g := &multiFake{botFake: kitFake(t)}
+	rep, err := runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	for _, b := range rep.Remote.Preflight.Bots {
+		if b.Talents != "0/5/31" {
+			t.Errorf("%+v", b)
+		}
+	}
+	for _, w := range rep.Remote.Preflight.Warnings {
+		if strings.Contains(w, "talents") {
+			t.Errorf("warning %q", w)
+		}
+	}
+}
+
+// A bot that answers 0 spent points through BotLinesAll is warned about (a reset spec), the others are not.
+func TestRemotePreflightTalentsZeroPointsWarnsInTheTogetherPath(t *testing.T) {
+	g := &multiFake{botFake: kitFake(t)}
+	g.replies["command Healy talents"] = []string{"Forwarded command for Healy: talents; action success is not guaranteed.", "My current talent spec is: Holy (0/0/0) Link: 0"}
+	rep, err := runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil {
+		t.Fatalf("%v %v", err, rep.Notes)
+	}
+	pf := rep.Remote.Preflight
+	all := strings.Join(pf.Warnings, "\n")
+	if g.calls != 1 || pf.OK || !strings.Contains(all, "Healy: no talent points spent (0/0/0): a reset spec?") || strings.Contains(all, "Tanky: no talent") || strings.Contains(all, "Magey: no talent") {
+		t.Fatalf("calls %d warnings %v", g.calls, pf.Warnings)
+	}
+	for _, b := range pf.Bots {
+		if b.Name == "Healy" && b.Talents != "0/0/0" {
+			t.Errorf("%+v", b)
+		}
 	}
 }

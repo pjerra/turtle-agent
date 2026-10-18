@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Export the creature and game object spawns and the entrances of one map from the Tortoise world database to the
-# three TSV files that dungeongen reads:   export.sh <map> <outdir>   (writes <outdir>/creatures.tsv, gameobjects.tsv, entrances.tsv and portals.tsv)
+# three TSV files that dungeongen reads:   export.sh <map> <outdir>   (writes <outdir>/creatures.tsv, gameobjects.tsv, entrances.tsv, portals.tsv and movement.tsv)
 #
 # The database is the one in the docker stack on the server host. SELECTs only: the session is opened with
 # SET SESSION TRANSACTION READ ONLY and every statement below is a SELECT. No credential is read, printed or stored here:
@@ -66,4 +66,13 @@ FROM areatrigger_teleport t LEFT JOIN areatrigger_template a ON a.id = t.id
 WHERE t.target_map = $map ORDER BY t.id;
 SQL
 } > "$out/portals.tsv"
+# The waypoints of the map's patrolling spawns (creature_movement, movement type 2): a plan's patrol paths are copied from here.
+{
+  printf 'guid\tpoint\tx\ty\tz\twaittime\n'
+  query <<SQL
+SELECT m.id, m.point, m.position_x, m.position_y, m.position_z, m.waittime
+FROM creature_movement m JOIN creature c ON c.guid = m.id
+WHERE c.map = $map ORDER BY m.id, m.point;
+SQL
+} > "$out/movement.tsv"
 wc -l "$out"/*.tsv

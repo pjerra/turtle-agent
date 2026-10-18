@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -22,21 +23,39 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	bad := func(format string, a ...any) error {
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: fmt.Sprintf(format, a...)}
 	}
-	switch strings.ToLower(p.Mode) {
-	case "", "group":
-		if p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 {
-			return false, bad(`from_pull_group, start_here, have_items and pulltest go with mode "remote" (group mode has teleport)`)
+	mode, _, merr := runMode(p.Mode)
+	if merr != nil {
+		return false, merr
+	}
+	if mode == modeObserve {
+		if err := checkObserve(p, bad); err != nil {
+			return true, err
+		}
+	}
+	switch mode {
+	case modeLeader:
+		if p.FromPullGroup != nil || p.StartHere || len(p.HaveItems) > 0 {
+			return false, bad(`from_pull_group, start_here and have_items go with mode "remote" (commander; leader and group mode have teleport)`)
+		}
+		if len(p.GiveItems) > 0 {
+			return false, bad(`give_items goes with mode "remote" (commander): it sends .additem to a hired or named bot at the prepare step`)
+		}
+		if p.Pulltest != nil && (p.Teleport || p.Resume != nil) {
+			return false, bad(`pulltest in leader mode runs where the party stands, at the pack: leave teleport and resume out`)
+		}
+		if p.ForceStart {
+			return false, bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); leader mode has no such gate, so it would do nothing`)
 		}
 		if p.Tune != "" || p.LiveReload != nil {
-			return false, bad(`tune and live_reload go with mode "remote"`)
+			return false, bad(`tune and live_reload go with mode "remote" (commander)`)
 		}
-		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.KeepOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
-			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote"`)
+		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" || len(p.CC) > 0 || p.Team != "" || p.Preflight != "" || p.OnEnd != "" || p.KeepOnFail || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.GravesBatch != 0 || p.GravesRamp != nil || p.GravesOpenBy != "" || p.Enter != "" || p.IgnoreEntryLimit || p.Prepare != nil {
+			return false, bad(`lead_bot, bots, tank, healer, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, graves_open_by, cc, team, preflight, on_end, keep_on_fail, enter, ignore_entry_limit and prepare go with mode "remote" (commander)`)
+		}
+		if (p.Rotation != "" || p.Role != "") && p.Brain == "" && !strings.EqualFold(p.Mode, modeLeader) {
+			return false, bad(`rotation and role go with a brain (brain, or mode "leader", which picks the preset of the character's class)`)
 		}
 		return false, nil
-	case "remote":
-	default:
-		return false, bad(`mode must be "group" or "remote"`)
 	}
 	if p.Prepare != nil && p.Prepare.HiredParty() {
 		if p.LeadBot != "" || len(p.Bots) > 0 || p.Tank != "" || p.Healer != "" {
@@ -53,6 +72,22 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	}
 	if v := strings.ToLower(p.ObjectFallback); !slices.Contains([]string{"", dungeon.ObjectFallbackAgent, dungeon.ObjectFallbackOff}, v) {
 		return true, bad("object_fallback: %q is neither %q nor %q", p.ObjectFallback, dungeon.ObjectFallbackAgent, dungeon.ObjectFallbackOff)
+	}
+	if v := strings.ToLower(p.GravesOpenBy); !slices.Contains([]string{"", dungeon.GravesOpenCarrier, dungeon.GravesOpenAgent}, v) {
+		return true, bad("graves_open_by: %q is neither %q nor %q", p.GravesOpenBy, dungeon.GravesOpenCarrier, dungeon.GravesOpenAgent)
+	}
+	if p.GravesBatch < 0 || p.GravesBatch > 20 {
+		return true, bad("graves_batch: %d is outside 1-20", p.GravesBatch)
+	}
+	if r := p.GravesRamp; r != nil {
+		switch {
+		case p.GravesBatch != 0:
+			return true, bad("graves_batch and graves_ramp are two ways to set the batch size: give one")
+		case r.Start < 0 || r.Start > 20 || r.Step < 0 || r.Step > 10 || r.Max < 0 || r.Max > 40:
+			return true, bad("graves_ramp: start is 0-20 (default %d), step 0-10 (default %d), max 0-40 (0: no limit)", dungeon.GravesRampStart, dungeon.GravesRampStep)
+		case r.Max > 0 && r.Start > r.Max:
+			return true, bad("graves_ramp: start %d is above max %d", r.Start, r.Max)
+		}
 	}
 	if t := strings.ToLower(p.Team); t != "" && t != dungeon.TeamAlliance && t != dungeon.TeamHorde {
 		return true, bad("team: %q is neither %q nor %q", p.Team, dungeon.TeamAlliance, dungeon.TeamHorde)
@@ -71,6 +106,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 			return true, bad("%v", err)
 		}
 	}
+	if err := dungeon.ValidateGiveItems(p.GiveItems); err != nil {
+		return true, bad("%v", err)
+	}
 	for _, c := range p.CC {
 		if c.Entry == 0 || !slices.Contains(tbm.CCMarks, strings.ToLower(c.Mark)) || (c.Bot != "" && !botName.MatchString(c.Bot)) {
 			return true, bad("cc: each rule needs an entry, a mark (%s) and optionally a bot name", strings.Join(tbm.CCMarks, ", "))
@@ -81,14 +119,55 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		return true, bad(`teleport is a GM command of group mode; a remote run enters the dungeon itself (enter)`)
 	case p.Buffs != nil:
 		return true, bad(`buffs are GM commands (.aura); remote mode sends none`)
-	case p.Brain != "":
-		return true, bad(`brain plays the agent's own character; in remote mode the bots fight`)
+	case p.Brain != "" || p.Rotation != "" || p.Role != "":
+		return true, bad(`brain, rotation and role play the agent's own character; in remote (commander) mode the bots fight`)
 	case p.GM != nil || p.GMLevel != nil:
 		return true, bad(`gm and gm_level do not apply: a remote run sends no GM command but the one .tele name of its enter phase, which it asks the server about (enter)`)
 	case p.WaitSickness:
 		return true, bad(`wait_sickness is for the agent's own corpse run; it does not apply in remote mode`)
 	}
 	return true, nil
+}
+
+// checkObserve refuses what has no meaning in observe mode: the run leader on the server does the walking, the pulling and the object
+// steps, and the agent sends it no order, so the options that steer those (or start inside the plan) are refused instead of ignored.
+func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
+	switch {
+	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
+		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
+	case len(p.GiveItems) > 0:
+		return bad(`give_items puts items in the bags of the driven run's bots; in observe mode the run leader on the server gives the agent no such step (and its plan leaves an optional item leg out)`)
+	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil || p.GravesBatch != 0 || p.GravesRamp != nil || p.GravesOpenBy != "":
+		return bad(`cc, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, graves_open_by, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
+	case p.Tune != "" || p.LiveReload != nil:
+		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
+	case p.ForceStart:
+		return bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); observe mode starts at the plan's first step, so it would do nothing`)
+	}
+	if o := p.Observe; o != nil {
+		if o.Plan != "" && !planName.MatchString(o.Plan) {
+			return bad("observe.plan: %q is not a plan name (a-z, 0-9, _ and -)", o.Plan)
+		}
+		for _, v := range []struct {
+			name string
+			s    float64
+		}{{"poll_s", o.PollS}, {"max_run_s", o.MaxRunS}, {"stall_s", o.StallS}, {"paused_wait_s", o.PausedWaitS}} {
+			if v.s < 0 || v.s > 24*3600 {
+				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
+			}
+		}
+	}
+	return nil
+}
+
+// observeSpec is the dungeon.ObserveSpec of the run's observe parameters.
+func observeSpec(o *observeParam) *dungeon.ObserveSpec {
+	spec := &dungeon.ObserveSpec{}
+	if o != nil {
+		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS)
+	}
+	return spec
 }
 
 // checkNamedParty checks the lead bot, the other bots, the tank and the healer of a run that names its party.
@@ -115,6 +194,13 @@ func checkNamedParty(p dungeonRunParams, bad func(string, ...any) error) error {
 	return nil
 }
 
+// remoteRecoverWipe is the recover_wipe setting of a run that goes through startRemote: the caller's word, else on in a commander run and off
+// in an observed one (the agent steers nothing there; checkObserve refuses the option, so only the default is left).
+func remoteRecoverWipe(p dungeonRunParams) bool {
+	mode, _, _ := runMode(p.Mode)
+	return recoverWipeOn(p.RecoverWipe, mode != modeObserve)
+}
+
 // startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.
 func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, plan *dungeon.Plan, planPath, tunePath string, setup []string, from int, names []string) (dungeonRunResult, error) {
 	if r.remote == nil {
@@ -122,12 +208,20 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
-	cfg.Setup, cfg.RecoverWipe = setup, p.RecoverWipe
+	cfg.Setup = setup
 	cfg.Resume = p.Resume != nil && *p.Resume
 	if p.Watchdog != nil {
 		cfg.Watchdog = *p.Watchdog
 	}
-	opt := dungeon.RemoteOptions{PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	var observe *dungeon.ObserveSpec
+	mode, _, _ := runMode(p.Mode)
+	if mode == modeObserve {
+		observe = observeSpec(p.Observe)
+	}
+	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
+	// options say off.
+	cfg.RecoverWipe = remoteRecoverWipe(p)
+	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}
@@ -145,6 +239,10 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		c.Mark = strings.ToLower(c.Mark)
 		opt.CC = append(opt.CC, c)
 	}
+	// The abilities the options need are checked before the driver starts, so that a run that cannot give items fails before it hires anyone.
+	if err := dungeon.RemoteAbilities(remoteGame{r.remote}, opt, plan); err != nil {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: err.Error()}
+	}
 	drv := dungeon.NewRemoteDriver(plan, remoteGame{r.remote}, cfg, opt, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
@@ -155,7 +253,11 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		_ = drv.Run(ctx, from)
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
-	return dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", LeadBot: p.LeadBot}, nil
+	res := dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}
+	if observe != nil {
+		res.Mode, res.RunMode = modeObserve, modeObserve
+	}
+	return res, nil
 }
 
 // keptHires is a copy of what the run that kept a binding read of its hires (nil when none was kept). The caller holds r.mu.

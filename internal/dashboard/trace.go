@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -46,16 +47,18 @@ type TraceParty struct {
 
 // TraceSnapshot is what the dashboard knows of a trace file.
 type TraceSnapshot struct {
-	Path    string
-	SHA     string
-	Plan    string
-	RunID   string
-	Map     uint32
-	Started time.Time
-	Party   []TraceParty
-	Orders  []Order // the last maxOrders, oldest first
-	Ended   bool
-	Size    int64
+	Path string
+	SHA  string
+	// RouteEdit is the run's trace_meta.route_edit ("zulfarrak@v0007 sha256=..."): which edit of the route editor the run was started with.
+	RouteEdit string
+	Plan      string
+	RunID     string
+	Map       uint32
+	Started   time.Time
+	Party     []TraceParty
+	Orders    []Order // the last maxOrders, oldest first
+	Ended     bool
+	Size      int64
 }
 
 type traceFile struct {
@@ -174,7 +177,8 @@ func (f *traceFile) line(b []byte) {
 			Map   uint32 `json:"map"`
 			Start string `json:"start"`
 			Meta  struct {
-				SHA string `json:"agent_sha"`
+				SHA       string `json:"agent_sha"`
+				RouteEdit string `json:"route_edit"`
 			} `json:"meta"`
 		}
 		if json.Unmarshal(b, &h) != nil {
@@ -184,6 +188,7 @@ func (f *traceFile) line(b []byte) {
 		if f.snap.SHA == "" {
 			f.snap.SHA = shortSHA(h.Meta.SHA)
 		}
+		f.snap.RouteEdit = cleanRouteEdit(h.Meta.RouteEdit)
 		f.snap.Started, _ = time.Parse(time.RFC3339Nano, h.Start)
 	case "party":
 		var p struct {
@@ -235,4 +240,16 @@ func shortSHA(s string) string {
 		return s[:12]
 	}
 	return s
+}
+
+// routeEditTag is the shape of a run's route_edit tag: <plan>@v0007 sha256=<64 hex>.
+var routeEditTag = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}@v\d{4} sha256=[0-9a-f]{64}$`)
+
+// cleanRouteEdit keeps a run's route_edit tag when it has the shape `turtle-agent route-edits export` prints, else nothing: the text is the
+// caller's, and the page shows it.
+func cleanRouteEdit(s string) string {
+	if routeEditTag.MatchString(s) {
+		return s
+	}
+	return ""
 }

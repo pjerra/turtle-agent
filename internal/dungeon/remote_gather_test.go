@@ -124,7 +124,7 @@ func TestRemoteHalfThePartyDeadStopsTheLeg(t *testing.T) {
 	o := opts()
 	o.Bots = append(o.Bots, "Roguey", "Huntey")
 	rep, err := runRemote(t, g, plan, o, nil)
-	if err == nil || !strings.Contains(err.Error(), "wipe") || rep.PartyDowns != 1 || rep.Wipes != 0 {
+	if err == nil || !strings.Contains(err.Error(), "wipe") || rep.PartyDowns != 1 || rep.Wipes != 1 {
 		t.Fatalf("%v wipes %d party downs %d\n%s", err, rep.Wipes, rep.PartyDowns, notesOf(rep))
 	}
 	if !strings.Contains(notesOf(rep), "3 of 5 bots are dead") {
@@ -159,7 +159,7 @@ func TestRemoteHalfThePartyDeadIsRecoveredWithRecoverWipe(t *testing.T) {
 	o.Bots = append(o.Bots, "Roguey", "Huntey")
 	o.RezWait = -1
 	rep, err := runRemote(t, g, plan, o, func(c *Config) { c.RecoverWipe = true })
-	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || rep.Wipes != 0 || len(g.revived) != 3 {
+	if err != nil || rep.State != "done" || rep.PartyDowns != 1 || rep.Wipes != 1 || len(g.revived) != 3 {
 		t.Fatalf("%v %s wipes %d revived %v\n%s", err, rep.State, rep.Wipes, g.revived, notesOf(rep))
 	}
 }
@@ -306,5 +306,37 @@ func TestRemoteWalkPullsOnlyHostiles(t *testing.T) {
 	rep, err = runRemote(t, g, remotePlan(Leg{Name: "first", To: Point{120, 0, 0}}), opts(), nil)
 	if err != nil || rep.State != "done" || g.mobsKilled != 1 || rep.Remote.WalkAggros != 1 {
 		t.Fatalf("a neutral attacking the party was not fought: %v killed %d walk aggros %d\n%s", err, g.mobsKilled, rep.Remote.WalkAggros, notesOf(rep))
+	}
+}
+
+// ZF hires-2 run 6: the walk of leg 0 stopped (and gathered) 15 yd from a room of Velratha's packs of leg 2, which the walk took for the
+// plan's and left alone; ten mobs came. A pack of another leg standing in this leg's way is pulled before the hop like an unlisted one.
+func TestRemoteLaterLegsPackNearTheRouteIsPulled(t *testing.T) {
+	g := newFakeRemote(t)
+	g.aggro = 12
+	m := g.addMob(77, Point{60, 8, 0})
+	plan := remotePlan(Leg{Name: "first", To: Point{120, 0, 0}},
+		Leg{Name: "second", To: Point{100, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{77}, Positions: []Point{{60, 8, 0}}}}})
+	rep, err := runRemote(t, g, plan, opts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if m.aggroed || g.indexOf("cmd pullback "+tbm.GUIDArg(m.guid)) < 0 || rep.Remote.AheadPulls != 1 {
+		t.Fatalf("aggroed %v ahead %d orders %v", m.aggroed, rep.Remote.AheadPulls, g.orders)
+	}
+}
+
+// A hostile 27 yd off the route is out of AggroGuard (22) of the hops but within GatherClear (30) of a hop's end, where the party
+// would stop and gather: it is pulled first.
+func TestRemoteGatherSpotKeepsClearOfAPack(t *testing.T) {
+	g := newFakeRemote(t)
+	g.aggro = 10
+	m := g.addMob(77, Point{50, 27, 0})
+	rep, err := runRemote(t, g, remotePlan(Leg{Name: "first", To: Point{120, 0, 0}}), opts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if g.indexOf("cmd pullback "+tbm.GUIDArg(m.guid)) < 0 || rep.Remote.AheadPulls != 1 {
+		t.Fatalf("ahead %d orders %v", rep.Remote.AheadPulls, g.orders)
 	}
 }

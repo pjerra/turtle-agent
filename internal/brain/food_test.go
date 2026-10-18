@@ -69,6 +69,50 @@ func TestLeaderEatsTheBestFoodItsLevelAllows(t *testing.T) {
 	}
 }
 
+// A mana leader at a rest gate with an empty bag has nothing to drink: rest_drink's trigger is off, and the rest says "no drink" once,
+// not on every tick. The next rest says it again, and a drink in the bag brings the drink back.
+func TestRestDrinkSaysNoDrinkOncePerRest(t *testing.T) {
+	g := newFake()
+	g.self.Class, g.self.Power = ClassPaladin, 400 // 40% mana
+	r := newRig(t, g, Params{Strategies: []string{"rest_drink"}})
+	noDrink := func() int {
+		n := 0
+		for _, e := range g.events("brain_idle") {
+			if e.Data["reason"] == "no_drink" {
+				n++
+			}
+		}
+		return n
+	}
+	for i := 0; i < 5; i++ {
+		if d := r.tick(time.Second); d != nil {
+			t.Fatalf("tick %d drank from an empty bag: %+v", i, d)
+		}
+	}
+	if n := noDrink(); n != 1 {
+		t.Fatalf("%d no-drink lines in five ticks of one rest, want 1", n)
+	}
+	if restDrink().Actions[0].Possible(r.b.newCtx(g.clk.Now())) {
+		t.Fatal("drink possible with an empty bag")
+	}
+	// Full on mana the rest is over; the next low-mana rest says it again.
+	g.setSelf(func(u *objects.Unit) { u.Power = manaFull })
+	r.tick(time.Second)
+	g.setSelf(func(u *objects.Unit) { u.Power = 400 })
+	r.tick(time.Second)
+	if n := noDrink(); n != 2 {
+		t.Fatalf("%d no-drink lines after a second rest, want 2", n)
+	}
+	// A drink in the bag: it is possible, and the rule drinks it.
+	g.items = []objects.Item{{Entry: 159, Count: 5}} // Refreshing Spring Water
+	if !restDrink().Actions[0].Possible(r.b.newCtx(g.clk.Now())) {
+		t.Fatal("drink not possible with a drink in the bag")
+	}
+	if d := r.tick(time.Second); d == nil || d.Action != "drink" || len(g.used) != 1 || g.used[0] != 159 {
+		t.Fatalf("%+v used %v", d, g.used)
+	}
+}
+
 func TestLeaderEatsAfterDrinkingWhenLowOnBoth(t *testing.T) {
 	r := restRig(t)
 	r.g.items = []objects.Item{{Entry: itemBread, Count: 5}, {Entry: itemWater, Count: 2}}

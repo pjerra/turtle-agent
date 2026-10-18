@@ -39,6 +39,25 @@ func TestLoadDefaultsAndLookup(t *testing.T) {
 	}
 }
 
+func TestLoadsRunMetaDefault(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"model":"haiku","effort":"max","run":"zf-ab-2-s5"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.RunMeta != (RunMeta{Model: "haiku", Effort: "max", Run: "zf-ab-2-s5"}) {
+		t.Fatalf("run_meta %+v", s.RunMeta)
+	}
+	s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"model":"haiku","server_trace":true}}`))
+	if err != nil || !s.RunMeta.ServerTrace {
+		t.Fatalf("server_trace %+v %v", s.RunMeta, err)
+	}
+	// 96 joined characters pass: 32+31+31 letters plus two colons.
+	full := `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"model":"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm","effort":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","run":"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"}}`
+	if _, err := Load(writeSettings(t, 0o600, full)); err != nil {
+		t.Fatalf("96-char driver refused: %v", err)
+	}
+}
+
 func TestRejectsGroupReadableFile(t *testing.T) {
 	_, err := Load(writeSettings(t, 0o644, good))
 	if err == nil || !strings.Contains(err.Error(), "chmod 600") {
@@ -48,15 +67,20 @@ func TestRejectsGroupReadableFile(t *testing.T) {
 
 func TestRejectsBadSettings(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown field": `{"realmd":"h:1","accounts":{"a":"b"},"pasword":"x"}`,
-		"no port":       `{"realmd":"192.0.2.10","accounts":{"a":"b"}}`,
-		"public rpc":    `{"realmd":"h:1","accounts":{"a":"b"},"rpc":"0.0.0.0:8765"}`,
-		"no accounts":   `{"realmd":"h:1","accounts":{}}`,
-		"empty pw":      `{"realmd":"h:1","accounts":{"a":""}}`,
-		"bad rpc_auth":  `{"realmd":"h:1","accounts":{"a":"b"},"rpc_auth":"yes"}`,
-		"short token":   `{"realmd":"h:1","accounts":{"a":"b"},"rpc_token":"short"}`,
-		"space token":   `{"realmd":"h:1","accounts":{"a":"b"},"rpc_token":"has a space in it, long"}`,
-		"token and off": `{"realmd":"h:1","accounts":{"a":"b"},"rpc_auth":"off","rpc_token":"0123456789abcdef"}`,
+		"unknown field":      `{"realmd":"h:1","accounts":{"a":"b"},"pasword":"x"}`,
+		"no port":            `{"realmd":"192.0.2.10","accounts":{"a":"b"}}`,
+		"public rpc":         `{"realmd":"h:1","accounts":{"a":"b"},"rpc":"0.0.0.0:8765"}`,
+		"no accounts":        `{"realmd":"h:1","accounts":{}}`,
+		"empty pw":           `{"realmd":"h:1","accounts":{"a":""}}`,
+		"bad rpc_auth":       `{"realmd":"h:1","accounts":{"a":"b"},"rpc_auth":"yes"}`,
+		"short token":        `{"realmd":"h:1","accounts":{"a":"b"},"rpc_token":"short"}`,
+		"space token":        `{"realmd":"h:1","accounts":{"a":"b"},"rpc_token":"has a space in it, long"}`,
+		"token and off":      `{"realmd":"h:1","accounts":{"a":"b"},"rpc_auth":"off","rpc_token":"0123456789abcdef"}`,
+		"bad run_meta key":   `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"driver":"x"}}`,
+		"lone server_trace":  `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"server_trace":true}}`,
+		"bad run_meta char":  `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"model":"a b"}}`,
+		"bad run_meta colon": `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"run":"a:b"}}`,
+		"long run_meta":      `{"realmd":"h:1","accounts":{"a":"b"},"run_meta":{"model":"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm","effort":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","run":"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"}}`,
 	} {
 		if _, err := Load(writeSettings(t, 0o600, body)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -102,6 +126,14 @@ func TestDungeonsDir(t *testing.T) {
 	}
 	if s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"}}`)); err != nil || s.DungeonsDir != "" {
 		t.Fatalf("%q %v", s.DungeonsDir, err)
+	}
+}
+
+func TestRotationsDir(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"rotations_dir":"~/rot"}`))
+	home, _ := os.UserHomeDir()
+	if err != nil || s.RotationsDir != filepath.Join(home, "rot") {
+		t.Fatalf("%q %v", s.RotationsDir, err)
 	}
 }
 

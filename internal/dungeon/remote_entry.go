@@ -189,6 +189,10 @@ func entryNotFound(command string, res tbm.OrderResult) error {
 // plan's point when the action has one (the server picks the object), by the GUID of the agent's own copy otherwise. When the server finds
 // nothing and the agent has a GUID, that is sent once as the fallback.
 func (d *RemoteDriver) carryObject(ctx context.Context, rec *objRec, a Action, build func(arg string) string) (res tbm.OrderResult, failed bool, err error) {
+	if a.SpawnGUID != 0 {
+		// The plan names the exact spawn: open that one by its GUID, never a neighbour of the same entry that an entry order would pick.
+		return d.carryOrFallback(ctx, rec, build(tbm.GUIDArg(a.SpawnGUID)), objectPoint(a))
+	}
 	if a.Entry == 0 {
 		return d.carryOrFallback(ctx, rec, build(tbm.GUIDArg(a.GUID)), objectPoint(a))
 	}

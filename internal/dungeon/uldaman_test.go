@@ -167,9 +167,33 @@ func TestUldamanFullPlan(t *testing.T) {
 			t.Errorf("%s: no ritual step of 3 with a stand point for altar %d: %+v", name, altar, l.Steps)
 		}
 	}
-	// The Sentinel's room: the two Relic Hunters on the ledge join its fight, so they die first.
-	if f := leg("sentinel").Boss.First; fmt.Sprint(f) != "[4847 4847]" {
-		t.Errorf("sentinel first %v", f)
+	// The Sentinel's room: the Relic Hunter camp (five Hunters and a Geologist, the two ledge Hunters among them 23-24 yd from the Sentinel).
+	// One group of six (hires-3: the engage loop pulled the whole camp with the Sentinel) was a pull of radius 31.9 around (-145.3 378.6),
+	// 15.7 yd from the Sentinel (aggro 20 yd): the tank walked toward the west Hunters to reach it and pulled six mobs with the boss
+	// (uldaman-events-4, near wipe). Now: the lone Hunter on the route, the east trio (radius 6, 24 yd from the Sentinel), and the two west
+	// ledge Hunters as the boss step's first entries.
+	sen := leg("sentinel")
+	if f := sen.Boss.First; fmt.Sprint(f) != "[4847 4847]" {
+		t.Errorf("sentinel first %v, want the two west ledge Hunters", f)
+	}
+	if n := len(sen.PullGroups); n != 6 {
+		t.Errorf("sentinel has %d pull groups, want 6 (scorpid, basilisk, scorpids, basilisk, the lone Hunter, the east trio)", n)
+	} else {
+		lone, trio := sen.PullGroups[n-2], sen.PullGroups[n-1]
+		if fmt.Sprint(lone.Entries) != "[4847]" || len(lone.Positions) != 1 {
+			t.Errorf("sentinel lone Hunter: %+v", lone)
+		}
+		if fmt.Sprint(trio.Entries) != "[4847 4847 7030]" || len(trio.Positions) != 3 || trio.Radius != 6 {
+			t.Errorf("sentinel east trio: %+v", trio)
+		}
+		var cx, cy float64
+		for _, p := range trio.Positions {
+			cx, cy = cx+float64(p.X)/3, cy+float64(p.Y)/3
+		}
+		boss := sen.Boss.Position
+		if d := math.Hypot(cx-float64(boss.X), cy-float64(boss.Y)); d < 22 {
+			t.Errorf("the east trio's pull point is %.1f yd from the Sentinel, inside its aggro range with the party's reach", d)
+		}
 	}
 	// Archaedas: the adds that wake with him are not waited for; the Vault opens when he dies.
 	a := leg("archaedas")
@@ -335,6 +359,9 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 	}
 	add(l.To, false)
 	for _, g := range l.PullGroups {
+		for _, a := range g.Approach {
+			add(a, false)
+		}
 		for _, gp := range g.Positions {
 			add(gp, false)
 		}
@@ -345,6 +372,12 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 		}
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(*s.Ritual.Stand, false)
+		}
+		if s.LootObject != nil && s.LootObject.Stand != nil {
+			add(*s.LootObject.Stand, false)
+		}
+		if s.AreaTrigger != nil {
+			add(s.AreaTrigger.Stand, false)
 		}
 	}
 	if l.Boss != nil {
@@ -364,17 +397,33 @@ func waypointsDirect(l Leg) (pts []Point, direct []bool) {
 }
 
 // sentinelLeg is the index of the leg that crosses the one hole of the map 70 navmesh: its via waypoints are the west lip at -163.5 298.7
-// (where the leg before it ends, the scorpid pit), a direct step under the rock overhang to -162.8 294.8 (in the hole) and a direct step
-// up the ramp to -158.4 283.7, the first point of the east mesh.
+// (where the leg before it ends, the scorpid pit), a plain move to -161.1 284.5 on the pit floor (the last navmesh point before the ramp,
+// a complete navmesh path from the lip) and a direct step up the ramp to -158.4 283.7, the first point of the east mesh.
 const sentinelLeg = 5
+
+// pitFloor is the first direct step's end since 2026-10-17 (live run uldaman-events-2): the old point under the rock overhang,
+// -162.8 294.8 -51.2, was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the next direct step summoned it.
+// This one is on the mesh with a complete path from the lip (17.0 yd), and the step up the ramp from it is 4.2 yd. Its sight lines were
+// checked on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70): clear 1.5, 2 and 2.5 yd up, to the ramp top both ways and
+// from the lip; vmap floor -52.32. Since the live run uldaman-events-4 (2026-10-17) it is a plain move, not a direct step: the walk to it
+// is on the mesh, and every direct step is a gather the run leader's walk back must pass (both pauses of that run were "the point of
+// step 40 refused 4 times (too-far: <bot> is not with Bonky ...)" on the walk back after the lead bot died).
+var pitFloor = Point{X: -161.1, Y: 284.5, Z: -52.1}
 
 // holeFloor are plan points inside the navmesh hole at the scorpid pit, between two direct steps: no mesh floor stands in for the
 // server's ground check there, so it was checked on the live map 70 vmap with the core's own VMapManager2::getHeight and
 // isInLineOfSight (lostool on the test VM, ~/tb-ci/vmaps70, 2026-10-14): floor -51.25 and 3.1 yd clear above it, in sight (2 yd up,
 // both ways) of the lip and of the ramp top from every floor point within 1 yd of them. A hole point must be followed by a direct step.
-var holeFloor = map[Point]string{
-	{X: -162.8, Y: 294.8, Z: -51.2}: "under the high side of the rock overhang south of the pit lip",
+// Since 2026-10-17 the plan has none (pitFloor is on the mesh); the map stays for a later point that needs it.
+var holeFloor = map[Point]string{}
+
+// shelfPacks are pack positions on a navmesh island next to the route: no path reaches them, the pack is pulled from its group's approach
+// point (it comes down to the party), and the walk goes on from there. The path toward one must end within shelfReach of it.
+var shelfPacks = map[Point]string{
+	{X: -179.0, Y: 321.7, Z: -52.7}: "Jadespine Basilisk 30084 on the shelf north of the scorpid pit: the pit's path ends 12.4 yd short, at -173.9 310.7 -50.0",
 }
+
+const shelfReach = 15
 
 // Every waypoint of the Uldaman plan is on the server's navmesh and reachable from the one before it, walking the way
 // the driver will (path_to / walk_path). Runs only where the map 70 mmaps are (see mmapsDir); needs the cgo build.
@@ -415,6 +464,14 @@ func TestUldamanOnNavmesh(t *testing.T) {
 				from = to
 				checked++
 				continue
+			}
+			if _, shelf := shelfPacks[w]; shelf && len(path.Points) > 0 {
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("legs[%d] waypoint %d: the path toward the shelf pack %v ends %.1f yd from it", i, j, w, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
 			}
 			if path.Status != navmesh.Complete {
 				t.Errorf("legs[%d] (%s) waypoint %d %v from %v: %s %s", i, l.Name, j, w, from, path.Status, path.Reason)
@@ -573,6 +630,9 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 	}
 	add("to", l.To)
 	for gi, g := range l.PullGroups {
+		for ai, a := range g.Approach {
+			add(fmt.Sprintf("pull_groups[%d].approach[%d]", gi, ai), a)
+		}
 		for pi, p := range g.Positions {
 			add(fmt.Sprintf("pull_groups[%d].positions[%d]", gi, pi), p)
 		}
@@ -583,6 +643,12 @@ func planPoints(l Leg) (pts []Point, labels []string, direct []bool) {
 		}
 		if s.Ritual != nil && s.Ritual.Stand != nil {
 			add(fmt.Sprintf("steps[%d].ritual.stand", si), *s.Ritual.Stand)
+		}
+		if s.LootObject != nil && s.LootObject.Stand != nil {
+			add(fmt.Sprintf("steps[%d].loot_object.stand", si), *s.LootObject.Stand)
+		}
+		if s.AreaTrigger != nil {
+			add(fmt.Sprintf("steps[%d].area_trigger.stand", si), s.AreaTrigger.Stand)
 		}
 	}
 	if l.Boss != nil {
@@ -639,6 +705,17 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", where, err)
 			}
+			if _, shelf := shelfPacks[w]; shelf {
+				if len(path.Points) == 0 {
+					t.Fatalf("%s: no path toward the shelf pack", where)
+				}
+				end := path.Points[len(path.Points)-1]
+				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > shelfReach {
+					t.Errorf("%s: the path toward the shelf pack ends %.1f yd from it", where, d)
+				}
+				checked++
+				continue // the party stays where it pulled from
+			}
 			switch {
 			case path.Status == navmesh.Complete:
 			case direct[j]:
@@ -661,7 +738,7 @@ func TestUldamanPlanPointsOnMesh(t *testing.T) {
 	t.Logf("%d plan points on the map 70 navmesh in %s", checked, dir)
 }
 
-// The plan crosses the scorpid pit's navmesh hole with two direct steps (`cmd move ... direct`), and a direct step is short: within the
+// The plan crosses the scorpid pit's navmesh hole with one direct step (`cmd move ... direct`) up the ramp, and a direct step is short: within the
 // limits TortoiseBots enforces (25 yd across, 8 up or down) of the via point before it, which is where the party gathers. Without the
 // navmesh files only the lengths are checked; with them, both ends have navmesh floor (the server's own check is the map height within
 // 3 yd, which the mesh floor stands in for here). The east end is also the leg's `to`, so the walk to `to` after the step is no walk.
@@ -719,15 +796,85 @@ func TestUldamanDirectSteps(t *testing.T) {
 			}
 		}
 	}
-	if found != 2 {
-		t.Fatalf("the plan has %d direct steps, want the two across the scorpid pit's hole (under the overhang, then up the ramp to the east mesh)", found)
+	if found != 1 {
+		t.Fatalf("the plan has %d direct steps, want the one across the scorpid pit's hole (up the ramp from the pit floor to the east mesh)", found)
 	}
-	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || !v[1].Direct || !v[2].Direct {
-		t.Fatalf("legs[%d] via %v: want the lip, then the two direct steps", sentinelLeg, v)
-	} else if _, hole := holeFloor[v[1].Point]; !hole {
-		t.Errorf("legs[%d] via[1] %v: the first direct step should end on the vmap-checked point under the overhang (holeFloor)", sentinelLeg, v[1].Point)
+	if v := p.Legs[sentinelLeg].Via; len(v) != 3 || v[1].Direct || !v[2].Direct {
+		t.Fatalf("legs[%d] via %v: want the lip, the pit floor (a plain move), then the direct step up the ramp", sentinelLeg, v)
+	} else if v[1].Point != pitFloor {
+		t.Errorf("legs[%d] via[1] %v: the pit floor move should end on the vmap-checked pit floor point %v (pitFloor)", sentinelLeg, v[1].Point, pitFloor)
 	}
 	if p.Legs[sentinelLeg].Name != "sentinel" {
 		t.Fatalf("legs[%d] is %q, the sentinel leg", sentinelLeg, p.Legs[sentinelLeg].Name)
+	}
+}
+
+// Uldaman A run 6 (2026-10-14): Grimlok's corridor wiped at pull group 4 because the trio of two Brawlers and a Geomancer 25 yd east of the
+// group of three at 55 417 aggroed on the tank's way to it. Every Stonevault Brawler and Geomancer of the corridor that is not Grimlok's own
+// group is a position of a pull group, and the trio is pulled before the group of three.
+func TestUldamanGrimlokCorridorHasNoUnplannedPack(t *testing.T) {
+	p := loadUldaman(t)
+	var leg *Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "grimlok" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil {
+		t.Fatal("no grimlok leg")
+	}
+	planned := func(m map[string]string) int {
+		for gi, g := range leg.PullGroups {
+			for _, at := range g.Positions {
+				if c := mustPoint(m); dist3(Point{at.X, at.Y, 0}, Point{c.X, c.Y, 0}) < 0.5 {
+					return gi
+				}
+			}
+		}
+		return -1
+	}
+	for _, m := range tsv(t, "creatures.tsv") {
+		x, y := mustPoint(m).X, mustPoint(m).Y
+		if (m["entry"] != "4853" && m["entry"] != "4855") || m["group_leader"] == "27528" || x < 25 || y < 360 || y > 450 {
+			continue
+		}
+		if planned(m) < 0 {
+			t.Errorf("creature %s (entry %s) at %.1f %.1f is in no pull group of the grimlok leg", m["guid"], m["entry"], x, y)
+		}
+	}
+	trio, three := -1, -1
+	for gi, g := range leg.PullGroups {
+		for _, at := range g.Positions {
+			if dist3(Point{at.X, at.Y, 0}, Point{78.9, 404.9, 0}) < 1 {
+				trio = gi
+			}
+			if dist3(Point{at.X, at.Y, 0}, Point{55.8, 416.1, 0}) < 1 {
+				three = gi
+			}
+		}
+	}
+	if trio < 0 || three < 0 || trio >= three || fmt.Sprint(leg.PullGroups[trio].Entries) != "[4855 4855 4853]" {
+		t.Errorf("the trio at 79 405 is group %d, the group of three at 56 416 is group %d: the trio comes first", trio, three)
+	}
+}
+
+func mustPoint(m map[string]string) Point {
+	f := func(k string) float32 { v, _ := strconv.ParseFloat(m[k], 32); return float32(v) }
+	return Point{f("x"), f("y"), f("z")}
+}
+
+// The rest gates of the legs after the Sentinel (Uldaman A run 5/6: the healer pulled at 63 % mana with the default 50 % and Galgann's
+// section wiped; with these gates it went clean): the party is full before every pull of the big sections.
+func TestUldamanLateLegsRestUntilTheHealerIsFull(t *testing.T) {
+	p := loadUldaman(t)
+	for i := 6; i <= 12; i++ {
+		r := p.Legs[i].Rest
+		if r == nil || r.Health != 95 || r.HealerMana != 90 || r.Mana != 70 || r.MaxS != 150 {
+			t.Errorf("leg %d (%s): rest %+v", i, p.Legs[i].Name, r)
+		}
+	}
+	// The casters that run at 15 % health are named, so that the driver kills them before they are out of reach.
+	if fmt.Sprint(p.Fleers) != "[4853 4848 4849 7321]" {
+		t.Errorf("fleers %v", p.Fleers)
 	}
 }
