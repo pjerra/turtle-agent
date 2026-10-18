@@ -78,6 +78,9 @@ type Report struct {
 	TankFirst *TankFirstReport `json:"tank_first,omitempty"`
 	// RunID names the run: it is in every dungeon event (data.run_id) and in the trace file's header.
 	RunID string `json:"run_id"`
+	// RunMeta names the AI driver of the run (model, effort, run label, server_trace): it is written into the trace header, and
+	// with server_trace a remote run also sends it to the server's run record at run start. Absent when the run named none.
+	RunMeta *RunMeta `json:"run_meta,omitempty"`
 	// Trace says where the run's trace went and how it scored (README "Run traces and checks"); set when the run ends.
 	Trace *tracerun.Info `json:"trace,omitempty"`
 	// TraceFile is the trace's path while the run goes (empty when tracing is off or the file could not be made).

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/trace"
@@ -40,6 +41,9 @@ func TestDungeonRunTraceParametersAreChecked(t *testing.T) {
 		{`{"name":"rig","trace_meta":` + string(big) + `}`, "at most 16"},
 		{`{"name":"rig","trace_meta":{"":"x"}}`, "trace_meta: keys and values"},
 		{`{"name":"rig","trace":"yes"}`, "trace"},
+		{`{"name":"rig","run_meta":{"model":"a b"}}`, "run_meta.model"},
+		{`{"name":"rig","run_meta":{"run":"a:b"}}`, "no colon"},
+		{`{"name":"rig","run_meta":{"server_trace":true}}`, "server_trace"},
 	} {
 		out := r.call("dungeon_run", c.params)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
@@ -93,6 +97,71 @@ func TestDungeonRunWritesATraceUnderTheRunID(t *testing.T) {
 	}
 }
 
+// A run started with run_meta carries it in the report and in the trace header beside trace_meta.
+func TestDungeonRunWritesRunMeta(t *testing.T) {
+	r, dir := traceRig(t)
+	r.call("dungeon_run", `{"name":"rig","run_id":"r-meta-1","trace_meta":{"tb_sha":"abc"},"run_meta":{"model":"haiku","effort":"max","run":"zf-ab-2-s5"}}`)
+	st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+		ds := m["result"].(map[string]any)
+		return ds["state"] == "failed" && ds["running"] == false
+	})["result"].(map[string]any)
+	rep := st["report"].(map[string]any)
+	rm, _ := rep["run_meta"].(map[string]any)
+	if rm["model"] != "haiku" || rm["effort"] != "max" || rm["run"] != "zf-ab-2-s5" {
+		t.Fatalf("report run_meta %v", rm)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-meta-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Header.Meta["tb_sha"] != "abc" || f.Header.Meta["run_model"] != "haiku" || f.Header.Meta["run_effort"] != "max" || f.Header.Meta["run_label"] != "zf-ab-2-s5" {
+		t.Fatalf("header meta %v", f.Header.Meta)
+	}
+}
+
+// Without run_meta in the call the slot's settings default applies; the call's own run_meta wins over it.
+func TestDungeonRunTakesRunMetaFromTheSlot(t *testing.T) {
+	mk := func(def string) (*agentRig, string) {
+		plans, traces := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(plans, "rig.json"), []byte(rigPlan), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mo := methodOptions{DungeonsDir: plans, TracesDir: traces, AccountProbeWindow: 50 * time.Millisecond}
+		if def != "" {
+			mo.RunMeta = dungeon.RunMeta{Model: "slot-model", Effort: "low", Run: def}
+		}
+		return newRigWith(t, session.Options{}, [3]float32{1, 2, 3}, mo), traces
+	}
+	metaOf := func(r *agentRig, params string) map[string]any {
+		r.call("dungeon_run", params)
+		st := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+			ds := m["result"].(map[string]any)
+			return ds["running"] == false
+		})["result"].(map[string]any)
+		return st["report"].(map[string]any)["run_meta"].(map[string]any)
+	}
+	r, _ := mk("slot-run")
+	if rm := metaOf(r, `{"name":"rig","run_id":"r-slot-1"}`); rm["model"] != "slot-model" || rm["run"] != "slot-run" {
+		t.Fatalf("slot default not applied: %v", rm)
+	}
+	r2, _ := mk("slot-run")
+	if rm := metaOf(r2, `{"name":"rig","run_id":"r-slot-2","run_meta":{"model":"call-model"}}`); rm["model"] != "call-model" || rm["effort"] != nil || rm["run"] != nil {
+		t.Fatalf("call meta did not win: %v", rm)
+	}
+	r2b, _ := mk("slot-run")
+	if rm := metaOf(r2b, `{"name":"rig","run_id":"r-slot-2b","run_meta":{}}`); rm["model"] != "slot-model" || rm["run"] != "slot-run" {
+		t.Fatalf("empty run_meta switched the slot default off: %v", rm)
+	}
+	r3, _ := mk("")
+	r3.call("dungeon_run", `{"name":"rig","run_id":"r-slot-3"}`)
+	st := r3.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+		ds := m["result"].(map[string]any)
+		return ds["running"] == false
+	})["result"].(map[string]any)
+	if rm, ok := st["report"].(map[string]any)["run_meta"]; ok && rm != nil {
+		t.Fatalf("run_meta without a default: %v", rm)
+	}
+}
 func TestDungeonRunTraceFalseWritesNothing(t *testing.T) {
 	r, dir := traceRig(t)
 	res := r.call("dungeon_run", `{"name":"rig","trace":false}`)["result"].(map[string]any)

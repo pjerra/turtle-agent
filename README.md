@@ -57,7 +57,7 @@ copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmes
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
 the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder
-`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)).
+`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default).
 
 Log a character in and keep it online with the RPC server running:
 
@@ -281,7 +281,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `tune_set` | `key` (a tunable, see [Live tuning](#live-tuning)), `value` (a number, or `"default"` or `null` to put the key back) | `key`, `old` (the value now), `new`, `applies`. Refused at once as invalid params when the key is unknown, the value is outside its limits or a whole number is wanted, or it breaks a rule between two values; else taken, with the same `tune_change` event as a file's change, at the run's next leg start or pull-group start. Errors when no remote run goes |
 | `tune_list` | | `tunables[]`: `key`, `unit`, `min`, `max`, `default`, `base` (what the run was made with), `value` (now), `source` (`base`, `file`, `rpc`), `queued` (a `tune_set` waiting for the boundary), `doc` |
 | `brain_start` | `strategies` (a list of preset or strategy names, e.g. `["frost_mage"]`), `role` (`dps`, `tank`, `healer`; empty takes the role of the strategies, `dps` when none names one; it must fit them), `tank` (the party member to follow; default: found by class and target), `no_move` (never walk the player: no positioning, no stepping out of ground effects, no run to the tank; default off; a dungeon run's brain moves), `rotation` (a [rotation file](#rotations-as-data) in place of the preset's class rotation) | the `brain_status` result. Turns the [bot brain](#bot-brain) on; refused while one runs |
-| `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
+| `dungeon_run` (run traces) | `run_id` (name the run: letters, digits, `.`, `_`, `-`, at most 64; default `r-<utc yyyymmddThhmmss>-<4 hex>`), `trace` (`false` writes no trace file; on by default), `trace_meta` (free text for the trace header such as `{"tb_sha": "..."}`, at most 16 entries), `run_meta` (the AI driver `{"model", "effort", "run", "server_trace"}`: written into the trace header and the report; with `server_trace: true`, off by default, a remote run also sends it to the server's run record and stops that trace at the end — read the limits in [Run traces and checks](#run-traces-and-checks) first; default: the settings file's `run_meta`, and an explicit `{}` leaves that default in place) | `run_id`, `trace_file` (where the run's trace goes). The report has `run_id`, `run_meta` (when given), `trace_file` and, once the run ended, `trace` (path, counts, `verdict`, `failed[]`, `checks[]`); see [Run traces and checks](#run-traces-and-checks) |
 | `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
@@ -1282,8 +1282,30 @@ Pull Lab; no code or data of it is used.
 **Run id.** `r-<utc yyyymmddThhmmss>-<4 hex>`, e.g. `r-20261014T093012-a1b2`, made by the agent, or the caller's own `run_id` (letters,
 digits, `.`, `_`, `-`, at most 64, starting with a letter or digit; it names the file, so nothing else is allowed). It is in the
 `dungeon_run` and `brain_start` results, in the report (`run_id`), in the data of every `dungeon_*` and brain event (`data.run_id`), and
-in the trace's header and file name. A caller that sets `run_id` can stamp the same id on the server side later; nothing is sent to the
-server yet. `trace_meta` (up to 16 `key: text` pairs, e.g. `{"tb_sha": "...", "build": "19h", "scenario": "uldaman-1"}`) is copied
+in the trace's header and file name. `run_meta` (`{"model", "effort", "run", "server_trace"}`, e.g. `{"model": "haiku", "effort":
+"max", "run": "zf-ab-2-s5"}`) names the run's AI driver: `dungeon_run`'s wins when it names a driver (it replaces the slot default
+whole; an explicit but empty `{}` counts as absent, so the slot default still applies), else the settings file's `run_meta`. It is
+written into the trace header (`run_model`, `run_effort`, `run_label` beside `trace_meta`) and into the run report. By default
+nothing of it goes to the server.
+
+**Server trace (opt-in).** With `run_meta.server_trace: true` (off by default; refused without a model, effort or run) a remote
+run, driven or observed, also stamps the run on the server: at run start it sends `.bot trace start <run_id> ...
+driver=<model>:<effort>:<run>` (TortoiseBots #986), so the server's summary and the agent's trace join on one id, and it ends that
+trace with `.bot trace stop` whatever way the run ends (done, failed, stopped, a panic: the stop is deferred right after the
+acknowledged start, bounded to 5 s). It needs a TortoiseBots build that has `.bot trace` (the `driver=` field lives on
+feat/986-trace-summary-fields). A group run never sends it: party chat carries no answer; the report notes it. The run owns the
+server trace from an acknowledged start until the server answers its stop: a stop with no answer, a transport error or any refusal
+other than `not-running` or `forbidden` is tried again (3 tries, then again at the end of the run, each retry after a `.bot trace
+status` shows the trace running is still this run's id); when every try fails the report says the trace may still be running and
+to stop it by hand. A refused start sends no stop. A start with no answer may still have been applied: no stop is sent for it, and
+the report notes `server trace state unknown (start not acknowledged): stop it by hand if one is running`.
+
+The server's `.bot trace stop` is not scoped: it takes no run id and stops whatever trace is running (the server records one at a
+time). Two windows cannot be made safe from the agent's side: a start the server applied whose acknowledgement was lost leaves a
+trace running that the agent does not stop, and between a retry's `.bot trace status` and its `.bot trace stop` someone else's
+trace could start and be the one stopped. Enable `server_trace` only on boxes where nobody starts traces by hand. A run-id-scoped,
+atomic stop on the server (`.bot trace stop <run_id>`, refused unless that run is the one recording; TortoiseBots #986) would close
+both. and into the run report. `trace_meta` (up to 16 `key: text` pairs, e.g. `{"tb_sha": "...", "build": "19h", "scenario": "uldaman-1"}`) is copied
 into the header: the agent cannot know the server's build itself.
 
 **Where.** `<traces_dir>/<run_id>.jsonl` and `<traces_dir>/<run_id>.summary.json`. `traces_dir` is a settings key (a leading `~/` is the home

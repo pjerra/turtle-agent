@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -110,6 +111,7 @@ type fakeRemote struct {
 	tankTooFar   int
 	noDirect     bool                // the module does not know the direct flag: a move with it is refused as invalid
 	cmdErr       map[string][]string // verb -> codes the next such orders are refused with
+	traceErr     string              // code every `trace ...` order is refused with (an old module without the recorder)
 	holdDelay    time.Duration       // the mob goes on the tank this long after the pull; negative: the mage keeps it
 	engageDelay  time.Duration
 	killRate     float64 // hp per second once attacked
@@ -168,6 +170,12 @@ type fakeRemote struct {
 	leaveOnBind []string
 	stubborn    bool
 	joinErr     map[string]string
+	// traceAns scripts the next answers to `trace <verb>` (start, stop, status), one per order: "error" (a transport error,
+	// not applied), "timeout" (no answer, not applied), "lost" (applied, no answer), "cancel" (applied, the context is
+	// cancelled before the ack: context.Canceled), "hang" (no answer until the order's context ends, not applied), else
+	// an error code it is refused with. With none left the recorder answers as the server does (traceRun).
+	traceAns map[string][]string
+	traceRun string // the run id of the trace the fake server's recorder runs; "" idle
 }
 
 func newFakeRemote(t *testing.T) *fakeRemote {
@@ -411,6 +419,58 @@ func (g *fakeRemote) publish() {
 	g.stats.LastSeq = g.n
 }
 
+// traceRecorder is the fake server's run trace recorder (TortoiseBots `.bot trace start|stop|status`): one trace at a time, the
+// stop takes no run id, the status ack names the running trace's run id.
+func (g *fakeRemote) traceRecorder(ctx context.Context, f []string) (tbm.Reply, error) {
+	intent := f[0] + " " + f[1]
+	apply := func() tbm.Reply {
+		switch f[1] {
+		case "start":
+			if g.traceRun != "" {
+				return errReply(intent, "busy")
+			}
+			g.traceRun = f[2]
+			a := tbm.Ack{Intent: intent, Scope: "started", Count: 1, Executor: f[2]}
+			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}
+		case "stop":
+			if g.traceRun == "" {
+				return errReply(intent, "not-running")
+			}
+			a := tbm.Ack{Intent: intent, Scope: "stopped", Count: 1, Executor: g.traceRun}
+			g.traceRun = ""
+			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}
+		default:
+			a := tbm.Ack{Intent: intent, Scope: "idle", Executor: "-"}
+			if g.traceRun != "" {
+				a.Scope, a.Count, a.Executor = "running", 1, g.traceRun
+			}
+			return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}
+		}
+	}
+	ans := g.traceAns[f[1]]
+	if len(ans) == 0 {
+		return apply(), nil
+	}
+	g.traceAns[f[1]] = ans[1:]
+	timeout := tbm.Reply{Kind: tbm.KindTimeout, Lines: []string{}}
+	switch ans[0] {
+	case "error":
+		return tbm.Reply{}, errors.New("not in world")
+	case "timeout":
+		return timeout, nil
+	case "lost":
+		apply()
+		return timeout, nil
+	case "cancel":
+		apply()
+		return tbm.Reply{}, context.Canceled
+	case "hang":
+		<-ctx.Done()
+		return timeout, nil
+	}
+	return errReply(intent, ans[0]), nil
+}
+
 func ack(intent string) tbm.Reply {
 	a := tbm.Ack{Intent: intent, Scope: "party", Count: 3, Executor: "Tanky"}
 	return tbm.Reply{Kind: tbm.KindAck, OK: true, Ack: &a, Lines: []string{}}
@@ -433,6 +493,12 @@ func (g *fakeRemote) Command(ctx context.Context, command string) (tbm.Reply, er
 	if g.panicOn != "" && strings.HasPrefix(command, g.panicOn) {
 		g.panicOn = ""
 		panic("boom")
+	}
+	if g.traceErr != "" && strings.HasPrefix(command, "trace ") {
+		return errReply(strings.Fields(command)[0]+" "+strings.Fields(command)[1], g.traceErr), nil
+	}
+	if strings.HasPrefix(command, "trace ") {
+		return g.traceRecorder(ctx, strings.Fields(command))
 	}
 	f := strings.Fields(command)
 	intent := f[0] + " " + f[1]

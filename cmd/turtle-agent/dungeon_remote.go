@@ -216,7 +216,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

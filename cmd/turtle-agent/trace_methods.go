@@ -58,6 +58,11 @@ func (r *dungeonRunner) traceConfig(p dungeonRunParams) (tracerun.Config, error)
 		}
 	}
 	cfg.Meta = p.TraceMeta
+	if p.RunMeta != nil {
+		if msg := p.RunMeta.Check(); msg != "" {
+			return cfg, bad("%s", msg)
+		}
+	}
 	return cfg, nil
 }
 

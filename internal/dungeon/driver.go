@@ -154,6 +154,10 @@ type Config struct {
 	// Pulltest, when set, makes the run the leader-mode pull test (pulltest_leader.go): the plan's pack is pulled and killed Tries times by
 	// the party with the agent's own character playing, and each try is scored. The run's from_leg is the spec's leg.
 	Pulltest *PulltestSpec
+	// RunMeta names the AI driver of the run (model, effort, run label): it goes into the trace header and the run report. A group
+	// run never sends it to the server, server_trace or not (party chat carries no answer; the report notes it when server_trace
+	// was asked for). Zero: nothing is written.
+	RunMeta RunMeta
 	// Trace says how the run is traced: its run id, the trace folder, whether there is a trace at all (internal/tracerun).
 	Trace tracerun.Config
 	// Watchdog sets the stall levels of the progress watchdog (watchdog.go); it wins field by field over the plan's own. A zero field is
