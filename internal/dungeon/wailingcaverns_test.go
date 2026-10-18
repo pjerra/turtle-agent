@@ -87,7 +87,7 @@ func wcNear(ss []wcSpawn, entry uint32, p Point, yd float64) bool {
 }
 
 // The plan is what the export and the instance script say: the five bosses in route order, Lady Anacondra's four spawn spots (spawn pool
-// 10004) as one-member groups, every group member a spawn row of its entry, the one hop of the route a direct step with its exemption.
+// 10004) as one-member groups, every group member a spawn row of its entry, the one hop of the route a plain direct step with a check_skip (no GM).
 func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	p := loadPlan(t, wailingPlan)
 	if p.Map != 43 || p.Name != "wailing_caverns" || p.EntranceTrigger != 228 || p.Portal == nil || p.Portal.Map != 1 {
@@ -165,10 +165,59 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 				continue
 			}
 			hops++
-			if !w.GMCross {
-				t.Errorf("legs[%d] (%s): the direct hop %v is the gm_cross over the gap", i, l.Name, w)
+			// The hop down onto the ramp is a plain direct step (no GM): the check_skip is what keeps the plan check off it
+			// (the gm_cross before it was dropped 2026-10-18, when the step was walked live: tests/wc-hop-probe-2).
+			if w.GMCross {
+				t.Errorf("legs[%d] (%s): the direct hop %v still asks for a GM (gm_cross)", i, l.Name, w)
+			}
+			if w.CheckSkip == "" {
+				t.Errorf("legs[%d] (%s): the direct hop %v has no check_skip", i, l.Name, w)
 			}
 		}
+	}
+	// The hop of Lord Serpentis lands on the ramp 2.9 yd in from the edge point: the probe of 2026-10-18 (tests/wc-hop-probe-2) put
+	// the party on -287.5 5.0 -63.6 and showed that a stand on the old edge -289.1 3.2 -64.1 falls to the chasm floor (z -105.5).
+	serp := -1
+	for i, l := range p.Legs {
+		if l.Name == "serpentis" {
+			serp = i
+		}
+	}
+	if serp < 0 {
+		t.Fatalf("%s: no serpentis leg", p.Name)
+	}
+	landing := Point{X: -287.5, Y: 5.0, Z: -63.6}
+	edge := Point{X: -289.1, Y: 3.2, Z: -64.1}
+	lands := 0
+	for j, w := range p.Legs[serp].Via {
+		if w.Direct {
+			lands++
+			if d := dist3(w.Point, landing); d > 0.1 {
+				t.Errorf("legs[%d] (%s) via[%d]: the hop lands at %v, %.2f yd from the probe's landing %v (0.1 yd)", serp, p.Legs[serp].Name, j, w.Point, d, landing)
+			}
+		}
+		if d := dist3(w.Point, edge); d < 2 {
+			t.Errorf("legs[%d] (%s) via[%d] %v is %.2f yd from the old edge point %v, which the probe showed is not a stand (a .go xyz there fell to the chasm floor)", serp, p.Legs[serp].Name, j, w.Point, d, edge)
+		}
+	}
+	if lands != 1 {
+		t.Errorf("legs[%d] (serpentis): %d direct landings, want 1", serp, lands)
+	}
+	// The point before the direct step is the foot, and it is an `exact` waypoint: the driver holds the lead bot on it (1.5 yd with a
+	// stationary proof) instead of letting the walk's 5 yd arrival launch the step from short (PR 235; the probe of 2026-10-18 stood at 0.00 yd).
+	via := p.Legs[serp].Via
+	if len(via) < 2 {
+		t.Fatalf("legs[%d] (serpentis): %d via points, want the foot and the direct landing", serp, len(via))
+	}
+	foot := Point{X: -293.3, Y: 0.5, Z: -58}
+	if d := dist3(via[0].Point, foot); d > 0.1 {
+		t.Errorf("legs[%d] (serpentis) via[0] %v is %.2f yd from the foot %v (0.1 yd)", serp, via[0].Point, d, foot)
+	}
+	if !via[0].Exact {
+		t.Errorf("legs[%d] (serpentis) via[0] %v: the foot before the direct step is not exact", serp, via[0].Point)
+	}
+	if !via[1].Direct || via[1].GMCross {
+		t.Errorf("legs[%d] (serpentis) via[1] %v: want the plain direct landing after the exact foot", serp, via[1].Point)
 	}
 	// The four Fanglords open the Disciple's second menu (instance_wailing_caverns.cpp): Cobrahn, Pythas and Serpentis are bosses of the plan.
 	want := []uint32{3669, 3670, 3674, 3673, 5775}
