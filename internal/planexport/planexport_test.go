@@ -49,7 +49,7 @@ const small = `{"version":1,"name":"Tiny_Cave","status":"live-checked (test)","m
    {"wait_for":{"hostiles_gone":{"radius":20}}},
    {"wait_for":{"hostiles_gone":{"radius":8,"center":{"x":5,"y":5,"z":5}},"timeout_s":30}},
    {"loot_object":{"entry":902,"near":{"x":62,"y":0,"z":0},"expect_item":{"entry":7740,"name":"Gni'kiv Medallion"}}},
-   {"use_item":{"entry":7740,"name":"Gni'kiv Medallion","expect_item":{"entry":7733}}},
+   {"use_item":{"entry":7740,"name":"Gni'kiv Medallion","requires_item":{"entry":7741},"expect_item":{"entry":7733}}},
    {"ritual":{"entry":903,"position":{"x":63,"y":0,"z":0},"participants":3}}],
   "boss":{"entry":6906,"position":{"x":70,"y":0,"z":0},"first":[6907,6908],"team":"horde","loot_item":{"entry":5555,"name":"Prize"}},
   "after_boss":[{"loot_object":{"entry":904,"near":{"x":71,"y":0,"z":0}}}]},
@@ -110,7 +110,7 @@ func TestMappingFollowsTheGuide(t *testing.T) {
 	if l := at(10); l.Kind != KindLoot || l.Entry != 902 || l.Item != 7740 || !strings.Contains(l.Comment, "Gni'kiv") {
 		t.Fatalf("loot %+v", l)
 	}
-	if u := at(11); u.Entry != 7740 || u.Item != 7733 {
+	if u := at(11); u.Entry != 7740 || u.Item != 7733 || u.Param != 7741 {
 		t.Fatalf("use_item %+v", u)
 	}
 	if rt := at(12); rt.Kind != KindRitual || rt.Entry != 903 || rt.X != 63 {
