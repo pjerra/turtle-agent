@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,13 @@ type startFake struct {
 	drift       *Point
 	driftNow    bool
 	summonsLog  []string
+	// calls is every call of the fake that acts on the game, in order, beside the commands in orders: a refused start
+	// must leave both empty (no teleport, unbind, GM line, bot line or move).
+	calls []string
+}
+
+func (g *startFake) log(format string, a ...any) {
+	g.calls = append(g.calls, fmt.Sprintf(format, a...))
 }
 
 func newStartFake(t *testing.T) *startFake {
@@ -87,6 +95,7 @@ func (g *startFake) tick(*fakeRemote) {
 }
 
 func (g *startFake) Command(ctx context.Context, command string) (tbm.Reply, error) {
+	g.log("command %s", command)
 	f := strings.Fields(command)
 	if len(f) > 1 && f[0] == "cmd" && (f[1] == "move" || f[1] == "stay") && len(g.cmdErr[f[1]]) == 0 {
 		g.followAgent = false // the order replaces the follow
@@ -100,28 +109,71 @@ func (g *startFake) Command(ctx context.Context, command string) (tbm.Reply, err
 	return g.fakeRemote.Command(ctx, command)
 }
 
+// unboundByFresh records that prepare fresh disbanded the standing group (see GroupUnbind): the next `commander
+// status` answers not-bound.
+func (g *startFake) unboundByFresh() { g.fakeRemote.bound = false }
+
 func (g *startFake) AgentPlace() (Point, uint32, bool) { return g.agent, g.agentMap, true }
 func (g *startFake) AccountLevel(context.Context) (int, bool, error) {
 	return g.level, g.known, nil
 }
+func (g *startFake) TeleName(_ context.Context, player, location string) error {
+	g.log("tele name %s %s", player, location)
+	return nil
+}
+func (g *startFake) AgentName() string      { return "Commander" }
+func (g *startFake) AgentGUID() packet.GUID { return packet.GUID(0x1) }
+func (g *startFake) AgentMap() uint32       { return g.agentMap }
+func (g *startFake) Sees(string) bool       { return true }
+func (g *startFake) GMVisible(_ context.Context, on bool) error {
+	g.log("gm visible %v", on)
+	return nil
+}
+func (g *startFake) UnbindInstances(_ context.Context, player string, _ packet.GUID) error {
+	g.log("instance unbind all %s", player)
+	return nil
+}
+func (g *startFake) GroupUnbind(_ context.Context, player string, _ packet.GUID) (GroupUnbindResult, error) {
+	g.log("group unbind %s", player)
+	g.unboundByFresh()
+	return GroupUnbound, nil
+}
 func (g *startFake) Appear(_ context.Context, player string) error {
+	g.log("appear %s", player)
 	g.appears = append(g.appears, player)
 	l := g.lead()
 	g.agent, g.agentMap = Point{l.X, l.Y, l.Z}, g.mapID
 	return nil
 }
-func (g *startFake) WalkSelf(context.Context, Point) (WalkResult, error) {
+func (g *startFake) WalkSelf(_ context.Context, at Point) (WalkResult, error) {
+	g.log("walk self %v", at)
 	return WalkResult{Result: "arrived"}, nil
 }
 func (g *startFake) GoXYZ(_ context.Context, mapID uint32, at Point) error {
+	g.log("go xyz %v %d", at, mapID)
 	g.gos = append(g.gos, fmt.Sprintf("%.0f %.0f %.0f %d", at.X, at.Y, at.Z, mapID))
 	g.agent, g.agentMap = at, mapID
 	return nil
 }
 func (g *startFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
-	if command != "roster" { // read at the start of a run for its cc bot (resolveCCBot)
-		g.botLines = append(g.botLines, command)
+	g.log("bot %s", command)
+	if command == "roster" {
+		// Fresh prepare needs the bots online in the world: report them so (nonzero GUIDs).
+		lines := []string{fmt.Sprintf("TBM:ROSTER_BEGIN|%d", len(g.party))}
+		for _, p := range g.party {
+			lines = append(lines, fmt.Sprintf("TBM:ROSTER|%d|%s|1|online|0|Uldaman", uint32(uint64(p.GUID)&0xFFFFFFFF), p.Name))
+		}
+		lines = append(lines, "TBM:ROSTER_END")
+		var got []string
+		for _, l := range lines {
+			got = append(got, l)
+			if done(l) {
+				return got, true, nil
+			}
+		}
+		return got, false, nil
 	}
+	g.botLines = append(g.botLines, command)
 	if command == "summon "+g.lead().Name && !g.neverLead {
 		at := g.agent
 		g.leadTo, g.leadToAt = &at, g.now.Add(3*time.Second)
@@ -133,7 +185,9 @@ func (g *startFake) BotLines(_ context.Context, command string, _ time.Duration,
 	}
 	return nil, false, nil
 }
+
 func (g *startFake) Respawn(context.Context) error {
+	g.log("respawn")
 	g.respawns++
 	if g.respawnFn != nil {
 		g.respawnFn(g)
@@ -156,6 +210,26 @@ func runFrom(t *testing.T, g interface {
 	cfg.PostFight = 2 * time.Second
 	cfg.AddsWait = 4 * time.Second
 	cfg.Setup = setup
+	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
+	err := d.Run(context.Background(), fromLeg)
+	rep, ended := d.Status()
+	if err == nil && !ended {
+		t.Fatal("the report does not say the run ended")
+	}
+	return rep, err
+}
+
+// runFromResume is runFrom with cfg.Resume on (a resume after a pause/keep_on_fail into the same instance).
+func runFromResume(t *testing.T, g interface {
+	RemoteGame
+	clock() Clock
+}, plan *Plan, o RemoteOptions, fromLeg int, setup ...string) (Report, error) {
+	t.Helper()
+	cfg := DefaultConfig()
+	cfg.PostFight = 2 * time.Second
+	cfg.AddsWait = 4 * time.Second
+	cfg.Setup = setup
+	cfg.Resume = true
 	d := NewRemoteDriver(plan, g, cfg, o, g.clock())
 	err := d.Run(context.Background(), fromLeg)
 	rep, ended := d.Status()
@@ -434,6 +508,228 @@ func TestGatherSpotIsClearOfOtherPacks(t *testing.T) {
 	crowd := remotePlan(Leg{Name: "l", To: Point{0, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{2}, Positions: []Point{{200, 0, 0}}}, {Entries: []uint32{3}, Positions: []Point{{130, 0, 0}, {115, 0, 0}, {100, 0, 0}}}}})
 	if _, warn := crowd.GatherSpot(0, 0, nil); warn == "" {
 		t.Fatalf("no warning for a spot among packs")
+	}
+}
+
+// nothingSent fails the test unless the refused run sent nothing at all and says why: no command (bind, enter, loot,
+// summon), no teleport, unbind, GM line or bot line (calls), no move, and the report failed with the refusal.
+func nothingSent(t *testing.T, g *startFake, rep Report, err error, want string) {
+	t.Helper()
+	if err == nil || err.Error() != want {
+		t.Fatalf("not refused as expected:\n got %v\nwant %s", err, want)
+	}
+	if len(g.orders) != 0 || len(g.calls) != 0 || len(g.gos) != 0 || len(g.appears) != 0 || len(g.botLines) != 0 {
+		t.Fatalf("a refused start sent something: orders %q calls %q", g.orders, g.calls)
+	}
+	if rep.State != "failed" || rep.Error != want || rep.Start != nil || (rep.Remote != nil && rep.Remote.Bound) {
+		t.Fatalf("the report does not say the start was refused: state %q error %q start %v", rep.State, rep.Error, rep.Start)
+	}
+}
+
+func freshOpts(group int) RemoteOptions {
+	o := startOpts()
+	o.FromPullGroup = &group
+	o.Prepare = PrepareSpec{Fresh: true}
+	return o
+}
+
+// crowdPlan's pull group 1 has its gather spot (145 0 0, and the fallbacks 130 and 115) inside pull group 0.
+func crowdPlan() *Plan {
+	p := remotePlan(Leg{Name: "l", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{130, 0, 0}, {115, 0, 0}, {100, 0, 0}}},
+		{Entries: []uint32{2}, Positions: []Point{{200, 0, 0}}},
+	}})
+	p.OutsideTele = "uldaman"
+	return p
+}
+
+// A from_pull_group start whose gather spot is under the safe distance from a pack of an earlier step is refused in a
+// fresh instance (prepare.fresh: the earlier packs are alive) before anything is sent: not the prepare step's teleport
+// and unbinds, the bind, the enter or a GM line (zf-g9-6cd0b13: the gather spot was 21 yd from a live pack and the party
+// died there twice). force_start runs it anyway. In a non-fresh instance the same start only warns. A clear spot, or a
+// near pack of a later step (the run's own fight), is neither refused nor warned about.
+func TestStartRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
+	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	g := newStartFake(t)
+	rep, err := runFrom(t, g, crowdPlan(), freshOpts(1), 0)
+	nothingSent(t, g, rep, err, want)
+
+	o := freshOpts(1)
+	o.ForceStart = true
+	g = newStartFake(t)
+	rep, err = runFrom(t, g, crowdPlan(), o, 0)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("force_start: %v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if notes := notesOf(rep); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance; force_start: starting there anyway") {
+		t.Fatalf("no force_start note:\n%s", notes)
+	}
+	if !slices.ContainsFunc(g.calls, func(c string) bool { return strings.HasPrefix(c, "instance unbind all ") }) {
+		t.Fatalf("the forced fresh run did no prepare (the refusal test above proves nothing): %q", g.calls)
+	}
+	// A non-fresh instance: a warning, the run goes on.
+	one := 1
+	o3 := startOpts()
+	o3.FromPullGroup = &one
+	rep3, err := runFrom(t, newStartFake(t), crowdPlan(), o3, 0)
+	if err != nil || rep3.State != "done" {
+		t.Fatalf("non-fresh start refused: %v %s", err, rep3.State)
+	}
+	if notes := notesOf(rep3); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30); the instance is not known fresh") {
+		t.Fatalf("no warning in notes:\n%s", notes)
+	}
+	// A clear spot: no refusal.
+	g4 := newStartFake(t)
+	g4.addMob(299, Point{150, 0, 0})
+	g4.addMob(300, Point{300, 0, 0})
+	clear := groupPlan()
+	clear.OutsideTele = "uldaman"
+	if _, err := runFrom(t, g4, clear, freshOpts(1), 0); err != nil {
+		t.Fatalf("clear start refused: %v", err)
+	}
+	// A pack of a later step near the spot is the run's own fight, not a danger: no refusal, no warning.
+	later := remotePlan(Leg{Name: "l", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{2}, Positions: []Point{{200, 0, 0}}},
+		{Entries: []uint32{3}, Positions: []Point{{130, 0, 0}}},
+	}})
+	later.OutsideTele = "uldaman"
+	rep5, err := runFrom(t, newStartFake(t), later, freshOpts(0), 0)
+	if err != nil {
+		t.Fatalf("later pack refused: %v", err)
+	}
+	if notes := notesOf(rep5); strings.Contains(notes, "start: warning: from_pull_group") {
+		t.Fatalf("warning for a later pack:\n%s", notes)
+	}
+}
+
+// A from_leg start at a point under the safe distance from a pack of an earlier leg is refused in a fresh instance
+// unless force_start is passed. A resume is never refused: only a warning.
+func TestStartRefusesAFromLegNearAnEarlierPack(t *testing.T) {
+	p := remotePlan(
+		Leg{Name: "a", To: Point{10, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{12, 0, 0}}}}},
+		Leg{Name: "b", To: Point{100, 0, 0}},
+	)
+	p.OutsideTele = "uldaman"
+	const want = "from_leg 1: the start point 10 0 0 is 2 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	o := startOpts()
+	o.Prepare = PrepareSpec{Fresh: true}
+	g := newStartFake(t)
+	rep, err := runFrom(t, g, p, o, 1)
+	nothingSent(t, g, rep, err, want)
+	o.ForceStart = true
+	rep, err = runFrom(t, newStartFake(t), p, o, 1)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("force_start: %v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	// A resume (fresh or not): a warning only.
+	for _, fresh := range []bool{false, true} {
+		o2 := startOpts()
+		o2.Prepare.Fresh = fresh
+		rep2, err := runFromResume(t, newStartFake(t), p, o2, 1)
+		if err != nil || rep2.State != "done" {
+			t.Fatalf("resume (fresh %v) refused: %v %s", fresh, err, rep2.State)
+		}
+		if notes := notesOf(rep2); !strings.Contains(notes, "start: warning: from_leg 1: the start point 10 0 0 is 2 yd from pull group 0 of leg 0") || !strings.Contains(notes, "not known fresh") {
+			t.Fatalf("no warning in notes:\n%s", notes)
+		}
+	}
+}
+
+// The start point of from_leg N is where the boss of leg N-1 stands (LegStart). In a fresh instance that boss is
+// alive: the start is refused, and the refusal says so and points to from_pull_group or a cleared or kept instance.
+func TestStartRefusesAFromLegOnTheLiveBossOfTheLegBefore(t *testing.T) {
+	p := remotePlan(
+		Leg{Name: "a", To: Point{10, 0, 0}, Boss: &Boss{Entry: 5, Position: Point{40, 0, 0}}},
+		Leg{Name: "b", To: Point{100, 0, 0}},
+	)
+	p.OutsideTele = "uldaman"
+	const want = "from_leg 1: the boss of leg 0 is alive at the start point 40 0 0 in a fresh instance (entry 5, 0 yd away; a safe spot needs 30). Start at a pull group of leg 1 (from_pull_group), or in a cleared or kept instance (prepare.fresh false, or keep_on_fail and resume), or pass force_start to start there anyway"
+	o := startOpts()
+	o.Prepare = PrepareSpec{Fresh: true}
+	g := newStartFake(t)
+	rep, err := runFrom(t, g, p, o, 1)
+	nothingSent(t, g, rep, err, want)
+	// The same start in an instance not known fresh: a warning that names the boss.
+	rep, err = runFrom(t, newStartFake(t), p, startOpts(), 1)
+	if err != nil || !strings.Contains(notesOf(rep), "start: warning: from_leg 1: the start point 40 0 0 is 0 yd from the boss of leg 0 (entry 5) (a safe spot needs 30); the instance is not known fresh") {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+}
+
+// A hired party (prepare.party "hire", which takes no fresh) starts in a fresh instance: new hires have no saved one.
+// The exception is a hire that takes over the binding an earlier run kept (HireMemory) without rehire: that party is
+// still in its instance, so the start only warns.
+func TestStartGateTreatsAHiredPartyAsFresh(t *testing.T) {
+	p := crowdPlan()
+	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	hired := func(rehire bool, kept map[string]tbm.Who) RemoteOptions {
+		one := 1
+		o := startOpts()
+		o.Lead, o.Bots = "", nil
+		o.FromPullGroup = &one
+		o.Prepare = PrepareSpec{Party: PartyHire, Hire: &HireSpec{Rehire: rehire}}
+		o.HireMemory = kept
+		return o
+	}
+	if err := hired(false, nil).Prepare.Validate(true); err != nil {
+		t.Fatalf("the hire spec of the test is not one dungeon_run takes: %v", err)
+	}
+	g := newStartFake(t)
+	rep, err := runFrom(t, g, p, hired(false, nil), 0)
+	nothingSent(t, g, rep, err, want)
+	kept := map[string]tbm.Who{"tanky": {Class: "warrior", Level: 43}}
+	g = newStartFake(t)
+	rep, err = runFrom(t, g, p, hired(true, kept), 0)
+	nothingSent(t, g, rep, err, want)
+	// A kept binding taken over without rehire: not known fresh, a warning only (the run then fails on this fake, which
+	// cannot hire, but not at the gate).
+	rep, err = runFrom(t, newStartFake(t), p, hired(false, kept), 0)
+	if err == nil || strings.Contains(err.Error(), "force_start") || !strings.Contains(notesOf(rep), "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30); the instance is not known fresh") {
+		t.Fatalf("kept binding: %v\n%s", err, notesOf(rep))
+	}
+}
+
+// bentFake plans a path that bends: from the leg's To (0 0 0) up to 0 200 0, across to 200 200 0 and down to the pack
+// at 200 0 0. The gather spot on it (200 55 0, the fallbacks 200 70 0 and 200 85 0) is inside pull group 0 at 220 70 0;
+// the straight line's (145 0 0) is 100 yd clear of it. The gate must read the same path as the start.
+type bentFake struct{ *startFake }
+
+func (g bentFake) PlanPath(_ context.Context, _ uint32, from, to Point) ([]Point, error) {
+	if from == (Point{0, 0, 0}) && to == (Point{200, 0, 0}) {
+		return []Point{from, {0, 200, 0}, {200, 200, 0}, to}, nil
+	}
+	return []Point{from, to}, nil
+}
+
+func TestStartGateReadsTheNavmeshPath(t *testing.T) {
+	p := remotePlan(Leg{Name: "l", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{220, 70, 0}}},
+		{Entries: []uint32{2}, Positions: []Point{{200, 0, 0}}},
+	}})
+	p.OutsideTele = "uldaman"
+	g := newStartFake(t)
+	rep, err := runFrom(t, bentFake{g}, p, freshOpts(1), 0)
+	nothingSent(t, g, rep, err, "from_pull_group 1: the gather spot 200 55 0 is 25 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway")
+	// The straight line (no planner) gathers at 145 0 0: clear, not refused.
+	if _, err := runFrom(t, newStartFake(t), p, freshOpts(1), 0); err != nil && strings.Contains(err.Error(), "force_start") {
+		t.Fatalf("the straight-line start was refused: %v", err)
+	}
+}
+
+// A pulltest start whose gather spot is under the safe distance from a pack of an earlier step is refused in a fresh
+// instance before anything is sent, unless force_start is passed.
+func TestPulltestRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
+	o := ptOpts(PulltestSpec{Leg: 0, PullGroup: 1, Tries: 1})
+	o.Prepare = PrepareSpec{Fresh: true}
+	const want = "pulltest: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	g := newStartFake(t)
+	rep, err := runFrom(t, g, crowdPlan(), o, 0)
+	nothingSent(t, g, rep, err, want)
+	o.ForceStart = true
+	g = newStartFake(t)
+	g.addMob(2, Point{200, 0, 0})
+	if _, err := runFrom(t, g, crowdPlan(), o, 0); err != nil {
+		t.Fatalf("force_start: %v", err)
 	}
 }
 

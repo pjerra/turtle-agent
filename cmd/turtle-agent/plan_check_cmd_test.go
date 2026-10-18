@@ -183,6 +183,8 @@ func gateRig(t *testing.T, checks *int) *agentRig {
 		"walkgroup": `{"version":1,"name":"walkgroup","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"needs_walk":true,"positions":[{"x":6,"y":5,"z":5}]}]}]}`,
 		"walkboss":  `{"version":1,"name":"walkboss","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"boss":{"entry":9,"needs_walk":true,"position":{"x":6,"y":5,"z":5}}}]}`,
 		// An encounter of the other team: the driver looks at it before it skips the fight, so its unreachable look refuses the run.
+		// Pull group 1 gathers inside pull group 0 (TestDungeonRunForceStartIsTheUnsafeStartGates).
+		"crowd": `{"version":1,"name":"crowd","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"l","to":{"x":0,"y":5,"z":5},"pull_groups":[{"entries":[1,1,1],"positions":[{"x":130,"y":5,"z":5},{"x":115,"y":5,"z":5},{"x":100,"y":5,"z":5}]},{"entries":[2],"positions":[{"x":200,"y":5,"z":5}]}]}]}`,
 		"teamy": `{"version":1,"name":"teamy","status":"live-checked","map":0,"entrance":{"x":5,"y":5,"z":5},"legs":[{"name":"a","to":{"x":7,"y":5,"z":5},"pull_groups":[{"entries":[299],"team":"horde","positions":[{"x":99,"y":5,"z":5}]}]}]}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name+".json"), []byte(doc), 0o600); err != nil {
@@ -336,4 +338,104 @@ func TestPlanCheckFromPullGroupNeedsFromLeg(t *testing.T) {
 	if code := planCheckCmd([]string{"--dir", "../../dungeons", "--mmaps", t.TempDir(), "--from-pull-group", "0", "zulfarrak"}, &out, &errOut); code != exitUsage || !strings.Contains(errOut.String(), "needs --from-leg") {
 		t.Errorf("command: exit %d: %s", code, errOut.String())
 	}
+}
+
+// The unsafe-start gate through dungeon_run's own params (no driver options set by hand): force is the plan check's and
+// does not pass the gate, force_start does, and force_start does not pass the plan check. Pull group 1 of "crowd"
+// gathers at 145 5 5, 15 yd from pull group 0, which is alive in the fresh instance prepare.fresh asks for.
+func TestDungeonRunForceStartIsTheUnsafeStartGates(t *testing.T) {
+	var checks int
+	r := gateRig(t, &checks)
+	const start = `"mode":"commander","lead_bot":"Tanky","preflight":"off","from_leg":0,"from_pull_group":1,"prepare":{"fresh":true}`
+	const refusal = "from_pull_group 1: the gather spot 145 5 5 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	report := func(ok func(rep map[string]any) bool) map[string]any {
+		out := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
+			rep, _ := m["result"].(map[string]any)["report"].(map[string]any)
+			return rep != nil && ok(rep)
+		})
+		return out["result"].(map[string]any)["report"].(map[string]any)
+	}
+	stop := func() {
+		r.call("dungeon_stop", "{}")
+		r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["running"] == false })
+	}
+	// force alone: the plan check passes, the gate refuses (the run fails with the refusal).
+	if out := r.call("dungeon_run", `{"name":"crowd","force":true,`+start+`}`); out["error"] != nil {
+		t.Fatalf("%v", out)
+	}
+	if rep := report(func(rep map[string]any) bool { return rep["state"] == "failed" }); rep["error"] != refusal {
+		t.Fatalf("force passed the unsafe-start gate: %v", rep["error"])
+	}
+	stop()
+	// force_start: the gate lets it through with a note.
+	if out := r.call("dungeon_run", `{"name":"crowd","force_start":true,`+start+`}`); out["error"] != nil {
+		t.Fatalf("%v", out)
+	}
+	report(func(rep map[string]any) bool {
+		return strings.Contains(fmt.Sprint(rep["notes"]), "force_start: starting there anyway")
+	})
+	stop()
+	// force_start on a plan the plan check refuses: still refused, by the plan check.
+	out := r.call("dungeon_run", `{"name":"bad","force_start":true,"mode":"commander","lead_bot":"Tanky","preflight":"off"}`)
+	if msg, _ := out["error"].(map[string]any)["message"].(string); errCode(out) != rpc.CodeInvalidParams || !strings.Contains(msg, "plan check failed") {
+		t.Fatalf("force_start passed the plan check: %v", out)
+	}
+}
+
+// Over the RPC: dungeon_run refuses force_start in leader and observe mode (commander mode takes it, see
+// TestDungeonRunForceStartIsTheUnsafeStartGates).
+func TestDungeonRunRefusesForceStartOutsideCommanderMode(t *testing.T) {
+	var checks int
+	r := gateRig(t, &checks)
+	for _, params := range []string{`{"name":"ok","force_start":true}`, `{"name":"ok","mode":"leader","force_start":true}`, `{"name":"ok","mode":"observe","lead_bot":"Tanky","force_start":true}`} {
+		out := r.call("dungeon_run", params)
+		if msg, _ := out["error"].(map[string]any)["message"].(string); errCode(out) != rpc.CodeInvalidParams || !strings.Contains(msg, "force_start") || !strings.Contains(msg, "commander mode only") {
+			t.Errorf("%s: %v", params, out)
+			if out["error"] == nil {
+				r.call("dungeon_stop", "{}")
+			}
+		}
+	}
+}
+
+// run_meta (with server_trace) and force_start validated together: run_meta goes with every mode, force_start with
+// commander mode only, and each refusal names its own option.
+func TestDungeonRunRunMetaAndForceStartTogether(t *testing.T) {
+	const meta = `"run_meta":{"model":"opus","effort":"high","run":"t193","server_trace":true}`
+	for _, c := range []struct {
+		p      dungeonRunParams
+		remote bool
+		bad    string // "" accepted
+	}{
+		{dungeonRunParams{Mode: "commander", LeadBot: "Tanky", ForceStart: true, RunMeta: &dungeon.RunMeta{Model: "opus", ServerTrace: true}}, true, ""},
+		{dungeonRunParams{Mode: "leader", RunMeta: &dungeon.RunMeta{Model: "opus", ServerTrace: true}}, false, ""},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", RunMeta: &dungeon.RunMeta{Model: "opus", ServerTrace: true}}, true, ""},
+		{dungeonRunParams{Mode: "leader", ForceStart: true, RunMeta: &dungeon.RunMeta{Model: "opus", ServerTrace: true}}, false, "force_start"},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", ForceStart: true, RunMeta: &dungeon.RunMeta{Model: "opus", ServerTrace: true}}, true, "force_start"},
+	} {
+		remote, err := checkMode(c.p)
+		if c.bad == "" && (err != nil || remote != c.remote) || c.bad != "" && (err == nil || !strings.Contains(err.Error(), c.bad) || strings.Contains(err.Error(), "run_meta")) {
+			t.Errorf("checkMode %+v: %v %v", c.p, remote, err)
+		}
+	}
+	var checks int
+	r := gateRig(t, &checks)
+	// Over the RPC: force_start refused outside commander mode though run_meta is fine; a bad run_meta is refused for
+	// itself in commander mode though force_start is fine; both good in commander mode starts the run.
+	for _, c := range []struct{ params, want string }{
+		{`{"name":"ok","mode":"leader","force_start":true,` + meta + `}`, "force_start"},
+		{`{"name":"ok","mode":"observe","lead_bot":"Tanky","force_start":true,` + meta + `}`, "force_start"},
+		{`{"name":"ok","mode":"commander","lead_bot":"Tanky","preflight":"off","force_start":true,"run_meta":{"server_trace":true}}`, "run_meta.server_trace needs"},
+	} {
+		out := r.call("dungeon_run", c.params)
+		if msg, _ := out["error"].(map[string]any)["message"].(string); errCode(out) != rpc.CodeInvalidParams || !strings.Contains(msg, c.want) {
+			t.Errorf("%s: %v", c.params, out)
+		}
+	}
+	out := r.call("dungeon_run", `{"name":"ok","mode":"commander","lead_bot":"Tanky","preflight":"off","force_start":true,`+meta+`}`)
+	if out["error"] != nil || out["result"].(map[string]any)["started"] != true {
+		t.Fatalf("commander with run_meta and force_start: %v", out)
+	}
+	r.call("dungeon_stop", "{}")
+	r.eventually("dungeon_status", "{}", func(m map[string]any) bool { return m["result"].(map[string]any)["running"] == false })
 }

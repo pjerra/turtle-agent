@@ -43,6 +43,9 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 		if p.Pulltest != nil && (p.Teleport || p.Resume != nil) {
 			return false, bad(`pulltest in leader mode runs where the party stands, at the pack: leave teleport and resume out`)
 		}
+		if p.ForceStart {
+			return false, bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); leader mode has no such gate, so it would do nothing`)
+		}
 		if p.Tune != "" || p.LiveReload != nil {
 			return false, bad(`tune and live_reload go with mode "remote" (commander)`)
 		}
@@ -138,6 +141,8 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 		return bad(`cc, carrier, loot_restore, object_fallback, graves_batch, graves_ramp, graves_open_by, tank, healer and recover_wipe steer the bots; in observe mode the run leader on the server does that and the agent sends no order`)
 	case p.Tune != "" || p.LiveReload != nil:
 		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
+	case p.ForceStart:
+		return bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); observe mode starts at the plan's first step, so it would do nothing`)
 	}
 	if o := p.Observe; o != nil {
 		if o.Plan != "" && !planName.MatchString(o.Plan) {
@@ -216,7 +221,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

@@ -164,6 +164,51 @@ func (p *Plan) gatherWarning(leg, group int, at Point) string {
 	return ""
 }
 
+// earlierPack is the nearest pack or boss of a step the run skips, as nearestEarlier finds it.
+type earlierPack struct {
+	dist  float64
+	leg   int
+	group int    // the pull group; -1 for the leg's boss
+	entry uint32 // the boss's entry
+}
+
+// String names it in a refusal or a warning.
+func (e earlierPack) String() string {
+	if e.group < 0 {
+		return fmt.Sprintf("the boss of leg %d (entry %d)", e.leg, e.entry)
+	}
+	return fmt.Sprintf("pull group %d of leg %d", e.group, e.leg)
+}
+
+// nearestEarlier is nearestOther limited to the steps a start at pull group `group` of leg `leg` skips: every pull group
+// of the legs before leg, the groups of leg before group, and the bosses of the legs before leg (a from_leg start is
+// group 0 of its leg, so the boss of the leg before it is in). A pack of a later step is the run's own fight, not a
+// danger at the start point. dist is +Inf when there is none.
+func (p *Plan) nearestEarlier(leg, group int, at Point) earlierPack {
+	best := earlierPack{dist: math.Inf(1)}
+	for li, l := range p.Legs {
+		if li > leg {
+			break
+		}
+		for gi, g := range l.PullGroups {
+			if li == leg && gi >= group {
+				continue
+			}
+			for _, pos := range g.Positions {
+				if d := dist3(at, pos); d < best.dist {
+					best = earlierPack{dist: d, leg: li, group: gi}
+				}
+			}
+		}
+		if li < leg && l.Boss != nil {
+			if d := dist3(at, l.Boss.Position); d < best.dist {
+				best = earlierPack{dist: d, leg: li, group: -1, entry: l.Boss.Entry}
+			}
+		}
+	}
+	return best
+}
+
 // startNeeded says whether the run starts inside the dungeon: from a leg past the first, or at a pull group.
 func (d *RemoteDriver) startNeeded(fromLeg int) bool {
 	return fromLeg > 0 || d.opt.FromPullGroup != nil
@@ -177,8 +222,8 @@ func (d *RemoteDriver) startGroup() int {
 	return *d.opt.FromPullGroup
 }
 
-// checkStart refuses a start the plan does not have, and a start past an item the plan needs from a leg it skips. It runs before anything
-// is sent.
+// checkStart refuses a start the plan does not have and a start past an item the plan needs from a leg it skips. It
+// runs before anything is sent; so does the unsafe-start gate (checkStartSafety).
 func (d *RemoteDriver) checkStart(fromLeg int) error {
 	if d.opt.FromPullGroup != nil {
 		g := d.startGroup()
@@ -189,10 +234,88 @@ func (d *RemoteDriver) checkStart(fromLeg int) error {
 			return fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", g, fromLeg, d.plan.Legs[fromLeg].Name, n, n-1)
 		}
 	}
-	if d.opt.Pulltest == nil {
-		return d.plan.SkippedNeeds(fromLeg, d.opt.HaveItems)
+	if d.opt.Pulltest != nil {
+		return nil
 	}
-	return nil
+	return d.plan.SkippedNeeds(fromLeg, d.opt.HaveItems)
+}
+
+// checkStartSafety is the unsafe-start gate (#193, zf-g9-6cd0b13: a from_leg 8 start in a fresh instance gathered the
+// party 21 yd from a live pack and it died there twice). A from_leg, from_pull_group or pulltest start whose start point
+// is under gatherSafe yards from a pack or boss of a step the run skips is refused when the instance is known fresh
+// (freshStart: every skipped pack is alive), unless force_start. Otherwise it only warns in the report's notes: the
+// party may have fought its way there. Run calls it before the prepare step, the bind and the enter phase, so a refused
+// start has sent nothing: no teleport, no unbind, no bind, no instance entry, no loot change, no GM line. The point is
+// the one startAnywhere moves the party to: the gather spot on the same navmesh path (planPath, after markAvoid), or the
+// leg's start (LegStart: where the boss of the leg before it stands, when it has one). start_here moves nobody, so it
+// is not gated.
+func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error {
+	var (
+		at   Point
+		what string
+		near earlierPack
+	)
+	switch {
+	case d.opt.Pulltest != nil:
+		spec := d.opt.Pulltest.Normalized()
+		if spec.Validate(d.plan) != nil {
+			return nil // runPulltest refuses it
+		}
+		at, _ = d.plan.GatherSpot(spec.Leg, spec.PullGroup, d.planPath(ctx))
+		what = fmt.Sprintf("pulltest: the gather spot %.0f %.0f %.0f", at.X, at.Y, at.Z)
+		near = d.plan.nearestEarlier(spec.Leg, spec.PullGroup, at)
+	case d.opt.StartHere:
+		return nil
+	case d.opt.FromPullGroup != nil:
+		at, _ = d.plan.GatherSpot(fromLeg, d.startGroup(), d.planPath(ctx))
+		what = fmt.Sprintf("from_pull_group %d: the gather spot %.0f %.0f %.0f", d.startGroup(), at.X, at.Y, at.Z)
+		near = d.plan.nearestEarlier(fromLeg, d.startGroup(), at)
+	case fromLeg > 0:
+		at, _ = d.plan.LegStart(fromLeg)
+		what = fmt.Sprintf("from_leg %d: the start point %.0f %.0f %.0f", fromLeg, at.X, at.Y, at.Z)
+		near = d.plan.nearestEarlier(fromLeg, 0, at)
+	default:
+		return nil
+	}
+	if near.dist >= gatherSafe {
+		return nil
+	}
+	msg := fmt.Sprintf("%s is %.0f yd from %s (a safe spot needs %.0f)", what, near.dist, near, gatherSafe)
+	if !d.freshStart() {
+		d.rep.note("start: warning: " + msg + "; the instance is not known fresh, so it may be dead: starting there")
+		return nil
+	}
+	if d.opt.ForceStart {
+		d.rep.note("start: warning: " + msg + ", alive in a fresh instance; force_start: starting there anyway")
+		return nil
+	}
+	if near.group < 0 && d.opt.FromPullGroup == nil && d.opt.Pulltest == nil && near.leg == fromLeg-1 {
+		// The usual case of a fresh from_leg: LegStart is where that boss stands.
+		return fmt.Errorf("from_leg %d: the boss of leg %d is alive at the start point %.0f %.0f %.0f in a fresh instance (entry %d, %.0f yd away; a safe spot needs %.0f). Start at a pull group of leg %d (from_pull_group), or in a cleared or kept instance (prepare.fresh false, or keep_on_fail and resume), or pass force_start to start there anyway",
+			fromLeg, near.leg, at.X, at.Y, at.Z, near.entry, near.dist, gatherSafe, fromLeg)
+	}
+	return fmt.Errorf("%s, alive in a fresh instance: pass force_start to start there anyway", msg)
+}
+
+// freshStart says whether the run knows its instance is fresh, so that every pack and boss of a skipped step is alive at
+// the start. Fresh: prepare.fresh (the bots' instances are unbound before the bind), or a hired party (prepare.party
+// "hire", which Validate refuses together with fresh because a new hire has no saved instance). Not fresh: a resume
+// (cfg.Resume), and a hire without rehire that takes over the binding an earlier run kept (HireMemory: keep_on_fail or
+// a pause left the party in that run's instance). A hire that reuses a matching hire outside a kept binding still counts
+// as fresh: that bot may hold a saved instance, but which hires are reused is known only at the hire step, after this
+// gate, and a wrong refusal costs a force_start where a missed one cost zf-g9-6cd0b13 two wipes.
+func (d *RemoteDriver) freshStart() bool {
+	if d.cfg.Resume {
+		return false
+	}
+	if d.opt.Prepare.Fresh {
+		return true
+	}
+	if !d.opt.Prepare.HiredParty() {
+		return false
+	}
+	rehire := d.opt.Prepare.Hire != nil && d.opt.Prepare.Hire.Rehire
+	return rehire || d.opt.HireMemory == nil
 }
 
 // itemNeed is a step that needs an item (or the item the step uses itself).
