@@ -212,6 +212,13 @@ const (
 type Waypoint struct {
 	Point
 	Direct bool `json:"direct,omitempty"`
+	// Exact says the lead bot must stand on this waypoint (within directArrive, 1.5 yd) before the next step is sent, not merely within
+	// MoveArrive: it is for the plain waypoint a direct step is launched from, where a step sent from a few yards short is refused (`no-los`)
+	// or lands short of the gap. Only a plain waypoint whose next via is a direct step that is not a gm_cross may carry it (the loader refuses
+	// any other), the walk to it is asked for even when the leader stands within ArriveRadius of it, and a remote run that cannot bring the lead
+	// bot onto it fails the step instead of sending the step from short (remote.go tightenTo). In the file:
+	// {"x": -293.3, "y": 0.5, "z": -58, "exact": true}.
+	Exact bool `json:"exact,omitempty"`
 	// CheckSkip exempts the hop from the plan check (plancheck.go) and says why: a hop the navmesh cannot judge on purpose (Uldaman's scorpid
 	// pit, a gap the mesh does not link). The check lists it as skipped with this text instead of failing it. Empty: checked.
 	CheckSkip string `json:"check_skip,omitempty"`
@@ -716,6 +723,7 @@ type rawPortal struct {
 type rawWaypoint struct {
 	X, Y, Z   *float32
 	Direct    bool   `json:"direct"`
+	Exact     bool   `json:"exact"`
 	CheckSkip string `json:"check_skip"`
 	GMCross   bool   `json:"gm_cross"`
 }
@@ -1162,15 +1170,32 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, Exact: w.Exact, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
 		if w.GMCross {
 			if !w.Direct {
 				c.fail(wp, "gm_cross is a direct waypoint: add \"direct\": true")
 			}
+			if w.Exact {
+				c.fail(wp, "exact is for a plain waypoint the next direct step is launched from: a gm_cross point is reached by the GM move (GMCrossRadius), not by the walk")
+			}
 			continue // a GM moves the party: no gathering point before it and no direct limits
 		}
 		if !w.Direct {
+			// exact asks that the lead bot stand on this point (directArrive) before the next step: only the launch point of a real direct
+			// step needs that, and the walk to it is then held to 1.5 yd (remote.go tightenTo).
+			if w.Exact {
+				if i+1 >= len(r.Via) {
+					c.fail(wp, "exact needs a direct step after it (the point itself is the last via of the leg)")
+				} else if n := r.Via[i+1]; !n.Direct {
+					c.fail(wp, "exact is for the point a direct step is launched from: via[%d] is not a direct step", i+1)
+				} else if n.GMCross {
+					c.fail(wp, "exact is for the point a direct step is launched from: via[%d] is a gm_cross point (a GM moves the party there)", i+1)
+				}
+			}
 			continue
+		}
+		if w.Exact {
+			c.fail(wp, "exact is for a plain waypoint the next direct step is launched from, not for the direct step itself")
 		}
 		if i == 0 {
 			c.fail(wp, "a direct step needs a via point before it, where the party gathers")

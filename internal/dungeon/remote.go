@@ -586,12 +586,15 @@ type RemoteDriver struct {
 	shortSince time.Time
 	shortSaid  bool
 	// paused: Pause was called; the run ends stopped and keeps its binding (dungeon_pause).
-	paused       atomic.Bool
-	skipped      map[packet.GUID]string
-	lastAssist   time.Time
-	lastMove     time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
-	moveTo       Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
-	haveMoveTo   bool
+	paused     atomic.Bool
+	skipped    map[packet.GUID]string
+	lastAssist time.Time
+	lastMove   time.Time // when the last `cmd move` went out (MoveGap keeps the orders apart)
+	moveTo     Point     // the point of the last `cmd move` the module took: the lead bot's stay spot
+	haveMoveTo bool
+	// trail is the walk in progress: where the lead bot stood when it began and every point it has been sent to since, in order — the path
+	// it just walked. A launch waypoint's tighten (tightenTo) sends the lead bot back along it and never off it.
+	trail        []Point
 	tf           tankFirst                 // the tank-first state of the fights (remote_tank.go)
 	outSince     map[packet.GUID]time.Time // since when each living member stands on another map than the plan's (outsideAlive)
 	offSince     map[packet.GUID]time.Time // when a bot dead outside the dungeon was first left to run back (no GM account)
@@ -917,6 +920,9 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 					err = d.gmCross(ctx, a.To)
 				} else {
 					err = d.tracedWalkAs(ctx, a.To, a.Direct)
+					if err == nil && a.Exact {
+						err = d.tightenTo(ctx, a.To)
+					}
 				}
 			}
 			if err == nil {
@@ -2086,6 +2092,11 @@ func (d *RemoteDriver) walk(ctx context.Context, p Point, direct bool) error {
 const directArrive = 1.5
 
 func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveAt float32) error {
+	// The path this walk uses, for a tighten at the end of it (Action.Exact): where the lead bot stands now, then every point it is sent to.
+	d.trail = d.trail[:0]
+	if here, ok := d.leadPos(); ok {
+		d.trail = append(d.trail, here)
+	}
 	defer d.wd.enter("walk", fmt.Sprintf("to %.0f %.0f %.0f", p.X, p.Y, p.Z), func(ctx context.Context) (string, error) {
 		if direct {
 			// A plain move would plan the navmesh path again, which is the very thing a direct step goes around.
@@ -2198,6 +2209,9 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 		if err := d.moveGap(ctx); err != nil {
 			return err
 		}
+		if q, ok := moveArgsPoint(args); ok {
+			d.trail = append(d.trail, q) // a point the lead bot walks to: the way back for a tighten, if the walk ends short of p
+		}
 		r, err := d.order(ctx, "move", args...)
 		if err != nil {
 			return err
@@ -2257,7 +2271,7 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 			arrive = max(arrive, float32(tiny)+0.5)
 		}
 		ahead := wp != p && d.opt.LookAhead > 0
-		res, err := d.waitArrival(ctx, wp, arrive, ahead, &meter)
+		res, err := d.waitArrival(ctx, wp, arrive, ahead, &meter, time.Time{})
 		if err != nil {
 			return err
 		}
@@ -2287,6 +2301,186 @@ func (d *RemoteDriver) walkTo(ctx context.Context, p Point, direct bool, arriveA
 	}
 }
 
+// tightenTo holds the lead bot on a waypoint the plan marked Exact (a plain via point the direct step after it is launched from) before that
+// step is sent. The walk to the point ends as soon as the lead bot is within MoveArrive yards of it, and the module sends a direct step only
+// from the lead bot's own place: from a few yards short the step is refused (`no-los`, the WC serpentis route's run B) or lands short of the
+// gap, and the module carries out no plain move shorter than MinMove (~6 yd, measured on the ground plane), so the last yards need help.
+//
+// Three things it does, all within one cap (tightenWait, 25 s) and on the driver's own clock:
+//   - no order goes out over a lead bot that is still walking (the walk ends on its own arrival, which is wider than the last stretch);
+//   - a lead bot nearer than MinMove+0.5 yd to the point, on the ground plane, is walked BACK along the path the walk just used (d.trail: where
+//     it started and every point it was sent to, never a point off that path and never one past the waypoint) and then onto the point, so both
+//     moves are long enough for the module to carry out;
+//   - before the step is let go it wants PROOF: fresh frames showing the lead bot within directArrive of the point and standing within
+//     tightenStillYd of one fixed anchor for tightenProofHold (2 s of fresh looks). A quiet feed, a feed that does not list the lead bot, or a
+//     bot that crawls on (each look inside a fresh frame, but drifting from the anchor) proves nothing.
+//
+// No proof by the cap is a failed step, and no direct step goes out: the error names the waypoint, the distance and why (still moving, never
+// still, no lead bot in the feed, a quiet feed). That is the point of the flag — a direct step started from a bot that is not standing on the
+// launch point is how the hop over a 47 yd drop goes wrong.
+func (d *RemoteDriver) tightenTo(ctx context.Context, p Point) error {
+	began := d.clk.Now()
+	until := began.Add(tightenWait)
+	var (
+		meter walkMeter
+		prev  Point
+		last  float64
+	)
+	rounds, looks, seen := 0, 0, false
+	observed := d.n
+	anchor := Point{}
+	haveAnchor := false
+	freshSince := time.Time{}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := d.check(); err != nil {
+			return err
+		}
+		if err := d.ensureAlive(ctx); err != nil {
+			return err
+		}
+		if err := d.requireLiving(); err != nil {
+			return err
+		}
+		if err := d.tick(ctx, d.cfg.Poll); err != nil {
+			return err
+		}
+		now := d.clk.Now()
+		here, ok := d.leadPos()
+		fresh := ok && !d.stalled && d.n != observed
+		observed = d.n
+		moving := false
+		if ok {
+			moving = looks > 0 && dist3(here, prev) > tightenStillYd // the look before this one
+			looks++
+			prev = here
+			last, seen = dist3(here, p), true
+		}
+		// The proof: fresh looks only, one anchor position, tightenProofHold of them, and the lead bot on the point itself.
+		if !fresh {
+			freshSince = time.Time{} // a quiet feed, or frames that did not change, stands for nothing
+		} else if !haveAnchor || dist3(here, anchor) > tightenStillYd {
+			anchor, haveAnchor, freshSince = here, true, now
+		} else if freshSince.IsZero() {
+			freshSince = now
+		}
+		if fresh && last <= directArrive && !freshSince.IsZero() && now.Sub(freshSince) >= tightenProofHold {
+			return nil
+		}
+		if !now.Before(until) {
+			return d.tightenFail(p, last, seen, moving)
+		}
+		// One round of bringing the lead bot onto the point: only while it stands still (never an order over the move that carries it), and
+		// never before a second look, when there is no movement history yet to say whether it does.
+		if last <= directArrive || moving || looks < 2 || rounds >= tightenTries {
+			continue
+		}
+		rounds++
+		expired := false
+		var err error
+		if hdist(here, p) < tightenBack {
+			b, ok := d.trailBack(here, p)
+			if !ok {
+				continue // nothing of the walked path is far enough back: the cap ends this, not a step from short
+			}
+			d.rep.note(fmt.Sprintf("leg %d: launch waypoint %.1f %.1f %.1f: the lead bot stood %.1f yd away (the module carries out no move under %g yd on the ground plane); it is walked back to %.1f %.1f %.1f on the path it came, then onto the point", d.curLeg, p.X, p.Y, p.Z, last, float64(MinMove), b.X, b.Y, b.Z))
+			expired, err = d.tightenGo(ctx, b, &meter, &until)
+		} else {
+			expired, err = d.tightenGo(ctx, p, &meter, &until)
+		}
+		if err != nil {
+			return err
+		}
+		if expired {
+			continue // the next look judges the movement for the failure, on frames from after the wait
+		}
+	}
+}
+
+// tightenFail is the failed step of an Exact waypoint: the lead bot was not proved to stand on it within the cap, and no direct step is sent
+// from short of it. The error names the waypoint, the distance and why it was not proved.
+func (d *RemoteDriver) tightenFail(p Point, last float64, seen, moving bool) error {
+	if !seen {
+		// No lead record at all: a distance would be a made-up one.
+		d.rep.note(fmt.Sprintf("leg %d: launch waypoint %.1f %.1f %.1f: the feed listed no lead bot for %.0f s: the direct step is not sent", d.curLeg, p.X, p.Y, p.Z, tightenWait.Seconds()))
+		return fmt.Errorf("launch waypoint %.1f %.1f %.1f of the next direct step: the feed listed no lead bot for %.0f s; the direct step is not sent", p.X, p.Y, p.Z, tightenWait.Seconds())
+	}
+	why := "the lead bot never stood still on it"
+	switch {
+	case d.stalled:
+		why = "the feed went quiet"
+	case moving:
+		why = "the lead bot was still moving"
+	}
+	d.rep.note(fmt.Sprintf("leg %d: launch waypoint %.1f %.1f %.1f: no lead bot was proved to stand on it within %.0f s (%.1f yd away, %s): the direct step is not sent", d.curLeg, p.X, p.Y, p.Z, tightenWait.Seconds(), last, why))
+	return fmt.Errorf("launch waypoint %.1f %.1f %.1f of the next direct step: %.1f yd away and %s after %.0f s; the direct step is not sent", p.X, p.Y, p.Z, last, why, tightenWait.Seconds())
+}
+
+// tightenGo sends `cmd move q` and waits for the lead bot to come within directArrive yards of it, as a walk waits — but never past the
+// tighten's own deadline: a wait left to its own bounds (MoveStall for a bot that stands still, moveTimeout for one that walks and never
+// arrives, no bound at all for a quiet feed) would let the six moves of a full tighten far exceed the cap, so the wait is given until and ends
+// there. expired says the wait ended at that cap, so that the caller fails the step rather than order again. A pack that aggroes is
+// fought on the way (as a walk does) and the fight's time is given back to the cap, which is not an expiry.
+func (d *RemoteDriver) tightenGo(ctx context.Context, q Point, meter *walkMeter, until *time.Time) (expired bool, err error) {
+	if err := d.moveGap(ctx); err != nil {
+		return false, err
+	}
+	if _, err := d.order(ctx, "move", moveArgs(q)...); err != nil {
+		return false, err
+	}
+	res, err := d.waitArrival(ctx, q, directArrive, false, meter, *until)
+	if err != nil {
+		return false, err
+	}
+	expired = res == deadlineAt
+	if res == fightAt || (d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 && !d.batchOpening()) {
+		fight := d.clk.Now()
+		if err := d.walkAggro(ctx); err != nil {
+			return false, err
+		}
+		*until = until.Add(d.clk.Now().Sub(fight))
+		expired = false // the cap was given the fight's time back
+	}
+	return expired, nil
+}
+
+// trailBack is the point of the walk's own trail to send the lead bot back to before the move onto the launch point: the nearest trail point
+// that is at least tightenBack yards from the lead bot and from the launch point **on the ground plane** (hdist: the module measures a move
+// with GetDistance2d, so a point close on a ramp is no use however far it is in 3D), so both moves are carried out. Every point of the trail is
+// a point the walk sent the lead bot to (or where it started), so the way back and the way in are the path it just walked: never off the mesh,
+// never past the waypoint, and never onto the far side of the hop.
+func (d *RemoteDriver) trailBack(here, p Point) (Point, bool) {
+	best, bestYd, ok := Point{}, math.Inf(1), false
+	for _, q := range d.trail {
+		if yd := hdist(here, q); yd < tightenBack || hdist(q, p) < tightenBack {
+			continue
+		} else if yd < bestYd {
+			best, bestYd, ok = q, yd, true
+		}
+	}
+	return best, ok
+}
+
+// Bounds on the tighten of an Exact waypoint (tightenTo): at most tightenTries rounds, each the walk back along the path the walk used (when
+// the module would ignore the short move onto the point) and then the move onto the point, and at most tightenWait in all (a fight at the point
+// has its time given back); no proof within that cap fails the step. tightenStillYd is how much the lead bot may move and still count as
+// standing, and tightenProofHold is how long it must be seen, in fresh frames, within tightenStillYd of one anchor position before the direct
+// step is let go.
+const (
+	tightenWait      = 25 * time.Second
+	tightenTries     = 3
+	tightenStillYd   = 0.5
+	tightenProofHold = 2 * time.Second
+)
+
+// tightenBack is how far, on the ground plane, from the lead bot and from the launch point the point the tighten walks back to must lie: the
+// module ignores a plain move under MinMove (6 yd) and measures the stretch it walks on the ground plane (GetDistance2d, the same rule
+// remote.go's tiny-move step keeps to), so the move back and the move onto the point each need MinMove plus a little for a bot stopping short
+// and the feed's rounding (0.5 yd).
+const tightenBack = float64(MinMove) + 0.5
+
 type arrival int
 
 const (
@@ -2294,6 +2488,9 @@ const (
 	stalledAt
 	fightAt
 	nearAt // with look-ahead: close enough to the waypoint for the next order
+	// deadlineAt is the caller's own cap running out (waitArrival's until): not an arrival and not a stall, and the caller decides what it
+	// means (the tighten settles and then goes soft, or abandons the step when the lead bot is still moving).
+	deadlineAt
 )
 
 // walkSpeed is the speed (yd/s) a lead bot is taken to run at until the feed has shown it.
@@ -2364,9 +2561,11 @@ func (d *RemoteDriver) moveGap(ctx context.Context) error {
 }
 
 // waitArrival waits for the lead bot to come within arrive yards of wp. It ends early when the party is in a fight, when the
-// lead bot gained no ground in MoveStall, or at the leg's timeout (reported as a stall). With ahead it also ends as soon as the bot
-// is near wp (nearAt), so that the caller can send the next order before the bot stops.
-func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32, ahead bool, meter *walkMeter) (arrival, error) {
+// lead bot gained no ground in MoveStall, at the leg's timeout (reported as a stall), or at until when that is set: the caller's own cap
+// (deadlineAt, on the driver's own clock), which is checked at the top of every poll so that no branch of the loop — a stalled feed, no
+// arrival, a bot that walks and never arrives — can outlast it. With ahead it also ends as soon as the bot is near wp (nearAt), so that
+// the caller can send the next order before the bot stops.
+func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32, ahead bool, meter *walkMeter, until time.Time) (arrival, error) {
 	start, _ := d.leadPos()
 	began := d.clk.Now()
 	limit := moveTimeout(dist3(start, wp))
@@ -2376,6 +2575,9 @@ func (d *RemoteDriver) waitArrival(ctx context.Context, wp Point, arrive float32
 			return 0, err
 		}
 		now := d.clk.Now()
+		if !until.IsZero() && !now.Before(until) {
+			return deadlineAt, nil
+		}
 		here, ok := d.leadPos()
 		if ok && !d.stalled {
 			meter.look(d, here, now)

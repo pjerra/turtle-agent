@@ -83,6 +83,7 @@ type Action struct {
 	To        Point               // walk target
 	Direct    bool                // walk: a straight-line step (`cmd move ... direct`), not a navmesh path (Waypoint.Direct)
 	GMCross   bool                // walk: a GM moves the party to To (Waypoint.GMCross); remote runs only
+	Exact     bool                // walk: the waypoint is Exact (Waypoint.Exact): its point must be reached tightly (remote.go tightenTo)
 	Entries   []uint32            // pull: the group's entries
 	Positions []Point             // pull: where its members stand
 	Ambush    bool                // pull: the group is stealthed (PullGroup.Ambush)
@@ -281,8 +282,11 @@ func (s *Stepper) next() Action {
 		case phWalk:
 			if s.idx < len(l.Via) {
 				w := l.Via[s.idx]
-				// A direct waypoint is always walked (the party stands short of it by design), unless it stands on it already.
-				if dist3(s.w.Position(), w.Point) <= ArriveRadius {
+				// A waypoint with Exact is always returned, whatever the leader's distance — even standing on it: the remote driver must run its
+				// tighten, which is the only place that wants the proof (fresh frames, 2 s of standing at one anchor) before the direct step after
+				// this point goes out; the tighten itself skips the movement that is not needed. Every other via point (and the direct step's own
+				// point) is passed when the leader stands within ArriveRadius of it.
+				if !w.Exact && dist3(s.w.Position(), w.Point) <= ArriveRadius {
 					s.idx++
 					continue
 				}
@@ -293,7 +297,7 @@ func (s *Stepper) next() Action {
 				if w.GMCross {
 					kind = "gm_cross"
 				}
-				return Action{Kind: ActWalk, Leg: s.leg, Step: -1, To: w.Point, Direct: w.Direct, GMCross: w.GMCross, Label: s.label("%s to %.1f %.1f %.1f", kind, w.X, w.Y, w.Z)}
+				return Action{Kind: ActWalk, Leg: s.leg, Step: -1, To: w.Point, Direct: w.Direct, GMCross: w.GMCross, Exact: w.Exact, Label: s.label("%s to %.1f %.1f %.1f", kind, w.X, w.Y, w.Z)}
 			}
 			if dist3(s.w.Position(), l.To) <= ArriveRadius {
 				s.Complete()
