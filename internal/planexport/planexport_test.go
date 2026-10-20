@@ -735,7 +735,7 @@ func TestExactViaIsAFlaggedMove(t *testing.T) {
 	if s := r.Steps[0]; s.Kind != KindMove || s.X != 1 || s.Flags != FlagExact || !strings.Contains(s.Comment, "exact") {
 		t.Fatalf("exact via %+v", s)
 	}
-	if s := r.Steps[1]; s.Kind != KindMoveDirect || s.Flags != 0 {
+	if s := r.Steps[1]; s.Kind != KindMoveDirectExact || s.Flags != 0 || s.X != 10 {
 		t.Fatalf("its direct step %+v", s)
 	}
 	for i, s := range r.Steps {
@@ -750,15 +750,30 @@ func TestExactViaIsAFlaggedMove(t *testing.T) {
 	if err := Equal([]Rows{r}, back); err != nil || back[0].Steps[0].Flags != FlagExact {
 		t.Fatalf("round trip: %v %+v", err, back[0].Steps[0])
 	}
-	// Without exact in the plan, no row has the flag (the plain mapping is unchanged).
-	for _, s := range build(t, parsePlan(t, small)).Steps {
-		if s.Flags&FlagExact != 0 {
-			t.Fatalf("flag without exact: %+v", s)
+	// Without exact in the plan, no row has the flag and the direct step stays a move_direct (the plain mapping is unchanged).
+	plain := build(t, parsePlan(t, small))
+	for _, s := range plain.Steps {
+		if s.Flags&FlagExact != 0 || s.Kind == KindMoveDirectExact {
+			t.Fatalf("exact without exact: %+v", s)
 		}
 	}
+	if plain.Steps[1].Kind != KindMoveDirect {
+		t.Fatalf("plain direct step %+v", plain.Steps[1])
+	}
+	// The pairing both ways: an exact move before a plain move_direct, and a move_direct_exact after a plain move, are refused.
 	bad := r
 	bad.Steps = slices.Clone(r.Steps)
-	bad.Steps[1].Flags = FlagExact // on the move_direct
+	bad.Steps[1].Kind = KindMoveDirect
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_direct_exact") {
+		t.Fatalf("exact move before a plain move_direct: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[0].Flags = 0
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "must follow the exact move") {
+		t.Fatalf("move_direct_exact after a plain move: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[1].Flags = FlagExact // on the move_direct_exact
 	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "the exact flag is for a move row") {
 		t.Fatalf("exact on a move_direct: %v", err)
 	}
@@ -794,7 +809,7 @@ func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
 		if legOf[s.Leg] != "serpentis" || s.X != -293.3 || s.Y != 0.5 || s.Z != -58 {
 			t.Fatalf("exact row %+v (leg %s)", s, legOf[s.Leg])
 		}
-		if n.Kind != KindMoveDirect || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
+		if n.Kind != KindMoveDirectExact || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
 			t.Fatalf("after the foot: %+v", n)
 		}
 	}
@@ -845,5 +860,26 @@ func TestUnexpressedAttributesAreWarned(t *testing.T) {
 	}
 	if n := strings.Count(w, "skip ("); n != 1 {
 		t.Fatalf("one warning per attribute, %d for skip:\n%s", n, w)
+	}
+}
+
+// TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_direct_exact (it is a straight line, like a
+// move_direct): the exact foot stays right before its hop.
+func TestRouteLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"lavahop","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
+ "avoid":[{"name":"basin","min":{"x":200,"y":-5,"z":-9},"max":{"x":210,"y":5,"z":-1},"why":"lava"}],
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":10,"y":0,"z":-4,"direct":true}],"to":{"x":20,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":30,"y":0,"z":-4}}}]}`
+	route := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil // a via point on every hop it is asked about
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && res.Rows.Steps[i+1].Kind != KindMoveDirectExact {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
 	}
 }

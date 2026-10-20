@@ -22,16 +22,20 @@ import (
 const (
 	KindMove       = "move"
 	KindMoveDirect = "move_direct"
-	KindPull       = "pull"
-	KindBoss       = "boss"
-	KindLoot       = "loot"
-	KindOpen       = "open"
-	KindUseItem    = "use_item"
-	KindWaitObject = "wait_object"
-	KindWaitClear  = "wait_clear"
-	KindRest       = "rest"
-	KindRitual     = "ritual"
-	KindHold       = "hold"
+	// KindMoveDirectExact is the direct step right after an exact via (FlagExact): a move_direct in every way for a module that knows
+	// exact waypoints, and a kind an older module does not know, so its loader skips the row (UnknownKind) and no direct order goes
+	// out over the hole from a foot it walks as a plain move (fail closed against a binary rollback).
+	KindMoveDirectExact = "move_direct_exact"
+	KindPull            = "pull"
+	KindBoss            = "boss"
+	KindLoot            = "loot"
+	KindOpen            = "open"
+	KindUseItem         = "use_item"
+	KindWaitObject      = "wait_object"
+	KindWaitClear       = "wait_clear"
+	KindRest            = "rest"
+	KindRitual          = "ritual"
+	KindHold            = "hold"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -297,7 +301,7 @@ func (b *builder) leg(li int) error {
 	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName)})
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
-	for _, w := range l.Via {
+	for vi, w := range l.Via {
 		if w.GMCross && b.opt.GMCrossDirect {
 			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): via %.1f %.1f %.1f is a gm_cross; exported as a move_direct (a straight walk to the landing point), not tried live: the run leader has no GM move", li, l.Name, w.X, w.Y, w.Z))
 			b.move(w.Point, true, "via (gm_cross in the plan; move_direct, not tried live)")
@@ -310,6 +314,11 @@ func (b *builder) leg(li int) error {
 			// The plan allows exact only on a plain via whose next via is a direct step (dungeon.Parse refuses any other), so this row is
 			// always followed by its move_direct; Validate checks the rows keep it so.
 			b.add(StepRow{Kind: KindMove, X: w.X, Y: w.Y, Z: w.Z, Flags: FlagExact, Comment: "via (exact: the direct step's launch point)"})
+			b.last, b.haveLast = w.Point, true
+			continue
+		}
+		if w.Direct && vi > 0 && l.Via[vi-1].Exact {
+			b.add(StepRow{Kind: KindMoveDirectExact, X: w.X, Y: w.Y, Z: w.Z, Comment: "via (direct from the exact point before it)"})
 			b.last, b.haveLast = w.Point, true
 			continue
 		}
@@ -588,7 +597,7 @@ func Validate(r Rows) error {
 			return bad("%d entries (at most %d)", len(s.Entries), MaxEntries)
 		}
 		switch s.Kind {
-		case KindMove, KindMoveDirect, KindRest:
+		case KindMove, KindMoveDirect, KindMoveDirectExact, KindRest:
 		case KindPull:
 			if len(s.Entries) == 0 {
 				return bad("a pull needs entries")
@@ -618,8 +627,16 @@ func Validate(r Rows) error {
 			if s.Kind != KindMove {
 				return bad("the exact flag is for a move row (the loader refuses it on a %s)", s.Kind)
 			}
-			if i+1 >= len(r.Steps) || r.Steps[i+1].Plan != s.Plan || r.Steps[i+1].Leg != s.Leg || r.Steps[i+1].Kind != KindMoveDirect {
-				return bad("an exact move must be followed by the move_direct it launches (a row came between them, or there is none)")
+			if i+1 >= len(r.Steps) || r.Steps[i+1].Plan != s.Plan || r.Steps[i+1].Leg != s.Leg || r.Steps[i+1].Kind != KindMoveDirectExact {
+				return bad("an exact move must be followed by the move_direct_exact it launches (a row came between them, or there is none)")
+			}
+		}
+		if s.Kind == KindMoveDirectExact {
+			if i == 0 || r.Steps[i-1].Plan != s.Plan || r.Steps[i-1].Leg != s.Leg || r.Steps[i-1].Kind != KindMove || r.Steps[i-1].Flags&FlagExact == 0 {
+				return bad("a move_direct_exact must follow the exact move (flags %d) it is launched from", FlagExact)
+			}
+			if s.Flags != 0 {
+				return bad("a move_direct_exact carries no flags")
 			}
 		}
 		if len(s.Comment) > MaxComment {
@@ -659,7 +676,7 @@ func (b *builder) cutLongHops() error {
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
 			prev = &cp
 		}
-		if s.Kind == KindMove || s.Kind == KindMoveDirect {
+		if s.Kind == KindMove || s.Kind == KindMoveDirect || s.Kind == KindMoveDirectExact {
 			if prev != nil {
 				a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 				if d := dist3(a, c); d > MoveGapWarnYd {
@@ -704,13 +721,13 @@ func (b *builder) routeAroundAvoid() error {
 	added := map[int]int{}
 	for _, s := range b.rows.Steps {
 		switch s.Kind {
-		case KindMove, KindMoveDirect, KindPull, KindBoss, KindHold:
+		case KindMove, KindMoveDirect, KindMoveDirectExact, KindPull, KindBoss, KindHold:
 		default:
 			out = append(out, s)
 			continue
 		}
 		to := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
-		if s.Kind != KindMoveDirect {
+		if s.Kind != KindMoveDirect && s.Kind != KindMoveDirectExact {
 			via, err := b.opt.Route(b.plan.Map, prev, to)
 			if err != nil {
 				return fmt.Errorf("leg %d step %d (%s): %w", s.Leg, s.Seq, s.Kind, err)
