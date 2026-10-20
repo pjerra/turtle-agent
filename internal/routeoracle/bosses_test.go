@@ -1,6 +1,7 @@
 package routeoracle
 
 import (
+	"math"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -51,5 +52,25 @@ func TestGroupOnRouteHoldAndEmptyGroups(t *testing.T) {
 	}
 	if n := emptyGroups(&dungeon.Plan{Legs: []dungeon.Leg{{PullGroups: []dungeon.PullGroup{{}, *hold}}, {PullGroups: []dungeon.PullGroup{{}}}}}); n != 2 {
 		t.Errorf("empty groups %d, want 2", n)
+	}
+}
+
+// NearYd is the nearest of a group's positions, not the last one examined: with an off-path
+// group whose nearest position comes first it still reports the nearest.
+func TestGroupNearYdIsTheMinimumOverAllPositions(t *testing.T) {
+	route := []Vec3{{0, 0, 0}, {100, 0, 0}}
+	g := &dungeon.PullGroup{Radius: 10, Positions: []dungeon.Point{{X: 50, Y: 30, Z: 0}, {X: 50, Y: 90, Z: 0}}}
+	got, ok := GroupOnRoute(0, g, route)
+	if !ok || got.OnPath || math.Abs(got.NearYd-30) > 0.01 {
+		t.Errorf("off-path group: %+v ok %v, want near 30.0 (not the last position's 90.0)", got, ok)
+	}
+	// Same answer whatever the order, and when a later position puts the group on the path.
+	g2 := &dungeon.PullGroup{Radius: 10, Positions: []dungeon.Point{{X: 50, Y: 90, Z: 0}, {X: 50, Y: 30, Z: 0}}}
+	if got, _ := GroupOnRoute(0, g2, route); math.Abs(got.NearYd-30) > 0.01 {
+		t.Errorf("reversed: near %.1f", got.NearYd)
+	}
+	g3 := &dungeon.PullGroup{Radius: 10, Positions: []dungeon.Point{{X: 50, Y: 20, Z: 0}, {X: 50, Y: 60, Z: 0}, {X: 50, Y: 5, Z: 0}}}
+	if got, _ := GroupOnRoute(0, g3, route); !got.OnPath || math.Abs(got.NearYd-5) > 0.01 {
+		t.Errorf("on-path group: %+v, want on and near 5.0", got)
 	}
 }

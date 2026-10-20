@@ -3,6 +3,7 @@
 package routeoracle
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -285,7 +286,7 @@ func TestBossOnlyChainFoldsBosslessLegs(t *testing.T) {
 	for _, h := range a.Hand {
 		if h.Kind == "to" {
 			to++
-			if h.Leg == 0 && h.At.X == 46 {
+			if h.Leg != nil && *h.Leg == 0 && h.At.X == 46 {
 				sawHallTo++
 			}
 		}
@@ -293,7 +294,7 @@ func TestBossOnlyChainFoldsBosslessLegs(t *testing.T) {
 	if to != 2 || sawHallTo != 1 {
 		t.Errorf("row 0 to points among the hand points: %d (hall's: %d), hand %+v", to, sawHallTo, a.Hand)
 	}
-	if len(a.Packs) != 2 || a.Packs[0].Leg != 0 || a.Packs[1].Leg != 0 {
+	if len(a.Packs) != 2 || a.Packs[0].Leg == nil || *a.Packs[0].Leg != 0 || a.Packs[1].Leg == nil || *a.Packs[1].Leg != 0 {
 		t.Errorf("row 0 packs %+v, want the hall's two groups", a.Packs)
 	}
 	plain, err := Bosses(p, dir, plan, ObjectivesPlan)
@@ -424,5 +425,56 @@ func TestEmptyPullGroupIsSkippedAndCounted(t *testing.T) {
 	}
 	if !contains(walk.Summary(), "1 empty pull groups skipped") || !contains(live.Summary(), "1 empty pull groups skipped") {
 		t.Errorf("summaries %q / %q", walk.Summary(), live.Summary())
+	}
+}
+
+// A folded boss-only row says which stored leg each pack, hand point and break belongs to, and
+// writes the index even for leg 0 (a pointer, not an omitted zero). Leg 1 here is the NON-zero
+// case: dropping the assignment leaves the field nil and fails.
+func TestBossOnlyRowNamesTheStoredLegOfEachItem(t *testing.T) {
+	plan := `{"version":1,"name":"fold","map":0,"entrance":{"x":12,"y":12,"z":0},"legs":[
+	 {"name":"a","to":{"x":30,"y":12,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":30,"y":14,"z":0}]}]},
+	 {"name":"b","to":{"x":46,"y":16,"z":0},"via":[{"x":40,"y":12,"z":0,"check_skip":"fixture"}],
+	  "pull_groups":[{"entries":[2],"positions":[{"x":46,"y":14,"z":0}]}],
+	  "boss":{"entry":9,"position":{"x":48,"y":24,"z":0}}}]}`
+	dir := navfixture.WriteDir(t, 0, navfixture.LCorridor(0))
+	p := navmesh.NewPlanner(dir)
+	t.Cleanup(p.Close)
+	dp, err := dungeon.Parse("fold.json", []byte(plan))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	rep, err := Bosses(p, dir, dp, ObjectivesBosses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Legs) != 1 || rep.Legs[0].Status != "complete" || len(rep.Legs[0].Legs) != 2 {
+		t.Fatalf("rows %+v", rep.Legs)
+	}
+	row := rep.Legs[0]
+	got := func(p *int) int {
+		if p == nil {
+			return -1
+		}
+		return *p
+	}
+	if len(row.Packs) != 2 || got(row.Packs[0].Leg) != 0 || got(row.Packs[1].Leg) != 1 {
+		t.Errorf("pack legs: %+v", row.Packs)
+	}
+	var toLegs []int
+	for _, h := range row.Hand {
+		if h.Kind == "to" {
+			toLegs = append(toLegs, got(h.Leg))
+		}
+	}
+	if len(toLegs) != 2 || toLegs[0] != 0 || toLegs[1] != 1 {
+		t.Errorf("to points' legs %v, want [0 1]", toLegs)
+	}
+	if len(row.Breaks) != 1 || got(row.Breaks[0].Leg) != 1 {
+		t.Errorf("break legs: %+v", row.Breaks)
+	}
+	b, err := json.Marshal(row.Packs)
+	if err != nil || !strings.Contains(string(b), `"leg":0`) || !strings.Contains(string(b), `"leg":1`) {
+		t.Errorf("packs json %s (err %v): leg 0 must be written too", b, err)
 	}
 }

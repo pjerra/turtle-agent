@@ -84,7 +84,7 @@ type StoredPoint struct {
 // and whether the leg's live route touched it.
 type BreakTouched struct {
 	Via     int           `json:"via"`           // the waypoint's index in the leg's via, from 0
-	Leg     int           `json:"leg,omitempty"` // boss-only mode: the stored leg it belongs to
+	Leg     *int          `json:"leg,omitempty"` // boss-only mode: the stored leg it belongs to (a pointer: leg 0 is written)
 	Kind    string        `json:"kind"`
 	At      dungeon.Point `json:"at"`
 	Touched bool          `json:"touched"`
@@ -95,7 +95,7 @@ type BreakTouched struct {
 // positions.
 type PullOnPath struct {
 	Group    int      `json:"group"`
-	Leg      int      `json:"leg,omitempty"` // boss-only mode: the stored leg the group belongs to (absent: leg 0, or not a folded row)
+	Leg      *int     `json:"leg,omitempty"` // boss-only mode: the stored leg the group belongs to (a pointer: leg 0 is written; absent outside a folded row)
 	OnPath   bool     `json:"on_path"`
 	NearYd   float64  `json:"near_yd"` // horizontal distance of the nearest position to the route
 	DZYd     float64  `json:"dz_yd"`
@@ -135,7 +135,8 @@ func GroupOnRoute(gi int, g *dungeon.PullGroup, route []Vec3) (pg PullOnPath, ok
 	}
 	for i := range pos {
 		near := NearestPolyline(route, vec(pos[i]))
-		if !pg.OnPath || near.Dist2D < pg.NearYd {
+		// NearYd is the minimum over ALL positions, whether or not the group is on the path yet.
+		if i == 0 || near.Dist2D < pg.NearYd {
 			pg.NearYd, pg.DZYd = near.Dist2D, near.DZ
 		}
 		if OnCorridor(near, float64(radius)) {

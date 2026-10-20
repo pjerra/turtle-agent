@@ -109,7 +109,7 @@ type BreakHit struct {
 // stand that is not a break and not the objective) and how far the live path passes from it.
 type HandPoint struct {
 	Seq       int           `json:"seq"`
-	Leg       int           `json:"leg,omitempty"` // boss-only mode: the stored leg
+	Leg       *int          `json:"leg,omitempty"` // boss-only mode: the stored leg (a pointer: leg 0 is written)
 	Kind      string        `json:"kind"`
 	At        dungeon.Point `json:"at"`
 	NearYd    float64       `json:"near_yd"`
@@ -383,7 +383,7 @@ func planBossLeg(sc *navmesh.Planner, plan *dungeon.Plan, o objective, from Vec3
 	for _, li := range o.legs {
 		for _, b := range breaksOf(&plan.Legs[li], path.Points, end, path.Status == navmesh.Partial) {
 			if folded {
-				b.Leg = li
+				b.Leg = intPtr(li)
 			}
 			bl.Breaks = append(bl.Breaks, b)
 		}
@@ -408,7 +408,7 @@ func measureBossLeg(bl *BossLeg, plan *dungeon.Plan, o objective, path navmesh.P
 				continue
 			}
 			if folded {
-				pg.Leg = li
+				pg.Leg = intPtr(li)
 			}
 			bl.Packs = append(bl.Packs, pg)
 			if pg.OnPath {
@@ -417,7 +417,7 @@ func measureBossLeg(bl *BossLeg, plan *dungeon.Plan, o objective, path navmesh.P
 		}
 		for _, h := range handPoints(l, route, o.at) {
 			if folded {
-				h.Leg = li
+				h.Leg = intPtr(li)
 			}
 			bl.Hand = append(bl.Hand, h)
 			if h.Redundant {
@@ -426,7 +426,7 @@ func measureBossLeg(bl *BossLeg, plan *dungeon.Plan, o objective, path navmesh.P
 		}
 		for _, b := range breaksOf(l, route, Vec3{}, false) {
 			if folded {
-				b.Leg = li
+				b.Leg = intPtr(li)
 			}
 			bl.Breaks = append(bl.Breaks, b)
 		}
@@ -545,3 +545,5 @@ func breakHits(sc *navmesh.Planner, mapID uint32, plan *dungeon.Plan, legs []int
 	})
 	return out, nil
 }
+
+func intPtr(v int) *int { return &v }

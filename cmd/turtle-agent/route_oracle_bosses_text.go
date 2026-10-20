@@ -91,18 +91,18 @@ func bossesText(rep routeoracle.BossesReport) ([]byte, error) {
 		for _, g := range l.Packs {
 			if !g.OnPath {
 				fmt.Fprintf(w, "leg %d (%s): pack group %d of stored leg %d (entries %v) nearest position %.1f yd (dz %.1f) from the live path, radius %.0f yd\n",
-					l.Leg, l.Name, g.Group, g.Leg, g.Entries, g.NearYd, g.DZYd, g.RadiusYd)
+					l.Leg, l.Name, g.Group, legOf(g.Leg), g.Entries, g.NearYd, g.DZYd, g.RadiusYd)
 			}
 		}
 		for _, h := range l.Hand {
 			if !h.Redundant {
 				fmt.Fprintf(w, "leg %d (%s): hand %s (stored leg %d, seq %d) at %.1f,%.1f,%.1f is %.1f yd from the live path\n",
-					l.Leg, l.Name, h.Kind, h.Leg, h.Seq, h.At.X, h.At.Y, h.At.Z, h.NearYd)
+					l.Leg, l.Name, h.Kind, legOf(h.Leg), h.Seq, h.At.X, h.At.Y, h.At.Z, h.NearYd)
 			}
 		}
 		for _, b := range l.Breaks {
 			fmt.Fprintf(w, "leg %d (%s): stored break (stored leg %d) via %d (%s) at %.1f,%.1f,%.1f: live path passes it %v\n",
-				l.Leg, l.Name, b.Leg, b.Via, b.Kind, b.At.X, b.At.Y, b.At.Z, b.Touched)
+				l.Leg, l.Name, legOf(b.Leg), b.Via, b.Kind, b.At.X, b.At.Y, b.At.Z, b.Touched)
 		}
 		for _, j := range l.ZJumps {
 			fmt.Fprintf(w, "leg %d (%s): z jump %.1f yd at %.1f,%.1f,%.1f\n", l.Leg, l.Name, j.DropYd, j.At[0], j.At[1], j.At[2])
@@ -128,4 +128,12 @@ func bridgedOf(l *routeoracle.BossLeg) string {
 			l.Bridged.HandRedundant, len(l.Bridged.Hand))
 	}
 	return fmt.Sprintf("%s, %.0f yd short", l.Bridged.Status, l.Bridged.Live.EndGapYd)
+}
+
+// legOf is a folded row's stored leg index (0 when the field is absent).
+func legOf(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
