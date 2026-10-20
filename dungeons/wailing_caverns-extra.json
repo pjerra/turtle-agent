@@ -2,7 +2,7 @@
   "version": 1,
   "name": "wailing_caverns-extra",
   "kind": "dungeon",
-  "status": "draft (the earlier offline record of the Disciple of Naralex event: its steps are now legs 12-20 of dungeons/wailing_caverns.json; this file is not for running)",
+  "status": "draft (the Disciple of Naralex event of Wailing Caverns, written offline from script_waypoint 3678 and the escort script, machine-checked, never walked and never run live; it needs a GM commander for the return (gm_cross) or a live-probed non-GM return hop, and is not exported to the run leader; not for running before that)",
   "map": 43,
   "entrance": {"x": -158.441, "y": 131.601, "z": -74.2552},
   "entrance_trigger": 228,
@@ -15,18 +15,19 @@
     "z": 21.5403
   },
   "notes": [
-    "The Disciple of Naralex event of Wailing Caverns and what dungeons/wailing_caverns.json leaves out because the driver cannot do it yet. Do not run it as a plan: it is the record of the positions, entries and steps for the day the driver has the missing step types below. Mapped offline (world database export of map 43, src/scripts/dungeons/wailing_caverns/wailing_caverns.cpp and instance_wailing_caverns.cpp, script_waypoint 3678, gossip_menu 201/202); not walked live.",
-    "WHEN: after the four Fanglords (3671, 3669, 3670, 3673; Verdan and Skum are not needed) are dead. instance_wailing_caverns.cpp then sets the Disciple's default gossip menu to 202 and he yells (YELL_AFTER_GOSSIP). Before that his menu is 201 (text 698, gossip script 201 casts Mark of the Wild 5232 on the player). WHERE: the Disciple of Naralex (3678, faction 35, npc_flags 1, level 20, 1429 hp) stands at -134.965 125.402 -78.0945, 24 yd from the entrance point. The way back from Verdan is the long one (the hop in dungeons/wailing_caverns.json taken the other way: its landing -287.5 5.0 -63.6 up to the foot -293.3 0.5 -58.0, which the probe of 2026-10-18 showed cannot be climbed, tests/wc-hop-probe-2; then 1713 yd to the Disciple); it is not a leg here because the plan check walks the legs of a plan one after the other from the entrance. The live walk found that the hop cannot be walked back (the ramp side is 6 yd lower across a 3.9 yd gap with no floor: a jump down and an impossible climb up, and the navmesh has no link), so the way back to the Disciple is a gm_cross waypoint: the first leg below, escort_1, starts with a gm_cross via at the Disciple's stand, where a GM moves the party from behind Verdan (the alternative is the game's own shortcut, the waterfall hole behind Verdan, a drop into the river near the entrance, and the walk from the river).",
-    "STEP 1, the gossip (the step exists in turtle-agent pull request 194, feat/gossip-step, and is not in dev yet): option 0 of menu 202, 'Let the event begin!' (gossip_menu_option 202/0, condition 3678 = instance data TYPE_DISCIPLE is SPECIAL; the menu lags one update behind the last Fanglord's death, so retry_s is generous). Its script 202 is command 85 (send script event): OnScriptEventHappened starts the escort (npc_escortAI Start(false), no out-of-range check) and changes the Disciple to faction FACTION_ESCORT_N_NEUTRAL_ACTIVE. As a plan step: {\"gossip\": {\"npc\": 3678, \"near\": {\"x\": -134.965, \"y\": 125.402, \"z\": -78.0945}, \"option\": 0, \"stand\": {\"x\": -131.0, \"y\": 127.0, \"z\": -78.6}, \"retry_s\": 30, \"fail_text\": \"the Disciple's menu 202 needs all four Fanglords dead\"}}. It goes at the start of the first leg below (escort_1), where the leg's via point is the Disciple's stand.",
+    "Naralex event: needs a GM commander for the return (gm_cross), OR a live-probed non-GM return hop: the navmesh on map 43 has two disconnected parts and the only join is the one-way Serpentis-foot jump, probed partial in both directions; the reverse hop (ramp lip -287.5 5 -63.6 down to the foot -293.3 0.5 -58) is untested live; the Naralex event is meant to run as its own segment starting at the Disciple. This file is that segment: its legs are the former legs 12-20 of dungeons/wailing_caverns.json, which was cut back to the mapped walk to Verdan (legs 0-11, exported to the TortoiseBots run leader) so that no run of the base plan needs a GM; the gm_cross of the return_gossip leg stays only here. The plan-export tool refuses this file (the steps below are not run leader steps); the file is loaded and checked by the dungeon tests (shape, steps, waits, follow stretches, navmesh) so that it cannot rot.",
+    "The Disciple of Naralex event of Wailing Caverns, as plan legs (the gossip at menu 202 option 0, the escort's stops of script_waypoint 3678, the summoned waves, Mutanus held by instance data 4 reading DONE). Mapped offline (world database export of map 43, src/scripts/dungeons/wailing_caverns/wailing_caverns.cpp and instance_wailing_caverns.cpp, script_waypoint 3678, gossip_menu 201/202); not walked live.",
+    "WHEN: after the four Fanglords (3671, 3669, 3670, 3673; Verdan and Skum are not needed) are dead. instance_wailing_caverns.cpp then sets the Disciple's default gossip menu to 202 and he yells (YELL_AFTER_GOSSIP). Before that his menu is 201 (text 698, gossip script 201 casts Mark of the Wild 5232 on the player). WHERE: the Disciple of Naralex (3678, faction 35, npc_flags 1, level 20, 1429 hp) stands at -134.965 125.402 -78.0945, 24 yd from the entrance point. The way back from Verdan is the long one: the hop of dungeons/wailing_caverns.json taken the other way (its landing -287.5 5.0 -63.6 up to the foot -293.3 0.5 -58.0) cannot be climbed (the probe of 2026-10-18, tests/wc-hop-probe-2: a move from the ramp back to the foot stopped 5.0 yd short), and the navmesh of map 43 has two parts with the one-way jump as the only join (a plan from Verdan's room to the Disciple's stand is partial: the nearest reachable point is 81 yd short; the reverse is partial too), so the return of the first leg, return_gossip, is a gm_cross waypoint at the Disciple's stand, where a GM moves the party from behind Verdan (the commander's own character `.go xyz -131 127 -78.6`, `.bot summon <lead bot>`, `cmd summon` the others). The alternatives are the game's own shortcut, the waterfall hole behind Verdan (a drop into the river near the entrance, and the walk from the river), or a live-probed hop from the ramp lip down to the foot followed by the 1713 yd walk to the Disciple (an open follow-up: a live probe of the Serpentis return hop with move_hop_exact). The leg's target is the stand of the gossip (-134 128.5), not the Disciple's spawn point.",
+    "ESCORT RULE (core ScriptedEscortAI.cpp lines 226-234 and 303-312): while the Disciple is out of combat the escort FAILS when every member of the group is more than 100 yd from him. A walking NPC is slower than bots, so the follow legs stop at points of his road no more than 80 yd apart in a straight line (the stretch from one stop to the next, the stand counting as the first stop) and every stop waits for the Disciple seen within 8 to 9 yd of it before the party goes on: the party is then at most 80 + 9 yd ahead of him. A test pins the longest stretch and the vias of each follow leg to 80 yd.",
     "STEP 2, the escort (31 script_waypoints, 3678 walks at speed_walk 1 and is attacked by what is summoned; if he dies his summons vanish (JustDied) and the escort is over; the script does not say whether it can be started again; Wowhead says it cannot until the instance resets and the four Fanglords are killed again): the party must stay with him and kill what comes. Stops: waypoint 0 at his spot (he says SAY_CAST_MARK and casts Mark of the Wild 5232 on every living player within 30 yd, 5 s); waypoint 7 (-102.4 232.8 -91.5): two Deviate Ravagers (3636, 'raptors') are summoned at -67.9 214.4 -93.5 and -69.8 211.3 -93.5 and run at him, then he talks 5 s; waypoint 15 (-54 276.2 -92.8): Serpentine Cleansing (6270, a 15 s cast, he is rooted and does not react to attacks while it runs) and three Deviate Vipers (5755) summoned at -52.9 269.8, -58.5 279.8 and -49.6 278.2 (z -92.8) after the cast; waypoint 26 (52.2 208.7 -89.5): a 3 s stop, SAY_BEFORE_CHAMBER; waypoint 30 (114.6 236.9 -96.0, facing Naralex 3679 at 115.4 240.0 -94.0): the ritual. He casts Sleep (1090) on one of his attackers every 30 s and drinks a potion (8141) below 80 percent hp.",
     "STEP 3, the ritual at waypoint 30 (timers from the script, in seconds after he arrives): +1 SAY_BEFORE_RITUAL, +3 Naralex's Awakening 6271 (the Disciple is stunned by his own spell), +7 Naralex's emote, +12 three Deviate Moccasins (5762, level 20-21) summoned at Position[7..9] (123.8 271.9, 151.9 234.3, 127.6 200.8; z about -102), +52 seven Nightmare Ectoplasm (5763, level 20-21, faction 14, mechanic_immune_mask 64, immune to roots) at Position[3..9] (142.7 254.0, 140.5 219.8, 92.2 261.9, 100.3 268.6, 123.8 271.9, 151.9 234.3, 127.6 200.8), +92 Naralex speaks again, +102 Mutanus the Devourer (3654, level 22, 7944 hp, faction 270, EventAI 1720974-6) is summoned at Position[3] = 142.7 254.0 -102.2. Mutanus's spells: Naralex's Nightmare 7967 (interruptible), Terrify 7399, Thundercrack 8150; he has a school immunity mask of 32 (shadow). The summoned creatures run to the Disciple and attack him when they have no victim: the tank holds them, the others stay near him. When Mutanus dies (TYPE_MUTANUS DONE) every hostile of the instance that is alive or has no loot is despawned, and the script sets TYPE_DISCIPLE DONE: Naralex wakes, they speak (about 20 s) and fly away along 5 points, despawning (respawn 12 h). The loot (Mutanus drops the Glowing Shard, which starts a quest) stays on his corpse.",
     "WOWHEAD (read with tools/wowhead/wh.py: the strategy guide 7843, the npc pages of Mutanus 3654 and the Disciple 3678 and their comments; data, the script wins): the escort is optional and unlocks when all four Fanglords are dead; protect the Disciple at all costs, if he dies or the group wipes the event fails and cannot be repeated until the instance resets; Mutanus is a group-composition check: Thundercrack (8150) hits everything near him hard (melee suffer, bring ranged and a second healer for it), Terrify (7399), and Naralex's Nightmare (7967, a shadow sleep: 'makes others evil and asleep', interruptible, see the tactics of the boss) are his spells; Mutanus is immune to shadow damage (a comment; his school_immune_mask 32 agrees); fight the waves with area damage (Arcane Explosion, totems, Frost Nova and Polymorph for the swarm) and keep the AoE damage dealers alive; clear the mobs on the way to Naralex's room beforehand; a comment counts five Nightmare Ectoplasm where the script summons seven, another that killing the slimes too fast can keep Mutanus from spawning (the script has a plain timer) and another that killing the waves too fast stalls Naralex's spell animation on a later realm, so let the Disciple be hit first: unverified. His loot includes the Glowing Shard, which starts a quest.",
-    "WHAT THE DRIVER CANNOT DO YET (2026-10-20: the event's steps are now legs 12-20 of dungeons/wailing_caverns.json, written with the step vocabulary dev has; this file's legs below stay as the earlier record and are not to be run): (1) the gossip step is in dev (dungeon.Gossip; the main plan's leg return_gossip takes option 0 of menu 202); (2) there is no step that walks WITH the escort NPC: the main plan's legs walk ahead to each of his stops and wait_for.unit pins the party there until he arrives (states seen, radius 8 to 9 yd round the stop), which is an approximation, not a walk at his side; (3) nothing waits for a summon inside a leg: the wave pulls sit in the legs after the waits, so a wave the script summons late is pulled only when its own leg's pull runs (the ritual waves ride the waits of the legs before); (4) summoned waves (the vipers, Moccasins, ectoplasm and Mutanus have no spawn rows) are modelled as pull groups and waits at the summon positions: the driver fights what the feed shows there; (5) the Disciple must live: no step marks an NPC as one to protect (the waits' fail_texts are the only witness); (6) a boss with several possible spawn spots (Lady Anacondra) and a way down by falling (the shortcut behind Verdan) have no step either, see the main plan."
+    "WHAT THE DRIVER CANNOT DO YET: (1) there is no step that walks WITH the escort NPC: the follow legs walk ahead to each of his stops and wait_for.unit pins the party there until he arrives (state seen, radius 8 to 9 yd round the stop), which is an approximation, not a walk at his side; (2) nothing waits for a summon inside a leg: the wave pulls sit in the legs after the waits, so a wave the script summons late is pulled only when its own leg's pull runs (the ritual waves ride the waits of the legs before); the wave waits use the state `dead`, which passes on a corpse in view or a kill the run saw, because the summons despawn when they die and a `gone` wait (which needs a living unit seen first) could never pass after the pull has run; (3) summoned waves (the vipers, Moccasins, ectoplasm and Mutanus have no spawn rows) are modelled as pull groups and waits at the summon positions: the driver fights what the feed shows there; (4) the Disciple must live: no step marks an NPC as one to protect (the waits' fail_texts are the only witness); (5) a boss with several possible spawn spots (Lady Anacondra) and a way down by falling (the shortcut behind Verdan) have no step either, see the main plan."
   ],
   "legs": [
     {
-      "name": "escort_1",
-      "to": {"x": -102.4, "y": 232.8, "z": -91.3},
+      "name": "return_gossip",
+      "to": {"x": -134, "y": 128.5, "z": -78.1},
       "via": [
         {
           "x": -131,
@@ -36,76 +37,397 @@
           "gm_cross": true
         }
       ],
-      "pull_groups": [
+      "skip": [3678, 3679],
+      "steps": [
         {
-          "entries": [3636, 3636],
-          "positions": [
-            {"x": -67.9, "y": 214.4, "z": -93.5},
-            {"x": -69.8, "y": 211.3, "z": -93.5}
-          ]
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": -134.965, "y": 125.402, "z": -78.0945},
+              "radius": 8,
+              "state": "seen"
+            },
+            "timeout_s": 60,
+            "fail_text": "the Disciple of Naralex is not at his stand (-134.965 125.402 -78.0945): he is dead, or the party stands in the wrong place"
+          }
+        },
+        {
+          "gossip": {
+            "npc": 3678,
+            "near": {"x": -134.965, "y": 125.402, "z": -78.0945},
+            "option": 0,
+            "by": "tank",
+            "stand": {"x": -134, "y": 128.5, "z": -78.1},
+            "retry_s": 45,
+            "fail_text": "the Disciple's menu 202 has no 'Let the event begin!' (option 0): the four Fanglords are not all dead in this instance, or the escort already ran (it cannot be retried until a reset, Wowhead 3678)."
+          }
         }
       ],
-      "skip": [3678, 3679],
       "notes": [
-        "Starts with a gm_cross to the Disciple's stand (via 1 -131 127 -78.3: a GM moves the party there from behind Verdan), where the gossip step of the plan notes goes (option 0 of menu 202). Escort waypoint 7: SAY_1ST_WP, two Deviate Ravagers (3636) are SUMMONED (no spawn rows: the pull group is where they appear, then they run at the Disciple) at -67.9 214.4 -93.5 and -69.8 211.3 -93.5; the Disciple walks on 5 s after they are dead. A wait_for hostiles_gone (radius 35 around -68.8 212.9) would follow, but it passes at once while nothing is summoned yet."
+        "EVENT LEG 1: the way back from Verdan and the start of the Disciple escort. From the verdan leg's end the walk back over the ramp and the hop is impossible (the hop cannot be climbed, live 2026-10-18, tests/wc-hop-probe-2), and the waterfall hole behind Verdan is a fall, not a step: this leg starts with a gm_cross to the entrance hall, where a GM moves the party (the commander's own character `.go xyz -131 127 -78.6`, `.bot summon \u003clead bot\u003e`, `cmd summon` the others; remote runs with a GM commander; the module's own run leader has no such move, so this plan is not exported; the navmesh has no walk from Verdan's room to the Disciple, see the plan notes). The leg's target is the stand of the gossip (-134 128.5 -78.1), 3.9 yd from the gm_cross point, not the Disciple's spawn point. The Disciple of Naralex (3678, spawn guid 18675, -134.965 125.402 -78.0945, faction 35) stands 5.4 yd from the gm_cross point, 24 yd from the entrance. The wait checks he is alive at his stand, then the tank takes option 0 of his menu 202 ('Let the event begin!', gossip_menu_option 202/0, action script 202 = command 85 Start Escort; instance_wailing_caverns.cpp sets the menu only when Anacondra, Cobrahn, Pythas and Serpentis are DONE): the escort starts and the Disciple casts Mark of the Wild 5232 on every living player within 30 yd (5 s) and walks. He is then attackable by the event's summons only: never pulled by the party, skip."
       ]
     },
     {
-      "name": "escort_2",
+      "name": "follow_ravager_road",
+      "to": {"x": -108.6, "y": 195.4, "z": -80.6},
+      "via": [
+        {"x": -113.8, "y": 139.2, "z": -80.9}
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": -108.6, "y": 195.4, "z": -80.6},
+              "radius": 9,
+              "state": "seen"
+            },
+            "timeout_s": 240,
+            "fail_text": "the Disciple did not reach the escort road's point 5 (script_waypoint 3678 point 5, -108.6 195.4 -80.6) within 240 s: he pauses when he is attacked until the fight is over, and he is lost if he dies."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 2a: the first half of the walk ahead of the Disciple (script_waypoint 3678 points 0-5; the via point is point 2). The leg is split at point 5 so that no stretch from one stop to the next is longer than 80 yd in a straight line (stand to point 5: 71.6 yd): core ScriptedEscortAI fails the escort when every member of the group is more than 100 yd from the Disciple while he is out of combat (ScriptedEscortAI.cpp lines 226-234 and 303-312), and bots that run ahead of a walking NPC would pass it. Each stop waits for the Disciple within the wait's radius, so the party is never farther from him than that radius plus the stretch (a test pins 80 yd as the longest stretch)."
+      ]
+    },
+    {
+      "name": "follow_ravager",
+      "to": {"x": -102.4, "y": 232.8, "z": -91.5},
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": -102.4, "y": 232.8, "z": -91.5},
+              "radius": 9,
+              "state": "seen"
+            },
+            "timeout_s": 240,
+            "fail_text": "the Disciple did not reach the escort's first stop (script_waypoint 3678 point 7, -102.4 232.8 -91.5) within 240 s: he pauses when he is attacked until the fight is over, and he is lost if he dies."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 2b: the second half of the walk ahead (script_waypoint 3678 points 6-7: 38 yd from point 5) and the wait at the first stop, waypoint 7. The Deviate Ravagers on the road (26220, 26224) are members of the anacondra_a groups and are dead or pulled on the walk as walk aggros; the Disciple pauses the escort when anything attacks him. Waypoint 7 reached, the script summons two Deviate Ravagers (3636) at (-67.9 214.4 -93.5) and (-69.8 211.3 -93.5) and he yells SAY_1ST_WP; the next leg pulls them."
+      ]
+    },
+    {
+      "name": "ravager_pack",
+      "to": {"x": -102.4, "y": 232.8, "z": -91.5},
+      "pull_groups": [
+        {
+          "entries": [3636, 3636, 3636, 3636],
+          "positions": [
+            {"x": -102.4, "y": 232.8, "z": -91.5},
+            {"x": -69.8, "y": 211.3, "z": -93.5}
+          ],
+          "radius": 25
+        }
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3636],
+              "near": {"x": -102.4, "y": 232.8, "z": -91.5},
+              "radius": 40,
+              "state": "dead"
+            },
+            "timeout_s": 180,
+            "fail_text": "the summoned Deviate Ravagers (3636) are still alive 180 s after the pull (they run at the Disciple, who stands at the party's stop); a road Ravager that respawned near the stop (guids 26220, 26224) is pulled and dies with them."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 3: the ravager fight. The two summoned Ravagers have no spawn rows: the group's positions are the party's stop (the summons run at the Disciple, who stands at it) and the southern summon point; radius 25 keeps the road's own static Ravagers (guids 26220 and 26224 at the stop, 26216 and 26223 near the summon point) in the same pack, so the pull fights whatever of the entry stands in range - a respawned road Ravager is pulled and dies with the summons. When the summons are dead the Disciple says SAY_AFTER_1ST_TRASH and walks on 5 s later."
+      ]
+    },
+    {
+      "name": "follow_viper",
+      "to": {"x": -54, "y": 276.2, "z": -92.8},
+      "via": [
+        {"x": -43.3, "y": 205.2, "z": -96.3},
+        {"x": -32.5, "y": 238.5, "z": -93.5}
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": -54, "y": 276.2, "z": -92.8},
+              "radius": 8,
+              "state": "seen"
+            },
+            "timeout_s": 240,
+            "fail_text": "the Disciple did not reach the second stop (script_waypoint 3678 point 15, -54 276.2 -92.8, Lady Anacondra's spot 4) within 240 s."
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5755],
+              "near": {"x": -53.7, "y": 275.9, "z": -92.8},
+              "radius": 30,
+              "state": "hostile"
+            },
+            "timeout_s": 90,
+            "fail_text": "the three Deviate Vipers (5755) did not appear within 90 s of the Disciple's stop: he casts Serpentine Cleansing 6270 for 15 s (rooted, he reacts to nothing) and the vipers are summoned when the cast ends."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 4: the party follows the escort road east (points 8-14; the via points are points 11 and 13) to the second stop, waypoint 15, Lady Anacondra's own spot 4 (guid 1177978, a member of cobrahn_a's pull group 1: dead since). The wait checks his arrival, then the vipers: he casts Serpentine Cleansing 6270 (15 s, rooted, UNIT_STAT_ROOT: he reacts to no attack while it runs) and three Deviate Vipers (5755) are summoned at (-52.9 269.8), (-58.5 279.8) and (-49.6 278.2) (z -92.8) when the cast ends; they run at him. When neither he nor the player who started the event is in combat he says SAY_AFTER_CIRCLE and walks on. The static Vipers (5755) stand only in Cobrahn's room (y 377-493), 100 yd and more from this stop, so no spawn row of the entry can fire the wait early."
+      ]
+    },
+    {
+      "name": "viper_pack",
       "to": {"x": -54, "y": 276.2, "z": -92.8},
       "pull_groups": [
         {
-          "entries": [5755, 5755, 5755],
+          "entries": [5755, 5755, 5755, 3671, 3840, 3840, 3636],
           "positions": [
             {"x": -52.9, "y": 269.8, "z": -92.8},
-            {"x": -58.5, "y": 279.8, "z": -92.7},
-            {"x": -49.6, "y": 278.2, "z": -92.7}
-          ]
+            {"x": -58.5, "y": 279.8, "z": -92.8},
+            {"x": -49.6, "y": 278.2, "z": -92.8}
+          ],
+          "radius": 25
         }
       ],
       "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5755],
+              "near": {"x": -54, "y": 276.2, "z": -92.8},
+              "radius": 40,
+              "state": "dead"
+            },
+            "timeout_s": 180,
+            "fail_text": "the three summoned Deviate Vipers (5755) are still alive 180 s after the pull (they run at the Disciple, who stands at the party's stop)."
+          }
+        }
+      ],
       "notes": [
-        "Escort waypoint 15 (-54 276.2 -92.8, Lady Anacondra's spot 4): the Disciple casts Serpentine Cleansing (15 s, rooted); the three Deviate Vipers (5755) are summoned at the group's positions when it ends, and he walks on when neither he nor the player who started the event is in combat."
+        "EVENT LEG 5: the viper fight. The three vipers spawn 4.6 to 6.4 yd from the party's stop (they are summoned around the Disciple, who stands at it) and run at him; the group also lists Lady Anacondra (3671), the two Druids of the Fang (3840) and the static Deviate Ravager (3636) whose spawn rows stand in the stop's radius (guids 1177978, 26252, 26239, 26230: her spot 4 is the Disciple's stop): dead since the baseline run, a respawn is pulled and dies with the vipers, which is the walk's own road anyway. The other static Vipers (5755) stand only in Cobrahn's room, 100 yd and more away, so no spawn row of the entry can be a member here."
       ]
     },
     {
-      "name": "ritual",
-      "to": {"x": 114.6, "y": 236.9, "z": -95.9},
+      "name": "follow_ritual_a",
+      "to": {"x": 10.3, "y": 279.2, "z": -85.8},
       "via": [
-        {"x": 52.2, "y": 208.7, "z": -89.3}
+        {"x": -35.6, "y": 309, "z": -89.7},
+        {"x": -8.6, "y": 302.3, "z": -87.4}
       ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": 10.3, "y": 279.2, "z": -85.8},
+              "radius": 8,
+              "state": "seen"
+            },
+            "timeout_s": 300,
+            "fail_text": "the Disciple did not reach the road's point 22 (script_waypoint 3678 point 22, 10.3 279.2 -85.8) within 300 s."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 6a: the first third of the walk to the ritual (script_waypoint 3678 points 16-22; the via points are points 18 and 20): 64 yd in a straight line from the viper stop. The road from the viper stop to the ritual stop is 261 yd and its first stretch was 173 yd in a straight line, so it is split at points 22 and 25 into stretches of 64, 57 and 71 yd: core ScriptedEscortAI fails the escort when every member of the group is more than 100 yd from the Disciple while he is out of combat (ScriptedEscortAI.cpp lines 226-234 and 303-312)."
+      ]
+    },
+    {
+      "name": "follow_ritual_b",
+      "to": {"x": 43.3, "y": 233, "z": -87.6},
+      "via": [
+        {"x": 31.9, "y": 251.4, "z": -87.6}
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": 43.3, "y": 233, "z": -87.6},
+              "radius": 8,
+              "state": "seen"
+            },
+            "timeout_s": 300,
+            "fail_text": "the Disciple did not reach the road's point 25 (script_waypoint 3678 point 25, 43.3 233 -87.6) within 300 s."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 6b: the middle third of the walk to the ritual (script_waypoint 3678 points 23-25; the via point is point 24): 57 yd in a straight line from point 22."
+      ]
+    },
+    {
+      "name": "follow_ritual",
+      "to": {"x": 114.6, "y": 236.9, "z": -96},
+      "via": [
+        {"x": 52.2, "y": 208.7, "z": -89.5},
+        {"x": 88.3, "y": 225.2, "z": -94.4}
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3678],
+              "near": {"x": 114.6, "y": 236.9, "z": -96},
+              "radius": 8,
+              "state": "seen"
+            },
+            "timeout_s": 300,
+            "fail_text": "the Disciple did not reach the ritual stop (script_waypoint 3678 point 30, 114.6 236.9 -96, facing Naralex 3679 at 115.4 240.0 -94.0) within 300 s; the road has the 3 s stop at waypoint 26 (52.2 208.7 -89.5)."
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5762],
+              "near": {"x": 134.4, "y": 235.7, "z": -102.2},
+              "radius": 40,
+              "state": "hostile"
+            },
+            "timeout_s": 120,
+            "fail_text": "the three Deviate Moccasins (5762) did not appear: the ritual's own summons come 12 s after the Disciple arrives (SAY_BEFORE_RITUAL, Naralex's Awakening 6271 which stuns him, the Moccasins at Position[7..9])."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 6c: the last third of the walk (71 yd in a straight line from point 25) to Naralex's chamber (script_waypoint 3678 points 16-30; the via points are points 26 and 28) and waits at the ritual stop, waypoint 30. When the Disciple arrives he starts the ritual (instance data TYPE_DISCIPLE 4 turns IN_PROGRESS) and the summons come on the script's timers: 3 s after his arrival he casts Naralex's Awakening 6271 (a self stun), 12 s after it three Deviate Moccasins (5762) are summoned at Position[7..9] (123.8 271.9 -102.4, 151.9 234.3 -102.5, 127.6 200.8 -101.8) and walk to him, 52 s after it seven Nightmare Ectoplasm (5763) at Position[3..9], 92 s after it Naralex speaks and 102 s after it Mutanus the Devourer (3654) is summoned at Position[3]. The second wait of this leg pins the party until the Moccasins are up (the next leg pulls them); during every wait the party fights nothing by order: the bots' own combat AI is what answers an attacker, and this is the untested part of the segment (no live run yet)."
+      ]
+    },
+    {
+      "name": "ritual_moccus",
+      "to": {"x": 114.6, "y": 236.9, "z": -96},
       "pull_groups": [
         {
           "entries": [5762, 5762, 5762],
           "positions": [
-            {"x": 123.8, "y": 271.9, "z": -102.1},
-            {"x": 151.9, "y": 234.3, "z": -102.2},
-            {"x": 127.6, "y": 200.8, "z": -101.6}
-          ]
-        },
-        {
-          "entries": [5763, 5763, 5763, 5763, 5763, 5763, 5763],
-          "positions": [
-            {"x": 142.7, "y": 254, "z": -101.7},
-            {"x": 140.5, "y": 219.8, "z": -102},
-            {"x": 92.2, "y": 261.9, "z": -102.1},
-            {"x": 100.3, "y": 268.6, "z": -101.7},
-            {"x": 123.8, "y": 271.9, "z": -102.1},
-            {"x": 151.9, "y": 234.3, "z": -102.2},
-            {"x": 127.6, "y": 200.8, "z": -101.6}
-          ]
+            {"x": 123.8, "y": 271.9, "z": -102.4},
+            {"x": 151.9, "y": 234.3, "z": -102.5},
+            {"x": 127.6, "y": 200.8, "z": -101.8}
+          ],
+          "radius": 25
         }
       ],
       "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5762],
+              "near": {"x": 114.6, "y": 236.9, "z": -96},
+              "radius": 40,
+              "state": "dead"
+            },
+            "timeout_s": 180,
+            "fail_text": "the three summoned Deviate Moccasins (5762) are still alive 180 s after the pull; they walk to the Disciple and attack him."
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5763],
+              "near": {"x": 125.7, "y": 244.4, "z": -102.1},
+              "radius": 35,
+              "state": "hostile"
+            },
+            "timeout_s": 120,
+            "fail_text": "the seven Nightmare Ectoplasm (5763) did not appear within 120 s: the script summons them 40 s after the Moccasins (the timer runs whatever the party killed)."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 7: the Moccasin fight, then the wait for the Ectoplasm wave (it comes on the script's 40 s timer, not on the Moccasins' deaths: killing them faster does not hurry the Ectoplasm). The Moccasins have no spawn rows: the group's positions are the summon points and radius 25 covers them while they walk to the Disciple (2 to 5 yd along by the time the pull runs)."
+      ]
+    },
+    {
+      "name": "ritual_ecto",
+      "to": {"x": 114.6, "y": 236.9, "z": -96},
+      "pull_groups": [
+        {
+          "entries": [5763, 5763, 5763, 5763, 5763, 5763, 5763],
+          "positions": [
+            {"x": 142.7, "y": 254, "z": -102.2},
+            {"x": 140.5, "y": 219.8, "z": -102.4},
+            {"x": 92.2, "y": 261.9, "z": -101.5},
+            {"x": 100.3, "y": 268.6, "z": -102.2},
+            {"x": 123.8, "y": 271.9, "z": -102.4},
+            {"x": 151.9, "y": 234.3, "z": -102.5},
+            {"x": 127.6, "y": 200.8, "z": -101.8}
+          ],
+          "radius": 25
+        }
+      ],
+      "skip": [3678, 3679],
+      "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [5763],
+              "near": {"x": 114.6, "y": 236.9, "z": -96},
+              "radius": 40,
+              "state": "dead"
+            },
+            "timeout_s": 300,
+            "fail_text": "the seven Nightmare Ectoplasm (5763) are still alive 300 s after the pull; they are mechanic_immune_mask 64 (immune to roots and snares) and walk at the Disciple."
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [3654],
+              "near": {"x": 142.7, "y": 254, "z": -102.2},
+              "radius": 60,
+              "state": "seen"
+            },
+            "timeout_s": 240,
+            "fail_text": "Mutanus the Devourer (3654) did not appear within 240 s of the last wave: the script summons him 102 s after the Disciple arrives at the ritual stop, 10 s after Naralex speaks (SAY_BEFORE_MUTANUS)."
+          }
+        }
+      ],
+      "notes": [
+        "EVENT LEG 8: the Ectoplasm fight, then the wait for Mutanus. The Ectoplasm have no spawn rows: the group's positions are the seven summon points of Position[3..9] with radius 25 (the Moccasin points 7-9 are among them, so their group's radius 25 does not reach the Ectoplasm's own three points that stand apart)."
+      ]
+    },
+    {
+      "name": "mutanus",
+      "to": {"x": 114.6, "y": 236.9, "z": -96},
+      "skip": [3678, 3679],
       "boss": {
         "entry": 3654,
-        "position": {"x": 142.7, "y": 254, "z": -101.7},
-        "tactics": {
-          "interrupt": [7967]
+        "position": {"x": 142.7, "y": 254, "z": -102.2},
+        "hold": {
+          "instance_data": 4,
+          "spot": {"x": 114.6, "y": 236.9, "z": -96},
+          "radius": 50,
+          "timeout_s": 600
         }
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 50,
+              "center": {"x": 114.6, "y": 236.9, "z": -96}
+            },
+            "timeout_s": 180,
+            "fail_text": "a wave creature is still alive at the ritual stop 180 s after Mutanus died: the script despawns the hostiles it knows when TYPE_MUTANUS turns DONE; a straggler that never showed in the feed holds the leg."
+          }
+        }
+      ],
       "notes": [
-        "Escort waypoint 26 (52.2 208.7 -89.5, a 3 s stop; via 1), then waypoint 30: the ritual (plan notes, step 3). Group 1 is the three Deviate Moccasins (+12 s), group 2 the seven Nightmare Ectoplasm (+52 s), both SUMMONED at Position[7..9] and Position[3..9] of the script (no spawn rows). Mutanus the Devourer (3654) is summoned at 142.7 254.0 -102.2 about 102 s after the Disciple arrives, so the boss position is the point where he appears; when he dies the event is done. A wait_for hostiles_gone (radius 45 around Naralex) cannot gate the waves on time: see the missing step types."
+        "EVENT LEG 9, the end of the dungeon: Mutanus the Devourer (3654, level 22, 7944 hp, faction 270, EventAI 1720974-6) is summoned at Position[3] = 142.7 254.0 -102.2 (no spawn row: the boss position is the summon point) and walks at the Disciple. His spells are Naralex's Nightmare 7967 (a shadow sleep, interruptible), Terrify 7399 and Thundercrack 8150 (Thundercrack hits everything near him: keep the ranged and the healer off his feet); his school_immune_mask 32 says shadow immunity (a Wowhead comment agrees). NO boss tactics: ai_boss_tactic has no rows for him (map 43 has only Zandara Windhoof 61968). The boss's hold is the event's own gate: the party stands at the ritual stop (114.6 236.9 -96, the hold's spot, radius 50: the whole chamber between the summon points and the pool) and fights what the event sends until instance data 4 (TYPE_DISCIPLE) reads 3 (DONE) - which the script sets only when TYPE_MUTANUS (instance data 5) reads DONE, from Mutanus's own EventAI (1720976: command 37 on death, datalong 5, datalong2 3; 1720975 on aggro sets it 1 in progress; 1720974 on evade back to 0). 600 s is the hold's ceiling: the summons end 102 s after the Disciple's arrival, the fight a few minutes more. When Mutanus dies every hostile the script knows is despawned (instance_wailing_caverns.cpp SetData TYPE_MUTANUS DONE), Naralex wakes (he sits, SAY_NARALEX_AWAKEN), the two speak about 20 s and fly away along the script's fly points (MovementInform 33-38, 12 h respawn); the Glowing Shard (the quest item Mutanus drops, unverified live) stays with his corpse and is not in the plan."
       ]
     }
   ]

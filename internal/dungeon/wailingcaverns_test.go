@@ -100,7 +100,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	if p.Map != 43 || p.Name != "wailing_caverns" || p.EntranceTrigger != 228 || p.Portal == nil || p.Portal.Map != 1 {
 		t.Fatalf("%+v", p)
 	}
-	if lo, hi := p.Band(); lo != 18 || hi != 23 || !strings.HasPrefix(p.Status, "mapped (not live-checked") {
+	if lo, hi := p.Band(); lo != 18 || hi != 23 || p.Status != "mapped (not live-checked)" {
 		t.Fatalf("band %d-%d status %q", lo, hi, p.Status)
 	}
 	ss := wcSpawns(t)
@@ -109,12 +109,8 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	ana := 0
 	hops := 0
 	for i, l := range p.Legs {
-		if i >= 12 {
-			// The Naralex event legs (12-20): steps, wave groups and the Mutanus hold; TestNaralexEventSteps holds them.
-			continue
-		}
 		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
-			t.Errorf("legs[%d] (%s): the first-run plan has no steps (the event is the legs after verdan)", i, l.Name)
+			t.Errorf("legs[%d] (%s): the first-run plan has no steps (the event is in the extra file)", i, l.Name)
 		}
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
@@ -175,17 +171,12 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 			if !w.Direct {
 				continue
 			}
-			// The way back to the Disciple (leg 12, return_gossip) is a gm_cross by design: the ramp cannot be climbed and the
-			// waterfall hole behind Verdan is a fall, so a GM moves the party; the run leader's export cuts before that leg.
-			if w.GMCross {
-				if l.Name != "return_gossip" || !distAt(w.Point, Point{X: -131, Y: 127, Z: -78.6}, 0.1) {
-					t.Errorf("legs[%d] (%s): a gm_cross hop outside the return_gossip leg: %v", i, l.Name, w)
-				}
-				continue
-			}
 			hops++
 			// The hop down onto the ramp is a plain direct step (no GM): the check_skip is what keeps the plan check off it
 			// (the gm_cross before it was dropped 2026-10-18, when the step was walked live: tests/wc-hop-probe-2).
+			if w.GMCross {
+				t.Errorf("legs[%d] (%s): the direct hop %v still asks for a GM (gm_cross)", i, l.Name, w)
+			}
 			if w.CheckSkip == "" {
 				t.Errorf("legs[%d] (%s): the direct hop %v has no check_skip", i, l.Name, w)
 			}
@@ -354,23 +345,148 @@ func TestWailingCavernsNoUnclaimedMobNearAWalkPoint(t *testing.T) {
 	}
 }
 
-// The extra plan is a record: the escort stops, the summoned waves (pull groups at the places the script summons them) and Mutanus. It is a
-// draft like the plan, so it holds no steps: the waits the driver cannot do are in its notes.
+// The extra plan is the Naralex event as a segment of its own: 12 legs from the return_gossip leg to mutanus, a draft. It is loaded here (and
+// walked on the navmesh by TestWailingCavernsOnNavmesh) so that it cannot rot; its only gm_cross is the return, and its status says it
+// needs a GM commander or a live-probed return hop.
 func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 	p := loadPlan(t, wailingExtra)
-	if p.Name != "wailing_caverns-extra" || p.Map != 43 || len(p.Legs) != 3 || p.Status[:5] != "draft" {
+	if p.Name != "wailing_caverns-extra" || p.Map != 43 || len(p.Legs) != 12 || !strings.HasPrefix(p.Status, "draft") {
 		t.Fatalf("%+v", p)
 	}
-	last := p.Legs[len(p.Legs)-1]
-	if last.Boss == nil || last.Boss.Entry != 3654 || len(last.PullGroups) != 2 {
-		t.Fatalf("the last leg ends with Mutanus after the Moccasins and the ectoplasm: %+v", last)
+	if !strings.Contains(p.Status, "GM commander") || !strings.Contains(p.Status, "gm_cross") {
+		t.Errorf("status %q does not say that the event needs a GM commander for the return", p.Status)
 	}
+	if len(p.Notes) == 0 || !strings.HasPrefix(p.Notes[0], "Naralex event: needs a GM commander for the return (gm_cross), OR a live-probed non-GM return hop") {
+		t.Errorf("the first plan note must be the event banner: %q", p.Notes)
+	}
+	last := p.Legs[len(p.Legs)-1]
+	if last.Name != "mutanus" || last.Boss == nil || last.Boss.Entry != 3654 {
+		t.Fatalf("the last leg ends with Mutanus: %+v", last)
+	}
+	crosses := 0
 	for i, l := range p.Legs {
-		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
-			t.Errorf("legs[%d]: a draft has no steps", i)
+		for _, w := range l.Via {
+			if w.GMCross {
+				crosses++
+				if i != 0 || l.Name != "return_gossip" {
+					t.Errorf("legs[%d] (%s): a gm_cross outside the return_gossip leg", i, l.Name)
+				}
+			}
+		}
+	}
+	if crosses != 1 {
+		t.Errorf("%d gm_cross waypoints, want the one return", crosses)
+	}
+}
+
+// The mapped route (the base plan) needs no GM from any start leg: the Naralex return was the only gm_cross, and it lives in the extra plan
+// only (a gm_cross anywhere in the base plan would make the group driver refuse the dungeon from every leg and a remote run with a
+// non-GM commander refuse every leg up to it).
+func TestWailingCavernsBasePlanNeedsNoGM(t *testing.T) {
+	p := loadPlan(t, wailingPlan)
+	if len(p.Legs) != 12 || p.Legs[len(p.Legs)-1].Name != "verdan" {
+		t.Fatalf("%d legs, want the 12 legs of the walk to Verdan", len(p.Legs))
+	}
+	for from := 0; from <= len(p.Legs); from++ {
+		if p.HasGMCross(from) {
+			t.Errorf("HasGMCross(%d) is true: the base plan must not need a GM from any start leg", from)
+		}
+	}
+	// The extra plan is the opposite: it needs one from its first leg on, and from nowhere else.
+	e := loadPlan(t, wailingExtra)
+	if !e.HasGMCross(0) || e.HasGMCross(1) {
+		t.Errorf("extra plan: HasGMCross(0)=%v HasGMCross(1)=%v, want true and false (the return is its first leg)", e.HasGMCross(0), e.HasGMCross(1))
+	}
+}
+
+// Every wait of the wave legs ends on a state that needs no sighting. A leg runs its pull groups before its steps (stepper.go), so a wait
+// for "gone" (which passes only after it has itself seen a living unit: remote_trigger.go unitGone, driver.go UnitHolds) never saw the summons
+// alive when the pull has already killed them (TEMPSUMMON_DEAD_DESPAWN: the corpses vanish at once) and times out the run. "dead" also counts
+// the kills the run saw. No wait of the event may be "gone".
+func TestNaralexWaveWaitsNeedNoSighting(t *testing.T) {
+	p := loadPlan(t, wailingExtra)
+	waves := 0
+	for _, l := range p.Legs {
+		var pulled []uint32
+		for _, g := range l.PullGroups {
+			pulled = append(pulled, g.Entries...)
+		}
+		for _, st := range l.Steps {
+			if st.WaitFor == nil || st.WaitFor.Unit == nil {
+				continue
+			}
+			u := st.WaitFor.Unit
+			if u.State == UnitGone {
+				t.Errorf("%s: a wait for %v gone: it needs a sighting the pull may have made impossible", l.Name, u.Entries)
+			}
+			for _, e := range u.Entries {
+				if slices.Contains(pulled, e) && u.State != UnitDead {
+					t.Errorf("%s: the wait for the pulled entry %d is %q, want \"dead\" (the pull runs before the steps)", l.Name, e, u.State)
+				}
+			}
+			if u.State == UnitDead {
+				waves++
+			}
+		}
+	}
+	if waves != 4 {
+		t.Errorf("%d dead waits, want 4 (ravager_pack, viper_pack, ritual_moccus, ritual_ecto)", waves)
+	}
+}
+
+// The escort fails when every member of the group is more than 100 yd from the Disciple while he is out of combat (core
+// ScriptedEscortAI.cpp:226-234 and 303-312), and bots run ahead of a walking NPC. Each follow leg is a stop of the party at a point of
+// the escort road with a wait for the Disciple seen within the stop's radius; the straight line from one stop to the next (the stand is
+// the first stop) and from a stop to every via point after it stays within 80 yd, so the party is never more than 80 + 9 yd ahead of him.
+func TestNaralexFollowStretches(t *testing.T) {
+	p := loadPlan(t, wailingExtra)
+	const maxStretch = 80.0
+	stop := p.Legs[0].To
+	follows := 0
+	longest := 0.0
+	for _, l := range p.Legs {
+		if !strings.HasPrefix(l.Name, "follow_") {
+			stop = l.To
+			continue
+		}
+		follows++
+		for _, w := range l.Via {
+			if d := dist3(w.Point, stop); d > maxStretch {
+				t.Errorf("%s: via %v is %.0f yd from the stop before it %v (max %.0f)", l.Name, w.Point, d, stop, maxStretch)
+			}
+		}
+		d := dist3(l.To, stop)
+		longest = math.Max(longest, d)
+		if d > maxStretch {
+			t.Errorf("%s: %.0f yd in a straight line from the stop before it %v to %v (max %.0f)", l.Name, d, stop, l.To, maxStretch)
+		}
+		var w *UnitWait
+		for _, st := range l.Steps {
+			if st.WaitFor != nil && st.WaitFor.Unit != nil && slices.Equal(st.WaitFor.Unit.Entries, []uint32{3678}) {
+				w = st.WaitFor.Unit
+			}
+		}
+		if w == nil || w.State != UnitSeen || w.Near == nil || dist3(*w.Near, l.To) > 0.1 || w.Radius == 0 || w.Radius > 9 {
+			t.Errorf("%s: no wait for the Disciple seen within 9 yd of its stop: %+v", l.Name, w)
+		}
+		stop = l.To
+	}
+	if follows != 6 {
+		t.Errorf("%d follow legs, want 6", follows)
+	}
+	t.Logf("longest stretch %.1f yd", longest)
+	// The rule is written down in the plan notes (a reader of the plan must find why the roads are split).
+	notes := strings.Join(p.Notes, "\n")
+	for _, want := range []string{"ScriptedEscortAI.cpp lines 226-234 and 303-312", "100 yd", "80 yd"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("the plan notes lack the escort rule (%q)", want)
 		}
 	}
 }
+
+// escortWalkMax is the longest straight-line distance a point of a follow leg's walk may be from the stop before it: the core fails the
+// escort at 100 yd from the Disciple, who stands within 9 yd of that stop.
+const escortWalkMax = 90.0
 
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
 // the hop is the only break, and the whole walk to every member position is about 6240 yd (a change of route moves this number: update it with the plan's notes).
@@ -386,21 +502,13 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 		from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
 		total := 0.0
 		hops := 0
-		// The route split of wailing_caverns: legs 0-11 are the mapped walk to Verdan (the walk of 2026-10-15), legs 12-20 the
-		// Naralex event, written offline from script_waypoint 3678 (never walked). Each has its own distance bound.
-		baseTotal, eventTotal := 0.0, 0.0
-		baseHops, eventHops := 0, 0
+		stop := p.Legs[0].To // the previous stop of the escort: the stand, then each leg's own stop
 		for i, l := range p.Legs {
 			pts, direct := waypointsDirect(l)
 			for j, w := range pts {
 				to := [3]float32{w.X, w.Y, w.Z}
 				if direct[j] {
 					hops++
-					if i < 12 {
-						baseHops++
-					} else {
-						eventHops++
-					}
 					from = to
 					continue
 				}
@@ -419,24 +527,34 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 				if d := math.Hypot(float64(end[0]-w.X), float64(end[1]-w.Y)); d > 2.5 || math.Abs(float64(end[2]-w.Z)) > 4 {
 					t.Errorf("%s legs[%d] waypoint %d: the path ends %.1f yd (z %.1f) from %v", p.Name, i, j, d, end[2]-w.Z, w)
 				}
+				// The escort rule (ScriptedEscortAI.cpp:226-234, 303-312): the party runs ahead of the Disciple, who waits for it
+				// within the follow stop's radius (9 yd at most), so no point of the walk from one stop to the next may be 90 yd or
+				// more from the stop it leaves (100 yd is the core's limit).
+				if strings.HasPrefix(l.Name, "follow_") {
+					for _, q := range path.Points {
+						if d := math.Hypot(float64(q[0]-stop.X), float64(q[1]-stop.Y)); d > escortWalkMax {
+							t.Errorf("%s legs[%d] (%s): the walk to waypoint %d passes %v, %.0f yd from the previous stop %v (more than %.0f)", p.Name, i, l.Name, j, q, d, stop, escortWalkMax)
+						}
+					}
+				}
 				total += float64(path.Length)
 				from = to
 			}
-			if i < 12 {
-				baseTotal = total
-			}
+			stop = l.To
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
-		if p.Name == "wailing_caverns" {
-			// Legs 0-11 to Verdan: the walk of 2026-10-15 measured about 6240 yd with every member position and one direct hop.
-			if baseTotal < 6150 || baseTotal > 6350 || baseHops != 1 {
-				t.Errorf("%s: %.0f yd and %d hops over legs 0-11, expected about 6240 yd and the one hop onto the ramp", p.Name, baseTotal, baseHops)
+		switch p.Name {
+		case "wailing_caverns":
+			// The 12 legs to Verdan: the walk of 2026-10-15 measured about 6240 yd with every member position and one direct hop.
+			if total < 6150 || total > 6350 || hops != 1 {
+				t.Errorf("%s: %.0f yd and %d hops, expected about 6240 yd and the one hop onto the ramp", p.Name, total, hops)
 			}
-			// The event legs (12-20): the way back is a gm_cross (the ramp cannot be climbed, live 2026-10-18), then the escort
-			// road to the ritual stop and the chamber (script_waypoint 3678, points 0-31): 1044 yd of mesh path, measured.
-			eventTotal = total - baseTotal
-			if eventTotal < 950 || eventTotal > 1150 || eventHops != 1 {
-				t.Errorf("%s: %.0f yd and %d hops over legs 12-20, expected about 1044 yd and the one gm_cross", p.Name, eventTotal, eventHops)
+		case "wailing_caverns-extra":
+			// The Naralex event: the gm_cross onto the Disciple's stand (the ramp cannot be climbed back, live 2026-10-18; the
+			// navmesh has no walk from Verdan's room to the stand), then the escort road to the ritual stop and the chamber
+			// (script_waypoint 3678, points 0-31): 1041 yd of mesh path, measured.
+			if total < 950 || total > 1150 || hops != 1 {
+				t.Errorf("%s: %.0f yd and %d hops, expected about 1041 yd and the one gm_cross", p.Name, total, hops)
 			}
 		}
 	}
@@ -473,13 +591,10 @@ func naralexScriptWaypoints(t *testing.T) []Point {
 	return out
 }
 
-// naralexLeg finds the event leg by name and fails when the plan does not have it.
+// naralexLeg finds the event leg (of the extra plan) by name and fails when the plan does not have it.
 func naralexLeg(t *testing.T, p *Plan, name string) *Leg {
 	t.Helper()
 	for i, l := range p.Legs {
-		if i < 12 {
-			continue
-		}
 		if l.Name == name {
 			return &p.Legs[i]
 		}
@@ -488,15 +603,15 @@ func naralexLeg(t *testing.T, p *Plan, name string) *Leg {
 	return nil
 }
 
-// The Naralex event's steps (legs 12-20, after the verdan leg): the return by gm_cross and the gossip start, the escort's
+// The Naralex event's steps (the legs of wailing_caverns-extra.json): the return by gm_cross and the gossip start, the escort's
 // follow waits at the Disciple's stops (script_waypoint 3678), the wave pulls at the summon points (wailing_caverns.cpp
 // Position[10][3]; no spawn rows: the testdata export has none of these entries), and Mutanus's fight held by the event's
 // own instance data. The DB facts were read on 2026-10-20 through export.sh 43 and read-only SELECTs (menu 202 option 0,
 // 32 script_waypoint rows, no ai_boss_tactic rows for 3654, Mutanus EventAI 1720974-6 set data 5 to 1/3/0).
 func TestNaralexEventSteps(t *testing.T) {
-	p := loadPlan(t, wailingPlan)
-	if len(p.Legs) != 21 || p.Legs[11].Name != "verdan" {
-		t.Fatalf("%d legs, want 21 after the verdan leg", len(p.Legs))
+	p := loadPlan(t, wailingExtra)
+	if len(p.Legs) != 12 || p.Legs[0].Name != "return_gossip" || p.Legs[11].Name != "mutanus" {
+		t.Fatalf("%d legs, want the 12 event legs from return_gossip to mutanus", len(p.Legs))
 	}
 	wps := naralexScriptWaypoints(t)
 	if len(wps) != 32 {
@@ -528,8 +643,10 @@ func TestNaralexEventSteps(t *testing.T) {
 	if len(l.Via) != 1 || !l.Via[0].Direct || !l.Via[0].GMCross || distAt(l.Via[0].Point, Point{X: -131, Y: 127, Z: -78.6}, 0.1) == false {
 		t.Errorf("return_gossip: via %+v, want one gm_cross at -131 127 -78.6", l.Via)
 	}
-	if distAt(l.To, stand, 0.1) == false {
-		t.Errorf("return_gossip: to %v, want the Disciple's stand", l.To)
+	// The target is the gossip's stand, not the Disciple's spawn point (the lead bot would walk onto the NPC).
+	gossipStand := Point{X: -134, Y: 128.5, Z: -78.1}
+	if distAt(l.To, gossipStand, 0.1) == false || distAt(l.To, stand, 2) {
+		t.Errorf("return_gossip: to %v, want the gossip's stand %v, not the Disciple's spawn point %v", l.To, gossipStand, stand)
 	}
 	if len(l.Steps) != 2 {
 		t.Fatalf("return_gossip: %d steps, want the presence wait and the gossip", len(l.Steps))
@@ -545,15 +662,18 @@ func TestNaralexEventSteps(t *testing.T) {
 		t.Errorf("return_gossip step 1: %+v, want menu 202 option 0 by the tank, stand within 5 yd, retry_s 45", g)
 	}
 
-	// The follow legs wait for the Disciple at the script waypoints 7, 15, 30; the wave legs pull the summons at
-	// the summon points and wait for them gone.
+	// The follow legs wait for the Disciple at the script waypoints 5, 7, 15, 22, 25, 30 (the long roads are split, see
+	// TestNaralexFollowStretches); the wave legs pull the summons at the summon points and wait for them dead.
 	follows := []struct {
 		leg    string
 		to     Point
 		radius float32
 	}{
+		{"follow_ravager_road", Point{X: -108.6, Y: 195.4, Z: -80.6}, 9},
 		{"follow_ravager", Point{X: -102.4, Y: 232.8, Z: -91.5}, 9},
 		{"follow_viper", Point{X: -54, Y: 276.2, Z: -92.8}, 8},
+		{"follow_ritual_a", Point{X: 10.3, Y: 279.2, Z: -85.8}, 8},
+		{"follow_ritual_b", Point{X: 43.3, Y: 233, Z: -87.6}, 8},
 		{"follow_ritual", Point{X: 114.6, Y: 236.9, Z: -96}, 8},
 	}
 	for _, f := range follows {
@@ -580,7 +700,7 @@ func TestNaralexEventSteps(t *testing.T) {
 			t.Errorf("%s: wait %+v, want radius %.0f round the stop and a ceiling of at least 180 s", f.leg, found.Unit, f.radius)
 		}
 	}
-	for _, l := range p.Legs[12:] {
+	for _, l := range p.Legs {
 		if len(l.Skip) == 0 || !slices.Contains(l.Skip, 3678) || !slices.Contains(l.Skip, 3679) {
 			t.Errorf("legs (%s): skip %v, want the Disciple (3678) and Naralex (3679) skipped", l.Name, l.Skip)
 		}
@@ -591,7 +711,7 @@ func TestNaralexEventSteps(t *testing.T) {
 		leg    string
 		entry  uint32
 		radius float32
-		goneR  float32
+		deadR  float32
 		spots  []Point
 		stops  []Point
 		extra  []uint32
@@ -653,17 +773,19 @@ func TestNaralexEventSteps(t *testing.T) {
 				t.Errorf("%s: no pull position at the summon point %v", wv.leg, spot)
 			}
 		}
-		var gone *WaitFor
+		// The wave's end is the state "dead": the pull has run before the steps (stepper.go), so a "gone" wait would never
+		// have seen the wave alive (TestNaralexWaveWaitsNeedNoSighting).
+		var dead *WaitFor
 		for _, st := range l.Steps {
-			if st.WaitFor != nil && st.WaitFor.Unit != nil && st.WaitFor.Unit.State == "gone" {
-				gone = st.WaitFor
+			if st.WaitFor != nil && st.WaitFor.Unit != nil && st.WaitFor.Unit.State == UnitDead {
+				dead = st.WaitFor
 			}
 		}
-		if gone == nil {
-			t.Fatalf("%s: no wait for the wave to be gone", wv.leg)
+		if dead == nil {
+			t.Fatalf("%s: no wait for the wave to be dead", wv.leg)
 		}
-		if !slices.Contains(gone.Unit.Entries, wv.entry) || gone.Unit.Radius != wv.goneR {
-			t.Errorf("%s: gone wait %+v, want entry %d within %.0f yd", wv.leg, gone.Unit, wv.entry, wv.goneR)
+		if !slices.Contains(dead.Unit.Entries, wv.entry) || dead.Unit.Radius != wv.deadR {
+			t.Errorf("%s: dead wait %+v, want entry %d within %.0f yd", wv.leg, dead.Unit, wv.entry, wv.deadR)
 		}
 	}
 
@@ -724,7 +846,7 @@ func TestNaralexEventSteps(t *testing.T) {
 // script_waypoint 3678 row (the DB rounds its positions, 0.15 yd), so the party waits where the escort pauses. The
 // gm_cross of return_gossip is the one exception: the party is MOVED to the entrance hall, not walked to a waypoint.
 func TestNaralexEscortFollowsScriptWaypoints(t *testing.T) {
-	p := loadPlan(t, wailingPlan)
+	p := loadPlan(t, wailingExtra)
 	wps := naralexScriptWaypoints(t)
 	if len(wps) != 32 {
 		t.Fatalf("%d waypoints, want 32", len(wps))
@@ -741,9 +863,12 @@ func TestNaralexEscortFollowsScriptWaypoints(t *testing.T) {
 		via []string // expected waypoint numbers, "" for the gm_cross
 		to  string
 	}{
-		"follow_ravager": {[]string{"2", "5"}, "7"},
-		"follow_viper":   {[]string{"11", "13"}, "15"},
-		"follow_ritual":  {[]string{"26", "28"}, "30"},
+		"follow_ravager_road": {[]string{"2"}, "5"},
+		"follow_ravager":      {nil, "7"},
+		"follow_viper":        {[]string{"11", "13"}, "15"},
+		"follow_ritual_a":     {[]string{"18", "20"}, "22"},
+		"follow_ritual_b":     {[]string{"24"}, "25"},
+		"follow_ritual":       {[]string{"26", "28"}, "30"},
 	}
 	for name, want := range legs {
 		l := naralexLeg(t, p, name)
@@ -760,8 +885,8 @@ func TestNaralexEscortFollowsScriptWaypoints(t *testing.T) {
 		}
 	}
 	l := naralexLeg(t, p, "return_gossip")
-	if got := at(l.To); got != "0" {
-		t.Errorf("return_gossip: to %v is script waypoint %q, want 0 (the Disciple's stand)", l.To, got)
+	if got := at(l.To); got != "" {
+		t.Errorf("return_gossip: to %v is script waypoint %q: the target is the gossip's stand, not the Disciple's spawn point (waypoint 0)", l.To, got)
 	}
 	if len(l.Via) != 1 || !l.Via[0].GMCross {
 		t.Fatalf("return_gossip: via %+v, want the one gm_cross", l.Via)
