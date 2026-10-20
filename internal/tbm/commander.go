@@ -34,9 +34,9 @@ var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond"
 // put a second command on the line.
 var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
 
-// traceArgRe is argRe plus the `driver=` prefix of a trace start's last argument (`driver=<model>:<effort>:<run>`): the one argument
-// outside the commander's grammar, allowed for the trace group only.
-var traceArgRe = regexp.MustCompile(`^(driver=)?[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
+// traceDriverRe is the `driver=` word of a trace start (`driver=<model>:<effort>:<run>`), the one argument outside the commander's
+// grammar: the server stores up to 96 characters there (dungeon.RunMeta.Check), so the word allows 1-96.
+var traceDriverRe = regexp.MustCompile(`^driver=[A-Za-z0-9_.+\-:]{1,96}$`)
 
 // BadOrderWords says why a text cannot be the tail of one command line: every whitespace-separated word has to be an argument the
 // commander accepts (argRe). It returns "" for a text that can, else the first word that cannot, with the reason.
@@ -122,17 +122,21 @@ func CheckCommand(command string) error {
 		return fmt.Errorf("%s %s: unknown verb (%s)", group, verb, strings.Join(verbs, ", "))
 	}
 	if group == "trace" {
-		// The recorder's own grammar, no wider than the two lines a server trace sends: `start <run_id> [driver=...]`, `stop`, `status`.
-		switch {
-		case verb == "start" && (len(f) < 3 || len(f) > 4):
-			return errors.New("trace start: use `trace start <run_id> [driver=<model>:<effort>:<run>]`")
-		case verb != "start" && len(f) > 2:
-			return fmt.Errorf("trace %s: takes no argument", verb)
-		}
-		for _, a := range f[2:] {
-			if !traceArgRe.MatchString(a) {
-				return fmt.Errorf("argument %q: letters, digits and _ . , : + - only, not starting with a dot", a)
+		// The recorder's own grammar, no wider than the lines a server trace sends: `start <run_id> [driver=...]`, `stop`, `status`.
+		if verb != "start" {
+			if len(f) > 2 {
+				return fmt.Errorf("trace %s: takes no argument", verb)
 			}
+			return nil
+		}
+		if len(f) < 3 || len(f) > 4 {
+			return errors.New("trace start: use `trace start <run_id> [driver=<model>:<effort>:<run>]`")
+		}
+		if !argRe.MatchString(f[2]) {
+			return fmt.Errorf("trace start: %q is not a run id (letters, digits and _ . , : + - only)", f[2])
+		}
+		if len(f) == 4 && !traceDriverRe.MatchString(f[3]) {
+			return fmt.Errorf("trace start: %q is not a driver word (driver=<model>:<effort>:<run>, at most 96 characters)", f[3])
 		}
 		return nil
 	}
