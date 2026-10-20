@@ -180,7 +180,7 @@ func TestMinimapSlotsFloors(t *testing.T) {
 	dir := t.TempDir()
 	writeLayerFiles(t, dir, "189", uldamanWorldMap)
 	writeLayerFiles(t, dir, "189.worldmap", uldamanWorldMap)
-	for _, fl := range []string{"3f", "2f", "4f"} {
+	for _, fl := range []string{"10f", "3f", "2f"} {
 		m := uldamanWorldMap
 		m.Name = "Scarlet Monastery " + fl
 		writeLayerFiles(t, dir, "189.worldmap-"+fl, m)
@@ -190,16 +190,19 @@ func TestMinimapSlotsFloors(t *testing.T) {
 	writeLayerFiles(t, dir, "189.navmesh", nav)
 
 	ls := MinimapSlots(dir, 189)
-	if got, want := slotLabels(ls), "World map, World map 2f, World map 3f, World map 4f, Minimap, Navmesh"; got != want {
+	if got, want := slotLabels(ls), "World map, World map 2f, World map 3f, World map 10f, Minimap, Navmesh"; got != want {
 		t.Fatalf("labels = %s, want %s", got, want)
 	}
-	for i, fl := range []string{"", "2f", "3f", "4f"} {
+	for i, fl := range []string{"", "2f", "3f", "10f"} {
 		if ls[i].Kind != "worldmap" || ls[i].Floor != fl || !ls[i].Available {
 			t.Errorf("%d = %+v", i, ls[i])
 		}
 	}
 	if ls[2].URL != "/minimap/189.worldmap-3f.png" || ls[2].Label != "World map 3f" {
 		t.Errorf("3f = %+v", ls[2])
+	}
+	if ls[3].URL != "/minimap/189.worldmap-10f.png" || ls[3].Label != "World map 10f" {
+		t.Errorf("10f = %+v", ls[3])
 	}
 	if ls[4].Available || ls[4].Kind != "minimap" || ls[5].Kind != "navmesh" {
 		t.Errorf("after the floors: %+v / %+v", ls[4], ls[5])
@@ -261,9 +264,19 @@ func TestMinimapSlotStatusReasons(t *testing.T) {
 		t.Errorf("oversized reason = %q", l[1].Reason)
 	}
 
+	// control characters become spaces: one line is all the panel has
+	ctrl := "line one\nline two\ttab\r\x00nul\x7fdel"
+	b, _ := json.Marshal(map[string]map[string]string{"minimap": {"reason": ctrl}})
+	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if l := landOf(t, dir, 70); l[1].Reason != "line one line two tab  nul del" {
+		t.Errorf("control characters = %q", l[1].Reason)
+	}
+
 	// a long string is cut
 	long := strings.Repeat("x", 300)
-	b, _ := json.Marshal(map[string]map[string]string{"minimap": {"reason": long}})
+	b, _ = json.Marshal(map[string]map[string]string{"minimap": {"reason": long}})
 	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -307,6 +320,8 @@ func TestMinimapSlotsAndRoutes(t *testing.T) {
 	writeLayerFiles(t, dir, "70.navmesh", nav)
 	os.WriteFile(filepath.Join(dir, "209.json"), []byte("{broken"), 0o644)
 	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("no"), 0o644)
+	os.WriteFile(filepath.Join(dir, "70.status.png"), []byte("\x89PNG fake"), 0o644)
+	os.WriteFile(filepath.Join(dir, "70.status-2f.png"), []byte("\x89PNG fake"), 0o644)
 
 	p := NewPoller(Options{MinimapDir: dir, ConfigDir: t.TempDir(), Agents: "auto"})
 	srv := httptest.NewServer(Handler(p, "", nil))
@@ -357,7 +372,7 @@ func TestMinimapSlotsAndRoutes(t *testing.T) {
 	if code, ct, body := get("/minimap/70.navmesh.png"); code != 200 || ct != "image/png" || !strings.HasPrefix(body, "\x89PNG") {
 		t.Errorf("image = %d %s", code, ct)
 	}
-	for _, path := range []string{"/minimap/70.json", "/minimap/70.status.json", "/minimap/secret.txt", "/minimap/../secret.txt", "/minimap/%2e%2e/x.png", "/minimap/70.paper.png", "/minimap/", "/minimap/999.png"} {
+	for _, path := range []string{"/minimap/70.json", "/minimap/70.status.json", "/minimap/70.status.png", "/minimap/70.status-2f.png", "/minimap/secret.txt", "/minimap/../secret.txt", "/minimap/%2e%2e/x.png", "/minimap/70.paper.png", "/minimap/", "/minimap/999.png"} {
 		if code, _, _ := get(path); code == 200 {
 			t.Errorf("%s was served", path)
 		}

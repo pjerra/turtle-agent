@@ -3535,17 +3535,18 @@ plan: the entrance, Ironaya and Archaedas land on their rooms of the client's Ul
 **The three picture slots.** `GET /api/minimap/<map id>` always answers the same three slots in Zul'Farrak's order:
 `worldmap` (the main picture, then one entry per floor: `World map 2f`, ...), `minimap` and `navmesh`. Each entry has
 `kind`, `floor` (`""` or `2f`), `label`, `available`, and for a missing one a one-line `reason` instead of the picture's
-`url`, `x`, `y`, `w`, `h`; an available one keeps the older `name` and `source` fields too. The folder's own
-`<id>.<source>[-<n>f].json` is the slot of that source; the main `<id>.json` stands in only for a source the folder has no
-file of (an old folder), so a picture is never listed twice. A map the folder has nothing for still answers 200 with three
-missing slots; 404 means no `--minimap-dir` at all. The page's picker shows the three, disables a missing one as
-`<label> (none)` with its reason on hover, and draws the first available picture, so a saved choice of a kind the folder
-lost falls back instead of leaving a blank map.
+`url`, `x`, `y`, `w`, `h`. Every entry also keeps the older `name` and `source` fields: `name` is now the same as `label`
+(`World map`), and `source` is the slot's kind. The folder's own `<id>.<source>[-<n>f].json` is the slot of that source;
+the main `<id>.json` stands in only for a source the folder has no file of (an old folder), so a picture is never listed
+twice. A map the folder has nothing for still answers 200 with three missing slots; 404 means no `--minimap-dir` at all.
+The page's picker shows the three, disables a missing one as `<label> (none)` with its reason on hover, and draws the first
+available picture, so a saved choice of a kind the folder lost falls back instead of leaving a blank map.
 
 A slot's own reason comes from an optional `<id>.status.json` beside the pictures, which `minimap-extract` writes and an
 operator may edit: `{"minimap": {"reason": "..."}, "navmesh": {"reason": "..."}, "worldmap": {"reason": "..."}}`. It is read
 only if it is at most 64 KiB and a file of the folder itself (no symbolic link out, no other name); a malformed or oversized
-file is ignored, unknown kinds are ignored, and each reason is cut to 160 characters. Without it the dashboard uses a
+file is ignored, unknown kinds are ignored, control characters (a line break, a tab) become spaces, and each reason is cut to
+160 characters. Without it the dashboard uses a
 built-in line per kind (for the minimap: an indoor dungeon, whose in-game minimap the client draws from WMO tiles that
 `minimap-extract` does not compose yet).
 

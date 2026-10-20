@@ -65,7 +65,8 @@ func OverlayRect(m minimap.Meta) (x, y, w, h float64) {
 }
 
 var (
-	minimapFile = regexp.MustCompile(`^(\d{1,9})(?:\.(minimap|worldmap|navmesh|status)(-\d+f)?)?\.(json|png)$`)
+	// minimapFile is what /minimap/ serves: only images. The status file is a folder file the server reads itself, never one it hands out.
+	minimapFile = regexp.MustCompile(`^(\d{1,9})(?:\.(minimap|worldmap|navmesh)(-\d+f)?)?\.(json|png)$`)
 	layerName   = regexp.MustCompile(`^\d{1,9}\.(minimap|worldmap|navmesh|status)(-\d+f)?\.json$`)
 )
 
@@ -131,7 +132,15 @@ func statusReasons(dir, base string) map[string]string {
 	return out
 }
 
+// shortReason makes a hand-written reason safe for one line of the panel: a line break, a tab and any other control character
+// becomes a space, and the text is cut to 160 characters.
 func shortReason(r string) string {
+	r = strings.Map(func(c rune) rune {
+		if c < 0x20 || (c >= 0x7f && c <= 0x9f) {
+			return ' '
+		}
+		return c
+	}, r)
 	if utf8.RuneCountInString(r) <= maxReasonRunes {
 		return r
 	}

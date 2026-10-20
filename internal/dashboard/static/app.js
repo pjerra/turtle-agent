@@ -271,14 +271,17 @@ function ensurePlan(c) {
 }
 
 // The three picture slots of a map (the world map and its floors, the minimap, the navmesh); a server without a minimap
-// folder answers 404, and the card is looked at again after a while.
+// folder answers 404. An answer with no available picture at all is kept (its reasons still show) but looked at again after a
+// while: a dashboard left running through a re-extract then picks the pictures up without a reload.
 function ensureMinimap(id) {
   if (id == null) return undefined;
-  if (minimaps.has(id) && !(minimaps.get(id) === null && Date.now() - (minimapMiss.get(id) || 0) > 30000)) return minimaps.get(id);
+  const have = minimaps.get(id);
+  if (have === "loading") return have;
+  if (minimaps.has(id) && PS.keep(have, minimapMiss.get(id), Date.now())) return have;
   minimaps.set(id, "loading");
   fetch("/api/minimap/" + encodeURIComponent(id), { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
-    .then((ls) => { minimaps.set(id, ls && ls.length ? ls : null); minimapMiss.set(id, Date.now()); if (last) render(last); })
+    .then((ls) => { minimaps.set(id, Array.isArray(ls) ? ls : null); minimapMiss.set(id, Date.now()); if (last) render(last); })
     .catch(() => { minimaps.set(id, null); minimapMiss.set(id, Date.now()); });
   return "loading";
 }

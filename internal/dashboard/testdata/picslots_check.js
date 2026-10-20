@@ -66,9 +66,24 @@ assert.strictEqual(one.pick.label, "World map");
 const none = P.plan([Object.assign({}, zf[0], { available: false, reason: "no world map" }), uldaman[1], Object.assign({}, zf[2], { available: false, reason: "no mmaps" })]);
 assert.strictEqual(none.shown, false);
 assert.strictEqual(none.pick, null);
-assert.strictEqual(none.reason, WHY, "the greyed map picture explains the minimap gap");
+assert.ok(none.reason.indexOf("No picture for this map:") === 0, "the greyed map picture says no slot has a picture: " + none.reason);
+["no world map", WHY, "no mmaps"].forEach((why) => assert.ok(none.reason.indexOf(why) >= 0, "the combined reason keeps " + why));
 assert.strictEqual(none.options.length, 3);
 assert.deepStrictEqual(none.options.map((o) => o.text), ["World map (none)", "Minimap (none)", "Navmesh (none)"]);
+
+// ---- an answer without a single picture is kept (its reasons show) but asked again after the window
+assert.strictEqual(P.hasPicture(zf), true);
+assert.strictEqual(P.hasPicture(uldaman), true);
+assert.strictEqual(P.hasPicture(none.slots), false);
+assert.strictEqual(P.hasPicture(null), false);
+assert.strictEqual(P.hasPicture([]), false);
+assert.strictEqual(P.keep(zf, 0, 1e12), true, "an answer with a picture is final");
+assert.strictEqual(P.keep([], 1000, 1000), true, "a just-asked empty answer keeps its reasons on screen");
+assert.strictEqual(P.keep([], 1000, 1000 + P.ASK_AGAIN_MS), true);
+assert.strictEqual(P.keep([], 1000, 1001 + P.ASK_AGAIN_MS), false, "an empty answer is asked again after 30 s");
+assert.strictEqual(P.keep(null, 1000, 2000), true, "a just-failed request is not repeated at once");
+assert.strictEqual(P.keep(null, 0, 1e12), false);
+assert.strictEqual(P.plan([]).reason, "", "with no reasons at all the page keeps its own text");
 
 // ---- floors stay with the world map, in the server's order, and a saved floor is drawn
 const sm = [
