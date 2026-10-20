@@ -3509,6 +3509,7 @@ disk: `turtle-agent minimap-extract` reads the client's MPQ archives (read only;
 turtle-agent minimap-extract --client "/path/to/WoW/Data" --out ~/turtle-agent-minimaps --maps all-instances
 turtle-agent minimap-extract --client .../Data --out ~/turtle-agent-minimaps --maps 70,209 --mmaps ~/turtle-agent-mmaps
 turtle-agent minimap-extract --client .../Data --list          # what each dungeon and raid would get, nothing written
+turtle-agent minimap-extract --client .../Data --out ... --verbose   # log every map and every skipped tile
 turtle-agent dashboard --minimap-dir ~/turtle-agent-minimaps
 ```
 
@@ -3522,7 +3523,7 @@ can have up to three images, written as `<id>.<source>.png` + `.json`; the first
 | Source | What it is | Where it comes from |
 | --- | --- | --- |
 | `worldmap` | the map picture the client shows for the dungeon (the 4 x 3 tiles of `Interface\WorldMap\<area>`, cut to 1002 x 668); a dungeon with several floors gives `<id>.worldmap-2f.png`, ... too | `WorldMapArea.dbc` rows of the map: the picture's edges in world coordinates |
-| `minimap` | the terrain minimap tiles (256 px per 533.33 yd ADT tile) stitched into one image | `Textures\Minimap\md5translate.trs` and `Map.dbc`; a tile `map<A>_<B>.blp` is column A (from world y), row B (from world x). Indoor dungeons (WMOs) have none, or only the terrain around them |
+| `minimap` | the map's minimap picture: the terrain tiles, the client's own indoor WMO minimap tiles, or the WMO tiles drawn over the terrain | `Textures\Minimap\md5translate.trs`, `Map.dbc` and the map's WDT/ADTs: a terrain tile `map<A>_<B>.blp` is column A (from world y), row B (from world x); a WMO tile `<base>_<group>_<A>_<B>.blp` is placed by the WMO's MODF position and yaw and the group boxes of its MOGI (2 px per yard, bottom-left anchored tiles) |
 | `navmesh` | a height-shaded top-down render of the server's navmesh (transparent background, 2 px per yard) | `--mmaps`: the `.mmtile` files of the map, parsed in Go (no cgo) |
 
 The JSON beside each image: `map`, `name`, `source`, `width`, `height` (pixels), `px_per_yard`, and the world coordinates of
@@ -3532,8 +3533,28 @@ The image is north up and west left, as the in-game map is: pixel column `c` is 
 `north - south` yards tall in the plane its plan drawing uses (`x -> -y`, `y -> -x`). The test pins this against the Uldaman
 plan: the entrance, Ironaya and Archaedas land on their rooms of the client's Uldaman map.
 
-The output table lists, for every map, its type, the main image, its size and the other images. Archives it cannot read (a
-compression method used for audio only) are an error; a map no source has an image for is listed as `none`.
+A minimap's JSON also says `from`: `terrain` (the map's terrain tiles), `wmo` (only the client's indoor WMO tiles: a
+WMO-only dungeon, or one whose terrain tiles are blank) or `terrain+wmo` (the WMO tiles drawn over the terrain, as on
+Deadmines, Shadowfang Keep, Scholomance, Stratholme, Karazhan Crypt and the open dungeons with indoor props). The WMO
+tiles are the art the client itself draws indoors. Every placed WMO group that has tiles is drawn, groups whose bounding
+box bottom is higher (`PZ + z0`) over lower ones; outdoor props such as farms and ziggurats are included (they are the
+client's own art), and a group with no tiles is skipped. The placement transform is settled and pinned by tests: 2 px
+per yard, a tile index step of 128 yd, bottom-left anchored tiles, `U = 2(x-x0)`, `Vup = 2(y-y0)` with B counting up
+from the group box minimum, a 180-degree turn, `th = +rot.y`, `P = (17066.666 - pos[2], 17066.666 - pos[0], pos[1])` for
+an ADT placement and `P = 0` for a WDT one. A composed picture is capped at 8192 px a side (the scale is lowered, the
+tiles are still sampled at 2 px per yard) and at 4096 tile images (256 MiB of pixels) per map; a tile the archives lack
+or that fails to decode is skipped, and a WMO or a group with no usable tile never ends the run.
+
+When a source gives no picture, the extractor writes `<id>.status.json` beside the images with one line per missing
+source: `{"minimap":{"reason":"..."},"navmesh":{"reason":"..."},"worldmap":{"reason":"..."}}` (only the missing ones,
+each reason capped at 160 characters). The dashboard shows it on the disabled slot and otherwise uses its own default
+text. A missing indoor minimap names the case: (A) a WMO-only map, (B) blank terrain tiles, (C) no terrain tiles, then
+why the WMO picture is missing (no WMO placement, no WMO tile lines for it, none of its tiles decoded, or a blank
+composed picture). A map whose pictures all exist gets no status file, and a stale one is removed.
+
+The output table lists, for every map, its type, the main image, its size and the other images; a minimap shows its
+makeup as `minimap(terrain)`, `minimap(wmo)` or `minimap(terrain+wmo)`. Archives it cannot read (a compression method
+used for audio only) are an error; a map no source has an image for is listed as `none`.
 
 ## Navmesh walking
 
