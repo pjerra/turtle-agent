@@ -878,7 +878,7 @@ turtle-agent plan-export --all-live --out ./migrations/ --stamp 20261014200000  
 | `--gm-cross-direct` | export a `gm_cross` waypoint as a `move_direct` (a straight walk to the landing point) instead of refusing the plan; the run leader has no GM move. Written for Wailing Caverns' ramp to Lord Serpentis (6 yd down over 3.9 yd), which the plan now crosses with a plain direct step and a `check_skip`, so no plan needs it now; the row's comment and a warning say it is not tried live |
 | `--rev`, `--stamp` | the commit named in `ai_dungeon_plan.source` (default: `git rev-parse` of the plan folder, `+local` when it has changes) and the file's timestamp (default now) |
 
-Per leg the rows are, in the order the driver does them: the `via` waypoints (`move`, or `move_direct` for `direct`), `to` (`move`), each pull group (`pull`: the centre is the
+Per leg the rows are, in the order the driver does them: the `via` waypoints (`move`, or `move_direct` for `direct`; an `exact` via is a `move` with flags 64, the run leader's exact waypoint: done only once the lead bot stands within 1.5 yd of it, still for 2 s, and only then the direct step after it goes out, TortoiseBots `docs/guides/dungeon-run-leader.md` "Exact waypoints"; that direct step is written as kind `move_hop_exact`, which an older TortoiseBots does not know: its loader skips the row, so a rolled-back binary never sends the hop from short of the foot (it fails closed); the export refuses rows where anything comes between the two, an exact move before a plain `move_direct`, or a `move_hop_exact` not right after an exact move; a via's `check_skip` is the plan check's only and is not written, without a warning), `to` (`move`), each pull group (`pull`: the centre is the
 mean of its positions, the radius is its `radius` or the farthest position plus 10 yd, `entries` once each in first-seen order, flags 1 ambush / 2 alliance / 4 horde from `ambush`
 and `team`), the `steps` (`use_object` as a `move` to its `stand` and an `open` whose `item` is `requires_item`; `wait_for.gameobject` as `wait_object` with `param` 0/1/2 for
 ready/active/active_alt; `hostiles_gone` as `wait_clear`, centred on its `center` or on the last point of the leg; `loot_object` as `loot` with `item` the `expect_item`; `use_item` with
@@ -888,7 +888,7 @@ done by instance data 8 + encounter states 32, `radius`, `timeout_s`, `entries` 
 own spot is left out (the hold walks there, and the fight that starts with a ritual stays the hold's), and a `wait_for.gameobject` straight after it waits at most 60 s (the event's DONE
 opens the door). A `ritual` row carries its `participants` in `param`. With `--mmaps` a long hop is measured from the last pull, boss or hold row when one comes after the last move (the
 party fought there), so a leg's first move after a boss is not walked back from the move before the fight. Every `run leader hop` warning of the plan check is printed too. **Avoid boxes**: the run leader does not know a plan's `avoid` boxes (the rows have no column for them), so with `--mmaps` and a plan that has boxes the export checks every hop between two anchors (the entrance, move, pull, boss and hold rows) on the plain navmesh, the one the server walks: a hop whose path enters a box gets the corners of the avoid-aware path as `move` rows (comment `path (keeps out of an avoid box)`, hops of at most 25 yd, refined until each hop's plain path is clear), and a hop that cannot be made safe fails the export. Ragefire Chasm needs none (its plain paths already keep out of the basin).
-`skip`, `rest` and `watchdog` are not carried over, as the guide says. A **leg's `companions_loot: false`** cannot be carried either (the rows have no column for it, so the run leader's bots would loot the Zul'Farrak graveyard's chests): such a plan is **refused**, naming the leg, unless `--drop-companions-loot` says to export it without. An `area_trigger` is exported as a `move`, and its comment says `needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)`. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
+`skip`, `rest` and `watchdog` are not carried over, as the guide says. **Nothing is dropped silently**: every plan attribute the rows cannot carry is a warning on stderr, one per attribute, naming each place it stands and what the run leader does instead (`skip`, `leftover_entries`, a leg's `rest`, `needs_walk`, `patrol`, `boss.tactics`, `boss.companions_loot`, a dropped `companions_loot: false`, `fleers`, `no_cc`, `summoned_kill_first`, `hire_composition`, `level_band`, `raid`, `watchdog`, the entrance and teleports, `avoid` without `--mmaps`, a `stand` of a `loot_object` or `ritual`, an object's `spawn` or `range`, a `loot_object` `batch`, an `area_trigger`'s expect check and timeout); the migration's header should list them. Not warned: what is no run attribute (name, version, status, kind, map, notes, a via's `check_skip`, a pull group's `equiv`, which only the pull-test scenario reads). A **leg's `companions_loot: false`** cannot be carried either (the rows have no column for it, so the run leader's bots would loot the Zul'Farrak graveyard's chests): such a plan is **refused**, naming the leg, unless `--drop-companions-loot` says to export it without. An `area_trigger` is exported as a `move`, and its comment says `needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)`. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
 step without its entry) is refused here. The written SQL is read back and compared with the rows before the file is written. Uldaman exports 148 rows (14 legs, 133 steps, two
 of them holds); with its approach points and the hop measured from the last fight no move is more than 60 yd from the party, so `--mmaps` cuts nothing (the export of dd05724 cut 7 hops into 220 rows, walking the party back from the leg before's last move).
 
@@ -3567,6 +3567,24 @@ composed picture). A map whose pictures all exist gets no status file, and a sta
 The output table lists, for every map, its type, the main image, its size and the other images; a minimap shows its
 makeup as `minimap(terrain)`, `minimap(wmo)` or `minimap(terrain+wmo)`. Archives it cannot read (a compression method
 used for audio only) are an error; a map no source has an image for is listed as `none`.
+
+**The three picture slots.** `GET /api/minimap/<map id>` always answers the same three slots in Zul'Farrak's order:
+`worldmap` (the main picture, then one entry per floor: `World map 2f`, ...), `minimap` and `navmesh`. Each entry has
+`kind`, `floor` (`""` or `2f`), `label`, `available`, and for a missing one a one-line `reason` instead of the picture's
+`url`, `x`, `y`, `w`, `h`. Every entry also keeps the older `name` and `source` fields: `name` is now the same as `label`
+(`World map`), and `source` is the slot's kind. The folder's own `<id>.<source>[-<n>f].json` is the slot of that source;
+the main `<id>.json` stands in only for a source the folder has no file of (an old folder), so a picture is never listed
+twice. A map the folder has nothing for still answers 200 with three missing slots; 404 means no `--minimap-dir` at all.
+The page's picker shows the three, disables a missing one as `<label> (none)` with its reason on hover, and draws the first
+available picture, so a saved choice of a kind the folder lost falls back instead of leaving a blank map.
+
+A slot's own reason comes from an optional `<id>.status.json` beside the pictures, which `minimap-extract` writes and an
+operator may edit: `{"minimap": {"reason": "..."}, "navmesh": {"reason": "..."}, "worldmap": {"reason": "..."}}`. It is read
+only if it is at most 64 KiB and a file of the folder itself (no symbolic link out, no other name); a malformed or oversized
+file is ignored, unknown kinds are ignored, control characters (a line break, a tab) become spaces, and each reason is cut to
+160 characters. Without it the dashboard uses a
+built-in line per kind (for the minimap: an indoor dungeon whose in-game minimap the client draws from WMO tiles;
+`minimap-extract` composes it from those tiles, and a map it could not compose gets its reason here).
 
 ## Navmesh walking
 

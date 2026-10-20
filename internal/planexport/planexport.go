@@ -22,16 +22,20 @@ import (
 const (
 	KindMove       = "move"
 	KindMoveDirect = "move_direct"
-	KindPull       = "pull"
-	KindBoss       = "boss"
-	KindLoot       = "loot"
-	KindOpen       = "open"
-	KindUseItem    = "use_item"
-	KindWaitObject = "wait_object"
-	KindWaitClear  = "wait_clear"
-	KindRest       = "rest"
-	KindRitual     = "ritual"
-	KindHold       = "hold"
+	// KindMoveHopExact is the direct step right after an exact via (FlagExact): a move_direct in every way for a module that knows
+	// exact waypoints, and a kind an older module does not know, so its loader skips the row (UnknownKind) and no direct order goes
+	// out over the hole from a foot it walks as a plain move (fail closed against a binary rollback).
+	KindMoveHopExact = "move_hop_exact"
+	KindPull         = "pull"
+	KindBoss         = "boss"
+	KindLoot         = "loot"
+	KindOpen         = "open"
+	KindUseItem      = "use_item"
+	KindWaitObject   = "wait_object"
+	KindWaitClear    = "wait_clear"
+	KindRest         = "rest"
+	KindRitual       = "ritual"
+	KindHold         = "hold"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -43,6 +47,10 @@ const (
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
 	FlagDoneData  = 8
 	FlagEncounter = 32
+	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
+	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
+	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
+	FlagExact = 64
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -52,6 +60,7 @@ const (
 	MaxRadius      = 100   // yards
 	MaxTimeoutS    = 600   // seconds
 	MaxEntries     = 16    // creature entries of a pull or boss
+	MaxKind        = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
 	MaxPlanName    = 32    // ai_dungeon_plan.plan
 	MaxLegName     = 32    // ai_dungeon_leg.name
 	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
@@ -230,6 +239,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 			b.warnings = append(b.warnings, w.String())
 		}
 	}
+	upto := len(p.Legs)
+	if cut != "" {
+		upto = cutLeg
+	}
+	b.warnings = append(b.warnings, unexpressed(p, opt, upto)...)
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
@@ -288,7 +302,7 @@ func (b *builder) leg(li int) error {
 	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName)})
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
-	for _, w := range l.Via {
+	for vi, w := range l.Via {
 		if w.GMCross && b.opt.GMCrossDirect {
 			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): via %.1f %.1f %.1f is a gm_cross; exported as a move_direct (a straight walk to the landing point), not tried live: the run leader has no GM move", li, l.Name, w.X, w.Y, w.Z))
 			b.move(w.Point, true, "via (gm_cross in the plan; move_direct, not tried live)")
@@ -296,6 +310,18 @@ func (b *builder) leg(li int) error {
 		}
 		if w.GMCross {
 			return fmt.Errorf("via %.1f %.1f %.1f is a gm_cross: a GM moves the party there in a remote run, and the TortoiseBots run leader has no such step", w.X, w.Y, w.Z)
+		}
+		if w.Exact {
+			// The plan allows exact only on a plain via whose next via is a direct step (dungeon.Parse refuses any other), so this row is
+			// always followed by its move_direct; Validate checks the rows keep it so.
+			b.add(StepRow{Kind: KindMove, X: w.X, Y: w.Y, Z: w.Z, Flags: FlagExact, Comment: "via (exact: the direct step's launch point)"})
+			b.last, b.haveLast = w.Point, true
+			continue
+		}
+		if w.Direct && vi > 0 && l.Via[vi-1].Exact {
+			b.add(StepRow{Kind: KindMoveHopExact, X: w.X, Y: w.Y, Z: w.Z, Comment: "via (direct from the exact point before it)"})
+			b.last, b.haveLast = w.Point, true
+			continue
 		}
 		b.move(w.Point, w.Direct, "via")
 	}
@@ -559,11 +585,14 @@ func nameOr(a, b string) string {
 
 // Validate checks rows the way the module's loader would, so that a row it would skip is a refusal here.
 func Validate(r Rows) error {
-	for _, s := range r.Steps {
+	for i, s := range r.Steps {
 		where := fmt.Sprintf("plan %s leg %d step %d (%s)", s.Plan, s.Leg, s.Seq, s.Kind)
 		bad := func(format string, a ...any) error { return fmt.Errorf("%s: %s", where, fmt.Sprintf(format, a...)) }
 		if s.Radius < 0 || s.Radius > MaxRadius {
 			return bad("radius %.1f is outside 0-%d", s.Radius, MaxRadius)
+		}
+		if len(s.Kind) > MaxKind {
+			return bad("the kind is longer than ai_dungeon_step.kind holds (%d)", MaxKind)
 		}
 		if s.TimeoutS < 0 || s.TimeoutS > MaxTimeoutS {
 			return bad("timeout_s %d is outside 0-%d", s.TimeoutS, MaxTimeoutS)
@@ -572,7 +601,7 @@ func Validate(r Rows) error {
 			return bad("%d entries (at most %d)", len(s.Entries), MaxEntries)
 		}
 		switch s.Kind {
-		case KindMove, KindMoveDirect, KindRest:
+		case KindMove, KindMoveDirect, KindMoveHopExact, KindRest:
 		case KindPull:
 			if len(s.Entries) == 0 {
 				return bad("a pull needs entries")
@@ -597,6 +626,22 @@ func Validate(r Rows) error {
 		}
 		if s.Kind == KindWaitObject && s.Param > 2 {
 			return bad("param %d is above 2", s.Param)
+		}
+		if s.Flags&FlagExact != 0 {
+			if s.Kind != KindMove {
+				return bad("the exact flag is for a move row (the loader refuses it on a %s)", s.Kind)
+			}
+			if i+1 >= len(r.Steps) || r.Steps[i+1].Plan != s.Plan || r.Steps[i+1].Leg != s.Leg || r.Steps[i+1].Kind != KindMoveHopExact {
+				return bad("an exact move must be followed by the move_hop_exact it launches (a row came between them, or there is none)")
+			}
+		}
+		if s.Kind == KindMoveHopExact {
+			if i == 0 || r.Steps[i-1].Plan != s.Plan || r.Steps[i-1].Leg != s.Leg || r.Steps[i-1].Kind != KindMove || r.Steps[i-1].Flags&FlagExact == 0 {
+				return bad("a move_hop_exact must follow the exact move (flags %d) it is launched from", FlagExact)
+			}
+			if s.Flags != 0 {
+				return bad("a move_hop_exact carries no flags")
+			}
 		}
 		if len(s.Comment) > MaxComment {
 			return bad("comment longer than %d", MaxComment)
@@ -635,8 +680,10 @@ func (b *builder) cutLongHops() error {
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
 			prev = &cp
 		}
-		if s.Kind == KindMove || s.Kind == KindMoveDirect {
-			if prev != nil {
+		if s.Kind == KindMove || s.Kind == KindMoveDirect || s.Kind == KindMoveHopExact {
+			// The hop after an exact move is indivisible: no cut point may come between the exact move and it (the run leader launches
+			// it from that move only; Validate refuses rows that separate them). It is still the anchor for the next hop.
+			if prev != nil && s.Kind != KindMoveHopExact {
 				a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 				if d := dist3(a, c); d > MoveGapWarnYd {
 					if b.opt.Cut == nil {
@@ -680,13 +727,13 @@ func (b *builder) routeAroundAvoid() error {
 	added := map[int]int{}
 	for _, s := range b.rows.Steps {
 		switch s.Kind {
-		case KindMove, KindMoveDirect, KindPull, KindBoss, KindHold:
+		case KindMove, KindMoveDirect, KindMoveHopExact, KindPull, KindBoss, KindHold:
 		default:
 			out = append(out, s)
 			continue
 		}
 		to := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
-		if s.Kind != KindMoveDirect {
+		if s.Kind != KindMoveDirect && s.Kind != KindMoveHopExact {
 			via, err := b.opt.Route(b.plan.Map, prev, to)
 			if err != nil {
 				return fmt.Errorf("leg %d step %d (%s): %w", s.Leg, s.Seq, s.Kind, err)

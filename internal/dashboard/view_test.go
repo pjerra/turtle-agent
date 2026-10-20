@@ -118,6 +118,10 @@ func TestMarkerCSSDoesNotStyleLabelPlates(t *testing.T) {
 // TestMapLayers: the layer defaults, the one global saved choice, availability and the geometry of the newer layers.
 func TestMapLayers(t *testing.T) { runCheck(t, "layers_check.js", "layers.js") }
 
+// TestPictureSlots: the three map picture slots in Zul'Farrak's order, a missing kind, the floor entries, the saved choice
+// and the picker's options.
+func TestPictureSlots(t *testing.T) { runCheck(t, "picslots_check.js", "picslots.js") }
+
 // TestUnitInfo: what a character is doing, the hover box, status icons, threat colours, the event feed and the run progress.
 // TestPathMath: trails, planned vs walked, pull-group states, objects, aggro rings, patrols, combat lines, the ghost and the heat bins.
 func TestPathMath(t *testing.T) { runCheck(t, "paths_check.js", "paths.js") }
