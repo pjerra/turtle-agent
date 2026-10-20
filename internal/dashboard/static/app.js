@@ -2,12 +2,12 @@
 // Live dashboard page. Everything from the agents is put in the page with textContent, never as markup; the only markup
 // inserted is the plan drawing, which the server builds with escaped text.
 const SVGNS = "http://www.w3.org/2000/svg";
-const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit, RR = window.RealRoute; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), unitinfo.js (what a unit is doing, the hover box, events, progress)
+const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, PS = window.PictureSlots, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit, RR = window.RealRoute; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), picslots.js (the map picture slots), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const RF = window.RefreshRate; // refresh.js (the refresh-rate picker: how often the page polls)
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
 const plans = new Map(); // name -> geometry | "loading" | null
-const minimaps = new Map(); // map id -> [layer] | "loading" | null (no image for that map; looked for again after a while)
+const minimaps = new Map(); // map id -> [picture slot] | "loading" | null (no minimap folder; looked for again after a while)
 const minimapMiss = new Map(); // map id -> when it was found to have no image
 let view = "grid", activeTab = null, last = null;
 let dim = 30, followPref = true; // dim: percent the game map is darkened under the drawing; followPref: follow the party (per browser)
@@ -230,7 +230,8 @@ function makeCard(c) {
     h("span", {}, "faded = already done; white ring = in a fight"));
   parts.layer = h("select", { hidden: true, title: "background image of the map (extracted from your own client by turtle-agent minimap-extract)", "aria-label": "map background" });
   parts.layer.addEventListener("change", () => { rec.layerName = parts.layer.value; rec.layerApplied = null; if (last) render(last); });
-  parts.legend.append(parts.layer);
+  parts.picWhy = h("em", { class: "why", hidden: true }); // why the slot you asked for has no picture
+  parts.legend.append(parts.layer, parts.picWhy);
   parts.debug = h("details", {}, h("summary", { text: "Debug: raw status and files" }), h("div", { class: "files" }), h("pre", { text: "(open to load)" }));
   parts.debug.addEventListener("toggle", () => { if (parts.debug.open) loadRaw(c.id, parts); });
   const el = h("section", { class: "card", "data-id": c.id }, parts.head, h("div", { class: "cbody" }, parts.map, parts.info, parts.legend), parts.debug);
@@ -269,6 +270,8 @@ function ensurePlan(c) {
   return "loading";
 }
 
+// The three picture slots of a map (the world map and its floors, the minimap, the navmesh); a server without a minimap
+// folder answers 404, and the card is looked at again after a while.
 function ensureMinimap(id) {
   if (id == null) return undefined;
   if (minimaps.has(id) && !(minimaps.get(id) === null && Date.now() - (minimapMiss.get(id) || 0) > 30000)) return minimaps.get(id);
@@ -313,22 +316,29 @@ function ensureGhost(c) {
 }
 function ensureHeat(c) { return c.label.plan ? cachedFetch(heats, c.label.plan, "/api/heat/" + encodeURIComponent(c.label.plan)) : null; }
 
-// The image goes under the plan drawing; its rectangle is in the drawing's plane (yards), so the plan lines up with it.
+// The image goes under the plan drawing; its rectangle is in the drawing's plane (yards), so the plan lines up with it. The
+// picker lists every slot of the map (the world map and its floors, the minimap, the navmesh): a slot without a picture is
+// disabled and reads "<label> (none)" with its reason on hover, and the drawing falls back to the first available slot.
 function applyLayer(rec, svg, geo) {
   const ls = ensureMinimap(geo.map), sel = rec.parts.layer;
-  const have = Array.isArray(ls) ? ls : [];
-  sel.hidden = have.length < 2;
-  const names = have.map((l) => l.name).join("|");
-  if (have.length >= 2 && sel.dataset.names !== names) { sel.dataset.names = names; sel.replaceChildren(...have.map((l) => h("option", { value: l.name, text: l.name }))); }
-  const pick = have.find((l) => l.name === rec.layerName) || have[0];
-  rec.pick = pick || null;
-  const key = pick ? pick.url : "";
-  if (rec.layerApplied === key) return;
+  const plan = PS.plan(Array.isArray(ls) ? ls : [], rec.layerName);
+  sel.hidden = !plan.shown;
+  const names = plan.options.map((o) => o.value + "|" + o.disabled + "|" + o.title).join("\n");
+  if (plan.shown && sel.dataset.names !== names) {
+    sel.dataset.names = names;
+    sel.replaceChildren(...plan.options.map((o) => h("option", { value: o.value, text: o.text, disabled: o.disabled, title: o.title })));
+  }
+  rec.picWhy = plan.reason;
+  rec.parts.picWhy.textContent = plan.reason;
+  rec.parts.picWhy.hidden = !plan.reason;
+  rec.pick = plan.pick || null;
+  const key = plan.pick ? plan.pick.url : "";
+  if (rec.layerApplied === key) { if (plan.pick) sel.value = plan.pick.label; return; }
   rec.layerApplied = key;
   svg.querySelectorAll("image.bg").forEach((e) => e.remove());
-  if (!pick) return;
-  sel.value = pick.name;
-  const img = s("image", { class: "bg", href: pick.url, x: pick.x, y: pick.y, width: pick.w, height: pick.h, preserveAspectRatio: "none" });
+  if (!plan.pick) return;
+  sel.value = plan.pick.label;
+  const img = s("image", { class: "bg", href: plan.pick.url, x: plan.pick.x, y: plan.pick.y, width: plan.pick.w, height: plan.pick.h, preserveAspectRatio: "none" });
   svg.insertBefore(img, svg.firstChild);
 }
 
@@ -976,7 +986,7 @@ function renderMap(c, rec) {
   renderFeed(rec, c);
   const has = (sel) => !!svg.querySelector(sel), kind = (...ks) => c.mobs.some((m) => ks.includes(m.kind));
   rec.avail = ML.availability({
-    picture: !!rec.pick, route: has(".route, .direct"), packs: has(".pull, .pin"), cleared: c.mobs.some((m) => m.cleared) || has(".pull.cleared, .pin.cleared, .leg.done"),
+    picture: !!rec.pick, why: { picture: rec.picWhy || "" }, route: has(".route, .direct"), packs: has(".pull, .pin"), cleared: c.mobs.some((m) => m.cleared) || has(".pull.cleared, .pin.cleared, .leg.done"),
     bosses: has(".boss"), doors: has(".obj"), sections: has(".legname"), steps: has(".stepn"), trail: (c.trail || []).length >= 2, trailtime: stamps.length > 0, heading: !!(hd && lead),
     next: !!nt, bots: c.bots.some((b) => b.known), botTargets: botLines.length > 0, healer: healers.length > 0, commander: !!c.commander, cmdline: !!(c.commander && leadPos),
     hostile: kind("hostile"), neutral: kind("neutral", "friendly"), critter: kind("critter"), threat: threat.length > 0, pulltargets: pulls.length > 0, zones: false,

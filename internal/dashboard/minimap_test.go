@@ -98,36 +98,215 @@ func writeLayerFiles(t *testing.T, dir, stem string, m minimap.Meta) {
 	}
 }
 
-func TestMinimapLayersAndRoutes(t *testing.T) {
-	dir := t.TempDir()
-	writeLayerFiles(t, dir, "70", uldamanWorldMap)
-	writeLayerFiles(t, dir, "70.worldmap", uldamanWorldMap) // the main image's own copy: not listed twice
-	nav := uldamanWorldMap
-	nav.Source = "navmesh"
-	writeLayerFiles(t, dir, "70.navmesh", nav)
-	floor := uldamanWorldMap
-	writeLayerFiles(t, dir, "70.worldmap-2f", floor)
-	os.WriteFile(filepath.Join(dir, "209.json"), []byte("{broken"), 0o644)
-	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("no"), 0o644)
-
-	ls := MinimapLayers(dir, 70)
+func slotLabels(ls []MinimapLayer) string {
 	var names []string
 	for _, l := range ls {
-		names = append(names, l.Name+"="+l.URL)
+		names = append(names, l.Label)
 	}
-	if got, want := strings.Join(names, " "), "worldmap=/minimap/70.png navmesh=/minimap/70.navmesh.png worldmap 2f=/minimap/70.worldmap-2f.png"; got != want {
-		t.Errorf("layers = %s\nwant     %s", got, want)
+	return strings.Join(names, ", ")
+}
+
+func landOf(t *testing.T, dir string, id uint32) [3]MinimapLayer {
+	t.Helper()
+	ls := MinimapSlots(dir, id)
+	if len(ls) != 3 {
+		t.Fatalf("slots = %d (%s), want the three kinds", len(ls), slotLabels(ls))
+	}
+	return [3]MinimapLayer{ls[0], ls[1], ls[2]}
+}
+
+// The folder of Zul'Farrak: the main picture is the world map's copy, and every source has its own file. The main copy is not
+// listed a second time.
+func TestMinimapSlotsZulFarrak(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "209", uldamanWorldMap)
+	writeLayerFiles(t, dir, "209.worldmap", uldamanWorldMap)
+	mini := uldamanWorldMap
+	mini.Source = "minimap"
+	writeLayerFiles(t, dir, "209.minimap", mini)
+	nav := uldamanWorldMap
+	nav.Source = "navmesh"
+	writeLayerFiles(t, dir, "209.navmesh", nav)
+
+	ls := MinimapSlots(dir, 209)
+	if got, want := slotLabels(ls), "World map, Minimap, Navmesh"; got != want {
+		t.Fatalf("labels = %s, want %s", got, want)
+	}
+	for i, kind := range []string{"worldmap", "minimap", "navmesh"} {
+		l := ls[i]
+		if l.Kind != kind || l.Floor != "" || l.Name != l.Label || !l.Available || l.Reason != "" {
+			t.Errorf("%d = %+v", i, l)
+		}
+	}
+	if ls[0].URL != "/minimap/209.worldmap.png" || ls[1].URL != "/minimap/209.minimap.png" || ls[2].URL != "/minimap/209.navmesh.png" {
+		t.Errorf("urls = %s, %s, %s", ls[0].URL, ls[1].URL, ls[2].URL)
 	}
 	x, y, w, h := OverlayRect(uldamanWorldMap)
 	if l := ls[0]; l.X != x || l.Y != y || l.W != w || l.H != h {
-		t.Errorf("layer rect = %v %v %v %v", l.X, l.Y, l.W, l.H)
+		t.Errorf("rectangle = %v %v %v %v", l.X, l.Y, l.W, l.H)
 	}
-	if got := MinimapLayers(dir, 209); len(got) != 0 {
-		t.Errorf("a broken json gives layers: %v", got)
+	if got := MinimapSlots("", 209); got != nil {
+		t.Errorf("no folder gives slots: %v", got)
 	}
-	if MinimapLayers("", 70) != nil {
-		t.Error("no folder, no layers")
+	if got := MinimapSlots(dir, 70); len(got) != 3 {
+		t.Errorf("another map = %v", got)
 	}
+}
+
+// Uldaman has no minimap: the slot is still there, unavailable, with the built-in reason.
+func TestMinimapSlotMissingKind(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "70", uldamanWorldMap)
+	writeLayerFiles(t, dir, "70.worldmap", uldamanWorldMap)
+	nav := uldamanWorldMap
+	nav.Source = "navmesh"
+	writeLayerFiles(t, dir, "70.navmesh", nav)
+
+	l := landOf(t, dir, 70)
+	if !l[0].Available || l[0].Label != "World map" || !l[2].Available || l[2].Label != "Navmesh" {
+		t.Fatalf("world map or navmesh = %+v / %+v", l[0], l[2])
+	}
+	if l[1].Available || l[1].MinimapPicture != nil || l[1].Source != "minimap" || l[1].Kind != "minimap" {
+		t.Errorf("minimap = %+v, want unavailable", l[1])
+	}
+	if l[1].Reason != kindWhy["minimap"] || !strings.Contains(l[1].Reason, "WMO tiles") {
+		t.Errorf("minimap reason = %q", l[1].Reason)
+	}
+}
+
+// Scarlet Monastery: the main world map plus floors 2f-4f, then the missing minimap, then the navmesh. The floors are sorted by
+// number, whatever order the folder lists them in.
+func TestMinimapSlotsFloors(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "189", uldamanWorldMap)
+	writeLayerFiles(t, dir, "189.worldmap", uldamanWorldMap)
+	for _, fl := range []string{"3f", "2f", "4f"} {
+		m := uldamanWorldMap
+		m.Name = "Scarlet Monastery " + fl
+		writeLayerFiles(t, dir, "189.worldmap-"+fl, m)
+	}
+	nav := uldamanWorldMap
+	nav.Source = "navmesh"
+	writeLayerFiles(t, dir, "189.navmesh", nav)
+
+	ls := MinimapSlots(dir, 189)
+	if got, want := slotLabels(ls), "World map, World map 2f, World map 3f, World map 4f, Minimap, Navmesh"; got != want {
+		t.Fatalf("labels = %s, want %s", got, want)
+	}
+	for i, fl := range []string{"", "2f", "3f", "4f"} {
+		if ls[i].Kind != "worldmap" || ls[i].Floor != fl || !ls[i].Available {
+			t.Errorf("%d = %+v", i, ls[i])
+		}
+	}
+	if ls[2].URL != "/minimap/189.worldmap-3f.png" || ls[2].Label != "World map 3f" {
+		t.Errorf("3f = %+v", ls[2])
+	}
+	if ls[4].Available || ls[4].Kind != "minimap" || ls[5].Kind != "navmesh" {
+		t.Errorf("after the floors: %+v / %+v", ls[4], ls[5])
+	}
+}
+
+// An old folder has only the main picture. It stands in for the one source it names and is never the minimap or navmesh too.
+func TestMinimapSlotsOldFolder(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "70", uldamanWorldMap)
+
+	l := landOf(t, dir, 70)
+	if !l[0].Available || l[0].URL != "/minimap/70.png" || l[0].Kind != "worldmap" {
+		t.Errorf("world map = %+v", l[0])
+	}
+	for _, i := range []int{1, 2} {
+		if l[i].Available || l[i].Reason == "" {
+			t.Errorf("slot %d = %+v, want unavailable with a reason", i, l[i])
+		}
+	}
+	// a main picture of another source stands in for that source
+	mini := uldamanWorldMap
+	mini.Source = "minimap"
+	dir2 := t.TempDir()
+	writeLayerFiles(t, dir2, "70", mini)
+	l = landOf(t, dir2, 70)
+	if l[0].Available || !l[1].Available || l[1].URL != "/minimap/70.png" {
+		t.Errorf("main minimap folder = %+v", l)
+	}
+}
+
+// <id>.status.json gives a slot's own reason. An oversized or malformed file, an unknown kind, or a file outside the folder's
+// allow-list leaves the built-in reasons; a long string is cut to 160 characters.
+func TestMinimapSlotStatusReasons(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "70", uldamanWorldMap)
+	status := `{"minimap":{"reason":"no indoor art yet"},"navmesh":{"reason":"run without --mmaps"},"bogus":{"reason":"x"}}`
+	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := landOf(t, dir, 70)
+	if l[1].Reason != "no indoor art yet" || l[2].Reason != "run without --mmaps" {
+		t.Errorf("reasons = %q / %q", l[1].Reason, l[2].Reason)
+	}
+
+	// malformed: the defaults stand
+	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if l := landOf(t, dir, 70); l[1].Reason != kindWhy["minimap"] || l[2].Reason != kindWhy["navmesh"] {
+		t.Errorf("malformed reasons = %q / %q", l[1].Reason, l[2].Reason)
+	}
+
+	// oversized: the file is not read at all
+	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), []byte(strings.Repeat(" ", 1<<16)+status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if l := landOf(t, dir, 70); l[1].Reason != kindWhy["minimap"] {
+		t.Errorf("oversized reason = %q", l[1].Reason)
+	}
+
+	// a long string is cut
+	long := strings.Repeat("x", 300)
+	b, _ := json.Marshal(map[string]map[string]string{"minimap": {"reason": long}})
+	if err := os.WriteFile(filepath.Join(dir, "70.status.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if l := landOf(t, dir, 70); len([]rune(l[1].Reason)) != maxReasonRunes || l[1].Reason != strings.Repeat("x", 160) {
+		t.Errorf("long reason = %d characters", len([]rune(l[1].Reason)))
+	}
+
+	// another map's status file is not read
+	if err := os.WriteFile(filepath.Join(dir, "71.status.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if l := landOf(t, dir, 70); l[1].Reason != strings.Repeat("x", 160) {
+		t.Errorf("71.status.json changed 70: %q", l[1].Reason)
+	}
+
+	// a status file that is a symbolic link out of the folder is refused
+	outside := t.TempDir()
+	target := filepath.Join(outside, "70.status.json")
+	if err := os.WriteFile(target, []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(dir, "70.status.json"))
+	if err := os.Symlink(target, filepath.Join(dir, "70.status.json")); err != nil {
+		t.Skip("no symbolic links here")
+	}
+	if l := landOf(t, dir, 70); l[1].Reason != kindWhy["minimap"] {
+		t.Errorf("symlinked status reason = %q", l[1].Reason)
+	}
+	if got := statusReasons(dir, ".."); got != nil {
+		t.Errorf("a relative name was read: %v", got)
+	}
+}
+
+// A map id can be anything: an empty folder is still answered with three unavailable slots, and no folder gives 404.
+func TestMinimapSlotsAndRoutes(t *testing.T) {
+	dir := t.TempDir()
+	writeLayerFiles(t, dir, "70", uldamanWorldMap)
+	writeLayerFiles(t, dir, "70.worldmap", uldamanWorldMap)
+	nav := uldamanWorldMap
+	nav.Source = "navmesh"
+	writeLayerFiles(t, dir, "70.navmesh", nav)
+	os.WriteFile(filepath.Join(dir, "209.json"), []byte("{broken"), 0o644)
+	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("no"), 0o644)
 
 	p := NewPoller(Options{MinimapDir: dir, ConfigDir: t.TempDir(), Agents: "auto"})
 	srv := httptest.NewServer(Handler(p, "", nil))
@@ -141,10 +320,36 @@ func TestMinimapLayersAndRoutes(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, resp.Header.Get("Content-Type"), string(b)
 	}
-	if code, _, body := get("/api/minimap/70"); code != 200 || !strings.Contains(body, `"/minimap/70.png"`) {
+	if code, _, body := get("/api/minimap/70"); code != 200 || !strings.Contains(body, `"label":"World map"`) || !strings.Contains(body, `"/minimap/70.navmesh.png"`) {
 		t.Errorf("/api/minimap/70 = %d %s", code, body)
 	}
-	for _, path := range []string{"/api/minimap/209", "/api/minimap/abc", "/api/minimap/", "/api/minimap/-1", "/api/minimap/70/x"} {
+	// a map with nothing in the folder: 200 and the three missing slots, each without picture fields
+	code, _, body := get("/api/minimap/999")
+	if code != 200 {
+		t.Fatalf("/api/minimap/999 = %d %s", code, body)
+	}
+	var slots []map[string]any
+	if err := json.Unmarshal([]byte(body), &slots); err != nil {
+		t.Fatal(err)
+	}
+	if len(slots) != 3 {
+		t.Fatalf("999 slots = %v", body)
+	}
+	for i, kind := range []string{"worldmap", "minimap", "navmesh"} {
+		if slots[i]["kind"] != kind || slots[i]["available"] != false || slots[i]["reason"] == "" {
+			t.Errorf("999 slot %d = %v", i, slots[i])
+		}
+		for _, k := range []string{"url", "x", "y", "w", "h"} {
+			if _, ok := slots[i][k]; ok {
+				t.Errorf("999 slot %d has %s: %v", i, k, slots[i])
+			}
+		}
+	}
+	// a broken main file is a map with no picture, not a server error
+	if code, _, body := get("/api/minimap/209"); code != 200 || !strings.Contains(body, `"available":false`) {
+		t.Errorf("/api/minimap/209 = %d %s", code, body)
+	}
+	for _, path := range []string{"/api/minimap/abc", "/api/minimap/", "/api/minimap/-1", "/api/minimap/70/x"} {
 		if code, _, _ := get(path); code != 404 {
 			t.Errorf("%s = %d, want 404", path, code)
 		}
@@ -152,7 +357,7 @@ func TestMinimapLayersAndRoutes(t *testing.T) {
 	if code, ct, body := get("/minimap/70.navmesh.png"); code != 200 || ct != "image/png" || !strings.HasPrefix(body, "\x89PNG") {
 		t.Errorf("image = %d %s", code, ct)
 	}
-	for _, path := range []string{"/minimap/70.json", "/minimap/secret.txt", "/minimap/../secret.txt", "/minimap/%2e%2e/x.png", "/minimap/70.paper.png", "/minimap/", "/minimap/999.png"} {
+	for _, path := range []string{"/minimap/70.json", "/minimap/70.status.json", "/minimap/secret.txt", "/minimap/../secret.txt", "/minimap/%2e%2e/x.png", "/minimap/70.paper.png", "/minimap/", "/minimap/999.png"} {
 		if code, _, _ := get(path); code == 200 {
 			t.Errorf("%s was served", path)
 		}
