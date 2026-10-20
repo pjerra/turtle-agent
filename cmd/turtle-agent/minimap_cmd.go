@@ -10,8 +10,9 @@ import (
 	"github.com/pjerra/turtle-agent/internal/minimap"
 )
 
-const minimapUsage = "usage: turtle-agent minimap-extract --client <Data dir> --out <dir> [--maps 70,209|all-instances] [--mmaps DIR] [--list]\n" +
-	"  reads the game client's MPQ archives and writes <out>/<map>.png + <map>.json for the dashboard (README \"Minimaps\")"
+const minimapUsage = "usage: turtle-agent minimap-extract --client <Data dir> --out <dir> [--maps 70,209|all-instances] [--mmaps DIR] [--list] [--verbose]\n" +
+	"  reads the game client's MPQ archives and writes <out>/<map>.png + <map>.json for the dashboard (README \"Minimaps\")\n" +
+	"  the minimap picture is the terrain tiles, the client's indoor WMO tiles, or the WMO tiles over the terrain"
 
 // minimapCmd extracts the in-game minimaps of maps from the client the owner owns.
 func minimapCmd(args []string, stdout, stderr io.Writer) int {
@@ -21,8 +22,9 @@ func minimapCmd(args []string, stdout, stderr io.Writer) int {
 	out := fs.String("out", "", "folder to write <map>.png and <map>.json into")
 	maps := fs.String("maps", "all-instances", `map ids, comma separated, or "all-instances" (every dungeon and raid of Map.dbc)`)
 	mmaps := fs.String("mmaps", "", "server mmaps folder(s), comma separated: a map with no minimap tiles gets a height-shaded floor render of its navmesh")
-	prefer := fs.String("prefer", "", "order of the image sources for <map>.png, comma separated: minimap (the terrain tiles), worldmap (the map picture of the area), navmesh (default worldmap,minimap,navmesh)")
+	prefer := fs.String("prefer", "", "order of the image sources for <map>.png, comma separated: minimap (the terrain and indoor WMO tiles), worldmap (the map picture of the area), navmesh (default worldmap,minimap,navmesh)")
 	list := fs.Bool("list", false, "only report what each map would get; write nothing")
+	verbose := fs.Bool("verbose", false, "log every map and every skipped tile to stderr")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -40,18 +42,26 @@ func minimapCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "minimap-extract:", err)
 		return exitUsage
 	}
-	res, err := minimap.Run(minimap.Options{ClientDir: expandHome(*client), OutDir: expandHome(*out), MmapsDirs: splitDirs(*mmaps),
-		Maps: ids, All: all, Prefer: pref, ListOnly: *list})
+	opts := minimap.Options{ClientDir: expandHome(*client), OutDir: expandHome(*out), MmapsDirs: splitDirs(*mmaps),
+		Maps: ids, All: all, Prefer: pref, ListOnly: *list}
+	if *verbose {
+		opts.Log = func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) }
+	}
+	res, err := minimap.Run(opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "minimap-extract:", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%-4s %-34s %-8s %-10s %-10s %s\n", "map", "name", "type", "image", "size", "other images")
+	fmt.Fprintf(stdout, "%-4s %-34s %-8s %-22s %-10s %s\n", "map", "name", "type", "image", "size", "other images")
 	failed := 0
 	for _, r := range res {
 		size := "-"
+		image := "-"
 		if r.Kind != minimap.KindNone {
 			size = fmt.Sprintf("%dx%d", r.Meta.Width, r.Meta.Height)
+			if len(r.Layers) > 0 {
+				image = r.Layers[0].Label()
+			}
 		}
 		note := r.Note
 		if r.Error != nil {
@@ -61,13 +71,13 @@ func minimapCmd(args []string, stdout, stderr io.Writer) int {
 		var others []string
 		for _, l := range r.Layers {
 			if l.Kind != r.Kind || l.Floor != "" {
-				others = append(others, l.Kind+l.Floor)
+				others = append(others, l.Label())
 			}
 		}
 		if len(others) > 0 {
 			note = "also " + strings.Join(others, ",") + " " + note
 		}
-		fmt.Fprintf(stdout, "%-4d %-34s %-8s %-10s %-10s %s\n", r.ID, r.Name, typeName(r.Type), r.Kind, size, note)
+		fmt.Fprintf(stdout, "%-4d %-34s %-8s %-22s %-10s %s\n", r.ID, r.Name, typeName(r.Type), image, size, note)
 	}
 	if *out != "" && !*list {
 		fmt.Fprintf(stdout, "wrote to %s\n", filepath.Clean(expandHome(*out)))
