@@ -594,21 +594,22 @@ func TestNaralexEventSteps(t *testing.T) {
 		goneR  float32
 		spots  []Point
 		stops  []Point
+		extra  []uint32
 	}{
 		{"ravager_pack", 3636, 25, 40, []Point{
 			Point{X: -102.4, Y: 232.8, Z: -91.5}, // the party's stop: the summons run at the Disciple, who stands at it
 			Point{X: -69.8, Y: 211.3, Z: -93.5},  // the southern summon point (the first spawn is 3.6 yd from it)
-		}, nil},
+		}, nil, nil},
 		{"viper_pack", 5755, 25, 40, []Point{
 			Point{X: -52.9, Y: 269.8, Z: -92.8},
 			Point{X: -58.5, Y: 279.8, Z: -92.8},
 			Point{X: -49.6, Y: 278.2, Z: -92.8},
-		}, nil},
+		}, nil, []uint32{3671, 3840, 3840, 3636}}, // Anacondra's spot 4 pack, whose spawn rows stand in the stop's radius
 		{"ritual_moccus", 5762, 25, 40, []Point{
 			Point{X: 123.8, Y: 271.9, Z: -102.4},
 			Point{X: 151.9, Y: 234.3, Z: -102.5},
 			Point{X: 127.6, Y: 200.8, Z: -101.8},
-		}, nil},
+		}, nil, nil},
 	}
 	for _, wv := range waves {
 		l := naralexLeg(t, p, wv.leg)
@@ -616,9 +617,25 @@ func TestNaralexEventSteps(t *testing.T) {
 			t.Fatalf("%s: %d pull groups", wv.leg, len(l.PullGroups))
 		}
 		grp := l.PullGroups[0]
-		for _, e := range grp.Entries {
-			if e != wv.entry {
-				t.Errorf("%s: entry %d in the wave's group, want only %d", wv.leg, e, wv.entry)
+		if wv.extra != nil {
+			// The stop's own static neighbours are members too (the viper stop is Lady Anacondra's spot 4).
+			var got []uint32
+			for _, e := range grp.Entries {
+				if e == wv.entry {
+					got = append(got, e)
+				}
+			}
+			if len(got) != 3 {
+				t.Errorf("%s: %d of entry %d in the group, want the three summons", wv.leg, len(got), wv.entry)
+			}
+			if !slices.Equal(grp.Entries, append([]uint32{wv.entry, wv.entry, wv.entry}, wv.extra...)) {
+				t.Errorf("%s: entries %v, want the three summons and the static members %v", wv.leg, grp.Entries, wv.extra)
+			}
+		} else {
+			for _, e := range grp.Entries {
+				if e != wv.entry {
+					t.Errorf("%s: entry %d in the wave's group, want only %d", wv.leg, e, wv.entry)
+				}
 			}
 		}
 		if len(grp.Entries) < len(wv.spots) {

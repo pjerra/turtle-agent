@@ -880,7 +880,9 @@ func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	// The plan's return to the Disciple (leg 12, return_gossip) is a gm_cross; the option mirrors the re-export
+	// procedure (the run leader never runs past the cut, so the row it writes is documentation).
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, GMCrossDirect: true})
 	if err != nil {
 		t.Fatal(err)
 	}

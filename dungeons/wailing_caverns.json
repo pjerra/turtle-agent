@@ -1165,7 +1165,7 @@
       "to": {"x": -54, "y": 276.2, "z": -92.8},
       "pull_groups": [
         {
-          "entries": [5755, 5755, 5755],
+          "entries": [5755, 5755, 5755, 3671, 3840, 3840, 3636],
           "positions": [
             {"x": -52.9, "y": 269.8, "z": -92.8},
             {"x": -58.5, "y": 279.8, "z": -92.8},
@@ -1190,7 +1190,7 @@
         }
       ],
       "notes": [
-        "EVENT LEG 5: the viper fight. The three vipers spawn 4.6 to 6.4 yd from the party's stop (they are summoned around the Disciple, who stands at it) and run at him; the static Vipers (5755) stand only in Cobrahn's room, 100 yd and more away, so no spawn row of the entry can be a member here."
+        "EVENT LEG 5: the viper fight. The three vipers spawn 4.6 to 6.4 yd from the party's stop (they are summoned around the Disciple, who stands at it) and run at him; the group also lists Lady Anacondra (3671), the two Druids of the Fang (3840) and the static Deviate Ravager (3636) whose spawn rows stand in the stop's radius (guids 1177978, 26252, 26239, 26230: her spot 4 is the Disciple's stop): dead since the baseline run, a respawn is pulled and dies with the vipers, which is the walk's own road anyway. The other static Vipers (5755) stand only in Cobrahn's room, 100 yd and more away, so no spawn row of the entry can be a member here."
       ]
     },
     {
