@@ -10,7 +10,7 @@ DELETE FROM `ai_dungeon_step` WHERE `plan` = 'wailing_caverns';
 DELETE FROM `ai_dungeon_leg` WHERE `plan` = 'wailing_caverns';
 DELETE FROM `ai_dungeon_plan` WHERE `plan` = 'wailing_caverns';
 INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES
-('wailing_caverns', 43, '3840', '', '3671', 'turtle-agent 6e9749a dungeons/wailing_caverns.json', 'plan v1, mapped (not live-checked; the event legs 12-20 are an offline draft: written from script_waypoint 3678 and the escort script on 2026-10-20, machine-checked, never walked); cut before leg 12 (return_gossip): a step the run leader cannot do');
+('wailing_caverns', 43, '3840', '', '3671', 'turtle-agent 0ebddeb dungeons/wailing_caverns.json', 'plan v1, mapped (not live-checked; the event legs 12-20 are an offline draft: written from script_waypoint 3678 and the escort script on 2026-10-20, machine-checked, never walked); cut before leg 12 (return_gossip): a step the run leader cannot do');
 INSERT INTO `ai_dungeon_leg` (`plan`, `leg`, `name`, `comment`) VALUES
 ('wailing_caverns', 0, 'anacondra_a', ''),
 ('wailing_caverns', 1, 'anacondra_b', ''),
