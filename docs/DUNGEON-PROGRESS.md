@@ -33,8 +33,8 @@ Legend: ✓ done, — not done. PR numbers are in the `pjerra/turtle-agent` repo
 | The Stormwind Stockade | 23-28 | [zone 717](https://www.wowhead.com/classic/zone=717) (22-30) | `dungeons/stormwind_stockade.json` (5 legs) | — | — | — | — | Not started (draft plan only) |
 | Razorfen Kraul | 26-31 | [zone 491](https://www.wowhead.com/classic/zone=491) (24-40) | `dungeons/razorfen_kraul.json` (7 legs) | — | — | — | — | Not started (draft plan only) |
 | Gnomeregan | 27-33 | [zone 721](https://www.wowhead.com/classic/zone=721) (24-40) | `dungeons/gnomeregan.json` (5 legs) | — | — | — | — | Not started (draft plan only) |
-| Scarlet Monastery: Graveyard | 30-35 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_graveyard.json` (3 legs) | — | — | — | — | Not started (draft plan only) |
-| Scarlet Monastery: Library | 33-38 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_library.json` (2 legs) | — | — | — | — | Not started (draft plan only) |
+| Scarlet Monastery: Graveyard | 30-35 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_graveyard.json` (4 legs) | — | — | — | — | Not started (draft plan only) |
+| Scarlet Monastery: Library | 33-38 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_library.json` (3 legs) | — | — | — | — | Not started (draft plan only) |
 | Scarlet Monastery: Armory | 35-40 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_armory.json` (2 legs) | — | — | — | — | Not started (draft plan only) |
 | Razorfen Downs | 35-40 | [zone 722](https://www.wowhead.com/classic/zone=722) (33-47) | `dungeons/razorfen_downs.json` (4 legs) | — | — | — | — | Not started (draft plan only) |
 | Scarlet Monastery: Cathedral | 37-42 | [zone 796](https://www.wowhead.com/classic/zone=796) (29-45) | `dungeons/scarlet_cathedral.json` (3 legs) | — | — | — | — | Not started (draft plan only) |
