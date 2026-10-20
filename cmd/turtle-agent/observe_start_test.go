@@ -77,8 +77,8 @@ func TestObserveStartFromPullGroup(t *testing.T) {
 	}
 	group := 0
 	ps, err := observeStartFrom(p, 2, &group, 0, nil)(rows.StepCount())
-	if err != nil || ps.Words != "from step "+strconv.Itoa(groupOfLeg2) || ps.Step != groupOfLeg2 || !ps.HavePoint {
-		t.Fatalf("leg 2 group 0: %+v (want step %d) %v", ps, groupOfLeg2, err)
+	if err != nil || ps.Words != "from step "+strconv.Itoa(groupOfLeg2) || ps.Step != groupOfLeg2 || ps.ExpectLeg != "third" || !ps.HavePoint {
+		t.Fatalf("leg 2 group 0: %+v (want step %d, leg third) %v", ps, groupOfLeg2, err)
 	}
 	if _, err := observeStartFrom(p, 2, &group, 0, nil)(rows.StepCount() + 3); err == nil || !strings.Contains(err.Error(), "observe.from_step") {
 		t.Fatalf("a deployed plan of another row count: %v", err)
@@ -102,5 +102,28 @@ func TestObserveStartLegNameFallsBackToTheNumber(t *testing.T) {
 	ps, err = observeStartFrom(p, 2, nil, 0, nil)(0)
 	if err != nil || ps.Words != "from 1" || ps.LegName != "" {
 		t.Fatalf("duplicate name: %+v %v", ps, err)
+	}
+}
+
+// A from_step start knows the plan leg of that step when the rows are reproduced: the start reply's leg is checked against it.
+func TestObserveStartFromStepKnowsItsLeg(t *testing.T) {
+	p := startTestPlan(t)
+	res, err := planexport.Build(p, planexport.Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := res.Rows.GroupStep(p, 2, 0)
+	if !ok {
+		t.Fatal("no group step")
+	}
+	ps, err := observeStartFrom(p, 0, nil, n, nil)(res.Rows.StepCount())
+	if err != nil || ps.Step != n || ps.ExpectLeg != "third" || !ps.HavePoint {
+		t.Fatalf("%+v %v", ps, err)
+	}
+	// Without the server's step count the point and the leg are unknown: the start still goes (the place check then asks for
+	// allow_far_start).
+	ps, err = observeStartFrom(p, 0, nil, n, nil)(0)
+	if err != nil || ps.ExpectLeg != "" || ps.HavePoint {
+		t.Fatalf("no count: %+v %v", ps, err)
 	}
 }

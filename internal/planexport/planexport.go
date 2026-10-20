@@ -765,6 +765,16 @@ func (r Rows) LegNumber(p *dungeon.Plan, leg int) (int, bool) {
 	return row, true
 }
 
+// PlanLeg is the plan leg index of the exported row leg rowLeg (false when no leg has that number: a cut plan, or a leg outside it).
+func PlanLeg(p *dungeon.Plan, rowLeg int) (int, bool) {
+	for i := range p.Legs {
+		if n, ok := LegNumber(p, i); ok && n == rowLeg {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // StepPoint is the point of the rows' step step (1-based), and false when the rows have no such step. A pull or boss step's point is
 // where the party fights; a move's is where it walks. The observer's place check compares the party with it.
 func (r Rows) StepPoint(step int) (dungeon.Point, bool) {

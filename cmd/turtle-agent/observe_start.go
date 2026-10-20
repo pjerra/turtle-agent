@@ -44,7 +44,7 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				return dungeon.PartialStart{}, fmt.Errorf("from_step %d: the run leader's plan %s has %d steps (from 1)", step, plan.Name, serverSteps)
 			}
 			ps := dungeon.PartialStart{Words: "from step " + strconv.Itoa(step), Step: step, Leg: -1}
-			ps.Point, ps.HavePoint = observeStepPoint(plan, planner, serverSteps, step)
+			ps.Point, ps.HavePoint, ps.ExpectLeg = observeStepInfo(plan, planner, serverSteps, step)
 			return ps, nil
 		case group != nil:
 			if leg < 0 || leg >= len(plan.Legs) {
@@ -61,7 +61,7 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				return dungeon.PartialStart{}, err
 			}
 			rowLeg, _ := planexport.LegNumber(plan, leg)
-			return dungeon.PartialStart{Words: "from step " + strconv.Itoa(n), Step: n, Leg: leg, LegNumber: rowLeg, Point: at, HavePoint: ok}, nil
+			return dungeon.PartialStart{Words: "from step " + strconv.Itoa(n), Step: n, Leg: leg, LegNumber: rowLeg, ExpectLeg: plan.Legs[leg].Name, Point: at, HavePoint: ok}, nil
 		default:
 			if leg < 0 || leg >= len(plan.Legs) {
 				return dungeon.PartialStart{}, fmt.Errorf("from_leg %d: the plan has legs %v (numbers 0-%d)", leg, legNames(plan), len(plan.Legs)-1)
@@ -149,15 +149,16 @@ func observeGroupStep(plan *dungeon.Plan, leg, group int, planner *navmesh.Plann
 	return steps[0], at, haveAt, nil
 }
 
-// observeStepPoint is the point of the module's step step when an exporter option set reproduces the server's step count (else no point;
-// the start still goes).
-func observeStepPoint(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps, step int) (dungeon.Point, bool) {
+// observeStepInfo is the point of the module's step step and the plan leg it belongs to, when an exporter option set reproduces the
+// server's step count (else neither; the start still goes). The leg name is the expectation for the run leader's start reply.
+func observeStepInfo(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps, step int) (dungeon.Point, bool, string) {
 	if serverSteps <= 0 || step < 1 {
-		return dungeon.Point{}, false
+		return dungeon.Point{}, false, ""
 	}
 	cands, _ := observePlanRows(plan, planner)
 	var at dungeon.Point
-	have := false
+	have, haveLeg := false, false
+	legName := ""
 	for _, r := range cands {
 		if r.StepCount() != serverSteps || step > len(r.Steps) {
 			continue
@@ -167,10 +168,22 @@ func observeStepPoint(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps,
 		if !have {
 			at, have = p, true
 		} else if pointDist(at, p) > 1 {
-			return dungeon.Point{}, false
+			at, have = dungeon.Point{}, false
+		}
+		name := ""
+		if pi, ok := planexport.PlanLeg(plan, s.Leg); ok {
+			name = plan.Legs[pi].Name
+		}
+		if !haveLeg {
+			legName, haveLeg = name, name != ""
+		} else if name != legName {
+			legName, haveLeg = "", false
 		}
 	}
-	return at, have
+	if !haveLeg {
+		legName = ""
+	}
+	return at, have, legName
 }
 
 // observePlanRows rebuilds the plan's rows with the exporter option sets an applied migration may have used. The step count the server

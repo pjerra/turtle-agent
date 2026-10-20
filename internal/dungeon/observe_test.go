@@ -697,7 +697,7 @@ func TestObserveChecksTheStartMessage(t *testing.T) {
 	g = newFakeLeader(t, happyScript()...)
 	g.startExtra = []string{"The run starts at step 1 of 5 (leg first): the party is in the instance."}
 	_, err = runRemote(t, g, observePlan(), partial(), nil)
-	if err == nil || !strings.Contains(err.Error(), "drifted") {
+	if err == nil || !strings.Contains(err.Error(), "not the requested leg") {
 		t.Fatalf("%v", err)
 	}
 	if g.indexOf("run stop") < 0 {
@@ -800,6 +800,63 @@ func TestObservePartwayStartNeedsThePlace(t *testing.T) {
 		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
 	}
 	if !strings.Contains(strings.Join(rep.Notes, "\n"), "point is not known") || !strings.Contains(strings.Join(rep.Notes, "\n"), "allow_far_start") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// The parsed start reply must report the requested step and leg (round 4): a reply at another step is stopped once, without a watch
+// poll, for a from_step start and for a from_pull_group start; the requested one is accepted; the module's documented move-back into a
+// scripted event is the only step difference accepted, with a note.
+func TestObserveStartReplyStepMustMatch(t *testing.T) {
+	opts := func(ps PartialStart) RemoteOptions {
+		o := observeOpts(ObserveSpec{})
+		o.StartFrom = func(int) (PartialStart, error) { return ps, nil }
+		return o
+	}
+	stepStart := PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}
+	for _, c := range []struct {
+		name  string
+		start PartialStart
+		line  string
+		want  string
+	}{
+		{"from_step at another step", stepStart, "The run starts at step 1 of 5 (leg first): the party is in the instance.", "not the requested step 3"},
+		{"from_pull_group at another step", PartialStart{Words: "from step 4", Step: 4, Leg: 1, LegNumber: 1, LegName: "second", ExpectLeg: "second", Point: Point{}, HavePoint: true},
+			"The run starts at step 2 of 5 (leg second): the party is in the instance.", "not the requested step 4"},
+		{"from_step in another leg", PartialStart{Words: "from step 3", Step: 3, Leg: -1, ExpectLeg: "first", Point: Point{}, HavePoint: true},
+			"The run starts at step 3 of 5 (leg second): the party is in the instance.", `not the requested leg "first"`},
+	} {
+		g := newFakeLeader(t, happyScript()...)
+		g.startExtra = []string{c.line}
+		_, err := runRemote(t, g, observePlan(), opts(c.start), nil)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if n := len(g.ordersOf("run stop")); n != 1 {
+			t.Errorf("%s: %d run stops, want exactly 1: %v", c.name, n, g.orders)
+		}
+		if n := len(g.ordersOf("run status")); n != 0 {
+			t.Errorf("%s: %d status asks, want none (no watch): %v", c.name, n, g.orders)
+		}
+	}
+
+	g := newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	if rep, err := runRemote(t, g, observePlan(), opts(stepStart), nil); err != nil || rep.State != "done" {
+		t.Fatalf("the requested step: %v %s %s", err, rep.State, rep.Error)
+	}
+
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 2 of 5 (leg first): the party is in the instance. The start was moved back to the step that starts the event it fell in."}
+	rep, err := runRemote(t, g, observePlan(), opts(stepStart), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("the documented move-back: %v %s %s", err, rep.State, rep.Error)
+	}
+	if n := len(g.ordersOf("run stop")); n != 0 {
+		t.Fatalf("the documented move-back was stopped: %v", g.orders)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "moved the start back") {
 		t.Fatalf("notes %v", rep.Notes)
 	}
 }

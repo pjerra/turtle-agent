@@ -81,13 +81,16 @@ func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
 type PartialStart struct {
 	// Words are the `from ...` words: "from 4", "from leg serpentis", "from step 207"; "" for the first step.
 	Words string
-	// Step is the run leader's own 1-based step when the mapping knows it (from_step, from_pull_group); 0 when only the leg is known.
+	// Step is the requested step in the run leader's own numbering when the mapping knows it (from_step, from_pull_group); 0 when only
+	// the leg is known. It is the expected value of the start reply's step; the reply never changes it.
 	Step int
 	// Leg is the plan leg it starts at (-1 for a step start), LegNumber the leg's number in the exported rows and LegName the name sent
-	// ("" when the number was sent because the name is not safe for the command line or is not unique).
+	// ("" when the number was sent because the name is not safe for the command line or is not unique). ExpectLeg is the plan leg's name
+	// for a step start whose leg the mapping knows (it may be empty when the rows could not be reproduced).
 	Leg       int
 	LegNumber int
 	LegName   string
+	ExpectLeg string
 	// Point is where the start step (or the leg's first point) stands on the plan's map; HavePoint says it is known. It is the party's
 	// place: a partway start is refused when the lead bot stands far from it (ObserveSpec.AllowFarStart overrides).
 	Point     Point
@@ -440,21 +443,20 @@ func (d *RemoteDriver) verifyStartReply(ctx context.Context, lines []string) err
 		step, _ := strconv.Atoi(m[1])
 		steps, _ := strconv.Atoi(m[2])
 		leg := strings.TrimSpace(m[3])
-		d.start.Step = step
-		d.rep.note(fmt.Sprintf("observe mode: the run leader starts at step %d of %d (leg %s)", step, steps, leg))
-		if strings.Contains(line, "moved back") {
-			d.rep.note("observe mode: the run leader moved the start back to the step that opens the scripted event it fell in")
+		movedBack := strings.Contains(line, "moved back")
+		// The reply's step is checked against the requested one; the reply never overwrites it. The one documented difference is the
+		// module moving a start that fell inside a scripted event back to the step that opens it (the reply says "moved back").
+		if d.start.Step > 0 && step != d.start.Step && !movedBack {
+			d.stopRunLeader("the start line is not the requested start", "")
+			return fmt.Errorf("observe mode: run start: the run leader started at step %d of %d (leg %s), not the requested step %d: the deployed start is not the plan's; the run was stopped and is not watched", step, steps, leg, d.start.Step)
 		}
-		if d.start.Leg >= 0 && d.start.Leg < len(d.plan.Legs) {
-			want := d.plan.Legs[d.start.Leg].Name
-			ok := want != "" && strings.EqualFold(leg, want)
-			if want == "" {
-				ok = leg == strconv.Itoa(d.start.LegNumber)
-			}
-			if !ok {
-				d.stopRunLeader("the deployed plan's start leg does not match the plan file", "")
-				return fmt.Errorf("observe mode: run start: the run leader started at step %d (leg %q), not the plan file's leg %d (%q): the plan on the server has drifted; export it again with `turtle-agent plan-export` and restart the server", step, leg, d.start.Leg, want)
-			}
+		if want, ok := d.expectedStartLeg(); ok && !movedBack && !strings.EqualFold(leg, want) {
+			d.stopRunLeader("the start line is not the requested start", "")
+			return fmt.Errorf("observe mode: run start: the run leader started in leg %q, not the requested leg %q: the deployed start is not the plan's; the run was stopped and is not watched", leg, want)
+		}
+		d.rep.note(fmt.Sprintf("observe mode: the run leader starts at step %d of %d (leg %s)", step, steps, leg))
+		if movedBack {
+			d.rep.note("observe mode: the run leader moved the start back to the step that opens the scripted event it fell in")
 		}
 		return nil
 	}
@@ -475,41 +477,40 @@ func (d *RemoteDriver) verifyStartReply(ctx context.Context, lines []string) err
 	return fmt.Errorf("observe mode: run start: the run leader's start was not proven (no start message, and %s); the run was stopped and is not watched", why)
 }
 
-// startProof says why the newest status line does not prove the requested start ("" when it does): a step start needs that step (and the
-// leg, when the mapping knows it); a leg start needs the plan leg's name (or its number, for an unnamed leg).
+// startProof says why the newest status line does not prove the requested start ("" when it does). A step start needs that step; the
+// leg too when the mapping knows it. A leg start needs the plan leg's name (or its number, for an unnamed leg). Without the start line
+// there is no documented "moved back" sentence, so no step difference is accepted here.
 func (d *RemoteDriver) startProof() string {
 	o, s := d.obs, d.start
 	if !o.haveLast || o.last.Plan != o.spec.Plan {
 		return "does not show this run's status"
 	}
-	if s.Step > 0 {
-		if o.last.Step != s.Step {
-			return fmt.Sprintf("shows step %d/%d, not the requested step %d", o.last.Step, o.last.Steps, s.Step)
-		}
-		if s.Leg < 0 || s.Leg >= len(d.plan.Legs) {
-			return ""
-		}
-		return d.legProof(o.last.Leg, s)
+	if s.Step > 0 && o.last.Step != s.Step {
+		return fmt.Sprintf("shows step %d/%d, not the requested step %d", o.last.Step, o.last.Steps, s.Step)
 	}
-	if s.Leg < 0 || s.Leg >= len(d.plan.Legs) {
+	if want, ok := d.expectedStartLeg(); ok && !strings.EqualFold(o.last.Leg, want) {
+		return fmt.Sprintf("shows leg %q, not %q", o.last.Leg, want)
+	}
+	if s.Step == 0 && s.Leg < 0 {
 		return "has no leg to compare"
 	}
-	return d.legProof(o.last.Leg, s)
+	return ""
 }
 
-// legProof compares a status line's leg with the requested plan leg (the plan's name, or the row number for an unnamed leg).
-func (d *RemoteDriver) legProof(have string, s *PartialStart) string {
-	want := d.plan.Legs[s.Leg].Name
-	if want == "" {
-		if have != strconv.Itoa(s.LegNumber) {
-			return fmt.Sprintf("shows leg %q, not the plan's leg %d", have, s.LegNumber)
-		}
-		return ""
+// expectedStartLeg is the plan leg a partial start must report: the leg asked for, or the legacy of the requested step (ExpectLeg, from
+// the plan rows). "" when the mapping could not resolve it (a from_step whose rows are not reproduced): then only the step is checked.
+func (d *RemoteDriver) expectedStartLeg() (string, bool) {
+	s := d.start
+	if s.ExpectLeg != "" {
+		return s.ExpectLeg, true
 	}
-	if !strings.EqualFold(have, want) {
-		return fmt.Sprintf("shows leg %q, not %q", have, want)
+	if s.Leg < 0 || s.Leg >= len(d.plan.Legs) {
+		return "", false
 	}
-	return ""
+	if name := d.plan.Legs[s.Leg].Name; name != "" {
+		return name, true
+	}
+	return strconv.Itoa(s.LegNumber), true
 }
 
 // farStartYd is how far from the start step's point a partway start tolerates the lead bot (ObserveSpec.AllowFarStart overrides).

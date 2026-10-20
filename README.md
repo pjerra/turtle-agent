@@ -1617,8 +1617,10 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    step numbers — the run is refused at the probe, before a bot is hired, and `from_step` carries the number `.bot run status` shows (from 1) instead.
    **Checked before and after the start, fail closed.** A leg whose name is one word the command grammar takes and is unique in the plan is sent as
    `from leg <name>` (else its number). The start must be **proven**, not trusted: first by the run leader's own start line (`The run starts at step X of
-   Y (leg NAME)`) — a leg that is not the requested one means the deployed plan has drifted (a moved-back start inside a scripted event is noted); if no
-   start line comes (an ACK-only reply, changed text, a dropped line), `run status` right after the start must report the requested step (and its leg);
+   Y (leg NAME)`) — the reported step must be the requested one and the leg the expected one (the leg asked for, or the requested step's leg from the plan
+   rows); only a start the module says it moved back to open a scripted event may differ, and it is noted. Any other step or leg means the deployed start
+   is not the plan's: the run is stopped and the watch refused. If no start line comes (an ACK-only reply, changed text, a dropped line), `run status`
+   right after the start must report the requested step (and its leg);
    if neither source proves it, the newly started run is stopped and the watch refused — no unverified run is watched, and the failed run's unbind leaves
    no hire bound. The party's place is checked before `run start`: the lead bot must stand within 80 yd of the start step's point (the step's coordinates,
    or the leg's first point), and a start whose point or whose lead position is not known is refused too, since the place cannot be checked;
