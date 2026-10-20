@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -498,5 +499,59 @@ func TestRunControlNeedsAnObservedRun(t *testing.T) {
 	d := NewRemoteDriver(observePlan(), g, DefaultConfig(), opts(), g.clock())
 	if err := d.RunControl("pause"); err == nil {
 		t.Fatal("a driven run took a run control")
+	}
+}
+
+// maintenanceFake answers plain `.bot` lines (the preflight's maintenance, inv and talents) and records them, the way the real game does.
+type maintenanceFake struct {
+	*fakeLeader
+	botCmds []string
+}
+
+func (g *maintenanceFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
+	g.botCmds = append(g.botCmds, command)
+	return nil, false, nil
+}
+
+// maintenanceCmds are the `.bot maintenance` lines among the plain lines.
+func maintenanceCmds(cmds []string) []string {
+	var out []string
+	for _, c := range cmds {
+		if strings.HasPrefix(c, "maintenance ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// An observed run's preflight sends no `.bot maintenance` (it walks every bot to a vendor and scatters the party right after the hires'
+// autogear, which pauses the run leader with "the lead bot is not on the plan's map", #253); the kit check's reads still run.
+func TestObserveStartSendsNoMaintenanceByDefault(t *testing.T) {
+	g := &maintenanceFake{fakeLeader: newFakeLeader(t, happyScript()...)}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if got := maintenanceCmds(g.botCmds); len(got) != 0 {
+		t.Fatalf("an observed start sent maintenance: %v", got)
+	}
+	if !slices.Contains(g.botCmds, "inv Tanky") || !slices.Contains(g.botCmds, "command Tanky talents") {
+		t.Fatalf("the kit check's reads did not run: %v", g.botCmds)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "maintenance skipped (observe mode") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// observe.maintenance turns it back on, one line per bot of the first frame.
+func TestObserveMaintenanceOption(t *testing.T) {
+	g := &maintenanceFake{fakeLeader: newFakeLeader(t, happyScript()...)}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Maintenance: true}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	want := []string{"maintenance Tanky", "maintenance Healy", "maintenance Magey"}
+	if got := maintenanceCmds(g.botCmds); !slices.Equal(got, want) {
+		t.Fatalf("maintenance %v, want %v", got, want)
 	}
 }

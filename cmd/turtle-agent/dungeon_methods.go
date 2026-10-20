@@ -278,6 +278,10 @@ type observeParam struct {
 	MaxRunS     float64 `json:"max_run_s,omitempty"`
 	StallS      float64 `json:"stall_s,omitempty"`
 	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
+	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight; off by default. Maintenance walks a bot to a vendor
+	// for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and the run leader pauses
+	// with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
+	Maintenance bool `json:"maintenance,omitempty"`
 }
 
 type dungeonRunResult struct {

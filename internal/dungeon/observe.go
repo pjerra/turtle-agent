@@ -36,6 +36,10 @@ type ObserveSpec struct {
 	// PausedWait is how long a paused run waits for a resume (by a person on the server, or dungeon_resume) before the watch stops it and
 	// fails (default 10 min). The run leader pauses itself at 3 dead, an unsupported step or a ceiling and never goes on alone.
 	PausedWait time.Duration
+	// Maintenance sends `.bot maintenance <bot>` for every bot at the preflight, as a driven run does. Off by default: maintenance
+	// walks each bot to a vendor, bank or mailbox, and a party scattered over the maps right after autogear pauses the run leader ("the
+	// lead bot is not on the plan's map"). The inventory and talent reads still run.
+	Maintenance bool
 }
 
 // Observe defaults.
