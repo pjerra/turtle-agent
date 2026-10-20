@@ -766,3 +766,52 @@ func TestLegNumberAndGroupStep(t *testing.T) {
 		t.Error("a group the leg does not have has a step")
 	}
 }
+
+// The group starts at the walk left in front of it, not at its pull row (C): the live Wailing Caverns rows put three "approach path" rows
+// before leg 9's group 4 (steps 199-201, pull at 202), and cut hops put "path" rows before a long move of the approach.
+func TestGroupStepStartsAtTheWalkBeforeTheGroup(t *testing.T) {
+	groups := 9
+	var groupsJSON []string
+	for i := 0; i < groups; i++ {
+		groupsJSON = append(groupsJSON, fmt.Sprintf(`{"entries":[%d],"positions":[{"x":%d,"y":0,"z":0}]}`, 100+i, 20+i))
+	}
+	p := parsePlan(t, `{"version":1,"name":"Shape","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"west_column","to":{"x":10,"y":0,"z":0},"pull_groups":[`+strings.Join(groupsJSON, ",")+`]}]}`)
+	// The rows of the live migration's leg 9, steps 192-206.
+	row := func(kind, comment string) StepRow { return StepRow{Leg: 0, Kind: kind, Comment: comment} }
+	r := Rows{Legs: []LegRow{{Plan: "wailing_caverns", Leg: 0, Name: "west_column"}}, Steps: []StepRow{
+		row(KindMove, "to"),
+		row(KindPull, "pull group 0"), row(KindPull, "pull group 1"), row(KindPull, "pull group 2"),
+		row(KindMove, "approach path"), row(KindMove, "approach path"),
+		row(KindPull, "pull group 3"),
+		row(KindMove, "approach path"), row(KindMove, "approach path"), row(KindMove, "approach path"),
+		row(KindPull, "pull group 4"),
+		row(KindPull, "pull group 5"), row(KindPull, "pull group 6"), row(KindPull, "pull group 7"), row(KindPull, "pull group 8"),
+	}}
+	if n, ok := r.GroupStep(p, 0, 4); !ok || n != 8 { // 192+7: steps 199-201 are the approach, 202 the pull
+		t.Fatalf("leg 9 group 4: step %d ok %v, want the first approach row (8 in the shape; 202 in the live plan)", n, ok)
+	}
+	// A group right after an anchor keeps its own approach row, and one with no walk in front is its pull row.
+	if n, ok := r.GroupStep(p, 0, 2); !ok || n != 4 {
+		t.Fatalf("group 2: %d %v, want 4 (its own pull row, no walk in front)", n, ok)
+	}
+}
+
+// The same through Build: with --approach-hops the cut rows before a far pack are part of the group (#248 from_pull_group).
+func TestGroupStepWithApproachHops(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"Hops","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"first","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`)
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move pull" {
+		t.Fatalf("kinds %v", got)
+	}
+	if n, ok := res.Rows.GroupStep(p, 0, 0); !ok || n != 2 {
+		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 4)", n, ok)
+	}
+}
