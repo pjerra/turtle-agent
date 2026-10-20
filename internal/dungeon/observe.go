@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,6 +73,11 @@ func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
 	}
 	return s
 }
+
+// StartFromResolver maps an observed run's partial start (from_leg, from_pull_group, from_step) to the words after `.bot run start
+// <plan>` once the server's step count for the plan is known: "from 4", "from step 207", or "" for the first step. The mapping is the
+// cmd layer's (it owns the plan exporter); the driver only asks. An error refuses the run before a bot is hired.
+type StartFromResolver func(serverSteps int) (words string, err error)
 
 // RunLeaderWatcher is the optional part of a RemoteGame that has read the TBM:RUN lines the module pushes: the newest one and how
 // many have been read. Without it the observer relies on the replies to `.bot run start` and `.bot run status`.
@@ -188,6 +194,10 @@ func runLeaderRefusal(verb, plan string, e *tbm.Err) string {
 		"lead-unavailable": "the lead bot is between maps",
 		"no-run":           "no run is going",
 		"state":            "the run is not in a state that allows it",
+		"no-leg":           "the run leader's plan has no such leg: from_leg counts the exported rows (an optional leg takes no number); start at a later leg or pass observe.from_step",
+		"no-step":          "the run leader's plan has no such step: observe.from_step is the number .bot run status shows, from 1",
+		"not-in-instance":  "a partway start needs the party inside the instance: enter it first, or start from the beginning",
+		"party-scattered":  "a partway start needs the whole party in the lead bot's instance (.bot cmd summon first)",
 	}[e.Code]
 	if hint == "" {
 		return fmt.Sprintf("%s (%s)", e.Code, e.Message)
@@ -218,8 +228,33 @@ func (d *RemoteDriver) probeRunLeader(ctx context.Context) error {
 	if list != "" && !strings.Contains(" "+strings.ReplaceAll(strings.ReplaceAll(list, ",", " "), "(", " ")+" ", " "+spec.Plan+" ") {
 		return fmt.Errorf("observe mode: the server's run leader has no plan %q (it lists: %s): export the plan with `turtle-agent plan-export`, apply the migration and restart the server", spec.Plan, list)
 	}
+	d.planSteps = listedSteps(list, spec.Plan)
+	if d.opt.StartFrom != nil {
+		// A partial start is mapped here, before anything is hired: an unmappable from_pull_group must not pay for a party first.
+		words, err := d.opt.StartFrom(d.planSteps)
+		if err != nil {
+			return fmt.Errorf("observe mode: %w", err)
+		}
+		d.startFrom, d.haveStartFrom = words, true
+		if words != "" {
+			d.rep.note(fmt.Sprintf("observe mode: the run leader starts partway (`run start %s %s`; the server lists %d steps)", spec.Plan, words, d.planSteps))
+		}
+	}
 	d.rep.note("observe mode: the server's run leader answered; plans: " + nonEmpty(list, "(not listed)"))
 	return nil
+}
+
+// listedSteps reads a plan's step count out of `.bot run list` ("wailing_caverns (map 43, 226 steps)"). 0: the plan is not in the
+// list, or the list does not carry a count (an older module).
+func listedSteps(list, plan string) int {
+	// The plan name is followed by its map and count; a name is [a-z0-9_-] (planNameRe in the RPC layer).
+	re := regexp.MustCompile(`(?:^|, )` + regexp.QuoteMeta(plan) + ` \(map \d+, (\d+) steps`)
+	if m := re.FindStringSubmatch(list); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func nonEmpty(s, def string) string {
@@ -293,10 +328,15 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	}
 }
 
-// startRunLeader sends `.bot run start <plan>` and takes its answer.
+// startRunLeader sends `.bot run start <plan> [from ...]` and takes its answer. The `from ...` words are the probe's resolution of a
+// partial start (from_leg, from_pull_group, from_step): the run leader begins at that step of its own plan (#248).
 func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	o := d.obs
-	r, err := d.g.Command(ctx, "run start "+o.spec.Plan)
+	line := "run start " + o.spec.Plan
+	if d.haveStartFrom && d.startFrom != "" {
+		line += " " + d.startFrom
+	}
+	r, err := d.g.Command(ctx, line)
 	if err != nil {
 		return fmt.Errorf("run start: %w", err)
 	}

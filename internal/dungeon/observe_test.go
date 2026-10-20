@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -553,5 +554,46 @@ func TestObserveMaintenanceOption(t *testing.T) {
 	want := []string{"maintenance Tanky", "maintenance Healy", "maintenance Magey"}
 	if got := maintenanceCmds(g.botCmds); !slices.Equal(got, want) {
 		t.Fatalf("maintenance %v, want %v", got, want)
+	}
+}
+
+// A partial start (#248) goes out in the start line: the probe asks the resolver with the step count `.bot run list` gave, and
+// startRunLeader sends its `from ...` words.
+func TestObserveStartsPartway(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	asked := -1
+	o.StartFrom = func(serverSteps int) (string, error) {
+		asked = serverSteps
+		return "from step 3", nil
+	}
+	rep, err := runRemote(t, g, observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if asked != 5 { // the fake lists "rt (map 0, 5 steps)"
+		t.Fatalf("the resolver saw %d steps, want 5", asked)
+	}
+	if !slices.Contains(g.orders, "run start rt from step 3") {
+		t.Fatalf("orders %v", g.orders)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "starts partway") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// A partial start the resolver cannot map is refused at the probe, before a bot is hired or bound.
+func TestObserveStartFromRefusedAtTheProbe(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (string, error) {
+		return "", errors.New("from_pull_group 3: the server's plan has 226 steps, the plan file's rows give 198")
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "observe mode: from_pull_group 3") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.ordersOf("commander bind")) != 0 || len(g.ordersOf("run start")) != 0 {
+		t.Fatalf("something was sent: %v", g.orders)
 	}
 }

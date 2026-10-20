@@ -124,6 +124,10 @@ type dungeonRunParams struct {
 	// (AUTO-IMPROVE step 0), so its waypoints and pull order are unchecked. Without it such a plan is refused.
 	AllowDraft bool      `json:"allow_draft,omitempty"`
 	FromLeg    *legParam `json:"from_leg,omitempty"`
+	// FromStep is an observed run's exact start step in the run leader's own plan: the step number `.bot run status` shows, from 1
+	// (README "Observe mode"). It is the fallback for a from_leg / from_pull_group whose step cannot be mapped offline (the deployed rows
+	// were exported with other options); observe only, and it excludes from_leg and from_pull_group.
+	FromStep *int `json:"from_step,omitempty"`
 	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
 	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").

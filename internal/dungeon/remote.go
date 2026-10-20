@@ -158,6 +158,11 @@ type RemoteOptions struct {
 	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
 	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
 	Observe *ObserveSpec
+	// StartFrom resolves the `from ...` words of an observed run's `.bot run start <plan> [from ...]` when the run starts partway
+	// (from_leg, from_pull_group or from_step, #248). The run leader counts the steps of its own SQL plan, which the agent's plan legs and
+	// pull groups are not: the resolver gets the step count the server listed for the plan and returns the words ("" for the first step).
+	// Nil: the run starts at the plan's first step. It is checked before anything is hired.
+	StartFrom StartFromResolver
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -632,6 +637,11 @@ type RemoteDriver struct {
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
 	obs *observeState // the run leader watch of an observed run (observe.go); nil otherwise
+	// The observed run's partial start (#248): planSteps is the step count the server listed for the plan in `.bot run list`, and
+	// startFrom are the resolved `from ...` words (probeRunLeader asks RemoteOptions.StartFrom with that count).
+	planSteps     int
+	startFrom     string
+	haveStartFrom bool
 
 	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)

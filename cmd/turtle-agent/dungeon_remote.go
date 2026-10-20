@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 	"github.com/pjerra/turtle-agent/internal/tracerun"
@@ -26,6 +27,16 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 	mode, _, merr := runMode(p.Mode)
 	if merr != nil {
 		return false, merr
+	}
+	if p.FromStep != nil {
+		switch {
+		case mode != modeObserve:
+			return false, bad(`from_step is an observed run's start step in the run leader's plan: it goes with mode "observe" (a driven run starts from from_leg)`)
+		case *p.FromStep < 1:
+			return false, bad("from_step %d: a step number from 1 (the number .bot run status shows)", *p.FromStep)
+		case p.FromLeg != nil || p.FromPullGroup != nil:
+			return false, bad("from_step names the start step itself: leave from_leg and from_pull_group out")
+		}
 	}
 	if mode == modeObserve {
 		if err := checkObserve(p, bad); err != nil {
@@ -130,11 +141,12 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 }
 
 // checkObserve refuses what has no meaning in observe mode: the run leader on the server does the walking, the pulling and the object
-// steps, and the agent sends it no order, so the options that steer those (or start inside the plan) are refused instead of ignored.
+// steps, and the agent sends it no order, so the options that steer those (or move or equip the party for a start) are refused instead
+// of ignored. from_leg, from_pull_group and from_step only say at which step of the run leader's own plan it starts (#248).
 func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 	switch {
-	case p.FromPullGroup != nil || p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0 || (p.FromLeg != nil && (p.FromLeg.name != "" || p.FromLeg.index != 0)):
-		return bad(`from_leg, from_pull_group, start_here, have_items and pulltest start inside the plan; the run leader starts at the plan's first step (observe mode)`)
+	case p.StartHere || p.Pulltest != nil || len(p.HaveItems) > 0:
+		return bad(`start_here, have_items and pulltest move or equip the party; in observe mode the run leader does that, and from_leg, from_pull_group (or from_step) only say at which of its steps it starts`)
 	case len(p.GiveItems) > 0:
 		return bad(`give_items puts items in the bags of the driven run's bots; in observe mode the run leader on the server gives the agent no such step (and its plan leaves an optional item leg out)`)
 	case len(p.CC) > 0 || p.Carrier != "" || p.LootRestore != "" || p.ObjectFallback != "" || p.Tank != "" || p.Healer != "" || p.RecoverWipe != nil || p.GravesBatch != 0 || p.GravesRamp != nil || p.GravesOpenBy != "":
@@ -142,7 +154,7 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 	case p.Tune != "" || p.LiveReload != nil:
 		return bad(`tune and live_reload belong to the driven run (mode "commander")`)
 	case p.ForceStart:
-		return bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); observe mode starts at the plan's first step, so it would do nothing`)
+		return bad(`force_start passes the unsafe-start gate, which is commander mode only (mode "commander"); observe mode starts where the run leader's own plan says (from_leg, from_pull_group, from_step), so it would do nothing`)
 	}
 	if o := p.Observe; o != nil {
 		if o.Plan != "" && !planName.MatchString(o.Plan) {
@@ -215,13 +227,23 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	}
 	var observe *dungeon.ObserveSpec
 	mode, _, _ := runMode(p.Mode)
+	var startFrom dungeon.StartFromResolver
 	if mode == modeObserve {
 		observe = observeSpec(p.Observe)
+		var planner *navmesh.Planner
+		if r.remote != nil {
+			planner = r.remote.planner
+		}
+		step := 0
+		if p.FromStep != nil {
+			step = *p.FromStep
+		}
+		startFrom = observeStartFrom(plan, from, p.FromPullGroup, step, planner)
 	}
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, StartFrom: startFrom, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

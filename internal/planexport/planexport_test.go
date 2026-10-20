@@ -726,3 +726,43 @@ func TestLongHopStartsAtTheLastFight(t *testing.T) {
 		t.Fatalf("leg 1 %s", got)
 	}
 }
+
+// The run leader numbers the rows it loaded: an optional leg takes no leg number and its legs close up, and a pull group starts at its
+// first row (its approach move, else its pull row). An observer's from_leg / from_pull_group map through these.
+func TestLegNumberAndGroupStep(t *testing.T) {
+	const groups = `{"version":1,"name":"Groups","status":"live-checked (test)","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"first","to":{"x":10,"y":0,"z":0},"pull_groups":[
+	  {"entries":[100],"positions":[{"x":20,"y":0,"z":0}],"approach":[{"x":15,"y":0,"z":0}]},
+	  {"entries":[101],"positions":[{"x":25,"y":0,"z":0}]}]},
+	 {"name":"gong","to":{"x":0,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":900,"near":{"x":2,"y":0,"z":0},"requires_item":{"entry":9240}}}],"boss":{"entry":7,"position":{"x":5,"y":0,"z":0}}},
+	 {"name":"third","to":{"x":30,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":40,"y":0,"z":0}]}]}]}`
+	p := parsePlan(t, groups)
+	r := build(t, p)
+	if r.StepCount() != 6 || len(r.Steps) != 6 {
+		t.Fatalf("%d steps: %+v", r.StepCount(), r.Steps)
+	}
+	for leg, want := range map[int]int{0: 0, 2: 1} {
+		if got, ok := r.LegNumber(p, leg); !ok || got != want {
+			t.Errorf("leg %d: number %d ok %v, want %d", leg, got, ok, want)
+		}
+	}
+	if _, ok := r.LegNumber(p, 1); ok {
+		t.Error("the optional leg took a number")
+	}
+	for _, c := range []struct{ leg, group, want int }{
+		{0, 0, 2}, // the move to the leg (1), then the group's approach move
+		{0, 1, 4}, // the second group's pull row
+		{2, 0, 6}, // second leg written, its pull row after the leg's move
+	} {
+		got, ok := r.GroupStep(p, c.leg, c.group)
+		if !ok || got != c.want {
+			t.Errorf("leg %d group %d: step %d ok %v, want %d", c.leg, c.group, got, ok, c.want)
+		}
+	}
+	if _, ok := r.GroupStep(p, 1, 0); ok {
+		t.Error("the optional leg has no group step")
+	}
+	if _, ok := r.GroupStep(p, 0, 2); ok {
+		t.Error("a group the leg does not have has a step")
+	}
+}

@@ -737,3 +737,54 @@ func clip(s string, n int) string {
 	}
 	return strings.ToValidUTF8(s[:n], "")
 }
+
+// StepCount is the number of ai_dungeon_step rows: the step count the run leader lists for this plan (`.bot run list`).
+func (r Rows) StepCount() int { return len(r.Steps) }
+
+// LegNumber is the ai_dungeon_leg.leg number the export gives the plan's leg leg. An optional leg is left out and the legs after it
+// close up, so this is not the plan's own index. ok is false for a leg outside the plan and for an optional leg (which has no rows).
+func LegNumber(p *dungeon.Plan, leg int) (int, bool) {
+	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil {
+		return 0, false
+	}
+	row := 0
+	for i := 0; i < leg; i++ {
+		if p.Legs[i].Optional == nil {
+			row++
+		}
+	}
+	return row, true
+}
+
+// LegNumber is LegNumber(p, leg), and false also when these rows were cut before that leg (it has no rows at all).
+func (r Rows) LegNumber(p *dungeon.Plan, leg int) (int, bool) {
+	row, ok := LegNumber(p, leg)
+	if !ok || row >= len(r.Legs) {
+		return 0, false
+	}
+	return row, true
+}
+
+// GroupStep is the 1-based step number, as the run leader counts its own plan, of the plan leg's pull group group: its first row (the
+// group's approach move, else its pull or hold row). ok is false when the rows have no such group (an optional leg, a cut plan, a group
+// number the leg does not have).
+func (r Rows) GroupStep(p *dungeon.Plan, leg, group int) (int, bool) {
+	if leg < 0 || leg >= len(p.Legs) || group < 0 || group >= len(p.Legs[leg].PullGroups) {
+		return 0, false
+	}
+	rowLeg, ok := r.LegNumber(p, leg)
+	if !ok {
+		return 0, false
+	}
+	// The exporter puts this comment on the group's own rows (pull, hold and approach moves): "pull group <n>" or "pull group <n> ...".
+	prefix := "pull group " + strconv.Itoa(group)
+	for i, s := range r.Steps {
+		if s.Leg != rowLeg {
+			continue
+		}
+		if s.Comment == prefix || strings.HasPrefix(s.Comment, prefix+" ") {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
