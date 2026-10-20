@@ -479,6 +479,57 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	}
 }
 
+// The pool-stairs approach rows reach the run leader: in the exported velratha leg the two packs each have their two approach moves right
+// before the pull row (the STUCK #2 fix). The live 86-step plan's step 83 was this pull group; with the plan's approach points the exported
+// leg grows by four move rows and the pull is the fourth row later.
+func TestZulfarrakPoolStairsApproachRows(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := -1
+	for i, l := range res.Rows.Legs {
+		if l.Name == "velratha" {
+			leg = i
+		}
+	}
+	if leg < 0 {
+		t.Fatal("no velratha leg in the rows")
+	}
+	idx := func(entries string) int {
+		for i, s := range res.Rows.Steps {
+			if s.Leg == leg && s.Kind == KindPull && rowsEntries(s.Entries) == entries {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, tc := range []struct{ entries, first, last string }{
+		{"5650,7246,8095,5649", "1584.0 1050.0 9.0", "1582.0 1070.0 9.0"},
+		{"7246,5650", "1588.0 1080.0 9.1", "1593.6 1089.9 9.3"},
+	} {
+		i := idx(tc.entries)
+		if i < 2 {
+			t.Fatalf("pull %s at %d", tc.entries, i)
+		}
+		a, b := res.Rows.Steps[i-2], res.Rows.Steps[i-1]
+		if a.Kind != KindMove || b.Kind != KindMove || !strings.HasSuffix(a.Comment, " approach") ||
+			fmt.Sprintf("%.1f %.1f %.1f", a.X, a.Y, a.Z) != tc.first || fmt.Sprintf("%.1f %.1f %.1f", b.X, b.Y, b.Z) != tc.last || a.Seq+2 != res.Rows.Steps[i].Seq {
+			t.Fatalf("pull %s: %+v %+v before %+v", tc.entries, a, b, res.Rows.Steps[i])
+		}
+	}
+}
+
+// rowsEntries is a step row's entries as the plan's comma list.
+func rowsEntries(e []uint32) string {
+	s := make([]string, len(e))
+	for i, v := range e {
+		s[i] = fmt.Sprint(v)
+	}
+	return strings.Join(s, ",")
+}
+
 func buildDropLoot(t *testing.T, p *dungeon.Plan) Rows {
 	t.Helper()
 	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})

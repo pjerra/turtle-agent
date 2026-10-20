@@ -311,9 +311,9 @@
    "handwritten": true,
    "special": [
     "Zum'rah: area trigger 962 makes him hostile",
-    "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz",
+    "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz (its phase is instance data 1 = 7; the plan waits on Nekrum seen, no phase step yet)",
     "Weegli's gossip (or Bly's) has him blow the End Door for Ukorz and Ruuzlu",
-    "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; skipped without it)"
+    "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; it drops from Qiaga the Keeper 7996 outside the instance and 9241 must be used to make 9240, so no bot run can obtain it; skipped without give_items)"
    ]
   },
   {
