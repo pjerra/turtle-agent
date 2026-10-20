@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -75,10 +74,12 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "route-oracle: unknown --mode %q (want %s or %s)\n", *mode, modeWalk, modeBosses)
 		return exitUsage
 	}
-	if err := os.MkdirAll(*out, 0o755); err != nil {
+	outDir, err := safeOutDir(*out)
+	if err != nil {
 		fmt.Fprintf(stderr, "route-oracle: %v\n", err)
 		return exitUsage
 	}
+	*out = outDir
 	planner := navmesh.NewPlanner(*mmaps)
 	defer planner.Close()
 
@@ -174,16 +175,7 @@ func writeReport(rep any, txt []byte, dir, name string) error {
 	if err != nil {
 		return err
 	}
-	for _, target := range []string{filepath.Join(dir, name+".json"), filepath.Join(dir, name+".txt")} {
-		rel, err := filepath.Rel(dir, target)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("report %s resolves outside %s", target, dir)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, name+".json"), append(b, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, name+".txt"), txt, 0o644)
+	return writeFilesIn(dir, map[string][]byte{name + ".json": append(b, '\n'), name + ".txt": txt})
 }
 
 // oracleText is the plan's human table: one line per leg, then the failed legs' hops, the
