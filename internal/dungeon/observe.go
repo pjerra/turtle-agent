@@ -41,6 +41,9 @@ type ObserveSpec struct {
 	// walks each bot to a vendor, bank or mailbox, and a party scattered over the maps right after autogear pauses the run leader ("the
 	// lead bot is not on the plan's map"). The inventory and talent reads still run.
 	Maintenance bool
+	// AllowFarStart lets a partway start go on although the lead bot stands more than farStartYd from the start step's point: the note
+	// says so and the run leader walks there (or pauses) on its own. Off by default: a party in the wrong place is refused.
+	AllowFarStart bool
 }
 
 // Observe defaults.
@@ -74,10 +77,27 @@ func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
 	return s
 }
 
-// StartFromResolver maps an observed run's partial start (from_leg, from_pull_group, from_step) to the words after `.bot run start
-// <plan>` once the server's step count for the plan is known: "from 4", "from step 207", or "" for the first step. The mapping is the
-// cmd layer's (it owns the plan exporter); the driver only asks. An error refuses the run before a bot is hired.
-type StartFromResolver func(serverSteps int) (words string, err error)
+// PartialStart is where an observed run's `.bot run start <plan> from ...` puts the run leader (#248).
+type PartialStart struct {
+	// Words are the `from ...` words: "from 4", "from leg serpentis", "from step 207"; "" for the first step.
+	Words string
+	// Step is the run leader's own 1-based step when the mapping knows it (from_step, from_pull_group); 0 when only the leg is known.
+	Step int
+	// Leg is the plan leg it starts at (-1 for a step start), LegNumber the leg's number in the exported rows and LegName the name sent
+	// ("" when the number was sent because the name is not safe for the command line or is not unique).
+	Leg       int
+	LegNumber int
+	LegName   string
+	// Point is where the start step (or the leg's first point) stands on the plan's map; HavePoint says it is known. It is the party's
+	// place: a partway start is refused when the lead bot stands far from it (ObserveSpec.AllowFarStart overrides).
+	Point     Point
+	HavePoint bool
+}
+
+// StartFromResolver maps an observed run's partial start (from_leg, from_pull_group, from_step) to how it starts once the server's step
+// count for the plan is known. The mapping is the cmd layer's (it owns the plan exporter); the driver only asks. An error refuses the
+// run before a bot is hired.
+type StartFromResolver func(serverSteps int) (PartialStart, error)
 
 // RunLeaderWatcher is the optional part of a RemoteGame that has read the TBM:RUN lines the module pushes: the newest one and how
 // many have been read. Without it the observer relies on the replies to `.bot run start` and `.bot run status`.
@@ -231,13 +251,13 @@ func (d *RemoteDriver) probeRunLeader(ctx context.Context) error {
 	d.planSteps = listedSteps(list, spec.Plan)
 	if d.opt.StartFrom != nil {
 		// A partial start is mapped here, before anything is hired: an unmappable from_pull_group must not pay for a party first.
-		words, err := d.opt.StartFrom(d.planSteps)
+		start, err := d.opt.StartFrom(d.planSteps)
 		if err != nil {
 			return fmt.Errorf("observe mode: %w", err)
 		}
-		d.startFrom, d.haveStartFrom = words, true
-		if words != "" {
-			d.rep.note(fmt.Sprintf("observe mode: the run leader starts partway (`run start %s %s`; the server lists %d steps)", spec.Plan, words, d.planSteps))
+		d.start = &start
+		if start.Words != "" {
+			d.rep.note(fmt.Sprintf("observe mode: the run leader starts partway (`run start %s %s`; the server lists %d steps)", spec.Plan, start.Words, d.planSteps))
 		}
 	}
 	d.rep.note("observe mode: the server's run leader answered; plans: " + nonEmpty(list, "(not listed)"))
@@ -300,6 +320,9 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	if w, ok := d.g.(RunLeaderWatcher); ok {
 		_, o.baseN, _ = w.RunStatus()
 	}
+	if err := d.checkStartPlace(); err != nil {
+		return err
+	}
 	if err := d.startRunLeader(ctx); err != nil {
 		return err
 	}
@@ -333,8 +356,8 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	o := d.obs
 	line := "run start " + o.spec.Plan
-	if d.haveStartFrom && d.startFrom != "" {
-		line += " " + d.startFrom
+	if d.start != nil && d.start.Words != "" {
+		line += " " + d.start.Words
 	}
 	r, err := d.g.Command(ctx, line)
 	if err != nil {
@@ -343,7 +366,8 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	d.takeLines(r.Lines)
 	switch {
 	case r.Kind == tbm.KindErr && r.Err != nil && r.Err.Code == "busy":
-		// A run of this plan is already going (the agent restarted, or the run was started by hand): watch it, unless it is another plan's.
+		// A run of this plan is already going (the agent restarted, or the run was started by hand): watch it, unless it is another plan's
+		// or a partial start was asked for and the run going is at another step (A: adopting it would watch a run from the wrong place).
 		sr, serr := d.g.Command(ctx, "run status")
 		if serr != nil {
 			return fmt.Errorf("run start: busy, and run status: %w", serr)
@@ -352,16 +376,114 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 		if !o.haveLast || o.last.Plan != o.spec.Plan || o.last.State == tbm.RunDone || o.last.State == tbm.RunNone {
 			return fmt.Errorf("run start refused: %s", runLeaderRefusal("start", o.spec.Plan, r.Err))
 		}
+		if why := d.startMatchesStatus(o.last); why != "" {
+			return fmt.Errorf("run start refused: %s", why)
+		}
 		d.rep.note(fmt.Sprintf("observe mode: a run of %s was already going (%s); watching it", o.spec.Plan, o.last.Text()))
 	case r.Kind == tbm.KindErr:
 		return fmt.Errorf("run start refused: %s", runLeaderRefusal("start", o.spec.Plan, r.Err))
 	case r.Kind == tbm.KindTimeout && !o.haveLast:
 		return errors.New("run start: no answer: this server has no run leader (`.bot run` needs TortoiseBots PRs #962 and #963), or it is not answering")
+	default:
+		if err := d.verifyStartReply(r.Lines); err != nil {
+			return err
+		}
 	}
 	o.started = true
 	d.remote(func(rr *RemoteReport) { rr.Observe.Started = true })
 	d.rep.note("observe mode: run leader started plan " + o.spec.Plan)
 	return nil
+}
+
+// startMatchesStatus says why a run already going cannot stand for the requested partial start ("" when it can). A step start needs the
+// status at that step; a leg start by name needs the status in that leg; a leg start by number cannot be compared with the status line's
+// leg (a name) reliably, so it never adopts (A).
+func (d *RemoteDriver) startMatchesStatus(st tbm.RunStatus) string {
+	s := d.start
+	if s == nil || s.Words == "" {
+		return ""
+	}
+	switch {
+	case s.Step > 0:
+		if st.Step != s.Step {
+			return fmt.Sprintf("busy: the run going is at step %d/%d, not the requested step %d: stop it (.bot run stop) or wait for it to end", st.Step, st.Steps, s.Step)
+		}
+	case s.LegName != "":
+		if !strings.EqualFold(st.Leg, s.LegName) {
+			return fmt.Sprintf("busy: the run going is in leg %q, not the requested leg %q: stop it (.bot run stop) or wait for it to end", st.Leg, s.LegName)
+		}
+	default:
+		return "busy: a run going cannot be compared with a from_leg sent as a number (its status line names its leg): stop it (.bot run stop) and start again, or wait for it to end"
+	}
+	return ""
+}
+
+// startLineRe is the run leader's start message for a partway start (TortoiseBots, `.bot run start ... from ...`): "The run starts at
+// step 207 of 226 (leg serpentis): the party is in the instance; ...". A trailing sentence says when the start was moved back into the
+// step that opens a scripted event (G).
+var startLineRe = regexp.MustCompile(`The run starts at step (\d+) of (\d+) \(leg ([^)]+)\)`)
+
+// verifyStartReply checks the run leader's start message against the plan file (D): the leg it started at must be the plan leg asked for.
+// A drift (the deployed rows are another plan's, or another version's) stops the run and refuses the watch; the unbind follows as for any
+// failed run, so no hire stays bound. A message that is absent is noted, not failed (a module may answer with the ACK alone).
+func (d *RemoteDriver) verifyStartReply(lines []string) error {
+	if d.start == nil || d.start.Words == "" {
+		return nil
+	}
+	for _, line := range lines {
+		m := startLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		step, _ := strconv.Atoi(m[1])
+		steps, _ := strconv.Atoi(m[2])
+		leg := strings.TrimSpace(m[3])
+		d.start.Step = step
+		d.rep.note(fmt.Sprintf("observe mode: the run leader starts at step %d of %d (leg %s)", step, steps, leg))
+		if strings.Contains(line, "moved back") {
+			d.rep.note("observe mode: the run leader moved the start back to the step that opens the scripted event it fell in")
+		}
+		if d.start.Leg >= 0 && d.start.Leg < len(d.plan.Legs) {
+			want := d.plan.Legs[d.start.Leg].Name
+			ok := want != "" && strings.EqualFold(leg, want)
+			if want == "" {
+				ok = leg == strconv.Itoa(d.start.LegNumber)
+			}
+			if !ok {
+				d.stopRunLeader("the deployed plan's start leg does not match the plan file", "")
+				return fmt.Errorf("observe mode: run start: the run leader started at step %d (leg %q), not the plan file's leg %d (%q): the plan on the server has drifted; export it again with `turtle-agent plan-export` and restart the server", step, leg, d.start.Leg, want)
+			}
+		}
+		return nil
+	}
+	d.rep.note("observe mode: the run leader's start step line was not read: the start step was not verified against the plan")
+	return nil
+}
+
+// farStartYd is how far from the start step's point a partway start tolerates the lead bot (ObserveSpec.AllowFarStart overrides).
+const farStartYd = 80.0
+
+// checkStartPlace refuses a partway start whose step stands far from the party (E): the run leader walks from wherever the party is,
+// so a party left at the entrance for a step deep in the dungeon would walk the plan from the wrong place. It is a warning with
+// observe.allow_far_start.
+func (d *RemoteDriver) checkStartPlace() error {
+	if d.start == nil || d.start.Words == "" || !d.start.HavePoint {
+		return nil
+	}
+	lead, ok := d.leadPos()
+	if !ok {
+		return nil
+	}
+	dist := dist3(lead, d.start.Point)
+	if dist <= farStartYd {
+		return nil
+	}
+	at := fmt.Sprintf("the lead bot stands %.0f yd from the start step's point %.0f %.0f %.0f", dist, d.start.Point.X, d.start.Point.Y, d.start.Point.Z)
+	if d.opt.Observe.withDefaults(d.plan).AllowFarStart {
+		d.rep.note("observe mode: " + at + " (allow_far_start: the run leader walks from there)")
+		return nil
+	}
+	return fmt.Errorf("observe mode: %s: put the party there first, or pass observe.allow_far_start", at)
 }
 
 // runCeilingError is the watch ending at the run ceiling (ObserveSpec.MaxRun, observe.max_run_s).

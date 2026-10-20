@@ -282,10 +282,13 @@ type observeParam struct {
 	MaxRunS     float64 `json:"max_run_s,omitempty"`
 	StallS      float64 `json:"stall_s,omitempty"`
 	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
-	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight; off by default. Maintenance walks a bot to a vendor
-	// for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and the run leader pauses
-	// with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
+	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight (and at the hire check); off by default. Maintenance
+	// walks a bot to a vendor for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and
+	// the run leader pauses with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
 	Maintenance bool `json:"maintenance,omitempty"`
+	// AllowFarStart lets a partway start (from_leg, from_pull_group, from_step) go on although the lead bot stands more than 80 yd
+	// from the start step's point; the note says so. Off by default: a party in the wrong place is refused before `run start`.
+	AllowFarStart bool `json:"allow_far_start,omitempty"`
 }
 
 type dungeonRunResult struct {

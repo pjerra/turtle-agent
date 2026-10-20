@@ -29,9 +29,9 @@ func startTestPlan(t *testing.T) *dungeon.Plan {
 func TestObserveStartFromStep(t *testing.T) {
 	p := startTestPlan(t)
 	r := observeStartFrom(p, 0, nil, 207, nil)
-	words, err := r(226)
-	if err != nil || words != "from step 207" {
-		t.Fatalf("%q %v", words, err)
+	ps, err := r(226)
+	if err != nil || ps.Words != "from step 207" || ps.Step != 207 {
+		t.Fatalf("%+v %v", ps, err)
 	}
 	if _, err := r(206); err == nil || !strings.Contains(err.Error(), "206 steps") {
 		t.Fatalf("a step past the end: %v", err)
@@ -47,9 +47,9 @@ func TestObserveStartFromStep(t *testing.T) {
 // from_leg starts at the leg's first step; the number is the run leader's (an optional leg takes none), and no step count is needed.
 func TestObserveStartFromLeg(t *testing.T) {
 	p := startTestPlan(t)
-	words, err := observeStartFrom(p, 2, nil, 0, nil)(0)
-	if err != nil || words != "from 1" {
-		t.Fatalf("leg 2: %q %v", words, err)
+	ps, err := observeStartFrom(p, 2, nil, 0, nil)(0)
+	if err != nil || ps.Words != "from leg third" || ps.LegName != "third" || ps.Leg != 2 || ps.LegNumber != 1 || !ps.HavePoint || ps.Point != (dungeon.Point{X: 30, Y: 0, Z: 0}) {
+		t.Fatalf("leg 2: %+v %v", ps, err)
 	}
 	if observeStartFrom(p, 0, nil, 0, nil) != nil {
 		t.Fatal("leg 0 is the first step: it has a resolver")
@@ -76,14 +76,31 @@ func TestObserveStartFromPullGroup(t *testing.T) {
 		t.Fatal("leg 2 group 0 has no step")
 	}
 	group := 0
-	words, err := observeStartFrom(p, 2, &group, 0, nil)(rows.StepCount())
-	if err != nil || words != "from step "+strconv.Itoa(groupOfLeg2) {
-		t.Fatalf("leg 2 group 0: %q (want step %d) %v", words, groupOfLeg2, err)
+	ps, err := observeStartFrom(p, 2, &group, 0, nil)(rows.StepCount())
+	if err != nil || ps.Words != "from step "+strconv.Itoa(groupOfLeg2) || ps.Step != groupOfLeg2 || !ps.HavePoint {
+		t.Fatalf("leg 2 group 0: %+v (want step %d) %v", ps, groupOfLeg2, err)
 	}
 	if _, err := observeStartFrom(p, 2, &group, 0, nil)(rows.StepCount() + 3); err == nil || !strings.Contains(err.Error(), "observe.from_step") {
 		t.Fatalf("a deployed plan of another row count: %v", err)
 	}
 	if _, err := observeStartFrom(p, 2, &group, 0, nil)(0); err == nil || !strings.Contains(err.Error(), "did not list the plan's step count") {
 		t.Fatalf("no listed count: %v", err)
+	}
+}
+
+// A leg name with an apostrophe cannot go on the command line: the number goes, and the start message's leg name is the only check then.
+func TestObserveStartLegNameFallsBackToTheNumber(t *testing.T) {
+	p := startTestPlan(t)
+	p.Legs[2].Name = "high_priestess_mar'li"
+	ps, err := observeStartFrom(p, 2, nil, 0, nil)(0)
+	if err != nil || ps.Words != "from 1" || ps.LegName != "" || ps.LegNumber != 1 {
+		t.Fatalf("%+v %v", ps, err)
+	}
+	// A duplicate name (case-insensitively) is not unique: the number goes too.
+	p = startTestPlan(t)
+	p.Legs[2].Name = "FIRST"
+	ps, err = observeStartFrom(p, 2, nil, 0, nil)(0)
+	if err != nil || ps.Words != "from 1" || ps.LegName != "" {
+		t.Fatalf("duplicate name: %+v %v", ps, err)
 	}
 }

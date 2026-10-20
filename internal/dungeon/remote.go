@@ -637,11 +637,10 @@ type RemoteDriver struct {
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
 	obs *observeState // the run leader watch of an observed run (observe.go); nil otherwise
-	// The observed run's partial start (#248): planSteps is the step count the server listed for the plan in `.bot run list`, and
-	// startFrom are the resolved `from ...` words (probeRunLeader asks RemoteOptions.StartFrom with that count).
-	planSteps     int
-	startFrom     string
-	haveStartFrom bool
+	// The observed run's partial start (#248): planSteps is the step count the server listed for the plan in `.bot run list`, and start
+	// is how the run leader starts (probeRunLeader asks RemoteOptions.StartFrom with that count). Nil: the first step.
+	planSteps int
+	start     *PartialStart
 
 	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)

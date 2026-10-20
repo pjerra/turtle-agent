@@ -1603,9 +1603,10 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    two switches. No bot has been hired or bound at that point.
 2. **Prepare, bind, enter.** Exactly the commander mode's: `prepare` (hire or named bots), `commander bind`, `view on`, the enter phase, the kit
    check. `lead_bot`/`bots` or `prepare.party "hire"` are required; `preflight`, `enter`, `on_end`, `keep_on_fail`, `team` and `ignore_entry_limit` work as there.
-   The kit check's **`.bot maintenance` is off in observe mode** unless `observe.maintenance` is true: maintenance walks each bot to a
-   vendor, bank or mailbox, and a party scattered over the maps right after the hires' autogear pauses the run leader ("the lead bot is not on
-   the plan's map", #253). The inventory and talent reads still run; a hired party already gets its autogear in `prepare`.
+   **`.bot maintenance` is off in observe mode** unless `observe.maintenance` is true — in the kit check and in the hire check's top-up of
+   a reused hire or one short of drinks or ammo: maintenance walks each bot to a vendor, bank or mailbox, and a party scattered over the maps
+   right after the hires' autogear pauses the run leader ("the lead bot is not on the plan's map", #253). The inventory and talent reads still
+   run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step).
 3. **Start.** `.bot run start <plan> [from ...]` (the plan's file name in lower case, or `observe.plan`). A run of the same plan that is already going (`busy`) is
    adopted and watched; another plan's, or a finished one, is refused. **Partway** (`from_leg`, `from_pull_group`, `from_step`, #248): the run leader begins at
    that point of its own plan instead of step 1, for a party already standing at that point in the instance (the run leader checks
@@ -1614,6 +1615,13 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    first row (`from step <n>`) when the step count the server lists (`.bot run list`, at the probe) matches the rows the agent rebuilds with the exporter's
    option sets (plain; cut hops; approach paths; avoid-box routes). When no set matches — the deployed rows were exported with other options, which shift the
    step numbers — the run is refused at the probe, before a bot is hired, and `from_step` carries the number `.bot run status` shows (from 1) instead.
+   **Checked before and after the start.** A leg whose name is one word the command grammar takes and is unique in the plan is sent as `from leg <name>`
+   (else its number), and the run leader's own start line (`The run starts at step X of Y (leg NAME)`) is compared with the plan file: a leg that is not
+   the requested one means the deployed plan has drifted — the run is stopped and the watch refused instead of watching another plan (a moved-back start
+   inside a scripted event is noted). The lead bot must stand within 80 yd of the start step's point (the step's coordinates, or the leg's first point):
+   farther, the run is refused before `run start`; `observe.allow_far_start` turns that into a note and lets the run leader walk from there. Adopting a
+   run that is already going (`busy`) happens only when its status proves it is at the requested step (or in the leg, for a leg sent by name); a leg
+   sent as a number is never adopted.
 4. **Watch.** From here the agent sends **no order**: any `.bot cmd` order but `state`, and any `.bot action`, pauses the run leader. It reads the
    `TBM:RUN|<plan>|<state>|<step>/<steps>|<leg>|<kind>|<phase>|<note>` line the module pushes on every change (through the view feed), asks
    `.bot run status` every `poll_s` (15 s) as a safety net, and ignores a line of another plan. Per change the report, the trace (`run_leader`
@@ -1632,6 +1640,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | none | 20 s | no `TBM:RUN` line came after the start, or the module says "no run" |
 | none | | the binding ended: the view feed's end-of-binding line fails the run as in commander mode |
 | `maintenance` | false | not a ceiling: sends `.bot maintenance` to every bot at the kit check (off: it walks them to vendors and can scatter the party) |
+| `allow_far_start` | false | not a ceiling: lets a partway start go on although the lead bot stands more than 80 yd from the start step's point (a note says so; off: the run is refused before `run start`) |
 
 **Controls.** `dungeon_stop` stops the run (`.bot run stop`, then the unbind). In an observed run `dungeon_pause`, `dungeon_resume` and `dungeon_skip` send the run leader's own
 `.bot run pause|resume|skip` on the watch's next look; the answer is in `report.remote.observe.controls`. The `commander` method takes `{"op":"run","verb":"status"}`
