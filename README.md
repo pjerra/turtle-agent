@@ -95,6 +95,7 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
@@ -854,6 +855,19 @@ waypoint does the same and can be sent again from wherever a fight leaves the le
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
+
+### Route oracle
+
+`turtle-agent route-oracle --plans dungeons --mmaps DIR --out DIR` compares a plan's **stored route** with what the navmesh **plans live** for the same dungeon, leg by leg, and writes `<out>/<plan>.txt` (a human table) and `<out>/<plan>.json` (the machine report, Stage 1's fixture). It reads plan files and mmaps and nothing else; a plan's status, live or draft, changes nothing (the report is a measurement, not a gate). Without `--plan` it reports the five mapped plans: `wailing_caverns ragefire_chasm uldaman zulfarrak deadmines`.
+
+Per plan it builds two chains:
+
+- the **objective chain**: the entrance, then per leg the boss's position, or, when the leg has no boss, its `to` (else the leg's last step's point). Per leg the walk from the previous objective to this one is planned twice: on the plain planner, and on a scratch planner with `SetAvoid` of the plan's avoid boxes — the avoid-aware one is the live path the metrics use, because it is the one a run plans with;
+- the **stored polyline**: the plan's own points in the order planexport writes them (the `via` points, `to`, each pull group's `approach` points and its pull point — the positions' centroid, or a hold's spot —, the boss's approach points and position).
+
+Per leg the report holds: the status, end gap and live length of both runs; the stored chain's length and its ratio to the live length; the most and the mean distance of the leg's stored points to the live path; the path's Z jumps (consecutive samples of the corners and their ground sampling more than 8 yd apart in Z: ground the mesh joins without a climb); the leg's **breaks** — `via` points with `exact`, `direct`, `gm_cross` or `check_skip` — flagged when the live path passes within 6 yd of the foot, or when the leg is partial and the path's end stands within 10 yd of the foot; each pull group's corridor membership (one of its positions within the group's radius + 18 yd of the path, no more than 8 yd above or below it); and how many of the approach and via points are within 5 yd of the path ("redundant": the stored point adds nothing). The plan's line sums it up, and the report names the SHA-256 of every `.mmap`/`.mmtile` file the planning used.
+
+`internal/routeoracle` holds the report; its tests plan over a synthetic mesh (`internal/navmesh/navfixture`) and need no real mmaps.
 
 ### Exporting plans for the TortoiseBots run leader
 
