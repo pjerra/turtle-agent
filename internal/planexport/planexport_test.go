@@ -735,7 +735,7 @@ func TestExactViaIsAFlaggedMove(t *testing.T) {
 	if s := r.Steps[0]; s.Kind != KindMove || s.X != 1 || s.Flags != FlagExact || !strings.Contains(s.Comment, "exact") {
 		t.Fatalf("exact via %+v", s)
 	}
-	if s := r.Steps[1]; s.Kind != KindMoveDirectExact || s.Flags != 0 || s.X != 10 {
+	if s := r.Steps[1]; s.Kind != KindMoveHopExact || s.Flags != 0 || s.X != 10 {
 		t.Fatalf("its direct step %+v", s)
 	}
 	for i, s := range r.Steps {
@@ -753,33 +753,33 @@ func TestExactViaIsAFlaggedMove(t *testing.T) {
 	// Without exact in the plan, no row has the flag and the direct step stays a move_direct (the plain mapping is unchanged).
 	plain := build(t, parsePlan(t, small))
 	for _, s := range plain.Steps {
-		if s.Flags&FlagExact != 0 || s.Kind == KindMoveDirectExact {
+		if s.Flags&FlagExact != 0 || s.Kind == KindMoveHopExact {
 			t.Fatalf("exact without exact: %+v", s)
 		}
 	}
 	if plain.Steps[1].Kind != KindMoveDirect {
 		t.Fatalf("plain direct step %+v", plain.Steps[1])
 	}
-	// The pairing both ways: an exact move before a plain move_direct, and a move_direct_exact after a plain move, are refused.
+	// The pairing both ways: an exact move before a plain move_direct, and a move_hop_exact after a plain move, are refused.
 	bad := r
 	bad.Steps = slices.Clone(r.Steps)
 	bad.Steps[1].Kind = KindMoveDirect
-	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_direct_exact") {
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
 		t.Fatalf("exact move before a plain move_direct: %v", err)
 	}
 	bad.Steps = slices.Clone(r.Steps)
 	bad.Steps[0].Flags = 0
 	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "must follow the exact move") {
-		t.Fatalf("move_direct_exact after a plain move: %v", err)
+		t.Fatalf("move_hop_exact after a plain move: %v", err)
 	}
 	bad.Steps = slices.Clone(r.Steps)
-	bad.Steps[1].Flags = FlagExact // on the move_direct_exact
+	bad.Steps[1].Flags = FlagExact // on the move_hop_exact
 	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "the exact flag is for a move row") {
 		t.Fatalf("exact on a move_direct: %v", err)
 	}
 	bad.Steps = slices.Clone(r.Steps)
 	bad.Steps = append(bad.Steps[:1:1], append([]StepRow{{Plan: r.Steps[0].Plan, Leg: 0, Kind: KindMove, X: 5}}, r.Steps[1:]...)...)
-	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_direct") {
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
 		t.Fatalf("a row between the exact move and its direct step: %v", err)
 	}
 }
@@ -809,7 +809,7 @@ func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
 		if legOf[s.Leg] != "serpentis" || s.X != -293.3 || s.Y != 0.5 || s.Z != -58 {
 			t.Fatalf("exact row %+v (leg %s)", s, legOf[s.Leg])
 		}
-		if n.Kind != KindMoveDirectExact || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
+		if n.Kind != KindMoveHopExact || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
 			t.Fatalf("after the foot: %+v", n)
 		}
 	}
@@ -863,7 +863,7 @@ func TestUnexpressedAttributesAreWarned(t *testing.T) {
 	}
 }
 
-// TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_direct_exact (it is a straight line, like a
+// TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_hop_exact (it is a straight line, like a
 // move_direct): the exact foot stays right before its hop.
 func TestRouteLeavesTheExactHopAlone(t *testing.T) {
 	const js = `{"version":1,"name":"lavahop","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
@@ -878,8 +878,23 @@ func TestRouteLeavesTheExactHopAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, s := range res.Rows.Steps {
-		if s.Flags&FlagExact != 0 && res.Rows.Steps[i+1].Kind != KindMoveDirectExact {
+		if s.Flags&FlagExact != 0 && res.Rows.Steps[i+1].Kind != KindMoveHopExact {
 			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
 		}
+	}
+}
+
+// TestKindsFitTheColumn: ai_dungeon_step.kind is a varchar(16); every kind the exporter writes fits it, and Validate refuses one that
+// does not (move_direct_exact, 17 characters, was the first name of the exact hop's kind).
+func TestKindsFitTheColumn(t *testing.T) {
+	for _, k := range []string{KindMove, KindMoveDirect, KindMoveHopExact, KindPull, KindBoss, KindLoot, KindOpen, KindUseItem, KindWaitObject,
+		KindWaitClear, KindRest, KindRitual, KindHold} {
+		if len(k) > MaxKind {
+			t.Fatalf("kind %q is %d characters", k, len(k))
+		}
+	}
+	r := Rows{Plan: PlanRow{Plan: "q", Map: 1}, Legs: []LegRow{{Plan: "q"}}, Steps: []StepRow{{Plan: "q", Kind: "move_direct_exact"}}}
+	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "varchar") && !strings.Contains(err.Error(), "kind is longer") {
+		t.Fatalf("%v", err)
 	}
 }
