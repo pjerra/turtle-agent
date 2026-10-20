@@ -898,3 +898,28 @@ func TestKindsFitTheColumn(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// TestCutterLeavesTheExactHopAlone: with a cutter, a move_hop_exact farther than MoveGapWarnYd from its exact move gets no cut points
+// (the hop is indivisible): Build succeeds and the exact move stays right before its hop; the hop is the anchor of the next hop.
+func TestCutterLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"farhop","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":20,"y":0,"z":-4,"direct":true}],"to":{"x":75,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":80,"y":0,"z":-4}}}]}`
+	// dungeon.Parse holds a direct via to 25 yd, so the 65 yd hop is set on the parsed plan: the exporter must not rely on that limit.
+	p := parsePlan(t, js)
+	p.Legs[0].Via[1].X = 70
+	calls := 0
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		calls++
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && (res.Rows.Steps[i+1].Kind != KindMoveHopExact || res.Rows.Steps[i+1].X != 70) {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
+	}
+}

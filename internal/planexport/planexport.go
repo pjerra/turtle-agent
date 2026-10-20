@@ -681,7 +681,9 @@ func (b *builder) cutLongHops() error {
 			prev = &cp
 		}
 		if s.Kind == KindMove || s.Kind == KindMoveDirect || s.Kind == KindMoveHopExact {
-			if prev != nil {
+			// The hop after an exact move is indivisible: no cut point may come between the exact move and it (the run leader launches
+			// it from that move only; Validate refuses rows that separate them). It is still the anchor for the next hop.
+			if prev != nil && s.Kind != KindMoveHopExact {
 				a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 				if d := dist3(a, c); d > MoveGapWarnYd {
 					if b.opt.Cut == nil {
