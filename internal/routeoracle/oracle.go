@@ -83,7 +83,8 @@ type StoredPoint struct {
 // BreakTouched is a break waypoint of a leg (a via with exact/direct/gm_cross/check_skip)
 // and whether the leg's live route touched it.
 type BreakTouched struct {
-	Via     int           `json:"via"` // the waypoint's index in the leg's via, from 0
+	Via     int           `json:"via"`           // the waypoint's index in the leg's via, from 0
+	Leg     int           `json:"leg,omitempty"` // boss-only mode: the stored leg it belongs to
 	Kind    string        `json:"kind"`
 	At      dungeon.Point `json:"at"`
 	Touched bool          `json:"touched"`
@@ -93,15 +94,68 @@ type BreakTouched struct {
 // PullOnPath is a pull group and whether the leg's live route's corridor holds one of its
 // positions.
 type PullOnPath struct {
-	Group  int  `json:"group"`
-	OnPath bool `json:"on_path"`
-	// InCorridor (bosses mode): the centre is within the radius plus CorridorSlackYd of the
-	// route, the walk mode's own on_path measure.
-	InCorridor bool     `json:"in_corridor,omitempty"`
-	NearYd     float64  `json:"near_yd"` // horizontal distance of the nearest position to the route
-	DZYd       float64  `json:"dz_yd"`
-	RadiusYd   float64  `json:"radius_yd"`
-	Entries    []uint32 `json:"entries"`
+	Group    int      `json:"group"`
+	Leg      int      `json:"leg,omitempty"` // boss-only mode: the stored leg the group belongs to (absent: leg 0, or not a folded row)
+	OnPath   bool     `json:"on_path"`
+	NearYd   float64  `json:"near_yd"` // horizontal distance of the nearest position to the route
+	DZYd     float64  `json:"dz_yd"`
+	RadiusYd float64  `json:"radius_yd"`
+	Entries  []uint32 `json:"entries"`
+}
+
+// PackPositions is the positions a pull group is judged by: its mob positions, else a hold's
+// spot. A group with neither has nothing to pull or to walk to: it is EMPTY, left out of the
+// legs' walk and out of every pack count (the reports count them).
+func PackPositions(g *dungeon.PullGroup) []dungeon.Point {
+	if len(g.Positions) > 0 {
+		return g.Positions
+	}
+	if g.Hold != nil {
+		return []dungeon.Point{g.Hold.Spot}
+	}
+	return nil
+}
+
+// GroupOnRoute is the one definition of "a pack is on the route" both modes use: one of the
+// group's positions lies within the group's radius plus CorridorSlackYd of the route
+// horizontally and no more than CorridorMaxDZYd above or below it. ok is false for an empty
+// group.
+func GroupOnRoute(gi int, g *dungeon.PullGroup, route []Vec3) (pg PullOnPath, ok bool) {
+	pos := PackPositions(g)
+	if len(pos) == 0 {
+		return PullOnPath{}, false
+	}
+	radius := g.Radius
+	if radius <= 0 {
+		radius = DefaultPackRadius
+	}
+	pg = PullOnPath{Group: gi, RadiusYd: float64(radius), Entries: g.Entries}
+	if len(route) == 0 {
+		return pg, true
+	}
+	for i := range pos {
+		near := NearestPolyline(route, vec(pos[i]))
+		if !pg.OnPath || near.Dist2D < pg.NearYd {
+			pg.NearYd, pg.DZYd = near.Dist2D, near.DZ
+		}
+		if OnCorridor(near, float64(radius)) {
+			pg.OnPath = true
+		}
+	}
+	return pg, true
+}
+
+// emptyGroups counts the plan's pull groups with no position and no hold.
+func emptyGroups(plan *dungeon.Plan) int {
+	n := 0
+	for li := range plan.Legs {
+		for gi := range plan.Legs[li].PullGroups {
+			if len(PackPositions(&plan.Legs[li].PullGroups[gi])) == 0 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // LegReport is one leg's comparison of the stored route and the live route.
@@ -152,8 +206,11 @@ type Report struct {
 	Status string      `json:"status,omitempty"` // the plan's own status line
 	Avoid  int         `json:"avoid_boxes"`
 	Legs   []LegReport `json:"legs"`
-	PlanMs float64     `json:"plan_ms"` // the legs' plans together
-	Tiles  []TileFile  `json:"tiles"`
+	// EmptyGroups: pull groups with no position and no hold, skipped everywhere (not walked to,
+	// not in a pack count).
+	EmptyGroups int        `json:"empty_groups,omitempty"`
+	PlanMs      float64    `json:"plan_ms"` // the legs' plans together
+	Tiles       []TileFile `json:"tiles"`
 }
 
 // Summary is the plan's one summary line. The aggregates are over the COMPLETE legs only: a
@@ -192,8 +249,12 @@ func (r Report) Summary() string {
 	if complete > 0 {
 		mean = ratio / float64(complete)
 	}
-	return fmt.Sprintf("%s: map %d, %d legs: %d complete, %d failed, %d indeterminate; mean ratio %.2f%s; plan %.0f ms",
-		r.Plan, r.Map, n, complete, failed, indet, mean, packsOn, r.PlanMs)
+	empty := ""
+	if r.EmptyGroups > 0 {
+		empty = fmt.Sprintf("; %d empty pull groups skipped", r.EmptyGroups)
+	}
+	return fmt.Sprintf("%s: map %d, %d legs: %d complete, %d failed, %d indeterminate; mean ratio %.2f%s%s; plan %.0f ms",
+		r.Plan, r.Map, n, complete, failed, indet, mean, packsOn, empty, r.PlanMs)
 }
 
 // Oracle builds the plan's report. The walk it plans is the driver's own, leg by leg: the
@@ -214,7 +275,7 @@ func Oracle(p *navmesh.Planner, mmapsDir string, plan *dungeon.Plan) (Report, er
 	if err := CheckName(plan.Name); err != nil {
 		return Report{}, fmt.Errorf("plan file: %w", err)
 	}
-	rep := Report{Plan: plan.Name, Map: plan.Map, Status: plan.Status, Avoid: len(plan.Avoid)}
+	rep := Report{Plan: plan.Name, Map: plan.Map, Status: plan.Status, Avoid: len(plan.Avoid), EmptyGroups: emptyGroups(plan)}
 	scratch := p.Scratch()
 	defer scratch.Close()
 	scratch.SetAvoid(plan.Map, dungeon.NavBoxes(plan.Avoid))
@@ -558,28 +619,15 @@ func pullGroupsOf(l *dungeon.Leg, paths []navmesh.Path, segs []Segment) []PullOn
 	var out []PullOnPath
 	for gi := range l.PullGroups {
 		g := &l.PullGroups[gi]
-		radius := g.Radius
-		if radius <= 0 {
-			radius = DefaultPackRadius
-		}
 		var route []Vec3
 		for i := range segs {
 			if segs[i].Group != gi && len(paths[i].Points) > 0 {
 				route = append(route, paths[i].Points...)
 			}
 		}
-		pg := PullOnPath{Group: gi, RadiusYd: float64(radius), Entries: g.Entries}
-		for i := range g.Positions {
-			if len(route) == 0 {
-				continue
-			}
-			near := NearestPolyline(route, vec(g.Positions[i]))
-			if !pg.OnPath || near.Dist2D < pg.NearYd {
-				pg.NearYd, pg.DZYd = near.Dist2D, near.DZ
-			}
-			if OnCorridor(near, float64(radius)) {
-				pg.OnPath = true
-			}
+		pg, ok := GroupOnRoute(gi, g, route)
+		if !ok {
+			continue // an empty group: not in the pack counts
 		}
 		out = append(out, pg)
 	}
@@ -699,6 +747,9 @@ func legWalk(l *dungeon.Leg) []storedSpec {
 	}
 	for gi := range l.PullGroups {
 		g := &l.PullGroups[gi]
+		if len(PackPositions(g)) == 0 {
+			continue // an empty group has nothing to pull: no walk to it (the centroid of nothing is NaN)
+		}
 		for i := range g.Approach {
 			add(g.Approach[i], "approach", gi)
 		}

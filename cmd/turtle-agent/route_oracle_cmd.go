@@ -19,7 +19,7 @@ import (
 // exitRouteOracle: route-oracle could not report every plan (a failing plan is not a usage error).
 const exitRouteOracle = 12
 
-const routeOracleUsage = "usage: turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--plan NAME]..."
+const routeOracleUsage = "usage: turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]..."
 
 // The two modes. walk (the default) plans each plan's own stored sequence hop by hop and
 // scores the stored hops against the navmesh; bosses plans entrance -> each leg's objective
@@ -56,7 +56,8 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	plansDir := fs.String("plans", "dungeons", "the folder with the plan files")
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps (<map>.mmap and <map>*.mmtile); required")
-	out := fs.String("out", "", "folder for <plan>.txt and <plan>.json (<plan>-bosses.* in bosses mode); required")
+	out := fs.String("out", "", "folder for <plan>.txt and <plan>.json (<plan>-bosses.* in bosses mode, <plan>-bosses-only.* with --objectives bosses); required")
+	objectives := fs.String("objectives", routeoracle.ObjectivesPlan, "bosses mode only. plan: each leg's own objective (its boss, else its to point); bosses: ONLY the chain entrance -> boss 1 -> boss 2 ... (a leg without a boss is folded into the next boss; no stored to point is an objective)")
 	mode := fs.String("mode", modeWalk, "walk: score the plan's stored hops on the navmesh; bosses: plan entrance -> each boss live, with no hand points")
 	var plans []string
 	fs.Var(&planList{&plans}, "plan", "a plan name; repeatable (default: "+strings.Join(routeOracleDefaultPlans, ", ")+")")
@@ -72,6 +73,14 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if *mode != modeWalk && *mode != modeBosses {
 		fmt.Fprintf(stderr, "route-oracle: unknown --mode %q (want %s or %s)\n", *mode, modeWalk, modeBosses)
+		return exitUsage
+	}
+	if *objectives != routeoracle.ObjectivesPlan && *objectives != routeoracle.ObjectivesBosses {
+		fmt.Fprintf(stderr, "route-oracle: unknown --objectives %q (want %s or %s)\n", *objectives, routeoracle.ObjectivesPlan, routeoracle.ObjectivesBosses)
+		return exitUsage
+	}
+	if *mode == modeWalk && *objectives != routeoracle.ObjectivesPlan {
+		fmt.Fprintf(stderr, "route-oracle: --objectives %s needs --mode %s (the walk mode plans the plan's own stored sequence)\n", *objectives, modeBosses)
 		return exitUsage
 	}
 	outDir, err := safeOutDir(*out)
@@ -113,7 +122,7 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 		var summary string
 		var tiles []routeoracle.TileFile
 		if *mode == modeBosses {
-			rep, err := routeoracle.Bosses(planner, *mmaps, p)
+			rep, err := routeoracle.Bosses(planner, *mmaps, p, *objectives)
 			if err == nil {
 				err = writeBosses(rep, *out, n)
 			}
@@ -166,7 +175,11 @@ func writeBosses(rep routeoracle.BossesReport, dir, name string) error {
 	if err != nil {
 		return err
 	}
-	return writeReport(rep, txt, dir, name+"-bosses")
+	stem := name + "-bosses"
+	if rep.Objectives == routeoracle.ObjectivesBosses {
+		stem = name + "-bosses-only"
+	}
+	return writeReport(rep, txt, dir, stem)
 }
 
 // writeReport writes <stem>.json (the report) and <stem>.txt (the table) into dir.

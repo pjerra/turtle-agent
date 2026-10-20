@@ -3,6 +3,7 @@
 package routeoracle
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ const gapPlan = `{"version":1,"name":"gap","map":0,"entrance":{"x":12,"y":12,"z"
  {"name":"onward","to":{"x":30,"y":12,"z":0},
   "pull_groups":[{"entries":[104],"positions":[{"x":30,"y":12,"z":0}]}]}]}`
 
-func bossesFixture(t *testing.T) BossesReport {
+func bossesFixtureParts(t *testing.T) (*navmesh.Planner, string, *dungeon.Plan) {
 	t.Helper()
 	dir := navfixture.WriteDir(t, 0, gapMesh())
 	p := navmesh.NewPlanner(dir)
@@ -56,7 +57,13 @@ func bossesFixture(t *testing.T) BossesReport {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	rep, err := Bosses(p, dir, plan)
+	return p, dir, plan
+}
+
+func bossesFixture(t *testing.T) BossesReport {
+	t.Helper()
+	p, dir, plan := bossesFixtureParts(t)
+	rep, err := Bosses(p, dir, plan, ObjectivesPlan)
 	if err != nil {
 		t.Fatalf("Bosses: %v", err)
 	}
@@ -196,7 +203,7 @@ func TestBossesCorridorMetrics(t *testing.T) {
 func TestBossesRefusesABadName(t *testing.T) {
 	p := navmesh.NewPlanner("")
 	defer p.Close()
-	if _, err := Bosses(p, "", &dungeon.Plan{Name: "../escape"}); err == nil || !strings.Contains(err.Error(), "not a plan name") {
+	if _, err := Bosses(p, "", &dungeon.Plan{Name: "../escape"}, ObjectivesPlan); err == nil || !strings.Contains(err.Error(), "not a plan name") {
 		t.Errorf("err %v", err)
 	}
 }
@@ -221,7 +228,7 @@ func TestBossesNamesTheBridgingBreak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	rep, err := Bosses(p, dir, dp)
+	rep, err := Bosses(p, dir, dp, ObjectivesPlan)
 	if err != nil {
 		t.Fatalf("Bosses: %v", err)
 	}
@@ -249,5 +256,173 @@ func TestBossesNamesTheBridgingBreak(t *testing.T) {
 	// The void leg is non-comparable too, and its bridged plan fails as well.
 	if v := rep.Legs[2]; !v.NonComparable || v.Bridged == nil || v.Bridged.Status == "complete" {
 		t.Errorf("leg 2: %+v", v)
+	}
+}
+
+// Boss-only objectives: the chain is entrance -> boss 1 -> boss 2. The gap plan's legs 0 (hall),
+// 1 (stairs, a boss) and 2 (serpentis, a boss) give two objectives; the hall is folded into the
+// stairs row, its to point (46, 12) is a hand point and NOT an objective, and the legs after the
+// last boss (3, 4) are not planned.
+func TestBossOnlyChainFoldsBosslessLegs(t *testing.T) {
+	p, dir, plan := bossesFixtureParts(t)
+	rep, err := Bosses(p, dir, plan, ObjectivesBosses)
+	if err != nil {
+		t.Fatalf("Bosses: %v", err)
+	}
+	if rep.Objectives != ObjectivesBosses || len(rep.Legs) != 2 || len(rep.Unplanned) != 2 || rep.Unplanned[0] != 3 || rep.Unplanned[1] != 4 {
+		t.Fatalf("objectives %s legs %d unplanned %v", rep.Objectives, len(rep.Legs), rep.Unplanned)
+	}
+	a := rep.Legs[0]
+	if a.Name != "hall+stairs" || a.Leg != 1 || len(a.Legs) != 2 || a.Objective != "boss" || a.To.Y != 24 {
+		t.Errorf("row 0: %+v", a)
+	}
+	if a.From.X != 12 || a.From.Y != 12 || a.Status != "complete" {
+		t.Errorf("row 0 starts %v status %s", a.From, a.Status)
+	}
+	// The hall's to point (46, 12) and the stairs' to (48, 20) are hand points here (neither is
+	// an objective); the hall's far approach too. In the plan mode the hall's to IS its objective.
+	var to, sawHallTo int
+	for _, h := range a.Hand {
+		if h.Kind == "to" {
+			to++
+			if h.Leg == 0 && h.At.X == 46 {
+				sawHallTo++
+			}
+		}
+	}
+	if to != 2 || sawHallTo != 1 {
+		t.Errorf("row 0 to points among the hand points: %d (hall's: %d), hand %+v", to, sawHallTo, a.Hand)
+	}
+	if len(a.Packs) != 2 || a.Packs[0].Leg != 0 || a.Packs[1].Leg != 0 {
+		t.Errorf("row 0 packs %+v, want the hall's two groups", a.Packs)
+	}
+	plain, err := Bosses(p, dir, plan, ObjectivesPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range plain.Legs[0].Hand {
+		if h.Kind == "to" {
+			t.Errorf("plan mode counted the hall's objective to point as a hand point: %+v", h)
+		}
+	}
+	if plain.Legs[0].Objective != "to" {
+		t.Errorf("plan mode leg 0 objective %s", plain.Legs[0].Objective)
+	}
+	// Row 1: serpentis fails at the gap, names the break (stored leg 2, via 2).
+	f := rep.Legs[1]
+	if !f.Failed() || f.Leg != 2 || len(f.BreakHits) != 1 || f.BreakHits[0].Leg != 2 || f.BreakHits[0].Via != 2 {
+		t.Errorf("row 1: status %s hits %+v", f.Status, f.BreakHits)
+	}
+	tot := rep.Totals()
+	if tot.Complete != 1 || tot.Failed != 1 || tot.Sum.Packs != 2 || tot.Sum.PacksOn != 2 {
+		t.Errorf("totals %+v", tot)
+	}
+	if s := rep.Summary(); !contains(s, "2 boss objectives: 1 complete, 1 failed") || !contains(s, "2 legs after the last boss not planned") {
+		t.Errorf("summary %q", s)
+	}
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// Boss-only chain after a failure: the boss after the failed one is non-comparable and bridged
+// from the failed boss's position, as in the plan mode.
+func TestBossOnlyContinuationAfterAFailedBoss(t *testing.T) {
+	plan := `{"version":1,"name":"island","map":0,"entrance":{"x":12,"y":12,"z":0},"legs":[
+	 {"name":"crossing","to":{"x":60,"y":60,"z":0},
+	  "via":[{"x":48,"y":20,"z":0},{"x":102,"y":102,"z":0,"check_skip":"the island"}],
+	  "boss":{"entry":300,"position":{"x":110,"y":110,"z":0}}},
+	 {"name":"island hall","to":{"x":104,"y":104,"z":0},"boss":{"entry":301,"position":{"x":116,"y":116,"z":0}}}]}`
+	polys := append(navfixture.LCorridor(0), navfixture.Square(100, 100, 120, 120, 0))
+	dir := navfixture.WriteDir(t, 0, polys)
+	p := navmesh.NewPlanner(dir)
+	t.Cleanup(p.Close)
+	dp, err := dungeon.Parse("island.json", []byte(plan))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	rep, err := Bosses(p, dir, dp, ObjectivesBosses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Legs) != 2 || !rep.Legs[0].Failed() || len(rep.Legs[0].BreakHits) != 1 {
+		t.Fatalf("legs %+v", rep.Legs)
+	}
+	n := rep.Legs[1]
+	if !n.NonComparable || n.Bridged == nil || n.Bridged.Status != "complete" || n.Bridged.From != rep.Legs[0].To {
+		t.Errorf("row 1: %+v", n)
+	}
+	if tot := rep.Totals(); tot.Complete != 0 || tot.Failed != 1 || tot.Continuations != 1 || tot.Sum.LiveYd != 0 {
+		t.Errorf("totals %+v", tot)
+	}
+	if _, err := Bosses(p, dir, dp, "boss"); err == nil {
+		t.Error("an unknown objectives value was accepted")
+	}
+}
+
+// Both modes judge a pack by the same definition: a group's position within its radius plus 18
+// yd of the live route. Two groups of radius 5 sit 22 and 24 yd off the corridor: on (<= 23) and
+// off (> 23), in the walk mode and in the bosses mode alike.
+func TestPackDefinitionIsTheSameInBothModes(t *testing.T) {
+	plan := `{"version":1,"name":"packs","map":0,"entrance":{"x":12,"y":12,"z":0},"legs":[
+	 {"name":"hall","to":{"x":46,"y":12,"z":0},"pull_groups":[
+	  {"entries":[1],"radius":5,"positions":[{"x":30,"y":34,"z":0}]},
+	  {"entries":[2],"radius":5,"positions":[{"x":30,"y":36,"z":0}]}]}]}`
+	dir := navfixture.WriteDir(t, 0, navfixture.LCorridor(0))
+	p := navmesh.NewPlanner(dir)
+	t.Cleanup(p.Close)
+	dp, err := dungeon.Parse("packs.json", []byte(plan))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	walk, err := Oracle(p, dir, dp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := Bosses(p, dir, dp, ObjectivesPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, b := walk.Legs[0].Pulls, live.Legs[0].Packs
+	if len(w) != 2 || len(b) != 2 {
+		t.Fatalf("walk %d packs, bosses %d", len(w), len(b))
+	}
+	for i, want := range []bool{true, false} {
+		if w[i].OnPath != want || b[i].OnPath != want {
+			t.Errorf("group %d: walk %v bosses %v, want %v (near %.1f / %.1f yd)", i, w[i].OnPath, b[i].OnPath, want, w[i].NearYd, b[i].NearYd)
+		}
+	}
+}
+
+// A pull group with no position and no hold has nothing to walk to: the walk leaves it out
+// instead of walking to the NaN centroid of nothing, and neither mode counts it in a pack total.
+func TestEmptyPullGroupIsSkippedAndCounted(t *testing.T) {
+	plan := &dungeon.Plan{Name: "empty", Entrance: dungeon.Point{X: 12, Y: 12}, Legs: []dungeon.Leg{{
+		Name: "hall", To: dungeon.Point{X: 46, Y: 12},
+		PullGroups: []dungeon.PullGroup{{Entries: []uint32{1}}, {Entries: []uint32{2}, Positions: []dungeon.Point{{X: 44, Y: 12}}}},
+	}}}
+	dir := navfixture.WriteDir(t, 0, navfixture.LCorridor(0))
+	p := navmesh.NewPlanner(dir)
+	t.Cleanup(p.Close)
+	walk, err := Oracle(p, dir, plan)
+	if err != nil {
+		t.Fatalf("Oracle: %v", err)
+	}
+	if walk.EmptyGroups != 1 || len(walk.Legs[0].Pulls) != 1 || walk.Legs[0].Pulls[0].Group != 1 || walk.Legs[0].Status != "complete" {
+		t.Errorf("walk: empty %d pulls %+v status %s", walk.EmptyGroups, walk.Legs[0].Pulls, walk.Legs[0].Status)
+	}
+	for _, s := range walk.Legs[0].Segments {
+		if math.IsNaN(float64(s.At.X)) || s.Kind == "pull" && s.Group == 0 {
+			t.Errorf("a hop to the empty group: %+v", s)
+		}
+	}
+	live, err := Bosses(p, dir, plan, ObjectivesPlan)
+	if err != nil {
+		t.Fatalf("Bosses: %v", err)
+	}
+	if live.EmptyGroups != 1 || len(live.Legs[0].Packs) != 1 || live.Legs[0].Packs[0].Group != 1 {
+		t.Errorf("bosses: empty %d packs %+v", live.EmptyGroups, live.Legs[0].Packs)
+	}
+	if !contains(walk.Summary(), "1 empty pull groups skipped") || !contains(live.Summary(), "1 empty pull groups skipped") {
+		t.Errorf("summaries %q / %q", walk.Summary(), live.Summary())
 	}
 }

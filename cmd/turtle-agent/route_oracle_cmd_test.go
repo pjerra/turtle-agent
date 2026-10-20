@@ -174,3 +174,51 @@ func TestRouteOracleModeDefaultsToWalk(t *testing.T) {
 		t.Errorf("table: err %v\n%s", err, txt)
 	}
 }
+
+// --objectives: an unknown value is a usage error; boss-only objectives need the bosses mode;
+// the default is the plan's own objectives (<plan>-bosses.*), and boss-only writes
+// <plan>-bosses-only.* beside them without touching the others.
+func TestRouteOracleObjectivesFlag(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--objectives", "boss"}, "unknown --objectives"},
+		{[]string{"--objectives", "bosses"}, "needs --mode bosses"},
+		{[]string{"--mode", "walk", "--objectives", "bosses"}, "needs --mode bosses"},
+	} {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"--mmaps", "/nowhere", "--out", out}, c.args...)
+		if code := routeOracleCmd(args, &stdout, &stderr); code != exitUsage || !strings.Contains(stderr.String(), c.want) {
+			t.Errorf("%v: exit %d stderr %q, want %q", c.args, code, stderr.String(), c.want)
+		}
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("--out was made for a refused flag")
+	}
+
+	plans, mmaps := outFixture(t)
+	dir := t.TempDir()
+	run := func(extra ...string) int {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"--plans", plans, "--mmaps", mmaps, "--out", dir, "--plan", "corridor", "--mode", "bosses"}, extra...)
+		code := routeOracleCmd(args, &stdout, &stderr)
+		if code != exitOK {
+			t.Logf("stderr %q", stderr.String())
+		}
+		return code
+	}
+	has := func(f string) bool { _, err := os.Stat(filepath.Join(dir, f)); return err == nil }
+	if run() != exitOK || !has("corridor-bosses.json") || has("corridor-bosses-only.json") {
+		t.Error("the default objectives did not write the plan-objectives files alone")
+	}
+	// The fixture plan has no boss: the boss-only chain is empty and every leg is unplanned.
+	if run("--objectives", "bosses") != exitOK || !has("corridor-bosses-only.json") || !has("corridor-bosses-only.txt") {
+		t.Error("--objectives bosses did not write the boss-only files")
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "corridor-bosses-only.json"))
+	if !strings.Contains(string(b), `"objectives": "bosses"`) || !strings.Contains(string(b), `"unplanned_legs"`) {
+		t.Errorf("boss-only json: %s", b)
+	}
+}
