@@ -296,7 +296,11 @@ func loadWMO(set *mpq.Set, trs Translate, path string, budget *wmoBudget, logf f
 			mogi = append(mogi, d...)
 		}
 	})
-	for i := range min(len(mogi)/32, wmoMaxGroups) {
+	n := min(len(mogi)/32, wmoMaxGroups)
+	// MOGI group ids are positional: keep a slot for every entry, including a rejected one, so a tile's t.Group still
+	// names its own box.
+	m.groups = make([]*wmoGroup, n)
+	for i := range n {
 		o := i * 32
 		g := &wmoGroup{index: i, flags: le32(mogi, o),
 			x0: f32(mogi, o+4), y0: f32(mogi, o+8), z0: f32(mogi, o+12),
@@ -306,7 +310,7 @@ func loadWMO(set *mpq.Set, trs Translate, path string, budget *wmoBudget, logf f
 			logf("WMO %s group %d: implausible bounding box; skipped", base, i)
 			continue
 		}
-		m.groups = append(m.groups, g)
+		m.groups[i] = g
 	}
 	tiles := trs.WMO[base]
 	keys := make([]WMOTile, 0, len(tiles))
@@ -325,7 +329,8 @@ func loadWMO(set *mpq.Set, trs Translate, path string, budget *wmoBudget, logf f
 	})
 	for _, t := range keys {
 		m.listed++
-		if t.Group < 0 || t.Group >= len(m.groups) {
+		if t.Group < 0 || t.Group >= len(m.groups) || m.groups[t.Group] == nil {
+			m.failed++ // the tile's group was rejected; drop the tile with it
 			continue
 		}
 		if budget.tiles >= wmoMaxTiles || budget.bytes >= wmoTileBudget {
@@ -486,7 +491,7 @@ func placementNearNav(m *wmoModel, px, py, th float64, nav navBounds) bool {
 	any := false
 	d := wmoDrawable{px: px, py: py, th: th}
 	for _, g := range m.groups {
-		if len(g.tiles) == 0 {
+		if g == nil || len(g.tiles) == 0 {
 			continue
 		}
 		any = true
@@ -623,7 +628,7 @@ func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, nav *navB
 			continue
 		}
 		for _, g := range m.groups {
-			if len(g.tiles) == 0 {
+			if g == nil || len(g.tiles) == 0 {
 				continue
 			}
 			it := d

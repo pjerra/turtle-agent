@@ -167,6 +167,14 @@ func reviewClient(t *testing.T) string {
 	}))
 	fmt.Fprintf(&trs, "Deadmines\\map32_32.blp\tdeadmines_terrain.blp\n")
 	wdt("Deadmines", 1, []string{`World\wmo\Test\deadmines.wmo`}, [][]byte{fixMODF(0, 1, [3]float32{}, [3]float32{})}, nil)
+	// 910: group 0 has an invalid (inverted) box, group 1 is valid. The group ids are positional: group 1's tile must
+	// stay on group 1's box and group 0's tile must be dropped with its rejected group.
+	wmo("pos", reviewWMO([][6]float32{{100, 0, 0, 50, 32, 10}, {0, 0, 0, 32, 32, 10}}))
+	blp("pos0.blp", solidBLP(64, 64, color.NRGBA{200, 0, 0, 255}))
+	blp("pos1.blp", detailBLP(64, 64, color.NRGBA{0, 0, 200, 255}, color.NRGBA{0, 200, 0, 255}))
+	tile("pos", 0, 0, 0, "pos0.blp")
+	tile("pos", 1, 0, 0, "pos1.blp")
+	wdt("PosTest", 1, []string{`World\wmo\Test\pos.wmo`}, [][]byte{fixMODF(0, 1, [3]float32{}, [3]float32{})}, nil)
 	// 209: a map with a terrain minimap that is not one of the five overlay maps. Its WMO art must not be drawn over it.
 	wmo("keep", reviewWMO([][6]float32{{0, 0, 0, 32, 32, 10}}))
 	blp("keep0.blp", solidBLP(64, 64, color.NRGBA{230, 140, 0, 255}))
@@ -195,7 +203,7 @@ func reviewClient(t *testing.T) string {
 	}
 	rows := []mapRow{{36, "Deadmines", "Deadmines"}, {209, "ZulFarrak", "Zul'Farrak"}, {903, "OrderTest", "Order Test"}, {904, "AlphaTest", "Alpha Test"},
 		{905, "DedupTest", "Dedup Test"}, {906, "NoTilesTest", "No Tiles"}, {907, "CapTest", "Cap Test"},
-		{908, "WorkTest", "Work Test"}, {909, "BigBoxTest", "Big Box"}}
+		{908, "WorkTest", "Work Test"}, {909, "BigBoxTest", "Big Box"}, {910, "PosTest", "Positional Groups"}}
 	for _, r := range rows {
 		strs += r.dir + "\x00" + r.name + "\x00"
 	}
@@ -321,6 +329,23 @@ func TestWMODrawStaysInTileRectangles(t *testing.T) {
 	// One 128 x 128 yd tile at 2 px/yd is 65536 sampled pixels; the group box alone is 2048 yd, or 16.7 M samples.
 	if info.Work <= 0 || info.Work > 100_000 {
 		t.Errorf("work = %d pixels, want the tile rectangle only", info.Work)
+	}
+}
+
+func TestWMOInvalidGroupKeepsPositionalIDs(t *testing.T) {
+	l, info, ok, reason := reviewCompose(t, reviewClient(t), 910)
+	if !ok {
+		t.Fatalf("no minimap: %s", reason)
+	}
+	if info.Tiles != 1 {
+		t.Errorf("tiles = %d, want group 1's tile only (group 0 was rejected)", info.Tiles)
+	}
+	if l.Meta.Width != 64 || l.Meta.Height != 64 {
+		t.Errorf("canvas %dx%d, want group 1's 64x64 box", l.Meta.Width, l.Meta.Height)
+	}
+	// The rejected group 0's red tile must not attach to group 1 (the compacted-slice bug); the picture is group 1's.
+	if got := pixelAt(t, l, -16, -16); got != (color.NRGBA{0, 0, 200, 255}) {
+		t.Errorf("pixel = %v, want group 1's blue: a group id was resolved by compacted position", got)
 	}
 }
 

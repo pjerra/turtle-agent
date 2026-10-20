@@ -55,6 +55,7 @@ func alignDirs(t *testing.T) alignFixture {
 		plansDir:   os.Getenv("TURTLE_PLANS_DIR"),
 	}
 	if f.client == "" || f.minimapDir == "" || f.mmapsDir == "" || f.plansDir == "" {
+		fmt.Fprintf(os.Stderr, "NOT RUN %s: set TURTLE_CLIENT_DATA, TURTLE_MINIMAP_DIR, TURTLE_MMAPS_DIR and TURTLE_PLANS_DIR to run the client alignment tests\n", t.Name())
 		t.Skip("set TURTLE_CLIENT_DATA, TURTLE_MINIMAP_DIR, TURTLE_MMAPS_DIR and TURTLE_PLANS_DIR to run the client alignment test")
 	}
 	return f
@@ -370,13 +371,53 @@ func TestWMOAlignmentProofMaps(t *testing.T) {
 	}
 }
 
-// knownExceptions are the maps whose measured alignment fails a spec threshold for a known reason. The test fails on
-// every other failure; the reason is also written into the picture JSON as "note" where the picture itself has a limit.
-var knownExceptions = map[uint32]string{
-	189: "Herod's room has navmesh but no client art: artOnNav 0.624, 13/14 points (scarlet_armory:herod off the art)",
-	819: "part of the WMO has no navmesh (red areas where the client has no art): artOnNav 0.780, 6/7 points (entrance)",
-	822: "client art includes walls and rims with no navmesh (artOnNav 0.696); the two unrelated mini-hives are excluded, shift 0,0",
-	533: "the raw shift argmax is flat on a z-band navmesh 7x the art (artOnNav 0.939, 16/16); the filtered shift is 0,0",
+// alignExpect is the recorded state of a known-exception map: the metric with its band, the plan points and the shift.
+// A value outside the band in either direction fails the test, so an improvement also asks for an updated table.
+type alignExpect struct {
+	metric string
+	value  float64
+	band   float64
+	hits   int
+	total  int
+	shiftX int
+	shiftY int
+	rawX   int
+	rawY   int
+	pinRaw bool // the raw shift is part of the exception (533)
+	reason string
+}
+
+// knownExceptions are the maps whose measured alignment cannot meet a spec threshold for a known reason. The test fails
+// on every deviation from these recorded values; the reason is also written into the picture JSON as "note" where the
+// picture itself has a client-data limit.
+var knownExceptions = map[uint32]alignExpect{
+	189: {metric: "artOnNav", value: 0.624, band: 0.03, hits: 13, total: 14,
+		reason: "Herod's room has navmesh but no client art: artOnNav 0.624, 13/14 points (scarlet_armory:herod off the art)"},
+	819: {metric: "artOnNav", value: 0.780, band: 0.03, hits: 6, total: 7,
+		reason: "part of the WMO has no navmesh (red areas where the client has no art): artOnNav 0.780, 6/7 points (entrance)"},
+	822: {metric: "artOnNav", value: 0.696, band: 0.03, hits: 5, total: 5,
+		reason: "client art includes walls and rims with no navmesh (artOnNav 0.696); the two unrelated mini-hives are excluded, shift 0,0"},
+	533: {metric: "artOnNav", value: 0.939, band: 0.03, hits: 16, total: 16, rawX: 2, rawY: -6, pinRaw: true,
+		reason: "the raw shift argmax is flat on a z-band navmesh 7x the art (artOnNav 0.939, 16/16); the filtered shift is 0,0"},
+}
+
+// exceptionProblem is the first measured value that left an exception's recorded state.
+func exceptionProblem(m alignMetrics, exp alignExpect) string {
+	metric := m.artOnNav
+	if exp.metric == "iou" {
+		metric = m.iou
+	}
+	switch {
+	case math.Abs(metric-exp.value) > exp.band:
+		return fmt.Sprintf("%s %.3f outside %.3f +/- %.2f", exp.metric, metric, exp.value, exp.band)
+	case m.hits != exp.hits || m.points != exp.total:
+		return fmt.Sprintf("points %d/%d, recorded %d/%d", m.hits, m.points, exp.hits, exp.total)
+	case m.shiftX != exp.shiftX || m.shiftY != exp.shiftY:
+		return fmt.Sprintf("shift (%d,%d), recorded (%d,%d)", m.shiftX, m.shiftY, exp.shiftX, exp.shiftY)
+	case exp.pinRaw && (m.rawShiftX != exp.rawX || m.rawShiftY != exp.rawY):
+		return fmt.Sprintf("raw shift (%d,%d), recorded (%d,%d)", m.rawShiftX, m.rawShiftY, exp.rawX, exp.rawY)
+	}
+	return ""
 }
 
 // dungeonIDs are the 21 instance maps that have no client minimap (plan table).
@@ -387,6 +428,7 @@ var dungeonIDs = []uint32{34, 35, 43, 48, 70, 90, 109, 129, 189, 229, 230, 249, 
 func TestWMOAllDungeons(t *testing.T) {
 	outDir := os.Getenv("TURTLE_W2B_DIR")
 	if outDir == "" {
+		fmt.Fprintln(os.Stderr, "NOT RUN TestWMOAllDungeons: set TURTLE_W2B_DIR to write the all-dungeon overlays")
 		t.Skip("set TURTLE_W2B_DIR to write the all-dungeon overlays")
 	}
 	f := alignDirs(t)
@@ -415,12 +457,14 @@ func TestWMOAllDungeons(t *testing.T) {
 			raw3 := absInt(m.rawShiftX) > 3 || absInt(m.rawShiftY) > 3
 			t.Logf("W2B map=%d name=%q produced=y tiles=%d excluded=%d %s metric=%s pass=%v rawOver3=%v",
 				id, mapName(t, set, id), info.Tiles, info.Excluded, m, metric, pass, raw3)
-			if !pass || raw3 {
-				if reason, ok := knownExceptions[id]; ok {
-					t.Logf("KNOWN EXCEPTION map=%d: %s", id, reason)
+			if exp, ok := knownExceptions[id]; ok {
+				if problem := exceptionProblem(m, exp); problem != "" {
+					t.Errorf("map %d known exception left its recorded state: %s; update the table (%s)", id, problem, m)
 				} else {
-					t.Errorf("map %d alignment failed: %s (pass=%v, raw shift over 3 yd: %v)", id, m, pass, raw3)
+					t.Logf("KNOWN EXCEPTION map=%d: %s", id, exp.reason)
 				}
+			} else if !pass || raw3 {
+				t.Errorf("map %d alignment failed: %s (pass=%v, raw shift over 3 yd: %v)", id, m, pass, raw3)
 			}
 		})
 	}
