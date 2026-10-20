@@ -3,8 +3,9 @@ package minimap
 // The minimap the client draws indoors comes from tiles of the WMO's own groups, not from the terrain. md5translate lists
 // them as WMO\...\<base>_<group>_<A>_<B>.blp, and the root WMO's MOGI gives each group's bounding box. This file places
 // those groups (with the WDT or ADT MODF of each WMO) on one north-up picture and draws the tiles over the terrain minimap
-// when the map has one. The transform was settled against the server's navmesh (W2a): 2 px per yard, a tile index step
-// of 128 yd, bottom-left anchored tiles, a 180-degree turn, th = +rot.y, and all groups drawn by PZ+z0 rising.
+// on the five maps whose indoor part the plan puts over the terrain (W2a's Q-e). The transform was settled against the
+// server's navmesh (W2a): 2 px per yard, a tile index step of 128 yd, bottom-left anchored tiles, a 180-degree turn,
+// th = +rot.y, and all groups drawn by PZ+z0 rising.
 
 import (
 	"encoding/binary"
@@ -21,17 +22,25 @@ import (
 )
 
 const (
-	wmoPxPerYd    = 2.0       // the client's indoor minimap scale
-	wmoTilePx     = 256.0     // a tile index step in pixels at that scale
-	wmoTileYd     = 128.0     // ... in yards
+	wmoPxPerYd    = 2.0   // the client's indoor minimap scale
+	wmoTilePx     = 256.0 // a tile index step in pixels at that scale (128 yd)
+	wmoTileYd     = wmoTilePx / wmoPxPerYd
 	wmoMapCenter  = 17066.666 // the ADT placement convention: 32 * 533.333
 	wmoMaxSide    = 8192      // the longest side of a composed picture
 	wmoMaxTiles   = 4096      // decoded tiles per map
-	wmoTileBudget = 256 << 20 // decoded tile pixels per map, in bytes (256 tiles of 256x256 are 16 MiB)
+	wmoTileBudget = 256 << 20 // decoded tile pixels per map, in bytes (1024 tiles of 256x256)
 	wmoMaxTilePx  = 512       // the client's tiles are 256 px at most
 	wmoMaxPlace   = 4096      // placements per map
 	wmoMaxADTs    = 64        // an instance has at most 36 ADTs; a world map's WDT is not scanned
 	wmoMaxGroups  = 4096      // MOGI groups per WMO
+	// wmoMaxDrawables and wmoMaxWork bound the compositor: a group is one drawable, and every tile rectangle costs its
+	// output pixels. A bigger client file gets a reason in <id>.status.json, not a hang.
+	wmoMaxDrawables = 16384
+	wmoMaxWork      = 1 << 25 // sampled pixels per map (33.5 M; the largest real map, Dire Maul, samples 16.6 M)
+	// wmoNavMargin is how far (yards) a placement's box may lie outside the map's navmesh bounding box and still be
+	// drawn. Unrelated outdoor WMOs (Frostmane Hollow's Silithus mini-hives) are hundreds of yards away and have no
+	// navmesh; they are dropped.
+	wmoNavMargin = 200.0
 )
 
 const (
@@ -39,6 +48,47 @@ const (
 	fromWMO        = "wmo"
 	fromTerrainWMO = "terrain+wmo"
 )
+
+// overlayMaps are the maps whose indoor WMO art is drawn over an existing terrain minimap (the plan's Q-e). Every other
+// map with a usable terrain minimap keeps that picture untouched.
+var overlayMaps = map[uint32]bool{33: true, 36: true, 289: true, 329: true, 800: true}
+
+// wmoSkipUIDs are placements that belong to another zone: Frostmane Hollow's two Silithus mini-hives stand on the
+// outdoor surface navmesh, so the navmesh-box rule keeps them, but their art has nothing to do with the dungeon.
+var wmoSkipUIDs = map[uint32]map[uint32]bool{
+	822: {303286: true, 303232: true},
+}
+
+// wmoKnownLimits are one-line client-data limits of a composed picture, written into its JSON as "note" for humans (the
+// dashboards ignore the key).
+var wmoKnownLimits = map[uint32]string{
+	189: "Herod's room has navmesh but no client minimap art; the plan point there is off the picture",
+	819: "part of the WMO has no client minimap art (navmesh areas are drawn red); the entrance is off the picture",
+	822: "the two Silithus mini-hives (uids 303286 and 303232) belong to another zone and are not drawn",
+}
+
+// navBounds is the world rectangle of a map's navmesh (x north, y west).
+type navBounds struct {
+	North, South, West, East float64
+}
+
+// navBoundsOf is the world bounding box of the polygons, or nil when there are none.
+func navBoundsOf(polys []NavPoly) *navBounds {
+	if len(polys) == 0 {
+		return nil
+	}
+	nb := navBounds{North: -1e18, South: 1e18, West: -1e18, East: 1e18}
+	for _, p := range polys {
+		for _, v := range p.V {
+			nb.North, nb.South = math.Max(nb.North, float64(v[0])), math.Min(nb.South, float64(v[0]))
+			nb.West, nb.East = math.Max(nb.West, float64(v[1])), math.Min(nb.East, float64(v[1]))
+		}
+	}
+	if nb.North <= nb.South || nb.West <= nb.East {
+		return nil
+	}
+	return &nb
+}
 
 // wmoPlacement is one MODF: which WMO stands where. pos and rot are the client's (x east, y up, z north for the ADT
 // convention).
@@ -82,7 +132,9 @@ type wmoBudget struct {
 type wmoInfo struct {
 	ZMin, ZMax float64 // world z of the group boxes drawn (0 when none)
 	Tiles      int     // tile images drawn
-	Placements int     // MODF entries found
+	Work       int64   // output pixels the tile rectangles cover
+	Placements int     // MODF entries found (after uid dedup)
+	Excluded   int     // placements dropped for lying outside the map navmesh
 	WDT        bool    // the placements come from the WDT (a WMO-only map)
 }
 
@@ -129,7 +181,7 @@ func wmoPlacements(set *mpq.Set, dir string, logf func(string, ...any)) ([]wmoPl
 	if err != nil {
 		return nil, false, fmt.Errorf("WDT: %w", err)
 	}
-	var mwmo, modf, main []byte
+	var mwmo, modf, mainData []byte
 	flags := uint32(0)
 	walkChunks(wdt, func(id string, d []byte) {
 		switch id {
@@ -142,7 +194,7 @@ func wmoPlacements(set *mpq.Set, dir string, logf func(string, ...any)) ([]wmoPl
 		case "MODF":
 			modf = append(modf, d...)
 		case "MAIN":
-			main = append(main, d...)
+			mainData = append(mainData, d...)
 		}
 	})
 	names := splitCStrings(mwmo)
@@ -166,10 +218,10 @@ func wmoPlacements(set *mpq.Set, dir string, logf func(string, ...any)) ([]wmoPl
 	}
 	adts := 0
 	for i := range 64 * 64 {
-		if (i+1)*8 > len(main) {
+		if (i+1)*8 > len(mainData) {
 			break
 		}
-		if le32(main, i*8) == 0 {
+		if le32(mainData, i*8) == 0 {
 			continue
 		}
 		adts++
@@ -348,9 +400,113 @@ func (d wmoDrawable) local(X, Y float64) (float64, float64) {
 	return -(cs*dx + sn*dy), -(-sn*dx + cs*dy)
 }
 
+// wmoJob is one tile of one group in output pixels: the tile's local rectangle (clipped to the group box) and the output
+// rectangle it can touch. Drawing only these rectangles keeps the work proportional to the tiles, not to the group box
+// (an outdoor WMO can have a box hundreds of yards across around one small tile).
+type wmoJob struct {
+	d              wmoDrawable
+	t              *image.NRGBA
+	a, b           int
+	x0, y0, x1, y1 float64
+	rect           image.Rectangle
+}
+
+// jobs returns the tile rectangles of a drawable at the canvas scale. It returns no job for a tile outside the group box.
+func (d wmoDrawable) jobs(m Meta) []wmoJob {
+	out := make([]wmoJob, 0, len(d.g.tiles))
+	keys := make([][2]int, 0, len(d.g.tiles))
+	for k := range d.g.tiles {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+	for _, k := range keys {
+		a, b := k[0], k[1]
+		x0 := math.Max(d.g.x0, d.g.x0+float64(a)*wmoTileYd)
+		x1 := math.Min(d.g.x1, d.g.x0+float64(a+1)*wmoTileYd)
+		y0 := math.Max(d.g.y0, d.g.y0+float64(b)*wmoTileYd)
+		y1 := math.Min(d.g.y1, d.g.y0+float64(b+1)*wmoTileYd)
+		if x1 <= x0 || y1 <= y0 {
+			continue
+		}
+		// The tile's own four world corners give the exact rectangle.
+		tn, ts, tw, te := -1e18, 1e18, -1e18, 1e18
+		for _, c := range [4][2]float64{{x0, y0}, {x0, y1}, {x1, y0}, {x1, y1}} {
+			X, Y := d.world(c[0], c[1])
+			tn, ts = math.Max(tn, X), math.Min(ts, X)
+			tw, te = math.Max(tw, Y), math.Min(te, Y)
+		}
+		pc0, pr0 := m.ToPixel(tn, tw)
+		pc1, pr1 := m.ToPixel(ts, te)
+		rect := image.Rect(int(math.Floor(pc0)), int(math.Floor(pr0)), int(math.Ceil(pc1)), int(math.Ceil(pr1)))
+		rect = rect.Intersect(image.Rect(0, 0, m.Width, m.Height))
+		if rect.Empty() {
+			continue
+		}
+		out = append(out, wmoJob{d: d, t: d.g.tiles[k], a: a, b: b, x0: x0, y0: y0, x1: x1, y1: y1, rect: rect})
+	}
+	return out
+}
+
+// draw paints one tile rectangle. The inverse of the world transform lands each output pixel in the tile's local grid;
+// the pixel is drawn only when it is opaque (alpha >= 128).
+func (j wmoJob) draw(img *image.NRGBA, m Meta) {
+	for r := j.rect.Min.Y; r < j.rect.Max.Y; r++ {
+		for c := j.rect.Min.X; c < j.rect.Max.X; c++ {
+			X, Y := m.ToWorld(float64(c)+.5, float64(r)+.5)
+			x, y := j.d.local(X, Y)
+			if x < j.x0 || x > j.x1 || y < j.y0 || y > j.y1 {
+				continue
+			}
+			U := (x - j.d.g.x0) * wmoPxPerYd
+			V := (y - j.d.g.y0) * wmoPxPerYd
+			u := int(U - float64(j.a)*wmoTilePx)
+			v := j.t.Bounds().Dy() - 1 - int(V-float64(j.b)*wmoTilePx)
+			if u < 0 || v < 0 || u >= j.t.Bounds().Dx() || v >= j.t.Bounds().Dy() {
+				continue
+			}
+			px := j.t.NRGBAAt(u, v)
+			if px.A < 128 {
+				continue
+			}
+			px.A = 255
+			img.SetNRGBA(c, r, px)
+		}
+	}
+}
+
+// placementNearNav reports whether a placement's box intersects the navmesh rectangle grown by wmoNavMargin. A placement
+// with no tiles counts as near (it draws nothing).
+func placementNearNav(m *wmoModel, px, py, th float64, nav navBounds) bool {
+	n, s, w, e := -1e18, 1e18, -1e18, 1e18
+	any := false
+	d := wmoDrawable{px: px, py: py, th: th}
+	for _, g := range m.groups {
+		if len(g.tiles) == 0 {
+			continue
+		}
+		any = true
+		for _, c := range [4][2]float64{{g.x0, g.y0}, {g.x0, g.y1}, {g.x1, g.y0}, {g.x1, g.y1}} {
+			X, Y := d.world(c[0], c[1])
+			n, s = math.Max(n, X), math.Min(s, X)
+			w, e = math.Max(w, Y), math.Min(e, Y)
+		}
+	}
+	if !any {
+		return true
+	}
+	return n >= nav.South-wmoNavMargin && s <= nav.North+wmoNavMargin &&
+		w >= nav.East-wmoNavMargin && e <= nav.West+wmoNavMargin
+}
+
 // minimapSource builds a map's minimap picture: its terrain tiles, the minimap tiles of the WMOs placed on it drawn over
-// them, or the WMO tiles alone when there is no terrain picture. ok is false with a one-line reason when it has neither.
-func minimapSource(set *mpq.Set, trs Translate, dir string, logf func(string, ...any)) (Layer, wmoInfo, bool, string) {
+// them on the five overlay maps, or the WMO tiles alone when there is no terrain picture. ok is false with a one-line
+// reason when it has neither.
+func minimapSource(set *mpq.Set, trs Translate, dir string, id uint32, nav *navBounds, logf func(string, ...any)) (Layer, wmoInfo, bool, string) {
 	var info wmoInfo
 	terrainTiles := trs.Terrain[strings.ToLower(dir)]
 	hasTerrain := len(terrainTiles) > 0
@@ -367,21 +523,31 @@ func minimapSource(set *mpq.Set, trs Translate, dir string, logf func(string, ..
 			blank = true
 			logf("map %s: the terrain minimap tiles are blank; the WMO tiles alone are used", dir)
 		default:
+			if !overlayMaps[id] {
+				// This map's terrain minimap is already the picture: leave it exactly as the old extractor wrote it.
+				return Layer{Kind: KindMinimap, Meta: meta, Img: img}, info, true, ""
+			}
 			meta.From = fromTerrain
 			terrain = &Layer{Kind: KindMinimap, Meta: meta, Img: img}
 		}
 	}
-	layer, info, wmoReason := composeWMO(set, trs, dir, terrain, logf)
+	layer, info, wmoReason := composeWMO(set, trs, dir, terrain, nav, wmoSkipUIDs[id], logf)
 	if layer != nil {
 		if terrain == nil && isBlank(layer.Img) {
 			wmoReason = "the composed WMO minimap is blank"
 		} else {
+			if note := wmoKnownLimits[id]; note != "" {
+				layer.Meta.Note = note
+			}
 			return *layer, info, true, ""
 		}
 	}
 	if terrain != nil {
 		if wmoReason != "" {
 			logf("map %s: no WMO minimap over the terrain: %s", dir, wmoReason)
+		}
+		if note := wmoKnownLimits[id]; note != "" {
+			terrain.Meta.Note = note
 		}
 		return *terrain, info, true, ""
 	}
@@ -392,6 +558,7 @@ func minimapSource(set *mpq.Set, trs Translate, dir string, logf func(string, ..
 	if wmoReason != "" {
 		switch {
 		case info.Placements == 0:
+			wmoReason = "no WMO placement on this map"
 		case info.WDT:
 			wmoReason = "indoor dungeon (A: WMO-only map): " + wmoReason
 		case blank:
@@ -409,7 +576,7 @@ func minimapSource(set *mpq.Set, trs Translate, dir string, logf func(string, ..
 
 // composeWMO draws every WMO group that has tiles, the terrain picture under them when under is not nil, and returns the
 // picture plus what it measured. A terrain picture is never changed: when nothing could be drawn the caller keeps it.
-func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, logf func(string, ...any)) (*Layer, wmoInfo, string) {
+func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, nav *navBounds, skip map[uint32]bool, logf func(string, ...any)) (*Layer, wmoInfo, string) {
 	var info wmoInfo
 	places, wdt, err := wmoPlacements(set, dir, logf)
 	if err != nil {
@@ -445,6 +612,16 @@ func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, logf func
 			logf("WMO %s: the WDT MODF has position %v; the client uses (0,0,0) on a WMO-only map", m.base, p.pos)
 		}
 		d := wmoDrawable{px: px, py: py, pz: pz, th: p.rot[1] * math.Pi / 180}
+		if skip[p.uid] {
+			info.Excluded++
+			logf("WMO %s uid %d: placement belongs to another zone; not drawn", m.base, p.uid)
+			continue
+		}
+		if nav != nil && !placementNearNav(m, px, py, d.th, *nav) {
+			info.Excluded++
+			logf("WMO %s uid %d: its box is more than %.0f yd outside the map navmesh; not drawn", m.base, p.uid, wmoNavMargin)
+			continue
+		}
 		for _, g := range m.groups {
 			if len(g.tiles) == 0 {
 				continue
@@ -459,6 +636,9 @@ func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, logf func
 				it.wy0, it.wy1 = math.Min(it.wy0, Y), math.Max(it.wy1, Y)
 			}
 			drawables = append(drawables, it)
+			if len(drawables) > wmoMaxDrawables {
+				return nil, info, fmt.Sprintf("too many WMO groups to draw (more than %d)", wmoMaxDrawables)
+			}
 		}
 	}
 	if len(drawables) == 0 {
@@ -522,12 +702,22 @@ func composeWMO(set *mpq.Set, trs Translate, dir string, under *Layer, logf func
 	if m.Width <= 0 || m.Height <= 0 {
 		return nil, info, "the placed WMO groups are too narrow for a picture"
 	}
+	var jobs []wmoJob
+	for _, d := range drawables {
+		for _, j := range d.jobs(m) {
+			info.Work += int64(j.rect.Dx()) * int64(j.rect.Dy())
+			if info.Work > wmoMaxWork {
+				return nil, info, fmt.Sprintf("the WMO tiles would sample more than %d pixels", wmoMaxWork)
+			}
+			jobs = append(jobs, j)
+		}
+	}
 	img := image.NewNRGBA(image.Rect(0, 0, m.Width, m.Height))
 	if under != nil {
 		copyUnder(img, m, under)
 	}
-	for _, d := range drawables {
-		d.draw(img, m)
+	for _, j := range jobs {
+		j.draw(img, m)
 	}
 	seen := map[*wmoGroup]bool{}
 	for _, d := range drawables {
@@ -556,51 +746,6 @@ func copyUnder(dst *image.NRGBA, m Meta, under *Layer) {
 			dst.SetNRGBA(c, r, p)
 		}
 	}
-}
-
-// draw paints one group's tiles into the canvas. It walks the group's bounding rectangle in the canvas and samples each
-// output pixel back into the group's local grid, so rotation and scale are exact at every pixel.
-func (d wmoDrawable) draw(img *image.NRGBA, m Meta) {
-	c0, r0 := m.ToPixel(d.wx1, d.wy1)
-	c1, r1 := m.ToPixel(d.wx0, d.wy0)
-	x0, x1 := int(math.Floor(c0)), int(math.Ceil(c1))
-	y0, y1 := int(math.Floor(r0)), int(math.Ceil(r1))
-	x0, x1 = max(x0, 0), min(x1, m.Width-1)
-	y0, y1 = max(y0, 0), min(y1, m.Height-1)
-	for r := y0; r <= y1; r++ {
-		for c := x0; c <= x1; c++ {
-			X, Y := m.ToWorld(float64(c)+.5, float64(r)+.5)
-			x, y := d.local(X, Y)
-			if x < d.g.x0 || x > d.g.x1 || y < d.g.y0 || y > d.g.y1 {
-				continue
-			}
-			px, ok := d.g.pixelAt(x, y)
-			if !ok || px.A < 128 {
-				continue
-			}
-			px.A = 255
-			img.SetNRGBA(c, r, px)
-		}
-	}
-}
-
-// pixelAt maps a group-local point to a pixel of its tile: U = 2(x-x0) counts along local x and Vup = 2(y-y0) up from
-// y0. The tile's pixels are bottom-left anchored, so image row H-1 holds y0's edge.
-func (g *wmoGroup) pixelAt(x, y float64) (color.NRGBA, bool) {
-	U := (x - g.x0) * wmoPxPerYd
-	V := (y - g.y0) * wmoPxPerYd
-	a := int(math.Floor(U / wmoTilePx))
-	b := int(math.Floor(V / wmoTilePx))
-	t := g.tiles[[2]int{a, b}]
-	if t == nil {
-		return color.NRGBA{}, false
-	}
-	u := int(U - float64(a)*wmoTilePx)
-	v := t.Bounds().Dy() - 1 - int(V-float64(b)*wmoTilePx)
-	if u < 0 || v < 0 || u >= t.Bounds().Dx() || v >= t.Bounds().Dy() {
-		return color.NRGBA{}, false
-	}
-	return t.NRGBAAt(u, v), true
 }
 
 // oneLine collapses whitespace and caps a reason at 160 characters, as the dashboard's status.json contract says.

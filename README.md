@@ -3533,17 +3533,29 @@ The image is north up and west left, as the in-game map is: pixel column `c` is 
 `north - south` yards tall in the plane its plan drawing uses (`x -> -y`, `y -> -x`). The test pins this against the Uldaman
 plan: the entrance, Ironaya and Archaedas land on their rooms of the client's Uldaman map.
 
-A minimap's JSON also says `from`: `terrain` (the map's terrain tiles), `wmo` (only the client's indoor WMO tiles: a
-WMO-only dungeon, or one whose terrain tiles are blank) or `terrain+wmo` (the WMO tiles drawn over the terrain, as on
-Deadmines, Shadowfang Keep, Scholomance, Stratholme, Karazhan Crypt and the open dungeons with indoor props). The WMO
-tiles are the art the client itself draws indoors. Every placed WMO group that has tiles is drawn, groups whose bounding
-box bottom is higher (`PZ + z0`) over lower ones; outdoor props such as farms and ziggurats are included (they are the
-client's own art), and a group with no tiles is skipped. The placement transform is settled and pinned by tests: 2 px
-per yard, a tile index step of 128 yd, bottom-left anchored tiles, `U = 2(x-x0)`, `Vup = 2(y-y0)` with B counting up
-from the group box minimum, a 180-degree turn, `th = +rot.y`, `P = (17066.666 - pos[2], 17066.666 - pos[0], pos[1])` for
-an ADT placement and `P = 0` for a WDT one. A composed picture is capped at 8192 px a side (the scale is lowered, the
-tiles are still sampled at 2 px per yard) and at 4096 tile images (256 MiB of pixels) per map; a tile the archives lack
-or that fails to decode is skipped, and a WMO or a group with no usable tile never ends the run.
+A composed minimap's JSON also says `from`: `wmo` (only the client's indoor WMO tiles: a WMO-only dungeon, or one whose
+terrain tiles are blank) or `terrain+wmo` (the WMO tiles drawn over the terrain). A map with a usable terrain minimap
+keeps the old terrain-only picture byte for byte (no `from`), except the five maps whose indoor part the plan puts over
+the terrain: Deadmines 36, Shadowfang Keep 33, Scholomance 289, Stratholme 329 and Karazhan Crypt 800. The WMO tiles are
+the art the client itself draws indoors. Every placed WMO group that has tiles is drawn, groups whose bounding box
+bottom is higher (`PZ + z0`) over lower ones; outdoor props such as farms and ziggurats are included (they are the
+client's own art), and a group with no tiles is skipped. A placement whose box lies entirely outside the map navmesh
+box grown by 200 yd is not drawn (when `--mmaps` gives a navmesh), and two known placements of another zone are listed
+below. The placement transform is settled and pinned by tests: 2 px per yard, a tile index step of 128 yd, bottom-left
+anchored tiles, `U = 2(x-x0)`, `Vup = 2(y-y0)` with B counting up from the group box minimum, a 180-degree turn,
+`th = +rot.y`, `P = (17066.666 - pos[2], 17066.666 - pos[0], pos[1])` for an ADT placement and `P = 0` for a WDT one.
+A composed picture is capped at 8192 px a side (the scale is lowered, the tiles are still sampled at 2 px per yard),
+at 16384 group drawables, at 4096 tile images (256 MiB of decoded pixels) and at 33.5 M sampled pixels per map; a map
+over a cap gets a reason instead of a picture. A tile the archives lack or that fails to decode is skipped, and a WMO
+or a group with no usable tile never ends the run.
+
+A picture whose art has a known client-data gap carries a one-line `note` in its JSON (readers ignore the key):
+
+| map | note |
+| --- | --- |
+| 189 Scarlet Monastery | Herod's room has navmesh but no client minimap art; the plan point there is off the picture |
+| 819 Timbermaw Hold | part of the WMO has no client minimap art (navmesh areas are drawn red); the entrance is off the picture |
+| 822 Frostmane Hollow | the two Silithus mini-hives (uids 303286 and 303232) belong to another zone and are not drawn |
 
 When a source gives no picture, the extractor writes `<id>.status.json` beside the images with one line per missing
 source: `{"minimap":{"reason":"..."},"navmesh":{"reason":"..."},"worldmap":{"reason":"..."}}` (only the missing ones,

@@ -87,27 +87,35 @@ func (f alignFixture) mapDir(t *testing.T, set *mpq.Set, id uint32) string {
 	return ""
 }
 
-// compose calls the production minimap source for one map.
-func (f alignFixture) compose(t *testing.T, set *mpq.Set, trs Translate, id uint32) (Layer, wmoInfo) {
+// composeFull calls the production minimap source for one map with the map's navmesh box, and returns the polygons it
+// read for the z-band render.
+func (f alignFixture) composeFull(t *testing.T, set *mpq.Set, trs Translate, id uint32) (Layer, wmoInfo, []NavPoly) {
 	t.Helper()
-	l, info, ok, reason := minimapSource(set, trs, f.mapDir(t, set, id), t.Logf)
+	polys, tiles, perr := LoadMapPolys([]string{f.mmapsDir}, id)
+	if perr != nil || tiles == 0 {
+		t.Fatalf("map %d: mmaps: %v (%d tiles)", id, perr, tiles)
+	}
+	l, info, ok, reason := minimapSource(set, trs, f.mapDir(t, set, id), id, navBoundsOf(polys), t.Logf)
 	if !ok {
 		t.Fatalf("map %d has no minimap: %s", id, reason)
 	}
 	if l.Meta.Source != KindMinimap || l.Meta.From != fromWMO {
 		t.Fatalf("map %d: source %q from %q, want minimap/wmo", id, l.Meta.Source, l.Meta.From)
 	}
+	return l, info, polys
+}
+
+// compose calls composeFull when the polygons are not needed.
+func (f alignFixture) compose(t *testing.T, set *mpq.Set, trs Translate, id uint32) (Layer, wmoInfo) {
+	t.Helper()
+	l, info, _ := f.composeFull(t, set, trs, id)
 	return l, info
 }
 
 // zBandNav renders the navmesh polygons of a map whose mean height lies within the WMO groups' z range, so the picture
 // is compared with the dungeon floors, not the outdoor terrain of an ADT map.
-func (f alignFixture) zBandNav(t *testing.T, id uint32, info wmoInfo) (image.Image, Meta) {
+func (f alignFixture) zBandNav(t *testing.T, id uint32, info wmoInfo, polys []NavPoly) (image.Image, Meta) {
 	t.Helper()
-	polys, tiles, err := LoadMapPolys([]string{f.mmapsDir}, id)
-	if err != nil || tiles == 0 {
-		t.Fatalf("map %d: mmaps: %v (%d tiles)", id, err, tiles)
-	}
 	var keep []NavPoly
 	for _, p := range polys {
 		z := 0.0
@@ -335,11 +343,11 @@ func TestWMOAlignmentProofMaps(t *testing.T) {
 		{533, true, 0.90, false, 16},
 	} {
 		t.Run(strconv.FormatUint(uint64(c.id), 10), func(t *testing.T) {
-			l, info := f.compose(t, set, trs, c.id)
+			l, info, polys := f.composeFull(t, set, trs, c.id)
 			var nav image.Image
 			var nm Meta
 			if c.zband {
-				nav, nm = f.zBandNav(t, c.id, info)
+				nav, nm = f.zBandNav(t, c.id, info, polys)
 			} else {
 				nav, nm = f.liveNav(t, c.id)
 			}
@@ -362,6 +370,15 @@ func TestWMOAlignmentProofMaps(t *testing.T) {
 	}
 }
 
+// knownExceptions are the maps whose measured alignment fails a spec threshold for a known reason. The test fails on
+// every other failure; the reason is also written into the picture JSON as "note" where the picture itself has a limit.
+var knownExceptions = map[uint32]string{
+	189: "Herod's room has navmesh but no client art: artOnNav 0.624, 13/14 points (scarlet_armory:herod off the art)",
+	819: "part of the WMO has no navmesh (red areas where the client has no art): artOnNav 0.780, 6/7 points (entrance)",
+	822: "client art includes walls and rims with no navmesh (artOnNav 0.696); the two unrelated mini-hives are excluded, shift 0,0",
+	533: "the raw shift argmax is flat on a z-band navmesh 7x the art (artOnNav 0.939, 16/16); the filtered shift is 0,0",
+}
+
 // dungeonIDs are the 21 instance maps that have no client minimap (plan table).
 var dungeonIDs = []uint32{34, 35, 43, 48, 70, 90, 109, 129, 189, 229, 230, 249, 349, 389, 409, 429, 533, 816, 818, 819, 822}
 
@@ -379,25 +396,52 @@ func TestWMOAllDungeons(t *testing.T) {
 	}
 	for _, id := range dungeonIDs {
 		t.Run(strconv.FormatUint(uint64(id), 10), func(t *testing.T) {
-			l, info := f.compose(t, set, trs, id)
-			nav, nm := f.zBandNav(t, id, info)
+			l, info, polys := f.composeFull(t, set, trs, id)
+			nav, nm := f.zBandNav(t, id, info, polys)
 			pts := planPoints(t, f.plansDir, id)
 			m := measure(l.Img, l.Meta, nav, nm, pts)
 			name := strings.NewReplacer(" ", "_", "'", "", ":", "").Replace(strings.ToLower(strings.TrimSpace(mapName(t, set, id))))
 			if err := writeOverlay(filepath.Join(outDir, fmt.Sprintf("%d-%s.overlay.png", id, name)), l.Img, l.Meta, nav, nm, pts); err != nil {
 				t.Fatal(err)
 			}
-			pass := m.shiftWithin(2)
-			metric := "iou"
-			if !info.WDT {
-				metric = "artOnNav"
-				pass = pass && m.artOnNav >= 0.80
+			pass, metric := true, "iou"
+			if info.WDT {
+				pass = m.iou >= 0.50
 			} else {
-				pass = pass && m.iou >= 0.50
+				metric = "artOnNav"
+				pass = m.artOnNav >= 0.80
 			}
-			t.Logf("W2B map=%d name=%q produced=y tiles=%d %s metric=%s pass=%v", id, mapName(t, set, id), info.Tiles, m, metric, pass)
+			pass = pass && m.shiftWithin(2) && m.hits == m.points
+			raw3 := absInt(m.rawShiftX) > 3 || absInt(m.rawShiftY) > 3
+			t.Logf("W2B map=%d name=%q produced=y tiles=%d excluded=%d %s metric=%s pass=%v rawOver3=%v",
+				id, mapName(t, set, id), info.Tiles, info.Excluded, m, metric, pass, raw3)
+			if !pass || raw3 {
+				if reason, ok := knownExceptions[id]; ok {
+					t.Logf("KNOWN EXCEPTION map=%d: %s", id, reason)
+				} else {
+					t.Errorf("map %d alignment failed: %s (pass=%v, raw shift over 3 yd: %v)", id, m, pass, raw3)
+				}
+			}
 		})
 	}
+}
+
+// TestFrostmaneHivesExcluded checks the navmesh-box placement rule on the map that needed it: the two outdoor mini-hive
+// WMOs (uids 303286 and 303232) stand far from the dungeon and must not grow the picture.
+func TestFrostmaneHivesExcluded(t *testing.T) {
+	f := alignDirs(t)
+	set, trs := f.open(t)
+	l, info, polys := f.composeFull(t, set, trs, 822)
+	if info.Excluded < 2 {
+		t.Errorf("excluded = %d placements, want the two mini-hive WMOs", info.Excluded)
+	}
+	// The full picture was 2798 px wide with the hives; the dungeon alone is under 2000 px.
+	if l.Meta.Width > 2000 {
+		t.Errorf("canvas %d px wide, want the hives' ~350 yd of picture gone", l.Meta.Width)
+	}
+	nav, nm := f.zBandNav(t, 822, info, polys)
+	m := measure(l.Img, l.Meta, nav, nm, planPoints(t, f.plansDir, 822))
+	t.Logf("822: excluded=%d canvas=%dx%d %s", info.Excluded, l.Meta.Width, l.Meta.Height, m)
 }
 
 func mapName(t *testing.T, set *mpq.Set, id uint32) string {

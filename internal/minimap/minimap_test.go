@@ -76,7 +76,8 @@ func TestParseTranslate(t *testing.T) {
 		"WMO\\World\\wmo\\Dungeon\\kz_uldaman_b_006_03_00.blp\tw1.blp\n" +
 		"wmo/world/wmo/dungeon/stratholme_b_012_04_01.blp\tw2.blp\n" +
 		"WMO\\World\\wmo\\Dungeon\\mini-hive_d_000_00_00.blp\tw3.blp\n" +
-		"WMO\\World\\wmo\\Dungeon\\bad_0_0.blp\tw4.blp\n"
+		"WMO\\World\\wmo\\Dungeon\\bad_0_0.blp\tw4.blp\n" +
+		"WMO\\World\\wmo\\Dungeon\\sign_+03_00_00.blp\tw5.blp\n"
 	got := ParseTranslate([]byte(in))
 	zf := got.Terrain["zulfarrak"]
 	if len(zf) != 2 {
@@ -104,6 +105,9 @@ func TestParseTranslate(t *testing.T) {
 	}
 	if len(got.WMO["bad"]) != 0 {
 		t.Errorf("a tile without the fixed-width numbers is accepted: %v", got.WMO["bad"])
+	}
+	if len(got.WMO["sign"]) != 0 {
+		t.Errorf("a signed field is accepted: %v", got.WMO["sign"])
 	}
 }
 

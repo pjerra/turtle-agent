@@ -54,6 +54,8 @@ type Meta struct {
 	// minimap tiles of the WMO groups) or "terrain+wmo" (the WMO tiles drawn over the terrain). Empty for the other
 	// sources.
 	From string `json:"from,omitempty"`
+	// Note is a one-line known limit of the picture (a client-data gap), for humans; readers ignore unknown keys.
+	Note string `json:"note,omitempty"`
 }
 
 // Bounds fills the world edges for tiles rows r0..r1 and columns c0..c1 (inclusive) drawn at px pixels per tile.
@@ -134,11 +136,14 @@ func parseWMOTile(file string) (string, WMOTile, bool) {
 		return "", WMOTile{}, false
 	}
 	n := len(parts)
+	if len(parts[n-3]) != 3 || len(parts[n-2]) != 2 || len(parts[n-1]) != 2 ||
+		!allDigits(parts[n-3]) || !allDigits(parts[n-2]) || !allDigits(parts[n-1]) {
+		return "", WMOTile{}, false
+	}
 	g, err1 := strconv.Atoi(parts[n-3])
 	a, err2 := strconv.Atoi(parts[n-2])
 	bb, err3 := strconv.Atoi(parts[n-1])
-	if err1 != nil || err2 != nil || err3 != nil ||
-		len(parts[n-3]) != 3 || len(parts[n-2]) != 2 || len(parts[n-1]) != 2 {
+	if err1 != nil || err2 != nil || err3 != nil {
 		return "", WMOTile{}, false
 	}
 	base := strings.Join(parts[:n-3], "_")
@@ -146,6 +151,16 @@ func parseWMOTile(file string) (string, WMOTile, bool) {
 		return "", WMOTile{}, false
 	}
 	return base, WMOTile{Group: g, A: a, B: bb}, true
+}
+
+// allDigits reports whether s is a non-empty run of ASCII digits (Atoi alone accepts a sign).
+func allDigits(s string) bool {
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

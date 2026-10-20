@@ -170,7 +170,7 @@ func composed(t *testing.T, client string, id uint32) (Layer, wmoInfo) {
 		}
 	}
 	trs := ParseTranslate(mustRead(t, set, translatePath))
-	l, info, ok, reason := minimapSource(set, trs, dir, t.Logf)
+	l, info, ok, reason := minimapSource(set, trs, dir, id, nil, t.Logf)
 	if !ok {
 		t.Fatalf("no minimap: %s", reason)
 	}

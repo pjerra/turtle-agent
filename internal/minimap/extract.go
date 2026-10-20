@@ -74,11 +74,16 @@ type Layer struct {
 	Img image.Image
 }
 
-// Label is the layer's short name in the --list table: its kind, what a minimap is made of, and its floor.
+// Label is the layer's short name in the --list table: its kind, what a minimap is made of, and its floor. A minimap
+// with no "from" in its JSON is the old terrain-only picture.
 func (l Layer) Label() string {
 	s := l.Kind
-	if l.Kind == KindMinimap && l.Meta.From != "" {
-		s += "(" + l.Meta.From + ")"
+	if l.Kind == KindMinimap {
+		from := l.Meta.From
+		if from == "" {
+			from = fromTerrain
+		}
+		s += "(" + from + ")"
 	}
 	return s + l.Floor
 }
@@ -215,14 +220,31 @@ func Run(o Options) ([]Result, error) {
 		reasons := map[string]string{} // the reason of every source the map has no image for, for <id>.status.json
 		var notes []string
 		have := map[string][]Layer{}
-		if l, _, ok, reason := minimapSource(set, trs, r.Dir, logf); ok {
+		// The navmesh serves twice: its world box drops WMO placements that stand far outside the map (Frostmane
+		// Hollow's unrelated mini-hives), and its render is the navmesh layer.
+		var polys []NavPoly
+		var navTiles int
+		var navErr error
+		if len(o.MmapsDirs) > 0 {
+			polys, navTiles, navErr = LoadMapPolys(o.MmapsDirs, r.ID)
+		}
+		var nb *navBounds
+		if navErr == nil {
+			nb = navBoundsOf(polys)
+		}
+		fail := func(err error) {
+			if err != nil && res.Error == nil {
+				res.Error = err
+			}
+		}
+		if l, _, ok, reason := minimapSource(set, trs, r.Dir, r.ID, nb, logf); ok {
 			have[KindMinimap] = []Layer{l}
 		} else {
 			reasons[KindMinimap] = reason
 			notes = append(notes, reason)
 		}
 		if ls, err := worldMaps(set, wma, r.ID); err != nil {
-			res.Error = err
+			fail(err)
 			reasons[KindWorldMap] = err.Error()
 			notes = append(notes, err.Error())
 		} else if len(ls) > 0 {
@@ -235,26 +257,22 @@ func Run(o Options) ([]Result, error) {
 		case len(o.MmapsDirs) == 0:
 			reasons[KindNavmesh] = noMmapsReason
 			notes = append(notes, noMmapsReason)
+		case navErr != nil:
+			fail(navErr)
+			reasons[KindNavmesh] = navErr.Error()
+			notes = append(notes, navErr.Error())
+		case navTiles == 0:
+			reasons[KindNavmesh] = "no navmesh picture: the mmaps folder has no tile for this map"
+			notes = append(notes, reasons[KindNavmesh])
 		default:
-			polys, n, perr := LoadMapPolys(o.MmapsDirs, r.ID)
-			switch {
-			case perr != nil:
-				res.Error = perr
-				reasons[KindNavmesh] = perr.Error()
-				notes = append(notes, perr.Error())
-			case n == 0:
-				reasons[KindNavmesh] = "no navmesh picture: the mmaps folder has no tile for this map"
-				notes = append(notes, reasons[KindNavmesh])
-			default:
-				nimg, nmeta, rerr := RenderNavmesh(polys, 2, 4096)
-				if rerr != nil {
-					res.Error = rerr
-					reasons[KindNavmesh] = rerr.Error()
-					notes = append(notes, rerr.Error())
-				} else {
-					nmeta.Tiles = n
-					have[KindNavmesh] = []Layer{{Kind: KindNavmesh, Meta: nmeta, Img: nimg}}
-				}
+			nimg, nmeta, rerr := RenderNavmesh(polys, 2, 4096)
+			if rerr != nil {
+				fail(rerr)
+				reasons[KindNavmesh] = rerr.Error()
+				notes = append(notes, rerr.Error())
+			} else {
+				nmeta.Tiles = navTiles
+				have[KindNavmesh] = []Layer{{Kind: KindNavmesh, Meta: nmeta, Img: nimg}}
 			}
 		}
 		for _, k := range prefer {
