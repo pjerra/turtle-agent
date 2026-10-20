@@ -93,12 +93,15 @@ type BreakTouched struct {
 // PullOnPath is a pull group and whether the leg's live route's corridor holds one of its
 // positions.
 type PullOnPath struct {
-	Group    int      `json:"group"`
-	OnPath   bool     `json:"on_path"`
-	NearYd   float64  `json:"near_yd"` // horizontal distance of the nearest position to the route
-	DZYd     float64  `json:"dz_yd"`
-	RadiusYd float64  `json:"radius_yd"`
-	Entries  []uint32 `json:"entries"`
+	Group  int  `json:"group"`
+	OnPath bool `json:"on_path"`
+	// InCorridor (bosses mode): the centre is within the radius plus CorridorSlackYd of the
+	// route, the walk mode's own on_path measure.
+	InCorridor bool     `json:"in_corridor,omitempty"`
+	NearYd     float64  `json:"near_yd"` // horizontal distance of the nearest position to the route
+	DZYd       float64  `json:"dz_yd"`
+	RadiusYd   float64  `json:"radius_yd"`
+	Entries    []uint32 `json:"entries"`
 }
 
 // LegReport is one leg's comparison of the stored route and the live route.

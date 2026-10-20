@@ -108,3 +108,69 @@ func TestRouteOracleWritesTheFixtureReports(t *testing.T) {
 		}
 	}
 }
+
+// An unknown --mode is a usage error, refused before anything is made or planned.
+func TestRouteOracleRefusesAnUnknownMode(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out")
+	for _, mode := range []string{"boss", "Walk", "", "walk,bosses"} {
+		var stdout, stderr bytes.Buffer
+		code := routeOracleCmd([]string{"--mmaps", "/nowhere", "--out", out, "--mode", mode}, &stdout, &stderr)
+		if code != exitUsage {
+			t.Errorf("mode %q: exit %d, want %d (stderr %q)", mode, code, exitUsage, stderr.String())
+		}
+		if !strings.HasPrefix(stderr.String(), "route-oracle: unknown --mode") {
+			t.Errorf("mode %q: stderr %q", mode, stderr.String())
+		}
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("--out was made for a refused mode")
+	}
+}
+
+// The default mode is walk: without --mode the walk files are written and no bosses file is;
+// with --mode bosses the <plan>-bosses files are written and the walk files are not. The plan
+// has a gap in its mesh, so the bosses report carries a failed leg.
+func TestRouteOracleModeDefaultsToWalk(t *testing.T) {
+	dungeons := t.TempDir()
+	plan := `{"version":1,"name":"corridor","map":0,"entrance":{"x":12,"y":12,"z":0},"legs":[
+	 {"name":"hall","to":{"x":46,"y":12,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":44,"y":12,"z":0}]}]},
+	 {"name":"far","to":{"x":48,"y":44,"z":0},"boss":{"entry":2,"position":{"x":48,"y":48,"z":0}}}]}`
+	if err := os.WriteFile(filepath.Join(dungeons, "corridor.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var polys []navfixture.Poly
+	for _, p := range navfixture.LCorridor(0) {
+		if !(p[0][0] == 46 && p[0][1] == 26) {
+			polys = append(polys, p)
+		}
+	}
+	mmaps := navfixture.WriteDir(t, 0, polys)
+	exists := func(dir, f string) bool { _, err := os.Stat(filepath.Join(dir, f)); return err == nil }
+
+	walkOut := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := routeOracleCmd([]string{"--plans", dungeons, "--mmaps", mmaps, "--out", walkOut, "--plan", "corridor"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("default: exit %d (stderr %q)", code, stderr.String())
+	}
+	if !exists(walkOut, "corridor.json") || !exists(walkOut, "corridor.txt") || exists(walkOut, "corridor-bosses.json") || exists(walkOut, "corridor-bosses.txt") {
+		t.Errorf("default mode did not write the walk files alone")
+	}
+
+	bossOut := t.TempDir()
+	stdout.Reset()
+	stderr.Reset()
+	if code := routeOracleCmd([]string{"--plans", dungeons, "--mmaps", mmaps, "--out", bossOut, "--plan", "corridor", "--mode", "bosses"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("bosses: exit %d (stderr %q)", code, stderr.String())
+	}
+	if !exists(bossOut, "corridor-bosses.json") || !exists(bossOut, "corridor-bosses.txt") || exists(bossOut, "corridor.json") || exists(bossOut, "corridor.txt") {
+		t.Errorf("bosses mode did not write the -bosses files alone")
+	}
+	// The failed leg is listed with its reason on stdout and in the table.
+	if !strings.Contains(stdout.String(), "1 complete, 1 failed") || !strings.Contains(stdout.String(), "leg 1 (far): partial") {
+		t.Errorf("stdout %q", stdout.String())
+	}
+	txt, err := os.ReadFile(filepath.Join(bossOut, "corridor-bosses.txt"))
+	if err != nil || !strings.Contains(string(txt), "FAILED leg 1 (far)") {
+		t.Errorf("table: err %v\n%s", err, txt)
+	}
+}

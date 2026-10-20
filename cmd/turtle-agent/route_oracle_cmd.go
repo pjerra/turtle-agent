@@ -20,7 +20,15 @@ import (
 // exitRouteOracle: route-oracle could not report every plan (a failing plan is not a usage error).
 const exitRouteOracle = 12
 
-const routeOracleUsage = "usage: turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--plan NAME]..."
+const routeOracleUsage = "usage: turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--plan NAME]..."
+
+// The two modes. walk (the default) plans each plan's own stored sequence hop by hop and
+// scores the stored hops against the navmesh; bosses plans entrance -> each leg's objective
+// live, with no hand points and no break hops, to see what a boss list alone could do.
+const (
+	modeWalk   = "walk"
+	modeBosses = "bosses"
+)
 
 // routeOracleDefaultPlans are the plans the oracle reports when no --plan is given.
 var routeOracleDefaultPlans = []string{"wailing_caverns", "ragefire_chasm", "uldaman", "zulfarrak", "deadmines"}
@@ -49,7 +57,8 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	plansDir := fs.String("plans", "dungeons", "the folder with the plan files")
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps (<map>.mmap and <map>*.mmtile); required")
-	out := fs.String("out", "", "folder for <plan>.txt and <plan>.json; required")
+	out := fs.String("out", "", "folder for <plan>.txt and <plan>.json (<plan>-bosses.* in bosses mode); required")
+	mode := fs.String("mode", modeWalk, "walk: score the plan's stored hops on the navmesh; bosses: plan entrance -> each boss live, with no hand points")
 	var plans []string
 	fs.Var(&planList{&plans}, "plan", "a plan name; repeatable (default: "+strings.Join(routeOracleDefaultPlans, ", ")+")")
 	if err := fs.Parse(args); err != nil {
@@ -60,6 +69,10 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if *mmaps == "" || *out == "" || fs.NArg() > 0 {
 		fmt.Fprintln(stderr, routeOracleUsage)
+		return exitUsage
+	}
+	if *mode != modeWalk && *mode != modeBosses {
+		fmt.Fprintf(stderr, "route-oracle: unknown --mode %q (want %s or %s)\n", *mode, modeWalk, modeBosses)
 		return exitUsage
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -96,19 +109,36 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		t0 := time.Now()
-		rep, err := routeoracle.Oracle(planner, *mmaps, p)
-		if err != nil {
-			fmt.Fprintf(stderr, "route-oracle: %v\n", err)
-			failed = true
-			continue
+		var summary string
+		var tiles []routeoracle.TileFile
+		if *mode == modeBosses {
+			rep, err := routeoracle.Bosses(planner, *mmaps, p)
+			if err == nil {
+				err = writeBosses(rep, *out, n)
+			}
+			if err != nil {
+				fmt.Fprintf(stderr, "route-oracle: %v\n", err)
+				failed = true
+				continue
+			}
+			summary, tiles = rep.Summary(), rep.Tiles
+			for _, f := range failedBossLegs(rep) {
+				summary += "\n  " + f
+			}
+		} else {
+			rep, err := routeoracle.Oracle(planner, *mmaps, p)
+			if err == nil {
+				err = writeOracle(rep, *out, n)
+			}
+			if err != nil {
+				fmt.Fprintf(stderr, "route-oracle: %v\n", err)
+				failed = true
+				continue
+			}
+			summary, tiles = rep.Summary(), rep.Tiles
 		}
-		if err := writeOracle(rep, *out, n); err != nil {
-			fmt.Fprintf(stderr, "route-oracle: %v\n", err)
-			failed = true
-			continue
-		}
-		fmt.Fprintf(stdout, "%s (%.0f ms wall)\n%s\n", rep.Plan, float64(time.Since(t0).Microseconds())/1000, rep.Summary())
-		for _, t := range rep.Tiles {
+		fmt.Fprintf(stdout, "%s (%.0f ms wall)\n%s\n", p.Name, float64(time.Since(t0).Microseconds())/1000, summary)
+		for _, t := range tiles {
 			fmt.Fprintf(stdout, "  %s %s (%d bytes)\n", t.Name, t.Sha256, t.Bytes)
 		}
 	}
@@ -121,6 +151,25 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 // writeOracle writes the plan's <name>.txt and <name>.json into dir, under the validated
 // CLI name (never the plan JSON's own), and refuses a destination that resolves outside dir.
 func writeOracle(rep routeoracle.Report, dir, name string) error {
+	txt, err := oracleText(rep)
+	if err != nil {
+		return err
+	}
+	return writeReport(rep, txt, dir, name)
+}
+
+// writeBosses writes the plan's <name>-bosses.txt and <name>-bosses.json, under the validated
+// CLI name like writeOracle.
+func writeBosses(rep routeoracle.BossesReport, dir, name string) error {
+	txt, err := bossesText(rep)
+	if err != nil {
+		return err
+	}
+	return writeReport(rep, txt, dir, name+"-bosses")
+}
+
+// writeReport writes <stem>.json (the report) and <stem>.txt (the table) into dir.
+func writeReport(rep any, txt []byte, dir, name string) error {
 	b, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return err
@@ -132,10 +181,6 @@ func writeOracle(rep routeoracle.Report, dir, name string) error {
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, name+".json"), append(b, '\n'), 0o644); err != nil {
-		return err
-	}
-	txt, err := oracleText(rep)
-	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, name+".txt"), txt, 0o644)
