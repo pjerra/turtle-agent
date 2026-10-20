@@ -81,6 +81,20 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 			failed = true
 			continue
 		}
+		// The plan file's own name must be a plan name and the one asked for: the report is
+		// written under the name, so a name read from the JSON ("../escape") must never
+		// reach a path — the file names below come from the validated CLI name, and Oracle
+		// re-checks the plan's own.
+		if err := routeoracle.CheckName(p.Name); err != nil {
+			fmt.Fprintf(stderr, "route-oracle: %s.json: %v\n", n, err)
+			failed = true
+			continue
+		}
+		if p.Name != n {
+			fmt.Fprintf(stderr, "route-oracle: %s.json says name %q, want %q\n", n, p.Name, n)
+			failed = true
+			continue
+		}
 		t0 := time.Now()
 		rep, err := routeoracle.Oracle(planner, *mmaps, p)
 		if err != nil {
@@ -88,7 +102,7 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 			failed = true
 			continue
 		}
-		if err := writeOracle(rep, *out); err != nil {
+		if err := writeOracle(rep, *out, n); err != nil {
 			fmt.Fprintf(stderr, "route-oracle: %v\n", err)
 			failed = true
 			continue
@@ -104,31 +118,38 @@ func routeOracleCmd(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// writeOracle writes the plan's <plan>.txt and <plan>.json into dir.
-func writeOracle(rep routeoracle.Report, dir string) error {
+// writeOracle writes the plan's <name>.txt and <name>.json into dir, under the validated
+// CLI name (never the plan JSON's own), and refuses a destination that resolves outside dir.
+func writeOracle(rep routeoracle.Report, dir, name string) error {
 	b, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, rep.Plan+".json"), append(b, '\n'), 0o644); err != nil {
+	for _, target := range []string{filepath.Join(dir, name+".json"), filepath.Join(dir, name+".txt")} {
+		rel, err := filepath.Rel(dir, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("report %s resolves outside %s", target, dir)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".json"), append(b, '\n'), 0o644); err != nil {
 		return err
 	}
 	txt, err := oracleText(rep)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, rep.Plan+".txt"), txt, 0o644)
+	return os.WriteFile(filepath.Join(dir, name+".txt"), txt, 0o644)
 }
 
-// oracleText is the plan's human table: one line per leg, then the touched breaks, the packs
-// off the path, the stored points that are not redundant, the path's reasons, and the files
-// used with their SHA-256.
+// oracleText is the plan's human table: one line per leg, then the failed legs' hops, the
+// touched breaks, the packs off the path, the stored points that are not redundant, the
+// path's reasons, and the files used with their SHA-256.
 func oracleText(rep routeoracle.Report) ([]byte, error) {
 	var buf bytes.Buffer
 	w := tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "%s (map %d, status %q, %d avoid boxes)\n", rep.Plan, rep.Map, rep.Status, rep.Avoid)
 	fmt.Fprintln(w, rep.Summary())
-	fmt.Fprintln(w, "metrics against the avoid-aware path (a scratch planner with SetAvoid of the plan's boxes)")
+	fmt.Fprintln(w, "metrics against the avoid-aware route (a scratch planner with SetAvoid of the plan's boxes); failed and indeterminate legs score nothing")
 	fmt.Fprintf(w, "plan time %.0f ms\n", rep.PlanMs)
 	fmt.Fprintln(w, "leg\tname\tobjective\tfrom\tto\tplain\tavoid\tgap\tlive\tstored\tratio\tmaxd\tmeand\tzj\tbreaks\tpacks\tredundant")
 	for i := range rep.Legs {
@@ -142,11 +163,21 @@ func oracleText(rep routeoracle.Report) ([]byte, error) {
 	}
 	for i := range rep.Legs {
 		lr := &rep.Legs[i]
-		if lr.Avoid.Reason != "" {
-			fmt.Fprintf(w, "leg %d (%s): avoid %s: %s\n", lr.Leg, lr.Name, lr.Avoid.Status, lr.Avoid.Reason)
+		if lr.Reason != "" {
+			fmt.Fprintf(w, "leg %d (%s): %s: %s\n", lr.Leg, lr.Name, lr.Status, lr.Reason)
 		}
-		if lr.Plain.Status != lr.Avoid.Status && lr.Plain.Reason != "" {
-			fmt.Fprintf(w, "leg %d (%s): plain %s: %s\n", lr.Leg, lr.Name, lr.Plain.Status, lr.Plain.Reason)
+		if lr.Status == "complete" {
+			continue // a complete leg's hops say nothing the table does not
+		}
+		for j := range lr.Segments {
+			seg := &lr.Segments[j]
+			mark := ""
+			if seg.NonComparable {
+				mark = ", non-comparable (planned on from the point the partial path reached)"
+			}
+			fmt.Fprintf(w, "leg %d (%s): hop %d (%s) %.1f,%.1f -> %.1f,%.1f: plain %s, avoid %s, live %.1f yd, stored %.1f yd, ratio %.2f%s\n",
+				lr.Leg, lr.Name, seg.Seq, seg.Kind, seg.From.X, seg.From.Y, seg.At.X, seg.At.Y,
+				seg.Plain.Status, seg.Avoid.Status, seg.Avoid.LiveLenYd, seg.StoredLenYd, seg.Ratio, mark)
 		}
 		for _, b := range lr.Breaks {
 			if b.Touched {
@@ -161,8 +192,8 @@ func oracleText(rep routeoracle.Report) ([]byte, error) {
 			}
 		}
 		for _, s := range lr.Stored {
-			if !s.Redundant && (s.Kind == "approach" || s.Kind == "via" || s.Kind == "boss_approach") {
-				fmt.Fprintf(w, "leg %d (%s): stored %s (seq %d) at %.1f,%.1f,%.1f is %.1f yd from the path\n",
+			if !s.Redundant && isApproachVia(s.Kind) {
+				fmt.Fprintf(w, "leg %d (%s): stored %s (seq %d) at %.1f,%.1f,%.1f is %.1f yd from the route\n",
 					lr.Leg, lr.Name, s.Kind, s.Seq, s.At.X, s.At.Y, s.At.Z, s.NearYd)
 			}
 		}

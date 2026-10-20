@@ -74,8 +74,9 @@ func NearestPolyline(pts []Vec3, p Vec3) NearPoint {
 			best = NearPoint{Dist3D: d3, Dist2D: d2, DZ: dz, At: q}
 		}
 	}
-	upd(pts[0])
-	upd(pts[len(pts)-1])
+	for i := range pts {
+		upd(pts[i])
+	}
 	for i := 1; i < len(pts); i++ {
 		a, b := pts[i-1], pts[i]
 		ab := [3]float64{float64(b[0] - a[0]), float64(b[1] - a[1]), float64(b[2] - a[2])}
