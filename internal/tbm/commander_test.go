@@ -53,6 +53,24 @@ func TestCheckCommand(t *testing.T) {
 	}
 }
 
+// The server's run recorder is the one `.bot` group outside commander/cmd/run that a run sends (run_meta.server_trace): exactly its
+// start, its stop and the status the stop's retries read. Every other `.bot` line is still refused.
+func TestCheckCommandTrace(t *testing.T) {
+	// The driver word carries 1-96 characters after driver= (the server stores the value, at most 96: dungeon.RunMeta.Check); a run id is
+	// the commander's own argument.
+	long := strings.Repeat("a", 96)
+	for _, ok := range []string{"trace start r-20261020T095109-ab12 driver=deepseek:v4.1-flash:wc-s2", "trace stop", "trace status", "TRACE Stop", "trace start r driver=" + long} {
+		if err := CheckCommand(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"trace", "trace foo", "trace start", "trace start r;say hi", "trace stop now", "trace stop driver=x", "maintenance Tanky", "autogear Tanky blue", "inv Tanky", "logout Tanky", "trace start r driver=a b", "trace start r driver=" + long + "a", "trace start r notdriver=1", "trace start driver=x", "trace start r driver=bad/path"} {
+		if err := CheckCommand(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
 func TestIntent(t *testing.T) {
 	for in, want := range map[string]string{"cmd move 1 2 3": "cmd move", ".bot commander bind A B": "commander bind", "cmd": "", "CMD Rest": "cmd rest"} {
 		if got := Intent(in); got != want {

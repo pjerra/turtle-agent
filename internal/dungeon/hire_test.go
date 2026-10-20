@@ -1508,3 +1508,39 @@ func TestHireEpicIsJudgedAgainstTheBotsOwnLevel(t *testing.T) {
 		t.Fatalf("an epic for level 44 passed on a bot of level 42: %v %s", err, rep.State)
 	}
 }
+
+// The hire check's `.bot maintenance` follows the observe switch (#253): an observed run without observe.maintenance sends none (it walks
+// the hire to a vendor right after autogear); the supplies it finds are reported, and a driven run keeps topping them up.
+func TestHireMaintenanceFollowsTheObserveSwitch(t *testing.T) {
+	run := func(maintain bool) (*hireFake, *PrepareReport, error) {
+		g := newHireFake(t) // noSupplies: the hires come with empty bags
+		e := &prepEnv{g: g, plan: g.plan, spec: PrepareSpec{Party: PartyHire}, remote: true, maintain: maintain,
+			now: func() time.Time { return g.now }, sleep: g.clock().Sleep, note: func(string) {}, command: g.Command, settle: time.Second}
+		rep, err := runPrepare(context.Background(), e)
+		return g, rep, err
+	}
+	g, rep, err := run(false)
+	if n := g.count("maintenance"); n != 0 {
+		t.Fatalf("an observed hire check sent %d .bot maintenance lines: %v", n, g.botCmds)
+	}
+	if err == nil || !strings.Contains(err.Error(), "supplies:") {
+		t.Fatalf("the empty supplies were not reported: %v", err)
+	}
+	warned := false
+	for _, b := range rep.Ready.Bots {
+		for _, w := range b.Warnings {
+			warned = warned || strings.Contains(w, "observe mode: .bot maintenance skipped")
+		}
+	}
+	if !warned {
+		t.Fatalf("no warning names the skipped maintenance: %+v", rep.Ready.Bots)
+	}
+	g, rep, err = run(true)
+	if err != nil || !rep.Ready.Ready {
+		t.Fatalf("a driven hire check with maintenance failed: %v", err)
+	}
+	// The healer, the caster and the hunter (ammo); the tank and the rogue have nothing to top up.
+	if n := g.count("maintenance"); n != 3 || g.count("maintenance is disabled") != 0 {
+		t.Fatalf("maintenance lines %d: %v", n, g.botCmds)
+	}
+}

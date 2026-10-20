@@ -3,7 +3,9 @@ package dungeon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +27,9 @@ type fakeLeader struct {
 	listText     string // the answer of `run list`; empty: the server has no run leader and says nothing
 	startErr     string // the code `run start` is refused with
 	script       []leaderStep
-	noStopReason bool // a module from before TortoiseBots #1070: `run stop <reason>` is invalid
-	pushOff      bool // the feed does not deliver the pushed lines: only `run status` shows them
+	noStopReason bool     // a module from before TortoiseBots #1070: `run stop <reason>` is invalid
+	pushOff      bool     // the feed does not deliver the pushed lines: only `run status` shows them
+	startExtra   []string // extra lines the module's answer to `run start` carries (its start message)
 
 	running, paused bool
 	progress        time.Duration
@@ -129,7 +132,7 @@ func (l *fakeLeader) Command(ctx context.Context, command string) (tbm.Reply, er
 		l.running = true
 		r := ack(intent)
 		l.advanceLeader()
-		r.Lines = l.statusLines()
+		r.Lines = append(slices.Clone(l.startExtra), l.statusLines()...)
 		return r, nil
 	case "status":
 		r := ack(intent)
@@ -498,5 +501,362 @@ func TestRunControlNeedsAnObservedRun(t *testing.T) {
 	d := NewRemoteDriver(observePlan(), g, DefaultConfig(), opts(), g.clock())
 	if err := d.RunControl("pause"); err == nil {
 		t.Fatal("a driven run took a run control")
+	}
+}
+
+// maintenanceFake answers plain `.bot` lines (the preflight's maintenance, inv and talents) and records them, the way the real game does.
+type maintenanceFake struct {
+	*fakeLeader
+	botCmds []string
+}
+
+func (g *maintenanceFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
+	g.botCmds = append(g.botCmds, command)
+	return nil, false, nil
+}
+
+// maintenanceCmds are the `.bot maintenance` lines among the plain lines.
+func maintenanceCmds(cmds []string) []string {
+	var out []string
+	for _, c := range cmds {
+		if strings.HasPrefix(c, "maintenance ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// An observed run's preflight sends no `.bot maintenance` (it walks every bot to a vendor and scatters the party right after the hires'
+// autogear, which pauses the run leader with "the lead bot is not on the plan's map", #253); the kit check's reads still run.
+func TestObserveStartSendsNoMaintenanceByDefault(t *testing.T) {
+	g := &maintenanceFake{fakeLeader: newFakeLeader(t, happyScript()...)}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if got := maintenanceCmds(g.botCmds); len(got) != 0 {
+		t.Fatalf("an observed start sent maintenance: %v", got)
+	}
+	if !slices.Contains(g.botCmds, "inv Tanky") || !slices.Contains(g.botCmds, "command Tanky talents") {
+		t.Fatalf("the kit check's reads did not run: %v", g.botCmds)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "maintenance skipped (observe mode") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// observe.maintenance turns it back on, one line per bot of the first frame.
+func TestObserveMaintenanceOption(t *testing.T) {
+	g := &maintenanceFake{fakeLeader: newFakeLeader(t, happyScript()...)}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Maintenance: true}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	want := []string{"maintenance Tanky", "maintenance Healy", "maintenance Magey"}
+	if got := maintenanceCmds(g.botCmds); !slices.Equal(got, want) {
+		t.Fatalf("maintenance %v, want %v", got, want)
+	}
+}
+
+// A partial start (#248) goes out in the start line: the probe asks the resolver with the step count `.bot run list` gave, and
+// startRunLeader sends its `from ...` words.
+func TestObserveStartsPartway(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	asked := -1
+	o.StartFrom = func(serverSteps int) (PartialStart, error) {
+		asked = serverSteps
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}, nil
+	}
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	rep, err := runRemote(t, g, observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if asked != 5 { // the fake lists "rt (map 0, 5 steps)"
+		t.Fatalf("the resolver saw %d steps, want 5", asked)
+	}
+	if !slices.Contains(g.orders, "run start rt from step 3") {
+		t.Fatalf("orders %v", g.orders)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "starts partway") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// A partial start the resolver cannot map is refused at the probe, before a bot is hired or bound.
+func TestObserveStartFromRefusedAtTheProbe(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{}, errors.New("from_pull_group 3: the server's plan has 226 steps, the plan file's rows give 198")
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "observe mode: from_pull_group 3") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.ordersOf("commander bind")) != 0 || len(g.ordersOf("run start")) != 0 {
+		t.Fatalf("something was sent: %v", g.orders)
+	}
+}
+
+// A busy run of the same plan is adopted for a partial start only when its status proves it is at the requested step (A).
+func TestObserveBusyAtTheRequestedStepIsAdopted(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	g.running = true
+	g.emit(rs("running", 3, 5, "first", "move", "walk", "walking"))
+	g.progress, g.next = s(20), 3
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}, nil
+	}
+	rep, err := runRemote(t, g, observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "already going") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// At another step the run going is not watched: the watch would not be the requested start (A).
+func TestObserveBusyAtAnotherStepIsRefused(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	g.running = true
+	g.emit(rs("running", 2, 5, "first", "pull", "pull", "pulling"))
+	g.progress, g.next = s(9), 2
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}, nil
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "busy") || !strings.Contains(err.Error(), "step 2") || !strings.Contains(err.Error(), "requested step 3") {
+		t.Fatalf("%v", err)
+	}
+	if g.indexOf("run stop") >= 0 {
+		t.Fatalf("another run was stopped: %v", g.orders)
+	}
+}
+
+// A leg start by name is adopted only when the status stands in that leg; a leg sent as a number cannot be compared, so it never adopts.
+func TestObserveBusyLegStart(t *testing.T) {
+	newBusy := func(leg string) *fakeLeader {
+		g := newFakeLeader(t,
+			leaderStep{0, rs("running", 4, 5, leg, "move", "walk", "walking")},
+			leaderStep{s(30), rs("done", 5, 5, leg, "move", "walk", "plan done")})
+		g.running = true
+		g.emit(g.script[0].st) // the status `run status` answers with, before the clock moves
+		g.next = 1
+		return g
+	}
+	legStart := func(name string) func(int) (PartialStart, error) {
+		return func(int) (PartialStart, error) {
+			return PartialStart{Words: "from leg " + name, Leg: 1, LegNumber: 1, LegName: name, Point: Point{}, HavePoint: true}, nil
+		}
+	}
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = legStart("second")
+	if rep, err := runRemote(t, newBusy("second"), observePlan(), o, nil); err != nil || rep.State != "done" {
+		t.Fatalf("same leg: %v %s %s", err, rep.State, rep.Error)
+	}
+	o = observeOpts(ObserveSpec{})
+	o.StartFrom = legStart("second")
+	if _, err := runRemote(t, newBusy("first"), observePlan(), o, nil); err == nil || !strings.Contains(err.Error(), `leg "first"`) {
+		t.Fatalf("another leg: %v", err)
+	}
+	o = observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from 1", Leg: 1, LegNumber: 1, Point: Point{}, HavePoint: true}, nil
+	}
+	if _, err := runRemote(t, newBusy("second"), observePlan(), o, nil); err == nil || !strings.Contains(err.Error(), "cannot be compared") {
+		t.Fatalf("a numeric leg: %v", err)
+	}
+}
+
+// The run leader's start message names the leg it really started in; a mismatch with the plan file is a drifted deployment: the run is
+// stopped and not watched (D). The message is also the proof of the start step and of a start moved back into an event (G).
+func TestObserveChecksTheStartMessage(t *testing.T) {
+	partial := func() RemoteOptions {
+		o := observeOpts(ObserveSpec{})
+		o.StartFrom = func(int) (PartialStart, error) {
+			return PartialStart{Words: "from leg second", Leg: 1, LegNumber: 1, LegName: "second", Point: Point{}, HavePoint: true}, nil
+		}
+		return o
+	}
+	g := newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 4 of 5 (leg second): the party is in the instance; the steps before it are not done or checked. The start was moved back to the step that starts the event it fell in."}
+	rep, err := runRemote(t, g, observePlan(), partial(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	notes := strings.Join(rep.Notes, "\n")
+	if !strings.Contains(notes, "starts at step 4 of 5 (leg second)") || !strings.Contains(notes, "moved the start back") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 1 of 5 (leg first): the party is in the instance."}
+	_, err = runRemote(t, g, observePlan(), partial(), nil)
+	if err == nil || !strings.Contains(err.Error(), "not the requested leg") {
+		t.Fatalf("%v", err)
+	}
+	if g.indexOf("run stop") < 0 {
+		t.Fatalf("the drifted run was not stopped: %v", g.orders)
+	}
+	// Not watched: no status poll of the watch (the end's own `cmd stay` is every remote run's).
+	if len(g.ordersOf("run status")) != 0 {
+		t.Fatalf("the drifted run was watched: %v", g.orders)
+	}
+}
+
+// A partway start is refused when the lead bot stands far from its step (E); observe.allow_far_start turns it into a note.
+func TestObservePartwayStartChecksThePlace(t *testing.T) {
+	at := func(allow bool) RemoteOptions {
+		o := observeOpts(ObserveSpec{AllowFarStart: allow})
+		o.StartFrom = func(int) (PartialStart, error) {
+			return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{X: 300, Y: 0, Z: 0}, HavePoint: true}, nil
+		}
+		return o
+	}
+	g := newFakeLeader(t, happyScript()...)
+	_, err := runRemote(t, g, observePlan(), at(false), nil)
+	if err == nil || !strings.Contains(err.Error(), "yd from the start step's point") || !strings.Contains(err.Error(), "allow_far_start") {
+		t.Fatalf("%v", err)
+	}
+	if g.indexOf("run start") >= 0 {
+		t.Fatalf("the run was started from the wrong place: %v", g.orders)
+	}
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	rep, err := runRemote(t, g, observePlan(), at(true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "allow_far_start") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// A partial start is proven, not trusted (fail closed): an ACK without the start message is asked of `run status`; at another step the
+// newly started run is stopped and the watch refused (no polls after the proof ask).
+func TestObserveACKOnlyStartWithoutProofIsStopped(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...) // its first status is step 1, the start asks for step 3
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}, nil
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "start was not proven") || !strings.Contains(err.Error(), "not the requested step 3") {
+		t.Fatalf("%v", err)
+	}
+	if g.indexOf("run stop") < 0 {
+		t.Fatalf("the unproven run was not stopped: %v", g.orders)
+	}
+	if n := len(g.ordersOf("run status")); n != 1 {
+		t.Fatalf("%d run status asks: one for the proof, none for a watch: %v", n, g.orders)
+	}
+}
+
+// The status line is the second source: a module that answers the start with an ACK alone is accepted when its status is at the step.
+func TestObserveACKOnlyStartWithStatusProofIsAccepted(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 3, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("done", 5, 5, "first", "move", "walk", "plan done")})
+	o := observeOpts(ObserveSpec{})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}, nil
+	}
+	rep, err := runRemote(t, g, observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "proves the start") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// No start-step point means the place cannot be checked: refused, unless observe.allow_far_start (fail closed).
+func TestObservePartwayStartNeedsThePlace(t *testing.T) {
+	o := func(allow bool) RemoteOptions {
+		spec := ObserveSpec{AllowFarStart: allow}
+		opts := observeOpts(spec)
+		opts.StartFrom = func(int) (PartialStart, error) {
+			return PartialStart{Words: "from step 3", Step: 3, Leg: -1}, nil // no point
+		}
+		return opts
+	}
+	g := newFakeLeader(t, happyScript()...)
+	_, err := runRemote(t, g, observePlan(), o(false), nil)
+	if err == nil || !strings.Contains(err.Error(), "start step's point is not known") || !strings.Contains(err.Error(), "allow_far_start") {
+		t.Fatalf("%v", err)
+	}
+	if g.indexOf("run start") >= 0 {
+		t.Fatalf("the run was started without a place to check: %v", g.orders)
+	}
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	rep, err := runRemote(t, g, observePlan(), o(true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "point is not known") || !strings.Contains(strings.Join(rep.Notes, "\n"), "allow_far_start") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// The parsed start reply must report the requested step and leg (round 4): a reply at another step is stopped once, without a watch
+// poll, for a from_step start and for a from_pull_group start; the requested one is accepted; the module's documented move-back into a
+// scripted event is the only step difference accepted, with a note.
+func TestObserveStartReplyStepMustMatch(t *testing.T) {
+	opts := func(ps PartialStart) RemoteOptions {
+		o := observeOpts(ObserveSpec{})
+		o.StartFrom = func(int) (PartialStart, error) { return ps, nil }
+		return o
+	}
+	stepStart := PartialStart{Words: "from step 3", Step: 3, Leg: -1, Point: Point{}, HavePoint: true}
+	for _, c := range []struct {
+		name  string
+		start PartialStart
+		line  string
+		want  string
+	}{
+		{"from_step at another step", stepStart, "The run starts at step 1 of 5 (leg first): the party is in the instance.", "not the requested step 3"},
+		{"from_pull_group at another step", PartialStart{Words: "from step 4", Step: 4, Leg: 1, LegNumber: 1, LegName: "second", ExpectLeg: "second", Point: Point{}, HavePoint: true},
+			"The run starts at step 2 of 5 (leg second): the party is in the instance.", "not the requested step 4"},
+		{"from_step in another leg", PartialStart{Words: "from step 3", Step: 3, Leg: -1, ExpectLeg: "first", Point: Point{}, HavePoint: true},
+			"The run starts at step 3 of 5 (leg second): the party is in the instance.", `not the requested leg "first"`},
+	} {
+		g := newFakeLeader(t, happyScript()...)
+		g.startExtra = []string{c.line}
+		_, err := runRemote(t, g, observePlan(), opts(c.start), nil)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if n := len(g.ordersOf("run stop")); n != 1 {
+			t.Errorf("%s: %d run stops, want exactly 1: %v", c.name, n, g.orders)
+		}
+		if n := len(g.ordersOf("run status")); n != 0 {
+			t.Errorf("%s: %d status asks, want none (no watch): %v", c.name, n, g.orders)
+		}
+	}
+
+	g := newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	if rep, err := runRemote(t, g, observePlan(), opts(stepStart), nil); err != nil || rep.State != "done" {
+		t.Fatalf("the requested step: %v %s %s", err, rep.State, rep.Error)
+	}
+
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 2 of 5 (leg first): the party is in the instance. The start was moved back to the step that starts the event it fell in."}
+	rep, err := runRemote(t, g, observePlan(), opts(stepStart), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("the documented move-back: %v %s %s", err, rep.State, rep.Error)
+	}
+	if n := len(g.ordersOf("run stop")); n != 0 {
+		t.Fatalf("the documented move-back was stopped: %v", g.orders)
+	}
+	if !strings.Contains(strings.Join(rep.Notes, "\n"), "moved the start back") {
+		t.Fatalf("notes %v", rep.Notes)
 	}
 }

@@ -273,9 +273,11 @@ type prepEnv struct {
 	memory map[string]tbm.Who
 	// remote: the run is in remote mode (the only mode that prepares).
 	remote bool
-	now    func() time.Time
-	sleep  func(ctx context.Context, d time.Duration) error
-	note   func(string)
+	// maintain: the hire check may send `.bot maintenance` (observe mode: only with observe.maintenance, #253).
+	maintain bool
+	now      func() time.Time
+	sleep    func(ctx context.Context, d time.Duration) error
+	note     func(string)
 	// shortcut books a GM line the step sent (setup_shortcuts and the trace).
 	shortcut func(line string)
 	// entryOK is the ledger check before a fresh entry (nil: no ledger).

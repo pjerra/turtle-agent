@@ -334,32 +334,38 @@ func (f *hireFlow) gearAndSupplies(ctx context.Context, b *hireBot) {
 	}
 	drinks, ammo, short := g.supplies(class, role)
 	if b.reused || (len(short) > 0 && !f.spec.NoFix) {
-		before := fmt.Sprintf("drinks %d", drinks)
-		if ammo != "" {
-			before += ", " + ammo
-		}
-		switch v := maintainBot(ctx, f.e.g, b.name); v {
-		case "maintained":
-			if g2, err := f.readGear(ctx, b.name); err != nil {
-				b.fail("inventory after maintenance: %v", err)
-				return
-			} else {
-				g = g2
-			}
-			drinks, ammo, short = g.supplies(class, role)
-			after := fmt.Sprintf("drinks %d", drinks)
+		if !f.e.maintain {
+			// An observed run's hire check (#253): `.bot maintenance` walks the hire to a vendor right after its autogear and scatters
+			// the party, which pauses the run leader ("the lead bot is not on the plan's map"). Supplies are reported as they are.
+			b.warn("observe mode: .bot maintenance skipped (observe.maintenance is off): supplies are as the hire came")
+		} else {
+			before := fmt.Sprintf("drinks %d", drinks)
 			if ammo != "" {
-				after += ", " + ammo
+				before += ", " + ammo
 			}
-			if before == after {
-				b.rb.Fixed = append(b.rb.Fixed, "maintenance: repaired, nothing to restock ("+after+")")
-			} else {
-				b.rb.Fixed = append(b.rb.Fixed, fmt.Sprintf("maintenance: %s -> %s", before, after))
+			switch v := maintainBot(ctx, f.e.g, b.name); v {
+			case "maintained":
+				if g2, err := f.readGear(ctx, b.name); err != nil {
+					b.fail("inventory after maintenance: %v", err)
+					return
+				} else {
+					g = g2
+				}
+				drinks, ammo, short = g.supplies(class, role)
+				after := fmt.Sprintf("drinks %d", drinks)
+				if ammo != "" {
+					after += ", " + ammo
+				}
+				if before == after {
+					b.rb.Fixed = append(b.rb.Fixed, "maintenance: repaired, nothing to restock ("+after+")")
+				} else {
+					b.rb.Fixed = append(b.rb.Fixed, fmt.Sprintf("maintenance: %s -> %s", before, after))
+				}
+			case "disabled":
+				b.warn("maintenance is off on the server (AiPlayerbot.OwnedBotMaintenanceEnabled = 0): supplies are as the hire came")
+			default:
+				b.warn("maintenance: %s", v)
 			}
-		case "disabled":
-			b.warn("maintenance is off on the server (AiPlayerbot.OwnedBotMaintenanceEnabled = 0): supplies are as the hire came")
-		default:
-			b.warn("maintenance: %s", v)
 		}
 	}
 	if len(short) > 0 {
