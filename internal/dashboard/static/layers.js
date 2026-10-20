@@ -135,10 +135,12 @@
   }
   function set(state, key, on) { const out = normalize(state); if (key in out) out[key] = !!on; return out; }
 
-  // {key: {ok, why}} for one card's map. ctx has the booleans named by `needs`; a missing one is false.
+  // {key: {ok, why}} for one card's map. ctx has the booleans named by `needs`; a missing one is false. A caller may pass a
+  // better reason for a missing layer in ctx.why ("picture": the map picture slot's own reason), so the panel explains the
+  // real gap.
   function availability(ctx) {
-    const c = ctx || {}, out = {};
-    DEFS.forEach((d) => { out[d.key] = !d.needs || c[d.needs] ? { ok: true, why: "" } : { ok: false, why: d.why || "no data" }; });
+    const c = ctx || {}, whys = c.why && typeof c.why === "object" ? c.why : {}, out = {};
+    DEFS.forEach((d) => { out[d.key] = !d.needs || c[d.needs] ? { ok: true, why: "" } : { ok: false, why: whys[d.needs] || d.why || "no data" }; });
     return out;
   }
   const groups = () => DEFS.reduce((g, d) => (g.indexOf(d.group) < 0 ? g.concat(d.group) : g), []);

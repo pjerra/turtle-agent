@@ -815,3 +815,200 @@ func TestGroupStepWithApproachHops(t *testing.T) {
 		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 4)", n, ok)
 	}
 }
+
+// TestExactViaIsAFlaggedMove: an exact via point is a move row with FlagExact, right before its move_direct; the flag survives the SQL
+// round trip; Validate refuses the flag on any other kind and an exact move that is not followed by its move_direct.
+func TestExactViaIsAFlaggedMove(t *testing.T) {
+	p := parsePlan(t, strings.Replace(small, `{"x":1,"y":0,"z":0}`, `{"x":1,"y":0,"z":0,"exact":true}`, 1))
+	r := build(t, p)
+	if s := r.Steps[0]; s.Kind != KindMove || s.X != 1 || s.Flags != FlagExact || !strings.Contains(s.Comment, "exact") {
+		t.Fatalf("exact via %+v", s)
+	}
+	if s := r.Steps[1]; s.Kind != KindMoveHopExact || s.Flags != 0 || s.X != 10 {
+		t.Fatalf("its direct step %+v", s)
+	}
+	for i, s := range r.Steps {
+		if i != 0 && s.Flags&FlagExact != 0 {
+			t.Fatalf("step %d carries the exact flag: %+v", i, s)
+		}
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil || back[0].Steps[0].Flags != FlagExact {
+		t.Fatalf("round trip: %v %+v", err, back[0].Steps[0])
+	}
+	// Without exact in the plan, no row has the flag and the direct step stays a move_direct (the plain mapping is unchanged).
+	plain := build(t, parsePlan(t, small))
+	for _, s := range plain.Steps {
+		if s.Flags&FlagExact != 0 || s.Kind == KindMoveHopExact {
+			t.Fatalf("exact without exact: %+v", s)
+		}
+	}
+	if plain.Steps[1].Kind != KindMoveDirect {
+		t.Fatalf("plain direct step %+v", plain.Steps[1])
+	}
+	// The pairing both ways: an exact move before a plain move_direct, and a move_hop_exact after a plain move, are refused.
+	bad := r
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[1].Kind = KindMoveDirect
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
+		t.Fatalf("exact move before a plain move_direct: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[0].Flags = 0
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "must follow the exact move") {
+		t.Fatalf("move_hop_exact after a plain move: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[1].Flags = FlagExact // on the move_hop_exact
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "the exact flag is for a move row") {
+		t.Fatalf("exact on a move_direct: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps = append(bad.Steps[:1:1], append([]StepRow{{Plan: r.Steps[0].Plan, Leg: 0, Kind: KindMove, X: 5}}, r.Steps[1:]...)...)
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
+		t.Fatalf("a row between the exact move and its direct step: %v", err)
+	}
+}
+
+// TestWailingCavernsSerpentisFootIsExact: the export of the real plan carries the live-proven hop as the exact foot, then the
+// move_direct to the landing, in the serpentis leg.
+func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/wailing_caverns.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legOf := map[int]string{}
+	for _, l := range res.Rows.Legs {
+		legOf[l.Leg] = l.Name
+	}
+	var exact []StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact == 0 {
+			continue
+		}
+		exact = append(exact, s)
+		n := res.Rows.Steps[i+1]
+		if legOf[s.Leg] != "serpentis" || s.X != -293.3 || s.Y != 0.5 || s.Z != -58 {
+			t.Fatalf("exact row %+v (leg %s)", s, legOf[s.Leg])
+		}
+		if n.Kind != KindMoveHopExact || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
+			t.Fatalf("after the foot: %+v", n)
+		}
+	}
+	if len(exact) != 1 {
+		t.Fatalf("%d exact rows", len(exact))
+	}
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{"skip (leg 0 (", "patrol (", "boss.tactics (", "fleers (plan", "not in the rows"} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("warnings lack %q:\n%s", want, w)
+		}
+	}
+	if strings.Contains(w, "check_skip") {
+		t.Fatalf("check_skip is the plan check's only and is not warned:\n%s", w)
+	}
+}
+
+// TestUnexpressedAttributesAreWarned: every plan attribute the rows cannot carry is one warning naming where it stands; what is no run
+// attribute (notes, check_skip, equiv) is not; an exported leg only (a cut leg's attributes are not the rows').
+func TestUnexpressedAttributesAreWarned(t *testing.T) {
+	const js = `{"version":1,"name":"attrs","status":"live-checked (test)","map":70,"entrance":{"x":0,"y":0,"z":0},
+ "level_band":[20,25],"fleers":[300],"no_cc":[301],"notes":["a note"],
+ "legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"skip":[200],"leftover_entries":[201],"rest":{"health":70},"notes":["leg note"],
+  "via":[{"x":5,"y":0,"z":0,"check_skip":"a hole"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}],"equiv":"e1"}],
+  "steps":[{"loot_object":{"entry":902,"near":{"x":21,"y":0,"z":0},"stand":{"x":20,"y":0,"z":0}}},
+   {"ritual":{"entry":903,"position":{"x":22,"y":0,"z":0},"participants":3,"stand":{"x":21,"y":0,"z":0}}}]},
+ {"name":"b","to":{"x":30,"y":0,"z":0},"skip":[202],"boss":{"entry":7000,"position":{"x":40,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"level_band (plan [20 25])", "fleers (plan [300])", "no_cc (plan [301])",
+		"skip (leg 0 (a) [200]; leg 1 (b) [202]): not in the rows", "leftover_entries (leg 0 (a) [201])", "rest (leg 0 (a))",
+		"stand (loot_object, ritual) (leg 0 (a) steps[0]; leg 0 (a) steps[1])",
+	} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("warnings lack %q:\n%s", want, w)
+		}
+	}
+	for _, not := range []string{"check_skip", "equiv", "note"} {
+		if strings.Contains(w, not) {
+			t.Fatalf("%q is no run attribute and is not warned:\n%s", not, w)
+		}
+	}
+	if n := strings.Count(w, "skip ("); n != 1 {
+		t.Fatalf("one warning per attribute, %d for skip:\n%s", n, w)
+	}
+}
+
+// TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_hop_exact (it is a straight line, like a
+// move_direct): the exact foot stays right before its hop.
+func TestRouteLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"lavahop","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
+ "avoid":[{"name":"basin","min":{"x":200,"y":-5,"z":-9},"max":{"x":210,"y":5,"z":-1},"why":"lava"}],
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":10,"y":0,"z":-4,"direct":true}],"to":{"x":20,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":30,"y":0,"z":-4}}}]}`
+	route := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil // a via point on every hop it is asked about
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && res.Rows.Steps[i+1].Kind != KindMoveHopExact {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
+	}
+}
+
+// TestKindsFitTheColumn: ai_dungeon_step.kind is a varchar(16); every kind the exporter writes fits it, and Validate refuses one that
+// does not (move_direct_exact, 17 characters, was the first name of the exact hop's kind).
+func TestKindsFitTheColumn(t *testing.T) {
+	for _, k := range []string{KindMove, KindMoveDirect, KindMoveHopExact, KindPull, KindBoss, KindLoot, KindOpen, KindUseItem, KindWaitObject,
+		KindWaitClear, KindRest, KindRitual, KindHold} {
+		if len(k) > MaxKind {
+			t.Fatalf("kind %q is %d characters", k, len(k))
+		}
+	}
+	r := Rows{Plan: PlanRow{Plan: "q", Map: 1}, Legs: []LegRow{{Plan: "q"}}, Steps: []StepRow{{Plan: "q", Kind: "move_direct_exact"}}}
+	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "varchar") && !strings.Contains(err.Error(), "kind is longer") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// TestCutterLeavesTheExactHopAlone: with a cutter, a move_hop_exact farther than MoveGapWarnYd from its exact move gets no cut points
+// (the hop is indivisible): Build succeeds and the exact move stays right before its hop; the hop is the anchor of the next hop.
+func TestCutterLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"farhop","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":20,"y":0,"z":-4,"direct":true}],"to":{"x":75,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":80,"y":0,"z":-4}}}]}`
+	// dungeon.Parse holds a direct via to 25 yd, so the 65 yd hop is set on the parsed plan: the exporter must not rely on that limit.
+	p := parsePlan(t, js)
+	p.Legs[0].Via[1].X = 70
+	calls := 0
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		calls++
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && (res.Rows.Steps[i+1].Kind != KindMoveHopExact || res.Rows.Steps[i+1].X != 70) {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
+	}
+}
