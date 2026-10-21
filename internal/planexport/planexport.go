@@ -433,9 +433,17 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 			b.seq--
 		}
 	}
-	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: EncounterDone,
-		Flags: FlagDoneData | FlagEncounter, TimeoutS: h.TimeoutS, Entries: entries,
-		Comment: clip(fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %d (DONE)", comment, h.Data, EncounterDone), MaxComment)})
+	param, flags := uint32(EncounterDone), uint32(FlagDoneData|FlagEncounter)
+	done := fmt.Sprintf("%d (DONE)", EncounterDone)
+	if h.Value != nil {
+		// A script value (Zul'Farrak's pyramid phase), not an encounter state: flag 8 alone, so the run leader reads no FAIL or reset
+		// into it and its loader takes a param above 4 (DungeonPlanPolicy.h NormalizePlanStep).
+		param, flags = *h.Value, FlagDoneData
+		done = fmt.Sprintf("%d (a script value, not an encounter state)", *h.Value)
+	}
+	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
+		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries,
+		Comment: clip(fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done), MaxComment)})
 	b.last, b.haveLast = h.Spot, true
 }
 
@@ -514,6 +522,12 @@ func (b *builder) step(st dungeon.Step) error {
 
 func (b *builder) wait(w *dungeon.WaitFor) error {
 	timeout := w.TimeoutS
+	if w.Hold != nil {
+		// The wait's run leader form (dungeon.Hold on a wait_for): the event's hold row in place of the wait, which the run leader may not
+		// be able to run at all (a unit wait). The agent's driver still runs the wait as written.
+		b.hold(w.Hold, uniq(w.Hold.Entries), "wait hold")
+		return nil
+	}
 	switch {
 	case w.GameObject != nil:
 		g := w.GameObject
@@ -614,7 +628,8 @@ func Validate(r Rows) error {
 			if s.Entry == 0 || s.Flags&FlagDoneData == 0 {
 				return bad("a hold needs its instance data (entry) and done flag")
 			}
-			if s.Param > 4 {
+			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
+			if s.Flags&FlagEncounter != 0 && s.Param > 4 {
 				return bad("param %d is no encounter state (0-4)", s.Param)
 			}
 		case KindWaitClear:

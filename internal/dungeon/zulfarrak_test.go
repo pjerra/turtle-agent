@@ -190,6 +190,137 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 	}
 }
 
+// The pool-stairs fix of zf-full-19z16 (RUN-LESSONS, STUCK #2): the last two packs of the west road are pulled from approach points on the
+// lower floor, west of the stair mouth. The stair base at 1629 1099 z 9.7 is an island on the 209 navmesh (a path to it ends 8.8 yd short),
+// and followers sent there to gather went up to z 31-46.8 before the approach rows. The last point of each approach is within the run
+// leader's reach of the pack (RunLeaderReachYd), and no point is on the upper level or near the island.
+func TestZulfarrakPoolStairsApproach(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	v := zfLeg(t, p, "velratha")
+	if len(v.PullGroups) != 6 {
+		t.Fatalf("%d pull groups", len(v.PullGroups))
+	}
+	stair := Point{1629.2, 1099, 9.7}
+	for _, tc := range []struct {
+		group  int
+		first  Point
+		last   Point
+		packAt Point
+	}{
+		{4, Point{1584, 1050, 9}, Point{1603, 1043, 9.8}, Point{1576.2, 1079.1, 9}},
+		{5, Point{1588, 1080, 9.1}, Point{1584, 1088, 9.1}, Point{1601.7, 1104.4, 9}},
+	} {
+		g := v.PullGroups[tc.group]
+		if len(g.Approach) != 2 || g.Approach[0] != tc.first || g.Approach[1] != tc.last {
+			t.Errorf("pull group %d approach %v, want %v %v", tc.group, g.Approach, tc.first, tc.last)
+			continue
+		}
+		if d := dist3(tc.last, tc.packAt); d > RunLeaderReachYd {
+			t.Errorf("pull group %d: the last approach point is %.1f yd from the pack (at most %d)", tc.group, d, RunLeaderReachYd)
+		}
+		for _, a := range g.Approach {
+			if a.Z > 15 {
+				t.Errorf("pull group %d: approach point %v is on the upper level", tc.group, a)
+			}
+			if d := dist3(a, stair); d < 20 {
+				t.Errorf("pull group %d: approach point %v is %.1f yd from the stair island", tc.group, a, d)
+			}
+		}
+		// Where the party stands to pull must not pull the pack by itself (cold review 2026-10-21: 1582 1070 stood 10.8 yd from the
+		// Witch Doctor, 1593.6 1089.9 16.6 yd from a Shadowhunter): at least approachClearYd from every member of the group, at its
+		// spawn and, for the patrol, at every waypoint less the follower's offset.
+		for _, m := range zfGroupMembers(t, g) {
+			if d := groundDist(tc.last, m.at) - m.slack; d < approachClearYd {
+				t.Errorf("pull group %d: the last approach point %v is %.1f yd from %s", tc.group, tc.last, d, m.what)
+			} else {
+				t.Logf("pull group %d: %v is %.1f yd from %s", tc.group, tc.last, d, m.what)
+			}
+		}
+	}
+}
+
+// approachClearYd is how far the run leader's stand before a pull keeps from every member of the pack (a pack's aggro reach at level 46
+// against the party is under 20 yd).
+const approachClearYd = 20
+
+// zfPatrol81587 is the waypoint path of the Sul'lithuz Sandcrawler 81587 (tortoise-wow sql/base creature_movement, 2026-10-21), the
+// patrol leader of velratha pull group 4; its followers 81588 and 81601 walk at 3.46 and 5.34 yd from it (creature_groups dist).
+var zfPatrol81587 = []Point{{1586.05, 1087.71, 8.88}, {1569.59, 1052.09, 8.88}, {1563.27, 1014.31, 8.88}, {1574.27, 1065.17, 8.88}, {1597.99, 1104.79, 8.88}, {1622.52, 1131.7, 8.88}}
+
+const zfPatrolFollowYd = 5.34
+
+type zfMember struct {
+	what  string
+	at    Point
+	slack float64 // yards to take off the distance: a wanderer's wander radius, a follower's offset from its leader
+}
+
+// zfGroupMembers are the spawns of the world export that a pull group stands for (its entries, within 3 yd of one of its positions), each
+// at its spawn (less its wander radius), and a patrol leader's waypoints (less the followers' offset).
+func zfGroupMembers(t *testing.T, g PullGroup) []zfMember {
+	t.Helper()
+	var out []zfMember
+	for _, m := range zfTSV(t, "creatures.tsv") {
+		f := func(k string) float64 { v, _ := strconv.ParseFloat(m[k], 64); return v }
+		at := Point{float32(f("x")), float32(f("y")), float32(f("z"))}
+		mine := false
+		for i, pos := range g.Positions {
+			if strconv.Itoa(int(g.Entries[i])) == m["entry"] && groundDist(pos, at) < 3 {
+				mine = true
+			}
+		}
+		if !mine {
+			continue
+		}
+		out = append(out, zfMember{fmt.Sprintf("%s %s (spawn %s)", m["entry"], m["name"], m["guid"]), at, f("wander")})
+		if m["guid"] == "81587" {
+			for i, w := range zfPatrol81587 {
+				out = append(out, zfMember{fmt.Sprintf("the patrol of 81587 at waypoint %d (with its followers)", i+1), w, zfPatrolFollowYd})
+			}
+		}
+	}
+	if len(out) < len(g.Positions) {
+		t.Fatalf("only %d of the group's %d positions are spawns of the export", len(out), len(g.Positions))
+	}
+	return out
+}
+
+func groundDist(a, b Point) float64 { return math.Hypot(float64(a.X-b.X), float64(a.Y-b.Y)) }
+
+// The gong step rings the real Gong of Zul'Farrak (141832, the type-10 goober with lock 459 and event 2488), never the Turtle decoration copy
+// 20901 at the same place, with the Mallet used ON it (via_item) from within use range; the optional gate is the Mallet, and the leg waits for
+// Gahz'rilla before its boss fight.
+func TestZulfarrakGongStep(t *testing.T) {
+	p := loadPlan(t, zulfarrakPlan)
+	g := zfLeg(t, p, "gahzrilla")
+	if g.Optional == nil || g.Optional.Item != 9240 || g.Optional.Name != "Mallet of Zul'Farrak" {
+		t.Fatalf("optional %+v", g.Optional)
+	}
+	if len(g.Steps) != 2 {
+		t.Fatalf("%d steps", len(g.Steps))
+	}
+	u := g.Steps[0].UseObject
+	near := Point{1650.9, 1171.9, 10.9}
+	if u == nil || u.Entry != 141832 || !u.ViaItem || u.RequiresItem == nil || u.RequiresItem.Entry != 9240 || u.Near == nil || *u.Near != near {
+		t.Fatalf("gong step %+v", u)
+	}
+	if u.Stand == nil || dist3(*u.Stand, near) > UseRange {
+		t.Errorf("the stand %v is not within %.0f yd of the gong: the item's spell has a short range", u.Stand, UseRange)
+	}
+	w := g.Steps[1].WaitFor
+	if w == nil || w.Unit == nil || fmt.Sprint(w.Unit.Entries) != "[7273]" || w.Unit.State != UnitSeen || w.TimeoutS != 30 {
+		t.Errorf("the wait for Gahz'rilla %+v", w)
+	}
+	for _, s := range g.Steps {
+		if r := objRef(s); r != nil && r.Entry == 20901 {
+			t.Errorf("a step targets the decoration copy 20901, not the real gong 141832")
+		}
+	}
+	if g.Boss == nil || g.Boss.Entry != 7273 {
+		t.Errorf("boss %+v", g.Boss)
+	}
+}
+
 // Every pack member and boss the plans name is a spawn of the export at that place, and the Troll Cage and the Gong are objects of it.
 // What the instance script summons (Gahz'rilla, Nekrum, Sezz'ziz, the waves) has no row and is not looked for.
 func TestZulfarrakPlansMatchTheWorldExport(t *testing.T) {

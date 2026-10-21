@@ -45,6 +45,9 @@ func (p *Plan) runLeaderWalk(from int, move func(RunLeaderPoint), fight func(leg
 				move(RunLeaderPoint{li, fmt.Sprintf("%s[%d].use_object.stand", kind, si), *st.UseObject.Stand})
 			case st.AreaTrigger != nil && st.AreaTrigger.By != TriggerAgent:
 				move(RunLeaderPoint{li, fmt.Sprintf("%s[%d].area_trigger.stand", kind, si), st.AreaTrigger.Stand})
+			case st.WaitFor != nil && st.WaitFor.Hold != nil:
+				// plan-export writes such a wait as its hold row: the run leader's party stands on the hold's spot.
+				move(RunLeaderPoint{li, fmt.Sprintf("%s[%d].wait_for.hold spot", kind, si), st.WaitFor.Hold.Spot})
 			}
 		}
 	}

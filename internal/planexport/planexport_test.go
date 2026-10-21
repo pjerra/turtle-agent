@@ -352,8 +352,7 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 	}
 }
 
-// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
-// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg (the tests of the legs up to Zum'rah).
 func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	t.Helper()
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
@@ -370,9 +369,11 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	return nil
 }
 
-// The whole shipped Zul'Farrak plan is exported up to the zumrah leg: the legs after it (the stairs event) use a unit wait and the gossip
-// step, which the run leader has no step for, so the export is cut before the first of them, with a note that names the leg and the step.
-func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
+// The whole shipped Zul'Farrak plan is exported up to the stairs_base leg (Nekrum and Sezz'ziz): the two waits of the stairs event carry
+// their holds (instance data 1, the pyramid phase), so the stairs legs export; the legs after stairs_base (the End Door, Bly, Ukorz) use a
+// unit wait without a hold and the gossip step, which the run leader has no step for, so the export is cut before the first of them, with a
+// note that names the leg and the step.
+func TestZulfarrakIsCutAfterStairsBase(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
@@ -381,22 +382,39 @@ func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole := buildWhole(t, zulfarrakThroughZumrah(t))
-	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
-		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	whole := buildWhole(t, zulfarrakThrough(t, "stairs_base"))
+	if len(res.Rows.Legs) != 14 || res.Rows.Legs[13].Name != "stairs_base" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through stairs_base: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
 	}
-	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "after_boss[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+	for _, want := range []string{"exported legs 0-13 (stairs_base) only", "cut before leg 14 (weegli_door)", "steps[0]: wait_for.unit has no run leader step (unit 7607 seen)", "2 after it"} {
 		if !strings.Contains(res.Cut, want) {
 			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
 		}
 	}
-	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 11 (stairs)") {
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 14 (weegli_door)") {
 		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
 	}
+}
+
+// zulfarrakThrough is the shipped Zul'Farrak plan cut after the leg named last.
+func zulfarrakThrough(t *testing.T, last string) *dungeon.Plan {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, l := range p.Legs {
+		if l.Name == last {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatalf("the plan has no %s leg", last)
+	return nil
 }
 
 // buildWhole builds a plan that has to export whole.
@@ -477,6 +495,57 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
 	}
+}
+
+// The pool-stairs approach rows reach the run leader: in the exported velratha leg the two packs each have their two approach moves right
+// before the pull row (the STUCK #2 fix). The live 86-step plan's step 83 was this pull group; with the plan's approach points the exported
+// leg grows by four move rows and the pull is the fourth row later.
+func TestZulfarrakPoolStairsApproachRows(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := -1
+	for i, l := range res.Rows.Legs {
+		if l.Name == "velratha" {
+			leg = i
+		}
+	}
+	if leg < 0 {
+		t.Fatal("no velratha leg in the rows")
+	}
+	idx := func(entries string) int {
+		for i, s := range res.Rows.Steps {
+			if s.Leg == leg && s.Kind == KindPull && rowsEntries(s.Entries) == entries {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, tc := range []struct{ entries, first, last string }{
+		{"5650,7246,8095,5649", "1584.0 1050.0 9.0", "1603.0 1043.0 9.8"},
+		{"7246,5650", "1588.0 1080.0 9.1", "1584.0 1088.0 9.1"},
+	} {
+		i := idx(tc.entries)
+		if i < 2 {
+			t.Fatalf("pull %s at %d", tc.entries, i)
+		}
+		a, b := res.Rows.Steps[i-2], res.Rows.Steps[i-1]
+		if a.Kind != KindMove || b.Kind != KindMove || !strings.HasSuffix(a.Comment, " approach") ||
+			fmt.Sprintf("%.1f %.1f %.1f", a.X, a.Y, a.Z) != tc.first || fmt.Sprintf("%.1f %.1f %.1f", b.X, b.Y, b.Z) != tc.last || a.Seq+2 != res.Rows.Steps[i].Seq {
+			t.Fatalf("pull %s: %+v %+v before %+v", tc.entries, a, b, res.Rows.Steps[i])
+		}
+	}
+}
+
+// rowsEntries is a step row's entries as the plan's comma list.
+func rowsEntries(e []uint32) string {
+	s := make([]string, len(e))
+	for i, v := range e {
+		s[i] = fmt.Sprint(v)
+	}
+	return strings.Join(s, ",")
 }
 
 func buildDropLoot(t *testing.T, p *dungeon.Plan) Rows {

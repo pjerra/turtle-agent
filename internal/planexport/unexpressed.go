@@ -33,6 +33,7 @@ var unexpressedWhy = map[string]string{
 	"stand (loot_object, ritual)": "no stand point in the row: the bots walk to the object themselves",
 	"object spawn/range":          "the row names the object by entry near its point only (the module's own search range)",
 	"loot_object batch":           "no batches: the chests are opened one step at a time",
+	"wait_for with a hold":        "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
 	"area_trigger expect/timeout": "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
 }
 
@@ -134,6 +135,8 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 					if st.LootObject.Batch != "" {
 						add("loot_object batch", at)
 					}
+				case st.WaitFor != nil && st.WaitFor.Hold != nil:
+					add("wait_for with a hold", at)
 				case st.WaitFor != nil && st.WaitFor.GameObject != nil:
 					ref(st.WaitFor.GameObject.ObjectRef)
 				case st.Ritual != nil:
