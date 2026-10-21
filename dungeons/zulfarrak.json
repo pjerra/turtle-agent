@@ -23,7 +23,7 @@
   "cc_priority": [7246, 5648],
   "cc_always": [7246],
   "no_cc": [7276, 7286],
-  "kill_first": [7785, 8179, 5650, 7247],
+  "kill_first": [7785, 8179, 5650, 7247, 7608, 7606, 7605],
   "summoned_kill_first": [7785, 8179],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. THE ROUTE: Antu'sul (in seven legs), Theka the Martyr, Hydromancer Velratha (1470 yd of navmesh path from the entrance, checked by TestZulfarrakOnNavmesh), then the courtyard of the pyramid and Witch Doctor Zum'rah (PR B, TortoiseBots #984), then the legs after Zum'rah that were written from the instance script and have not run live: the stairs event (stairs, stairs_top, stairs_base), Sergeant Bly and his crew (bly), the End Door (weegli_door) and Chief Ukorz Sandscalp with Ruuzlu (ukorz). A failure in one of them ends the run; from_leg \"stairs\" starts there. Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
@@ -692,7 +692,8 @@
               "state": "seen"
             },
             "timeout_s": 30,
-            "fail_text": "Gahz'rilla (7273) did not show within 30 s of the gong: the gong may not have been rung (the Mallet's lock is checked by the server), or the instance already summoned him once (a second summon despawns him)."
+            "fail_text": "Gahz'rilla (7273) did not show within 30 s of the gong: the gong may not have been rung (the Mallet's lock is checked by the server), or the instance already summoned him once (a second summon despawns him).",
+            "agent_only": "the boss row after it waits 60 s for an absent boss (the run leader's boss search), then pauses: that stands in for this wait"
           }
         }
       ],
@@ -1308,7 +1309,8 @@
               "state": "gone"
             },
             "timeout_s": 120,
-            "fail_text": "Weegli Blastfuse was still in view 120 s after the gossip: he walks to the End Door, blows it up and runs off to 1827 1184, where he despawns."
+            "fail_text": "Weegli Blastfuse was still in view 120 s after the gossip: he walks to the End Door, blows it up and runs off to 1827 1184, where he despawns.",
+            "agent_only": "the End Door wait of weegli_door saw him blow the door; a Weegli still running off when Bly's option fires only plants a second barrel at the open door (zulfarrak.cpp DestroyDoor)"
           }
         },
         {
@@ -1320,14 +1322,15 @@
               "state": "seen"
             },
             "timeout_s": 60,
-            "fail_text": "Sergeant Bly is not at 1883.8 1200.8 (his place when the event is over): the crew walks there when the last troll of wave 3 is dead."
+            "fail_text": "Sergeant Bly is not at 1883.8 1200.8 (his place when the event is over): the crew walks there when the last troll of wave 3 is dead.",
+            "agent_only": "the weegli_door hold waited for instance data 1 = 8 (the event over: the crew at its places, Bly's option offered); the gossip row fails with no-npc if he is not there"
           }
         },
         {
           "gossip": {
             "npc": 7604,
             "near": {"x": 1883.82, "y": 1200.83, "z": 8.87},
-            "text": "settled",
+            "option": 0,
             "by": "tank",
             "stand": {"x": 1883.8, "y": 1204.5, "z": 8.9},
             "retry_s": 30,
@@ -1343,17 +1346,23 @@
               "state": "hostile"
             },
             "timeout_s": 30,
-            "fail_text": "Sergeant Bly did not turn hostile within 30 s of the gossip (his script turns him and his crew hostile 10 s after the option)."
+            "fail_text": "Sergeant Bly did not turn hostile within 30 s of the gossip (his script turns him and his crew hostile 10 s after the option).",
+            "agent_only": "the boss hold waits for it: Bly is the hold's first unit, which counts while still friendly, and the hold ends only once he and his crew are dead"
           }
         }
       ],
       "boss": {
         "entry": 7604,
         "position": {"x": 1883.82, "y": 1200.83, "z": 8.87},
-        "first": [7608, 7606, 7605]
+        "first": [7608, 7606, 7605],
+        "hold": {
+          "spot": {"x": 1884, "y": 1212, "z": 9},
+          "radius": 25,
+          "timeout_s": 300
+        }
       },
       "notes": [
-        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). Weegli is already gone (the weegli_door leg ran first), and if he were not, Bly's script would call his DoAction again. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. Wowhead (guide, comments): Oro's area damage (Rain of Fire) and Murta's healing make this fight hard, so Murta and Oro die before Bly (boss.first: Murta, Oro, Raven); Murta is the priest with Holy Smite, Renew, Heal and Power Word: Shield, Oro the warlock with Shadow Bolt, Immolate, Rain of Fire and Curse of Weakness, Raven the rogue with Poison, Backstab and Gouge; Bly is 18k health with Revenge and Shield Bash and has no loot table (the guide) but the Divino-matic Rod of the quest 'Divino-matic Rod' (item 8548). Two Wowhead differences from this server: a comment says the crew uses Hearthstones and leaves after the event if the party rests (the script has no such thing: they stand at their places), and that talking to Weegli, waiting for them to leave, then Bly leaves Bly alone to fight; neither applies here. The leg begins with the wait for Weegli to be gone (it stood in weegli_door until 2026-10-21). THE RUN LEADER LEAVES THIS LEG OUT (2026-10-21): it has no boss that turns hostile later, so the export is made with `plan-export --skip-legs bly`; Bly's menu is one line (index 0, zulfarrak.cpp:184 inside OnGossipHello_npc_sergeant_bly, :178-194), kept as text here until the leg is exported."
+        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). Weegli is already gone (the weegli_door leg ran first), and if he were not, Bly's script would call his DoAction again. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. Wowhead (guide, comments): Oro's area damage (Rain of Fire) and Murta's healing make this fight hard, so Murta and Oro die before Bly (boss.first: Murta, Oro, Raven); Murta is the priest with Holy Smite, Renew, Heal and Power Word: Shield, Oro the warlock with Shadow Bolt, Immolate, Rain of Fire and Curse of Weakness, Raven the rogue with Poison, Backstab and Gouge; Bly is 18k health with Revenge and Shield Bash and has no loot table (the guide) but the Divino-matic Rod of the quest 'Divino-matic Rod' (item 8548). Two Wowhead differences from this server: a comment says the crew uses Hearthstones and leaves after the event if the party rests (the script has no such thing: they stand at their places), and that talking to Weegli, waiting for them to leave, then Bly leaves Bly alone to fight; neither applies here. The leg begins with the wait for Weegli to be gone (it stood in weegli_door until 2026-10-21). THE RUN LEADER'S FORM (2026-10-21; until then the export was made with `plan-export --skip-legs bly`): the gossip is option 0 (Bly's menu is one line, zulfarrak.cpp:184 inside OnGossipHello_npc_sergeant_bly, :178-194; the text was 'settled'), written as a gossip row (cmd gossip 7604 BOT 1, by the lead bot, which is the tank: the one Bly attacks); the three unit waits are agent_only (no rows); the boss's hold has no instance_data, so plan-export writes a hold DONE BY ITS UNITS (flags 0) on the leg's own spot 1884 1212 9, 11 yd north of Bly, radius 25 (the crew stands 1874-1895 1199-1206, at most 17 yd from it), 300 s, units 7604, 7608, 7606, 7605: Bly first, so he counts while still friendly, and the hold ends when all four are dead after one turned hostile. A boss row would leave a friendly Bly alone at once. The hold has no kill order, so Murta, Oro and Raven are in the plan's kill_first (focused in every fight: they fight only here). Needs 7604 in AiPlayerbot.BotGossipNpcs."
       ]
     },
     {

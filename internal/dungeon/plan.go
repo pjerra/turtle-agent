@@ -342,8 +342,14 @@ type PullGroup struct {
 // A wait_for may carry one too (WaitFor.Hold): it is that wait's run leader form, for an event whose script keeps its progress in an
 // instance data value the agent's driver does not read (Zul'Farrak's pyramid phase, instance data 1). plan-export then writes the hold
 // row in place of the wait (which the run leader could not run), and the agent's driver runs the wait as written.
+//
+// A boss's hold may leave Data out (0): the event is then DONE BY ITS UNITS, for a boss that is friendly until a script turns him (Zul'Farrak's
+// Sergeant Bly, 10 s after his gossip option). plan-export writes entry 0, param 0, flags 0 (the run leader's hold with neither done flag:
+// every unit of its entries within Radius dead, after one was seen hostile) with the boss's entry first, so he counts while still friendly
+// (TortoiseBots DungeonRunPolicy.h EventUnitCounts). A boss row would leave a friendly boss alone at once. A pull group's or a wait's hold
+// still needs Data, and a Value needs Data.
 type Hold struct {
-	Data uint32 `json:"instance_data"`
+	Data uint32 `json:"instance_data,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
@@ -653,6 +659,10 @@ type WaitFor struct {
 	// Hold is this wait's form for the TortoiseBots run leader (see Hold): plan-export writes it as a hold row instead of the wait. The
 	// agent's own driver does not read it.
 	Hold *Hold `json:"hold,omitempty"`
+	// AgentOnly says why the TortoiseBots run leader needs no row for this wait (a unit wait, which it cannot run: an earlier or a later row
+	// covers what the wait checks). plan-export leaves the wait out with a warning that quotes it, instead of cutting the plan there. Only a
+	// unit wait without a hold takes it. The agent's own driver runs the wait as written.
+	AgentOnly string `json:"agent_only,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
@@ -948,6 +958,7 @@ type rawWait struct {
 	TimeoutS     *int         `json:"timeout_s"`
 	FailText     string       `json:"fail_text"`
 	Hold         *rawHold     `json:"hold"`
+	AgentOnly    *string      `json:"agent_only"`
 }
 
 type rawObjState struct {
@@ -1303,7 +1314,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			pg.Patrol = pat
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
-		pg.Hold = c.hold(gp+".hold", g.Hold, false)
+		pg.Hold = c.hold(gp+".hold", g.Hold, false, false)
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	for i, lv := range r.Leave {
@@ -1365,7 +1376,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			}
 		}
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
-		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false, true)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
@@ -1433,15 +1444,19 @@ func (c *checker) approach(path string, ps []rawPoint) []Point {
 }
 
 // hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold only (a pull group's or a boss's hold is an
-// encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins.
-func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
+// encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins. unitsAllowed
+// (a boss's hold only) lets instance_data be left out: the event is done by its units (see Hold).
+func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool) *Hold {
 	if r == nil {
 		return nil
 	}
 	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
 	h.Spot = c.point(path+".spot", r.Spot)
-	if r.Data == 0 {
-		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
+	switch {
+	case r.Data == 0 && r.Value != nil:
+		c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
+	case r.Data == 0 && !unitsAllowed:
+		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units)")
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
@@ -1741,7 +1756,19 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		}
 		w.HostilesGone = h
 	}
-	w.Hold = c.hold(path+".hold", r.Hold, true)
+	w.Hold = c.hold(path+".hold", r.Hold, true, false)
+	if a := r.AgentOnly; a != nil {
+		switch {
+		case r.Unit == nil:
+			c.fail(path+".agent_only", "only a unit wait takes it (the other waits are rows of their own)")
+		case r.Hold != nil:
+			c.fail(path+".agent_only", "a wait with a hold is the hold's row: it cannot also be left out")
+		case strings.TrimSpace(*a) == "" || len(*a) > MaxFailText || strings.ContainsAny(*a, "\r\n\t"):
+			c.fail(path+".agent_only", "say why the run leader needs no row for it, on one line of at most %d characters", MaxFailText)
+		default:
+			w.AgentOnly = *a
+		}
+	}
 	return w
 }
 
