@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 	"slices"
@@ -81,8 +82,7 @@ func TestUldamanCCListsAreCCAbleUnitsOfPullGroups(t *testing.T) {
 	}
 }
 
-// The cc bot's pick on Uldaman's real plan: a Grimlok-corridor pack of a Geomancer and two Brawlers is sheeped on the Geomancer even below
-// big_pack (cc_always), never on the Brawlers; a pack of Stone Stewards (elementals) gives no pick; the healer Oracle is never sheeped.
+// The cc bot's pick on Uldaman's real plan: a big pack of a Geomancer and four Brawlers is sheeped on the Geomancer, never on the Brawlers; a pack of Stone Stewards (elementals) gives no pick; the healer Oracle is never sheeped.
 func TestUldamanPackCCPicksTheCasterAndNeverTheElemental(t *testing.T) {
 	d := ledgerDriver(t)
 	d.plan = loadPlan(t, uldamanPlan)
@@ -90,7 +90,7 @@ func TestUldamanPackCCPicksTheCasterAndNeverTheElemental(t *testing.T) {
 		return tbm.HostileRec{GUID: packet.GUID(0xF130000000000000 | guid), Entry: entry, HPPct: 100, Flags: "-", X: x}
 	}
 	target := mk(1, 4855, 0)
-	pick, ok := d.ccPick(target, []tbm.HostileRec{target, mk(2, 4855, 30), mk(3, 4853, 5)}, true)
+	pick, ok := d.ccPick(target, []tbm.HostileRec{target, mk(2, 4855, 30), mk(3, 4853, 5), mk(8, 4855, 40), mk(9, 4855, 40)}, false)
 	if !ok || pick.Entry != 4853 {
 		t.Fatalf("pick %+v %v", pick, ok)
 	}
@@ -100,5 +100,62 @@ func TestUldamanPackCCPicksTheCasterAndNeverTheElemental(t *testing.T) {
 	}
 	if d.ccAllowed(mk(7, 4852, 0)) {
 		t.Error("the Oracle (kill_first) may be sheeped")
+	}
+}
+
+// No boss.first entry of any leg is cc_always: a cc_always entry gets pack and reactive CC below big_pack too, and the encounter kills its
+// `first` adds in the plan's order (Codex review of feat/uldaman-cc: Grimlok's Geomancer 4853).
+func TestUldamanNoBossFirstAddIsCCAlways(t *testing.T) {
+	p := loadUldaman(t)
+	n := 0
+	for _, l := range p.Legs {
+		if l.Boss == nil {
+			continue
+		}
+		for _, e := range l.Boss.First {
+			n++
+			if slices.Contains(p.CCAlways, e) {
+				t.Errorf("%s: boss.first %d is in cc_always", l.Name, e)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no boss.first entry")
+	}
+}
+
+// Grimlok's fight (his `first` adds 4855, 4853, 4863 and the boss): in the boss fight none of them is picked for CC by the pack pick, whatever the
+// pack size, and the kill order stays boss.first then the boss. The same Geomancer in an ordinary pull (no boss fight) is still sheepable.
+func TestUldamanGrimlokFightSelectsNoFirstAddForCC(t *testing.T) {
+	d := ledgerDriver(t)
+	d.plan = loadPlan(t, uldamanPlan)
+	li := -1
+	for i, l := range d.plan.Legs {
+		if l.Name == "grimlok" {
+			li = i
+		}
+	}
+	if li < 0 || fmt.Sprint(d.plan.Legs[li].Boss.First) != "[4855 4853 4863]" {
+		t.Fatalf("grimlok leg %d", li)
+	}
+	d.curLeg = li
+	mk := func(guid uint64, entry uint32, x float32) tbm.HostileRec {
+		return tbm.HostileRec{GUID: packet.GUID(0xF130000000000000 | guid), Entry: entry, HPPct: 100, Flags: "-", X: x}
+	}
+	target := mk(1, 4855, 0)
+	pack := []tbm.HostileRec{target, mk(2, 4855, 20), mk(3, 4853, 30), mk(4, 4863, 25), mk(5, 4855, 10), mk(6, 4855, 12)}
+	d.bossFight = true
+	if pick, ok := d.ccPick(target, pack, false); ok {
+		t.Errorf("a boss.first add was picked for CC: %+v", pick)
+	}
+	if pick, ok := d.ccPick(target, pack, true); ok {
+		t.Errorf("always: picked %+v", pick)
+	}
+	d.bossFight = false
+	if pick, ok := d.ccPick(target, pack, false); !ok || pick.Entry != 4853 {
+		t.Errorf("ordinary pull: %+v %v", pick, ok)
+	}
+	if enc := append(slices.Clone(d.plan.Legs[li].Boss.First), d.plan.Legs[li].Boss.Entry); fmt.Sprint(enc) != "[4855 4853 4863 4854]" {
+		t.Errorf("kill order %v", enc)
 	}
 }
