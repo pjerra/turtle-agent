@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/pjerra/turtle-agent/internal/tracecheck"
+	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
 
 // leaderStep is a status the fake run leader reaches after `at` of running time.
@@ -330,6 +334,60 @@ func TestObserveCountsAWipeOnItsRisingEdge(t *testing.T) {
 	}
 	if rep.Wipes != 2 {
 		t.Fatalf("wipes %d (want 2)\n%s", rep.Wipes, notesOf(rep))
+	}
+}
+
+// A single member alive does not re-arm the wipe latch: all dead, one member alive (4 of 5), all dead again within the latch, then a
+// real regroup (nobody dead), then all dead again: two collapses, so Wipes == 2 and exactly 2 trace "wipe" events, and the tracecheck
+// deaths oracle reads them ("%d wipes" in its detail: stepFailedRecover never runs in an observed run).
+func TestObserveWipeLatchReArmsBelowThreeDead(t *testing.T) {
+	g := newFakeLeader(t, wipeScript()...)
+	g.party = append(g.party, &tbm.PartyRec{GUID: packet.GUID(0x2D), Name: "Loxy", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"},
+		&tbm.PartyRec{GUID: packet.GUID(0x2E), Name: "Grok", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"})
+	// the dead count of the tick, alive when negative
+	deadOf := map[int]int{1: 5, 2: 4, 3: 5, 4: 0, 5: 5}
+	base := g.onTick
+	ticks := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		n := deadOf[ticks]
+		for i, p := range fr.party {
+			if dead := i < n; dead {
+				p.Dead, p.HP, p.State = true, 0, "d"
+			} else {
+				p.Dead, p.HP, p.State = false, p.MaxHP, "n"
+			}
+		}
+	}
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Poll: s(3)}), func(c *Config) { c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-wipe-hyst"} })
+	if err != nil || rep.State != "done" || rep.Remote.Observe.Ended != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 2 {
+		t.Fatalf("wipes %d (want 2)\n%s", rep.Wipes, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-wipe-hyst.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+		}
+	}
+	if wipes != 2 {
+		t.Fatalf("%d wipe events in the trace (want 2)", wipes)
+	}
+	for _, c := range tracecheck.Score(f, tracecheck.Defaults()) {
+		if c.ID == tracecheck.IDDeaths && !strings.Contains(c.Detail, ", 2 wipes") {
+			t.Fatalf("the deaths oracle does not say 2 wipes: %+v", c)
+		}
 	}
 }
 
