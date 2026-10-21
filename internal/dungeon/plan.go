@@ -141,6 +141,15 @@ func (p *Plan) Band() (lo, hi int) {
 	return p.LevelBand[0], p.LevelBand[1]
 }
 
+// Leaves lists every Leave of the plan, in leg order: a spawn stands for the whole run, so a leg's list holds for every leg's points.
+func (p *Plan) Leaves() []Leave {
+	var out []Leave
+	for _, l := range p.Legs {
+		out = append(out, l.Leave...)
+	}
+	return out
+}
+
 // Portal is a point of the outer map: the centre of the entrance's area trigger.
 type Portal struct {
 	Map uint32 `json:"map"`
@@ -163,9 +172,14 @@ type Leg struct {
 	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
-	Skip  []uint32 `json:"skip,omitempty"`
-	Steps []Step   `json:"steps,omitempty"`
-	Boss  *Boss    `json:"boss,omitempty"`
+	Skip []uint32 `json:"skip,omitempty"`
+	// Leave lists the spawns a run must not pull, fight or walk up to (zf-r6: the lone Shadowhunter 7246, spawn 81610, on a navmesh island at
+	// 1591 1047.7, which the module's hop pull engaged and whose island took the tank). The plan check keeps every approach point and stand of
+	// the plan LeaveClearYd away from them (leave_clear_test.go). The run leader's rows have no place for it yet: plan-export writes it into
+	// the leg row's comment and warns.
+	Leave []Leave `json:"leave,omitempty"`
+	Steps []Step  `json:"steps,omitempty"`
+	Boss  *Boss   `json:"boss,omitempty"`
 	// CompanionsLoot false has the driver order the party's corpse and object looting off (".bot behavior <bot> loot off") from the start
 	// of the leg to its end, and on again after: the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes
 	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
@@ -185,6 +199,18 @@ type Leg struct {
 	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+}
+
+// LeaveClearYd is how far an approach point or a stand keeps from a Leave spawn: more than the run leader's hop pull reaches (kHopPullYd, 15).
+const LeaveClearYd = 15.0
+
+// Leave is one spawn a run leaves alone (Leg.Leave): Entry is its creature entry, Spawn its creature guid (0: not named), At where it stands
+// and Why the reason, for the reader and for the exported leg row.
+type Leave struct {
+	Entry uint32 `json:"entry"`
+	Spawn uint32 `json:"spawn,omitempty"`
+	At    Point  `json:"at"`
+	Why   string `json:"why"`
 }
 
 // OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
@@ -749,6 +775,7 @@ type rawLeg struct {
 	Via        []rawWaypoint     `json:"via"`
 	PullGroups []rawPullGroup    `json:"pull_groups"`
 	Skip       []uint32          `json:"skip"`
+	Leave      []rawLeave        `json:"leave"`
 	Steps      []json.RawMessage `json:"steps"`
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
@@ -759,6 +786,13 @@ type rawLeg struct {
 	Rest           *RestSpec    `json:"rest"`
 	Notes          []string     `json:"notes"`
 	NeedsWalk      bool         `json:"needs_walk"`
+}
+
+type rawLeave struct {
+	Entry uint32    `json:"entry"`
+	Spawn uint32    `json:"spawn"`
+	At    *rawPoint `json:"at"`
+	Why   string    `json:"why"`
 }
 
 type rawPullGroup struct {
@@ -1260,6 +1294,25 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		pg.Approach = c.approach(gp+".approach", g.Approach)
 		pg.Hold = c.hold(gp+".hold", g.Hold, false)
 		l.PullGroups = append(l.PullGroups, pg)
+	}
+	for i, lv := range r.Leave {
+		lp := fmt.Sprintf("%s.leave[%d]", path, i)
+		if lv.Entry == 0 {
+			c.fail(lp+".entry", "required (the creature entry to leave alone)")
+		}
+		if strings.TrimSpace(lv.Why) == "" {
+			c.fail(lp+".why", "required (why the run leaves it: the reader and the exported leg row need the reason)")
+		}
+		at := c.point(lp+".at", lv.At)
+		for j, g := range r.PullGroups {
+			for k, gp := range g.Positions {
+				if gp.X != nil && gp.Y != nil && lv.Entry != 0 && slices.Contains(g.Entries, lv.Entry) &&
+					math.Hypot(float64(*gp.X-at.X), float64(*gp.Y-at.Y)) < 3 {
+					c.fail(lp, "pull_groups[%d].positions[%d] is this spawn: the leg would pull what it leaves", j, k)
+				}
+			}
+		}
+		l.Leave = append(l.Leave, Leave{Entry: lv.Entry, Spawn: lv.Spawn, At: at, Why: strings.TrimSpace(lv.Why)})
 	}
 	c.entries(path+".skip", r.Skip, false)
 	for i, e := range r.Skip {
