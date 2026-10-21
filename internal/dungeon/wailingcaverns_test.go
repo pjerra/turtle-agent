@@ -346,42 +346,34 @@ func TestWailingCavernsNoUnclaimedMobNearAWalkPoint(t *testing.T) {
 }
 
 // The extra plan is the Naralex event as a segment of its own: 12 legs from the return_gossip leg to mutanus, a draft. It is loaded here (and
-// walked on the navmesh by TestWailingCavernsOnNavmesh) so that it cannot rot; its only gm_cross is the return, and its status says it
-// needs a GM commander or a live-probed return hop.
+// walked on the navmesh by TestWailingCavernsOnNavmesh) so that it cannot rot; its return from Verdan is the live-probed hop pair (no
+// gm_cross anywhere: TestNaralexReturnHop pins the pair), and its status says so.
 func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 	p := loadPlan(t, wailingExtra)
 	if p.Name != "wailing_caverns-extra" || p.Map != 43 || len(p.Legs) != 12 || !strings.HasPrefix(p.Status, "draft") {
 		t.Fatalf("%+v", p)
 	}
-	if !strings.Contains(p.Status, "GM commander") || !strings.Contains(p.Status, "gm_cross") {
-		t.Errorf("status %q does not say that the event needs a GM commander for the return", p.Status)
+	if !strings.Contains(p.Status, "hop pair") || strings.Contains(p.Status, "GM commander") {
+		t.Errorf("status %q does not say that the return is the live-probed hop pair (no GM)", p.Status)
 	}
-	if len(p.Notes) == 0 || !strings.HasPrefix(p.Notes[0], "Naralex event: needs a GM commander for the return (gm_cross), OR a live-probed non-GM return hop") {
+	if len(p.Notes) == 0 || !strings.HasPrefix(p.Notes[0], "Naralex event: the return from Verdan is a live-probed hop pair, no GM") {
 		t.Errorf("the first plan note must be the event banner: %q", p.Notes)
 	}
 	last := p.Legs[len(p.Legs)-1]
 	if last.Name != "mutanus" || last.Boss == nil || last.Boss.Entry != 3654 {
 		t.Fatalf("the last leg ends with Mutanus: %+v", last)
 	}
-	crosses := 0
 	for i, l := range p.Legs {
 		for _, w := range l.Via {
 			if w.GMCross {
-				crosses++
-				if i != 0 || l.Name != "return_gossip" {
-					t.Errorf("legs[%d] (%s): a gm_cross outside the return_gossip leg", i, l.Name)
-				}
+				t.Errorf("legs[%d] (%s): a gm_cross at %v: the return is the hop pair, the event needs no GM", i, l.Name, w.Point)
 			}
 		}
 	}
-	if crosses != 1 {
-		t.Errorf("%d gm_cross waypoints, want the one return", crosses)
-	}
 }
 
-// The mapped route (the base plan) needs no GM from any start leg: the Naralex return was the only gm_cross, and it lives in the extra plan
-// only (a gm_cross anywhere in the base plan would make the group driver refuse the dungeon from every leg and a remote run with a
-// non-GM commander refuse every leg up to it).
+// The mapped route (the base plan) needs no GM from any start leg (a gm_cross anywhere in the base plan would make the group driver refuse
+// the dungeon from every leg and a remote run with a non-GM commander refuse every leg up to it); nor does the extra plan.
 func TestWailingCavernsBasePlanNeedsNoGM(t *testing.T) {
 	p := loadPlan(t, wailingPlan)
 	if len(p.Legs) != 12 || p.Legs[len(p.Legs)-1].Name != "verdan" {
@@ -392,10 +384,12 @@ func TestWailingCavernsBasePlanNeedsNoGM(t *testing.T) {
 			t.Errorf("HasGMCross(%d) is true: the base plan must not need a GM from any start leg", from)
 		}
 	}
-	// The extra plan is the opposite: it needs one from its first leg on, and from nowhere else.
+	// The extra plan needs none either since the return became the hop pair (it had the one gm_cross of the return until 2026-10-22).
 	e := loadPlan(t, wailingExtra)
-	if !e.HasGMCross(0) || e.HasGMCross(1) {
-		t.Errorf("extra plan: HasGMCross(0)=%v HasGMCross(1)=%v, want true and false (the return is its first leg)", e.HasGMCross(0), e.HasGMCross(1))
+	for from := 0; from <= len(e.Legs); from++ {
+		if e.HasGMCross(from) {
+			t.Errorf("extra plan: HasGMCross(%d) is true: the return is the hop pair, the event needs no GM", from)
+		}
 	}
 }
 
@@ -500,6 +494,12 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 	for _, f := range []string{wailingPlan, wailingExtra} {
 		p := loadPlan(t, f)
 		from := [3]float32{p.Entrance.X, p.Entrance.Y, p.Entrance.Z}
+		if f == wailingExtra {
+			// The event is the segment after the verdan leg: its first leg walks back from Verdan's room to the ramp lip (the upper part of the mesh).
+			vp := loadPlan(t, wailingPlan)
+			end := vp.Legs[len(vp.Legs)-1].To
+			from = [3]float32{end.X, end.Y, end.Z}
+		}
 		total := 0.0
 		hops := 0
 		stop := p.Legs[0].To // the previous stop of the escort: the stand, then each leg's own stop
@@ -550,11 +550,11 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 				t.Errorf("%s: %.0f yd and %d hops, expected about 6240 yd and the one hop onto the ramp", p.Name, total, hops)
 			}
 		case "wailing_caverns-extra":
-			// The Naralex event: the gm_cross onto the Disciple's stand (the ramp cannot be climbed back, live 2026-10-18; the
-			// navmesh has no walk from Verdan's room to the stand), then the escort road to the ritual stop and the chamber
-			// (script_waypoint 3678, points 0-31): 1041 yd of mesh path, measured.
-			if total < 950 || total > 1150 || hops != 1 {
-				t.Errorf("%s: %.0f yd and %d hops, expected about 1041 yd and the one gm_cross", p.Name, total, hops)
+			// The Naralex event, walked from the end of the verdan leg: the walk to the ramp lip, the hop down to the foot (the ramp
+			// cannot be walked back, live 2026-10-18; the hop worked 3 of 3 on 2026-10-22), the long walk to the Disciple's stand,
+			// then the escort road to the ritual stop and the chamber (script_waypoint 3678, points 0-31): 2987 yd of mesh path, measured.
+			if total < 2900 || total > 3070 || hops != 1 {
+				t.Errorf("%s: %.0f yd and %d hops, expected about 2987 yd and the one hop pair", p.Name, total, hops)
 			}
 		}
 	}
@@ -640,8 +640,9 @@ func TestNaralexEventSteps(t *testing.T) {
 
 	// The talk: a wait for the Disciple alive at his stand, then the gossip at option 0 of menu 202.
 	l := naralexLeg(t, p, "return_gossip")
-	if len(l.Via) != 1 || !l.Via[0].Direct || !l.Via[0].GMCross || distAt(l.Via[0].Point, Point{X: -131, Y: 127, Z: -78.6}, 0.1) == false {
-		t.Errorf("return_gossip: via %+v, want one gm_cross at -131 127 -78.6", l.Via)
+	// The way back from Verdan is the hop pair (TestNaralexReturnHop pins it); no GM move is left.
+	if len(l.Via) != 2 {
+		t.Errorf("return_gossip: via %+v, want the hop pair (the exact lip, the direct foot)", l.Via)
 	}
 	// The target is the gossip's stand, not the Disciple's spawn point (the lead bot would walk onto the NPC).
 	gossipStand := Point{X: -134, Y: 128.5, Z: -78.1}
@@ -888,11 +889,13 @@ func TestNaralexEscortFollowsScriptWaypoints(t *testing.T) {
 	if got := at(l.To); got != "" {
 		t.Errorf("return_gossip: to %v is script waypoint %q: the target is the gossip's stand, not the Disciple's spawn point (waypoint 0)", l.To, got)
 	}
-	if len(l.Via) != 1 || !l.Via[0].GMCross {
-		t.Fatalf("return_gossip: via %+v, want the one gm_cross", l.Via)
+	if len(l.Via) != 2 {
+		t.Fatalf("return_gossip: via %+v, want the hop pair", l.Via)
 	}
-	if got := at(l.Via[0].Point); got != "" {
-		t.Errorf("return_gossip: the gm_cross point %v is script waypoint %s: the GM stand is not an escort stop", l.Via[0].Point, got)
+	for _, w := range l.Via {
+		if got := at(w.Point); got != "" {
+			t.Errorf("return_gossip: the hop point %v is script waypoint %s: the lip and the foot are not escort stops", w.Point, got)
+		}
 	}
 	// The ritual stop is the escort's last ground: points 30 and 31 stand on it (the final walk back is a zero-length
 	// step of the script), and Naralex's spawn (33973, 115.4 240.0 -94.0) is within 12 yd of it.
@@ -903,5 +906,83 @@ func TestNaralexEscortFollowsScriptWaypoints(t *testing.T) {
 	naralex := Point{X: 115.408, Y: 240.017, Z: -94.021}
 	if !distAt(naralex, stop30, 12) {
 		t.Errorf("Naralex (3679 at %v) is not within 12 yd of the ritual stop", naralex)
+	}
+}
+
+// The return from Verdan is the live-probed hop pair, not a GM move (the probe of 2026-10-22, r9-19z26 slot 1: from the ramp lip one direct
+// move to the foot landed the lead on the foot, 0.0 yd, 3 of 3): the first via is the ramp lip as an `exact` plain waypoint, the second the
+// foot as a direct step, and the pair is the Serpentis hop of the base plan taken the other way, point for point. The plan export writes the
+// pair as an exact move and a move_hop_exact (planexport.TestNaralexReturnHopRows).
+func TestNaralexReturnHop(t *testing.T) {
+	base := loadPlan(t, wailingPlan)
+	extra := loadPlan(t, wailingExtra)
+	l := naralexLeg(t, extra, "return_gossip")
+	var serp Leg
+	for _, bl := range base.Legs {
+		if bl.Name == "serpentis" {
+			serp = bl
+		}
+	}
+	if len(serp.Via) != 2 || len(l.Via) != 2 {
+		t.Fatalf("serpentis via %d, return_gossip via %d, want two each (the hop pair)", len(serp.Via), len(l.Via))
+	}
+	foot, lip := serp.Via[0].Point, serp.Via[1].Point
+	if d := dist3(foot, Point{X: -293.3, Y: 0.5, Z: -58}); d > 0.1 {
+		t.Fatalf("the base plan's foot %v moved (%.2f yd): the probe's foot is -293.3 0.5 -58", foot, d)
+	}
+	if d := dist3(lip, Point{X: -287.5, Y: 5, Z: -63.6}); d > 0.1 {
+		t.Fatalf("the base plan's landing %v moved (%.2f yd): the probe's lip is -287.5 5 -63.6", lip, d)
+	}
+	up, down := l.Via[0], l.Via[1]
+	if d := dist3(up.Point, lip); d > 0.1 {
+		t.Errorf("return_gossip via[0] %v is %.2f yd from the ramp lip %v (the hop's launch point, 0.1 yd)", up.Point, d, lip)
+	}
+	if !up.Exact || up.Direct || up.GMCross {
+		t.Errorf("return_gossip via[0] %+v: want the lip as a plain exact waypoint (the lead bot held on it before the hop)", up)
+	}
+	if d := dist3(down.Point, foot); d > 0.1 {
+		t.Errorf("return_gossip via[1] %v is %.2f yd from the foot %v (the hop's landing, 0.1 yd)", down.Point, d, foot)
+	}
+	if !down.Direct || down.Exact || down.GMCross {
+		t.Errorf("return_gossip via[1] %+v: want the foot as a plain direct step", down)
+	}
+	if up.CheckSkip == "" || down.CheckSkip == "" {
+		t.Errorf("return_gossip: the lip (check_skip %q) and the foot (check_skip %q) both need a check_skip: the mesh cannot judge the walk to the lip from the entrance nor the jump", up.CheckSkip, down.CheckSkip)
+	}
+	// The direct step is within the limits of a direct step (the loader checks it against the previous via; this pins the numbers).
+	if h := math.Hypot(float64(down.X-up.X), float64(down.Y-up.Y)); h > DirectMaxDistance || math.Abs(float64(down.Z-up.Z)) > DirectMaxVertical {
+		t.Errorf("the hop is %.1f yd across and %.1f yd down, over the limits of a direct step", h, down.Z-up.Z)
+	}
+	// The navmesh facts the plan rests on: the lip is walkable from the end of Verdan's room (the upper part), and the walk from the foot
+	// to the Disciple's stand is complete (the lower part); the lip is not walkable to the foot (the whole reason for the hop).
+	dir := mapMmaps(43)
+	if dir == "" {
+		t.Skip("no map 43 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 043.mmap and the 043*.mmtile tiles")
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	pt := func(p Point) [3]float32 { return [3]float32{p.X, p.Y, p.Z} }
+	verdan := base.Legs[len(base.Legs)-1].To
+	plan := func(from, to Point) navmesh.Path {
+		path, err := pl.Plan(43, pt(from), pt(to))
+		if errors.Is(err, navmesh.ErrNoEngine) {
+			t.Skip("built without cgo: no navmesh engine")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if p := plan(verdan, lip); p.Status != navmesh.Complete {
+		t.Errorf("Verdan's room %v to the lip %v: %s %s, want a complete walk", verdan, lip, p.Status, p.Reason)
+	}
+	if p := plan(foot, l.To); p.Status != navmesh.Complete || p.Length < 1600 || p.Length > 1800 {
+		t.Errorf("the foot %v to the gossip stand %v: %s, %.0f yd, want a complete walk of about 1706 yd", foot, l.To, p.Status, float64(p.Length))
+	}
+	if p := plan(lip, foot); p.Status == navmesh.Complete {
+		t.Errorf("the lip %v to the foot %v is walkable on the mesh: the hop is no longer needed (drop it, and the check_skips)", lip, foot)
+	}
+	if p := plan(extra.Entrance, lip); p.Status == navmesh.Complete {
+		t.Errorf("the entrance %v to the lip is walkable: the event would need no hop (or the mesh changed)", extra.Entrance)
 	}
 }

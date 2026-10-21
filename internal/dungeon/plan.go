@@ -251,8 +251,8 @@ type Waypoint struct {
 	// GMCross says the party does not walk to this point: a GM account moves it there (remote driver, gmCross): the commander's own
 	// character goes to the point (`.appear <lead bot>` when it is not near, then `.go xyz`), `.bot summon <lead bot>` brings the lead
 	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
-	// It is for a gap no walk crosses (Wailing Caverns' ramp was the case until 2026-10-18, when that hop became a plain direct step with a
-	// check_skip; the Disciple hop of dungeons/wailing_caverns-extra.json is one). It is a direct waypoint (the file says
+	// It is for a gap no walk crosses (Wailing Caverns' ramp was the case until 2026-10-18, and the Disciple's return of dungeons/wailing_caverns-extra.json until 2026-10-22:
+	// both became a plain direct step with a check_skip). It is a direct waypoint (the file says
 	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
 	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account that may .go xyz (level 1 and up, read with `.account`): without
 	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
