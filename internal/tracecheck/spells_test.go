@@ -86,8 +86,8 @@ func TestSpellsNotRecordedOnATraceWithoutCastsOrActions(t *testing.T) {
 	expect(t, get(t, Score(newTrace(0).f, Defaults()), IDSpells), trace.NA)
 }
 
-// An older trace has the action name but no verdict letter: everything that needs the letter says "not recorded", the counts that
-// do not still work, and nothing fails.
+// An older trace has the action name but no verdict letter: everything that needs the letter says "not recorded" or counts the action
+// as unknown (never as executed), and nothing fails.
 func TestSpellsOnAnOlderTraceWithoutVerdicts(t *testing.T) {
 	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
 		m := sb(gMage, "frostbolt", "")
@@ -96,14 +96,15 @@ func TestSpellsOnAnOlderTraceWithoutVerdicts(t *testing.T) {
 		return []trace.Bot{tank, m}, []trace.Mob{onParty()}
 	})
 	r := Spells(b.f, Defaults())
-	if r.VerdictSeen || r.Idle.Recorded || !r.ActsSeen || !r.CastsSeen {
+	if r.VerdictSeen || r.Idle.Recorded || r.Idle.Unknown == 0 || !r.ActsSeen || !r.CastsSeen {
 		t.Fatalf("%+v", r)
 	}
-	if r.Taunts.Done != 1 || r.Taunts.Tried != 1 {
+	// With no verdict letter an action is unknown: it is not counted as executed.
+	if r.Taunts.Done != 0 || r.Taunts.Unknown != 1 || r.Taunts.Tried != 1 {
 		t.Fatalf("taunts %+v", r.Taunts)
 	}
 	text := strings.Join(r.Lines(), "\n")
-	for _, want := range []string{"action verdicts not recorded", "idle share: not recorded", "verdict not recorded"} {
+	for _, want := range []string{"action verdicts not recorded", "idle share: not recorded", "0 executed (verdict O) of 1 tried, 1 with no verdict letter (unknown)"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in\n%s", want, text)
 		}
@@ -276,7 +277,7 @@ func TestSpellsInterruptCover(t *testing.T) {
 	})
 	r := Spells(b.f, Defaults())
 	in := r.Interrupt
-	if in.Casts != 7 || in.Covered != 2 || in.CutShort != 2 || in.Pct != 28.6 || len(in.TopMissed) != 1 || in.TopMissed[0].Name != "Shadow Bolt" || in.TopMissed[0].N != 5 {
+	if in.Casts != 7 || in.Near != 2 || in.Confirmed != 2 || in.CutShort != 2 || in.Pct != 28.6 || len(in.TopMissed) != 1 || in.TopMissed[0].Name != "Shadow Bolt" || in.TopMissed[0].N != 5 {
 		t.Fatalf("%+v", in)
 	}
 	if len(r.Warnings) != 1 || !strings.HasPrefix(r.Warnings[0], "interrupt_cover") {
@@ -315,10 +316,10 @@ func TestSpellsInterruptThatCutACastShort(t *testing.T) {
 			return []trace.Bot{act}, []trace.Mob{onParty()}
 		})
 	}
-	if in := Spells(mk(1).f, Defaults()).Interrupt; in.Covered != 1 || in.CutShort != 1 {
+	if in := Spells(mk(1).f, Defaults()).Interrupt; in.Near != 1 || in.CutShort != 1 {
 		t.Fatalf("%+v", in)
 	}
-	if in := Spells(mk(3).f, Defaults()).Interrupt; in.Covered != 1 || in.CutShort != 0 {
+	if in := Spells(mk(3).f, Defaults()).Interrupt; in.Near != 1 || in.CutShort != 0 {
 		t.Fatalf("%+v", in)
 	}
 }
@@ -339,15 +340,16 @@ func TestSpellsTauntsAreCountedPerBot(t *testing.T) {
 	}
 }
 
-func TestSpellsCrowdControlSuccess(t *testing.T) {
-	// Four polymorph actions: the first puts a cc flag on a mob; the second does nothing; the third is a failed cast (F, not counted);
-	// the fourth is cast on a mob that was already crowd-controlled before it, which is no new flag.
+func TestSpellsCrowdControlIsAnUncorrelatedObservation(t *testing.T) {
+	// Four polymorph actions by a mage targeting 0xf1: the first is followed by a new cc flag on 0xf1; the second by none; the third is a
+	// failed cast (F, not counted); the fourth is cast while 0xf3 was already crowd-controlled before it, which is no new flag.
 	poly := map[int]string{10: "O", 20: "O", 30: "F", 40: "O"}
 	b := spellTrace(60, func(s int) ([]trace.Bot, []trace.Mob) {
 		m := sb(gMage, "frostbolt", "O")
 		if res, ok := poly[s]; ok {
 			m = sb(gMage, "polymorph", res)
 		}
+		m.Target = "0xf1"
 		mob := onParty()
 		if s >= 11 && s <= 14 { // the flag appears a second after the first polymorph
 			mob.CC = true
@@ -357,24 +359,38 @@ func TestSpellsCrowdControlSuccess(t *testing.T) {
 	})
 	r := Spells(b.f, Defaults())
 	cc := r.CC
-	if cc.Casts != 3 || cc.Evaluable != 3 || cc.Landed != 1 || cc.Pct != 33.3 || cc.BySpell[0].Name != "polymorph" {
+	if cc.Actions != 3 || cc.Unknown != 0 || cc.WithMobs != 3 || cc.FlagSeen != 1 || cc.TargetSeen != 3 || cc.Attributed != 1 || cc.BySpell[0].Name != "polymorph" {
 		t.Fatalf("%+v", cc)
 	}
-	if len(r.Warnings) != 1 || !strings.HasPrefix(r.Warnings[0], "cc_success") {
+	// No warning is raised from it, and nothing in the text calls it a success.
+	if len(r.Warnings) != 0 {
 		t.Fatalf("%q", r.Warnings)
 	}
-	cfg := Defaults()
-	if err := cfg.Set(IDCCSuccess, 30); err != nil {
-		t.Fatal(err)
+	text := strings.Join(r.Lines(), "\n") + get(t, Score(b.f, Defaults()), IDSpells).Detail
+	if !strings.Contains(text, "observation, not a success rate") || !strings.Contains(text, "uncorrelated") || strings.Contains(text, "landed") {
+		t.Fatalf("\n%s", text)
 	}
-	if r := Spells(b.f, cfg); len(r.Warnings) != 0 {
-		t.Fatalf("%q", r.Warnings)
+	if err := (&Config{}).Set("cc_success", 50); err == nil {
+		t.Fatal("cc_success is no threshold any more")
+	}
+	// A flag on another mob than the caster's target is seen, but not attributed.
+	o := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := sb(gMage, "frostbolt", "O")
+		if s == 10 {
+			m = sb(gMage, "polymorph", "O")
+		}
+		m.Target = "0xf1"
+		sheep := trace.Mob{G: "0xf5", HPPct: 90, Combat: true, Target: gTank, CC: s >= 12}
+		return []trace.Bot{m}, []trace.Mob{onParty(), sheep}
+	})
+	if cc := Spells(o.f, Defaults()).CC; cc.FlagSeen != 1 || cc.TargetSeen != 1 || cc.Attributed != 0 {
+		t.Fatalf("%+v", cc)
 	}
 	// An area crowd control (frost nova) is not judged by the flag.
 	n := spellTrace(20, func(s int) ([]trace.Bot, []trace.Mob) {
 		return []trace.Bot{sb(gMage, "frost nova", "O")}, []trace.Mob{onParty()}
 	})
-	if r := Spells(n.f, Defaults()); r.CC.Casts != 0 {
+	if r := Spells(n.f, Defaults()); r.CC.Actions != 0 {
 		t.Fatalf("%+v", r.CC)
 	}
 }
@@ -384,7 +400,7 @@ func TestSpellsNeverFailsARun(t *testing.T) {
 	b := idleTrace(40)
 	b.ev(5000, "note", "text", "x")
 	cfg := Defaults()
-	cfg.IdleSharePct, cfg.InterruptCoverPct, cfg.CCSuccessPct = 0, 100, 100
+	cfg.IdleSharePct, cfg.InterruptCoverPct = 0, 100
 	cs := Score(b.f, cfg)
 	c := get(t, cs, IDSpells)
 	if c.Verdict != trace.Pass || c.Count == 0 {
@@ -396,14 +412,14 @@ func TestSpellsNeverFailsARun(t *testing.T) {
 	}
 }
 
-func TestSpellsSetKnowsTheThreeLimits(t *testing.T) {
+func TestSpellsSetKnowsTheTwoLimits(t *testing.T) {
 	cfg := Defaults()
-	for id, field := range map[string]*float64{IDIdleShare: &cfg.IdleSharePct, IDInterruptCover: &cfg.InterruptCoverPct, IDCCSuccess: &cfg.CCSuccessPct} {
+	for id, field := range map[string]*float64{IDIdleShare: &cfg.IdleSharePct, IDInterruptCover: &cfg.InterruptCoverPct} {
 		if err := cfg.Set(id, 7); err != nil || *field != 7 {
 			t.Errorf("%s: %v %g", id, err, *field)
 		}
 	}
-	if d := Defaults(); d.IdleSharePct != 15 || d.InterruptCoverPct != 30 || d.CCSuccessPct != 50 {
+	if d := Defaults(); d.IdleSharePct != 15 || d.InterruptCoverPct != 30 {
 		t.Fatalf("%+v", d)
 	}
 }
@@ -427,9 +443,10 @@ func TestBotVerdictFieldsAreAdditive(t *testing.T) {
 	}
 }
 
-// An interrupt counts when it runs within a second before the cast's first frame or after its last, not further away.
-func TestSpellsInterruptWindowIsOneSecond(t *testing.T) {
-	at := func(kickAt int) int {
+// An interrupt action is during a cast from a second before its first frame to its last frame. In the frame right after the last one it
+// is counted apart (an interrupt that worked takes the cast out of the next frame, so does a kick that came too late); later, nothing.
+func TestSpellsInterruptWindowIsASecondBeforeToTheCastsEnd(t *testing.T) {
+	at := func(kickAt int) [2]int {
 		b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
 			act := sb(gMage, "sinister strike", "O")
 			if s == kickAt {
@@ -440,11 +457,182 @@ func TestSpellsInterruptWindowIsOneSecond(t *testing.T) {
 			}
 			return []trace.Bot{act}, []trace.Mob{onParty()}
 		})
-		return Spells(b.f, Defaults()).Interrupt.Covered
+		in := Spells(b.f, Defaults()).Interrupt
+		return [2]int{in.Near, in.After}
 	}
-	for kickAt, want := range map[int]int{9: 1, 10: 1, 11: 1, 8: 0, 12: 0} {
+	for kickAt, want := range map[int][2]int{9: {1, 0}, 10: {1, 0}, 11: {0, 1}, 8: {0, 0}, 12: {0, 0}} {
 		if got := at(kickAt); got != want {
-			t.Errorf("kick at %d s: covered %d, want %d", kickAt, got, want)
+			t.Errorf("kick at %d s: during/after %v, want %v", kickAt, got, want)
 		}
+	}
+	// The warning is held to the favourable reading: six casts each followed by a kick in the next frame raise none.
+	b := spellTrace(80, func(s int) ([]trace.Bot, []trace.Mob) {
+		act := sb(gMage, "sinister strike", "O")
+		if s%10 == 1 && s >= 11 {
+			act = sb(gMage, "kick", "O")
+		}
+		if s%10 == 0 && s >= 10 && s < 70 {
+			return []trace.Bot{act}, []trace.Mob{mobCasting(spShadowBolt)}
+		}
+		return []trace.Bot{act}, []trace.Mob{onParty()}
+	})
+	if in := Spells(b.f, Defaults()); in.Interrupt.Casts != 6 || in.Interrupt.Near != 0 || in.Interrupt.After != 6 || len(in.Warnings) != 0 {
+		t.Fatalf("%+v %q", in.Interrupt, in.Warnings)
+	}
+}
+
+// Frames are samples: a sustained cs is several casts back to back. With the cast time known the run is ceil(duration / cast time);
+// without it, one, and the report says it is a lower bound.
+func TestSpellsCastEpisodesFromARunOfFrames(t *testing.T) {
+	const frostbolt2s, arcaneMissiles, serpentSting = 17503, 5143, 13549 // a 2.0 s cast; a channel with no cast time; a spell the table gives a negative cast time
+	if castTimeMS(frostbolt2s) != 2000 || castTimeMS(arcaneMissiles) != 0 || castTimeMS(serpentSting) != 0 {
+		t.Fatalf("the spell table changed: %d %d %d", castTimeMS(frostbolt2s), castTimeMS(arcaneMissiles), castTimeMS(serpentSting))
+	}
+	run := func(id uint32, frames int) ClassSpell {
+		b := spellTrace(frames+4, func(s int) ([]trace.Bot, []trace.Mob) {
+			m := sb(gMage, "", "")
+			if s >= 2 && s < 2+frames {
+				m.Cast = id
+			}
+			return []trace.Bot{m}, nil
+		})
+		return Spells(b.f, Defaults()).Classes[0]
+	}
+	if c := run(frostbolt2s, 6); c.Casts != 3 || c.CastsLB != 0 { // 6 s of a 2 s cast
+		t.Fatalf("%+v", c)
+	}
+	if c := run(frostbolt2s, 1); c.Casts != 1 {
+		t.Fatalf("%+v", c)
+	}
+	if c := run(frostbolt2s, 3); c.Casts != 2 { // 3 s: two casts at least, never more than the frames
+		t.Fatalf("%+v", c)
+	}
+	c := run(arcaneMissiles, 6)
+	if c.Casts != 1 || c.CastsLB != 1 {
+		t.Fatalf("%+v", c)
+	}
+	if c := run(serpentSting, 4); c.Casts != 1 || c.CastsLB != 1 { // a negative table value is no cast time
+		t.Fatalf("%+v", c)
+	}
+	lines := strings.Join(Spells(spellTrace(10, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := sb(gMage, "", "")
+		m.Cast = arcaneMissiles
+		return []trace.Bot{m}, nil
+	}).f, Defaults()).Lines(), "\n")
+	if !strings.Contains(lines, "about 1 cast episodes") || !strings.Contains(lines, "a lower bound: 1 run(s)") {
+		t.Fatalf("\n%s", lines)
+	}
+}
+
+func twoCasts() []trace.Mob {
+	return []trace.Mob{
+		{G: "0xf2", HPPct: 90, Combat: true, Target: gTank, Cast: spShadowBolt},
+		{G: "0xf4", HPPct: 90, Combat: true, Target: gTank, Cast: 403}, // Lightning Bolt
+	}
+}
+
+// One kick covers one cast: two enemy casts at the same moment are not both covered by it.
+func TestSpellsOneInterruptActionCoversOneCast(t *testing.T) {
+	mk := func(target string, kicks ...int) InterruptUse {
+		b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+			act := sb(gMage, "sinister strike", "O")
+			act.Target = target
+			for i, k := range kicks {
+				if s == k {
+					act = sb(gMage, []string{"kick", "pummel"}[i%2], "O") // a different name, so that two in a row are two actions
+					act.Target = target
+				}
+			}
+			if s == 10 {
+				return []trace.Bot{act}, twoCasts()
+			}
+			return []trace.Bot{act}, []trace.Mob{onParty()}
+		})
+		return Spells(b.f, Defaults()).Interrupt
+	}
+	in := mk("", 10)
+	if in.Casts != 2 || in.Near != 1 || len(in.TopMissed) != 1 {
+		t.Fatalf("%+v", in)
+	}
+	// Two kicks, two casts: both covered, one each.
+	if in := mk("", 9, 10); in.Near != 2 {
+		t.Fatalf("%+v", in)
+	}
+	// The interrupter's target must be the casting mob when both are known: a kick on 0xf4 covers the Lightning Bolt, not the Shadow Bolt.
+	in = mk("0xf4", 10)
+	if in.Near != 1 || len(in.TopMissed) != 1 || in.TopMissed[0].Name != "Shadow Bolt" || in.ByBot[0].Name != "Mage" {
+		t.Fatalf("%+v", in)
+	}
+	// A kick on a mob that casts nothing covers nothing.
+	if in := mk("0xf9", 10); in.Near != 0 {
+		t.Fatalf("%+v", in)
+	}
+}
+
+// A trace in which only some bots sent verdict letters: a blank verdict from a bot that sent none is unknown, not "not executed" and
+// not "executed". It is left out of the idle denominator and out of the executed counts.
+func TestSpellsMixedVersionTrace(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		healer := sb(gHealer, "heal on party", "O") // sends verdicts
+		mage := sb(gMage, "frostbolt", "")          // an older module: none
+		tank := sb(gTank, "sunder armor", "")
+		if s == 20 {
+			tank = sb(gTank, "taunt", "")
+			mage = sb(gMage, "kick", "")
+		}
+		return []trace.Bot{healer, mage, tank}, []trace.Mob{onParty()}
+	})
+	r := Spells(b.f, Defaults())
+	if !r.VerdictSeen || !r.Idle.Recorded || r.Idle.Engaged != 40 || r.Idle.Idle != 0 || r.Idle.Unknown != 80 {
+		t.Fatalf("%+v", r.Idle) // the healer's 40 frames count; the mage's and the tank's 80 mana-user frames are unknown
+	}
+	if r.Taunts.Done != 0 || r.Taunts.Unknown != 1 || r.Taunts.Tried != 1 {
+		t.Fatalf("%+v", r.Taunts)
+	}
+	// A blank verdict from the mage with no enemy cast near: nothing to match, and nothing counted as executed.
+	if r.Interrupt.Near != 0 {
+		t.Fatalf("%+v", r.Interrupt)
+	}
+	// With a cast near it, the unknown kick is matched but not confirmed.
+	c := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		healer := sb(gHealer, "heal on party", "O")
+		mage := sb(gMage, "frostbolt", "")
+		if s == 20 {
+			mage = sb(gMage, "kick", "")
+		}
+		mobs := []trace.Mob{onParty()}
+		if s == 20 {
+			mobs = []trace.Mob{mobCasting(spShadowBolt)}
+		}
+		return []trace.Bot{healer, mage}, mobs
+	})
+	in := Spells(c.f, Defaults()).Interrupt
+	if in.Casts != 1 || in.Near != 1 || in.Confirmed != 0 {
+		t.Fatalf("%+v", in)
+	}
+	// A bot that does send verdict letters but sent none for one action has a missing verdict there: it is not "not known to have failed".
+	e := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := sb(gMage, "sinister strike", "O")
+		if s == 20 {
+			m = sb(gMage, "kick", "")
+		}
+		if s == 20 {
+			return []trace.Bot{m}, []trace.Mob{mobCasting(spShadowBolt)}
+		}
+		return []trace.Bot{m}, []trace.Mob{onParty()}
+	})
+	if in := Spells(e.f, Defaults()).Interrupt; in.Casts != 1 || in.Near != 0 || in.After != 0 {
+		t.Fatalf("%+v", in)
+	}
+	// The healer's own failed verdicts are failures, not unknowns: its engaged idle frames are counted.
+	d := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		h := sb(gHealer, "heal on party", "I")
+		if s < 20 {
+			h.Res = "O"
+		}
+		return []trace.Bot{h, sb(gMage, "frostbolt", "")}, []trace.Mob{onParty()}
+	})
+	if r := Spells(d.f, Defaults()); r.Idle.Engaged != 40 || r.Idle.Idle != 20 || r.Idle.Pct != 50 {
+		t.Fatalf("%+v", r.Idle)
 	}
 }

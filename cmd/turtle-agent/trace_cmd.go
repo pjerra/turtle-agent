@@ -33,7 +33,7 @@ func traceScoreCmd(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print the verdicts as JSON (one object per trace)")
 	summary := fs.Bool("summary", false, "write <run_id>.summary.json beside each trace")
 	var sets thresholdFlags
-	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls, stuck, facing, and the spell warnings idle_share, interrupt_cover, cc_success)")
+	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls, stuck, facing, and the spell warnings idle_share, interrupt_cover)")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(stderr, traceScoreUsage)
 		return exitUsage

@@ -30,7 +30,6 @@ const (
 	// Thresholds of the spells check (its own id is IDSpells): they make warnings, never a fail.
 	IDIdleShare      = "idle_share"
 	IDInterruptCover = "interrupt_cover"
-	IDCCSuccess      = "cc_success"
 
 	maxEvidence    = 8
 	minRunSeconds  = 60
@@ -57,16 +56,15 @@ type Config struct {
 
 	// The spells check only warns: these are the limits of its warnings.
 	IdleSharePct      float64 // percent of engaged mana-user frames without an executed action (a warning above this)
-	InterruptCoverPct float64 // percent of enemy casts that met an interrupt (a warning below this)
-	CCSuccessPct      float64 // percent of crowd-control actions whose target showed the cc flag (a warning below this)
+	InterruptCoverPct float64 // percent of enemy casts with an interrupt action near them (a warning below this; proximity, not a confirmed interrupt)
 }
 
 // Defaults are the thresholds of the first set of checks.
 func Defaults() Config {
-	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2, IdleSharePct: 15, InterruptCoverPct: 30, CCSuccessPct: 50}
+	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2, IdleSharePct: 15, InterruptCoverPct: 30}
 }
 
-var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover, IDCCSuccess}
+var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover}
 
 // Set changes the threshold of the check with the given id (the CLI's --set id=value). deaths and gm_shortcuts have none.
 func (c *Config) Set(id string, v float64) error {
@@ -91,8 +89,6 @@ func (c *Config) Set(id string, v float64) error {
 		c.IdleSharePct = v
 	case IDInterruptCover:
 		c.InterruptCoverPct = v
-	case IDCCSuccess:
-		c.CCSuccessPct = v
 	default:
 		return fmt.Errorf("no threshold for check %q (have %s)", id, strings.Join(thresholdIDs, ", "))
 	}
