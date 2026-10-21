@@ -90,6 +90,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return planExportCmd(args[1:], stdout, stderr)
 	case "plan-check":
 		return planCheckCmd(args[1:], stdout, stderr)
+	case "route-oracle":
+		return routeOracleCmd(args[1:], stdout, stderr)
 	case "route-edits":
 		return routeEditsCmd(ctx, args[1:], stdout, stderr)
 	case "version":
@@ -117,6 +119,7 @@ func usage(w io.Writer) {
   turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR] [--list]
   turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+  turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--plan NAME]...
   turtle-agent route-edits list [--edit-dir DIR] [--json] [<plan>] | export [--edit-dir DIR] [--config-dir DIR] --to DIR <plan> [vN|latest] | promote [--edit-dir DIR] --worktree PATH <plan> vN
   turtle-agent version`)
 }

@@ -1,6 +1,11 @@
 turtle-agent
 Copyright (c) 2026 pjerra
 
+turtle-agent is licensed under the GNU Affero General Public License v3.0 or later (see LICENSE).
+Versions before the licence change were MIT-licensed (LICENSES/MIT-turtle-agent-before-agpl.txt).
+The third-party code below stays under its own licence and is compatible with the AGPL.
+Contributions: one commit (af8a2fd, session create) by Sagiroth, relicensed with his consent (see the licence-change PR).
+
 turtle-agent contains code ported from agent-wow
 (https://github.com/agent-wow/agent-wow), commit 5ef4916, used under the MIT License:
 
