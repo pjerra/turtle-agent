@@ -72,7 +72,7 @@ func TestValidateHoldForms(t *testing.T) {
 		{"units without entries", hold(0, 0, 0, nil), false},
 		{"units with an entry", hold(1, 0, 0, []uint32{7604}), false},
 		{"units with a param", hold(0, 3, 0, []uint32{7604}), false},
-		{"encounter without data", hold(1, 3, FlagEncounter, []uint32{7604}), false},
+		{"encounter without data", hold(0, 0, FlagEncounter, []uint32{7604}), false},
 	} {
 		if err := Validate(tc.r); (err == nil) != tc.ok {
 			t.Errorf("%s: %v", tc.name, err)
