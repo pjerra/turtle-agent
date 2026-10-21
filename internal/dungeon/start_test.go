@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -45,6 +46,13 @@ type startFake struct {
 	// calls is every call of the fake that acts on the game, in order, beside the commands in orders: a refused start
 	// must leave both empty (no teleport, unbind, GM line, bot line or move).
 	calls []string
+
+	// .gps: gpsFn answers it (nil: the fake has no .gps reply and the call fails); sink puts the agent that far below the point of each
+	// `.go xyz`; goPts is every point `.go xyz` was sent.
+	gpsFn    func(g *startFake) (string, error)
+	gpsCalls int
+	sink     float32
+	goPts    []Point
 }
 
 func (g *startFake) log(format string, a ...any) {
@@ -152,8 +160,17 @@ func (g *startFake) WalkSelf(_ context.Context, at Point) (WalkResult, error) {
 func (g *startFake) GoXYZ(_ context.Context, mapID uint32, at Point) error {
 	g.log("go xyz %v %d", at, mapID)
 	g.gos = append(g.gos, fmt.Sprintf("%.0f %.0f %.0f %d", at.X, at.Y, at.Z, mapID))
-	g.agent, g.agentMap = at, mapID
+	g.goPts = append(g.goPts, at)
+	g.agent, g.agentMap = Point{at.X, at.Y, at.Z - g.sink}, mapID
 	return nil
+}
+func (g *startFake) GPS(context.Context) (string, error) {
+	g.log("gps")
+	g.gpsCalls++
+	if g.gpsFn == nil {
+		return "", errors.New("no .gps reply")
+	}
+	return g.gpsFn(g)
 }
 func (g *startFake) BotLines(_ context.Context, command string, _ time.Duration, done func(string) bool) ([]string, bool, error) {
 	g.log("bot %s", command)

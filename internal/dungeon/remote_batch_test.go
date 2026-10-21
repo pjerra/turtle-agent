@@ -1338,3 +1338,7 @@ func TestAgentHomeIsThePreBatchSpot(t *testing.T) {
 		t.Fatalf("home %v (the batch centre is 33 0 0)\n%s", last, notesOf(rep2))
 	}
 }
+
+func (*agentHandsGame) GPS(context.Context) (string, error) {
+	return "", errors.New("no .gps in this fake")
+}
