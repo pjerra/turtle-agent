@@ -147,7 +147,16 @@ func approachClearanceOf(p *Plan, only map[Point]bool) []standFinding {
 // as known and not fixed here (the rule is stricter than the walks they were live-checked with; each needs a stand measured on the navmesh).
 var zfGuarded = map[Point]bool{{X: 1642.1, Y: 902.1}: true, {X: 1660.7, Y: 901.2}: true}
 
-// The guarded groups of Zul'Farrak must pass the rule; every other finding, in any plan, is logged (report-only).
+// uldamanGuarded are the Uldaman groups the 2026-10-21 pull order changed (PLAN-ULDAMAN-GRIMLOK; key: the first spawn): the Stone Steward, the Sculptor
+// trio and the two southern Rocksmashers before the Ancient Stone Keeper, Grimlok's first pull with the third Brawler, the two groups moved in from the
+// keepers_door leg, the merged patrol and trio, and the pair before Grimlok. The rest of Uldaman stays report-only (the two findings of the old order
+// that sat on the moved groups are gone; one on the Keeper leg's third group remains).
+var uldamanGuarded = map[Point]bool{
+	{X: -39.6, Y: 272.8}: true, {X: -44.1, Y: 272.7}: true, {X: -49.6, Y: 202}: true,
+	{X: 30.5, Y: 375.8}: true, {X: 49.3, Y: 346.2}: true, {X: 37, Y: 331.8}: true, {X: 57.9, Y: 374}: true, {X: 37.6, Y: 438.8}: true,
+}
+
+// The guarded groups of Zul'Farrak and Uldaman must pass the rule; every other finding, in any plan, is logged (report-only).
 func TestPlansApproachClearance(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(plansDir, "*.json"))
 	for _, f := range files {
@@ -156,8 +165,8 @@ func TestPlansApproachClearance(t *testing.T) {
 			continue // plans_all_test reports a plan that does not load
 		}
 		fail := map[string]bool{}
-		if p.Name == "zulfarrak" {
-			for _, x := range approachClearanceOf(p, zfGuarded) {
+		if guarded := map[string]map[Point]bool{"zulfarrak": zfGuarded, "uldaman": uldamanGuarded}[p.Name]; guarded != nil {
+			for _, x := range approachClearanceOf(p, guarded) {
 				t.Errorf("%s: %s", p.Name, x)
 				fail[x.String()] = true
 			}
