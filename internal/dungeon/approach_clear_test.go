@@ -64,13 +64,47 @@ func approachClearance(p *Plan) []standFinding {
 
 // approachClearanceOf is approachClearance, limited to the groups whose first spawn is in only (nil: every group).
 func approachClearanceOf(p *Plan, only map[Point]bool) []standFinding {
-	type ref struct {
-		leg   string
-		idx   int
-		g     PullGroup
-		anchr Point
+	var out []standFinding
+	refs, patrols := groupStands(p)
+	for k, r := range refs {
+		if only != nil && !only[Point{X: r.g.Positions[0].X, Y: r.g.Positions[0].Y}] {
+			continue
+		}
+		stand, wantLater := r.stand, laterGroupClearYd
+		if len(r.g.Approach) == 0 {
+			wantLater += approachDriftYd
+		}
+		for _, later := range refs[k+1:] {
+			for _, pos := range later.g.Positions {
+				if d := groundDist(stand, pos); d < wantLater {
+					out = append(out, standFinding{r.leg, r.idx, stand, fmt.Sprintf("a spawn of leg %s group %d at %.1f %.1f (pulled later)", later.leg, later.idx, pos.X, pos.Y), d, wantLater})
+				}
+			}
+		}
+		for _, pa := range patrols {
+			for j := 0; j+1 < len(pa.Path); j++ {
+				if d := pointToSegYd(stand, pa.Path[j], pa.Path[j+1]); d < patrolPathClearYd {
+					out = append(out, standFinding{r.leg, r.idx, stand, fmt.Sprintf("the patrol path of %v (segment %d)", pa.Entries, j+1), d, patrolPathClearYd})
+				}
+			}
+		}
 	}
-	var refs []ref
+	return out
+}
+
+// groupRef is a pull group the run leader walks up to and pulls, with where its party stands to do it.
+type groupRef struct {
+	leg   string
+	idx   int
+	g     PullGroup
+	stand Point
+}
+
+// groupStands lists, in plan order, the groups of the plan that the run leader walks up to and pulls, each with its stand (see the const
+// block), and the patrols of the groups counted. Groups the run leader does not walk up to (ambush, hold, off the navmesh) and repeats of a
+// pack an earlier leg lists are left out, and are not a stand's anchor.
+func groupStands(p *Plan) ([]groupRef, []Patrol) {
+	var refs []groupRef
 	var patrols []Patrol
 	anchor := p.Entrance
 	var seen []Point // positions of the groups already counted: a later leg that lists the same pack again (velratha's pair) is a repeat, dead by then
@@ -101,45 +135,24 @@ func approachClearanceOf(p *Plan, only map[Point]bool) []standFinding {
 			if dup || g.Ambush || g.Hold != nil || g.NeedsWalk || len(g.Positions) == 0 {
 				continue
 			}
-			refs = append(refs, ref{l.Name, i, g, anchor})
+			var stand Point
+			if n := len(g.Approach); n > 0 {
+				stand = g.Approach[n-1]
+			} else {
+				c := groupCentre(g)
+				d := groundDist(anchor, c)
+				if d <= runLeaderApproachYd {
+					stand = anchor
+				} else {
+					f := (d - runLeaderApproachYd) / d
+					stand = Point{anchor.X + float32(f)*(c.X-anchor.X), anchor.Y + float32(f)*(c.Y-anchor.Y), c.Z}
+				}
+			}
+			refs = append(refs, groupRef{l.Name, i, g, stand})
 			anchor = groupCentre(g)
 		}
 	}
-	var out []standFinding
-	for k, r := range refs {
-		if only != nil && !only[Point{X: r.g.Positions[0].X, Y: r.g.Positions[0].Y}] {
-			continue
-		}
-		stand, wantLater := Point{}, laterGroupClearYd
-		if n := len(r.g.Approach); n > 0 {
-			stand = r.g.Approach[n-1]
-		} else {
-			c := groupCentre(r.g)
-			d := groundDist(r.anchr, c)
-			if d <= runLeaderApproachYd {
-				stand = r.anchr
-			} else {
-				f := (d - runLeaderApproachYd) / d
-				stand = Point{r.anchr.X + float32(f)*(c.X-r.anchr.X), r.anchr.Y + float32(f)*(c.Y-r.anchr.Y), c.Z}
-			}
-			wantLater += approachDriftYd
-		}
-		for _, later := range refs[k+1:] {
-			for _, pos := range later.g.Positions {
-				if d := groundDist(stand, pos); d < wantLater {
-					out = append(out, standFinding{r.leg, r.idx, stand, fmt.Sprintf("a spawn of leg %s group %d at %.1f %.1f (pulled later)", later.leg, later.idx, pos.X, pos.Y), d, wantLater})
-				}
-			}
-		}
-		for _, pa := range patrols {
-			for j := 0; j+1 < len(pa.Path); j++ {
-				if d := pointToSegYd(stand, pa.Path[j], pa.Path[j+1]); d < patrolPathClearYd {
-					out = append(out, standFinding{r.leg, r.idx, stand, fmt.Sprintf("the patrol path of %v (segment %d)", pa.Entries, j+1), d, patrolPathClearYd})
-				}
-			}
-		}
-	}
-	return out
+	return refs, patrols
 }
 
 // zfGuarded are the Zul'Farrak groups held to the rule (key: the first spawn): the Antu'sul leg's Shadowcaster / Soul Eater pair and the

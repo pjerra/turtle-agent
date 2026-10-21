@@ -24,6 +24,7 @@ var unexpressedWhy = map[string]string{
 	"watchdog":                  "the agent's watchdog; the run leader has its own ceilings",
 	"avoid":                     "the run leader does not know avoid boxes; export with --mmaps to route its hops around them (a fight can still drag the party in)",
 	"skip":                      "no skip list column: the run leader pulls a hostile within 15 yd of a hop point that no later step owns, a skipped unit too",
+	"leave":                     "no column or step kind: the spawns are free text in the leg row's comment and the run leader still pulls, fights and hops to them like any hostile (a module part that reads the list would need a step kind or a flag on the leg's pull and hop rows)",
 	"leftover_entries":          "no sweep of idle summoned units; the bots fight what aggroes",
 	"rest":                      "the run leader's own rest lines apply",
 	"companions_loot false":     "dropped (--drop-companions-loot): the bots loot as they like on this leg",
@@ -101,6 +102,9 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 		leg := fmt.Sprintf("leg %d (%s)", li, l.Name)
 		if len(l.Skip) > 0 {
 			add("skip", fmt.Sprintf("%s %v", leg, l.Skip))
+		}
+		for _, lv := range l.Leave {
+			add("leave", fmt.Sprintf("%s %d at %.1f %.1f", leg, lv.Entry, lv.At.X, lv.At.Y))
 		}
 		// The leftovers are carried anyway when the leg's chests are carrier rows: every exported chest's sweep pull names them.
 		if len(l.LeftoverEntries) > 0 && !opt.sweepsLeftovers(l) {
