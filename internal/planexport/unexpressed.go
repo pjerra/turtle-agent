@@ -14,19 +14,20 @@ import (
 // no run attribute at all: the plan's name, version, status, kind, map and notes, a via's check_skip (turtle-agent's plan check only),
 // a pull group's equiv (the pull-test scenario only), a step's fail_text and a use_item's name (both in the row's comment).
 var unexpressedWhy = map[string]string{
-	"entrance/teleports/portal":   "the run leader starts inside the instance (`.bot run start` checks the party is in it); getting there is the caller's",
-	"level_band":                  "the run leader leads the bound party at whatever level it is",
-	"hire_composition":            "the run leader leads the bound party as it is",
-	"fleers":                      "no column; the bots' own AI chases or lets go a fleeing mob",
-	"no_cc":                       "no column; the run leader's crowd control picks only from cc_priority and cc_always",
-	"summoned_kill_first":         "no column; only kill_first is focused",
-	"raid":                        "no column; the run leader leads one party",
-	"watchdog":                    "the agent's watchdog; the run leader has its own ceilings",
-	"avoid":                       "the run leader does not know avoid boxes; export with --mmaps to route its hops around them (a fight can still drag the party in)",
-	"skip":                        "no skip list column: the run leader pulls a hostile within 15 yd of a hop point that no later step owns, a skipped unit too",
-	"leftover_entries":            "no sweep of idle summoned units; the bots fight what aggroes",
-	"rest":                        "the run leader's own rest lines apply",
-	"companions_loot false":       "dropped (--drop-companions-loot): the bots loot as they like on this leg",
+	"entrance/teleports/portal": "the run leader starts inside the instance (`.bot run start` checks the party is in it); getting there is the caller's",
+	"level_band":                "the run leader leads the bound party at whatever level it is",
+	"hire_composition":          "the run leader leads the bound party as it is",
+	"fleers":                    "no column; the bots' own AI chases or lets go a fleeing mob",
+	"no_cc":                     "no column; the run leader's crowd control picks only from cc_priority and cc_always",
+	"summoned_kill_first":       "no column; only kill_first is focused",
+	"raid":                      "no column; the run leader leads one party",
+	"watchdog":                  "the agent's watchdog; the run leader has its own ceilings",
+	"avoid":                     "the run leader does not know avoid boxes; export with --mmaps to route its hops around them (a fight can still drag the party in)",
+	"skip":                      "no skip list column: the run leader pulls a hostile within 15 yd of a hop point that no later step owns, a skipped unit too",
+	"leftover_entries":          "no sweep of idle summoned units; the bots fight what aggroes",
+	"rest":                      "the run leader's own rest lines apply",
+	"companions_loot false":     "dropped (--drop-companions-loot): the bots loot as they like on this leg",
+	"companions_loot false (the chests exported)": "not carried: turn the bots' looting off for this leg (setup), or a module with the trapped-chest rule; the setup of the carrier run: looting off for every bot, party loot method free-for-all, the Executioner's Key 8444 on the lead bot, at least 16 free bag slots on the lead bot, a fresh instance (a looted grave respawns after 2 h); flag 256 needs a TortoiseBots module with the gone-is-done step flag: an older module ignores it and pauses on a despawned grave after a wipe (then a .bot run skip skips the row)",
 	"needs_walk":                  "the point was not snapped to the navmesh by a mapping walk; the run leader walks to it as given",
 	"patrol":                      "no patrol path or period: the run leader pulls the pack where it stands when it comes",
 	"boss.tactics":                "the plan's tactics are the agent's; a bound party uses the module's boss tactics (docs/guides/boss-tactics.md)",
@@ -37,6 +38,20 @@ var unexpressedWhy = map[string]string{
 	"wait_for with a hold":        "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
 	"gossip stand/by/retry_s":     "the row is the order `cmd gossip <npc> <lead bot> <option>`: the lead bot talks (the tank or carrier of a plan is the same bot), walks to the NPC itself, asks once (no retry), and ends on the order's ACK; the stand point, the talker and retry_s are the agent's only (fail_text is in the row's comment)",
 	"area_trigger expect/timeout": "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
+}
+
+// sweepsLeftovers says whether the leg's LeftoverEntries are carried by the export anyway: with CarrierChests a companions_loot-false
+// leg's exported chest rows end each in the sweep pull of the same entries, so the entries are in the rows and not warned here.
+func (o Options) sweepsLeftovers(l dungeon.Leg) bool {
+	if !o.CarrierChests || l.CompanionsLoot == nil || *l.CompanionsLoot {
+		return false
+	}
+	for _, st := range l.Steps {
+		if st.LootObject != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // unexpressed lists the attributes of the plan's exported legs (legs before `upto`, the optional ones left out) that the rows cannot carry.
@@ -87,14 +102,19 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 		if len(l.Skip) > 0 {
 			add("skip", fmt.Sprintf("%s %v", leg, l.Skip))
 		}
-		if len(l.LeftoverEntries) > 0 {
+		// The leftovers are carried anyway when the leg's chests are carrier rows: every exported chest's sweep pull names them.
+		if len(l.LeftoverEntries) > 0 && !opt.sweepsLeftovers(l) {
 			add("leftover_entries", fmt.Sprintf("%s %v", leg, l.LeftoverEntries))
 		}
 		if l.Rest != nil {
 			add("rest", leg)
 		}
 		if l.CompanionsLoot != nil && !*l.CompanionsLoot && opt.DropCompanionsLoot {
-			add("companions_loot false", leg)
+			if opt.CarrierChests {
+				add("companions_loot false (the chests exported)", leg)
+			} else {
+				add("companions_loot false", leg)
+			}
 		}
 		if l.NeedsWalk {
 			add("needs_walk", leg+" to")

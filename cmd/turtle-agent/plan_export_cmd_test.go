@@ -158,3 +158,39 @@ func TestPlanExportSkipLegs(t *testing.T) {
 		t.Fatal("a file was written for a refused export")
 	}
 }
+
+// --carrier-chests needs --drop-companions-loot (refused alone); with it, the zumrah leg's 31 Shallow Grave steps are 31 triples of
+// move, loot (flag 256) and sweep pull in the rows, before the trigger and the boss.
+func TestPlanExportCarrierChests(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runExport("--dir", "../../dungeons", "--skip-legs", "bly", "--carrier-chests", "--stamp", "20261021200000", "--out", dir, "zulfarrak"); code != exitUsage || !strings.Contains(errs, "--carrier-chests needs --drop-companions-loot") {
+		t.Fatalf("without --drop-companions-loot: %d %q", code, errs)
+	}
+	if code, _, errs := runExport("--dir", "../../dungeons", "--skip-legs", "bly", "--carrier-chests", "--drop-companions-loot", "--stamp", "20261021200100", "--rev", "abc12345", "--out", dir, "zulfarrak"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021200100_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "'loot', 128403,") {
+		t.Fatal("no grave loot row in the migration")
+	}
+	rows, err := planexport.Parse(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rows[0]
+	n := 0
+	for _, s := range r.Steps {
+		if s.Entry == 128403 {
+			n++
+			if s.Flags&planexport.FlagGoneIsDone == 0 {
+				t.Fatalf("a grave loot row without flag 256: %+v", s)
+			}
+		}
+	}
+	if n != 31 {
+		t.Fatalf("%d grave loot rows, want 31", n)
+	}
+}

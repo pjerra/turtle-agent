@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--gm-cross-direct] [--approach-hops] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -38,6 +38,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	rev := fs.String("rev", "", "the turtle-agent commit named in ai_dungeon_plan.source (default: git rev-parse of the plan folder, if it is a checkout)")
 	stamp := fs.String("stamp", "", "the migration's timestamp, YYYYMMDDHHMMSS (default: now, UTC)")
 	dropLoot := fs.Bool("drop-companions-loot", false, "export a plan with a leg whose companions_loot is false anyway, without it (the rows cannot carry it: the run leader's bots loot; refused without)")
+	carrierChests := fs.Bool("carrier-chests", false, "with --drop-companions-loot, export such a leg's loot_object steps as carrier rows: a move to its stand, the loot (gone-is-done flag 256), and — when the leg has leftover_entries — their sweep pull at the point; the bots' looting still has to be turned off for the leg in the setup, or a module's trapped-chest rule has to skip them; flag 256 needs a TortoiseBots module with the gone-is-done step flag: an older module ignores it and pauses on a despawned grave after a wipe (then a .bot run skip skips the row)")
 	gmCrossDirect := fs.Bool("gm-cross-direct", false, "export a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan; only for a gap that is a drop the line crosses, and not tried live")
 	approach := fs.Bool("approach-hops", false, "with --mmaps, also cut the hop to a pull, boss or hold that is more than 50 yd from the anchor before it into move rows along the navmesh path (the run leader's own hops are at most 8 of 40 yd)")
 	skipLegs := fs.String("skip-legs", "", "leg names (comma list) left out of the rows, each with a warning; the later legs close up (Zul'Farrak's bly: a boss that turns hostile after his gossip, which the run leader cannot do). An unknown name is refused")
@@ -59,6 +60,9 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	case !*allLive && len(names) == 0:
 		fmt.Fprintln(stderr, planExportUsage)
 		return fail("name at least one plan, or pass --all-live")
+	case *carrierChests && !*dropLoot:
+		fmt.Fprintln(stderr, planExportUsage)
+		return fail("--carrier-chests needs --drop-companions-loot (the companions_loot-false leg's chest rows are not exported without it)")
 	}
 	if *allLive {
 		m, err := filepath.Glob(filepath.Join(*dir, "*.json"))
@@ -101,7 +105,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		return fail("%s exists: a migration that is applied is never edited; export to a new name, or pass --force", target)
 	}
 	var planner *navmesh.Planner
-	opt := planexport.Options{DropCompanionsLoot: *dropLoot, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach}
+	opt := planexport.Options{DropCompanionsLoot: *dropLoot, CarrierChests: *carrierChests, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach}
 	for _, n := range strings.Split(*skipLegs, ",") {
 		if n = strings.TrimSpace(n); n != "" {
 			opt.SkipLegs = append(opt.SkipLegs, n)

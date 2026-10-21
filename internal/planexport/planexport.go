@@ -49,6 +49,12 @@ const (
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
 	FlagDoneData  = 8
 	FlagEncounter = 32
+	// FlagGoneIsDone marks a loot or open row as done when its object is gone (the module's kPlanFlagGoneIsDone): a `not-found` answer
+	// for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead of pausing the run.
+	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted; the flag matters only for a run
+	// resumed after a wipe at one of these rows (a fresh run does not need it). A loader that knows no such flag drops it (unknown flags
+	// are ignored on a loot/open), so the rows still load.
+	FlagGoneIsDone = 256
 	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
@@ -137,6 +143,15 @@ type Options struct {
 	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
 	// graveyard chests). Without this option such a plan is refused.
 	DropCompanionsLoot bool
+	// CarrierChests, with DropCompanionsLoot, exports a companions_loot-false leg's loot_object steps as chest rows the carrier alone
+	// takes: a move to its stand, a loot row (entry, near point, the expected item, FlagGoneIsDone), and, when the leg has
+	// LeftoverEntries, a pull row of those entries at the chest's near point (radius carrierSweepRadiusYd, "sweep"): the trap a grave
+	// (Zul'Farrak's Shallow Graves) is linked to raises its adds on the opener in the same server call, so the loot row can never be
+	// safe without the sweep behind it, and one chest a row (no batch) keeps them two at a time. The companions_loot setting itself is
+	// still not in the rows: the bots' looting has to be turned off for the leg in the setup, or a module's auto-loot rule has to skip a
+	// trapped chest. Without the option the loot_object steps are left out as before. Needs DropCompanionsLoot (the chest would not be
+	// in the rows without it anyway).
+	CarrierChests bool
 	// ApproachHops, with Cut, also cuts the hop to a pull, boss or hold row that is more than the run leader's reach (50 yd) from the
 	// anchor before it (the move, or the fight, the party stood at) into move rows along the planned path, the last of them at least
 	// 25 yd short of the target. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd
@@ -351,10 +366,23 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.Steps {
-		// A leg whose companions_loot is false (only exported with DropCompanionsLoot) has its chests opened by the carrier bot alone: with the
-		// leg's looting setting dropped those steps would send bots at them, so they are left out, with a warning.
-		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot {
+		// A leg whose companions_loot is false: with DropCompanionsLoot alone the chest steps would send bots at chests the leg wants left
+		// alone unless the setup mutes them, so they are left out, with a warning. With CarrierChests each chest becomes rows the carrier
+		// alone runs: the stand move, the loot (flag 256, gone is done), and the leg's leftover entries as the sweep pull at its point
+		// (the chest's linked trap raises its adds before the order's ACK, so the sweep is part of the chest, and one chest a row keeps
+		// the adds two at a time).
+		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.CarrierChests {
 			b.skippedLoot++
+			continue
+		}
+		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot && b.opt.CarrierChests {
+			if st.LootObject.Stand == nil {
+				// The chest rows walk the party to a stand before the loot (the run leader takes rows from where the party stands); a chest
+				// without one would be a two-row standless loot, which no row could make safe: the loot would be taken from wherever the
+				// last row left the party, possibly out of the search range or in the next pack.
+				return fmt.Errorf("steps[%d]: loot_object %d has no stand: give the chest a stand point (the carrier's rows walk the party there before the loot)", si, st.LootObject.Entry)
+			}
+			b.carrierChest(l, st.LootObject)
 			continue
 		}
 		if err := b.step(st); err != nil {
@@ -494,6 +522,29 @@ func itemEntry(i *dungeon.ItemRef) uint32 {
 		return 0
 	}
 	return i.Entry
+}
+
+// carrierSweepRadiusYd is the sweep pull's radius at a carrier chest: the trap's adds rise on the chest's point (Zul'Farrak's Shallow
+// Grave trap 128972 spawns at the grave itself), so the ones that engage at once are fought by the fight block and an idle stray of
+// this chest's pair is within a few yards of it; one grave's adds only, not the next grave's (the nearest stands 3.9 yd off).
+const carrierSweepRadiusYd = 15
+
+// carrierChest writes a companions_loot-false leg's chest (Options.CarrierChests): the move to its stand, the carrier's loot row with
+// FlagGoneIsDone (a looted chest of spawntimesecs 7200 despawns, so a resumed run takes the gone chest as done instead of pausing on
+// it), and — when the leg has leftover_entries — the sweep pull (the chest's linked trap raises its adds in the same server call the
+// loot ACK answers, and round 3's eleven leftovers aggroed the next walk; the loot row is never safe without the sweep). batch is
+// ignored: one chest a row keeps the adds two at a time (batches of 3+ wiped twice in round 4); the `loot_object batch` warning stays.
+func (b *builder) carrierChest(l dungeon.Leg, lo *dungeon.LootObject) {
+	if lo.Stand != nil {
+		b.move(*lo.Stand, false, "stand")
+	}
+	x, y, z := refPoint(lo.ObjectRef)
+	b.add(StepRow{Kind: KindLoot, Entry: lo.Entry, X: x, Y: y, Z: z, Item: itemEntry(lo.ExpectItem), Flags: FlagGoneIsDone,
+		Comment: clip(itemComment("loot", lo.ExpectItem), MaxComment)})
+	if len(l.LeftoverEntries) > 0 {
+		b.add(StepRow{Kind: KindPull, X: x, Y: y, Z: z, Radius: carrierSweepRadiusYd, Entries: uniq(l.LeftoverEntries),
+			Comment: clip("sweep: what the chest raised", MaxComment)})
+	}
 }
 
 func (b *builder) step(st dungeon.Step) error {
@@ -691,6 +742,14 @@ func Validate(r Rows) error {
 		}
 		if s.Kind == KindWaitObject && s.Param > 2 {
 			return bad("param %d is above 2", s.Param)
+		}
+		if s.Flags&FlagGoneIsDone != 0 {
+			// The exporter's own rule (ours, not the module's): the module reads the flag off a loot/open row only, so the exporter refuses
+			// it on any other kind; a module that knows no such step flag yet ignores unknown flags on a loot/open and pauses on a gone
+			// object, so nothing breaks either way.
+			if s.Kind != KindLoot && s.Kind != KindOpen {
+				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
+			}
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
