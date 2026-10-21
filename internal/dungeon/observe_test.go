@@ -1024,3 +1024,35 @@ func TestObserveStartReplyStepMustMatch(t *testing.T) {
 		t.Fatalf("notes %v", rep.Notes)
 	}
 }
+
+// A run starts by undoing the `loot off` a crashed run's boss may have left (lootOnAtStart). An observed run may keep the operator's
+// setting instead (observe.keep_loot_setting): the graves legs turn the companions' looting off by themselves, and an observed run never
+// reaches them. The setting is observe only: a driven run always sends the orders.
+func TestLootOnAtStartSendsBehaviorOrdersUnlessKept(t *testing.T) {
+	all := []string{"Tanky loot true", "Healy loot true", "Magey loot true"}
+	for _, c := range []struct {
+		name string
+		o    RemoteOptions
+		want []string
+	}{
+		{"driven", opts(), all},
+		{"observe", observeOpts(ObserveSpec{}), all},
+		{"observe with keep_loot_setting", observeOpts(ObserveSpec{KeepLootSetting: true}), nil},
+	} {
+		g := newFakeCarrier(t)
+		d := NewRemoteDriver(observePlan(), g, DefaultConfig(), c.o, g.clock())
+		d.fr.Party = []tbm.PartyRec{{Name: "Tanky"}, {Name: "Healy"}, {Name: "Magey"}}
+		d.lootOnAtStart(context.Background())
+		if !slices.Equal(g.behaviors, c.want) {
+			t.Errorf("%s: behaviors %v, want %v", c.name, g.behaviors, c.want)
+		}
+		notes := strings.Join(d.Report().Notes, "\n")
+		if c.want == nil {
+			if !strings.Contains(notes, "loot setting kept as the operator set it") {
+				t.Errorf("%s: no note about the kept setting: %v", c.name, notes)
+			}
+		} else if strings.Contains(notes, "loot setting kept") {
+			t.Errorf("%s: the kept-setting note went out: %v", c.name, notes)
+		}
+	}
+}

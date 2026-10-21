@@ -346,3 +346,33 @@ func TestRunUldamanScriptStartAndPulltestParams(t *testing.T) {
 		}
 	}
 }
+
+// --keep-loot-setting is an observed run's option: it becomes observe.keep_loot_setting, and a driven run refuses it.
+func TestRunUldamanScriptKeepLootSetting(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	out, err := exec.Command(bash, "../../tools/run-uldaman.sh", "--mode", "observe", "--keep-loot-setting", "--print-params").Output()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	var p dungeonRunParams
+	dec := json.NewDecoder(bytes.NewReader(out))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if p.Observe == nil || !p.Observe.KeepLootSetting {
+		t.Errorf("observe.keep_loot_setting did not reach the params: %+v", p.Observe)
+	}
+	if remote, err := checkMode(p); !remote || err != nil {
+		t.Fatalf("checkMode %v %v", remote, err)
+	}
+	cmd := exec.Command(bash, "../../tools/run-uldaman.sh", "--keep-loot-setting", "--print-params")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil || !strings.Contains(stderr.String(), "--keep-loot-setting goes with --mode observe") {
+		t.Errorf("commander mode took --keep-loot-setting: %v %q", err, stderr.String())
+	}
+}
