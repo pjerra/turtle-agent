@@ -1682,7 +1682,9 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 for a hand-sent run command.
 
 **Report.** `report.remote.mode` is `observe`; `report.remote.observe` has `plan`, the newest `state`, `step`, `steps`, `leg`, `kind`, `phase`, `note` and a
-plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.legs[]` has one
+plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.wipes`
+counts the watched party's wipes: one rising edge of "every bot dead" in the feed is one wipe, and the party coming back alive lets the next one count
+(the run leader stops and recovers on its own; the watch only counts). `report.legs[]` has one
 entry per leg the run leader entered, with its seconds. `report.current` is "run leader: sentinel · pull 7/41 · pulling". The orders counters stay at zero but for the end's
 `stay`. Not in observe mode: `tune`, `live_reload`, `cc`, `carrier`, `loot_restore`, `object_fallback`, `tank`, `healer`, `recover_wipe` and the start options that
 move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) are refused, since the agent steers nothing; `from_leg`, `from_pull_group` and
@@ -1910,7 +1912,9 @@ the first step in, and the agent stays **outside and ungrouped**. When a bot of 
      bot that is not on the plan's map, 6 s apart, **by name**: a bot the feed does not list (it left the group, or the feed dropped it) is
      summoned too (the module answers `no-bot` for a bot outside the group, and the run fails saying so).
    - **cmd:** `cmd move` legs to the portal on the outer map as for the walk, then up to 8 s for the other bots to stand within 30 yd of it, then
-     `.bot cmd enter <entrance_trigger>`. The module answers `TBM:ACTION_PENDING|cmd enter|party|<budget s>|<trigger>` and one final line:
+     `.bot cmd enter <entrance_trigger>`. With `cmd enter` the lead bot is at the door already when it stands within 30 yd of the portal on the
+     ground plane and no more than 12 yd above or below it: a door in a cave or on a ledge stands above or below the walkable ground, so the
+     3D 5-yd arrive check of the plain walk would never pass. Without `cmd enter` the lead bot must reach the portal point itself. The module answers `TBM:ACTION_PENDING|cmd enter|party|<budget s>|<trigger>` and one final line:
      `TBM:ACTION_ACK|cmd enter|party|<n>|entered` (the party is inside; the run waits for the lead bot on the plan's map) or
      `TBM:ACTION_ERR|cmd enter|<code>|<Bot>: <msg> [(n of m got in)]`. The wait for the final line is the budget plus 8 s (the module ends the
      order with its own `timeout` about 6 s after the budget), at most 130 s (its worst case is 60 + 30 + 30 s and 6 s). Retries are bounded: `busy` 3, `cancelled` 2, `too-far` 2 (a wait for the
