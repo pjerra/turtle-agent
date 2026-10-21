@@ -216,19 +216,21 @@ func TestZulfarrakPoolStairsApproach(t *testing.T) {
 	stair := Point{1629.2, 1099, 9.7}
 	for _, tc := range []struct {
 		group  int
-		first  Point
-		last   Point
+		points []Point // the approach rows, the last is where the party stands to pull
 		packAt Point
 	}{
-		{4, Point{1584, 1050, 9}, Point{1603, 1043, 9.8}, Point{1576.2, 1079.1, 9}},
-		{5, Point{1588, 1080, 9.1}, Point{1584, 1088, 9.1}, Point{1601.7, 1104.4, 9}},
+		// Group 4: south of the island Shadowhunter 81610 (leave_clear_test.go), then up the east side; the first point keeps a party that stands
+		// on the west lane after the lone Blood Drinker from taking the short way, which passes 1.1 yd from 81610.
+		{4, []Point{{1594, 1011, 10.9}, {1598, 1028, 9.6}, {1606, 1040, 10.3}}, Point{1576.2, 1079.1, 9}},
+		{5, []Point{{1588, 1080, 9.1}, {1584, 1088, 9.1}}, Point{1601.7, 1104.4, 9}},
 	} {
 		g := v.PullGroups[tc.group]
-		if len(g.Approach) != 2 || g.Approach[0] != tc.first || g.Approach[1] != tc.last {
-			t.Errorf("pull group %d approach %v, want %v %v", tc.group, g.Approach, tc.first, tc.last)
+		if fmt.Sprint(g.Approach) != fmt.Sprint(tc.points) {
+			t.Errorf("pull group %d approach %v, want %v", tc.group, g.Approach, tc.points)
 			continue
 		}
-		if d := dist3(tc.last, tc.packAt); d > RunLeaderReachYd {
+		last := tc.points[len(tc.points)-1]
+		if d := dist3(last, tc.packAt); d > RunLeaderReachYd {
 			t.Errorf("pull group %d: the last approach point is %.1f yd from the pack (at most %d)", tc.group, d, RunLeaderReachYd)
 		}
 		for _, a := range g.Approach {
@@ -243,10 +245,10 @@ func TestZulfarrakPoolStairsApproach(t *testing.T) {
 		// Witch Doctor, 1593.6 1089.9 16.6 yd from a Shadowhunter): at least approachClearYd from every member of the group, at its
 		// spawn and, for the patrol, at every waypoint less the follower's offset.
 		for _, m := range zfGroupMembers(t, g) {
-			if d := groundDist(tc.last, m.at) - m.slack; d < approachClearYd {
-				t.Errorf("pull group %d: the last approach point %v is %.1f yd from %s", tc.group, tc.last, d, m.what)
+			if d := groundDist(last, m.at) - m.slack; d < approachClearYd {
+				t.Errorf("pull group %d: the last approach point %v is %.1f yd from %s", tc.group, last, d, m.what)
 			} else {
-				t.Logf("pull group %d: %v is %.1f yd from %s", tc.group, tc.last, d, m.what)
+				t.Logf("pull group %d: %v is %.1f yd from %s", tc.group, last, d, m.what)
 			}
 		}
 	}

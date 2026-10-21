@@ -280,6 +280,24 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	return Result{Rows: b.rows, Warnings: b.warnings, Cut: cut}, nil
 }
 
+// leaveComment is the leg row's comment for the leg's `leave` list. The rows have no column or step kind for a spawn the run leaves alone (a
+// new kind is skipped and logged by the loader, and flags 1, 2 and 4 are taken), so the list is free text in the leg's comment column: for
+// the reader, and for the module part that will read it (PLAN-ZF-LESSONS #3). Empty: no comment.
+func leaveComment(l dungeon.Leg) string {
+	if len(l.Leave) == 0 {
+		return ""
+	}
+	parts := make([]string, len(l.Leave))
+	for i, lv := range l.Leave {
+		spawn := ""
+		if lv.Spawn != 0 {
+			spawn = fmt.Sprintf(" spawn %d", lv.Spawn)
+		}
+		parts[i] = fmt.Sprintf("%d%s at %s %s: %s", lv.Entry, spawn, num(lv.At.X), num(lv.At.Y), lv.Why)
+	}
+	return strings.TrimSpace(clip("leave (not read by the run leader yet): "+strings.Join(parts, "; "), MaxComment))
+}
+
 func planComment(p *dungeon.Plan) string {
 	c := "plan v1"
 	if p.Status != "" {
@@ -333,7 +351,7 @@ func (b *builder) leg(li int) error {
 	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
 		return fmt.Errorf("companions_loot is false and the run leader's rows cannot carry it (TortoiseBots has no such column): its bots would loot what this leg wants left alone; export is refused (pass DropCompanionsLoot / --drop-companions-loot to export without it): %w", ErrCompanionsLoot)
 	}
-	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName)})
+	b.rows.Legs = append(b.rows.Legs, LegRow{Plan: b.name, Leg: b.outLeg, Name: clip(l.Name, MaxLegName), Comment: leaveComment(l)})
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for vi, w := range l.Via {

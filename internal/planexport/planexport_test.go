@@ -548,9 +548,10 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	}
 }
 
-// The pool-stairs approach rows reach the run leader: in the exported velratha leg the two packs each have their two approach moves right
-// before the pull row (the STUCK #2 fix). The live 86-step plan's step 83 was this pull group; with the plan's approach points the exported
-// leg grows by four move rows and the pull is the fourth row later.
+// The pool-stairs approach rows reach the run leader: in the exported velratha leg the two packs each have their approach moves right
+// before the pull row (the STUCK #2 fix; the five-mob pack has three since the island Shadowhunter 81610 is left alone, the four-mob pack
+// two). The live 86-step plan's step 83 was this pull group; with the plan's approach points the exported leg grows by move rows and the
+// pull is that many rows later.
 func TestZulfarrakPoolStairsApproachRows(t *testing.T) {
 	p := zulfarrakThroughZumrah(t)
 	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
@@ -575,7 +576,7 @@ func TestZulfarrakPoolStairsApproachRows(t *testing.T) {
 		return -1
 	}
 	for _, tc := range []struct{ entries, first, last string }{
-		{"5650,7246,8095,5649", "1584.0 1050.0 9.0", "1603.0 1043.0 9.8"},
+		{"5650,7246,8095,5649", "1598.0 1028.0 9.6", "1606.0 1040.0 10.3"},
 		{"7246,5650", "1588.0 1080.0 9.1", "1584.0 1088.0 9.1"},
 	} {
 		i := idx(tc.entries)
@@ -1033,6 +1034,39 @@ func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
 	}
 	if strings.Contains(w, "check_skip") {
 		t.Fatalf("check_skip is the plan check's only and is not warned:\n%s", w)
+	}
+}
+
+// A leg's `leave` list has no place in the rows: it is the leg row's comment (free text, round-trips through the SQL) and one warning that
+// says the run leader does not read it. A leg without one has no comment and no warning.
+func TestLeaveIsTheLegCommentAndWarned(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"},{"entry":5,"at":{"x":3,"y":4,"z":0},"why":"x"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}]}]},
+ {"name":"b","to":{"x":30,"y":0,"z":0},"boss":{"entry":7000,"position":{"x":40,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := res.Rows.Legs[0].Comment; c != "leave (not read by the run leader yet): 7246 spawn 81610 at 1591 1047.7: island Shadowhunter; 5 at 3 4: x" {
+		t.Errorf("leg comment %q", c)
+	}
+	if c := res.Rows.Legs[1].Comment; c != "" {
+		t.Errorf("a leg without leave has the comment %q", c)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	if !strings.Contains(w, "leave (leg 0 (a) 7246 at 1591.0 1047.7; leg 0 (a) 5 at 3.0 4.0): not in the rows: no column or step kind") || strings.Count(w, "leave (") != 1 {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	// A long reason is cut to the comment column, not refused.
+	long := strings.Repeat("x", 400)
+	res, err = Build(parsePlan(t, strings.Replace(js, "island Shadowhunter", long, 1)), Options{Source: "test"})
+	if err != nil || len(res.Rows.Legs[0].Comment) > MaxComment {
+		t.Fatalf("%v, comment %d bytes", err, len(res.Rows.Legs[0].Comment))
 	}
 }
 
