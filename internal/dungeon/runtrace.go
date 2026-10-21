@@ -393,7 +393,13 @@ func (d *RemoteDriver) traceBegin(fromLeg int) {
 	}
 	// The feed has facing and the bot's target but no movement flag or class, and it has threat lists.
 	caps := []string{trace.CapFacing, trace.CapThreat, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
-	hdr := trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: d.opt.Tank, Options: opts, Caps: caps}
+	// An observed run is driven by the server's run leader, which is the lead bot: the header names it as the tank, or the threat check
+	// would have to guess it from the frames.
+	tank := d.opt.Tank
+	if d.observing() {
+		tank = d.opt.Lead
+	}
+	hdr := trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: tank, Options: opts, Caps: caps}
 	hdr.Meta = runMetaHeader(d.cfg.Trace.Meta, d.opt.RunMeta)
 	d.tr.Begin(hdr)
 	if !d.tr.On() {

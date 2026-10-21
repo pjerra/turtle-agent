@@ -1459,7 +1459,7 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 | `rest_share` | the rest gates took more than this share of the run | 40 % | the run is shorter than 60 s |
 | `stale_party` | a mana user's power did not change for this long while someone else's health or power did (the party data stopped updating); full mana and dead members are ignored | 60 s | no frames with a mana user |
 | `walk_stops` | the lead stood still (at least 1.5 s) in the middle of a walk of the plan more often than this per 100 yd walked; the last 3 s of a walk are arriving | 4 stops / 100 yd | under 100 yd walked |
-| `threat_off_tank` | a party member other than the tank held the top threat of a living mob during a pull for longer than this; the tank is `header.tank`, else the `tank` role, else whoever holds the top threat most often | 4 s | no threat data (group runs have none) |
+| `threat_off_tank` | a mob in combat is on a party member other than the tank — its `tg` is that member, or the member ties the tank's threat — during a pull for longer than this; a dead tank, a mob with no target (polymorphed, fleeing, evading) and a mob out of combat do not count; the tank is `header.tank` (an observed run names its lead), else the `tank` role, else whoever holds the top threat most often; the detail gives the spans per tank-combat-hour | 4 s | no threat data (group runs have none) |
 | `deaths` | any death or wipe | 0 | never |
 | `order_refusals` | more than this share of the orders was refused (`err` replies and `refusal` events) | 20 % | fewer than 3 orders |
 | `feed_stalls` | the longest gap between two feed frames is over this | 10 s | no feed frames (group runs) |
