@@ -51,9 +51,9 @@ const (
 	FlagEncounter = 32
 	// FlagGoneIsDone marks a loot or open row as done when its object is gone (the module's kPlanFlagGoneIsDone): a `not-found` answer
 	// for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead of pausing the run.
-	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted, so a run restarted after a wipe in
-	// one of these rows would otherwise pause on the grave the wipe happened at. A loader that knows no such flag drops it (unknown
-	// flags are ignored on a loot/open), so the rows still load.
+	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted; the flag matters only for a run
+	// resumed after a wipe at one of these rows (a fresh run does not need it). A loader that knows no such flag drops it (unknown flags
+	// are ignored on a loot/open), so the rows still load.
 	FlagGoneIsDone = 256
 	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
@@ -376,6 +376,12 @@ func (b *builder) leg(li int) error {
 			continue
 		}
 		if st.LootObject != nil && l.CompanionsLoot != nil && !*l.CompanionsLoot && b.opt.CarrierChests {
+			if st.LootObject.Stand == nil {
+				// The chest rows walk the party to a stand before the loot (the run leader takes rows from where the party stands); a chest
+				// without one would be a two-row standless loot, which no row could make safe: the loot would be taken from wherever the
+				// last row left the party, possibly out of the search range or in the next pack.
+				return fmt.Errorf("steps[%d]: loot_object %d has no stand: give the chest a stand point (the carrier's rows walk the party there before the loot)", si, st.LootObject.Entry)
+			}
 			b.carrierChest(l, st.LootObject)
 			continue
 		}
@@ -738,8 +744,11 @@ func Validate(r Rows) error {
 			return bad("param %d is above 2", s.Param)
 		}
 		if s.Flags&FlagGoneIsDone != 0 {
+			// The exporter's own rule (ours, not the module's): the module reads the flag off a loot/open row only, so the exporter refuses
+			// it on any other kind; a module that knows no such step flag yet ignores unknown flags on a loot/open and pauses on a gone
+			// object, so nothing breaks either way.
 			if s.Kind != KindLoot && s.Kind != KindOpen {
-				return bad("the gone-is-done flag is for a loot or open row (the loader refuses it on a %s)", s.Kind)
+				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
 			}
 		}
 		if s.Flags&FlagExact != 0 {

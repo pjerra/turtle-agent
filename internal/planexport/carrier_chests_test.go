@@ -205,6 +205,19 @@ func TestCarrierChestsWarnings(t *testing.T) {
 	if !strings.Contains(text, "not carried: turn the bots' looting off for this leg (setup), or a module with the trapped-chest rule") {
 		t.Fatalf("no setup warning: %v", res.Warnings)
 	}
+	for _, want := range []string{
+		"looting off for every bot",
+		"party loot method free-for-all",
+		"Executioner's Key 8444 on the lead bot",
+		"at least 16 free bag slots on the lead bot",
+		"a fresh instance",
+		"flag 256 needs a TortoiseBots module with the gone-is-done step flag",
+		"pauses on a despawned grave after a wipe (then a .bot run skip skips the row)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the setup warning lacks %q: %v", want, res.Warnings)
+		}
+	}
 	if strings.Contains(text, "dropped (--drop-companions-loot): the bots loot as they like") {
 		t.Fatalf("the old dropped text under CarrierChests: %v", res.Warnings)
 	}
@@ -219,5 +232,19 @@ func TestCarrierChestsWarnings(t *testing.T) {
 	old := strings.Join(without.Warnings, "\n")
 	if !strings.Contains(old, "dropped (--drop-companions-loot): the bots loot as they like") || strings.Contains(old, "not carried: turn") {
 		t.Fatalf("the old texts under DropCompanionsLoot alone: %v", without.Warnings)
+	}
+}
+
+// TestCarrierChestsRefusesAStandlessChest: with CarrierChests a loot_object with no stand has no row form (the chest rows walk the
+// party to a stand before the loot) and is refused, naming the step's entry.
+func TestCarrierChestsRefusesAStandlessChest(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"fc","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"grave","to":{"x":20,"y":0,"z":0},"companions_loot":false,"steps":[{"loot_object":{"entry":128403,"near":{"x":10,"y":0,"z":0}}}]}]}`)
+	_, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, CarrierChests: true})
+	if err == nil || !strings.Contains(err.Error(), "leg 0 (grave): steps[0]: loot_object 128403 has no stand") {
+		t.Fatalf("a chest without a stand: %v", err)
+	}
+	// Without CarrierChests the step is left out as before, not refused.
+	if _, err := Build(p, Options{Source: "test", DropCompanionsLoot: true}); err != nil {
+		t.Fatalf("without CarrierChests: %v", err)
 	}
 }
