@@ -692,7 +692,7 @@
               "state": "seen"
             },
             "timeout_s": 30,
-            "fail_text": "Gahz'rilla (7273) did not show within 30 s of the gong: the gong may not have been rung (the Mallet's lock is checked by the server), or the instance already summoned him once (a second summon despawns him).",
+            "fail_text": "Gahz'rilla (7273) did not show within 30 s of the gong: the gong may not have been rung (the Mallet's lock is checked by the server), or the instance already summoned him once (a second ring summons a new Gahz'rilla that the instance kills at once, instance_zulfarrak.cpp:185-190, leaving a dead, invisible 7273 at the pit).",
             "agent_only": "the boss row after it waits 60 s for an absent boss (the run leader's boss search), then pauses: that stands in for this wait"
           }
         }
