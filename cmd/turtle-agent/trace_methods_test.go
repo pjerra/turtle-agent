@@ -202,7 +202,7 @@ func TestBrainSessionHasARunIDAndATrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Header.Source != "brain" || f.Header.Run != "r-brain-1" || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 10 || len(f.Party) != 1 || !f.Party[0].Lead {
+	if f.Header.Source != "brain" || f.Header.Run != "r-brain-1" || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 11 || len(f.Party) != 1 || !f.Party[0].Lead {
 		t.Fatalf("%+v", f.Header)
 	}
 	var states []string
@@ -273,7 +273,7 @@ func TestTraceScoreCommand(t *testing.T) {
 		Failed  []string
 		Checks  []trace.Check
 	}
-	if err := json.Unmarshal([]byte(lines[1]), &v); err != nil || v.Run != "r-dead" || v.Verdict != "fail" || len(v.Failed) != 1 || v.Failed[0] != "deaths" || len(v.Checks) != 10 {
+	if err := json.Unmarshal([]byte(lines[1]), &v); err != nil || v.Run != "r-dead" || v.Verdict != "fail" || len(v.Failed) != 1 || v.Failed[0] != "deaths" || len(v.Checks) != 11 {
 		t.Fatalf("%v %+v", err, v)
 	}
 	// --summary writes the summary beside the trace.
@@ -282,7 +282,7 @@ func TestTraceScoreCommand(t *testing.T) {
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "r-clean.summary.json"))
 	var s trace.Summary
-	if err != nil || json.Unmarshal(b, &s) != nil || s.Run != "r-clean" || s.Status != "complete" || s.Verdict != "pass" || len(s.Oracles) != 10 || s.Bytes == 0 || s.Src != "agent" || s.Scorer == "" {
+	if err != nil || json.Unmarshal(b, &s) != nil || s.Run != "r-clean" || s.Status != "complete" || s.Verdict != "pass" || len(s.Oracles) != 11 || s.Bytes == 0 || s.Src != "agent" || s.Scorer == "" {
 		t.Fatalf("%v %s", err, b)
 	}
 	// Usage errors.
@@ -310,8 +310,55 @@ func TestBrainTraceFinishEndsASessionThatStoppedEarly(t *testing.T) {
 		t.Fatal("still listed as live")
 	}
 	f, err := trace.Read(filepath.Join(dir, "r-early.jsonl"))
-	if err != nil || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 10 || f.Party[0].G != "0x2a" {
+	if err != nil || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 11 || f.Party[0].G != "0x2a" {
 		t.Fatalf("%v %+v", err, f)
 	}
 	bt.finish("r-early") // a second call is harmless
+}
+
+// trace-score prints the spells section under the checks and puts the report in --json; a warning in it never makes the run fail.
+func TestTraceScorePrintsTheSpellsSection(t *testing.T) {
+	dir := t.TempDir()
+	w, err := trace.Open(trace.Options{Dir: dir, RunID: "r-spells"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Header(trace.Header{Source: "dungeon_run", Mode: "remote", Plan: "rfc", Start: time.Unix(1_000_000, 0).UTC(), StartUnix: 1_000_000, IntervalMS: 1000,
+		Party: []trace.Member{{G: "0x11", Name: "Tanky"}, {G: "0x12", Name: "Healy"}}})
+	for s := int64(0); s < 40; s++ {
+		res, why := "O", ""
+		if s >= 10 && s < 30 { // twenty idle seconds with a mob on the tank
+			res, why = "I", "oom"
+		}
+		w.Frame(trace.Frame{Envelope: trace.Envelope{T: s * 1000}, Via: "feed",
+			Bots: []trace.Bot{{G: "0x11", Alive: true, Combat: true, State: "c", HP: 9, MaxHP: 10, Power: 50, MaxPow: 100, PType: 1, Action: "sunder armor", Res: "O"},
+				{G: "0x12", Alive: true, Combat: true, State: "c", HP: 9, MaxHP: 10, Power: 500, MaxPow: 1000, Action: "heal on party", Res: res, Why: why}},
+			Mobs: []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: "0x11"}}})
+	}
+	w.End(trace.End{Envelope: trace.Envelope{T: 40_000}, Ended: time.Unix(1_000_040, 0).UTC(), Reason: "done", Seconds: 40})
+	w.Close()
+	var out, errOut bytes.Buffer
+	code := run(context.Background(), []string{"trace-score", "--set", "rest_share=100", w.Path()}, &out, &errOut)
+	text := out.String()
+	for _, want := range []string{"PASS spells", "Spells (report only", "priest   Healy", "idle share: 50.0 %", "WARN idle_share", "why not: oom 20"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in\n%s", want, text)
+		}
+	}
+	if code == exitTraceFail && strings.Contains(text, "FAIL spells") {
+		t.Fatalf("the spells check failed the run:\n%s", text)
+	}
+	out.Reset()
+	run(context.Background(), []string{"trace-score", "--json", w.Path()}, &out, &errOut)
+	var v struct {
+		Spells struct {
+			Idle struct {
+				Pct float64 `json:"pct"`
+			} `json:"idle"`
+			Warnings []string `json:"warnings"`
+		} `json:"spells"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil || v.Spells.Idle.Pct != 50 || len(v.Spells.Warnings) != 1 {
+		t.Fatalf("%v %s", err, out.String())
+	}
 }

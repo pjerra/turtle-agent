@@ -595,7 +595,7 @@ Run again with a level 40 character of each class that has its spells (`.learn a
 
 ## Run traces and checks (issue #73, data-collection step 1)
 
-The trace writer, the recorder and the ten checks run only against the fake game, the fake feed and hand-made traces (README "Run traces
+The trace writer, the recorder and the eleven checks run only against the fake game, the fake feed and hand-made traces (README "Run traces
 and checks"). Nothing below has run live. Use the agent slot only, `trace_meta` to note the build, and keep the traces: they are the data.
 
 1. **A short group run.** `dungeon_run {"name":"uldaman","gm":false,"run_id":"live-1","trace_meta":{"tb_sha":"<sha>","build":"<n>"}}` with a

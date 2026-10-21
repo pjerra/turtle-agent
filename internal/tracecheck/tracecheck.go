@@ -27,6 +27,10 @@ const (
 	IDStuck       = "stuck"
 	IDFacing      = "facing"
 
+	// Thresholds of the spells check (its own id is IDSpells): they make warnings, never a fail.
+	IDIdleShare      = "idle_share"
+	IDInterruptCover = "interrupt_cover"
+
 	maxEvidence    = 8
 	minRunSeconds  = 60
 	minOrders      = 3
@@ -49,14 +53,18 @@ type Config struct {
 	FeedGapMax     float64 // seconds without a feed frame
 	StuckSeconds   float64 // a member that should move stands still this long
 	FacingHoldS    float64 // seconds a member in melee range stands turned away from its target
+
+	// The spells check only warns: these are the limits of its warnings.
+	IdleSharePct      float64 // percent of engaged mana-user frames without an executed action (a warning above this)
+	InterruptCoverPct float64 // percent of enemy casts with an interrupt action near them (a warning below this; proximity, not a confirmed interrupt)
 }
 
 // Defaults are the thresholds of the first set of checks.
 func Defaults() Config {
-	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2}
+	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2, IdleSharePct: 15, InterruptCoverPct: 30}
 }
 
-var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing}
+var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover}
 
 // Set changes the threshold of the check with the given id (the CLI's --set id=value). deaths and gm_shortcuts have none.
 func (c *Config) Set(id string, v float64) error {
@@ -77,6 +85,10 @@ func (c *Config) Set(id string, v float64) error {
 		c.StuckSeconds = v
 	case IDFacing:
 		c.FacingHoldS = v
+	case IDIdleShare:
+		c.IdleSharePct = v
+	case IDInterruptCover:
+		c.InterruptCoverPct = v
 	default:
 		return fmt.Errorf("no threshold for check %q (have %s)", id, strings.Join(thresholdIDs, ", "))
 	}
@@ -85,7 +97,7 @@ func (c *Config) Set(id string, v float64) error {
 
 // Score runs every check over the trace.
 func Score(f *trace.File, c Config) []trace.Check {
-	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c)}
+	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c), spellsCheck(f, c)}
 	for i := range cs {
 		if cs[i].FirstMS == 0 && len(cs[i].Evidence) > 0 {
 			cs[i].FirstMS = cs[i].Evidence[0]
