@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -273,6 +274,91 @@ func TestObservePollsWhenNothingIsPushed(t *testing.T) {
 	}
 	if rep.Remote.Observe.Step != 5 {
 		t.Fatalf("%+v", rep.Remote.Observe)
+	}
+}
+
+// wipeParty kills the whole fake party in place (or brings it back): the next frame the feed publishes shows it.
+func wipeParty(g *fakeRemote, dead bool) {
+	for _, p := range g.party {
+		p.Dead, p.HP, p.State = dead, 0, "d"
+		if !dead {
+			p.HP, p.State = p.MaxHP, "n"
+		}
+	}
+}
+
+// wipeScript keeps the run going while the party dies and lives again: statuses every 5 s (no stall), done at 20 s.
+func wipeScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking to -1 2 3")},
+		{s(5), rs("running", 2, 5, "first", "pull", "pull", "pulling 299")},
+		{s(10), rs("running", 3, 5, "first", "boss", "pull", "pulling boss")},
+		{s(20), rs("done", 5, 5, "first", "move", "walk", "plan done")},
+	}
+}
+
+// deathsOnTicks drives the party's deaths by the ticks of the watch (one sleep of cfg.Poll, one frame, one countDeaths each):
+// first all dead for 3 polls, then alive for 1, then all dead again for 2, then alive to the end.
+func deathsOnTicks(g *fakeLeader, deadTicks int, reviveAt int, deadAgainTo int) {
+	base := g.onTick
+	ticks := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		switch {
+		case ticks <= deadTicks, ticks > reviveAt && ticks <= deadAgainTo:
+			wipeParty(fr, true)
+		default:
+			wipeParty(fr, false)
+		}
+	}
+}
+
+// A wipe of an observed run is counted once, on the rising edge of "all dead": three polls of a dead party are one wipe, and the
+// party coming back alive lets the next wipe count again. The run leader owns the run, so the watch neither stops nor revives.
+func TestObserveCountsAWipeOnItsRisingEdge(t *testing.T) {
+	g := newFakeLeader(t, wipeScript()...)
+	g.party = append(g.party, &tbm.PartyRec{GUID: packet.GUID(0x2D), Name: "Loxy", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"},
+		&tbm.PartyRec{GUID: packet.GUID(0x2E), Name: "Grok", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"})
+	deathsOnTicks(g, 3, 4, 6)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" || rep.Remote.Observe.Ended != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 2 {
+		t.Fatalf("wipes %d (want 2)\n%s", rep.Wipes, notesOf(rep))
+	}
+}
+
+// A party with one bot alive is no wipe: four dead of five count nothing.
+func TestObserveCountsNoWipeWhileABotLives(t *testing.T) {
+	g := newFakeLeader(t, wipeScript()...)
+	g.party = append(g.party, &tbm.PartyRec{GUID: packet.GUID(0x2D), Name: "Loxy", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"},
+		&tbm.PartyRec{GUID: packet.GUID(0x2E), Name: "Grok", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"})
+	base := g.onTick
+	ticks := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		for i, p := range fr.party {
+			p.Dead, p.State = i < 4, "n"
+			if i < 4 {
+				p.HP, p.State = 0, "d"
+			}
+		}
+	}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 0 {
+		t.Fatalf("wipes %d (want 0)\n%s", rep.Wipes, notesOf(rep))
 	}
 }
 

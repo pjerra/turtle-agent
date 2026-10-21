@@ -171,6 +171,7 @@ type observeState struct {
 	baseN     uint64 // lines read before the start: older ones are another run's
 	lastPoll  time.Time
 	serverEnd bool // the module said the run is done: no stop is needed
+	wiped     bool // the feed showed the whole party dead: one rising edge of it is one wipe
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -342,7 +343,14 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 			return err
 		}
 		d.resendViewIfSilent(ctx)
-		d.countDeaths()
+		// The wipe count of an observed run: the run leader owns the run (it stops and recovers on its own), the watch only counts. The
+		// result of countDeaths is an edge, not a level: without the wiped flag three polls of a dead party would count three wipes, and
+		// the party coming back alive clears it for the next one.
+		all := d.countDeaths()
+		if all && !o.wiped {
+			d.rep.update(func(r *Report) { r.Wipes++ })
+		}
+		o.wiped = all
 		d.serveRunRequests(ctx)
 		d.readRunLines()
 		if d.clk.Now().Sub(o.lastPoll) >= spec.Poll {
