@@ -40,6 +40,7 @@ const (
 	cmdEnterCombatWait  = 45 * time.Second // an order refused in-combat waits for the fight to end this long
 	cmdEnterMax         = 4 * time.Minute  // the whole of the walk and the order: past it the phase fails
 	cmdEnterGather      = 30               // yards from the portal at which a bot counts as at the door
+	cmdEnterDoorDZ      = 12               // yards above or below the portal within which the lead bot still counts as at the door
 )
 
 // CmdEnterReport is what the `cmd enter` order did, in the enter report.
