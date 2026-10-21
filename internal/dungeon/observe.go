@@ -56,6 +56,9 @@ const (
 	observeGone = 20 * time.Second
 	// MaxRunChanges bounds the changes kept in the report.
 	MaxRunChanges = 300
+	// wipeDeadReArm is the dead-member count below which the wipe latch re-arms (TortoiseBots DungeonRunPolicy.kWipeDead, 3): a party
+	// that is all dead, one member alive for a poll, all dead again, is one collapse, not two.
+	wipeDeadReArm = 3
 )
 
 func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
@@ -344,13 +347,20 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		}
 		d.resendViewIfSilent(ctx)
 		// The wipe count of an observed run: the run leader owns the run (it stops and recovers on its own), the watch only counts. The
-		// result of countDeaths is an edge, not a level: without the wiped flag three polls of a dead party would count three wipes, and
-		// the party coming back alive clears it for the next one.
+		// result of countDeaths is an edge, not a level: without the wiped flag three polls of a dead party would count three wipes. The
+		// latch re-arms only once fewer than wipeDeadReArm members are dead (the module's kWipeDead): a single in-place revive (one member
+		// alive for a poll, dead again the next) re-arms a plain "not all dead" check and double counts the collapse. The "wipe" event goes
+		// to the trace, so the tracecheck deaths oracle sees the wipes of an observed run too (stepFailedRecover never runs in observe mode).
 		all := d.countDeaths()
 		if all && !o.wiped {
 			d.rep.update(func(r *Report) { r.Wipes++ })
+			d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": "the whole party is dead", "observe": true})
 		}
-		o.wiped = all
+		if all {
+			o.wiped = true
+		} else if deadCount(d.fr) < wipeDeadReArm {
+			o.wiped = false
+		}
 		d.serveRunRequests(ctx)
 		d.readRunLines()
 		if d.clk.Now().Sub(o.lastPoll) >= spec.Poll {
@@ -738,6 +748,18 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
 		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note})
 	}
+}
+
+// deadCount is how many members of the frame's party are dead (the latch of the wipe count compares it with wipeDeadReArm; tbm.ViewFrame
+// counts it nowhere: AllDead is the all-rounded edge, not the level).
+func deadCount(fr tbm.ViewFrame) int {
+	n := 0
+	for _, p := range fr.Party {
+		if p.Dead {
+			n++
+		}
+	}
+	return n
 }
 
 // legOf finds the plan leg a status line names (by name, or by number when the module had no name); -1 when none.
