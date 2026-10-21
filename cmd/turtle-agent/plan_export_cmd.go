@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--gm-cross-direct] [--approach-hops] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--gm-cross-direct] [--approach-hops] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -40,6 +40,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	dropLoot := fs.Bool("drop-companions-loot", false, "export a plan with a leg whose companions_loot is false anyway, without it (the rows cannot carry it: the run leader's bots loot; refused without)")
 	gmCrossDirect := fs.Bool("gm-cross-direct", false, "export a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan; only for a gap that is a drop the line crosses, and not tried live")
 	approach := fs.Bool("approach-hops", false, "with --mmaps, also cut the hop to a pull, boss or hold that is more than 50 yd from the anchor before it into move rows along the navmesh path (the run leader's own hops are at most 8 of 40 yd)")
+	skipLegs := fs.String("skip-legs", "", "leg names (comma list) left out of the rows, each with a warning; the later legs close up (Zul'Farrak's bly: a boss that turns hostile after his gossip, which the run leader cannot do). An unknown name is refused")
 	force := fs.Bool("force", false, "let --out replace an existing file (never edit a migration that is applied)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -101,6 +102,11 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	var planner *navmesh.Planner
 	opt := planexport.Options{DropCompanionsLoot: *dropLoot, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach}
+	for _, n := range strings.Split(*skipLegs, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			opt.SkipLegs = append(opt.SkipLegs, n)
+		}
+	}
 	var naive *navmesh.Planner
 	if *mmaps != "" {
 		planner = navmesh.NewPlanner(*mmaps)

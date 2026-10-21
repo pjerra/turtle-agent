@@ -1240,28 +1240,26 @@
               "state": "seen"
             },
             "timeout_s": 60,
-            "fail_text": "Weegli Blastfuse is not at 1877.5 1199.6 (his place when the event is over): the crew walks there when the last troll of wave 3 is dead."
+            "fail_text": "Weegli Blastfuse is not at 1877.5 1199.6 (his place when the event is over): the crew walks there when the last troll of wave 3 is dead.",
+            "hold": {
+              "instance_data": 1,
+              "value": 8,
+              "spot": {"x": 1877.5, "y": 1199.6, "z": 8.9},
+              "radius": 30,
+              "timeout_s": 600,
+              "entries": [7787, 7788, 7789, 8876, 8877]
+            }
           }
         },
         {
           "gossip": {
             "npc": 7607,
             "near": {"x": 1877.52, "y": 1199.63, "z": 8.87},
-            "text": "blow",
+            "option": 0,
             "by": "tank",
             "stand": {"x": 1877.5, "y": 1203.3, "z": 8.9},
             "retry_s": 30,
             "fail_text": "Weegli's menu has no option to blow up the door: the event is not over (PYRAMID_KILLED_ALL_TROLLS), or he is dead."
-          }
-        },
-        {
-          "wait_for": {
-            "unit": {
-              "entries": [7607],
-              "state": "gone"
-            },
-            "timeout_s": 120,
-            "fail_text": "Weegli Blastfuse was still in view 120 s after the gossip: he walks to the End Door, blows it up and runs off to 1827 1184, where he despawns."
           }
         },
         {
@@ -1272,12 +1270,12 @@
               "state": "active"
             },
             "timeout_s": 60,
-            "fail_text": "The End Door (146084) is not open although Weegli Blastfuse (7607) has gone: he opens it only if he reaches it alive and unhurt."
+            "fail_text": "The End Door (146084) is not open 60 s after Weegli Blastfuse's gossip: he opens it only if he reaches it alive and unhurt."
           }
         }
       ],
       "notes": [
-        "NEEDS A LIVE RUN. The End Door (146084 at 1854.53 1142.89 16.08, shut, state ready) opens only when Weegli Blastfuse (7607, level 43, 16.6k health) has blown it up (zulfarrak.cpp npc_weegli_blastfuseAI::DestroyDoor): he walks to 1858.57 1146.35 14.7 as a friendly (faction 35), plants an explosive (game object 144065 at 1856.3 1145 15.5), runs to 1863.77 1176.99, the explosive goes off, the door is used (EVENT_END_DOOR done, saved with the instance: a door blown once stays open for the run's later entries) and he runs on to 1827.1 1184 and despawns. Two things start it: Weegli's own option 'Will you blow up that door now?' (index 0, offered only while PYRAMID_KILLED_ALL_TROLLS) and Bly's option (the bly leg: 10 s after it, Bly's script calls Weegli's DoAction). This leg does Weegli's FIRST, as the Wowhead Classic comments on Weegli, Bly and Ukorz advise ('talk to the goblin first', 'try talking to him before Bly'): he is gone and the door open before the crew turns hostile, so the fight cannot kill him or keep him from the door (a comment: he cannot open the door if he is dead or attacking someone; one that hits him by mistake should not kill him but go back up and reset him). The script has no reason for the order (both orders run the same DestroyDoor); a second DestroyDoor on a Weegli that is still walking would plant a second barrel, which is why the leg waits for him to be gone before the bly leg talks to Bly. The gossip is by the tank, 3.8 yd from his place (1877.5 1199.6). If Weegli died in the waves nothing opens the door: the first wait fails after 60 s. The party waits where it is, 60 yd from the blast."
+        "NEEDS A LIVE RUN. The End Door (146084 at 1854.53 1142.89 16.08, shut, state ready) opens only when Weegli Blastfuse (7607, level 43, 16.6k health) has blown it up (zulfarrak.cpp npc_weegli_blastfuseAI::DestroyDoor): he walks to 1858.57 1146.35 14.7 as a friendly (faction 35), plants an explosive (game object 144065 at 1856.3 1145 15.5), runs to 1863.77 1176.99, the explosive goes off, the door is used (EVENT_END_DOOR done, saved with the instance: a door blown once stays open for the run's later entries) and he runs on to 1827.1 1184 and despawns. Two things start it: Weegli's own option 'Will you blow up that door now?' (index 0, offered only while PYRAMID_KILLED_ALL_TROLLS) and Bly's option (the bly leg: 10 s after it, Bly's script calls Weegli's DoAction). This leg does Weegli's FIRST, as the Wowhead Classic comments on Weegli, Bly and Ukorz advise ('talk to the goblin first', 'try talking to him before Bly'): he is gone and the door open before the crew turns hostile, so the fight cannot kill him or keep him from the door (a comment: he cannot open the door if he is dead or attacking someone; one that hits him by mistake should not kill him but go back up and reset him). The script has no reason for the order (both orders run the same DestroyDoor); a second DestroyDoor on a Weegli that is still walking would plant a second barrel, which is why the bly leg begins by waiting for him to be gone (that wait stood in this leg until 2026-10-21; the run leader has no unit wait, and the door's active state, the wait after the gossip, is what it can read). The gossip is by the tank, 3.8 yd from his place (1877.5 1199.6). If Weegli died in the waves nothing opens the door: the first wait fails after 60 s. The party waits where it is, 60 yd from the blast. THE RUN LEADER'S FORM (2026-10-21, TortoiseBots feat/run-gossip-step): the first wait carries a hold on instance data 1 = 8 (PYRAMID_KILLED_ALL_TROLLS, the last value of the pyramid phase, zulfarrak.h:40) on Weegli's place, 600 s, the wave entries; the gossip is the option number 0 (the menu's index: Weegli's menu has exactly one line, ADD_GOSSIP_ITEM at zulfarrak.cpp:497 inside OnGossipHello_npc_weegli_blastfuse, :490-509, and OnGossipSelect :479-488 acts on that line, GOSSIP_ACTION_INFO_DEF + 1), which plan-export writes as a gossip row (param 1 = the number `cmd gossip` takes, counted from 1: .bot cmd gossip 7607 BOT 1); the agent's own driver still runs the wait for Weegli and the gossip as written. The NPC must be in AiPlayerbot.BotGossipNpcs (7607 listed; Bly's 7604 too for the agent's bly leg)."
       ]
     },
     {
@@ -1285,6 +1283,16 @@
       "to": {"x": 1884, "y": 1212, "z": 9},
       "skip": [7607, 7269],
       "steps": [
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [7607],
+              "state": "gone"
+            },
+            "timeout_s": 120,
+            "fail_text": "Weegli Blastfuse was still in view 120 s after the gossip: he walks to the End Door, blows it up and runs off to 1827 1184, where he despawns."
+          }
+        },
         {
           "wait_for": {
             "unit": {
@@ -1327,7 +1335,7 @@
         "first": [7608, 7606, 7605]
       },
       "notes": [
-        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). Weegli is already gone (the weegli_door leg ran first), and if he were not, Bly's script would call his DoAction again. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. Wowhead (guide, comments): Oro's area damage (Rain of Fire) and Murta's healing make this fight hard, so Murta and Oro die before Bly (boss.first: Murta, Oro, Raven); Murta is the priest with Holy Smite, Renew, Heal and Power Word: Shield, Oro the warlock with Shadow Bolt, Immolate, Rain of Fire and Curse of Weakness, Raven the rogue with Poison, Backstab and Gouge; Bly is 18k health with Revenge and Shield Bash and has no loot table (the guide) but the Divino-matic Rod of the quest 'Divino-matic Rod' (item 8548). Two Wowhead differences from this server: a comment says the crew uses Hearthstones and leaves after the event if the party rests (the script has no such thing: they stand at their places), and that talking to Weegli, waiting for them to leave, then Bly leaves Bly alone to fight; neither applies here."
+        "NEEDS A LIVE RUN. Sergeant Bly (7604, level 45, 18.5k health: Shield Bash 11972, Revenge 12170) after the event: his only gossip option is 'That's it! I'm tired of helping you out.  It's time we settled things on the battlefield!' (menu 1517 while PYRAMID_KILLED_ALL_TROLLS; 1515 before the cages, 1516 during). zulfarrak.cpp npc_sergeant_blyAI: 10 s after the option he turns hostile (faction 14) and attacks the one who talked, Raven (7605, level 44, 6.2k, Gouge 12540), Oro Eyegouge (7606, level 44, 4.4k, mana, spell list 76060: Immolate 11962, Curse of Weakness 12741, Shadow Bolt 9613) and Murta Grimgut (7608, level 44, 5k, mana, a healer: Renew 11640, Power Word: Shield 11974, 10577) turn hostile too, and WEEGLI IS NOT TURNED HOSTILE: Bly's script calls Weegli's DoAction, which makes him friendly (faction 35) and has him walk to the End Door and blow it up (see weegli_door). Weegli is already gone (the weegli_door leg ran first), and if he were not, Bly's script would call his DoAction again. The kill order is the healer, the caster, the rogue, then Bly (boss.first). The gossip is by the tank (the one Bly attacks); a menu that lacks the option is asked again for 30 s. Weegli's script heals the whole crew to full the moment the event ends. Wowhead (guide, comments): Oro's area damage (Rain of Fire) and Murta's healing make this fight hard, so Murta and Oro die before Bly (boss.first: Murta, Oro, Raven); Murta is the priest with Holy Smite, Renew, Heal and Power Word: Shield, Oro the warlock with Shadow Bolt, Immolate, Rain of Fire and Curse of Weakness, Raven the rogue with Poison, Backstab and Gouge; Bly is 18k health with Revenge and Shield Bash and has no loot table (the guide) but the Divino-matic Rod of the quest 'Divino-matic Rod' (item 8548). Two Wowhead differences from this server: a comment says the crew uses Hearthstones and leaves after the event if the party rests (the script has no such thing: they stand at their places), and that talking to Weegli, waiting for them to leave, then Bly leaves Bly alone to fight; neither applies here. The leg begins with the wait for Weegli to be gone (it stood in weegli_door until 2026-10-21). THE RUN LEADER LEAVES THIS LEG OUT (2026-10-21): it has no boss that turns hostile later, so the export is made with `plan-export --skip-legs bly`; Bly's menu is one line (index 0, zulfarrak.cpp:184 inside OnGossipHello_npc_sergeant_bly, :178-194), kept as text here until the leg is exported."
       ]
     },
     {

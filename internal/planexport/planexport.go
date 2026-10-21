@@ -36,6 +36,8 @@ const (
 	KindRest         = "rest"
 	KindRitual       = "ritual"
 	KindHold         = "hold"
+	// KindGossip is a gossip step: the lead bot talks to creature `entry` and picks option `param` (`.bot cmd gossip <entry> <bot> <param>`).
+	KindGossip = "gossip"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -73,6 +75,9 @@ const (
 	MoveGapWarnYd  = 60    // the module logs consecutive moves farther apart than this
 	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
 	DefaultBossRad = 30
+	// MaxGossipOption is the highest `param` of a gossip row: the number `.bot cmd gossip` takes counts the menu from 1 (a 1.12 menu holds 15
+	// options), while the plan's `option` is the menu's own index counted from 0 (the CMSG_GOSSIP_SELECT_OPTION value): the row's param is option + 1.
+	MaxGossipOption = 15
 )
 
 // PlanRow is one ai_dungeon_plan row.
@@ -141,6 +146,11 @@ type Options struct {
 	// run leader has no GM move. Only right where the gap is a drop the straight line crosses (Wailing Caverns' ramp to Lord Serpentis,
 	// 6 yd down over a 3.9 yd gap); the row's comment and a warning say it is not tried live.
 	GMCrossDirect bool
+	// SkipLegs names legs (by their name in the plan) that are left out of the rows, each with a warning, and the later legs close up, as for
+	// an optional leg. For a leg the run leader cannot do while the legs after it can: Zul'Farrak's Sergeant Bly, who turns hostile after his
+	// gossip (the run leader has no boss that turns hostile later), stands between the Weegli gossip that opens the End Door and the legs behind
+	// that door. An unknown name is an error (a misspelling would otherwise export the leg or cut the plan there).
+	SkipLegs []string
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -204,6 +214,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	}{{"cc_priority", p.CCPriority}, {"cc_always", p.CCAlways}, {"kill_first", p.KillFirst}} {
 		if n := len(entriesText(l.es)); n > MaxPlanList {
 			return Result{}, fmt.Errorf("plan %s: %s is %d characters as a comma list (ai_dungeon_plan.%s holds %d)", name, l.col, n, l.col, MaxPlanList)
+		}
+	}
+	for _, n := range opt.SkipLegs {
+		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n }) {
+			return Result{}, fmt.Errorf("plan %s: skip-legs names %q, which is no leg of the plan", name, n)
 		}
 	}
 	b := &builder{opt: opt, plan: p, name: name}
@@ -289,6 +304,10 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
+	if slices.Contains(b.opt.SkipLegs, l.Name) {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): left out of the export by the exporter's skip-legs option (a leg the run leader cannot do, or does not need): the later legs close up", li, l.Name))
+		return nil
+	}
 	if l.Optional != nil {
 		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
 		// end the run at its first use of the object: the leg is left out and the later legs close up.
@@ -513,7 +532,18 @@ func (b *builder) step(st dungeon.Step) error {
 		b.add(StepRow{Kind: KindRitual, Entry: r.Entry, X: r.Position.X, Y: r.Position.Y, Z: r.Position.Z, Param: uint32(r.Participants), Comment: fmt.Sprintf("ritual of %d", r.Participants)})
 	case st.Gossip != nil:
 		g := st.Gossip
-		return noStep("gossip (NPC %d, %s): the run leader's plan has no gossip step yet, so a plan with one cannot be exported until it has", g.NPC, g.OptionText())
+		switch {
+		case g.Talker() == dungeon.GossipByAgent:
+			return noStep("gossip (NPC %d, %s): by \"agent\" is the agent's own character talking, which a bound party has none of (use by \"tank\" or \"carrier\": the lead bot talks)", g.NPC, g.OptionText())
+		case g.Option == nil:
+			return noStep("gossip (NPC %d, %s): names its option by text, and the run leader's row carries the option number (the menu's index, \"option\")", g.NPC, g.OptionText())
+		case *g.Option+1 > MaxGossipOption:
+			return fmt.Errorf("gossip (NPC %d, %s): the run leader's row counts the menu from 1 and holds at most %d (a menu holds %d options)", g.NPC, g.OptionText(), MaxGossipOption, MaxGossipOption)
+		}
+		// x y z: where the NPC stands (the run leader walks the lead bot there when it is farther than 30 yd, and the order searches within 40 yd
+		// of the bot). The row's param is the option the way `.bot cmd gossip` counts it, from 1: the plan's option (the menu index) + 1.
+		b.add(StepRow{Kind: KindGossip, Entry: g.NPC, X: g.Near.X, Y: g.Near.Y, Z: g.Near.Z, Param: *g.Option + 1,
+			Comment: clip(gossipComment(g), MaxComment)})
 	default:
 		return fmt.Errorf("an empty step")
 	}
@@ -567,6 +597,15 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 		return fmt.Errorf("wait_for: neither gameobject nor hostiles_gone")
 	}
 	return nil
+}
+
+// gossipComment is the row's comment: the plan's option and the plan's failure text.
+func gossipComment(g *dungeon.Gossip) string {
+	c := fmt.Sprintf("talk to %d, menu index %d (cmd gossip option %d)", g.NPC, *g.Option, *g.Option+1)
+	if g.FailText != "" {
+		c += ": " + g.FailText
+	}
+	return c
 }
 
 func waitComment(base string, w *dungeon.WaitFor) string {
@@ -623,6 +662,17 @@ func Validate(r Rows) error {
 		case KindBoss, KindLoot, KindOpen, KindUseItem, KindWaitObject, KindRitual:
 			if s.Entry == 0 {
 				return bad("needs an entry")
+			}
+		case KindGossip:
+			if s.Entry == 0 {
+				return bad("needs an entry")
+			}
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the option counts from 1, `.bot cmd gossip` refuses 0; no flag is read.
+			if s.Param < 1 || s.Param > MaxGossipOption {
+				return bad("param %d is outside 1-%d (the option, counted from 1)", s.Param, MaxGossipOption)
+			}
+			if s.Flags != 0 {
+				return bad("a gossip carries no flags")
 			}
 		case KindHold:
 			if s.Entry == 0 || s.Flags&FlagDoneData == 0 {
