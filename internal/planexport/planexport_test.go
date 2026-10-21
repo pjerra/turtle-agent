@@ -529,7 +529,7 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		"move 0 1884 1212 9 r0 p0 f0 t0 []",
 		"hold 1 1877.5 1199.6 8.9 r30 p8 f8 t600 [7787 7788 7789 8876 8877]",
 		"gossip 7607 1877.52 1199.63 8.87 r0 p1 f0 t0 []",
-		"wait_object 146084 1854.5 1142.9 16.1 r0 p1 f0 t60 []",
+		"wait_object 146084 1854.5 1142.9 16.1 r0 p2 f0 t60 []",
 	}
 	if !slices.Equal(door, want) {
 		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
@@ -760,11 +760,13 @@ func TestOptionalLegIsLeftOut(t *testing.T) {
 	}
 }
 
-// A use_object whose item is used ON the object (via_item) has no row in the run leader's tables: the export is refused, naming the step.
-func TestViaItemUseObjectIsRefused(t *testing.T) {
+// A use_object whose item is used ON the object (via_item) is a use_on row (TestViaItemIsAUseOnRowOnlyWithOptional); one without the
+// object's point has none: the row names the object by its point, so the export is refused, naming the step.
+func TestViaItemUseObjectWithoutAPointIsRefused(t *testing.T) {
 	p := parsePlan(t, `{"version":1,"name":"vi","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"gong","to":{"x":30,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"stand":{"x":32,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`)
-	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item") {
+	p.Legs[0].Steps[0].UseObject.Near = nil // the plan check asks for near; a plan built in code may lack it
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item needs requires_item (the item used on it) and near") {
 		t.Fatalf("%v", err)
 	}
 }

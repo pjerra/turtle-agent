@@ -38,6 +38,10 @@ const (
 	KindHold         = "hold"
 	// KindGossip is a gossip step: the lead bot talks to creature `entry` and picks option `param` (`.bot cmd gossip <entry> <bot> <param>`).
 	KindGossip = "gossip"
+	// KindUseOn is an item used ON a game object (TortoiseBots kind use_on, 2026-10-21): entry = the object, x,y,z = its point, item = the
+	// item (`.bot cmd use <item> <carrier> entry:<obj>@x,y,z`). A plan's use_object with via_item. A module from before the kind skips the
+	// row (UnknownKind).
+	KindUseOn = "use_on"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -166,6 +170,11 @@ type Options struct {
 	// 2026-10-21, when his leg got a boss hold done by its units). An unknown name is an error (a misspelling would otherwise export the leg or
 	// cut the plan there).
 	SkipLegs []string
+	// WithOptional names optional legs (Leg.Optional) to write into the rows anyway, each with a warning that the item the leg needs is the
+	// operator's to give to the lead bot before `.bot run start` (a GM .additem: the run leader has no GM step, and pauses at the leg's
+	// use_on when no party bot carries it). Zul'Farrak's gahzrilla (the Mallet of Zul'Farrak 9240 on the gong). A name that is no optional
+	// leg of the plan is an error.
+	WithOptional []string
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -234,6 +243,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	for _, n := range opt.SkipLegs {
 		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n }) {
 			return Result{}, fmt.Errorf("plan %s: skip-legs names %q, which is no leg of the plan", name, n)
+		}
+	}
+	for _, n := range opt.WithOptional {
+		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n && l.Optional != nil }) {
+			return Result{}, fmt.Errorf("plan %s: with-optional names %q, which is no optional leg of the plan", name, n)
 		}
 	}
 	b := &builder{opt: opt, plan: p, name: name}
@@ -341,7 +355,10 @@ func (b *builder) leg(li int) error {
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): left out of the export by the exporter's skip-legs option (a leg the run leader cannot do, or does not need): the later legs close up", li, l.Name))
 		return nil
 	}
-	if l.Optional != nil {
+	if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
+		item := l.Optional.Ref()
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
+	} else if l.Optional != nil {
 		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
 		// end the run at its first use of the object: the leg is left out and the later legs close up.
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
@@ -579,7 +596,16 @@ func (b *builder) step(st dungeon.Step) error {
 	case st.UseObject != nil:
 		u := st.UseObject
 		if u.ViaItem {
-			return fmt.Errorf("use_object %d with via_item (the item is used on the object): the run leader's open row cannot carry it", u.Entry)
+			// The item used ON the object: the run leader's use_on row (TortoiseBots 2026-10-21), the object named by its point.
+			if u.RequiresItem == nil || u.Near == nil {
+				return fmt.Errorf("use_object %d with via_item needs requires_item (the item used on it) and near (the object's point) for the run leader's use_on row", u.Entry)
+			}
+			if u.Stand != nil {
+				b.move(*u.Stand, false, "stand")
+			}
+			b.add(StepRow{Kind: KindUseOn, Entry: u.Entry, X: u.Near.X, Y: u.Near.Y, Z: u.Near.Z, Item: u.RequiresItem.Entry,
+				Comment: clip("use "+u.RequiresItem.String()+" on object "+strconv.Itoa(int(u.Entry)), MaxComment)})
+			return nil
 		}
 		if u.Stand != nil {
 			b.move(*u.Stand, false, "stand")
@@ -744,6 +770,17 @@ func Validate(r Rows) error {
 		case KindBoss, KindLoot, KindOpen, KindUseItem, KindWaitObject, KindRitual:
 			if s.Entry == 0 {
 				return bad("needs an entry")
+			}
+		case KindUseOn:
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the object, the item, a point; no flag or param.
+			if s.Entry == 0 || s.Item == 0 {
+				return bad("a use_on needs the object (entry) and the item used on it (item)")
+			}
+			if s.X == 0 && s.Y == 0 && s.Z == 0 {
+				return bad("a use_on needs the object's point")
+			}
+			if s.Flags != 0 || s.Param != 0 {
+				return bad("a use_on carries no flags or param")
 			}
 		case KindGossip:
 			if s.Entry == 0 {

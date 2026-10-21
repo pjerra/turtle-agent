@@ -179,7 +179,8 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 	w := zfLeg(t, p, "weegli_door")
 	if len(w.Steps) != 3 || w.Steps[0].WaitFor == nil || w.Steps[0].WaitFor.Unit == nil || w.Steps[0].WaitFor.Unit.State != "seen" ||
 		w.Steps[1].Gossip == nil || w.Steps[1].Gossip.NPC != 7607 || w.Steps[1].Gossip.By != "tank" ||
-		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.GameObject == nil || w.Steps[2].WaitFor.GameObject.Entry != 146084 {
+		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.GameObject == nil || w.Steps[2].WaitFor.GameObject.Entry != 146084 ||
+		w.Steps[2].WaitFor.GameObject.State != "active_alt" { // Weegli's blast opens the End Door with the alternative state (zulfarrak.cpp:423; r8)
 		t.Errorf("weegli_door: %+v", w.Steps)
 	}
 	// Weegli's menu has one line (zulfarrak.cpp:497): option 0, by number so that the run leader can send it; the wait before it carries the
