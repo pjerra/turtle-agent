@@ -33,7 +33,7 @@ func traceScoreCmd(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print the verdicts as JSON (one object per trace)")
 	summary := fs.Bool("summary", false, "write <run_id>.summary.json beside each trace")
 	var sets thresholdFlags
-	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls)")
+	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls, stuck, facing, and the spell warnings idle_share, interrupt_cover, cc_success)")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(stderr, traceScoreUsage)
 		return exitUsage
@@ -77,13 +77,17 @@ func traceScoreCmd(args []string, stdout, stderr io.Writer) int {
 				return exitUsage
 			}
 		}
+		report := tracecheck.Spells(f, cfg)
 		if *asJSON {
-			_ = json.NewEncoder(stdout).Encode(map[string]any{"run": f.Header.Run, "file": path, "verdict": verdict, "failed": failed, "checks": checks})
+			_ = json.NewEncoder(stdout).Encode(map[string]any{"run": f.Header.Run, "file": path, "verdict": verdict, "failed": failed, "checks": checks, "spells": report})
 			continue
 		}
 		fmt.Fprintf(stdout, "%s  %s %s %s  %.0f s  %s\n", f.Header.Run, f.Header.Source, f.Header.Mode, f.Header.Plan, f.Seconds(), strings.ToUpper(verdict))
 		for _, c := range checks {
 			fmt.Fprintf(stdout, "  %-4s %-16s %s\n", strings.ToUpper(c.Verdict), c.ID, describeCheck(c))
+		}
+		for _, l := range report.Lines() {
+			fmt.Fprintln(stdout, l)
 		}
 	}
 	return code
@@ -92,6 +96,9 @@ func traceScoreCmd(args []string, stdout, stderr io.Writer) int {
 func describeCheck(c trace.Check) string {
 	if c.Verdict == trace.NA {
 		return "n/a: " + c.Detail
+	}
+	if c.ID == tracecheck.IDSpells { // report only: the detail is the line, the section below has the tables
+		return "report: " + c.Detail
 	}
 	return fmt.Sprintf("%g %s (limit %g): %s", c.Value, c.Unit, c.Threshold, c.Detail)
 }

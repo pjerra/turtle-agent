@@ -458,7 +458,7 @@ func feedFrame(fr tbm.ViewFrame) trace.Frame {
 	}
 	for _, p := range fr.Party {
 		b := trace.Bot{G: guidText(p.GUID), Alive: !p.Dead, Combat: p.InCombat(), State: p.State, HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPow: p.MaxPower,
-			PType: p.PowerType, X: p.X, Y: p.Y, Z: p.Z, Target: guidText(p.Target), Cast: p.Spell, Action: p.Action, Lead: p.GUID == fr.Lead && fr.Lead != 0}
+			PType: p.PowerType, X: p.X, Y: p.Y, Z: p.Z, Target: guidText(p.Target), Cast: p.Spell, Action: p.Action, Res: p.Result, Why: p.Reason, Lead: p.GUID == fr.Lead && fr.Lead != 0}
 		if h, ok := hostile[p.Target]; ok {
 			b.Facing = facingDegrees(p.O, p.X, p.Y, h.X, h.Y)
 		}

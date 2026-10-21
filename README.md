@@ -290,7 +290,6 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
-| `spells` | `spell_id`, `name` (a part of it), `highest` (only the highest known rank of each name), `passive` (include passives) | the known spells with their template data, cooldown and `ready`/`remaining_ms`/`why`, `affordable`; see [Agent state](#agent-state) |
 | `cast_state` | | the cast (`idle`, `casting`, `channelling`), `last_cast`, `last_failure` with its reason, the `gcd`, the combo points; see [Agent state](#agent-state) |
 | `face` | `guid` | |
 | `walk_to` | `x`, `y`, `z` (short, straight-line walks that ignore terrain; see Movement; `walk_path` follows the terrain) | |
@@ -1398,7 +1397,7 @@ list). A group run has no `threat`; a remote run has no `moving`; neither has `i
 Frame bots (`bots[]`, keyed by `g`; the name is in the party record): `al` alive, `cb` in combat, `st` engine state (`c` combat, `n` non-combat,
 `d` dead, `r` reaction), `hp`/`mhp`, `pw`/`mpw` power and its maximum, `pt` power type (0 mana, 1 rage, 2 focus, 3 energy), `x` `y` `z`, `mv` a
 movement is active, and when set `tg` target, `fa` facing (degrees 0-180 between where the bot faces and the direction to its hostile target in view), `cs` the
-spell it casts (feed), `act` its last action (feed), plus the agent's `np` (position unknown: x, y, z are 0) and `lead`. Frame mobs (`mobs[]`):
+spell it casts (feed), `act` its last action (feed; the module cuts the name to 16 bytes), `res` and `why` the verdict on that action and the reason a failed check did not run (feed, with TB #924; absent from older modules and traces), plus the agent's `np` (position unknown: x, y, z are 0) and `lead`. Frame mobs (`mobs[]`):
 `g`, `hp` percent, `x` `y` `z`, `cb`, and when set `tg`, `cs`, `ev` evading, `cc` crowd-controlled, `thr` the top of the threat list as
 `[guid, percent of the top]` pairs (feed only). A group run's mobs are the hostile units in combat or within 60 yd (at most 40), without
 threat; a remote run copies the feed's party, hostiles and threat records. `end.counters` has the writer's `frames`, `events`, `party`,
@@ -1466,7 +1465,9 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 | `feed_stalls` | the longest gap between two feed frames is over this | 10 s | no feed frames (group runs) |
 | `gm_shortcuts` | the honest-run flag: the run used any GM shortcut or was set up with `setup` commands, so a player could not have done it | 0 | never |
 | `stuck` | a member that should be moving (the lead in a walk of the plan, or a member more than 10 yd from the lead in one; alive and out of combat) did not move 1 yd for this long; the detail lists where, for a per-dungeon stuck-spot map | 5 s, any stall | no walk of the plan, or no frames |
+| `spells` | **report only, never fails**: what each class cast and did (casts per class from `cs`, action mix, verdict letters and reasons, idle share, power at death, interrupt cover, taunts, crowd-control success); its warnings are the limits below. `turtle-agent trace-score` prints the tables under the checks, `--json` has them as `spells`. 1 Hz frames only: instants and casts shorter than a second are not seen, and an action chosen in two frames in a row counts once. A trace without `res` prints `not recorded` for what needs it | warnings: `idle_share` over 15 % of engaged mana-user frames with no executed (`O`) action for 4 s, `interrupt_cover` under 30 % of enemy casts (from 5) with an interrupt action within 1 s, `cc_success` under 50 % of single-target crowd-control actions (from 3) followed by a new cc flag on a mob within 4 s; `--set idle_share=20` etc. | no bot frame has a `cs` or an `act` |
 | `facing` | a bot in combat stands (no movement) within 6 yd of its hostile target for longer than this while its `fa` is over 90 degrees (the server rule, without its casting case: the agent does not see casts) | 2 s | the header lacks the `facing` capability, or no frame has a bot in melee range of its target |
+| `spells` | `spell_id`, `name` (a part of it), `highest` (only the highest known rank of each name), `passive` (include passives) | the known spells with their template data, cooldown and `ready`/`remaining_ms`/`why`, `affordable`; see [Agent state](#agent-state) |
 
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame

@@ -180,7 +180,9 @@ type Bot struct {
 	Target string  `json:"tg,omitempty"`
 	Facing *int    `json:"fa,omitempty"` // degrees, 0-180, between where it faces and the direction to its hostile target (with a target in view)
 	Cast   uint32  `json:"cs,omitempty"`
-	Action string  `json:"act,omitempty"` // the last action its AI ran (feed)
+	Action string  `json:"act,omitempty"` // the last action its AI ran (feed); the module cuts the name to 16 bytes
+	Res    string  `json:"res,omitempty"` // the verdict on that action (feed, modules with TB #924): O ok, F failed, I impossible, U useless, P prerequisites, V dropped
+	Why    string  `json:"why,omitempty"` // why a failed check did not run (feed): no-item, oom, range, los, cd, moving, casting, no-target
 	NoPos  bool    `json:"np,omitempty"`  // the position is not known (x, y, z are 0)
 	Lead   bool    `json:"lead,omitempty"`
 }
