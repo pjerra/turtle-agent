@@ -996,7 +996,13 @@ func behaviorWhy(r tbm.Reply, err error) string {
 
 // lootOnAtStart turns corpse looting on for every bound bot when a remote run starts. A run that ended between a boss's `loot off` and
 // its deferred `loot on` (a crash, say) leaves the bots loot-off, so every run sets it back. A refusal is noted; the run goes on.
+// An observed run may keep the operator's setting instead (observe.keep_loot_setting): it sends nothing and notes one line. The setting
+// is observe only: a driven run always sends the undo, because its own legs turn looting off and on.
 func (d *RemoteDriver) lootOnAtStart(ctx context.Context) {
+	if o := d.opt.Observe; o != nil && o.KeepLootSetting {
+		d.rep.note("loot setting kept as the operator set it")
+		return
+	}
 	og, ok := d.orderGame()
 	if !ok {
 		return

@@ -177,7 +177,7 @@ func observeSpec(o *observeParam) *dungeon.ObserveSpec {
 	spec := &dungeon.ObserveSpec{}
 	if o != nil {
 		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
-		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait, spec.Maintenance, spec.AllowFarStart = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS), o.Maintenance, o.AllowFarStart
+		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait, spec.Maintenance, spec.AllowFarStart, spec.KeepLootSetting = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS), o.Maintenance, o.AllowFarStart, o.KeepLootSetting
 	}
 	return spec
 }

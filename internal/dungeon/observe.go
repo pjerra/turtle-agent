@@ -44,6 +44,10 @@ type ObserveSpec struct {
 	// AllowFarStart lets a partway start go on although the lead bot stands more than farStartYd from the start step's point: the note
 	// says so and the run leader walks there (or pauses) on its own. Off by default: a party in the wrong place is refused.
 	AllowFarStart bool
+	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the
+	// run start's undo of a crashed run's boss `loot off`). Off by default. Observe only: a driven run always sends the undo, since
+	// its legs turn looting off and on themselves and a crashed run may have left it off.
+	KeepLootSetting bool
 }
 
 // Observe defaults.

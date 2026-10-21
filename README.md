@@ -1638,6 +1638,9 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    a reused hire or one short of drinks or ammo: maintenance walks each bot to a vendor, bank or mailbox, and a party scattered over the maps
    right after the hires' autogear pauses the run leader ("the lead bot is not on the plan's map", #253). The inventory and talent reads still
    run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step).
+   The start also undoes a boss `loot off` a crashed run left in place (`.bot behavior <bot> loot on` for every bot) unless
+   `observe.keep_loot_setting` is true: then the bots' corpse looting stays as the operator set it, as a dungeon whose legs need looting off
+   does. A driven run always sends the undo.
 3. **Start.** `.bot run start <plan> [from ...]` (the plan's file name in lower case, or `observe.plan`). A run of the same plan that is already going (`busy`) is
    adopted and watched; another plan's, or a finished one, is refused. **Partway** (`from_leg`, `from_pull_group`, `from_step`, #248): the run leader begins at
    that point of its own plan instead of step 1, for a party already standing at that point in the instance (the run leader checks
@@ -1676,6 +1679,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | none | | the binding ended: the view feed's end-of-binding line fails the run as in commander mode |
 | `maintenance` | false | not a ceiling: sends `.bot maintenance` to every bot at the kit check (off: it walks them to vendors and can scatter the party) |
 | `allow_far_start` | false | not a ceiling: lets a partway start go on although the lead bot stands more than 80 yd from the start step's point, or the point or the lead's position is not known (a note says so; off: the run is refused before `run start`) |
+| `keep_loot_setting` | false | not a ceiling: leaves the bots' corpse looting as the operator set it (the start sends no `.bot behavior <bot> loot on`, the undo of a boss `loot off` a crashed run left); a driven run always sends the undo |
 
 **Controls.** `dungeon_stop` stops the run (`.bot run stop`, then the unbind). In an observed run `dungeon_pause`, `dungeon_resume` and `dungeon_skip` send the run leader's own
 `.bot run pause|resume|skip` on the watch's next look; the answer is in `report.remote.observe.controls`. The `commander` method takes `{"op":"run","verb":"status"}`
@@ -1695,7 +1699,7 @@ move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) a
 **Dashboard.** An observed run's card (`turtle-agent dashboard`) shows the run leader's state in plain text, in the "Now" line and as `run.leader` in
 the card JSON: `Run leader: Sentinel · pull 7/41 · pulling`, `Run leader paused: Sentinel · boss 12/41 · 3 dead: regroup ...`, `Run leader: finished all 41 steps`.
 
-`tools/run-uldaman.sh --mode observe [--hire] [--no-fresh]` builds the params of an observed Uldaman run.
+`tools/run-uldaman.sh --mode observe [--hire] [--no-fresh] [--keep-loot-setting]` builds the params of an observed Uldaman run.
 
 ## Remote leader
 

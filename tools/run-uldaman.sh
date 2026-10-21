@@ -4,13 +4,15 @@
 #
 #   tools/run-uldaman.sh [--mode commander|observe|leader] [--brain PRESET] [--rotation NAME] [--role ROLE]
 #                        [--hire [--rehire] [--level N]] [--relogin] [--no-fresh] [--from-leg N [--pull-group M] [--start-here]]
-#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--force-start] [--logout] [--print-params]
+#                        [--pulltest LEG:GROUP[:TRIES[:RESET]]] [--force-start] [--keep-loot-setting] [--logout] [--print-params]
 #
 #   --mode M       the run mode (README "Run modes"; or MODE=). commander (the default): the agent leads a bot group from outside it, everything
 #                  below. leader: the agent's character is in the group and plays while it leads (the bot brain, the preset of its class unless
 #                  --brain names one; the party is the one the character is in: none of the commander's options go with it, only --from-leg).
 #                  observe: a TortoiseBots run leader (`.bot run`) clears the dungeon and the agent watches (README "Observe mode"): the commander
 #                  options below (--hire, --no-fresh, LEAD/BOTS) prepare the party, but no start option and no TANK/HEALER go with it.
+#                  --keep-loot-setting leaves the bots' corpse looting as the operator set it: the run start sends no
+#                  `.bot behavior <bot> loot on` (observe only; a driven run always sends it).
 #                  With --pulltest, leader mode runs the pull test on the character (README "Pull test in leader mode"): the party stands at the pack, the
 #                  character plays with the brain, and the result scores it (dps, casts failed by reason, idle in combat...). A/B two rotations:
 #                  run it twice with --rotation A and --rotation B (3 or more tries each), then `turtle-agent pulltest --compare a.json b.json`.
@@ -74,7 +76,7 @@ VMTEST=${VMTEST:-$HOME/TortoiseBots-audit/tools/vmtest.sh}
 VM=${VMTEST_HOST:-yulon-ubuntu2}
 MODE=${MODE:-commander} BRAIN= ROTATION= ROLE=
 FRESH=true FROM_LEG=0 PULL_GROUP= HAVE_ITEMS= START_HERE=0 PULLTEST= FORCE_START=0 RELOGIN=0 LOGOUT=0 PRINT=0 HIRE=0 REHIRE=0 LEVEL=
-COMPOSITION=${COMPOSITION:-}
+COMPOSITION=${COMPOSITION:-} KEEP_LOOT=0
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -93,6 +95,7 @@ while [ $# -gt 0 ]; do
     --have-items) shift; HAVE_ITEMS=${1:?--have-items needs a comma list of item entries} ;;
     --pulltest) shift; PULLTEST=${1:?--pulltest needs LEG:GROUP[:TRIES[:RESET]]} ;;
     --force-start) FORCE_START=1 ;;
+    --keep-loot-setting) KEEP_LOOT=1 ;;
     --logout) LOGOUT=1 ;;
     --print-params) PRINT=1 ;;
     -h|--help) sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
@@ -111,6 +114,7 @@ case $MODE in
   observe) ;;
   *) die "--mode is commander, observe or leader" ;;
 esac
+[ "$KEEP_LOOT" = 0 ] || [ "$MODE" = observe ] || die "--keep-loot-setting goes with --mode observe (a driven run always turns corpse looting on at its start)"
 name_word() { [[ $1 =~ ^[a-z0-9_]{1,40}$ ]]; }
 [ -z "$BRAIN" ] || name_word "$BRAIN" || die "--brain: a preset name (a-z, 0-9, _)"
 [ -z "$ROTATION" ] || name_word "$ROTATION" || die "--rotation: a rotation name (a-z, 0-9, _)"
@@ -179,6 +183,9 @@ fi
 [ "$FORCE_START" = 0 ] || [ "$MODE" = observe ] || start_json+="\"force_start\":true,"
 
 sha_label=${SHA8:-unknown}
+# An observed run can leave the bots' corpse looting as the operator set it (observe.keep_loot_setting); a driven run always turns it on.
+keep_json=""
+[ "$KEEP_LOOT" = 0 ] || keep_json='"observe":{"keep_loot_setting":true},'
 params() {
   if [ "$MODE" = leader ]; then
     printf '{"name":"uldaman","mode":"leader",'
@@ -196,12 +203,14 @@ params() {
     [ -z "$LEVEL" ] || { hire+="${sep}\"level\":$LEVEL"; sep=","; }
     [ -z "$comp_json" ] || { hire+="${sep}\"composition\":$comp_json"; sep=","; }
     printf '{"name":"uldaman","mode":"%s",%s' "$MODE" "$start_json"
+    printf '%s' "$keep_json"
     printf '"prepare":{"party":"hire","hire":{%s},"gm_setup":["gm visible off"]},' "$hire"
     printf '"trace_meta":{"script":"run-uldaman.sh","agent_sha":"%s","party":"hire"}}' "$sha_label"
     return
   fi
   if [ "$MODE" = observe ]; then
     printf '{"name":"uldaman","mode":"observe","lead_bot":"%s","bots":%s,' "$LEAD" "$bots_json"
+    printf '%s' "$keep_json"
   else
     printf '{"name":"uldaman","mode":"commander","lead_bot":"%s","bots":%s,"tank":"%s","healer":"%s",%s' "$LEAD" "$bots_json" "$TANK" "$HEALER" "$start_json"
   fi

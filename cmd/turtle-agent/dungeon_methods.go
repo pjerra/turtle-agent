@@ -289,6 +289,9 @@ type observeParam struct {
 	// AllowFarStart lets a partway start (from_leg, from_pull_group, from_step) go on although the lead bot stands more than 80 yd
 	// from the start step's point; the note says so. Off by default: a party in the wrong place is refused before `run start`.
 	AllowFarStart bool `json:"allow_far_start,omitempty"`
+	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the undo
+	// of a boss `loot off` a crashed run left in place). Off by default. Observe only; a driven run always sends the undo.
+	KeepLootSetting bool `json:"keep_loot_setting,omitempty"`
 }
 
 type dungeonRunResult struct {
