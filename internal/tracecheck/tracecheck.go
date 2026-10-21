@@ -406,8 +406,18 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 	var worstWho string
 	var ev []int64
 	spans := map[string]bool{}
+	combatFrames := 0
 	for _, fr := range f.Frames {
+		alive, inCombat := tankState(fr, tank)
+		if inCombat {
+			combatFrames++
+		}
 		if !inPull(fr.T) {
+			open2 = map[string]int64{}
+			continue
+		}
+		// A tank that is dead (or not in the frame) holds nothing: its death is not threat lost to a non-tank.
+		if tank != "" && !alive {
 			open2 = map[string]int64{}
 			continue
 		}
@@ -419,6 +429,12 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 			haveThreat = true
 			holder := h.Threat[0].G
 			if tank == "" || !member[holder] || holder == tank {
+				continue
+			}
+			// The mob must be on the holder: a mob that still swings at the tank, or that has no target (polymorphed, fleeing,
+			// evading), is not threat lost to a non-tank. A tie with the tank is the tank's: the core keeps the tie in insertion
+			// order, so the holder is listed first although the mob is still the tank's within the 110 %/130 % rule.
+			if !h.Combat || h.Target != holder || tiedWithTank(h.Threat, tank) {
 				continue
 			}
 			seen[h.G] = true
@@ -449,8 +465,44 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 	if worstWho != "" {
 		d = fmt.Sprintf("%s held the top threat of a mob for %.0f s (tank %s)", worstWho, worst, f.Name(tank))
 	}
+	// The rate makes runs of different lengths comparable: the episodes per hour the tank spends in combat.
+	interval := f.Header.IntervalMS
+	if interval <= 0 {
+		interval = 1000
+	}
+	combatS := float64(combatFrames) * float64(interval) / 1000
+	if combatS > 0 {
+		d += fmt.Sprintf("; %d spans in %.0f s of tank combat, %.0f per tank-combat-hour", len(spans), combatS, float64(len(spans))*3600/combatS)
+	}
 	fail := worst > c.ThreatOffTankS
 	return trace.Check{ID: id, Name: name, Verdict: verdict(fail), Count: countIf(fail, len(spans)), Value: round1(worst), Threshold: c.ThreatOffTankS, Unit: "s", Detail: d, Evidence: ev}
+}
+
+// tankState reads the tank in a frame: whether it is alive and whether it is in combat. A frame that does not list the tank says neither.
+func tankState(fr trace.Frame, tank string) (alive, combat bool) {
+	if tank == "" {
+		return false, false
+	}
+	for _, b := range fr.Bots {
+		if b.G == tank {
+			return b.Alive, b.Alive && b.Combat
+		}
+	}
+	return false, false
+}
+
+// tiedWithTank says whether the tank sits level with the top of a threat list: the values are raw threat as a share of the top, so an
+// equal share is a tie, and a tie between the tank and the holder counts as the tank's.
+func tiedWithTank(thr []trace.Threat, tank string) bool {
+	if tank == "" || len(thr) < 2 {
+		return false
+	}
+	for _, t := range thr[1:] {
+		if t.G == tank {
+			return t.Pct == thr[0].Pct
+		}
+	}
+	return false
 }
 
 // ---- deaths and wipes ----

@@ -391,6 +391,26 @@ func TestObserveWipeLatchReArmsBelowThreeDead(t *testing.T) {
 	}
 }
 
+// An observed run is driven by the server's run leader, which is the lead bot: the trace header names it as the tank, so the threat
+// oracle does not have to guess the tank from the frames. A driven run keeps the tank it was given (TestTraceOfARemoteRun).
+func TestObserveTraceNamesTheLeadAsTheTank(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-tank"}
+	})
+	if err != nil || rep.Trace == nil || rep.Trace.Path == "" {
+		t.Fatalf("%v %+v", err, rep.Trace)
+	}
+	f, err := trace.Read(rep.Trace.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Header.Lead != "Tanky" || f.Header.Tank != f.Header.Lead {
+		t.Fatalf("header lead %q tank %q, want both Tanky", f.Header.Lead, f.Header.Tank)
+	}
+}
+
 // A party with one bot alive is no wipe: four dead of five count nothing.
 func TestObserveCountsNoWipeWhileABotLives(t *testing.T) {
 	g := newFakeLeader(t, wipeScript()...)

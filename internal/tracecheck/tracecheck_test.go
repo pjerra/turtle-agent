@@ -203,6 +203,33 @@ func mob(g string, hp int, top string) trace.Mob {
 	m := trace.Mob{G: g, HPPct: hp, Combat: true}
 	if top != "" {
 		m.Threat = []trace.Threat{{G: top, Pct: 100}}
+		m.Target = top // the mob is on the member that holds it
+	}
+	return m
+}
+
+// threatTrace is a 40 s traced fight with a pull from 0 s to 30 s: one feed frame a second from Tank, Healer and Mage, with the bots and
+// mobs that tick builds for that second.
+func threatTrace(tick func(s int64) (bots []trace.Bot, mobs []trace.Mob)) *build {
+	b := newTrace(40)
+	b.f.Header.Tank = "Tank"
+	b.ev(0, "pull_start").ev(30_000, "pull_end")
+	for s := int64(0); s <= 40; s++ {
+		bots, mobs := tick(s)
+		fr := b.frame(s*1000, "feed", bots...)
+		fr.Mobs = mobs
+	}
+	return b
+}
+
+// mageHolds is the fixture's off-tank stretch: the mage is top of the mob from 10 s to 20 s.
+func mageHolds(s int64) bool { return s >= 10 && s < 20 }
+
+// threatMob is the fixture's mob: the holder is top with 100, and the tank is second with tankPct when that is above zero.
+func threatMob(holder string, tankPct int) trace.Mob {
+	m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: holder, Threat: []trace.Threat{{G: holder, Pct: 100}}}
+	if tankPct > 0 {
+		m.Threat = append(m.Threat, trace.Threat{G: gTank, Pct: tankPct})
 	}
 	return m
 }
@@ -273,6 +300,112 @@ func TestThreatOffTheTank(t *testing.T) {
 	// Frames with no threat lists (a group run): n/a.
 	none := mk(func(int64) string { return "" })
 	expect(t, get(t, Score(none.f, Defaults()), IDThreat), trace.NA)
+}
+
+// A mob that keeps swinging at the tank is not threat lost to the mage on top of its list.
+func TestThreatIgnoresAMobThatIsNotOnTheHolder(t *testing.T) {
+	b := threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+		m := threatMob(gTank, 0)
+		if mageHolds(s) {
+			m = threatMob(gMage, 0)
+		}
+		m.Target = gTank
+		return members(), []trace.Mob{m}
+	})
+	c := get(t, Score(b.f, Defaults()), IDThreat)
+	expect(t, c, trace.Pass)
+	if c.Value != 0 || c.Count != 0 {
+		t.Fatalf("%+v", c)
+	}
+}
+
+// A mob with no target (polymorphed, fleeing, evading) is not on the mage either.
+func TestThreatIgnoresAMobWithNoTarget(t *testing.T) {
+	b := threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+		m := threatMob(gTank, 0)
+		if mageHolds(s) {
+			m = threatMob(gMage, 0)
+			m.Target = ""
+		}
+		return members(), []trace.Mob{m}
+	})
+	expect(t, get(t, Score(b.f, Defaults()), IDThreat), trace.Pass)
+}
+
+// A mob out of combat does not hit anyone.
+func TestThreatIgnoresAMobThatIsNotInCombat(t *testing.T) {
+	b := threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+		m := threatMob(gTank, 0)
+		if mageHolds(s) {
+			m = threatMob(gMage, 0)
+			m.Combat = false
+		}
+		return members(), []trace.Mob{m}
+	})
+	expect(t, get(t, Score(b.f, Defaults()), IDThreat), trace.Pass)
+}
+
+// A dead tank loses no threat: its death is not a span. The same stretch with the tank alive fails, so the frames are counted.
+func TestThreatIgnoresTheFramesOfADeadTank(t *testing.T) {
+	mk := func(dead func(s int64) bool) *build {
+		return threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+			bots := members()
+			if dead(s) {
+				bots[0].Alive = false
+			}
+			m := threatMob(gTank, 0)
+			if mageHolds(s) {
+				m = threatMob(gMage, 0)
+			}
+			return bots, []trace.Mob{m}
+		})
+	}
+	// The tank dies at 10 s and is back at 20 s: the mage held the mob on the way out, not while the tank lay dead.
+	dead := func(s int64) bool { return mageHolds(s) }
+	expect(t, get(t, Score(mk(dead).f, Defaults()), IDThreat), trace.Pass)
+	alive := get(t, Score(mk(func(int64) bool { return false }).f, Defaults()), IDThreat)
+	expect(t, alive, trace.Fail)
+	if alive.Value != 9 || alive.Count != 1 {
+		t.Fatalf("%+v", alive)
+	}
+}
+
+// The values are raw threat as a share of the top, and a tie between the mage and the tank is the tank's: the core keeps the tie in
+// insertion order. One point below the mage is not a tie.
+func TestThreatCountsATieWithTheTankAsTheTanks(t *testing.T) {
+	mk := func(tankPct int) *build {
+		return threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+			m := threatMob(gTank, 0)
+			if mageHolds(s) {
+				m = threatMob(gMage, tankPct)
+			}
+			return members(), []trace.Mob{m}
+		})
+	}
+	expect(t, get(t, Score(mk(100).f, Defaults()), IDThreat), trace.Pass)
+	c := get(t, Score(mk(90).f, Defaults()), IDThreat)
+	expect(t, c, trace.Fail)
+	if c.Value != 9 || c.Count != 1 {
+		t.Fatalf("%+v", c)
+	}
+}
+
+// The detail carries the episodes per hour the tank spends in combat: one 9 s span in 41 s of combat is 88 per hour.
+func TestThreatReportsTheRatePerTankCombatHour(t *testing.T) {
+	b := threatTrace(func(s int64) ([]trace.Bot, []trace.Mob) {
+		bots := members()
+		bots[0].Combat = true
+		m := threatMob(gTank, 0)
+		if mageHolds(s) {
+			m = threatMob(gMage, 0)
+		}
+		return bots, []trace.Mob{m}
+	})
+	c := get(t, Score(b.f, Defaults()), IDThreat)
+	expect(t, c, trace.Fail)
+	if !strings.Contains(c.Detail, "1 spans in 41 s of tank combat, 88 per tank-combat-hour") {
+		t.Fatalf("%+v", c)
+	}
 }
 
 func TestDeaths(t *testing.T) {
