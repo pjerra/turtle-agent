@@ -211,26 +211,6 @@
           "radius": 15
         },
         {
-          "entries": [5648, 5650, 5650, 5650],
-          "positions": [
-            {"x": 1660.7, "y": 901.2, "z": 8.9},
-            {"x": 1664.1, "y": 911.3, "z": 9},
-            {"x": 1669.7, "y": 896.5, "z": 9},
-            {"x": 1672.6, "y": 906.4, "z": 9}
-          ],
-          "radius": 15
-        },
-        {
-          "entries": [7246, 5648, 5648, 5649],
-          "positions": [
-            {"x": 1662.3, "y": 929.7, "z": 9.1},
-            {"x": 1661.9, "y": 938.5, "z": 9.2},
-            {"x": 1660.8, "y": 937.6, "z": 9.2},
-            {"x": 1656.8, "y": 943, "z": 9.1}
-          ],
-          "radius": 15
-        },
-        {
           "entries": [5648, 7247],
           "positions": [
             {"x": 1642.1, "y": 902.1, "z": 9.5},
@@ -288,7 +268,33 @@
             ],
             "period_s": 126,
             "source": "creature_movement of spawn 155626 (Sandfury Shadowhunter, movement type 2, 45 points, 316 yd at 2.5 yd/s); its creature_groups members are the Shadowhunter 44170 and the rare Zerillis 10082 (skipped). Live: the pair (0xAC8A, 0x25FEA) walked 1684 920 -\u003e 1668 917 on the map walk and joined the pull of 1680 871 at 1651 911 (zf1-hires-3 run 4)."
-          }
+          },
+          "approach": [
+            {"x": 1620, "y": 880, "z": 8.97}
+          ]
+        },
+        {
+          "entries": [5648, 5650, 5650, 5650],
+          "positions": [
+            {"x": 1660.7, "y": 901.2, "z": 8.9},
+            {"x": 1664.1, "y": 911.3, "z": 9},
+            {"x": 1669.7, "y": 896.5, "z": 9},
+            {"x": 1672.6, "y": 906.4, "z": 9}
+          ],
+          "radius": 15,
+          "approach": [
+            {"x": 1630, "y": 878, "z": 8.93}
+          ]
+        },
+        {
+          "entries": [7246, 5648, 5648, 5649],
+          "positions": [
+            {"x": 1662.3, "y": 929.7, "z": 9.1},
+            {"x": 1661.9, "y": 938.5, "z": 9.2},
+            {"x": 1660.8, "y": 937.6, "z": 9.2},
+            {"x": 1656.8, "y": 943, "z": 9.1}
+          ],
+          "radius": 15
         }
       ],
       "skip": [7269, 10080, 10082],
@@ -297,7 +303,9 @@
         "ZF-1 (2026-10-14) and TestZulfarrakRouteHasNoUnplannedPack: four mobs of the export stood within 20 yd of this leg's navmesh route in no pull group, besides the pack of rows 38009-38011: the wandering Blood Drinker 45709 (1685.9 888.8, added to the group at 1681 872), the Blood Drinker 81452 (1713.7 784.1) and the Witch Doctor 81468 (1776.9 813.7, on the slope), now groups of their own.",
         "The road x 1485-1535 by direct hops (ZF-2: 1485.6 825.5 -\u003e 1498.7 829.9 -\u003e 1506 844.9, z 8.9-10.2; ZF-1 run 4: -\u003e 1520 840 -\u003e 1535 834): the agent's navmesh routes this stretch north over the ramp (1561 955), which the server refuses or which leads into the Farraki arena; the hops were walked live in both runs (ZF-1 kept the 1505 846 via; 1506 844.9 is 1.5 yd from it). Plan check (#187): the hops to 1520 840 and 1535 834 are plain waypoints now (complete straight paths of 15 and 16 yd); the second was refused no-los when a fight begun by the pack at 1535 826 had dragged the lead bot onto the ledge at 1534 815. 1535 834 is the leg's `to`, so it is not a via of its own.",
         "The pack at 1680.8 871.5 (spawns 44225 + 45708, linked, and the wandering Blood Drinker 45709) is three mobs, but every pull of it in ZF-1 hires-3 drew far more: the pair of Shadowhunters (7246, spawn 155626 with 44170) walks a 316 yd loop through 1643-1707 874-930 that passes 10 yd from the pack (its waypoints 22-24) and through the Shadowcaster + Soul Eater pair at 1642-1645 902-906; in run 4 a pet aggroed that pair from the pull spot (33 yd), the Shadowhunters joined, then the camp of 1660-1673 896-911 (Shadowcaster 44162, Witch Doctors 44164, 44165, 44169) came on the tank: twelve mobs, wipe in 34 s. So the pair is now a pull group before the pack, both carry the Shadowhunters' patrol (the driver waits for it to walk away or pulls it alone first, and Polymorphs a Shadowhunter that joins), and the camp of four stays out (keep fights south of y 885). The Witch Doctor 45710 patrols 1658.5 805.5 \u003c-\u003e 1679.9 858.1 (45 s round) and can join the pack from the south: no pull group (its spawn stands 15-20 yd from the Shadowhunter camp of 1639-1645 798-815); the walk's pulls on the way and the reactive CC take it.",
-        "Route edit Z3 (2026-10-16, test it in one group): the Shadowcaster camp of four at 1660 901 and the pack at 1662 930 (Shadowhunter, two Shadowcasters, Blood Drinker) were groups 1 and 2 of the `velratha` leg and are groups 6 and 7 here, pulled before the Shadowcaster / Soul Eater pair at 1642 902 (the last group, with the Shadowhunters' patrol), from the west stand at 1620 880. In round 3 the pull of the pair drew the camp and the Shadowhunter pack with it: 7 mobs in 118 s (s2b), 11 mobs in 172 s with 7 deaths and a wipe (s4-b), the same bot twice in s1b. The linked pack of three at 1613-1619 892-897 (Witch Doctor 42633, Shadowcaster 43695, Blood Drinker 43697) is group 4: it stands at that stand and joined the 62 s fight of the pair in all three runs (Z9). The `velratha` leg keeps the pair as its group 1, killed earlier in the run when the Antu'sul leg took it."
+        "Route edit Z3 (2026-10-16, test it in one group): the Shadowcaster camp of four at 1660 901 and the pack at 1662 930 (Shadowhunter, two Shadowcasters, Blood Drinker) were groups 1 and 2 of the `velratha` leg and are groups 6 and 7 here, pulled before the Shadowcaster / Soul Eater pair at 1642 902 (the last group, with the Shadowhunters' patrol), from the west stand at 1620 880. In round 3 the pull of the pair drew the camp and the Shadowhunter pack with it: 7 mobs in 118 s (s2b), 11 mobs in 172 s with 7 deaths and a wipe (s4-b), the same bot twice in s1b. The linked pack of three at 1613-1619 892-897 (Witch Doctor 42633, Shadowcaster 43695, Blood Drinker 43697) is group 4: it stands at that stand and joined the 62 s fight of the pair in all three runs (Z9). The `velratha` leg keeps the pair as its group 1, killed earlier in the run when the Antu'sul leg took it.",
+        "Route edit Z3 reverted for the module (2026-10-21, r2-19z19 step 26): the camp (5648 + 3 x 5650 at 1660 901) and the pack at 1662 930 were pulled before the pair and the export carried no stand, so the run leader stopped 30 yd short of the camp centre at 1642.1 886.7, 15.4 yd from the pair's Shadowcaster 42627 and 4.9 yd from the patrol's waypoint 1646.7 888.4: the fight began in the walk phase (no pull order, no crowd control) and the camp, the patrol, the north pack and the Blood Drinker 45709 joined (wipe at step 26 of 133; zf-full-19z16 pulled the pair first and cleared). The order is now ..., Witch Doctor 1633.3 868.3, the pair (with its patrol block), the camp, the north pack. Stands are the last approach point, ground distances to the spawns of the plan. The pair from 1620 880 z 8.97 (navmesh floor): 42627 31.3 yd, 7247 36.1, the camp's nearest (44162) 45.9, the north pack's nearest (44177) 65.3, the wanderer 45709 (1685.9 888.8) 66.5, the patrol path 26.8 (waypoint 1643.3 893.3). The camp from 1630 878 z 8.93: 44162 38.5, 44165 43.8, the other camp spawns 47.7 and 51.2, the north pack 61.0, 45709 56.9, the patrol path 19.6 (waypoint 1646.7 888.4 at 19.7). TestApproachClearanceFailsOnTheOldAntusulOrder holds the rule (20 yd from every later group, 15 yd from every patrol path) against this order. The agent's own driver does not walk the approach points.",
+        "Zerillis (10082) was up in zf-full-19z16 (fought at t 836-889) and in r2-19z19 (0x25FE9): he is the rare member of the 155626 patrol (creature_groups leader 155626 with 44170 and 155625 = 10082). The skip list entry 'probably not up' stays in this edit. plan-export does not carry skip lists (the rows have no skip column) and 10082 is in no pull row's entries, so the entry changes no row; it only makes the agent-led driver ignore him as a target."
       ]
     },
     {
