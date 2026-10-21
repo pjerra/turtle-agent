@@ -878,3 +878,54 @@ func TestUldamanLateLegsRestUntilTheHealerIsFull(t *testing.T) {
 		t.Errorf("fleers %v", p.Fleers)
 	}
 }
+
+// The descent leg ends where the squad east of the Temple Door is pulled to the party, not walked into (TortoiseBots r9-19z26:
+// the old end 141 290 lay 7 yd from the squad's 7396 at 148.1 287.9; the tank engaged on arrival, fought at the squad's west edge
+// and its combat moves took it onto the raised rubble at 132-139 / 296-304, a patch of mesh at z -23.8 that no path leaves, where
+// every move after it was refused). The end is out of the squad's reach and off that rubble.
+func TestUldamanDescentEndsOffTheRubble(t *testing.T) {
+	p := loadUldaman(t)
+	var leg *Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "descent" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil || len(leg.PullGroups) == 0 {
+		t.Fatal("no descent leg with pull groups")
+	}
+	end := leg.To
+	for _, at := range leg.PullGroups[0].Positions {
+		if d := math.Hypot(float64(end.X-at.X), float64(end.Y-at.Y)); d < 20 {
+			t.Errorf("the leg ends %.1f yd from the squad member at %.1f %.1f: walked into, not pulled (want 20 yd or more)", d, at.X, at.Y)
+		}
+	}
+	// The rubble patch (offline navmesh of map 70: the mesh round 137.3 298.7 -23.3, the tank's spot in r9).
+	dx := math.Max(math.Max(132-float64(end.X), float64(end.X)-139), 0)
+	dy := math.Max(math.Max(296-float64(end.Y), float64(end.Y)-304), 0)
+	if d := math.Hypot(dx, dy); d < 12 {
+		t.Errorf("the leg ends %.1f yd from the rubble at 132-139 / 296-304 (want 12 yd or more)", d)
+	}
+	dir := mmapsDir()
+	if dir == "" {
+		t.Skip("no map 70 navmesh files: the paths are not checked")
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	rubble := [3]float32{137.3, 298.7, -23.3}
+	to := [3]float32{end.X, end.Y, end.Z}
+	path, err := pl.Plan(p.Map, rubble, to)
+	if errors.Is(err, navmesh.ErrNoEngine) {
+		t.Skip("built without cgo: no navmesh engine")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status == navmesh.Complete {
+		t.Errorf("the rubble at 137.3 298.7 has a complete path to the leg's end: the mesh changed, read the r9 note again")
+	}
+	via := leg.Via[len(leg.Via)-1]
+	if path, _ := pl.Plan(p.Map, [3]float32{via.X, via.Y, via.Z}, to); path.Status != navmesh.Complete {
+		t.Errorf("via %v to the leg's end: %s %s", via, path.Status, path.Reason)
+	}
+}
