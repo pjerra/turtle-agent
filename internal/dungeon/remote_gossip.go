@@ -80,11 +80,12 @@ func (d *RemoteDriver) gossipBot(by string) (tbm.PartyRec, error) {
 	return m, nil
 }
 
-// gossipOrder is the order of a bot's talk: `cmd gossip <npc entry> <bot> <option>`.
+// gossipOrder is the order of a bot's talk: `cmd gossip <npc entry> <bot> <option>`. The order counts the menu from 1 (TortoiseBots
+// GossipOrderPolicy.h refuses 0), while the plan's option is the menu's own index from 0, so the order carries option + 1.
 func gossipOrder(g *Gossip, bot string) string {
 	opt := g.Text
 	if g.Option != nil {
-		opt = strconv.FormatUint(uint64(*g.Option), 10)
+		opt = strconv.FormatUint(uint64(*g.Option)+1, 10)
 	}
 	return fmt.Sprintf("cmd gossip %d %s %s", g.NPC, bot, opt)
 }

@@ -136,7 +136,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			if l.Boss != nil && (l.Boss.Entry == 7607 || slicesContains(l.Boss.First, 7607)) {
 				t.Errorf("%s/%s: Weegli (7607) must not be killed: he blows the End Door", pl.Name, l.Name)
 			}
-			if l.Boss != nil && l.Boss.Entry >= 7604 && l.Boss.Entry <= 7608 && (pl != p || l.Name != "bly" || l.Boss.Entry != 7604 || len(l.Steps) < 2 || l.Steps[1].Gossip == nil || l.Steps[1].Gossip.NPC != 7604) {
+			if l.Boss != nil && l.Boss.Entry >= 7604 && l.Boss.Entry <= 7608 && (pl != p || l.Name != "bly" || l.Boss.Entry != 7604 || len(l.Steps) < 3 || l.Steps[2].Gossip == nil || l.Steps[2].Gossip.NPC != 7604) {
 				t.Errorf("%s/%s: the crew is a boss only in the bly leg, after Bly's gossip", pl.Name, l.Name)
 			}
 			if l.Boss != nil && l.Boss.Entry == 7271 && (pl != p || l.Name != "zumrah" || len(l.Steps) == 0 || l.Steps[len(l.Steps)-1].AreaTrigger == nil) {
@@ -162,7 +162,8 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 }
 
 // The stairs event in order: the cage, the hold at the top, wave 3 at the foot of the stairs (Nekrum first, then Sezz'ziz), then Weegli
-// (gossip, gone, the End Door open) BEFORE Bly (gossip, hostile, the crew), then Ukorz with Ruuzlu first.
+// (seen at his place with the run leader's hold on the pyramid phase 8, the gossip by option number 0, the End Door open) BEFORE Bly
+// (Weegli gone, Bly seen, gossip, hostile, the crew), then Ukorz with Ruuzlu first.
 func TestZulfarrakStairsEventOrder(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	var names []string
@@ -176,13 +177,25 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 		t.Errorf("wave 3: Nekrum first, Sezz'ziz the boss: %+v", b)
 	}
 	w := zfLeg(t, p, "weegli_door")
-	if len(w.Steps) != 4 || w.Steps[1].Gossip == nil || w.Steps[1].Gossip.NPC != 7607 || w.Steps[1].Gossip.By != "tank" ||
-		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.Unit == nil || w.Steps[2].WaitFor.Unit.State != "gone" ||
-		w.Steps[3].WaitFor == nil || w.Steps[3].WaitFor.GameObject == nil || w.Steps[3].WaitFor.GameObject.Entry != 146084 {
+	if len(w.Steps) != 3 || w.Steps[0].WaitFor == nil || w.Steps[0].WaitFor.Unit == nil || w.Steps[0].WaitFor.Unit.State != "seen" ||
+		w.Steps[1].Gossip == nil || w.Steps[1].Gossip.NPC != 7607 || w.Steps[1].Gossip.By != "tank" ||
+		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.GameObject == nil || w.Steps[2].WaitFor.GameObject.Entry != 146084 {
 		t.Errorf("weegli_door: %+v", w.Steps)
 	}
+	// Weegli's menu has one line (zulfarrak.cpp:497): option 0, by number so that the run leader can send it; the wait before it carries the
+	// run leader's hold on the pyramid phase (instance data 1) reading 8, PYRAMID_KILLED_ALL_TROLLS, the value that makes his menu offer it.
+	if g := w.Steps[1].Gossip; g.Option == nil || *g.Option != 0 || g.Text != "" {
+		t.Errorf("Weegli's gossip is option 0, not a text: %+v", g)
+	}
+	if h := w.Steps[0].WaitFor.Hold; h == nil || h.Data != 1 || h.Value == nil || *h.Value != 8 || h.TimeoutS != 600 {
+		t.Errorf("weegli_door's hold: %+v", h)
+	}
 	y := zfLeg(t, p, "bly")
-	if y.Steps[1].Gossip == nil || y.Steps[1].Gossip.NPC != 7604 || y.Boss == nil || y.Boss.Entry != 7604 || fmt.Sprint(y.Boss.First) != "[7608 7606 7605]" {
+	if len(y.Steps) != 4 || y.Steps[0].WaitFor == nil || y.Steps[0].WaitFor.Unit == nil || y.Steps[0].WaitFor.Unit.State != "gone" ||
+		y.Steps[0].WaitFor.Unit.Entries[0] != 7607 {
+		t.Errorf("bly begins by waiting for Weegli to be gone (a second DestroyDoor plants a second barrel): %+v", y.Steps)
+	}
+	if y.Steps[2].Gossip == nil || y.Steps[2].Gossip.NPC != 7604 || y.Boss == nil || y.Boss.Entry != 7604 || fmt.Sprint(y.Boss.First) != "[7608 7606 7605]" {
 		t.Errorf("bly: %+v %+v", y.Steps, y.Boss)
 	}
 	if u := zfLeg(t, p, "ukorz").Boss; u == nil || u.Entry != 7267 || fmt.Sprint(u.First) != "[7797]" {

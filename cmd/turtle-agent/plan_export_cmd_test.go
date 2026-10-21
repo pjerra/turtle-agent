@@ -128,3 +128,33 @@ func TestPlanExportCutsAtAStepTheRunLeaderCannotDo(t *testing.T) {
 		t.Fatalf("first leg: %d %q", code, errs)
 	}
 }
+
+// --skip-legs leaves a named leg out (the shipped Zul'Farrak plan then reaches the End Door and Ukorz past Bly), and a name that is no leg
+// of the plan is refused before anything is written.
+func TestPlanExportSkipLegs(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bly", "--stamp", "20261021005900", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 16 legs") || strings.Contains(out, "CUT") {
+		t.Fatalf("output %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021005900_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "'gossip', 7607,") || !strings.Contains(string(data), "'ukorz'") || strings.Contains(string(data), "'bly'") {
+		t.Fatal("the rows lack the Weegli gossip or Ukorz, or still have Bly")
+	}
+	if !strings.Contains(errs, "leg 16 (bly): left out of the export by the exporter's skip-legs option") {
+		t.Fatalf("stderr %q", errs)
+	}
+	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bli", "--stamp", "20261021005901", "--out", dir, "zulfarrak")
+	if code == exitOK || !strings.Contains(errs, `skip-legs names "bli"`) {
+		t.Fatalf("a misspelt leg: %d %q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261021005901_world.sql")); err == nil {
+		t.Fatal("a file was written for a refused export")
+	}
+}

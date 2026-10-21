@@ -369,11 +369,11 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	return nil
 }
 
-// The whole shipped Zul'Farrak plan is exported up to the stairs_base leg (Nekrum and Sezz'ziz): the two waits of the stairs event carry
-// their holds (instance data 1, the pyramid phase), so the stairs legs export; the legs after stairs_base (the End Door, Bly, Ukorz) use a
-// unit wait without a hold and the gossip step, which the run leader has no step for, so the export is cut before the first of them, with a
-// note that names the leg and the step.
-func TestZulfarrakIsCutAfterStairsBase(t *testing.T) {
+// The whole shipped Zul'Farrak plan is exported up to the weegli_door leg: the two waits of the stairs event carry their holds (instance
+// data 1, the pyramid phase), Weegli's wait carries the hold on phase 8, and his gossip is a gossip row by option number. The bly leg begins with
+// a unit wait without a hold (Weegli gone), which the run leader has no step for, so the export is cut before it, with a note that names the leg
+// and the step (the plan's gahzrilla leg is optional and takes no row number, so bly is row leg 15 of plan leg 16); ukorz after it is not in the rows (TestZulfarrakWithoutBlyReachesUkorz).
+func TestZulfarrakIsCutAtBly(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
@@ -382,21 +382,72 @@ func TestZulfarrakIsCutAfterStairsBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole := buildWhole(t, zulfarrakThrough(t, "stairs_base"))
-	if len(res.Rows.Legs) != 14 || res.Rows.Legs[13].Name != "stairs_base" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
-		t.Fatalf("%d legs, %d steps (the plan through stairs_base: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	whole := buildWhole(t, zulfarrakThrough(t, "weegli_door"))
+	if len(res.Rows.Legs) != 15 || res.Rows.Legs[14].Name != "weegli_door" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through weegli_door: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
 	}
-	for _, want := range []string{"exported legs 0-13 (stairs_base) only", "cut before leg 14 (weegli_door)", "steps[0]: wait_for.unit has no run leader step (unit 7607 seen)", "2 after it"} {
+	for _, want := range []string{"exported legs 0-14 (weegli_door) only", "cut before leg 15 (bly)", "steps[0]: wait_for.unit has no run leader step (unit 7607 gone)", "1 after it"} {
 		if !strings.Contains(res.Cut, want) {
 			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
 		}
 	}
-	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 14 (weegli_door)") {
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 15 (bly)") {
 		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
+	}
+}
+
+// With the bly leg left out (the exporter's skip-legs option: the run leader has no boss that turns hostile after his gossip) the shipped plan
+// exports whole: the weegli_door leg is the hold on the pyramid phase 8 at Weegli's place, the gossip 7607 option 1 (the plan's option 0), and the
+// End Door wait; the ukorz leg follows it in plain kinds.
+func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, SkipLegs: []string{"bly"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
+	}
+	legs := res.Rows.Legs
+	if len(legs) != 16 || legs[14].Name != "weegli_door" || legs[15].Name != "ukorz" || legs[15].Leg != 15 {
+		t.Fatalf("legs %+v", legs)
+	}
+	var door []string
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 14 {
+			door = append(door, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
+		}
+	}
+	want := []string{
+		"move 0 1884 1212 9 r0 p0 f0 t0 []",
+		"hold 1 1877.5 1199.6 8.9 r30 p8 f8 t600 [7787 7788 7789 8876 8877]",
+		"gossip 7607 1877.52 1199.63 8.87 r0 p1 f0 t0 []",
+		"wait_object 146084 1854.5 1142.9 16.1 r0 p1 f0 t60 []",
+	}
+	if !slices.Equal(door, want) {
+		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
+	}
+	ukorz := kinds(res.Rows, 15)
+	if len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss || slices.Contains(ukorz, KindGossip) {
+		t.Errorf("ukorz kinds %v", ukorz)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
+		return strings.Contains(w, "leg 16 (bly): left out of the export by the exporter's skip-legs option")
+	}) {
+		t.Errorf("no warning for the skipped leg: %v", res.Warnings)
+	}
+	// The skipped leg's attributes are not warned about: its gossip stand, its skip list and the like are not in any row.
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "leg 16 (bly)") && !strings.Contains(w, "left out of the export") {
+			t.Errorf("a warning about the skipped leg: %s", w)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package planexport
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -34,6 +35,7 @@ var unexpressedWhy = map[string]string{
 	"object spawn/range":          "the row names the object by entry near its point only (the module's own search range)",
 	"loot_object batch":           "no batches: the chests are opened one step at a time",
 	"wait_for with a hold":        "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
+	"gossip stand/by/retry_s":     "the row is the order `cmd gossip <npc> <lead bot> <option>`: the lead bot talks (the tank or carrier of a plan is the same bot), walks to the NPC itself, asks once (no retry), and ends on the order's ACK; the stand point, the talker and retry_s are the agent's only (fail_text is in the row's comment)",
 	"area_trigger expect/timeout": "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
 }
 
@@ -78,7 +80,7 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 		if li >= upto {
 			break
 		}
-		if l.Optional != nil {
+		if l.Optional != nil || slices.Contains(opt.SkipLegs, l.Name) {
 			continue // left out of the export, with its own warning
 		}
 		leg := fmt.Sprintf("leg %d (%s)", li, l.Name)
@@ -143,6 +145,8 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 					if st.Ritual.Stand != nil {
 						add("stand (loot_object, ritual)", at)
 					}
+				case st.Gossip != nil:
+					add("gossip stand/by/retry_s", at)
 				case st.AreaTrigger != nil:
 					add("area_trigger expect/timeout", at)
 				}
