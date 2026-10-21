@@ -291,3 +291,46 @@ func TestRemoteEnterCmdCeilingDoesNotCountAFightOnTheWay(t *testing.T) {
 		t.Fatalf("without the fight the ceiling holds: %v", err)
 	}
 }
+
+// A door in a hill or a cave stands above the walkable ground: the module's own move never lifts a bot to the portal's Z (the fake
+// clamps the lead bot back to the ground), so with `cmd enter` only the ground-plane rule (within cmdEnterGather of the portal,
+// cmdEnterDoorDZ above or below it) gets the order out at the door; a 3D MoveArrive check would walk to the 4-minute ceiling instead.
+func TestRemoteEnterCmdIsSentAtADoorAboveTheGround(t *testing.T) {
+	g := newEnterOrders(t, enterAck(3))
+	g.plan.Portal = &Portal{Map: 0, Point: Point{304, 0, 9}} // 4 yd off on the ground plane, 9 yd up
+	base := g.fakeRemote.onTick
+	g.fakeRemote.onTick = func(fr *fakeRemote) {
+		base(fr)
+		fr.lead().Z = 0 // the bot walks on the ground: it never stands on the portal's point
+	}
+	rep, err := g.run(RemoteOptions{Enter: EnterCmd})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if len(g.sent) != 1 || g.sent[0] != "cmd enter 924" {
+		t.Fatalf("the order never went out at the door: %v\n%s", g.sent, notesOf(rep))
+	}
+}
+
+// Without `cmd enter` nothing changes: the lead bot is taken in by the area trigger (the fake's stand-in for a bot walking into
+// it) on the ground below the portal's point, and no enter order is sent.
+func TestRemoteEnterWalkStillTakesATriggerAboveTheGround(t *testing.T) {
+	g := newEnterOrders(t, enterAck(3))
+	g.plan.Portal = &Portal{Map: 0, Point: Point{304, 0, 9}}
+	g.portal = &Point{304, 0, 9}
+	base := g.fakeRemote.onTick
+	g.fakeRemote.onTick = func(fr *fakeRemote) {
+		base(fr)
+		fr.lead().Z = 0
+	}
+	rep, err := g.run(RemoteOptions{Enter: EnterWalk})
+	if err != nil || rep.State != "done" || rep.Remote.Enter.Method != EnterWalk {
+		t.Fatalf("%v %s %+v\n%s", err, rep.State, rep.Remote.Enter, notesOf(rep))
+	}
+	if len(g.sent) != 0 || g.idx("order cmd enter") >= 0 {
+		t.Fatalf("an enter order went out without enterCmd: %v\n%s", g.sent, g.log)
+	}
+	if g.idx("portal") < 0 {
+		t.Fatalf("the trigger never took the lead bot in: %v\n%s", g.log, notesOf(rep))
+	}
+}
