@@ -309,8 +309,18 @@ type PullGroup struct {
 // first and Entries) as the event's mobs. A move row straight before it to the same spot is left out (the hold walks there itself), and
 // a game object wait straight after it waits at most HoldDoorWaitS (the event's DONE is what opens the door). The agent's own driver
 // does not read it: it fights the group (or the boss) and waits for the steps as written.
+//
+// A wait_for may carry one too (WaitFor.Hold): it is that wait's run leader form, for an event whose script keeps its progress in an
+// instance data value the agent's driver does not read (Zul'Farrak's pyramid phase, instance data 1). plan-export then writes the hold
+// row in place of the wait (which the run leader could not run), and the agent's driver runs the wait as written.
 type Hold struct {
-	Data     uint32  `json:"instance_data"`
+	Data uint32 `json:"instance_data"`
+	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
+	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
+	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
+	// ends the hold when the data reads exactly Value, so it must be a value the script keeps for a while (a wave that is being fought),
+	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before.
+	Value    *uint32 `json:"value,omitempty"`
 	Spot     Point   `json:"spot"`
 	Radius   float32 `json:"radius"`
 	TimeoutS int     `json:"timeout_s"`
@@ -610,6 +620,9 @@ type WaitFor struct {
 	// FailText is added to the failure when the wait times out: the reason a person should read (Uldaman's altar waits say that the
 	// ritual needs three participants).
 	FailText string `json:"fail_text,omitempty"`
+	// Hold is this wait's form for the TortoiseBots run leader (see Hold): plan-export writes it as a hold row instead of the wait. The
+	// agent's own driver does not read it.
+	Hold *Hold `json:"hold,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
@@ -766,6 +779,7 @@ type rawHold struct {
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
 	Entries  []uint32  `json:"entries"`
+	Value    *uint32   `json:"value"`
 }
 
 type rawPatrol struct {
@@ -894,6 +908,7 @@ type rawWait struct {
 	Unit         *rawUnitWait `json:"unit"`
 	TimeoutS     *int         `json:"timeout_s"`
 	FailText     string       `json:"fail_text"`
+	Hold         *rawHold     `json:"hold"`
 }
 
 type rawObjState struct {
@@ -1357,7 +1372,7 @@ func (c *checker) hold(path string, r *rawHold) *Hold {
 	if r == nil {
 		return nil
 	}
-	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
 	h.Spot = c.point(path+".spot", r.Spot)
 	if r.Data == 0 {
 		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
@@ -1654,6 +1669,7 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		}
 		w.HostilesGone = h
 	}
+	w.Hold = c.hold(path+".hold", r.Hold)
 	return w
 }
 

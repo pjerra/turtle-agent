@@ -352,8 +352,7 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 	}
 }
 
-// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
-// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg (the tests of the legs up to Zum'rah).
 func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	t.Helper()
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
@@ -370,9 +369,11 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	return nil
 }
 
-// The whole shipped Zul'Farrak plan is exported up to the zumrah leg: the legs after it (the stairs event) use a unit wait and the gossip
-// step, which the run leader has no step for, so the export is cut before the first of them, with a note that names the leg and the step.
-func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
+// The whole shipped Zul'Farrak plan is exported up to the stairs_base leg (Nekrum and Sezz'ziz): the two waits of the stairs event carry
+// their holds (instance data 1, the pyramid phase), so the stairs legs export; the legs after stairs_base (the End Door, Bly, Ukorz) use a
+// unit wait without a hold and the gossip step, which the run leader has no step for, so the export is cut before the first of them, with a
+// note that names the leg and the step.
+func TestZulfarrakIsCutAfterStairsBase(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
@@ -381,22 +382,39 @@ func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole := buildWhole(t, zulfarrakThroughZumrah(t))
-	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
-		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	whole := buildWhole(t, zulfarrakThrough(t, "stairs_base"))
+	if len(res.Rows.Legs) != 14 || res.Rows.Legs[13].Name != "stairs_base" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through stairs_base: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
 	}
-	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "after_boss[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+	for _, want := range []string{"exported legs 0-13 (stairs_base) only", "cut before leg 14 (weegli_door)", "steps[0]: wait_for.unit has no run leader step (unit 7607 seen)", "2 after it"} {
 		if !strings.Contains(res.Cut, want) {
 			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
 		}
 	}
-	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 11 (stairs)") {
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 14 (weegli_door)") {
 		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
 	}
+}
+
+// zulfarrakThrough is the shipped Zul'Farrak plan cut after the leg named last.
+func zulfarrakThrough(t *testing.T, last string) *dungeon.Plan {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, l := range p.Legs {
+		if l.Name == last {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatalf("the plan has no %s leg", last)
+	return nil
 }
 
 // buildWhole builds a plan that has to export whole.
