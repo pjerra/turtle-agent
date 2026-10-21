@@ -7,8 +7,8 @@ import (
 )
 
 // A wait_for that carries a hold is exported as that hold row (the wait itself, a unit wait, has no run leader step), and a hold with a
-// value is done by that instance data value read as a script value: flag 8 alone (no encounter flag 32), param = the value. A hold without
-// a value keeps the encounter DONE (param 3, flags 40). Zul'Farrak's pyramid phase (instance data 1) is the case.
+// value is done by that instance data value read as a script value: flag 8 alone (no encounter flag 32), param = the value. A pull group's
+// hold (no value: the plan refuses one there) keeps the encounter DONE (param 3, flags 40). Zul'Farrak's pyramid phase (instance data 1) is the case.
 func TestWaitHoldIsTheRowAndValueIsAScriptValue(t *testing.T) {
 	const js = `{"version":1,"name":"zf","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"cage","to":{"x":10,"y":0,"z":0},
@@ -19,8 +19,7 @@ func TestWaitHoldIsTheRowAndValueIsAScriptValue(t *testing.T) {
   "steps":[{"wait_for":{"unit":{"entries":[7796],"state":"seen"},"timeout_s":600,
    "hold":{"instance_data":1,"value":7,"spot":{"x":20,"y":0,"z":0},"radius":30,"timeout_s":600}}}]},
  {"name":"group","to":{"x":40,"y":0,"z":0},
-  "pull_groups":[{"entries":[4857],"positions":[{"x":45,"y":0,"z":0}],"hold":{"instance_data":4,"value":5,"spot":{"x":45,"y":0,"z":0},"radius":20,"timeout_s":300}},
-   {"entries":[4858],"positions":[{"x":50,"y":0,"z":0}],"hold":{"instance_data":2,"spot":{"x":50,"y":0,"z":0},"radius":20,"timeout_s":300}}]}]}`
+  "pull_groups":[{"entries":[4858],"positions":[{"x":50,"y":0,"z":0}],"hold":{"instance_data":2,"spot":{"x":50,"y":0,"z":0},"radius":20,"timeout_s":300}}]}]}`
 	res, err := Build(parsePlan(t, js), Options{Source: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -50,8 +49,7 @@ func TestWaitHoldIsTheRowAndValueIsAScriptValue(t *testing.T) {
 	}{
 		{0, 2, "hold 1 20 0 0 r30 p3 f8 t90 [7787 7788]"},
 		{1, 0, "hold 1 20 0 0 r30 p7 f8 t600 []"},
-		{2, 1, "hold 4 45 0 0 r20 p5 f8 t300 [4857]"},
-		{2, 2, "hold 2 50 0 0 r20 p3 f40 t300 [4858]"},
+		{2, 1, "hold 2 50 0 0 r20 p3 f40 t300 [4858]"},
 	} {
 		if got := row(tc.leg, tc.seq); got != tc.want {
 			t.Errorf("leg %d step %d: %s, want %s", tc.leg, tc.seq, got, tc.want)

@@ -319,7 +319,8 @@ type Hold struct {
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
 	// ends the hold when the data reads exactly Value, so it must be a value the script keeps for a while (a wave that is being fought),
-	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before.
+	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. Only a wait_for's hold takes a
+	// value, and never 0 (the value instance data starts at): the plan check refuses both.
 	Value    *uint32 `json:"value,omitempty"`
 	Spot     Point   `json:"spot"`
 	Radius   float32 `json:"radius"`
@@ -1257,7 +1258,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			pg.Patrol = pat
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
-		pg.Hold = c.hold(gp+".hold", g.Hold)
+		pg.Hold = c.hold(gp+".hold", g.Hold, false)
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	c.entries(path+".skip", r.Skip, false)
@@ -1300,7 +1301,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			}
 		}
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
-		b.Hold = c.hold(bp+".hold", r.Boss.Hold)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
@@ -1367,8 +1368,9 @@ func (c *checker) approach(path string, ps []rawPoint) []Point {
 	return out
 }
 
-// hold reads a pull group's or a boss's hold.
-func (c *checker) hold(path string, r *rawHold) *Hold {
+// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold only (a pull group's or a boss's hold is an
+// encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins.
+func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
 	if r == nil {
 		return nil
 	}
@@ -1384,6 +1386,12 @@ func (c *checker) hold(path string, r *rawHold) *Hold {
 		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
 	}
 	c.entries(path+".entries", r.Entries, false)
+	switch {
+	case r.Value != nil && !valueAllowed:
+		c.fail(path+".value", "only a wait_for's hold takes a value; a pull group's or a boss's hold ends on the encounter state DONE")
+	case r.Value != nil && *r.Value == 0:
+		c.fail(path+".value", "0 is the value instance data starts at, so the hold would end at once: give the value the event reaches")
+	}
 	return h
 }
 
@@ -1669,7 +1677,7 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		}
 		w.HostilesGone = h
 	}
-	w.Hold = c.hold(path+".hold", r.Hold)
+	w.Hold = c.hold(path+".hold", r.Hold, true)
 	return w
 }
 
