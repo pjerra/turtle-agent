@@ -220,7 +220,7 @@ func TestZulfarrakPoolStairsApproach(t *testing.T) {
 		packAt Point
 	}{
 		// Group 4: south of the island Shadowhunter 81610 (leave_clear_test.go), then up the east side; the first point keeps a party that stands
-		// on the west lane after the lone Blood Drinker from taking the short way, which passes 1.1 yd from 81610.
+		// on the west lane after the lone Blood Drinker from taking the short way, which passes 0.8 yd from 81610.
 		{4, []Point{{1594, 1011, 10.9}, {1598, 1028, 9.6}, {1606, 1040, 10.3}}, Point{1576.2, 1079.1, 9}},
 		{5, []Point{{1588, 1080, 9.1}, {1584, 1088, 9.1}}, Point{1601.7, 1104.4, 9}},
 	} {

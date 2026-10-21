@@ -3,6 +3,7 @@ package dungeon
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -168,10 +169,25 @@ func TestLeaveClearanceChecksComputedStandsBossesAndVias(t *testing.T) {
 	}
 }
 
+// walkMinYd is the shortest ground distance from at to any segment of the path (all segments, not the first that is close).
+func walkMinYd(at Point, path navmesh.Path) float64 {
+	min := math.Inf(1)
+	for i := 0; i+1 < len(path.Points); i++ {
+		x, y := path.Points[i], path.Points[i+1]
+		if d := pointToSegYd(at, Point{x[0], x[1], x[2]}, Point{y[0], y[1], y[2]}); d < min {
+			min = d
+		}
+	}
+	if len(path.Points) == 1 {
+		min = groundDist(at, Point{path.Points[0][0], path.Points[0][1], path.Points[0][2]})
+	}
+	return min
+}
+
 // leaveWalkClearance walks every pull group with approach rows on the navmesh, from where the party stands after the group before it (that
-// group's stand) through the approach points in order, and returns a finding for each stretch of the walk that passes within LeaveClearYd of
-// a Leave. The points alone are not enough: zulfarrak's first velratha rows 1584 1050 -> 1603 1043 are the navmesh's short way past the
-// island, 1.1 yd from the Shadowhunter, whichever side the points are on.
+// group's stand) through the approach points in order, and returns a finding for each walk whose shortest distance to a Leave, over all its
+// segments, is under LeaveClearYd; the finding carries that shortest distance. The points alone are not enough: zulfarrak's first velratha
+// rows 1584 1050 -> 1603 1043 are the navmesh's short way past the island, 0.8 yd from the Shadowhunter, whichever side the points are on.
 func leaveWalkClearance(t *testing.T, p *Plan, pl *navmesh.Planner) []leaveFinding {
 	t.Helper()
 	leaves := p.Leaves()
@@ -183,24 +199,14 @@ func leaveWalkClearance(t *testing.T, p *Plan, pl *navmesh.Planner) []leaveFindi
 		}
 		from := refs[k-1].stand
 		for j, a := range r.g.Approach {
-			path, err := pl.Plan(p.Map, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{a.X, a.Y, a.Z})
-			if errors.Is(err, navmesh.ErrNoEngine) {
-				t.Skip("built without cgo: no navmesh engine")
-			}
-			if err != nil {
-				t.Fatalf("leg %s pull group %d approach %d: %v", r.leg, r.idx, j, err)
-			}
+			path := planWalk(t, pl, p.Map, from, a)
 			if path.Status != navmesh.Complete {
 				t.Errorf("leg %s pull group %d approach %d %v from %v: %s %s", r.leg, r.idx, j, a, from, path.Status, path.Reason)
 				continue
 			}
 			for _, lv := range leaves {
-				for i := 0; i+1 < len(path.Points); i++ {
-					x, y := path.Points[i], path.Points[i+1]
-					if d := pointToSegYd(lv.At, Point{x[0], x[1], x[2]}, Point{y[0], y[1], y[2]}); d < LeaveClearYd {
-						out = append(out, leaveFinding{r.leg, fmt.Sprintf("pull group %d walk to approach %d (from %.0f %.0f)", r.idx, j, from.X, from.Y), a, lv, d})
-						break
-					}
+				if d := walkMinYd(lv.At, path); d < LeaveClearYd {
+					out = append(out, leaveFinding{r.leg, fmt.Sprintf("pull group %d walk to approach %d (from %.0f %.0f)", r.idx, j, from.X, from.Y), a, lv, d})
 				}
 			}
 			from = a
@@ -209,8 +215,81 @@ func leaveWalkClearance(t *testing.T, p *Plan, pl *navmesh.Planner) []leaveFindi
 	return out
 }
 
-// Zul'Farrak's walks to its approach points keep 15 yd from the island Shadowhunter; the old rows, whose points were too close anyway, are
-// found by the walk too (their short way passes 1.1 yd from it).
+func planWalk(t *testing.T, pl *navmesh.Planner, mapID uint32, from, to Point) navmesh.Path {
+	t.Helper()
+	path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
+	if errors.Is(err, navmesh.ErrNoEngine) {
+		t.Skip("built without cgo: no navmesh engine")
+	}
+	if err != nil {
+		t.Fatalf("walk %v -> %v: %v", from, to, err)
+	}
+	return path
+}
+
+// leavePullWalkClearance is the module's own walk after the approach rows: from each pull group's stand toward the pack (its centre and each
+// member's position: the tank walks to its firing stand, about 30 yd short of the pack, and the pull fetches the pack back along the same
+// ground), and the pack's way back to the stand. Both are navmesh paths of the stand and the pack, in both directions; a finding carries
+// the shortest distance to a Leave over every segment of every one of them. Unlike the approach rows these walks are not plan data: a
+// finding here is a risk for the module to meet, not a row to move.
+func leavePullWalkClearance(t *testing.T, p *Plan, pl *navmesh.Planner) []leaveFinding {
+	t.Helper()
+	leaves := p.Leaves()
+	refs, _ := groupStands(p)
+	var out []leaveFinding
+	for _, r := range refs {
+		targets := append([]Point{groupCentre(r.g)}, r.g.Positions...)
+		for _, lv := range leaves {
+			min, which := math.Inf(1), ""
+			for ti, to := range targets {
+				for dir, walk := range [2][2]Point{{r.stand, to}, {to, r.stand}} {
+					path := planWalk(t, pl, p.Map, walk[0], walk[1])
+					if len(path.Points) == 0 {
+						continue
+					}
+					if d := walkMinYd(lv.At, path); d < min {
+						min = d
+						which = fmt.Sprintf("stand to pack position %d", ti-1)
+						if ti == 0 {
+							which = "stand to pack centre"
+						}
+						if dir == 1 {
+							which = strings.Replace(which, "stand to pack", "pack to stand", 1)
+						}
+					}
+				}
+			}
+			if min < LeaveClearYd {
+				out = append(out, leaveFinding{r.leg, fmt.Sprintf("pull group %d %s (stand %.0f %.0f)", r.idx, which, r.stand.X, r.stand.Y), r.stand, lv, min})
+			}
+		}
+	}
+	return out
+}
+
+// zfKnownLeaveWalks are the walks of Zul'Farrak that pass the island Shadowhunter closer than LeaveClearYd and that plan data cannot move
+// (measured on the 209 navmesh, 2026-10-21; the value is the shortest distance over every segment of the walk, held to +-0.5 yd so a change
+// of the plan or of the mesh that makes one worse, or better, has to be looked at):
+//   - velratha group 5, the approach walk 1606 1040 -> 1588 1080: 5.0 yd. The only way north from the east side to the next pack is the west
+//     lane, which the island's mesh patch sits beside.
+//   - velratha group 4, the pull walk from the stand 1606 1040 toward the pack at 1583 1087 (the tank walks to its firing stand about 30 yd
+//     short of it, around y 1060, and the pull fetches the pack back along the same lane): 5.0 yd. The pack holds Shadowhunters (7246) like
+//     the island mob, so a social-link aggro of 81610 by the dragged pack is possible too.
+//   - velratha group 3, the lone Blood Drinker at 1585.1 1035.5: 13.6 yd, the pack's own position.
+//
+// The Shadowhunter is passive at such range (zf-r6: 4 passes at 100 % out of combat; the agent walks it every time), so what keeps the run
+// leader's hop pull and melee chase from taking it is the module (PLAN-ZF-LESSONS #2), not the plan.
+var zfKnownLeaveWalks = []struct {
+	what string
+	yd   float64
+}{
+	{"pull group 5 walk to approach 0", 5.0},
+	{"pull group 4 stand to pack", 5.0},
+	{"pull group 3 stand to pack", 13.6},
+}
+
+// Zul'Farrak's walks to its approach points keep 15 yd from the island Shadowhunter except the known ones; the old rows, whose points were
+// too close anyway, are found by the walk too (their short way passes 0.8 yd from it).
 func TestZulfarrakApproachWalkKeepsClearOfLeave(t *testing.T) {
 	dir := zulfarrakMmaps()
 	if dir == "" {
@@ -219,22 +298,27 @@ func TestZulfarrakApproachWalkKeepsClearOfLeave(t *testing.T) {
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
 	p := loadPlan(t, zulfarrakPlan)
-	// Known and not fixable by points: the only way north from the east side to the next pack (pull group 5, 1601.7 1104.4) is the west lane,
-	// which passes the island Shadowhunter at 9.3 yd. It is passive at that range (zf-r6: 4 passes at 100 % out of combat; the agent walks
-	// it every time); what keeps the run leader's hop pull from taking it is the module (PLAN-ZF-LESSONS #2), not the plan. The entry must
-	// stay true: if the walk stops passing it, drop the entry.
-	const knownWalk = "pull group 5 walk to approach 0"
-	known := false
-	for _, f := range leaveWalkClearance(t, p, pl) {
-		if f.leg == "velratha" && strings.HasPrefix(f.what, knownWalk) {
-			known = true
-			t.Logf("known: %s", f)
-			continue
+	seen := map[string]bool{}
+	for _, f := range append(leaveWalkClearance(t, p, pl), leavePullWalkClearance(t, p, pl)...) {
+		known := false
+		for _, k := range zfKnownLeaveWalks {
+			if f.leg == "velratha" && strings.HasPrefix(f.what, k.what) {
+				known = true
+				seen[k.what] = true
+				t.Logf("known: %s", f)
+				if f.dist < k.yd-0.5 || f.dist > k.yd+0.5 {
+					t.Errorf("the known walk %q is %.1f yd from the Shadowhunter, recorded %.1f: look at it and record the new figure", k.what, f.dist, k.yd)
+				}
+			}
 		}
-		t.Errorf("%s", f)
+		if !known {
+			t.Errorf("%s", f)
+		}
 	}
-	if !known {
-		t.Errorf("the known walk (%s) is no longer within %.0f yd of the island Shadowhunter: remove it from the test", knownWalk, LeaveClearYd)
+	for _, k := range zfKnownLeaveWalks {
+		if !seen[k.what] {
+			t.Errorf("the known walk %q is no longer within %.0f yd of the island Shadowhunter: remove it from zfKnownLeaveWalks", k.what, LeaveClearYd)
+		}
 	}
 	for li := range p.Legs {
 		l := &p.Legs[li]
@@ -252,6 +336,6 @@ func TestZulfarrakApproachWalkKeepsClearOfLeave(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("the walk of 848693b's rows (1584 1050 -> 1603 1043, 1.3 yd from the Shadowhunter) is not found")
+		t.Fatal("the walk of 848693b's rows (1584 1050 -> 1603 1043, 0.8 yd from the Shadowhunter) is not found")
 	}
 }
