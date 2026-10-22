@@ -234,7 +234,7 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 					}
 					continue
 				}
-				if !hasC(g.Entries[k], at) && !onOwnPatrolPath(g, g.Entries[k], at) {
+				if !hasC(g.Entries[k], at) && !onOwnPatrolPath(g, g.Entries[k], at, cs) {
 					t.Errorf("legs[%d] (%s).pull_groups[%d]: no spawn of %d at %v", i, l.Name, j, g.Entries[k], at)
 				}
 			}
@@ -295,11 +295,25 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 	}
 }
 
-// onOwnPatrolPath reports whether at is a point of the patrol path of the group's own patrol, and the entry is one the patrol lists: a patrolling
-// unit the plan counts in a group it passes (the Manufactured Golem 2582923 walks to the Harvester room's door: harvester group 0 lists its entry
-// at the path point nearest the group, so that the pull's pack, and the joiner estimate, count it) stands at a point of its beat, not at its spawn.
-func onOwnPatrolPath(g PullGroup, entry uint32, at Point) bool {
+// onOwnPatrolPath reports whether at is a point of the beat of the group's patrol, and that beat is the entry's own: the patrol's source names the
+// spawn whose creature_movement it is, and that spawn is a creature of the entry. A patrolling unit the plan counts in a group it passes (the
+// Manufactured Golem 2582923 is in hall group 2 at its spawn and walks to the Harvester room's door: harvester group 0 lists its entry at the
+// beat point nearest the group, so that the pull's pack, and the joiner estimate, count it) stands at a point of its beat, not at its spawn.
+func onOwnPatrolPath(g PullGroup, entry uint32, at Point, creatures []map[string]string) bool {
 	if g.Patrol == nil || !slicesContains(g.Patrol.Entries, entry) {
+		return false
+	}
+	m := regexp.MustCompile(`creature_movement of spawn (\d+) `).FindStringSubmatch(g.Patrol.Source)
+	if m == nil {
+		return false
+	}
+	own := false
+	for _, c := range creatures {
+		if c["guid"] == m[1] && c["entry"] == strconv.Itoa(int(entry)) {
+			own = true
+		}
+	}
+	if !own {
 		return false
 	}
 	for _, q := range g.Patrol.Path {

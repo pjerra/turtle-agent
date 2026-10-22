@@ -33,7 +33,7 @@
     "Doors, from the instance script and the gameobject_scripts rows: Rhahk'Zor's death opens 13965 (state active); Sneed's death opens spawn 26185 (17153 at -290.3 -537.0); Gilnid's death opens spawn 26182 (17153 at -168.5 -579.9); the cannon sets 16397 to active_alt. The levers 101831, 101832, 101834 (gameobject_scripts 26188, 26197, 26192) open the same three doors for 15 s from the far side and are not used; the lever 101833 does something only once the Iron Clad Door is open. Spawns 26183 (-262.7 -482.4) and 26184 (-243.0 -578.6) have no script and no lever: the plan clicks them (use_object, wait_for active), which is what their lock 86 (Quick Open, no key) allows; NOT VERIFIED, the walk must try both.",
     "Mechanics the plan cannot express (the step types do not exist): killing a unit that has no spawn row (Sneed 643, the Defias Overseer the gunpowder summons) is done by a wait_for hostiles_gone, not by a step that names it; a trigger that waits for a door to be shut again; the alarm event after the cannon; picking the Smite phases (nothing to do but heal and survive the 6 s swaps). See the README section on the Deadmines plan.",
     "The CC lists come from the spell lists and Wowhead's guide, not from a run: cc_priority the Wizard (4418: Chains of Ice, Fireball), the Evoker (1729: Flamestrike) and the Squallshaper (1732: Frost Nova, which Wowhead calls the most annoying and which is also the one to keep sheeped at Greenskin); kill_first the Blackguards (636, before Smite's 66 % and VanCleef's adds) and the Goblin Engineer (622: Summon Remote-Controlled Golem, stun the cast or kill the goblin first, the golem goes with it). Wowhead also names Melt Ore (the Craftsman's slowing fire DoT). fleers are the entries whose EventAI flees at 15 % health (command 47).",
-    "Pack sizes, Deadmines r12-19z29 and r14-19z32 (2026-10-22, 202/202 steps, 14 then 10 deaths; ~/TortoiseBots-audit/DEADMINES-PACKS-2026-10-22.md): the fights of the Harvester room and the Gilnid ramp were 2-10 times the plan's group math, from four causes: (1) patrolling units no pull row owned (the Engineer 622 spawn 79213 walks the whole ramp floor in 85 s, the golem 2582923 walks from the hall to the Harvester room's door, the Woodcarver 79207 to the Sneed door); (2) Summon Remote-Controlled Golem (3605) adds, 14 casts a run, which the plan cannot count; (3) fleeing runners (622 and 1731 flee at 15 %) that drag a fight into the next camp; (4) walks over uncleared ground. r14 (guard-budget and pet fixes in) went 4 to 0 deaths at the boss pull but killed 5 at step 90 (Harvester room: golem 61962, Engineers 622 and Craftsmen 1731, 10 units) and 5 at step 118 (the walk down the foundry spiral to the Craftsman 79247, whose firing stand lay on the floor at the spiral's foot, 15 yd from the terrace Engineer 79212), with the tank dead early in both and the mana users at 1-55 % at death (they entered the fights at 75-100 %: a rest row would not have helped, and the plan has no rest step the exporter can write). The plan now: cc_priority starts with 622 and 1731 and cc_always is 622 (sheep the Engineer that summons the golems; the run leader never sheeps the pull target, so a pack of two 622 or a 622 with a Craftsman gets it); the Sneed leg pulls the patroller's group first; the Harvester room splits the golem from the Craftsman and Engineer south of the Taskmaster's beat, pulls the Taskmaster over its whole beat and counts the patrolling golem in the room's first group; the Gilnid ramp is pulled from the spiral first and the floor ring one camp at a time before the boss (see the legs' notes). All new stands were chosen on the navmesh to keep 17 yd (3-D) from every spawn pulled later; they and the plan check say nothing about line of sight, which only a live run shows."
+    "Pack sizes, Deadmines r12-19z29 and r14-19z32 (2026-10-22, 202/202 steps, 14 then 10 deaths; ~/TortoiseBots-audit/DEADMINES-PACKS-2026-10-22.md): the fights of the Harvester room and the Gilnid ramp were 2-10 times the plan's group math, from four causes: (1) patrolling units that pull rows did not count where they walk (the Engineer 622 spawn 79213 walks the whole Gilnid floor in 85 s; the golem 2582923 is in hall group 2 at its spawn but its beat ends at the Harvester room's door, so harvester group 0 counts it a second time; the Woodcarver 79207 walks to the Sneed door); (2) Summon Remote-Controlled Golem (3605) adds, 14 casts a run, which the plan cannot count; (3) fleeing runners (622 and 1731 flee at 15 %) that drag a fight into the next camp; (4) walks over uncleared ground. r14 (guard-budget and pet fixes in) went 4 to 0 deaths at the boss pull but killed 5 at step 90 (Harvester room: golem 61962, Engineers 622 and Craftsmen 1731, 10 units) and 5 at step 118 (the walk down the foundry spiral to the Craftsman 79247, whose firing stand lay on the floor at the spiral's foot, 15 yd from the terrace Engineer 79212), with the tank dead early in both and the mana users at 1-55 % at death (they entered the fights at 75-100 %: a rest row would not have helped, and the plan has no rest step the exporter can write). The plan now: cc_priority starts with 622 and 1731 and cc_always is 622 (sheep the Engineer that summons the golems; the run leader never sheeps the pull target, so a pack with a 622 beside another unit gets it); the Sneed leg pulls the patroller's group first; the Harvester room pulls the Taskmaster over the west half of its beat (radius 12, not the boss side) and the south-middle pack (Craftsman, Engineer and golem, which does assist: same faction) from the west, 23 yd 3-D from the ledge Overseer's beat; the Gilnid ramp pulls the terrace Engineers from the terrace stand first, the Craftsman under the spiral from the floor, and the floor ring one camp at a time before the boss (see the legs' notes). Stands were chosen on the navmesh to keep 17 yd (3-D) from every spawn pulled later, and checked with a navmesh sight proxy (no walkable surface, a ramp, crosses the eye-height line to the first target; the cold review of 2026-10-22 found the spiral stand -195 -598 z 34.8 blind to 79247 by exactly that). The proxy is not a line-of-sight test (no vmaps here): only a live run shows it."
   ],
   "legs": [
     {
@@ -1286,7 +1286,7 @@
           "positions": [
             {"x": -95.9344, "y": -569.47, "z": 51.2296}
           ],
-          "radius": 22,
+          "radius": 12,
           "patrol": {
             "entries": [634],
             "path": [
@@ -1299,31 +1299,13 @@
           }
         },
         {
-          "entries": [1731, 622],
+          "entries": [1731, 622, 61962],
           "positions": [
             {"x": -92.5465, "y": -578.331, "z": 51.2296},
-            {"x": -88.1863, "y": -579.469, "z": 51.2296}
-          ],
-          "radius": 8,
-          "patrol": {
-            "entries": [4417],
-            "path": [
-              {"x": -95.9, "y": -569.5, "z": 51.2},
-              {"x": -75.3, "y": -569.8, "z": 51.2}
-            ],
-            "period_s": 16.5,
-            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
-          },
-          "approach": [
-            {"x": -116, "y": -573, "z": 52}
-          ]
-        },
-        {
-          "entries": [61962],
-          "positions": [
+            {"x": -88.1863, "y": -579.469, "z": 51.2296},
             {"x": -81.7283, "y": -583.432, "z": 51.2296}
           ],
-          "radius": 6,
+          "radius": 9,
           "patrol": {
             "entries": [4417],
             "path": [
@@ -1334,7 +1316,7 @@
             "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           },
           "approach": [
-            {"x": -104, "y": -575, "z": 52.5}
+            {"x": -112, "y": -573, "z": 52.5}
           ]
         },
         {
@@ -1374,7 +1356,7 @@
       },
       "notes": [
         "Masterpiece Harvester (61963) is Turtle's replacement for the Foe Reaper: 4918 hp, no spell list, only a say on aggro and on death (EventAI 2200054, 2200055). The Manufactured Golems (61962) Cleave and are immune to most CC (mechanic_immune_mask 42693394).",
-        "r12-19z29 step 90 (the south-middle pack) engaged 10 units and the boss, 4 dead; r14-19z32 killed 5 there. The south-middle pack is now two pulls from the room's west side: the Craftsman 2583042 with the Engineer 2583041, then the golem 2582936 alone (7-11 yd east of them; a golem is another creature family and does not assist, only its own aggro reach joins it, and the stands are 24 yd off); the Taskmaster 4417 (spawn 2583073, a 20.6 yd beat along y -569.5) is pulled over its whole beat, radius 22, before them, not only when it is at its west end. Group 0 lists the golem 2582923 (61962) at the point (-147.8 -567.8) of its own beat, 5 yd from the Engineer 2583036: the golem walks to the room's door (x -124) in 62 s and was in no pull row."
+        "r12-19z29 step 90 (the south-middle pack) engaged 10 units and the boss, 4 dead; r14-19z32 killed 5 there. The pack (Craftsman 2583042, Engineer 2583041 and the golem 2582936, 6.5 yd east of the Engineer: same faction 17, so it assists; the creature-family assist reach is 10 yd and CanAssistTo checks faction) is one pull of three, so the joiner estimate counts 3, with cc_always on the Engineer, from the west stand -112 -573 z 52.5: 20.2 yd from the Craftsman, 23.0 yd (3-D) from the nearest point of the beat of the Overseer 2583051 on the z 57.8 ledge (beat -92.5 -583.9 to -64.6 -584.8; aggro reach 15-16 yd at level 22-23; the old stand -104 -575 was 15.5 yd from it), and at least 18 yd from the boss, the later groups and that beat. The Taskmaster 4417 (spawn 2583073, a 20.6 yd beat along y -569.5 from x -95.9 to -75.3) is pulled with radius 12 from its west end: the disc ends at x -83.9, 17.0 yd from the Harvester (-66.9 -570.0; 5 yd more than the 12 yd of the family assist reach), where radius 22 reached -73.9, 7 yd from him; when the Taskmaster is on the east half of its beat the run leader waits for it as before. Group 0 lists the golem 2582923 (61962) at the point (-147.8 -567.8) of its own beat, 5 yd from the Engineer 2583036: its spawn is in hall group 2 (-184.0 -528.7), and its beat reaches the room's door (x -124) in 62 s, so group 0 counts it a second time."
       ]
     },
     {
@@ -1405,16 +1387,6 @@
           "radius": 8
         },
         {
-          "entries": [1731],
-          "positions": [
-            {"x": -198.926, "y": -603.779, "z": 19.3022}
-          ],
-          "radius": 8,
-          "approach": [
-            {"x": -195, "y": -598, "z": 34.8}
-          ]
-        },
-        {
           "entries": [622, 622],
           "positions": [
             {"x": -207.48, "y": -585.729, "z": 20.9768},
@@ -1423,6 +1395,16 @@
           "radius": 10,
           "approach": [
             {"x": -195, "y": -596, "z": 36.5}
+          ]
+        },
+        {
+          "entries": [1731],
+          "positions": [
+            {"x": -198.926, "y": -603.779, "z": 19.3022}
+          ],
+          "radius": 8,
+          "approach": [
+            {"x": -215, "y": -590, "z": 21.1}
           ]
         },
         {
@@ -1562,7 +1544,7 @@
       ],
       "notes": [
         "The leg first walks back from the Harvester to the top of the foundry ramp (-186.9 -569.9 z 51), then down the spiral (z 51 to 19) round the pit to Gilnid at -177.4 -574.5 z 19.3. Gilnid (1763) casts Molten Metal (list 17630), a debuff that cuts the tank's threat: the healer keeps the tank up while it lasts. His Goblin Craftsman (1731, spawn 79211) is killed first (Wowhead's guide says an Engineer stands beside him: the database has a Craftsman, so the plan follows the database). Keep the pull to Gilnid and that one add: more goblins join if the room is not cleared first, and an Engineer's golem (Summon Remote-Controlled Golem, 3605) is stopped by a stun in the cast or by killing the Engineer. His death opens the Heavy Door 26182 east of him, the way to the gunpowder and the cannon.",
-        "r14-19z32 step 118 (the Craftsman 79247 under the spiral) had its firing stand on the floor at the spiral's foot (-215 -589), where the walk down engaged the terrace Engineer 79212 (spawn z 21), then 79209, the Craftsman 79203, Gilnid's Craftsman 79211, the patrolling Engineer 79213 and Gilnid himself (5 dead); steps 119-124 were then instant 'pack cleared' rows (a radius-3 pull on the spawn point of the patrolling Engineer, camps already dead in the melee) and step 125/126 pulled the northern pairs 79196/79201 with the boss (they stood in cannon_a, after him) while 79197/79198 were in no group at all. The leg now goes: the spiral's pairs (groups 0-2), the Craftsman under the spiral from a stand on the spiral at z 34.8, the two terrace Engineers together from z 36.5 (a pack of two 622: one is sheeped), then down the spiral to its foot for the west pair (Craftsman 79218 with the patrolling Engineer 79213 in one group with its patrol), the west-wall pair (79205/79208), the terrace Craftsman 79203, the two northern pairs (79197/79198 new, 79196/79201 moved up from cannon_a) and the Craftsman 79204 beside Gilnid, then the boss with its escort 79211. Each stand keeps 17 yd (3-D) from every spawn pulled after it; the boss approach is unchanged."
+        "r14-19z32 step 118 (the Craftsman 79247 under the spiral) had its firing stand on the floor at the spiral's foot (-215 -589), where the walk down engaged the terrace Engineer 79212 (spawn z 21), then 79209, the Craftsman 79203, Gilnid's Craftsman 79211, the patrolling Engineer 79213 and Gilnid himself (5 dead); steps 119-124 were then instant 'pack cleared' rows (a radius-3 pull on the spawn point of the patrolling Engineer, camps already dead in the melee) and step 125/126 pulled the northern pairs 79196/79201 with the boss (they stood in cannon_a, after him) while 79197/79198 were in no group at all. The 79247 stand on the spiral (-195 -598 z 34.8) was tried first and is wrong: the spiral's navmesh surface at z 32-34 lies directly above 79247 (-198.9 -603.8 z 19.3), so the shot line has no sight and the run leader walks the tank down the 57 yd spiral to the first sighted point, the spiral's foot. The leg now goes: the spiral's pairs (groups 0-2), the two terrace Engineers 79212/79209 together from the terrace stand -195 -596 z 36.5 (lines to both cross the open pit; 19.3 yd 3-D from 79247, the nearest spawn pulled later), then the Craftsman 79247 from the floor at -215 -590 z 21.1 (21.2 yd from it, 22.5 yd from the nearest spawn pulled after it, the Craftsman 79203; the terrace Engineers are dead by then), then the west pair (Craftsman 79218 with the patrolling Engineer 79213 in one group with its patrol), the west-wall pair (79205/79208), the terrace Craftsman 79203, the two northern pairs (79197/79198 new, 79196/79201 moved up from cannon_a) and the Craftsman 79204 beside Gilnid, then the boss with its escort 79211. Each stand keeps 17 yd (3-D) from every spawn pulled after it; the boss approach is unchanged."
       ]
     },
     {
