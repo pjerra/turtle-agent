@@ -21,10 +21,11 @@ func gnomereganLeg(t *testing.T, p *Plan, name string) Leg {
 }
 
 // The map's EventAI (tortoise-wow sql/base creature_ai_events, read 2026-10-22): 6206, 6207, 6211, 6391, 6392 and 6407 flee at 15 % health;
-// the healer (6392 Holdout Medic) and the casters (6329 Irradiated Pillager with Radiation Bolt, 6223 Leprous Defender with Shoot/Multi-Shot)
-// are the CC entries, and 6392 is the one to CC in every pack; kill_first the mid-fight summoners and the AoE machines (6220 Irradiated
-// Horror summons Remote-Controlled Golems, 7849 Mobile Alert System summons two Mechanized Sentries, 6226 Flame Spray, 6227 Hail Storm).
-// No entry is in two lists: the loader refuses that.
+// the healer (6392 Holdout Medic) and the caster (6329 Irradiated Pillager with Radiation Bolt) are the CC entries, and 6392 is the one to
+// CC in every pack; kill_first the mid-fight summoners and the AoE machines (6220 Irradiated Horror summons Remote-Controlled Golems,
+// 7849 Mobile Alert System summons two Mechanized Sentries, 6226 Flame Spray, 6227 Hail Storm), plus 6223 Leprous Defender: the first live
+// run's step 25 (2026-10-22) showed its ranged Shoot/Multi-Shot killing the tank while the party was split, and a kill_first entry is never
+// crowd-controlled, so it is no longer in cc_priority. No entry is in two lists: the loader refuses that.
 func TestGnomereganUnitListsComeFromTheCensus(t *testing.T) {
 	p := loadPlan(t, gnomereganPlan)
 	for _, c := range []struct {
@@ -32,9 +33,9 @@ func TestGnomereganUnitListsComeFromTheCensus(t *testing.T) {
 		got, want string
 	}{
 		{"fleers", fmt.Sprint(p.Fleers), "[6206 6207 6211 6391 6392 6407]"},
-		{"cc_priority", fmt.Sprint(p.CCPriority), "[6392 6329 6223]"},
+		{"cc_priority", fmt.Sprint(p.CCPriority), "[6392 6329]"},
 		{"cc_always", fmt.Sprint(p.CCAlways), "[6392]"},
-		{"kill_first", fmt.Sprint(p.KillFirst), "[6220 6226 6227 7849]"},
+		{"kill_first", fmt.Sprint(p.KillFirst), "[6220 6226 6227 7849 6223]"},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s %s, want %s", c.name, c.got, c.want)
@@ -106,6 +107,83 @@ func TestGnomereganOversizedPacksStayAsTheCensusListsThem(t *testing.T) {
 		}
 		if got := len(l.PullGroups[c.n].Entries); got != c.want {
 			t.Errorf("%s pull group %d: %d entries, want %d", c.leg, c.n, got, c.want)
+		}
+	}
+}
+
+// The step-25 fix (r20-19z39 slot 4, 2026-10-22; GNOMEREGAN-STEP25-2026-10-22.md): leg 0's cave chain (the 6223 Leprous Defender and 6233
+// Mechanized Sentry camps at x -517..-427, y 226..273, z -211.5..-207.8) is pulled from its east end (-427 239) westwards, one camp per step,
+// radius 8, and every group carries an approach point on its own cave floor 18-23 yd from the pack with every member inside the run leader's
+// 24.5 yd shot range. The first live run pulled the chain's west end from the Holdout landing (z -171.8, 21-36 yd above the packs): 'to firing
+// stand 1/2 for 6233 ... 24.5 yd from it; was 55.7 yd, los no', then the tank walked the whole cave with the healer and mage 60-70 yd behind
+// and the whole cave joined the step. The two same-camp pairs are one group each: 6223+6233 stand 10.1 yd apart and the two 6233 rows 6.7 yd,
+// so a radius 8 on either row still counts the other camp's mobs as the step's living units (DungeonRunPolicy.h:514) and the fight is one.
+func TestGnomereganTheCaveChainIsPulledFromTheEastOnItsOwnFloor(t *testing.T) {
+	p := loadPlan(t, gnomereganPlan)
+	l := gnomereganLeg(t, p, "viscous_fallout")
+	var chain []PullGroup
+	var at []int
+	for i, g := range l.PullGroups {
+		if len(g.Positions) == 0 {
+			continue
+		}
+		pos := g.Positions[0]
+		if pos.X >= -520 && pos.X <= -420 && pos.Y >= 220 && pos.Y <= 280 && pos.Z >= -213 && pos.Z <= -206 {
+			chain = append(chain, g)
+			at = append(at, i)
+		}
+	}
+	if len(chain) != 7 {
+		t.Fatalf("%d cave-chain groups, want 7 (6223+6233, 6223, the 3 x 6233, 6233 x2, 6223+6233, 6223, 6223+6233)", len(chain))
+	}
+	if at[0] != 23 {
+		t.Errorf("the chain starts at pull group %d, want 23 (right after the Holdout groups)", at[0])
+	}
+	for k := 1; k < len(at); k++ {
+		if at[k] != at[k-1]+1 {
+			t.Errorf("the chain is not contiguous: %v", at)
+			break
+		}
+	}
+	// East to west: the first camp is the one at -427 239 (its positions include -427.26 238.57); from the second on the centres move west.
+	first := groupCentre(chain[0])
+	for _, pos := range chain[0].Positions {
+		if groundDist(pos, Point{X: -427.3, Y: 238.6}) <= 1.5 {
+			goto east
+		}
+	}
+	t.Errorf("the first cave pull is %.1f %.1f, not the east-end camp at -427.3 238.6", first.X, first.Y)
+east:
+	last := groupCentre(chain[len(chain)-1])
+	if last.X > -510 {
+		t.Errorf("the last cave pull is at x %.1f, want the west end (x <= -510)", last.X)
+	}
+	for k := 1; k < len(chain); k++ {
+		c, prev := groupCentre(chain[k]), groupCentre(chain[k-1])
+		if c.X >= prev.X {
+			t.Errorf("pull group %d (x %.1f) is not west of pull group %d (x %.1f)", at[k], c.X, at[k-1], prev.X)
+		}
+	}
+	for k, g := range chain {
+		if g.Radius != 8 {
+			t.Errorf("pull group %d: radius %g, want 8 (one camp per step)", at[k], g.Radius)
+		}
+		if len(g.Approach) != 1 {
+			t.Errorf("pull group %d: %d approach points, want 1", at[k], len(g.Approach))
+			continue
+		}
+		stand := g.Approach[0]
+		c := groupCentre(g)
+		if dz := float64(stand.Z - c.Z); dz < -3 || dz > 3 {
+			t.Errorf("pull group %d: the stand z %.1f is %.1f yd off the pack's z %.1f (another floor)", at[k], stand.Z, dz, c.Z)
+		}
+		if d := groundDist(stand, c); d < 18 || d > 23 {
+			t.Errorf("pull group %d: the stand is %.1f yd from the pack's centre, want 18-23", at[k], d)
+		}
+		for _, pos := range g.Positions {
+			if d := groundDist(stand, pos); d > 24.5 {
+				t.Errorf("pull group %d: the stand is %.1f yd from a member at %.1f %.1f, outside the 24.5 yd shot range", at[k], d, pos.X, pos.Y)
+			}
 		}
 	}
 }

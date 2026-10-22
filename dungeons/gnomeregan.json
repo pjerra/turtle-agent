@@ -23,11 +23,12 @@
     "hunter:dps"
   ],
   "fleers": [6206, 6207, 6211, 6391, 6392, 6407],
-  "cc_priority": [6392, 6329, 6223],
+  "cc_priority": [6392, 6329],
   "cc_always": [6392],
-  "kill_first": [6220, 6226, 6227, 7849],
+  "kill_first": [6220, 6226, 6227, 7849, 6223],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 90 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "Leg 0's cave chain (the 6223 Leprous Defender and 6233 Mechanized Sentry camps at x -517..-427, y 226..273, z -211.5..-207.8) is pulled from its east end westwards, one camp per step, radius 8, with an approach point on each camp's own floor 18-23 yd from it (first live run r20-19z39 slot 4: the tank pulled from the Holdout landing 21-36 yd above the packs and the ranged party stayed 60-70 yd behind while the whole cave joined the step). The two same-camp pairs (6223/6233 at 10.1 yd and the two 6233 rows at 6.7 yd) are one group each. Route into the cave: from the Holdout landing the navmesh goes (-548 147) (-530 115) east and up to (-448 240); it passes the 6220 at -445 174 and the 6220 at -477 165 (leg 0 pull groups 30-31 after the reorder) within 1-8 yd, so the walk to the first cave pull can still wake them: the mapping walk decides whether those packs move in front of the chain.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg",
     "Needs: Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in",
@@ -216,27 +217,38 @@
           "radius": 12
         },
         {
-          "entries": [6223, 6233],
+          "entries": [6233, 6223, 6233],
           "positions": [
-            {"x": -511.379, "y": 263.088, "z": -207.823},
-            {"x": -517.389, "y": 262.573, "z": -207.823}
+            {"x": -432.397, "y": 238.449, "z": -211.538},
+            {"x": -427.261, "y": 238.569, "z": -211.461},
+            {"x": -427.681, "y": 228.466, "z": -211.543}
           ],
-          "radius": 13.1
+          "radius": 8,
+          "approach": [
+            {"x": -429.8, "y": 215.2, "z": -211.5}
+          ]
         },
         {
           "entries": [6223],
           "positions": [
-            {"x": -490.481, "y": 272.661, "z": -211.014}
+            {"x": -440.169, "y": 267.683, "z": -211.46}
           ],
-          "radius": 10
+          "radius": 8,
+          "approach": [
+            {"x": -428.7, "y": 247.8, "z": -211.5}
+          ]
         },
         {
-          "entries": [6233, 6223],
+          "entries": [6233, 6233, 6233],
           "positions": [
-            {"x": -473.89, "y": 262.926, "z": -207.823},
-            {"x": -468.047, "y": 262.68, "z": -207.823}
+            {"x": -446.551, "y": 226.332, "z": -207.906},
+            {"x": -446.372, "y": 233.008, "z": -207.908},
+            {"x": -445.739, "y": 235.804, "z": -207.823}
           ],
-          "radius": 13
+          "radius": 8,
+          "approach": [
+            {"x": -445.5, "y": 212.2, "z": -207.9}
+          ]
         },
         {
           "entries": [6233, 6233],
@@ -244,44 +256,42 @@
             {"x": -455.033, "y": 257.621, "z": -207.823},
             {"x": -451.578, "y": 254.518, "z": -207.823}
           ],
-          "radius": 12.4
-        },
-        {
-          "entries": [6223],
-          "positions": [
-            {"x": -440.169, "y": 267.683, "z": -211.46}
-          ],
-          "radius": 10
+          "radius": 8,
+          "approach": [
+            {"x": -446.7, "y": 235.6, "z": -207.9}
+          ]
         },
         {
           "entries": [6233, 6223],
           "positions": [
-            {"x": -432.397, "y": 238.449, "z": -211.538},
-            {"x": -427.261, "y": 238.569, "z": -211.461}
+            {"x": -473.89, "y": 262.926, "z": -207.823},
+            {"x": -468.047, "y": 262.68, "z": -207.823}
           ],
-          "radius": 12.6
+          "radius": 8,
+          "approach": [
+            {"x": -451.8, "y": 254.3, "z": -207.9}
+          ]
         },
         {
-          "entries": [6233],
+          "entries": [6223],
           "positions": [
-            {"x": -427.681, "y": 228.466, "z": -211.543}
+            {"x": -490.481, "y": 272.661, "z": -211.014}
           ],
-          "radius": 10
+          "radius": 8,
+          "approach": [
+            {"x": -472.5, "y": 273.9, "z": -211.5}
+          ]
         },
         {
-          "entries": [6233],
+          "entries": [6223, 6233],
           "positions": [
-            {"x": -446.551, "y": 226.332, "z": -207.906}
+            {"x": -511.379, "y": 263.088, "z": -207.823},
+            {"x": -517.389, "y": 262.573, "z": -207.823}
           ],
-          "radius": 10
-        },
-        {
-          "entries": [6233, 6233],
-          "positions": [
-            {"x": -446.372, "y": 233.008, "z": -207.908},
-            {"x": -445.739, "y": 235.804, "z": -207.823}
-          ],
-          "radius": 11.5
+          "radius": 8,
+          "approach": [
+            {"x": -494.2, "y": 268.6, "z": -208.2}
+          ]
         },
         {
           "entries": [6220],
