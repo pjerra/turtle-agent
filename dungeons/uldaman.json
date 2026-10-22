@@ -480,9 +480,8 @@
         {
           "entries": [4860],
           "positions": [
-            {"x": -42, "y": 240, "z": -48.3}
+            {"x": -39.6, "y": 272.8, "z": -49}
           ],
-          "radius": 12,
           "approach": [
             {"x": -64, "y": 241, "z": -49.7}
           ]
@@ -526,8 +525,7 @@
         "From the Sentinel south-west through the big central hall (x -110 to -40, y 200 to 340): the Earthen guards of the hall (Earthen Rocksmashers 7011, Sculptors 7012, faction 415, hostile to both teams, stationary or wandering 2-5 yd) in five groups, two Stone Stewards (4860, waypoint patrols: their spawn point is where the plan looks first). Packs are the spawns within 10 yd of the navmesh route (the older legs use 8), grouped by tools/dungeongen (12 yd, creature groups).",
         "Ancient Stone Keeper (7206, level 44, 8910 hp, faction 415, no script, one spell, 10132) stands alone at the south end of the central hall, a dead end off the way on: it is a mini boss, nothing opens behind it.",
         "The run leader stands the party within 50 yd of each pack (approach points): the south mouth of the tunnel for the first group, past the doorway at -126..-119 320..322 (a vmap lintel 5-6 yd up: no point there) for the Stone Steward, then the rooms south to the Keeper. Without them every pack of the leg was 75-195 yd from the leg's `to` and the run leader's own hops failed (live 2026-10-16, steps 77-84).",
-        "The Stone Steward (4860 at -39.6 272.8, a patrol along x -42 from y 274 to 234), the Sculptor trio north of the Keeper (-44 .. -43 at y 255-273) and the two southern Rocksmashers (-49.6 202 and -43.2 204) are pulled before the Keeper: pull groups 7-9 here, the first two moved from the galgann leg, from stands in the south hall (-64 241, -58 241, -64 227) that stay 23 yd or more from the Keeper and from the groups pulled after them. In the runs r4 slot1 (wipe) and r6 slot5 (two deaths) the patrol and the trio were alive at the Keeper and 5-7 mobs fought together; with only the Steward or 2-4 mobs at a time nobody died (PLAN-ULDAMAN-GRIMLOK.txt, #1).",
-        "r10 regression: the Stone Steward (4860) patrols the x -42 lane from y 274 to 234, and its pull point at the north end (-39.6 272.8, r10) found it walking away in all three r10 runs, so the step read 'pack cleared' in 0 s and the Steward joined the Keeper fight at step 68; the point moves to the south end of the lane (-42 240 -48.3, r12), per ~/TortoiseBots-audit/PLAN-ULDAMAN-R10-REGRESSION.txt (F1 Option A)."
+        "The Stone Steward (4860 at -39.6 272.8, a patrol along x -42 from y 274 to 234), the Sculptor trio north of the Keeper (-44 .. -43 at y 255-273) and the two southern Rocksmashers (-49.6 202 and -43.2 204) are pulled before the Keeper: pull groups 7-9 here, the first two moved from the galgann leg, from stands in the south hall (-64 241, -58 241, -64 227) that stay 23 yd or more from the Keeper and from the groups pulled after them. In the runs r4 slot1 (wipe) and r6 slot5 (two deaths) the patrol and the trio were alive at the Keeper and 5-7 mobs fought together; with only the Steward or 2-4 mobs at a time nobody died (PLAN-ULDAMAN-GRIMLOK.txt, #1)."
       ]
     },
     {

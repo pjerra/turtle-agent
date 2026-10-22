@@ -325,12 +325,12 @@ func TestUldamanPullOrderExport(t *testing.T) {
 	// ancient_stone_keeper (leg 6): after the Rocksmasher at -43.6 237.3 come the Steward, the trio and the southern pair, then the boss approach and the boss.
 	check(6,
 		"pull [7011] -43.6,237.3 r10",
-		"move -64.0,241.0", "pull [4860] -42.0,240.0 r12",
+		"move -64.0,241.0", "pull [4860] -39.6,272.8 r10",
 		"move -58.0,241.0", "pull [7012 7011] -43.0,263.9 r18.9",
 		"move -64.0,227.0", "pull [7011] -46.4,202.9 r13.4",
 		"move -73.3,240.2", "boss 7206")
 	for _, r := range rows(7) {
-		if strings.Contains(r, "[4860]") || strings.Contains(r, "-39.6,272.8") || strings.Contains(r, "-42.0,240.0") {
+		if strings.Contains(r, "[4860]") || strings.Contains(r, "-39.6,272.8") {
 			t.Errorf("galgann still pulls the Steward: %s", r)
 		}
 	}
