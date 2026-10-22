@@ -645,6 +645,67 @@ func TestObserveWindowWipeIsNotCountedTwiceWhenTheyThenAllDieTogether(t *testing
 	}
 }
 
+// A lone death after the counted wipe is no second wipe. Loxy has been dead for 100 s when the other four die: the all-dead frame counts
+// the wipe while the window rule is false (Loxy's death is outside the 90 s), so the revive below three dead re-arms the latch. Loxy then
+// dies again 10 s after the wipe: the window rule reads deaths newer than the counted wipe only, so the four deaths of the wipe do not
+// make it fire again. The whole party dying inside the window cannot test this: the window rule then stays true for the 90 s of the
+// counted wipe, the latch never re-arms, and a lone death counts nothing either way.
+func TestObserveNoSecondWipeFromALoneDeathAfterAWindowWipe(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	base, ticks := g.onTick, 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		dead := map[int]bool{}
+		if ticks == 22 {
+			dead = map[int]bool{0: true, 1: true, 2: true, 4: true}
+		}
+		if ticks == 24 {
+			dead[3] = true
+		}
+		if ticks >= 2 && ticks <= 22 {
+			dead[3] = true // Loxy stays down through the collapse: a death older than the wipe's window
+		}
+		for i, p := range fr.party {
+			if dead[i] {
+				p.Dead, p.HP, p.State = true, 0, "d"
+			} else {
+				p.Dead, p.HP, p.State = false, p.MaxHP, "n"
+			}
+		}
+	}
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-lone"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 6 {
+		t.Fatalf("deaths %d (want 6: Loxy's two and the other four in the wipe): %+v", len(rep.Deaths), rep.Deaths)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-lone.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+}
+
 func TestObserveRefusesAServerWithoutTheRunLeaderBeforeHiring(t *testing.T) {
 	g := newFakeLeader(t)
 	g.listText = ""
