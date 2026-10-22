@@ -2136,6 +2136,15 @@ with the ordinary per-leg logic (the rest gate at the leg's start, walks, pulls,
    to see the bot stay within 4 yd of it (three tries, then the run fails);
 4. `cmd summon <bot>` for every other living bot that is not with the lead bot, and a wait until all stand together.
 
+**The commander's z (issue #292).** `.go xyz` takes the z it is given and never snaps to the ground, so a point with a wrong z put the
+commander under the terrain (or in the air) and the party was brought to it. After step 2 the agent sends the plain GM line `.gps` (the
+reply's lines are read as `KindSystem` text) and reads `GroundZ` (the top surface) and `FloorZ` (the floor under the commander's z). A
+commander more than 0.5 yd from `FloorZ` gets one more `.go xyz X Y FloorZ+0.3` (booked as a GM start line) and `.gps` is read again. The
+start is refused, before the lead bot is touched, with the target z, `GroundZ`, `FloorZ` and the commander's z when it still stands more
+than 0.5 yd off the floor, or when `GroundZ` and `FloorZ` differ and `FloorZ` is more than 3 yd from the target z (the floor under the
+commander is another layer than the point). The check is best effort: a failed or unanswered `.gps`, a reply without `GroundZ`/`FloorZ` or
+with no height data (-100000) leaves the start as it was, with one note per run saying the z check could not be made.
+
 The two GM lines are the only GM commands; neither is aimed at another player. They count in `remote.gm_commands` and are listed in
 `setup_shortcuts` as `... (GM start point)` and in `start.gm_commands`. A party that is at the start point already (the lead bot within 20 yd,
 the others within 25 yd of it) sends nothing (`start.method` `already there`); a lead bot that stands within 60 yd of one of the leg's own points (its `to`, vias, step stands, pull group positions, boss), or, with `resume`, within 80 yd (`ResumeMaxOff`) of the leg's route from the previous leg's end through its `to`, its pack positions and its boss, with the party together also sends nothing (`already in the leg`: a resume into the Zum'rah room is not sent back to the courtyard; rfc-live-2's resume into leg 4 was sent back to the leg's first point and the party summoned again, 127 s). The account must be a GM (`.go xyz` is observer level): with a
