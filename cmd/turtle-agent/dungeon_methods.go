@@ -349,6 +349,8 @@ type dungeonRunner struct {
 	tracesDir string
 	// runMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
 	runMeta dungeon.RunMeta
+	// eluna puts a remote run's partway start on the Eluna test toolkit (settings eluna_toolkit; test servers only).
+	eluna bool
 	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
 	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.

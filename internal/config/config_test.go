@@ -205,3 +205,19 @@ func TestAddonsOverride(t *testing.T) {
 		t.Fatal(`an "addons" list without the fingerprint addons was accepted`)
 	}
 }
+
+// The Eluna test toolkit is off unless the settings turn it on: a test-server feature, never a default.
+func TestElunaToolkitSetting(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"}}`))
+	if err != nil || s.ElunaToolkit {
+		t.Fatalf("absent: %v %v", s.ElunaToolkit, err)
+	}
+	s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"eluna_toolkit":true}`))
+	if err != nil || !s.ElunaToolkit {
+		t.Fatalf("set: %v %v", s.ElunaToolkit, err)
+	}
+	s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"eluna_toolkit":false}`))
+	if err != nil || s.ElunaToolkit {
+		t.Fatalf("off: %v %v", s.ElunaToolkit, err)
+	}
+}

@@ -142,6 +142,10 @@ type RemoteOptions struct {
 	FromPullGroup *int
 	StartHere     bool
 	StartWait     time.Duration
+	// ElunaPlace puts a partway start's party on the start step with the Eluna test toolkit (settings eluna_toolkit; test servers
+	// only, see eluna_place.go): the agent's `.go xyz` to the step, `q floor`, `quiet`, `action stay`, `place`, `action follow`, in
+	// place of the distance check. Off: no `.tt` line is sent.
+	ElunaPlace bool
 	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
 	HaveItems []uint32
 	// GiveItems is the give_items run option: GM `.additem` lines on named bots at the prepare step (prepare_give.go).

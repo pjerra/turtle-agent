@@ -61,6 +61,10 @@ type Settings struct {
 	// names one. Only with server_trace (off by default) does a remote run send `.bot trace start <run_id> ...
 	// driver=<model>:<effort>:<run>` and stop that trace at the end (a group run never sends it).
 	RunMeta RunMeta `json:"run_meta,omitempty"`
+	// ElunaToolkit puts a remote run's partway start on the Eluna test toolkit (`.tt`: the start step's floor, the area's quiet,
+	// the party placed at the step). Test servers only, and only with the toolkit scripts loaded; a server without them answers
+	// nothing and the run is refused. Off by default.
+	ElunaToolkit bool `json:"eluna_toolkit,omitempty"`
 	// SharedFingerprint makes every account present one addon fingerprint (one file, as for
 	// one real PC). Off by default: the core's anticheat bans by a hash of fingerprint and IP,
 	// so a shared print marked on one account would reach all of them.

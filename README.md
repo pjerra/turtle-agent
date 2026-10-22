@@ -57,7 +57,7 @@ copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmes
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
 the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder
-`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default).
+`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `eluna_toolkit` (off by default) puts an observed run's partway start on the Eluna test toolkit: a TEST server only, and only with the toolkit scripts loaded (see [Dungeon runs](#dungeon-runs), observe mode).
 
 Log a character in and keep it online with the RPC server running:
 
@@ -248,6 +248,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
+| `tt` | `cmd` (one Eluna test toolkit command without the `.tt` prefix, e.g. `q floor 1 2 3` or `quiet 50 1862.6 1054.9 9 w=20`; one line, no `#`, 200 characters at most) | `replies[]`: the `TTJSON` objects the server sent for this request, in order (one, or two for `quiet` and `place`; a reply carrying another request id is dropped). A refusal (`ok:false`) is an error with the toolkit's `err` in `data.err`; no answer is a timeout with the replies so far in `data.replies`. TEST servers with the toolkit loaded, GM rank 3 or more |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
 | `chat_log` | `since`, `limit` | chat and system events only |
 | `invite` / `accept_invite` / `leave_group` | `name` / – / – | |
@@ -1662,6 +1663,14 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    or the leg's first point), and a start whose point or whose lead position is not known is refused too, since the place cannot be checked;
    `observe.allow_far_start` turns each of these refusals into a note. Adopting a run that is already going (`busy`) happens only when its status proves it
    is at the requested step (or in the leg, for a leg sent by name); a leg sent as a number is never adopted.
+   **Placed with the Eluna test toolkit** (`eluna_toolkit` in the settings, off by default; TEST servers only, with TortoiseBots'
+   `tools/eluna/test-toolkit` loaded): with it on, a partway start at a known step point is made, not only checked. Before `run start` the
+   agent moves to the point 2 yd above it on the plan's map (`.go xyz`), waits 2 s, and then, in this order: `q floor` (refused when there is
+   no floor, or the floor is more than 3 yd from the step's z: another level), `quiet` over 50 yd for `w=20` (refused when anything stands near
+   or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `.bot action stay`, `place` with
+   `spread=3` (refused when the second read does not verify every member) and `.bot action follow`, right before the run leader starts. A refused
+   step ends the run there with `observe mode: eluna place: ...` naming it; the success is a note `eluna place: quiet, <n> placed at <x> <y> <z>`.
+   A game without the toolkit client fails the start rather than starting untested. The same commands are reachable by hand through the `tt` method.
 4. **Watch.** From here the agent sends **no order**: any `.bot cmd` order but `state`, and any `.bot action`, pauses the run leader. It reads the
    `TBM:RUN|<plan>|<state>|<step>/<steps>|<leg>|<kind>|<phase>|<note>` line the module pushes on every change (through the view feed), asks
    `.bot run status` every `poll_s` (15 s) as a safety net, and ignores a line of another plan. Per change the report, the trace (`run_leader`

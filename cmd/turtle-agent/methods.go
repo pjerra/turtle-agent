@@ -128,6 +128,8 @@ type methodOptions struct {
 	TracesDir string
 	// RunMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
 	RunMeta dungeon.RunMeta
+	// ElunaToolkit is the settings' eluna_toolkit: a remote run's partway start is placed with the Eluna test toolkit (a test server).
+	ElunaToolkit bool
 	// Planner is the navmesh path_to uses; map_snapshot draws its polygons as the background. Nil: no background.
 	Planner *navmesh.Planner
 	// PlanCheckNav makes the navmesh dungeon_run's plan check walks, and closes it (nil: a scratch copy of Planner). Tests give a fake.
@@ -156,6 +158,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("gm", rpc.Typed(func(ctx context.Context, p gmParams) (empty, error) {
 		return empty{}, rpcErr(cur().GM(ctx, p.Text))
 	}))
+	registerElunaMethods(srv, cur)
 	srv.Register("events", rpc.Typed(func(ctx context.Context, p eventsParams) (events.Page, error) {
 		q := events.Query{Since: p.Since, Kinds: p.Kinds, PartyOnly: p.PartyOnly, Limit: p.Limit}
 		return readEvents(ctx, log, q, p.WaitMS), nil
@@ -263,6 +266,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	dungeonRun.tracesDir = opts.TracesDir
 	dungeonRun.runMeta = opts.RunMeta
+	dungeonRun.eluna = opts.ElunaToolkit
 	dungeonRun.tunePath = opts.TunePath
 	dungeonRun.checkNav = opts.PlanCheckNav
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)

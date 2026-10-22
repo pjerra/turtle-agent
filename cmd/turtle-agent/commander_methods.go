@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/eluna"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -561,6 +562,33 @@ func (g remoteGame) Appear(ctx context.Context, player string) error {
 // here; nothing the caller wrote goes into the line.
 func (g remoteGame) GoXYZ(ctx context.Context, mapID uint32, at dungeon.Point) error {
 	return g.c.cur().Teleport(ctx, at.X, at.Y, at.Z, int(mapID))
+}
+
+// dungeon.ElunaToolkit is the Eluna test toolkit's `.tt` queries (dungeon/eluna_place.go), on the agent's own character: the toolkit
+// answers the caller, and the start path moves that character to the step first. TEST servers only (settings eluna_toolkit).
+
+var _ dungeon.ElunaToolkit = remoteGame{}
+
+func (g remoteGame) tt() *eluna.Client {
+	return &eluna.Client{
+		Send: func(ctx context.Context, line string) error { return g.c.cur().GM(ctx, line) },
+		Log:  g.c.cur().Log(),
+	}
+}
+
+// TTFloor is `.tt q floor`: the floor a caller's z searches at the point.
+func (g remoteGame) TTFloor(ctx context.Context, p dungeon.Point) (eluna.FloorResult, error) {
+	return g.tt().Floor(ctx, p.X, p.Y, p.Z)
+}
+
+// TTQuiet is `.tt quiet`: whether the area stays clear for wait.
+func (g remoteGame) TTQuiet(ctx context.Context, p dungeon.Point, radius float32, wait time.Duration) (eluna.QuietResult, error) {
+	return g.tt().Quiet(ctx, p.X, p.Y, p.Z, radius, wait)
+}
+
+// TTPlace is `.tt place`: the party in a ring of spread yards around the point, verified.
+func (g remoteGame) TTPlace(ctx context.Context, p dungeon.Point, spread float32) (eluna.PlaceResult, error) {
+	return g.tt().Place(ctx, p.X, p.Y, p.Z, spread)
 }
 
 // Respawn sends the commander's own ".respawn" with nothing selected (dungeon.Respawner): the core respawns the creatures and game objects

@@ -331,6 +331,9 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	if w, ok := d.g.(RunLeaderWatcher); ok {
 		_, o.baseN, _ = w.RunStatus()
 	}
+	if err := d.elunaPlace(ctx); err != nil {
+		return err
+	}
 	if err := d.checkStartPlace(); err != nil {
 		return err
 	}
