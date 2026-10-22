@@ -1136,6 +1136,32 @@ func TestObserveCountsTheRunLeadersRestPhase(t *testing.T) {
 	}
 }
 
+// A pause is not rest: a paused status still carries the phase it was paused in, but the time a run waits paused is not the run
+// leader resting (PausedWait is 10 min, and that would fail rest_share). The open rest closes when the run pauses; a resume in the
+// same phase opens a new one.
+func TestObservePausedTimeIsNotRest(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		leaderStep{s(20), rs("paused", 2, 5, "first", "pull", "rest", "3 dead: regroup (cmd revive), then .bot run resume")},
+		leaderStep{s(300), rs("running", 2, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(320), rs("done", 5, 5, "first", "pull", "pull", "plan done")},
+	)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds < 9 || rep.RestSeconds > 11 {
+		t.Fatalf("rest seconds %v (want about 10: the rest before the pause, not the 280 s pause)\n%s", rep.RestSeconds, notesOf(rep))
+	}
+	if len(rep.RestGates) != 1 {
+		t.Fatalf("rest gates %+v (want 1)", rep.RestGates)
+	}
+	if rep.RestGates[0].Result != "run_leader" {
+		t.Errorf("gate %+v: result %q, want run_leader", rep.RestGates[0], rep.RestGates[0].Result)
+	}
+}
+
 // A rest the run leader is still in when the run ends is closed at the end, so its time is not lost.
 func TestObserveCountsARestThatIsOpenWhenTheRunEnds(t *testing.T) {
 	g := newFakeLeader(t,

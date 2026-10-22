@@ -715,9 +715,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	prev, had := o.last, o.haveLast
 	o.last, o.haveLast, o.lastAt = st, true, now
-	// The run leader's rest phase is the observed run's rest: a status still in phase rest keeps it open (one rest), any other phase
-	// closes it before the leg switch below, so the rest lands in the leg it happened in.
-	if st.Phase == "rest" {
+	// The run leader's rest phase is the observed run's rest: a running status still in phase rest keeps it open (one rest), any
+	// other phase or state closes it before the leg switch below, so the rest lands in the leg it happened in. A paused status keeps
+	// the phase it paused in, but the pause is waiting for a person, not resting: it closes the rest, and the resume opens a new one.
+	if st.Phase == "rest" && st.State == tbm.RunRunning {
 		if !o.restOpen {
 			o.restSince, o.restOpen = now, true
 		}
