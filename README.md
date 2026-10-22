@@ -1690,9 +1690,13 @@ for a hand-sent run command.
 **Report.** `report.remote.mode` is `observe`; `report.remote.observe` has `plan`, the newest `state`, `step`, `steps`, `leg`, `kind`, `phase`, `note` and a
 plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.wipes`
 counts the watched party's wipes: one rising edge of "every bot dead" in the feed is one wipe, the latch re-arms only once fewer than
-3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe), and each counted
-wipe also goes to the trace as a `wipe` event with `"observe": true`, so the tracecheck deaths oracle sees it too (the run leader stops
-and recovers on its own; the watch only counts). `report.legs[]` has one
+3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe). A wipe also counts
+when every member has died within 90 s of each other, each death newer than the last counted wipe, even if the lead bot revived in
+between (no frame shows them all dead; the RFC run: five dead within 63 s): that `wipe` event has `"window": true`. Each counted wipe
+also goes to the trace as a `wipe` event with `"observe": true`, so the tracecheck deaths oracle sees it too (the run leader stops and
+recovers on its own; the watch only counts). In an observe run `report.leader_deaths`, `report.resurrections` and `report.seconds_dead`
+(in all and per leg) count the lead bot's deaths and revives from the feed, each death also a `leader_death` trace event; a revive here
+is any return to alive, the run leader's own revive included, not only an accepted resurrection. `report.legs[]` has one
 entry per leg the run leader entered, with its seconds. `report.current` is "run leader: sentinel · pull 7/41 · pulling". The orders counters stay at zero but for the end's
 `stay`. Not in observe mode: `tune`, `live_reload`, `cc`, `carrier`, `loot_restore`, `object_fallback`, `tank`, `healer`, `recover_wipe` and the start options that
 move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) are refused, since the agent steers nothing; `from_leg`, `from_pull_group` and
