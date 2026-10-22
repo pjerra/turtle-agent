@@ -374,3 +374,48 @@ func TestUldamanPairStandSeesBothOfThePair(t *testing.T) {
 		}
 	}
 }
+
+// PLAN-ULDAMAN-GRIMLOK-ISLAND D1 (2026-10-22): the tank of Grimlok's pull group 3 shot from the crest above the 6x6 pit at 39.7-46.1 370.7-376.8 (the
+// stand 42.7 376.5 -34.9) and fell in twice. The second approach (37.5 363.5 -42.5) is on the lower floor 4 yd below the pit: its path to each position is
+// complete, and its path to the first position stays off the pit and off the crest band that rims it.
+func TestUldamanGrimlokPullThreeSecondApproachStaysOffThePit(t *testing.T) {
+	dir := mmapsDir()
+	if dir == "" {
+		t.Skip("no map 70 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 070.mmap and the 070*.mmtile tiles")
+	}
+	p := loadUldaman(t)
+	g := p.Legs[uldamanLeg(t, p, "grimlok")].PullGroups[3]
+	if len(g.Approach) != 2 {
+		t.Fatalf("grimlok pull group 3 has %d approach points, want 2: %+v", len(g.Approach), g.Approach)
+	}
+	last := g.Approach[1]
+	if math.Hypot(float64(last.X-37.5), float64(last.Y-363.5)) > 0.1 || math.Abs(float64(last.Z+42.5)) > 0.1 {
+		t.Errorf("the last approach point of grimlok pull group 3 is %v, want (37.5, 363.5, -42.5)", last)
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	plan := func(from, to Point) navmesh.Path {
+		path, err := pl.Plan(p.Map, [3]float32{from.X, from.Y, from.Z}, [3]float32{to.X, to.Y, to.Z})
+		if errors.Is(err, navmesh.ErrNoEngine) {
+			t.Skip("built without cgo: no navmesh engine")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	for _, pos := range g.Positions {
+		if path := plan(last, pos); path.Status != navmesh.Complete {
+			t.Errorf("no complete path from %v to the group-3 position %v: %v", last, pos, path.Status)
+		}
+	}
+	path := plan(last, g.Positions[0])
+	for _, v := range path.Points {
+		q := Point{X: v[0], Y: v[1], Z: v[2]}
+		inPit := q.X >= 39.5 && q.X <= 46.3 && q.Y >= 370.5 && q.Y <= 377.0 && q.Z >= -39.5 && q.Z <= -37.5
+		onCrest := q.X >= 39.5 && q.X <= 47.5 && q.Y >= 369.5 && q.Y <= 378.5 && q.Z > -36.5
+		if inPit || onCrest {
+			t.Errorf("the path from %v to %v goes through the pit or its crest at %v", last, g.Positions[0], q)
+		}
+	}
+}
