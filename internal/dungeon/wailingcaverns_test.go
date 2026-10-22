@@ -100,6 +100,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	paths := wcPatrolPaths(t)
 	var bosses []uint32
 	ana := 0
+	kresh := 0
 	hops := 0
 	for i, l := range p.Legs {
 		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
@@ -122,8 +123,19 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 					t.Errorf("legs[%d] (%s) pull_groups[%d]: no spawn row of entry %d near %v", i, l.Name, gi, e, g.Positions[k])
 				}
 				switch e {
-				case 2914, 3835, 3653, 3678, 3679, 5912, 3669, 3670, 3673, 3674, 5775:
-					t.Errorf("legs[%d] (%s) pull_groups[%d]: entry %d is a critter, a neutral, a friendly, the rare or a boss", i, l.Name, gi, e)
+				case 2914, 3835, 3678, 3679, 5912, 3669, 3670, 3673, 3674, 5775:
+					t.Errorf("legs[%d] (%s) pull_groups[%d]: entry %d is a critter, a friendly, the rare or a boss", i, l.Name, gi, e)
+				case 3653:
+					// Kresh, the neutral turtle of the river: one one-member group (cobrahn_a), never skipped in the leg that pulls him.
+					kresh++
+					if len(g.Entries) != 1 || l.Name != "cobrahn_a" || g.Radius > 12 {
+						t.Errorf("legs[%d] (%s) pull_groups[%d]: Kresh must be the one-member group of cobrahn_a with radius <= 12 (a Crocolisk stands 15.5 yd off): %+v", i, l.Name, gi, g)
+					}
+					for _, sk := range l.Skip {
+						if sk == 3653 {
+							t.Errorf("legs[%d] (%s): skips Kresh and pulls him", i, l.Name)
+						}
+					}
 				}
 			}
 			for _, e := range g.Entries {
@@ -228,6 +240,9 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 		if bosses[i] != want[i] {
 			t.Fatalf("bosses %v, want %v", bosses, want)
 		}
+	}
+	if kresh != 1 {
+		t.Errorf("%d pull groups with Kresh, want the one in cobrahn_a", kresh)
 	}
 	if ana != 4 {
 		t.Errorf("%d groups with Lady Anacondra as a member, want one per spawn spot (four)", ana)
