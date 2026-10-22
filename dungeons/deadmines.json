@@ -23,7 +23,8 @@
     "hunter:dps"
   ],
   "fleers": [598, 622, 634, 1725, 1729, 1731, 1732, 3947, 4418],
-  "cc_priority": [4418, 1729, 1732],
+  "cc_priority": [622, 1731, 4418, 1729, 1732],
+  "cc_always": [622],
   "kill_first": [636, 622],
   "notes": [
     "The Deadmines (map 36), written from the world database export of tortoise-wow (tools/dungeongen/testdata/map36, read with export.sh; creature_movement of the patrols in movement.tsv), the instance script (src/scripts/dungeons/deadmines: instance_deadmines.cpp, deadmines.cpp, boss_mr_smite.cpp), the EventAI and creature_spells rows, Lock.dbc, and the map 36 navmesh (every route point is a point of a path_to route; TestDeadminesOnNavmesh). Wowhead Classic (the instance page zone=1581, the strategy guide 7786 and the npc pages with their comments, fetched with tools/wowhead/wh.py) was read for the kill order, the trash to watch and the boss tips; where it differs from the database or the script the plan follows the server and the README section lists the differences. Status stays draft (not mapped, not live-checked) until the GM-invisible walk (step 2) has checked the route, the doors and the patrols in the instance; dungeon_run refuses it without allow_draft. The patrol periods are estimates (path length at 2.5 yd/s plus the waits), not timed.",
@@ -31,7 +32,8 @@
     "Route (1611 yd of navmesh path, 16 legs, 130 pull groups, 7 bosses): mine_a and rhahk_zor along the upper mine to Rhahk'Zor (644, opens the Factory Door 13965 by dying); factory and the Heavy Door 17153 at -262.7 -482.4; sneed (Sneed's Shredder 642, then Sneed 643, whose death opens the Heavy Door at -290.3 -537.0); west_area and the Heavy Door 17154 at -243.0 -578.6; hall and harvester (Masterpiece Harvester 61963 on the z 51 plateau, a side branch the navmesh reaches before the foundry); gilnid (down the spiral ramp to Gilnid 1763, whose death opens the Heavy Door 26182 at -168.5 -579.9); cannon_a and cannon (Defias Gunpowder 17155, Defias Cannon 16398, the Iron Clad Door 16397); dock and mr_smite (Mr. Smite 646); deck_a, deck_b and captain_greenskin (647); edwin_vancleef (639). Cookie (645), Miner Johnson (3586), Jared Voss (61961) and the laboratory are named mobs on no leg.",
     "Doors, from the instance script and the gameobject_scripts rows: Rhahk'Zor's death opens 13965 (state active); Sneed's death opens spawn 26185 (17153 at -290.3 -537.0); Gilnid's death opens spawn 26182 (17153 at -168.5 -579.9); the cannon sets 16397 to active_alt. The levers 101831, 101832, 101834 (gameobject_scripts 26188, 26197, 26192) open the same three doors for 15 s from the far side and are not used; the lever 101833 does something only once the Iron Clad Door is open. Spawns 26183 (-262.7 -482.4) and 26184 (-243.0 -578.6) have no script and no lever: the plan clicks them (use_object, wait_for active), which is what their lock 86 (Quick Open, no key) allows; NOT VERIFIED, the walk must try both.",
     "Mechanics the plan cannot express (the step types do not exist): killing a unit that has no spawn row (Sneed 643, the Defias Overseer the gunpowder summons) is done by a wait_for hostiles_gone, not by a step that names it; a trigger that waits for a door to be shut again; the alarm event after the cannon; picking the Smite phases (nothing to do but heal and survive the 6 s swaps). See the README section on the Deadmines plan.",
-    "The CC lists come from the spell lists and Wowhead's guide, not from a run: cc_priority the Wizard (4418: Chains of Ice, Fireball), the Evoker (1729: Flamestrike) and the Squallshaper (1732: Frost Nova, which Wowhead calls the most annoying and which is also the one to keep sheeped at Greenskin); kill_first the Blackguards (636, before Smite's 66 % and VanCleef's adds) and the Goblin Engineer (622: Summon Remote-Controlled Golem, stun the cast or kill the goblin first, the golem goes with it). Wowhead also names Melt Ore (the Craftsman's slowing fire DoT). fleers are the entries whose EventAI flees at 15 % health (command 47)."
+    "The CC lists come from the spell lists and Wowhead's guide, not from a run: cc_priority the Wizard (4418: Chains of Ice, Fireball), the Evoker (1729: Flamestrike) and the Squallshaper (1732: Frost Nova, which Wowhead calls the most annoying and which is also the one to keep sheeped at Greenskin); kill_first the Blackguards (636, before Smite's 66 % and VanCleef's adds) and the Goblin Engineer (622: Summon Remote-Controlled Golem, stun the cast or kill the goblin first, the golem goes with it). Wowhead also names Melt Ore (the Craftsman's slowing fire DoT). fleers are the entries whose EventAI flees at 15 % health (command 47).",
+    "Pack sizes, Deadmines r12-19z29 and r14-19z32 (2026-10-22, 202/202 steps, 14 then 10 deaths; ~/TortoiseBots-audit/DEADMINES-PACKS-2026-10-22.md): the fights of the Harvester room and the Gilnid ramp were 2-10 times the plan's group math, from four causes: (1) patrolling units no pull row owned (the Engineer 622 spawn 79213 walks the whole ramp floor in 85 s, the golem 2582923 walks from the hall to the Harvester room's door, the Woodcarver 79207 to the Sneed door); (2) Summon Remote-Controlled Golem (3605) adds, 14 casts a run, which the plan cannot count; (3) fleeing runners (622 and 1731 flee at 15 %) that drag a fight into the next camp; (4) walks over uncleared ground. r14 (guard-budget and pet fixes in) went 4 to 0 deaths at the boss pull but killed 5 at step 90 (Harvester room: golem 61962, Engineers 622 and Craftsmen 1731, 10 units) and 5 at step 118 (the walk down the foundry spiral to the Craftsman 79247, whose firing stand lay on the floor at the spiral's foot, 15 yd from the terrace Engineer 79212), with the tank dead early in both and the mana users at 1-55 % at death (they entered the fights at 75-100 %: a rest row would not have helped, and the plan has no rest step the exporter can write). The plan now: cc_priority starts with 622 and 1731 and cc_always is 622 (sheep the Engineer that summons the golems; the run leader never sheeps the pull target, so a pack of two 622 or a 622 with a Craftsman gets it); the Sneed leg pulls the patroller's group first; the Harvester room splits the golem from the Craftsman and Engineer south of the Taskmaster's beat, pulls the Taskmaster over its whole beat and counts the patrolling golem in the room's first group; the Gilnid ramp is pulled from the spiral first and the floor ring one camp at a time before the boss (see the legs' notes). All new stands were chosen on the navmesh to keep 17 yd (3-D) from every spawn pulled later; they and the plan check say nothing about line of sight, which only a live run shows."
   ],
   "legs": [
     {
@@ -759,14 +761,6 @@
       "to": {"x": -261.1, "y": -485.6, "z": 49.5},
       "pull_groups": [
         {
-          "entries": [641, 641],
-          "positions": [
-            {"x": -284.672, "y": -480.893, "z": 49.2836},
-            {"x": -291.981, "y": -477.763, "z": 49.2735}
-          ],
-          "radius": 12
-        },
-        {
           "entries": [641],
           "positions": [
             {"x": -277.256, "y": -494.085, "z": 49.5858}
@@ -785,6 +779,14 @@
             "period_s": 47.5,
             "source": "creature_movement of spawn 79207 (Goblin Woodcarver, 6 points, 119 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
+        },
+        {
+          "entries": [641, 641],
+          "positions": [
+            {"x": -284.672, "y": -480.893, "z": 49.2836},
+            {"x": -291.981, "y": -477.763, "z": 49.2735}
+          ],
+          "radius": 12
         },
         {
           "entries": [641],
@@ -863,7 +865,8 @@
         }
       ],
       "notes": [
-        "Sneed's Shredder (642, spawn 79223) walks a 15-point loop around its room (x -310.6 to -289.4, y -532.6 to -499.4; 134 yd, 72.0 s a lap with two 8 s waits, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt); a boss fight searches 80 yd). When it dies, Eject Sneed (5141) puts Sneed (643, 3128 hp, Disarm 6430) in its place with a fresh threat table: he has no spawn row, so no plan field can name him; the wait for hostiles to be gone after the boss is what kills him. The Shredder casts Terrify (7399, instant) and Distracting Pain (3603). The Goblin Woodcarvers (641) Axe Toss (6466). Wowhead's guide and the DB agree that the whole room must be cleared of Woodcarvers first: Terrify sends a feared player into them (the leg pulls every Woodcarver within 45 yd of the Shredder)."
+        "Sneed's Shredder (642, spawn 79223) walks a 15-point loop around its room (x -310.6 to -289.4, y -532.6 to -499.4; 134 yd, 72.0 s a lap with two 8 s waits, timed on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt); a boss fight searches 80 yd). When it dies, Eject Sneed (5141) puts Sneed (643, 3128 hp, Disarm 6430) in its place with a fresh threat table: he has no spawn row, so no plan field can name him; the wait for hostiles to be gone after the boss is what kills him. The Shredder casts Terrify (7399, instant) and Distracting Pain (3603). The Goblin Woodcarvers (641) Axe Toss (6466). Wowhead's guide and the DB agree that the whole room must be cleared of Woodcarvers first: Terrify sends a feared player into them (the leg pulls every Woodcarver within 45 yd of the Shredder).",
+        "The Woodcarver 79207 walks a 119 yd beat that comes within 10 yd of the door stand (-271.2 -482.4) every 47.5 s, and r12-19z29 step 50 (the move to the door stand, no pull yet) was engaged 2 s into the step by it and the pair beside it: 5 Woodcarvers, the Shredder and Sneed in one fight, the warrior dead. The group whose radius (19) covers that beat (spawn 79192 and the patroller) is therefore the leg's first pull: the party pulls it alone at the door instead of meeting it in a move. Nothing the plan can write holds the party back from the door itself."
       ]
     },
     {
@@ -1242,11 +1245,25 @@
       "to": {"x": -151.5, "y": -560, "z": 51.3},
       "pull_groups": [
         {
-          "entries": [622],
+          "entries": [622, 61962],
           "positions": [
-            {"x": -152.739, "y": -570.464, "z": 51.2296}
+            {"x": -152.739, "y": -570.464, "z": 51.2296},
+            {"x": -147.8, "y": -567.8, "z": 51.2}
           ],
-          "radius": 11
+          "radius": 11,
+          "patrol": {
+            "entries": [61962],
+            "path": [
+              {"x": -184, "y": -528.7, "z": 51.3},
+              {"x": -168.9, "y": -550.9, "z": 51.2},
+              {"x": -147.8, "y": -567.8, "z": 51.2},
+              {"x": -124, "y": -568.9, "z": 51.2},
+              {"x": -147.7, "y": -568, "z": 51.2},
+              {"x": -169.2, "y": -549.8, "z": 51.2}
+            ],
+            "period_s": 62,
+            "source": "creature_movement of spawn 2582923 (Manufactured Golem, 6 points, 155 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          }
         },
         {
           "entries": [1731, 61962],
@@ -1269,7 +1286,7 @@
           "positions": [
             {"x": -95.9344, "y": -569.47, "z": 51.2296}
           ],
-          "radius": 6,
+          "radius": 22,
           "patrol": {
             "entries": [634],
             "path": [
@@ -1282,13 +1299,12 @@
           }
         },
         {
-          "entries": [1731, 622, 61962],
+          "entries": [1731, 622],
           "positions": [
             {"x": -92.5465, "y": -578.331, "z": 51.2296},
-            {"x": -88.1863, "y": -579.469, "z": 51.2296},
-            {"x": -81.7283, "y": -583.432, "z": 51.2296}
+            {"x": -88.1863, "y": -579.469, "z": 51.2296}
           ],
-          "radius": 5,
+          "radius": 8,
           "patrol": {
             "entries": [4417],
             "path": [
@@ -1297,7 +1313,29 @@
             ],
             "period_s": 16.5,
             "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
-          }
+          },
+          "approach": [
+            {"x": -116, "y": -573, "z": 52}
+          ]
+        },
+        {
+          "entries": [61962],
+          "positions": [
+            {"x": -81.7283, "y": -583.432, "z": 51.2296}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4417],
+            "path": [
+              {"x": -95.9, "y": -569.5, "z": 51.2},
+              {"x": -75.3, "y": -569.8, "z": 51.2}
+            ],
+            "period_s": 16.5,
+            "source": "creature_movement of spawn 2583073 (Defias Taskmaster, 2 points, 41 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
+          },
+          "approach": [
+            {"x": -104, "y": -575, "z": 52.5}
+          ]
         },
         {
           "entries": [622],
@@ -1335,7 +1373,8 @@
         "position": {"x": -66.8989, "y": -570.032, "z": 51.2299}
       },
       "notes": [
-        "Masterpiece Harvester (61963) is Turtle's replacement for the Foe Reaper: 4918 hp, no spell list, only a say on aggro and on death (EventAI 2200054, 2200055). The Manufactured Golems (61962) Cleave and are immune to most CC (mechanic_immune_mask 42693394)."
+        "Masterpiece Harvester (61963) is Turtle's replacement for the Foe Reaper: 4918 hp, no spell list, only a say on aggro and on death (EventAI 2200054, 2200055). The Manufactured Golems (61962) Cleave and are immune to most CC (mechanic_immune_mask 42693394).",
+        "r12-19z29 step 90 (the south-middle pack) engaged 10 units and the boss, 4 dead; r14-19z32 killed 5 there. The south-middle pack is now two pulls from the room's west side: the Craftsman 2583042 with the Engineer 2583041, then the golem 2582936 alone (7-11 yd east of them; a golem is another creature family and does not assist, only its own aggro reach joins it, and the stands are 24 yd off); the Taskmaster 4417 (spawn 2583073, a 20.6 yd beat along y -569.5) is pulled over its whole beat, radius 22, before them, not only when it is at its west end. Group 0 lists the golem 2582923 (61962) at the point (-147.8 -567.8) of its own beat, 5 yd from the Engineer 2583036: the golem walks to the room's door (x -124) in 62 s and was in no pull row."
       ]
     },
     {
@@ -1370,14 +1409,29 @@
           "positions": [
             {"x": -198.926, "y": -603.779, "z": 19.3022}
           ],
-          "radius": 8
+          "radius": 8,
+          "approach": [
+            {"x": -195, "y": -598, "z": 34.8}
+          ]
         },
         {
-          "entries": [1731],
+          "entries": [622, 622],
           "positions": [
-            {"x": -234.991, "y": -575.816, "z": 19.3065}
+            {"x": -207.48, "y": -585.729, "z": 20.9768},
+            {"x": -197.997, "y": -582.979, "z": 20.9769}
           ],
-          "radius": 18,
+          "radius": 10,
+          "approach": [
+            {"x": -195, "y": -596, "z": 36.5}
+          ]
+        },
+        {
+          "entries": [1731, 622],
+          "positions": [
+            {"x": -234.991, "y": -575.816, "z": 19.3065},
+            {"x": -232.502, "y": -569.785, "z": 19.3065}
+          ],
+          "radius": 9,
           "patrol": {
             "entries": [622],
             "path": [
@@ -1403,21 +1457,10 @@
             ],
             "period_s": 85,
             "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
-          }
-        },
-        {
-          "entries": [622],
-          "positions": [
-            {"x": -207.48, "y": -585.729, "z": 20.9768}
-          ],
-          "radius": 6
-        },
-        {
-          "entries": [622],
-          "positions": [
-            {"x": -232.502, "y": -569.785, "z": 19.3065}
-          ],
-          "radius": 3
+          },
+          "approach": [
+            {"x": -221, "y": -596, "z": 21.8}
+          ]
         },
         {
           "entries": [1731, 622],
@@ -1425,21 +1468,42 @@
             {"x": -226.034, "y": -555.927, "z": 19.3065},
             {"x": -226.113, "y": -563.705, "z": 19.3065}
           ],
-          "radius": 5
+          "radius": 5,
+          "approach": [
+            {"x": -225, "y": -584, "z": 20.9}
+          ]
         },
         {
           "entries": [1731],
           "positions": [
             {"x": -209.573, "y": -568.15, "z": 20.9768}
           ],
-          "radius": 12
+          "radius": 12,
+          "approach": [
+            {"x": -221, "y": -584, "z": 21}
+          ]
         },
         {
-          "entries": [622],
+          "entries": [1731, 622],
           "positions": [
-            {"x": -197.997, "y": -582.979, "z": 20.9769}
+            {"x": -210.095, "y": -552.754, "z": 19.3065},
+            {"x": -207.133, "y": -551.25, "z": 19.3065}
           ],
-          "radius": 6
+          "radius": 8,
+          "approach": [
+            {"x": -217, "y": -576, "z": 21.1}
+          ]
+        },
+        {
+          "entries": [622, 1731],
+          "positions": [
+            {"x": -187.23, "y": -549.39, "z": 19.3},
+            {"x": -186.878, "y": -553.565, "z": 19.3065}
+          ],
+          "radius": 11,
+          "approach": [
+            {"x": -207, "y": -568, "z": 21.1}
+          ]
         },
         {
           "entries": [1731],
@@ -1472,7 +1536,10 @@
             ],
             "period_s": 85,
             "source": "creature_movement of spawn 79213 (Goblin Engineer, 19 points, 213 yd at 2.5 yd/s); period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
-          }
+          },
+          "approach": [
+            {"x": -203, "y": -568, "z": 21.1}
+          ]
         }
       ],
       "boss": {
@@ -1494,21 +1561,14 @@
         }
       ],
       "notes": [
-        "The leg first walks back from the Harvester to the top of the foundry ramp (-186.9 -569.9 z 51), then down the spiral (z 51 to 19) round the pit to Gilnid at -177.4 -574.5 z 19.3. Gilnid (1763) casts Molten Metal (list 17630), a debuff that cuts the tank's threat: the healer keeps the tank up while it lasts. His Goblin Craftsman (1731, spawn 79211) is killed first (Wowhead's guide says an Engineer stands beside him: the database has a Craftsman, so the plan follows the database). Keep the pull to Gilnid and that one add: more goblins join if the room is not cleared first, and an Engineer's golem (Summon Remote-Controlled Golem, 3605) is stopped by a stun in the cast or by killing the Engineer. His death opens the Heavy Door 26182 east of him, the way to the gunpowder and the cannon."
+        "The leg first walks back from the Harvester to the top of the foundry ramp (-186.9 -569.9 z 51), then down the spiral (z 51 to 19) round the pit to Gilnid at -177.4 -574.5 z 19.3. Gilnid (1763) casts Molten Metal (list 17630), a debuff that cuts the tank's threat: the healer keeps the tank up while it lasts. His Goblin Craftsman (1731, spawn 79211) is killed first (Wowhead's guide says an Engineer stands beside him: the database has a Craftsman, so the plan follows the database). Keep the pull to Gilnid and that one add: more goblins join if the room is not cleared first, and an Engineer's golem (Summon Remote-Controlled Golem, 3605) is stopped by a stun in the cast or by killing the Engineer. His death opens the Heavy Door 26182 east of him, the way to the gunpowder and the cannon.",
+        "r14-19z32 step 118 (the Craftsman 79247 under the spiral) had its firing stand on the floor at the spiral's foot (-215 -589), where the walk down engaged the terrace Engineer 79212 (spawn z 21), then 79209, the Craftsman 79203, Gilnid's Craftsman 79211, the patrolling Engineer 79213 and Gilnid himself (5 dead); steps 119-124 were then instant 'pack cleared' rows (a radius-3 pull on the spawn point of the patrolling Engineer, camps already dead in the melee) and step 125/126 pulled the northern pairs 79196/79201 with the boss (they stood in cannon_a, after him) while 79197/79198 were in no group at all. The leg now goes: the spiral's pairs (groups 0-2), the Craftsman under the spiral from a stand on the spiral at z 34.8, the two terrace Engineers together from z 36.5 (a pack of two 622: one is sheeped), then down the spiral to its foot for the west pair (Craftsman 79218 with the patrolling Engineer 79213 in one group with its patrol), the west-wall pair (79205/79208), the terrace Craftsman 79203, the two northern pairs (79197/79198 new, 79196/79201 moved up from cannon_a) and the Craftsman 79204 beside Gilnid, then the boss with its escort 79211. Each stand keeps 17 yd (3-D) from every spawn pulled after it; the boss approach is unchanged."
       ]
     },
     {
       "name": "cannon_a",
       "to": {"x": -177.4, "y": -574.5, "z": 19.4},
       "pull_groups": [
-        {
-          "entries": [622, 1731],
-          "positions": [
-            {"x": -187.23, "y": -549.39, "z": 19.3},
-            {"x": -186.878, "y": -553.565, "z": 19.3065}
-          ],
-          "radius": 11
-        },
         {
           "entries": [4416],
           "positions": [

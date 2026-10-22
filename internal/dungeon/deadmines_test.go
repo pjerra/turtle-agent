@@ -91,8 +91,8 @@ func TestDeadminesPlanLoads(t *testing.T) {
 	}
 	// EventAI "flee at 15 %" (command 47) of the entries the plan fights: miners, engineers, overseers, watchmen, evokers, craftsmen,
 	// squallshapers, shipbuilders and wizards.
-	if fmt.Sprint(p.Fleers) != "[598 622 634 1725 1729 1731 1732 3947 4418]" || fmt.Sprint(p.CCPriority) != "[4418 1729 1732]" || fmt.Sprint(p.KillFirst) != "[636 622]" {
-		t.Errorf("fleers %v cc_priority %v kill_first %v", p.Fleers, p.CCPriority, p.KillFirst)
+	if fmt.Sprint(p.Fleers) != "[598 622 634 1725 1729 1731 1732 3947 4418]" || fmt.Sprint(p.CCPriority) != "[622 1731 4418 1729 1732]" || fmt.Sprint(p.CCAlways) != "[622]" || fmt.Sprint(p.KillFirst) != "[636 622]" {
+		t.Errorf("fleers %v cc_priority %v cc_always %v kill_first %v", p.Fleers, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	if lo, hi := p.Band(); lo != 18 || hi != 22 {
 		t.Errorf("band %d-%d", lo, hi)
@@ -234,7 +234,7 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 					}
 					continue
 				}
-				if !hasC(g.Entries[k], at) {
+				if !hasC(g.Entries[k], at) && !onOwnPatrolPath(g, g.Entries[k], at) {
 					t.Errorf("legs[%d] (%s).pull_groups[%d]: no spawn of %d at %v", i, l.Name, j, g.Entries[k], at)
 				}
 			}
@@ -293,6 +293,21 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 	if patrols < 20 {
 		t.Errorf("only %d patrols", patrols)
 	}
+}
+
+// onOwnPatrolPath reports whether at is a point of the patrol path of the group's own patrol, and the entry is one the patrol lists: a patrolling
+// unit the plan counts in a group it passes (the Manufactured Golem 2582923 walks to the Harvester room's door: harvester group 0 lists its entry
+// at the path point nearest the group, so that the pull's pack, and the joiner estimate, count it) stands at a point of its beat, not at its spawn.
+func onOwnPatrolPath(g PullGroup, entry uint32, at Point) bool {
+	if g.Patrol == nil || !slicesContains(g.Patrol.Entries, entry) {
+		return false
+	}
+	for _, q := range g.Patrol.Path {
+		if dist3(q, at) < 0.06 {
+			return true
+		}
+	}
+	return false
 }
 
 // deadminesPatrolGuids are the spawn rows of the patrols the plan carries: the spawn its source names and its formation members.
