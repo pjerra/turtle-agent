@@ -111,6 +111,7 @@
   {
    "name": "gnomeregan",
    "title": "Gnomeregan",
+   "handwritten": true,
    "map": 90,
    "kind": "dungeon",
    "data": "map90",
