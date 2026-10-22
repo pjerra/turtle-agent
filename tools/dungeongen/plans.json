@@ -140,6 +140,7 @@
    "kind": "dungeon",
    "data": "map47",
    "trigger": 244,
+   "handwritten": true,
    "bosses": [
     6168,
     4424,
