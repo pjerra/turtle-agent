@@ -9,25 +9,25 @@ import (
 )
 
 // The `.gps` read of the start's z check (dungeon.StartHands.GPS). `.gps` is a plain GM line (no ".bot " in front) and the core answers it
-// with several system messages; the last one holds GroundZ and FloorZ.
+// with several system messages; the one with GroundZ and FloorZ ends the read (a TileX line may follow it).
 const (
 	gpsTotalWait = 3 * time.Second        // the whole read
 	gpsQuietWait = 400 * time.Millisecond // the read ends this long after the last line once a line has come
 )
 
-// GPS sends ".gps" for the agent's own character and returns the system lines that followed, joined by newlines. An error is a line that
-// could not be sent or no reply within gpsTotalWait.
+// GPS selects the agent's own character, waits until the server shows it selected, and sends ".gps": the core reports the unit the GM has
+// selected, so a mob or a bot left selected would be read in the commander's place. It returns the system lines that followed, joined by
+// newlines. An error is a selection or a line that could not be sent, or no reply within gpsTotalWait.
 func (g remoteGame) GPS(ctx context.Context) (string, error) {
-	s := g.c.cur()
-	log := s.Log()
+	log := g.c.cur().Log()
 	since := log.Last()
-	if err := s.GM(ctx, ".gps"); err != nil {
+	if err := g.selectThenGM(ctx, g.AgentGUID(), ".gps"); err != nil {
 		return "", err
 	}
 	return readGPSReply(ctx, log, since, gpsTotalWait, gpsQuietWait)
 }
 
-// readGPSReply collects the system lines the log gets after since: it returns at the line that has "FloorZ" (the last line of the reply),
+// readGPSReply collects the system lines the log gets after since: it returns at the line that has "FloorZ" (the one that ends the reply),
 // else quiet after the last line once one has come, else at total with an error when there was none.
 func readGPSReply(ctx context.Context, log *events.Log, since uint64, total, quiet time.Duration) (string, error) {
 	tctx, cancel := context.WithTimeout(ctx, total)
@@ -49,13 +49,13 @@ func readGPSReply(ctx context.Context, log *events.Log, since uint64, total, qui
 		if p.More {
 			continue
 		}
-		wctx := tctx
+		wctx, cancel := tctx, context.CancelFunc(func() {})
 		if len(lines) > 0 {
-			var c context.CancelFunc
-			wctx, c = context.WithTimeout(tctx, quiet)
-			defer c()
+			wctx, cancel = context.WithTimeout(tctx, quiet)
 		}
-		if log.Wait(wctx, cursor) != nil {
+		err := log.Wait(wctx, cursor)
+		cancel()
+		if err != nil {
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}

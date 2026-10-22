@@ -293,10 +293,10 @@ func TestStartFromLegMovesTheCommanderAndSummonsTheParty(t *testing.T) {
 	if s == nil || s.Kind != StartLeg || s.Leg != 1 || s.Method != "gm" || s.Point != (Point{100, 0, 0}) || !s.LeadSummoned || fmt.Sprint(s.Summoned) != "[Healy]" {
 		t.Fatalf("start %+v", s)
 	}
-	if fmt.Sprint(s.GMCommands) != "[.appear Tanky .go xyz 100.00 0.00 0.00 0]" || len(s.Skipped) != 1 || s.Skipped[0] != "leg 0 (first): skipped (from_leg)" {
+	if fmt.Sprint(s.GMCommands) != "[.appear Tanky .go xyz 100.00 0.00 0.00 0 .gps]" || len(s.Skipped) != 1 || s.Skipped[0] != "leg 0 (first): skipped (from_leg)" {
 		t.Fatalf("start %+v", s)
 	}
-	if rep.Remote.GMCommands != 2 || rep.Remote.RunGMAssists != 0 {
+	if rep.Remote.GMCommands != 3 || rep.Remote.RunGMAssists != 0 {
 		t.Fatalf("gm %d assists %d", rep.Remote.GMCommands, rep.Remote.RunGMAssists)
 	}
 	if got := fmt.Sprint(rep.SetupShortcuts); !strings.Contains(got, ".appear Tanky (GM start point)") || !strings.Contains(got, ".go xyz 100.00 0.00 0.00 0 (GM start point)") {

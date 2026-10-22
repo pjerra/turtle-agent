@@ -2137,13 +2137,14 @@ with the ordinary per-leg logic (the rest gate at the leg's start, walks, pulls,
 4. `cmd summon <bot>` for every other living bot that is not with the lead bot, and a wait until all stand together.
 
 **The commander's z (issue #292).** `.go xyz` takes the z it is given and never snaps to the ground, so a point with a wrong z put the
-commander under the terrain (or in the air) and the party was brought to it. After step 2 the agent sends the plain GM line `.gps` (the
-reply's lines are read as `KindSystem` text) and reads `GroundZ` (the top surface) and `FloorZ` (the floor under the commander's z). A
+commander under the terrain (or in the air) and the party was brought to it. After step 2 the agent selects its own character, waits
+for the server to show the selection, and sends the plain GM line `.gps` (the reply's lines are read as `KindSystem` text) and reads `GroundZ` (the top surface) and `FloorZ` (the floor under the commander's z). A
 commander more than 0.5 yd from `FloorZ` gets one more `.go xyz X Y FloorZ+0.3` (booked as a GM start line) and `.gps` is read again. The
 start is refused, before the lead bot is touched, with the target z, `GroundZ`, `FloorZ` and the commander's z when it still stands more
 than 0.5 yd off the floor, or when `GroundZ` and `FloorZ` differ and `FloorZ` is more than 3 yd from the target z (the floor under the
-commander is another layer than the point). The check is best effort: a failed or unanswered `.gps`, a reply without `GroundZ`/`FloorZ` or
-with no height data (-100000) leaves the start as it was, with one note per run saying the z check could not be made.
+commander is another layer than the point). The check is best effort: a failed or unanswered `.gps`, a reply without its X/Y, `GroundZ` or
+`FloorZ`, a reply about another unit (its X/Y more than 20 yd from the commander) or one with no height data (-200000) leaves the start as
+it was, with one note per run saying the z check could not be made.
 
 The two GM lines are the only GM commands; neither is aimed at another player. They count in `remote.gm_commands` and are listed in
 `setup_shortcuts` as `... (GM start point)` and in `start.gm_commands`. A party that is at the start point already (the lead bot within 20 yd,

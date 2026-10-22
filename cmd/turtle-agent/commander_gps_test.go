@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/session"
 )
 
 func gpsSys(l *events.Log, text string) { l.Append(events.Event{Kind: events.KindSystem, Text: text}) }
@@ -46,5 +49,56 @@ func TestReadGPSReplyQuietAndTimeout(t *testing.T) {
 	cancel()
 	if _, err := readGPSReply(ctx, log, log.Last(), time.Second, 50*time.Millisecond); err == nil {
 		t.Fatal("a cancelled context must be an error")
+	}
+}
+
+// `.gps` reports the unit the commander has selected, so the read selects the agent's own character (guid 0x2A) first and sends the line
+// only once the server shows that selection. A stranger left selected (a mob, a bot) must not be read in its place.
+func TestGPSSelectsTheCommanderBeforeTheLine(t *testing.T) {
+	const stranger = packet.GUID(0x4D2)
+	r := newRig(t)
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(stranger)) // the server shows a stranger selected
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	type reply struct {
+		text string
+		err  error
+	}
+	done := make(chan reply, 1)
+	go func() {
+		text, err := g.GPS(context.Background())
+		done <- reply{text, err}
+	}()
+	var ops []uint16
+	for len(ops) < 2 {
+		p, err := r.srv.Next(2 * time.Second)
+		if err != nil {
+			t.Fatalf("after %v: %v", ops, err)
+		}
+		switch p.Op {
+		case opcode.CMSGSetSelection:
+			if guid := packet.NewReader(p.Body).GUID(); guid != 0x2A {
+				t.Fatalf("selected %#x, not the commander (0x2A)", uint64(guid))
+			}
+			ops = append(ops, p.Op)
+			r.srv.Send(opcode.SMSGUpdateObject, selfValues(0x2A)) // the server's echo of the selection
+		case opcode.CMSGMessagechat:
+			if len(ops) == 0 {
+				t.Fatal("the .gps line was sent before the commander was selected")
+			}
+			if !strings.Contains(string(p.Body), ".gps") {
+				t.Fatalf("chat line %q", p.Body)
+			}
+			ops = append(ops, p.Op)
+			r.s.Log().Append(events.Event{Kind: events.KindSystem, Text: "X: 1.000000 Y: 2.000000 Z: 3.000000 Orientation: 0.000000\n" +
+				"GroundZ: 3.000000 FloorZ: 3.000000 Have height data (Map: 1 VMap: 1)"})
+		}
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || !strings.Contains(got.text, "FloorZ: 3.000000") {
+			t.Fatalf("%q %v", got.text, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GPS did not return")
 	}
 }
