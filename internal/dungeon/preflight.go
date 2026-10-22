@@ -176,6 +176,7 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		pf.Bots = append(pf.Bots, b)
 	}
 	d.checkAllTalents(ctx, bl, pf)
+	d.checkPartyStrength(pf)
 	for i, m := range d.fr.Party {
 		d.checkKit(ctx, bl, pf, &pf.Bots[i], m)
 		if err := ctx.Err(); err != nil {

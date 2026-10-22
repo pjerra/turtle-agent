@@ -393,6 +393,131 @@ func TestRemotePreflightStrictFailsTheRun(t *testing.T) {
 	}
 }
 
+// #266: the plan's tank floor warns before the first step when the hired tank's max health is below it (a level-16 tank in white gear).
+func TestPreflightWarnsAWeakTank(t *testing.T) {
+	g := kitFake(t)
+	g.party[0].MaxHP = 641
+	p := plan1()
+	p.TankMinHP = 800
+	rep, err := runRemote(t, g, p, kitOpts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("a warning failed the run: %v %s %s", err, rep.State, notesOf(rep))
+	}
+	pf := rep.Remote.Preflight
+	if pf == nil {
+		t.Fatal("no preflight")
+	}
+	want := "Tanky: the tank's max health is 641, the plan wants at least 800 for its level band (weak gear: autogear again, or hire another tank)"
+	if all := strings.Join(pf.Warnings, "\n"); !strings.Contains(all, want) {
+		t.Errorf("missing %q in\n%s", want, all)
+	}
+
+	// Strict mode fails the run on the same warning.
+	g = kitFake(t)
+	g.party[0].MaxHP = 641
+	o := kitOpts()
+	o.Preflight = "strict"
+	rep, err = runRemote(t, g, p, o, nil)
+	if err == nil || !strings.Contains(err.Error(), "preflight (strict)") || !strings.Contains(err.Error(), "max health is 641") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+}
+
+// A tank at the floor or above it warns nothing, and a plan without a floor does not check at all.
+func TestPreflightStrongTankAndNoFloorWarnNothing(t *testing.T) {
+	g := kitFake(t)
+	g.party[0].MaxHP = 901
+	p := plan1()
+	p.TankMinHP = 800
+	rep, err := runRemote(t, g, p, kitOpts(), nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "max health is") {
+		t.Fatalf("a strong tank was warned about:\n%s", all)
+	}
+
+	g = kitFake(t)
+	g.party[0].MaxHP = 641
+	rep, err = runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "max health is") {
+		t.Fatalf("a plan without a floor warned:\n%s", all)
+	}
+}
+
+// teamBotFake is a botFake whose game knows the agent's team and each bot's race-team (BotTeamer).
+type teamBotFake struct {
+	*botFake
+	team     string
+	botTeams map[packet.GUID]string
+}
+
+func (g teamBotFake) Team() string                    { return g.team }
+func (g teamBotFake) BotTeam(guid packet.GUID) string { return g.botTeams[guid] }
+
+// #266: a hired bot of the other faction is flagged before the first step (the feed carries no race; the object store has it).
+func TestPreflightFlagsAHireOfTheOtherFaction(t *testing.T) {
+	teams := map[packet.GUID]string{gTank: "horde", gHealer: "alliance", gMage: "horde"}
+	g := teamBotFake{botFake: kitFake(t), team: "horde", botTeams: teams}
+	rep, err := runRemote(t, g, plan1(), kitOpts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, notesOf(rep))
+	}
+	pf := rep.Remote.Preflight
+	if pf == nil {
+		t.Fatal("no preflight")
+	}
+	want := "Healy: is alliance but the party's team is horde (a hire of the other faction: keep it out of enemy towns, hire and enter at the dungeon door)"
+	all := strings.Join(pf.Warnings, "\n")
+	if !strings.Contains(all, want) {
+		t.Fatalf("missing %q in\n%s", want, all)
+	}
+	if n := strings.Count(all, "but the party's team is"); n != 1 {
+		t.Fatalf("%d team warnings:\n%s", n, all)
+	}
+
+	// The run's team option wins over the agent's; the two horde bots are flagged now.
+	o := kitOpts()
+	o.Team = "alliance"
+	rep, err = runRemote(t, g, plan1(), o, nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	all = strings.Join(rep.Remote.Preflight.Warnings, "\n")
+	for _, w := range []string{"Tanky: is horde", "Magey: is horde"} {
+		if !strings.Contains(all, w) {
+			t.Errorf("missing %q in\n%s", w, all)
+		}
+	}
+	if strings.Contains(all, "Healy: is") {
+		t.Errorf("the alliance healer was warned:\n%s", all)
+	}
+	if n := strings.Count(all, "but the party's team is"); n != 2 {
+		t.Fatalf("%d team warnings:\n%s", n, all)
+	}
+
+	// A game without BotTeamer says nothing...
+	rep, err = runRemote(t, kitFake(t), plan1(), kitOpts(), nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "but the party's team is") {
+		t.Fatalf("a game without BotTeamer warned:\n%s", all)
+	}
+	// ... and neither does a bot out of view (BotTeam "").
+	g2 := teamBotFake{botFake: kitFake(t), team: "horde", botTeams: map[packet.GUID]string{}}
+	rep, err = runRemote(t, g2, plan1(), kitOpts(), nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "but the party's team is") {
+		t.Fatalf("a bot out of view warned:\n%s", all)
+	}
+}
+
 func TestRemotePreflightMaintenanceOffOrRefused(t *testing.T) {
 	g := kitFake(t)
 	g.replies["maintenance Tanky"] = []string{"Owned-bot maintenance is disabled (AiPlayerbot.OwnedBotMaintenanceEnabled = 0)."}
