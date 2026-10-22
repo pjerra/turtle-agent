@@ -95,6 +95,7 @@
    "title": "The Stockade",
    "map": 34,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map34",
    "trigger": 101,
    "bosses": [

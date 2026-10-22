@@ -20,7 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+//
+// stormwind_stockade (42, 2026-10-22): the draft was hand-fixed from the pack census (~/TortoiseBots-audit/PREP-STOCKADE-2026-10-22.md), not mapped. Its groups that the
+// fix did not touch keep the radius the exporter gave them (farthest member + 10 yd), and the cells are dense: most findings are such a group whose radius plus the margin
+// reaches the next pack. The ones the fix leaves on purpose: Bruegal 8 yd from the east pair, and Dextren 11 yd from the Inmates pulled in front of him.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "stormwind_stockade": 42}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
