@@ -625,11 +625,12 @@ type RemoteDriver struct {
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
 
-	pts       *ptSampler         // the pull-test try being scored (pulltest.go); nil outside one
-	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
-	trSeen    uint64             // the feed frame count the trace last took
-	trRoster  bool
-	trStalled bool
+	pts        *ptSampler         // the pull-test try being scored (pulltest.go); nil outside one
+	tr         *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
+	trSeen     uint64             // the feed frame count the trace last took
+	trRoster   bool
+	trInstance bool
+	trStalled  bool
 
 	// The progress watchdog (watchdog.go) and the requests its recoveries leave for the loops they interrupt.
 	wd         *watchdog

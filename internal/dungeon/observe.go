@@ -188,6 +188,9 @@ type observeState struct {
 	leadDownAt time.Time                 // when the lead bot last went dead
 	leadDown   bool
 	lastWipeAt time.Time // when the last wipe was counted
+	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
+	restSince time.Time // when the run leader's current rest phase began
+	restOpen  bool
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -315,6 +318,9 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	})
 	// Whatever way the watch ends, a run still alive on the server is stopped: the agent leaves the party idle, not half-led.
 	defer func() {
+		if o.restOpen {
+			d.endObservedRest(d.clk.Now())
+		}
 		why, reason := "", ""
 		var ceiling *runCeilingError
 		switch {
@@ -723,6 +729,16 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	prev, had := o.last, o.haveLast
 	o.last, o.haveLast, o.lastAt = st, true, now
+	// The run leader's rest phase is the observed run's rest: a running status still in phase rest keeps it open (one rest), any
+	// other phase or state closes it before the leg switch below, so the rest lands in the leg it happened in. A paused status keeps
+	// the phase it paused in, but the pause is waiting for a person, not resting: it closes the rest, and the resume opens a new one.
+	if st.Phase == "rest" && st.State == tbm.RunRunning {
+		if !o.restOpen {
+			o.restSince, o.restOpen = now, true
+		}
+	} else if o.restOpen {
+		d.endObservedRest(now)
+	}
 	if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 		o.pausedAt = now
 	}
@@ -766,6 +782,24 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
 		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note})
 	}
+}
+
+// endObservedRest closes the run leader's rest phase: it counts as a rest gate (Result "run_leader"), in the report, the leg and the trace.
+func (d *RemoteDriver) endObservedRest(now time.Time) {
+	o := d.obs
+	o.restOpen = false
+	secs := max(now.Sub(o.restSince).Seconds(), 0)
+	leg := max(d.curLeg, 0)
+	d.rep.update(func(r *Report) {
+		r.RestSeconds += secs
+		if n := len(r.Legs); n > 0 {
+			r.Legs[n-1].RestSeconds += secs
+		}
+		if len(r.RestGates) < maxRestGates {
+			r.RestGates = append(r.RestGates, RestGate{Leg: leg, Seconds: secs, Result: "run_leader"})
+		}
+	})
+	d.tr.Event("rest", map[string]any{"leg": d.curLeg, "seconds": secs, "source": "run_leader"})
 }
 
 // deadCount is how many members of the frame's party are dead (the latch of the wipe count compares it with wipeDeadReArm; tbm.ViewFrame

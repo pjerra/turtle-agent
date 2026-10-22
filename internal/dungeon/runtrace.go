@@ -431,6 +431,14 @@ func (d *RemoteDriver) traceLook() {
 				d.tr.Party(trace.Member{G: guidText(p.GUID), Name: p.Name, Lead: p.GUID == d.fr.Lead && d.fr.Lead != 0, Role: d.roleOf(p.Name)})
 			}
 		}
+		if !d.trInstance && d.fr.Lead != 0 {
+			if lead, ok := d.memberByGUID(d.fr.Lead); ok && lead.Instance != 0 {
+				d.trInstance = true
+				inst := lead.Instance
+				d.rep.update(func(r *Report) { r.Instance = inst })
+				d.tr.Event("instance", map[string]any{"instance": inst, "map": lead.Map})
+			}
+		}
 		if d.tr.Due() {
 			d.tr.Frame(feedFrame(d.fr))
 		}
