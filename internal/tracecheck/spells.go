@@ -34,18 +34,21 @@ const (
 
 // SpellReport is the report; Lines prints it. Fields are exported for --json.
 type SpellReport struct {
-	Frames      int          `json:"frames"`       // frames with bots
-	CastsSeen   bool         `json:"casts_seen"`   // any bot frame has a cs
-	ActsSeen    bool         `json:"acts_seen"`    // any bot frame has an act
-	VerdictSeen bool         `json:"verdict_seen"` // any bot frame has the verdict letter (res)
-	Classes     []ClassSpell `json:"classes"`
-	Idle        IdleShare    `json:"idle"`
-	Deaths      []DeathMana  `json:"deaths,omitempty"`
-	DryBots     int          `json:"dry_bots"` // mana users that went under 10 % mana in combat
-	Interrupt   InterruptUse `json:"interrupt"`
-	Taunts      TauntUse     `json:"taunts"`
-	CC          CCUse        `json:"cc"`
-	Warnings    []string     `json:"warnings,omitempty"`
+	Frames       int          `json:"frames"`       // frames with bots
+	CastsSeen    bool         `json:"casts_seen"`   // any bot frame has a cs
+	ActsSeen     bool         `json:"acts_seen"`    // any bot frame has an act
+	VerdictSeen  bool         `json:"verdict_seen"` // any bot frame has the verdict letter (res)
+	Classes      []ClassSpell `json:"classes"`
+	Idle         IdleShare    `json:"idle"`
+	Deaths       []DeathMana  `json:"deaths,omitempty"`
+	DryBots      int          `json:"dry_bots"` // mana users that went under 10 % mana in combat
+	Interrupt    InterruptUse `json:"interrupt"`
+	Taunts       TauntUse     `json:"taunts"`
+	CC           CCUse        `json:"cc"`
+	TauntLatency TauntLatency `json:"taunt_latency"`
+	CCHold       CCHold       `json:"cc_hold"`
+	PetThreat    PetThreat    `json:"pet_threat"`
+	Warnings     []string     `json:"warnings,omitempty"`
 }
 
 // ClassSpell is one class's casts, action mix and verdicts.
@@ -872,6 +875,10 @@ func Spells(f *trace.File, c Config) SpellReport {
 	}
 	r.CC.BySpell = topN(ccBySpell, 5)
 
+	r.TauntLatency = tauntLatency(f, acts, ivS)
+	r.CCHold = ccHold(f, ccs, ivS)
+	r.PetThreat = petThreat(f)
+
 	r.warn(c)
 	return r
 }
@@ -884,6 +891,15 @@ func (r *SpellReport) warn(c Config) {
 	// of missing verdicts. It is still proximity, not a confirmed interrupt.
 	if r.Interrupt.Casts >= minCastsRate && r.Interrupt.PctWithAfter < c.InterruptCoverPct {
 		r.Warnings = append(r.Warnings, fmt.Sprintf("interrupt_cover only %.1f %% of %d enemy casts have an interrupt action during or just after them (limit %g; proximity, not confirmed)", r.Interrupt.PctWithAfter, r.Interrupt.Casts, c.InterruptCoverPct))
+	}
+	if t := r.TauntLatency; t.Episodes >= minTauntEpisodes && t.MedianS > c.TauntLatencyS {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("taunt_latency median %.1f s over %d episodes where a non-tank held a mob (limit %g; frames are samples, the resolution is about one frame)", t.MedianS, t.Episodes, c.TauntLatencyS))
+	}
+	if h := r.CCHold; h.Joined >= minCCEpisodes && h.HeldPct < c.CCHoldPct {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("cc_hold only %.1f %% of %d crowd-control episodes held %.0f s or more (limit %g %%; flags are not tied to the caster)", h.HeldPct, h.Joined, ccBrokenS, c.CCHoldPct))
+	}
+	if p := r.PetThreat; p.MobFrames >= minPetMobFrames && p.Pct > c.PetThreatPct {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("pet_threat %.1f %% of %d mob-frames have a pet on top threat (limit %g %%)", p.Pct, p.MobFrames, c.PetThreatPct))
 	}
 }
 
@@ -1041,6 +1057,17 @@ func (r SpellReport) Lines() []string {
 		out = append(out, fmt.Sprintf("  crowd control (observation, not a success rate): %d actions not known to have failed (%s; %d with no verdict letter); a new cc flag on some mob within %.0f s after %d of %d (not tied to the caster or the spell); on the caster's own target %d of %d where it was in view",
 			r.CC.Actions, joinCounts(r.CC.BySpell), r.CC.Unknown, ccWindowS, r.CC.FlagSeen, r.CC.WithMobs, r.CC.Attributed, r.CC.TargetSeen))
 	}
+	if t := r.TauntLatency; !t.Recorded {
+		out = append(out, "  taunt latency: not measured (no tank named in the trace, or no mob victims)")
+	} else {
+		out = append(out, fmt.Sprintf("  taunt latency: %d episodes where a mob's top victim was a party member that is not the tank; answered by the tank's taunt %d, back on the tank without one %d, dropped open %d; median %.1f s, worst %.1f s (1 Hz samples)", t.Episodes, t.ByTaunt, t.Returned, t.Open, t.MedianS, t.WorstS))
+	}
+	if h := r.CCHold; h.Joined == 0 {
+		out = append(out, "  cc hold: no crowd-control episode joined to a single-target cc action; flags are not tied to the caster (1 Hz samples)")
+	} else {
+		out = append(out, fmt.Sprintf("  cc hold: %d joined episodes; %d broken under %.0f s; %.1f %% held; median length %.1f s; flags are not tied to the caster (1 Hz samples)", h.Joined, h.Broken, ccBrokenS, h.HeldPct, h.MedianS))
+	}
+	out = append(out, fmt.Sprintf("  pet threat: a pet (guid 0xf140...) held the top threat in %d of %d mob-frames (%.1f %%) (1 Hz samples)", r.PetThreat.PetTop, r.PetThreat.MobFrames, r.PetThreat.Pct))
 	for _, w := range r.Warnings {
 		out = append(out, "  WARN "+w)
 	}
