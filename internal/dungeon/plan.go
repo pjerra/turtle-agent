@@ -537,6 +537,10 @@ type Gossip struct {
 	Stand    *Point  `json:"stand,omitempty"`
 	RetryS   int     `json:"retry_s,omitempty"`
 	FailText string  `json:"fail_text,omitempty"`
+	// DeadIsDone says a dead NPC is the end of the step (the run leader's row carries the module's kPlanFlagDeadNpcIsDone): Sergeant Bly
+	// and his crew die in the pyramid event's troll waves in some runs, and talking to a corpse then stops the run for nothing. Only
+	// plan-export reads it; the agent's own driver still fails on a dead NPC.
+	DeadIsDone bool `json:"dead_is_done,omitempty"`
 }
 
 // Talker is who talks, By or its default.
@@ -880,6 +884,8 @@ type rawGossip struct {
 	Stand    *rawPoint `json:"stand"`
 	RetryS   *int      `json:"retry_s"`
 	FailText string    `json:"fail_text"`
+	// DeadIsDone: see Gossip.DeadIsDone.
+	DeadIsDone bool `json:"dead_is_done"`
 }
 
 type rawUnitWait struct {
@@ -1637,7 +1643,7 @@ func (c *checker) ritual(path string, r *rawRitual) *Ritual {
 }
 
 func (c *checker) gossip(path string, r *rawGossip) *Gossip {
-	out := &Gossip{NPC: r.NPC, By: r.By}
+	out := &Gossip{NPC: r.NPC, By: r.By, DeadIsDone: r.DeadIsDone}
 	if r.NPC == 0 {
 		c.fail(path+".npc", "required (the entry of the creature to talk to)")
 	}

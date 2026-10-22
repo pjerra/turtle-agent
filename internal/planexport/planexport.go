@@ -59,6 +59,11 @@ const (
 	// resumed after a wipe at one of these rows (a fresh run does not need it). A loader that knows no such flag drops it (unknown flags
 	// are ignored on a loot/open), so the rows still load.
 	FlagGoneIsDone = 256
+	// FlagDeadNpcIsDone marks a gossip row as done when its NPC is dead (the module's kPlanFlagDeadNpcIsDone): the order refused with the
+	// dead-NPC wording ends the step with a note instead of pausing the run. A plan's gossip step sets it with "dead_is_done": true
+	// (Zul'Farrak's Sergeant Bly, whose crew the pyramid event's troll waves kill in some runs). A module without the flag refuses a
+	// gossip row that carries any flag, so the module and the exported rows go together. 512: 128 is reserved by the module.
+	FlagDeadNpcIsDone = 512
 	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
@@ -646,7 +651,11 @@ func (b *builder) step(st dungeon.Step) error {
 		}
 		// x y z: where the NPC stands (the run leader walks the lead bot there when it is farther than 30 yd, and the order searches within 40 yd
 		// of the bot). The row's param is the option the way `.bot cmd gossip` counts it, from 1: the plan's option (the menu index) + 1.
-		b.add(StepRow{Kind: KindGossip, Entry: g.NPC, X: g.Near.X, Y: g.Near.Y, Z: g.Near.Z, Param: *g.Option + 1,
+		var flags uint32
+		if g.DeadIsDone {
+			flags = FlagDeadNpcIsDone
+		}
+		b.add(StepRow{Kind: KindGossip, Entry: g.NPC, X: g.Near.X, Y: g.Near.Y, Z: g.Near.Z, Param: *g.Option + 1, Flags: flags,
 			Comment: clip(gossipComment(g), MaxComment)})
 	default:
 		return fmt.Errorf("an empty step")
@@ -786,12 +795,13 @@ func Validate(r Rows) error {
 			if s.Entry == 0 {
 				return bad("needs an entry")
 			}
-			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the option counts from 1, `.bot cmd gossip` refuses 0; no flag is read.
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the option counts from 1, `.bot cmd gossip` refuses 0; the one flag
+			// read is kPlanFlagDeadNpcIsDone.
 			if s.Param < 1 || s.Param > MaxGossipOption {
 				return bad("param %d is outside 1-%d (the option, counted from 1)", s.Param, MaxGossipOption)
 			}
-			if s.Flags != 0 {
-				return bad("a gossip carries no flags")
+			if s.Flags&^FlagDeadNpcIsDone != 0 {
+				return bad("a gossip carries no flag but the dead-npc-is-done flag (%d)", FlagDeadNpcIsDone)
 			}
 		case KindHold:
 			// Done by instance data (flag 8, entry = the data's index) or by its units (no flag, the entries): the loader's rule
@@ -825,6 +835,9 @@ func Validate(r Rows) error {
 			if s.Kind != KindLoot && s.Kind != KindOpen {
 				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
 			}
+		}
+		if s.Flags&FlagDeadNpcIsDone != 0 && s.Kind != KindGossip {
+			return bad("the dead-npc-is-done flag is for a gossip row (the loader refuses it on a %s)", s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {

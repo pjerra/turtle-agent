@@ -462,11 +462,17 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 	}
 	want := []string{
 		"move 0 1884 1212 9 r0 p0 f0 t0 []",
-		"gossip 7604 1883.82 1200.83 8.87 r0 p1 f0 t0 []",
+		"gossip 7604 1883.82 1200.83 8.87 r0 p1 f512 t0 []", // dead_is_done: his crew can be dead before the leg
 		"hold 0 1884 1212 9 r25 p0 f0 t300 [7604 7608 7606 7605]",
 	}
 	if !slices.Equal(bly, want) {
 		t.Errorf("bly rows:\n%s\nwant\n%s", strings.Join(bly, "\n"), strings.Join(want, "\n"))
+	}
+	// Only Bly's gossip carries the flag: without Weegli (7607) the End Door stays shut, so a dead Weegli must pause the run.
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindGossip && (s.Flags == FlagDeadNpcIsDone) != (s.Entry == 7604) {
+			t.Errorf("gossip %d has flags %d", s.Entry, s.Flags)
+		}
 	}
 	for _, s := range res.Rows.Steps {
 		if s.Leg == 15 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {

@@ -107,6 +107,76 @@ func TestValidateGossipRow(t *testing.T) {
 	}
 }
 
+// "dead_is_done": true on a gossip step writes the module's kPlanFlagDeadNpcIsDone (512) on the row and nothing else changes; without it
+// (or with false) the row's flags stay 0, so a dead NPC pauses the run (Weegli: the End Door cannot be opened without him).
+func TestGossipDeadIsDoneIsExported(t *testing.T) {
+	for _, tc := range []struct {
+		fields string
+		flags  uint32
+	}{
+		{`"option":0,"by":"tank","dead_is_done":true`, FlagDeadNpcIsDone},
+		{`"option":0,"by":"tank","dead_is_done":false`, 0},
+		{`"option":0,"by":"tank"`, 0},
+	} {
+		res, err := Build(gossipPlan(t, tc.fields), Options{Source: "test"})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.fields, err)
+		}
+		g := gossipRow(t, res.Rows)
+		if g.Flags != tc.flags || g.Param != 1 || g.Entry != 7607 {
+			t.Errorf("%s: row %+v", tc.fields, g)
+		}
+		back, err := Parse(WriteSQL([]Rows{res.Rows}))
+		if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+			t.Fatalf("%s: SQL does not read back: %v", tc.fields, err)
+		}
+		if err := Validate(res.Rows); err != nil {
+			t.Errorf("%s: %v", tc.fields, err)
+		}
+	}
+	if FlagDeadNpcIsDone != 512 {
+		t.Errorf("the module's kPlanFlagDeadNpcIsDone is 512, not %d", FlagDeadNpcIsDone)
+	}
+}
+
+// The flag is for a gossip row: Validate refuses it on every other kind (the module's loader refuses it there too), and a gossip row may
+// carry it alone, no other flag.
+func TestValidateDeadNpcIsDoneOnlyOnGossip(t *testing.T) {
+	gossip := Rows{Steps: []StepRow{{Plan: "p", Kind: KindGossip, Entry: 7604, Param: 1, Flags: FlagDeadNpcIsDone}}}
+	if err := Validate(gossip); err != nil {
+		t.Fatalf("gossip with the flag: %v", err)
+	}
+	gossip.Steps[0].Flags = FlagDeadNpcIsDone | FlagAlliance
+	if err := Validate(gossip); err == nil {
+		t.Errorf("a gossip row with another flag besides it must be refused")
+	}
+	for _, r := range []StepRow{
+		{Kind: KindMove, X: 1},
+		{Kind: KindPull, Entries: []uint32{1}},
+		{Kind: KindBoss, Entry: 1},
+		{Kind: KindLoot, Entry: 1},
+		{Kind: KindOpen, Entry: 1},
+		{Kind: KindHold, Entries: []uint32{1}},
+		{Kind: KindWaitObject, Entry: 1},
+		{Kind: KindWaitClear, Radius: 5},
+		{Kind: KindRitual, Entry: 1},
+	} {
+		r.Plan, r.Flags = "p", r.Flags|FlagDeadNpcIsDone
+		if err := Validate(Rows{Steps: []StepRow{r}}); err == nil || !strings.Contains(err.Error(), "dead-npc-is-done") {
+			t.Errorf("%s row with the flag: %v", r.Kind, err)
+		}
+	}
+}
+
+// In a plan file the key belongs to a gossip step only: on any other step the loader refuses an unknown field.
+func TestDeadIsDoneKeyIsForGossipSteps(t *testing.T) {
+	const js = `{"version":1,"name":"zf","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"end","to":{"x":10,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":146084,"near":{"x":30,"y":0,"z":0},"state":"active"},"timeout_s":60,"dead_is_done":true}}]}]}`
+	if _, err := dungeon.Parse("test.json", []byte(js)); err == nil || !strings.Contains(err.Error(), "dead_is_done") {
+		t.Errorf("a wait_for with dead_is_done: %v", err)
+	}
+}
+
 // SkipLegs leaves a named leg out with a warning, and the later legs close up; a name that is no leg is an error.
 func TestSkipLegsClosesUp(t *testing.T) {
 	const js = `{"version":1,"name":"skip","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[

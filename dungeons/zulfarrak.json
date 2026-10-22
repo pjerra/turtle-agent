@@ -1334,7 +1334,8 @@
             "by": "tank",
             "stand": {"x": 1883.8, "y": 1204.5, "z": 8.9},
             "retry_s": 30,
-            "fail_text": "Sergeant Bly's menu has no option to fight: the event is not over (PYRAMID_KILLED_ALL_TROLLS), or he is dead."
+            "fail_text": "Sergeant Bly's menu has no option to fight: the event is not over (PYRAMID_KILLED_ALL_TROLLS), or he is dead.",
+            "dead_is_done": true
           }
         },
         {
