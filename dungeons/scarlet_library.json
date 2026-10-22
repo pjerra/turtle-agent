@@ -22,12 +22,18 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [4287, 4288, 4291, 4296, 4299],
+  "cc_priority": [4299, 4296],
+  "cc_always": [4299],
+  "kill_first": [4291],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 189 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: Houndmaster Loksey's hounds (SPELL_SUMMONSCARLETHOUND)",
     "Needs: Brother Wystan (61983) is a Turtle addition: EventAI, spell list 180317 (Fireball 8402); he patrols (movement_type 2), the boss step meets him on his path",
-    "One of four wings of map 189."
+    "One of four wings of map 189.",
+    "Pack census 2026-10-22 (no GM walk: tools/dungeongen/testdata/map189 + sql/base): 86 library spawns (81 trash 33-36 elite, 3 bosses, Brother Wystan patrols his beat x 209.5-232.0 on the upper floor; the Monk 2583271 patrols 220.8 -386.7 to 220.9 -338.5 on and off the upper floor; the Chaplain 40098 patrols 265 -379 to 221.1 -329; the Beastmaster 40068 and his Hound 40070 patrol x 201.2 -232.9 to 201.4 -288; the Gallants 40047 and 40082 patrol the east hall; tracking-hound packs are creature_groups of the Beastmasters and of Loksey). Flees at 15% HP (EventAI): 4287 4288 4291 4296 4299. Casters: 4291 Diviner (Fireball 9053) and 4296 Adept (Heal 6063); the 4299 Chaplain heals (Power Word: Shield 6066, Renew 8362). Wystan's Fireball 8402 casts with a bar (interruptFlags 15, preventionType 1): boss.tactics.interrupt.",
+    "Fix round 2026-10-22: Loksey's three Tracking Hounds (creature_groups leader 40088: 40089 40090 40091, at 120.9-123.8 -257.7..-261.4, 3 yd from him) were the pull group at his cage and Wystan's two camp Monks (2583275 2583276 at 208.4 210.9 -404.9..-407.3, 3-4 yd from his spawn point) were a pull group by themselves: both folded into their boss step as boss.first. The patrols named above were added to their pull groups (lg1 group of the 220.82 Monk, lg1 group of the Chaplain 265 -379). Arcanist Doan's two hall packs (40119 40120 and 40121 40122 40123) get radius 9: they are 8 yd apart in one 15 yd chain of 8, Doan stands 25.7 yd from the first stand and his spawn 40124 wanders his room at x 142-148 (4 s waits). The 9 run-leader hop notices and the 220 yd detour at the Diviner pair (216.5 -418.5) stay from plan-check (the walk settles them)."
   ],
   "legs": [
     {
@@ -43,6 +49,7 @@
         },
         {
           "entries": [4287, 4296, 4287],
+          "radius": 12,
           "positions": [
             {"x": 223.34, "y": -229.759, "z": 18.614},
             {"x": 221.084, "y": -226.658, "z": 18.614},
@@ -147,18 +154,11 @@
             {"x": 267.888, "y": -233.814, "z": 18.614},
             {"x": 271.381, "y": -233.791, "z": 18.614}
           ]
-        },
-        {
-          "entries": [4304, 4304, 4304],
-          "positions": [
-            {"x": 123.754, "y": -261.435, "z": 18.6299},
-            {"x": 123.09, "y": -258.452, "z": 18.6299},
-            {"x": 120.958, "y": -257.75, "z": 18.6299}
-          ]
         }
       ],
       "boss": {
         "entry": 3974,
+        "first": [4304],
         "position": {"x": 119.938, "y": -260.869, "z": 18.6299}
       }
     },
@@ -235,14 +235,17 @@
           "entries": [4540],
           "positions": [
             {"x": 220.82, "y": -386.671, "z": 23.8437}
-          ]
-        },
-        {
-          "entries": [4540, 4540],
-          "positions": [
-            {"x": 208.394, "y": -404.917, "z": 23.8828},
-            {"x": 210.902, "y": -407.296, "z": 23.8744}
-          ]
+          ],
+          "patrol": {
+            "entries": [4540],
+            "path": [
+              {"x": 220.82, "y": -386.671, "z": 23.8437},
+              {"x": 220.9, "y": -338.5, "z": 18.5}
+            ],
+            "period_s": 38.5,
+            "period_estimate": true,
+            "source": "creature_movement of spawn 2583271 (Scarlet Monk, 2 points, 96.3 yd at 2.5 yd/s: the beat runs from the upper library's y -386.7 down to the floor's y -338.5 and back); the plan check warns for the estimate"
+          }
         },
         {
           "entries": [4291, 4540],
@@ -302,7 +305,23 @@
           "entries": [4299],
           "positions": [
             {"x": 265.031, "y": -379.047, "z": 20.078}
-          ]
+          ],
+          "patrol": {
+            "entries": [4299],
+            "path": [
+              {"x": 265.0, "y": -379.0, "z": 20.1},
+              {"x": 265.2, "y": -341.5, "z": 20.1},
+              {"x": 265.1, "y": -339.1, "z": 18.5},
+              {"x": 265.0, "y": -329.3, "z": 18.5},
+              {"x": 221.1, "y": -329.2, "z": 18.5},
+              {"x": 265.0, "y": -329.3, "z": 18.5},
+              {"x": 265.1, "y": -339.1, "z": 18.5},
+              {"x": 265.2, "y": -341.5, "z": 20.1}
+            ],
+            "period_s": 83,
+            "period_estimate": true,
+            "source": "creature_movement of spawn 40098 (Scarlet Chaplain, 8 points, 207 yd at 2.5 yd/s: the beat runs south past the diviners' hall to y -329 and walks west to x 221.1 and back); the plan check warns for the estimate"
+          }
         },
         {
           "entries": [4299, 4291],
@@ -335,7 +354,9 @@
       ],
       "boss": {
         "entry": 61983,
-        "position": {"x": 209.491, "y": -401.61, "z": 23.8661}
+        "first": [4540],
+        "position": {"x": 209.491, "y": -401.61, "z": 23.8661},
+        "tactics": {"interrupt": ["Fireball"]}
       }
     },
     {
@@ -344,6 +365,7 @@
       "pull_groups": [
         {
           "entries": [4540, 4540],
+          "radius": 9,
           "positions": [
             {"x": 173.965, "y": -427.5, "z": 18.6164},
             {"x": 173.977, "y": -430.87, "z": 18.616}
@@ -351,6 +373,7 @@
         },
         {
           "entries": [4291, 4540, 4299],
+          "radius": 9,
           "positions": [
             {"x": 180.105, "y": -442.338, "z": 18.9438},
             {"x": 183.061, "y": -443.497, "z": 18.9388},
