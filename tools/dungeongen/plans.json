@@ -71,6 +71,7 @@
    "title": "Blackfathom Deeps",
    "map": 48,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map48",
    "trigger": 257,
    "bosses": [
