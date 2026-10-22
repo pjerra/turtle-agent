@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -63,6 +64,9 @@ const (
 	// wipeDeadReArm is the dead-member count below which the wipe latch re-arms (TortoiseBots DungeonRunPolicy.kWipeDead, 3): a party
 	// that is all dead, one member alive for a poll, all dead again, is one collapse, not two.
 	wipeDeadReArm = 3
+	// wipeWindow is a wipe counted from the feed's deaths: every member of the party dying within this long, even when the lead bot
+	// revives in between (the RFC run: all five dead within 63 s, never in one frame).
+	wipeWindow = 90 * time.Second
 )
 
 func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
@@ -167,18 +171,23 @@ func (r *ObserveReport) clone() *ObserveReport {
 
 // observeState is the observer's own state.
 type observeState struct {
-	spec      ObserveSpec
-	started   bool
-	startedAt time.Time
-	last      tbm.RunStatus
-	haveLast  bool
-	lastAt    time.Time // when the status last changed
-	pausedAt  time.Time
-	seenN     uint64
-	baseN     uint64 // lines read before the start: older ones are another run's
-	lastPoll  time.Time
-	serverEnd bool // the module said the run is done: no stop is needed
-	wiped     bool // the feed showed the whole party dead: one rising edge of it is one wipe
+	spec       ObserveSpec
+	started    bool
+	startedAt  time.Time
+	last       tbm.RunStatus
+	haveLast   bool
+	lastAt     time.Time // when the status last changed
+	pausedAt   time.Time
+	seenN      uint64
+	baseN      uint64 // lines read before the start: older ones are another run's
+	lastPoll   time.Time
+	serverEnd  bool                      // the module said the run is done: no stop is needed
+	wiped      bool                      // the feed showed the whole party dead: one rising edge of it is one wipe
+	wasDead    map[packet.GUID]bool      // dead in the previous frame (nil until the first frame)
+	deathAt    map[packet.GUID]time.Time // when each member last went dead
+	leadDownAt time.Time                 // when the lead bot last went dead
+	leadDown   bool
+	lastWipeAt time.Time // when the last wipe was counted
 	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
 	restSince time.Time // when the run leader's current rest phase began
 	restOpen  bool
@@ -361,12 +370,17 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		// latch re-arms only once fewer than wipeDeadReArm members are dead (the module's kWipeDead): a single in-place revive (one member
 		// alive for a poll, dead again the next) re-arms a plain "not all dead" check and double counts the collapse. The "wipe" event goes
 		// to the trace, so the tracecheck deaths oracle sees the wipes of an observed run too (stepFailedRecover never runs in observe mode).
+		// The window rule counts a wipe the frames never show: every member died within wipeWindow, each death newer than the last counted
+		// wipe, so a lead bot that revives between their deaths does not hide the collapse. trackObservedDeaths reads the same frames for
+		// the lead bot's deaths and revives.
 		all := d.countDeaths()
-		if all && !o.wiped {
+		window := d.trackObservedDeaths(d.clk.Now())
+		if (all || window) && !o.wiped {
 			d.rep.update(func(r *Report) { r.Wipes++ })
-			d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": "the whole party is dead", "observe": true})
+			o.lastWipeAt = d.clk.Now()
+			d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": "the whole party is dead", "observe": true, "window": !all})
 		}
-		if all {
+		if all || window {
 			o.wiped = true
 		} else if deadCount(d.fr) < wipeDeadReArm {
 			o.wiped = false
@@ -798,6 +812,52 @@ func deadCount(fr tbm.ViewFrame) int {
 		}
 	}
 	return n
+}
+
+// trackObservedDeaths follows the party's deaths in the newest frame: the lead bot's deaths and revives go into the report
+// (LeaderDeaths, Resurrections, SecondsDead, the leg's too) and the trace (event leader_death), and the result says that every
+// member has died within wipeWindow, each death newer than the last counted wipe.
+func (d *RemoteDriver) trackObservedDeaths(now time.Time) bool {
+	o := d.obs
+	if !d.haveFr {
+		return false
+	}
+	if o.wasDead == nil { // the first frame is the baseline: a bot already dead in it is not a death
+		o.wasDead, o.deathAt = map[packet.GUID]bool{}, map[packet.GUID]time.Time{}
+		for _, p := range d.fr.Party {
+			o.wasDead[p.GUID] = p.Dead
+		}
+		return false
+	}
+	for _, p := range d.fr.Party {
+		isLead := d.fr.Lead != 0 && p.GUID == d.fr.Lead
+		if p.Dead && !o.wasDead[p.GUID] {
+			o.deathAt[p.GUID] = now
+			if isLead {
+				o.leadDown, o.leadDownAt = true, now
+				d.rep.update(func(r *Report) { r.LeaderDeaths++ })
+				d.legStat(func(l *LegReport) { l.LeaderDeaths++ })
+				d.tr.Event("leader_death", map[string]any{"name": p.Name, "a": guidText(p.GUID), "leg": d.curLeg})
+			}
+		}
+		if !p.Dead && o.wasDead[p.GUID] && isLead && o.leadDown {
+			o.leadDown = false
+			secs := now.Sub(o.leadDownAt).Seconds()
+			d.rep.update(func(r *Report) { r.Resurrections++; r.SecondsDead += secs })
+			d.legStat(func(l *LegReport) { l.Resurrections++; l.SecondsDead += secs })
+		}
+		o.wasDead[p.GUID] = p.Dead
+	}
+	if len(d.fr.Party) < 2 {
+		return false
+	}
+	for _, p := range d.fr.Party {
+		at, ok := o.deathAt[p.GUID]
+		if !ok || !at.After(o.lastWipeAt) || now.Sub(at) > wipeWindow {
+			return false
+		}
+	}
+	return true
 }
 
 // legOf finds the plan leg a status line names (by name, or by number when the module had no name); -1 when none.

@@ -1691,9 +1691,13 @@ for a hand-sent run command.
 **Report.** `report.remote.mode` is `observe`; `report.remote.observe` has `plan`, the newest `state`, `step`, `steps`, `leg`, `kind`, `phase`, `note` and a
 plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.wipes`
 counts the watched party's wipes: one rising edge of "every bot dead" in the feed is one wipe, the latch re-arms only once fewer than
-3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe), and each counted
-wipe also goes to the trace as a `wipe` event with `"observe": true`, so the tracecheck deaths oracle sees it too (the run leader stops
-and recovers on its own; the watch only counts). `report.legs[]` has one
+3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe). A wipe also counts
+when every member has died within 90 s of each other, each death newer than the last counted wipe, even if the lead bot revived in
+between (no frame shows them all dead; the RFC run: five dead within 63 s): that `wipe` event has `"window": true`. Each counted wipe
+also goes to the trace as a `wipe` event with `"observe": true`, so the tracecheck deaths oracle sees it too (the run leader stops and
+recovers on its own; the watch only counts). In an observe run `report.leader_deaths`, `report.resurrections` and `report.seconds_dead`
+(in all and per leg) count the lead bot's deaths and revives from the feed, each death also a `leader_death` trace event; a revive here
+is any return to alive, the run leader's own revive included, not only an accepted resurrection. `report.legs[]` has one
 entry per leg the run leader entered, with its seconds. `report.current` is "run leader: sentinel · pull 7/41 · pulling". `report.instance` is the lead bot's numeric instance id, read from the feed
 (absent until a frame shows one); the trace has one `instance` event (`instance`, `map`) and the summary's `instance` is filled from it when
 the header has none. The orders counters stay at zero but for the end's
@@ -2138,6 +2142,16 @@ with the ordinary per-leg logic (the rest gate at the leg's start, walks, pulls,
    agent sends `cmd move <the point it landed on>` (the module's hold-this-spot order; `cmd stay` as the last try) and watches the feed for 4 s
    to see the bot stay within 4 yd of it (three tries, then the run fails);
 4. `cmd summon <bot>` for every other living bot that is not with the lead bot, and a wait until all stand together.
+
+**The commander's z (issue #292).** `.go xyz` takes the z it is given and never snaps to the ground, so a point with a wrong z put the
+commander under the terrain (or in the air) and the party was brought to it. After step 2 the agent selects its own character, waits
+for the server to show the selection, and sends the plain GM line `.gps` (the reply's lines are read as `KindSystem` text) and reads `GroundZ` (the top surface) and `FloorZ` (the floor under the commander's z). A
+commander more than 0.5 yd from `FloorZ` gets one more `.go xyz X Y FloorZ+0.3` (booked as a GM start line) and `.gps` is read again. The
+start is refused, before the lead bot is touched, with the target z, `GroundZ`, `FloorZ` and the commander's z when it still stands more
+than 0.5 yd off the floor, or when `GroundZ` and `FloorZ` differ and `FloorZ` is more than 3 yd from the target z (the floor under the
+commander is another layer than the point). The check is best effort: a failed or unanswered `.gps`, a reply without its X/Y, `GroundZ` or
+`FloorZ`, a reply about another unit (its X/Y more than 20 yd from the commander) or one with no height data (-200000) leaves the start as
+it was, with one note per run saying the z check could not be made.
 
 The two GM lines are the only GM commands; neither is aimed at another player. They count in `remote.gm_commands` and are listed in
 `setup_shortcuts` as `... (GM start point)` and in `start.gm_commands`. A party that is at the start point already (the lead bot within 20 yd,

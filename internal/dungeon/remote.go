@@ -536,6 +536,7 @@ type RemoteDriver struct {
 
 	bound       bool
 	unbinding   bool
+	gpsWarned   bool // the note that the start's z check could not read .gps is written
 	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
