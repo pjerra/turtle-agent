@@ -392,3 +392,7 @@ func TestRemoteEnterGatherCountsMissingDeadAndFarBotsAsApart(t *testing.T) {
 		}
 	}
 }
+
+func (*portalFake) GPS(context.Context) (string, error) {
+	return "", errors.New("no .gps in this fake")
+}
