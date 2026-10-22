@@ -34,38 +34,45 @@
   "legs": [
     {
       "name": "roogug",
-      "to": {"x": 1987.53, "y": 1600.03, "z": 79.8027},
+      "to": {"x": 1994, "y": 1615, "z": 83.2},
       "pull_groups": [
         {
           "entries": [4530],
           "positions": [
             {"x": 1987.53, "y": 1600.03, "z": 79.8027}
-          ]
+          ],
+          "radius": 25
         },
         {
           "entries": [4436, 4436],
           "positions": [
             {"x": 1996.96, "y": 1606.41, "z": 81.8151},
             {"x": 2005.06, "y": 1597.86, "z": 81.3098}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4520],
           "positions": [
             {"x": 1996.25, "y": 1630.64, "z": 80.9216}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4436, 4436],
           "positions": [
             {"x": 2000.94, "y": 1646.68, "z": 80.5056},
             {"x": 2012.39, "y": 1646.38, "z": 80.4228}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4520],
           "positions": [
             {"x": 2019.32, "y": 1660.39, "z": 82.7042}
+          ],
+          "approach": [
+            {"x": 2000, "y": 1635, "z": 81}
           ]
         },
         {
@@ -247,7 +254,10 @@
         "entry": 6168,
         "position": {"x": 2142.99, "y": 1581.57, "z": 80.3842},
         "first": [4516, 4442]
-      }
+      },
+      "notes": [
+        "opening stand (r19-19z37 live run 1, stopped at step 4): the party stood at 1987.5 1600, where the formation slot's ground lookup finds the upper walkway at about z 95 (floors at 1988 1608: 95.0 and 1975 1600: 92.9). The two ranged bots walked the corridor west to the ramp foot at 1949.9 1594.4 and up it while idle after the fight (targets were themselves, activity 'formation station'), not chasing a runner: no mob of the run ever stood above z 83. The stand is now 1994 1615, a lower-floor pocket whose 2 yd ring has no upper polygon (1992-1996, 1613-1617 all z 83.0-83.7), so the formation slots do not pull the bots up. The ramp is STEEP-flagged above z 87 for the agent's filter; the server's own filter (steep included) paths both ways. Pull group 0 keeps radius 25 so its Handler 4530, which wanders 22 yd to the corridor mouth, is owned and not hop-pulled; the two 4436 pairs and the 4520 have radius 10 so a wandering joiner is not dragged in. Pull group 4's approach 2000 1635 is the explicit corridor regroup after the first four pulls."
+      ]
     },
     {
       "name": "aggem_thorncurse",

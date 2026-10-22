@@ -39,6 +39,37 @@ func TestRazorfenUnitListsComeFromTheCensus(t *testing.T) {
 	}
 }
 
+// The opening stand of leg 0 (r19-19z37 live run 1, stopped at step 4): the party stands at 1994 1615, a lower-floor pocket
+// with no upper polygon in its formation ring, not at 1987.5 1600 where the slot lookup found the walkway above (z 92-95) and
+// the two ranged bots climbed the west ramp while idle after the fight. The Handler 4530 keeps radius 25 (it wanders 22 yd to
+// the corridor mouth and was hop-pulled when the radius was 10); the Quilguards and the Geomancer keep radius 10, and the
+// 4520 after them carries the corridor regroup move at 2000 1635.
+func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
+	p := loadPlan(t, rfkPlan)
+	l := rfkLeg(t, p, "roogug")
+	if got := fmt.Sprintf("%.1f %.1f %.1f", l.To.X, l.To.Y, l.To.Z); got != "1994.0 1615.0 83.2" {
+		t.Errorf("roogug to = %s, want 1994.0 1615.0 83.2", got)
+	}
+	want := []struct {
+		group  int
+		radius float32
+	}{
+		{0, 25}, // Handler 4530: its own wander to the corridor mouth
+		{1, 10}, // Quilguard pair
+		{2, 10}, // Geomancer 4520
+		{3, 10}, // second Quilguard pair
+	}
+	for _, c := range want {
+		if got := l.PullGroups[c.group].Radius; got != c.radius {
+			t.Errorf("roogug pull group %d radius %v, want %v", c.group, got, c.radius)
+		}
+	}
+	g := l.PullGroups[4]
+	if len(g.Approach) != 1 || g.Approach[0].X != 2000 || g.Approach[0].Y != 1635 || g.Approach[0].Z != 81 {
+		t.Errorf("roogug pull group 4 approach %+v, want the corridor regroup point 2000 1635 81", g.Approach)
+	}
+}
+
 // The packs that stand with a boss are the boss row's first, not pulls of their own: Roogug's two Defenders and two Adepts (8 yd
 // from him, a pull of radius 23.6 took the boss in), Jargba's Acolyte and Groundshaker (6-9 yd), the two Death's Head Priests
 // under Charlga's den (the boss is 2 yd from the priest pull, 20 yd up). The two Spearhides 5-6 yd from Ramtusk are his first.
