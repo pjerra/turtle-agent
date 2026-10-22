@@ -20,7 +20,12 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+//
+// frostmane_hollow (191, counted when the plan became hand-edited on 2026-10-22) is a generated skeleton with the run leader's rows fixed by hand
+// from the census (Hailar's, Kan'za's and Handler Oboka's linked adds are the boss rows' first, the two Warrior camps of leg 1 are one group,
+// the leg starts are stands): its groups carry no radius of their own, so this check counts them at the driver's 25 yd, while the exported
+// rows take the exporter's own radius (farthest member + 10 yd). The radii are for the mapping walk, which has not been done.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "frostmane_hollow": 191}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

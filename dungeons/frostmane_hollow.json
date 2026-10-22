@@ -20,6 +20,8 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [63137, 63139],
+  "kill_first": [63136, 63132, 36519, 82],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 822 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -29,7 +31,7 @@
   "legs": [
     {
       "name": "battlemaster_ubukaz",
-      "to": {"x": -7581.97, "y": -3608.21, "z": 215.07},
+      "to": {"x": -7593.75, "y": -3614.8, "z": 215.29},
       "pull_groups": [
         {
           "entries": [19],
@@ -149,7 +151,7 @@
     },
     {
       "name": "kan'za_the_seer",
-      "to": {"x": -7740.86, "y": -3565.81, "z": 200.656},
+      "to": {"x": -7751.21, "y": -3557.16, "z": 200.24},
       "pull_groups": [
         {
           "entries": [51],
@@ -330,13 +332,6 @@
           ]
         },
         {
-          "entries": [63137, 63137],
-          "positions": [
-            {"x": -7764.02, "y": -3475.73, "z": 192.062},
-            {"x": -7765.74, "y": -3479.52, "z": 192.015}
-          ]
-        },
-        {
           "entries": [67, 51, 108],
           "positions": [
             {"x": -7747.2, "y": -3474.48, "z": 192.603},
@@ -427,18 +422,13 @@
           ]
         },
         {
-          "entries": [67, 67, 67, 67, 108],
+          "entries": [67, 67, 67, 67, 108, 108, 67, 67, 67, 67],
           "positions": [
             {"x": -7684.37, "y": -3495.96, "z": 191.159},
             {"x": -7682.01, "y": -3492.23, "z": 191.203},
             {"x": -7677.94, "y": -3490, "z": 191.286},
             {"x": -7683.46, "y": -3500.57, "z": 191.179},
-            {"x": -7679.57, "y": -3496.28, "z": 191.251}
-          ]
-        },
-        {
-          "entries": [108, 67, 67, 67, 67],
-          "positions": [
+            {"x": -7679.57, "y": -3496.28, "z": 191.251},
             {"x": -7666.32, "y": -3499.98, "z": 191.261},
             {"x": -7662.06, "y": -3493.81, "z": 191.174},
             {"x": -7666, "y": -3508.29, "z": 191.26},
@@ -485,12 +475,16 @@
       ],
       "boss": {
         "entry": 63129,
-        "position": {"x": -7762.68, "y": -3478.69, "z": 192.057}
-      }
+        "position": {"x": -7762.68, "y": -3478.69, "z": 192.057},
+        "first": [63137, 63137]
+      },
+      "notes": [
+        "Kan'za's two Snowcallers (63137, 3 yd from him, linked to him by creature_linking flag 3) are the boss row's first, not a pull group; the group of Cretins and Warriors at -7681 -3495 / -7664 -3501 is one pull group (two camps 17 yd apart whose pull circles overlapped)."
+      ]
     },
     {
       "name": "tan'sha_the_sleek",
-      "to": {"x": -7561.77, "y": -3482.95, "z": 200.047},
+      "to": {"x": -7574.73, "y": -3486.63, "z": 200.27},
       "pull_groups": [
         {
           "entries": [67, 63137, 51],
@@ -573,12 +567,6 @@
           ]
         },
         {
-          "entries": [63132],
-          "positions": [
-            {"x": -7549.87, "y": -3312.25, "z": 193.356}
-          ]
-        },
-        {
           "entries": [82],
           "positions": [
             {"x": -7551.01, "y": -3404.34, "z": 198.928}
@@ -601,12 +589,16 @@
       ],
       "boss": {
         "entry": 63133,
-        "position": {"x": -7552.62, "y": -3312.94, "z": 193.313}
-      }
+        "position": {"x": -7552.62, "y": -3312.94, "z": 193.313},
+        "first": [63132]
+      },
+      "notes": [
+        "Handler Oboka (63132, a healer 3 yd from Tan'sha and linked to her) is the boss row's first, not a pull group: pulling him alone pulls the boss."
+      ]
     },
     {
       "name": "hailar_the_frigid",
-      "to": {"x": -7897.85, "y": -3476.12, "z": 196.283},
+      "to": {"x": -7886.46, "y": -3483.11, "z": 197.46},
       "pull_groups": [
         {
           "entries": [63137, 63139, 63136],
@@ -623,36 +615,6 @@
           ]
         },
         {
-          "entries": [36519],
-          "positions": [
-            {"x": -8006.62, "y": -3469.16, "z": 187.528}
-          ]
-        },
-        {
-          "entries": [36519],
-          "positions": [
-            {"x": -8020.6, "y": -3476.01, "z": 187.528}
-          ]
-        },
-        {
-          "entries": [36519],
-          "positions": [
-            {"x": -8030.99, "y": -3465.72, "z": 187.528}
-          ]
-        },
-        {
-          "entries": [36519],
-          "positions": [
-            {"x": -8025.42, "y": -3451.11, "z": 187.528}
-          ]
-        },
-        {
-          "entries": [36519],
-          "positions": [
-            {"x": -8009.89, "y": -3452.75, "z": 187.528}
-          ]
-        },
-        {
           "entries": [63135],
           "positions": [
             {"x": -7908.1, "y": -3535.26, "z": 144.064}
@@ -661,8 +623,12 @@
       ],
       "boss": {
         "entry": 63130,
-        "position": {"x": -8019.12, "y": -3462.6, "z": 187.528}
-      }
+        "position": {"x": -8019.12, "y": -3462.6, "z": 187.528},
+        "first": [36519, 36519, 36519, 36519, 36519]
+      },
+      "notes": [
+        "Hailar's five Ritualists (36519, passive channelers of Frostmane Ritual 41592, 150 hp/s each on him, linked to him and to each other) are the boss row's first, killed before him (and in kill_first), not five single pulls."
+      ]
     }
   ]
 }

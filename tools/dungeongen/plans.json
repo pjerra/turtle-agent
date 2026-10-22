@@ -719,6 +719,7 @@
    "title": "Frostmane Hollow",
    "map": 822,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map822",
    "trigger": 5662,
    "bosses": [
