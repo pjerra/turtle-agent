@@ -440,6 +440,211 @@ func TestObserveCountsNoWipeWhileABotLives(t *testing.T) {
 	}
 }
 
+// observeRunScript keeps an observed run going past the death tables of the window tests: a status every 20 s and done at 200 s.
+func observeRunScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		{s(20), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		{s(40), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		{s(60), rs("running", 3, 5, "first", "boss", "fight", "fighting")},
+		{s(80), rs("running", 4, 5, "first", "move", "walk", "walking")},
+		{s(100), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(120), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(140), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(160), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(180), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(200), rs("done", 5, 5, "first", "move", "walk", "plan done")},
+	}
+}
+
+// deathsOnTickTable kills the party indexes the table names for each tick of the watch (one cfg.Poll sleep, one frame): the ticks
+// after the table's last key are all alive.
+func deathsOnTickTable(g *fakeLeader, table map[int][]int) {
+	base := g.onTick
+	ticks := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		dead := map[int]bool{}
+		for _, i := range table[ticks] {
+			dead[i] = true
+		}
+		for i, p := range fr.party {
+			if dead[i] {
+				p.Dead, p.HP, p.State = true, 0, "d"
+			} else {
+				p.Dead, p.HP, p.State = false, p.MaxHP, "n"
+			}
+		}
+	}
+}
+
+// fiveBotLeader is the party of the wipe tests: five bots, the lead bot first (the frame's Lead).
+func fiveBotLeader(t *testing.T, script ...leaderStep) *fakeLeader {
+	g := newFakeLeader(t, script...)
+	g.party = append(g.party, &tbm.PartyRec{GUID: packet.GUID(0x2D), Name: "Loxy", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"},
+		&tbm.PartyRec{GUID: packet.GUID(0x2E), Name: "Grok", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"})
+	return g
+}
+
+// An observed run's report counts the lead bot's own deaths and revives from the feed: two deaths, each revived 5 s later, and no
+// wipe (the other four never died).
+func TestObserveCountsALeadDeathAndItsRevive(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 5: {0}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-lead-death"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.LeaderDeaths != 2 || rep.Resurrections != 2 {
+		t.Fatalf("leader deaths %d resurrections %d (want 2 and 2)\n%s", rep.LeaderDeaths, rep.Resurrections, notesOf(rep))
+	}
+	if rep.SecondsDead < 5 || rep.SecondsDead > 20 {
+		t.Fatalf("seconds dead %v (want 5..20)", rep.SecondsDead)
+	}
+	if rep.Wipes != 0 {
+		t.Fatalf("wipes %d (want 0)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 2 {
+		t.Fatalf("deaths %d (want 2): %+v", len(rep.Deaths), rep.Deaths)
+	}
+	legDeaths := 0
+	for _, l := range rep.Legs {
+		legDeaths += l.LeaderDeaths
+	}
+	if legDeaths != 2 {
+		t.Fatalf("leg leader deaths %d (want 2): %+v", legDeaths, rep.Legs)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-lead-death.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range f.Events {
+		if e.Ev == "leader_death" {
+			n++
+			if e.D["name"] != "Tanky" {
+				t.Fatalf("leader_death names %v (want Tanky)", e.D["name"])
+			}
+		}
+	}
+	if n != 2 {
+		t.Fatalf("%d leader_death events in the trace (want 2)", n)
+	}
+	if c := f.End.Counter("leader_deaths"); c != 2 {
+		t.Fatalf("trace end leader_deaths %v (want 2)", c)
+	}
+}
+
+// The RFC case: the lead bot revives, so the whole party is never dead in one frame, but all five died within 25 s: one wipe.
+func TestObserveCountsAWipeSpreadOverOneEpisode(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-wipe"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if rep.LeaderDeaths != 2 {
+		t.Fatalf("leader deaths %d (want 2)", rep.LeaderDeaths)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-wipe.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+			if e.D["window"] != true {
+				t.Fatalf("the wipe event is not a window wipe: %+v", e.D)
+			}
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+	for _, c := range tracecheck.Score(f, tracecheck.Defaults()) {
+		if c.ID == tracecheck.IDDeaths && !strings.Contains(c.Detail, ", 1 wipes") {
+			t.Fatalf("the deaths oracle does not say 1 wipes: %+v", c)
+		}
+	}
+}
+
+// The same deaths 30 s apart are outside the 90 s window: the lead's first death is 120 s older than the last member's, so no wipe.
+func TestObserveNoWipeWhenTheDeathsAreOutsideTheWindow(t *testing.T) {
+	g := fiveBotLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(100), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		leaderStep{s(200), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		leaderStep{s(300), rs("running", 4, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(400), rs("done", 5, 5, "first", "move", "walk", "plan done")})
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 30 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-out"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 0 {
+		t.Fatalf("wipes %d (want 0)\n%s", rep.Wipes, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-out.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			t.Fatalf("a wipe event outside the window: %+v", e.D)
+		}
+	}
+}
+
+// The window wipe and the all-dead latch are one wipe: counted at tick 6, the all-dead ticks 7 and 8 must not count it again.
+func TestObserveWindowWipeIsNotCountedTwiceWhenTheyThenAllDieTogether(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 1, 2, 3, 4}, 8: {0, 1, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-once"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-once.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+}
+
 func TestObserveRefusesAServerWithoutTheRunLeaderBeforeHiring(t *testing.T) {
 	g := newFakeLeader(t)
 	g.listText = ""
