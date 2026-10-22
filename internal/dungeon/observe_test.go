@@ -787,6 +787,135 @@ func TestObservePauseAndResumeGoThroughTheRPC(t *testing.T) {
 	}
 }
 
+func TestPlayerOrderOf(t *testing.T) {
+	for _, c := range []struct {
+		note  string
+		order string
+		ok    bool
+	}{
+		{"player order (cmd summon Healy): .bot run resume to go on", "cmd summon Healy", true},
+		{"player order (move 1 2 3): .bot run resume to go on; cave cleared meanwhile: .bot run resume goes on with step 4", "move 1 2 3", true},
+		{"player order (cmd revive)", "cmd revive", true},
+		{"player order (cmd summon Healy): .bot run resume to go on; note (2): a later aside", "cmd summon Healy", true},
+		{"3 dead: regroup (cmd revive), then .bot run resume", "", false},
+		{"", "", false},
+	} {
+		order, ok := playerOrderOf(c.note)
+		if ok != c.ok || order != c.order {
+			t.Fatalf("playerOrderOf(%q) = %q, %v", c.note, order, ok)
+		}
+	}
+}
+
+// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the order,
+// and the run going on again is recorded as the resume after it.
+func TestObserveRecordsAPlayerOrderPauseAndItsResume(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("running", 3, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	var d *RemoteDriver
+	paused, asked := false, false
+	g.onStatus = func(l *fakeLeader, st tbm.RunStatus) {
+		// the module paused the run for the order: the leader holds it until a resume
+		if st.State == tbm.RunPaused {
+			paused = true
+			l.paused = true
+		}
+	}
+	tick := g.onTick
+	g.onTick = func(gr *fakeRemote) {
+		// the resume comes a look after the paused status: the watch serves requests before it reads the feed
+		if paused && !asked {
+			asked = true
+			if err := d.RunControl("resume"); err != nil {
+				t.Error(err)
+			}
+		}
+		tick(gr)
+	}
+	d = NewRemoteDriver(observePlan(), g, DefaultConfig(), observeOpts(ObserveSpec{}), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 1 || !strings.Contains(ob.PlayerOrders[0], "cmd summon Healy") || !strings.Contains(ob.PlayerOrders[0], "step 2/") {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	var order, resumed, ack bool
+	for _, c := range ob.Controls {
+		order = order || c == "player order: cmd summon Healy"
+		resumed = resumed || strings.HasPrefix(c, "resumed after the player order")
+		ack = ack || strings.HasPrefix(c, "resume: ack")
+	}
+	if !order || !resumed || !ack {
+		t.Fatalf("controls %v", ob.Controls)
+	}
+}
+
+func TestObserveDoesNotCountAnOrdinaryPauseAsAPlayerOrder(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "3 dead: regroup (cmd revive), then .bot run resume")},
+		leaderStep{s(10), rs("running", 3, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	var d *RemoteDriver
+	paused, asked := false, false
+	g.onStatus = func(l *fakeLeader, st tbm.RunStatus) {
+		if st.State == tbm.RunPaused {
+			paused = true
+			l.paused = true
+		}
+	}
+	tick := g.onTick
+	g.onTick = func(gr *fakeRemote) {
+		if paused && !asked {
+			asked = true
+			if err := d.RunControl("resume"); err != nil {
+				t.Error(err)
+			}
+		}
+		tick(gr)
+	}
+	d = NewRemoteDriver(observePlan(), g, DefaultConfig(), observeOpts(ObserveSpec{}), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if g.indexOf("run resume") < 0 {
+		t.Fatalf("the run was never resumed: %v", g.orders)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 0 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	for _, c := range ob.Controls {
+		if strings.HasPrefix(c, "player order") || strings.HasPrefix(c, "resumed after") {
+			t.Fatalf("controls %v", ob.Controls)
+		}
+	}
+}
+
+// The module appends to the note of a pause it already made ("; boss meanwhile: ..."): that is the same player order, counted once.
+func TestObservePlayerOrderPauseRepeatedNoteCountsOnce(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on; boss meanwhile: .bot run resume goes on with step 3")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if ob := rep.Remote.Observe; len(ob.PlayerOrders) != 1 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+}
+
 func TestObserveAPausedRunThatNobodyResumesIsStopped(t *testing.T) {
 	g := newFakeLeader(t,
 		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},

@@ -153,6 +153,8 @@ type ObserveReport struct {
 	Pauses int `json:"pauses"`
 	// Controls are the pause, resume, skip and stop requests sent, in order, each with its answer.
 	Controls []string `json:"controls,omitempty"`
+	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
+	PlayerOrders []string `json:"player_orders,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
 	Ended string `json:"ended,omitempty"`
 	// Changes are the status changes, oldest first (the newest MaxRunChanges).
@@ -165,6 +167,7 @@ func (r *ObserveReport) clone() *ObserveReport {
 	}
 	c := *r
 	c.Controls = append([]string(nil), r.Controls...)
+	c.PlayerOrders = append([]string(nil), r.PlayerOrders...)
 	c.Changes = append([]RunChange{}, r.Changes...)
 	return &c
 }
@@ -191,6 +194,8 @@ type observeState struct {
 	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
 	restSince time.Time // when the run leader's current rest phase began
 	restOpen  bool
+	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
+	playerPaused bool
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -715,6 +720,22 @@ func (d *RemoteDriver) takeLines(lines []string) {
 	}
 }
 
+// playerOrderOf reads the order out of the note of a pause the module made for a player's order: "player order (<order>): <why>". A later
+// status of the same pause appends to the note ("; X meanwhile: ..."), so the order ends at the first "): ". ok is false for any other note.
+func playerOrderOf(note string) (order string, ok bool) {
+	rest, ok := strings.CutPrefix(note, "player order (")
+	if !ok {
+		return "", false
+	}
+	if order, _, ok := strings.Cut(rest, "): "); ok {
+		return order, true
+	}
+	if i := strings.LastIndex(rest, ")"); i >= 0 {
+		return rest[:i], true
+	}
+	return "", false
+}
+
 // takeStatus folds one status into the observer, the report, the trace, the events and the current-step label.
 func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	o := d.obs
@@ -761,6 +782,25 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 			ob.Changes = append([]RunChange{}, ob.Changes[n-MaxRunChanges:]...)
 		}
 	})
+	// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the
+	// order so a person sees why the run waited. Only the first status of that pause counts: the module appends to the note of a pause it
+	// already made. The run going on again is the resume after the order, whether the agent or a person sent it.
+	if order, ok := playerOrderOf(st.Note); st.State == tbm.RunPaused && ok && !o.playerPaused {
+		o.playerPaused = true
+		d.remote(func(r *RemoteReport) {
+			if ob := r.Observe; len(ob.PlayerOrders) < 50 {
+				ob.PlayerOrders = append(ob.PlayerOrders, fmt.Sprintf("step %d/%d (%s): %s", st.Step, st.Steps, st.Leg, order))
+			}
+		})
+		d.control("player order: " + order)
+		d.tr.Event("player_order", map[string]any{"order": order, "step": st.Step, "leg_name": st.Leg})
+		d.rep.note("observe mode: the run paused for a player order (" + order + ")")
+	}
+	if o.playerPaused && (st.State == tbm.RunRunning || st.State == tbm.RunDone) {
+		o.playerPaused = false
+		d.control(fmt.Sprintf("resumed after the player order at step %d", st.Step))
+		d.rep.note("observe mode: the run went on after the player order")
+	}
 	label := "run leader: " + st.Text()
 	if st.State != tbm.RunRunning {
 		label = "run leader " + st.State + ": " + st.Text()
