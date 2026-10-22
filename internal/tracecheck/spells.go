@@ -235,7 +235,7 @@ var categoryList = []catEntry{
 // longCC is the single-target crowd control that holds a mob long enough to read at 1 Hz. Only these join a cc_hold episode: the
 // short stuns and disorients of the crowd-control category (cheap shot, kidney shot, bash, gouge, death coil, hammer of justice)
 // end unflagged within a few seconds, so counting them would read as broken holds.
-var longCC = []string{"polymorph", "sap", "shackle undead", "freezing trap", "banish", "hibernate", "seduction", "blind", "fear", "turn undead"}
+var longCC = []string{"polymorph", "sap", "shackle undead", "freezing trap", "banish", "hibernate", "entangling roots", "seduction", "blind", "fear", "turn undead"}
 
 // longCCAction says whether an action name is long crowd control (the feed's suffixes are cut first).
 func longCCAction(n string) bool {

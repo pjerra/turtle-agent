@@ -866,6 +866,22 @@ func TestSpellsCCHoldIgnoresAShortStun(t *testing.T) {
 	}
 }
 
+// A root is long crowd control: an Entangling Roots episode that ends early is a broken hold, not left out like a short stun.
+func TestSpellsCCHoldCountsAnEntanglingRootsBreak(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		druid := sb(gMage, "wrath", "O")
+		if s == 9 {
+			druid = sb(gMage, "entangling roots", "O")
+			druid.Target = "0xf1"
+		}
+		flagged := s >= 10 && s <= 13 // 4 s, then the mob is up again
+		return []trace.Bot{druid}, []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: flagged}}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 1 || h.Broken != 1 {
+		t.Fatalf("%+v", h)
+	}
+}
+
 // A mob killed while flagged is not a broken hold: its death ended the episode, not the cc.
 func TestSpellsCCHoldDoesNotCountAMobKilledWhileFlagged(t *testing.T) {
 	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
