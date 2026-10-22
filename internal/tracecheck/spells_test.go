@@ -636,3 +636,347 @@ func TestSpellsMixedVersionTrace(t *testing.T) {
 		t.Fatalf("%+v", r.Idle)
 	}
 }
+
+// tauntTrace: a hostile on the tank that is switched to the healer for [start, start+lat] of episode k (start 10+25k), with the
+// tank taunting at start+lat when taunt is set. No tank is named in the header: the caller sets it.
+func tauntTrace(lats []int, taunt bool) *build {
+	return spellTrace(200, func(s int) ([]trace.Bot, []trace.Mob) {
+		mob := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		tank := sb(gTank, "sunder armor", "O")
+		for k, lat := range lats {
+			start := 10 + 25*k
+			if s >= start && s <= start+lat {
+				mob.Target = gHealer
+				mob.Threat = []trace.Threat{{G: gHealer, Pct: 100}}
+			}
+			if taunt && s == start+lat {
+				tank = sb(gTank, "taunt", "O")
+			}
+		}
+		return []trace.Bot{tank, sb(gHealer, "flash heal", "O")}, []trace.Mob{mob}
+	})
+}
+
+// The median time from a non-tank victim to the tank's taunt, or to the hostile going back to the tank.
+func TestSpellsTauntLatencyMedian(t *testing.T) {
+	// Answered by a taunt: the latency is the frame time of the taunt.
+	b := tauntTrace([]int{2, 2, 2, 6}, true)
+	b.f.Header.Tank = "Tank"
+	r := Spells(b.f, Defaults())
+	if t1 := r.TauntLatency; t1.Episodes != 4 || t1.ByTaunt != 4 || t1.MedianS != 2 || t1.WorstS != 6 {
+		t.Fatalf("%+v", t1)
+	}
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "taunt_latency") {
+			t.Fatalf("median 2 s is within the limit: %q", w)
+		}
+	}
+	// A median over the limit warns, and the check still passes with the warning in its detail.
+	b = tauntTrace([]int{6, 7, 8, 2}, true)
+	b.f.Header.Tank = "Tank"
+	r = Spells(b.f, Defaults())
+	if t1 := r.TauntLatency; t1.MedianS != 6.5 {
+		t.Fatalf("%+v", t1)
+	}
+	warned := false
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "taunt_latency") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("no warning: %q", r.Warnings)
+	}
+	c := get(t, Score(b.f, Defaults()), IDSpells)
+	if c.Verdict != trace.Pass || !strings.Contains(c.Detail, "taunt_latency") {
+		t.Fatalf("%+v", c)
+	}
+	// Returned to the tank without a taunt: the latency is the return frame's time minus the start (lat+1).
+	b = tauntTrace([]int{2, 2, 4, 4}, false)
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 4 || t1.ByTaunt != 0 || t1.Returned != 4 || t1.MedianS != 4 {
+		t.Fatalf("%+v", t1)
+	}
+	// Fewer than three episodes: no warning.
+	b = tauntTrace([]int{9, 9}, true)
+	b.f.Header.Tank = "Tank"
+	r = Spells(b.f, Defaults())
+	if r.TauntLatency.Episodes != 2 || len(r.Warnings) != 0 {
+		t.Fatalf("%+v %q", r.TauntLatency, r.Warnings)
+	}
+	// No tank named anywhere: not measured.
+	b = tauntTrace([]int{2, 2, 2, 6}, true)
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Recorded || t1.Episodes != 0 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// The crowd-control hold: an episode is a run of consecutive frames with the mob flagged, joined to a single-target cc action.
+func TestSpellsCCHoldBrokenEpisodes(t *testing.T) {
+	const polyEvery = 20
+	ccTrace := func(lens []int, extra int, goneFrom int) *build {
+		return spellTrace(100, func(s int) ([]trace.Bot, []trace.Mob) {
+			m := sb(gMage, "frostbolt", "O")
+			if s >= 10 && s <= 70 && s%polyEvery == 10 {
+				m = sb(gMage, "polymorph", "O")
+				m.Target = "0xf1"
+			}
+			flagged := false
+			for k, n := range lens {
+				p := 10 + polyEvery*k
+				if s >= p+1 && s <= p+n {
+					flagged = true
+				}
+			}
+			if extra > 0 && s >= 85 && s < 85+extra {
+				flagged = true
+			}
+			var mobs []trace.Mob
+			if goneFrom < 0 || s < goneFrom {
+				mobs = append(mobs, trace.Mob{G: "0xf2", HPPct: 80, Combat: true, Target: gTank, CC: flagged})
+			}
+			return []trace.Bot{m}, mobs
+		})
+	}
+	// Four joined episodes, two of them shorter than 5 s: half held, no warning at exactly 50 %.
+	r := Spells(ccTrace([]int{10, 10, 2, 2}, 0, -1).f, Defaults())
+	if h := r.CCHold; h.Joined != 4 || h.Broken != 2 || h.HeldPct != 50 {
+		t.Fatalf("%+v", h)
+	}
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "cc_hold") {
+			t.Fatalf("50 %% is not under the limit: %q", w)
+		}
+	}
+	// Three of four broken warns.
+	r = Spells(ccTrace([]int{10, 2, 2, 2}, 0, -1).f, Defaults())
+	if h := r.CCHold; h.Broken != 3 || h.HeldPct != 25 {
+		t.Fatalf("%+v", h)
+	}
+	warned := false
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "cc_hold") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("no warning: %q", r.Warnings)
+	}
+	// A flagged run with no cc action before it is not joined: left out.
+	r = Spells(ccTrace([]int{10, 10, 2, 2}, 2, -1).f, Defaults())
+	if h := r.CCHold; h.Joined != 4 {
+		t.Fatalf("%+v", h)
+	}
+	// A mob that leaves the frames after a short joined episode was not seen unflagged: held, not broken.
+	r = Spells(ccTrace([]int{10, 10, 2, 2}, 0, 73).f, Defaults())
+	if h := r.CCHold; h.Joined != 4 || h.Broken != 1 {
+		t.Fatalf("%+v", h)
+	}
+}
+
+// A victim that is not a party member (a pet) neither opens nor closes a taunt-latency episode.
+func TestSpellsTauntLatencyIgnoresANonPartyVictim(t *testing.T) {
+	const pet = "0xf140000000000009"
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		if s >= 10 && s <= 14 {
+			m.Target, m.Threat = pet, []trace.Threat{{G: pet, Pct: 100}}
+		}
+		return []trace.Bot{sb(gTank, "sunder armor", "O")}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 0 || t1.ByTaunt != 0 || t1.Returned != 0 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// The tank dying during an open episode cuts it off as open: the return after it is a new situation, not an answer.
+func TestSpellsTauntLatencyTankDeathCutsTheEpisodeOff(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		if s >= 10 && s < 20 {
+			m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+		}
+		tank := sb(gTank, "sunder armor", "O")
+		tank.Alive = s < 12 || s >= 20
+		return []trace.Bot{tank, sb(gHealer, "flash heal", "O")}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Open != 1 || t1.Episodes != 0 || t1.ByTaunt != 0 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A taunt-category action from anyone but the tank answers nothing.
+func TestSpellsTauntLatencyCountsOnlyTheTank(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		healer := sb(gHealer, "flash heal", "O")
+		if s >= 10 && s <= 13 {
+			m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+		}
+		if s == 13 {
+			healer = sb(gHealer, "taunt", "O")
+		}
+		return []trace.Bot{sb(gTank, "sunder armor", "O"), healer}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 1 || t1.ByTaunt != 0 || t1.Returned != 1 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A taunt with a target answers only that mob's episode; the other open episode is a return.
+func TestSpellsTauntWithATargetAnswersOnlyThatMobsEpisode(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		tank := sb(gTank, "sunder armor", "O")
+		if s == 13 {
+			tank = sb(gTank, "taunt", "O")
+			tank.Target = "0xf1"
+		}
+		var mobs []trace.Mob
+		for _, g := range []string{"0xf1", "0xf2"} {
+			m := trace.Mob{G: g, HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+			if s >= 10 && s <= 13 {
+				m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+			}
+			mobs = append(mobs, m)
+		}
+		return []trace.Bot{tank, sb(gHealer, "flash heal", "O")}, mobs
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 2 || t1.ByTaunt != 1 || t1.Returned != 1 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A short stun that ends unflagged is not a broken hold: cc_hold joins only the long crowd control.
+func TestSpellsCCHoldIgnoresAShortStun(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		rogue := sb(gMage, "frostbolt", "O")
+		if s == 9 {
+			rogue = sb(gMage, "gouge", "O")
+			rogue.Target = "0xf1"
+		}
+		flagged := s >= 10 && s <= 13 // 4 s, then the mob is up again
+		return []trace.Bot{rogue}, []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: flagged}}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 0 || h.Broken != 0 {
+		t.Fatalf("%+v", h)
+	}
+}
+
+// A root is long crowd control: an Entangling Roots episode that ends early is a broken hold, not left out like a short stun.
+func TestSpellsCCHoldCountsAnEntanglingRootsBreak(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		druid := sb(gMage, "wrath", "O")
+		if s == 9 {
+			druid = sb(gMage, "entangling roots", "O")
+			druid.Target = "0xf1"
+		}
+		flagged := s >= 10 && s <= 13 // 4 s, then the mob is up again
+		return []trace.Bot{druid}, []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: flagged}}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 1 || h.Broken != 1 {
+		t.Fatalf("%+v", h)
+	}
+}
+
+// A mob killed while flagged is not a broken hold: its death ended the episode, not the cc.
+func TestSpellsCCHoldDoesNotCountAMobKilledWhileFlagged(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		mage := sb(gMage, "frostbolt", "O")
+		if s == 9 {
+			mage = sb(gMage, "polymorph", "O")
+			mage.Target = "0xf1"
+		}
+		mob := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: s >= 10 && s <= 11}
+		if s >= 12 {
+			mob.HPPct = 0 // killed while polymorphed: the corpse is no longer flagged
+		}
+		return []trace.Bot{mage}, []trace.Mob{mob}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 1 || h.Broken != 0 {
+		t.Fatalf("%+v", h)
+	}
+}
+
+// The share of mob-frames whose top threat holder is a pet (guid prefix 0xf140).
+func TestSpellsPetThreatShare(t *testing.T) {
+	const pet = "0xf140000000000009"
+	petTrace := func(secs int, petFrame func(s int) bool) *build {
+		return spellTrace(secs, func(s int) ([]trace.Bot, []trace.Mob) {
+			thr := []trace.Threat{{G: gTank, Pct: 100}}
+			if petFrame(s) {
+				thr = []trace.Threat{{G: pet, Pct: 100}}
+			}
+			return []trace.Bot{sb(gTank, "sunder armor", "O")}, []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: thr}}
+		})
+	}
+	r := Spells(petTrace(60, func(s int) bool { return s < 6 }).f, Defaults())
+	if p := r.PetThreat; p.MobFrames != 60 || p.PetTop != 6 || p.Pct != 10 {
+		t.Fatalf("%+v", p)
+	}
+	warned := false
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "pet_threat") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("no warning: %q", r.Warnings)
+	}
+	r = Spells(petTrace(60, func(s int) bool { return s == 0 }).f, Defaults())
+	if p := r.PetThreat; p.Pct != 1.7 || len(r.Warnings) != 0 {
+		t.Fatalf("%+v %q", p, r.Warnings)
+	}
+	// Half the frames, but under 30 mob-frames: no warning.
+	r = Spells(petTrace(20, func(s int) bool { return s < 10 }).f, Defaults())
+	if p := r.PetThreat; p.MobFrames != 20 || p.Pct != 50 || len(r.Warnings) != 0 {
+		t.Fatalf("%+v %q", p, r.Warnings)
+	}
+	// A dead mob, one out of combat and one with no threat list are not mob-frames.
+	b := spellTrace(5, func(s int) ([]trace.Bot, []trace.Mob) {
+		return []trace.Bot{sb(gTank, "sunder armor", "O")}, []trace.Mob{
+			{G: "0xf1", HPPct: 0, Combat: true, Threat: []trace.Threat{{G: pet, Pct: 100}}},
+			{G: "0xf2", HPPct: 90, Combat: false, Threat: []trace.Threat{{G: pet, Pct: 100}}},
+			{G: "0xf3", HPPct: 90, Combat: true},
+		}
+	})
+	if p := Spells(b.f, Defaults()).PetThreat; p.MobFrames != 0 || p.PetTop != 0 {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestSpellsNewLimitsAreSettable(t *testing.T) {
+	d := Defaults()
+	if d.TauntLatencyS != 3 || d.CCHoldPct != 50 || d.PetThreatPct != 5 {
+		t.Fatalf("%+v", d)
+	}
+	cfg := Defaults()
+	for id, field := range map[string]*float64{IDTauntLatency: &cfg.TauntLatencyS, IDCCHold: &cfg.CCHoldPct, IDPetThreat: &cfg.PetThreatPct} {
+		if err := cfg.Set(id, 7); err != nil || *field != 7 {
+			t.Errorf("%s: %v %g", id, err, *field)
+		}
+	}
+	err := (&Config{}).Set("bogus", 1)
+	if err == nil {
+		t.Fatal("bogus is no threshold")
+	}
+	for _, id := range []string{IDTauntLatency, IDCCHold, IDPetThreat} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("%q is not in %q", id, err)
+		}
+	}
+}
+
+func TestSpellsLinesNameTheNewReadings(t *testing.T) {
+	b := tauntTrace([]int{6, 7, 8, 2}, true)
+	b.f.Header.Tank = "Tank"
+	text := strings.Join(Spells(b.f, Defaults()).Lines(), "\n")
+	for _, want := range []string{"taunt latency", "cc hold", "pet threat", "1 Hz"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%q is missing in\n%s", want, text)
+		}
+	}
+}
