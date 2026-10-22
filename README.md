@@ -1190,7 +1190,7 @@ What the driver does for each action of the plan (the stepper decides which):
   TortoiseBots, not to work around). After the cap the run goes on with a note if everyone has 50% health, else it fails. **Report:** `rest_seconds` (the run's total, and per leg),
   and `rest_gates[]`, one per gate: `leg`, `seconds` waited, `max_s`, `result` (`rested`, `stalled` = passed with non-drinkers, `gave_up` = the cap came with someone short, `failed`),
   `short[]` (who was short when it ended, `Wishe mana 29%`), `drink_orders[]`, `drink_order_sent`, `drink_order_result`, `party_rest_refused`,
-  `skipped` and `refills[]`. **Lighter gates (both modes):** a gate that finds everyone at the targets on its first frame costs no time (`skipped: true`, result `rested`);
+  `skipped` and `refills[]`. In an observe run the run leader's own `rest` phases count as rest gates (`result` `run_leader`, and the `rest` trace events carry `"source": "run_leader"`), so `rest_share` is real there too. **Lighter gates (both modes):** a gate that finds everyone at the targets on its first frame costs no time (`skipped: true`, result `rested`);
   the gate that opens a leg whose first step is a walk of 60 yd or more lets the party go when everyone is over the walking floors (health 70%, healer mana 40%, other
   mana 25%) instead of holding: result `walking`, `skipped: true`, a note, and the party rests on the way; the gate before the first pull still waits for the targets.
   A leg's `rest` overrides it: `walk_yd` (`-1`: always hold, 1-5000), `walk_health`, `walk_healer_mana`, `walk_mana`. The report totals them as `rest_gates_skipped` (of which
@@ -1414,7 +1414,8 @@ Events (`ev`; fields beside `ev`, a field named like an envelope field is writte
 | `order` | an order sent: group `via: "chat"`, `intent` (`pullback`, `attack`, `rest`, `follow`, `command`, ...), `text`; remote `via: "cmd"`, `verb`, `text`, `reply` (`ack`, `err`, `timeout`), `code`, `message`, `ms` (the answer's latency) |
 | `refusal` | group mode: a bot's whisper or `TBM:ACTION_ERR` refusing an order: `intent`, `code`, `message` |
 | `pull_start`, `pull_end` | a pull: `target`, `entry`, `guid`, position; the end has `outcome` (`won`, `no_engage`, `evaded`, `refused`, `retarget`, `error`), `kills`, `seconds` |
-| `rest` | a rest gate ended: `seconds` waited, `leg` |
+| `rest` | a rest gate ended: `seconds` waited, `leg`; an observe run's run leader rest has `source` `run_leader` |
+| `instance` | the lead bot's dungeon instance id, once, when the feed shows one: `instance`, `map` (the summary's `instance` comes from it when the header has none) |
 | `stall` | the [run watchdog](#run-watchdog) fired: `level` (`warn`, `recover`, `fail`), `stalled_s`, `last_progress`, `waiting` (phase, step, last order), `phase`; a recovery has `recovery` (what it did) and `recovery_error`, a failure `error` |
 | `walk_start`, `walk_end` | a walk of the plan: target `x y z`; the end has `ok`, `error`, `seconds` |
 | `death`, `wipe` | a party member died (`a` its guid, `name`); the whole party was dead (a wipe, recovered or not) |
@@ -1693,7 +1694,9 @@ counts the watched party's wipes: one rising edge of "every bot dead" in the fee
 3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe), and each counted
 wipe also goes to the trace as a `wipe` event with `"observe": true`, so the tracecheck deaths oracle sees it too (the run leader stops
 and recovers on its own; the watch only counts). `report.legs[]` has one
-entry per leg the run leader entered, with its seconds. `report.current` is "run leader: sentinel · pull 7/41 · pulling". The orders counters stay at zero but for the end's
+entry per leg the run leader entered, with its seconds. `report.current` is "run leader: sentinel · pull 7/41 · pulling". `report.instance` is the lead bot's numeric instance id, read from the feed
+(absent until a frame shows one); the trace has one `instance` event (`instance`, `map`) and the summary's `instance` is filled from it when
+the header has none. The orders counters stay at zero but for the end's
 `stay`. Not in observe mode: `tune`, `live_reload`, `cc`, `carrier`, `loot_restore`, `object_fallback`, `tank`, `healer`, `recover_wipe` and the start options that
 move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) are refused, since the agent steers nothing; `from_leg`, `from_pull_group` and
 `from_step` only say at which step of the run leader's plan it starts.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1054,5 +1055,207 @@ func TestLootOnAtStartSendsBehaviorOrdersUnlessKept(t *testing.T) {
 		} else if strings.Contains(notes, "loot setting kept") {
 			t.Errorf("%s: the kept-setting note went out: %v", c.name, notes)
 		}
+	}
+}
+
+// restScript walks, rests 20 s in the pull, pulls, rests 10 s at the boss, pulls, and is done 40 s later.
+func restScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		{s(30), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		{s(50), rs("running", 3, 5, "first", "boss", "rest", "resting")},
+		{s(60), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		{s(100), rs("done", 5, 5, "second", "move", "walk", "plan done")},
+	}
+}
+
+// restEvents are the trace's "rest" events.
+func restEvents(f *trace.File) []trace.Event {
+	var out []trace.Event
+	for _, e := range f.Events {
+		if e.Ev == "rest" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// The run leader's own rest phase is the observed run's rest: an observe run has no gate of the agent's, so the time a status says
+// phase rest counts as a rest gate, in the report, the leg and the trace.
+func TestObserveCountsTheRunLeadersRestPhase(t *testing.T) {
+	g := newFakeLeader(t, restScript()...)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds < 25 || rep.RestSeconds > 35 {
+		t.Fatalf("rest seconds %v (want 30, 20 s + 10 s)\n%s", rep.RestSeconds, notesOf(rep))
+	}
+	if len(rep.RestGates) != 2 {
+		t.Fatalf("rest gates %+v (want 2)", rep.RestGates)
+	}
+	for _, gate := range rep.RestGates {
+		if gate.Result != "run_leader" {
+			t.Errorf("gate %+v: result %q, want run_leader", gate, gate.Result)
+		}
+	}
+	var sum float64
+	for _, l := range rep.Legs {
+		sum += l.RestSeconds
+	}
+	if diff := sum - rep.RestSeconds; diff > 0.001 || diff < -0.001 {
+		t.Errorf("legs rest %v, report rest %v", sum, rep.RestSeconds)
+	}
+	if rep.RestShare <= 0 {
+		t.Errorf("rest share %v", rep.RestShare)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rests := restEvents(f)
+	if len(rests) != 2 {
+		t.Fatalf("%d rest events in the trace (want 2)", len(rests))
+	}
+	for _, e := range rests {
+		if e.D["source"] != "run_leader" {
+			t.Errorf("rest event %v: source %v", e.Ev, e.D["source"])
+		}
+		if secs, ok := e.D["seconds"].(float64); !ok || secs <= 0 {
+			t.Errorf("rest event seconds %v (%T)", e.D["seconds"], e.D["seconds"])
+		}
+	}
+	for _, c := range tracecheck.Score(f, tracecheck.Defaults()) {
+		if c.ID == tracecheck.IDRestShare && c.Value <= 0 {
+			t.Fatalf("the rest_share check reads %v: %+v", c.Value, c)
+		}
+	}
+}
+
+// A rest the run leader is still in when the run ends is closed at the end, so its time is not lost.
+func TestObserveCountsARestThatIsOpenWhenTheRunEnds(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		leaderStep{s(40), rs("done", 5, 5, "first", "move", "rest", "plan done")},
+	)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-open-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if len(rep.RestGates) != 1 {
+		t.Fatalf("rest gates %+v (want 1)", rep.RestGates)
+	}
+	if rep.RestSeconds < 25 {
+		t.Fatalf("rest seconds %v (want about 30)", rep.RestSeconds)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-open-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rests := restEvents(f); len(rests) != 1 {
+		t.Fatalf("%d rest events in the trace (want 1)", len(rests))
+	}
+}
+
+// A run that never says phase rest has no rest: the leader's phase is not a rest gate until it says so.
+func TestObserveWithNoRestPhaseCountsNoRest(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-no-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds != 0 || len(rep.RestGates) != 0 {
+		t.Fatalf("rest %v in %+v, want none", rep.RestSeconds, rep.RestGates)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-no-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rests := restEvents(f); len(rests) != 0 {
+		t.Fatalf("%d rest events in the trace (want none)", len(rests))
+	}
+}
+
+// instanceEvents are the trace's "instance" events.
+func instanceEvents(f *trace.File) []trace.Event {
+	var out []trace.Event
+	for _, e := range f.Events {
+		if e.Ev == "instance" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// The lead bot's instance id comes from the feed: the report carries it, the trace has one instance event, and the summary reads it
+// from that event.
+func TestObserveExposesTheInstanceId(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	g.party[0].Instance = 4321
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-inst"}
+	})
+	if err != nil || rep.State != "done" || rep.Trace == nil {
+		t.Fatalf("%v %s %s %+v", err, rep.State, rep.Error, rep.Trace)
+	}
+	if rep.Instance != 4321 {
+		t.Fatalf("report instance %d, want 4321", rep.Instance)
+	}
+	f, err := trace.Read(rep.Trace.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insts := instanceEvents(f)
+	if len(insts) != 1 {
+		t.Fatalf("%d instance events in the trace (want 1)", len(insts))
+	}
+	if v, ok := insts[0].D["instance"].(float64); !ok || v != 4321 {
+		t.Fatalf("instance event %v", insts[0].D)
+	}
+	if _, ok := insts[0].D["map"]; !ok {
+		t.Fatalf("the instance event has no map: %v", insts[0].D)
+	}
+	b, err := os.ReadFile(trace.SummaryPath(rep.Trace.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum trace.Summary
+	if err := json.Unmarshal(b, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum.Instance != 4321 {
+		t.Fatalf("summary instance %d, want 4321: %s", sum.Instance, b)
+	}
+
+	// A feed with no instance id says none, and writes no instance event.
+	g = newFakeLeader(t, happyScript()...)
+	dir = t.TempDir()
+	rep, err = runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-no-inst"}
+	})
+	if err != nil || rep.State != "done" || rep.Trace == nil {
+		t.Fatalf("%v %s %s %+v", err, rep.State, rep.Error, rep.Trace)
+	}
+	if rep.Instance != 0 {
+		t.Fatalf("report instance %d, want 0", rep.Instance)
+	}
+	f, err = trace.Read(rep.Trace.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if insts := instanceEvents(f); len(insts) != 0 {
+		t.Fatalf("%d instance events in the trace (want none)", len(insts))
 	}
 }
