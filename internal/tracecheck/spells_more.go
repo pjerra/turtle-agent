@@ -29,8 +29,8 @@ type TauntLatency struct {
 	WorstS   float64 `json:"worst_s"`
 }
 
-// CCHold is the crowd-control episodes joined to a single-target cc action and whether they held. The flags are not tied to the
-// caster: the feed does not say who a polymorph went to.
+// CCHold is the crowd-control episodes joined to a single-target long cc action (polymorph, sap and the like; the short stuns are
+// left out) and whether they held. The flags are not tied to the caster: the feed does not say who a polymorph went to.
 type CCHold struct {
 	Joined  int     `json:"joined_episodes"`
 	Broken  int     `json:"broken"`
@@ -87,21 +87,25 @@ func tauntLatency(f *trace.File, acts []actEv, ivS float64) TauntLatency {
 			party[b.G] = true
 		}
 	}
-	var taunts []int64
+	var taunts []actEv
 	for _, a := range acts {
 		if cat, _ := CategoryOf(a.name); cat == CatTaunt && a.g == tank && a.plausible() {
-			taunts = append(taunts, a.t)
+			taunts = append(taunts, a)
 		}
 	}
-	sort.Slice(taunts, func(i, j int) bool { return taunts[i] < taunts[j] })
+	sort.SliceStable(taunts, func(i, j int) bool { return taunts[i].t < taunts[j].t })
 	open := map[string]int64{} // guid -> the frame time the episode began
 	var lats []float64
 	closeEp := func(g string, st, at int64) {
 		delete(open, g)
 		tt := int64(-1)
-		for _, t := range taunts {
-			if t >= st && t <= at {
-				tt = t
+		for _, ta := range taunts {
+			// A taunt with a target answers only that mob; without one the feed does not say, so any taunt in the episode counts.
+			if ta.target != "" && ta.target != g {
+				continue
+			}
+			if ta.t >= st && ta.t <= at {
+				tt = ta.t
 				break
 			}
 		}
@@ -167,8 +171,9 @@ func tauntLatency(f *trace.File, acts []actEv, ivS float64) TauntLatency {
 }
 
 // ccHold follows the cc flag of every mob: an episode is a run of consecutive frames with the mob present and flagged. Only the
-// episodes that start within the cc window of a single-target cc action are joined (Joined); a joined episode under ccBrokenS
-// that ends with the mob still in view and unflagged was broken, and every other one held.
+// episodes that start within the cc window of a single-target long cc action are joined (Joined; ccs holds those, the short stuns
+// and disorients are left out by longCC); a joined episode under ccBrokenS that ends with the mob still in view, alive and unflagged
+// was broken, and every other one held.
 func ccHold(f *trace.File, ccs []actEv, ivS float64) CCHold {
 	var r CCHold
 	type episode struct {
@@ -205,10 +210,10 @@ func ccHold(f *trace.File, ccs []actEv, ivS float64) CCHold {
 				if m.CC && m.HPPct > 0 {
 					open[m.G] = &episode{start: fr.T, last: fr.T}
 				}
+			case m.HPPct == 0:
+				end(m.G, e, false) // dead: the mob was killed, which is not the hold breaking
 			case !m.CC:
 				end(m.G, e, true)
-			case m.HPPct == 0:
-				end(m.G, e, false) // dead
 			default:
 				e.last = fr.T
 			}

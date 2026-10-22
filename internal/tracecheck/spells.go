@@ -232,6 +232,22 @@ var categoryList = []catEntry{
 	{"wait for attack", CatStay, false},
 }
 
+// longCC is the single-target crowd control that holds a mob long enough to read at 1 Hz. Only these join a cc_hold episode: the
+// short stuns and disorients of the crowd-control category (cheap shot, kidney shot, bash, gouge, death coil, hammer of justice)
+// end unflagged within a few seconds, so counting them would read as broken holds.
+var longCC = []string{"polymorph", "sap", "shackle undead", "freezing trap", "banish", "hibernate", "seduction", "blind", "fear", "turn undead"}
+
+// longCCAction says whether an action name is long crowd control (the feed's suffixes are cut first).
+func longCCAction(n string) bool {
+	n = normalizeAction(n)
+	for _, key := range longCC {
+		if keyMatch(n, key) {
+			return true
+		}
+	}
+	return false
+}
+
 // classKeys are the names that tell a class, listed by class.
 var classKeys = map[string][]string{
 	"warrior": {"sunder armor", "shield bash", "heroic strike", "revenge", "shield slam", "shield block", "thunder clap", "taunt", "challenging shout",
@@ -714,7 +730,7 @@ func Spells(f *trace.File, c Config) SpellReport {
 				r.Taunts.Unknown++
 			}
 		case CatCC:
-			if single && a.plausible() {
+			if single && longCCAction(a.name) && a.plausible() {
 				ccs = append(ccs, a)
 			}
 		}

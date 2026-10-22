@@ -774,6 +774,117 @@ func TestSpellsCCHoldBrokenEpisodes(t *testing.T) {
 	}
 }
 
+// A victim that is not a party member (a pet) neither opens nor closes a taunt-latency episode.
+func TestSpellsTauntLatencyIgnoresANonPartyVictim(t *testing.T) {
+	const pet = "0xf140000000000009"
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		if s >= 10 && s <= 14 {
+			m.Target, m.Threat = pet, []trace.Threat{{G: pet, Pct: 100}}
+		}
+		return []trace.Bot{sb(gTank, "sunder armor", "O")}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 0 || t1.ByTaunt != 0 || t1.Returned != 0 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// The tank dying during an open episode cuts it off as open: the return after it is a new situation, not an answer.
+func TestSpellsTauntLatencyTankDeathCutsTheEpisodeOff(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		if s >= 10 && s < 20 {
+			m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+		}
+		tank := sb(gTank, "sunder armor", "O")
+		tank.Alive = s < 12 || s >= 20
+		return []trace.Bot{tank, sb(gHealer, "flash heal", "O")}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Open != 1 || t1.Episodes != 0 || t1.ByTaunt != 0 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A taunt-category action from anyone but the tank answers nothing.
+func TestSpellsTauntLatencyCountsOnlyTheTank(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		m := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+		healer := sb(gHealer, "flash heal", "O")
+		if s >= 10 && s <= 13 {
+			m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+		}
+		if s == 13 {
+			healer = sb(gHealer, "taunt", "O")
+		}
+		return []trace.Bot{sb(gTank, "sunder armor", "O"), healer}, []trace.Mob{m}
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 1 || t1.ByTaunt != 0 || t1.Returned != 1 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A taunt with a target answers only that mob's episode; the other open episode is a return.
+func TestSpellsTauntWithATargetAnswersOnlyThatMobsEpisode(t *testing.T) {
+	b := spellTrace(40, func(s int) ([]trace.Bot, []trace.Mob) {
+		tank := sb(gTank, "sunder armor", "O")
+		if s == 13 {
+			tank = sb(gTank, "taunt", "O")
+			tank.Target = "0xf1"
+		}
+		var mobs []trace.Mob
+		for _, g := range []string{"0xf1", "0xf2"} {
+			m := trace.Mob{G: g, HPPct: 80, Combat: true, Target: gTank, Threat: []trace.Threat{{G: gTank, Pct: 100}}}
+			if s >= 10 && s <= 13 {
+				m.Target, m.Threat = gHealer, []trace.Threat{{G: gHealer, Pct: 100}}
+			}
+			mobs = append(mobs, m)
+		}
+		return []trace.Bot{tank, sb(gHealer, "flash heal", "O")}, mobs
+	})
+	b.f.Header.Tank = "Tank"
+	if t1 := Spells(b.f, Defaults()).TauntLatency; t1.Episodes != 2 || t1.ByTaunt != 1 || t1.Returned != 1 {
+		t.Fatalf("%+v", t1)
+	}
+}
+
+// A short stun that ends unflagged is not a broken hold: cc_hold joins only the long crowd control.
+func TestSpellsCCHoldIgnoresAShortStun(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		rogue := sb(gMage, "frostbolt", "O")
+		if s == 9 {
+			rogue = sb(gMage, "gouge", "O")
+			rogue.Target = "0xf1"
+		}
+		flagged := s >= 10 && s <= 13 // 4 s, then the mob is up again
+		return []trace.Bot{rogue}, []trace.Mob{{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: flagged}}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 0 || h.Broken != 0 {
+		t.Fatalf("%+v", h)
+	}
+}
+
+// A mob killed while flagged is not a broken hold: its death ended the episode, not the cc.
+func TestSpellsCCHoldDoesNotCountAMobKilledWhileFlagged(t *testing.T) {
+	b := spellTrace(30, func(s int) ([]trace.Bot, []trace.Mob) {
+		mage := sb(gMage, "frostbolt", "O")
+		if s == 9 {
+			mage = sb(gMage, "polymorph", "O")
+			mage.Target = "0xf1"
+		}
+		mob := trace.Mob{G: "0xf1", HPPct: 80, Combat: true, Target: gTank, CC: s >= 10 && s <= 11}
+		if s >= 12 {
+			mob.HPPct = 0 // killed while polymorphed: the corpse is no longer flagged
+		}
+		return []trace.Bot{mage}, []trace.Mob{mob}
+	})
+	if h := Spells(b.f, Defaults()).CCHold; h.Joined != 1 || h.Broken != 0 {
+		t.Fatalf("%+v", h)
+	}
+}
+
 // The share of mob-frames whose top threat holder is a pet (guid prefix 0xf140).
 func TestSpellsPetThreatShare(t *testing.T) {
 	const pet = "0xf140000000000009"
