@@ -22,8 +22,10 @@ type ElunaToolkit interface {
 	TTFloor(ctx context.Context, p Point) (eluna.FloorResult, error)
 	// TTQuiet is `.tt quiet`: whether the area stays clear for wait, and what stands near or roams.
 	TTQuiet(ctx context.Context, p Point, radius float32, wait time.Duration) (eluna.QuietResult, error)
-	// TTPlace is `.tt place`: the party in a ring of spread yards around the point, verified.
-	TTPlace(ctx context.Context, p Point, spread float32) (eluna.PlaceResult, error)
+	// TTPlace is `.tt place ... of=<of>`: the party in a ring of spread yards around the point, verified. of names the
+	// player whose group is placed (a commander bound with `.bot commander bind` is not in the bots' group); empty: the
+	// caller's own group.
+	TTPlace(ctx context.Context, p Point, spread float32, of string) (eluna.PlaceResult, error)
 }
 
 const (
@@ -41,6 +43,9 @@ const (
 	elunaQuietWait   = 20 * time.Second
 	// elunaSpread is the ring's radius: the bots stand within a few yards of the step, not on it.
 	elunaSpread = 3
+	// elunaDriftYd is the distance from its ring spot past which a placed member is noted as drifted: the toolkit's own old
+	// rule (5 yd) is what bots break while walking a few steps after the teleport, on the floor all the same.
+	elunaDriftYd = 5
 )
 
 // elunaPlace is the start placement of an observed run, right before checkStartPlace: the agent moves to the start step's point,
@@ -94,20 +99,33 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 		return fmt.Errorf("observe mode: eluna place: action stay: %w", err)
 	}
 
-	// 5. The party is put at the step, the toolkit's second read proving it.
-	pl, err := tk.TTPlace(ctx, p, elunaSpread)
+	// 5. The party is put at the step, the toolkit's second read proving it. The group is the lead bot's: a bound
+	// commander is not in it, so `of=` names the lead bot whenever a binding stands.
+	of := ""
+	if d.bound {
+		of = d.opt.Lead
+	}
+	pl, err := tk.TTPlace(ctx, p, elunaSpread, of)
 	if err != nil {
 		return fmt.Errorf("observe mode: eluna place: place: %w", err)
 	}
-	if !pl.Placed {
+	// The floor is the test: the bots teleport and then drift a few yards, still on the floor, so a member's distance
+	// from its ring spot is only noted. A missing member (why) or a member off the floor fails the placement.
+	if !pl.OnFloor() {
 		return fmt.Errorf("observe mode: eluna place: place did not verify: %s", describePlaced(pl))
 	}
+	drifted := describeDrift(pl.Members)
 
-	// 6. Follow is released right before the run leader starts and walks.
+	// 6. Follow is released right before the run leader starts and walks. Nothing waits after the place: a bound party
+	// with no run going wanders off within about a minute, so the start follows at once.
 	if _, err := d.g.Command(ctx, "action follow"); err != nil {
 		return fmt.Errorf("observe mode: eluna place: action follow: %w", err)
 	}
-	d.rep.note(fmt.Sprintf("eluna place: quiet, %d placed at %.1f %.1f %.1f", len(pl.Members), p.X, p.Y, p.Z))
+	note := fmt.Sprintf("eluna place: quiet, %d placed at %.1f %.1f %.1f", len(pl.Members), p.X, p.Y, p.Z)
+	if drifted != "" {
+		note += " (drifted: " + drifted + ")"
+	}
+	d.rep.note(note)
 	return nil
 }
 
@@ -134,16 +152,32 @@ func describeQuiet(q eluna.QuietResult) string {
 	return strings.Join(parts, ", ")
 }
 
-// describePlaced lists the members the place's second read did not accept.
+// describePlaced lists the members the place's second read did not accept: the ones it could not find and the ones off the
+// floor (|dz| beyond PlaceDzTolerance). The distance `d` is not a reason: the start path judges by the floor.
 func describePlaced(pl eluna.PlaceResult) string {
 	var parts []string
 	for _, m := range pl.Members {
-		if !m.OK {
-			parts = append(parts, fmt.Sprintf("%s %.1f yd off, %.1f yd high", nonEmpty(m.Name, m.GUID), m.Dist, m.Dz))
+		switch {
+		case m.Why != "":
+			parts = append(parts, fmt.Sprintf("%s %s", nonEmpty(m.Name, m.GUID), m.Why))
+		case absDiff(m.Dz, 0) > eluna.PlaceDzTolerance:
+			parts = append(parts, fmt.Sprintf("%s %.1f yd off the floor, %.1f yd from its spot", nonEmpty(m.Name, m.GUID), m.Dz, m.Dist))
 		}
 	}
 	if len(parts) == 0 {
 		return "no member verified"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// describeDrift lists the placed members that stand more than elunaDriftYd from their ring spot: still on the floor, so a
+// note, not a refusal.
+func describeDrift(ms []eluna.Placed) string {
+	var parts []string
+	for _, m := range ms {
+		if m.Dist > elunaDriftYd {
+			parts = append(parts, fmt.Sprintf("%s %.1f yd", nonEmpty(m.Name, m.GUID), m.Dist))
+		}
 	}
 	return strings.Join(parts, ", ")
 }

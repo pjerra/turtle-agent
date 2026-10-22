@@ -38,6 +38,10 @@ type Client struct {
 	Log     Log
 	NewID   func() string
 	Timeout time.Duration
+	// Of names the player whose group the group commands act on (`of=<name>`). A commander bound with `.bot commander
+	// bind` is not a member of the bots' group, so the toolkit run as the commander must be told the bots' lead bot;
+	// the toolkit's `of=` takes that player's group instead of the caller's. Empty: the caller's own group.
+	Of string
 }
 
 // Error is a reply with ok:false: the toolkit's error code and message.
@@ -73,6 +77,9 @@ func (c *Client) Do(ctx context.Context, sub string, extra time.Duration) ([]Rep
 	}
 	id := newID()
 	since := c.Log.Last()
+	if of := c.ofArg(sub); of != "" {
+		sub += of
+	}
 	if err := c.Send(ctx, ".tt "+sub+" #"+id); err != nil {
 		return nil, err
 	}
@@ -155,6 +162,7 @@ type QuietResult struct {
 type Placed struct {
 	GUID   string    `json:"g"`
 	Name   string    `json:"n"`
+	Why    string    `json:"why"` // set when the member could not be found (gone)
 	OK     bool      `json:"ok"`
 	Pos    []float32 `json:"p"`
 	Dz     float32   `json:"dz"`
@@ -164,10 +172,61 @@ type Placed struct {
 	Alive  bool      `json:"alive"`
 }
 
-// PlaceResult is the second read of `place`: whether every member stands where it was put.
+// PlaceResult is the second read of `place`: whether the party stands on the floor it was put on.
 type PlaceResult struct {
 	Placed  bool
 	Members []Placed
+}
+
+// PlaceDzTolerance is how far a placed member's z may be from the floor it was put on and still count as placed. The
+// toolkit's own `placed` also requires each member within 5 yd of its ring spot, but the bots walk a few yards after the
+// teleport while still on the floor, so distance alone is not a failed placement.
+const PlaceDzTolerance = 1.5
+
+// OnFloor reports whether every member of the placement stands on the floor it was put on: each one found and its |dz|
+// within PlaceDzTolerance. Distance drift (`d`) is not judged here: a bot that stepped a few yards away is still placed.
+func (p PlaceResult) OnFloor() bool {
+	if len(p.Members) == 0 {
+		return false
+	}
+	for _, m := range p.Members {
+		if m.Why != "" || absF(m.Dz) > PlaceDzTolerance {
+			return false
+		}
+	}
+	return true
+}
+
+// ofArg is the `of=` argument Do appends to a group command when Of is set: " of=<name>", else "".
+func (c *Client) ofArg(sub string) string {
+	if c.Of == "" || !groupCommand(sub) {
+		return ""
+	}
+	return " of=" + c.Of
+}
+
+// groupCommand reports whether a toolkit command acts on a group (TortoiseBots tools/eluna/test-toolkit, tt_commands.lua):
+// place, reset and q group. Only those take `of=`; the player's name would be an error on any other command.
+func groupCommand(sub string) bool {
+	f := strings.Fields(sub)
+	if len(f) == 0 {
+		return false
+	}
+	switch f[0] {
+	case "place", "reset":
+		return true
+	case "q":
+		return len(f) > 1 && f[1] == "group"
+	}
+	return false
+}
+
+// absF is |v|.
+func absF(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // Floor asks the z-aware floor at a point.

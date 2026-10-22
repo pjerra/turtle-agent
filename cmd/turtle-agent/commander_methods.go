@@ -586,9 +586,12 @@ func (g remoteGame) TTQuiet(ctx context.Context, p dungeon.Point, radius float32
 	return g.tt().Quiet(ctx, p.X, p.Y, p.Z, radius, wait)
 }
 
-// TTPlace is `.tt place`: the party in a ring of spread yards around the point, verified.
-func (g remoteGame) TTPlace(ctx context.Context, p dungeon.Point, spread float32) (eluna.PlaceResult, error) {
-	return g.tt().Place(ctx, p.X, p.Y, p.Z, spread)
+// TTPlace is `.tt place ... of=<of>`: the party in a ring of spread yards around the point, verified. of names the player
+// whose group is placed (a bound commander is not in it); empty: the caller's own group.
+func (g remoteGame) TTPlace(ctx context.Context, p dungeon.Point, spread float32, of string) (eluna.PlaceResult, error) {
+	c := g.tt()
+	c.Of = of
+	return c.Place(ctx, p.X, p.Y, p.Z, spread)
 }
 
 // Respawn sends the commander's own ".respawn" with nothing selected (dungeon.Respawner): the core respawns the creatures and game objects

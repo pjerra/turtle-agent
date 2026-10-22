@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -214,6 +215,118 @@ func TestPlaceNotPlaced(t *testing.T) {
 	}
 	if (*sent)[0] != ".tt place 10.00 20.00 30.00 spread=3 #t1" {
 		t.Fatalf("sent %q", (*sent)[0])
+	}
+}
+
+// With Of set, the group commands carry `of=<name>`: a bound commander is not in the bots' group, so place, q group and
+// reset would act on the commander's empty group.
+func TestGroupCommandsCarryOf(t *testing.T) {
+	c, l, sent := testClient(t)
+	c.Of = "Leadbot"
+	c.Send = func(ctx context.Context, line string) error {
+		*sent = append(*sent, line)
+		l.add(`TTJSON {"v":1,"cmd":"x","id":"t1","ok":true}`)
+		return nil
+	}
+	for _, sub := range []string{"place 10 20 30 spread=3", "q group", "reset 33"} {
+		if _, err := c.Do(context.Background(), sub, 0); err != nil {
+			t.Fatalf("%s: %v", sub, err)
+		}
+	}
+	want := []string{
+		".tt place 10 20 30 spread=3 of=Leadbot #t1",
+		".tt q group of=Leadbot #t1",
+		".tt reset 33 of=Leadbot #t1",
+	}
+	if !slices.Equal(*sent, want) {
+		t.Fatalf("sent %q, want %q", *sent, want)
+	}
+	// Every other command keeps the caller's group (of= is not a toolkit argument there).
+	if _, err := c.Do(context.Background(), "q units 10", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*sent)[len(*sent)-1]; got != ".tt q units 10 #t1" {
+		t.Fatalf("sent %q", got)
+	}
+}
+
+// Without Of (nothing bound, or the caller's own group) no `of=` is sent.
+func TestGroupCommandsWithoutOf(t *testing.T) {
+	c, l, sent := testClient(t)
+	c.Send = func(ctx context.Context, line string) error {
+		*sent = append(*sent, line)
+		l.add(`TTJSON {"v":1,"cmd":"x","id":"t1","ok":true}`)
+		return nil
+	}
+	if _, err := c.Do(context.Background(), "place 10 20 30 spread=3", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Do(context.Background(), "q group", 0); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{".tt place 10 20 30 spread=3 #t1", ".tt q group #t1"}
+	if !slices.Equal(*sent, want) {
+		t.Fatalf("sent %q, want %q", *sent, want)
+	}
+}
+
+// A placement is judged by the floor, not by the distance: a bot that drifted 7 yd from its ring spot but stands 0.3 yd
+// from the floor is placed (the toolkit's own `placed` says no), while a bot 3 yd off the floor is not.
+func TestPlaceOnFloorJudgesDzNotDistance(t *testing.T) {
+	c, l, _ := testClient(t)
+	c.Send = func(ctx context.Context, line string) error {
+		l.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":1,"final":false,"members":[{"g":"0x1","n":"A"}]}`)
+		l.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":2,"final":true,"placed":false,"members":[{"g":"0x1","n":"A","ok":false,"d":7,"dz":0.3,"alive":true}]}`)
+		return nil
+	}
+	p, err := c.Place(context.Background(), 10, 20, 30, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Placed || !p.OnFloor() {
+		t.Fatalf("d=7 dz=0.3: placed %v, on floor %v", p.Placed, p.OnFloor())
+	}
+
+	c2, l2, _ := testClient(t)
+	c2.Send = func(ctx context.Context, line string) error {
+		l2.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":2,"final":true,"placed":false,"members":[{"g":"0x1","n":"A","ok":false,"d":1,"dz":3}]}`)
+		return nil
+	}
+	p2, err := c2.Place(context.Background(), 10, 20, 30, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2.OnFloor() {
+		t.Fatalf("dz=3 counted as on the floor: %+v", p2)
+	}
+
+	// -0.3 is as close as 0.3 (the height difference is signed).
+	c3, l3, _ := testClient(t)
+	c3.Send = func(ctx context.Context, line string) error {
+		l3.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":2,"final":true,"placed":true,"members":[{"g":"0x1","n":"A","dz":-0.3}]}`)
+		return nil
+	}
+	if p3, err := c3.Place(context.Background(), 10, 20, 30, 3); err != nil || !p3.OnFloor() {
+		t.Fatalf("%+v %v", p3, err)
+	}
+}
+
+// A member the toolkit could not find (why "gone") is not on the floor, and a placement with no members at all is not either:
+// an empty read must not pass as a placed party.
+func TestPlaceOnFloorNeedsEveryMember(t *testing.T) {
+	if (PlaceResult{}).OnFloor() {
+		t.Fatal("an empty placement is on the floor")
+	}
+	gone := PlaceResult{Members: []Placed{{GUID: "0x1", Why: "gone"}, {GUID: "0x2", Dz: 0.2}}}
+	if gone.OnFloor() {
+		t.Fatalf("a gone member passed: %+v", gone)
+	}
+	one := PlaceResult{Members: []Placed{{GUID: "0x1", Dz: 0.2}, {GUID: "0x2", Dz: -1.4}}}
+	if !one.OnFloor() {
+		t.Fatalf("members on the floor were refused: %+v", one)
+	}
+	if edge := (PlaceResult{Members: []Placed{{GUID: "0x1", Dz: 1.5}}}); !edge.OnFloor() {
+		t.Fatal("1.5 yd is the tolerance's edge and must pass")
 	}
 }
 

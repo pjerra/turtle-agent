@@ -34,6 +34,9 @@ type elunaFake struct {
 	placeErr error
 	placeAt  []Point
 	spread   []float32
+	of       []string
+
+	times []time.Time // when each entry of seq was made (the fake clock)
 }
 
 func newElunaFake(t *testing.T) *elunaFake {
@@ -50,6 +53,7 @@ func newElunaFake(t *testing.T) *elunaFake {
 
 func (g *elunaFake) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
 	g.seq = append(g.seq, "go xyz")
+	g.times = append(g.times, g.now)
 	g.goAt = append(g.goAt, at)
 	g.goMap = append(g.goMap, mapID)
 	return g.goErr
@@ -57,26 +61,31 @@ func (g *elunaFake) GoXYZ(ctx context.Context, mapID uint32, at Point) error {
 
 func (g *elunaFake) TTFloor(ctx context.Context, p Point) (eluna.FloorResult, error) {
 	g.seq = append(g.seq, "tt floor")
+	g.times = append(g.times, g.now)
 	return g.floor, g.floorErr
 }
 
 func (g *elunaFake) TTQuiet(ctx context.Context, p Point, r float32, wait time.Duration) (eluna.QuietResult, error) {
 	g.seq = append(g.seq, "tt quiet")
+	g.times = append(g.times, g.now)
 	g.quietAt = append(g.quietAt, p)
 	g.quietR = append(g.quietR, r)
 	g.quietW = append(g.quietW, wait)
 	return g.quiet, g.quietErr
 }
 
-func (g *elunaFake) TTPlace(ctx context.Context, p Point, spread float32) (eluna.PlaceResult, error) {
+func (g *elunaFake) TTPlace(ctx context.Context, p Point, spread float32, of string) (eluna.PlaceResult, error) {
 	g.seq = append(g.seq, "tt place")
+	g.times = append(g.times, g.now)
 	g.placeAt = append(g.placeAt, p)
 	g.spread = append(g.spread, spread)
+	g.of = append(g.of, of)
 	return g.place, g.placeErr
 }
 
 func (g *elunaFake) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	g.seq = append(g.seq, command)
+	g.times = append(g.times, g.now)
 	return g.fakeLeader.Command(ctx, command)
 }
 
@@ -162,6 +171,75 @@ func TestElunaPlaceOrder(t *testing.T) {
 	notes := strings.Join(rep.Notes, "\n")
 	if !strings.Contains(notes, "eluna place: quiet, 2 placed at 1.0 2.0 3.0") {
 		t.Fatalf("notes %v", rep.Notes)
+	}
+}
+
+// The bind makes a bots-only group the commander is not in: the place names the lead bot's group with `of=`.
+func TestElunaPlacePassesTheLeadBotsGroup(t *testing.T) {
+	g := newElunaFake(t)
+	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{X: 1, Y: 2, Z: 3}, true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if !slices.Equal(g.of, []string{"Tanky"}) {
+		t.Fatalf("place of= %q, want the run's lead bot", g.of)
+	}
+}
+
+// Nothing waits after the place: bound bots with no run going wander off in about a minute, so the run starts in the same
+// instant as the placement (the fake clock only moves on a wait).
+func TestElunaPlaceStartsAtOnce(t *testing.T) {
+	g := newElunaFake(t)
+	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{X: 1, Y: 2, Z: 3}, true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	place, start := indexIn(g.seq, "tt place"), indexPrefix(g.seq, "run start")
+	if place < 0 || start < 0 || start < place {
+		t.Fatalf("place at %d, run start at %d: %v", place, start, g.seq)
+	}
+	if !g.times[start].Equal(g.times[place]) {
+		t.Fatalf("the start waited %v after the place: %v", g.times[start].Sub(g.times[place]), g.seq)
+	}
+}
+
+// A member that drifted 7 yd from its ring spot but stands 0.3 yd from the floor is placed: the toolkit's own `placed` is
+// false, the start goes on and the drift is only a note.
+func TestElunaPlaceDriftIsANote(t *testing.T) {
+	g := newElunaFake(t)
+	g.place = eluna.PlaceResult{Placed: false, Members: []eluna.Placed{
+		{GUID: "0x1", Name: "Tanky", Dz: 0.2, Dist: 1.1},
+		{GUID: "0x2", Name: "Magey", Dz: 0.3, Dist: 7},
+	}}
+	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{}, true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	notes := strings.Join(rep.Notes, "\n")
+	if !strings.Contains(notes, "eluna place: quiet, 2 placed at 0.0 0.0 0.0 (drifted: Magey 7.0 yd)") {
+		t.Fatalf("notes %v", rep.Notes)
+	}
+	if indexPrefix(g.orders, "run start") < 0 {
+		t.Fatalf("the run was not started: %v", g.orders)
+	}
+}
+
+// A member 3 yd off the floor is not placed: the run is refused there, with the member and its height named.
+func TestElunaPlaceRefusesOffFloor(t *testing.T) {
+	g := newElunaFake(t)
+	g.place = eluna.PlaceResult{Placed: true, Members: []eluna.Placed{
+		{GUID: "0x1", Name: "Tanky", Dz: 0.2, Dist: 1.1},
+		{GUID: "0x2", Name: "Magey", Dz: 3, Dist: 1, OK: true},
+	}}
+	_, err := runRemote(t, g, observePlan(), elunaOpts(Point{}, true), nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "observe mode: eluna place:") || !strings.Contains(err.Error(), "Magey") || !strings.Contains(err.Error(), "off the floor") {
+		t.Fatalf("%v", err)
+	}
+	if s := placeSeq(g.seq); slices.Contains(s, "action follow") {
+		t.Fatalf("an off-floor party was released: %v", s)
+	}
+	if indexPrefix(g.orders, "run start") >= 0 {
+		t.Fatalf("the run was started: %v", g.orders)
 	}
 }
 
