@@ -27,7 +27,8 @@
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
     "Needs: Arugal's summoning focus (GO_ARUGAL_FOCUS)",
-    "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."
+    "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs.",
+    "Fix round 2026-10-22 (PREP-SFK census): cc_priority = the Shadowfang Darksouls (3855, they shield themselves in shadow on aggro), the Spectral Clerics (61970, the court's casters) and the intro Arugal (10000, a 26 elite with 6510 hp that stands in the pull beside Odo's yard); all three have mechanic_immune_mask 0. No fleers in the legs of this file (only Ashcrombe 3850, a friendly, and Wolfguard Worg 5058, leg 6) and no cc_always/kill_first: no trash stuns the party and Springvale heals his own guards, but he is the pull target himself."
   ],
   "legs": [
     {
@@ -41,23 +42,14 @@
           ]
         },
         {
-          "entries": [3861, 2110, 3851, 3851, 3861, 3851, 3861],
+          "entries": [3861, 2110, 3851, 3851],
           "positions": [
             {"x": -236.623, "y": 2118.53, "z": 87.0845},
             {"x": -241.8, "y": 2113.14, "z": 87.013},
             {"x": -246.038, "y": 2120.35, "z": 87.0119},
-            {"x": -243.039, "y": 2129.03, "z": 87.0962},
-            {"x": -258.757, "y": 2121.37, "z": 81.2629},
-            {"x": -246.705, "y": 2136.28, "z": 81.2629},
-            {"x": -255.29, "y": 2129.89, "z": 81.2629}
-          ]
-        },
-        {
-          "entries": [3866, 3868],
-          "positions": [
-            {"x": -243.174, "y": 2126.93, "z": 100.112},
-            {"x": -248.788, "y": 2122.86, "z": 100.112}
-          ]
+            {"x": -243.039, "y": 2129.03, "z": 87.0962}
+          ],
+          "radius": 14
         },
         {
           "entries": [3873],
@@ -75,7 +67,8 @@
       ],
       "boss": {
         "entry": 3914,
-        "position": {"x": -252.091, "y": 2123.11, "z": 81.1795}
+        "position": {"x": -252.091, "y": 2123.11, "z": 81.1795},
+        "first": [3861, 3851]
       },
       "notes": [
         "button \"Lever\" entry 101811 at -245.6 2132.3 82.8",
@@ -83,7 +76,9 @@
         "button \"Lever\" entry 18901 at -249.2 2123.1 82.8",
         "door \"Cell Door\" entry 18934 at -251.2 2116.4 81.2",
         "door \"Cell Door\" entry 18935 at -244.1 2134.4 81.1",
-        "door \"Cell Door\" entry 18936 at -247.8 2125.2 81.1"
+        "door \"Cell Door\" entry 18936 at -247.8 2125.2 81.1",
+        "Fix round 2026-10-22 (PREP-SFK census): the pack's three southern spawns (-258.8 2121.4, -246.7 2136.3, -255.3 2129.9, z 81) stand 7-13 yd from Rethilgore and are his boss row's entries now; the pull keeps the four of the gallery (z 87, radius 14).",
+        "Fix round 2026-10-22: Odo's guards (Vile Bat 16259, Blood Seeker 16258) were pull group 3 (z 100.1, the hall's floor); they are Odo's creature_group and beyond the closed Courtyard Door: they are leg 4 (odo)'s boss row's entries now."
       ]
     },
     {
@@ -117,17 +112,13 @@
           ]
         },
         {
-          "entries": [3875, 3875],
+          "entries": [3875, 3875, 3854],
           "positions": [
             {"x": -182.096, "y": 2231.79, "z": 76.3246},
-            {"x": -179.083, "y": 2236.49, "z": 76.3246}
-          ]
-        },
-        {
-          "entries": [3854],
-          "positions": [
+            {"x": -179.083, "y": 2236.49, "z": 76.3246},
             {"x": -180.117, "y": 2233.84, "z": 76.2416}
-          ]
+          ],
+          "radius": 8
         },
         {
           "entries": [3853, 3853],
@@ -159,14 +150,6 @@
           "positions": [
             {"x": -170.947, "y": 2250.15, "z": 86.3712},
             {"x": -176.157, "y": 2250.3, "z": 86.5898}
-          ]
-        },
-        {
-          "entries": [3875, 3875, 2110],
-          "positions": [
-            {"x": -192.787, "y": 2249.88, "z": 76.2846},
-            {"x": -193.134, "y": 2257.3, "z": 76.2846},
-            {"x": -204.552, "y": 2255.98, "z": 76.2013}
           ]
         },
         {
@@ -204,7 +187,8 @@
             {"x": -234.131, "y": 2236.26, "z": 79.8619},
             {"x": -234.131, "y": 2236.26, "z": 79.8619},
             {"x": -227.76, "y": 2234.48, "z": 79.7656}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [3853],
@@ -215,15 +199,19 @@
       ],
       "boss": {
         "entry": 3886,
-        "position": {"x": -202.596, "y": 2257.96, "z": 76.2846}
-      }
+        "position": {"x": -202.596, "y": 2257.96, "z": 76.2846},
+        "first": [3875, 2110]
+      },
+      "notes": [
+        "Fix round 2026-10-22 (PREP-SFK census): the pack in front of Razorclaw (2 Servitors and a Black Rat, 2249-2257) is his boss row's entries (7 yd); the Wolfguard beside the Servitors of the second yard is in their pull now (0.6 yd); the steed pen's radius is 17 so the two Wailing Guardsmen of the hall above (z 102.8, 12-13 yd) and Springvale (17.6 yd) stay out of the count."
+      ]
     },
     {
       "name": "baron_silverlaine",
       "to": {"x": -229.406, "y": 2272.55, "z": 75.0827},
       "pull_groups": [
         {
-          "entries": [3875, 3875, 3857, 3875, 3857, 3875, 3857, 2110, 3875, 3875],
+          "entries": [3875, 3875, 3857, 3875, 3857, 3875, 3857, 2110, 3875, 3875, 3854],
           "positions": [
             {"x": -229.406, "y": 2272.55, "z": 75.0827},
             {"x": -230.603, "y": 2284.89, "z": 75.0827},
@@ -235,7 +223,8 @@
             {"x": -254.61, "y": 2290.36, "z": 76.3315},
             {"x": -261.486, "y": 2287.64, "z": 75.0826},
             {"x": -262.139, "y": 2296.84, "z": 75.4708}
-          ]
+          ],
+          "radius": 27
         },
         {
           "entries": [3854],
@@ -249,7 +238,8 @@
             {"x": -246.525, "y": 2308.05, "z": 95.8663},
             {"x": -256.684, "y": 2312.51, "z": 95.8663},
             {"x": -266.808, "y": 2314.64, "z": 95.9498}
-          ]
+          ],
+          "radius": 11
         },
         {
           "entries": [3854],
@@ -282,17 +272,29 @@
           ]
         },
         {
-          "entries": [61970, 61970, 61970, 61970, 4075, 3854, 61970, 3855, 3855, 3855, 61970, 61970, 4075, 4075, 3855, 3855],
+          "entries": [61970, 3854, 3855, 3855],
+          "positions": [
+            {"x": -247.62, "y": 2383.15, "z": 96.8225},
+            {"x": -250.191, "y": 2391.31, "z": 96.8227},
+            {"x": -248.518, "y": 2394.53, "z": 96.8226},
+            {"x": -249.284, "y": 2396.23, "z": 96.8227}
+          ],
+          "radius": 14
+        },
+        {
+          "entries": [61970, 61970, 61970, 4075],
           "positions": [
             {"x": -242.85, "y": 2373.06, "z": 96.9808},
             {"x": -239.725, "y": 2371.8, "z": 97.004},
-            {"x": -247.62, "y": 2383.15, "z": 96.8225},
             {"x": -237.445, "y": 2377.14, "z": 96.8226},
-            {"x": -242.656, "y": 2384.2, "z": 96.8226},
-            {"x": -250.191, "y": 2391.31, "z": 96.8227},
+            {"x": -242.656, "y": 2384.2, "z": 96.8226}
+          ],
+          "radius": 18
+        },
+        {
+          "entries": [61970, 3855, 61970, 61970, 4075, 4075, 3855, 3855],
+          "positions": [
             {"x": -230.825, "y": 2356.38, "z": 96.8225},
-            {"x": -248.518, "y": 2394.53, "z": 96.8226},
-            {"x": -249.284, "y": 2396.23, "z": 96.8227},
             {"x": -231.63, "y": 2344.95, "z": 96.8226},
             {"x": -226.078, "y": 2369.39, "z": 97.0967},
             {"x": -224.315, "y": 2362.71, "z": 97.0434},
@@ -300,7 +302,8 @@
             {"x": -224.002, "y": 2349.58, "z": 96.8226},
             {"x": -218.162, "y": 2341.28, "z": 96.823},
             {"x": -216.051, "y": 2344.55, "z": 96.8226}
-          ]
+          ],
+          "radius": 24
         },
         {
           "entries": [61969],
@@ -373,7 +376,10 @@
       "boss": {
         "entry": 3887,
         "position": {"x": -275.342, "y": 2297.35, "z": 76.2365}
-      }
+      },
+      "notes": [
+        "Fix round 2026-10-22 (PREP-SFK census): the east half of Silverlaine's court (16 units in one pull) is three pulls (4/4/8, radii 14/18/24) split on the spawn clusters; the Wolfguard that stood inside the west pull's radius is its entry now; the west Darksouls' radius is 11. The court's units see 20 yd, so a fight there can still chain across the splits: watch the court."
+      ]
     },
     {
       "name": "commander_springvale",
@@ -403,7 +409,8 @@
             {"x": -256.982, "y": 2249.59, "z": 100.976},
             {"x": -256.649, "y": 2241.38, "z": 100.892},
             {"x": -259.918, "y": 2242.56, "z": 100.977}
-          ]
+          ],
+          "radius": 26
         },
         {
           "entries": [3877],
@@ -440,7 +447,8 @@
             {"x": -207.099, "y": 2162.01, "z": 79.8483},
             {"x": -195.926, "y": 2162.95, "z": 79.8327},
             {"x": -198.594, "y": 2153.93, "z": 79.8471}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [3875],
@@ -456,7 +464,8 @@
             {"x": -222.174, "y": 2149.43, "z": 81.0438},
             {"x": -231.866, "y": 2165.91, "z": 79.8476},
             {"x": -214.404, "y": 2146.14, "z": 80.9466}
-          ]
+          ],
+          "radius": 19
         },
         {
           "entries": [3877],
@@ -490,7 +499,8 @@
             {"x": -206.364, "y": 2130.33, "z": 86.5839},
             {"x": -194.589, "y": 2133.5, "z": 81.584},
             {"x": -191.003, "y": 2125.8, "z": 81.585}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [3873, 3873, 3873],
@@ -498,7 +508,8 @@
             {"x": -191.989, "y": 2129.11, "z": 97.4733},
             {"x": -186.698, "y": 2137.24, "z": 97.3899},
             {"x": -192.012, "y": 2124.54, "z": 97.3899}
-          ]
+          ],
+          "radius": 11
         },
         {
           "entries": [3872],
@@ -523,16 +534,19 @@
           "positions": [
             {"x": -197.316, "y": 2111.16, "z": 81.1401},
             {"x": -205.378, "y": 2117.15, "z": 81.1379}
-          ]
+          ],
+          "radius": 10
         }
       ],
       "boss": {
         "entry": 4279,
-        "position": {"x": -236.708, "y": 2146.08, "z": 100.112}
+        "position": {"x": -236.708, "y": 2146.08, "z": 100.112},
+        "first": [3866, 3868]
       },
       "notes": [
         "button \"Lever\" entry 101812 at -236.3 2164.0 91.2",
-        "door \"Courtyard Door\" entry 18895 at -242.6 2159.1 90.6"
+        "door \"Courtyard Door\" entry 18895 at -242.6 2159.1 90.6",
+        "Fix round 2026-10-22 (PREP-SFK census): radii cut to the groups' own members where a neighbour or a boss stood in the default (the walkway pulls and the pull beside the intro Arugal; the leg's second pull keeps leg 5's Officer out). The boss and the walkway packs (z 97.4-100.1) stand beyond the closed Courtyard Door 18895 (the mesh splits there): the mapping walk must measure the stands before the first run."
       ]
     },
     {
@@ -695,5 +709,6 @@
         "position": {"x": -76.7541, "y": 2152.41, "z": 155.792}
       }
     }
-  ]
+  ],
+  "cc_priority": [3855, 61970, 10000]
 }
