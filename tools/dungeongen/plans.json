@@ -944,6 +944,7 @@
    "title": "Black Morass",
    "map": 269,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map269",
    "trigger": 1632,
    "bosses": [
@@ -958,6 +959,7 @@
     50105
    ],
    "special": [
+    "Handwritten since 2026-10-24: the census fixes (critters out of the pulls, merged split packs, Epochronos' guard moved last, patrol blocks, no_cc/kill_first) and the 2-opt route are not what the generator writes",
     "wave/portal event: Time Anomalies (50106, 49 spawns) and the Black Morass portals; Chronar, Epochronos, Antnormi are timed events (npc_antnormi, boss_epochronos, boss_chronar), Medivh (faction 35) closes it"
    ],
    "notes": [

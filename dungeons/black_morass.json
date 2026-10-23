@@ -21,11 +21,19 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "no_cc": [50106, 61316, 61317, 61318, 61575, 65100, 65101, 65102, 65103, 65105, 65110, 65111, 65112, 65122, 65124],
+  "kill_first": [65124, 65102, 65105, 61575],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 269 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Needs: wave/portal event: Time Anomalies (50106, 49 spawns) and the Black Morass portals; Chronar, Epochronos, Antnormi are timed events (npc_antnormi, boss_epochronos, boss_chronar), Medivh (faction 35) closes it",
-    "Turtle custom (Caverns of Time, map 269). The data leaves open whether this is a 5-man; hired party is the 5-man default."
+    "DRAFT: a skeleton from the world database export of map 269 (tools/dungeongen, spec tools/dungeongen/plans.json), fixed from the 2026-10-24 census of tools/dungeongen/testdata/map269 and ~/tortoise-wow/sql/base. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "Census: 330 spawns, 23 entries. The 28 Snakes (2914, faction 190, level 1, 9 hp, critter) are out of every pull (26 pure snake pulls gone). Max planned pack is 5 units.",
+    "Hostile trash is faction 40 (34, Escortee) except the Time Anomaly 50106 (faction 7, neutral but attackable) and the cave mobs 61316/61317/61318 (faction 16). None is humanoid: no Polymorph, so cc_priority/cc_always are empty and every trash entry is in no_cc. No trash script flees (no Flee/EventAI 47 anywhere in the instance), so fleers is empty.",
+    "Casters: 50106 Arcane Explosion (27989); 61316 Sand Blast (57103); 61317 Earth Shock (13281); 61318 Arcane Bolt (25055); 61575 Epidamu Drain Mana (17682); 65102 Riftweaver Time Stop (23171, 20 s) + Shadow Shock + Mind Blast; 65100 Dragonspawn Rend/Cleave; 65101 Riftguard charges a casting player within 50 yd (22911); 65103 Whelp drains 5 % max mana every 3 s from players within 20 yd and Arcane Explosions at full mana; 65105 Rift-Lord Whirlwind/Thunderclap/Demolishing Shout; 65110 Poison 24097; 65111 Wound 16549; 65112 Paralyzing Poison 3609. kill_first: 65124 Mossheart (Rejuvenation 20664 below 75 %, Entangling Roots, Dredge Sickness within 10 yd), 65102 (Time Stop), 65105 (Whirlwind), 61575 (Drain Mana).",
+    "Named scripted mobs in pulls, not bosses: Rotmaw 65122 (Consume roots itself and shrinks a player for 15.5 s, then Knockback; Mortal Wound/Sunder), Mossheart 65124 (stealths out of combat; Rejuv), Epidamu 61575 (Drain Mana). Boss rows: Antnormi 65125 (Thrash, Cowering Roar, Shadow Shock; Enrage at 20 % or 5 min), Medivh 50105 (FACTION 35: friendly to the party, no script, 1,024,000 hp; the run leader's boss step reads 'boss is friendly to this party: left alone' and the leg advances - the row is a destination marker, not a kill), Epochronos 65116 (Sand Breath, Swoop, Arcane Blast; at 50 % banishes itself and summons one Echo: Lich King 65117 / Kael'thas 65118 / Vashj 65119, which must die before it unbanishes), Chronar 65113 (Shout, Mortal Strike, Sweeping Slam, Spell Reflection, Enrage at 35 %).",
+    "The Time Anomaly 50106 at -1450.10 6967.23 -14.3097 stood 18.9 yd from Epochronos (detection 20): moved to the end of its leg, so the boss joins that one pull and not a mid-leg one.",
+    "Patrols with a creature_movement path: 65100 guid 2567942 (237 yd, ~95 s), 65101 2567943 (190 yd, ~76 s), 65101 2567944 (184 yd, ~74 s), 61318 2574761 (319 yd, ~128 s), 61318 2574775 (431 yd, ~172 s). Each group whose stand is within 25 yd of a path carries that patrol block (period is the path length at 2.5 yd/s: period_estimate). Mossheart 65124, Medivh 50105 and the Bronze Defenders 65126/65128 have movement_type 2 but no movement rows: no block can be written; the mapping walk measures them.",
+    "Floors: all pull stands are exact spawn rows and no pack spans |dz| \u003e 6. The map is stacked: other hostile packs stand directly above/below many stands (50106/61317/61318 in the z -165..+56 cave column, 65100-65103 between -230 and -122). Aggro is 3-D, so they are not pull members, but the route between floors is the mapping walk's first item: seven approach hops could not be cut (leg 2 step 40; leg 3 steps 2, 15, 16, 28, 30 and the boss step 34; the nearest reachable point is up to 142.9 yd short). The 274 run-leader hop notices are the same walk.",
+    "Route: leg order antnormi -\u003e medivh -\u003e epochronos -\u003e chronar is the shortest of the 24 permutations (7,852 yd from the entrance; the next best is +532). Within each leg the groups are ordered by a 3-D 2-opt from the leg's start to its boss (6,221-\u003e5,233, 1,649-\u003e1,406, 3,455-\u003e2,846 and 1,901-\u003e1,751 yd; the vertical travel also falls, 311-\u003e306, 661-\u003e442, 491-\u003e452).",
+    "The instance script teleports a player below z -281 back to the entrance; Epochronos' death removes the Sand Wall 2010865 (and a 180322 barrier within 75 yd). No door, lever or key is in the plan."
   ],
   "legs": [
     {
@@ -36,867 +44,919 @@
           "entries": [65112],
           "positions": [
             {"x": -1961.5, "y": 6797, "z": 26.5253}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1939.49, "y": 6822.87, "z": 24.0799}
-          ]
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1827.36, "y": 6802.03, "z": 23.043}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1979.9, "y": 6828.08, "z": 21.4262}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2016.08, "y": 6847.11, "z": 22.0302}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -2036.69, "y": 6816.76, "z": 26.7454}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2007.35, "y": 6891.23, "z": 18.7287}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2018.9, "y": 6908.06, "z": 17.2907}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2029.71, "y": 6943.22, "z": 18.7559}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2046.4, "y": 6978.92, "z": 19.0497}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2021.64, "y": 6986, "z": 18.3945}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2025.22, "y": 7007.35, "z": 22.6916}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -2019.5, "y": 7034.8, "z": 22.2666}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2028.84, "y": 7058.97, "z": 23.6438}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -2046.59, "y": 7049.68, "z": 22.832}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1971.13, "y": 7083.82, "z": 18.5235}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1949.56, "y": 7072.45, "z": 21.715}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1928.19, "y": 7079.03, "z": 19.2261}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1941.15, "y": 7046.94, "z": 22.6256}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1951.65, "y": 7018.84, "z": 22.0832}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1907.26, "y": 7012.25, "z": 19.3319}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1879.79, "y": 7021.8, "z": 24.0336}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1853.7, "y": 7036.01, "z": 23.146}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1838.98, "y": 7029.69, "z": 21.8843}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1847.68, "y": 7009.94, "z": 18.1984}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1811.08, "y": 7028.17, "z": 21.8617}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1788.89, "y": 7026.89, "z": 18.7755}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1759.26, "y": 7019.16, "z": 22.2804}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1760.52, "y": 7065.96, "z": 18.0124}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1790.77, "y": 7080.52, "z": 19.0975}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1808.07, "y": 7072.72, "z": 22.3778}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1844.78, "y": 7055.73, "z": 29.4423}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1860.35, "y": 7075.64, "z": 22.4224}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1843.94, "y": 7099.04, "z": 19.8676}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1871.98, "y": 7118.39, "z": 20.5866}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1868.02, "y": 7154.35, "z": 19.8182}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1903.16, "y": 7167.46, "z": 19.1788}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1895.73, "y": 7188.68, "z": 19.5239}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1917.73, "y": 7185.42, "z": 22.2099}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1945.28, "y": 7170.15, "z": 22.3983}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1976.74, "y": 7170.48, "z": 22.8862}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2001.15, "y": 7141.2, "z": 20.2207}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1994.96, "y": 7118.45, "z": 19.6195}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1954.61, "y": 7114.47, "z": 18.1808}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1887.34, "y": 7054.62, "z": 20.843}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1929.14, "y": 6977.06, "z": 20.3809}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1926.9, "y": 6960.8, "z": 20.1928}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1945.39, "y": 6930.79, "z": 18.6026}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1968.47, "y": 6929.84, "z": 24.1815}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1962, "y": 6965.4, "z": 22.6998}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1996.06, "y": 6974.05, "z": 18.6787}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1983.33, "y": 6888.01, "z": 23.2575}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1958.53, "y": 6879.53, "z": 23.4127}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1927.94, "y": 6873.59, "z": 23.476}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1924.01, "y": 6898.04, "z": 24.6651}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1914.85, "y": 6911.3, "z": 23.0503}
-          ]
-        },
-        {
-          "entries": [65124],
-          "positions": [
-            {"x": -1880.32, "y": 6904.04, "z": 26.2261}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1856.14, "y": 6897.87, "z": 25.155}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1822.34, "y": 6886.18, "z": 23.272}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1825.36, "y": 6854.93, "z": 18.4971}
-          ]
+            {"x": -1812.51, "y": 6769.63, "z": 25.9948}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1793.11, "y": 6834.93, "z": 18.579}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1781.62, "y": 6867.74, "z": 18.9593}
-          ]
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1825.36, "y": 6854.93, "z": 18.4971}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1822.34, "y": 6886.18, "z": 23.272}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1807.42, "y": 6935.15, "z": 23.8192}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1826, "y": 6962.79, "z": 22.6771}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -1848.96, "y": 6937.99, "z": 26.3717}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1878.39, "y": 6955.34, "z": 20.5704}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1765.71, "y": 6970.48, "z": 18.6887}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1771.62, "y": 7109.5, "z": 19.0093}
-          ]
+            {"x": -1760.52, "y": 7065.96, "z": 18.0124}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1735.68, "y": 7109.65, "z": 19.7362}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1721.8, "y": 7112.22, "z": 22.2348}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1734.47, "y": 7154.25, "z": 21.9511}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1710.46, "y": 7168.58, "z": 22.0513}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1743.89, "y": 7197.24, "z": 22.2986}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1763.16, "y": 7202.01, "z": 19.0204}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1778.78, "y": 7224.54, "z": 19.4809}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1802.24, "y": 7240.71, "z": 17.471}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1820.41, "y": 7235.56, "z": 18.788}
-          ]
+            {"x": -1792.34, "y": 7257.22, "z": 19.3349}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1779.21, "y": 7273.94, "z": 23.4918}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1768.34, "y": 7267.31, "z": 19.8856}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1749.21, "y": 7259.81, "z": 17.2667}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1733.83, "y": 7239.8, "z": 19.8312}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1697.42, "y": 7214.61, "z": 17.017}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1699.89, "y": 7238.28, "z": 20.9026}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1739.58, "y": 7284.41, "z": 18.6074}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1732.66, "y": 7320.33, "z": 18.7313}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1704.92, "y": 7341.37, "z": 23.1531}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1678.04, "y": 7340.75, "z": 22.3304}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1741.71, "y": 7375.55, "z": 20.493}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1768.08, "y": 7391.27, "z": 19.5211}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1760.42, "y": 7435.24, "z": 22.3997}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1795.56, "y": 7452.95, "z": 23.2454}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1810.15, "y": 7437.94, "z": 24.0011}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1787.36, "y": 7401.61, "z": 19.7327}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1812.22, "y": 7374.73, "z": 19.7594}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1828.85, "y": 7363.68, "z": 22.4782}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1820.08, "y": 7351.39, "z": 22.5396}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1793.33, "y": 7340.85, "z": 24.4612}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1804.22, "y": 7316.93, "z": 23.7561}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1769.68, "y": 7310.96, "z": 22.7367}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1752.41, "y": 7301.77, "z": 18.6283}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1800.3, "y": 7289.21, "z": 23.1145}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1842.84, "y": 7345.14, "z": 21.2446}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1863.76, "y": 7354.31, "z": 19.4332}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1853.2, "y": 7371.96, "z": 21.9701}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1837.96, "y": 7427.27, "z": 22.7257}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1866.67, "y": 7409.05, "z": 21.3124}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1881.85, "y": 7392.83, "z": 19.195}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1908.22, "y": 7386.27, "z": 18.5434}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1928.41, "y": 7372.35, "z": 19.1067}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1945, "y": 7397, "z": 18.8994}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1934.39, "y": 7411.23, "z": 26.2}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1969.5, "y": 7409.59, "z": 22.083}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2020.93, "y": 7397.75, "z": 23.9325}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2036.1, "y": 7307.49, "z": 19.696}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2007.09, "y": 7284.86, "z": 19.1291}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2035.62, "y": 7267.15, "z": 19.5448}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2038.5, "y": 7240.69, "z": 19.2035}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2021.87, "y": 7225.38, "z": 22.5502}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2025.48, "y": 7198.71, "z": 23.3223}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2037.87, "y": 7170.88, "z": 19.2213}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1999.9, "y": 7214.71, "z": 21.6031}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1978.01, "y": 7240.89, "z": 17.4777}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1946.09, "y": 7232.61, "z": 17.5342}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1894.57, "y": 7235.88, "z": 17.3332}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1875.96, "y": 7231.93, "z": 17.4776}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1865.33, "y": 7199.54, "z": 19.6036}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1858.34, "y": 7227.83, "z": 17.4771}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1836.67, "y": 7231.24, "z": 18.8047}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1838.61, "y": 7251.72, "z": 18.726}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111, 65111],
           "positions": [
             {"x": -1817.39, "y": 7247.32, "z": 18.8037},
             {"x": -1824.89, "y": 7254.1, "z": 18.8232}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1838.61, "y": 7251.72, "z": 18.726}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1836.67, "y": 7231.24, "z": 18.8047}
-          ]
+            {"x": -1820.41, "y": 7235.56, "z": 18.788}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1858.34, "y": 7227.83, "z": 17.4771}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1875.96, "y": 7231.93, "z": 17.4776}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1894.57, "y": 7235.88, "z": 17.3332}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1865.33, "y": 7199.54, "z": 19.6036}
-          ]
+            {"x": -1802.24, "y": 7240.71, "z": 17.471}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1795.71, "y": 7198.46, "z": 22.0893}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1785.96, "y": 7170.83, "z": 23.1466}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1805.42, "y": 7160.9, "z": 21.9068}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1826.98, "y": 7134.54, "z": 19.5103}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1792.34, "y": 7257.22, "z": 19.3349}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1779.21, "y": 7273.94, "z": 23.4918}
-          ]
+            {"x": -1771.62, "y": 7109.5, "z": 19.0093}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1768.34, "y": 7267.31, "z": 19.8856}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1749.21, "y": 7259.81, "z": 17.2667}
-          ]
+            {"x": -1790.77, "y": 7080.52, "z": 19.0975}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1733.83, "y": 7239.8, "z": 19.8312}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1727.82, "y": 7218.3, "z": 23.5585}
-          ]
+            {"x": -1843.94, "y": 7099.04, "z": 19.8676}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1697.42, "y": 7214.61, "z": 17.017}
-          ]
+            {"x": -1871.98, "y": 7118.39, "z": 20.5866}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1699.89, "y": 7238.28, "z": 20.9026}
-          ]
+            {"x": -1868.02, "y": 7154.35, "z": 19.8182}
+          ],
+          "radius": 2
         },
         {
-          "entries": [2914],
+          "entries": [65111],
           "positions": [
-            {"x": -1694.18, "y": 7285.53, "z": 23.9762}
-          ]
+            {"x": -1903.16, "y": 7167.46, "z": 19.1788}
+          ],
+          "radius": 2
         },
         {
-          "entries": [65110],
+          "entries": [65111],
           "positions": [
-            {"x": -1739.58, "y": 7284.41, "z": 18.6074}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1752.41, "y": 7301.77, "z": 18.6283}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1769.68, "y": 7310.96, "z": 22.7367}
-          ]
-        },
-        {
-          "entries": [65112, 2914],
-          "positions": [
-            {"x": -1804.22, "y": 7316.93, "z": 23.7561},
-            {"x": -1807.04, "y": 7322.02, "z": 22.9725}
-          ]
+            {"x": -1895.73, "y": 7188.68, "z": 19.5239}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1793.33, "y": 7340.85, "z": 24.4612}
-          ]
+            {"x": -1917.73, "y": 7185.42, "z": 22.2099}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1820.08, "y": 7351.39, "z": 22.5396}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1828.85, "y": 7363.68, "z": 22.4782}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1812.22, "y": 7374.73, "z": 19.7594}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1787.36, "y": 7401.61, "z": 19.7327}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1768.08, "y": 7391.27, "z": 19.5211}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1741.71, "y": 7375.55, "z": 20.493}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1704.92, "y": 7341.37, "z": 23.1531}
-          ]
+            {"x": -1945.28, "y": 7170.15, "z": 22.3983}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1678.04, "y": 7340.75, "z": 22.3304}
-          ]
+            {"x": -1976.74, "y": 7170.48, "z": 22.8862}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1732.66, "y": 7320.33, "z": 18.7313}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1800.3, "y": 7289.21, "z": 23.1145}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1866.44, "y": 7306.46, "z": 22.4573}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1842.84, "y": 7345.14, "z": 21.2446}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1863.76, "y": 7354.31, "z": 19.4332}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1853.2, "y": 7371.96, "z": 21.9701}
-          ]
+            {"x": -1994.96, "y": 7118.45, "z": 19.6195}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1881.85, "y": 7392.83, "z": 19.195}
-          ]
+            {"x": -1954.61, "y": 7114.47, "z": 18.1808}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1928.19, "y": 7079.03, "z": 19.2261}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1866.67, "y": 7409.05, "z": 21.3124}
-          ]
+            {"x": -1860.35, "y": 7075.64, "z": 22.4224}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1844.78, "y": 7055.73, "z": 29.4423}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1837.96, "y": 7427.27, "z": 22.7257}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1810.15, "y": 7437.94, "z": 24.0011}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1795.56, "y": 7452.95, "z": 23.2454}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1760.42, "y": 7435.24, "z": 22.3997}
-          ]
+            {"x": -1808.07, "y": 7072.72, "z": 22.3778}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -1908.22, "y": 7386.27, "z": 18.5434}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1928.41, "y": 7372.35, "z": 19.1067}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1941.21, "y": 7370.7, "z": 21.0659}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -1945, "y": 7397, "z": 18.8994}
-          ]
+            {"x": -1788.89, "y": 7026.89, "z": 18.7755}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1934.39, "y": 7411.23, "z": 26.2}
-          ]
+            {"x": -1811.08, "y": 7028.17, "z": 21.8617}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1969.5, "y": 7409.59, "z": 22.083}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2020.93, "y": 7397.75, "z": 23.9325}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2036.9, "y": 7362.88, "z": 22.5509}
-          ]
+            {"x": -1838.98, "y": 7029.69, "z": 21.8843}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -2036.1, "y": 7307.49, "z": 19.696}
-          ]
+            {"x": -1847.68, "y": 7009.94, "z": 18.1984}
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -2007.09, "y": 7284.86, "z": 19.1291}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2035.62, "y": 7267.15, "z": 19.5448}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2038.5, "y": 7240.69, "z": 19.2035}
-          ]
+            {"x": -1878.39, "y": 6955.34, "z": 20.5704}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -2021.87, "y": 7225.38, "z": 22.5502}
-          ]
+            {"x": -1848.96, "y": 6937.99, "z": 26.3717}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1999.9, "y": 7214.71, "z": 21.6031}
-          ]
+            {"x": -1856.14, "y": 6897.87, "z": 25.155}
+          ],
+          "radius": 2
         },
         {
-          "entries": [65112],
+          "entries": [65124],
           "positions": [
-            {"x": -2025.48, "y": 7198.71, "z": 23.3223}
-          ]
+            {"x": -1880.32, "y": 6904.04, "z": 26.2261}
+          ],
+          "radius": 6
         },
         {
           "entries": [65111],
           "positions": [
-            {"x": -2037.87, "y": 7170.88, "z": 19.2213}
-          ]
+            {"x": -1914.85, "y": 6911.3, "z": 23.0503}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1978.01, "y": 7240.89, "z": 17.4777}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1946.09, "y": 7232.61, "z": 17.5342}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1936.78, "y": 7297.14, "z": 25.2845}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1966.51, "y": 7308, "z": 25.6692}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1901.24, "y": 7347.91, "z": 21.4291}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -1827.36, "y": 6802.03, "z": 23.043}
-          ]
+            {"x": -1924.01, "y": 6898.04, "z": 24.6651}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
-            {"x": -1812.51, "y": 6769.63, "z": 25.9948}
-          ]
+            {"x": -1927.94, "y": 6873.59, "z": 23.476}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1958.53, "y": 6879.53, "z": 23.4127}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1979.9, "y": 6828.08, "z": 21.4262}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2036.69, "y": 6816.76, "z": 26.7454}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2016.08, "y": 6847.11, "z": 22.0302}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2018.9, "y": 6908.06, "z": 17.2907}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2007.35, "y": 6891.23, "z": 18.7287}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1983.33, "y": 6888.01, "z": 23.2575}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1968.47, "y": 6929.84, "z": 24.1815}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2029.71, "y": 6943.22, "z": 18.7559}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2046.4, "y": 6978.92, "z": 19.0497}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2021.64, "y": 6986, "z": 18.3945}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1996.06, "y": 6974.05, "z": 18.6787}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1962, "y": 6965.4, "z": 22.6998}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1926.9, "y": 6960.8, "z": 20.1928}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1929.14, "y": 6977.06, "z": 20.3809}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1879.79, "y": 7021.8, "z": 24.0336}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1853.7, "y": 7036.01, "z": 23.146}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1887.34, "y": 7054.62, "z": 20.843}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1907.26, "y": 7012.25, "z": 19.3319}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1951.65, "y": 7018.84, "z": 22.0832}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1941.15, "y": 7046.94, "z": 22.6256}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1971.13, "y": 7083.82, "z": 18.5235}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2019.5, "y": 7034.8, "z": 22.2666}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2025.22, "y": 7007.35, "z": 22.6916}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2046.59, "y": 7049.68, "z": 22.832}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2028.84, "y": 7058.97, "z": 23.6438}
+          ],
+          "radius": 2
         }
       ],
       "boss": {
@@ -912,182 +972,162 @@
           "entries": [65111],
           "positions": [
             {"x": -2052.7, "y": 7200.09, "z": 19.5721}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2081.02, "y": 7191.27, "z": 19.0252}
-          ]
-        },
-        {
-          "entries": [65111],
-          "positions": [
-            {"x": -2084.39, "y": 7223.11, "z": 20.1898}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -2062.49, "y": 7241.16, "z": 20.2627}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2083.55, "y": 7273.78, "z": 23.8032}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2105.01, "y": 7310.04, "z": 23.9717}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2099.24, "y": 7324.19, "z": 23.332}
-          ]
-        },
-        {
-          "entries": [65110],
-          "positions": [
-            {"x": -2077.43, "y": 7373.29, "z": 23.6338}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2080.34, "y": 7396.06, "z": 24.57}
-          ]
-        },
-        {
-          "entries": [65122],
-          "positions": [
-            {"x": -2095.36, "y": 7410.7, "z": 24.6254}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2049.58, "y": 7398.37, "z": 24.5028}
-          ]
+          ],
+          "radius": 2
         },
         {
-          "entries": [65112],
+          "entries": [65122],
           "positions": [
-            {"x": -2098.39, "y": 7058.17, "z": 21.119}
-          ]
+            {"x": -2095.36, "y": 7410.7, "z": 24.6254}
+          ],
+          "radius": 2
         },
         {
-          "entries": [65112],
+          "entries": [65110],
           "positions": [
-            {"x": -2126.13, "y": 7041.78, "z": 22.3814}
-          ]
+            {"x": -2077.43, "y": 7373.29, "z": 23.6338}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -2099.24, "y": 7324.19, "z": 23.332}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2084.39, "y": 7223.11, "z": 20.1898}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2081.02, "y": 7191.27, "z": 19.0252}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2148.66, "y": 7066.13, "z": 22.6299}
-          ]
+          ],
+          "radius": 2
         },
         {
-          "entries": [65111],
+          "entries": [65112],
           "positions": [
-            {"x": -2080.89, "y": 7012.62, "z": 18.7784}
-          ]
-        },
-        {
-          "entries": [2914, 65111],
-          "positions": [
-            {"x": -2073.17, "y": 7022.57, "z": 17.1534},
-            {"x": -2067.25, "y": 7031.25, "z": 18.3504}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2082.19, "y": 6985.83, "z": 22.3579}
-          ]
+            {"x": -2126.13, "y": 7041.78, "z": 22.3814}
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -2080.78, "y": 6955.31, "z": 23.2046}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2083.84, "y": 6930.09, "z": 23.0334}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2109.14, "y": 6910.69, "z": 22.9806}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2098.28, "y": 6886.91, "z": 22.7038}
-          ]
-        },
-        {
-          "entries": [65112],
-          "positions": [
-            {"x": -2137.8, "y": 6875.71, "z": 21.9572}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -2138.44, "y": 6900.59, "z": 22.4088}
-          ]
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2137.8, "y": 6875.71, "z": 21.9572}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2122.37, "y": 6847.37, "z": 21.7669}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2106.05, "y": 6828.81, "z": 22.4071}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2109.43, "y": 6802.64, "z": 25.0902}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -2090.32, "y": 6792.57, "z": 33.127}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -2060.34, "y": 6809.39, "z": 27.4346}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -2130.43, "y": 6797.28, "z": 35.7295}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -2054.51, "y": 6954.79, "z": 22.2724}
-          ]
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2080.89, "y": 7012.62, "z": 18.7784}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -2067.25, "y": 7031.25, "z": 18.3504}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -2098.39, "y": 7058.17, "z": 21.119}
+          ],
+          "radius": 2
         }
       ],
       "boss": {
@@ -1100,272 +1140,631 @@
       "to": {"x": -1725.48, "y": 7007.04, "z": 21.5786},
       "pull_groups": [
         {
-          "entries": [2914],
+          "entries": [65110],
           "positions": [
-            {"x": -1725.48, "y": 7007.04, "z": 21.5786}
-          ]
+            {"x": -1690.46, "y": 7002.38, "z": 19.833}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
-            {"x": -1690.46, "y": 7002.38, "z": 19.833}
-          ]
+            {"x": -1724.64, "y": 6946.2, "z": 21.9985}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65111],
+          "positions": [
+            {"x": -1746.09, "y": 6864.96, "z": 18.2927}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1725.82, "y": 6841.04, "z": 24.6708}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1686.95, "y": 6831.16, "z": 25.2198}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1653.72, "y": 6842.83, "z": 22.388}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1625.43, "y": 6873.82, "z": 22.4737}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65110],
+          "positions": [
+            {"x": -1662.07, "y": 6912.24, "z": 22.739}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65112],
+          "positions": [
+            {"x": -1679.57, "y": 6954.88, "z": 23.7261}
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1664.81, "y": 7026.54, "z": 21.548}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1635.97, "y": 7049.97, "z": 22.4223}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1627.07, "y": 7031.47, "z": 27.4084}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1674.33, "y": 7071.16, "z": 23.0935}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1689.26, "y": 7089.15, "z": 22.5864}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1697.49, "y": 7122.68, "z": 19.9343}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1675.3, "y": 7136.65, "z": 19.8452}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1680.24, "y": 7176.06, "z": 19.2043}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65111],
           "positions": [
             {"x": -1669.32, "y": 7201.72, "z": 19.4773}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1655.65, "y": 7190.98, "z": 21.5404}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65110],
           "positions": [
             {"x": -1642.89, "y": 7201.15, "z": 22.9754}
-          ]
-        },
-        {
-          "entries": [2914],
-          "positions": [
-            {"x": -1629.45, "y": 7226.88, "z": 35.4384}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1637.91, "y": 7290.98, "z": 49.2733}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1627.6, "y": 7310.98, "z": 30.975}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1632.81, "y": 7340.14, "z": 21.758}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1652.39, "y": 7361, "z": 22.6174}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65112],
           "positions": [
             {"x": -1596.45, "y": 7322.16, "z": 56.3672}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1567.54, "y": 7108.01, "z": 23.722}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1579.99, "y": 7097.05, "z": 23.7814}
-          ]
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1567.54, "y": 7108.01, "z": 23.722}
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1540.02, "y": 7103.94, "z": 25.1783}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1508.03, "y": 7116.81, "z": 20.9398}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1476.12, "y": 7113.89, "z": 11.9042}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1446.36, "y": 7089.12, "z": 4.09432}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106, 61318],
           "positions": [
             {"x": -1429.14, "y": 7068.82, "z": -0.750885},
             {"x": -1424.57, "y": 7063.18, "z": -2.25193}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1419.75, "y": 7035.47, "z": -8.02037}
-          ]
+            {"x": -1431.01, "y": 7107.62, "z": -76.2847}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [61317, 61317, 61317],
+          "positions": [
+            {"x": -1446.13, "y": 7079.91, "z": -98.3371},
+            {"x": -1447.56, "y": 7087.44, "z": -98.3378},
+            {"x": -1455.31, "y": 7081.13, "z": -98.3371}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1471.63, "y": 7078.23, "z": -98.3371}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [61317, 61317],
+          "positions": [
+            {"x": -1478.51, "y": 7058.27, "z": -98.3371},
+            {"x": -1473.38, "y": 7048.02, "z": -98.3371}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [50106, 61318],
+          "positions": [
+            {"x": -1469.4, "y": 7030.33, "z": -98.8604},
+            {"x": -1474.72, "y": 7025.21, "z": -101.115}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [65100],
+          "positions": [
+            {"x": -1477.05, "y": 7003.01, "z": -108.714}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1500.13, "y": 7001.49, "z": -101.455}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1518.65, "y": 7013.01, "z": -14.3092}
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1459.96, "y": 7004.49, "z": -14.3604}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1450.1, "y": 6967.23, "z": -14.3097}
-          ]
+            {"x": -1419.75, "y": 7035.47, "z": -8.02037}
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1470.82, "y": 6956.15, "z": -14.3097}
-          ]
+            {"x": -1410.05, "y": 6965.76, "z": -14.4259}
+          ],
+          "radius": 6
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1473.8, "y": 6934.49, "z": -14.3097}
-          ]
+            {"x": -1366.76, "y": 6946.89, "z": -32.675}
+          ],
+          "radius": 6
         },
         {
-          "entries": [61317, 50106],
+          "entries": [61575],
           "positions": [
-            {"x": -1446.31, "y": 6914.8, "z": -14.5806},
-            {"x": -1445.66, "y": 6911.3, "z": -15.0014}
-          ]
+            {"x": -1405.35, "y": 7004.3, "z": -85.968}
+          ],
+          "radius": 2
         },
         {
-          "entries": [50106],
+          "entries": [65102],
           "positions": [
-            {"x": -1445.99, "y": 6893.6, "z": -16.0629}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1431.77, "y": 6896.89, "z": -17.7539}
-          ]
+            {"x": -1417.11, "y": 7036.27, "z": -85.9293}
+          ],
+          "radius": 2
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1425.16, "y": 6915.06, "z": -17.5101}
-          ]
+            {"x": -1416.69, "y": 7072.08, "z": -95.3256}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
-          "entries": [61317, 61318, 61317],
+          "entries": [61317, 50106, 61317, 61317],
           "positions": [
-            {"x": -1413.44, "y": 6906.26, "z": -20.7224},
-            {"x": -1408.93, "y": 6901.77, "z": -21.6443},
-            {"x": -1408.34, "y": 6897.26, "z": -21.7993}
-          ]
+            {"x": -1379.36, "y": 7091.62, "z": -81.0365},
+            {"x": -1377.07, "y": 7095.86, "z": -80.2716},
+            {"x": -1384.91, "y": 7087.47, "z": -83.5644},
+            {"x": -1386.4, "y": 7093.28, "z": -84.7116}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1389.92, "y": 6917.17, "z": -27.7892}
-          ]
+            {"x": -1345.23, "y": 7074.66, "z": -63.2992}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
+        },
+        {
+          "entries": [61317],
+          "positions": [
+            {"x": -1334.37, "y": 7070.01, "z": -60.0518}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1366.67, "y": 6896.32, "z": -17.6223}
-          ]
+            {"x": -1340.17, "y": 7056.6, "z": -57.8411}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1383.06, "y": 6882.37, "z": -12.6585}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1351.41, "y": 6927.9, "z": -32.6752}
-          ]
-        },
-        {
-          "entries": [61316],
-          "positions": [
-            {"x": -1339.93, "y": 6921.69, "z": -32.675}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1325.51, "y": 6912.92, "z": -22.4307}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1321.97, "y": 6943.19, "z": -32.675}
-          ]
-        },
-        {
-          "entries": [61318],
-          "positions": [
-            {"x": -1324.41, "y": 6980.7, "z": -34.9059}
-          ]
+            {"x": -1318.34, "y": 7060, "z": -48.776}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [61317, 50106, 61317, 61317, 61317],
@@ -1375,181 +1774,169 @@
             {"x": -1325.38, "y": 7017.04, "z": -44.7085},
             {"x": -1320.75, "y": 7020.88, "z": -45.8353},
             {"x": -1324.73, "y": 7026.13, "z": -47.1859}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1318.34, "y": 7060, "z": -48.776}
-          ]
-        },
-        {
-          "entries": [61317],
-          "positions": [
-            {"x": -1334.37, "y": 7070.01, "z": -60.0518}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1345.23, "y": 7074.66, "z": -63.2992}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1340.17, "y": 7056.6, "z": -57.8411}
-          ]
-        },
-        {
-          "entries": [61317, 50106, 61317, 61317],
-          "positions": [
-            {"x": -1379.36, "y": 7091.62, "z": -81.0365},
-            {"x": -1377.07, "y": 7095.86, "z": -80.2716},
-            {"x": -1384.91, "y": 7087.47, "z": -83.5644},
-            {"x": -1386.4, "y": 7093.28, "z": -84.7116}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1416.69, "y": 7072.08, "z": -95.3256}
-          ]
-        },
-        {
-          "entries": [61317, 61317, 61317],
-          "positions": [
-            {"x": -1446.13, "y": 7079.91, "z": -98.3371},
-            {"x": -1447.56, "y": 7087.44, "z": -98.3378},
-            {"x": -1455.31, "y": 7081.13, "z": -98.3371}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1471.63, "y": 7078.23, "z": -98.3371}
-          ]
-        },
-        {
-          "entries": [61317, 61317],
-          "positions": [
-            {"x": -1478.51, "y": 7058.27, "z": -98.3371},
-            {"x": -1473.38, "y": 7048.02, "z": -98.3371}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1469.4, "y": 7030.33, "z": -98.8604}
-          ]
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [61318],
           "positions": [
-            {"x": -1474.72, "y": 7025.21, "z": -101.115}
-          ]
-        },
-        {
-          "entries": [65100],
-          "positions": [
-            {"x": -1477.05, "y": 7003.01, "z": -108.714}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1500.13, "y": 7001.49, "z": -101.455}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1518.65, "y": 7013.01, "z": -14.3092}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1410.05, "y": 6965.76, "z": -14.4259}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1366.76, "y": 6946.89, "z": -32.675}
-          ]
-        },
-        {
-          "entries": [61575],
-          "positions": [
-            {"x": -1405.35, "y": 7004.3, "z": -85.968}
-          ]
-        },
-        {
-          "entries": [65102],
-          "positions": [
-            {"x": -1417.11, "y": 7036.27, "z": -85.9293}
-          ]
+            {"x": -1324.41, "y": 6980.7, "z": -34.9059}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1324.41, "y": 6980.7, "z": -34.91},
+              {"x": -1323.5, "y": 7007.36, "z": -42.19},
+              {"x": -1325.04, "y": 7032.44, "z": -48.91},
+              {"x": -1336.82, "y": 7061.11, "z": -58.47},
+              {"x": -1350.36, "y": 7080.61, "z": -66.77},
+              {"x": -1372.38, "y": 7088.44, "z": -77.43},
+              {"x": -1398.49, "y": 7086.83, "z": -88.85},
+              {"x": -1428.03, "y": 7081.77, "z": -97.95},
+              {"x": -1445.9, "y": 7079.44, "z": -98.34},
+              {"x": -1414.84, "y": 7081.34, "z": -94.3},
+              {"x": -1382.05, "y": 7089.72, "z": -82.18},
+              {"x": -1352.56, "y": 7081.31, "z": -67.83},
+              {"x": -1331.66, "y": 7056.69, "z": -56.57},
+              {"x": -1323, "y": 7027.31, "z": -47.5},
+              {"x": -1325.18, "y": 6997.37, "z": -39.42}
+            ],
+            "period_s": 172,
+            "period_estimate": true,
+            "source": "creature_movement 2574775"
+          }
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1431.01, "y": 7107.62, "z": -76.2847}
-          ]
+            {"x": -1321.97, "y": 6943.19, "z": -32.675}
+          ],
+          "radius": 6
         },
         {
-          "entries": [2914],
+          "entries": [50106],
           "positions": [
-            {"x": -1649.09, "y": 7094.02, "z": 22.4107}
-          ]
+            {"x": -1325.51, "y": 6912.92, "z": -22.4307}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65112],
+          "entries": [61316],
           "positions": [
-            {"x": -1679.57, "y": 6954.88, "z": 23.7261}
-          ]
+            {"x": -1339.93, "y": 6921.69, "z": -32.675}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65110],
+          "entries": [50106],
           "positions": [
-            {"x": -1724.64, "y": 6946.2, "z": 21.9985}
-          ]
+            {"x": -1351.41, "y": 6927.9, "z": -32.6752}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65110],
+          "entries": [50106],
           "positions": [
-            {"x": -1662.07, "y": 6912.24, "z": 22.739}
-          ]
+            {"x": -1389.92, "y": 6917.17, "z": -27.7892}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65112],
+          "entries": [50106],
           "positions": [
-            {"x": -1625.43, "y": 6873.82, "z": 22.4737}
-          ]
+            {"x": -1366.67, "y": 6896.32, "z": -17.6223}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65110],
+          "entries": [50106],
           "positions": [
-            {"x": -1653.72, "y": 6842.83, "z": 22.388}
-          ]
+            {"x": -1383.06, "y": 6882.37, "z": -12.6585}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65112],
+          "entries": [61317, 61318, 61317],
           "positions": [
-            {"x": -1686.95, "y": 6831.16, "z": 25.2198}
-          ]
+            {"x": -1413.44, "y": 6906.26, "z": -20.7224},
+            {"x": -1408.93, "y": 6901.77, "z": -21.6443},
+            {"x": -1408.34, "y": 6897.26, "z": -21.7993}
+          ],
+          "radius": 4
         },
         {
-          "entries": [65112],
+          "entries": [50106],
           "positions": [
-            {"x": -1725.82, "y": 6841.04, "z": 24.6708}
-          ]
+            {"x": -1425.16, "y": 6915.06, "z": -17.5101}
+          ],
+          "radius": 6
         },
         {
-          "entries": [65111],
+          "entries": [50106],
           "positions": [
-            {"x": -1746.09, "y": 6864.96, "z": 18.2927}
-          ]
+            {"x": -1431.77, "y": 6896.89, "z": -17.7539}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1445.99, "y": 6893.6, "z": -16.0629}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [61317, 50106],
+          "positions": [
+            {"x": -1446.31, "y": 6914.8, "z": -14.5806},
+            {"x": -1445.66, "y": 6911.3, "z": -15.0014}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1473.8, "y": 6934.49, "z": -14.3097}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1470.82, "y": 6956.15, "z": -14.3097}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1450.1, "y": 6967.23, "z": -14.3097}
+          ],
+          "radius": 6
         }
       ],
       "boss": {
@@ -1565,13 +1952,38 @@
           "entries": [50106],
           "positions": [
             {"x": -1475.41, "y": 6965.1, "z": -122.491}
-          ]
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [61318],
+            "path": [
+              {"x": -1474.72, "y": 7025.21, "z": -101.11},
+              {"x": -1481.77, "y": 7006.89, "z": -107.25},
+              {"x": -1482.98, "y": 6990.56, "z": -112.57},
+              {"x": -1481.84, "y": 6975.29, "z": -118.22},
+              {"x": -1474.68, "y": 6959.99, "z": -124.29},
+              {"x": -1480.01, "y": 6970.15, "z": -120.12},
+              {"x": -1485.81, "y": 6993.28, "z": -111.5},
+              {"x": -1476.3, "y": 7010.99, "z": -105.65},
+              {"x": -1472.36, "y": 7038.86, "z": -98.34},
+              {"x": -1473.78, "y": 7064.84, "z": -98.34},
+              {"x": -1456.16, "y": 7081.17, "z": -98.34},
+              {"x": -1431.62, "y": 7081.46, "z": -98.34},
+              {"x": -1457.29, "y": 7075.98, "z": -98.34},
+              {"x": -1472.77, "y": 7063.34, "z": -98.34},
+              {"x": -1473.97, "y": 7045.88, "z": -98.34}
+            ],
+            "period_s": 128,
+            "period_estimate": true,
+            "source": "creature_movement 2574761"
+          }
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1450.25, "y": 6953.42, "z": -182.498}
-          ]
+            {"x": -1483.13, "y": 7029.88, "z": -157.938}
+          ],
+          "radius": 6
         },
         {
           "entries": [65101, 65100, 65101],
@@ -1579,82 +1991,15 @@
             {"x": -1446.43, "y": 6964.65, "z": -191.329},
             {"x": -1451.82, "y": 6969.25, "z": -189.941},
             {"x": -1444.78, "y": 6972.06, "z": -190.695}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [50106],
           "positions": [
-            {"x": -1402.03, "y": 6974.72, "z": -230.124}
-          ]
-        },
-        {
-          "entries": [65101],
-          "positions": [
-            {"x": -1402.9, "y": 7049.05, "z": -216.779}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1385.33, "y": 7064.66, "z": -164.957}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1377.37, "y": 7080.18, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1385.19, "y": 7093.24, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [65105],
-          "positions": [
-            {"x": -1394.47, "y": 7084.93, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1406.72, "y": 7094.58, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1396.92, "y": 7103.01, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1417.8, "y": 7081.73, "z": -164.956}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1408.48, "y": 7073.09, "z": -164.772}
-          ]
-        },
-        {
-          "entries": [65103, 65103, 65103, 65102],
-          "positions": [
-            {"x": -1437.28, "y": 7065.6, "z": -167.709},
-            {"x": -1437.59, "y": 7062.78, "z": -167.858},
-            {"x": -1440.67, "y": 7062.51, "z": -168.308},
-            {"x": -1442.88, "y": 7067.14, "z": -168.319}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1483.13, "y": 7029.88, "z": -157.938}
-          ]
+            {"x": -1450.25, "y": 6953.42, "z": -182.498}
+          ],
+          "radius": 6
         },
         {
           "entries": [65100, 65100, 65102],
@@ -1662,32 +2007,64 @@
             {"x": -1483.82, "y": 6924.89, "z": -232.556},
             {"x": -1490.37, "y": 6923.34, "z": -232.572},
             {"x": -1483.95, "y": 6918.24, "z": -232.563}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65105],
           "positions": [
             {"x": -1513.28, "y": 6885.61, "z": -232.599}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [65102, 65101],
           "positions": [
             {"x": -1570, "y": 6816.24, "z": -232.598},
             {"x": -1563.01, "y": 6810.84, "z": -232.598}
-          ]
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
         },
         {
           "entries": [65100],
           "positions": [
             {"x": -1581.17, "y": 6811.15, "z": -232.599}
-          ]
-        },
-        {
-          "entries": [65100],
-          "positions": [
-            {"x": -1564.93, "y": 6798.71, "z": -232.599}
-          ]
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
         },
         {
           "entries": [65100, 65100, 65101],
@@ -1695,56 +2072,60 @@
             {"x": -1601.29, "y": 6780.28, "z": -230.253},
             {"x": -1608.37, "y": 6784.15, "z": -229.806},
             {"x": -1606.47, "y": 6778.03, "z": -230.018}
-          ]
-        },
-        {
-          "entries": [65100, 65102, 65100],
-          "positions": [
-            {"x": -1590.63, "y": 6758.85, "z": -229.952},
-            {"x": -1585.64, "y": 6759.23, "z": -229.724},
-            {"x": -1583.79, "y": 6753.77, "z": -229.372}
-          ]
-        },
-        {
-          "entries": [65101],
-          "positions": [
-            {"x": -1629.96, "y": 6731.27, "z": -224.374}
-          ]
-        },
-        {
-          "entries": [65100, 65100, 65100, 65100],
-          "positions": [
-            {"x": -1636.04, "y": 6729.12, "z": -222.818},
-            {"x": -1630.07, "y": 6723.76, "z": -222.889},
-            {"x": -1643, "y": 6731, "z": -221.116},
-            {"x": -1629.2, "y": 6716.21, "z": -220.933}
-          ]
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
         },
         {
           "entries": [65100, 65100],
           "positions": [
             {"x": -1682.67, "y": 6697.73, "z": -211.523},
             {"x": -1688.42, "y": 6704.85, "z": -211.046}
-          ]
-        },
-        {
-          "entries": [65100, 65100],
-          "positions": [
-            {"x": -1684.32, "y": 6670.27, "z": -211.546},
-            {"x": -1682.14, "y": 6661.57, "z": -211.116}
-          ]
-        },
-        {
-          "entries": [50106],
-          "positions": [
-            {"x": -1663.42, "y": 6652.19, "z": -199.023}
-          ]
-        },
-        {
-          "entries": [65100],
-          "positions": [
-            {"x": -1739.02, "y": 6667.59, "z": -205.277}
-          ]
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65100],
+            "path": [
+              {"x": -1739.02, "y": 6667.59, "z": -205.28},
+              {"x": -1739.01, "y": 6667.6, "z": -205.28},
+              {"x": -1728.27, "y": 6669.63, "z": -208.29},
+              {"x": -1721.61, "y": 6671.77, "z": -209.86},
+              {"x": -1709.6, "y": 6676.12, "z": -211.6},
+              {"x": -1703.11, "y": 6678.74, "z": -211.81},
+              {"x": -1687.69, "y": 6684.97, "z": -211.93},
+              {"x": -1680.35, "y": 6688.53, "z": -211.99},
+              {"x": -1667.38, "y": 6697.51, "z": -212.21},
+              {"x": -1656.35, "y": 6706.11, "z": -215.03},
+              {"x": -1642.07, "y": 6718.38, "z": -220.01},
+              {"x": -1638.36, "y": 6721.62, "z": -221.35},
+              {"x": -1641.68, "y": 6718.46, "z": -220.13},
+              {"x": -1652.57, "y": 6709.66, "z": -216.36},
+              {"x": -1663.97, "y": 6699.47, "z": -212.85},
+              {"x": -1679.93, "y": 6686.37, "z": -212.1},
+              {"x": -1695.33, "y": 6679.21, "z": -211.99},
+              {"x": -1721.65, "y": 6671.57, "z": -209.84},
+              {"x": -1738.69, "y": 6667.18, "z": -205.43}
+            ],
+            "period_s": 95,
+            "period_estimate": true,
+            "source": "creature_movement 2567942"
+          }
         },
         {
           "entries": [65103, 65103, 65100, 65100],
@@ -1753,19 +2134,176 @@
             {"x": -1789.06, "y": 6689.14, "z": -191.581},
             {"x": -1794.06, "y": 6693.86, "z": -190.527},
             {"x": -1799.26, "y": 6681.33, "z": -189.899}
-          ]
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65100],
+          "positions": [
+            {"x": -1739.02, "y": 6667.59, "z": -205.277}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65100],
+            "path": [
+              {"x": -1739.02, "y": 6667.59, "z": -205.28},
+              {"x": -1739.01, "y": 6667.6, "z": -205.28},
+              {"x": -1728.27, "y": 6669.63, "z": -208.29},
+              {"x": -1721.61, "y": 6671.77, "z": -209.86},
+              {"x": -1709.6, "y": 6676.12, "z": -211.6},
+              {"x": -1703.11, "y": 6678.74, "z": -211.81},
+              {"x": -1687.69, "y": 6684.97, "z": -211.93},
+              {"x": -1680.35, "y": 6688.53, "z": -211.99},
+              {"x": -1667.38, "y": 6697.51, "z": -212.21},
+              {"x": -1656.35, "y": 6706.11, "z": -215.03},
+              {"x": -1642.07, "y": 6718.38, "z": -220.01},
+              {"x": -1638.36, "y": 6721.62, "z": -221.35},
+              {"x": -1641.68, "y": 6718.46, "z": -220.13},
+              {"x": -1652.57, "y": 6709.66, "z": -216.36},
+              {"x": -1663.97, "y": 6699.47, "z": -212.85},
+              {"x": -1679.93, "y": 6686.37, "z": -212.1},
+              {"x": -1695.33, "y": 6679.21, "z": -211.99},
+              {"x": -1721.65, "y": 6671.57, "z": -209.84},
+              {"x": -1738.69, "y": 6667.18, "z": -205.43}
+            ],
+            "period_s": 95,
+            "period_estimate": true,
+            "source": "creature_movement 2567942"
+          }
+        },
+        {
+          "entries": [65100, 65100],
+          "positions": [
+            {"x": -1684.32, "y": 6670.27, "z": -211.546},
+            {"x": -1682.14, "y": 6661.57, "z": -211.116}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65100],
+            "path": [
+              {"x": -1739.02, "y": 6667.59, "z": -205.28},
+              {"x": -1739.01, "y": 6667.6, "z": -205.28},
+              {"x": -1728.27, "y": 6669.63, "z": -208.29},
+              {"x": -1721.61, "y": 6671.77, "z": -209.86},
+              {"x": -1709.6, "y": 6676.12, "z": -211.6},
+              {"x": -1703.11, "y": 6678.74, "z": -211.81},
+              {"x": -1687.69, "y": 6684.97, "z": -211.93},
+              {"x": -1680.35, "y": 6688.53, "z": -211.99},
+              {"x": -1667.38, "y": 6697.51, "z": -212.21},
+              {"x": -1656.35, "y": 6706.11, "z": -215.03},
+              {"x": -1642.07, "y": 6718.38, "z": -220.01},
+              {"x": -1638.36, "y": 6721.62, "z": -221.35},
+              {"x": -1641.68, "y": 6718.46, "z": -220.13},
+              {"x": -1652.57, "y": 6709.66, "z": -216.36},
+              {"x": -1663.97, "y": 6699.47, "z": -212.85},
+              {"x": -1679.93, "y": 6686.37, "z": -212.1},
+              {"x": -1695.33, "y": 6679.21, "z": -211.99},
+              {"x": -1721.65, "y": 6671.57, "z": -209.84},
+              {"x": -1738.69, "y": 6667.18, "z": -205.43}
+            ],
+            "period_s": 95,
+            "period_estimate": true,
+            "source": "creature_movement 2567942"
+          }
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1663.42, "y": 6652.19, "z": -199.023}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [65101, 65100, 65100, 65100, 65100],
+          "positions": [
+            {"x": -1629.96, "y": 6731.27, "z": -224.374},
+            {"x": -1636.04, "y": 6729.12, "z": -222.818},
+            {"x": -1630.07, "y": 6723.76, "z": -222.889},
+            {"x": -1643, "y": 6731, "z": -221.116},
+            {"x": -1629.2, "y": 6716.21, "z": -220.933}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
+        },
+        {
+          "entries": [65100, 65102, 65100],
+          "positions": [
+            {"x": -1590.63, "y": 6758.85, "z": -229.952},
+            {"x": -1585.64, "y": 6759.23, "z": -229.724},
+            {"x": -1583.79, "y": 6753.77, "z": -229.372}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
+        },
+        {
+          "entries": [65100],
+          "positions": [
+            {"x": -1564.93, "y": 6798.71, "z": -232.599}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1629.96, "y": 6731.27, "z": -224.37},
+              {"x": -1629.8, "y": 6731.44, "z": -224.42},
+              {"x": -1617.6, "y": 6744.89, "z": -228.12},
+              {"x": -1601.9, "y": 6764.17, "z": -230.68},
+              {"x": -1585.82, "y": 6787.09, "z": -231.93},
+              {"x": -1572.33, "y": 6806.05, "z": -232.6},
+              {"x": -1584.63, "y": 6788.1, "z": -232.19},
+              {"x": -1600.76, "y": 6765.21, "z": -230.66},
+              {"x": -1629.04, "y": 6731.72, "z": -224.62}
+            ],
+            "period_s": 76,
+            "period_estimate": true,
+            "source": "creature_movement 2567943"
+          }
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1431.12, "y": 6875.02, "z": -127.872}
-          ]
+          ],
+          "radius": 6
         },
         {
           "entries": [61318],
           "positions": [
             {"x": -1419.85, "y": 6906.57, "z": -138.015}
-          ]
+          ],
+          "radius": 9
         },
         {
           "entries": [65103, 65103, 65101, 65101, 65103],
@@ -1775,13 +2313,112 @@
             {"x": -1351.13, "y": 6972.1, "z": -147.787},
             {"x": -1342.71, "y": 6971.04, "z": -147.25},
             {"x": -1337.55, "y": 6966.27, "z": -146.38}
-          ]
+          ],
+          "radius": 2
         },
         {
           "entries": [50106],
           "positions": [
             {"x": -1325.34, "y": 6991.95, "z": -141.521}
-          ]
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1385.33, "y": 7064.66, "z": -164.957}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1377.37, "y": 7080.18, "z": -164.956}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [65105],
+          "positions": [
+            {"x": -1394.47, "y": 7084.93, "z": -164.956}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1385.19, "y": 7093.24, "z": -164.956}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1396.92, "y": 7103.01, "z": -164.956}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1406.72, "y": 7094.58, "z": -164.956}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1417.8, "y": 7081.73, "z": -164.956}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1408.48, "y": 7073.09, "z": -164.772}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [65103, 65103, 65103, 65102],
+          "positions": [
+            {"x": -1437.28, "y": 7065.6, "z": -167.709},
+            {"x": -1437.59, "y": 7062.78, "z": -167.858},
+            {"x": -1440.67, "y": 7062.51, "z": -168.308},
+            {"x": -1442.88, "y": 7067.14, "z": -168.319}
+          ],
+          "radius": 2
+        },
+        {
+          "entries": [65101],
+          "positions": [
+            {"x": -1402.9, "y": 7049.05, "z": -216.779}
+          ],
+          "radius": 2,
+          "patrol": {
+            "entries": [65101],
+            "path": [
+              {"x": -1402.9, "y": 7049.05, "z": -216.78},
+              {"x": -1390.06, "y": 7027.12, "z": -212.23},
+              {"x": -1387.84, "y": 7000.71, "z": -206.37},
+              {"x": -1394.77, "y": 6980.07, "z": -201.6},
+              {"x": -1408.62, "y": 6972.1, "z": -198.57},
+              {"x": -1396.12, "y": 6979.49, "z": -201.32},
+              {"x": -1384.85, "y": 7016.08, "z": -209.72},
+              {"x": -1389.42, "y": 7028.08, "z": -212.33},
+              {"x": -1402.78, "y": 7048.24, "z": -216.65}
+            ],
+            "period_s": 74,
+            "period_estimate": true,
+            "source": "creature_movement 2567944"
+          }
+        },
+        {
+          "entries": [50106],
+          "positions": [
+            {"x": -1402.03, "y": 6974.72, "z": -230.124}
+          ],
+          "radius": 6
         }
       ],
       "boss": {
