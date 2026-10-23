@@ -39,10 +39,17 @@ func (d *RemoteDriver) checkPartyStrength(pf *Preflight) {
 	if team == "" {
 		return
 	}
+	unread := 0
 	for _, m := range d.fr.Party {
 		botTeam := bt.BotTeam(m.GUID)
+		if botTeam == "" {
+			unread++
+		}
 		if botTeam != "" && !strings.EqualFold(botTeam, team) {
 			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: is %s but the party's team is %s (a hire of the other faction: keep it out of enemy towns, hire and enter at the dungeon door)", m.Name, botTeam, team))
 		}
+	}
+	if unread > 0 {
+		d.rep.note(fmt.Sprintf("faction check: %d of %d bots not in view, not checked", unread, len(d.fr.Party)))
 	}
 }

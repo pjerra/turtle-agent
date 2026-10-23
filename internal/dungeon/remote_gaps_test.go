@@ -507,7 +507,7 @@ func TestPreflightFlagsAHireOfTheOtherFaction(t *testing.T) {
 	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "but the party's team is") {
 		t.Fatalf("a game without BotTeamer warned:\n%s", all)
 	}
-	// ... and neither does a bot out of view (BotTeam "").
+	// ... and neither does a bot out of view (BotTeam ""), which the report notes once.
 	g2 := teamBotFake{botFake: kitFake(t), team: "horde", botTeams: map[packet.GUID]string{}}
 	rep, err = runRemote(t, g2, plan1(), kitOpts(), nil)
 	if err != nil || rep.Remote.Preflight == nil {
@@ -515,6 +515,71 @@ func TestPreflightFlagsAHireOfTheOtherFaction(t *testing.T) {
 	}
 	if all := strings.Join(rep.Remote.Preflight.Warnings, "\n"); strings.Contains(all, "but the party's team is") {
 		t.Fatalf("a bot out of view warned:\n%s", all)
+	}
+	if !strings.Contains(notesOf(rep), "faction check: 3 of 3 bots not in view, not checked") {
+		t.Fatalf("no note for the unread races:\n%s", notesOf(rep))
+	}
+
+	// One of three out of view: one note, with both counts.
+	g3 := teamBotFake{botFake: kitFake(t), team: "horde", botTeams: map[packet.GUID]string{gTank: "horde", gHealer: "alliance"}}
+	rep, err = runRemote(t, g3, plan1(), kitOpts(), nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(notesOf(rep), "faction check: 1 of 3 bots not in view, not checked") {
+		t.Fatalf("no note for the one unread race:\n%s", notesOf(rep))
+	}
+	if n := strings.Count(notesOf(rep), "faction check:"); n != 1 {
+		t.Fatalf("%d faction notes:\n%s", n, notesOf(rep))
+	}
+}
+
+// movedByMaintenance empties the object store's team of every bot once a `.bot maintenance` order went out, as the real store does when the
+// hires walk to their vendors.
+type movedByMaintenance struct{ *teamBotFake }
+
+func (g movedByMaintenance) BotTeam(guid packet.GUID) string {
+	for _, l := range g.teamBotFake.botFake.lines {
+		if strings.HasPrefix(l, "maintenance ") {
+			return ""
+		}
+	}
+	return g.teamBotFake.BotTeam(guid)
+}
+
+// #266: the faction check runs before the maintenance orders, so a hire the maintenance moves out of view is still warned about.
+func TestPreflightFactionCheckRunsBeforeMaintenance(t *testing.T) {
+	teams := map[packet.GUID]string{gTank: "horde", gHealer: "alliance", gMage: "horde"}
+	g := &teamBotFake{botFake: kitFake(t), team: "horde", botTeams: teams}
+	rep, err := runRemote(t, movedByMaintenance{g}, plan1(), kitOpts(), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, notesOf(rep))
+	}
+	// The orders went out (the store would be empty after them), and the warning is there anyway.
+	if got := g.sent("maintenance"); len(got) != 3 {
+		t.Fatalf("%d maintenance orders: %v", len(got), got)
+	}
+	all := strings.Join(rep.Remote.Preflight.Warnings, "\n")
+	if !strings.Contains(all, "Healy: is alliance but the party's team is horde") {
+		t.Fatalf("the hire of the other faction was not warned about:\n%s", all)
+	}
+}
+
+// #266: without a named tank the floor reads the lead bot, the party member that takes the hits.
+func TestPreflightTankFloorFallsBackToTheLead(t *testing.T) {
+	g := kitFake(t)
+	g.party[0].MaxHP = 641
+	p := plan1()
+	p.TankMinHP = 800
+	o := kitOpts()
+	o.Tank = ""
+	rep, err := runRemote(t, g, p, o, nil)
+	if err != nil || rep.Remote.Preflight == nil {
+		t.Fatalf("%v", err)
+	}
+	all := strings.Join(rep.Remote.Preflight.Warnings, "\n")
+	if !strings.Contains(all, "Tanky: the tank's max health is 641, the plan wants at least 800") {
+		t.Fatalf("the lead's health was not checked for the tank floor:\n%s", all)
 	}
 }
 
