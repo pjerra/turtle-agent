@@ -220,7 +220,7 @@
    "outside_tele": "ScarletMonastery",
    "notes": [
     "One of four wings of map 189; the packs are the ones inside the wing's box.",
-    "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk, so his leg is last"
+    "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk, so his leg is third and Scorn's boss (a Scourge Invasion spawn that is not in the world) is the boss-only last leg"
    ],
    "handwritten": true
   },

@@ -42,7 +42,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | 47 | `razorfen_kraul`: Razorfen Kraul | 26-31 | 7 | draft | yes | Agathelos' Ward (GO_AGATHELOS_WARD) is opened by the keep script before Agathelos the Raging; Willix the Importer escort (optional) |
 | 816 | `dragonmaw_retreat`: Dragonmaw Retreat | 26-31 | 5 | draft | yes | none known |
 | 90 | `gnomeregan`: Gnomeregan | 27-33 | 5 | draft | yes | the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg; Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in; Grubbis (7361) has no spawn row |
-| 189 | `scarlet_graveyard`: Scarlet Monastery: Graveyard | 30-35 | 4 | draft | yes | none known |
+| 189 | `scarlet_graveyard`: Scarlet Monastery: Graveyard | 30-35 | 5 | draft | yes | none known |
 | 802 | `crescent_grove`: Crescent Grove | 31-36 | 5 | draft | yes | Keeper Ranathos carries npc_flags (questgiver): a gossip or dialogue starts his fight |
 | 189 | `scarlet_library`: Scarlet Monastery: Library | 33-38 | 3 | draft | yes | Houndmaster Loksey's hounds (SPELL_SUMMONSCARLETHOUND); Brother Wystan (61983) is a Turtle addition: EventAI, spell list 180317 (Fireball 8402); he patrols (movement_type 2), the boss step meets him on his path |
 | 818 | `stormwrought_ruins`: Stormwrought Ruins | 33-38 | 11 | draft | yes | secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID); Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS) |
