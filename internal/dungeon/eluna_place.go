@@ -64,6 +64,19 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	}
 	p := d.start.Point
 
+	// 0. The commander enters the lead bot's instance first. The bound party went through the portal on its own (`cmd enter`) into an
+	// instance of its group; a `.go xyz` from outside makes the commander an instance of its own, and the toolkit then sees another
+	// instance than the party's: quiet reads the wrong creatures and place finds "no_members" (live 2026-10-23, Gnomeregan: party in
+	// instance 110, commander in 111). `.appear <lead bot>` is what commander mode's start uses for the same reason (start.go commanderTo).
+	if d.bound && d.opt.Lead != "" {
+		if err := hands.Appear(ctx, d.opt.Lead); err != nil {
+			return fmt.Errorf("observe mode: eluna place: .appear %s: %w", d.opt.Lead, err)
+		}
+		if err := d.clk.Sleep(ctx, elunaSettle); err != nil {
+			return err
+		}
+	}
+
 	// 1. The agent stands above the step: the floor query searches from the caller's z.
 	if err := hands.GoXYZ(ctx, d.plan.Map, Point{X: p.X, Y: p.Y, Z: p.Z + elunaRise}); err != nil {
 		return fmt.Errorf("observe mode: eluna place: .go xyz to the start step: %w", err)
@@ -122,6 +135,7 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	if err := d.elunaOrder(ctx, "cmd follow"); err != nil {
 		return fmt.Errorf("observe mode: eluna place: cmd follow: %w", err)
 	}
+	d.elunaPlaced = true
 	note := fmt.Sprintf("eluna place: quiet, %d placed at %.1f %.1f %.1f", len(pl.Members), p.X, p.Y, p.Z)
 	if drifted != "" {
 		note += " (drifted: " + drifted + ")"

@@ -98,7 +98,11 @@ func (g *elunaFake) Command(ctx context.Context, command string) (tbm.Reply, err
 // The rest of StartHands (the start path asserts it for the `.go xyz`).
 func (g *elunaFake) AgentPlace() (Point, uint32, bool)               { return Point{}, 0, true }
 func (g *elunaFake) AccountLevel(context.Context) (int, bool, error) { return 3, true, nil }
-func (g *elunaFake) Appear(context.Context, string) error            { return nil }
+func (g *elunaFake) Appear(_ context.Context, who string) error {
+	g.seq = append(g.seq, "appear "+who)
+	g.times = append(g.times, g.now)
+	return nil
+}
 func (g *elunaFake) WalkSelf(context.Context, Point) (WalkResult, error) {
 	return WalkResult{}, nil
 }
@@ -128,7 +132,7 @@ func placeSeq(seq []string) []string {
 	var out []string
 	for i, s := range seq {
 		switch {
-		case s == "go xyz", s == "tt floor", s == "tt quiet", s == "tt place", s == "cmd follow":
+		case strings.HasPrefix(s, "appear "), s == "go xyz", s == "tt floor", s == "tt quiet", s == "tt place", s == "cmd follow":
 			out = append(out, s)
 		case s == "cmd stay":
 			// The placement's hold comes right before its `tt place`; the run's own end-of-run `cmd stay` (endStay) comes after
@@ -160,11 +164,12 @@ func TestElunaPlaceOffByDefault(t *testing.T) {
 // The decided order of the start placement: move, floor, quiet, stay, place, follow — and the run starts after it.
 func TestElunaPlaceOrder(t *testing.T) {
 	g := newElunaFake(t)
-	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{X: 1, Y: 2, Z: 3}, true), nil)
+	o := elunaOpts(Point{X: 1, Y: 2, Z: 3}, true)
+	rep, err := runRemote(t, g, observePlan(), o, nil)
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
 	}
-	want := []string{"go xyz", "tt floor", "tt quiet", "cmd stay", "tt place", "cmd follow"}
+	want := []string{"appear " + o.Lead, "go xyz", "tt floor", "tt quiet", "cmd stay", "tt place", "cmd follow"}
 	if got := placeSeq(g.seq); !slices.Equal(got, want) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
@@ -354,5 +359,19 @@ func TestElunaPlaceRefusedOrderEndsTheRun(t *testing.T) {
 		if indexPrefix(g.orders, "run start") >= 0 {
 			t.Fatalf("%s refused but the run was started: %v", order, g.orders)
 		}
+	}
+}
+
+// After a verified place the distance check is not asked of the view feed: its lead position is still the one from before the teleport
+// (live 2026-10-23: "the lead bot stands 689 yd from the start step's point" right after a placed party). A start far from where the
+// fake lead stands goes on, and the run is started.
+func TestElunaPlaceSkipsTheStaleDistanceCheck(t *testing.T) {
+	g := newElunaFake(t)
+	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{X: 700, Y: 0, Z: 0}, true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if indexPrefix(g.orders, "run start") < 0 {
+		t.Fatalf("the run was not started: %v", g.orders)
 	}
 }
