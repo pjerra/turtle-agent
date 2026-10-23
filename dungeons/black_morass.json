@@ -31,8 +31,8 @@
     "Named scripted mobs in pulls, not bosses: Rotmaw 65122 (Consume roots itself and shrinks a player for 15.5 s, then Knockback; Mortal Wound/Sunder), Mossheart 65124 (stealths out of combat; Rejuv), Epidamu 61575 (Drain Mana). Boss rows: Antnormi 65125 (Thrash, Cowering Roar, Shadow Shock; Enrage at 20 % or 5 min), Medivh 50105 (FACTION 35: friendly to the party, no script, 1,024,000 hp; the run leader's boss step reads 'boss is friendly to this party: left alone' and the leg advances - the row is a destination marker, not a kill), Epochronos 65116 (Sand Breath, Swoop, Arcane Blast; at 50 % banishes itself and summons one Echo: Lich King 65117 / Kael'thas 65118 / Vashj 65119, which must die before it unbanishes), Chronar 65113 (Shout, Mortal Strike, Sweeping Slam, Spell Reflection, Enrage at 35 %).",
     "The Time Anomaly 50106 at -1450.10 6967.23 -14.3097 stood 18.9 yd from Epochronos (detection 20): moved to the end of its leg, so the boss joins that one pull and not a mid-leg one.",
     "Patrols with a creature_movement path: 65100 guid 2567942 (237 yd, ~95 s), 65101 2567943 (190 yd, ~76 s), 65101 2567944 (184 yd, ~74 s), 61318 2574761 (319 yd, ~128 s), 61318 2574775 (431 yd, ~172 s). Each group whose stand is within 25 yd of a path carries that patrol block (period is the path length at 2.5 yd/s: period_estimate). Mossheart 65124, Medivh 50105 and the Bronze Defenders 65126/65128 have movement_type 2 but no movement rows: no block can be written; the mapping walk measures them.",
-    "Floors: all pull stands are exact spawn rows and no pack spans |dz| \u003e 6. The map is stacked: other hostile packs stand directly above/below many stands (50106/61317/61318 in the z -165..+56 cave column, 65100-65103 between -230 and -122). Aggro is 3-D, so they are not pull members, but the route between floors is the mapping walk's first item: seven approach hops could not be cut (leg 2 step 40; leg 3 steps 2, 15, 16, 28, 30 and the boss step 34; the nearest reachable point is up to 142.9 yd short). The 274 run-leader hop notices are the same walk.",
-    "Route: leg order antnormi -\u003e medivh -\u003e epochronos -\u003e chronar is the shortest of the 24 permutations (7,852 yd from the entrance; the next best is +532). Within each leg the groups are ordered by a 3-D 2-opt from the leg's start to its boss (6,221-\u003e5,233, 1,649-\u003e1,406, 3,455-\u003e2,846 and 1,901-\u003e1,751 yd; the vertical travel also falls, 311-\u003e306, 661-\u003e442, 491-\u003e452).",
+    "Floors: all pull stands are exact spawn rows and no pack spans |dz| \u003e 6. The map is stacked: other hostile packs stand directly above/below many stands (50106/61317/61318 in the z -165..+56 cave column, 65100-65103 between -230 and -122). Aggro is 3-D, so they are not pull members, but the route between floors is the mapping walk's first item: six approach hops could not be cut (leg 3 steps 2, 3, 5, 15, 18 and 22; the nearest reachable point is 12.6-90.3 yd from the pack). The 247 run-leader hop notices are the same walk.",
+    "Route: leg order antnormi -\u003e medivh -\u003e epochronos -\u003e chronar is the shortest of the 24 permutations (7,852 yd from the entrance; the next best is +532). Within each leg the groups are ordered by a 3-D 2-opt from the leg's start to its boss (5,797-\u003e4,940, 1,522-\u003e1,347, 3,321-\u003e2,789 and 1,900-\u003e1,751 yd; the vertical travel is 270-\u003e267, 53-\u003e55, 651-\u003e593 and 491-\u003e452).",
     "The instance script teleports a player below z -281 back to the entrance; Epochronos' death removes the Sand Wall 2010865 (and a 180322 barrier within 75 yd). No door, lever or key is in the plan."
   ],
   "legs": [
@@ -550,7 +550,7 @@
             {"x": -1817.39, "y": 7247.32, "z": 18.8037},
             {"x": -1824.89, "y": 7254.1, "z": 18.8232}
           ],
-          "radius": 2
+          "radius": 6.1
         },
         {
           "entries": [65111],
@@ -1341,7 +1341,7 @@
             {"x": -1429.14, "y": 7068.82, "z": -0.750885},
             {"x": -1424.57, "y": 7063.18, "z": -2.25193}
           ],
-          "radius": 6
+          "radius": 9.7
         },
         {
           "entries": [50106],
@@ -1357,7 +1357,7 @@
             {"x": -1447.56, "y": 7087.44, "z": -98.3378},
             {"x": -1455.31, "y": 7081.13, "z": -98.3371}
           ],
-          "radius": 6,
+          "radius": 11.9,
           "patrol": {
             "entries": [61318],
             "path": [
@@ -1418,7 +1418,7 @@
             {"x": -1478.51, "y": 7058.27, "z": -98.3371},
             {"x": -1473.38, "y": 7048.02, "z": -98.3371}
           ],
-          "radius": 6,
+          "radius": 11.7,
           "patrol": {
             "entries": [61318],
             "path": [
@@ -1449,7 +1449,7 @@
             {"x": -1469.4, "y": 7030.33, "z": -98.8604},
             {"x": -1474.72, "y": 7025.21, "z": -101.115}
           ],
-          "radius": 6,
+          "radius": 9.9,
           "patrol": {
             "entries": [61318],
             "path": [
@@ -1621,7 +1621,7 @@
             {"x": -1384.91, "y": 7087.47, "z": -83.5644},
             {"x": -1386.4, "y": 7093.28, "z": -84.7116}
           ],
-          "radius": 6,
+          "radius": 12.5,
           "patrol": {
             "entries": [61318],
             "path": [
@@ -1775,7 +1775,7 @@
             {"x": -1320.75, "y": 7020.88, "z": -45.8353},
             {"x": -1324.73, "y": 7026.13, "z": -47.1859}
           ],
-          "radius": 6,
+          "radius": 15.4,
           "patrol": {
             "entries": [61318],
             "path": [
@@ -1886,7 +1886,7 @@
             {"x": -1408.93, "y": 6901.77, "z": -21.6443},
             {"x": -1408.34, "y": 6897.26, "z": -21.7993}
           ],
-          "radius": 4
+          "radius": 9.6
         },
         {
           "entries": [50106],
@@ -1915,7 +1915,7 @@
             {"x": -1446.31, "y": 6914.8, "z": -14.5806},
             {"x": -1445.66, "y": 6911.3, "z": -15.0014}
           ],
-          "radius": 6
+          "radius": 7.8
         },
         {
           "entries": [50106],
@@ -1992,7 +1992,7 @@
             {"x": -1451.82, "y": 6969.25, "z": -189.941},
             {"x": -1444.78, "y": 6972.06, "z": -190.695}
           ],
-          "radius": 2
+          "radius": 5.5
         },
         {
           "entries": [50106],
@@ -2008,7 +2008,7 @@
             {"x": -1490.37, "y": 6923.34, "z": -232.572},
             {"x": -1483.95, "y": 6918.24, "z": -232.563}
           ],
-          "radius": 2
+          "radius": 5.5
         },
         {
           "entries": [65105],
@@ -2023,7 +2023,7 @@
             {"x": -1570, "y": 6816.24, "z": -232.598},
             {"x": -1563.01, "y": 6810.84, "z": -232.598}
           ],
-          "radius": 2,
+          "radius": 5.4,
           "patrol": {
             "entries": [65101],
             "path": [
@@ -2073,7 +2073,7 @@
             {"x": -1608.37, "y": 6784.15, "z": -229.806},
             {"x": -1606.47, "y": 6778.03, "z": -230.018}
           ],
-          "radius": 2,
+          "radius": 5.5,
           "patrol": {
             "entries": [65101],
             "path": [
@@ -2098,7 +2098,7 @@
             {"x": -1682.67, "y": 6697.73, "z": -211.523},
             {"x": -1688.42, "y": 6704.85, "z": -211.046}
           ],
-          "radius": 2,
+          "radius": 5.6,
           "patrol": {
             "entries": [65100],
             "path": [
@@ -2135,7 +2135,7 @@
             {"x": -1794.06, "y": 6693.86, "z": -190.527},
             {"x": -1799.26, "y": 6681.33, "z": -189.899}
           ],
-          "radius": 2
+          "radius": 8.7
         },
         {
           "entries": [65100],
@@ -2177,7 +2177,7 @@
             {"x": -1684.32, "y": 6670.27, "z": -211.546},
             {"x": -1682.14, "y": 6661.57, "z": -211.116}
           ],
-          "radius": 2,
+          "radius": 5.5,
           "patrol": {
             "entries": [65100],
             "path": [
@@ -2222,7 +2222,7 @@
             {"x": -1643, "y": 6731, "z": -221.116},
             {"x": -1629.2, "y": 6716.21, "z": -220.933}
           ],
-          "radius": 2,
+          "radius": 12.1,
           "patrol": {
             "entries": [65101],
             "path": [
@@ -2248,7 +2248,7 @@
             {"x": -1585.64, "y": 6759.23, "z": -229.724},
             {"x": -1583.79, "y": 6753.77, "z": -229.372}
           ],
-          "radius": 2,
+          "radius": 5.6,
           "patrol": {
             "entries": [65101],
             "path": [
@@ -2314,7 +2314,7 @@
             {"x": -1342.71, "y": 6971.04, "z": -147.25},
             {"x": -1337.55, "y": 6966.27, "z": -146.38}
           ],
-          "radius": 2
+          "radius": 9.4
         },
         {
           "entries": [50106],
@@ -2387,7 +2387,7 @@
             {"x": -1440.67, "y": 7062.51, "z": -168.308},
             {"x": -1442.88, "y": 7067.14, "z": -168.319}
           ],
-          "radius": 2
+          "radius": 5.2
         },
         {
           "entries": [65101],
