@@ -50,8 +50,13 @@ func TestGnomereganUnitListsComeFromTheCensus(t *testing.T) {
 // Thermaplugg have no pull inside their sight; the draft's 2-D near misses 0.1/0.2 are 54 yd above the Fallout, 2.7 is 44 yd below the Pummeler).
 func TestGnomereganTheAgentsAtTheAmbassadorAreHisFirst(t *testing.T) {
 	p := loadPlan(t, gnomereganPlan)
-	if len(p.Legs) != 5 {
-		t.Fatalf("%d legs, want 5", len(p.Legs))
+	if len(p.Legs) != 6 {
+		t.Fatalf("%d legs, want 6", len(p.Legs))
+	}
+	// 6228 is a 30 % pool spawn (pool 9001), not a guaranteed one: his leg is last, after Thermaplugg, so an instance without him
+	// stops the run only once everything else is done.
+	if len(p.Legs) == 0 || p.Legs[len(p.Legs)-1].Name != "dark_iron_ambassador" {
+		t.Fatalf("the last leg is %q, want dark_iron_ambassador", p.Legs[len(p.Legs)-1].Name)
 	}
 	d := gnomereganLeg(t, p, "dark_iron_ambassador")
 	if d.Boss == nil || d.Boss.Entry != 6228 {
@@ -60,8 +65,8 @@ func TestGnomereganTheAgentsAtTheAmbassadorAreHisFirst(t *testing.T) {
 	if got := fmt.Sprint(d.Boss.First); got != "[6212]" {
 		t.Errorf("dark_iron_ambassador: boss first %s, want [6212]", got)
 	}
-	if n := len(d.PullGroups); n != 24 {
-		t.Errorf("dark_iron_ambassador: %d pull groups, want 24", n)
+	if n := len(d.PullGroups); n != 1 {
+		t.Errorf("dark_iron_ambassador: %d pull groups, want the one Agent in front of him", n)
 	}
 	if last := d.PullGroups[len(d.PullGroups)-1]; last.Entries[0] != 6212 || len(last.Entries) != 1 {
 		t.Errorf("dark_iron_ambassador: the last pull is %v, want the Agent in front of him", last.Entries)
