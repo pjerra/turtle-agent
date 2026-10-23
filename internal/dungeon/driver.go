@@ -35,8 +35,8 @@ type Game interface {
 	Chat(ctx context.Context, channel, text string) error
 	// GM runs a GM command (".revive Name").
 	GM(ctx context.Context, text string) error
-	// GMOn selects the unit and runs a GM command that acts on the selected unit (".aura <id>") as one operation,
-	// so that nothing else can change the selection between the two.
+	// GMOn selects the unit, waits until the server is known to have that selection in force, and runs a GM command that
+	// acts on the selected unit (".aura <id>") only while it stands; an error, with nothing sent, when it is not confirmed.
 	GMOn(ctx context.Context, guid packet.GUID, text string) error
 	Teleport(ctx context.Context, to Point, mapID uint32) error
 	// ProbeAccount sends ".account" (SEC_PLAYER, Chat.cpp:77) and reads the account's security level from the server's reply

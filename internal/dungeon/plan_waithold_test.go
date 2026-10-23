@@ -54,15 +54,15 @@ func TestRunLeaderReachCountsAWaitHoldSpot(t *testing.T) {
 	}
 }
 
-// A hold's value: never 0 (instance data starts at 0, so the hold would end at once), and only on a wait's hold (a pull group's or a boss's
-// hold is an encounter that ends DONE).
+// A hold's value: never 0 (instance data starts at 0, so the hold would end at once), and only on a wait's or a boss's hold (a pull group's
+// hold is an encounter that ends DONE; a boss pair such as Mograine and Whitemane keeps its own numbers in its data, so its hold takes one).
 func TestHoldValueIsRefusedWhereItCannotWork(t *testing.T) {
 	const hold = `"hold":{"instance_data":1,%s"spot":{"x":5,"y":6,"z":7},"radius":30,"timeout_s":600}`
 	h := func(value string) string { return strings.Replace(hold, "%s", value, 1) }
 	for _, tc := range []struct{ name, js, want string }{
 		{"value 0 on a wait", eventPlan(`{"wait_for":{"unit":{"entries":[7],"state":"seen"},`+h(`"value":0,`)+`}}`, ""), "wait_for.hold.value: 0 is the value instance data starts at"},
-		{"value on a pull group", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[4857],"positions":[{"x":5,"y":6,"z":7}],` + h(`"value":5,`) + `}]}]}`, "hold.value: only a wait_for's hold takes a value"},
-		{"value on a boss", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"boss":{"entry":2748,"position":{"x":5,"y":6,"z":7},` + h(`"value":5,`) + `}}]}`, "hold.value: only a wait_for's hold takes a value"},
+		{"value on a pull group", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[4857],"positions":[{"x":5,"y":6,"z":7}],` + h(`"value":5,`) + `}]}]}`, "hold.value: only a wait_for's or a boss's hold takes a value"},
+		{"value 0 on a boss", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"boss":{"entry":2748,"position":{"x":5,"y":6,"z":7},` + h(`"value":0,`) + `}}]}`, "boss.hold.value: 0 is the value instance data starts at"},
 	} {
 		if _, err := Parse("bad.json", []byte(tc.js)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", tc.name, err)
@@ -71,6 +71,7 @@ func TestHoldValueIsRefusedWhereItCannotWork(t *testing.T) {
 	for _, ok := range []string{
 		eventPlan(`{"wait_for":{"unit":{"entries":[7],"state":"seen"},`+h(`"value":7,`)+`}}`, ""),
 		`{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"boss":{"entry":2748,"position":{"x":5,"y":6,"z":7},` + h(``) + `}}]}`,
+		`{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"boss":{"entry":2748,"position":{"x":5,"y":6,"z":7},` + h(`"value":4,`) + `}}]}`,
 	} {
 		if _, err := Parse("ok.json", []byte(ok)); err != nil {
 			t.Errorf("%v", err)

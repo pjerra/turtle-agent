@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -784,3 +785,5 @@ func TestRemoteFailedRunKeepsTheBinding(t *testing.T) {
 		}
 	}
 }
+
+func (*goFake) GPS(context.Context) (string, error) { return "", errors.New("no .gps in this fake") }

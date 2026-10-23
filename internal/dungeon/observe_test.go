@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -440,6 +441,272 @@ func TestObserveCountsNoWipeWhileABotLives(t *testing.T) {
 	}
 }
 
+// observeRunScript keeps an observed run going past the death tables of the window tests: a status every 20 s and done at 200 s.
+func observeRunScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		{s(20), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		{s(40), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		{s(60), rs("running", 3, 5, "first", "boss", "fight", "fighting")},
+		{s(80), rs("running", 4, 5, "first", "move", "walk", "walking")},
+		{s(100), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(120), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(140), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(160), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(180), rs("running", 4, 5, "first", "move", "walk", "walking on")},
+		{s(200), rs("done", 5, 5, "first", "move", "walk", "plan done")},
+	}
+}
+
+// deathsOnTickTable kills the party indexes the table names for each tick of the watch (one cfg.Poll sleep, one frame): the ticks
+// after the table's last key are all alive.
+func deathsOnTickTable(g *fakeLeader, table map[int][]int) {
+	base := g.onTick
+	ticks := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		dead := map[int]bool{}
+		for _, i := range table[ticks] {
+			dead[i] = true
+		}
+		for i, p := range fr.party {
+			if dead[i] {
+				p.Dead, p.HP, p.State = true, 0, "d"
+			} else {
+				p.Dead, p.HP, p.State = false, p.MaxHP, "n"
+			}
+		}
+	}
+}
+
+// fiveBotLeader is the party of the wipe tests: five bots, the lead bot first (the frame's Lead).
+func fiveBotLeader(t *testing.T, script ...leaderStep) *fakeLeader {
+	g := newFakeLeader(t, script...)
+	g.party = append(g.party, &tbm.PartyRec{GUID: packet.GUID(0x2D), Name: "Loxy", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"},
+		&tbm.PartyRec{GUID: packet.GUID(0x2E), Name: "Grok", HP: 1000, MaxHP: 1000, Power: 1000, MaxPower: 1000, PowerType: 0, State: "n"})
+	return g
+}
+
+// An observed run's report counts the lead bot's own deaths and revives from the feed: two deaths, each revived 5 s later, and no
+// wipe (the other four never died).
+func TestObserveCountsALeadDeathAndItsRevive(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 5: {0}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-lead-death"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.LeaderDeaths != 2 || rep.Resurrections != 2 {
+		t.Fatalf("leader deaths %d resurrections %d (want 2 and 2)\n%s", rep.LeaderDeaths, rep.Resurrections, notesOf(rep))
+	}
+	if rep.SecondsDead < 5 || rep.SecondsDead > 20 {
+		t.Fatalf("seconds dead %v (want 5..20)", rep.SecondsDead)
+	}
+	if rep.Wipes != 0 {
+		t.Fatalf("wipes %d (want 0)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 2 {
+		t.Fatalf("deaths %d (want 2): %+v", len(rep.Deaths), rep.Deaths)
+	}
+	legDeaths := 0
+	for _, l := range rep.Legs {
+		legDeaths += l.LeaderDeaths
+	}
+	if legDeaths != 2 {
+		t.Fatalf("leg leader deaths %d (want 2): %+v", legDeaths, rep.Legs)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-lead-death.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range f.Events {
+		if e.Ev == "leader_death" {
+			n++
+			if e.D["name"] != "Tanky" {
+				t.Fatalf("leader_death names %v (want Tanky)", e.D["name"])
+			}
+		}
+	}
+	if n != 2 {
+		t.Fatalf("%d leader_death events in the trace (want 2)", n)
+	}
+	if c := f.End.Counter("leader_deaths"); c != 2 {
+		t.Fatalf("trace end leader_deaths %v (want 2)", c)
+	}
+}
+
+// The RFC case: the lead bot revives, so the whole party is never dead in one frame, but all five died within 25 s: one wipe.
+func TestObserveCountsAWipeSpreadOverOneEpisode(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-wipe"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if rep.LeaderDeaths != 2 {
+		t.Fatalf("leader deaths %d (want 2)", rep.LeaderDeaths)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-wipe.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+			if e.D["window"] != true {
+				t.Fatalf("the wipe event is not a window wipe: %+v", e.D)
+			}
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+	for _, c := range tracecheck.Score(f, tracecheck.Defaults()) {
+		if c.ID == tracecheck.IDDeaths && !strings.Contains(c.Detail, ", 1 wipes") {
+			t.Fatalf("the deaths oracle does not say 1 wipes: %+v", c)
+		}
+	}
+}
+
+// The same deaths 30 s apart are outside the 90 s window: the lead's first death is 120 s older than the last member's, so no wipe.
+func TestObserveNoWipeWhenTheDeathsAreOutsideTheWindow(t *testing.T) {
+	g := fiveBotLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(100), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		leaderStep{s(200), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		leaderStep{s(300), rs("running", 4, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(400), rs("done", 5, 5, "first", "move", "walk", "plan done")})
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 30 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-out"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 0 {
+		t.Fatalf("wipes %d (want 0)\n%s", rep.Wipes, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-out.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			t.Fatalf("a wipe event outside the window: %+v", e.D)
+		}
+	}
+}
+
+// The window wipe and the all-dead latch are one wipe: counted at tick 6, the all-dead ticks 7 and 8 must not count it again.
+func TestObserveWindowWipeIsNotCountedTwiceWhenTheyThenAllDieTogether(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	deathsOnTickTable(g, map[int][]int{2: {0}, 3: {1}, 4: {1, 2}, 5: {1, 2, 3}, 6: {1, 2, 3, 4}, 7: {0, 1, 2, 3, 4}, 8: {0, 1, 2, 3, 4}})
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-once"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-once.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+}
+
+// A lone death after the counted wipe is no second wipe. Loxy has been dead for 100 s when the other four die: the all-dead frame counts
+// the wipe while the window rule is false (Loxy's death is outside the 90 s), so the revive below three dead re-arms the latch. Loxy then
+// dies again 10 s after the wipe: the window rule reads deaths newer than the counted wipe only, so the four deaths of the wipe do not
+// make it fire again. The whole party dying inside the window cannot test this: the window rule then stays true for the 90 s of the
+// counted wipe, the latch never re-arms, and a lone death counts nothing either way.
+func TestObserveNoSecondWipeFromALoneDeathAfterAWindowWipe(t *testing.T) {
+	g := fiveBotLeader(t, observeRunScript()...)
+	base, ticks := g.onTick, 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		ticks++
+		dead := map[int]bool{}
+		if ticks == 22 {
+			dead = map[int]bool{0: true, 1: true, 2: true, 4: true}
+		}
+		if ticks == 24 {
+			dead[3] = true
+		}
+		if ticks >= 2 && ticks <= 22 {
+			dead[3] = true // Loxy stays down through the collapse: a death older than the wipe's window
+		}
+		for i, p := range fr.party {
+			if dead[i] {
+				p.Dead, p.HP, p.State = true, 0, "d"
+			} else {
+				p.Dead, p.HP, p.State = false, p.MaxHP, "n"
+			}
+		}
+	}
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-window-lone"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 6 {
+		t.Fatalf("deaths %d (want 6: Loxy's two and the other four in the wipe): %+v", len(rep.Deaths), rep.Deaths)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-window-lone.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+}
+
 func TestObserveRefusesAServerWithoutTheRunLeaderBeforeHiring(t *testing.T) {
 	g := newFakeLeader(t)
 	g.listText = ""
@@ -517,6 +784,156 @@ func TestObservePauseAndResumeGoThroughTheRPC(t *testing.T) {
 	}
 	if err := d.RunControl("fly"); err == nil {
 		t.Error("an unknown verb was accepted")
+	}
+}
+
+func TestPlayerOrderOf(t *testing.T) {
+	for _, c := range []struct {
+		note  string
+		order string
+		ok    bool
+	}{
+		{"player order (cmd summon Healy): .bot run resume to go on", "cmd summon Healy", true},
+		{"player order (move 1 2 3): .bot run resume to go on; cave cleared meanwhile: .bot run resume goes on with step 4", "move 1 2 3", true},
+		{"player order (cmd revive)", "cmd revive", true},
+		{"player order (cmd summon Healy): .bot run resume to go on; note (2): a later aside", "cmd summon Healy", true},
+		{"3 dead: regroup (cmd revive), then .bot run resume", "", false},
+		{"", "", false},
+	} {
+		order, ok := playerOrderOf(c.note)
+		if ok != c.ok || order != c.order {
+			t.Fatalf("playerOrderOf(%q) = %q, %v", c.note, order, ok)
+		}
+	}
+}
+
+// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the order,
+// and the run going on again is recorded as the resume after it.
+func TestObserveRecordsAPlayerOrderPauseAndItsResume(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("running", 3, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	var d *RemoteDriver
+	paused, asked := false, false
+	g.onStatus = func(l *fakeLeader, st tbm.RunStatus) {
+		// the module paused the run for the order: the leader holds it until a resume
+		if st.State == tbm.RunPaused {
+			paused = true
+			l.paused = true
+		}
+	}
+	tick := g.onTick
+	g.onTick = func(gr *fakeRemote) {
+		// the resume comes a look after the paused status: the watch serves requests before it reads the feed
+		if paused && !asked {
+			asked = true
+			if err := d.RunControl("resume"); err != nil {
+				t.Error(err)
+			}
+		}
+		tick(gr)
+	}
+	d = NewRemoteDriver(observePlan(), g, DefaultConfig(), observeOpts(ObserveSpec{}), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 1 || !strings.Contains(ob.PlayerOrders[0], "cmd summon Healy") || !strings.Contains(ob.PlayerOrders[0], "step 2/") {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	var order, resumed, ack bool
+	for _, c := range ob.Controls {
+		order = order || c == "player order: cmd summon Healy"
+		resumed = resumed || strings.HasPrefix(c, "resumed after the player order")
+		ack = ack || strings.HasPrefix(c, "resume: ack")
+	}
+	if !order || !resumed || !ack {
+		t.Fatalf("controls %v", ob.Controls)
+	}
+}
+
+// #270: a pause for a player order that ends in a stop did not resume: the latch lets go with no "resumed after" entry.
+func TestObservePlayerOrderPauseEndingInAStopHasNoResume(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 1 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	for _, c := range ob.Controls {
+		if strings.HasPrefix(c, "resumed after the player order") {
+			t.Fatalf("a stop wrote a resume: %v", ob.Controls)
+		}
+	}
+}
+
+func TestObserveDoesNotCountAnOrdinaryPauseAsAPlayerOrder(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "3 dead: regroup (cmd revive), then .bot run resume")},
+		leaderStep{s(10), rs("running", 3, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	var d *RemoteDriver
+	paused, asked := false, false
+	g.onStatus = func(l *fakeLeader, st tbm.RunStatus) {
+		if st.State == tbm.RunPaused {
+			paused = true
+			l.paused = true
+		}
+	}
+	tick := g.onTick
+	g.onTick = func(gr *fakeRemote) {
+		if paused && !asked {
+			asked = true
+			if err := d.RunControl("resume"); err != nil {
+				t.Error(err)
+			}
+		}
+		tick(gr)
+	}
+	d = NewRemoteDriver(observePlan(), g, DefaultConfig(), observeOpts(ObserveSpec{}), g.clock())
+	err := d.Run(context.Background(), 0)
+	rep, _ := d.Status()
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if g.indexOf("run resume") < 0 {
+		t.Fatalf("the run was never resumed: %v", g.orders)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 0 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	for _, c := range ob.Controls {
+		if strings.HasPrefix(c, "player order") || strings.HasPrefix(c, "resumed after") {
+			t.Fatalf("controls %v", ob.Controls)
+		}
+	}
+}
+
+// The module appends to the note of a pause it already made ("; boss meanwhile: ..."): that is the same player order, counted once.
+func TestObservePlayerOrderPauseRepeatedNoteCountsOnce(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on; boss meanwhile: .bot run resume goes on with step 3")},
+		leaderStep{s(20), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if ob := rep.Remote.Observe; len(ob.PlayerOrders) != 1 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
 	}
 }
 
@@ -1054,5 +1471,233 @@ func TestLootOnAtStartSendsBehaviorOrdersUnlessKept(t *testing.T) {
 		} else if strings.Contains(notes, "loot setting kept") {
 			t.Errorf("%s: the kept-setting note went out: %v", c.name, notes)
 		}
+	}
+}
+
+// restScript walks, rests 20 s in the pull, pulls, rests 10 s at the boss, pulls, and is done 40 s later.
+func restScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		{s(30), rs("running", 2, 5, "first", "pull", "pull", "pulling")},
+		{s(50), rs("running", 3, 5, "first", "boss", "rest", "resting")},
+		{s(60), rs("running", 3, 5, "first", "boss", "pull", "pulling")},
+		{s(100), rs("done", 5, 5, "second", "move", "walk", "plan done")},
+	}
+}
+
+// restEvents are the trace's "rest" events.
+func restEvents(f *trace.File) []trace.Event {
+	var out []trace.Event
+	for _, e := range f.Events {
+		if e.Ev == "rest" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// The run leader's own rest phase is the observed run's rest: an observe run has no gate of the agent's, so the time a status says
+// phase rest counts as a rest gate, in the report, the leg and the trace.
+func TestObserveCountsTheRunLeadersRestPhase(t *testing.T) {
+	g := newFakeLeader(t, restScript()...)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds < 25 || rep.RestSeconds > 35 {
+		t.Fatalf("rest seconds %v (want 30, 20 s + 10 s)\n%s", rep.RestSeconds, notesOf(rep))
+	}
+	if len(rep.RestGates) != 2 {
+		t.Fatalf("rest gates %+v (want 2)", rep.RestGates)
+	}
+	for _, gate := range rep.RestGates {
+		if gate.Result != "run_leader" {
+			t.Errorf("gate %+v: result %q, want run_leader", gate, gate.Result)
+		}
+	}
+	var sum float64
+	for _, l := range rep.Legs {
+		sum += l.RestSeconds
+	}
+	if diff := sum - rep.RestSeconds; diff > 0.001 || diff < -0.001 {
+		t.Errorf("legs rest %v, report rest %v", sum, rep.RestSeconds)
+	}
+	if rep.RestShare <= 0 {
+		t.Errorf("rest share %v", rep.RestShare)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rests := restEvents(f)
+	if len(rests) != 2 {
+		t.Fatalf("%d rest events in the trace (want 2)", len(rests))
+	}
+	for _, e := range rests {
+		if e.D["source"] != "run_leader" {
+			t.Errorf("rest event %v: source %v", e.Ev, e.D["source"])
+		}
+		if secs, ok := e.D["seconds"].(float64); !ok || secs <= 0 {
+			t.Errorf("rest event seconds %v (%T)", e.D["seconds"], e.D["seconds"])
+		}
+	}
+	for _, c := range tracecheck.Score(f, tracecheck.Defaults()) {
+		if c.ID == tracecheck.IDRestShare && c.Value <= 0 {
+			t.Fatalf("the rest_share check reads %v: %+v", c.Value, c)
+		}
+	}
+}
+
+// A pause is not rest: a paused status still carries the phase it was paused in, but the time a run waits paused is not the run
+// leader resting (PausedWait is 10 min, and that would fail rest_share). The open rest closes when the run pauses; a resume in the
+// same phase opens a new one.
+func TestObservePausedTimeIsNotRest(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		leaderStep{s(20), rs("paused", 2, 5, "first", "pull", "rest", "3 dead: regroup (cmd revive), then .bot run resume")},
+		leaderStep{s(300), rs("running", 2, 5, "first", "pull", "pull", "pulling 299")},
+		leaderStep{s(320), rs("done", 5, 5, "first", "pull", "pull", "plan done")},
+	)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds < 9 || rep.RestSeconds > 11 {
+		t.Fatalf("rest seconds %v (want about 10: the rest before the pause, not the 280 s pause)\n%s", rep.RestSeconds, notesOf(rep))
+	}
+	if len(rep.RestGates) != 1 {
+		t.Fatalf("rest gates %+v (want 1)", rep.RestGates)
+	}
+	if rep.RestGates[0].Result != "run_leader" {
+		t.Errorf("gate %+v: result %q, want run_leader", rep.RestGates[0], rep.RestGates[0].Result)
+	}
+}
+
+// A rest the run leader is still in when the run ends is closed at the end, so its time is not lost.
+func TestObserveCountsARestThatIsOpenWhenTheRunEnds(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), rs("running", 2, 5, "first", "pull", "rest", "resting")},
+		leaderStep{s(40), rs("done", 5, 5, "first", "move", "rest", "plan done")},
+	)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-open-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if len(rep.RestGates) != 1 {
+		t.Fatalf("rest gates %+v (want 1)", rep.RestGates)
+	}
+	if rep.RestSeconds < 25 {
+		t.Fatalf("rest seconds %v (want about 30)", rep.RestSeconds)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-open-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rests := restEvents(f); len(rests) != 1 {
+		t.Fatalf("%d rest events in the trace (want 1)", len(rests))
+	}
+}
+
+// A run that never says phase rest has no rest: the leader's phase is not a rest gate until it says so.
+func TestObserveWithNoRestPhaseCountsNoRest(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-no-rest"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.RestSeconds != 0 || len(rep.RestGates) != 0 {
+		t.Fatalf("rest %v in %+v, want none", rep.RestSeconds, rep.RestGates)
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-observe-no-rest.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rests := restEvents(f); len(rests) != 0 {
+		t.Fatalf("%d rest events in the trace (want none)", len(rests))
+	}
+}
+
+// instanceEvents are the trace's "instance" events.
+func instanceEvents(f *trace.File) []trace.Event {
+	var out []trace.Event
+	for _, e := range f.Events {
+		if e.Ev == "instance" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// The lead bot's instance id comes from the feed: the report carries it, the trace has one instance event, and the summary reads it
+// from that event.
+func TestObserveExposesTheInstanceId(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	g.party[0].Instance = 4321
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-inst"}
+	})
+	if err != nil || rep.State != "done" || rep.Trace == nil {
+		t.Fatalf("%v %s %s %+v", err, rep.State, rep.Error, rep.Trace)
+	}
+	if rep.Instance != 4321 {
+		t.Fatalf("report instance %d, want 4321", rep.Instance)
+	}
+	f, err := trace.Read(rep.Trace.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insts := instanceEvents(f)
+	if len(insts) != 1 {
+		t.Fatalf("%d instance events in the trace (want 1)", len(insts))
+	}
+	if v, ok := insts[0].D["instance"].(float64); !ok || v != 4321 {
+		t.Fatalf("instance event %v", insts[0].D)
+	}
+	if _, ok := insts[0].D["map"]; !ok {
+		t.Fatalf("the instance event has no map: %v", insts[0].D)
+	}
+	b, err := os.ReadFile(trace.SummaryPath(rep.Trace.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum trace.Summary
+	if err := json.Unmarshal(b, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum.Instance != 4321 {
+		t.Fatalf("summary instance %d, want 4321: %s", sum.Instance, b)
+	}
+
+	// A feed with no instance id says none, and writes no instance event.
+	g = newFakeLeader(t, happyScript()...)
+	dir = t.TempDir()
+	rep, err = runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-observe-no-inst"}
+	})
+	if err != nil || rep.State != "done" || rep.Trace == nil {
+		t.Fatalf("%v %s %s %+v", err, rep.State, rep.Error, rep.Trace)
+	}
+	if rep.Instance != 0 {
+		t.Fatalf("report instance %d, want 0", rep.Instance)
+	}
+	f, err = trace.Read(rep.Trace.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if insts := instanceEvents(f); len(insts) != 0 {
+		t.Fatalf("%d instance events in the trace (want none)", len(insts))
 	}
 }
