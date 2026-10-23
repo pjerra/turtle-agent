@@ -21,13 +21,20 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [5259, 5273],
+  "cc_priority": [5259, 5273, 5226],
+  "cc_always": [5259],
+  "kill_first": [5271, 5280, 5291],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 109 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: six Atal'ai statues (GO_ATALAI_STATUE_1-6) lit in order summon Atal'alarion; the six troll mini-bosses (5712-5717) are the statues' guards",
     "Needs: four Eternal Flames (GO_ETERNAL_FLAME_1-4) summon the Avatar of Hakkar (8443, no spawn row)",
     "Needs: Jammal'an's barrier (GO_JAMMALAN_BARRIER) and the Hakkar doors (GO_HAKKAR_DOOR_1-2)",
-    "Needs: Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar"
+    "Needs: Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar",
+    "Census 2026-10-23 (map 109 spawn export, no live run): fleers 5259 and 5273 (EventAI command 47 at 15% HP); cc_priority 5259,5273,5226 (the two healers, the Hex, the Slowing Poison); cc_always 5259; kill_first 5271,5280,5291 (Fear, Sleep, Frostbolt Volley with the Swoop summon). Radii cut on pulls 0.5, 3.2 and 3.3 so a row does not take the next pack (same entries, 14.4-26.8 yd), and set to 17 yd on the seven Hakkari Frostwing 5291 pulls (their wander is 15 yd).",
+    "BLOCKER for the first live run: the instance script hides Weaver 5720 and Dreamscythe 5721 (VISIBILITY_OFF, not selectable) and keeps Shade of Eranikus 5709 not selectable until TYPE_JAMMALAN is DONE, but this skeleton fights the Weaver (leg 1) and Dreamscythe (leg 2) boss rows before the Jammal'an leg (leg 3); Atal'alarion 8580 is hidden until the six statues are lit in order and the plan has no statue steps. The leg-0 boss row and the leg-1/2 boss rows cannot finish as ordered (bug: the plan fails at what it is meant to do; the fix is an order change, a behaviour change for the maintainer to decide).",
+    "Patrols: 5708 Spawn of Hakkar (guids 33621 and 34520, 12-point paths spanning about 190 yd) and Murk Worm 5226 (guids 33676 46 points and 34168 4 points) walk the halls the plan clears; the pull rows carry no patrol path, so a pull of one of them can find nothing at its point (the run leader then reads the pack as cleared) and they can join later fights."
   ],
   "legs": [
     {
@@ -84,7 +91,8 @@
             {"x": -480.789, "y": 47.3489, "z": -173.862},
             {"x": -484.906, "y": 47.7435, "z": -173.594},
             {"x": -495.708, "y": 51.8927, "z": -173.313}
-          ]
+          ],
+          "radius": 17.5
         },
         {
           "entries": [8311, 5226, 5226, 8311],
@@ -456,31 +464,36 @@
           "entries": [5291],
           "positions": [
             {"x": -399.046, "y": 209.403, "z": -90.8796}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [5291],
           "positions": [
             {"x": -378.717, "y": 251.202, "z": -90.8439}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [5291],
           "positions": [
             {"x": -380.593, "y": 270.517, "z": -90.83}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [5291],
           "positions": [
             {"x": -471.309, "y": 297.133, "z": -90.6995}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [5291],
           "positions": [
             {"x": -488.499, "y": 273.113, "z": -90.7271}
-          ]
+          ],
+          "radius": 17
         }
       ],
       "boss": {
@@ -558,7 +571,8 @@
           "entries": [5291],
           "positions": [
             {"x": -535.628, "y": 203.112, "z": -90.9058}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [5259, 8318, 8318, 8318, 5267, 8318],
@@ -575,7 +589,8 @@
           "entries": [5291],
           "positions": [
             {"x": -555.544, "y": 270.643, "z": -90.8346}
-          ]
+          ],
+          "radius": 17
         },
         {
           "entries": [8311],
@@ -751,7 +766,8 @@
             {"x": -467.583, "y": -76.3734, "z": -90.8275},
             {"x": -476.669, "y": -74.2078, "z": -90.8275},
             {"x": -476.251, "y": -80.8728, "z": -90.8275}
-          ]
+          ],
+          "radius": 14.3
         },
         {
           "entries": [5271, 5271, 5273, 5263, 5263, 5271, 5271, 5269, 5271],
@@ -765,7 +781,8 @@
             {"x": -457.244, "y": -97.7436, "z": -90.8275},
             {"x": -448.423, "y": -91.5326, "z": -90.8275},
             {"x": -448.944, "y": -93.9112, "z": -90.8275}
-          ]
+          ],
+          "radius": 15.6
         },
         {
           "entries": [5263, 5271, 5271],

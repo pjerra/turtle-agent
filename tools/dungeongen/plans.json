@@ -399,6 +399,7 @@
    "title": "The Temple of Atal'Hakkar",
    "map": 109,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map109",
    "trigger": 446,
    "bosses": [
