@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -883,6 +922,14 @@
    "entrance_tele": "hateforgeinstance",
    "notes": [
     "Turtle custom. 'Broody' (60715) shares Engineer Figgles' spot and is not a leg."
+   ],
+   "handwritten": true,
+   "special": [
+    "Bargul Blackhammer (60735) stands on the terrace above the quarry (z 194.5); that terrace is a separate navmesh network: the creature path 2570432 walks up a ramp at -8321.1 -3448.1 z 180.8 / -8323.7 -3452.3 z 182.5 that the mesh does not link to the lower floor (plan-check: nearest reachable point 9.6/12.6 yd away). The boss is needs_walk; the mapping walk must test the ramp (or the run needs a gm_cross/direct hop).",
+    "Engineer Figgles' terrace room: Broody 60715 stands 3.7 yd from him and is the boss's first; the two room packs (old groups 8 and 9) are last before the boss and will wake him (16-19 yd).",
+    "34 spawns patrol (creature_movement type 2; the boss Corrosis 60829 among them, 243 yd/97 s); a patrol block sits on every pull its path enters and on every pull of a patrolling member.",
+    "No creature_groups, no creature_linking, no rare rank 2/4, no EventAI events: nothing flees; the Cleric 60718 is the only healer (script mob_hateforge_cleric, Greater Heal 10965).",
+    "The dispel-counterpart aura script (spell_hateforge_dispel_counterpart) gates on map 807 (Emerald Sanctum), not 808: the 56508-56516 auras never pair in Hateforge."
    ]
   },
   {
