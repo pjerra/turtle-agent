@@ -796,10 +796,16 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		d.tr.Event("player_order", map[string]any{"order": order, "step": st.Step, "leg_name": st.Leg})
 		d.rep.note("observe mode: the run paused for a player order (" + order + ")")
 	}
-	if o.playerPaused && (st.State == tbm.RunRunning || st.State == tbm.RunDone) {
-		o.playerPaused = false
-		d.control(fmt.Sprintf("resumed after the player order at step %d", st.Step))
-		d.rep.note("observe mode: the run went on after the player order")
+	if o.playerPaused {
+		switch st.State {
+		case tbm.RunRunning:
+			o.playerPaused = false
+			d.control(fmt.Sprintf("resumed after the player order at step %d", st.Step))
+			d.rep.note("observe mode: the run went on after the player order")
+		case tbm.RunDone:
+			// The run stopped instead of going on: the pause is over, but there was no resume to record (#270).
+			o.playerPaused = false
+		}
 	}
 	label := "run leader: " + st.Text()
 	if st.State != tbm.RunRunning {

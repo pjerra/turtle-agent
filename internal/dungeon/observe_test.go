@@ -856,6 +856,27 @@ func TestObserveRecordsAPlayerOrderPauseAndItsResume(t *testing.T) {
 	}
 }
 
+// #270: a pause for a player order that ends in a stop did not resume: the latch lets go with no "resumed after" entry.
+func TestObservePlayerOrderPauseEndingInAStopHasNoResume(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", "player order (cmd summon Healy): .bot run resume to go on")},
+		leaderStep{s(10), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if len(ob.PlayerOrders) != 1 {
+		t.Fatalf("player orders %v", ob.PlayerOrders)
+	}
+	for _, c := range ob.Controls {
+		if strings.HasPrefix(c, "resumed after the player order") {
+			t.Fatalf("a stop wrote a resume: %v", ob.Controls)
+		}
+	}
+}
+
 func TestObserveDoesNotCountAnOrdinaryPauseAsAPlayerOrder(t *testing.T) {
 	g := newFakeLeader(t,
 		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
