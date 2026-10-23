@@ -262,8 +262,8 @@ type GhostAnswer struct {
 	Runs     int          `json:"runs"`           // runs of the plan looked at
 }
 
-// Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, the quicker
-// of equals. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
+// Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, and of
+// equals a clean clear (no packs left) before a run with packs left, then the quicker. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
 // or, when planLegs says how many sections the plan has, a run with that many done and none left. The answer is cached until the
 // folders are listed again.
 func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
@@ -297,10 +297,11 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		if d == nil {
 			continue
 		}
-		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && d.Seconds < best.Seconds) {
+		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && ghostBetter(d, best)) {
 			best, bestF = d, f
 		}
 	}
+
 	if best == nil {
 		ans.Why = "no earlier run of " + plan + " in the tests folder"
 		return h.keepGhost(key, ans)
@@ -321,6 +322,15 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		ans.Path = thinPath(best.Paths[0], ghostMaxPoints)
 	}
 	return h.keepGhost(key, ans)
+}
+
+// ghostBetter says whether d is the better ghost of two runs that finished the same sections: a clean clear (Left == 0) beats a run with packs left, and of two alike runs the quicker wins.
+func ghostBetter(d, best *RunDigest) bool {
+	dClean, bestClean := d.Left == 0, best.Left == 0
+	if dClean != bestClean {
+		return dClean
+	}
+	return d.Seconds < best.Seconds
 }
 
 func (h *History) keepGhost(key string, ans GhostAnswer) []byte {
