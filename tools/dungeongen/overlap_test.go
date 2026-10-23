@@ -20,7 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+// dire_maul_east: 6 (2026-10-24): the interleaved Warpwood packs (a 10-lasher pack's 15-22 yd radius reaches the neighbouring treant
+// pack at 62 -350, a Guardian pack 26 yd from a lasher row, a Death Lash 20 yd from a lasher pack), the lone Felsworn patrol 56992 6.7 yd
+// from the satyr pack it walks past, and the Stomper/Guardian rows 5-17 yd from the Death Lashes that patrol the basin rim. Every group is
+// a creature_groups pack; the radii are its own spread + 0.5 (the mapping walk settles the stands).
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "dire_maul_east": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

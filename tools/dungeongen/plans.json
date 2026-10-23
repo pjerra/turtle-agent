@@ -504,6 +504,7 @@
    "title": "Dire Maul: East",
    "map": 429,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map429",
    "trigger": 3184,
    "bosses": [
@@ -523,12 +524,13 @@
    "entrance_tele": "dmeast",
    "outside_tele": "DireMaulEast",
    "special": [
-    "Pusillin's chase (npc_pusillin, gossip) for the Crescent Key",
-    "five crystal events (GO_CRISTAL_1-5_EVENT) and the Alzzin door (GO_DOOR_ALZZIN_IN)",
-    "Pusillin (14354) is friendly until the chase"
+    "Old Ironbark (11491, npc_ecorcefer) opens the Conservatory Door 176907 to Alzzin after Zevrim is DONE (gossip; not a plan step)",
+    "Pusillin (14354) is friendly until the chase (npc_pusillin sets faction 35) and drops the Crescent Key",
+    "Isalien (16097) is summoned at her brazier 181047 through trigger 16045, not a spawn fight"
    ],
    "notes": [
-    "One of three wings of map 429. The East wing has four entrances (3183-3185); 3184 is the usual one."
+    "One of three wings of map 429. The East wing has four entrances (3183-3185); 3184 is the usual one and the plan's entrance.",
+    "The census box ends before the Gordok Commons courtyard at x 293-300, y 22-40 (entrance 3189's side): Gordok Brutes 11441, Mage-Lords 11444 and Mastiffs 13036 there are not this wing's trash."
    ]
   },
   {
