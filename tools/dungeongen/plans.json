@@ -678,14 +678,13 @@
    "title": "Scholomance",
    "map": 289,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map289",
    "trigger": 2567,
    "bosses": [
     10505,
-    11261,
-    10901,
     10507,
-    10504,
+    10901,
     10502,
     10503,
     11622,
@@ -695,7 +694,9 @@
       10433
      ]
     },
-    10508
+    10508,
+    11261,
+    10504
    ],
    "outside_tele": "Scholomance",
    "scripted": [
@@ -705,10 +706,11 @@
     10433
    ],
    "special": [
-    "Viewing Room Key (GO_VIEWING_ROOM_DOOR) and the boss gates (GO_GATE_MALICIA, GO_GATE_THEOLEN, GO_GATE_POLKELT, GO_GATE_RAVENIAN, GO_GATE_ILLUCIA, GO_GATE_BAROV, GO_GATE_GANDLING); the gates open as the Barovs fall",
+    "Viewing Room Key (item 13873) and the boss gates (GO_GATE_MALICIA, GO_GATE_THEOLEN, GO_GATE_POLKELT, GO_GATE_RAVENIAN, GO_GATE_ILLUCIA, GO_GATE_BAROV, GO_GATE_GANDLING); the gates spawn open and Gandling's opens when the six bosses are done",
     "Kirtonos the Herald is summoned at the brazier (GO_BRAZIER_KIRTONOS, GO_GATE_KIRTONOS), optional",
     "Darkmaster Gandling (1853) has no spawn row: he appears after the Barov wing",
-    "Dawn's Gambit (GO_DAWN_S_GAMBIT) for Vectus and Marduk Blackpool; Doctor Theolen Krastinov carries npc_flags (questgiver) until the fight"
+    "Dawn's Gambit (GO_DAWN_S_GAMBIT) for Vectus and Marduk Blackpool; Doctor Theolen Krastinov carries npc_flags (questgiver) until the fight",
+    "hand-mapped 2026-10-24 from the world export (map289), the map-289 navmesh and the world SQL: critters out, boss-linked guards folded into the boss rows, Kormok's disabled trigger out, 6-unit cap, leg order from the bosses' positions (see ~/TortoiseBots-audit/PREP-SCHOLOMANCE-2026-10-24.md)"
    ],
    "notes": [
     "Skeleton Key / lockpicking for the entrance chests is not modelled."
