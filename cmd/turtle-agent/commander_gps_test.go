@@ -68,22 +68,27 @@ func TestGPSSelectsTheCommanderBeforeTheLine(t *testing.T) {
 		text, err := g.GPS(context.Background())
 		done <- reply{text, err}
 	}()
+	// The server applies each selection and echoes it. A neutral selection of nothing may come first (when GPS starts before the session
+	// read the create block, the field is unknown: session.SelectConfirmed); anything else, or a line on anything but the commander, fails.
 	var ops []uint16
-	for len(ops) < 2 {
+	inForce := stranger
+	for len(ops) == 0 || ops[len(ops)-1] != opcode.CMSGMessagechat {
 		p, err := r.srv.Next(2 * time.Second)
 		if err != nil {
 			t.Fatalf("after %v: %v", ops, err)
 		}
 		switch p.Op {
 		case opcode.CMSGSetSelection:
-			if guid := packet.NewReader(p.Body).GUID(); guid != 0x2A {
-				t.Fatalf("selected %#x, not the commander (0x2A)", uint64(guid))
+			guid := packet.NewReader(p.Body).GUID()
+			if guid != 0x2A && (guid != 0 || len(ops) != 0) {
+				t.Fatalf("selected %#x, not the commander (0x2A) or a first neutral selection of nothing", uint64(guid))
 			}
+			inForce = guid
 			ops = append(ops, p.Op)
-			r.srv.Send(opcode.SMSGUpdateObject, selfValues(0x2A)) // the server's echo of the selection
+			r.srv.Send(opcode.SMSGUpdateObject, selfValues(guid)) // the server's echo of the selection
 		case opcode.CMSGMessagechat:
-			if len(ops) == 0 {
-				t.Fatal("the .gps line was sent before the commander was selected")
+			if inForce != 0x2A {
+				t.Fatalf("the .gps line was sent with %#x selected, not the commander", uint64(inForce))
 			}
 			if !strings.Contains(string(p.Body), ".gps") {
 				t.Fatalf("chat line %q", p.Body)

@@ -379,33 +379,15 @@ func (g remoteGame) GMVisible(ctx context.Context, on bool) error {
 // gmSelectConfirmWait is how long the server is given to show a selection before a line that acts on it is given up on.
 var gmSelectConfirmWait = 3 * time.Second
 
-// selectConfirmed selects the unit and waits until the SERVER shows it as the agent's selection (the target field of the agent's own object,
-// which the core sends back after it handled CMSG_SET_SELECTION). The core queues that packet (map thread) apart from a GM's chat line (world
-// thread), so a line sent right after can run on the selection from before: none (the sender itself) or a stale one, which can be another
-// player. Run 6b: `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra. An error, with nothing sent, when
-// the server does not show the selection in time.
+// selectConfirmed selects the unit (0: none) and waits until the SERVER is known to have it in force as the agent's selection
+// (session.SelectConfirmed: an echo of the target field of the agent's own object that answers this select and not an older one, nor a
+// combat or stun rewrite of the field). The core queues that packet (map thread) apart from a GM's chat line (world thread), so a line sent
+// right after can run on the selection from before: none (the sender itself) or a stale one, which can be another player. Run 6b:
+// `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra; issue #296: a stale echo of the lead, with a
+// stranger's select pending behind it, let `.additem` run on the stranger. An error, with nothing sent, when the server does not show the
+// selection in time.
 func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error {
-	s := g.c.cur()
-	if _, err := s.Target(ctx, guid, ""); err != nil {
-		return err
-	}
-	timer := time.NewTimer(gmSelectConfirmWait)
-	defer timer.Stop()
-	tick := time.NewTicker(25 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		sel, ok := s.ServerSelection()
-		if ok && sel == guid {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			return fmt.Errorf("the server did not show %v as the agent's selection within %s (it shows %v): not sending a line that acts on the selection", guid, gmSelectConfirmWait, sel)
-		case <-tick.C:
-		}
-	}
+	return g.c.cur().SelectConfirmed(ctx, guid, gmSelectConfirmWait)
 }
 
 // gmSelectAttempts is how many times selectThenGM selects and confirms again when the selection changed after the confirmation.
@@ -570,28 +552,17 @@ func (g remoteGame) GoXYZ(ctx context.Context, mapID uint32, at dungeon.Point) e
 // around the commander. The selection is cleared first and the server is waited for to show it cleared, else the line would act on that
 // one unit alone (or fail on a player).
 func (g remoteGame) Respawn(ctx context.Context) error {
-	s := g.c.cur()
-	if err := s.ClearTarget(ctx); err != nil {
-		return err
+	return respawnUnselected(ctx, g.c.cur())
+}
+
+// respawnUnselected clears the selection, waits until the server is known to have it cleared (a stale echo of an earlier clear, or the
+// field cleared by the end of a fight, does not count), and sends ".respawn" only while that stands (selectThenGM with no unit).
+func respawnUnselected(ctx context.Context, s *session.Session) error {
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return s }}}
+	if err := g.selectThenGM(ctx, 0, ".respawn"); err != nil {
+		return fmt.Errorf("respawn with nothing selected: %w", err)
 	}
-	timer := time.NewTimer(gmSelectConfirmWait)
-	defer timer.Stop()
-	tick := time.NewTicker(25 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if sel, ok := s.ServerSelection(); ok && sel == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			sel, _ := s.ServerSelection()
-			return fmt.Errorf("the server did not show the selection cleared within %s (it shows %v): not sending .respawn", gmSelectConfirmWait, sel)
-		case <-tick.C:
-		}
-	}
-	return s.GM(ctx, ".respawn")
+	return nil
 }
 
 // WalkSelf is walk_path for the agent's character.
