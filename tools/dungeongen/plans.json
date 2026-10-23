@@ -277,6 +277,7 @@
    "title": "Razorfen Downs",
    "map": 129,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map129",
    "trigger": 442,
    "bosses": [
@@ -288,8 +289,9 @@
    "entrance_tele": "rfd",
    "outside_tele": "RazorfenDowns",
    "special": [
-    "Tuten'kash (7355) has no spawn row: the Gong (GO_GONG) summons him",
-    "Belnistrasz idol-room ritual (GO_BELNISTRASZ_BRAZIER, GO_IDOL_*_FIRE) summons Plaguemaw the Rotting; escort quest, optional"
+    "Tuten'kash (7355) has no spawn row: the Gong (GO_GONG) summons him after two waves of spider adds; not a leg",
+    "Belnistrasz idol-room ritual (GO_BELNISTRASZ_BRAZIER, GO_IDOL_*_FIRE) summons Plaguemaw the Rotting; escort quest, optional",
+    "hand-mapped 2026-10-23 from the world export (map129), the map-129 navmesh and the world SQL: critters out, the rare Ragglesnout 7354 fought with leg 3's pack, patrol blocks on the pulls the Glutton and the room patrols cross (see ~/TortoiseBots-audit/PREP-RAZORFEN-DOWNS-2026-10-23.md)"
    ]
   },
   {
