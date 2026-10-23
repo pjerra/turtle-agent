@@ -348,8 +348,11 @@ type Hold struct {
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
 	// ends the hold when the data reads exactly Value, so it must be a value the script keeps for a while (a wave that is being fought),
-	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. Only a wait_for's hold takes a
-	// value, and never 0 (the value instance data starts at): the plan check refuses both.
+	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. A wait_for's hold and a boss's
+	// hold take a value; a pull group's hold does not, and no hold takes 0 (the value instance data starts at): the plan check refuses both.
+	// A boss's hold with a value is a scripted pair whose data keeps its own numbers: Scarlet Monastery's Mograine and Whitemane (instance
+	// data 1: 0 not started, 1 in progress, 2 Mograine died once, 3 revived, 4 both dead) would read as FAIL at 2 and as DONE at 3 under the
+	// encounter flag, so their hold is value 4 (sm-cathedral-mograine, 2026-10-23).
 	Value    *uint32 `json:"value,omitempty"`
 	Spot     Point   `json:"spot"`
 	Radius   float32 `json:"radius"`
@@ -1365,7 +1368,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			}
 		}
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
-		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold, true)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
@@ -1432,7 +1435,7 @@ func (c *checker) approach(path string, ps []rawPoint) []Point {
 	return out
 }
 
-// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold only (a pull group's or a boss's hold is an
+// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold and on a boss's hold (a pull group's hold is an
 // encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins.
 func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
 	if r == nil {
@@ -1452,7 +1455,7 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
 	c.entries(path+".entries", r.Entries, false)
 	switch {
 	case r.Value != nil && !valueAllowed:
-		c.fail(path+".value", "only a wait_for's hold takes a value; a pull group's or a boss's hold ends on the encounter state DONE")
+		c.fail(path+".value", "only a wait_for's or a boss's hold takes a value; a pull group's hold ends on the encounter state DONE")
 	case r.Value != nil && *r.Value == 0:
 		c.fail(path+".value", "0 is the value instance data starts at, so the hold would end at once: give the value the event reaches")
 	}

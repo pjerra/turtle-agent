@@ -124,3 +124,47 @@ func TestZulfarrakStairsEventRows(t *testing.T) {
 		t.Fatalf("stairs rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// A boss's hold with a value (sm-cathedral-mograine, 2026-10-23): Scarlet Monastery's Mograine and Whitemane keep their own numbers in
+// instance data 1 (0 not started, 1 in progress, 2 Mograine died once, 3 revived, 4 both dead). Under the encounter flag 2 reads as FAIL and
+// 3 as DONE, so the pair's hold is written with value 4: param 4, flags 8 alone, the boss entry and the hold's entries as the event's mobs,
+// and the timeout as given. This is the shape the scarlet_cathedral data job writes; a boss hold without a value keeps param 3, flags 40.
+func TestBossHoldValueIsAScriptValue(t *testing.T) {
+	const js = `{"version":1,"name":"sm","status":"live-checked (test)","map":189,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"mograine","to":{"x":1140,"y":1398,"z":30.8},
+  "boss":{"entry":3976,"position":{"x":1153.87,"y":1398.39,"z":32.6112},
+   "hold":{"instance_data":1,"value":4,"spot":{"x":1140,"y":1398,"z":30.8},"radius":35,"timeout_s":600,"entries":[3977]}}},
+ {"name":"plain","to":{"x":1200,"y":1398,"z":30},
+  "boss":{"entry":2748,"position":{"x":1210,"y":1398,"z":30},
+   "hold":{"instance_data":2,"spot":{"x":1210,"y":1398,"z":30},"radius":30,"timeout_s":300}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindHold {
+			got = append(got, fmt.Sprintf("%d hold %d %g %g %g r%g p%d f%d t%d %v", s.Leg, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
+			if s.Param == 4 && !strings.Contains(s.Comment, "reads 4 (a script value, not an encounter state)") {
+				t.Errorf("the pair's hold comment does not say its value is a script value: %q", s.Comment)
+			}
+		}
+	}
+	want := []string{
+		"0 hold 1 1140 1398 30.8 r35 p4 f8 t600 [3976 3977]",
+		"1 hold 2 1210 1398 30 r30 p3 f40 t300 [2748]",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("hold rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if err := Validate(res.Rows); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{res.Rows}, back); err != nil {
+		t.Fatal(err)
+	}
+}

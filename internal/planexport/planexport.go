@@ -487,7 +487,8 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	return nil
 }
 
-// hold writes a scripted event's hold row (dungeon.Hold): done when instance data h.Data reads DONE, read as encounter states. A move row
+// hold writes a scripted event's hold row (dungeon.Hold): done when instance data h.Data reads DONE, read as encounter states, or, with
+// h.Value (a wait's or a boss's hold), when it reads that script value (flag 8 alone; Mograine and Whitemane: data 1 value 4). A move row
 // straight before it to the same spot is left out: the hold walks there itself, and a ritual followed straight by its hold keeps the
 // event's first fight (it starts with the ritual's cast) in the hold.
 func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
