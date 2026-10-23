@@ -158,6 +158,9 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		maintenanceNote = "not sent (observe mode: observe.maintenance is off)"
 		d.rep.note("preflight: .bot maintenance skipped (observe mode: off by default, it scatters the party to vendors); pass observe.maintenance to send it")
 	}
+	// Before the maintenance orders, not after: `.bot maintenance` walks the hires to vendors, they leave the object store, and the faction
+	// check would read no race and skip its warning (#266). The check needs only the first frame's party and what is in view now.
+	d.checkPartyStrength(pf)
 	for _, m := range d.fr.Party {
 		b := PreflightBot{Name: m.Name, Maintenance: maintenanceNote}
 		if maintenanceOn {
