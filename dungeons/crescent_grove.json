@@ -21,11 +21,16 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [92101],
+  "cc_always": [92101],
+  "kill_first": [92124, 92123, 92119, 92125, 92126, 92114, 92121],
+  "no_cc": [92112, 92113, 92116, 92117, 92118, 92120, 92122, 92127],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 802 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: Keeper Ranathos carries npc_flags (questgiver): a gossip or dialogue starts his fight",
-    "Turtle custom (Twisted Branch Grove / Ashenvale grove). Boss order is the order of the boss ids, which matches the layout from the entrance outward."
+    "Turtle custom (Twisted Branch Grove / Ashenvale grove). Boss order is the order of the boss ids, which matches the layout from the entrance outward.",
+    "Census 2026-10-23 (world export of map 802, no live run; ~/TortoiseBots-audit/PREP-CRESCENT-GROVE-2026-10-23.md): 459 spawns: 437 of the 443 hostile ones are in the pulls (the five bosses are boss rows, the hostile quest NPC Speaker Gnarr 92130 is left out), and the 14 Deer 883 (critters, faction 31) and the two friendly quest NPCs are not. The two Wardens 92128/92129 stand in their own single pulls, not as boss steps; the Elders 92105/92106 stood 11 yd from Grovetender Engryss and are his first; the Deer pull 9 yd from Keeper Ranathos is gone. No creature_groups, no creature_linking, no rare spawn, no EventAI flee on any entry, no door/lever/key or instance script (only two collision objects, an exit, herbs and Kalanar's Strongbox). The two Roaming Felguards 92120 (guids 2566199 and 2566320) patrol (396 yd/158 s and 454 yd/182 s at 2.5 yd/s); their single pulls carry the path and an estimated period. Every trash unit has sight 20 yd and call for help 5 yd; cc_priority is the Shaman 92101 (the only polymorphable healer: Healing Wave, Lightning Bolt), kill_first the heal-curse, fear, mana-burn and nuke casters, no_cc the demons, elementals and undead that Polymorph cannot take. The bosses' interruptible casts are in their tactics (plan only: the rows cannot carry tactics)."
   ],
   "legs": [
     {
@@ -68,7 +73,8 @@
           "positions": [
             {"x": 512.039, "y": -96.566, "z": 269.342},
             {"x": 500.706, "y": -99.578, "z": 267.813}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92103],
@@ -81,14 +87,16 @@
           "positions": [
             {"x": 505.417, "y": -123.434, "z": 269.75},
             {"x": 516.574, "y": -126.037, "z": 270.181}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92101, 92103],
           "positions": [
             {"x": 528.389, "y": -119.464, "z": 270.7},
             {"x": 528.286, "y": -130.542, "z": 270.966}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92100, 92100, 92100],
@@ -182,7 +190,8 @@
           "positions": [
             {"x": 310.477, "y": -29.7596, "z": 273.707},
             {"x": 305.565, "y": -39.6529, "z": 274.815}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92103, 92104, 92101],
@@ -268,18 +277,6 @@
           ]
         },
         {
-          "entries": [92105],
-          "positions": [
-            {"x": 266.258, "y": -158.38, "z": 276.253}
-          ]
-        },
-        {
-          "entries": [92106],
-          "positions": [
-            {"x": 262.68, "y": -137.309, "z": 276.586}
-          ]
-        },
-        {
           "entries": [92102],
           "positions": [
             {"x": 213.568, "y": -165.827, "z": 286.667}
@@ -317,18 +314,13 @@
           "positions": [
             {"x": 215.456, "y": -52.8876, "z": 238.522},
             {"x": 225.27, "y": -46.2887, "z": 238.01}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92103],
           "positions": [
             {"x": 275.114, "y": -17.1911, "z": 256.719}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 274.286, "y": 0.793903, "z": 242.676}
           ]
         },
         {
@@ -450,7 +442,8 @@
       ],
       "boss": {
         "entry": 92107,
-        "position": {"x": 261.576, "y": -148.21, "z": 276.333}
+        "position": {"x": 261.576, "y": -148.21, "z": 276.333},
+        "first": [92105, 92106]
       }
     },
     {
@@ -461,12 +454,6 @@
           "entries": [92115],
           "positions": [
             {"x": 162.522, "y": -59.1201, "z": 245.879}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 165.871, "y": -32.3333, "z": 241.862}
           ]
         },
         {
@@ -519,7 +506,8 @@
             {"x": 297.477, "y": 58.8648, "z": 235.779},
             {"x": 294.692, "y": 54.1197, "z": 236.728},
             {"x": 301.822, "y": 58.0858, "z": 236.787}
-          ]
+          ],
+          "radius": 13
         },
         {
           "entries": [92113, 92113],
@@ -698,13 +686,8 @@
             {"x": 315.226, "y": 258.363, "z": 260.418},
             {"x": 312.091, "y": 256.663, "z": 258.671},
             {"x": 312.276, "y": 254.061, "z": 258.364}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 270.277, "y": 302.44, "z": 276.801}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [92115],
@@ -738,7 +721,8 @@
             {"x": 202.885, "y": 195.63, "z": 239.4},
             {"x": 197.969, "y": 199.34, "z": 237.845},
             {"x": 192.796, "y": 194.482, "z": 239.039}
-          ]
+          ],
+          "radius": 16
         },
         {
           "entries": [92113],
@@ -813,10 +797,9 @@
           ]
         },
         {
-          "entries": [92113, 883],
+          "entries": [92113],
           "positions": [
-            {"x": 184.328, "y": 174.402, "z": 238.972},
-            {"x": 172.912, "y": 171.576, "z": 238.01}
+            {"x": 184.328, "y": 174.402, "z": 238.972}
           ]
         },
         {
@@ -850,12 +833,6 @@
           ]
         },
         {
-          "entries": [883],
-          "positions": [
-            {"x": 61.4787, "y": 102.482, "z": 237.412}
-          ]
-        },
-        {
           "entries": [92116],
           "positions": [
             {"x": 84.3967, "y": 83.4391, "z": 228.553}
@@ -865,18 +842,6 @@
           "entries": [92117],
           "positions": [
             {"x": 49.7226, "y": 68.5841, "z": 237.133}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 27.2069, "y": 72.0855, "z": 246.736}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 6.73167, "y": 71.2935, "z": 256.072}
           ]
         },
         {
@@ -922,12 +887,6 @@
           ]
         },
         {
-          "entries": [883],
-          "positions": [
-            {"x": 112.853, "y": -38.9772, "z": 248.207}
-          ]
-        },
-        {
           "entries": [92115],
           "positions": [
             {"x": 124.105, "y": -54.6147, "z": 251.759}
@@ -952,21 +911,9 @@
           ]
         },
         {
-          "entries": [883],
-          "positions": [
-            {"x": 129.248, "y": 44.2373, "z": 230.431}
-          ]
-        },
-        {
           "entries": [92116],
           "positions": [
             {"x": 161.222, "y": 40.6883, "z": 228.646}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 124.397, "y": 76.8979, "z": 230.431}
           ]
         },
         {
@@ -1061,12 +1008,6 @@
           ]
         },
         {
-          "entries": [883],
-          "positions": [
-            {"x": 166.658, "y": 225.507, "z": 250.921}
-          ]
-        },
-        {
           "entries": [92115],
           "positions": [
             {"x": 179.653, "y": 250.724, "z": 259.225}
@@ -1101,18 +1042,6 @@
           "entries": [92115],
           "positions": [
             {"x": 118.373, "y": 198.67, "z": 249.986}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 134.67, "y": 180.375, "z": 240.18}
-          ]
-        },
-        {
-          "entries": [883],
-          "positions": [
-            {"x": 179.679, "y": 303.985, "z": 289.749}
           ]
         },
         {
@@ -1158,16 +1087,16 @@
           ]
         },
         {
-          "entries": [883, 92115],
+          "entries": [92115],
           "positions": [
-            {"x": 16.6111, "y": -37.6351, "z": 256.448},
             {"x": 26.975, "y": -33.9361, "z": 251.985}
           ]
         }
       ],
       "boss": {
         "entry": 92109,
-        "position": {"x": 122.596, "y": 67.9047, "z": 230.427}
+        "position": {"x": 122.596, "y": 67.9047, "z": 230.427},
+        "tactics": {"interrupt": ["Wrath", "Regrowth"]}
       }
     },
     {
@@ -1258,18 +1187,38 @@
           ]
         },
         {
-          "entries": [92120],
+          "entries": [92120, 92122, 92122, 92120],
           "positions": [
-            {"x": -411.602, "y": -185.373, "z": 300.222}
-          ]
-        },
-        {
-          "entries": [92122, 92122, 92120],
-          "positions": [
+            {"x": -411.602, "y": -185.373, "z": 300.222},
             {"x": -405.478, "y": -190.661, "z": 298.939},
             {"x": -403.92, "y": -182.961, "z": 298.601},
             {"x": -400.533, "y": -187.714, "z": 297.999}
-          ]
+          ],
+          "radius": 10,
+          "patrol": {
+            "entries": [92120],
+            "path": [
+              {"x": -411.602, "y": -185.373, "z": 300.222},
+              {"x": -428.865, "y": -183.114, "z": 302.778},
+              {"x": -454.735, "y": -172.687, "z": 303.485},
+              {"x": -499.177, "y": -154.26, "z": 305.481},
+              {"x": -523.733, "y": -129.328, "z": 315.343},
+              {"x": -545.58, "y": -128.204, "z": 322.686},
+              {"x": -562.5, "y": -127.333, "z": 326.202},
+              {"x": -581.763, "y": -145.93, "z": 331.979},
+              {"x": -607.922, "y": -147.628, "z": 334.524},
+              {"x": -581.191, "y": -149.13, "z": 332.266},
+              {"x": -563.106, "y": -125.8, "z": 326.033},
+              {"x": -541.381, "y": -128.277, "z": 321.495},
+              {"x": -519.713, "y": -133.821, "z": 312.85},
+              {"x": -503.726, "y": -154.641, "z": 305.994},
+              {"x": -468.206, "y": -167.358, "z": 303.643},
+              {"x": -450.473, "y": -180.833, "z": 303.42}
+            ],
+            "period_s": 182,
+            "period_estimate": true,
+            "source": "creature_movement 2566320"
+          }
         },
         {
           "entries": [92119],
@@ -1516,7 +1465,8 @@
       ],
       "boss": {
         "entry": 92108,
-        "position": {"x": -308.922, "y": -307.698, "z": 295.928}
+        "position": {"x": -308.922, "y": -307.698, "z": 295.928},
+        "tactics": {"interrupt": ["Starfire"]}
       }
     },
     {
@@ -1607,7 +1557,8 @@
             {"x": -504.146, "y": -71.2826, "z": 316.676},
             {"x": -501.548, "y": -61.4889, "z": 316.672},
             {"x": -501.271, "y": -56.2795, "z": 316.672}
-          ]
+          ],
+          "radius": 14
         },
         {
           "entries": [92123, 92123],
@@ -1808,7 +1759,27 @@
           "entries": [92120],
           "positions": [
             {"x": -386.913, "y": -82.1182, "z": 296.959}
-          ]
+          ],
+          "patrol": {
+            "entries": [92120],
+            "path": [
+              {"x": -386.913, "y": -82.1182, "z": 296.959},
+              {"x": -387.248, "y": -101.851, "z": 296.583},
+              {"x": -386.715, "y": -121.532, "z": 296.584},
+              {"x": -379.765, "y": -153.514, "z": 296.581},
+              {"x": -372.932, "y": -187.775, "z": 295.248},
+              {"x": -351.574, "y": -216.902, "z": 294.244},
+              {"x": -328.922, "y": -238.333, "z": 292.764},
+              {"x": -323.448, "y": -261.207, "z": 289.189},
+              {"x": -329.754, "y": -240.867, "z": 292.53},
+              {"x": -356.984, "y": -210.947, "z": 294.47},
+              {"x": -376.881, "y": -176.35, "z": 295.572},
+              {"x": -388.655, "y": -130.278, "z": 296.58}
+            ],
+            "period_s": 158,
+            "period_estimate": true,
+            "source": "creature_movement 2566199"
+          }
         },
         {
           "entries": [92120],
@@ -2096,7 +2067,8 @@
       ],
       "boss": {
         "entry": 92110,
-        "position": {"x": -659.29, "y": -390.521, "z": 352.396}
+        "position": {"x": -659.29, "y": -390.521, "z": 352.396},
+        "tactics": {"interrupt": ["Shadow Bolt", "Flamestrike"]}
       }
     }
   ]

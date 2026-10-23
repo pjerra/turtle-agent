@@ -765,6 +765,7 @@
    "title": "Crescent Grove",
    "map": 802,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map802",
    "trigger": 5004,
    "bosses": [
