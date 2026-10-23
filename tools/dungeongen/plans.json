@@ -432,6 +432,7 @@
    "title": "Blackrock Depths",
    "map": 230,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map230",
    "trigger": 1466,
    "bosses": [
