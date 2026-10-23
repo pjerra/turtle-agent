@@ -159,6 +159,7 @@ assert.strictEqual(P.clockMin(0), "0:00"); assert.strictEqual(P.clockMin(2467), 
 assert.ok(/fastest clear: 41:07 \(f1\)/.test(P.ghostDescribe({ found: true, complete: true, seconds: 2467, folder: "f1" })));
 assert.ok(/furthest earlier run \(3 sections\)/.test(P.ghostDescribe({ found: true, complete: false, legs_done: 3, seconds: 90 })));
 assert.ok(/furthest earlier run \(3 of 14 sections\): 1:30/.test(P.ghostDescribe({ found: true, complete: false, legs_done: 3, plan_legs: 14, seconds: 90 })));
+assert.ok(/furthest earlier run \(4 sections\): 10:00, 2 packs left \(g\)/.test(P.ghostDescribe({ found: true, complete: false, legs_done: 4, seconds: 600, left: 2, folder: "g" })));
 assert.strictEqual(P.ghostDescribe({ found: false }), "");
 
 // ---- stalls, refusals, heat

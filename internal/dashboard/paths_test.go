@@ -382,6 +382,31 @@ func TestHistoryGhostPartialRunIsNoClear(t *testing.T) {
 	}
 }
 
+func TestHistoryGhostRunWithPacksLeftIsNoClear(t *testing.T) {
+	dir := t.TempDir()
+	w := fullRun("r-left", "zf", 100, 600, 4, "done", nil)
+	w.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "g", w)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Complete || g.Left != 2 || g.LegsDone != 4 {
+		t.Fatalf("a finished run with 2 packs left is not a clear: %+v", g)
+	}
+	clean := fullRun("r-clean", "zf", 200, 700, 4, "done", nil)
+	writeRun(t, dir, "h", clean)
+	h = NewHistory(nil, dir)
+	g = GhostAnswer{}
+	if err := json.Unmarshal(h.Ghost("zf", "r-left", 0), &g); err != nil { // without the run that left packs behind
+		t.Fatal(err)
+	}
+	if !g.Found || !g.Complete || g.Left != 0 || g.Run != "r-clean" {
+		t.Fatalf("a finished run with no packs left is a clear: %+v", g)
+	}
+}
+
 func TestHistoryHeatBoundedToLatestRuns(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < HeatRuns+5; i++ {

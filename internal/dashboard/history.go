@@ -253,7 +253,8 @@ type GhostAnswer struct {
 	Run      string       `json:"run,omitempty"`
 	Folder   string       `json:"folder,omitempty"`
 	Seconds  float64      `json:"seconds,omitempty"`
-	Complete bool         `json:"complete,omitempty"` // the run cleared the whole dungeon
+	Complete bool         `json:"complete,omitempty"` // the run cleared the whole dungeon (done with no packs left)
+	Left     int          `json:"left,omitempty"`     // packs the run leader left alive
 	LegsDone int          `json:"legs_done,omitempty"`
 	PlanLegs int          `json:"plan_legs,omitempty"` // the plan's sections, when the page said
 	Legs     []DLeg       `json:"legs,omitempty"`
@@ -262,8 +263,9 @@ type GhostAnswer struct {
 }
 
 // Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, the quicker
-// of equals. A run that ended "done" and started at the first section counts as a clear of the whole dungeon, or, when planLegs says how
-// many sections the plan has, a run with that many done. The answer is cached until the folders are listed again.
+// of equals. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
+// or, when planLegs says how many sections the plan has, a run with that many done and none left. The answer is cached until the
+// folders are listed again.
 func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -303,11 +305,11 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		ans.Why = "no earlier run of " + plan + " in the tests folder"
 		return h.keepGhost(key, ans)
 	}
-	ans.Found, ans.Run, ans.Folder, ans.Seconds, ans.LegsDone, ans.Legs = true, best.Run, bestF.folder, best.Seconds, best.LegsDone, best.Legs
+	ans.Found, ans.Run, ans.Folder, ans.Seconds, ans.LegsDone, ans.Left, ans.Legs = true, best.Run, bestF.folder, best.Seconds, best.LegsDone, best.Left, best.Legs
 	if planLegs > 0 {
-		ans.Complete = best.LegsDone >= planLegs
+		ans.Complete = best.LegsDone >= planLegs && best.Left == 0
 	} else {
-		ans.Complete = bestF.reason == "done" && bestF.fromLeg == 0
+		ans.Complete = bestF.reason == "done" && bestF.fromLeg == 0 && best.Left == 0
 	}
 	for _, p := range best.Paths {
 		if p.Lead {
