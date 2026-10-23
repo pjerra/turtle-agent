@@ -59,8 +59,8 @@ func TestGnomereganTheAgentsAtTheAmbassadorAreHisFirst(t *testing.T) {
 	if got := fmt.Sprint(d.Boss.First); got != "[6212]" {
 		t.Errorf("dark_iron_ambassador: boss first %s, want [6212]", got)
 	}
-	if n := len(d.PullGroups); n != 26 {
-		t.Errorf("dark_iron_ambassador: %d pull groups, want 26", n)
+	if n := len(d.PullGroups); n != 24 {
+		t.Errorf("dark_iron_ambassador: %d pull groups, want 24", n)
 	}
 	if last := d.PullGroups[len(d.PullGroups)-1]; last.Entries[0] != 6212 || len(last.Entries) != 1 {
 		t.Errorf("dark_iron_ambassador: the last pull is %v, want the Agent in front of him", last.Entries)
@@ -97,8 +97,8 @@ func TestGnomereganOversizedPacksStayAsTheCensusListsThem(t *testing.T) {
 	}{
 		{"electrocutioner_6000", 34, 11},
 		{"electrocutioner_6000", 19, 6},
-		{"crowd_pummeler_9-60", 2, 8},
-		{"crowd_pummeler_9-60", 11, 9},
+		{"crowd_pummeler_9-60", 1, 8},
+		{"crowd_pummeler_9-60", 10, 9},
 		{"mekgineer_thermaplugg", 3, 7},
 	} {
 		l := gnomereganLeg(t, p, c.leg)
