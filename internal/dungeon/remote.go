@@ -539,6 +539,7 @@ type RemoteDriver struct {
 	stalled bool
 
 	bound       bool
+	elunaPlaced bool // the Eluna toolkit placed and verified the party at the start step (eluna_place.go): the distance check is not asked of the stale feed
 	unbinding   bool
 	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.

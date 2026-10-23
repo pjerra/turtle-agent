@@ -549,6 +549,11 @@ func (d *RemoteDriver) checkStartPlace() error {
 	if d.start == nil || d.start.Words == "" {
 		return nil
 	}
+	if d.elunaPlaced {
+		// The toolkit put the party on the step's floor and its second read proved it; the view feed's lead position is still the one
+		// from before the teleport (live 2026-10-23: "the lead bot stands 689 yd" right after a verified place).
+		return nil
+	}
 	allow := d.opt.Observe.withDefaults(d.plan).AllowFarStart
 	if !d.start.HavePoint {
 		msg := "the start step's point is not known (the deployed rows could not be reproduced from the plan file), so the party's place cannot be checked"

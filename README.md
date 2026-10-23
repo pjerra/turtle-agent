@@ -1665,13 +1665,13 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    is at the requested step (or in the leg, for a leg sent by name); a leg sent as a number is never adopted.
    **Placed with the Eluna test toolkit** (`eluna_toolkit` in the settings, off by default; TEST servers only, with TortoiseBots'
    `tools/eluna/test-toolkit` loaded): with it on, a partway start at a known step point is made, not only checked. Before `run start` the
-   agent moves to the point 2 yd above it on the plan's map (`.go xyz`), waits 2 s, and then, in this order: `q floor` (refused when there is
+   agent first enters the lead bot's instance (`.appear <lead bot>`: a `.go xyz` from outside would make an instance of its own, other than the party's), moves to the point 2 yd above it on the plan's map (`.go xyz`), waits 2 s, and then, in this order: `q floor` (refused when there is
    no floor, or the floor is more than 3 yd from the step's z: another level), `quiet` over 50 yd for `w=20` (refused when anything stands near
    or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `cmd stay` (the commander order), `place` with
    `spread=3` and `of=<lead bot>` (the bind makes a bots-only group the commander is not in, so the toolkit is told whose group to move),
    and `cmd follow`, right before the run leader starts. The place's second read is judged by the floor: every member must be found
    with its `dz` within 1.5 yd of the floor it was put on; bots that walk a few yards from their ring spot after the teleport are placed
-   all the same and the drift is only a note (`drifted: <name> <d> yd`). Nothing waits after a successful place: a bound party with no run
+   all the same and the drift is only a note (`drifted: <name> <d> yd`). A verified place also ends the lead-bot distance check of the start (the view feed's lead position is older than the teleport). Nothing waits after a successful place: a bound party with no run
    going wanders off within about a minute, so `run start` follows at once. A refused
    step ends the run there with `observe mode: eluna place: ...` naming it; the success is a note `eluna place: quiet, <n> placed at <x> <y> <z>`.
    A game without the toolkit client fails the start rather than starting untested. The same commands are reachable by hand through the `tt` method.
