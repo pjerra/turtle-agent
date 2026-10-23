@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -41,9 +42,10 @@ func TestRazorfenUnitListsComeFromTheCensus(t *testing.T) {
 
 // The opening stand of leg 0 (r19-19z37 live run 1, stopped at step 4): the party stands at 1994 1615, a lower-floor pocket
 // with no upper polygon in its formation ring, not at 1987.5 1600 where the slot lookup found the walkway above (z 92-95) and
-// the two ranged bots climbed the west ramp while idle after the fight. The Handler 4530 keeps radius 25 (it wanders 22 yd to
-// the corridor mouth and was hop-pulled when the radius was 10); the Quilguards and the Geomancer keep radius 10, and the
-// 4520 after them carries the corridor regroup move at 2000 1635.
+// the two ranged bots climbed the west ramp while idle after the fight. The five corridor pull groups all have radius 10
+// (r20-19z39 run 2: group 0's radius 25 owned both Quilguards of the next group and the first fight began at the corridor
+// mouth), group 4 carries the corridor regroup move at 2000 1635, and the two pulls that outran the run leader's 8 approach
+// hops (39 and 42) carry stands on the hall floor within 60 yd of their packs.
 func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
 	p := loadPlan(t, rfkPlan)
 	l := rfkLeg(t, p, "roogug")
@@ -54,10 +56,11 @@ func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
 		group  int
 		radius float32
 	}{
-		{0, 25}, // Handler 4530: its own wander to the corridor mouth
+		{0, 10}, // Handler 4530
 		{1, 10}, // Quilguard pair
 		{2, 10}, // Geomancer 4520
 		{3, 10}, // second Quilguard pair
+		{5, 10}, // Handler 4530 + Quilguard pair: the default was 19.3
 	}
 	for _, c := range want {
 		if got := l.PullGroups[c.group].Radius; got != c.radius {
@@ -67,6 +70,34 @@ func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
 	g := l.PullGroups[4]
 	if len(g.Approach) != 1 || g.Approach[0].X != 2000 || g.Approach[0].Y != 1635 || g.Approach[0].Z != 81 {
 		t.Errorf("roogug pull group 4 approach %+v, want the corridor regroup point 2000 1635 81", g.Approach)
+	}
+	// Pull 39's pack (run 2 stopped on it at 61.0 yd): the stand 2110 1600 82.1 is 42.0 yd from it on the hall floor (the
+	// corridor the tank pulled it from); pull 42's pack (4440) is 14.0 yd from its stand 2180 1610 81.3, radius 10.
+	for _, c := range []struct {
+		name    string
+		group   int
+		x, y, z float32
+		pack    Point
+	}{
+		{"step 39's 4532", 21, 2110, 1600, 82.1, l.PullGroups[21].Positions[0]},
+		{"step 42's 4440", 24, 2180, 1610, 81.3, l.PullGroups[24].Positions[0]},
+	} {
+		g := l.PullGroups[c.group]
+		if len(g.Approach) != 1 {
+			t.Errorf("roogug pull group %d (%s) approach %+v, want one stand point", c.group, c.name, g.Approach)
+			continue
+		}
+		a := g.Approach[0]
+		if a.X != c.x || a.Y != c.y || a.Z != c.z {
+			t.Errorf("roogug pull group %d (%s) approach %+v, want %.0f %.0f %.1f", c.group, c.name, a, c.x, c.y, c.z)
+		}
+		dx, dy, dz := float64(a.X-c.pack.X), float64(a.Y-c.pack.Y), float64(a.Z-c.pack.Z)
+		if d := math.Sqrt(dx*dx + dy*dy + dz*dz); d > 60 {
+			t.Errorf("roogug pull group %d (%s): the stand is %.1f yd from the pack, want at most 60", c.group, c.name, d)
+		}
+	}
+	if got := l.PullGroups[24].Radius; got != 10 {
+		t.Errorf("roogug pull group 24 (4440) radius %v, want the explicit 10", got)
 	}
 }
 

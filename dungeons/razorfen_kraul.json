@@ -41,7 +41,7 @@
           "positions": [
             {"x": 1987.53, "y": 1600.03, "z": 79.8027}
           ],
-          "radius": 25
+          "radius": 10
         },
         {
           "entries": [4436, 4436],
@@ -81,7 +81,8 @@
             {"x": 2032.3, "y": 1650.53, "z": 81.4707},
             {"x": 2044.06, "y": 1648.99, "z": 81.998},
             {"x": 2048.13, "y": 1655.96, "z": 81.6141}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4541],
@@ -183,6 +184,9 @@
           "entries": [4532],
           "positions": [
             {"x": 2138.38, "y": 1630.94, "z": 81.7384}
+          ],
+          "approach": [
+            {"x": 2110, "y": 1600, "z": 82.1}
           ]
         },
         {
@@ -202,6 +206,10 @@
           "entries": [4440],
           "positions": [
             {"x": 2183.11, "y": 1596.42, "z": 79.9248}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2180, "y": 1610, "z": 81.3}
           ]
         },
         {
@@ -256,7 +264,7 @@
         "first": [4516, 4442]
       },
       "notes": [
-        "opening stand (r19-19z37 live run 1, stopped at step 4): the party stood at 1987.5 1600, where the formation slot's ground lookup finds the upper walkway at about z 95 (floors at 1988 1608: 95.0 and 1975 1600: 92.9). The two ranged bots walked the corridor west to the ramp foot at 1949.9 1594.4 and up it while idle after the fight (targets were themselves, activity 'formation station'), not chasing a runner: no mob of the run ever stood above z 83. The stand is now 1994 1615, a lower-floor pocket whose 2 yd ring has no upper polygon (1992-1996, 1613-1617 all z 83.0-83.7), so the formation slots do not pull the bots up. The ramp is STEEP-flagged above z 87 for the agent's filter; the server's own filter (steep included) paths both ways. Pull group 0 keeps radius 25 so its Handler 4530, which wanders 22 yd to the corridor mouth, is owned and not hop-pulled; the two 4436 pairs and the 4520 have radius 10 so a wandering joiner is not dragged in. Pull group 4's approach 2000 1635 is the explicit corridor regroup after the first four pulls."
+        "opening stand (r19-19z37 live run 1, stopped at step 4): the party stood at 1987.5 1600, where the formation slot's ground lookup finds the upper walkway at about z 95 (floors at 1988 1608: 95.0 and 1975 1600: 92.9). The two ranged bots walked the corridor west to the ramp foot at 1949.9 1594.4 and up it while idle after the fight (targets were themselves, activity 'formation station'), not chasing a runner: no mob of the run ever stood above z 83. The stand is now 1994 1615, a lower-floor pocket whose 2 yd ring has no upper polygon (1992-1996, 1613-1617 all z 83.0-83.7), so the formation slots do not pull the bots up. The ramp is STEEP-flagged above z 87 for the agent's filter; the server's own filter (steep included) paths both ways. Run 2 (r20-19z39, stopped at step 42 of 634): step 1 still fought at the corridor mouth (the Handler's summoned Tamed Battleboar 4535, and group 0's radius 25 owned both 4436 Quilguards of the next group as well), and pulls 39 (4532 at 2138.38 1630.94) and 42 (4440 at 2183.11 1596.42) paused with '8 approach hops did not bring the party within 60.0 yd of the pack' (nearest 61.0, 69.8 and 107.3 yd) while the run leader's own hops walked the long way round the west hall. Now the five corridor groups (0-5) all have radius 10 (group 0 was 25; group 5's default was 19.3), so each is pulled from the 1994 1615 stand on its own; group 4's approach 2000 1635 stays. Pull 39's pack has the approach stand 2110 1600 82.1: 42.0 yd from the pack, on the hall floor, 17.3 yd from the corridor point 2113 1617 where run 2's tank did pull it (navmesh probe 2026-10-22: complete path, same floor; the room east of x about 2135 is a navmesh pocket of its own and 710 yd by path from the corridor, so a stand inside it would only be walked the long way round). Pull 42's pack keeps radius 10 (its own unit only) and gets the approach stand 2180 1610 81.3: 14.0 yd 3-D from the pack, on the hall floor (probe: complete path, 14.0 yd to the pack), so the approach is not left to the run leader's 8 hops and the fight is not fought down the slope toward 2150 1475 67. The room floor east of x about 2115 is a navmesh pocket of its own: from the corridor's pocket the probe walks 640-730 yd round the west hall and the lower hall to reach either stand, the same route run 2's own hops tried; the packs in it are pulled from the west across the 15-25 yd gap (the mobs walk it, as they did live)."
       ]
     },
     {
