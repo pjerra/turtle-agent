@@ -397,7 +397,7 @@ func (b *digestBuilder) event(ev string, t int64, line []byte) {
 		var e struct {
 			Left float64 `json:"left"`
 		}
-		if json.Unmarshal(line, &e) == nil && e.Left > 0 {
+		if json.Unmarshal(line, &e) == nil {
 			b.left = int(e.Left)
 		}
 		return

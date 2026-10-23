@@ -407,6 +407,25 @@ func TestHistoryGhostRunWithPacksLeftIsNoClear(t *testing.T) {
 	}
 }
 
+func TestHistoryGhostLaterRunLeaderWithoutLeftClears(t *testing.T) {
+	w := fullRun("r-stale", "zf", 100, 600, 4, "done", nil)
+	w.event(598000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	w.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done"`)
+	if d := digestOf(w).Snapshot(0); d.Left != 0 {
+		t.Fatalf("a later run_leader without left resets the count: %+v", d)
+	}
+	dir := t.TempDir()
+	writeRun(t, dir, "g", w)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || !g.Complete || g.Left != 0 {
+		t.Fatalf("a done run whose last report left no packs is a clear: %+v", g)
+	}
+}
+
 func TestHistoryHeatBoundedToLatestRuns(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < HeatRuns+5; i++ {
