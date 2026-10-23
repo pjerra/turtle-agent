@@ -28,7 +28,7 @@ Legend: ✓ done, — not done. PR numbers are in the `pjerra/turtle-agent` repo
 
 | Instance | Levels | Wowhead | Plan file | Mapped | Walked | Cleared | PR | What's left |
 |---|---|---|---|---|---|---|---|---|
-| Shadowfang Keep | 19-25 | [zone 209](https://www.wowhead.com/classic/zone=209) (18-32) | `dungeons/shadowfang_keep.json` (8 legs) | — | — | — | — | Not started (draft plan only) |
+| Shadowfang Keep | 19-25 | [zone 209](https://www.wowhead.com/classic/zone=209) (18-32) | `dungeons/shadowfang_keep.json` (10 legs) | — | — | — | — | Run 1 (2026-10-23) cleared Rethilgore, Razorclaw, Silverlaine and Springvale; Odo stalled on the navmesh seam and the closed Courtyard Door, which the plan now carries (gossip + wait_object + move_direct), legs 5-7 re-added, not re-run |
 | Blackfathom Deeps | 22-27 | [zone 719](https://www.wowhead.com/classic/zone=719) (20-35) | `dungeons/blackfathom_deeps.json` (7 legs) | — | — | — | — | Not started (draft plan only) |
 | The Stormwind Stockade | 23-28 | [zone 717](https://www.wowhead.com/classic/zone=717) (22-30) | `dungeons/stormwind_stockade.json` (5 legs) | — | — | — | — | Not started (draft plan only) |
 | Razorfen Kraul | 26-31 | [zone 491](https://www.wowhead.com/classic/zone=491) (24-40) | `dungeons/razorfen_kraul.json` (7 legs) | — | — | — | — | Not started (draft plan only) |

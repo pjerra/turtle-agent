@@ -42,6 +42,7 @@
   {
    "name": "shadowfang_keep",
    "title": "Shadowfang Keep",
+   "handwritten": true,
    "map": 33,
    "kind": "dungeon",
    "data": "map33",
@@ -59,8 +60,8 @@
    "entrance_tele": "sfk",
    "outside_tele": "ShadowFangKeep",
    "special": [
-    "courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
-    "Arugal's summoning focus (GO_ARUGAL_FOCUS)"
+    "Courtyard Door 18895: a gossip step on Deathstalker Adamant 3849 (option 0) plus a 60 s wait_object, in the plan since 2026-10-23; the Odo floor and the walkway are past the navmesh stair-top seam, crossed by a move_direct (walked live)",
+    "still no step for the Sorcerer's Gate 18972 and Arugal's Lair door 18971 (said to open as bosses die, unverified) or Arugal's summoning focus 18973"
    ],
    "notes": [
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."

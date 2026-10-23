@@ -19,8 +19,10 @@ import (
 // groups are not touched by an offline lane (38 since the courtyard, Zum'rah and Gahz'rilla legs of #192 and #195 came in; was 29). Uldaman's 150 (was 149, 144) count the two Jadespine Basilisks
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
-// member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+// member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first. Shadowfang Keep is 231: a draft
+// whose radii are the generator's defaults or cut only around the census fixes (PREP-SFK-2026-10-22 "Risky steps"), with the mapping walk
+// still to settle the overlapping packs of the court, the walkway and the upper floors; count it again after that walk.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "shadowfang_keep": 231}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
