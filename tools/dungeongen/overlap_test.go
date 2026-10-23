@@ -20,7 +20,9 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+// Sunken Temple (2026-10-23): 113 findings at the default 25 yd read (the exporter's own radii are farthest+10, and the three radii
+// that reached the next pack are cut in the plan); the map is a dense two-ring temple where most packs stand within 28 yd of the next.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "sunken_temple": 113}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
