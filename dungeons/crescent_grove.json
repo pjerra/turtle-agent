@@ -23,8 +23,8 @@
   ],
   "cc_priority": [92101],
   "cc_always": [92101],
-  "kill_first": [92124, 92123, 92119, 92125, 92126, 92114, 92121],
   "no_cc": [92112, 92113, 92116, 92117, 92118, 92120, 92122, 92127],
+  "kill_first": [92124, 92123, 92119, 92125, 92126, 92114, 92121],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 802 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -1096,7 +1096,12 @@
       "boss": {
         "entry": 92109,
         "position": {"x": 122.596, "y": 67.9047, "z": 230.427},
-        "tactics": {"interrupt": ["Wrath", "Regrowth"]}
+        "tactics": {
+          "interrupt": [
+            "Wrath",
+            "Regrowth"
+          ]
+        }
       }
     },
     {
@@ -1466,7 +1471,11 @@
       "boss": {
         "entry": 92108,
         "position": {"x": -308.922, "y": -307.698, "z": 295.928},
-        "tactics": {"interrupt": ["Starfire"]}
+        "tactics": {
+          "interrupt": [
+            "Starfire"
+          ]
+        }
       }
     },
     {
@@ -2068,7 +2077,12 @@
       "boss": {
         "entry": 92110,
         "position": {"x": -659.29, "y": -390.521, "z": 352.396},
-        "tactics": {"interrupt": ["Shadow Bolt", "Flamestrike"]}
+        "tactics": {
+          "interrupt": [
+            "Shadow Bolt",
+            "Flamestrike"
+          ]
+        }
       }
     }
   ]
