@@ -32,7 +32,7 @@
     "One of four wings of map 189.",
     "Census 2026-10-23 (96 spawns, 93 trash 34-40 rank 1, 3 bosses): all trash is humanoid faction 67 (Fairbanks is undead type 6, faction 67). Fleers: 4294 4298 4299 4300 4301 4302 (EventAI 47); 4295 4303 4540 do not flee. Healers: 4303 Abbot (Heal 6064 + Renew 8362), 4300 Wizard (Healing Wave 547 + Lightning Bolt 20802), 4299 Chaplain (Power Word: Shield 6066 + Renew 8362): kill_first 4303 4300 4299, and no cc_always, so no pack depends on a Polymorph (the r21 Library step 54 was a failed CC on 4299 in this same wing data). No creature_groups and no rare rank 2/4 in the wing. Six single-member patrollers carry their creature_movement path as a patrol block (period estimated); the Wizard 39967 (376 yd) and the Myrmidon 39965 (329 yd) loop the whole lower hall and cross most pulls.",
     "Fairbanks 4542 (boss_high_inquisitor_fairbanks: Curse of Blood, Dispel Magic, Fear, Sleep, PW:S, Heal at 25 %) stands 16 yd from the Monk 4540 of pull group 6, inside his 20 yd detection and behind the Secret Door 97700: the pull is gone and the Monk is boss.first. The door objects 104591, 104600 and 97700 all stand state 1 (active) in the spawn export; the instance script closes the High Inquisitor's Door 104600 when the event starts and opens it when Mograine dies, so no door step is exported.",
-    "Mograine (3976) and Whitemane (3977) are one event: on Mograine's progress the instance calls every Scarlet Chaplain/Wizard/Centurion/Champion/Abbot/Monk within 82 yd to his victim, and on his death the High Inquisitor's Door opens and Whitemane walks to him; the plan kills Mograine in leg 1 and Whitemane in leg 2, all packs within 82 yd are pulled earlier, and the event itself is the run leader's fight, not a plan step."
+    "Mograine (3976) and Whitemane (3977) are one event and one boss hold (instance data 1, value 4, entries 3976 3977) on a spot 14 yd west of Mograine: on Mograine's progress the instance calls every Scarlet Chaplain/Wizard/Centurion/Champion/Abbot/Monk within 82 yd to his victim, and his first death is a fake one, Whitemane walks to him and revives him, and both must die (data 1 reads 4 only then); all packs within 82 yd are pulled earlier, the hold is the run leader's fight, and no leg's to is Whitemane's own spot. The chapel packs before him are pulled from stands more than 30 yd from 1153.87 1398.39 (his detection is 20 yd)."
   ],
   "legs": [
     {
@@ -43,6 +43,33 @@
           "entries": [4295],
           "positions": [
             {"x": 876.701, "y": 1322.55, "z": 18.0893}
+          ]
+        },
+        {
+          "entries": [4298, 4298],
+          "positions": [
+            {"x": 876.506, "y": 1359.32, "z": 18.0893},
+            {"x": 865.244, "y": 1359.41, "z": 18.0893}
+          ]
+        },
+        {
+          "entries": [4298, 4295],
+          "positions": [
+            {"x": 868.398, "y": 1406, "z": 18.0893},
+            {"x": 873.301, "y": 1406.05, "z": 18.0893}
+          ]
+        },
+        {
+          "entries": [4294, 4295],
+          "positions": [
+            {"x": 889.963, "y": 1374.25, "z": 18.7611},
+            {"x": 889.978, "y": 1378.01, "z": 18.7611}
+          ]
+        },
+        {
+          "entries": [4298],
+          "positions": [
+            {"x": 890.282, "y": 1360.67, "z": 18.7611}
           ]
         },
         {
@@ -95,6 +122,9 @@
           "positions": [
             {"x": 1131.25, "y": 1390.61, "z": 30.3824},
             {"x": 1131.12, "y": 1393.02, "z": 30.3852}
+          ],
+          "approach": [
+            {"x": 1095, "y": 1420, "z": 30.5578}
           ]
         },
         {
@@ -103,7 +133,10 @@
             {"x": 1131.19, "y": 1405.14, "z": 30.3888},
             {"x": 1130.96, "y": 1407.78, "z": 30.3828}
           ],
-          "radius": 9
+          "radius": 9,
+          "approach": [
+            {"x": 1100, "y": 1414, "z": 30.6191}
+          ]
         },
         {
           "entries": [4540, 4302, 4303, 4303, 4303],
@@ -411,6 +444,9 @@
             {"x": 1136.41, "y": 1451.23, "z": 30.3863},
             {"x": 1137.65, "y": 1455.58, "z": 30.3845},
             {"x": 1141.36, "y": 1462.66, "z": 30.3821}
+          ],
+          "approach": [
+            {"x": 1134.5, "y": 1431.5, "z": 30.5}
           ]
         },
         {
@@ -427,13 +463,19 @@
             "period_s": 15.5,
             "period_estimate": true,
             "source": "creature_movement guid 40034"
-          }
+          },
+          "approach": [
+            {"x": 1130, "y": 1436, "z": 30.937}
+          ]
         },
         {
           "entries": [4299, 4540],
           "positions": [
             {"x": 1159.59, "y": 1456.71, "z": 30.3882},
             {"x": 1165.83, "y": 1456.84, "z": 31.6319}
+          ],
+          "approach": [
+            {"x": 1146, "y": 1462, "z": 30.4573}
           ]
         },
         {
@@ -442,6 +484,9 @@
             {"x": 1165.94, "y": 1439.46, "z": 31.6319},
             {"x": 1160.33, "y": 1438.27, "z": 30.3882},
             {"x": 1165.88, "y": 1437.27, "z": 31.6319}
+          ],
+          "approach": [
+            {"x": 1150, "y": 1450, "z": 30.8036}
           ]
         },
         {
@@ -453,53 +498,30 @@
             {"x": 1106.8, "y": 1379.17, "z": 30.3025},
             {"x": 1100.04, "y": 1372.48, "z": 30.3885}
           ],
-          "radius": 14
-        },
-        {
-          "entries": [4294, 4295],
-          "positions": [
-            {"x": 889.963, "y": 1374.25, "z": 18.7611},
-            {"x": 889.978, "y": 1378.01, "z": 18.7611}
-          ]
-        },
-        {
-          "entries": [4298],
-          "positions": [
-            {"x": 890.282, "y": 1360.67, "z": 18.7611}
-          ]
-        },
-        {
-          "entries": [4298, 4298],
-          "positions": [
-            {"x": 876.506, "y": 1359.32, "z": 18.0893},
-            {"x": 865.244, "y": 1359.41, "z": 18.0893}
-          ]
-        },
-        {
-          "entries": [4298, 4295],
-          "positions": [
-            {"x": 868.398, "y": 1406, "z": 18.0893},
-            {"x": 873.301, "y": 1406.05, "z": 18.0893}
+          "radius": 14,
+          "approach": [
+            {"x": 1118, "y": 1415, "z": 30.487}
           ]
         }
       ],
       "boss": {
         "entry": 3976,
-        "position": {"x": 1153.87, "y": 1398.39, "z": 32.6112}
+        "position": {"x": 1153.87, "y": 1398.39, "z": 32.6112},
+        "hold": {
+          "instance_data": 1,
+          "value": 4,
+          "spot": {"x": 1140, "y": 1398, "z": 31.0314},
+          "radius": 35,
+          "timeout_s": 600,
+          "entries": [3977]
+        }
       },
       "notes": [
         "button \"Lever\" entry 104589 at 1073.9 1405.9 30.3",
         "door \"Chapel Door\" entry 104591 at 1069.9 1399.1 30.8",
-        "door \"High Inquisitor's Door\" entry 104600 at 1173.0 1398.9 32.0"
+        "door \"High Inquisitor's Door\" entry 104600 at 1173.0 1398.9 32.0",
+        "The hold's spot 1140 1398 31.03 is the navmesh ground 14 yd west of Mograine (walkable, a 14 yd walk to him) and 62 yd from Whitemane's spawn behind the High Inquisitor's Door, so she must come to the party; radius 35 covers the chapel, timeout_s 600 the corpse timer."
       ]
-    },
-    {
-      "name": "high_inquisitor_whitemane",
-      "to": {"x": 1202.13, "y": 1399.07, "z": 29.0931},
-      "boss": {
-        "entry": 3977,
-        "position": {"x": 1202.13, "y": 1399.07, "z": 29.0931}
-      }
     }
   ]
 }
