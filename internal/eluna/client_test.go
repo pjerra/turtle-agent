@@ -218,6 +218,37 @@ func TestPlaceNotPlaced(t *testing.T) {
 	}
 }
 
+// The toolkit sends a fractional hp (live 2026-10-23: 91.6): the members of place and the unit of q unit decode instead of
+// failing the run with "json: cannot unmarshal number 91.6 into Go struct field .0.hp of type int".
+func TestFractionalHPDecodes(t *testing.T) {
+	c, l, _ := testClient(t)
+	c.Send = func(ctx context.Context, line string) error {
+		l.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":1,"final":false,"members":[{"g":"0x1","n":"A"}]}`)
+		l.add(`TTJSON {"v":1,"cmd":"place","id":"t1","ok":true,"read":2,"final":true,"placed":true,"members":[{"g":"0x1","n":"Kaeron","ok":true,"hp":91.6,"d":16.8,"dz":-1.6,"alive":true}]}`)
+		return nil
+	}
+	p, err := c.Place(context.Background(), 10, 20, 30, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Members) != 1 || p.Members[0].HP != 91.6 {
+		t.Fatalf("%+v", p)
+	}
+
+	c2, l2, _ := testClient(t)
+	c2.Send = func(ctx context.Context, line string) error {
+		l2.add(`TTJSON {"v":1,"cmd":"q.unit","id":"t1","ok":true,"asked":"0xF130000E450000FF","unit":{"g":"0xF130000E450000FF","e":1,"n":"B","hp":91.6}}`)
+		return nil
+	}
+	u, err := c2.Unit(context.Background(), 0xF130000E450000FF, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.HP != 91.6 {
+		t.Fatalf("%+v", u)
+	}
+}
+
 // With Of set, the group commands carry `of=<name>`: a bound commander is not in the bots' group, so place, q group and
 // reset would act on the commander's empty group.
 func TestGroupCommandsCarryOf(t *testing.T) {

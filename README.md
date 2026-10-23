@@ -1667,13 +1667,12 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    `tools/eluna/test-toolkit` loaded): with it on, a partway start at a known step point is made, not only checked. Before `run start` the
    agent first enters the lead bot's instance (`.appear <lead bot>`: a `.go xyz` from outside would make an instance of its own, other than the party's), moves to the point 2 yd above it on the plan's map (`.go xyz`), waits 2 s, and then, in this order: `q floor` (refused when there is
    no floor, or the floor is more than 3 yd from the step's z: another level), `quiet` over 50 yd for `w=20` (refused when anything stands near
-   or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `cmd stay` (the commander order), `place` with
-   `spread=3` and `of=<lead bot>` (the bind makes a bots-only group the commander is not in, so the toolkit is told whose group to move),
-   and `cmd follow`, right before the run leader starts. The place's second read is judged by the floor: every member must be found
+   or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `.bot summon <lead bot>` (2 s: the party
+   comes to the step, so the hold below is taken at the new spot), `place` with `spread=3` and `of=<lead bot>` (the bind makes a bots-only group the commander is not in, so the toolkit is told whose group to move),
+   `cmd stay` (the commander order, anchored where the place put the bots: never before the place, or a bot walks back to its old spot), and `cmd follow`, right before the run leader starts. The place's second read is judged by the floor: every member must be found
    with its `dz` within 1.5 yd of the floor it was put on; bots that walk a few yards from their ring spot after the teleport are placed
    all the same and the drift is only a note (`drifted: <name> <d> yd`). A verified place also ends the lead-bot distance check of the start (the view feed's lead position is older than the teleport). Nothing waits after a successful place: a bound party with no run
    going wanders off within about a minute, so `run start` follows at once. A refused
-   step ends the run there with `observe mode: eluna place: ...` naming it; the success is a note `eluna place: quiet, <n> placed at <x> <y> <z>`.
    **Options** (`dungeon_run`'s `eluna_place`): `{"dz": <yd>, "skip": [<entry>, ...]}`. They go to the toolkit's `quiet` as `dz=` and `skip=`: units more than `dz` yd above or below
    the start step's point (default 8; `0` = no vertical limit, the old 2D rule) and units whose entry is in `skip` (e.g. Shadowfang Keep's Deathstalker Adamant, `3849`, for the door gossip)
    neither count for the quiet check nor stop the run. Absent, nothing is sent and the toolkit's own default (dz 8) applies. Validation: `eluna_place` goes with mode `observe` (else

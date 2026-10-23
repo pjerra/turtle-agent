@@ -51,9 +51,9 @@ const (
 )
 
 // elunaPlace is the start placement of an observed run, right before checkStartPlace: the agent moves to the start step's point,
-// proves the floor under it and that the area is clear, holds the bots, puts them at the step and releases them (the run leader
-// starts at once). Any refused step ends the run there: an error starting "observe mode: eluna place:" names the step. It does
-// nothing unless ElunaPlace is on and the run starts partway at a known point.
+// proves the floor under it and that the area is clear, gathers the party at the step with the toolkit, holds them there and releases
+// them (the run leader starts at once). Any refused step ends the run there: an error starting "observe mode: eluna place:" names the
+// step. It does nothing unless ElunaPlace is on and the run starts partway at a known point.
 func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	if !d.opt.ElunaPlace || d.start == nil || d.start.Words == "" || !d.start.HavePoint {
 		return nil
@@ -114,9 +114,22 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 		return errors.New("observe mode: eluna place: " + msg)
 	}
 
-	// 4. The bots hold where they are, so that they do not walk the ring off again while it is placed.
-	if err := d.elunaOrder(ctx, "cmd stay"); err != nil {
-		return fmt.Errorf("observe mode: eluna place: cmd stay: %w", err)
+	// 4. The party is summoned to the agent first: the bots come to where the agent stands (the step), so the hold is taken
+	// at the new spot. A `cmd stay` before the summon would anchor the bots at their old spot, and a bot would walk back after
+	// the teleport (live 2026-10-23, Razorfen Kraul: 'place did not verify: Kaeron -1.6 yd off the floor, 16.8 yd from its spot').
+	if d.bound && d.opt.Lead != "" {
+		bl, ok := d.g.(BotLiner)
+		if !ok {
+			return errors.New("observe mode: eluna place: this game cannot send .bot summon: the lead bot cannot be brought to the start step")
+		}
+		lines, _, err := bl.BotLines(ctx, "summon "+d.opt.Lead, 5*time.Second, func(line string) bool { return line != "" })
+		if err != nil {
+			return fmt.Errorf("observe mode: eluna place: .bot summon %s: %w", d.opt.Lead, err)
+		}
+		d.rep.note(fmt.Sprintf("eluna place: .bot summon %s: %s", d.opt.Lead, nonEmpty(strings.Join(lines, " / "), "no answer")))
+		if err := d.clk.Sleep(ctx, elunaSettle); err != nil {
+			return err
+		}
 	}
 
 	// 5. The party is put at the step, the toolkit's second read proving it. The group is the lead bot's: a bound
@@ -136,7 +149,13 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	}
 	drifted := describeDrift(pl.Members)
 
-	// 6. Follow is released right before the run leader starts and walks. Nothing waits after the place: a bound party
+	// 6. Stay anchors the bots where the place put them, so they do not walk the ring off again before the run leader
+	// starts. It goes after the place, never before: a stay sent before the place would hold them at their old spot.
+	if err := d.elunaOrder(ctx, "cmd stay"); err != nil {
+		return fmt.Errorf("observe mode: eluna place: cmd stay: %w", err)
+	}
+
+	// 7. Follow is released right before the run leader starts and walks. Nothing waits after the place: a bound party
 	// with no run going wanders off within about a minute, so the start follows at once.
 	if err := d.elunaOrder(ctx, "cmd follow"); err != nil {
 		return fmt.Errorf("observe mode: eluna place: cmd follow: %w", err)

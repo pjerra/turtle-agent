@@ -143,8 +143,8 @@ type RemoteOptions struct {
 	StartHere     bool
 	StartWait     time.Duration
 	// ElunaPlace puts a partway start's party on the start step with the Eluna test toolkit (settings eluna_toolkit; test servers
-	// only, see eluna_place.go): the agent's `.go xyz` to the step, `q floor`, `quiet`, `cmd stay`, `place`, `cmd follow`, in
-	// place of the distance check. Off: no `.tt` line is sent.
+	// only, see eluna_place.go): the agent's `.go xyz` to the step, `q floor`, `quiet`, `.bot summon <lead>`, `place`, `cmd stay`,
+	// `cmd follow`, in place of the distance check. Off: no `.tt` line is sent.
 	ElunaPlace bool
 	// ElunaDz and ElunaSkip are the run's placement options (dungeon_run eluna_place {dz, skip}): the toolkit's quiet then ignores
 	// units more than ElunaDz yards above or below the start step (0: no vertical limit; nil: the toolkit's default, 8) and the

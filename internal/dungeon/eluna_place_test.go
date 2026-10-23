@@ -97,6 +97,12 @@ func (g *elunaFake) Command(ctx context.Context, command string) (tbm.Reply, err
 	return g.fakeLeader.Command(ctx, command)
 }
 
+func (g *elunaFake) BotLines(ctx context.Context, command string, wait time.Duration, done func(string) bool) ([]string, bool, error) {
+	g.seq = append(g.seq, ".bot "+command)
+	g.times = append(g.times, g.now)
+	return []string{"summoned"}, true, nil
+}
+
 // The rest of StartHands (the start path asserts it for the `.go xyz`).
 func (g *elunaFake) AgentPlace() (Point, uint32, bool)               { return Point{}, 0, true }
 func (g *elunaFake) AccountLevel(context.Context) (int, bool, error) { return 3, true, nil }
@@ -136,10 +142,12 @@ func placeSeq(seq []string) []string {
 		switch {
 		case strings.HasPrefix(s, "appear "), s == "go xyz", s == "tt floor", s == "tt quiet", s == "tt place", s == "cmd follow":
 			out = append(out, s)
+		case strings.HasPrefix(s, ".bot summon "):
+			out = append(out, ".bot summon")
 		case s == "cmd stay":
-			// The placement's hold comes right before its `tt place`; the run's own end-of-run `cmd stay` (endStay) comes after
+			// The placement's hold comes right after its `tt place`; the run's own end-of-run `cmd stay` (endStay) comes after
 			// everything and is not the placement's.
-			if indexIn(seq[i+1:], "tt place") >= 0 {
+			if indexIn(seq[:i], "tt place") >= 0 && indexIn(seq[i+1:], "cmd follow") >= 0 {
 				out = append(out, s)
 			}
 		}
@@ -163,7 +171,9 @@ func TestElunaPlaceOffByDefault(t *testing.T) {
 	}
 }
 
-// The decided order of the start placement: move, floor, quiet, stay, place, follow — and the run starts after it.
+// The decided order of the start placement: move, floor, quiet, summon, place, stay, follow — and the run starts after it.
+// The stay is after the place, never before: a stay sent before the place would anchor the bots at their old spot and a bot
+// would walk back after the teleport (live 2026-10-23, Razorfen Kraul).
 func TestElunaPlaceOrder(t *testing.T) {
 	g := newElunaFake(t)
 	o := elunaOpts(Point{X: 1, Y: 2, Z: 3}, true)
@@ -171,7 +181,7 @@ func TestElunaPlaceOrder(t *testing.T) {
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
 	}
-	want := []string{"appear " + o.Lead, "go xyz", "tt floor", "tt quiet", "cmd stay", "tt place", "cmd follow"}
+	want := []string{"appear " + o.Lead, "go xyz", "tt floor", "tt quiet", ".bot summon", "tt place", "cmd stay", "cmd follow"}
 	if got := placeSeq(g.seq); !slices.Equal(got, want) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
@@ -190,6 +200,9 @@ func TestElunaPlaceOrder(t *testing.T) {
 	notes := strings.Join(rep.Notes, "\n")
 	if !strings.Contains(notes, "eluna place: quiet, 2 placed at 1.0 2.0 3.0") {
 		t.Fatalf("notes %v", rep.Notes)
+	}
+	if !strings.Contains(notes, "eluna place: .bot summon "+o.Lead) {
+		t.Fatalf("no summon note: %v", rep.Notes)
 	}
 }
 
@@ -275,7 +288,7 @@ func TestElunaPlaceRefusesNotQuiet(t *testing.T) {
 	if !strings.Contains(err.Error(), "5650") || !strings.Contains(err.Error(), "Witch Doctor Zum'rah") || !strings.Contains(err.Error(), "5651") {
 		t.Fatalf("the refusal does not say what stands there: %v", err)
 	}
-	if s := placeSeq(g.seq); slices.Contains(s, "tt place") || slices.Contains(s, "cmd follow") {
+	if s := placeSeq(g.seq); slices.Contains(s, ".bot summon") || slices.Contains(s, "tt place") || slices.Contains(s, "cmd follow") {
 		t.Fatalf("a party that is not alone was placed: %v", s)
 	}
 	if indexPrefix(g.orders, "run start") >= 0 {
@@ -297,11 +310,26 @@ func TestElunaPlaceRefusesFloorMismatch(t *testing.T) {
 	if indexPrefix(g.orders, "run start") >= 0 {
 		t.Fatalf("the run was started: %v", g.orders)
 	}
+}
 
+// A fractional hp in the toolkit's place reply (live 2026-10-23: hp 91.6) decodes and the run goes on.
+func TestElunaPlaceFractionalHP(t *testing.T) {
+	g := newElunaFake(t)
+	g.place = eluna.PlaceResult{Placed: true, Members: []eluna.Placed{{GUID: "0x1", Name: "Tanky", HP: 91.6}, {GUID: "0x2", Name: "Magey", HP: 100}}}
+	rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{}, true), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if indexPrefix(g.orders, "run start") < 0 {
+		t.Fatalf("the run was not started: %v", g.orders)
+	}
+}
+
+func TestElunaPlaceRefusesNoFloor(t *testing.T) {
 	// No floor at all (indoors, off the mesh) is refused too.
-	g = newElunaFake(t)
+	g := newElunaFake(t)
 	g.floor = eluna.FloorResult{}
-	_, err = runRemote(t, g, observePlan(), elunaOpts(Point{Z: 0}, true), nil)
+	_, err := runRemote(t, g, observePlan(), elunaOpts(Point{Z: 0}, true), nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "observe mode: eluna place:") || !strings.Contains(err.Error(), "no floor") {
 		t.Fatalf("%v", err)
 	}

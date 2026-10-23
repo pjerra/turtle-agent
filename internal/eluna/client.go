@@ -137,7 +137,7 @@ type Unit struct {
 	Name   string  `json:"n"`
 	Dist   float32 `json:"d"`  // 2D distance to the queried point
 	Dz     float32 `json:"dz"` // height difference to the queried point
-	HP     int     `json:"hp"` // percent
+	HP     float64 `json:"hp"` // percent (the toolkit may send a fraction: 91.6)
 	Dead   bool    `json:"dead"`
 	Combat bool    `json:"cb"`
 }
@@ -167,7 +167,7 @@ type Placed struct {
 	Pos    []float32 `json:"p"`
 	Dz     float32   `json:"dz"`
 	Dist   float32   `json:"d"`
-	HP     int       `json:"hp"`
+	HP     float64   `json:"hp"` // percent (the toolkit may send a fraction: 91.6)
 	Combat bool      `json:"cb"`
 	Alive  bool      `json:"alive"`
 }
