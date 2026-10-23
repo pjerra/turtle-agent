@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -183,6 +184,62 @@ east:
 		for _, pos := range g.Positions {
 			if d := groundDist(stand, pos); d > 24.5 {
 				t.Errorf("pull group %d: the stand is %.1f yd from a member at %.1f %.1f, outside the 24.5 yd shot range", at[k], d, pos.X, pos.Y)
+			}
+		}
+	}
+}
+
+// The Alarm-a-bomb 7897 patrols the corridor x -573..-557, y 74..126 (spawn 30134 at -573.6 126.1) and cannot be attacked: r23 slot 4
+// (2026-10-23, 0 deaths) stopped at step 181 (leg 0 pull group 66, the 6329/6211/6329 pack at -575 40) because the run leader's own
+// approach hop ended at -566.8 78.8, inside that corridor, and the gather then failed four times on Varcus and Helmina, whom the bomb
+// held in combat at -561 110. The group's stand walks the party to -572 58, 16.0 yd south of the corridor and on the route to the pack;
+// every other approach point of the plan stays out of the corridor too (the transport waypoints the exporter cuts are not stands).
+func TestGnomereganTheStep181StandIsOutOfTheBombCorridor(t *testing.T) {
+	p := loadPlan(t, gnomereganPlan)
+	l := gnomereganLeg(t, p, "viscous_fallout")
+	if len(l.PullGroups) <= 66 {
+		t.Fatalf("viscous_fallout: only %d pull groups", len(l.PullGroups))
+	}
+	g := l.PullGroups[66]
+	if got := fmt.Sprint(g.Entries); got != "[6329 6211 6329]" {
+		t.Fatalf("pull group 66: entries %s, want the step-181 pack [6329 6211 6329]", got)
+	}
+	if len(g.Approach) != 1 {
+		t.Fatalf("pull group 66: %d approach points, want 1 (the step-181 stand)", len(g.Approach))
+	}
+	stand := g.Approach[0]
+	if want := (Point{X: -572, Y: 58, Z: -198.75}); stand != want {
+		t.Errorf("pull group 66: stand %+v, want %+v", stand, want)
+	}
+	// The corridor: x -573..-557, y 74..126. 15 yd clear of it in the ground plane.
+	corridor := func(x, y float64) float64 {
+		dx := math.Max(0, math.Max(-573-x, x+557))
+		dy := math.Max(0, math.Max(74-y, y-126))
+		return math.Hypot(dx, dy)
+	}
+	if d := corridor(float64(stand.X), float64(stand.Y)); d < 15 {
+		t.Errorf("pull group 66: the stand is %.1f yd from the bomb's corridor, want at least 15", d)
+	}
+	// The stand is in the run leader's sight of the pack (60 yd) and on its own floor, close enough for the pull.
+	c := groupCentre(g)
+	if d := groundDist(stand, c); d < 15 || d > 60 {
+		t.Errorf("pull group 66: the stand is %.1f yd from the pack's centre, want 15-60", d)
+	}
+	if dz := float64(stand.Z - c.Z); dz < -3 || dz > 3 {
+		t.Errorf("pull group 66: the stand z %.1f is %.1f yd off the pack's z %.1f (another floor)", stand.Z, dz, c.Z)
+	}
+	for _, pos := range g.Positions {
+		if d := groundDist(stand, pos); d > 24.5 {
+			t.Errorf("pull group 66: the stand is %.1f yd from a member at %.1f %.1f, outside the 24.5 yd shot range", d, pos.X, pos.Y)
+		}
+	}
+	// No other stand of the plan sits in the corridor.
+	for _, leg := range p.Legs {
+		for i, group := range leg.PullGroups {
+			for _, a := range group.Approach {
+				if d := corridor(float64(a.X), float64(a.Y)); d == 0 {
+					t.Errorf("leg %s pull group %d: the approach %+v lies in the bomb's corridor", leg.Name, i, a)
+				}
 			}
 		}
 	}

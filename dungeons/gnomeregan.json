@@ -34,7 +34,8 @@
     "Needs: the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg",
     "Needs: Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in",
     "Needs: Grubbis (7361) has no spawn row",
-    "The Back Entrance (trigger 523) puts the party deep inside; this plan starts at the front."
+    "The Back Entrance (trigger 523) puts the party deep inside; this plan starts at the front.",
+    "Step 181's stand (leg 0 pull group 66, the 6329/6211/6329 pack at -575 40): the run leader's own approach hop stopped at -566.8 78.8, inside the Alarm-a-bomb 7897's patrol corridor (x -573..-557, y 74..126), and the gather then failed three times on Varcus and Helmina, held in combat by the unattackable bomb at -561 110 (r23 slot 4, 2026-10-23, step 181 of 621, 0 deaths). The pull now has an approach stand at -572 58 (16.0 yd south of the corridor's y 74 edge, 11.8 yd from the nearest member, 18.6 yd from the pack's centre), on the same route south from the corridor to the pack: a complete navmesh path from group 65's point (21.2 yd) and to the pack (18.6 yd) on the server's filter. The stand is where the party gathers and pulls from; the bomb's corridor stays on the walk."
   ],
   "legs": [
     {
@@ -560,7 +561,10 @@
             {"x": -572.245, "y": 36.1417, "z": -196.701},
             {"x": -577.057, "y": 35.9964, "z": -197.327}
           ],
-          "radius": 17.5
+          "radius": 17.5,
+          "approach": [
+            {"x": -572, "y": 58, "z": -198.75}
+          ]
         },
         {
           "entries": [6211, 6329, 6206],
