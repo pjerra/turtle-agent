@@ -72,15 +72,17 @@ func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
 		t.Errorf("roogug pull group 4 approach %+v, want the corridor regroup point 2000 1635 81", g.Approach)
 	}
 	// Pull 39's pack (run 2 stopped on it at 61.0 yd): the stand 2110 1600 82.1 is 42.0 yd from it on the hall floor (the
-	// corridor the tank pulled it from); pull 42's pack (4440) is 14.0 yd from its stand 2180 1610 81.3, radius 10.
+	// corridor the tank pulled it from); pull 42's pack (4440) has the same stand (run 3 refused the room's stand 2180 1604:
+	// no walkable path) and radius 10, 73 yd from the pack because the room east of x about 2135 is another pocket.
 	for _, c := range []struct {
 		name    string
 		group   int
 		x, y, z float32
 		pack    Point
+		maxYd   float64
 	}{
-		{"step 39's 4532", 21, 2110, 1600, 82.1, l.PullGroups[21].Positions[0]},
-		{"step 42's 4440", 24, 2180, 1610, 81.3, l.PullGroups[24].Positions[0]},
+		{"step 39's 4532", 21, 2110, 1600, 82.1, l.PullGroups[21].Positions[0], 60},
+		{"step 42's 4440", 24, 2110, 1600, 82.1, l.PullGroups[24].Positions[0], 80},
 	} {
 		g := l.PullGroups[c.group]
 		if len(g.Approach) != 1 {
@@ -92,8 +94,8 @@ func TestRazorfenOpeningStandStaysOffTheLedge(t *testing.T) {
 			t.Errorf("roogug pull group %d (%s) approach %+v, want %.0f %.0f %.1f", c.group, c.name, a, c.x, c.y, c.z)
 		}
 		dx, dy, dz := float64(a.X-c.pack.X), float64(a.Y-c.pack.Y), float64(a.Z-c.pack.Z)
-		if d := math.Sqrt(dx*dx + dy*dy + dz*dz); d > 60 {
-			t.Errorf("roogug pull group %d (%s): the stand is %.1f yd from the pack, want at most 60", c.group, c.name, d)
+		if d := math.Sqrt(dx*dx + dy*dy + dz*dz); d > c.maxYd {
+			t.Errorf("roogug pull group %d (%s): the stand is %.1f yd from the pack, want at most %.0f", c.group, c.name, d, c.maxYd)
 		}
 	}
 	if got := l.PullGroups[24].Radius; got != 10 {
