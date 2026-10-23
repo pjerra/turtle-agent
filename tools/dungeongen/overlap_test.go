@@ -20,10 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-// Dire Maul North's 6 are packs that aggro as one creature_group and spread 25-40 yd (the four 10-member Carrion Swarmer flocks and the 6-mastiff pack at the King's ring):
-// the check measures each listed position + radius, and a flock's far member then reaches the next flock, while the row the module reads (the mean of the positions +
-// the radius) stays clear of every other spawn of the same entry (the plan's own census: 0 same-entry joiners at the row's centre).
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "dire_maul_north": 6}
+// Dire Maul North's 7 are packs that aggro as one creature_group and spread 25-40 yd (the four 10-member Carrion Swarmer flocks and the 6-mastiff pack at the King's ring),
+// plus the courtyard's First Pack, whose pool 4294 has two mastiff rows at one of its four points (only one variant is spawned): the check measures each listed position +
+// radius, and a flock's far member then reaches the next flock, while the row the module reads (the mean of the positions + the radius) stays clear of every other spawn
+// of the same entry (the plan's own census: 0 same-entry joiners at the row's centre).
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "dire_maul_north": 7}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
