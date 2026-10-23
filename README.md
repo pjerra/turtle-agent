@@ -1667,9 +1667,9 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    `tools/eluna/test-toolkit` loaded): with it on, a partway start at a known step point is made, not only checked. Before `run start` the
    agent moves to the point 2 yd above it on the plan's map (`.go xyz`), waits 2 s, and then, in this order: `q floor` (refused when there is
    no floor, or the floor is more than 3 yd from the step's z: another level), `quiet` over 50 yd for `w=20` (refused when anything stands near
-   or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `.bot action stay`, `place` with
+   or roams; the near and roaming units are named with entry and distance; nothing is cleared out), `cmd stay` (the commander order), `place` with
    `spread=3` and `of=<lead bot>` (the bind makes a bots-only group the commander is not in, so the toolkit is told whose group to move),
-   and `.bot action follow`, right before the run leader starts. The place's second read is judged by the floor: every member must be found
+   and `cmd follow`, right before the run leader starts. The place's second read is judged by the floor: every member must be found
    with its `dz` within 1.5 yd of the floor it was put on; bots that walk a few yards from their ring spot after the teleport are placed
    all the same and the drift is only a note (`drifted: <name> <d> yd`). Nothing waits after a successful place: a bound party with no run
    going wanders off within about a minute, so `run start` follows at once. A refused
