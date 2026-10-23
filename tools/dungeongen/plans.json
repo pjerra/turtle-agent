@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -573,8 +612,8 @@
    "trigger": 3189,
    "bosses": [
     14326,
-    14323,
     14321,
+    14323,
     14325,
     {
      "entry": 11501,
@@ -594,20 +633,27 @@
    "entrance_tele": "dmnorth",
    "outside_tele": "DireMaulNorth",
    "scripted": [
-    14326,
-    14323,
+    11441,
+    11444,
+    11445,
+    11448,
+    11450,
     14321,
+    14323,
+    14324,
     14325,
-    14324
+    14326
    ],
    "special": [
     "Gordok Courtyard Key and Gordok Inner Door Key (ITEM_GORDOK_COURTYARD_KEY, ITEM_GORDOK_INNER_DOOR_KEY)",
-    "the Gordok guards and Captain Kromcrush carry npc_flags (gossip): they are the tribute event's mobs, hostile only after the event or the quest; King Gordok can be befriended (tribute) instead of killed",
-    "Stomper Kreeg (14322, vendor) is not a leg"
+    "the Gordok guards (14326, 14321, 14323) and Captain Kromcrush 14325 carry npc_flags gossip (the tribute dialogue/buffs) and are hostile (faction 45); King Gordok can be befriended (tribute) instead of killed",
+    "Stomper Kreeg (14322, vendor) is not a leg",
+    "the Gordok ogres (11441 Brute, 11444 Mage-Lord, 11445 Captain, 11448 Warlock, 11450 Reaver) carry npc_flags 1 (gossip: the tribute event) and are hostile (faction 45): scripted lists them so the pack check reads their flags as the tribute's, not as a friendly NPC's"
    ],
    "notes": [
     "One of three wings of map 429. Cho'Rush the Observer (14324) fights with King Gordok."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "stratholme_live",
