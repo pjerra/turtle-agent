@@ -66,8 +66,14 @@ func TestDraftPlansAreWhatTheGeneratorWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) < 40 {
-		t.Fatalf("only %d plans generated", len(files))
+	wantN := 0
+	for _, ps := range sf.Plans {
+		if !ps.Handwritten {
+			wantN++
+		}
+	}
+	if len(files) != wantN {
+		t.Fatalf("%d plans generated for %d plans the spec does not mark handwritten", len(files), wantN)
 	}
 	for _, f := range files {
 		want, err := os.ReadFile(f)

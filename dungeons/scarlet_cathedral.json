@@ -22,12 +22,17 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [4294, 4298, 4299, 4300, 4301, 4302],
+  "kill_first": [4303, 4300, 4299],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 189 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: chapel door (GO_CHAPPEL_DOOR) before Mograine and Whitemane",
     "Needs: Mograine and Whitemane are one event: Whitemane resurrects Mograine",
-    "One of four wings of map 189."
+    "One of four wings of map 189.",
+    "Census 2026-10-23 (96 spawns, 93 trash 34-40 rank 1, 3 bosses): all trash is humanoid faction 67 (Fairbanks is undead type 6, faction 67). Fleers: 4294 4298 4299 4300 4301 4302 (EventAI 47); 4295 4303 4540 do not flee. Healers: 4303 Abbot (Heal 6064 + Renew 8362), 4300 Wizard (Healing Wave 547 + Lightning Bolt 20802), 4299 Chaplain (Power Word: Shield 6066 + Renew 8362): kill_first 4303 4300 4299, and no cc_always, so no pack depends on a Polymorph (the r21 Library step 54 was a failed CC on 4299 in this same wing data). No creature_groups and no rare rank 2/4 in the wing. Six single-member patrollers carry their creature_movement path as a patrol block (period estimated); the Wizard 39967 (376 yd) and the Myrmidon 39965 (329 yd) loop the whole lower hall and cross most pulls.",
+    "Fairbanks 4542 (boss_high_inquisitor_fairbanks: Curse of Blood, Dispel Magic, Fear, Sleep, PW:S, Heal at 25 %) stands 16 yd from the Monk 4540 of pull group 6, inside his 20 yd detection and behind the Secret Door 97700: the pull is gone and the Monk is boss.first. The door objects 104591, 104600 and 97700 all stand state 1 (active) in the spawn export; the instance script closes the High Inquisitor's Door 104600 when the event starts and opens it when Mograine dies, so no door step is exported.",
+    "Mograine (3976) and Whitemane (3977) are one event: on Mograine's progress the instance calls every Scarlet Chaplain/Wizard/Centurion/Champion/Abbot/Monk within 82 yd to his victim, and on his death the High Inquisitor's Door opens and Whitemane walks to him; the plan kills Mograine in leg 1 and Whitemane in leg 2, all packs within 82 yd are pulled earlier, and the event itself is the run leader's fight, not a plan step."
   ],
   "legs": [
     {
@@ -62,29 +67,19 @@
           ]
         },
         {
-          "entries": [4302],
-          "positions": [
-            {"x": 1134.68, "y": 1338.78, "z": 30.3007}
-          ]
-        },
-        {
           "entries": [4300, 4301, 4302],
           "positions": [
             {"x": 1137.72, "y": 1341.88, "z": 30.3849},
             {"x": 1140.97, "y": 1336.32, "z": 30.3851},
             {"x": 1141.86, "y": 1343.3, "z": 30.387}
-          ]
-        },
-        {
-          "entries": [4540],
-          "positions": [
-            {"x": 1166.93, "y": 1340.42, "z": 31.6328}
-          ]
+          ],
+          "radius": 10
         }
       ],
       "boss": {
         "entry": 4542,
-        "position": {"x": 1158.86, "y": 1354.27, "z": 30.389}
+        "position": {"x": 1158.86, "y": 1354.27, "z": 30.389},
+        "first": [4540]
       },
       "notes": [
         "button \"Torch\" entry 97701 at 1169.0 1345.6 33.0",
@@ -107,7 +102,8 @@
           "positions": [
             {"x": 1131.19, "y": 1405.14, "z": 30.3888},
             {"x": 1130.96, "y": 1407.78, "z": 30.3828}
-          ]
+          ],
+          "radius": 9
         },
         {
           "entries": [4540, 4302, 4303, 4303, 4303],
@@ -117,14 +113,16 @@
             {"x": 1118.56, "y": 1394.85, "z": 30.3911},
             {"x": 1107.01, "y": 1403.8, "z": 30.3909},
             {"x": 1106.51, "y": 1395.47, "z": 30.3909}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4303, 4540],
           "positions": [
             {"x": 1093.89, "y": 1405.21, "z": 30.3866},
             {"x": 1093.94, "y": 1407.44, "z": 30.3825}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4302, 4540],
@@ -137,7 +135,17 @@
           "entries": [4299],
           "positions": [
             {"x": 1079.82, "y": 1376.72, "z": 30.3059}
-          ]
+          ],
+          "patrol": {
+            "entries": [4299],
+            "path": [
+              {"x": 1079.82, "y": 1376.72, "z": 30.306},
+              {"x": 1129.49, "y": 1376.74, "z": 30.307}
+            ],
+            "period_s": 19.9,
+            "period_estimate": true,
+            "source": "creature_movement guid 40008"
+          }
         },
         {
           "entries": [4299, 4301],
@@ -233,7 +241,29 @@
           "entries": [4300],
           "positions": [
             {"x": 903.927, "y": 1437.55, "z": 18.6778}
-          ]
+          ],
+          "patrol": {
+            "entries": [4300],
+            "path": [
+              {"x": 931.463, "y": 1438.92, "z": 18.678},
+              {"x": 955.212, "y": 1438.85, "z": 18.678},
+              {"x": 932.093, "y": 1438.75, "z": 18.678},
+              {"x": 889.276, "y": 1438.58, "z": 18.678},
+              {"x": 888.942, "y": 1408.23, "z": 18.678},
+              {"x": 888.934, "y": 1380.1, "z": 18.678},
+              {"x": 888.986, "y": 1359.89, "z": 18.678},
+              {"x": 913.864, "y": 1359.55, "z": 18.678},
+              {"x": 953.407, "y": 1359.5, "z": 18.678},
+              {"x": 914.107, "y": 1359.53, "z": 18.678},
+              {"x": 889.116, "y": 1359.75, "z": 18.678},
+              {"x": 889.041, "y": 1380.13, "z": 18.678},
+              {"x": 889.014, "y": 1408.55, "z": 18.678},
+              {"x": 889.077, "y": 1438.54, "z": 18.678}
+            ],
+            "period_s": 150.4,
+            "period_estimate": true,
+            "source": "creature_movement guid 39967"
+          }
         },
         {
           "entries": [4295, 4294],
@@ -246,7 +276,21 @@
           "entries": [4295],
           "positions": [
             {"x": 889.992, "y": 1420.7, "z": 18.7611}
-          ]
+          ],
+          "patrol": {
+            "entries": [4295],
+            "path": [
+              {"x": 891.195, "y": 1362.07, "z": 18.678},
+              {"x": 954.183, "y": 1361.67, "z": 18.678},
+              {"x": 891.245, "y": 1361.85, "z": 18.678},
+              {"x": 891.223, "y": 1436.41, "z": 18.678},
+              {"x": 955.375, "y": 1436.5, "z": 18.678},
+              {"x": 891.415, "y": 1436.2, "z": 18.678}
+            ],
+            "period_s": 131.4,
+            "period_estimate": true,
+            "source": "creature_movement guid 39965"
+          }
         },
         {
           "entries": [4298],
@@ -334,14 +378,25 @@
           "entries": [4300],
           "positions": [
             {"x": 1082.92, "y": 1417.33, "z": 30.3027}
-          ]
+          ],
+          "patrol": {
+            "entries": [4300],
+            "path": [
+              {"x": 1082.92, "y": 1417.33, "z": 30.303},
+              {"x": 1133.32, "y": 1416.96, "z": 30.302}
+            ],
+            "period_s": 20.2,
+            "period_estimate": true,
+            "source": "creature_movement guid 40015"
+          }
         },
         {
           "entries": [4301, 4302],
           "positions": [
             {"x": 1099.92, "y": 1425.87, "z": 30.3883},
             {"x": 1103.96, "y": 1419.38, "z": 30.3908}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4301, 4302],
@@ -362,7 +417,17 @@
           "entries": [4300],
           "positions": [
             {"x": 1135.38, "y": 1459.44, "z": 30.2991}
-          ]
+          ],
+          "patrol": {
+            "entries": [4300],
+            "path": [
+              {"x": 1135.38, "y": 1459.44, "z": 30.299},
+              {"x": 1135.36, "y": 1420.64, "z": 30.306}
+            ],
+            "period_s": 15.5,
+            "period_estimate": true,
+            "source": "creature_movement guid 40034"
+          }
         },
         {
           "entries": [4299, 4540],
@@ -387,7 +452,8 @@
             {"x": 1118.77, "y": 1372.24, "z": 30.3885},
             {"x": 1106.8, "y": 1379.17, "z": 30.3025},
             {"x": 1100.04, "y": 1372.48, "z": 30.3885}
-          ]
+          ],
+          "radius": 14
         },
         {
           "entries": [4294, 4295],
