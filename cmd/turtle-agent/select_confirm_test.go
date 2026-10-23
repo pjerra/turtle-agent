@@ -468,8 +468,78 @@ func TestGMLineAfterAnAttackOnThePlayerSelectsItForReal(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"sel 0x2a", "sel 0x23a", "chat on 0x23a"}; strings.Join(c.ops, ",") != strings.Join(want, ",") {
+	if want := []string{"sel 0x0", "sel 0x23a", "chat on 0x23a"}; strings.Join(c.ops, ",") != strings.Join(want, ",") {
 		t.Fatalf("ops %v, want %v", c.ops, want)
+	}
+}
+
+// selfFlags is a values update of the agent's own UNIT_FIELD_FLAGS (in combat, stunned).
+func selfFlags(flags uint32) []byte {
+	w := objtest.Header(1).U8(uint8(objects.BlockValues)).PackedGUID(0x2A)
+	objtest.Values(w, 192, map[uint16]uint32{objects.UnitFlags: flags})
+	return w.Bytes()
+}
+
+// Codex's case (#296 review): the lead X is confirmed, a select of G is pending, the agent is in combat and the core rewrites the target
+// field to G (Unit::Attack). That must not confirm G: the selection the GM line acts on can still be X. Nothing is selected or sent until
+// combat ended (and SelectionCombatSettle passed); then G is selected again, through a neutral selection because its old send was fenced
+// off, and the line goes out after the echo of that new send.
+func TestGMLineWaitsOutCombatWhenTheFieldIsRewrittenToThePendingUnit(t *testing.T) {
+	old := session.SelectionCombatSettle
+	session.SelectionCombatSettle = 100 * time.Millisecond
+	defer func() { session.SelectionCombatSettle = old }()
+	const x, g = packet.GUID(0x23A), packet.GUID(0x4D2)
+	r := newRig(t)
+	ownSelection(t, r, x)
+	if _, err := r.s.Target(context.Background(), g, ""); err != nil { // pending: the server has not applied it
+		t.Fatal(err)
+	}
+	if ops := selOps(r, 100*time.Millisecond); len(ops) != 1 || ops[0] != "sel 0x4d2" {
+		t.Fatalf("ops %v", ops)
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfFlags(objects.UnitFlagInCombat))
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(g)) // the attack's rewrite, exactly the pending unit
+	waitUntil(t, func() bool { sel, _ := r.s.ServerSelection(); return sel == g })
+	gm := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	done := make(chan error, 1)
+	go func() { done <- gm.selectThenGM(context.Background(), g, ".levelup 2") }()
+	if ops := selOps(r, 400*time.Millisecond); len(ops) != 0 {
+		t.Fatalf("sent while in combat: %v", ops)
+	}
+	if r.s.SelectionConfirmed(g) {
+		t.Fatal("the combat rewrite confirmed the pending unit")
+	}
+	cooled := time.Now()
+	c := &coreLike{r: r, sel: g, field: g}
+	r.srv.Send(opcode.SMSGUpdateObject, selfFlags(0))
+	c.run(t, 3)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(cooled); d < 100*time.Millisecond {
+		t.Fatalf("the line went out %s after combat, inside the settle", d)
+	}
+	if want := []string{"sel 0x0", "sel 0x4d2", "chat on 0x4d2"}; strings.Join(c.ops, ",") != strings.Join(want, ",") {
+		t.Fatalf("ops %v, want %v", c.ops, want)
+	}
+}
+
+// A fight that outlasts the wait: an error, and nothing selected or sent.
+func TestGMLineInCombatPastTheWaitSendsNothing(t *testing.T) {
+	old := gmSelectConfirmWait
+	gmSelectConfirmWait = 300 * time.Millisecond
+	defer func() { gmSelectConfirmWait = old }()
+	const lead = packet.GUID(0x23A)
+	r := newRig(t)
+	ownSelection(t, r, lead)
+	r.srv.Send(opcode.SMSGUpdateObject, selfFlags(objects.UnitFlagStunned))
+	waitUntil(t, func() bool { return !r.s.SelectionConfirmed(lead) })
+	gm := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	if err := gm.selectThenGM(context.Background(), lead, ".levelup 2"); err == nil || !strings.Contains(err.Error(), "in combat or stunned") {
+		t.Fatalf("%v", err)
+	}
+	if ops := selOps(r, 200*time.Millisecond); len(ops) != 0 {
+		t.Fatalf("ops %v", ops)
 	}
 }
 

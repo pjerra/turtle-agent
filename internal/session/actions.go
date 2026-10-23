@@ -728,6 +728,7 @@ func (s *Session) onNewWorld(body []byte) error {
 	s.mapID, s.pos = nw.Map, [4]float32{nw.X, nw.Y, nw.Z, nw.O}
 	s.target = 0
 	s.selUnknownLocked()
+	s.selAttacking = false
 	self := s.self.GUID
 	s.mu.Unlock()
 	s.stopWalk(errNewMap, false) // after the position, so a walk_path woken by it reads the new one
@@ -827,6 +828,9 @@ func (s *Session) onAttackStart(body []byte) error {
 	if err != nil {
 		return err
 	}
+	if a.Attacker == s.selfGUID() {
+		s.setAttacking(true) // Unit::Attack writes the victim into the target field in the next update
+	}
 	s.emit(events.Event{Kind: events.KindAttackStart, SourceGUID: a.Attacker, TargetGUID: a.Victim})
 	return nil
 }
@@ -835,6 +839,9 @@ func (s *Session) onAttackStop(body []byte) error {
 	a, err := game.ParseAttackStop(body)
 	if err != nil {
 		return err
+	}
+	if a.Attacker == s.selfGUID() {
+		s.setAttacking(false) // AttackStop writes 0 into the target field in the next update: SelectionCombatSettle covers it
 	}
 	s.emit(events.Event{Kind: events.KindAttackStop, SourceGUID: a.Attacker, TargetGUID: a.Victim})
 	return nil

@@ -2,6 +2,7 @@ package session
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
@@ -197,5 +198,52 @@ func TestSelectionLogNewWorldForgets(t *testing.T) {
 	r.s.mu.Unlock()
 	if r.s.SelectionConfirmed(selLead) || !r.s.SelectionAmbiguous(selLead) {
 		t.Fatal("still confirmed after the teleport")
+	}
+}
+
+func (r selRig) hot(on bool) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.selSetHotLocked(on)
+}
+
+// Codex's case: X confirmed, G pending, the player in combat, the core rewrites the field to G. That echo confirms nothing, nor does any
+// echo while the player is hot or settling; after it cooled down, G needs a neutral selection (its old send was fenced off) and a fresh
+// echo of a new send.
+func TestSelectionLogCombatRewriteToThePendingUnitConfirmsNothing(t *testing.T) {
+	old := SelectionCombatSettle
+	SelectionCombatSettle = 50 * time.Millisecond
+	defer func() { SelectionCombatSettle = old }()
+	r := newSelRig()
+	r.own(t, selLead)   // X
+	r.sent(selStranger) // G, pending
+	r.hot(true)
+	r.echo(selStranger) // Unit::Attack on G
+	if r.s.SelectionConfirmed(selStranger) {
+		t.Fatal("a combat rewrite confirmed the pending unit")
+	}
+	r.hot(false)
+	r.echo(selStranger) // within the settle: still not trusted
+	if r.s.SelectionConfirmed(selStranger) {
+		t.Fatal("confirmed while settling")
+	}
+	time.Sleep(60 * time.Millisecond)
+	r.echo(selStranger) // after it: the old send of G was fenced off
+	if r.s.SelectionConfirmed(selStranger) {
+		t.Fatal("an echo of a fenced-off send confirmed")
+	}
+	if !r.s.SelectionAmbiguous(selStranger) {
+		t.Fatal("G was fenced off: a neutral selection is needed")
+	}
+	n, ok := r.neutral()
+	if !ok || n == selStranger || n == selLead {
+		t.Fatalf("neutral %v %v", n, ok)
+	}
+	r.sent(n)
+	r.echo(n)
+	r.sent(selStranger)
+	r.echo(selStranger)
+	if !r.s.SelectionConfirmed(selStranger) {
+		t.Fatal("the fresh echo after the neutral did not confirm")
 	}
 }

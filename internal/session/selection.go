@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,7 +25,15 @@ import (
 //     prefix of them (several applied in one map update give one echo, and a select that does not change the field gives none);
 //   - an echo of a value the session never sent (a combat or stun rewrite, a create block) leaves the selection in force UNKNOWN; the
 //     sends after the lower bound stay pending.
-// What is left: a combat rewrite to exactly the unit of a pending select reads as that select's echo.
+//   - those rewrites happen only while the player attacks, is in combat or is stunned (the core's other SetTargetGuid calls are for
+//     creatures, Unit.cpp:9815/9859). A combat rewrite to exactly the unit of a pending select would read as that select's echo, so while
+//     the player is HOT (attacking since an SMSG_ATTACKSTART of its own until the SMSG_ATTACKSTOP, UNIT_FLAG_IN_COMBAT or UNIT_FLAG_STUNNED
+//     on its object) and for SelectionCombatSettle after, no echo confirms anything and no GM line on a selection goes out. When the player
+//     cools down, every send so far is fenced off (treated as dropped: an echo of one of those units confirms nothing until an echo of a
+//     later send was seen), and SelectConfirmed selects again, through a neutral selection where its unit is among the fenced ones. A run
+//     that stays hot past the wait gets an error and no line. Left: a rewrite whose sign of combat comes in a LATER update than the rewrite
+//     itself (none of the core paths above does this for a player: the melee start is announced before the update, the flags of a cast's
+//     combat and of a stun go in the same update).
 //
 // selLog[0] is the selection known to be in force at a lower bound of the server's progress through the sent selections, known only when an
 // echo answered one of the session's own sends (selBaseKnown); selLog[1:] are the selections sent since, any of which may still be pending.
@@ -37,6 +46,57 @@ import (
 // selCap bounds the log: the selections sent with no echo between them. Past it the oldest are dropped, the selection in force becomes
 // unknown, and an echo of a dropped unit confirms nothing until an echo of a later send was seen.
 const selCap = 32
+
+// SelectionCombatSettle is how long after the player stopped attacking, left combat or a stun the selection echoes are still not trusted:
+// the field rewrite of an AttackStop comes in the update after the SMSG_ATTACKSTOP.
+var SelectionCombatSettle = time.Second
+
+// selHotLocked says whether the field may be rewritten by combat or a stun now. The caller holds s.mu.
+func (s *Session) selHotLocked() bool {
+	return s.selHot || time.Now().Before(s.selCoolAt)
+}
+
+// selSetHotLocked records whether the player attacks, is in combat or is stunned. Cooling down fences off every send so far. The caller
+// holds s.mu.
+func (s *Session) selSetHotLocked(hot bool) {
+	if hot == s.selHot {
+		return
+	}
+	s.selHot = hot
+	if hot {
+		return
+	}
+	s.selCoolAt = time.Now().Add(SelectionCombatSettle)
+	if s.selDropped == nil {
+		s.selDropped = map[packet.GUID]bool{}
+	}
+	for i, x := range s.selLog {
+		if i > 0 || s.selBaseKnown {
+			s.selDropped[x] = true
+		}
+	}
+	s.selLog, s.selBaseKnown = []packet.GUID{0}, false
+}
+
+// updateHot recomputes the hot state from the player's own object and its melee attack. Run before an update's target field is read.
+func (s *Session) updateHot(self packet.GUID) {
+	flags := uint32(0)
+	if u, ok := s.store.Get(self, 0, 0, 0); ok && self != 0 {
+		flags = u.Flags
+	}
+	s.mu.Lock()
+	s.selSetHotLocked(s.selAttacking || flags&(objects.UnitFlagInCombat|objects.UnitFlagStunned) != 0)
+	s.mu.Unlock()
+}
+
+// setAttacking records an SMSG_ATTACKSTART (true) or SMSG_ATTACKSTOP (false) of the player itself.
+func (s *Session) setAttacking(on bool) {
+	s.mu.Lock()
+	s.selAttacking = on
+	self := s.self.GUID
+	s.mu.Unlock()
+	s.updateHot(self)
+}
 
 // selSentLocked records a CMSG_SET_SELECTION of g written to the server. The caller holds s.mu.
 func (s *Session) selSentLocked(g packet.GUID) {
@@ -65,6 +125,10 @@ func (s *Session) selSentLocked(g packet.GUID) {
 // selObservedLocked records that the server shows v in the player's target field. The caller holds s.mu.
 func (s *Session) selObservedLocked(v packet.GUID) {
 	s.selShown, s.selShownOK = v, true
+	if s.selHotLocked() {
+		s.selBaseKnown = false // combat or a stun may have written it
+		return
+	}
 	if len(s.selLog) == 0 {
 		s.selLog, s.selBaseKnown = []packet.GUID{0}, false // nothing sent: the field says nothing about the selection
 		return
@@ -102,7 +166,7 @@ func (s *Session) selUnknownLocked() {
 }
 
 func (s *Session) selConfirmedLocked(g packet.GUID) bool {
-	if !s.selBaseKnown || len(s.selLog) == 0 {
+	if !s.selBaseKnown || len(s.selLog) == 0 || s.selHotLocked() {
 		return false
 	}
 	for _, x := range s.selLog {
@@ -120,7 +184,7 @@ func (s *Session) selNeedsNeutralLocked(g packet.GUID) bool {
 	if s.selConfirmedLocked(g) {
 		return false
 	}
-	if !s.selBaseKnown && (!s.selShownOK || s.selShown == g) {
+	if !s.selBaseKnown && (!s.selShownOK || s.selShown == g) || s.selDropped[g] {
 		return true
 	}
 	seen := false
@@ -145,8 +209,8 @@ func (s *Session) selNeutralLocked() (packet.GUID, bool) {
 			continue
 		}
 		in := false
-		for _, x := range s.selLog {
-			if x == c {
+		for i, x := range s.selLog {
+			if x == c && (i > 0 || s.selBaseKnown) { // an unknown base is a placeholder, not a unit
 				in = true
 				break
 			}
@@ -192,12 +256,28 @@ func (s *Session) sendSelection(ctx context.Context, g packet.GUID) error {
 	return err
 }
 
+// errSelHot ends a wait for a selection when the player turned hot (selHotLocked): the selection is made again once it cooled down.
+var errSelHot = errors.New("the player is attacking, in combat or stunned")
+
 // SelectConfirmed selects the unit g (0: none) and waits, up to wait in all, until the server is known to have it in force
 // (SelectionConfirmed). When a new select of g could stay unconfirmed (SelectionAmbiguous), a neutral selection (none, or the player itself)
-// is made and confirmed first. An error when the confirmation does not come in time; a line that acts on the selection must not be sent then.
+// is made and confirmed first. While the player is attacking, in combat or stunned nothing is selected and nothing is confirmed (the core
+// rewrites the field then); the selection is made once the player cooled down. An error when the confirmation does not come in time; a
+// line that acts on the selection must not be sent then.
 func (s *Session) SelectConfirmed(ctx context.Context, g packet.GUID, wait time.Duration) error {
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
+	for {
+		if err := s.awaitCool(ctx, wait, timer.C); err != nil {
+			return err
+		}
+		if err := s.selectOnce(ctx, g, wait, timer.C); !errors.Is(err, errSelHot) {
+			return err
+		}
+	}
+}
+
+func (s *Session) selectOnce(ctx context.Context, g packet.GUID, wait time.Duration, expired <-chan time.Time) error {
 	s.mu.Lock()
 	need := s.selNeedsNeutralLocked(g)
 	n, ok := s.selNeutralLocked()
@@ -206,22 +286,49 @@ func (s *Session) SelectConfirmed(ctx context.Context, g packet.GUID, wait time.
 		if err := s.sendSelection(ctx, n); err != nil {
 			return err
 		}
-		if err := s.awaitSelection(ctx, n, wait, timer.C); err != nil {
+		if err := s.awaitSelection(ctx, n, wait, expired); err != nil {
 			return fmt.Errorf("%w (the neutral selection made before %v)", err, g)
 		}
 	}
 	if err := s.sendSelection(ctx, g); err != nil {
 		return err
 	}
-	return s.awaitSelection(ctx, g, wait, timer.C)
+	return s.awaitSelection(ctx, g, wait, expired)
+}
+
+// awaitCool waits until the player is not hot.
+func (s *Session) awaitCool(ctx context.Context, wait time.Duration, expired <-chan time.Time) error {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		s.mu.Lock()
+		hot := s.selHotLocked()
+		s.mu.Unlock()
+		if !hot {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-expired:
+			return fmt.Errorf("the agent was attacking, in combat or stunned for all of %s (the core rewrites its target field then, so no selection can be confirmed): not sending a line that acts on the selection", wait)
+		case <-tick.C:
+		}
+	}
 }
 
 func (s *Session) awaitSelection(ctx context.Context, g packet.GUID, wait time.Duration, expired <-chan time.Time) error {
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		if s.SelectionConfirmed(g) {
+		s.mu.Lock()
+		ok, hot := s.selConfirmedLocked(g), s.selHotLocked()
+		s.mu.Unlock()
+		if ok {
 			return nil
+		}
+		if hot {
+			return errSelHot
 		}
 		select {
 		case <-ctx.Done():
