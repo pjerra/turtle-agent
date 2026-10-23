@@ -63,7 +63,7 @@ func TestDungeonRunModesAreRefusedClearly(t *testing.T) {
 	r := dungeonRig(t)
 	for _, c := range []struct{ params, want string }{
 		{`{"name":"rig","mode":"observe"}`, "needs lead_bot"},
-		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","from_leg":1}`, "start inside the plan"},
+		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","start_here":true}`, "move or equip the party"},
 		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","tank":"Tanky"}`, "the agent sends no order"},
 		{`{"name":"rig","mode":"commander"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"leader","lead_bot":"Tanky"}`, `go with mode "remote"`},
@@ -235,3 +235,32 @@ func TestCheckModeForceStartIsCommanderOnly(t *testing.T) {
 		t.Errorf("commander: %v %v", remote, err)
 	}
 }
+
+// from_step is an observed run's start in the run leader's own plan: observe only, and it names the start itself (no from_leg or
+// from_pull_group beside it). from_leg and from_pull_group are no longer refused in observe mode (#248).
+func TestCheckModeFromStep(t *testing.T) {
+	for _, c := range []struct {
+		p    dungeonRunParams
+		want string
+	}{
+		{dungeonRunParams{Mode: "commander", LeadBot: "Tanky", FromStep: intp(1)}, "mode \"observe\""},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", FromStep: intp(0)}, "from 1"},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", FromStep: intp(207), FromLeg: &legParam{index: 10}}, "leave from_leg"},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", FromStep: intp(5), FromPullGroup: intp(1)}, "leave from_leg"},
+	} {
+		if _, err := checkMode(c.p); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v", c.p, err)
+		}
+	}
+	for _, p := range []dungeonRunParams{
+		{Mode: "observe", LeadBot: "Tanky", FromStep: intp(207)},
+		{Mode: "observe", LeadBot: "Tanky", FromLeg: &legParam{index: 10}},
+		{Mode: "observe", LeadBot: "Tanky", FromLeg: &legParam{index: 10}, FromPullGroup: intp(1)},
+	} {
+		if remote, err := checkMode(p); !remote || err != nil {
+			t.Errorf("%+v: remote %v, %v", p, remote, err)
+		}
+	}
+}
+
+func intp(n int) *int { return &n }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -453,7 +454,13 @@ func (d *RemoteDriver) walkToPortal(ctx context.Context, pt *Portal, began time.
 			return fmt.Errorf("enter: the lead bot %s is on map %d; the portal is on map %d", l.Name, l.Map, pt.Map)
 		}
 		here := partyPoint(l)
-		if dist3(here, pt.Point) <= float64(d.opt.MoveArrive) {
+		// With `cmd enter` the lead bot is at the door once it stands within cmdEnterGather yards of the portal on the ground plane and no
+		// more than cmdEnterDoorDZ above or below it: the order takes the party near the door, not onto the portal's point, and a door in
+		// a cave or on a ledge stands above or below the walkable ground, so the 3D MoveArrive check would never pass and the walk would
+		// end at its ceiling without an order. Without `cmd enter` the lead bot must reach the point itself: the area trigger takes it in.
+		atDoor := dist3(here, pt.Point) <= float64(d.opt.MoveArrive) ||
+			d.enterCmd && hdist(here, pt.Point) <= cmdEnterGather && math.Abs(float64(here.Z-pt.Point.Z)) <= cmdEnterDoorDZ
+		if atDoor {
 			if d.enterCmd {
 				return d.cmdEnterAtDoor(ctx, began)
 			}

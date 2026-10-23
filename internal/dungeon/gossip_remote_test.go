@@ -149,8 +149,9 @@ func TestRemoteGossipByTheCarrierSendsTheOrderAndTheAckEndsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
-	// The carrier is the first bot that is neither the lead, the tank nor the healer.
-	if fmt.Sprint(g.orders) != "[cmd gossip 7607 Magey 0]" || g.talk.hellos != 0 || len(g.talk.selects) != 0 {
+	// The carrier is the first bot that is neither the lead, the tank nor the healer. The plan's option 0 (the menu's first line) is the
+	// order's 1: `cmd gossip` counts from 1 and refuses 0 (TortoiseBots GossipOrderPolicy.h).
+	if fmt.Sprint(g.orders) != "[cmd gossip 7607 Magey 1]" || g.talk.hellos != 0 || len(g.talk.selects) != 0 {
 		t.Fatalf("orders %v hellos %d selects %v", g.orders, g.talk.hellos, g.talk.selects)
 	}
 	s := rep.Remote.ObjectSteps[0]
@@ -240,5 +241,23 @@ func TestRemoteGossipByTheAgentNeedsHands(t *testing.T) {
 	d := &RemoteDriver{g: g.nearGame}
 	if err := d.gossipByAgent(context.Background(), Action{Gossip: &Gossip{NPC: 1}}); err == nil || !strings.Contains(err.Error(), "the agent has no hands for a gossip step") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// The order counts the menu from 1 (TortoiseBots GossipOrderPolicy.h refuses 0), the plan's option is the menu's own index from 0: the order
+// carries option + 1, and a text goes as it is.
+func TestGossipOrderCountsFromOne(t *testing.T) {
+	two, zero := uint32(2), uint32(0)
+	for _, tc := range []struct {
+		g    Gossip
+		want string
+	}{
+		{Gossip{NPC: 7607, Option: &zero}, "cmd gossip 7607 Tanky 1"},
+		{Gossip{NPC: 7607, Option: &two}, "cmd gossip 7607 Tanky 3"},
+		{Gossip{NPC: 7604, Text: "settled"}, "cmd gossip 7604 Tanky settled"},
+	} {
+		if got := gossipOrder(&tc.g, "Tanky"); got != tc.want {
+			t.Errorf("%+v: %q, want %q", tc.g, got, tc.want)
+		}
 	}
 }

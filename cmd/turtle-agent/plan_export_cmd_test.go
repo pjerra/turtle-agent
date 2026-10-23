@@ -128,3 +128,69 @@ func TestPlanExportCutsAtAStepTheRunLeaderCannotDo(t *testing.T) {
 		t.Fatalf("first leg: %d %q", code, errs)
 	}
 }
+
+// --skip-legs leaves a named leg out (the shipped Zul'Farrak plan then reaches the End Door and Ukorz past Bly), and a name that is no leg
+// of the plan is refused before anything is written.
+func TestPlanExportSkipLegs(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bly", "--stamp", "20261021005900", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 16 legs") || strings.Contains(out, "CUT") {
+		t.Fatalf("output %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021005900_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "'gossip', 7607,") || !strings.Contains(string(data), "'ukorz'") || strings.Contains(string(data), "'bly'") {
+		t.Fatal("the rows lack the Weegli gossip or Ukorz, or still have Bly")
+	}
+	if !strings.Contains(errs, "leg 16 (bly): left out of the export by the exporter's skip-legs option") {
+		t.Fatalf("stderr %q", errs)
+	}
+	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bli", "--stamp", "20261021005901", "--out", dir, "zulfarrak")
+	if code == exitOK || !strings.Contains(errs, `skip-legs names "bli"`) {
+		t.Fatalf("a misspelt leg: %d %q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261021005901_world.sql")); err == nil {
+		t.Fatal("a file was written for a refused export")
+	}
+}
+
+// --carrier-chests needs --drop-companions-loot (refused alone); with it, the zumrah leg's 31 Shallow Grave steps are 31 triples of
+// move, loot (flag 256) and sweep pull in the rows, before the trigger and the boss.
+func TestPlanExportCarrierChests(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runExport("--dir", "../../dungeons", "--skip-legs", "bly", "--carrier-chests", "--stamp", "20261021200000", "--out", dir, "zulfarrak"); code != exitUsage || !strings.Contains(errs, "--carrier-chests needs --drop-companions-loot") {
+		t.Fatalf("without --drop-companions-loot: %d %q", code, errs)
+	}
+	if code, _, errs := runExport("--dir", "../../dungeons", "--skip-legs", "bly", "--carrier-chests", "--drop-companions-loot", "--stamp", "20261021200100", "--rev", "abc12345", "--out", dir, "zulfarrak"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021200100_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "'loot', 128403,") {
+		t.Fatal("no grave loot row in the migration")
+	}
+	rows, err := planexport.Parse(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rows[0]
+	n := 0
+	for _, s := range r.Steps {
+		if s.Entry == 128403 {
+			n++
+			if s.Flags&planexport.FlagGoneIsDone == 0 {
+				t.Fatalf("a grave loot row without flag 256: %+v", s)
+			}
+		}
+	}
+	if n != 31 {
+		t.Fatalf("%d grave loot rows, want 31", n)
+	}
+}

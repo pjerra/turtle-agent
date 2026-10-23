@@ -72,9 +72,14 @@ func TestBoundsAndPixelTransform(t *testing.T) {
 }
 
 func TestParseTranslate(t *testing.T) {
-	in := "dir: Azeroth\nAzeroth\\map32_48.blp\tabc123.blp\n\nZulFarrak\\map29_27.blp\tf00d.blp\r\nZULFARRAK\\map30_28.blp\t0bad.blp\nbroken line\nx\\notamap.blp\tz.blp\n"
+	in := "dir: Azeroth\nAzeroth\\map32_48.blp\tabc123.blp\n\nZulFarrak\\map29_27.blp\tf00d.blp\r\nZULFARRAK\\map30_28.blp\t0bad.blp\nbroken line\nx\\notamap.blp\tz.blp\n" +
+		"WMO\\World\\wmo\\Dungeon\\kz_uldaman_b_006_03_00.blp\tw1.blp\n" +
+		"wmo/world/wmo/dungeon/stratholme_b_012_04_01.blp\tw2.blp\n" +
+		"WMO\\World\\wmo\\Dungeon\\mini-hive_d_000_00_00.blp\tw3.blp\n" +
+		"WMO\\World\\wmo\\Dungeon\\bad_0_0.blp\tw4.blp\n" +
+		"WMO\\World\\wmo\\Dungeon\\sign_+03_00_00.blp\tw5.blp\n"
 	got := ParseTranslate([]byte(in))
-	zf := got["zulfarrak"]
+	zf := got.Terrain["zulfarrak"]
 	if len(zf) != 2 {
 		t.Fatalf("zulfarrak tiles = %v", zf)
 	}
@@ -82,8 +87,27 @@ func TestParseTranslate(t *testing.T) {
 	if zf[Tile{Row: 27, Col: 29}] != "f00d.blp" || zf[Tile{Row: 28, Col: 30}] != "0bad.blp" {
 		t.Errorf("tiles = %v", zf)
 	}
-	if got["azeroth"][Tile{Row: 48, Col: 32}] != "abc123.blp" {
-		t.Errorf("azeroth = %v", got["azeroth"])
+	if got.Terrain["azeroth"][Tile{Row: 48, Col: 32}] != "abc123.blp" {
+		t.Errorf("azeroth = %v", got.Terrain["azeroth"])
+	}
+	if len(got.Terrain["wmo"]) != 0 {
+		t.Errorf("a WMO tile landed in the terrain tiles: %v", got.Terrain["wmo"])
+	}
+	// the base name keeps its underscores; the group, A and B are the last three fixed-width fields
+	if got.WMO["kz_uldaman_b"][WMOTile{Group: 6, A: 3, B: 0}] != "w1.blp" {
+		t.Errorf("kz_uldaman_b = %v", got.WMO["kz_uldaman_b"])
+	}
+	if got.WMO["stratholme_b"][WMOTile{Group: 12, A: 4, B: 1}] != "w2.blp" {
+		t.Errorf("stratholme_b = %v", got.WMO["stratholme_b"])
+	}
+	if got.WMO["mini-hive_d"][WMOTile{Group: 0, A: 0, B: 0}] != "w3.blp" {
+		t.Errorf("mini-hive_d = %v", got.WMO["mini-hive_d"])
+	}
+	if len(got.WMO["bad"]) != 0 {
+		t.Errorf("a tile without the fixed-width numbers is accepted: %v", got.WMO["bad"])
+	}
+	if len(got.WMO["sign"]) != 0 {
+		t.Errorf("a signed field is accepted: %v", got.WMO["sign"])
 	}
 }
 

@@ -60,6 +60,12 @@ assert.strictEqual(av.zonenames.ok, false);
 av = L.availability({ trail: true, trailtime: true, threat: true, healer: true });
 assert.strictEqual(av.threat.ok, true); assert.strictEqual(av.healring.ok, true); assert.strictEqual(av.trailtime.ok, true);
 assert.strictEqual(av.heading.ok, false); assert.strictEqual(av.aggro.ok, false);
+// a caller's own reason for a missing layer wins over the built-in text (the map picture slot's reason)
+av = L.availability({ picture: false, why: { picture: "no minimap picture: indoor dungeon" } });
+assert.strictEqual(av.bg.ok, false);
+assert.strictEqual(av.bg.why, "no minimap picture: indoor dungeon");
+av = L.availability({ picture: false });
+assert.strictEqual(av.bg.why, L.DEFS.find((d) => d.key === "bg").why);
 assert.deepStrictEqual(L.groups(), ["Map", "Plan", "Walk", "Party", "Mobs", "Marks", "Run"]);
 
 // ---- guids: the feed prints them in different widths

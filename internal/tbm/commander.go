@@ -22,6 +22,9 @@ import (
 var (
 	CommanderVerbs = []string{"bind", "unbind", "status", "view"}
 	CmdVerbs       = []string{"attack", "pull", "pullback", "cc", "focus", "move", "stay", "follow", "rest", "revive", "summon", "enter", "loot", "open", "use", "ritual", "lootmethod", "state", "gossip"}
+	// TraceVerbs are the `.bot trace` verbs a run sends for the server's run recorder (run_meta.server_trace): start, stop, and the
+	// status its stop retries read to see whether the trace running is still the run's own. Not a commander command: a narrow allow.
+	TraceVerbs = []string{"start", "stop", "status"}
 )
 
 // CCMarks are the raid marks `.bot cmd cc` takes.
@@ -30,6 +33,10 @@ var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond"
 // argRe is what one argument of a command may be: names, numbers, a GUID, a mark, an object by entry (entry:<id>@x,y,z). No spaces, no control characters, no way to
 // put a second command on the line.
 var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
+
+// traceDriverRe is the `driver=` word of a trace start (`driver=<model>:<effort>:<run>`), the one argument outside the commander's
+// grammar: the server stores up to 96 characters there (dungeon.RunMeta.Check), so the word allows 1-96.
+var traceDriverRe = regexp.MustCompile(`^driver=[A-Za-z0-9_.+\-:]{1,96}$`)
 
 // BadOrderWords says why a text cannot be the tail of one command line: every whitespace-separated word has to be an argument the
 // commander accepts (argRe). It returns "" for a text that can, else the first word that cannot, with the reason.
@@ -100,8 +107,12 @@ func CheckCommand(command string) error {
 		verbs = CmdVerbs
 	case "run":
 		verbs = RunVerbs
+	case "trace":
+		// The server's run recorder, sent by a remote run with run_meta.server_trace (dungeon.startServerTrace and stopServerTrace).
+		// Only these verbs: every other `.bot` line stays refused.
+		verbs = TraceVerbs
 	default:
-		return fmt.Errorf("%q is not a commander command: use commander, cmd or run", f[0])
+		return fmt.Errorf("%q is not a commander command: use commander, cmd, run or trace", f[0])
 	}
 	found := false
 	for _, v := range verbs {
@@ -109,6 +120,25 @@ func CheckCommand(command string) error {
 	}
 	if !found {
 		return fmt.Errorf("%s %s: unknown verb (%s)", group, verb, strings.Join(verbs, ", "))
+	}
+	if group == "trace" {
+		// The recorder's own grammar, no wider than the lines a server trace sends: `start <run_id> [driver=...]`, `stop`, `status`.
+		if verb != "start" {
+			if len(f) > 2 {
+				return fmt.Errorf("trace %s: takes no argument", verb)
+			}
+			return nil
+		}
+		if len(f) < 3 || len(f) > 4 {
+			return errors.New("trace start: use `trace start <run_id> [driver=<model>:<effort>:<run>]`")
+		}
+		if !argRe.MatchString(f[2]) {
+			return fmt.Errorf("trace start: %q is not a run id (letters, digits and _ . , : + - only)", f[2])
+		}
+		if len(f) == 4 && !traceDriverRe.MatchString(f[3]) {
+			return fmt.Errorf("trace start: %q is not a driver word (driver=<model>:<effort>:<run>, at most 96 characters)", f[3])
+		}
+		return nil
 	}
 	for _, a := range f[2:] {
 		if !argRe.MatchString(a) {

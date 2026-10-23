@@ -95,6 +95,9 @@ type Plan struct {
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
 	LevelBand []int `json:"level_band,omitempty"`
+	// TankMinHP is the least max health the hired tank should have for the plan's level band (Ragefire Chasm 800 at 13-18, #266): a tank
+	// below it is a preflight warning (weak gear: autogear again, or hire another tank). 0: no check.
+	TankMinHP uint32 `json:"tank_min_hp,omitempty"`
 	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
 	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
 	HireComposition []string `json:"hire_composition,omitempty"`
@@ -141,6 +144,15 @@ func (p *Plan) Band() (lo, hi int) {
 	return p.LevelBand[0], p.LevelBand[1]
 }
 
+// Leaves lists every Leave of the plan, in leg order: a spawn stands for the whole run, so a leg's list holds for every leg's points.
+func (p *Plan) Leaves() []Leave {
+	var out []Leave
+	for _, l := range p.Legs {
+		out = append(out, l.Leave...)
+	}
+	return out
+}
+
 // Portal is a point of the outer map: the centre of the entrance's area trigger.
 type Portal struct {
 	Map uint32 `json:"map"`
@@ -163,9 +175,14 @@ type Leg struct {
 	Via        []Waypoint  `json:"via,omitempty"`
 	PullGroups []PullGroup `json:"pull_groups,omitempty"`
 	// Skip lists creature entries the leg never waits for: rares, escorts, friendly NPCs, and adds that die with the boss.
-	Skip  []uint32 `json:"skip,omitempty"`
-	Steps []Step   `json:"steps,omitempty"`
-	Boss  *Boss    `json:"boss,omitempty"`
+	Skip []uint32 `json:"skip,omitempty"`
+	// Leave lists the spawns a run must not pull, fight or walk up to (zf-r6: the lone Shadowhunter 7246, spawn 81610, on a navmesh island at
+	// 1591 1047.7, which the module's hop pull engaged and whose island took the tank). The plan check keeps every approach point and stand of
+	// the plan LeaveClearYd away from them (leave_clear_test.go). The run leader's rows have no place for it yet: plan-export writes it into
+	// the leg row's comment and warns.
+	Leave []Leave `json:"leave,omitempty"`
+	Steps []Step  `json:"steps,omitempty"`
+	Boss  *Boss   `json:"boss,omitempty"`
 	// CompanionsLoot false has the driver order the party's corpse and object looting off (".bot behavior <bot> loot off") from the start
 	// of the leg to its end, and on again after: the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes
 	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
@@ -185,6 +202,18 @@ type Leg struct {
 	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
 	Rest  *RestSpec `json:"rest,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+}
+
+// LeaveClearYd is how far an approach point or a stand keeps from a Leave spawn: more than the run leader's hop pull reaches (kHopPullYd, 15).
+const LeaveClearYd = 15.0
+
+// Leave is one spawn a run leaves alone (Leg.Leave): Entry is its creature entry, Spawn its creature guid (0: not named), At where it stands
+// and Why the reason, for the reader and for the exported leg row.
+type Leave struct {
+	Entry uint32 `json:"entry"`
+	Spawn uint32 `json:"spawn,omitempty"`
+	At    Point  `json:"at"`
+	Why   string `json:"why"`
 }
 
 // OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
@@ -309,8 +338,19 @@ type PullGroup struct {
 // first and Entries) as the event's mobs. A move row straight before it to the same spot is left out (the hold walks there itself), and
 // a game object wait straight after it waits at most HoldDoorWaitS (the event's DONE is what opens the door). The agent's own driver
 // does not read it: it fights the group (or the boss) and waits for the steps as written.
+//
+// A wait_for may carry one too (WaitFor.Hold): it is that wait's run leader form, for an event whose script keeps its progress in an
+// instance data value the agent's driver does not read (Zul'Farrak's pyramid phase, instance data 1). plan-export then writes the hold
+// row in place of the wait (which the run leader could not run), and the agent's driver runs the wait as written.
 type Hold struct {
-	Data     uint32  `json:"instance_data"`
+	Data uint32 `json:"instance_data"`
+	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
+	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
+	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
+	// ends the hold when the data reads exactly Value, so it must be a value the script keeps for a while (a wave that is being fought),
+	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. Only a wait_for's hold takes a
+	// value, and never 0 (the value instance data starts at): the plan check refuses both.
+	Value    *uint32 `json:"value,omitempty"`
 	Spot     Point   `json:"spot"`
 	Radius   float32 `json:"radius"`
 	TimeoutS int     `json:"timeout_s"`
@@ -610,6 +650,9 @@ type WaitFor struct {
 	// FailText is added to the failure when the wait times out: the reason a person should read (Uldaman's altar waits say that the
 	// ritual needs three participants).
 	FailText string `json:"fail_text,omitempty"`
+	// Hold is this wait's form for the TortoiseBots run leader (see Hold): plan-export writes it as a hold row instead of the wait. The
+	// agent's own driver does not read it.
+	Hold *Hold `json:"hold,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
@@ -704,6 +747,7 @@ type rawPlan struct {
 	Outside    string            `json:"outside_tele"`
 	Portal     *rawPortal        `json:"portal"`
 	Band       []int             `json:"level_band"`
+	TankMinHP  *uint32           `json:"tank_min_hp"`
 	Hire       []string          `json:"hire_composition"`
 	CCPrio     []uint32          `json:"cc_priority"`
 	CCAlways   []uint32          `json:"cc_always"`
@@ -735,6 +779,7 @@ type rawLeg struct {
 	Via        []rawWaypoint     `json:"via"`
 	PullGroups []rawPullGroup    `json:"pull_groups"`
 	Skip       []uint32          `json:"skip"`
+	Leave      []rawLeave        `json:"leave"`
 	Steps      []json.RawMessage `json:"steps"`
 	Boss       *rawBoss          `json:"boss"`
 	AfterBoss  []json.RawMessage `json:"after_boss"`
@@ -745,6 +790,13 @@ type rawLeg struct {
 	Rest           *RestSpec    `json:"rest"`
 	Notes          []string     `json:"notes"`
 	NeedsWalk      bool         `json:"needs_walk"`
+}
+
+type rawLeave struct {
+	Entry uint32    `json:"entry"`
+	Spawn uint32    `json:"spawn"`
+	At    *rawPoint `json:"at"`
+	Why   string    `json:"why"`
 }
 
 type rawPullGroup struct {
@@ -766,6 +818,7 @@ type rawHold struct {
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
 	Entries  []uint32  `json:"entries"`
+	Value    *uint32   `json:"value"`
 }
 
 type rawPatrol struct {
@@ -894,6 +947,7 @@ type rawWait struct {
 	Unit         *rawUnitWait `json:"unit"`
 	TimeoutS     *int         `json:"timeout_s"`
 	FailText     string       `json:"fail_text"`
+	Hold         *rawHold     `json:"hold"`
 }
 
 type rawObjState struct {
@@ -978,6 +1032,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if rp.TankMinHP != nil {
+		if v := *rp.TankMinHP; v != 0 && (v < 100 || v > 20000) {
+			c.fail("tank_min_hp", "%d: use 0 or 100-20000", v)
+		} else {
+			p.TankMinHP = v
+		}
 	}
 	if len(rp.CCPrio) > 0 {
 		p.CCPriority = slices.Clone(rp.CCPrio)
@@ -1242,8 +1303,27 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			pg.Patrol = pat
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
-		pg.Hold = c.hold(gp+".hold", g.Hold)
+		pg.Hold = c.hold(gp+".hold", g.Hold, false)
 		l.PullGroups = append(l.PullGroups, pg)
+	}
+	for i, lv := range r.Leave {
+		lp := fmt.Sprintf("%s.leave[%d]", path, i)
+		if lv.Entry == 0 {
+			c.fail(lp+".entry", "required (the creature entry to leave alone)")
+		}
+		if strings.TrimSpace(lv.Why) == "" {
+			c.fail(lp+".why", "required (why the run leaves it: the reader and the exported leg row need the reason)")
+		}
+		at := c.point(lp+".at", lv.At)
+		for j, g := range r.PullGroups {
+			for k, gp := range g.Positions {
+				if gp.X != nil && gp.Y != nil && lv.Entry != 0 && slices.Contains(g.Entries, lv.Entry) &&
+					math.Hypot(float64(*gp.X-at.X), float64(*gp.Y-at.Y)) < 3 {
+					c.fail(lp, "pull_groups[%d].positions[%d] is this spawn: the leg would pull what it leaves", j, k)
+				}
+			}
+		}
+		l.Leave = append(l.Leave, Leave{Entry: lv.Entry, Spawn: lv.Spawn, At: at, Why: strings.TrimSpace(lv.Why)})
 	}
 	c.entries(path+".skip", r.Skip, false)
 	for i, e := range r.Skip {
@@ -1285,7 +1365,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			}
 		}
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
-		b.Hold = c.hold(bp+".hold", r.Boss.Hold)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
@@ -1352,12 +1432,13 @@ func (c *checker) approach(path string, ps []rawPoint) []Point {
 	return out
 }
 
-// hold reads a pull group's or a boss's hold.
-func (c *checker) hold(path string, r *rawHold) *Hold {
+// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold only (a pull group's or a boss's hold is an
+// encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins.
+func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
 	if r == nil {
 		return nil
 	}
-	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
 	h.Spot = c.point(path+".spot", r.Spot)
 	if r.Data == 0 {
 		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
@@ -1369,6 +1450,12 @@ func (c *checker) hold(path string, r *rawHold) *Hold {
 		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
 	}
 	c.entries(path+".entries", r.Entries, false)
+	switch {
+	case r.Value != nil && !valueAllowed:
+		c.fail(path+".value", "only a wait_for's hold takes a value; a pull group's or a boss's hold ends on the encounter state DONE")
+	case r.Value != nil && *r.Value == 0:
+		c.fail(path+".value", "0 is the value instance data starts at, so the hold would end at once: give the value the event reaches")
+	}
 	return h
 }
 
@@ -1654,6 +1741,7 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		}
 		w.HostilesGone = h
 	}
+	w.Hold = c.hold(path+".hold", r.Hold, true)
 	return w
 }
 

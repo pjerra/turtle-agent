@@ -393,7 +393,13 @@ func (d *RemoteDriver) traceBegin(fromLeg int) {
 	}
 	// The feed has facing and the bot's target but no movement flag or class, and it has threat lists.
 	caps := []string{trace.CapFacing, trace.CapThreat, trace.CapOrders, trace.CapWalks, trace.CapPartyList}
-	hdr := trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: d.opt.Tank, Options: opts, Caps: caps}
+	// An observed run is driven by the server's run leader, which is the lead bot: the header names it as the tank, or the threat check
+	// would have to guess it from the frames.
+	tank := d.opt.Tank
+	if d.observing() {
+		tank = d.opt.Lead
+	}
+	hdr := trace.Header{Map: d.plan.Map, Plan: d.plan.Name, FromLeg: fromLeg, Lead: d.opt.Lead, Tank: tank, Options: opts, Caps: caps}
 	hdr.Meta = runMetaHeader(d.cfg.Trace.Meta, d.opt.RunMeta)
 	d.tr.Begin(hdr)
 	if !d.tr.On() {
@@ -425,6 +431,14 @@ func (d *RemoteDriver) traceLook() {
 				d.tr.Party(trace.Member{G: guidText(p.GUID), Name: p.Name, Lead: p.GUID == d.fr.Lead && d.fr.Lead != 0, Role: d.roleOf(p.Name)})
 			}
 		}
+		if !d.trInstance && d.fr.Lead != 0 {
+			if lead, ok := d.memberByGUID(d.fr.Lead); ok && lead.Instance != 0 {
+				d.trInstance = true
+				inst := lead.Instance
+				d.rep.update(func(r *Report) { r.Instance = inst })
+				d.tr.Event("instance", map[string]any{"instance": inst, "map": lead.Map})
+			}
+		}
 		if d.tr.Due() {
 			d.tr.Frame(feedFrame(d.fr))
 		}
@@ -452,7 +466,7 @@ func feedFrame(fr tbm.ViewFrame) trace.Frame {
 	}
 	for _, p := range fr.Party {
 		b := trace.Bot{G: guidText(p.GUID), Alive: !p.Dead, Combat: p.InCombat(), State: p.State, HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPow: p.MaxPower,
-			PType: p.PowerType, X: p.X, Y: p.Y, Z: p.Z, Target: guidText(p.Target), Cast: p.Spell, Action: p.Action, Lead: p.GUID == fr.Lead && fr.Lead != 0}
+			PType: p.PowerType, X: p.X, Y: p.Y, Z: p.Z, Target: guidText(p.Target), Cast: p.Spell, Action: p.Action, Res: p.Result, Why: p.Reason, Lead: p.GUID == fr.Lead && fr.Lead != 0}
 		if h, ok := hostile[p.Target]; ok {
 			b.Facing = facingDegrees(p.O, p.X, p.Y, h.X, h.Y)
 		}

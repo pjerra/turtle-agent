@@ -27,6 +27,13 @@ const (
 	IDStuck       = "stuck"
 	IDFacing      = "facing"
 
+	// Thresholds of the spells check (its own id is IDSpells): they make warnings, never a fail.
+	IDIdleShare      = "idle_share"
+	IDInterruptCover = "interrupt_cover"
+	IDTauntLatency   = "taunt_latency"
+	IDCCHold         = "cc_hold"
+	IDPetThreat      = "pet_threat"
+
 	maxEvidence    = 8
 	minRunSeconds  = 60
 	minOrders      = 3
@@ -49,14 +56,22 @@ type Config struct {
 	FeedGapMax     float64 // seconds without a feed frame
 	StuckSeconds   float64 // a member that should move stands still this long
 	FacingHoldS    float64 // seconds a member in melee range stands turned away from its target
+
+	// The spells check only warns: these are the limits of its warnings.
+	IdleSharePct      float64 // percent of engaged mana-user frames without an executed action (a warning above this)
+	InterruptCoverPct float64 // percent of enemy casts with an interrupt action near them (a warning below this; proximity, not a confirmed interrupt)
+	TauntLatencyS     float64 // median seconds from a non-tank victim to a taunt or a return (a warning above this)
+	CCHoldPct         float64 // percent of cc episodes that held (a warning below this)
+	PetThreatPct      float64 // percent of mob-frames with a pet on top threat (a warning above this)
 }
 
 // Defaults are the thresholds of the first set of checks.
 func Defaults() Config {
-	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2}
+	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2, IdleSharePct: 15, InterruptCoverPct: 30,
+		TauntLatencyS: 3, CCHoldPct: 50, PetThreatPct: 5}
 }
 
-var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing}
+var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover, IDTauntLatency, IDCCHold, IDPetThreat}
 
 // Set changes the threshold of the check with the given id (the CLI's --set id=value). deaths and gm_shortcuts have none.
 func (c *Config) Set(id string, v float64) error {
@@ -77,6 +92,16 @@ func (c *Config) Set(id string, v float64) error {
 		c.StuckSeconds = v
 	case IDFacing:
 		c.FacingHoldS = v
+	case IDIdleShare:
+		c.IdleSharePct = v
+	case IDInterruptCover:
+		c.InterruptCoverPct = v
+	case IDTauntLatency:
+		c.TauntLatencyS = v
+	case IDCCHold:
+		c.CCHoldPct = v
+	case IDPetThreat:
+		c.PetThreatPct = v
 	default:
 		return fmt.Errorf("no threshold for check %q (have %s)", id, strings.Join(thresholdIDs, ", "))
 	}
@@ -85,7 +110,7 @@ func (c *Config) Set(id string, v float64) error {
 
 // Score runs every check over the trace.
 func Score(f *trace.File, c Config) []trace.Check {
-	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c)}
+	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c), spellsCheck(f, c)}
 	for i := range cs {
 		if cs[i].FirstMS == 0 && len(cs[i].Evidence) > 0 {
 			cs[i].FirstMS = cs[i].Evidence[0]
@@ -406,8 +431,18 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 	var worstWho string
 	var ev []int64
 	spans := map[string]bool{}
+	combatFrames := 0
 	for _, fr := range f.Frames {
+		alive, inCombat := tankState(fr, tank)
+		if inCombat {
+			combatFrames++
+		}
 		if !inPull(fr.T) {
+			open2 = map[string]int64{}
+			continue
+		}
+		// A tank that is dead (or not in the frame) holds nothing: its death is not threat lost to a non-tank.
+		if tank != "" && !alive {
 			open2 = map[string]int64{}
 			continue
 		}
@@ -419,6 +454,12 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 			haveThreat = true
 			holder := h.Threat[0].G
 			if tank == "" || !member[holder] || holder == tank {
+				continue
+			}
+			// The mob must be on the holder: a mob that still swings at the tank, or that has no target (polymorphed, fleeing,
+			// evading), is not threat lost to a non-tank. A tie with the tank is the tank's: the core keeps the tie in insertion
+			// order, so the holder is listed first although the mob is still the tank's within the 110 %/130 % rule.
+			if !h.Combat || h.Target != holder || tiedWithTank(h.Threat, tank) {
 				continue
 			}
 			seen[h.G] = true
@@ -449,8 +490,44 @@ func threatOffTank(f *trace.File, c Config) trace.Check {
 	if worstWho != "" {
 		d = fmt.Sprintf("%s held the top threat of a mob for %.0f s (tank %s)", worstWho, worst, f.Name(tank))
 	}
+	// The rate makes runs of different lengths comparable: the episodes per hour the tank spends in combat.
+	interval := f.Header.IntervalMS
+	if interval <= 0 {
+		interval = 1000
+	}
+	combatS := float64(combatFrames) * float64(interval) / 1000
+	if combatS > 0 {
+		d += fmt.Sprintf("; %d spans in %.0f s of tank combat, %.0f per tank-combat-hour", len(spans), combatS, float64(len(spans))*3600/combatS)
+	}
 	fail := worst > c.ThreatOffTankS
 	return trace.Check{ID: id, Name: name, Verdict: verdict(fail), Count: countIf(fail, len(spans)), Value: round1(worst), Threshold: c.ThreatOffTankS, Unit: "s", Detail: d, Evidence: ev}
+}
+
+// tankState reads the tank in a frame: whether it is alive and whether it is in combat. A frame that does not list the tank says neither.
+func tankState(fr trace.Frame, tank string) (alive, combat bool) {
+	if tank == "" {
+		return false, false
+	}
+	for _, b := range fr.Bots {
+		if b.G == tank {
+			return b.Alive, b.Alive && b.Combat
+		}
+	}
+	return false, false
+}
+
+// tiedWithTank says whether the tank sits level with the top of a threat list: the values are raw threat as a share of the top, so an
+// equal share is a tie, and a tie between the tank and the holder counts as the tank's.
+func tiedWithTank(thr []trace.Threat, tank string) bool {
+	if tank == "" || len(thr) < 2 {
+		return false
+	}
+	for _, t := range thr[1:] {
+		if t.G == tank {
+			return t.Pct == thr[0].Pct
+		}
+	}
+	return false
 }
 
 // ---- deaths and wipes ----

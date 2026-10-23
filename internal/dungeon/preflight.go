@@ -149,9 +149,20 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 	}
 	began := d.clk.Now()
 	pf := &Preflight{Mode: mode, OK: true}
-	maintenanceOn := true
+	maintenanceOn := d.preflightMaintains()
+	maintenanceNote := "not sent"
+	if !maintenanceOn {
+		// An observed run's preflight, by default: `.bot maintenance` walks each bot to a vendor, and hires autogeared a moment ago
+		// scatter over the maps, which pauses the run leader ("the lead bot is not on the plan's map", #253). The inventory and
+		// talent reads below still run; observe.maintenance brings maintenance back.
+		maintenanceNote = "not sent (observe mode: observe.maintenance is off)"
+		d.rep.note("preflight: .bot maintenance skipped (observe mode: off by default, it scatters the party to vendors); pass observe.maintenance to send it")
+	}
+	// Before the maintenance orders, not after: `.bot maintenance` walks the hires to vendors, they leave the object store, and the faction
+	// check would read no race and skip its warning (#266). The check needs only the first frame's party and what is in view now.
+	d.checkPartyStrength(pf)
 	for _, m := range d.fr.Party {
-		b := PreflightBot{Name: m.Name, Maintenance: "not sent"}
+		b := PreflightBot{Name: m.Name, Maintenance: maintenanceNote}
 		if maintenanceOn {
 			b.Maintenance = d.maintain(ctx, bl, m.Name)
 			if b.Maintenance == "disabled" {
@@ -187,6 +198,15 @@ func (d *RemoteDriver) preflight(ctx context.Context) error {
 		return fmt.Errorf("preflight (strict): %s", strings.Join(pf.Warnings, "; "))
 	}
 	return nil
+}
+
+// preflightMaintains says whether the preflight sends `.bot maintenance`: a driven run always does; an observed run only with
+// observe.maintenance (Off by default: the run leader's party must not wander off to vendors, #253).
+func (d *RemoteDriver) preflightMaintains() bool {
+	if d.observing() {
+		return d.opt.Observe.withDefaults(d.plan).Maintenance
+	}
+	return true
 }
 
 // maintain sends `.bot maintenance name` and reads the verdict.

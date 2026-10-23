@@ -124,6 +124,10 @@ type dungeonRunParams struct {
 	// (AUTO-IMPROVE step 0), so its waypoints and pull order are unchecked. Without it such a plan is refused.
 	AllowDraft bool      `json:"allow_draft,omitempty"`
 	FromLeg    *legParam `json:"from_leg,omitempty"`
+	// FromStep is an observed run's exact start step in the run leader's own plan: the step number `.bot run status` shows, from 1
+	// (README "Observe mode"). It is the fallback for a from_leg / from_pull_group whose step cannot be mapped offline (the deployed rows
+	// were exported with other options); observe only, and it excludes from_leg and from_pull_group.
+	FromStep *int `json:"from_step,omitempty"`
 	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
 	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
@@ -278,6 +282,16 @@ type observeParam struct {
 	MaxRunS     float64 `json:"max_run_s,omitempty"`
 	StallS      float64 `json:"stall_s,omitempty"`
 	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
+	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight (and at the hire check); off by default. Maintenance
+	// walks a bot to a vendor for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and
+	// the run leader pauses with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
+	Maintenance bool `json:"maintenance,omitempty"`
+	// AllowFarStart lets a partway start (from_leg, from_pull_group, from_step) go on although the lead bot stands more than 80 yd
+	// from the start step's point; the note says so. Off by default: a party in the wrong place is refused before `run start`.
+	AllowFarStart bool `json:"allow_far_start,omitempty"`
+	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the undo
+	// of a boss `loot off` a crashed run left in place). Off by default. Observe only; a driven run always sends the undo.
+	KeepLootSetting bool `json:"keep_loot_setting,omitempty"`
 }
 
 type dungeonRunResult struct {

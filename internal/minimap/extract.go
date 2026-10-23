@@ -69,7 +69,23 @@ type Layer struct {
 	Kind  string
 	Floor string // "" for the main picture, else the area suffix ("2f")
 	Meta  Meta
-	Img   image.Image
+	// Img is the picture. Run clears it after writing the files, so a run over every instance holds only the metadata;
+	// ListOnly keeps the pictures.
+	Img image.Image
+}
+
+// Label is the layer's short name in the --list table: its kind, what a minimap is made of, and its floor. A minimap
+// with no "from" in its JSON is the old terrain-only picture.
+func (l Layer) Label() string {
+	s := l.Kind
+	if l.Kind == KindMinimap {
+		from := l.Meta.From
+		if from == "" {
+			from = fromTerrain
+		}
+		s += "(" + from + ")"
+	}
+	return s + l.Floor
 }
 
 // Result is what became of one map.
@@ -201,43 +217,62 @@ func Run(o Options) ([]Result, error) {
 	var out []Result
 	for _, r := range want {
 		res := Result{ID: r.ID, Name: r.Name, Dir: r.Dir, Type: r.InstanceType, Kind: KindNone}
+		reasons := map[string]string{} // the reason of every source the map has no image for, for <id>.status.json
 		var notes []string
 		have := map[string][]Layer{}
-		if tiles := trs[strings.ToLower(r.Dir)]; len(tiles) > 0 {
-			img, meta, err := stitch(set, tiles)
-			switch {
-			case err != nil:
+		// The navmesh serves twice: its world box drops WMO placements that stand far outside the map (Frostmane
+		// Hollow's unrelated mini-hives), and its render is the navmesh layer.
+		var polys []NavPoly
+		var navTiles int
+		var navErr error
+		if len(o.MmapsDirs) > 0 {
+			polys, navTiles, navErr = LoadMapPolys(o.MmapsDirs, r.ID)
+		}
+		var nb *navBounds
+		if navErr == nil {
+			nb = navBoundsOf(polys)
+		}
+		fail := func(err error) {
+			if err != nil && res.Error == nil {
 				res.Error = err
-			case isBlank(img):
-				notes = append(notes, "minimap tiles are blank")
-			default:
-				have[KindMinimap] = []Layer{{Kind: KindMinimap, Meta: meta, Img: img}}
 			}
+		}
+		if l, _, ok, reason := minimapSource(set, trs, r.Dir, r.ID, nb, logf); ok {
+			have[KindMinimap] = []Layer{l}
 		} else {
-			notes = append(notes, "no minimap tiles")
+			reasons[KindMinimap] = reason
+			notes = append(notes, reason)
 		}
 		if ls, err := worldMaps(set, wma, r.ID); err != nil {
-			res.Error = err
+			fail(err)
+			reasons[KindWorldMap] = err.Error()
+			notes = append(notes, err.Error())
 		} else if len(ls) > 0 {
 			have[KindWorldMap] = ls
 		} else {
-			notes = append(notes, "no world map picture")
+			reasons[KindWorldMap] = noWorldMapReason
+			notes = append(notes, noWorldMapReason)
 		}
-		if len(o.MmapsDirs) > 0 {
-			polys, n, perr := LoadMapPolys(o.MmapsDirs, r.ID)
-			switch {
-			case perr != nil:
-				res.Error = perr
-			case n == 0:
-				notes = append(notes, "no mmaps")
-			default:
-				nimg, nmeta, rerr := RenderNavmesh(polys, 2, 4096)
-				if rerr != nil {
-					res.Error = rerr
-				} else {
-					nmeta.Tiles = n
-					have[KindNavmesh] = []Layer{{Kind: KindNavmesh, Meta: nmeta, Img: nimg}}
-				}
+		switch {
+		case len(o.MmapsDirs) == 0:
+			reasons[KindNavmesh] = noMmapsReason
+			notes = append(notes, noMmapsReason)
+		case navErr != nil:
+			fail(navErr)
+			reasons[KindNavmesh] = navErr.Error()
+			notes = append(notes, navErr.Error())
+		case navTiles == 0:
+			reasons[KindNavmesh] = "no navmesh picture: the mmaps folder has no tile for this map"
+			notes = append(notes, reasons[KindNavmesh])
+		default:
+			nimg, nmeta, rerr := RenderNavmesh(polys, 2, 4096)
+			if rerr != nil {
+				fail(rerr)
+				reasons[KindNavmesh] = rerr.Error()
+				notes = append(notes, rerr.Error())
+			} else {
+				nmeta.Tiles = navTiles
+				have[KindNavmesh] = []Layer{{Kind: KindNavmesh, Meta: nmeta, Img: nimg}}
 			}
 		}
 		for _, k := range prefer {
@@ -270,10 +305,17 @@ func Run(o Options) ([]Result, error) {
 					res.Error = err
 				}
 			}
+			if err := writeStatus(o.OutDir, r.ID, reasons); err != nil {
+				res.Error = err
+			}
+			// The files are the product; the pixels of a map this big must not all stay in memory until the end.
+			for i := range res.Layers {
+				res.Layers[i].Img = nil
+			}
 		}
 		var kinds []string
 		for _, l := range res.Layers {
-			kinds = append(kinds, l.Kind+l.Floor)
+			kinds = append(kinds, l.Label())
 		}
 		logf("map %d %s [%s]: main %s, images %s %s", r.ID, r.Name, r.Dir, res.Kind, strings.Join(kinds, ","), res.Note)
 		out = append(out, res)
@@ -281,29 +323,94 @@ func Run(o Options) ([]Result, error) {
 	return out, nil
 }
 
-// isBlank reports whether an image has next to nothing on it: at least 98 % of the pixels one colour or transparent.
-func isBlank(img image.Image) bool {
-	b := img.Bounds()
-	counts := map[color.NRGBA]int{}
-	n := 0
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
-			if c.A == 0 {
-				continue
-			}
-			counts[c]++
-			n++
+// One-line reasons for the sources a map often lacks, in the wording the dashboard uses when no status file says more.
+const (
+	noWorldMapReason = "no world map picture: the client has no WorldMapArea row for this map"
+	noMmapsReason    = "no navmesh picture: minimap-extract ran without --mmaps"
+)
+
+// statusFile is the dashboard's <id>.status.json contract: a reason per source that has no picture.
+type statusFile map[string]statusReason
+
+type statusReason struct {
+	Reason string `json:"reason"`
+}
+
+// writeStatus writes <id>.status.json when a source is missing and removes a stale one when every source exists.
+func writeStatus(dir string, id uint32, reasons map[string]string) error {
+	p := filepath.Join(dir, strconv.FormatUint(uint64(id), 10)+".status.json")
+	if len(reasons) == 0 {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	sf := statusFile{}
+	for _, k := range []string{KindMinimap, KindWorldMap, KindNavmesh} {
+		if r := oneLine(reasons[k]); r != "" {
+			sf[k] = statusReason{Reason: r}
 		}
 	}
-	if n == 0 {
+	j, err := json.MarshalIndent(sf, "", " ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, append(j, '\n'), 0o644)
+}
+
+// isBlank reports whether an image has next to nothing on it: at least 98 % of the pixels one colour or transparent.
+// It keeps at most 16 candidate colours (a Misra-Gries summary finds every colour above 1/17 of the pixels, and 98 %
+// is far above that), so a large composed minimap costs no map of all its colours.
+func isBlank(img image.Image) bool {
+	b := img.Bounds()
+	scan := func(f func(color.NRGBA) bool) {
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			for x := b.Min.X; x < b.Max.X; x++ {
+				c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+				if c.A == 0 {
+					continue
+				}
+				if !f(c) {
+					return
+				}
+			}
+		}
+	}
+	cand := map[color.NRGBA]int{}
+	seen := 0
+	scan(func(c color.NRGBA) bool {
+		seen++
+		if _, ok := cand[c]; ok {
+			cand[c]++
+		} else if len(cand) < 16 {
+			cand[c] = 1
+		} else {
+			for k, n := range cand {
+				n--
+				if n <= 0 {
+					delete(cand, k)
+				} else {
+					cand[k] = n
+				}
+			}
+		}
+		return true
+	})
+	if seen == 0 {
 		return true
 	}
 	top := 0
-	for _, v := range counts {
-		top = max(top, v)
+	for c := range cand {
+		n := 0
+		scan(func(p color.NRGBA) bool {
+			if p == c {
+				n++
+			}
+			return true
+		})
+		top = max(top, n)
 	}
-	return float64(top) >= 0.98*float64(n)
+	return float64(top) >= 0.98*float64(seen)
 }
 
 func baseNames(ps []string) []string {

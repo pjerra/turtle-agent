@@ -165,6 +165,7 @@
    "trigger": 45,
    "bosses": [
     3983,
+    61972,
     14693,
     4543
    ],
@@ -179,7 +180,8 @@
    "entrance_tele": "smgy",
    "outside_tele": "ScarletMonastery",
    "notes": [
-    "One of four wings of map 189; the packs are the ones inside the wing's box."
+    "One of four wings of map 189; the packs are the ones inside the wing's box.",
+    "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk"
    ]
   },
   {
@@ -191,6 +193,7 @@
    "trigger": 614,
    "bosses": [
     3974,
+    61983,
     6487
    ],
    "bbox": [
@@ -204,7 +207,8 @@
    "entrance_tele": "smlib",
    "outside_tele": "ScarletMonastery",
    "special": [
-    "Houndmaster Loksey's hounds (SPELL_SUMMONSCARLETHOUND)"
+    "Houndmaster Loksey's hounds (SPELL_SUMMONSCARLETHOUND)",
+    "Brother Wystan (61983) is a Turtle addition: EventAI, spell list 180317 (Fireball 8402); he patrols (movement_type 2), the boss step meets him on his path"
    ],
    "notes": [
     "One of four wings of map 189."
@@ -307,9 +311,9 @@
    "handwritten": true,
    "special": [
     "Zum'rah: area trigger 962 makes him hostile",
-    "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz",
+    "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz (its phase is instance data 1 = 7; the plan waits on Nekrum seen, no phase step yet)",
     "Weegli's gossip (or Bly's) has him blow the End Door for Ukorz and Ruuzlu",
-    "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; skipped without it)"
+    "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; it drops from Qiaga the Keeper 7996 outside the instance and 9241 must be used to make 9240, so no bot run can obtain it; skipped without give_items)"
    ]
   },
   {

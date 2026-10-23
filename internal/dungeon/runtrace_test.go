@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/tbm"
 	"github.com/pjerra/turtle-agent/internal/trace"
 	"github.com/pjerra/turtle-agent/internal/tracerun"
 )
@@ -43,7 +44,7 @@ func TestTraceOfAGroupRun(t *testing.T) {
 	if rep.RunID != "r-test-1" || stamped == 0 || unstamped != 0 {
 		t.Fatalf("run id %q, %d stamped events, %d without the id", rep.RunID, stamped, unstamped)
 	}
-	if rep.Trace == nil || rep.Trace.Path != filepath.Join(dir, "r-test-1.jsonl") || rep.Trace.Error != "" || len(rep.Trace.Checks) != 10 || rep.Trace.Frames == 0 {
+	if rep.Trace == nil || rep.Trace.Path != filepath.Join(dir, "r-test-1.jsonl") || rep.Trace.Error != "" || len(rep.Trace.Checks) != 11 || rep.Trace.Frames == 0 {
 		t.Fatalf("trace info %+v", rep.Trace)
 	}
 	f, err := trace.Read(rep.Trace.Path)
@@ -80,7 +81,7 @@ func TestTraceOfAGroupRun(t *testing.T) {
 	if f.End == nil || f.End.Reason != "done" || f.End.Seconds <= 0 || f.End.Counter("pulls") != 3 || f.End.Counter("frames") != float64(len(f.Frames)) || f.End.Counter("party") != 3 || f.End.Counter("mobs") == 0 {
 		t.Fatalf("end %+v", f.End)
 	}
-	if len(f.Oracles) != 10 || f.Oracles[0].ID == "" {
+	if len(f.Oracles) != 11 || f.Oracles[0].ID == "" {
 		t.Fatalf("oracles %+v", f.Oracles)
 	}
 	var s trace.Summary
@@ -88,7 +89,7 @@ func TestTraceOfAGroupRun(t *testing.T) {
 	if err != nil || json.Unmarshal(b, &s) != nil {
 		t.Fatalf("summary: %v %s", err, b)
 	}
-	if s.Run != "r-test-1" || s.Src != "agent" || s.Status != "complete" || s.EndReason != "done" || s.Plan != "t" || len(s.Oracles) != 10 || s.TraceFile != "r-test-1.jsonl" || s.Verdict == "" || s.EndUnix == 0 || s.Scorer == "" {
+	if s.Run != "r-test-1" || s.Src != "agent" || s.Status != "complete" || s.EndReason != "done" || s.Plan != "t" || len(s.Oracles) != 11 || s.TraceFile != "r-test-1.jsonl" || s.Verdict == "" || s.EndUnix == 0 || s.Scorer == "" {
 		t.Fatalf("summary %+v", s)
 	}
 	for _, ev := range f.Events { // every event carries the envelope
@@ -222,7 +223,28 @@ func TestTraceOfARemoteRun(t *testing.T) {
 	if orders < 3 || answered == 0 || hostiles == 0 || n["walk_start"] == 0 || n["pull_start"] == 0 || n["pull_end"] == 0 || n["roster"] != 1 || threat == 0 {
 		t.Fatalf("orders %d answered %d hostiles %d events %v", orders, answered, hostiles, n)
 	}
-	if f.End == nil || f.End.Counter("orders_sent") == 0 || len(f.Oracles) != 10 {
+	if f.End == nil || f.End.Counter("orders_sent") == 0 || len(f.Oracles) != 11 {
 		t.Fatalf("end %+v oracles %d", f.End, len(f.Oracles))
+	}
+}
+
+// The feed frame keeps the verdict letter and the reason code of the bot's newest action (TB #924), and leaves them out when the module
+// sent none (an older module), so an older trace and a new one read the same.
+func TestFeedFrameKeepsTheActionVerdict(t *testing.T) {
+	fr := tbm.ViewFrame{Seq: 3, Party: []tbm.PartyRec{
+		{GUID: 1, Name: "Mage", Spell: 837, Action: "frostbolt", Result: "F", Reason: "oom", State: "c", HP: 1, MaxHP: 2},
+		{GUID: 2, Name: "Old", Action: "stay", State: "c", HP: 1, MaxHP: 2},
+	}}
+	out := feedFrame(fr)
+	if out.Bots[0].Res != "F" || out.Bots[0].Why != "oom" || out.Bots[0].Action != "frostbolt" || out.Bots[0].Cast != 837 {
+		t.Fatalf("%+v", out.Bots[0])
+	}
+	if out.Bots[1].Res != "" || out.Bots[1].Why != "" {
+		t.Fatalf("%+v", out.Bots[1])
+	}
+	line, err := json.Marshal(out.Bots[0])
+	old, _ := json.Marshal(out.Bots[1])
+	if err != nil || !strings.Contains(string(line), `"res":"F"`) || !strings.Contains(string(line), `"why":"oom"`) || strings.Contains(string(old), `"res"`) || strings.Contains(string(old), `"why"`) {
+		t.Fatalf("%s | %s", line, old)
 	}
 }

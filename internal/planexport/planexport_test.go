@@ -286,6 +286,70 @@ func TestUldaman(t *testing.T) {
 	t.Logf("uldaman: %d legs, %d steps, %d rows, %d warnings", len(r.Legs), len(r.Steps), r.Count(), len(res.Warnings))
 }
 
+// TestUldamanPullOrderExport: the rows of the 2026-10-21 pull order (PLAN-ULDAMAN-GRIMLOK) come out in the order the leg walks: the Stone Keeper leg pulls the
+// Steward, the Sculptor trio and the two southern Rocksmashers (each after its move row) before its boss row, the galgann leg no longer pulls the first two,
+// Grimlok's corridor is the seven pulls of the plan with the moved keepers_door groups after the first, and the keepers_door leg starts at its old group 3.
+func TestUldamanPullOrderExport(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/uldaman.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "turtle-agent test dungeons/uldaman.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := func(leg int) (out []string) {
+		for _, s := range res.Rows.Steps {
+			if s.Leg != leg {
+				continue
+			}
+			switch s.Kind {
+			case KindPull:
+				out = append(out, fmt.Sprintf("pull %v %.1f,%.1f r%g", s.Entries, s.X, s.Y, s.Radius))
+			case KindMove:
+				out = append(out, fmt.Sprintf("move %.1f,%.1f", s.X, s.Y))
+			case KindBoss:
+				out = append(out, fmt.Sprintf("boss %d", s.Entry))
+			}
+		}
+		return out
+	}
+	// check wants the rows in a row somewhere in the leg's rows (the leg's `to` move row comes first).
+	check := func(leg int, want ...string) {
+		t.Helper()
+		got := strings.Join(rows(leg), "\n") + "\n"
+		if !strings.Contains(got, strings.Join(want, "\n")+"\n") {
+			t.Errorf("leg %d rows:\n%s\nwant in a row:\n%s", leg, got, strings.Join(want, "\n"))
+		}
+	}
+	// ancient_stone_keeper (leg 6): after the Rocksmasher at -43.6 237.3 come the Steward, the trio and the southern pair, then the boss approach and the boss.
+	check(6,
+		"pull [7011] -43.6,237.3 r10",
+		"move -64.0,241.0", "pull [4860] -39.6,272.8 r10",
+		"move -58.0,241.0", "pull [7012 7011] -43.0,263.9 r18.9",
+		"move -64.0,227.0", "pull [7011] -46.4,202.9 r13.4",
+		"move -73.3,240.2", "boss 7206")
+	for _, r := range rows(7) {
+		if strings.Contains(r, "[4860]") || strings.Contains(r, "-39.6,272.8") {
+			t.Errorf("galgann still pulls the Steward: %s", r)
+		}
+	}
+	// galgann (leg 7) starts at the Rocksmasher pack at -18.8 276.5 (its first group, the Keeper's Rocksmasher, is a repeat that has no row).
+	check(7, "pull [7012 7011] -18.8,276.5 r15.5")
+	// grimlok (leg 8): pull 0 with the third Brawler, the two moved groups from their west stands, the merged patrol and trio, the east trio, the three, the pair.
+	check(8,
+		"pull [4853 4855] 35.8,370.6 r16",
+		"move 28.0,360.0", "pull [4855 4853] 49.1,343.5 r12.8",
+		"move 33.0,354.0", "pull [4855] 39.5,327.5 r15.1",
+		"move 19.1,366.4", "pull [4855 4853] 58.6,374.4 r18",
+		"move 50.8,379.3", "pull [4855 4853] 83.2,401.9 r15.3",
+		"pull [4855 4853] 51.7,420.1 r16",
+		"move 48.0,419.0", "pull [4853 4855] 38.8,442.0 r13.5",
+		"boss 4854")
+	// keepers_door (leg 9) begins with its old pull group 3 from the stand at 47.6 357.3.
+	check(9, "move 47.6,357.3", "pull [4855 4853] 44.3,308.4 r15.9")
+}
+
 // TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
 // ai_dungeon_plan), as comma lists like `entries`, in the column order of that migration, and they read back.
 func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
@@ -352,8 +416,7 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 	}
 }
 
-// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg: the legs after it (the stairs event, Bly, the End Door,
-// Ukorz) use the gossip step and unit waits, which the run leader has no step for.
+// zulfarrakThroughZumrah is the shipped Zul'Farrak plan cut after the zumrah leg (the tests of the legs up to Zum'rah).
 func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	t.Helper()
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
@@ -370,9 +433,11 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	return nil
 }
 
-// The whole shipped Zul'Farrak plan is exported up to the zumrah leg: the legs after it (the stairs event) use a unit wait and the gossip
-// step, which the run leader has no step for, so the export is cut before the first of them, with a note that names the leg and the step.
-func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
+// The whole shipped Zul'Farrak plan is exported up to the weegli_door leg: the two waits of the stairs event carry their holds (instance
+// data 1, the pyramid phase), Weegli's wait carries the hold on phase 8, and his gossip is a gossip row by option number. The bly leg begins with
+// a unit wait without a hold (Weegli gone), which the run leader has no step for, so the export is cut before it, with a note that names the leg
+// and the step (the plan's gahzrilla leg is optional and takes no row number, so bly is row leg 15 of plan leg 16); ukorz after it is not in the rows (TestZulfarrakWithoutBlyReachesUkorz).
+func TestZulfarrakIsCutAtBly(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
@@ -381,22 +446,90 @@ func TestZulfarrakIsCutAfterZumrah(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole := buildWhole(t, zulfarrakThroughZumrah(t))
-	if len(res.Rows.Legs) != 11 || res.Rows.Legs[10].Name != "zumrah" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
-		t.Fatalf("%d legs, %d steps (the plan through zumrah: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	whole := buildWhole(t, zulfarrakThrough(t, "weegli_door"))
+	if len(res.Rows.Legs) != 15 || res.Rows.Legs[14].Name != "weegli_door" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
+		t.Fatalf("%d legs, %d steps (the plan through weegli_door: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
 	}
-	for _, want := range []string{"exported legs 0-10 (zumrah) only", "cut before leg 11 (stairs)", "after_boss[1]: wait_for.unit has no run leader step (unit 7607 seen)", "5 after it"} {
+	for _, want := range []string{"exported legs 0-14 (weegli_door) only", "cut before leg 15 (bly)", "steps[0]: wait_for.unit has no run leader step (unit 7607 gone)", "1 after it"} {
 		if !strings.Contains(res.Cut, want) {
 			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
 		}
 	}
-	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 11 (stairs)") {
+	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 15 (bly)") {
 		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
 	}
+}
+
+// With the bly leg left out (the exporter's skip-legs option: the run leader has no boss that turns hostile after his gossip) the shipped plan
+// exports whole: the weegli_door leg is the hold on the pyramid phase 8 at Weegli's place, the gossip 7607 option 1 (the plan's option 0), and the
+// End Door wait; the ukorz leg follows it in plain kinds.
+func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, SkipLegs: []string{"bly"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
+	}
+	legs := res.Rows.Legs
+	if len(legs) != 16 || legs[14].Name != "weegli_door" || legs[15].Name != "ukorz" || legs[15].Leg != 15 {
+		t.Fatalf("legs %+v", legs)
+	}
+	var door []string
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 14 {
+			door = append(door, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
+		}
+	}
+	want := []string{
+		"move 0 1884 1212 9 r0 p0 f0 t0 []",
+		"hold 1 1877.5 1199.6 8.9 r30 p8 f8 t600 [7787 7788 7789 8876 8877]",
+		"gossip 7607 1877.52 1199.63 8.87 r0 p1 f0 t0 []",
+		"wait_object 146084 1854.5 1142.9 16.1 r0 p1 f0 t60 []",
+	}
+	if !slices.Equal(door, want) {
+		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
+	}
+	ukorz := kinds(res.Rows, 15)
+	if len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss || slices.Contains(ukorz, KindGossip) {
+		t.Errorf("ukorz kinds %v", ukorz)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
+		return strings.Contains(w, "leg 16 (bly): left out of the export by the exporter's skip-legs option")
+	}) {
+		t.Errorf("no warning for the skipped leg: %v", res.Warnings)
+	}
+	// The skipped leg's attributes are not warned about: its gossip stand, its skip list and the like are not in any row.
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "leg 16 (bly)") && !strings.Contains(w, "left out of the export") {
+			t.Errorf("a warning about the skipped leg: %s", w)
+		}
+	}
+}
+
+// zulfarrakThrough is the shipped Zul'Farrak plan cut after the leg named last.
+func zulfarrakThrough(t *testing.T, last string) *dungeon.Plan {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, l := range p.Legs {
+		if l.Name == last {
+			p.Legs = p.Legs[:i+1]
+			return p
+		}
+	}
+	t.Fatalf("the plan has no %s leg", last)
+	return nil
 }
 
 // buildWhole builds a plan that has to export whole.
@@ -477,6 +610,58 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
 	}
+}
+
+// The pool-stairs approach rows reach the run leader: in the exported velratha leg the two packs each have their approach moves right
+// before the pull row (the STUCK #2 fix; the five-mob pack has three since the island Shadowhunter 81610 is left alone, the four-mob pack
+// two). The live 86-step plan's step 83 was this pull group; with the plan's approach points the exported leg grows by move rows and the
+// pull is that many rows later.
+func TestZulfarrakPoolStairsApproachRows(t *testing.T) {
+	p := zulfarrakThroughZumrah(t)
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := -1
+	for i, l := range res.Rows.Legs {
+		if l.Name == "velratha" {
+			leg = i
+		}
+	}
+	if leg < 0 {
+		t.Fatal("no velratha leg in the rows")
+	}
+	idx := func(entries string) int {
+		for i, s := range res.Rows.Steps {
+			if s.Leg == leg && s.Kind == KindPull && rowsEntries(s.Entries) == entries {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, tc := range []struct{ entries, first, last string }{
+		{"5650,7246,8095,5649", "1598.0 1028.0 9.6", "1606.0 1040.0 10.3"},
+		{"7246,5650", "1588.0 1080.0 9.1", "1584.0 1088.0 9.1"},
+	} {
+		i := idx(tc.entries)
+		if i < 2 {
+			t.Fatalf("pull %s at %d", tc.entries, i)
+		}
+		a, b := res.Rows.Steps[i-2], res.Rows.Steps[i-1]
+		if a.Kind != KindMove || b.Kind != KindMove || !strings.HasSuffix(a.Comment, " approach") ||
+			fmt.Sprintf("%.1f %.1f %.1f", a.X, a.Y, a.Z) != tc.first || fmt.Sprintf("%.1f %.1f %.1f", b.X, b.Y, b.Z) != tc.last || a.Seq+2 != res.Rows.Steps[i].Seq {
+			t.Fatalf("pull %s: %+v %+v before %+v", tc.entries, a, b, res.Rows.Steps[i])
+		}
+	}
+}
+
+// rowsEntries is a step row's entries as the plan's comma list.
+func rowsEntries(e []uint32) string {
+	s := make([]string, len(e))
+	for i, v := range e {
+		s[i] = fmt.Sprint(v)
+	}
+	return strings.Join(s, ",")
 }
 
 func buildDropLoot(t *testing.T, p *dungeon.Plan) Rows {
@@ -724,5 +909,324 @@ func TestLongHopStartsAtTheLastFight(t *testing.T) {
 	}
 	if got := strings.Join(kinds(res.Rows, 1), " "); got != "move boss" {
 		t.Fatalf("leg 1 %s", got)
+	}
+}
+
+// The run leader numbers the rows it loaded: an optional leg takes no leg number and its legs close up, and a pull group starts at its
+// first row (its approach move, else its pull row). An observer's from_leg / from_pull_group map through these.
+func TestLegNumberAndGroupStep(t *testing.T) {
+	const groups = `{"version":1,"name":"Groups","status":"live-checked (test)","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"first","to":{"x":10,"y":0,"z":0},"pull_groups":[
+	  {"entries":[100],"positions":[{"x":20,"y":0,"z":0}],"approach":[{"x":15,"y":0,"z":0}]},
+	  {"entries":[101],"positions":[{"x":25,"y":0,"z":0}]}]},
+	 {"name":"gong","to":{"x":0,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":900,"near":{"x":2,"y":0,"z":0},"requires_item":{"entry":9240}}}],"boss":{"entry":7,"position":{"x":5,"y":0,"z":0}}},
+	 {"name":"third","to":{"x":30,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":40,"y":0,"z":0}]}]}]}`
+	p := parsePlan(t, groups)
+	r := build(t, p)
+	if r.StepCount() != 6 || len(r.Steps) != 6 {
+		t.Fatalf("%d steps: %+v", r.StepCount(), r.Steps)
+	}
+	for leg, want := range map[int]int{0: 0, 2: 1} {
+		if got, ok := r.LegNumber(p, leg); !ok || got != want {
+			t.Errorf("leg %d: number %d ok %v, want %d", leg, got, ok, want)
+		}
+	}
+	if _, ok := r.LegNumber(p, 1); ok {
+		t.Error("the optional leg took a number")
+	}
+	for _, c := range []struct{ leg, group, want int }{
+		{0, 0, 2}, // the move to the leg (1), then the group's approach move
+		{0, 1, 4}, // the second group's pull row
+		{2, 0, 6}, // second leg written, its pull row after the leg's move
+	} {
+		got, ok := r.GroupStep(p, c.leg, c.group)
+		if !ok || got != c.want {
+			t.Errorf("leg %d group %d: step %d ok %v, want %d", c.leg, c.group, got, ok, c.want)
+		}
+	}
+	if _, ok := r.GroupStep(p, 1, 0); ok {
+		t.Error("the optional leg has no group step")
+	}
+	if _, ok := r.GroupStep(p, 0, 2); ok {
+		t.Error("a group the leg does not have has a step")
+	}
+}
+
+// The group starts at the walk left in front of it, not at its pull row (C): the live Wailing Caverns rows put three "approach path" rows
+// before leg 9's group 4 (steps 199-201, pull at 202), and cut hops put "path" rows before a long move of the approach.
+func TestGroupStepStartsAtTheWalkBeforeTheGroup(t *testing.T) {
+	groups := 9
+	var groupsJSON []string
+	for i := 0; i < groups; i++ {
+		groupsJSON = append(groupsJSON, fmt.Sprintf(`{"entries":[%d],"positions":[{"x":%d,"y":0,"z":0}]}`, 100+i, 20+i))
+	}
+	p := parsePlan(t, `{"version":1,"name":"Shape","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"west_column","to":{"x":10,"y":0,"z":0},"pull_groups":[`+strings.Join(groupsJSON, ",")+`]}]}`)
+	// The rows of the live migration's leg 9, steps 192-206.
+	row := func(kind, comment string) StepRow { return StepRow{Leg: 0, Kind: kind, Comment: comment} }
+	r := Rows{Legs: []LegRow{{Plan: "wailing_caverns", Leg: 0, Name: "west_column"}}, Steps: []StepRow{
+		row(KindMove, "to"),
+		row(KindPull, "pull group 0"), row(KindPull, "pull group 1"), row(KindPull, "pull group 2"),
+		row(KindMove, "approach path"), row(KindMove, "approach path"),
+		row(KindPull, "pull group 3"),
+		row(KindMove, "approach path"), row(KindMove, "approach path"), row(KindMove, "approach path"),
+		row(KindPull, "pull group 4"),
+		row(KindPull, "pull group 5"), row(KindPull, "pull group 6"), row(KindPull, "pull group 7"), row(KindPull, "pull group 8"),
+	}}
+	if n, ok := r.GroupStep(p, 0, 4); !ok || n != 8 { // 192+7: steps 199-201 are the approach, 202 the pull
+		t.Fatalf("leg 9 group 4: step %d ok %v, want the first approach row (8 in the shape; 202 in the live plan)", n, ok)
+	}
+	// A group right after an anchor keeps its own approach row, and one with no walk in front is its pull row.
+	if n, ok := r.GroupStep(p, 0, 2); !ok || n != 4 {
+		t.Fatalf("group 2: %d %v, want 4 (its own pull row, no walk in front)", n, ok)
+	}
+}
+
+// The same through Build: with --approach-hops the cut rows before a far pack are part of the group (#248 from_pull_group).
+func TestGroupStepWithApproachHops(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"Hops","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"first","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`)
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move pull" {
+		t.Fatalf("kinds %v", got)
+	}
+	if n, ok := res.Rows.GroupStep(p, 0, 0); !ok || n != 2 {
+		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 4)", n, ok)
+	}
+}
+
+// TestExactViaIsAFlaggedMove: an exact via point is a move row with FlagExact, right before its move_direct; the flag survives the SQL
+// round trip; Validate refuses the flag on any other kind and an exact move that is not followed by its move_direct.
+func TestExactViaIsAFlaggedMove(t *testing.T) {
+	p := parsePlan(t, strings.Replace(small, `{"x":1,"y":0,"z":0}`, `{"x":1,"y":0,"z":0,"exact":true}`, 1))
+	r := build(t, p)
+	if s := r.Steps[0]; s.Kind != KindMove || s.X != 1 || s.Flags != FlagExact || !strings.Contains(s.Comment, "exact") {
+		t.Fatalf("exact via %+v", s)
+	}
+	if s := r.Steps[1]; s.Kind != KindMoveHopExact || s.Flags != 0 || s.X != 10 {
+		t.Fatalf("its direct step %+v", s)
+	}
+	for i, s := range r.Steps {
+		if i != 0 && s.Flags&FlagExact != 0 {
+			t.Fatalf("step %d carries the exact flag: %+v", i, s)
+		}
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil || back[0].Steps[0].Flags != FlagExact {
+		t.Fatalf("round trip: %v %+v", err, back[0].Steps[0])
+	}
+	// Without exact in the plan, no row has the flag and the direct step stays a move_direct (the plain mapping is unchanged).
+	plain := build(t, parsePlan(t, small))
+	for _, s := range plain.Steps {
+		if s.Flags&FlagExact != 0 || s.Kind == KindMoveHopExact {
+			t.Fatalf("exact without exact: %+v", s)
+		}
+	}
+	if plain.Steps[1].Kind != KindMoveDirect {
+		t.Fatalf("plain direct step %+v", plain.Steps[1])
+	}
+	// The pairing both ways: an exact move before a plain move_direct, and a move_hop_exact after a plain move, are refused.
+	bad := r
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[1].Kind = KindMoveDirect
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
+		t.Fatalf("exact move before a plain move_direct: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[0].Flags = 0
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "must follow the exact move") {
+		t.Fatalf("move_hop_exact after a plain move: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps[1].Flags = FlagExact // on the move_hop_exact
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "the exact flag is for a move row") {
+		t.Fatalf("exact on a move_direct: %v", err)
+	}
+	bad.Steps = slices.Clone(r.Steps)
+	bad.Steps = append(bad.Steps[:1:1], append([]StepRow{{Plan: r.Steps[0].Plan, Leg: 0, Kind: KindMove, X: 5}}, r.Steps[1:]...)...)
+	if err := Validate(bad); err == nil || !strings.Contains(err.Error(), "followed by the move_hop_exact") {
+		t.Fatalf("a row between the exact move and its direct step: %v", err)
+	}
+}
+
+// TestWailingCavernsSerpentisFootIsExact: the export of the real plan carries the live-proven hop as the exact foot, then the
+// move_direct to the landing, in the serpentis leg.
+func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/wailing_caverns.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legOf := map[int]string{}
+	for _, l := range res.Rows.Legs {
+		legOf[l.Leg] = l.Name
+	}
+	var exact []StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact == 0 {
+			continue
+		}
+		exact = append(exact, s)
+		n := res.Rows.Steps[i+1]
+		if legOf[s.Leg] != "serpentis" || s.X != -293.3 || s.Y != 0.5 || s.Z != -58 {
+			t.Fatalf("exact row %+v (leg %s)", s, legOf[s.Leg])
+		}
+		if n.Kind != KindMoveHopExact || n.X != -287.5 || n.Y != 5 || n.Z != -63.6 {
+			t.Fatalf("after the foot: %+v", n)
+		}
+	}
+	if len(exact) != 1 {
+		t.Fatalf("%d exact rows", len(exact))
+	}
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{"skip (leg 0 (", "patrol (", "boss.tactics (", "fleers (plan", "not in the rows"} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("warnings lack %q:\n%s", want, w)
+		}
+	}
+	if strings.Contains(w, "check_skip") {
+		t.Fatalf("check_skip is the plan check's only and is not warned:\n%s", w)
+	}
+}
+
+// A leg's `leave` list has no place in the rows: it is the leg row's comment (free text, round-trips through the SQL) and one warning that
+// says the run leader does not read it. A leg without one has no comment and no warning.
+func TestLeaveIsTheLegCommentAndWarned(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"},{"entry":5,"at":{"x":3,"y":4,"z":0},"why":"x"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}]}]},
+ {"name":"b","to":{"x":30,"y":0,"z":0},"boss":{"entry":7000,"position":{"x":40,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := res.Rows.Legs[0].Comment; c != "leave (not read by the run leader yet): 7246 spawn 81610 at 1591 1047.7: island Shadowhunter; 5 at 3 4: x" {
+		t.Errorf("leg comment %q", c)
+	}
+	if c := res.Rows.Legs[1].Comment; c != "" {
+		t.Errorf("a leg without leave has the comment %q", c)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	if !strings.Contains(w, "leave (leg 0 (a) 7246 at 1591.0 1047.7; leg 0 (a) 5 at 3.0 4.0): not in the rows: no column or step kind") || strings.Count(w, "leave (") != 1 {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+	back, err := Parse(WriteSQL([]Rows{res.Rows}))
+	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	// A long reason is cut to the comment column, not refused.
+	long := strings.Repeat("x", 400)
+	res, err = Build(parsePlan(t, strings.Replace(js, "island Shadowhunter", long, 1)), Options{Source: "test"})
+	if err != nil || len(res.Rows.Legs[0].Comment) > MaxComment {
+		t.Fatalf("%v, comment %d bytes", err, len(res.Rows.Legs[0].Comment))
+	}
+}
+
+// TestUnexpressedAttributesAreWarned: every plan attribute the rows cannot carry is one warning naming where it stands; what is no run
+// attribute (notes, check_skip, equiv) is not; an exported leg only (a cut leg's attributes are not the rows').
+func TestUnexpressedAttributesAreWarned(t *testing.T) {
+	const js = `{"version":1,"name":"attrs","status":"live-checked (test)","map":70,"entrance":{"x":0,"y":0,"z":0},
+ "level_band":[20,25],"fleers":[300],"no_cc":[301],"notes":["a note"],
+ "legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"skip":[200],"leftover_entries":[201],"rest":{"health":70},"notes":["leg note"],
+  "via":[{"x":5,"y":0,"z":0,"check_skip":"a hole"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}],"equiv":"e1"}],
+  "steps":[{"loot_object":{"entry":902,"near":{"x":21,"y":0,"z":0},"stand":{"x":20,"y":0,"z":0}}},
+   {"ritual":{"entry":903,"position":{"x":22,"y":0,"z":0},"participants":3,"stand":{"x":21,"y":0,"z":0}}}]},
+ {"name":"b","to":{"x":30,"y":0,"z":0},"skip":[202],"boss":{"entry":7000,"position":{"x":40,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"level_band (plan [20 25])", "fleers (plan [300])", "no_cc (plan [301])",
+		"skip (leg 0 (a) [200]; leg 1 (b) [202]): not in the rows", "leftover_entries (leg 0 (a) [201])", "rest (leg 0 (a))",
+		"stand (loot_object, ritual) (leg 0 (a) steps[0]; leg 0 (a) steps[1])",
+	} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("warnings lack %q:\n%s", want, w)
+		}
+	}
+	for _, not := range []string{"check_skip", "equiv", "note"} {
+		if strings.Contains(w, not) {
+			t.Fatalf("%q is no run attribute and is not warned:\n%s", not, w)
+		}
+	}
+	if n := strings.Count(w, "skip ("); n != 1 {
+		t.Fatalf("one warning per attribute, %d for skip:\n%s", n, w)
+	}
+}
+
+// TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_hop_exact (it is a straight line, like a
+// move_direct): the exact foot stays right before its hop.
+func TestRouteLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"lavahop","status":"live-checked (test)","map":389,"entrance":{"x":0,"y":0,"z":0},
+ "avoid":[{"name":"basin","min":{"x":200,"y":-5,"z":-9},"max":{"x":210,"y":5,"z":-1},"why":"lava"}],
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":10,"y":0,"z":-4,"direct":true}],"to":{"x":20,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":30,"y":0,"z":-4}}}]}`
+	route := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil // a via point on every hop it is asked about
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && res.Rows.Steps[i+1].Kind != KindMoveHopExact {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
+	}
+}
+
+// TestKindsFitTheColumn: ai_dungeon_step.kind is a varchar(16); every kind the exporter writes fits it, and Validate refuses one that
+// does not (move_direct_exact, 17 characters, was the first name of the exact hop's kind).
+func TestKindsFitTheColumn(t *testing.T) {
+	for _, k := range []string{KindMove, KindMoveDirect, KindMoveHopExact, KindPull, KindBoss, KindLoot, KindOpen, KindUseItem, KindWaitObject,
+		KindWaitClear, KindRest, KindRitual, KindHold} {
+		if len(k) > MaxKind {
+			t.Fatalf("kind %q is %d characters", k, len(k))
+		}
+	}
+	r := Rows{Plan: PlanRow{Plan: "q", Map: 1}, Legs: []LegRow{{Plan: "q"}}, Steps: []StepRow{{Plan: "q", Kind: "move_direct_exact"}}}
+	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "varchar") && !strings.Contains(err.Error(), "kind is longer") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// TestCutterLeavesTheExactHopAlone: with a cutter, a move_hop_exact farther than MoveGapWarnYd from its exact move gets no cut points
+// (the hop is indivisible): Build succeeds and the exact move stays right before its hop; the hop is the anchor of the next hop.
+func TestCutterLeavesTheExactHopAlone(t *testing.T) {
+	const js = `{"version":1,"name":"farhop","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","via":[{"x":5,"y":0,"z":0,"exact":true},{"x":20,"y":0,"z":-4,"direct":true}],"to":{"x":75,"y":0,"z":-4},
+  "boss":{"entry":7000,"position":{"x":80,"y":0,"z":-4}}}]}`
+	// dungeon.Parse holds a direct via to 25 yd, so the 65 yd hop is set on the parsed plan: the exporter must not rely on that limit.
+	p := parsePlan(t, js)
+	p.Legs[0].Via[1].X = 70
+	calls := 0
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		calls++
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Flags&FlagExact != 0 && (res.Rows.Steps[i+1].Kind != KindMoveHopExact || res.Rows.Steps[i+1].X != 70) {
+			t.Fatalf("a row between the foot and its hop: %+v", res.Rows.Steps[i+1])
+		}
 	}
 }

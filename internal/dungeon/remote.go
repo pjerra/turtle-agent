@@ -158,6 +158,11 @@ type RemoteOptions struct {
 	// Observe makes the run a watch of the TortoiseBots run leader instead of a driven one (observe.go): after the same prepare, bind and
 	// enter, `.bot run start <plan>` goes out and the agent sends no order, it reads the TBM:RUN status. Nil: a driven (commander) run.
 	Observe *ObserveSpec
+	// StartFrom resolves the `from ...` words of an observed run's `.bot run start <plan> [from ...]` when the run starts partway
+	// (from_leg, from_pull_group or from_step, #248). The run leader counts the steps of its own SQL plan, which the agent's plan legs and
+	// pull groups are not: the resolver gets the step count the server listed for the plan and returns the words ("" for the first step).
+	// Nil: the run starts at the plan's first step. It is checked before anything is hired.
+	StartFrom StartFromResolver
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -531,6 +536,7 @@ type RemoteDriver struct {
 
 	bound       bool
 	unbinding   bool
+	gpsWarned   bool // the note that the start's z check could not read .gps is written
 	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
 	// groupLocked is set when the enter phase begins to send the party in: no leave, invite or bind may follow until the run ends.
 	groupLocked   bool
@@ -619,11 +625,12 @@ type RemoteDriver struct {
 	seenHostile   map[packet.GUID]uint32     // units listed alive in the feed at some point of the run, with their entry (the team gate's evidence)
 	killedGUID    map[packet.GUID]bool       // units a won pull killed
 
-	pts       *ptSampler         // the pull-test try being scored (pulltest.go); nil outside one
-	tr        *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
-	trSeen    uint64             // the feed frame count the trace last took
-	trRoster  bool
-	trStalled bool
+	pts        *ptSampler         // the pull-test try being scored (pulltest.go); nil outside one
+	tr         *tracerun.Recorder // the run id and the trace (nil-safe; no file when tracing is off)
+	trSeen     uint64             // the feed frame count the trace last took
+	trRoster   bool
+	trInstance bool
+	trStalled  bool
 
 	// The progress watchdog (watchdog.go) and the requests its recoveries leave for the loops they interrupt.
 	wd         *watchdog
@@ -632,6 +639,10 @@ type RemoteDriver struct {
 	viewResent bool     // `commander view on` went out again since the feed was last heard from
 
 	obs *observeState // the run leader watch of an observed run (observe.go); nil otherwise
+	// The observed run's partial start (#248): planSteps is the step count the server listed for the plan in `.bot run list`, and start
+	// is how the run leader starts (probeRunLeader asks RemoteOptions.StartFrom with that count). Nil: the first step.
+	planSteps int
+	start     *PartialStart
 
 	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)
