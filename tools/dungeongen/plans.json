@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -915,6 +954,7 @@
    "title": "Stormwind Vault",
    "map": 35,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map35",
    "trigger": 107,
    "bosses": [
@@ -932,11 +972,13 @@
     80852
    ],
    "special": [
-    "vault door and rat doors (GO_VAULT_DOOR, GO_RAT_DOOR_ONE/TWO)",
-    "Tham'Grarr carries npc_flags (gossip): his fight is started by gossip"
+    "vault door 4000509 opens when the four bosses Black Bride/Tham'Grarr/Aszosh/Damian are dead (instance_stormwind_vault; its OnCreatureDeath sets all four flags on the first of them); Arc'tiras closes it on aggro and is optional",
+    "rat trap GO 3000273 at -1.697 116.335 -40.0507 teleports a player within 5 yd to it, closes the Portcullis Small doors 3000275/3000276 ~20 s and summons 15 Vault Rats 93106",
+    "boss adds with no spawn row: Risen Lackey 10482 (Aszosh 17618), Frigid Guardian 60612 (Arc'tiras), Vault Rat 93106 (rat trap)"
    ],
    "notes": [
-    "Turtle custom 5-man at level 60-62 (Stormwind Vault, outside entrance 107 in Stormwind; 5002 and 5003 are other outside entrances)."
+    "Turtle custom 5-man at level 60-62 (Stormwind Vault, outside entrance 107 in Stormwind; 5002 and 5003 are other outside entrances).",
+    "Hand-written 2026-10-24 from the map-35 spawn census: every pull rebuilt from the 8-yd spawn clusters, radius farthest+0.5 (no pull reaches a neighbour), the Aszosh and Black Bride guards folded into boss.first, the west-wing trash moved to the Tham'Grarr leg and Arc'tiras last (no walk back east through the bride hall)."
    ]
   },
   {
