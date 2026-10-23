@@ -20,7 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+//
+// windhorn_canyon (34, 2026-10-23): the draft was hand-fixed from the pack census (~/TortoiseBots-audit/PREP-WINDHORN-CANYON-2026-10-23.md), not mapped. Most findings are the
+// 2-D radius plus the margin reaching a pack on another floor (the canyon stacks three layers; the row radius cannot exclude them), and the dense Shalk antechamber the fix
+// leaves as 3+2+1 on purpose.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "windhorn_canyon": 34}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

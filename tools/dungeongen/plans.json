@@ -741,6 +741,7 @@
    "title": "Windhorn Canyon",
    "map": 820,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map820",
    "trigger": 5611,
    "bosses": [
