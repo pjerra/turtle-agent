@@ -350,6 +350,57 @@ func TestEntryTargetsWaitFailsAtItsTimeoutNamingTheLastAnswer(t *testing.T) {
 	_ = rep
 }
 
+// entrySealGoneStep is the keystone and a wait for the Seal that may be gone_ok.
+func entrySealGoneStep(timeout int, goneOK bool) []Step {
+	st := entrySealStep(timeout)
+	st[1].WaitFor.GameObject.GoneOK = goneOK
+	return st
+}
+
+// gone_ok: the object is answered ready, then not-found (a script that removes it): done, with the note, long before the timeout.
+func TestEntryTargetsWaitGoneAfterSeenIsDone(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	g.fakeRemote.onTick = func(*fakeRemote) {
+		if len(g.asked) >= 4 && len(g.world) == 2 { // the Seal was answered ready a few times, then the script removed it
+			g.world = g.world[:1]
+		}
+	}
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(60, true)}, Leg{Name: "i", To: Point{20, 20, 0}})
+	rep, err := entryRun(t, g, plan)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if !hasNote(rep, "is gone after it was seen: counted as done (gone_ok)") {
+		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// ... never answered found, it is not gone but not there yet: the wait runs out its timeout.
+func TestEntryTargetsWaitNeverSeenIsNotGone(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	g.world = g.world[:1]
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(20, true)})
+	_, err := entryRun(t, g, plan)
+	if err == nil || !strings.Contains(err.Error(), "waited 20 s for game object 124372") || !strings.Contains(err.Error(), "last cmd state answer: not-found") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// ... and without gone_ok the same removal is a timeout.
+func TestEntryTargetsWaitGoneWithoutTheFlagTimesOut(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	g.fakeRemote.onTick = func(*fakeRemote) {
+		if len(g.asked) >= 4 && len(g.world) == 2 {
+			g.world = g.world[:1]
+		}
+	}
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(20, false)})
+	_, err := entryRun(t, g, plan)
+	if err == nil || !strings.Contains(err.Error(), "waited 20 s for game object 124372") {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestEntryTargetsWaitsForTheAlternativeState(t *testing.T) {
 	for in, want := range map[string]string{"active": "active", "ready": "ready", "active_alt": "alternative"} {
 		if got := wantedState(in); got != want {

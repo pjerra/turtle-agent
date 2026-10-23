@@ -656,6 +656,12 @@ type WaitFor struct {
 type ObjectState struct {
 	ObjectRef
 	State string `json:"state"`
+	// GoneOK counts the object being gone as the wanted state, once the run has seen it: a wait that reads the object found (in any
+	// state) and later not found at all is done. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
+	// Door 18895, which Deathstalker Adamant's escort opens and despawns a few waypoints later) never reads "active" for long. An object
+	// never seen is not gone, only not there yet: the wait runs out its timeout as before. plan-export writes it as the wait_object
+	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries).
+	GoneOK bool `json:"gone_ok,omitempty"`
 }
 
 // HostilesGone waits until no hostile unit is within Radius yards of Center (the player when nil).
@@ -948,7 +954,8 @@ type rawWait struct {
 
 type rawObjState struct {
 	rawRef
-	State string `json:"state"`
+	State  string `json:"state"`
+	GoneOK bool   `json:"gone_ok"`
 }
 
 type rawHostiles struct {
@@ -1708,7 +1715,7 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		w.Unit = c.unitWait(path+".unit", r.Unit)
 	case r.GameObject != nil:
 		gp := path + ".gameobject"
-		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State}
+		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State, GoneOK: r.GameObject.GoneOK}
 		if !validState(g.State) {
 			c.fail(gp+".state", "%q is none of %s", g.State, strings.Join(ObjectStates, ", "))
 		}

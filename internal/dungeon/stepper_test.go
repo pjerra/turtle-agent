@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,6 +164,58 @@ func TestStepperSkipsWhatIsAlreadyTrue(t *testing.T) {
 	s.Complete()
 	if a = s.Next(); a.Kind != ActKill {
 		t.Fatalf("a wait that already holds is over: %+v", a)
+	}
+}
+
+// A wait_for gameobject with gone_ok (Shadowfang Keep's Courtyard Door): done when the object is in the state, or not in view after it
+// was seen; an object never seen waits out its timeout.
+func goneOKPlan(goneOK string) string {
+	return `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},
+  "steps":[{"wait_for":{"gameobject":{"entry":124372,"state":"active"` + goneOK + `},"timeout_s":20}}],
+  "boss":{"entry":7,"position":{"x":40,"y":0,"z":0}}}]}`
+}
+
+func TestStepperWaitGoneOKAfterSeenIsDone(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{10, 1, 0}}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(mustPlan(t, goneOKPlan(`,"gone_ok":true`)), w, clk.now)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("the seal is ready: %+v", a)
+	}
+	w.objs = w.objs[:1] // the script removed the seal
+	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActKill {
+		t.Fatalf("seen and gone is done: %+v", a)
+	}
+}
+
+func TestStepperWaitGoneOKNeverSeenWaitsOutItsTimeout(t *testing.T) {
+	w := &fakeWorld{objs: doors()[:1], pos: Point{10, 1, 0}}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(mustPlan(t, goneOKPlan(`,"gone_ok":true`)), w, clk.now)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("%+v", a)
+	}
+	clk.t = clk.t.Add(5 * time.Second)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("never seen is not gone: %+v", a)
+	}
+	clk.t = clk.t.Add(20 * time.Second)
+	if a := s.Next(); a.Kind != ActFailed || !strings.Contains(a.Err, "waited 20 s for game object 124372") {
+		t.Fatalf("%+v", a)
+	}
+}
+
+func TestStepperWaitGoneWithoutGoneOKKeepsWaiting(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{10, 1, 0}}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(mustPlan(t, goneOKPlan("")), w, clk.now)
+	s.Next()
+	w.objs = w.objs[:1]
+	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("%+v", a)
 	}
 }
 

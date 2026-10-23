@@ -99,6 +99,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad stand", step(`{"use_object":{"entry":1,"stand":{"x":0,"y":0}}}`), "legs[0].steps[0].use_object.stand.z: required"},
 		{"wait nothing", step(`{"wait_for":{}}`), "legs[0].steps[0].wait_for: needs gameobject, hostiles_gone or unit"},
 		{"wait both", step(`{"wait_for":{"gameobject":{"entry":1,"state":"active"},"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for: has both gameobject and hostiles_gone"},
+		{"gone_ok is a flag", step(`{"wait_for":{"gameobject":{"entry":1,"state":"active","gone_ok":"yes"}}}`), "gone_ok"},
 		{"bad state", step(`{"wait_for":{"gameobject":{"entry":1,"state":"open"}}}`), `legs[0].steps[0].wait_for.gameobject.state: "open" is none of ready, active, active_alt`},
 		{"no state", step(`{"wait_for":{"gameobject":{"entry":1}}}`), `wait_for.gameobject.state: "" is none of`},
 		{"no radius", step(`{"wait_for":{"hostiles_gone":{}}}`), "legs[0].steps[0].wait_for.hostiles_gone.radius: required"},
@@ -210,6 +211,34 @@ func TestParseLootUseAndTeam(t *testing.T) {
 	b2, _ := Marshal(q)
 	if string(b) != string(b2) {
 		t.Fatalf("not stable:\n%s\n%s", b, b2)
+	}
+}
+
+// gone_ok on a wait_for gameobject is read, written back and refused on a wait that has no object.
+func TestParseWaitGoneOK(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":33,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":1,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":18895,"near":{"x":-242.58,"y":2159.05,"z":90.62},"state":"active","gone_ok":true},"timeout_s":25}},
+  {"wait_for":{"gameobject":{"entry":18972,"state":"active"},"timeout_s":60}}]}]}`
+	p, err := Parse("t.json", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := p.Legs[0].Steps[0].WaitFor.GameObject, p.Legs[0].Steps[1].WaitFor.GameObject
+	if !a.GoneOK || b.GoneOK {
+		t.Fatalf("%+v %+v", a, b)
+	}
+	out, err := Marshal(p)
+	if err != nil || strings.Count(string(out), `"gone_ok": true`) != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	q, err := Parse("t.json", out)
+	if err != nil || !q.Legs[0].Steps[0].WaitFor.GameObject.GoneOK {
+		t.Fatalf("%v", err)
+	}
+	// hostiles_gone has no object to be gone: the key is unknown there.
+	bad := strings.Replace(src, `"gameobject":{"entry":18972,"state":"active"}`, `"hostiles_gone":{"radius":5,"gone_ok":true}`, 1)
+	if _, err := Parse("t.json", []byte(bad)); err == nil || !strings.Contains(err.Error(), "gone_ok") {
+		t.Fatalf("%v", err)
 	}
 }
 

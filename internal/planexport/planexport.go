@@ -49,6 +49,9 @@ const (
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
 	FlagDoneData  = 8
 	FlagEncounter = 32
+	// FlagGoneIsDone on a wait_object row (the plan's wait_for.gameobject.gone_ok): done when the object is in the wanted state or is not found
+	// after the run read it found; an object never seen still pauses at the timeout. A module without the wait_object reading refuses the flag
+	// on that kind (BadParam) and skips the row, so the plan then lacks the wait.
 	// FlagGoneIsDone marks a loot or open row as done when its object is gone (the module's kPlanFlagGoneIsDone): a `not-found` answer
 	// for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead of pausing the run.
 	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted; the flag matters only for a run
@@ -646,7 +649,14 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 			timeout = dungeon.HoldDoorWaitS
 			base += fmt.Sprintf(" (at most %d s: the hold before it ends with the event done)", timeout)
 		}
-		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), TimeoutS: timeout, Comment: clip(waitComment(base, w), MaxComment)})
+		var flags uint32
+		if g.GoneOK {
+			// gone_ok: the run leader also counts the object not found, after a wait step read it found, as done (kPlanFlagGoneIsDone on a
+			// wait_object row). A module without that reading refuses the flag on a wait_object and skips the row (the loader names it).
+			flags = FlagGoneIsDone
+			base += " or gone"
+		}
+		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), TimeoutS: timeout, Flags: flags, Comment: clip(waitComment(base, w), MaxComment)})
 	case w.HostilesGone != nil:
 		h := w.HostilesGone
 		// A wait with no centre is about the party's own spot: the last point the leg put it at.
@@ -765,8 +775,8 @@ func Validate(r Rows) error {
 			// The exporter's own rule (ours, not the module's): the module reads the flag off a loot/open row only, so the exporter refuses
 			// it on any other kind; a module that knows no such step flag yet ignores unknown flags on a loot/open and pauses on a gone
 			// object, so nothing breaks either way.
-			if s.Kind != KindLoot && s.Kind != KindOpen {
-				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
+			if s.Kind != KindLoot && s.Kind != KindOpen && s.Kind != KindWaitObject {
+				return bad("the gone-is-done flag is for a loot, open or wait_object row: the exporter refuses it on a %s (a module without the step flag ignores it on a loot or open)", s.Kind)
 			}
 		}
 		if s.Flags&FlagExact != 0 {
