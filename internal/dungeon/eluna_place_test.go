@@ -37,6 +37,9 @@ type elunaFake struct {
 	of       []string
 
 	times []time.Time // when each entry of seq was made (the fake clock)
+
+	// refuse makes the commander answer these orders with an ERR (the real commander refuses a line outside its grammar).
+	refuse map[string]bool
 }
 
 func newElunaFake(t *testing.T) *elunaFake {
@@ -86,6 +89,9 @@ func (g *elunaFake) TTPlace(ctx context.Context, p Point, spread float32, of str
 func (g *elunaFake) Command(ctx context.Context, command string) (tbm.Reply, error) {
 	g.seq = append(g.seq, command)
 	g.times = append(g.times, g.now)
+	if g.refuse[command] {
+		return tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Code: "bad_command", Message: "refused"}}, nil
+	}
 	return g.fakeLeader.Command(ctx, command)
 }
 
@@ -120,10 +126,16 @@ func indexPrefix(list []string, prefix string) int {
 
 func placeSeq(seq []string) []string {
 	var out []string
-	for _, s := range seq {
+	for i, s := range seq {
 		switch {
-		case s == "go xyz", s == "tt floor", s == "tt quiet", s == "tt place", s == "action stay", s == "action follow":
+		case s == "go xyz", s == "tt floor", s == "tt quiet", s == "tt place", s == "cmd follow":
 			out = append(out, s)
+		case s == "cmd stay":
+			// The placement's hold comes right before its `tt place`; the run's own end-of-run `cmd stay` (endStay) comes after
+			// everything and is not the placement's.
+			if indexIn(seq[i+1:], "tt place") >= 0 {
+				out = append(out, s)
+			}
 		}
 	}
 	return out
@@ -152,7 +164,7 @@ func TestElunaPlaceOrder(t *testing.T) {
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
 	}
-	want := []string{"go xyz", "tt floor", "tt quiet", "action stay", "tt place", "action follow"}
+	want := []string{"go xyz", "tt floor", "tt quiet", "cmd stay", "tt place", "cmd follow"}
 	if got := placeSeq(g.seq); !slices.Equal(got, want) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
@@ -165,7 +177,7 @@ func TestElunaPlaceOrder(t *testing.T) {
 	if len(g.placeAt) != 1 || g.placeAt[0] != (Point{X: 1, Y: 2, Z: 3}) || g.spread[0] != 3 {
 		t.Fatalf("place %v spread %v", g.placeAt, g.spread)
 	}
-	if i, j := indexIn(g.seq, "action follow"), indexPrefix(g.seq, "run start"); i < 0 || j < 0 || i > j {
+	if i, j := indexIn(g.seq, "cmd follow"), indexPrefix(g.seq, "run start"); i < 0 || j < 0 || i > j {
 		t.Fatalf("follow at %d, run start at %d: %v", i, j, g.seq)
 	}
 	notes := strings.Join(rep.Notes, "\n")
@@ -235,7 +247,7 @@ func TestElunaPlaceRefusesOffFloor(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "observe mode: eluna place:") || !strings.Contains(err.Error(), "Magey") || !strings.Contains(err.Error(), "off the floor") {
 		t.Fatalf("%v", err)
 	}
-	if s := placeSeq(g.seq); slices.Contains(s, "action follow") {
+	if s := placeSeq(g.seq); slices.Contains(s, "cmd follow") {
 		t.Fatalf("an off-floor party was released: %v", s)
 	}
 	if indexPrefix(g.orders, "run start") >= 0 {
@@ -256,7 +268,7 @@ func TestElunaPlaceRefusesNotQuiet(t *testing.T) {
 	if !strings.Contains(err.Error(), "5650") || !strings.Contains(err.Error(), "Witch Doctor Zum'rah") || !strings.Contains(err.Error(), "5651") {
 		t.Fatalf("the refusal does not say what stands there: %v", err)
 	}
-	if s := placeSeq(g.seq); slices.Contains(s, "tt place") || slices.Contains(s, "action follow") {
+	if s := placeSeq(g.seq); slices.Contains(s, "tt place") || slices.Contains(s, "cmd follow") {
 		t.Fatalf("a party that is not alone was placed: %v", s)
 	}
 	if indexPrefix(g.orders, "run start") >= 0 {
@@ -272,7 +284,7 @@ func TestElunaPlaceRefusesFloorMismatch(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "observe mode: eluna place:") || !strings.Contains(err.Error(), "floor") {
 		t.Fatalf("%v", err)
 	}
-	if s := placeSeq(g.seq); slices.Contains(s, "tt quiet") || slices.Contains(s, "action stay") {
+	if s := placeSeq(g.seq); slices.Contains(s, "tt quiet") || slices.Contains(s, "cmd stay") {
 		t.Fatalf("a floor 10 yd below the step was placed on: %v", s)
 	}
 	if indexPrefix(g.orders, "run start") >= 0 {
@@ -326,5 +338,21 @@ func TestElunaPlaceRefusesPlaceError(t *testing.T) {
 	}
 	if indexPrefix(g.orders, "run start") >= 0 {
 		t.Fatalf("the run was started: %v", g.orders)
+	}
+}
+
+// The hold and the release are commander orders (`cmd stay`, `cmd follow`: the real commander refused `action stay`, live 2026-10-23); a
+// refusal of either ends the run there and nothing is started.
+func TestElunaPlaceRefusedOrderEndsTheRun(t *testing.T) {
+	for _, order := range []string{"cmd stay", "cmd follow"} {
+		g := newElunaFake(t)
+		g.refuse = map[string]bool{order: true}
+		_, err := runRemote(t, g, observePlan(), elunaOpts(Point{}, true), nil)
+		if err == nil || !strings.HasPrefix(err.Error(), "observe mode: eluna place:") || !strings.Contains(err.Error(), order) || !strings.Contains(err.Error(), "bad_command") {
+			t.Fatalf("%s: %v", order, err)
+		}
+		if indexPrefix(g.orders, "run start") >= 0 {
+			t.Fatalf("%s refused but the run was started: %v", order, g.orders)
+		}
 	}
 }

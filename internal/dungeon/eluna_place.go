@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/eluna"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // The targeted start placement of an observed run (settings eluna_toolkit): instead of leaving the party wherever it stood and
@@ -95,8 +96,8 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	}
 
 	// 4. The bots hold where they are, so that they do not walk the ring off again while it is placed.
-	if _, err := d.g.Command(ctx, "action stay"); err != nil {
-		return fmt.Errorf("observe mode: eluna place: action stay: %w", err)
+	if err := d.elunaOrder(ctx, "cmd stay"); err != nil {
+		return fmt.Errorf("observe mode: eluna place: cmd stay: %w", err)
 	}
 
 	// 5. The party is put at the step, the toolkit's second read proving it. The group is the lead bot's: a bound
@@ -118,14 +119,27 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 
 	// 6. Follow is released right before the run leader starts and walks. Nothing waits after the place: a bound party
 	// with no run going wanders off within about a minute, so the start follows at once.
-	if _, err := d.g.Command(ctx, "action follow"); err != nil {
-		return fmt.Errorf("observe mode: eluna place: action follow: %w", err)
+	if err := d.elunaOrder(ctx, "cmd follow"); err != nil {
+		return fmt.Errorf("observe mode: eluna place: cmd follow: %w", err)
 	}
 	note := fmt.Sprintf("eluna place: quiet, %d placed at %.1f %.1f %.1f", len(pl.Members), p.X, p.Y, p.Z)
 	if drifted != "" {
 		note += " (drifted: " + drifted + ")"
 	}
 	d.rep.note(note)
+	return nil
+}
+
+// elunaOrder sends a commander order (`cmd stay`, `cmd follow`: the commander grammar has no `action`, live 2026-10-23) and turns a
+// refusal reply into an error.
+func (d *RemoteDriver) elunaOrder(ctx context.Context, command string) error {
+	r, err := d.g.Command(ctx, command)
+	if err != nil {
+		return err
+	}
+	if r.Kind == tbm.KindErr && r.Err != nil {
+		return fmt.Errorf("refused: %s (%s)", r.Err.Code, r.Err.Message)
+	}
 	return nil
 }
 
