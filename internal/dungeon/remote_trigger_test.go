@@ -1523,3 +1523,7 @@ func TestRecoveryReleasesOnlyTheCorpseNearMobsAtOnce(t *testing.T) {
 		t.Fatalf("after the wait: revived %v", g.revived)
 	}
 }
+
+func (*triggerGame) GPS(context.Context) (string, error) {
+	return "", errors.New("no .gps in this fake")
+}
