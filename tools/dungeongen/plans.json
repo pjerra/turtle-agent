@@ -321,6 +321,7 @@
    "title": "Maraudon: Orange",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map349",
    "trigger": 3133,
    "bosses": [
@@ -348,8 +349,11 @@
    "entrance_tele": "maraorange",
    "outside_tele": "MaraudonOrange",
    "special": [
-    "Celebras the Cursed's Scepter of Celebras event is optional and not on this route",
-    "Princess Theradras: the party enters her cave by the inner passage (join of the orange and purple routes unverified)"
+    "census-corrected 2026-10-24: the critters (2914/13321/6145/4076) are out of every pack, one pull per creature_groups assist chain, radii to the farthest member, the pulls ordered nearest-neighbour inside each leg with the boss last; 85 pulls carry a patrol block (estimated round)",
+    "Lord Vyletongue (12236) and Celebras the Cursed (12225) are the purple plan's legs (the spec splits the wings by bbox); a full orange-side clear walks past them",
+    "Meshlok the Harvester (12237) is a rare, a 70% pool spawn on guid 54652 (pool 34901) where the export shows a Cavern Lurker 12223 at 731.1 -77.0 -57.5: not on this route",
+    "Rotgrip (13596) and Princess Theradras (12201) patrol (382 yd and 104 yd paths) and their boss rows use the spawn point",
+    "Rotgrip's boss point needs the mapping walk (needs_walk); no door, lever or key in this wing"
    ],
    "notes": [
     "The orange route and the purple route (maraudon_purple) share the inner bosses; the draft lists them in both."

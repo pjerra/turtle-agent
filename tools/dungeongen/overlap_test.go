@@ -20,7 +20,12 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+//
+// maraudon_orange's 6 (2026-10-24) are interleaved spawns of the orange wing's larva halls: the 8-Vile-Larva pulls are one linked pack of
+// creature_groups 14-17 yd wide (a wanderer adds 5 yd), so their radius reaches the next larva and the Constrictor Vines of the
+// neighbouring pull, and two Deep Borer/Shardling pulls of the leg 3 hall stand within each other's range. No radius separates them
+// without leaving a member out, and the packs cannot be split (they aggro together).
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "maraudon_orange": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
