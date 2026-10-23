@@ -55,7 +55,7 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 
 // offlineMapped are the plans whose legs, doors and steps were written by hand offline (no live walk yet), so they carry steps and are still
 // drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
-var offlineMapped = map[string]bool{"deadmines": true}
+var offlineMapped = map[string]bool{"deadmines": true, "shadowfang_keep": true}
 
 func TestOfflineMappedPlansAreStillDrafts(t *testing.T) {
 	for name := range offlineMapped {

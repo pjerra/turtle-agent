@@ -561,7 +561,6 @@ var planCheckKnownFailing = map[string]bool{
 	"maraudon_purple":       true,
 	"molten_core":           true,
 	"naxxramas":             true,
-	"shadowfang_keep":       true,
 	"stormwrought_ruins":    true,
 	"timbermaw_hold":        true,
 	"upper_karazhan_halls":  true,

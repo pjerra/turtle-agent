@@ -26,8 +26,8 @@
   "notes": [
     "DRAFT: a skeleton from the world database export of map 33 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Needs: courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
-    "Needs: Arugal's summoning focus (GO_ARUGAL_FOCUS)",
+    "Needs: the Sorcerer's Gate 18972 at -129.0 2166.2 129.2 (leg fenrus_the_devourer's route) and Arugal's Lair door 18971 at -118.1 2161.9 155.7 (the nandos leg's route), plus Arugal's summoning focus 18973 (GO_ARUGAL_FOCUS) at -146.4 2173.0 150.5. The source notes say the keep script opens them as bosses die, but no step opens them here: the plans carry no use_object/gossip for them, and the mesh crosses both door lines, so plan-check cannot see the closure. Add the event steps only from a live measurement (the Courtyard Door round proves the gossip/lever shape).",
+    "Door round 2026-10-23 (r24 shadowfang_keep slot7): the Courtyard Door 18895 is a gossip step on Deathstalker Adamant (3849) in the new courtyard_door leg (the live probe opened it), and Odo's floor and the walkway come after a move_direct across the navmesh seam at the stair top (see the odo_the_blindwatcher leg). The full plan is 10 legs; legs 0-3 are unchanged from the r24 run 1 export.",
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs.",
     "Fix round 2026-10-22 (PREP-SFK census): cc_priority = the Shadowfang Darksouls (3855, they shield themselves in shadow on aggro), the Spectral Clerics (61970, the court's casters) and the intro Arugal (10000, a 26 elite with 6510 hp that stands in the pull beside Odo's yard); all three have mechanic_immune_mask 0. No fleers in the legs of this file (only Ashcrombe 3850, a friendly, and Wolfguard Worg 5058, leg 6) and no cc_always/kill_first: no trash stuns the party and Springvale heals his own guards, but he is the pull target himself."
   ],
@@ -432,7 +432,40 @@
       }
     },
     {
-      "name": "odo_the_blindwatcher",
+      "name": "courtyard_door",
+      "to": {"x": -243.7, "y": 2116.9, "z": 81.3},
+      "steps": [
+        {
+          "gossip": {
+            "npc": 3849,
+            "near": {"x": -243.7, "y": 2113.7, "z": 81.3},
+            "option": 0,
+            "by": "tank",
+            "stand": {"x": -243.7, "y": 2116.9, "z": 81.3},
+            "retry_s": 30,
+            "fail_text": "Deathstalker Adamant's menu has no option to unlock the courtyard door: he is dead, or the party stands out of the server's 5 yd gossip range."
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 18895,
+              "near": {"x": -242.58, "y": 2159.05, "z": 90.62},
+              "spawn": 20835,
+              "state": "active"
+            },
+            "timeout_s": 60,
+            "fail_text": "The Courtyard Door (18895, spawn 20835) is not open 60 s after Adamant's gossip (live 2026-10-23: the option removed it from the commander's object list; if the object is gone rather than active, this wait cannot read the state)."
+          }
+        }
+      ],
+      "notes": [
+        "Needs: Deathstalker Adamant (3849, at -243.7 2113.7 81.3, in the entrance cells) and his menu's option 0 \"Please unlock the courtyard door\". Live probe 2026-10-23 (tests/r24/slot7): the commander gossiped him and the Courtyard Door 18895 (guid 20835, at -242.58 2159.05 90.62; the lever 101812 at -236.25 2164.04 91.16 is the other opener, 15 s after its use) left the gameobject list. Horde party: the freed-NPC event's Horde NPC; the Alliance counterpart is Sorcerer Ashcrombe 3850.",
+        "The walk back to the cells from Springvale's hall (~200 yd) is deliberate: the gossip must come before the courtyard-side pulls of the next leg, and the legs 0-3 rows stay as the run 1 export."
+      ]
+    },
+    {
+      "name": "odo_the_blindwatcher_yard",
       "to": {"x": -200.86, "y": 2191.01, "z": 79.8479},
       "pull_groups": [
         {
@@ -504,6 +537,35 @@
           "radius": 17
         },
         {
+          "entries": [3861, 3851],
+          "positions": [
+            {"x": -197.316, "y": 2111.16, "z": 81.1401},
+            {"x": -205.378, "y": 2117.15, "z": 81.1379}
+          ],
+          "radius": 10
+        }
+      ],
+      "notes": [
+        "button \"Lever\" entry 101812 at -236.25 2164.04 91.16",
+        "door \"Courtyard Door\" entry 18895 (spawn 20835) at -242.58 2159.05 90.62",
+        "Split 2026-10-23 (r24 shadowfang_keep slot7, PREP + NAVMESH-GAPS): this leg is the entrance-side (network A) pulls only. The walkway pulls (Tormented Officers 3873, Deathsworn Captain 3872) and Odo's floor (z 100.1) are on the far network B, and the navmesh seam at the stair top (-264.5 2150.3 95.9; A ends -264.8 2149.3, B starts -265.2 2150.6) cuts them off: the next leg crosses it with a move_direct and fights them from the west/upper side. The leg's second pull keeps the far-side Officer out."
+      ]
+    },
+    {
+      "name": "odo_the_blindwatcher",
+      "to": {"x": -266.5, "y": 2150.2, "z": 95.9},
+      "via": [
+        {"x": -264.8, "y": 2149.3, "z": 95.9},
+        {
+          "x": -266.5,
+          "y": 2150.2,
+          "z": 95.9,
+          "direct": true,
+          "check_skip": "the mesh build seam at the stair top: network A ends at -264.8 2149.3 95.9 and network B starts at -265.2 2150.6 95.8, 1.0-2.2 yd apart at the same height; the ramp collision runs under the landing plate, so Recast drops the step and leaves it unlinked. The ray from the launch point leaves the mesh at once (no static geometry at 96.2-98.5 in the collision check). Crossed live 2026-10-23 (tests/r24/slot7): the commander walked to -266.5 2150.2 95.9 and path_to from there to Odo's spot was complete (40 yd); from the east side (-262.5 2150.3) it was partial."
+        }
+      ],
+      "pull_groups": [
+        {
           "entries": [3873, 3873, 3873],
           "positions": [
             {"x": -191.989, "y": 2129.11, "z": 97.4733},
@@ -529,14 +591,6 @@
           "positions": [
             {"x": -205.822, "y": 2105.25, "z": 97.3899}
           ]
-        },
-        {
-          "entries": [3861, 3851],
-          "positions": [
-            {"x": -197.316, "y": 2111.16, "z": 81.1401},
-            {"x": -205.378, "y": 2117.15, "z": 81.1379}
-          ],
-          "radius": 10
         }
       ],
       "boss": {
@@ -545,9 +599,8 @@
         "first": [3866, 3868]
       },
       "notes": [
-        "button \"Lever\" entry 101812 at -236.3 2164.0 91.2",
-        "door \"Courtyard Door\" entry 18895 at -242.6 2159.1 90.6",
-        "Fix round 2026-10-22 (PREP-SFK census): radii cut to the groups' own members where a neighbour or a boss stood in the default (the walkway pulls and the pull beside the intro Arugal; the leg's second pull keeps leg 5's Officer out). The boss and the walkway packs (z 97.4-100.1) stand beyond the closed Courtyard Door 18895 (the mesh splits there): the mapping walk must measure the stands before the first run."
+        "The move_direct crosses the mesh seam at the stair top: launch -264.8 2149.3 95.9 (network A, the ramp from Springvale's side), landing -266.5 2150.2 95.9 (network B, the ramparts landing). 2.0 yd across, 0 up or down; the direct step's limits are 25 yd and 8 yd. A walk to the landing crossed it live 2026-10-23; the plan check exempts this one hop (check_skip), whose ray cannot see the mesh across the seam.",
+        "The four walkway pulls and Odo are all on network B: from the landing the path to Odo's spot is complete (40 yd) and to the first walkway pull 123 yd. The guards Vile Bat 3866 and Blood Seeker 3868 are Odo's boss row's first, not a pull."
       ]
     },
     {
