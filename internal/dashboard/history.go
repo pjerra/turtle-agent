@@ -263,7 +263,7 @@ type GhostAnswer struct {
 }
 
 // Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, and of
-// equals a clean clear (no packs left) before a run with packs left, then the quicker. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
+// equals a confirmed clean clear before any other run, then the quicker. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
 // or, when planLegs says how many sections the plan has, a run with that many done and none left. The answer is cached until the
 // folders are listed again.
 func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
@@ -297,7 +297,7 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		if d == nil {
 			continue
 		}
-		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && ghostBetter(d, best)) {
+		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && ghostBetter(f, d, bestF, best)) {
 			best, bestF = d, f
 		}
 	}
@@ -310,7 +310,7 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 	if planLegs > 0 {
 		ans.Complete = best.LegsDone >= planLegs && best.Left == 0
 	} else {
-		ans.Complete = bestF.reason == "done" && bestF.fromLeg == 0 && best.Left == 0
+		ans.Complete = confirmedClear(bestF, best)
 	}
 	for _, p := range best.Paths {
 		if p.Lead {
@@ -324,9 +324,17 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 	return h.keepGhost(key, ans)
 }
 
-// ghostBetter says whether d is the better ghost of two runs that finished the same sections: a clean clear (Left == 0) beats a run with packs left, and of two alike runs the quicker wins.
-func ghostBetter(d, best *RunDigest) bool {
-	dClean, bestClean := d.Left == 0, best.Left == 0
+// confirmedClear is a run that cleared the whole dungeon for sure: it ended
+// "done", started at the first section and left no packs alive. An
+// interrupted run never reported a final count, so its Left of 0 proves
+// nothing. Complete and the ghost tie-break share this predicate.
+func confirmedClear(f runFile, d *RunDigest) bool {
+	return f.reason == "done" && f.fromLeg == 0 && d.Left == 0
+}
+
+// ghostBetter says whether d is the better ghost of two runs that finished the same sections: a confirmed clean clear beats any other run, and of two alike runs the quicker wins.
+func ghostBetter(df runFile, d *RunDigest, bestF runFile, best *RunDigest) bool {
+	dClean, bestClean := confirmedClear(df, d), confirmedClear(bestF, best)
 	if dClean != bestClean {
 		return dClean
 	}

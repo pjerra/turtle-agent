@@ -456,6 +456,35 @@ func TestHistoryGhostOnlyDirtyRunsFasterWins(t *testing.T) {
 	}
 }
 
+func TestHistoryGhostAbortedLeftZeroIsNoClear(t *testing.T) {
+	dir := t.TempDir()
+	// An interrupted run never reported a final count, so its Left of 0 must
+	// not beat a finished run with packs left on the clean-clear rule: the
+	// quicker of the two wins.
+	writeRun(t, dir, "g", fullRun("r-aborted", "zf", 100, 700, 4, "failed", nil))
+	dirty := fullRun("r-dirty", "zf", 200, 600, 4, "done", nil)
+	dirty.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "h", dirty)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-dirty" || g.Complete || g.Left != 2 || g.LegsDone != 4 {
+		t.Fatalf("an aborted Left-0 run must not beat a faster finished run with packs left: %+v", g)
+	}
+	// A confirmed clean clear beats both even when slower.
+	writeRun(t, dir, "i", fullRun("r-clean", "zf", 300, 800, 4, "done", nil))
+	h = NewHistory(nil, dir)
+	g = GhostAnswer{}
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-clean" || !g.Complete || g.Left != 0 || g.LegsDone != 4 {
+		t.Fatalf("a done clean run beats the aborted and dirty ones: %+v", g)
+	}
+}
+
 func TestHistoryGhostLaterRunLeaderWithoutLeftClears(t *testing.T) {
 	w := fullRun("r-stale", "zf", 100, 600, 4, "done", nil)
 	w.event(598000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
