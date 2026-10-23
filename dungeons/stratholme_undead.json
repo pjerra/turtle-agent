@@ -20,13 +20,20 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "no_cc": [10381, 10382, 10390, 10391, 10405, 10406, 10407, 10408, 10409, 10411, 10412, 10413, 10414, 10416, 10417, 10463, 10464, 10393, 10809],
+  "kill_first": [10393, 10411, 10400, 10398],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 329 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Needs: Ramstein the Gorger (10439) has no spawn row: summoned by the Gauntlet/ziggurat script",
-    "Needs: Ziggurat gates (GO_ZIGGURAT1-5) and trap gates (GO_PORT_TRAP_GATE_1-4); Baron Rivendare needs the Slaughter House gates open",
-    "Needs: Skull the Mad rare and Hearthsinger Forresten (rare) are skipped",
-    "Back entrance (2214) of map 329; the live side is stratholme_live."
+    "DRAFT: a skeleton from the world database export of map 329 (tools/dungeongen, spec tools/dungeongen/plans.json), hand-written since 2026-10-24 (census below). Walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "Census 2026-10-24 (487 spawns on map 329; world base + core scripts): the Spectral/Ghostly Citizens (10384/10385) are faction 7 = neutral (faction_template masks 0) and are out of every pull; Hearthsinger Forresten (10558, neutral rare) stays in the legs' skip lists; Skul (10393) and Stonespine (10809), both hostile rank-2 rares, are members of the packs they stand in (their spawns are 1.4-2.7 yd from a pack member) and are kill_first.",
+    "No trash entry of this side flees: creature_ai_events has no FLEE action (command 47) for any of 10381 10382 10390 10391 10398 10399 10400 10405 10406 10407 10408 10409 10411 10412 10413 10414 10416 10417 10463 10464 10393 10809. The undead are type 6 (no_cc: a Polymorph does not land); only 10398/10399/10400 are humanoid (type 7) and no pack needs one.",
+    "Ash'ari Crystals 10415 are NOT pulls: the crystal suicides once the Thuzadin Acolytes within 50 yd of it are dead (mobs_cristal_zuggurat; that grid search is 2-D, so each crystal sees its own five acolytes 1-9 yd away), and the plan kills all 15 acolytes at the three ziggurats. The crystal stands 47-51 yd above the acolytes' floor and the navmesh has no polygon at its x,y (probe: Floors and Nearest find nothing within 20 yd), so a pull could not be walked. Killing all three opens the gauntlet and Slaughter Square ports (TYPE_CRISTAL_DIE -\u003e StartSlaugtherSquare).",
+    "Baron Rivendare is UNIT_FLAG_NOT_SELECTABLE|SPAWNING until the Slaughter Square event: aggro any of the 13 Bile Spewers/Venom Belchers (the last leg's pulls), kill them all, and Ramstein the Gorger (10439, no spawn row) is summoned at 4032.35 -3380.57 and the Baron becomes selectable. The rows cannot name Ramstein or the five Black Guards (10394) the event spawns; the party fights them where they stand.",
+    "The 45-minute Baron run starts only from Ysida's Cage (181071); the plan has no use_object step, so the party does not free her and no timer runs.",
+    "Doors are script state, not rows: Service Entrance 175368, Gauntlet Gate 175357, Slaughter Square Gate 175358 (opens on Ramstein's death), Ziggurat doors 175379/175380/175381 (open on Nerub'enkan's, Anastari's and Maleki's deaths) and the ports 175373/175374 (crystals). The bots walk through a closed door (the SM wings' and the live side's runs did), so none is a row.",
+    "Patrols: 23 of the map's 36 movement-type-2 spawns stand within 25 yd of a plan point (the three Eyes of Naxxramas 10411, the Patchwork Horrors 10414, the gargoyles 10408/10409, the plague ghouls 10405, Stonespine 10809); the plan carries no patrol block, so a single-unit pull of one is found where it stands, and one that walks into a fight is not in the rows.",
+    "The north-west street past 0.14 (3574 -3346) leaves six hostiles of the next block (3535-3545 -3340..-3356: 10390/10391/10381, 20.6-25.7 yd from the nearest plan point) outside the pulls: within aggro + 5 yd, so a pull that drifts or a knockback can add them; the mapping walk picks the stands.",
+    "Adds with no spawn row: Ravaged Cadaver 10381 summons a Broken Cadaver on death, Thuzadin Necromancer 10400 a Skeletal Servant (12420) on spawn, Eye of Naxxramas 10411 gargoyles on aggro, the abominations' event Ramstein and the Black Guards.",
+    "Back entrance (2214) of map 329; the live side is stratholme_live (its bosses are another migration on the same map)."
   ],
   "legs": [
     {
@@ -43,19 +50,8 @@
             {"x": 3645.3, "y": -3638.41, "z": 138.556},
             {"x": 3644.79, "y": -3627.93, "z": 137.948},
             {"x": 3650.12, "y": -3643.09, "z": 138.49}
-          ]
-        },
-        {
-          "entries": [10381, 10382, 10382, 10390, 10391, 10390, 10391],
-          "positions": [
-            {"x": 3682.41, "y": -3601.54, "z": 137.621},
-            {"x": 3689.37, "y": -3607.98, "z": 138.397},
-            {"x": 3681.87, "y": -3594.08, "z": 137.619},
-            {"x": 3690.67, "y": -3600.46, "z": 138.302},
-            {"x": 3694.5, "y": -3603.23, "z": 138.723},
-            {"x": 3689.68, "y": -3594.95, "z": 138.108},
-            {"x": 3688.26, "y": -3586.21, "z": 138.198}
-          ]
+          ],
+          "radius": 10.8
         },
         {
           "entries": [10391, 10382, 10390, 10390, 10390, 10391, 10381],
@@ -67,92 +63,116 @@
             {"x": 3703.67, "y": -3618.57, "z": 140.765},
             {"x": 3712.61, "y": -3613.89, "z": 141.662},
             {"x": 3710.51, "y": -3620.16, "z": 141.547}
-          ]
+          ],
+          "radius": 14.2
         },
         {
-          "entries": [10414],
+          "entries": [10381, 10382, 10382, 10390, 10391, 10390, 10391],
           "positions": [
-            {"x": 3644.71, "y": -3518.91, "z": 136.687}
-          ]
+            {"x": 3682.41, "y": -3601.54, "z": 137.621},
+            {"x": 3689.37, "y": -3607.98, "z": 138.397},
+            {"x": 3681.87, "y": -3594.08, "z": 137.619},
+            {"x": 3690.67, "y": -3600.46, "z": 138.302},
+            {"x": 3694.5, "y": -3603.23, "z": 138.723},
+            {"x": 3689.68, "y": -3594.95, "z": 138.108},
+            {"x": 3688.26, "y": -3586.21, "z": 138.198}
+          ],
+          "radius": 12.6
         },
         {
-          "entries": [10381, 10381, 10391, 10391, 10381, 10385, 10390, 10390, 10385],
+          "entries": [10381, 10381, 10391, 10391, 10381, 10390, 10390, 10414],
           "positions": [
             {"x": 3638.63, "y": -3521.61, "z": 136.766},
             {"x": 3635.68, "y": -3525.94, "z": 136.988},
             {"x": 3633.91, "y": -3511.75, "z": 136.466},
             {"x": 3630.8, "y": -3514, "z": 136.498},
             {"x": 3629.4, "y": -3526.21, "z": 137.106},
-            {"x": 3629.17, "y": -3536.3, "z": 138.541},
             {"x": 3621.5, "y": -3514.44, "z": 137.108},
             {"x": 3620.27, "y": -3520.09, "z": 137.493},
-            {"x": 3626.35, "y": -3536.6, "z": 138.556}
-          ]
+            {"x": 3644.71, "y": -3518.91, "z": 136.687}
+          ],
+          "radius": 13.3
         },
         {
           "entries": [10405, 10405],
           "positions": [
             {"x": 3605.81, "y": -3515, "z": 138.072},
             {"x": 3599.83, "y": -3512.07, "z": 137.782}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [10381, 10382, 10391, 10391, 10405, 10405, 10390, 10390, 10390, 10382, 10382, 10390, 10381, 10391, 10385, 10391, 10390, 10405, 10405, 10405],
+          "entries": [10391, 10390, 10382],
+          "positions": [
+            {"x": 3627.89, "y": -3498.67, "z": 136.835},
+            {"x": 3627.54, "y": -3492.95, "z": 137.034},
+            {"x": 3631.89, "y": -3492.75, "z": 137.014}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [10405, 10405, 10405],
+          "positions": [
+            {"x": 3644.4, "y": -3477.18, "z": 138.435},
+            {"x": 3641.66, "y": -3472.63, "z": 138.752},
+            {"x": 3646.34, "y": -3472.8, "z": 138.284}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [10381, 10382, 10391, 10405, 10405, 10390],
           "positions": [
             {"x": 3612.31, "y": -3495.04, "z": 136.794},
             {"x": 3618.75, "y": -3497.01, "z": 137.193},
             {"x": 3615.97, "y": -3491.77, "z": 136.805},
-            {"x": 3627.89, "y": -3498.67, "z": 136.835},
             {"x": 3606.79, "y": -3487.57, "z": 136.021},
             {"x": 3603.74, "y": -3486.7, "z": 135.76},
-            {"x": 3627.54, "y": -3492.95, "z": 137.034},
-            {"x": 3622.67, "y": -3487.86, "z": 137.44},
+            {"x": 3622.67, "y": -3487.86, "z": 137.44}
+          ],
+          "radius": 11
+        },
+        {
+          "entries": [10390, 10382, 10390, 10381, 10391, 10391, 10390, 10393, 10411],
+          "positions": [
             {"x": 3591.79, "y": -3484.97, "z": 135.11},
-            {"x": 3631.89, "y": -3492.75, "z": 137.014},
             {"x": 3596.14, "y": -3481.59, "z": 135.044},
             {"x": 3590.24, "y": -3475.11, "z": 134.934},
             {"x": 3597.46, "y": -3472.57, "z": 134.946},
             {"x": 3586.79, "y": -3475.41, "z": 135.112},
-            {"x": 3641.3, "y": -3487.3, "z": 137.42},
             {"x": 3594.25, "y": -3470.98, "z": 134.98},
             {"x": 3584.44, "y": -3466.19, "z": 135.343},
-            {"x": 3644.4, "y": -3477.18, "z": 138.435},
-            {"x": 3641.66, "y": -3472.63, "z": 138.752},
-            {"x": 3646.34, "y": -3472.8, "z": 138.284}
-          ]
-        },
-        {
-          "entries": [10411],
-          "positions": [
+            {"x": 3585.2, "y": -3464.97, "z": 135.415},
             {"x": 3582.7, "y": -3465.87, "z": 135.415}
-          ]
+          ],
+          "radius": 12.5
         },
         {
-          "entries": [10382],
+          "entries": [10390, 10391, 10381, 10391, 10382, 10405, 10405, 10390, 10382],
           "positions": [
+            {"x": 3535.83, "y": -3416.23, "z": 134.661},
+            {"x": 3536.74, "y": -3423.91, "z": 135.678},
+            {"x": 3541.29, "y": -3425.16, "z": 135.546},
+            {"x": 3541.83, "y": -3413.87, "z": 134.467},
+            {"x": 3542.26, "y": -3419.04, "z": 135.031},
+            {"x": 3543.17, "y": -3421.47, "z": 135.277},
+            {"x": 3544.56, "y": -3418.9, "z": 135.078},
+            {"x": 3547.97, "y": -3427.44, "z": 135.729},
             {"x": 3550.21, "y": -3421.96, "z": 135.874}
-          ]
+          ],
+          "radius": 8.9
         },
         {
-          "entries": [10390, 10391, 10390, 10382],
+          "entries": [10390, 10391, 10390, 10382, 10381, 10382, 10391],
           "positions": [
             {"x": 3550.8, "y": -3386.03, "z": 133.597},
             {"x": 3550.92, "y": -3378.58, "z": 132.764},
             {"x": 3551.97, "y": -3371.45, "z": 132.314},
-            {"x": 3554.79, "y": -3369.68, "z": 132.578}
-          ]
-        },
-        {
-          "entries": [10390, 10390, 10382, 10382, 10382, 10391, 10391],
-          "positions": [
-            {"x": 3563.91, "y": -3351.76, "z": 130.562},
-            {"x": 3564.66, "y": -3347.12, "z": 129.834},
-            {"x": 3569.41, "y": -3346.16, "z": 129.924},
-            {"x": 3578.67, "y": -3347.97, "z": 129.653},
-            {"x": 3574.97, "y": -3343.18, "z": 128.983},
-            {"x": 3580, "y": -3340.8, "z": 128.446},
-            {"x": 3585.29, "y": -3343.82, "z": 128.051}
-          ]
+            {"x": 3554.79, "y": -3369.68, "z": 132.578},
+            {"x": 3546.78, "y": -3386.96, "z": 133.048},
+            {"x": 3545.27, "y": -3381.85, "z": 132.547},
+            {"x": 3546.02, "y": -3376.33, "z": 132.486}
+          ],
+          "radius": 11
         },
         {
           "entries": [10381, 10382, 10391, 10391, 10381, 10390, 10390],
@@ -164,7 +184,21 @@
             {"x": 3560.17, "y": -3312.98, "z": 130.42},
             {"x": 3551.75, "y": -3318.7, "z": 129.777},
             {"x": 3554.91, "y": -3311.05, "z": 130.428}
-          ]
+          ],
+          "radius": 11.5
+        },
+        {
+          "entries": [10390, 10390, 10382, 10382, 10382, 10391, 10391],
+          "positions": [
+            {"x": 3563.91, "y": -3351.76, "z": 130.562},
+            {"x": 3564.66, "y": -3347.12, "z": 129.834},
+            {"x": 3569.41, "y": -3346.16, "z": 129.924},
+            {"x": 3578.67, "y": -3347.97, "z": 129.653},
+            {"x": 3574.97, "y": -3343.18, "z": 128.983},
+            {"x": 3580, "y": -3340.8, "z": 128.446},
+            {"x": 3585.29, "y": -3343.82, "z": 128.051}
+          ],
+          "radius": 12.1
         },
         {
           "entries": [10381, 10391, 10391, 10381, 10390, 10390, 10381],
@@ -176,7 +210,8 @@
             {"x": 3657.38, "y": -3503.78, "z": 136.583},
             {"x": 3660.48, "y": -3505.01, "z": 136.699},
             {"x": 3666.81, "y": -3513.29, "z": 136.923}
-          ]
+          ],
+          "radius": 15.6
         },
         {
           "entries": [10391, 10381, 10391, 10382, 10390, 10382, 10390],
@@ -188,10 +223,11 @@
             {"x": 3694.43, "y": -3482.54, "z": 131.681},
             {"x": 3698.85, "y": -3494.28, "z": 132.122},
             {"x": 3698.4, "y": -3489.43, "z": 131.056}
-          ]
+          ],
+          "radius": 12
         }
       ],
-      "skip": [10393, 10558, 10809],
+      "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10435,
         "position": {"x": 3663.23, "y": -3619.14, "z": 137.984}
@@ -205,7 +241,10 @@
         "door \"Gauntlet Gate\" entry 175357 at 3727.3 -3599.1 142.2",
         "door \"King's Square Gate\" entry 175352 at 3571.6 -3451.7 136.4",
         "door \"King's Square Gate\" entry 175353 at 3555.8 -3434.9 136.4",
-        "door \"Service Entrance Gate\" entry 175368 at 3624.9 -3642.2 138.4"
+        "door \"Service Entrance Gate\" entry 175368 at 3624.9 -3642.2 138.4",
+        "The pulls run entrance -\u003e King's Square (0.1) -\u003e the Gauntlet corner (0.2, 0.3) -\u003e the east hall (0.4, 0.5) -\u003e Elders' Square west (0.6, 0.7) -\u003e the street packs (0.8-0.11) -\u003e the north street (0.12, 0.13) -\u003e back east (0.14, 0.15), 207 yd shorter than the draft's walk from the north street to the east hall and back to the boss. The exporter writes a leg's boss last, so Barthilas is the leg's last step; his spawn is 20.4 yd from the first pack (detection 20, just outside it), so a fight at 0.1 that drifts may bring him.",
+        "The 20-unit pack the draft had at 3614 -3483 is four pulls by formation: the 7-unit street pack (with Skul and the Eye of Naxxramas), the 6-unit mid pack, the 3-unit formation at 3629 -3495 and the three plague ghouls at 3643 -3475. The Patchwork Horror's pull is merged into the 7-unit pack 6.7 yd from it.",
+        "The single cadaver pull at 3550 -3422 was half of a 7-member formation the spec's bbox cut (x below 3550): the pull is the whole formation plus the two plague ghouls standing in it, 9 units."
       ]
     },
     {
@@ -213,66 +252,48 @@
       "to": {"x": 3714.04, "y": -3480.83, "z": 129.701},
       "pull_groups": [
         {
-          "entries": [10384, 10385, 10385],
-          "positions": [
-            {"x": 3714.04, "y": -3480.83, "z": 129.701},
-            {"x": 3732.72, "y": -3486.28, "z": 131.443},
-            {"x": 3725.91, "y": -3480.77, "z": 130.194}
-          ]
-        },
-        {
           "entries": [10405],
           "positions": [
             {"x": 3720.41, "y": -3467.63, "z": 129.765}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10405, 10405],
           "positions": [
             {"x": 3729.88, "y": -3457.67, "z": 130.372},
             {"x": 3728.83, "y": -3453.79, "z": 130.257}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10405],
           "positions": [
             {"x": 3715.36, "y": -3438.74, "z": 129.506}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [10384],
+          "entries": [10405, 10390, 10391, 10381, 10391, 10381, 10390, 10381],
           "positions": [
-            {"x": 3704.26, "y": -3408.54, "z": 132.106}
-          ]
-        },
-        {
-          "entries": [10405],
-          "positions": [
-            {"x": 3698.03, "y": -3400.21, "z": 132.125}
-          ]
-        },
-        {
-          "entries": [10390, 10391, 10381, 10391, 10381, 10390, 10381, 10384, 10385, 10384, 10385],
-          "positions": [
+            {"x": 3698.03, "y": -3400.21, "z": 132.125},
             {"x": 3698.26, "y": -3396.78, "z": 132.03},
             {"x": 3692.67, "y": -3397.77, "z": 132.193},
             {"x": 3701.04, "y": -3390.68, "z": 132.005},
             {"x": 3693.51, "y": -3391.12, "z": 131.853},
             {"x": 3688.14, "y": -3393.81, "z": 132.071},
             {"x": 3692.79, "y": -3387.9, "z": 131.515},
-            {"x": 3689.05, "y": -3388.88, "z": 131.576},
-            {"x": 3696.66, "y": -3376.94, "z": 131.376},
-            {"x": 3696.66, "y": -3376.94, "z": 131.376},
-            {"x": 3697.62, "y": -3374.77, "z": 131.246},
-            {"x": 3697.62, "y": -3374.77, "z": 131.246}
-          ]
+            {"x": 3689.05, "y": -3388.88, "z": 131.576}
+          ],
+          "radius": 8.3
         },
         {
           "entries": [10405, 10405],
           "positions": [
             {"x": 3691.85, "y": -3411.13, "z": 133.07},
             {"x": 3688.22, "y": -3413.07, "z": 133.199}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10382, 10390, 10381, 10382, 10391, 10390, 10391],
@@ -284,18 +305,12 @@
             {"x": 3675.72, "y": -3355.71, "z": 126.064},
             {"x": 3670.59, "y": -3352.4, "z": 125.407},
             {"x": 3679.91, "y": -3348.5, "z": 125.79}
-          ]
+          ],
+          "radius": 10.5
         },
         {
-          "entries": [10385],
+          "entries": [10390, 10391, 10382, 10391, 10390, 10382, 10382],
           "positions": [
-            {"x": 3656.81, "y": -3355.02, "z": 126.067}
-          ]
-        },
-        {
-          "entries": [10384, 10390, 10391, 10382, 10391, 10390, 10382, 10382],
-          "positions": [
-            {"x": 3662.65, "y": -3337.44, "z": 123.913},
             {"x": 3661.63, "y": -3329.61, "z": 123.558},
             {"x": 3656.47, "y": -3328.22, "z": 123.607},
             {"x": 3667.63, "y": -3328.37, "z": 123.758},
@@ -303,13 +318,8 @@
             {"x": 3666.9, "y": -3322.76, "z": 123.613},
             {"x": 3658.89, "y": -3320.39, "z": 123.878},
             {"x": 3664.81, "y": -3319.01, "z": 124.366}
-          ]
-        },
-        {
-          "entries": [10384],
-          "positions": [
-            {"x": 3683.31, "y": -3327.97, "z": 124.96}
-          ]
+          ],
+          "radius": 7.9
         },
         {
           "entries": [10390, 10390, 10381, 10391, 10405, 10381, 10391, 10382],
@@ -322,23 +332,23 @@
             {"x": 3682.91, "y": -3292.13, "z": 127.906},
             {"x": 3679.71, "y": -3291.16, "z": 127.943},
             {"x": 3678.92, "y": -3283.11, "z": 127.833}
-          ]
+          ],
+          "radius": 11.8
         },
         {
-          "entries": [10405, 10384, 10385, 10405, 10384],
+          "entries": [10405, 10405],
           "positions": [
             {"x": 3671.39, "y": -3266.41, "z": 127.872},
-            {"x": 3670.07, "y": -3264.18, "z": 127.886},
-            {"x": 3670.07, "y": -3264.18, "z": 127.886},
-            {"x": 3672.73, "y": -3262.85, "z": 127.883},
-            {"x": 3670.38, "y": -3261.41, "z": 127.893}
-          ]
+            {"x": 3672.73, "y": -3262.85, "z": 127.883}
+          ],
+          "radius": 5
         },
         {
           "entries": [10414],
           "positions": [
             {"x": 3715.01, "y": -3257.74, "z": 127.507}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10382, 10390, 10391, 10391, 10381, 10382, 10390],
@@ -350,7 +360,8 @@
             {"x": 3736.66, "y": -3256.57, "z": 129.281},
             {"x": 3734.98, "y": -3267.27, "z": 129.133},
             {"x": 3736.98, "y": -3263.34, "z": 129.114}
-          ]
+          ],
+          "radius": 8
         },
         {
           "entries": [10399, 10399, 10399, 10399, 10399],
@@ -360,30 +371,28 @@
             {"x": 3846.93, "y": -3496.3, "z": 141.293},
             {"x": 3832.5, "y": -3503.44, "z": 141.294},
             {"x": 3839.72, "y": -3500.14, "z": 144.293}
-          ]
+          ],
+          "radius": 8.8
         },
         {
-          "entries": [10408],
+          "entries": [10408, 10400, 10398, 10413, 10398, 10400],
           "positions": [
-            {"x": 3872.85, "y": -3525.79, "z": 138.397}
-          ]
-        },
-        {
-          "entries": [10400, 10398, 10413, 10398, 10400],
-          "positions": [
+            {"x": 3872.85, "y": -3525.79, "z": 138.397},
             {"x": 3874.31, "y": -3530.61, "z": 138.431},
             {"x": 3881.51, "y": -3529.74, "z": 139.191},
             {"x": 3873.09, "y": -3535.47, "z": 137.948},
             {"x": 3884.31, "y": -3536.34, "z": 138.722},
             {"x": 3880.09, "y": -3540.83, "z": 138.284}
-          ]
+          ],
+          "radius": 9.3
         },
         {
           "entries": [10464, 10413],
           "positions": [
             {"x": 3874.94, "y": -3558.29, "z": 137.367},
             {"x": 3869.79, "y": -3573.63, "z": 139.894}
-          ]
+          ],
+          "radius": 8.6
         },
         {
           "entries": [10412, 10398, 10398],
@@ -391,14 +400,16 @@
             {"x": 3855.54, "y": -3557.05, "z": 139.7},
             {"x": 3855.52, "y": -3560.36, "z": 140.537},
             {"x": 3853.18, "y": -3553.89, "z": 139.772}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10463, 10412],
           "positions": [
             {"x": 3861.35, "y": -3583.3, "z": 141.99},
             {"x": 3853.99, "y": -3590.34, "z": 142.523}
-          ]
+          ],
+          "radius": 5.6
         },
         {
           "entries": [10406, 10407, 10407],
@@ -406,59 +417,42 @@
             {"x": 3835.02, "y": -3591.73, "z": 145.058},
             {"x": 3832.02, "y": -3588.27, "z": 145.217},
             {"x": 3830.42, "y": -3592.75, "z": 145.511}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10408],
           "positions": [
             {"x": 3824.23, "y": -3617.32, "z": 145.299}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10463],
           "positions": [
             {"x": 3836.66, "y": -3619.58, "z": 145.114}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10400, 10398],
           "positions": [
             {"x": 3852.82, "y": -3614.61, "z": 145.467},
             {"x": 3854.3, "y": -3609.99, "z": 144.861}
-          ]
-        },
-        {
-          "entries": [10398, 10398, 10400],
-          "positions": [
-            {"x": 3952.27, "y": -3564.68, "z": 130.852},
-            {"x": 3955.43, "y": -3568.09, "z": 129.926},
-            {"x": 3956.98, "y": -3564.79, "z": 129.275}
-          ]
-        },
-        {
-          "entries": [10407, 10407, 10406],
-          "positions": [
-            {"x": 3966.53, "y": -3546.19, "z": 127.225},
-            {"x": 3973.51, "y": -3550.02, "z": 125.891},
-            {"x": 3971.61, "y": -3543.55, "z": 126.368}
-          ]
-        },
-        {
-          "entries": [10415],
-          "positions": [
-            {"x": 3838.85, "y": -3500.02, "z": 192.029}
           ],
-          "needs_walk": true
+          "radius": 5
         }
       ],
-      "skip": [10393, 10558, 10809],
+      "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10437,
         "position": {"x": 3854.98, "y": -3528.84, "z": 144.293}
       },
       "notes": [
         "button \"Market Row Postbox\" entry 176346 at 3690.0 -3405.4 132.8",
-        "door \"Doodad_ZigguratDoor02\" entry 175379 at 3851.7 -3523.0 144.2"
+        "door \"Doodad_ZigguratDoor02\" entry 175379 at 3851.7 -3523.0 144.2",
+        "The 6-unit pull at 3876 -3534 stands 19.1 yd from Nerub'enkan (detection 20): kill it from the far side, or expect the boss in that fight.",
+        "The ziggurat's five Thuzadin Acolytes (3831-3847 -3493..-3503) are the pull; their Ash'ari Crystal suicides when they die and is not a row."
       ]
     },
     {
@@ -466,30 +460,46 @@
       "to": {"x": 3972, "y": -3567.57, "z": 126.131},
       "pull_groups": [
         {
+          "entries": [10398, 10398, 10400],
+          "positions": [
+            {"x": 3952.27, "y": -3564.68, "z": 130.852},
+            {"x": 3955.43, "y": -3568.09, "z": 129.926},
+            {"x": 3956.98, "y": -3564.79, "z": 129.275}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [10407, 10407, 10406],
+          "positions": [
+            {"x": 3966.53, "y": -3546.19, "z": 127.225},
+            {"x": 3973.51, "y": -3550.02, "z": 125.891},
+            {"x": 3971.61, "y": -3543.55, "z": 126.368}
+          ],
+          "radius": 5
+        },
+        {
           "entries": [10464],
           "positions": [
             {"x": 3972, "y": -3567.57, "z": 126.131}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10405, 10405],
           "positions": [
             {"x": 3971.39, "y": -3583.59, "z": 128.364},
             {"x": 3972.95, "y": -3591.59, "z": 128.776}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [10412],
+          "entries": [10412, 10413, 10464],
           "positions": [
-            {"x": 3985.15, "y": -3588.23, "z": 127.607}
-          ]
-        },
-        {
-          "entries": [10413, 10464],
-          "positions": [
+            {"x": 3985.15, "y": -3588.23, "z": 127.607},
             {"x": 3997.04, "y": -3588.57, "z": 128.426},
             {"x": 3993.2, "y": -3602.72, "z": 128.873}
-          ]
+          ],
+          "radius": 10.1
         },
         {
           "entries": [10405, 10406, 10406],
@@ -497,7 +507,8 @@
             {"x": 4006.36, "y": -3596.17, "z": 130.203},
             {"x": 4011.42, "y": -3596.38, "z": 130.905},
             {"x": 4007.92, "y": -3589.73, "z": 130.129}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10400, 10400, 10398, 10398],
@@ -506,15 +517,8 @@
             {"x": 4023.59, "y": -3616.79, "z": 131.632},
             {"x": 4021.41, "y": -3618.52, "z": 131.038},
             {"x": 4025.44, "y": -3620.96, "z": 131.121}
-          ]
-        },
-        {
-          "entries": [10398, 10400, 10400],
-          "positions": [
-            {"x": 4029.56, "y": -3639.27, "z": 133.738},
-            {"x": 4027.78, "y": -3641.1, "z": 133.629},
-            {"x": 4026.23, "y": -3643.39, "z": 133.837}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10400, 10398, 10398],
@@ -522,13 +526,15 @@
             {"x": 4004.1, "y": -3639.83, "z": 131.702},
             {"x": 4000.77, "y": -3642.53, "z": 131.913},
             {"x": 3999.92, "y": -3639.64, "z": 131.909}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10463],
           "positions": [
             {"x": 4001.46, "y": -3630.33, "z": 130.046}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10412, 10407, 10405],
@@ -536,7 +542,8 @@
             {"x": 3989.16, "y": -3625.46, "z": 130.152},
             {"x": 3979.07, "y": -3620.75, "z": 129.757},
             {"x": 3973.07, "y": -3623.11, "z": 130.109}
-          ]
+          ],
+          "radius": 9.5
         },
         {
           "entries": [10463, 10406, 10405],
@@ -544,47 +551,42 @@
             {"x": 3974.81, "y": -3640.5, "z": 132.177},
             {"x": 3975.15, "y": -3648.3, "z": 133.832},
             {"x": 3972.59, "y": -3649, "z": 134.522}
-          ]
+          ],
+          "radius": 6
         },
         {
-          "entries": [10408],
+          "entries": [10408, 10406, 10407, 10407],
           "positions": [
-            {"x": 3954.53, "y": -3642.82, "z": 134.184}
-          ]
-        },
-        {
-          "entries": [10406, 10407, 10407],
-          "positions": [
+            {"x": 3954.53, "y": -3642.82, "z": 134.184},
             {"x": 3951.68, "y": -3648.49, "z": 136.914},
             {"x": 3949.97, "y": -3636, "z": 134.591},
             {"x": 3942.94, "y": -3638.15, "z": 136.92}
-          ]
+          ],
+          "radius": 8.1
         },
         {
           "entries": [10463, 10412],
           "positions": [
             {"x": 3997.02, "y": -3566.96, "z": 126.309},
             {"x": 3995.33, "y": -3555.18, "z": 124.711}
-          ]
+          ],
+          "radius": 6.5
         },
         {
-          "entries": [10408],
+          "entries": [10408, 10400, 10400],
           "positions": [
-            {"x": 3985.92, "y": -3543.39, "z": 124.898}
-          ]
-        },
-        {
-          "entries": [10400, 10400],
-          "positions": [
+            {"x": 3985.92, "y": -3543.39, "z": 124.898},
             {"x": 3988.43, "y": -3540.57, "z": 124.662},
             {"x": 3992.31, "y": -3541.65, "z": 124.509}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10464],
           "positions": [
             {"x": 4014.25, "y": -3540.64, "z": 122.87}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10406, 10406, 10405],
@@ -592,7 +594,8 @@
             {"x": 4020.85, "y": -3556.55, "z": 125.597},
             {"x": 4026.23, "y": -3557.18, "z": 126.157},
             {"x": 4019.97, "y": -3561.34, "z": 126.63}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10405, 10407, 10405, 10405],
@@ -601,38 +604,39 @@
             {"x": 4019.1, "y": -3522.99, "z": 122.102},
             {"x": 4022.91, "y": -3517.33, "z": 122.107},
             {"x": 4016.6, "y": -3516.25, "z": 122.13}
-          ]
+          ],
+          "radius": 7.6
         },
         {
           "entries": [10408],
           "positions": [
             {"x": 4048.21, "y": -3520.04, "z": 121.658}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10405, 10406],
           "positions": [
             {"x": 4054.57, "y": -3514.83, "z": 122.07},
             {"x": 4058.27, "y": -3517.76, "z": 122.389}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [10409],
+          "entries": [10409, 10408, 10809],
           "positions": [
+            {"x": 4058.86, "y": -3530.33, "z": 122.247},
+            {"x": 4058.86, "y": -3530.33, "z": 122.247},
             {"x": 4058.86, "y": -3530.33, "z": 122.247}
-          ]
-        },
-        {
-          "entries": [10408],
-          "positions": [
-            {"x": 4058.86, "y": -3530.33, "z": 122.247}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10411],
           "positions": [
             {"x": 4067.56, "y": -3534.45, "z": 122.677}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10399, 10399, 10399, 10399, 10399],
@@ -642,24 +646,23 @@
             {"x": 4057.55, "y": -3666.56, "z": 135.737},
             {"x": 4052.36, "y": -3672.82, "z": 132.738},
             {"x": 4057.06, "y": -3674.9, "z": 132.738}
-          ]
-        },
-        {
-          "entries": [10415],
-          "positions": [
-            {"x": 4057.59, "y": -3665.95, "z": 183.078}
           ],
-          "needs_walk": true
+          "radius": 8.8
         }
       ],
-      "skip": [10393, 10558, 10809],
+      "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10438,
-        "position": {"x": 4035.81, "y": -3647.78, "z": 135.738}
+        "position": {"x": 4035.81, "y": -3647.78, "z": 135.738},
+        "first": [10398, 10400]
       },
       "notes": [
         "door \"Doodad_LargePortcullis06\" entry 175374 at 4040.0 -3504.3 121.7",
-        "door \"Doodad_ZigguratDoor03\" entry 175381 at 4038.1 -3649.9 135.7"
+        "door \"Doodad_ZigguratDoor03\" entry 175381 at 4038.1 -3649.9 135.7",
+        "The two corridor packs at 3952 -3566 and 3970 -3547 open the leg: they lie between Nerub'enkan's ziggurat and this leg's start (3972 -3568), and the exporter writes a leg's boss last, so they cannot close leg 1 before its boss (that was 111 + 115 + 123 yd of walking).",
+        "The 3-unit pack at 4029 -3640 is 10.7 yd from Maleki (detection 20): it is the boss's `first` row, not a pull.",
+        "The two spawns at 4058.86 -3530.33 (Rockwing Screecher 10409, Rockwing Gargoyle 10408) and Stonespine's spawn are the same spot: one 3-unit pull.",
+        "The ziggurat's five acolytes at 4052-4066 -3660..-3675 are the pull; their crystal suicides."
       ]
     },
     {
@@ -672,35 +675,34 @@
             {"x": 3902.89, "y": -3664.17, "z": 139.883},
             {"x": 3898.28, "y": -3666.94, "z": 140.008},
             {"x": 3894.39, "y": -3665.17, "z": 141.097}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [10408],
+          "entries": [10408, 10406, 10406, 10407, 10412],
           "positions": [
-            {"x": 3897.53, "y": -3682.29, "z": 141.72}
-          ]
-        },
-        {
-          "entries": [10406, 10406, 10407, 10412],
-          "positions": [
+            {"x": 3897.53, "y": -3682.29, "z": 141.72},
             {"x": 3898.46, "y": -3683.88, "z": 142.262},
             {"x": 3891.44, "y": -3678.44, "z": 141.57},
             {"x": 3891.4, "y": -3689, "z": 143.387},
             {"x": 3887.16, "y": -3677.5, "z": 141.664}
-          ]
+          ],
+          "radius": 8.2
         },
         {
           "entries": [10464, 10412],
           "positions": [
             {"x": 3873.95, "y": -3679.66, "z": 142.745},
             {"x": 3861.68, "y": -3686.35, "z": 142.462}
-          ]
+          ],
+          "radius": 7.5
         },
         {
           "entries": [10463],
           "positions": [
             {"x": 3875.71, "y": -3701.37, "z": 142.759}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10400, 10398, 10400],
@@ -708,7 +710,8 @@
             {"x": 3886.05, "y": -3708.18, "z": 143.614},
             {"x": 3888.94, "y": -3708.61, "z": 143.682},
             {"x": 3888.36, "y": -3712.72, "z": 143.354}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10463, 10400, 10400, 10398],
@@ -717,14 +720,16 @@
             {"x": 3835.26, "y": -3698.04, "z": 142.876},
             {"x": 3833.74, "y": -3694.12, "z": 143.266},
             {"x": 3829.61, "y": -3698.28, "z": 143.387}
-          ]
+          ],
+          "radius": 9.9
         },
         {
           "entries": [10406, 10405],
           "positions": [
             {"x": 3823.46, "y": -3682.39, "z": 145.028},
             {"x": 3821.31, "y": -3685.07, "z": 144.894}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10463, 10413, 10406, 10405],
@@ -733,28 +738,32 @@
             {"x": 3840.02, "y": -3664.83, "z": 144.508},
             {"x": 3852.41, "y": -3660.46, "z": 144.55},
             {"x": 3855.54, "y": -3664.61, "z": 144.512}
-          ]
+          ],
+          "radius": 13.5
         },
         {
           "entries": [10413, 10463],
           "positions": [
             {"x": 3830.55, "y": -3647.74, "z": 145.88},
             {"x": 3826.44, "y": -3646.11, "z": 145.951}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10406, 10406],
           "positions": [
             {"x": 3840.03, "y": -3636.68, "z": 146.248},
             {"x": 3844.09, "y": -3632.58, "z": 146.628}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10413, 10464],
           "positions": [
             {"x": 3823.52, "y": -3625.72, "z": 145.561},
             {"x": 3806.42, "y": -3628.08, "z": 145.202}
-          ]
+          ],
+          "radius": 9.1
         },
         {
           "entries": [10407, 10406, 10406],
@@ -762,7 +771,8 @@
             {"x": 3807.41, "y": -3646.83, "z": 146.999},
             {"x": 3811.01, "y": -3651.6, "z": 147.239},
             {"x": 3804.63, "y": -3653.52, "z": 147.376}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10399, 10399, 10399, 10399, 10399],
@@ -772,23 +782,19 @@
             {"x": 3840.35, "y": -3751.6, "z": 145.175},
             {"x": 3855.6, "y": -3749.94, "z": 145.175},
             {"x": 3852.87, "y": -3754.37, "z": 145.175}
-          ]
-        },
-        {
-          "entries": [10415],
-          "positions": [
-            {"x": 3847.58, "y": -3748.46, "z": 195.809}
           ],
-          "needs_walk": true
+          "radius": 8.8
         }
       ],
-      "skip": [10393, 10558, 10809],
+      "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10436,
         "position": {"x": 3855.34, "y": -3715.75, "z": 148.175}
       },
       "notes": [
-        "door \"Doodad_ZigguratDoor01\" entry 175380 at 3853.5 -3722.9 148.1"
+        "door \"Doodad_ZigguratDoor01\" entry 175380 at 3853.5 -3722.9 148.1",
+        "The gargoyle at 3897.53 -3682.29 is 1.8 yd from the 4-unit pack: one 5-unit pull.",
+        "The ziggurat's five acolytes at 3839-3856 -3746..-3754 are the pull; their crystal suicides."
       ]
     },
     {
@@ -799,82 +805,95 @@
           "entries": [10416],
           "positions": [
             {"x": 4009.16, "y": -3434.68, "z": 120.951}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 3995.31, "y": -3425.23, "z": 120.991}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 3998.95, "y": -3403.29, "z": 117.52}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4012.37, "y": -3401.48, "z": 116.073}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4022.83, "y": -3424.39, "z": 117.549}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4040.22, "y": -3443.81, "z": 119.751}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4052.9, "y": -3432.7, "z": 118.528}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 4053.98, "y": -3413.3, "z": 116.076}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4072.01, "y": -3401.01, "z": 115.653}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4083.99, "y": -3379.84, "z": 116.318}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 4097.98, "y": -3397.96, "z": 115.993}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4089.61, "y": -3431.32, "z": 116.945}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 3990.78, "y": -3381.93, "z": 118.724}
-          ]
+          ],
+          "radius": 5
         }
       ],
-      "skip": [10393, 10558, 10809],
+      "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10440,
         "position": {"x": 4032.79, "y": -3333.02, "z": 115.061}

@@ -20,7 +20,14 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "stratholme_undead": 15}
+
+// stratholme_undead's 15 are the dense Scourge street packs: the Gauntlet's two packs (0.2/0.3, 22 yd apart, same-entry mobs inside each
+// other's radius + 3), the four street pulls the draft's 20-unit pack became (each next pack 7-10 yd on), the Maleki ziggurat's caster
+// packs at 4000-4025 -3590..-3645 and the crypt ring of the Anastari leg. Every finding is the next pack of the same entries in the
+// margin, none is a forgotten spawn: the one pack the spec's bbox cut in half (the 7-member formation around 3545 -3420, outside x 3550)
+// is listed whole, and the only two "in range" rows left are the boss-adjacent packs of 0.1 (Barthilas, 20.4 yd) and 1.13 (Nerub'enkan,
+// 19.1 yd).
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
