@@ -157,3 +157,66 @@ func TestShadowfangKeepDoorAndSeam(t *testing.T) {
 		}
 	}
 }
+
+// TestShadowfangKeepStep39SplitAndStair holds the 2026-10-23 data fix (r25 shadowfang_keep slot5, the step-39 pull that
+// wiped twice): the south court's six-unit pull (one row, radius 22.1, 12 units in the radius) is two pulls of three with
+// explicit stands clear of every later pack, the rat is out of it, and the walk up to the upper court goes through the
+// stair's real top as approach points. Every pin fails when a piece is cut.
+func TestShadowfangKeepStep39SplitAndStair(t *testing.T) {
+	p, err := Load("../../dungeons/shadowfang_keep.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l2 := p.Legs[2]
+	south, north := l2.PullGroups[4], l2.PullGroups[5]
+	if len(south.Entries) != 3 || south.Radius != 8 || len(south.Approach) != 1 {
+		t.Fatalf("south half: %v radius %g approach %v", south.Entries, south.Radius, south.Approach)
+	}
+	if south.Entries[0] != 3854 || south.Entries[1] != 3854 || south.Entries[2] != 61970 {
+		t.Fatalf("south half entries: %v", south.Entries)
+	}
+	if len(north.Entries) != 3 || north.Radius != 8 || len(north.Approach) != 1 {
+		t.Fatalf("north half: %v radius %g approach %v", north.Entries, north.Radius, north.Approach)
+	}
+	// The next group's Wolfguard (at -254.049 2355.36) is the north half's now; no other group lists it.
+	for gi, g := range l2.PullGroups {
+		for _, q := range g.Positions {
+			if gi != 5 && groundDist(q, Point{X: -254.049, Y: 2355.36, Z: 96.8226}) < 1 {
+				t.Fatalf("leg 2 group %d still lists the folded-in Wolfguard at %v", gi, q)
+			}
+			// The rat the run leader walked its tank 14.6 yd for is in no pull of the leg.
+			if groundDist(q, Point{X: -250.311, Y: 2352.27, Z: 96.8225}) < 1 {
+				t.Fatalf("leg 2 group %d still lists the rat at %v", gi, q)
+			}
+		}
+	}
+	// Both stands keep the 20-yd aggro reach clear of every spawn of every group pulled later (the run's wipe shape).
+	for _, half := range []int{4, 5} {
+		stand := l2.PullGroups[half].Approach[0]
+		for gi := half + 1; gi < len(l2.PullGroups); gi++ {
+			for _, q := range l2.PullGroups[gi].Positions {
+				if d := groundDist(stand, q); d < laterGroupClearYd {
+					t.Fatalf("the south/north stand %v is %.1f yd from the later group %d's spawn %v", stand, d, gi, q)
+				}
+			}
+		}
+	}
+	// The stair: the upper court's pull carries the walk up the server's own path (turn, top, landing), in order and
+	// within the run leader's reach of the pull's centre.
+	stair := l2.PullGroups[2].Approach
+	want := []Point{{X: -287.2, Y: 2305.1, Z: 90.7}, {X: -284.3, Y: 2320.8, Z: 96.6}, {X: -275.5, Y: 2321.7, Z: 96.2}}
+	if len(stair) != len(want) {
+		t.Fatalf("pull group 3 approach: %v", stair)
+	}
+	for i := range want {
+		if stair[i] != want[i] {
+			t.Fatalf("stair point %d: %v, want %v", i, stair[i], want[i])
+		}
+	}
+	if d := groundDist(stair[len(stair)-1], PackCentre(l2.PullGroups[2])); d > RunLeaderReachYd {
+		t.Fatalf("the stair landing is %.1f yd from the pull's centre (over the run leader's reach)", d)
+	}
+	if z := stair[0].Z; z <= l2.To.Z || z >= stair[1].Z {
+		t.Fatalf("the stair points do not climb: %v", stair)
+	}
+}

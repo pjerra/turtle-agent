@@ -28,6 +28,7 @@
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: the Sorcerer's Gate 18972 at -129.0 2166.2 129.2 (leg fenrus_the_devourer's route) and Arugal's Lair door 18971 at -118.1 2161.9 155.7 (the nandos leg's route), plus Arugal's summoning focus 18973 (GO_ARUGAL_FOCUS) at -146.4 2173.0 150.5. The source notes say the keep script opens them as bosses die, but no step opens them here: the plans carry no use_object/gossip for them, and the mesh crosses both door lines, so plan-check cannot see the closure. Add the event steps only from a live measurement (the Courtyard Door round proves the gossip/lever shape).",
     "Door round 2026-10-23 (r24 shadowfang_keep slot7): the Courtyard Door 18895 is a gossip step on Deathstalker Adamant (3849) in the new courtyard_door leg (the live probe opened it), and Odo's floor and the walkway come after a move_direct across the navmesh seam at the stair top (see the odo_the_blindwatcher leg). The full plan is 10 legs; legs 0-3 are unchanged from the r24 run 1 export.",
+    "Fix round 2026-10-23 (r25 shadowfang_keep slot5): leg 2's step-39 pull (one row of 12 court units at radius 22.1) is two pulls of three with their own stands and the rat taken out, and the walk up to the upper court goes through the stair's real top as approach points (see the baron_silverlaine leg). Legs 0-1 and 3-9 are unchanged from the 20261023180000 export.",
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs.",
     "Fix round 2026-10-22 (PREP-SFK census): cc_priority = the Shadowfang Darksouls (3855, they shield themselves in shadow on aggro), the Spectral Clerics (61970, the court's casters) and the intro Arugal (10000, a 26 elite with 6510 hp that stands in the pull beside Odo's yard); all three have mechanic_immune_mask 0. No fleers in the legs of this file (only Ashcrombe 3850, a friendly, and Wolfguard Worg 5058, leg 6) and no cc_always/kill_first: no trash stuns the party and Springvale heals his own guards, but he is the pull target himself."
   ],
@@ -240,7 +241,12 @@
             {"x": -256.684, "y": 2312.51, "z": 95.8663},
             {"x": -266.808, "y": 2314.64, "z": 95.9498}
           ],
-          "radius": 11
+          "radius": 11,
+          "approach": [
+            {"x": -287.2, "y": 2305.1, "z": 90.7},
+            {"x": -284.3, "y": 2320.8, "z": 96.6},
+            {"x": -275.5, "y": 2321.7, "z": 96.2}
+          ]
         },
         {
           "entries": [3854],
@@ -249,20 +255,27 @@
           ]
         },
         {
-          "entries": [3854, 3854, 61970, 4075, 3855, 61970],
+          "entries": [3854, 3854, 61970],
           "positions": [
             {"x": -248.522, "y": 2337.56, "z": 96.8226},
             {"x": -243.699, "y": 2335.67, "z": 96.8226},
-            {"x": -249.887, "y": 2344.07, "z": 96.8225},
-            {"x": -250.311, "y": 2352.27, "z": 96.8225},
-            {"x": -251.34, "y": 2353.74, "z": 96.8227},
-            {"x": -244.5, "y": 2358.42, "z": 96.8226}
+            {"x": -249.887, "y": 2344.07, "z": 96.8225}
+          ],
+          "radius": 8,
+          "approach": [
+            {"x": -248.5, "y": 2321.0, "z": 97.0}
           ]
         },
         {
-          "entries": [3854],
+          "entries": [61970, 3855, 3854],
           "positions": [
+            {"x": -244.5, "y": 2358.42, "z": 96.8226},
+            {"x": -251.34, "y": 2353.74, "z": 96.8227},
             {"x": -254.049, "y": 2355.36, "z": 96.8226}
+          ],
+          "radius": 8,
+          "approach": [
+            {"x": -250.7, "y": 2332.5, "z": 96.9}
           ]
         },
         {
@@ -379,7 +392,8 @@
         "position": {"x": -275.342, "y": 2297.35, "z": 76.2365}
       },
       "notes": [
-        "Fix round 2026-10-22 (PREP-SFK census): the east half of Silverlaine's court (16 units in one pull) is three pulls (4/4/8, radii 14/18/24) split on the spawn clusters; the Wolfguard that stood inside the west pull's radius is its entry now; the west Darksouls' radius is 11. The court's units see 20 yd, so a fight there can still chain across the splits: watch the court."
+        "Fix round 2026-10-22 (PREP-SFK census): the east half of Silverlaine's court (16 units in one pull) is three pulls (4/4/8, radii 14/18/24) split on the spawn clusters; the Wolfguard that stood inside the west pull's radius is its entry now; the west Darksouls' radius is 11. The court's units see 20 yd, so a fight there can still chain across the splits: watch the court.",
+        "Fix round 2026-10-23 (r25 shadowfang_keep slot5, the step-39 pull that wiped twice): the pull exported as one row at -248.04 2346.95 radius 22.1 (entries 3854,61970,4075,3855) covered 12 court units, among them the Wolfguard of the next pull and two Darksouls 20 yd away, and its rat 4075 (a critter that does not fight) made the run leader walk its tank 14.6 yd to a firing stand first. It is two pulls of three now with radii 8 and explicit stands: the south one (2 Wolfguards + the Spectral Cleric at -249.9 2344.1) from -248.5 2321, the north one (the Cleric at -244.5 2358.4, the Darksoul at -251.3 2353.7 and the next group's Wolfguard at -254.0 2355.4, folded in here) from -250.7 2332.5, both stands 22.8-29.3 yd clear of every pack pulled later. The rat is out. Silverlaine (3887 at -275.3 2297.4, z 76.2) stands 56.6 yd away on the floor below his court, outside every radius. The two halves stand 9.7 yd apart (Cleric south to Darksoul north): a fight can still draw the other half in on its 20-yd sight. The upper court's pulls come after an explicit walk up the stair (pull group 3's approach: -287.2 2305.1, the stair's real top -284.3 2320.8, the landing -275.5 2321.7), so the run leader and its walk back go up the server's path instead of a hop of their own."
       ]
     },
     {
