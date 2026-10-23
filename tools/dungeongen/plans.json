@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -536,6 +575,7 @@
    "title": "Dire Maul: West",
    "map": 429,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map429",
    "trigger": 3186,
    "bosses": [
@@ -556,9 +596,10 @@
    "entrance_tele": "dmwest",
    "outside_tele": "DireMaulWest",
    "special": [
-    "Immol'thar behind a force field (GO_FORCE_FIELD) and the pylons; Tortheldrin's crumble wall (GO_CRUMBLE_WALL)",
-    "Ferra (14308) shares Illyanna's spot; Revanchion (14690) is Turtle's",
-    "Dreadsteed ritual (dreadsteed_ritual.cpp) is a class quest, not part of the clear"
+    "five crystal events (GO_DireMaulCrystalGenerator 177259/177257/177258/179504/179505, four Mana Remnants 11483 within 20 yd each); the last opens the force field 179503 and the magic vortex 179506 and makes Immol'thar selectable, and enables Tortheldrin after Immol'thar dies",
+    "the 29 Shen'dralar Wisps (14361) and the 16 Highborne Summoners (11466) are neutral (faction_template hostileMask 0) and not pulled; the Summoners turn hostile at the crystal event",
+    "Ferra (14308) is Illyanna's pet (boss.first); Revanchion (14690) is Turtle's and has a leg of its own, first in the hall; Tsu'zee (11467, rare) is an explicit pull member of the Kalendris hall",
+    "west-wing door 300601 (lock 1562: the Crescent Key 18249, inferred - no lock table in the export) and stair door 177211 (no lock); the dreadsteed ritual is a class quest, not part of the clear"
    ],
    "notes": [
     "One of three wings of map 429."
