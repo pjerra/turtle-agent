@@ -39,7 +39,7 @@ type entryState struct {
 	waitKey    [2]int
 	waitPolled time.Time
 	waitLast   string
-	// The game objects (describeRef) a gone_ok wait has had a `cmd state` answer for in this run: not-found later counts as done.
+	// The game objects (describeRef) a wait has had a `cmd state` answer for in this run: with gone_ok, not-found later counts as done.
 	seen map[string]bool
 }
 
@@ -239,12 +239,10 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 		switch {
 		case res.Kind == tbm.KindAck && res.State != nil:
 			d.entry.waitLast = fmt.Sprintf("state:%s flags:%s", res.State.State, res.State.Flags)
-			if w.GoneOK {
-				if d.entry.seen == nil {
-					d.entry.seen = map[string]bool{}
-				}
-				d.entry.seen[describeRef(&w.ObjectRef)] = true
+			if d.entry.seen == nil {
+				d.entry.seen = map[string]bool{}
 			}
+			d.entry.seen[describeRef(&w.ObjectRef)] = true
 			if strings.EqualFold(res.State.State, wantedState(w.State)) {
 				d.rep.note(fmt.Sprintf("%s: cmd state says %s is %s (guid %d)", a.Label, describeRef(&w.ObjectRef), res.State.State, res.State.GUID))
 				d.st.SkipStep()

@@ -146,7 +146,7 @@ type Stepper struct {
 	err       string
 	skipped   []string        // what the team gate passed over since Skipped was last called
 	teamSeen  map[string]bool // team-gated parts already noted as hostile in view (a note once per part)
-	objSeen   map[string]bool // game objects a gone_ok wait has seen in view (describeRef): gone later counts as done
+	objSeen   map[string]bool // game objects a wait has seen in view (describeRef): with gone_ok, gone later counts as done
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -588,7 +588,7 @@ func (s *Stepper) holds(w *WaitFor) bool {
 			return false // the driver asks the module (cmd state): the agent's copy of the object proves nothing
 		}
 		o, ok := s.find(&w.GameObject.ObjectRef)
-		if ok && w.GameObject.GoneOK {
+		if ok {
 			if s.objSeen == nil {
 				s.objSeen = map[string]bool{}
 			}
