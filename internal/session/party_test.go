@@ -23,7 +23,7 @@ func fullStats(g packet.GUID, hp, maxHP uint16) []byte {
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(expectWait)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatal("condition not reached")
