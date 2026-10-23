@@ -26,9 +26,13 @@
   "kill_first": [60718, 60726, 60723, 60712, 60738],
   "summoned_kill_first": [60712, 60738],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 808 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "DRAFT, hand-edited from the map-808 export after the data census of 2026-10-24 (PREP-HATEFORGE-QUARRY-2026-10-24.md): the packs are the spawn clusters nearest each boss, the row of a pack that the generator had split in two is merged, every radius is 2.5 yd off the group's own spawn rows, and Broody 60715 is Engineer Figgles' first. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run; dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Turtle custom. 'Broody' (60715) shares Engineer Figgles' spot and is not a leg."
+    "Turtle custom. 'Broody' (60715) shares Engineer Figgles' spot and is not a leg.",
+    "Bargul 60735 stands on the terrace above the quarry; that terrace is a separate navmesh network (the creature path 2570432 walks up a ramp at -8321.1 -3448.1 z 180.8 / -8323.7 -3452.3 z 182.5 that the mesh does not link to the lower floor). The boss is needs_walk: the mapping walk tests the ramp, else the leg needs a gm_cross or an off-mesh link.",
+    "No creature_groups, no creature_linking, no rare rank 2/4, no EventAI event (nothing flees) and no instance script on map 808. The Cleric 60718 is the only healer (Greater Heal 10965), the Shadowcaller 60726 the only AoE caster, the Taskmaster 60723 roots with Hooked Net 13608.",
+    "34 spawns patrol (creature_movement type 2, the boss Corrosis 60829 among them); a patrol block sits on every pull its path enters and on every pull of a patrolling member. The run leader's rows carry none.",
+    "Not in the rows: no_cc, summoned_kill_first (the Engineer's Decoy Dragonlings 60712, Har'gesh's Faceless Terrors 60738), the patrols, needs_walk, the draft status."
   ],
   "legs": [
     {
