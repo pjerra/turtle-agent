@@ -1688,10 +1688,13 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 
 **Controls.** `dungeon_stop` stops the run (`.bot run stop`, then the unbind). In an observed run `dungeon_pause`, `dungeon_resume` and `dungeon_skip` send the run leader's own
 `.bot run pause|resume|skip` on the watch's next look; the answer is in `report.remote.observe.controls`. The `commander` method takes `{"op":"run","verb":"status"}`
-for a hand-sent run command.
+for a hand-sent run command. A pause the module makes for a player's order (`PauseForPlayer`: the observer's own `cmd summon`, a `move`, ...) is listed in
+`report.remote.observe.player_orders`, one entry per pause (later orders during the same pause are not listed separately), with the step and the order (`step 2/5 (first): cmd summon Healy`); `controls` also records
+`player order: ...` and `resumed after the player order at step N` when the run goes on again, also when a person resumed on the server (a run that stops instead of going on ends the pause with no resume entry). The pause itself is the module's: after a `cmd`
+order the run waits for `dungeon_resume` / `.bot run resume`.
 
 **Report.** `report.remote.mode` is `observe`; `report.remote.observe` has `plan`, the newest `state`, `step`, `steps`, `leg`, `kind`, `phase`, `note` and a
-plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.wipes`
+plain-words `text`, `started`, `lines`, `polls`, `pauses`, `controls`, `player_orders`, `ended` and `changes[]` (the newest 300 status changes with their time). `report.wipes`
 counts the watched party's wipes: one rising edge of "every bot dead" in the feed is one wipe, the latch re-arms only once fewer than
 3 members are dead (a single member revived in place for a poll, dead again the next, does not count a second wipe). A wipe also counts
 when every member has died within 90 s of each other, each death newer than the last counted wipe, even if the lead bot revived in
