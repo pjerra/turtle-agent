@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/eluna"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -36,6 +37,21 @@ func checkMode(p dungeonRunParams) (remote bool, err error) {
 			return false, bad("from_step %d: a step number from 1 (the number .bot run status shows)", *p.FromStep)
 		case p.FromLeg != nil || p.FromPullGroup != nil:
 			return false, bad("from_step names the start step itself: leave from_leg and from_pull_group out")
+		}
+	}
+	if p.ElunaPlace != nil {
+		switch {
+		case mode != modeObserve:
+			return false, bad(`eluna_place goes with mode "observe" (the Eluna placement is an observed run's partway start)`)
+		case p.ElunaPlace.Dz != nil && *p.ElunaPlace.Dz < 0:
+			return false, bad("eluna_place.dz %v: a distance in yards from 0 (0: no vertical limit)", *p.ElunaPlace.Dz)
+		case len(p.ElunaPlace.Skip) > eluna.MaxSkip:
+			return false, bad("eluna_place.skip: at most %d entries", eluna.MaxSkip)
+		}
+		for _, e := range p.ElunaPlace.Skip {
+			if e == 0 {
+				return false, bad("eluna_place.skip: entry 0 is not a creature entry")
+			}
 		}
 	}
 	if mode == modeObserve {
@@ -243,7 +259,15 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ElunaPlace: r.eluna, ForceStart: p.ForceStart, Observe: observe, StartFrom: startFrom, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	if p.ElunaPlace != nil && !r.eluna {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "eluna_place needs the settings' eluna_toolkit (test servers only): without it no placement runs and the options would do nothing"}
+	}
+	var elunaDz *float32
+	var elunaSkip []uint32
+	if p.ElunaPlace != nil {
+		elunaDz, elunaSkip = p.ElunaPlace.Dz, p.ElunaPlace.Skip
+	}
+	opt := dungeon.RemoteOptions{ElunaDz: elunaDz, ElunaSkip: elunaSkip, RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ElunaPlace: r.eluna, ForceStart: p.ForceStart, Observe: observe, StartFrom: startFrom, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

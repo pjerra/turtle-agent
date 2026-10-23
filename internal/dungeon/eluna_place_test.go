@@ -24,11 +24,12 @@ type elunaFake struct {
 	floor    eluna.FloorResult
 	floorErr error
 
-	quiet    eluna.QuietResult
-	quietErr error
-	quietAt  []Point
-	quietR   []float32
-	quietW   []time.Duration
+	quiet     eluna.QuietResult
+	quietErr  error
+	quietAt   []Point
+	quietR    []float32
+	quietW    []time.Duration
+	quietOpts []eluna.QuietOpts
 
 	place    eluna.PlaceResult
 	placeErr error
@@ -68,12 +69,13 @@ func (g *elunaFake) TTFloor(ctx context.Context, p Point) (eluna.FloorResult, er
 	return g.floor, g.floorErr
 }
 
-func (g *elunaFake) TTQuiet(ctx context.Context, p Point, r float32, wait time.Duration) (eluna.QuietResult, error) {
+func (g *elunaFake) TTQuiet(ctx context.Context, p Point, r float32, wait time.Duration, opts eluna.QuietOpts) (eluna.QuietResult, error) {
 	g.seq = append(g.seq, "tt quiet")
 	g.times = append(g.times, g.now)
 	g.quietAt = append(g.quietAt, p)
 	g.quietR = append(g.quietR, r)
 	g.quietW = append(g.quietW, wait)
+	g.quietOpts = append(g.quietOpts, opts)
 	return g.quiet, g.quietErr
 }
 
@@ -373,5 +375,44 @@ func TestElunaPlaceSkipsTheStaleDistanceCheck(t *testing.T) {
 	}
 	if indexPrefix(g.orders, "run start") < 0 {
 		t.Fatalf("the run was not started: %v", g.orders)
+	}
+}
+
+// The run's eluna_place options (RemoteOptions.ElunaDz / ElunaSkip) reach the toolkit's quiet; without them the zero options go
+// (the toolkit's own defaults).
+func TestElunaPlacePassesDzAndSkipToQuiet(t *testing.T) {
+	g := newElunaFake(t)
+	o := elunaOpts(Point{X: 1, Y: 2, Z: 3}, true)
+	dz := float32(6)
+	o.ElunaDz, o.ElunaSkip = &dz, []uint32{3849}
+	if rep, err := runRemote(t, g, observePlan(), o, nil); err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if len(g.quietOpts) != 1 || g.quietOpts[0].Dz == nil || *g.quietOpts[0].Dz != 6 || !slices.Equal(g.quietOpts[0].Skip, []uint32{3849}) {
+		t.Fatalf("quiet options %+v", g.quietOpts)
+	}
+	g = newElunaFake(t)
+	if rep, err := runRemote(t, g, observePlan(), elunaOpts(Point{X: 1, Y: 2, Z: 3}, true), nil); err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if len(g.quietOpts) != 1 || g.quietOpts[0].Dz != nil || len(g.quietOpts[0].Skip) != 0 {
+		t.Fatalf("default quiet options %+v", g.quietOpts)
+	}
+}
+
+// A from_leg whose point is only the plan's leg point (the leg's first row was not found) is never placed: the run leader starts at
+// the first row, which can be a whole leg away. Nothing is sent to the toolkit.
+func TestElunaPlaceRefusesAPlanPointStart(t *testing.T) {
+	g := newElunaFake(t)
+	o := elunaOpts(Point{X: 1, Y: 2, Z: 3}, true)
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from leg b", Leg: 1, Point: Point{X: 1, Y: 2, Z: 3}, HavePoint: true, PointFromPlan: true}, nil
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "eluna place: the start point of this from_leg") {
+		t.Fatalf("%v", err)
+	}
+	if s := placeSeq(g.seq); len(s) != 0 {
+		t.Fatalf("the toolkit was used: %v", s)
 	}
 }

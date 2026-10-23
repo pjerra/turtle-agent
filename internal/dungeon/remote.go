@@ -146,6 +146,11 @@ type RemoteOptions struct {
 	// only, see eluna_place.go): the agent's `.go xyz` to the step, `q floor`, `quiet`, `cmd stay`, `place`, `cmd follow`, in
 	// place of the distance check. Off: no `.tt` line is sent.
 	ElunaPlace bool
+	// ElunaDz and ElunaSkip are the run's placement options (dungeon_run eluna_place {dz, skip}): the toolkit's quiet then ignores
+	// units more than ElunaDz yards above or below the start step (0: no vertical limit; nil: the toolkit's default, 8) and the
+	// listed entries (a friendly NPC the test needs near the step). Only read with ElunaPlace on.
+	ElunaDz   *float32
+	ElunaSkip []uint32
 	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
 	HaveItems []uint32
 	// GiveItems is the give_items run option: GM `.additem` lines on named bots at the prepare step (prepare_give.go).

@@ -582,8 +582,8 @@ func (g remoteGame) TTFloor(ctx context.Context, p dungeon.Point) (eluna.FloorRe
 }
 
 // TTQuiet is `.tt quiet`: whether the area stays clear for wait.
-func (g remoteGame) TTQuiet(ctx context.Context, p dungeon.Point, radius float32, wait time.Duration) (eluna.QuietResult, error) {
-	return g.tt().Quiet(ctx, p.X, p.Y, p.Z, radius, wait)
+func (g remoteGame) TTQuiet(ctx context.Context, p dungeon.Point, radius float32, wait time.Duration, opts eluna.QuietOpts) (eluna.QuietResult, error) {
+	return g.tt().QuietWith(ctx, p.X, p.Y, p.Z, radius, wait, opts)
 }
 
 // TTPlace is `.tt place ... of=<of>`: the party in a ring of spread yards around the point, verified. of names the player

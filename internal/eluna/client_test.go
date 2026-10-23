@@ -413,3 +413,40 @@ func TestTypedDecodersSeeRawFields(t *testing.T) {
 		t.Fatalf("%v %v", f, err)
 	}
 }
+
+// quiet sends the toolkit's dz= window and skip= list only when the run asks for them; dz=0 (no vertical limit) is sent as 0.
+func TestQuietWithSendsWindowAndSkip(t *testing.T) {
+	f := func(v float32) *float32 { return &v }
+	for _, c := range []struct {
+		o    QuietOpts
+		want string
+	}{
+		{QuietOpts{}, ".tt quiet 50.00 1.00 2.00 3.00 w=0 #t1"},
+		{QuietOpts{Dz: f(8)}, ".tt quiet 50.00 1.00 2.00 3.00 w=0 dz=8 #t1"},
+		{QuietOpts{Dz: f(0)}, ".tt quiet 50.00 1.00 2.00 3.00 w=0 dz=0 #t1"},
+		{QuietOpts{Dz: f(6.5), Skip: []uint32{3849, 3850}}, ".tt quiet 50.00 1.00 2.00 3.00 w=0 dz=6.5 skip=3849,3850 #t1"},
+		{QuietOpts{Skip: []uint32{3849}}, ".tt quiet 50.00 1.00 2.00 3.00 w=0 skip=3849 #t1"},
+	} {
+		c2, l, sent := testClient(t)
+		c2.Send = func(ctx context.Context, line string) error {
+			*sent = append(*sent, line)
+			l.add(`TTJSON {"v":1,"cmd":"quiet","id":"t1","ok":true,"read":1,"final":true,"quiet":true,"near":[],"roamers":[]}`)
+			return nil
+		}
+		q, err := c2.QuietWith(context.Background(), 1, 2, 3, 50, 0, c.o)
+		if err != nil || !q.Quiet {
+			t.Fatalf("%+v: %+v %v", c.o, q, err)
+		}
+		if (*sent)[0] != c.want {
+			t.Errorf("sent %q, want %q", (*sent)[0], c.want)
+		}
+	}
+	// at most the toolkit's 16 entries go
+	var many []uint32
+	for i := uint32(1); i <= 20; i++ {
+		many = append(many, i)
+	}
+	if got := strings.Count(QuietOpts{Skip: many}.args(), ",") + 1; got != MaxSkip {
+		t.Errorf("%d entries sent, want %d", got, MaxSkip)
+	}
+}
