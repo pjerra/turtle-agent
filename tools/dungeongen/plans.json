@@ -360,6 +360,7 @@
    "title": "Maraudon: Purple",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map349",
    "trigger": 3134,
    "bosses": [
