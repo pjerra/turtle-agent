@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
@@ -139,40 +140,35 @@ func gmLine(text string) (string, error) {
 	return text, nil
 }
 
-// GMOn selects the unit g and sends the GM command text as ONE operation of the session's owner goroutine: no other
-// request (a target call, the addon host's click) can change the selection between the two packets. Use it for a
-// command that acts on the selected unit (".aura <id>", ".revive"), which the core runs on whatever is selected
-// when it arrives (Chat.cpp:2329-2340).
+// GMOnSelectWait is how long GMOn gives the server to show the selection before the line is given up on.
+var GMOnSelectWait = 3 * time.Second
+
+// gmOnAttempts is how many times GMOn selects and confirms again when the selection changed after the confirmation.
+const gmOnAttempts = 3
+
+// GMOn selects the unit g, waits until the server is known to have it in force (SelectConfirmed), and sends the GM command text with
+// GMOnConfirmed: only while that confirmed selection still stands, with no selection packet of its own. Use it for a command that acts on
+// the selected unit (".aura <id>", ".revive"), which the core runs on whatever is selected when it arrives (Chat.cpp:2329-2340); the core
+// handles a selection on the map thread and a chat line on the world thread, so a line sent right after its selection can run on the one
+// before. If another request changed the selection after the confirmation, the unit is selected and confirmed again (gmOnAttempts times).
+// An error, with nothing sent, when the server does not show the selection in time.
 func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 	if g == 0 {
 		return errors.New("gm: no unit to select")
 	}
-	text, err := gmLine(text)
-	if err != nil {
+	if _, err := gmLine(text); err != nil {
 		return err
 	}
-	say, err := game.ChatTypeByName("say")
-	if err != nil {
-		return err
-	}
-	body, err := game.BuildMessageChat(say, "", text)
-	if err != nil {
-		return err
-	}
-	_, err = s.do(ctx, func() (any, error) {
-		if err := s.inWorld(); err != nil {
-			return nil, err
+	var err error
+	for try := 0; try < gmOnAttempts; try++ {
+		if err = s.SelectConfirmed(ctx, g, GMOnSelectWait); err != nil {
+			return err
 		}
-		if err := s.conn.WritePacket(opcode.CMSGSetSelection, game.BuildSetSelection(g)); err != nil {
-			return nil, err
+		if err = s.GMOnConfirmed(ctx, g, text); !errors.Is(err, ErrSelectionChanged) {
+			return err
 		}
-		s.mu.Lock()
-		s.target = g
-		s.selSentLocked(g)
-		s.mu.Unlock()
-		return nil, s.conn.WritePacket(opcode.CMSGMessagechat, body)
-	})
-	return err
+	}
+	return fmt.Errorf("%w: it changed %d times between the server's confirmation and the line, which was not sent", err, gmOnAttempts)
 }
 
 // ErrSelectionChanged is GMOnConfirmed's refusal: the selection is not the unit the caller confirmed (another request changed it, or the
@@ -184,11 +180,8 @@ var ErrSelectionChanged = errors.New("gm: the selection is not the confirmed uni
 // (SelectionConfirmed: an echo that cannot answer an older select, selection.go). It sends no CMSG_SET_SELECTION of its own: the core handles a selection on the map thread and a GM chat line on the world
 // thread, so a selection sent right before the line would not be in force when the line runs, and the line would act on whatever the server showed
 // before. When the selection is no longer the confirmed one it returns ErrSelectionChanged with nothing sent, and the caller selects and confirms
-// again (see the commander's selectThenGM).
+// again (see GMOn and the commander's selectThenGM). g may be 0: a line that must run with nothing selected (".respawn").
 func (s *Session) GMOnConfirmed(ctx context.Context, g packet.GUID, text string) error {
-	if g == 0 {
-		return errors.New("gm: no unit to select")
-	}
 	text, err := gmLine(text)
 	if err != nil {
 		return err

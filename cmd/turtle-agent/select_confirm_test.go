@@ -59,6 +59,7 @@ func TestGMLineWaitsForTheServerToShowTheSelection(t *testing.T) {
 	// The server shows a stranger as selected and never changes it.
 	r := newRig(t)
 	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(stranger))
+	waitUntil(t, func() bool { g, ok := r.s.ServerSelection(); return ok && g == stranger }) // the field is known: no neutral selection
 	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
 	err := g.selectThenGM(context.Background(), lead, ".instance groupunbind all")
 	if err == nil || !strings.Contains(err.Error(), "did not show") {
@@ -71,6 +72,7 @@ func TestGMLineWaitsForTheServerToShowTheSelection(t *testing.T) {
 	// The selection lands late (after 150 ms): the line goes out after it.
 	r = newRig(t)
 	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(stranger))
+	waitUntil(t, func() bool { g, ok := r.s.ServerSelection(); return ok && g == stranger }) // the field is known: no neutral selection
 	g = remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
 	go func() {
 		time.Sleep(150 * time.Millisecond)
@@ -192,8 +194,7 @@ func TestGMLineRunsOnTheConfirmedSelectionWhenSelectionAndChatAreOnSeparateThrea
 func TestGMLineIsNotSentWhenTheConfirmedSelectionChanged(t *testing.T) {
 	const lead, stranger = packet.GUID(0x23A), packet.GUID(0x4D2)
 	r := newRig(t)
-	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(lead)) // the server shows the lead...
-	waitUntil(t, func() bool { g, ok := r.s.ServerSelection(); return ok && g == lead })
+	ownSelection(t, r, lead)                                                  // the server shows the lead...
 	if _, err := r.s.Target(context.Background(), stranger, ""); err != nil { // ...but another request selected the stranger since
 		t.Fatal(err)
 	}
@@ -255,7 +256,10 @@ func TestSelectionEchoMustAnswerTheSelectItConfirms(t *testing.T) {
 	// A fresh echo: the server showed nothing selected, the lead is selected, the echo shows it.
 	r := newRig(t)
 	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(0))
-	waitUntil(t, func() bool { return r.s.SelectionConfirmed(0) })
+	waitUntil(t, func() bool { _, ok := r.s.ServerSelection(); return ok })
+	if r.s.SelectionConfirmed(0) {
+		t.Fatal("a create block confirmed a selection the session never sent")
+	}
 	if _, err := r.s.Target(context.Background(), lead, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -299,8 +303,7 @@ func TestSelectionEchoMustAnswerTheSelectItConfirms(t *testing.T) {
 func TestGMLineOnTheUnchangedSelectionNeedsNoEcho(t *testing.T) {
 	const lead = packet.GUID(0x23A)
 	r := newRig(t)
-	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(lead))
-	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+	ownSelection(t, r, lead)
 	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
 	start := time.Now()
 	for i := 0; i < 3; i++ {
@@ -322,8 +325,7 @@ func TestGMLineOnTheUnchangedSelectionNeedsNoEcho(t *testing.T) {
 func TestGMLineSelectsNeutralFirstWhenAnEchoWouldBeAmbiguous(t *testing.T) {
 	const lead, stranger = packet.GUID(0x23A), packet.GUID(0x4D2)
 	r := newRig(t)
-	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(lead))
-	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+	ownSelection(t, r, lead)
 	if _, err := r.s.Target(context.Background(), stranger, ""); err != nil { // pending: the server has not shown it
 		t.Fatal(err)
 	}
@@ -358,6 +360,116 @@ func TestGMLineSelectsNeutralFirstWhenAnEchoWouldBeAmbiguous(t *testing.T) {
 	}
 	if ops[0] != "sel 0x0" || ops[1] != "sel 0x23a" || ops[2] != "chat on 0x23a" {
 		t.Fatalf("ops %v", ops)
+	}
+}
+
+// ownSelection makes g the confirmed selection the way a run does: the create block (which says nothing about the selection), the
+// session's own select of g and the server's echo of it. The select packet is read off the wire.
+func ownSelection(t *testing.T, r *agentRig, g packet.GUID) {
+	t.Helper()
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(0x777))
+	waitUntil(t, func() bool { _, ok := r.s.ServerSelection(); return ok })
+	var err error
+	if g == 0 {
+		err = r.s.ClearTarget(context.Background())
+	} else {
+		_, err = r.s.Target(context.Background(), g, "")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(g))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(g) })
+	if ops := selOps(r, 100*time.Millisecond); len(ops) != 1 {
+		t.Fatalf("ops %v", ops)
+	}
+}
+
+// coreLike plays the core for the selection: it applies each CMSG_SET_SELECTION as it reads it and echoes the target field when it
+// changed; rewrite changes the FIELD alone (combat, a stun), not the selection; a chat line is recorded with the selection in force.
+type coreLike struct {
+	r     *agentRig
+	sel   packet.GUID // what GM commands act on
+	field packet.GUID // UNIT_FIELD_TARGET as the client last saw it
+	ops   []string
+}
+
+// run reads until want ops (selections and chat lines) were seen.
+func (c *coreLike) run(t *testing.T, want int) {
+	t.Helper()
+	for len(c.ops) < want {
+		p, err := c.r.srv.Next(2 * time.Second)
+		if err != nil {
+			t.Fatalf("ops %v: %v", c.ops, err)
+		}
+		switch p.Op {
+		case opcode.CMSGSetSelection:
+			c.sel = packet.NewReader(p.Body).GUID()
+			c.ops = append(c.ops, fmt.Sprintf("sel %#x", uint64(c.sel)))
+			if c.sel != c.field {
+				c.field = c.sel
+				c.r.srv.Send(opcode.SMSGUpdateObject, selfValues(c.field))
+			}
+		case opcode.CMSGMessagechat:
+			c.ops = append(c.ops, fmt.Sprintf("chat on %#x", uint64(c.sel)))
+		}
+	}
+}
+
+func (c *coreLike) rewrite(t *testing.T, field packet.GUID) {
+	t.Helper()
+	c.field = field
+	c.r.srv.Send(opcode.SMSGUpdateObject, selfValues(field))
+	waitUntil(t, func() bool { g, _ := c.r.s.ServerSelection(); return g == field })
+}
+
+// Unit::AttackStop (the mob the agent fought and had selected died) writes 0 into the target field and leaves the selection on the mob. The
+// old dedupe took that 0 for a cleared selection, so `.respawn` went out on the selected mob before the clear landed. Now the clear goes
+// through a neutral selection (the agent itself: the field already shows 0, so a clear would get no echo), and the line runs with nothing
+// selected.
+func TestRespawnAfterAttackStopWaitsForTheRealClear(t *testing.T) {
+	const mob = packet.GUID(0xF130000000000077)
+	r := newRig(t)
+	ownSelection(t, r, mob)
+	c := &coreLike{r: r, sel: mob, field: mob}
+	c.rewrite(t, 0) // AttackStop
+	if r.s.SelectionConfirmed(0) {
+		t.Fatal("the combat rewrite confirmed a cleared selection")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}.Respawn(context.Background())
+	}()
+	c.run(t, 3)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"sel 0x2a", "sel 0x0", "chat on 0x0"}; strings.Join(c.ops, ",") != strings.Join(want, ",") {
+		t.Fatalf("ops %v, want %v", c.ops, want)
+	}
+}
+
+// Unit::Attack writes the victim into the field without selecting it: with nothing selected, an attack on the lead shows the lead. A line
+// for the lead must not go out on that; it selects the lead through a neutral selection (the field already shows the lead, so a select of
+// it would get no echo) and runs on the lead.
+func TestGMLineAfterAnAttackOnThePlayerSelectsItForReal(t *testing.T) {
+	const lead = packet.GUID(0x23A)
+	r := newRig(t)
+	ownSelection(t, r, 0)
+	c := &coreLike{r: r, sel: 0, field: 0}
+	c.rewrite(t, lead) // Attack
+	if r.s.SelectionConfirmed(lead) {
+		t.Fatal("the attack confirmed the victim as the selection")
+	}
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	done := make(chan error, 1)
+	go func() { done <- g.selectThenGM(context.Background(), lead, ".levelup 2") }()
+	c.run(t, 3)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"sel 0x2a", "sel 0x23a", "chat on 0x23a"}; strings.Join(c.ops, ",") != strings.Join(want, ",") {
+		t.Fatalf("ops %v, want %v", c.ops, want)
 	}
 }
 

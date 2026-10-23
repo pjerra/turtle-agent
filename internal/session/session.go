@@ -220,7 +220,10 @@ type Session struct {
 	target       packet.GUID
 	selLog       []packet.GUID // the selections sent and the one known in force, selection.go
 	selBaseKnown bool
-	falling      bool // s.fall != nil, for Status
+	selShown     packet.GUID // the target field the server showed last; selShownOK: one was seen since the object was (re)created
+	selShownOK   bool
+	selDropped   map[packet.GUID]bool // units of sends dropped from the log at selCap
+	falling      bool                 // s.fall != nil, for Status
 	zUnknown     bool
 
 	// owner-loop only
