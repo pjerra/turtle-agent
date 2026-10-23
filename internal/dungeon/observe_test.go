@@ -67,7 +67,11 @@ func runLine(st tbm.RunStatus) string {
 		}
 		return s
 	}
-	return fmt.Sprintf("TBM:RUN|%s|%s|%d/%d|%s|%s|%s|%s", d(st.Plan), st.State, st.Step, st.Steps, d(st.Leg), d(st.Kind), d(st.Phase), d(st.Note))
+	s := fmt.Sprintf("TBM:RUN|%s|%s|%d/%d|%s|%s|%s|%s", d(st.Plan), st.State, st.Step, st.Steps, d(st.Leg), d(st.Kind), d(st.Phase), d(st.Note))
+	if st.Left > 0 {
+		s += fmt.Sprintf("|left %d", st.Left)
+	}
+	return s
 }
 
 func (l *fakeLeader) emit(st tbm.RunStatus) {
@@ -264,6 +268,26 @@ func TestObserveWatchesARunToTheEnd(t *testing.T) {
 	}
 	if _, err := json.Marshal(rep); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A done line with packs left behind keeps the count: the note is bare and the report carries Left.
+func TestObserveKeepsThePacksLeftCount(t *testing.T) {
+	done := rs("done", 5, 5, "second", "move", "walk", "plan done")
+	done.Left = 2
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), done})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if ob.Left != 2 || ob.Note != "plan done" || ob.State != "done" {
+		t.Fatalf("observe %+v", ob)
+	}
+	if last := ob.Changes[len(ob.Changes)-1]; last.Left != 2 || last.Note != "plan done" {
+		t.Fatalf("last change %+v", last)
 	}
 }
 

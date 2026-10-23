@@ -253,7 +253,8 @@ type GhostAnswer struct {
 	Run      string       `json:"run,omitempty"`
 	Folder   string       `json:"folder,omitempty"`
 	Seconds  float64      `json:"seconds,omitempty"`
-	Complete bool         `json:"complete,omitempty"` // the run cleared the whole dungeon
+	Complete bool         `json:"complete,omitempty"` // the run cleared the whole dungeon (done with no packs left)
+	Left     int          `json:"left,omitempty"`     // packs the run leader left alive
 	LegsDone int          `json:"legs_done,omitempty"`
 	PlanLegs int          `json:"plan_legs,omitempty"` // the plan's sections, when the page said
 	Legs     []DLeg       `json:"legs,omitempty"`
@@ -261,9 +262,10 @@ type GhostAnswer struct {
 	Runs     int          `json:"runs"`           // runs of the plan looked at
 }
 
-// Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, the quicker
-// of equals. A run that ended "done" and started at the first section counts as a clear of the whole dungeon, or, when planLegs says how
-// many sections the plan has, a run with that many done. The answer is cached until the folders are listed again.
+// Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, and of
+// equals a confirmed clean clear before any other run, then the quicker. A run that ended "done", started at the first section and left no packs alive counts as a clear of the whole dungeon,
+// or, when planLegs says how many sections the plan has, a run with that many done and none left. The answer is cached until the
+// folders are listed again.
 func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -295,19 +297,20 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		if d == nil {
 			continue
 		}
-		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && d.Seconds < best.Seconds) {
+		if best == nil || d.LegsDone > best.LegsDone || (d.LegsDone == best.LegsDone && ghostBetter(f, d, bestF, best)) {
 			best, bestF = d, f
 		}
 	}
+
 	if best == nil {
 		ans.Why = "no earlier run of " + plan + " in the tests folder"
 		return h.keepGhost(key, ans)
 	}
-	ans.Found, ans.Run, ans.Folder, ans.Seconds, ans.LegsDone, ans.Legs = true, best.Run, bestF.folder, best.Seconds, best.LegsDone, best.Legs
+	ans.Found, ans.Run, ans.Folder, ans.Seconds, ans.LegsDone, ans.Left, ans.Legs = true, best.Run, bestF.folder, best.Seconds, best.LegsDone, best.Left, best.Legs
 	if planLegs > 0 {
-		ans.Complete = best.LegsDone >= planLegs
+		ans.Complete = best.LegsDone >= planLegs && best.Left == 0
 	} else {
-		ans.Complete = bestF.reason == "done" && bestF.fromLeg == 0
+		ans.Complete = confirmedClear(bestF, best)
 	}
 	for _, p := range best.Paths {
 		if p.Lead {
@@ -319,6 +322,23 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		ans.Path = thinPath(best.Paths[0], ghostMaxPoints)
 	}
 	return h.keepGhost(key, ans)
+}
+
+// confirmedClear is a run that cleared the whole dungeon for sure: it ended
+// "done", started at the first section and left no packs alive. An
+// interrupted run never reported a final count, so its Left of 0 proves
+// nothing. Complete and the ghost tie-break share this predicate.
+func confirmedClear(f runFile, d *RunDigest) bool {
+	return f.reason == "done" && f.fromLeg == 0 && d.Left == 0
+}
+
+// ghostBetter says whether d is the better ghost of two runs that finished the same sections: a confirmed clean clear beats any other run, and of two alike runs the quicker wins.
+func ghostBetter(df runFile, d *RunDigest, bestF runFile, best *RunDigest) bool {
+	dClean, bestClean := confirmedClear(df, d), confirmedClear(bestF, best)
+	if dClean != bestClean {
+		return dClean
+	}
+	return d.Seconds < best.Seconds
 }
 
 func (h *History) keepGhost(key string, ans GhostAnswer) []byte {

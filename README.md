@@ -3582,7 +3582,8 @@ most sections; `GET /api/heat/<plan>` the death places of the latest 20 runs. Bo
 at most 600 files, 6 folders deep, listed at most every 90 s, parsed once per change and cached (28 digests). What the data lacks is left out and the legend
 says so: the feed has **no creature level** (rings are 20 yd), **no name of who put a crowd control on** (the cyan line needs a `cmd cc` order of the commander),
 **no heal spell target** (a healer that targets a friend is taken to heal it), and patrols are only drawn when the plan has them. Runs that started at a later
-section (`from_leg`) are not counted as a clear of the whole dungeon. Botwatch files are not read: they carry no plan name.
+section (`from_leg`) are not counted as a clear of the whole dungeon, nor are runs whose run leader reported packs left alive (`TBM:RUN ... |left <K>`):
+the ghost names the count ("furthest earlier run (4 sections), 2 packs left") and a run's card shows it ("Run leader: finished all 41 steps, 2 packs left"). Botwatch files are not read: they carry no plan name.
 
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that

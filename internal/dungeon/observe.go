@@ -129,6 +129,7 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
+	Left  int       `json:"left,omitempty"` // packs the run leader left alive
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -143,6 +144,7 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
+	Left  int    `json:"left,omitempty"` // packs the run leader left alive
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -769,10 +771,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++
@@ -813,7 +815,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	d.rep.setCurrent(label)
 	d.wd.progress("run leader: " + st.Text())
-	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note}
+	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note, "left": st.Left}
 	d.tr.Event("run_leader", data)
 	// The legs: a new leg name ends the one before it and starts the next, so the report has the per-leg times.
 	if li := d.legOf(st.Leg); li >= 0 && li != d.curLeg && st.State != tbm.RunNone {
@@ -826,7 +828,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", li, name), map[string]any{"leg": li, "name": name, "phase": "start", "mode": "observe"})
 	}
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
-		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note})
+		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note, "left": st.Left})
 	}
 }
 
