@@ -102,6 +102,10 @@ type PartialStart struct {
 	// place: a partway start is refused when the lead bot stands far from it (ObserveSpec.AllowFarStart overrides).
 	Point     Point
 	HavePoint bool
+	// PointFromPlan marks a from_leg whose Point is the plan's leg point (first via, else to) because the leg's first row could not be
+	// found: no exporter option set reproduced the server's step count. The run leader starts at the first ROW, which can be far from
+	// that point, so the Eluna placement (settings eluna_toolkit) refuses it.
+	PointFromPlan bool
 }
 
 // StartFromResolver maps an observed run's partial start (from_leg, from_pull_group, from_step) to how it starts once the server's step

@@ -22,7 +22,8 @@ type ElunaToolkit interface {
 	// TTFloor is `.tt q floor`: the floor a caller's z searches at a point.
 	TTFloor(ctx context.Context, p Point) (eluna.FloorResult, error)
 	// TTQuiet is `.tt quiet`: whether the area stays clear for wait, and what stands near or roams.
-	TTQuiet(ctx context.Context, p Point, radius float32, wait time.Duration) (eluna.QuietResult, error)
+	// opts carries the run's placement options (dz window, skipped entries); the zero value leaves the toolkit's defaults.
+	TTQuiet(ctx context.Context, p Point, radius float32, wait time.Duration, opts eluna.QuietOpts) (eluna.QuietResult, error)
 	// TTPlace is `.tt place ... of=<of>`: the party in a ring of spread yards around the point, verified. of names the
 	// player whose group is placed (a commander bound with `.bot commander bind` is not in the bots' group); empty: the
 	// caller's own group.
@@ -62,6 +63,11 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	if !okToolkit || !okHands {
 		return errors.New("observe mode: eluna place: eluna_toolkit is on but this game has no Eluna client")
 	}
+	if d.start.PointFromPlan {
+		// from_leg whose first row could not be found in rows that reproduce the server's step count: the point is the plan's leg
+		// point, which can be a whole leg away from where the run leader starts (Gnomeregan thermaplugg_route: 215 yd). Never place there.
+		return errors.New("observe mode: eluna place: the start point of this from_leg is the plan's leg point, not the leg's first row (no exporter option set reproduces the server's step count); start with from_step <the leg's first step>")
+	}
 	p := d.start.Point
 
 	// 0. The commander enters the lead bot's instance first. The bound party went through the portal on its own (`cmd enter`) into an
@@ -98,7 +104,7 @@ func (d *RemoteDriver) elunaPlace(ctx context.Context) error {
 	}
 
 	// 3. Nothing waits at the step. There is no clearto here (the owner's decision): a pack in the way refuses the run.
-	q, err := tk.TTQuiet(ctx, p, elunaQuietRadius, elunaQuietWait)
+	q, err := tk.TTQuiet(ctx, p, elunaQuietRadius, elunaQuietWait, eluna.QuietOpts{Dz: d.opt.ElunaDz, Skip: d.opt.ElunaSkip})
 	if err != nil {
 		return fmt.Errorf("observe mode: eluna place: quiet: %w", err)
 	}

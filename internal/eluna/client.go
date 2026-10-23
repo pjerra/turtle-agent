@@ -250,12 +250,49 @@ func (c *Client) Floor(ctx context.Context, x, y, z float32) (FloorResult, error
 	return out, nil
 }
 
+// QuietOpts narrow what `quiet` counts (the toolkit's dz= and skip=). The zero value sends neither, so the toolkit's own defaults
+// apply (dz 8 yd, no skipped entries).
+type QuietOpts struct {
+	// Dz is the vertical window in yards: units farther above or below the point do not count. Nil: the toolkit's default (8);
+	// a pointer to 0 sends dz=0, which means no vertical limit (the old 2D rule).
+	Dz *float32
+	// Skip lists entries that never count (e.g. a friendly NPC the test needs near the point). At most MaxSkip are sent.
+	Skip []uint32
+}
+
+// MaxSkip is the most entries the toolkit reads from one skip= list (its idList cap).
+const MaxSkip = 16
+
+// args is the " dz=.. skip=.." tail of a quiet line.
+func (o QuietOpts) args() string {
+	var s string
+	if o.Dz != nil {
+		s += " dz=" + strconv.FormatFloat(float64(*o.Dz), 'f', -1, 32)
+	}
+	if n := len(o.Skip); n > 0 {
+		if n > MaxSkip {
+			n = MaxSkip
+		}
+		ids := make([]string, n)
+		for i := 0; i < n; i++ {
+			ids[i] = strconv.FormatUint(uint64(o.Skip[i]), 10)
+		}
+		s += " skip=" + strings.Join(ids, ",")
+	}
+	return s
+}
+
 // Quiet holds (or asks) whether a radius around a point stays clear for wait, and answers after it: the second read of the command.
 func (c *Client) Quiet(ctx context.Context, x, y, z, radius float32, wait time.Duration) (QuietResult, error) {
+	return c.QuietWith(ctx, x, y, z, radius, wait, QuietOpts{})
+}
+
+// QuietWith is Quiet with the toolkit's vertical window and entry filter.
+func (c *Client) QuietWith(ctx context.Context, x, y, z, radius float32, wait time.Duration, o QuietOpts) (QuietResult, error) {
 	if wait < 0 {
 		wait = 0
 	}
-	sub := "quiet " + f2(radius) + " " + f2(x) + " " + f2(y) + " " + f2(z) + " w=" + strconv.FormatFloat(wait.Seconds(), 'f', -1, 64)
+	sub := "quiet " + f2(radius) + " " + f2(x) + " " + f2(y) + " " + f2(z) + " w=" + strconv.FormatFloat(wait.Seconds(), 'f', -1, 64) + o.args()
 	rs, err := c.Do(ctx, sub, wait+10*time.Second)
 	if err != nil {
 		return QuietResult{}, err

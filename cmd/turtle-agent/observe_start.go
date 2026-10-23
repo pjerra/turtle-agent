@@ -76,7 +76,15 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 			} else if rowLeg > 0 { // leg 0 is the first step: no `from` (the run leader's own beginning)
 				ps.Words = "from " + strconv.Itoa(rowLeg)
 			}
-			ps.Point, ps.HavePoint = legStartPoint(plan, leg)
+			// The run leader starts at the leg's first ROW, which with cut-hop rows is a walk row far from the plan's first point
+			// (Gnomeregan thermaplugg_route: 215 yd). The same point as `from_step <first row of the leg>`; the plan's own point only
+			// when no exporter option set reproduces the server's step count (marked, so the Eluna placement refuses it).
+			if at, ok := observeLegFirstRow(plan, planner, serverSteps, rowLeg); ok {
+				ps.Point, ps.HavePoint = at, true
+			} else {
+				ps.Point, ps.HavePoint = legStartPoint(plan, leg)
+				ps.PointFromPlan = ps.HavePoint
+			}
 			return ps, nil
 		}
 	}
@@ -109,6 +117,46 @@ func legStartPoint(p *dungeon.Plan, leg int) (dungeon.Point, bool) {
 		return l.Via[0].Point, true
 	}
 	return l.To, true
+}
+
+// observeLegFirstRow is the point of the first row of the exported leg number rowLeg, in the rows an exporter option set reproduces
+// the server's step count with (false: no step count, no such rows, or the matching option sets put the row in different places).
+func observeLegFirstRow(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps, rowLeg int) (dungeon.Point, bool) {
+	if serverSteps <= 0 {
+		return dungeon.Point{}, false
+	}
+	cands, _ := observePlanRows(plan, planner)
+	return legFirstRowIn(cands, serverSteps, rowLeg)
+}
+
+// legFirstRowIn is observeLegFirstRow over given candidate rows.
+func legFirstRowIn(cands []planexport.Rows, serverSteps, rowLeg int) (dungeon.Point, bool) {
+	var at dungeon.Point
+	have := false
+	for _, r := range cands {
+		if r.StepCount() != serverSteps {
+			continue
+		}
+		found := false
+		for _, s := range r.Steps {
+			if s.Leg != rowLeg {
+				continue
+			}
+			p := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
+			switch {
+			case !have:
+				at, have = p, true
+			case pointDist(at, p) > 1:
+				return dungeon.Point{}, false // the option sets put the leg's first row in different places
+			}
+			found = true
+			break
+		}
+		if !found {
+			return dungeon.Point{}, false
+		}
+	}
+	return at, have
 }
 
 // observeGroupStep maps a plan leg's pull group to the run leader's 1-based step number and that step's point.
