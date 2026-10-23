@@ -811,6 +811,7 @@
    "title": "Stormwrought Ruins",
    "map": 818,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map818",
    "trigger": 5347,
    "bosses": [
@@ -828,11 +829,13 @@
    ],
    "route": true,
    "special": [
-    "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",
-    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)"
+    "secret door 2006138 at -5561.22 -3933.33 255.589 starts closed and opens only when all four Chamber Levers 2020236 are used (guids 5025429-5025432); no plan step yet: the last leg needs them",
+    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS); Eldermaw's crocolisk 62674 and Ighal'for's Mergothid 62673 have no spawn row",
+    "hand-mapped 2026-10-24 from the world export (map818), the world SQL and the core scripts: duplicate rows merged, radii to the groups' own members, boss guards last, cc_priority/no_cc/kill_first from the spell lists (see ~/TortoiseBots-audit/PREP-STORMWROUGHT-RUINS-2026-10-24.md)"
    ],
    "notes": [
-    "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front."
+    "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front.",
+    "hand-mapped 2026-10-24 from the world export (map818), the world SQL and the core scripts: duplicate rows merged, radii to the groups' own members, boss guards moved to the end of their leg, no_cc/cc_priority/kill_first from the spell lists; the mapping walk is still to do (see ~/TortoiseBots-audit/PREP-STORMWROUGHT-RUINS-2026-10-24.md)"
    ]
   },
   {
