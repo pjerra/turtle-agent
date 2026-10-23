@@ -241,6 +241,10 @@ const (
 type Waypoint struct {
 	Point
 	Direct bool `json:"direct,omitempty"`
+	// Trigger is the area trigger id the TortoiseBots run leader's move row for this point walks into (its `entry` column):
+	// the bot that walks into the zone takes the trigger's script although AiPlayerbot.BotAreaTriggers does not list it
+	// (fix/plan-gossip-allow). 0: the row carries no entry, as before. In the file: {"x": 1903, "y": 1014, "z": 11.8, "trigger": 962}.
+	Trigger uint32 `json:"trigger,omitempty"`
 	// Exact says the lead bot must stand on this waypoint (within directArrive, 1.5 yd) before the next step is sent, not merely within
 	// MoveArrive: it is for the plain waypoint a direct step is launched from, where a step sent from a few yards short is refused (`no-los`)
 	// or lands short of the gap. Only a plain waypoint whose next via is a direct step that is not a gm_cross may carry it (the loader refuses
@@ -768,6 +772,7 @@ type rawPortal struct {
 type rawWaypoint struct {
 	X, Y, Z   *float32
 	Direct    bool   `json:"direct"`
+	Trigger   uint32 `json:"trigger"`
 	Exact     bool   `json:"exact"`
 	CheckSkip string `json:"check_skip"`
 	GMCross   bool   `json:"gm_cross"`
@@ -1232,7 +1237,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
-		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, Exact: w.Exact, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
+		l.Via = append(l.Via, Waypoint{Point: pt, Direct: w.Direct, Trigger: w.Trigger, Exact: w.Exact, CheckSkip: w.CheckSkip, GMCross: w.GMCross})
 		if w.GMCross {
 			if !w.Direct {
 				c.fail(wp, "gm_cross is a direct waypoint: add \"direct\": true")

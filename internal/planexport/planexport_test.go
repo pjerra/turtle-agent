@@ -406,9 +406,9 @@ func TestAreaTriggerBecomesAMoveToTheStand(t *testing.T) {
 		if m.X != 44 || m.Y != 0 || !strings.Contains(m.Comment, "area trigger 962: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)") || !strings.Contains(m.Comment, "unit 7271 hostile") {
 			t.Fatalf("%s: %+v", by, m)
 		}
-	}
-	if _, err := Build(plan("agent"), Options{Source: "test", DropCompanionsLoot: true}); err == nil || !strings.Contains(err.Error(), `area_trigger 962: by "agent" has no run leader step`) {
-		t.Fatalf("%v", err)
+		if m.Entry != 962 {
+			t.Fatalf("%s: the trigger walk carries entry %d, want 962: %+v", by, m.Entry, m)
+		}
 	}
 	wait := parsePlan(t, `{"version":1,"name":"w","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":20,"y":0,"z":0},"steps":[{"wait_for":{"unit":{"entries":[7271],"state":"dead"}}}]}]}`)
 	if _, err := Build(wait, Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "wait_for.unit has no run leader step (unit 7271 dead)") {
@@ -609,6 +609,86 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A via waypoint's trigger is the move row's entry: the run-bound bot fires that trigger walking in (fix/plan-gossip-allow).
+// Old files without it still load, and their rows carry entry 0.
+func TestViaTriggerRoundTrips(t *testing.T) {
+	const js = `{"version":1,"name":"trig","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"hall","via":[{"x":1,"y":0,"z":0},{"x":10,"y":0,"z":0,"direct":true,"trigger":962}],"to":{"x":20,"y":0,"z":0},"boss":{"entry":7271,"position":{"x":30,"y":0,"z":0}}}]}`
+	p := parsePlan(t, js)
+	if p.Legs[0].Via[1].Trigger != 962 || p.Legs[0].Via[0].Trigger != 0 {
+		t.Fatalf("via triggers %+v", p.Legs[0].Via)
+	}
+	out, err := dungeon.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := dungeon.Parse("trig.json", out); err != nil || again.Legs[0].Via[1].Trigger != 962 {
+		t.Fatalf("the trigger does not survive Marshal: %v %+v", err, again.Legs[0].Via)
+	}
+	r := build(t, p)
+	var moves []StepRow
+	for _, s := range r.Steps {
+		if s.Kind == KindMove || s.Kind == KindMoveDirect {
+			moves = append(moves, s)
+		}
+	}
+	if len(moves) != 3 || moves[0].Entry != 0 || moves[1].Entry != 962 || moves[2].Entry != 0 {
+		t.Fatalf("move entries %+v", moves)
+	}
+	if moves[1].Kind != KindMoveDirect || moves[1].X != 10 {
+		t.Fatalf("trigger row %+v", moves[1])
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil || Equal([]Rows{r}, back) != nil {
+		t.Fatalf("no round trip: %v", err)
+	}
+	if back[0].Steps[1].Entry != 962 {
+		t.Fatalf("the entry does not survive the migration: %+v", back[0].Steps[1])
+	}
+	// An old file without the field stays valid and exports entry 0.
+	old := parsePlan(t, `{"version":1,"name":"old","status":"live-checked","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"hall","via":[{"x":1,"y":0,"z":0}],"to":{"x":20,"y":0,"z":0},"boss":{"entry":7271,"position":{"x":30,"y":0,"z":0}}}]}`)
+	if old.Legs[0].Via[0].Trigger != 0 {
+		t.Fatalf("unset trigger is not 0: %+v", old.Legs[0].Via)
+	}
+	for _, s := range build(t, old).Steps {
+		if (s.Kind == KindMove || s.Kind == KindMoveDirect) && s.Entry != 0 {
+			t.Fatalf("an old move carries an entry: %+v", s)
+		}
+	}
+}
+
+// Zul'Farrak's export carries the area trigger of the Zum'rah walk on the move row into the zone (leg 10, 1903 1014 11.8,
+// entry 962, TortoiseBots migration 20261024000000_world.sql) and 0 on every other move row, so a re-export keeps it.
+func TestZulfarrakExportCarriesTheZumrahTrigger(t *testing.T) {
+	res := zulfarrakWithoutBly(t, true)
+	n := -1
+	for _, l := range res.Rows.Legs {
+		if l.Name == "zumrah" {
+			n = l.Leg
+		}
+	}
+	if n != 10 {
+		t.Fatalf("the zumrah rows are leg %d, want 10", n)
+	}
+	var moves []StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == n && (s.Kind == KindMove || s.Kind == KindMoveDirect) {
+			moves = append(moves, s)
+		}
+	}
+	if len(moves) == 0 {
+		t.Fatal("no move rows in the zumrah leg")
+	}
+	var trig []StepRow
+	for _, m := range moves {
+		if m.Entry != 0 {
+			trig = append(trig, m)
+		}
+	}
+	if len(trig) != 1 || trig[0].Entry != 962 || trig[0].X != 1903 || trig[0].Y != 1014 {
+		t.Fatalf("trigger rows %+v", trig)
 	}
 }
 

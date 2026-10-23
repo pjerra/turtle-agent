@@ -326,12 +326,12 @@ func (b *builder) add(s StepRow) {
 	b.rows.Steps = append(b.rows.Steps, s)
 }
 
-func (b *builder) move(p dungeon.Point, direct bool, comment string) {
+func (b *builder) move(p dungeon.Point, direct bool, trigger uint32, comment string) {
 	kind := KindMove
 	if direct {
 		kind = KindMoveDirect
 	}
-	b.add(StepRow{Kind: kind, X: p.X, Y: p.Y, Z: p.Z, Comment: comment})
+	b.add(StepRow{Kind: kind, Entry: trigger, X: p.X, Y: p.Y, Z: p.Z, Comment: comment})
 	b.last, b.haveLast = p, true
 }
 
@@ -357,7 +357,7 @@ func (b *builder) leg(li int) error {
 	for vi, w := range l.Via {
 		if w.GMCross && b.opt.GMCrossDirect {
 			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): via %.1f %.1f %.1f is a gm_cross; exported as a move_direct (a straight walk to the landing point), not tried live: the run leader has no GM move", li, l.Name, w.X, w.Y, w.Z))
-			b.move(w.Point, true, "via (gm_cross in the plan; move_direct, not tried live)")
+			b.move(w.Point, true, 0, "via (gm_cross in the plan; move_direct, not tried live)")
 			continue
 		}
 		if w.GMCross {
@@ -366,18 +366,18 @@ func (b *builder) leg(li int) error {
 		if w.Exact {
 			// The plan allows exact only on a plain via whose next via is a direct step (dungeon.Parse refuses any other), so this row is
 			// always followed by its move_direct; Validate checks the rows keep it so.
-			b.add(StepRow{Kind: KindMove, X: w.X, Y: w.Y, Z: w.Z, Flags: FlagExact, Comment: "via (exact: the direct step's launch point)"})
+			b.add(StepRow{Kind: KindMove, Entry: w.Trigger, X: w.X, Y: w.Y, Z: w.Z, Flags: FlagExact, Comment: "via (exact: the direct step's launch point)"})
 			b.last, b.haveLast = w.Point, true
 			continue
 		}
 		if w.Direct && vi > 0 && l.Via[vi-1].Exact {
-			b.add(StepRow{Kind: KindMoveHopExact, X: w.X, Y: w.Y, Z: w.Z, Comment: "via (direct from the exact point before it)"})
+			b.add(StepRow{Kind: KindMoveHopExact, Entry: w.Trigger, X: w.X, Y: w.Y, Z: w.Z, Comment: "via (direct from the exact point before it)"})
 			b.last, b.haveLast = w.Point, true
 			continue
 		}
-		b.move(w.Point, w.Direct, "via")
+		b.move(w.Point, w.Direct, w.Trigger, "via")
 	}
-	b.move(l.To, false, "to")
+	b.move(l.To, false, 0, "to")
 	for gi, g := range l.PullGroups {
 		if err := b.pull(gi, g); err != nil {
 			return fmt.Errorf("pull_groups[%d]: %w", gi, err)
@@ -476,7 +476,7 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	}
 	c := fmt.Sprintf("pull group %d", gi)
 	for _, a := range g.Approach {
-		b.move(a, false, c+" approach")
+		b.move(a, false, 0, c+" approach")
 	}
 	if g.Hold != nil {
 		b.hold(g.Hold, uniq(g.Entries), c+" hold")
@@ -514,7 +514,7 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 
 func (b *builder) boss(bs *dungeon.Boss) error {
 	for _, a := range bs.Approach {
-		b.move(a, false, "boss approach")
+		b.move(a, false, 0, "boss approach")
 	}
 	if bs.Hold != nil {
 		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
@@ -554,7 +554,7 @@ const carrierSweepRadiusYd = 15
 // ignored: one chest a row keeps the adds two at a time (batches of 3+ wiped twice in round 4); the `loot_object batch` warning stays.
 func (b *builder) carrierChest(l dungeon.Leg, lo *dungeon.LootObject) {
 	if lo.Stand != nil {
-		b.move(*lo.Stand, false, "stand")
+		b.move(*lo.Stand, false, 0, "stand")
 	}
 	x, y, z := refPoint(lo.ObjectRef)
 	b.add(StepRow{Kind: KindLoot, Entry: lo.Entry, X: x, Y: y, Z: z, Item: itemEntry(lo.ExpectItem), Flags: FlagGoneIsDone,
@@ -573,7 +573,7 @@ func (b *builder) step(st dungeon.Step) error {
 			return fmt.Errorf("use_object %d with via_item (the item is used on the object): the run leader's open row cannot carry it", u.Entry)
 		}
 		if u.Stand != nil {
-			b.move(*u.Stand, false, "stand")
+			b.move(*u.Stand, false, 0, "stand")
 		}
 		x, y, z := refPoint(u.ObjectRef)
 		b.add(StepRow{Kind: KindOpen, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Comment: itemComment("open", u.RequiresItem)})
@@ -594,7 +594,7 @@ func (b *builder) step(st dungeon.Step) error {
 		if t.By == dungeon.TriggerAgent {
 			return noStep("area_trigger %d: by \"agent\" has no run leader step (the leader is a bot: use \"auto\" or \"bot\")", t.ID)
 		}
-		b.move(t.Stand, false, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
+		b.move(t.Stand, false, t.ID, clip(fmt.Sprintf("area trigger %d: the bot walks into the zone; needs AiPlayerbot.BotAreaTriggers = %d (TortoiseBots #1002); expect %s", t.ID, t.ID, t.Expect), MaxComment))
 	case st.Ritual != nil:
 		r := st.Ritual
 		// param: the participants, the bots the run leader sends to use the object (gameobject_template data0 of a summoning ritual).
@@ -724,6 +724,10 @@ func Validate(r Rows) error {
 		}
 		switch s.Kind {
 		case KindMove, KindMoveDirect, KindMoveHopExact, KindRest:
+			// The move kinds carry no entry but the area trigger they walk into (fix/plan-gossip-allow): unset elsewhere.
+			if s.Kind == KindRest && s.Entry != 0 {
+				return bad("a rest carries no entry")
+			}
 		case KindPull:
 			if len(s.Entries) == 0 {
 				return bad("a pull needs entries")
