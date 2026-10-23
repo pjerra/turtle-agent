@@ -22,9 +22,9 @@ import (
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
 var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "stratholme_live": 32}
 
-// stratholme_live's 32 are the market's interleaved packs (a 12-16 yd radius plus the 3 yd margin reaches the next pack of the same entries
-// on 26 groups), Skul in range of two other groups beside the one he is listed in, Balzaphon (event 81: never spawned) in range of two, and
-// Archivist Galford within a hall pack's radius plus the margin. The skulls the draft left out (the neutral citizens of faction 7) are in
+// stratholme_live's 32 are 27 interleaved market and hall packs (a 5-19 yd radius plus the 3 yd margin reaches the next pack of the same
+// or another entry), Skul in range of two other groups beside the one he is listed in, Balzaphon (event 81: never spawned) in range of two,
+// and Archivist Galford inside a hall pack's margin. The neutral citizens of faction 7 the draft left out are in
 // the legs' skip lists.
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
