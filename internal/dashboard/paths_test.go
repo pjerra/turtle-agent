@@ -382,6 +382,128 @@ func TestHistoryGhostPartialRunIsNoClear(t *testing.T) {
 	}
 }
 
+func TestHistoryGhostRunWithPacksLeftIsNoClear(t *testing.T) {
+	dir := t.TempDir()
+	w := fullRun("r-left", "zf", 100, 600, 4, "done", nil)
+	w.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "g", w)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Complete || g.Left != 2 || g.LegsDone != 4 {
+		t.Fatalf("a finished run with 2 packs left is not a clear: %+v", g)
+	}
+	clean := fullRun("r-clean", "zf", 200, 700, 4, "done", nil)
+	writeRun(t, dir, "h", clean)
+	h = NewHistory(nil, dir)
+	g = GhostAnswer{}
+	if err := json.Unmarshal(h.Ghost("zf", "r-left", 0), &g); err != nil { // without the run that left packs behind
+		t.Fatal(err)
+	}
+	if !g.Found || !g.Complete || g.Left != 0 || g.Run != "r-clean" {
+		t.Fatalf("a finished run with no packs left is a clear: %+v", g)
+	}
+}
+
+func TestHistoryGhostPrefersCleanClearOverFasterDirty(t *testing.T) {
+	dir := t.TempDir()
+	// dirty run is faster (600 s) with the same LegsDone; clean run is slower (700 s). The clean one must win.
+	dirty := fullRun("r-dirty", "zf", 100, 600, 4, "done", nil)
+	dirty.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "g", dirty)
+	writeRun(t, dir, "h", fullRun("r-clean", "zf", 200, 700, 4, "done", nil))
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-clean" || !g.Complete || g.Left != 0 || g.LegsDone != 4 {
+		t.Fatalf("clean slower run beats dirty faster one: %+v", g)
+	}
+}
+
+func TestHistoryGhostTwoCleanRunsFasterWins(t *testing.T) {
+	dir := t.TempDir()
+	writeRun(t, dir, "g", fullRun("r-slow", "zf", 100, 700, 4, "done", nil))
+	writeRun(t, dir, "h", fullRun("r-fast", "zf", 200, 600, 4, "done", nil))
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-fast" || !g.Complete || g.Left != 0 {
+		t.Fatalf("faster of two clean runs wins: %+v", g)
+	}
+}
+
+func TestHistoryGhostOnlyDirtyRunsFasterWins(t *testing.T) {
+	dir := t.TempDir()
+	slow := fullRun("r-dirty-slow", "zf", 100, 700, 4, "done", nil)
+	slow.event(699000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":1`)
+	writeRun(t, dir, "g", slow)
+	fast := fullRun("r-dirty-fast", "zf", 200, 600, 4, "done", nil)
+	fast.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "h", fast)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-dirty-fast" || g.Complete || g.Left != 2 {
+		t.Fatalf("faster of two dirty runs wins and stays incomplete: %+v", g)
+	}
+}
+
+func TestHistoryGhostAbortedLeftZeroIsNoClear(t *testing.T) {
+	dir := t.TempDir()
+	// An interrupted run never reported a final count, so its Left of 0 must
+	// not beat a finished run with packs left on the clean-clear rule: the
+	// quicker of the two wins.
+	writeRun(t, dir, "g", fullRun("r-aborted", "zf", 100, 700, 4, "failed", nil))
+	dirty := fullRun("r-dirty", "zf", 200, 600, 4, "done", nil)
+	dirty.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	writeRun(t, dir, "h", dirty)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-dirty" || g.Complete || g.Left != 2 || g.LegsDone != 4 {
+		t.Fatalf("an aborted Left-0 run must not beat a faster finished run with packs left: %+v", g)
+	}
+	// A confirmed clean clear beats both even when slower.
+	writeRun(t, dir, "i", fullRun("r-clean", "zf", 300, 800, 4, "done", nil))
+	h = NewHistory(nil, dir)
+	g = GhostAnswer{}
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Run != "r-clean" || !g.Complete || g.Left != 0 || g.LegsDone != 4 {
+		t.Fatalf("a done clean run beats the aborted and dirty ones: %+v", g)
+	}
+}
+
+func TestHistoryGhostLaterRunLeaderWithoutLeftClears(t *testing.T) {
+	w := fullRun("r-stale", "zf", 100, 600, 4, "done", nil)
+	w.event(598000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done","left":2`)
+	w.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done"`)
+	if d := digestOf(w).Snapshot(0); d.Left != 0 {
+		t.Fatalf("a later run_leader without left resets the count: %+v", d)
+	}
+	dir := t.TempDir()
+	writeRun(t, dir, "g", w)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || !g.Complete || g.Left != 0 {
+		t.Fatalf("a done run whose last report left no packs is a clear: %+v", g)
+	}
+}
+
 func TestHistoryHeatBoundedToLatestRuns(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < HeatRuns+5; i++ {
