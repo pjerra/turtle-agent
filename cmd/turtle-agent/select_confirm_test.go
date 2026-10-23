@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -205,22 +206,157 @@ func TestGMLineIsNotSentWhenTheConfirmedSelectionChanged(t *testing.T) {
 	for _, c := range chats(r, 300*time.Millisecond) {
 		t.Fatalf("a line was sent: %q", c)
 	}
-	// Selected and shown: the line goes out right after the test's own selection; GMOnConfirmed adds no selection packet of its own.
+	// Selected again, but the server has not shown it: it still shows the lead from before the stranger was selected, and that stale echo
+	// (sent again) does not confirm the new select of the lead (issue #296).
 	if _, err := r.s.Target(context.Background(), lead, ""); err != nil {
 		t.Fatal(err)
 	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	time.Sleep(100 * time.Millisecond)
+	if r.s.SelectionConfirmed(lead) {
+		t.Fatal("a stale echo of the lead confirmed the new select")
+	}
+	if err := r.s.GMOnConfirmed(context.Background(), lead, ".additem 9240"); !errors.Is(err, session.ErrSelectionChanged) {
+		t.Fatalf("stale echo: %v", err)
+	}
+	// The server shows the stranger, then the lead: now the line goes out, and GMOnConfirmed adds no selection packet of its own.
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(stranger))
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
 	if err := r.s.GMOnConfirmed(context.Background(), lead, ".additem 9240"); err != nil {
 		t.Fatal(err)
 	}
-	var ops []uint16
-	for {
-		p, err := r.srv.Next(300 * time.Millisecond)
-		if err != nil {
-			break
-		}
-		ops = append(ops, p.Op)
+	if ops := selOps(r, 300*time.Millisecond); len(ops) != 2 || ops[0] != "sel 0x23a" || ops[1] != "chat" {
+		t.Fatalf("ops %v", ops)
 	}
-	if n := len(ops); n != 2 || ops[0] != opcode.CMSGSetSelection || ops[1] != opcode.CMSGMessagechat {
+}
+
+// selOps are the selections (as "sel 0x..") and chat lines (as "chat") the server received, in order, until nothing came for d.
+func selOps(r *agentRig, d time.Duration) []string {
+	var out []string
+	for {
+		p, err := r.srv.Next(d)
+		if err != nil {
+			return out
+		}
+		switch p.Op {
+		case opcode.CMSGSetSelection:
+			out = append(out, fmt.Sprintf("sel %#x", uint64(packet.NewReader(p.Body).GUID())))
+		case opcode.CMSGMessagechat:
+			out = append(out, "chat")
+		}
+	}
+}
+
+// The selection-log rule (session.SelectionConfirmed): an echo confirms a select only when it cannot answer an older one.
+func TestSelectionEchoMustAnswerTheSelectItConfirms(t *testing.T) {
+	const lead, stranger = packet.GUID(0x23A), packet.GUID(0x4D2)
+
+	// A fresh echo: the server showed nothing selected, the lead is selected, the echo shows it.
+	r := newRig(t)
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(0))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(0) })
+	if _, err := r.s.Target(context.Background(), lead, ""); err != nil {
+		t.Fatal(err)
+	}
+	if r.s.SelectionConfirmed(lead) {
+		t.Fatal("confirmed before any echo")
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+
+	// A stale echo: lead, then stranger, then lead again are sent; an echo of the lead may answer the first, with the stranger still
+	// pending, so it confirms nothing; the stranger's echo and then the lead's do.
+	r = newRig(t)
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(0))
+	for _, g := range []packet.GUID{lead, stranger, lead} {
+		if _, err := r.s.Target(context.Background(), g, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	time.Sleep(100 * time.Millisecond)
+	if r.s.SelectionConfirmed(lead) || r.s.SelectionConfirmed(stranger) {
+		t.Fatal("a stale echo confirmed a selection")
+	}
+	if !r.s.SelectionAmbiguous(lead) {
+		t.Fatal("lead before stranger, unresolved: a new select of the lead is ambiguous")
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(stranger))
+	time.Sleep(100 * time.Millisecond)
+	if r.s.SelectionConfirmed(lead) || r.s.SelectionConfirmed(stranger) {
+		t.Fatal("the stranger's echo, with the lead sent after it, confirmed a selection")
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+	if r.s.SelectionAmbiguous(lead) {
+		t.Fatal("ambiguous after the log was resolved")
+	}
+}
+
+// The core sends no update when a selection does not change the target field: selecting the unit already confirmed is confirmed at once,
+// with no echo, and the line goes out without a wait.
+func TestGMLineOnTheUnchangedSelectionNeedsNoEcho(t *testing.T) {
+	const lead = packet.GUID(0x23A)
+	r := newRig(t)
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(lead))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if err := g.selectThenGM(context.Background(), lead, ".levelup 2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("three lines on the unchanged selection took %s", d)
+	}
+	if ops := selOps(r, 300*time.Millisecond); len(ops) != 6 || ops[1] != "chat" || ops[3] != "chat" || ops[5] != "chat" {
+		t.Fatalf("ops %v", ops)
+	}
+}
+
+// A core that applies several selections in one update echoes only the last value, and only when it changed. With the lead confirmed and a
+// stranger's select pending, an echo of a new select of the lead could not be told from the old one: selectConfirmed selects none first,
+// waits for that echo, then selects the lead, and the line runs on the lead.
+func TestGMLineSelectsNeutralFirstWhenAnEchoWouldBeAmbiguous(t *testing.T) {
+	const lead, stranger = packet.GUID(0x23A), packet.GUID(0x4D2)
+	r := newRig(t)
+	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(lead))
+	waitUntil(t, func() bool { return r.s.SelectionConfirmed(lead) })
+	if _, err := r.s.Target(context.Background(), stranger, ""); err != nil { // pending: the server has not shown it
+		t.Fatal(err)
+	}
+	if ops := selOps(r, 100*time.Millisecond); len(ops) != 1 || ops[0] != "sel 0x4d2" {
+		t.Fatalf("ops %v", ops)
+	}
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
+	done := make(chan error, 1)
+	go func() { done <- g.selectThenGM(context.Background(), lead, ".levelup 2") }()
+	inForce, shown := lead, lead
+	var ops []string
+	for len(ops) < 3 {
+		p, err := r.srv.Next(2 * time.Second)
+		if err != nil {
+			t.Fatalf("ops %v: %v", ops, err)
+		}
+		switch p.Op {
+		case opcode.CMSGSetSelection:
+			// The stranger's select and this one are applied in one update; the echo shows the last value, if it changed.
+			inForce = packet.NewReader(p.Body).GUID()
+			ops = append(ops, fmt.Sprintf("sel %#x", uint64(inForce)))
+			if inForce != shown {
+				shown = inForce
+				r.srv.Send(opcode.SMSGUpdateObject, selfValues(inForce))
+			}
+		case opcode.CMSGMessagechat:
+			ops = append(ops, fmt.Sprintf("chat on %#x", uint64(inForce)))
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if ops[0] != "sel 0x0" || ops[1] != "sel 0x23a" || ops[2] != "chat on 0x23a" {
 		t.Fatalf("ops %v", ops)
 	}
 }

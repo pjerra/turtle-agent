@@ -376,29 +376,56 @@ func (g remoteGame) GMVisible(ctx context.Context, on bool) error {
 // gmSelectConfirmWait is how long the server is given to show a selection before a line that acts on it is given up on.
 var gmSelectConfirmWait = 3 * time.Second
 
-// selectConfirmed selects the unit and waits until the SERVER shows it as the agent's selection (the target field of the agent's own object,
-// which the core sends back after it handled CMSG_SET_SELECTION). The core queues that packet (map thread) apart from a GM's chat line (world
-// thread), so a line sent right after can run on the selection from before: none (the sender itself) or a stale one, which can be another
-// player. Run 6b: `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra. An error, with nothing sent, when
-// the server does not show the selection in time.
+// selectConfirmed selects the unit and waits until the SERVER is known to have it in force as the agent's selection
+// (session.SelectionConfirmed: the target field of the agent's own object, which the core sends back after it handled CMSG_SET_SELECTION,
+// in an echo that cannot be an older one). The core queues that packet (map thread) apart from a GM's chat line (world thread), so a line
+// sent right after can run on the selection from before: none (the sender itself) or a stale one, which can be another player. Run 6b:
+// `.instance groupunbind all` answered "Glacienne is not in a group" for a selected Lcwarra. Issue #296: an echo still showing the unit from
+// an earlier select, with another unit's select pending behind it, is not a confirmation. When an echo of the new select could not be told
+// from such an older one (the unit was selected before another unit, and the server has not shown how far it got), a neutral selection
+// (none, or the agent itself) is made and confirmed first. An error, with nothing sent, when the server does not show the selection in time.
 func (g remoteGame) selectConfirmed(ctx context.Context, guid packet.GUID) error {
 	s := g.c.cur()
-	if _, err := s.Target(ctx, guid, ""); err != nil {
-		return err
-	}
 	timer := time.NewTimer(gmSelectConfirmWait)
 	defer timer.Stop()
-	tick := time.NewTicker(25 * time.Millisecond)
+	if s.SelectionAmbiguous(guid) {
+		if n, ok := s.SelectionNeutral(); ok {
+			if err := selectUnit(ctx, s, n); err != nil {
+				return err
+			}
+			if err := awaitSelection(ctx, s, n, timer.C); err != nil {
+				return fmt.Errorf("%w (the neutral selection made before %v)", err, guid)
+			}
+		}
+	}
+	if err := selectUnit(ctx, s, guid); err != nil {
+		return err
+	}
+	return awaitSelection(ctx, s, guid, timer.C)
+}
+
+// selectUnit sends the selection of the unit, or of none for 0.
+func selectUnit(ctx context.Context, s *session.Session, guid packet.GUID) error {
+	if guid == 0 {
+		return s.ClearTarget(ctx)
+	}
+	_, err := s.Target(ctx, guid, "")
+	return err
+}
+
+// awaitSelection waits until the session says the server has the unit in force as the agent's selection, or until expired fires.
+func awaitSelection(ctx context.Context, s *session.Session, guid packet.GUID, expired <-chan time.Time) error {
+	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		sel, ok := s.ServerSelection()
-		if ok && sel == guid {
+		if s.SelectionConfirmed(guid) {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-timer.C:
+		case <-expired:
+			sel, _ := s.ServerSelection()
 			return fmt.Errorf("the server did not show %v as the agent's selection within %s (it shows %v): not sending a line that acts on the selection", guid, gmSelectConfirmWait, sel)
 		case <-tick.C:
 		}
@@ -567,26 +594,15 @@ func (g remoteGame) GoXYZ(ctx context.Context, mapID uint32, at dungeon.Point) e
 // around the commander. The selection is cleared first and the server is waited for to show it cleared, else the line would act on that
 // one unit alone (or fail on a player).
 func (g remoteGame) Respawn(ctx context.Context) error {
-	s := g.c.cur()
-	if err := s.ClearTarget(ctx); err != nil {
-		return err
-	}
-	timer := time.NewTimer(gmSelectConfirmWait)
-	defer timer.Stop()
-	tick := time.NewTicker(25 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if sel, ok := s.ServerSelection(); ok && sel == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			sel, _ := s.ServerSelection()
-			return fmt.Errorf("the server did not show the selection cleared within %s (it shows %v): not sending .respawn", gmSelectConfirmWait, sel)
-		case <-tick.C:
-		}
+	return respawnUnselected(ctx, g.c.cur())
+}
+
+// respawnUnselected clears the selection, waits until the server is known to have it cleared (selectConfirmed with no unit, so a stale echo
+// of an earlier clear does not count), and sends ".respawn".
+func respawnUnselected(ctx context.Context, s *session.Session) error {
+	g := remoteGame{c: &commanderService{cur: func() *session.Session { return s }}}
+	if err := g.selectConfirmed(ctx, 0); err != nil {
+		return fmt.Errorf("the selection was not cleared, not sending .respawn: %w", err)
 	}
 	return s.GM(ctx, ".respawn")
 }

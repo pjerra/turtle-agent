@@ -251,6 +251,7 @@ func (s *Session) Target(ctx context.Context, g packet.GUID, name string) (objec
 		}
 		s.mu.Lock()
 		s.target = g
+		s.selSentLocked(g)
 		s.mu.Unlock()
 		return nil, nil
 	})
@@ -726,6 +727,7 @@ func (s *Session) onNewWorld(body []byte) error {
 	s.mu.Lock()
 	s.mapID, s.pos = nw.Map, [4]float32{nw.X, nw.Y, nw.Z, nw.O}
 	s.target = 0
+	s.selUnknownLocked()
 	self := s.self.GUID
 	s.mu.Unlock()
 	s.stopWalk(errNewMap, false) // after the position, so a walk_path woken by it reads the new one

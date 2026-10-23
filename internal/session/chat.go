@@ -168,6 +168,7 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 		}
 		s.mu.Lock()
 		s.target = g
+		s.selSentLocked(g)
 		s.mu.Unlock()
 		return nil, s.conn.WritePacket(opcode.CMSGMessagechat, body)
 	})
@@ -179,8 +180,8 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 var ErrSelectionChanged = errors.New("gm: the selection is not the confirmed unit any more")
 
 // GMOnConfirmed sends the GM command text, and nothing else, as ONE operation of the session's owner goroutine, if the unit g is the selection the
-// caller confirmed: the session believes g is selected (no request selected another unit since) AND the server shows g as the player's selection
-// (ServerSelection). It sends no CMSG_SET_SELECTION of its own: the core handles a selection on the map thread and a GM chat line on the world
+// caller confirmed: the session believes g is selected (no request selected another unit since) AND the server is known to have g in force
+// (SelectionConfirmed: an echo that cannot answer an older select, selection.go). It sends no CMSG_SET_SELECTION of its own: the core handles a selection on the map thread and a GM chat line on the world
 // thread, so a selection sent right before the line would not be in force when the line runs, and the line would act on whatever the server showed
 // before. When the selection is no longer the confirmed one it returns ErrSelectionChanged with nothing sent, and the caller selects and confirms
 // again (see the commander's selectThenGM).
@@ -205,9 +206,9 @@ func (s *Session) GMOnConfirmed(ctx context.Context, g packet.GUID, text string)
 			return nil, err
 		}
 		s.mu.Lock()
-		believed := s.target
+		ok := s.target == g && s.selConfirmedLocked(g)
 		s.mu.Unlock()
-		if sel, ok := s.ServerSelection(); believed != g || !ok || sel != g {
+		if !ok {
 			return nil, ErrSelectionChanged
 		}
 		return nil, s.conn.WritePacket(opcode.CMSGMessagechat, body)
@@ -229,6 +230,7 @@ func (s *Session) ClearTarget(ctx context.Context) error {
 		}
 		s.mu.Lock()
 		s.target = 0
+		s.selSentLocked(0)
 		s.mu.Unlock()
 		return nil, nil
 	})

@@ -203,23 +203,25 @@ type Session struct {
 	clockFn   func() time.Time // nil: the wall clock; a replay sets the time of the record it handles
 	afterTake func()           // tests only: runs in takeAll between the take and the close
 
-	mu        sync.Mutex // guards these fields for readers outside the loop
-	state     Status
-	self      Character
-	mapID     uint32
-	pos       [4]float32
-	walkDist  float64 // yards along its path the last walk got to when it stopped, arrived or was aborted; read by walk_path
-	latency   uint32
-	unknown   map[uint16]int
-	parseErrs int
-	lastErr   string
-	party     PartyInfo
-	offer     *resurrectOffer                 // the open resurrection offer, death.go
-	reclaimAt time.Time                       // the corpse may be reclaimed from here, death.go
-	marks     [game.RaidIconCount]packet.GUID // the group's raid icons
-	target    packet.GUID
-	falling   bool // s.fall != nil, for Status
-	zUnknown  bool
+	mu           sync.Mutex // guards these fields for readers outside the loop
+	state        Status
+	self         Character
+	mapID        uint32
+	pos          [4]float32
+	walkDist     float64 // yards along its path the last walk got to when it stopped, arrived or was aborted; read by walk_path
+	latency      uint32
+	unknown      map[uint16]int
+	parseErrs    int
+	lastErr      string
+	party        PartyInfo
+	offer        *resurrectOffer                 // the open resurrection offer, death.go
+	reclaimAt    time.Time                       // the corpse may be reclaimed from here, death.go
+	marks        [game.RaidIconCount]packet.GUID // the group's raid icons
+	target       packet.GUID
+	selLog       []packet.GUID // the selections sent and the one known in force, selection.go
+	selBaseKnown bool
+	falling      bool // s.fall != nil, for Status
+	zUnknown     bool
 
 	// owner-loop only
 	finished        bool
