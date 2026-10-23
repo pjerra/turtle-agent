@@ -638,8 +638,10 @@
     "Ysida Harmon's cage (GO_CAGE_YSIDA) starts the 45-minute Baron run for Rivendare's death",
     "Order of the Silver Hand bosses (Jarien 16101, Sothos 16102, Turtle) are script-driven"
    ],
+   "handwritten": true,
    "notes": [
-    "Live side of map 329 (left entrance 2217 is equivalent); Baron Rivendare is in stratholme_undead."
+    "Live side of map 329 (left entrance 2217 is equivalent); Baron Rivendare is in stratholme_undead.",
+    "Hand-written after the 2026-10-24 census: the neutral citizens and the never-spawned Balzaphon are out of the pulls, Skul is listed where he stands, radii are the members' spread, Jarien/Sothos are Dathrohan's first, and the Galford hall packs close leg 0 (see dungeons/stratholme_live.json notes)."
    ]
   },
   {

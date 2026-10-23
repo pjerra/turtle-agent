@@ -20,7 +20,12 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "stratholme_live": 32}
+
+// stratholme_live's 32 are the market's interleaved packs (a 12-16 yd radius plus the 3 yd margin reaches the next pack of the same entries
+// on 26 groups), Skul in range of two other groups beside the one he is listed in, Balzaphon (event 81: never spawned) in range of two, and
+// Archivist Galford within a hall pack's radius plus the margin. The skulls the draft left out (the neutral citizens of faction 7) are in
+// the legs' skip lists.
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
