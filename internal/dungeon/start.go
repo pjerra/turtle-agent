@@ -90,6 +90,9 @@ type StartHands interface {
 	Follower
 	// GoXYZ sends `.go xyz x y z map` for the agent's own character and waits for its teleport.
 	GoXYZ(ctx context.Context, mapID uint32, at Point) error
+	// GPS sends the plain GM line `.gps` for the agent's own character and returns the lines the core answered with, joined by newlines
+	// (empty and an error when no reply came).
+	GPS(ctx context.Context) (string, error)
 }
 
 // LegStart is where a run from leg i begins: the entrance for leg 0, else where the leg before ended (its boss, else its To).
@@ -678,7 +681,7 @@ func (d *RemoteDriver) commanderTo(ctx context.Context, h StartHands, at Point) 
 	if p, mm, ok := h.AgentPlace(); !ok || mm != d.plan.Map || hdist(p, at) > startNear {
 		return fmt.Errorf("the commander is not at the start point after .go xyz (at %.0f %.0f on map %d)", p.X, p.Y, mm)
 	}
-	return nil
+	return d.checkStartZ(ctx, h, at)
 }
 
 // bringLead summons the lead bot to the commander with `.bot summon <lead bot>`, a player command of the commander's own account (the

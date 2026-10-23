@@ -64,6 +64,7 @@ const (
 	UnitFlagSpawning         uint32 = 0x00000002
 	UnitFlagPlayerControlled uint32 = 0x00000008
 	UnitFlagImmuneToPlayer   uint32 = 0x00000100
+	UnitFlagStunned          uint32 = 0x00040000
 	UnitFlagInCombat         uint32 = 0x00080000
 	UnitFlagNotSelectable    uint32 = 0x02000000
 )
