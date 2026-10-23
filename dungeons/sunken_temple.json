@@ -22,7 +22,7 @@
     "hunter:dps"
   ],
   "fleers": [5259, 5273],
-  "cc_priority": [5259, 5273, 5226],
+  "cc_priority": [5259, 5273, 5269, 5226],
   "cc_always": [5259],
   "kill_first": [5271, 5280, 5291],
   "notes": [
@@ -32,7 +32,7 @@
     "Needs: four Eternal Flames (GO_ETERNAL_FLAME_1-4) summon the Avatar of Hakkar (8443, no spawn row)",
     "Needs: Jammal'an's barrier (GO_JAMMALAN_BARRIER) and the Hakkar doors (GO_HAKKAR_DOOR_1-2)",
     "Needs: Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar",
-    "Census 2026-10-23 (map 109 spawn export, no live run): fleers 5259 and 5273 (EventAI command 47 at 15% HP); cc_priority 5259,5273,5226 (the two healers, the Hex, the Slowing Poison); cc_always 5259; kill_first 5271,5280,5291 (Fear, Sleep, Frostbolt Volley with the Swoop summon). Radii cut on pulls 0.5, 3.2 and 3.3 so a row does not take the next pack (same entries, 14.4-26.8 yd), and set to 17 yd on the seven Hakkari Frostwing 5291 pulls (their wander is 15 yd).",
+    "Census 2026-10-23 (map 109 spawn export, no live run): fleers 5259 and 5273 (EventAI command 47 at 15% HP); cc_priority 5259,5273,5269,5226 (the healers, the Hex, the Slowing Poison); cc_always 5259; kill_first 5271,5280,5291 (Fear, Sleep, Frostbolt Volley with the Swoop summon). Radii cut on pulls 0.5, 3.2 and 3.3 so a row does not take the next pack (same entries, 14.4-26.8 yd), and set to 17 yd on the seven Hakkari Frostwing 5291 pulls (their wander is 15 yd).",
     "BLOCKER for the first live run: the instance script hides Weaver 5720 and Dreamscythe 5721 (VISIBILITY_OFF, not selectable) and keeps Shade of Eranikus 5709 not selectable until TYPE_JAMMALAN is DONE, but this skeleton fights the Weaver (leg 1) and Dreamscythe (leg 2) boss rows before the Jammal'an leg (leg 3); Atal'alarion 8580 is hidden until the six statues are lit in order and the plan has no statue steps. The leg-0 boss row and the leg-1/2 boss rows cannot finish as ordered (bug: the plan fails at what it is meant to do; the fix is an order change, a behaviour change for the maintainer to decide).",
     "Patrols: 5708 Spawn of Hakkar (guids 33621 and 34520, 12-point paths spanning about 190 yd) and Murk Worm 5226 (guids 33676 46 points and 34168 4 points) walk the halls the plan clears; the pull rows carry no patrol path, so a pull of one of them can find nothing at its point (the run leader then reads the pack as cleared) and they can join later fights."
   ],
