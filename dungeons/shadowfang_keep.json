@@ -29,6 +29,7 @@
     "Needs: the Sorcerer's Gate 18972 at -129.0 2166.2 129.2 (leg fenrus_the_devourer's route) and Arugal's Lair door 18971 at -118.1 2161.9 155.7 (the nandos leg's route), plus Arugal's summoning focus 18973 (GO_ARUGAL_FOCUS) at -146.4 2173.0 150.5. The source notes say the keep script opens them as bosses die, but no step opens them here: the plans carry no use_object/gossip for them, and the mesh crosses both door lines, so plan-check cannot see the closure. Add the event steps only from a live measurement (the Courtyard Door round proves the gossip/lever shape).",
     "Door round 2026-10-23 (r24 shadowfang_keep slot7): the Courtyard Door 18895 is a gossip step on Deathstalker Adamant (3849) in the new courtyard_door leg (the live probe opened it), and Odo's floor and the walkway come after a move_direct across the navmesh seam at the stair top (see the odo_the_blindwatcher leg). The full plan is 10 legs; legs 0-3 are unchanged from the r24 run 1 export.",
     "Fix round 2026-10-23 (r25 shadowfang_keep slot5): leg 2's step-39 pull (one row of 12 court units at radius 22.1) is two pulls of three with their own stands and the rat taken out, and the walk up to the upper court goes through the stair's real top as approach points (see the baron_silverlaine leg). Legs 0-1 and 3-9 are unchanged from the 20261023180000 export.",
+    "Not in the plan: Alliance parties open the courtyard cells through Ashcrombe (3850, gossip option 0, at -240.904 2122.55 81.2629) instead of Deathstalker Adamant (3849), and the schema has no team-specific step form (team gates only a pull group or a boss), so the courtyard_door leg carries Adamant's gossip alone; an Alliance run needs a second plan or a team field on gossip, plus AiPlayerbot.BotGossipNpcs += 3849,3850 (INTERACTIONS-VERIFIED-2026-10-24).",
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs.",
     "Fix round 2026-10-22 (PREP-SFK census): cc_priority = the Shadowfang Darksouls (3855, they shield themselves in shadow on aggro), the Spectral Clerics (61970, the court's casters) and the intro Arugal (10000, a 26 elite with 6510 hp that stands in the pull beside Odo's yard); all three have mechanic_immune_mask 0. No fleers in the legs of this file (only Ashcrombe 3850, a friendly, and Wolfguard Worg 5058, leg 6) and no cc_always/kill_first: no trash stuns the party and Springvale heals his own guards, but he is the pull target himself."
   ],
@@ -466,10 +467,11 @@
               "entry": 18895,
               "near": {"x": -242.58, "y": 2159.05, "z": 90.62},
               "spawn": 20835,
-              "state": "active"
+              "state": "active",
+              "gone_ok": true
             },
             "timeout_s": 60,
-            "fail_text": "The Courtyard Door (18895, spawn 20835) is not open 60 s after Adamant's gossip (live 2026-10-23: the option removed it from the commander's object list; if the object is gone rather than active, this wait cannot read the state)."
+            "fail_text": "The Courtyard Door (18895, spawn 20835) was not seen open or gone 60 s after Adamant's gossip (instance_shadowfang_keep.cpp:193-201 sets it active at Adamant's waypoint 6 and his escort script removes it about 5 waypoints later, so gone_ok counts it gone once it was seen)."
           }
         }
       ],
@@ -713,6 +715,29 @@
         "entry": 4274,
         "position": {"x": -135.609, "y": 2168.66, "z": 128.779}
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 35,
+              "center": {"x": -148, "y": 2171, "z": 128.6}
+            },
+            "timeout_s": 90,
+            "fail_text": "Fenrus' death summons 4 Arugal's Voidwalkers (4627) 14 s later (generic_scripts 9536); the 4th death opens the Sorcerer's Gate 18972. Kill all four."
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 18972,
+              "near": {"x": -129.034, "y": 2166.16, "z": 129.187},
+              "state": "active"
+            },
+            "timeout_s": 90,
+            "fail_text": "The Sorcerer's Gate opens on the 4th voidwalker death (instance_shadowfang_keep.cpp:176-184); a voidwalker left alive keeps it shut."
+          }
+        }
+      ],
       "notes": [
         "door \"Sorcerer's Gate\" entry 18972 at -129.0 2166.2 129.2"
       ]
