@@ -790,6 +790,7 @@
    "title": "Dragonmaw Retreat",
    "map": 816,
    "kind": "dungeon",
+   "handwritten": true,
    "data": "map816",
    "trigger": 5343,
    "bosses": [
