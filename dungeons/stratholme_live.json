@@ -31,7 +31,7 @@
     "Faction 7 is neutral (Spectral Citizen 10384, Ghostly Citizen 10385, Hearthsinger Forresten 10558): the draft's 16 citizens left every pull (two groups were only citizens) and 10558 stays in the leg skip lists. Balzaphon 14684 is a Scourge Invasion event spawn (event 81, start/end 0000-00-00, the Scorn case) and never spawns: dropped.",
     "Skul 10393 (rare, hostile, Arcane Bolt/Frost Shock/Frostbolt) stands 2.6 yd from the pull at 3509.6 -3316.1: listed in that group (the skip list is no row, and the run leader would pull him anyway).",
     "Radii are the farthest member from the pull's centroid plus 0.5 yd (plus 5 when a member wanders), floor 5: the exporter's farthest+10 reached the next pack of the same entries on 12 pulls.",
-    "Jarien 16101 and Sothos 16102 stand 16.9 yd from Dathrohan (detection 20): their one-pull leg is gone and the boss lists them as first. Dathrohan turns into Balnazzar (10813, level 62, 31080 hp) below 40% and on death summons 32 skeletons at eight fixed points.",
+    "Jarien 16101 and Sothos 16102 stand 16.9 yd from Dathrohan (detection 20): their one-pull leg is gone and the boss lists them as first. Dathrohan (10812) turns into Balnazzar (10813, level 62, 31080 hp) below 40% by UpdateEntry on the same creature (boss_dathrohan_balnazzar.cpp:251), so the boss entry is 10813: the run leader only counts a corpse of the boss entry as boss down, and 10812 never leaves a corpse. 10812 is in first so both drivers order the Dathrohan phase (kill order 16101, 16102, 10812, then 10813) and track the same GUID across the transform; Balnazzar's death ends the step, and on death he summons 32 skeletons at eight fixed points.",
     "The Galford hall packs (11043/10425/10424 at 3483 -3081 and 3467 -3070, 3x10424/10425 at 3439 -3090) are the last three pulls of leg 0: two of them stand 18-19.6 yd from Galford and his fight follows them by design.",
     "Malor the Zealous 11032 (17094 hp, Lay on Hands) is a single pull, but the 5-skeleton pack before it stands 19.8 yd from him and his detection is 20: expect him in that fight.",
     "Leg 0 groups 8-12 are one pile: the lone Patchwork Horror 10414 and the lone Plague Ghoul 10405 stand inside the 8-unit pack at 3509 -3319 (0.7-7.1 yd): the first of those pulls brings the pile. The mapping walk picks the stands.",
@@ -507,9 +507,9 @@
       "to": {"x": 3422.88, "y": -3056.5, "z": 136.498},
       "skip": [10384, 10385, 10558],
       "boss": {
-        "entry": 10812,
+        "entry": 10813,
         "position": {"x": 3413.63, "y": -3042.04, "z": 136.534},
-        "first": [16101, 16102]
+        "first": [16101, 16102, 10812]
       }
     },
     {
