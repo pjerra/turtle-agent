@@ -102,8 +102,9 @@ func TestScholomanceCrittersAndTheDisabledKormokAreOutOfEveryPull(t *testing.T) 
 }
 
 // The leg order is the 2-opt route over the bosses' own positions (Malicia-Ravenian 17 yd, Krastinov-Alexei 4 yd, Polkelt-Illucia 9 yd): the export
-// walks 3863 yd instead of 4506 yd. Malicia's leg is the boss alone (its only pull was a rat); the Vectus and Alexei boss rows carry the adds the
-// rules turn hostile (Vectus' Marduk 10433, Alexei's two linked Risen Guards 10489) and Rattlegore's carries its linked Risen Construct 10488.
+// walks 3863 yd instead of 4506 yd. Malicia's leg is the route clear: the landing-to-Malicia walk is 554 yd of navmesh and passes 40 census packs
+// within 30 yd (r28c slotC wiped on them five times in one move row); the Vectus and Alexei boss rows carry the adds the rules turn hostile
+// (Vectus' Marduk 10433, Alexei's two linked Risen Guards 10489) and Rattlegore's carries its linked Risen Construct 10488.
 func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 	p := loadPlan(t, scholomancePlan)
 	want := []struct {
@@ -112,7 +113,7 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		pulls int
 		first string
 	}{
-		{"instructor_malicia", 10505, 0, "[]"},
+		{"instructor_malicia", 10505, 40, "[]"},
 		{"the_ravenian", 10507, 7, "[]"},
 		{"lorekeeper_polkelt", 10901, 4, "[]"},
 		{"lady_illucia_barov", 10502, 14, "[]"},
@@ -144,8 +145,78 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		}
 		pulls += len(l.PullGroups)
 	}
-	if pulls != 112 {
-		t.Errorf("%d pull groups in all, want 112", pulls)
+	if pulls != 152 {
+		t.Errorf("%d pull groups in all, want 152", pulls)
+	}
+}
+
+// Leg 0 clears the whole walk from the landing to Malicia: every census pack within 30 yd of the 554-yard navmesh route, one at a time in route
+// order, each with an approach whose last point is a stand 15-25 yd from the pack's nearest member on the pack's own floor, and no stand inside a
+// pack that is still alive later in the leg (its radius + 5 yd). The first run's step 1 was a single move row through all of them.
+func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
+	p := loadPlan(t, scholomancePlan)
+	leg := p.Legs[0]
+	if leg.Name != "instructor_malicia" || leg.Boss == nil || leg.Boss.Entry != 10505 {
+		t.Fatalf("leg 0 is %q boss %+v, want instructor_malicia 10505", leg.Name, leg.Boss)
+	}
+	if len(leg.PullGroups) != 40 {
+		t.Fatalf("leg 0 has %d pull groups, want the 40 packs of the route", len(leg.PullGroups))
+	}
+	members := 0
+	for gi, g := range leg.PullGroups {
+		members += len(g.Entries)
+		if len(g.Approach) < 1 || len(g.Approach) > 4 {
+			t.Errorf("leg 0 pull group %d: %d approach points, want 1-4", gi, len(g.Approach))
+			continue
+		}
+		for _, e := range g.Entries {
+			if e == 4075 || e == 2110 || e == 16047 || e == 16118 || e == 10505 {
+				t.Errorf("leg 0 pull group %d lists %d (a critter, the trigger, Kormok or the boss)", gi, e)
+			}
+		}
+		// The stand is the approach's last point; it must be on the pack's floor, 15-25 yd from its nearest member.
+		stand := g.Approach[len(g.Approach)-1]
+		nearest := math.Inf(1)
+		for _, at := range g.Positions {
+			d := math.Sqrt(math.Pow(float64(at.X-stand.X), 2) + math.Pow(float64(at.Y-stand.Y), 2) + math.Pow(float64(at.Z-stand.Z), 2))
+			nearest = math.Min(nearest, d)
+			if math.Abs(float64(at.Z-stand.Z)) > 6 {
+				t.Errorf("leg 0 pull group %d: stand %v is %.1f yd off the pack's floor (member z %.1f)", gi, stand, math.Abs(float64(at.Z-stand.Z)), at.Z)
+			}
+		}
+		if nearest < 15 || nearest > 25 {
+			t.Errorf("leg 0 pull group %d: stand is %.1f yd from the nearest member, want 15-25", gi, nearest)
+		}
+		// The leg's boss is alive for every pull: its aggro is 20 yd, so the stand keeps 25.
+		if d := math.Sqrt(math.Pow(float64(stand.X-leg.Boss.Position.X), 2) + math.Pow(float64(stand.Y-leg.Boss.Position.Y), 2) + math.Pow(float64(stand.Z-leg.Boss.Position.Z), 2)); d < 25 {
+			t.Errorf("leg 0 pull group %d: stand is %.1f yd from the boss %d, inside its aggro", gi, d, leg.Boss.Entry)
+		}
+		// No stand inside a pack that is still alive later in the leg.
+		for gj := gi + 1; gj < len(leg.PullGroups); gj++ {
+			o := leg.PullGroups[gj]
+			var ox, oy, oz float64
+			for _, at := range o.Positions {
+				ox += float64(at.X)
+				oy += float64(at.Y)
+				oz += float64(at.Z)
+			}
+			m := float64(len(o.Positions))
+			oc := scholomanceSpawn{x: ox / m, y: oy / m, z: oz / m}
+			sd := math.Sqrt(math.Pow(float64(stand.X)-oc.x, 2) + math.Pow(float64(stand.Y)-oc.y, 2) + math.Pow(float64(stand.Z)-oc.z, 2))
+			if sd < float64(o.Radius)+5 {
+				t.Errorf("leg 0 pull group %d: stand is %.1f yd from later pack %d (radius %g + 5)", gi, sd, gj, o.Radius)
+			}
+		}
+	}
+	if members != 113 {
+		t.Errorf("leg 0 holds %d members, want the 113 of the 40 route packs", members)
+	}
+	// The first pack is the stair guard and the last is the pair by Malicia's door.
+	if got := fmt.Sprint(leg.PullGroups[0].Entries); got != "[10489]" {
+		t.Errorf("first leg-0 pack %s, want the stair guard [10489]", got)
+	}
+	if got := fmt.Sprint(leg.PullGroups[len(leg.PullGroups)-1].Entries); got != "[10469 10472]" {
+		t.Errorf("last leg-0 pack %s, want [10469 10472]", got)
 	}
 }
 

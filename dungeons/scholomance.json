@@ -33,16 +33,503 @@
     "Boss-linked guards: Alexei Barov is linked (creature_groups 48862, flags 2 AGGRO_TOGETHER) to his two Risen Guards 10489; Rattlegore is linked (48801) to a Risen Construct 10488. Their pulls are gone and the entries are the boss rows' first, so the boss row is the fight. Lord Blackwood 14695 (Turtle boss, script boss_lord_blackwood, 30520 hp) stands in the leg-7 hall pack at 200.29 151.785 109.795 and is fought as that pull's member; he is not one of the plan's ten bosses.",
     "Kormok: the trigger 16047 and Kormok 16118 share one point at -24.898 141.242 84.0468 with Ras Frostwhisper; Kormok's spawn 1068112 has spawn_flags 2 (SPAWN_FLAG_DISABLED: never spawned) and the trigger only spawns him on a spell hit. Their pull is gone; the Ras leg is three hall packs and the boss.",
     "Adds no spawn row names: Ras Frostwhisper's Frostbolt Volley/Fear/Chill Nova, the Dark Summoner 11582 summons a Risen Lackey on cast, the Necromancer 10477 casts Call of the Grave and Corpse Explosion, Instructor Malicia casts Call of the Grave. The plan's kill_first and cc lists are in the plan row.",
-    "Patrols (creature_movement, movement type 2): 22 spawns, among them Ras Frostwhisper (61 yd, 24 s), five Risen Guards (98-158 yd, 39-63 s), three Diseased Ghouls (98-110 yd, 39-44 s), Vectus (a 0 yd scripted teleport loop) and the students. No patrol block is written: the run leader's rows cannot carry one, and the patrol paths are for the mapping walk."
+    "Patrols (creature_movement, movement type 2): 22 spawns, among them Ras Frostwhisper (61 yd, 24 s), five Risen Guards (98-158 yd, 39-63 s), three Diseased Ghouls (98-110 yd, 39-44 s), Vectus (a 0 yd scripted teleport loop) and the students. No patrol block is written: the run leader's rows cannot carry one, and the patrol paths are for the mapping walk.",
+    "2026-10-24 leg 0 fix: the landing-to-Malicia walk is 554 yd of navmesh (east ring, west hall, the 104.8 hall, the lower corridor) and passes 40 census packs within 30 yd; the leg is now those 40 pulls in route order, each with an approach and a stand, instead of one move row (the r28c slotC first run wiped five times on them)."
   ],
   "legs": [
     {
       "name": "instructor_malicia",
-      "to": {"x": 86.6634, "y": -1.96039, "z": 85.3117},
+      "to": {"x": 190.819, "y": 126.329, "z": 137.227},
+      "pull_groups": [
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 191.084, "y": 79.743, "z": 128.518}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 193.4305, "y": 94.5583, "z": 128.4561}
+          ]
+        },
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 209.808, "y": 79.8682, "z": 128.518}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 192.0296, "y": 77.0524, "z": 128.4561}
+          ]
+        },
+        {
+          "entries": [10489, 10489],
+          "positions": [
+            {"x": 203.679, "y": 64.6575, "z": 128.518},
+            {"x": 198.386, "y": 64.2557, "z": 128.518}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 212.1604, "y": 77.038, "z": 129.5378}
+          ]
+        },
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 200.353, "y": 54.1937, "z": 128.86}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 206.4453, "y": 70.0646, "z": 128.4561}
+          ]
+        },
+        {
+          "entries": [10471, 10470],
+          "positions": [
+            {"x": 230.72, "y": 19.9185, "z": 115.809},
+            {"x": 229.563, "y": 17.8128, "z": 115.808}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 229.5999, "y": 45.8667, "z": 116.7562},
+            {"x": 235.8355, "y": 40.116, "z": 115.7744}
+          ]
+        },
+        {
+          "entries": [10471, 10470, 10471, 10499],
+          "positions": [
+            {"x": 240.778, "y": 45.3544, "z": 115.791},
+            {"x": 241.015, "y": 52.0705, "z": 115.791},
+            {"x": 239.281, "y": 53.6591, "z": 115.791},
+            {"x": 241.602, "y": 48.3987, "z": 115.791}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 228.7119, "y": 35.1049, "z": 115.8237}
+          ]
+        },
+        {
+          "entries": [10471],
+          "positions": [
+            {"x": 238.317, "y": 30.1833, "z": 115.717}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 242.2673, "y": 48.7681, "z": 115.7578}
+          ]
+        },
+        {
+          "entries": [10470, 10470, 10471],
+          "positions": [
+            {"x": 242.78, "y": 32.143, "z": 115.791},
+            {"x": 240.293, "y": 27.8336, "z": 115.8},
+            {"x": 239.267, "y": 25.2639, "z": 115.805}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 240.78, "y": 47.4135, "z": 115.7574}
+          ]
+        },
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 240.817, "y": 75.5046, "z": 110.056}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 259.1999, "y": 64, "z": 109.9562},
+            {"x": 259.817, "y": 75.5046, "z": 110.0943}
+          ]
+        },
+        {
+          "entries": [10476, 11258, 11582],
+          "positions": [
+            {"x": 277.33, "y": 78.4843, "z": 109.982},
+            {"x": 277.681, "y": 80.8369, "z": 110.067},
+            {"x": 279.979, "y": 78.9085, "z": 109.842}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 259.33, "y": 79.4099, "z": 110.0895}
+          ]
+        },
+        {
+          "entries": [11258, 11582, 10476],
+          "positions": [
+            {"x": 246.487, "y": 80.5749, "z": 110.173},
+            {"x": 243.487, "y": 80.5749, "z": 110.055},
+            {"x": 243.871, "y": 82.9685, "z": 109.917}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 262.9676, "y": 76.4552, "z": 110.1258}
+          ]
+        },
+        {
+          "entries": [11551],
+          "positions": [
+            {"x": 247.555, "y": 91.3432, "z": 110.055}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 266.555, "y": 91.3432, "z": 110.0013}
+          ]
+        },
+        {
+          "entries": [11582, 10476, 10476, 11258],
+          "positions": [
+            {"x": 273.496, "y": 102.927, "z": 110.055},
+            {"x": 273.637, "y": 101.085, "z": 110.033},
+            {"x": 276.647, "y": 106.101, "z": 109.758},
+            {"x": 276.349, "y": 101.999, "z": 110.287}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 257.0569, "y": 103.97, "z": 110.0389}
+          ]
+        },
+        {
+          "entries": [10476, 11582, 11258, 10476],
+          "positions": [
+            {"x": 249.607, "y": 103.293, "z": 110.033},
+            {"x": 249.179, "y": 99.3561, "z": 109.806},
+            {"x": 246.482, "y": 100.671, "z": 110.277},
+            {"x": 243.635, "y": 101.195, "z": 109.883}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 266.2257, "y": 101.1288, "z": 109.8894}
+          ]
+        },
+        {
+          "entries": [11582, 10476, 10476, 11258],
+          "positions": [
+            {"x": 275.279, "y": 124.641, "z": 109.842},
+            {"x": 279.041, "y": 124.33, "z": 109.775},
+            {"x": 273.738, "y": 120.894, "z": 109.849},
+            {"x": 276.451, "y": 121.88, "z": 110.252}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 257.7747, "y": 118.0187, "z": 110.0562}
+          ]
+        },
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 281.938, "y": 121.338, "z": 109.973}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 263.3532, "y": 117.3877, "z": 110.0562}
+          ]
+        },
+        {
+          "entries": [11582, 10476, 11258, 10476],
+          "positions": [
+            {"x": 249.223, "y": 121.483, "z": 110.002},
+            {"x": 249.25, "y": 118.011, "z": 109.987},
+            {"x": 246.482, "y": 120.263, "z": 110.308},
+            {"x": 246.102, "y": 124.054, "z": 109.808}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 266.7643, "y": 120.9528, "z": 110.0562}
+          ]
+        },
+        {
+          "entries": [10489],
+          "positions": [
+            {"x": 260.888, "y": 130.607, "z": 110.057}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 241.888, "y": 130.607, "z": 110.097}
+          ]
+        },
+        {
+          "entries": [10477, 10469, 10498],
+          "positions": [
+            {"x": 276.195, "y": 150.866, "z": 109.868},
+            {"x": 272.357, "y": 155.6, "z": 109.865},
+            {"x": 276.712, "y": 153.875, "z": 109.869}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 261.7054, "y": 138.5841, "z": 109.948}
+          ]
+        },
+        {
+          "entries": [10487],
+          "positions": [
+            {"x": 259.834, "y": 164.623, "z": 109.848}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 256.8618, "y": 145.8569, "z": 109.7657}
+          ]
+        },
+        {
+          "entries": [10477, 10469, 10469],
+          "positions": [
+            {"x": 243.902, "y": 164.119, "z": 109.742},
+            {"x": 242.655, "y": 165.943, "z": 109.739},
+            {"x": 237.077, "y": 166.516, "z": 109.729}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 241.2113, "y": 146.526, "z": 109.6789}
+          ]
+        },
+        {
+          "entries": [10469, 10477, 10498, 10477],
+          "positions": [
+            {"x": 235.725, "y": 141.804, "z": 109.728},
+            {"x": 232.765, "y": 140.263, "z": 109.724},
+            {"x": 231.218, "y": 143.303, "z": 109.723},
+            {"x": 230.069, "y": 140.256, "z": 109.723}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 251.4442, "y": 141.4065, "z": 109.7511}
+          ]
+        },
+        {
+          "entries": [10469],
+          "positions": [
+            {"x": 213.422, "y": 145.911, "z": 109.723}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 228.1429, "y": 129.5618, "z": 109.6562}
+          ]
+        },
+        {
+          "entries": [11551],
+          "positions": [
+            {"x": 219.244, "y": 134.258, "z": 109.723}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 222.6856, "y": 112.5289, "z": 109.6562}
+          ]
+        },
+        {
+          "entries": [10477, 10469, 14695],
+          "positions": [
+            {"x": 210.077, "y": 145.658, "z": 109.817},
+            {"x": 210.321, "y": 148.933, "z": 109.807},
+            {"x": 200.29, "y": 151.785, "z": 109.795}
+          ],
+          "radius": 7.8,
+          "approach": [
+            {"x": 206.896, "y": 129.792, "z": 109.7764}
+          ]
+        },
+        {
+          "entries": [10477, 10477, 10469],
+          "positions": [
+            {"x": 215.032, "y": 123.275, "z": 109.733},
+            {"x": 221.318, "y": 123.231, "z": 109.724},
+            {"x": 221.687, "y": 121.072, "z": 109.723}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 209.8457, "y": 138.9805, "z": 109.7287}
+          ]
+        },
+        {
+          "entries": [10477, 10487, 10498, 10469],
+          "positions": [
+            {"x": 175.599, "y": 135.13, "z": 109.566},
+            {"x": 173.16, "y": 127.189, "z": 109.709},
+            {"x": 170.96, "y": 132.657, "z": 109.667},
+            {"x": 171.38, "y": 136.536, "z": 109.638}
+          ],
+          "radius": 6.2,
+          "approach": [
+            {"x": 193.3159, "y": 128.5119, "z": 109.8491}
+          ]
+        },
+        {
+          "entries": [10469, 10477, 10498],
+          "positions": [
+            {"x": 184.448, "y": 116.57, "z": 109.723},
+            {"x": 181.724, "y": 115.292, "z": 109.723},
+            {"x": 183.815, "y": 113.239, "z": 109.723}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 186.8635, "y": 131.6622, "z": 109.772}
+          ]
+        },
+        {
+          "entries": [10481],
+          "positions": [
+            {"x": 221.917, "y": 96.4046, "z": 104.798}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 207.3547, "y": 106.6666, "z": 106.1562}
+          ]
+        },
+        {
+          "entries": [10485, 10485, 10485, 10485, 10481, 10495],
+          "positions": [
+            {"x": 214.574, "y": 101.917, "z": 104.798},
+            {"x": 217.536, "y": 99.4131, "z": 104.798},
+            {"x": 216.722, "y": 96.5785, "z": 104.798},
+            {"x": 221.917, "y": 96.4046, "z": 104.798},
+            {"x": 221.956, "y": 103.89, "z": 104.798},
+            {"x": 221.956, "y": 103.89, "z": 104.798}
+          ],
+          "radius": 5.3,
+          "approach": [
+            {"x": 197.6378, "y": 108.5913, "z": 106.1328}
+          ]
+        },
+        {
+          "entries": [10495, 10481, 10485, 10485, 10495, 10485],
+          "positions": [
+            {"x": 215.996, "y": 91.7486, "z": 104.798},
+            {"x": 222.002, "y": 82.2615, "z": 104.798},
+            {"x": 214.575, "y": 81.7494, "z": 104.715},
+            {"x": 215.633, "y": 79.811, "z": 104.798},
+            {"x": 220.372, "y": 73.5207, "z": 104.798},
+            {"x": 219.002, "y": 70.5227, "z": 104.715}
+          ],
+          "radius": 12.5,
+          "approach": [
+            {"x": 226.1333, "y": 102.7743, "z": 106.1562}
+          ]
+        },
+        {
+          "entries": [10495, 10485, 10485, 10485, 10495, 10481],
+          "positions": [
+            {"x": 204.405, "y": 98.9768, "z": 104.715},
+            {"x": 203.038, "y": 98.6992, "z": 104.798},
+            {"x": 199.187, "y": 103.225, "z": 104.715},
+            {"x": 202.634, "y": 93.892, "z": 104.244},
+            {"x": 197.118, "y": 98.0816, "z": 104.798},
+            {"x": 198.013, "y": 94.1485, "z": 104.244}
+          ],
+          "radius": 6.1,
+          "approach": [
+            {"x": 217.6616, "y": 106.463, "z": 104.7562}
+          ]
+        },
+        {
+          "entries": [11551],
+          "positions": [
+            {"x": 210.082, "y": 82.1787, "z": 104.244}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 196.647, "y": 95.6137, "z": 104.5547}
+          ]
+        },
+        {
+          "entries": [10495, 10485, 10485, 10485, 10495, 10495],
+          "positions": [
+            {"x": 185.168, "y": 95.0084, "z": 104.799},
+            {"x": 185.926, "y": 100.079, "z": 104.798},
+            {"x": 180.612, "y": 100.176, "z": 104.798},
+            {"x": 179.126, "y": 94.6681, "z": 104.8},
+            {"x": 179.117, "y": 95.5166, "z": 104.8},
+            {"x": 180.356, "y": 102.901, "z": 104.798}
+          ],
+          "radius": 5.5,
+          "approach": [
+            {"x": 200.4836, "y": 95.0859, "z": 104.6914}
+          ]
+        },
+        {
+          "entries": [10485],
+          "positions": [
+            {"x": 187.086, "y": 92.537, "z": 104.767}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 170.6666, "y": 101.6, "z": 104.7562}
+          ]
+        },
+        {
+          "entries": [10485, 10485, 10481, 10495, 10495, 10485],
+          "positions": [
+            {"x": 196.305, "y": 79.2109, "z": 104.244},
+            {"x": 199.247, "y": 78.7078, "z": 104.244},
+            {"x": 196.58, "y": 74.704, "z": 104.346},
+            {"x": 202.629, "y": 80.0779, "z": 104.244},
+            {"x": 204.191, "y": 73.0652, "z": 104.798},
+            {"x": 214.38, "y": 73.1017, "z": 104.798}
+          ],
+          "radius": 13.1,
+          "approach": [
+            {"x": 185.8728, "y": 91.1988, "z": 104.5881}
+          ]
+        },
+        {
+          "entries": [10481, 10485, 10495, 10485, 10495],
+          "positions": [
+            {"x": 179.384, "y": 83.667, "z": 104.8},
+            {"x": 181.214, "y": 80.6029, "z": 104.799},
+            {"x": 185.533, "y": 80.6186, "z": 104.715},
+            {"x": 180.483, "y": 74.1536, "z": 104.799},
+            {"x": 185.903, "y": 70.4123, "z": 104.798}
+          ],
+          "radius": 8.7,
+          "approach": [
+            {"x": 174.6193, "y": 98.4296, "z": 104.7562}
+          ]
+        },
+        {
+          "entries": [10472, 10469, 10472],
+          "positions": [
+            {"x": 125.396, "y": 2.596, "z": 85.4379},
+            {"x": 123.306, "y": 3.9328, "z": 85.3117},
+            {"x": 126.473, "y": 4.8813, "z": 85.3117}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 149.3333, "y": 64, "z": 102.9562},
+            {"x": 173.8666, "y": 36.8, "z": 88.7561},
+            {"x": 154.9333, "y": 4.5333, "z": 89.0562},
+            {"x": 121.3159, "y": -13.0668, "z": 85.2287}
+          ]
+        },
+        {
+          "entries": [10477, 10472, 10472],
+          "positions": [
+            {"x": 112.921, "y": -4.4509, "z": 85.4598},
+            {"x": 110.892, "y": -6.4628, "z": 85.3117},
+            {"x": 113.736, "y": -7.0968, "z": 85.3117}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 115.2686, "y": 11.1398, "z": 85.2561}
+          ]
+        },
+        {
+          "entries": [10469, 10472],
+          "positions": [
+            {"x": 102.454, "y": 4.3742, "z": 85.3117},
+            {"x": 101.082, "y": 6.4019, "z": 85.3117}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 120, "y": 5, "z": 85.349}
+          ]
+        }
+      ],
       "boss": {
         "entry": 10505,
         "position": {"x": 86.6634, "y": -1.96039, "z": 85.3117}
-      }
+      },
+      "notes": [
+        "The whole walk from the landing to Malicia (554 yd on the navmesh, not the 200 yd the straight line suggests) is cut into pulls: every census pack within 30 yd (aggro 20 + 10) of the path and on the path's floor (|dz| \u003c= 6.5), one at a time, in route order (40 groups, from the stair guards through the 109.7 ring and the 104.8 hall to Malicia's room).",
+        "Stands: 15-25 yd from the pack's nearest member, on the pack's own floor, the pull target in sight (nnavmesh raycast), the stand clear of every pack still alive at that point by its radius + 5 yd; every group carries its approach (1-4 navmesh points, the last the stand).",
+        "Pull order was fixed by route progress; a pack whose stand could not clear a later pack was moved before it (none was moved in the end). Partial sight: 4.10, 4.1, 4.3 and 6.14 have members off the navmesh or behind a pillar; the member in sight is the pull target.",
+        "The packs are the same census cuts the later legs use (legs 1-6 own them there): leg 0 clears them first, so the later rows find them dead."
+      ]
     },
     {
       "name": "the_ravenian",
