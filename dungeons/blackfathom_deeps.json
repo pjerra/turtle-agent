@@ -23,9 +23,9 @@
     "hunter:dps"
   ],
   "fleers": [4805, 4809, 4810, 4811, 4812, 4814, 4815, 4818, 4819, 4820, 4821, 4822, 4823],
-  "cc_priority": [4820, 4809, 4813, 4811, 4799],
+  "cc_priority": [4820, 4809, 4811, 4799, 4814],
   "cc_always": [4820, 4809],
-  "kill_first": [4809],
+  "kill_first": [4809, 4813],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 48 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -1240,19 +1240,25 @@
           "radius": 7
         },
         {
+          "entries": [4813],
+          "positions": [
+            {"x": -799.32, "y": -108.703, "z": -25.7868}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": -797.6, "y": -107.2, "z": -24.4}
+          ]
+        },
+        {
           "entries": [4813, 4814],
           "positions": [
             {"x": -813.087, "y": -99.3175, "z": -25.6698},
             {"x": -818.654, "y": -108.217, "z": -25.7867}
           ],
-          "radius": 11
-        },
-        {
-          "entries": [4813],
-          "positions": [
-            {"x": -799.32, "y": -108.703, "z": -25.7868}
-          ],
-          "radius": 7
+          "radius": 8,
+          "approach": [
+            {"x": -797.6, "y": -107.2, "z": -24.4}
+          ]
         },
         {
           "entries": [4823],
