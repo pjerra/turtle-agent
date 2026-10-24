@@ -134,6 +134,8 @@ func (s *Session) applyBlocks(blocks []objects.Block) {
 	s.seedRunSpeed(blocks)
 	changes := s.store.Apply(blocks)
 	self := s.selfGUID()
+	s.updateHot(self) // first: a stun's flag and its field rewrite come in one update
+	s.observeSelection(blocks, self)
 	var selfAuras []uint32 // positive auras the player gained in this update: a mount's is among them
 	for _, c := range changes {
 		if c.GUID == self && c.Kind == objects.ChangeAura && c.New != 0 && c.Slot < objects.PositiveAuraSlots {

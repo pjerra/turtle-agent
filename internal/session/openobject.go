@@ -202,6 +202,10 @@ func (s *Session) takeAll(ctx context.Context, w *LootWindow, wait time.Duration
 // Race is the player's race id (UNIT_FIELD_BYTES_0, low byte), 0 until the player's create block has arrived.
 func (s *Session) Race() uint8 { return uint8(s.store.Field(s.selfGUID(), objects.UnitBytes0)) }
 
+// RaceOf is a unit's race id (UNIT_FIELD_BYTES_0, low byte), 0 while the unit is not in the object store: a hired bot's race, which the
+// perception feed does not carry.
+func (s *Session) RaceOf(g packet.GUID) uint8 { return uint8(s.store.Field(g, objects.UnitBytes0)) }
+
 // Team names the faction side of a race id, "alliance" or "horde" ("" for an id that is neither). The core takes it from the race's base
 // language (Player::TeamForRace, Player.cpp:7755-7773); the race masks name the same sets: human 1, dwarf 3, night elf 4, gnome 7 and
 // high elf 10 are the Alliance, orc 2, undead 5, tauren 6, troll 8 and goblin 9 the Horde (SharedDefines.h:41-70).

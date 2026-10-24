@@ -248,6 +248,30 @@ func TestParseFleers(t *testing.T) {
 	}
 }
 
+// TestPlanTankMinHPIsChecked: the tank floor is optional (0 or absent), and 100-20000 is the range; anything else names the field.
+func TestPlanTankMinHPIsChecked(t *testing.T) {
+	base := func(f string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},` + f + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+	}
+	for _, v := range []string{"99999", "50"} {
+		if _, err := Parse("t.json", []byte(base(`"tank_min_hp":`+v+`,`))); err == nil || !strings.Contains(err.Error(), "tank_min_hp") {
+			t.Errorf("%s: %v", v, err)
+		}
+	}
+	p, err := Parse("t.json", []byte(base(`"tank_min_hp":800,`)))
+	if err != nil || p.TankMinHP != 800 {
+		t.Errorf("800: %v %v", err, p)
+	}
+	p, err = Parse("t.json", []byte(base(`"tank_min_hp":0,`)))
+	if err != nil || p.TankMinHP != 0 {
+		t.Errorf("0: %v %v", err, p)
+	}
+	p, err = Parse("t.json", []byte(base(``)))
+	if err != nil || p.TankMinHP != 0 {
+		t.Errorf("absent: %v %v", err, p)
+	}
+}
+
 // TestApproachAndHoldAreRead: approach points and a hold are read, and their limits refused.
 func TestApproachAndHoldAreRead(t *testing.T) {
 	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
