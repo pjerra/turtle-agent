@@ -44,7 +44,27 @@ const (
 	WarnNeedlessDirect = "needless direct"
 	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
 	WarnEstimatedPatrol = "estimated patrol period"
+
+	// ReasonServerUnreachable is a hop the server's own path query refuses: the run
+	// leader's CheckMove answers "unreachable" (or the path's end is short after 3
+	// incomplete legs) from where the party stands, although the offline query has a
+	// complete path.
+	ReasonServerUnreachable = "server unreachable"
+	// ReasonArriveSwallowed is a direct hop the run leader never sends: it lies within
+	// the arrival radius (DungeonRunPolicy.h kArriveYd) of the point before it, so the
+	// run counts it reached (WalkTo returns "arrived") and the party stays behind.
+	ReasonArriveSwallowed = "hop inside the arrival radius"
 )
+
+// ArriveYd is the run leader's arrival radius: within it of its point a move counts as
+// reached without sending an order (TortoiseBots DungeonRunPolicy.h kArriveYd, WalkTo).
+const ArriveYd = 3.0
+
+// ServerQuerier is the optional part of a Navmesh that replays the server's own path
+// query; *navmesh.Planner implements it. The test fakes compile without it.
+type ServerQuerier interface {
+	ServerPath(mapID uint32, from, to navmesh.Vec3) (navmesh.ServerPath, error)
+}
 
 // Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
 type Navmesh interface {
@@ -416,6 +436,15 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 		for vi, w := range l.Via {
 			var err error
 			c.rec.stop("via", fmt.Sprintf("via %d", vi), 0, w.Point, "")
+			if !w.GMCross && dist3(cur, w.Point) <= ArriveYd && dist3(cur, w.Point) > 0.05 {
+				// Within the run leader's arrival radius the point counts as
+				// reached: WalkTo returns "arrived" without sending an order,
+				// so the party stays where it was (kArriveYd, WalkTo).
+				if w.Direct {
+					c.fail(fmt.Sprintf("via %d", vi), 0, w.Point, cur, ReasonArriveSwallowed, "%.1f yd from the point before it: the run leader counts it reached (kArriveYd %g) and never sends the hop; the party stays at %.1f %.1f %.1f", dist3(cur, w.Point), ArriveYd, cur.X, cur.Y, cur.Z)
+				}
+				continue
+			}
 			switch {
 			case w.GMCross:
 				cur, err = c.gmCross(fmt.Sprintf("gm_cross via %d", vi), w.Point, cur)
@@ -608,6 +637,26 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	c.rec.path(path)
+	// The server's own query judges the hop first: it models where the run
+	// leader really stands (the arrival radius kept the party behind) and the
+	// server's filter (steep included) and node budget. The walk goes on from
+	// where the server leaves the party.
+	if at, ok, err := c.serverWalk(part, 0, to, from); err != nil {
+		return at, err
+	} else if !ok {
+		return at, nil
+	} else if at != to {
+		path, err = c.nav.Plan(c.p.Map, vec(at), vec(to))
+		if err != nil {
+			return at, err
+		}
+		c.rec.path(path)
+		if path.Status != navmesh.Complete {
+			err := c.failPath(part, 0, to, at, path)
+			return at, err
+		}
+		return to, nil
+	}
 	if path.Status != navmesh.Complete {
 		err := c.failPath(part, 0, to, from, path)
 		if c.rec != nil && err == nil && pathReason(path) == ReasonUnreachable {
@@ -618,6 +667,38 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	return to, nil
+}
+
+// serverWalk simulates the run leader's walk of one hop with the server's own path
+// query: from cur toward to, at most 3 legs (kWalkTries, DungeonRunPolicy.h:155). It
+// returns where the party ends: to when the server takes it, cur (or a pocket the
+// incomplete path ends in) when the server refuses it. When the navmesh is not a
+// ServerQuerier, there is no server check and the hop passes.
+func (c *planChecker) serverWalk(part string, group int, to, from Point) (Point, bool, error) {
+	q, ok := c.nav.(ServerQuerier)
+	if !ok {
+		return to, true, nil
+	}
+	cur := from
+	for range 3 {
+		if dist3(cur, to) <= ArriveYd {
+			return to, true, nil
+		}
+		sp, err := q.ServerPath(c.p.Map, vec(cur), vec(to))
+		if err != nil {
+			return cur, false, err
+		}
+		if v := navmesh.ServerMoveVerdict(sp, vec(cur), vec(to), 0); v != "ok" {
+			c.fail(part, group, to, from, ReasonServerUnreachable, "the server's PathFinder (2048 nodes, 256 polys, smooth path, ground|water incl. steep) from %.1f %.1f %.1f answers type 0x%x: cmd move %s", cur.X, cur.Y, cur.Z, sp.Type, v)
+			return cur, false, nil
+		}
+		if sp.Type&navmesh.PathNormal != 0 {
+			return to, true, nil
+		}
+		cur = point(sp.ActualEnd)
+	}
+	c.fail(part, group, to, from, ReasonServerUnreachable, "after 3 incomplete legs the lead stands at %.1f %.1f %.1f, %.1f yd short", cur.X, cur.Y, cur.Z, dist3(cur, to))
+	return cur, false, nil
 }
 
 // pathReason is the reason a path that is not complete gives: the goal off the mesh, else unreachable.

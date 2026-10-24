@@ -137,8 +137,27 @@ func (e *engine) findPath(from, to Vec3) (int, []Vec3, Vec3) {
 	return int(rc), out[:int(n)], goal
 }
 
+// serverMaxPoints is the most smooth points the server's findSmoothPath returns
+// (PathFinder.h MAX_POINT_PATH_LENGTH).
+const serverMaxPoints = 256
+
+// serverPath replays the server's own query (the core's PathInfo: BuildPolyPath +
+// findSmoothPath): 2048 search nodes, at most 256 polys, ground|water included, nothing
+// excluded, a smoothed path of at most 256 points. It returns the path type bits
+// (PathNormal/PathIncomplete/PathNoPath), the smooth points, and the last smooth point
+// (what the run leader walks to), with the asked point's distance to its walk poly for
+// each end (0 when there is none).
+func (e *engine) serverPath(from, to Vec3) (uint32, []Vec3, Vec3, float32, float32) {
+	out := make([]Vec3, serverMaxPoints)
+	var n C.int
+	var actual Vec3
+	var typ C.uint
+	var sdist, edist C.float
+	C.nd_server_path(e.h, cvec(&from), cvec(&to), cvec(&out[0]), C.int(serverMaxPoints), &n, cvec(&actual), &typ, &sdist, &edist)
+	return uint32(typ), out[:int(n)], actual, float32(sdist), float32(edist)
+}
+
 // raycast casts a walkability ray over the mesh from one point to another: the fraction of the way at which it meets the mesh's
-// edge (over 1 when it reaches the end), and 0 for done, -1 when the start is off the mesh, -3 on a Detour failure.
 func (e *engine) raycast(from, to Vec3) (float32, int) {
 	var t C.float
 	rc := C.nd_raycast(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags), &t)

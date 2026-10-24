@@ -845,9 +845,13 @@ What it checks:
   before them (the last `via`, `to`, step stand or approach point; part `run leader pull group 3 approach 0`). A separate list, `run_leader` (reason `run leader hop`; never a failure, not a warning of the agent's own run), names every pack (the centre its `pull` row
   gets) and boss that stands more than 50 yd from the run leader's last move row: the run leader sees 60 yd from its lead bot and walks toward anything farther in navmesh hops of its own
   (`kApproachYd`/`kApproachHopYd`), which is where its Uldaman test of 2026-10-16 stopped (a hop point under a low ceiling refused `off-mesh`, and long paths with no path at all). Give such a
-  pack `approach` points. The check does **not** model the server's own refusals: `cmd move` snaps a point to the vmap floor found from 8 yd above it (a ceiling 4-6 yd above the floor wins
-  and the point is refused `off-mesh`, more than 5 yd from where the path ends), and the server's path finder keeps 2048 search nodes and 256 polygons (here 65535 and 2048) and builds
-  a smoothed path of at most 256 points; neither the vmaps nor that path are here, so an approach point is checked against the vmaps offline (`lostool` on the test VM).
+  pack `approach` points. Every `walk` hop above also runs the server's own path query (2048 search nodes, 256 polygons, ground|water included, steep included, a smoothed path of at most
+  256 points) and the run leader's `CheckMove` verdict on it: a hop the offline query takes but the server refuses fails as `server unreachable`, and the walk goes on from where the
+  server leaves the party (an incomplete path's end, or where it stood). A `direct` hop within the arrival radius (`ArriveYd`, 3 yd: `DungeonRunPolicy.h kArriveYd`) of the point before it
+  fails as `hop inside the arrival radius`: the run leader counts it reached without sending an order, so the party stays behind. Replay one hop of a live refusal from the logged lead
+  position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
+Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
+  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end).
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 

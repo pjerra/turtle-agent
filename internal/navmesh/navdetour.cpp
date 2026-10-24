@@ -21,6 +21,16 @@ const uint32_t MMAP_MAGIC = 0x4d4d4150;  // 'MMAP'
 const uint32_t MMAP_VERSION = 6;         // core MoveMapSharedDefines.h
 const int MAX_POLYS = 2048;              // the server keeps 256 (PathFinder.h MAX_PATH_LENGTH)
 const int MAX_NODES = 65535;             // the server's query has 2048 (MoveMap.cpp)
+// The server's own query: one dtNavMeshQuery per map init'ed with SERVER_NODES nodes (the core's MoveMap.cpp:333).
+const int SERVER_NODES = 2048;          // MoveMap.cpp:333
+const int SERVER_MAX_POLYS = 256;       // PathFinder.h MAX_PATH_LENGTH
+const int SERVER_MAX_POINTS = 256;      // PathFinder.h MAX_POINT_PATH_LENGTH
+const float SMOOTH_PATH_SLOP = 0.4f;    // PathFinder.cpp getSteerTarget
+const float SMOOTH_PATH_STEP_SIZE = 2.0f;  // PathFinder.cpp findSmoothPath
+const unsigned PT_NORMAL = 0x1;         // PathFinder.h PATHFIND_NORMAL
+const unsigned PT_SHORTCUT = 0x2;       // PATHFIND_SHORTCUT (unused: no swimming modelled)
+const unsigned PT_INCOMPLETE = 0x4;     // PATHFIND_INCOMPLETE
+const unsigned PT_NOPATH = 0x8;         // PATHFIND_NOPATH
 
 struct MmapTileHeader {
     uint32_t mmapMagic, dtVersion, mmapVersion, size, usesLiquids;
@@ -29,8 +39,8 @@ struct MmapTileHeader {
 struct Nav {
     dtNavMesh* mesh = nullptr;
     dtNavMeshQuery* query = nullptr;
+    dtNavMeshQuery* server = nullptr;
 };
-
 inline void toDt(const float* w, float* d) { d[0] = w[1]; d[1] = w[2]; d[2] = w[0]; }
 inline void toWow(const float* d, float* w) { w[0] = d[2]; w[1] = d[0]; w[2] = d[1]; }
 
@@ -83,8 +93,11 @@ extern "C" void* nd_create(const unsigned char* params, int size) {
     Nav* n = new Nav;
     n->mesh = dtAllocNavMesh();
     n->query = dtAllocNavMeshQuery();
-    if (!n->mesh || !n->query || dtStatusFailed(n->mesh->init(&p)) ||
-        dtStatusFailed(n->query->init(n->mesh, MAX_NODES))) {
+    n->server = dtAllocNavMeshQuery();
+    if (!n->mesh || !n->query || !n->server || dtStatusFailed(n->mesh->init(&p)) ||
+        dtStatusFailed(n->query->init(n->mesh, MAX_NODES)) ||
+        dtStatusFailed(n->server->init(n->mesh, SERVER_NODES))) {
+        dtFreeNavMeshQuery(n->server);
         dtFreeNavMeshQuery(n->query);
         dtFreeNavMesh(n->mesh);
         delete n;
@@ -97,6 +110,7 @@ extern "C" void nd_destroy(void* h) {
     Nav* n = (Nav*)h;
     if (!n)
         return;
+    dtFreeNavMeshQuery(n->server);
     dtFreeNavMeshQuery(n->query);
     dtFreeNavMesh(n->mesh);
     delete n;
@@ -362,4 +376,267 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
     }
     *count = npts;
     return result;
+}
+// ---- The server's own path query: PathInfo::BuildPolyPath + findSmoothPath (core
+// PathFinder.cpp:597-916), copied from specs/plancheck-vs-server-path/repro.cpp, which
+// is itself line-for-line from the core. ----
+
+// True when a lies within r (horizontally) and h (vertically) of b, in Detour (y, z, x) order.
+static bool inRangeYZX(const float* a, const float* b, float r, float h) {
+    float dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    return dx * dx + dz * dz < r * r && fabsf(dy) < h;
+}
+
+// PathFinder.cpp fixupCorridor.
+static uint32_t fixupCorridor(dtPolyRef* path, uint32_t npath, uint32_t maxPath, const dtPolyRef* visited,
+                              uint32_t nvisited) {
+    int fp = -1, fv = -1;
+    for (int i = npath - 1; i >= 0; --i) {
+        bool found = false;
+        for (int j = nvisited - 1; j >= 0; --j) {
+            if (path[i] == visited[j]) {
+                fp = i;
+                fv = j;
+                found = true;
+            }
+        }
+        if (found)
+            break;
+    }
+    if (fp == -1 || fv == -1)
+        return npath;
+    uint32_t req = nvisited - fv, orig = uint32_t(fp + 1) < npath ? fp + 1 : npath,
+             size = npath > orig ? npath - orig : 0;
+    if (req + size > maxPath)
+        size = maxPath - req;
+    if (size)
+        memmove(path + req, path + orig, size * sizeof(dtPolyRef));
+    for (uint32_t i = 0; i < req; ++i)
+        path[i] = visited[(nvisited - 1) - i];
+    return req + size;
+}
+
+// PathFinder.cpp fixupShortcuts.
+static int fixupShortcuts(dtPolyRef* path, int npath, dtNavMeshQuery* q) {
+    if (npath < 3)
+        return npath;
+    dtPolyRef neis[16];
+    int nn = 0;
+    const dtMeshTile* t = 0;
+    const dtPoly* p = 0;
+    if (dtStatusFailed(q->getAttachedNavMesh()->getTileAndPolyByRef(path[0], &t, &p)))
+        return npath;
+    for (unsigned k = p->firstLink; k != DT_NULL_LINK; k = t->links[k].next) {
+        if (t->links[k].ref && nn < 16)
+            neis[nn++] = t->links[k].ref;
+    }
+    int cut = 0;
+    for (int i = dtMin(6, npath) - 1; i > 1 && cut == 0; i--) {
+        for (int j = 0; j < nn; j++) {
+            if (path[i] == neis[j]) {
+                cut = i;
+                break;
+            }
+        }
+    }
+    if (cut > 1) {
+        int off = cut - 1;
+        npath -= off;
+        for (int i = 1; i < npath; i++)
+            path[i] = path[i + off];
+    }
+    return npath;
+}
+
+// PathFinder.cpp getSteerTarget (named steer in the spec's repro.cpp).
+static bool steer(dtNavMeshQuery* q, const float* sp, const float* ep, const dtPolyRef* path, uint32_t n,
+                  float* pos, unsigned char& fl, dtPolyRef& ref) {
+    float sp3[9];
+    unsigned char f3[3];
+    dtPolyRef r3[3];
+    int ns = 0;
+    if (dtStatusFailed(q->findStraightPath(sp, ep, path, n, sp3, f3, r3, &ns, 3)) || !ns)
+        return false;
+    int i = 0;
+    while (i < ns) {
+        if ((f3[i] & DT_STRAIGHTPATH_OFFMESH_CONNECTION) || !inRangeYZX(&sp3[i * 3], sp, SMOOTH_PATH_SLOP, 1000.0f))
+            break;
+        i++;
+    }
+    if (i >= ns)
+        return false;
+    dtVcopy(pos, &sp3[i * 3]);
+    pos[1] = sp[1];
+    fl = f3[i];
+    ref = r3[i];
+    return true;
+}
+
+// PathFinder.cpp findSmoothPath (named smooth in the spec's repro.cpp).
+static dtStatus smooth(dtNavMeshQuery* q, const dtQueryFilter& f, const float* sp, const float* ep,
+                       const dtPolyRef* pp, uint32_t pn, float* out, int* on, uint32_t maxS,
+                       uint32_t maxPoly) {
+    *on = 0;
+    uint32_t ns = 0;
+    dtPolyRef polys[SERVER_MAX_POLYS];
+    for (uint32_t i = 0; i < pn && i < SERVER_MAX_POLYS; ++i)
+        polys[i] = pp[i];
+    uint32_t np = pn;
+    float it[3], tg[3];
+    if (dtStatusFailed(q->closestPointOnPolyBoundary(polys[0], sp, it)))
+        return DT_FAILURE;
+    if (dtStatusFailed(q->closestPointOnPolyBoundary(polys[np - 1], ep, tg)))
+        return DT_FAILURE;
+    dtVcopy(&out[ns * 3], it);
+    ns++;
+    while (np && ns < maxS) {
+        float st[3];
+        unsigned char sf;
+        dtPolyRef sr = 0;
+        if (!steer(q, it, tg, polys, np, st, sf, sr))
+            break;
+        bool eop = sf & DT_STRAIGHTPATH_END, om = sf & DT_STRAIGHTPATH_OFFMESH_CONNECTION;
+        float d[3];
+        dtVsub(d, st, it);
+        float len = sqrtf(dtVdot(d, d));
+        float step = SMOOTH_PATH_STEP_SIZE;
+        if ((eop || om) && len < step)
+            len = 1.0f;
+        else if (len < step * 4)
+            len = step / len;
+        else
+            len = step * 4 / len;
+        float mt[3];
+        dtVmad(mt, it, d, len);
+        float res[3];
+        dtPolyRef vis[16];
+        int nv = 0;
+        if (dtStatusFailed(q->moveAlongSurface(polys[0], it, mt, &f, res, vis, &nv, 16)))
+            return DT_FAILURE;
+        np = fixupCorridor(polys, np, maxPoly, vis, nv);
+        np = fixupShortcuts(polys, np, q);
+        q->getPolyHeight(polys[0], res, &res[1]);
+        res[1] += 0.5f;
+        dtVcopy(it, res);
+        if (eop && inRangeYZX(it, st, SMOOTH_PATH_SLOP, 1.0f)) {
+            if (dtStatusSucceed(q->getPolyHeight(polys[0], tg, &tg[1]))) {
+                tg[1] += 0.5f;
+                dtVcopy(it, tg);
+            }
+            if (ns < maxS) {
+                dtVcopy(&out[ns * 3], it);
+                ns++;
+            }
+            break;
+        } else if (om && inRangeYZX(it, st, SMOOTH_PATH_SLOP, 1.0f)) {
+            dtPolyRef prev = 0, pr = polys[0];
+            uint32_t npos = 0;
+            while (npos < np && pr != sr) {
+                prev = pr;
+                pr = polys[npos];
+                npos++;
+            }
+            for (uint32_t i = npos; i < np; ++i)
+                polys[i - npos] = polys[i];
+            np -= npos;
+            float s2[3], e2[3];
+            if (dtStatusSucceed(q->getAttachedNavMesh()->getOffMeshConnectionPolyEndPoints(prev, pr, s2, e2))) {
+                if (ns < maxS) {
+                    dtVcopy(&out[ns * 3], s2);
+                    ns++;
+                }
+                dtVcopy(it, e2);
+                if (dtStatusFailed(q->getPolyHeight(polys[0], it, &it[1])))
+                    return DT_FAILURE;
+                it[1] += 0.2f;
+            }
+        }
+        if (ns < maxS) {
+            dtVcopy(&out[ns * 3], it);
+            ns++;
+        }
+    }
+    *on = ns;
+    return ns < 256 ? DT_SUCCESS : DT_FAILURE;
+}
+
+// PathInfo::FindWalkPoly on the server query (extents 5/10/5 and the +3 rule, PathFinder.cpp:160-175).
+static dtPolyRef serverWalkPoly(Nav* n, const float* p, const dtQueryFilter& f, float* closest, float* dist) {
+    const float ext[3] = {5.0f, 10.0f, 5.0f};
+    dtPolyRef ref = 0;
+    if (dtStatusFailed(n->server->findNearestPoly(p, ext, &f, &ref, closest)) || !ref)
+        return 0;
+    if (closest[1] > p[1] + 3.0f)
+        return 0;
+    *dist = dtVdist(closest, p);
+    return ref;
+}
+
+// nd_server_path: the server's exact query and verdict inputs (PathInfo::BuildPolyPath +
+// findSmoothPath, PathFinder.cpp:240-265, :384-392, :405-452, :915), with the server's
+// filter (include ground|water, exclude 0; PathFinder.cpp:547-566). start and end are WoW
+// (x, y, z); out takes up to max_points points in the same order; actual_end starts as end
+// and ends as the last smooth point (what the run leader walks to); type is one of
+// PT_NORMAL/PT_INCOMPLETE/PT_NOPATH; start_dist/end_dist are the asked point's distance
+// to its walk poly (0 when there is none). 0 done, -1 for a null handle.
+extern "C" int nd_server_path(void* h, const float* start, const float* end, float* out, int max_points,
+                              int* count, float* actual_end, unsigned* type, float* start_dist,
+                              float* end_dist) {
+    Nav* n = (Nav*)h;
+    if (!n || !n->server)
+        return -1;
+    *count = 0;
+    *type = PT_NOPATH;
+    *start_dist = 0;
+    *end_dist = 0;
+    dtQueryFilter f = makeFilter(0x09, 0);
+    float s[3], e[3], sc[3], ec[3], sdist = 0, edist = 0;
+    toDt(start, s);
+    toDt(end, e);
+    toWow(e, actual_end);
+    dtPolyRef sref = serverWalkPoly(n, s, f, sc, &sdist);
+    dtPolyRef eref = serverWalkPoly(n, e, f, ec, &edist);
+    *start_dist = sdist;
+    *end_dist = edist;
+    if (!sref || !eref) {
+        *type = PT_NOPATH;
+        return 0;
+    }
+    // BuildPolyPath's rule stays: a goal over 7 yd from the mesh clamps the end to the
+    // poly boundary and starts incomplete (PathFinder.cpp:240-265; swimming is not modelled).
+    unsigned incomplete = 0;
+    if (sdist > 7.0f || edist > 7.0f) {
+        float cp[3];
+        if (dtStatusSucceed(n->server->closestPointOnPolyBoundary(eref, e, cp))) {
+            dtVcopy(e, cp);
+            toWow(cp, actual_end);
+        }
+        incomplete = PT_INCOMPLETE;
+    }
+    // The raw asked start and end, not the floor points (PathFinder.cpp:384-392).
+    dtPolyRef polys[SERVER_MAX_POLYS];
+    int np = 0;
+    dtStatus st = n->server->findPath(sref, eref, s, e, &f, polys, &np, SERVER_MAX_POLYS);
+    if (!np || dtStatusFailed(st)) {
+        *type = PT_NOPATH;
+        return 0;
+    }
+    *type = (polys[np - 1] == eref && !incomplete) ? PT_NORMAL : PT_INCOMPLETE;
+    float pts[SERVER_MAX_POINTS * 3];
+    int nsmooth = 0;
+    dtStatus r = smooth(n->server, f, s, e, polys, np, pts, &nsmooth, SERVER_MAX_POINTS, SERVER_MAX_POLYS);
+    if (nsmooth < 2 || dtStatusFailed(r)) {
+        *type = PT_NOPATH;
+        *count = 0;
+        return 0;
+    }
+    int nout = nsmooth < max_points ? nsmooth : max_points;
+    for (int i = 0; i < nout; ++i) {
+        float d[3];
+        dtVcopy(d, &pts[i * 3]);
+        toWow(d, &out[i * 3]);
+    }
+    *count = nout;
+    toWow(&pts[(nsmooth - 1) * 3], actual_end);
+    return 0;
 }
