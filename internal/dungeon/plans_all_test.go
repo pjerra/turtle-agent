@@ -57,6 +57,17 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 // drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
 var offlineMapped = map[string]bool{"deadmines": true, "shadowfang_keep": true}
 
+// Ragefire Chasm is the one plan with measured hire data: 800 is the issue's tank floor for its level band (#266).
+func TestRagefireChasmPlanCarriesTheTankFloor(t *testing.T) {
+	p, err := Load(filepath.Join(plansDir, "ragefire_chasm.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.TankMinHP != 800 {
+		t.Fatalf("ragefire_chasm tank_min_hp is %d, want 800", p.TankMinHP)
+	}
+}
+
 func TestOfflineMappedPlansAreStillDrafts(t *testing.T) {
 	for name := range offlineMapped {
 		p, err := Load(filepath.Join(plansDir, name+".json"))

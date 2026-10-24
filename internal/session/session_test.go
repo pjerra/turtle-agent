@@ -54,6 +54,30 @@ func startWrapped(t *testing.T, opts Options, clientKey, serverKey []byte, wrap 
 // --capture records one.
 func startTapped(t *testing.T, opts Options, clientKey, serverKey []byte, wrap func(net.Conn) net.Conn, tap worldconn.Tap) *harness {
 	t.Helper()
+	return startClocked(t, opts, clientKey, serverKey, wrap, tap, true)
+}
+
+// expectWait is how long a test waits for a packet the session is about to send. The session
+// runs in real time (a walk leg takes a second, a flight a second or two), so a short
+// deadline turns a slow or loaded machine into a failure that says nothing about the code.
+// The wait ends when the packet arrives; the deadline only bounds a test that would fail anyway.
+const expectWait = 15 * time.Second
+
+// steadyClock is a session clock that only the monotonic clock drives. The host's wall clock
+// can be stepped (a WSL2 host steps it back about two seconds every half minute), and the
+// session slews its movement time towards the wall clock (clock.go), so a step during a walk
+// or a flight slows its client time for seconds and stretches the walk or skews a step's
+// time gap against its distance. The anticheat bounds this tolerates are covered in
+// clock_test.go; the tests of the walk, the flights and the packets' timing want the
+// session's own pace, which is what a steady wall clock gives.
+func steadyClock(start time.Time) func() time.Time {
+	return func() time.Time { return start.Add(time.Since(start)) }
+}
+
+// startClocked is startTapped with the session's clock steady (see steadyClock) or the real
+// one.
+func startClocked(t *testing.T, opts Options, clientKey, serverKey []byte, wrap func(net.Conn) net.Conn, tap worldconn.Tap, steady bool) *harness {
+	t.Helper()
 	cli, srvConn := net.Pipe()
 	t.Cleanup(func() { cli.Close(); srvConn.Close() })
 	ch := make(chan *worldtest.Server, 1)
@@ -78,6 +102,9 @@ func startTapped(t *testing.T, opts Options, clientKey, serverKey []byte, wrap f
 	}
 	h := &harness{t: t, srv: <-ch, run: make(chan error, 1)}
 	h.s = New(conn, opts)
+	if steady {
+		h.s.clockFn = steadyClock(h.s.start)
+	}
 	go func() { h.run <- h.s.Run(context.Background()) }()
 	// Ruling P1/P2: no Run goroutine outlives its test. Closing the pipes ends Run;
 	// Done closes before Run returns into the buffered h.run, drained or not.
@@ -115,7 +142,7 @@ func charEnumBody(chars ...Character) []byte {
 
 func (h *harness) expect(op uint16) worldconn.Packet {
 	h.t.Helper()
-	p, err := h.srv.Expect(op, 2*time.Second)
+	p, err := h.srv.Expect(op, expectWait)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -140,7 +167,7 @@ func (h *harness) enterWorld() {
 	h.expect(opcode.CMSGSetActiveMover)
 	select {
 	case <-h.s.Ready():
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		h.t.Fatal("not ready")
 	}
 }
@@ -443,7 +470,7 @@ func TestPongTimeoutDisconnects(t *testing.T) {
 		if !errors.Is(err, ErrDisconnected) {
 			t.Fatalf("err = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		t.Fatal("no disconnect without pongs")
 	}
 }
@@ -554,7 +581,7 @@ func TestLockedCharacterLoginIsRetried(t *testing.T) {
 	h.expect(opcode.CMSGSetActiveMover)
 	select {
 	case <-h.s.Ready():
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		t.Fatal("not ready after the retry")
 	}
 	if !strings.Contains(log.String(), "retrying") {
@@ -576,7 +603,7 @@ func TestLockedCharacterGivesUpAfterRetries(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "code 1") {
 			t.Fatalf("err = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		t.Fatal("session did not give up")
 	}
 }
