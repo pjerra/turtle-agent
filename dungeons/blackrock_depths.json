@@ -443,7 +443,13 @@
             {"x": 551.262, "y": -244.794, "z": -70.0144},
             {"x": 556.167, "y": -248.163, "z": -70.6092}
           ],
-          "radius": 12
+          "radius": 12,
+          "approach": [
+            {"x": 499.13, "y": -128.93, "z": -61.95},
+            {"x": 514.06, "y": -173.13, "z": -59.94},
+            {"x": 516.89, "y": -205.01, "z": -58.6},
+            {"x": 535, "y": -244, "z": -68}
+          ]
         },
         {
           "entries": [8892, 8892, 8891],
@@ -702,13 +708,6 @@
           "radius": 10
         },
         {
-          "entries": [16079],
-          "positions": [
-            {"x": 590.631, "y": -181.061, "z": -53.9102}
-          ],
-          "radius": 7
-        },
-        {
           "entries": [8921, 8921, 8921, 8921],
           "positions": [
             {"x": 581.996, "y": -176.436, "z": -84.4941},
@@ -716,7 +715,13 @@
             {"x": 582.865, "y": -190.914, "z": -84.4943},
             {"x": 574.727, "y": -196.646, "z": -84.4187}
           ],
-          "radius": 17
+          "radius": 17,
+          "approach": [
+            {"x": 589.9, "y": -117.9, "z": -39.7},
+            {"x": 584.2, "y": -124.2, "z": -49.7},
+            {"x": 583.6, "y": -143.7, "z": -53.2},
+            {"x": 582.8, "y": -164.4, "z": -83.9}
+          ]
         },
         {
           "entries": [8921, 8921],
@@ -1010,7 +1015,10 @@
         "door \"Cell Door\" entry 170569 at 630.4 -160.3 -71.0",
         "door \"Giant Door Fake Collision\" entry 161462 at 723.1 -105.9 -71.5",
         "door \"Giant Doors\" entry 157923 at 723.1 -105.9 -71.5",
-        "door \"Ironfel\" entry 164688 at 525.1 -238.8 -41.0"
+        "door \"Ironfel\" entry 164688 at 525.1 -238.8 -41.0",
+        "Warder Stilgiss 16079 dropped: the live run cleared his single row without a fight (r35 step 171), and his point between the z-34 shelf and the g38 pit forced a 63 yd hop the lead cannot walk from the shelf; the g38 approach now starts on the shelf",
+        "g38 (four 8921) is pulled from a 23 yd stand on its own z-84 floor (582.8 -164.4 -83.9); the approach climbs down the shelf in four checked hops",
+        "g9 (8909 8892 8892) is pulled from the z-65 tier: the approach (499.1 -128.9 -61.9, 514.1 -173.1 -59.9, 516.9 -205.0 -58.6, 535 -244 -68) walks the only served route from the z-43 ledge down, because the direct hop from the tier refuses"
       ]
     },
     {
@@ -1120,19 +1128,6 @@
           "radius": 10
         },
         {
-          "entries": [8898, 8898, 8899],
-          "positions": [
-            {"x": 679.312, "y": -5.77373, "z": -59.9752},
-            {"x": 677.94, "y": -8.26589, "z": -59.9756},
-            {"x": 682.865, "y": -9.60982, "z": -59.9754}
-          ],
-          "radius": 9,
-          "approach": [
-            {"x": 676, "y": 17, "z": -60},
-            {"x": 660, "y": -5, "z": -60}
-          ]
-        },
-        {
           "entries": [8911, 8899, 8898, 8911],
           "positions": [
             {"x": 692.248, "y": -12.2783, "z": -45.5771},
@@ -1205,7 +1200,41 @@
             {"x": 682.926, "y": 55.1231, "z": -59.9582},
             {"x": 678.88, "y": 55.816, "z": -59.9536}
           ],
-          "radius": 8
+          "radius": 8,
+          "approach": [
+            {"x": 663.2, "y": 49.3, "z": -59.5}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 9033,
+        "position": {"x": 652.39, "y": 21.3737, "z": -59.976},
+        "first": [8901],
+        "approach": [
+          {"x": 668, "y": 36, "z": -59.4}
+        ]
+      },
+      "notes": [
+        "door \"Giant Door Mechanism\" entry 161461 at 614.0 -46.9 -59.6",
+        "door \"The Shadowforge Lock\" entry 161460 at 615.6 -49.8 -60.1",
+        "g3 (8898 8898 8899) is not pulled here any more: the walk down from the upper hall to its room passes the z-45 hall (8911/8898) and the boss's aggro, so the hall and the boss come first and g3 opens the next leg"
+      ]
+    },
+    {
+      "name": "golem_lord_argelmach",
+      "to": {"x": 676, "y": 30, "z": -59},
+      "pull_groups": [
+        {
+          "entries": [8898, 8898, 8899],
+          "positions": [
+            {"x": 679.312, "y": -5.77373, "z": -59.9752},
+            {"x": 677.94, "y": -8.26589, "z": -59.9756},
+            {"x": 682.865, "y": -9.60982, "z": -59.9754}
+          ],
+          "radius": 9,
+          "approach": [
+            {"x": 682, "y": 12, "z": -59.5}
+          ]
         },
         {
           "entries": [8895, 8893, 8893, 8893, 8894],
@@ -1216,7 +1245,13 @@
             {"x": 613.474, "y": 92.0275, "z": -73.7863},
             {"x": 614.825, "y": 96.8101, "z": -73.7865}
           ],
-          "radius": 13
+          "radius": 13,
+          "approach": [
+            {"x": 704, "y": 0, "z": -45.8},
+            {"x": 757.6, "y": -62.4, "z": -44.9},
+            {"x": 700.5, "y": -126.4, "z": -45.7},
+            {"x": 610.97, "y": 65.48, "z": -73.28}
+          ]
         },
         {
           "entries": [8921],
@@ -1375,22 +1410,7 @@
             {"x": 470.46, "y": -23.0012, "z": -67.8432}
           ],
           "radius": 10
-        }
-      ],
-      "boss": {
-        "entry": 9033,
-        "position": {"x": 652.39, "y": 21.3737, "z": -59.976},
-        "first": [8901]
-      },
-      "notes": [
-        "door \"Giant Door Mechanism\" entry 161461 at 614.0 -46.9 -59.6",
-        "door \"The Shadowforge Lock\" entry 161460 at 615.6 -49.8 -60.1"
-      ]
-    },
-    {
-      "name": "golem_lord_argelmach",
-      "to": {"x": 763.269, "y": 22.2708, "z": -53.664},
-      "pull_groups": [
+        },
         {
           "entries": [8920],
           "positions": [
@@ -1503,7 +1523,10 @@
         "entry": 8983,
         "position": {"x": 846.801, "y": 16.2806, "z": -53.6395},
         "first": [8906, 8907]
-      }
+      },
+      "notes": [
+        "starts at Angerforge's hall (to 676 30 -59), pulls the g3 8898/8899 pack from 682 12 -59.5, then the old leg-3 lower hall (g12-g29) and Arglemach's packs; Angerforge's room is already clear"
+      ]
     },
     {
       "name": "lord_incendius",
