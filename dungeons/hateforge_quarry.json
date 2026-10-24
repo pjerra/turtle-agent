@@ -926,10 +926,21 @@
     },
     {
       "name": "bargul_terrace",
-      "to": {"x": -8321.5, "y": -3447.5, "z": 181.0},
+      "to": {"x": -8321.5, "y": -3447.5, "z": 181},
       "via": [
-        {"x": -8320.0, "y": -3447.5, "z": 180.1, "exact": true},
-        {"x": -8321.5, "y": -3447.5, "z": 181.0, "direct": true, "check_skip": "the ramp up to Bargul's terrace is a 1.5 yd step across with no navmesh link (the lower mesh ends at -8320.0 -3447.5 z180.1, the terrace mesh starts 1.5 yd away at -8321.5 -3447.5 z181.0); the direct hop is 1.5 yd across and 0.9 up, walked on the vmap line, not tried live: the run of 2026-10-24 (r28c slotE) stopped at the boss for it"}
+        {
+          "x": -8320,
+          "y": -3447.5,
+          "z": 180.1,
+          "exact": true
+        },
+        {
+          "x": -8321.5,
+          "y": -3447.5,
+          "z": 181,
+          "direct": true,
+          "check_skip": "the ramp up to Bargul's terrace is a 1.5 yd step across with no navmesh link (the lower mesh ends at -8320.0 -3447.5 z180.1, the terrace mesh starts 1.5 yd away at -8321.5 -3447.5 z181.0); the direct hop is 1.5 yd across and 0.9 up, walked on the vmap line, not tried live: the run of 2026-10-24 (r28c slotE) stopped at the boss for it"
+        }
       ],
       "boss": {
         "entry": 60735,
@@ -943,8 +954,19 @@
       "name": "corrosis",
       "to": {"x": -8302.06, "y": -3514.62, "z": 109.141},
       "via": [
-        {"x": -8321.5, "y": -3447.5, "z": 181.0, "exact": true},
-        {"x": -8320.0, "y": -3447.5, "z": 180.1, "direct": true, "check_skip": "the way down from Bargul's terrace crosses the same unlinked ramp seam as the way up (1.5 yd across, 0.9 down); the direct hop is walked on the vmap line, not tried live"}
+        {
+          "x": -8321.5,
+          "y": -3447.5,
+          "z": 181,
+          "exact": true
+        },
+        {
+          "x": -8320,
+          "y": -3447.5,
+          "z": 180.1,
+          "direct": true,
+          "check_skip": "the way down from Bargul's terrace crosses the same unlinked ramp seam as the way up (1.5 yd across, 0.9 down); the direct hop is walked on the vmap line, not tried live"
+        }
       ],
       "pull_groups": [
         {
