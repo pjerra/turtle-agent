@@ -34,7 +34,8 @@
     "Needs: Urok Doomhowl is summoned with the Challenge to Urok (GO_CHALLENGE_UROK) at the ogre room.",
     "Needs: Halycon and Gizrul the Slavener (summoned); Gizrul (10268) has no spawn row.",
     "Needs: the Doors (GO_DOORS) and the Rookery eggs (GO_ROOKERY_EGG) are UBRS-side; no door, lever or key step is needed for the seven bosses.",
-    "LBRS and UBRS share map 229; this plan is the lower half. UBRS is the raid plan upper_blackrock_spire."
+    "LBRS and UBRS share map 229; this plan is the lower half. UBRS is the raid plan upper_blackrock_spire.",
+    "Server-path fix 2026-10-24 (r33 slot5): leg 0 pull group 13's pack is pulled from the z 31 pit floor and a refused or skipped pull leaves the party there; the export's cut from the z 50 row ran through the z 45-46 ledge (-62.1 -389.3, -63.5 -389.9) and -106.7 -405.3, all refused by the server. Pull group 14 now walks from the pit point -45.3 -404 31.5 via -42.666786 -533 29.3; pull group 5 and the Omokk boss split the 39.2 -577.1 / 0 -576 corridor at 10 -576.2 29.7; leg 1 has a via at 0 -448 -18.5, and pull group 22 (leg 1) and pull group 3 (leg 3) split the 0 -448 and -21.33 -533.33 seams. Every exported move passes path-check from the last executed move."
   ],
   "legs": [
     {
@@ -85,7 +86,10 @@
             {"x": -26.74, "y": -304.02, "z": 31.8},
             {"x": -19.17, "y": -304.5, "z": 31.8}
           ],
-          "radius": 5
+          "radius": 5,
+          "approach": [
+            {"x": 10, "y": -576.2, "z": 29.7}
+          ]
         },
         {
           "entries": [9201, 9218, 9198, 9200],
@@ -168,7 +172,11 @@
             {"x": 27.3233, "y": -399.098, "z": 48.732},
             {"x": 24.1818, "y": -402.388, "z": 48.7564}
           ],
-          "radius": 5
+          "radius": 5,
+          "approach": [
+            {"x": -45.3, "y": -404, "z": 31.5},
+            {"x": -42.666786, "y": -533, "z": 29.3}
+          ]
         },
         {
           "entries": [9216, 9197],
@@ -253,7 +261,10 @@
       ],
       "boss": {
         "entry": 9196,
-        "position": {"x": -22.6518, "y": -299.75, "z": 31.7016}
+        "position": {"x": -22.6518, "y": -299.75, "z": 31.7016},
+        "approach": [
+          {"x": 10, "y": -576.2, "z": 29.7}
+        ]
       },
       "notes": [
         "goober \"Flame of Blackrock Spire\" entry 181347 at -15.5 -364.1 49.6"
@@ -262,6 +273,9 @@
     {
       "name": "shadow_hunter_vosh'gajin",
       "to": {"x": -83.4826, "y": -423.774, "z": -18.935},
+      "via": [
+        {"x": 0, "y": -448, "z": -18.5}
+      ],
       "pull_groups": [
         {
           "entries": [9262, 9259, 9261, 9261],
@@ -783,7 +797,10 @@
             "period_s": 20,
             "period_estimate": true,
             "source": "guid 43503"
-          }
+          },
+          "approach": [
+            {"x": -24, "y": -536, "z": 29.7}
+          ]
         },
         {
           "entries": [9201],
@@ -1455,7 +1472,10 @@
             "period_s": 75.3,
             "period_estimate": true,
             "source": "guid 44349"
-          }
+          },
+          "approach": [
+            {"x": 0, "y": -448, "z": -18.5}
+          ]
         },
         {
           "entries": [10375, 10375, 10375, 10374, 10374, 10375],
