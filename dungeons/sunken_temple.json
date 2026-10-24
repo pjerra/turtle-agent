@@ -218,6 +218,15 @@
           ]
         }
       ],
+      "steps": [
+        {"use_object": {"entry": 148830, "near": {"x": -515.553, "y": 95.2582, "z": -148.74}, "spawn": 27898, "stand": {"x": -513.0, "y": 95.3, "z": -148.74}}},
+        {"use_object": {"entry": 148831, "near": {"x": -419.849, "y": 94.4837, "z": -148.74}, "spawn": 27899, "stand": {"x": -422.4, "y": 94.5, "z": -148.74}}},
+        {"use_object": {"entry": 148832, "near": {"x": -491.4, "y": 135.97, "z": -148.74}, "spawn": 28111, "stand": {"x": -491.4, "y": 133.4, "z": -148.74}}},
+        {"use_object": {"entry": 148833, "near": {"x": -491.491, "y": 53.4818, "z": -148.74}, "spawn": 28112, "stand": {"x": -491.5, "y": 56.0, "z": -148.74}}},
+        {"use_object": {"entry": 148834, "near": {"x": -443.855, "y": 136.101, "z": -148.74}, "spawn": 28113, "stand": {"x": -443.9, "y": 133.5, "z": -148.74}}},
+        {"use_object": {"entry": 148835, "near": {"x": -443.417, "y": 53.8312, "z": -148.74}, "spawn": 28114, "stand": {"x": -443.4, "y": 56.4, "z": -148.74}}},
+        {"wait_for": {"unit": {"entries": [8580], "near": {"x": -473.182, "y": 96.5247, "z": -189.73}, "radius": 30, "state": "seen"}, "timeout_s": 30, "fail_text": "Atal'alarion appears when the sixth statue is lit in the order S,N,SW,SE,NW,NE (instance_sunken_temple.cpp ProcessStatueEvent: a wrong statue triggers a trap and does not advance the counter).", "hold": {"instance_data": 4, "spot": {"x": -460.0, "y": 96.8, "z": -189.58}, "radius": 30, "timeout_s": 30, "entries": [8580]}}}
+      ],
       "boss": {
         "entry": 8580,
         "position": {"x": -473.182, "y": 96.5247, "z": -189.73},
