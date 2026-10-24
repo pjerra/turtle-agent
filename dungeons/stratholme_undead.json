@@ -907,6 +907,17 @@
       "notes": [
         "door \"Ysida's Cage\" entry 181071 at 4044.3 -3334.2 115.1"
       ]
+    },
+    {
+      "name": "baron_rivendare_room",
+      "to": {"x": 4032.79, "y": -3333.02, "z": 115.061},
+      "boss": {
+        "entry": 10440,
+        "position": {"x": 4032.79, "y": -3333.02, "z": 115.061}
+      },
+      "notes": [
+        "r32 slotD: after the Slaughter Square hold the run walks through the gate the event opens and pulls Baron Rivendare 10440 at his spawn; kill_first 10440 (ai_boss_tactic) engages him the moment he is in combat with the party"
+      ]
     }
   ]
 }
