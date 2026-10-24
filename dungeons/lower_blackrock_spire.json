@@ -36,7 +36,8 @@
     "Needs: the Doors (GO_DOORS) and the Rookery eggs (GO_ROOKERY_EGG) are UBRS-side; no door, lever or key step is needed for the seven bosses.",
     "LBRS and UBRS share map 229; this plan is the lower half. UBRS is the raid plan upper_blackrock_spire.",
     "Server-path fix 2026-10-24 (r33 slot5): leg 0 pull group 13's pack is pulled from the z 31 pit floor and a refused or skipped pull leaves the party there; the export's cut from the z 50 row ran through the z 45-46 ledge (-62.1 -389.3, -63.5 -389.9) and -106.7 -405.3, all refused by the server. Pull group 14 now walks from the pit point -45.3 -404 31.5 via -42.666786 -533 29.3; pull group 5 and the Omokk boss split the 39.2 -577.1 / 0 -576 corridor at 10 -576.2 29.7; leg 1 has a via at 0 -448 -18.5, and pull group 22 (leg 1) and pull group 3 (leg 3) split the 0 -448 and -21.33 -533.33 seams. Every exported move passes path-check from the last executed move.",
-    "Server-path fix 2026-10-24 round 2 (r33 slot4b, step 80 = leg 0 pull group 20): the run leader stood on the z 31 pit floor at -27.3 -371.1 after the pit pulls and the server has no path from there up to the group's z 48.8 shelf row (NOPATH; the shelf is reached only by the east loop and the ramp at 41.9 -434.9 -> 43.9 -404.1), so pull group 20 now carries the approach points -35.2 -395.2 31.63, -42.67 -533 29.3, 5.33 -574.93 29.23 and the shelf stand 35.2 -355.73 48.73: the export's cut walks the east loop and the ramp at 41.87 -434.93 -> 43.2 -405.33 in hops of at most 50 yd, every one passes path-check, and the chain's first row is reachable from every pit point the pit pulls leave the party on (-27.3 -371.1 included)."
+    "Server-path fix 2026-10-24 round 2 (r33 slot4b, step 80 = leg 0 pull group 20): the run leader stood on the z 31 pit floor at -27.3 -371.1 after the pit pulls and the server has no path from there up to the group's z 48.8 shelf row (NOPATH; the shelf is reached only by the east loop and the ramp at 41.9 -434.9 -\u003e 43.9 -404.1), so pull group 20 now carries the approach points -35.2 -395.2 31.63, -42.67 -533 29.3, 5.33 -574.93 29.23 and the shelf stand 35.2 -355.73 48.73: the export's cut walks the east loop and the ramp at 41.87 -434.93 -\u003e 43.2 -405.33 in hops of at most 50 yd, every one passes path-check, and the chain's first row is reachable from every pit point the pit pulls leave the party on (-27.3 -371.1 included).",
+    "Server-path fix 2026-10-24 round 3 (r35 slot5, steps 217/222/223 = leg 1): the two 9240 Shadow Priests at -125.54 -472.94 and -125.34 -489.88 are Vosh'gajin's linked guards (creature_groups leader 43522, guids 43550/43551) and cannot be pulled 20 yd from him, so they are the boss's first units, not pulls. The z -7 pack (9268,9241) comes before the z 24 shelf: the shelf is reached only by the ramp from the z -7 ledge (146 yd), not from the z 11 spider floor (658 yd, and the server's node pool gives out 12 yd short). The 6-unit 9239/9240 pack at -99.1 -481.68 keeps its pull from the shelf's east end, the ramp top -81.07 -482.4 24.4 (17.8 yd from the pack centre, 42 yd from the boss): the room has no wider stand on the mesh. The 10374 patroller at -127.3 -520.33 is pulled from the east spur -104.8 -520.4 10.8 (60 yd from Mother Smolderweb, 22.5 yd from the pack), so a kill and its 10375 summons are fought away from the boss that wiped step 217. Every approach leg above passes path-check."
   ],
   "legs": [
     {
@@ -537,7 +538,13 @@
             "period_s": 75.3,
             "period_estimate": true,
             "source": "guid 44349"
-          }
+          },
+          "approach": [
+            {"x": -141.87, "y": -510.13, "z": -18.37},
+            {"x": -116.53, "y": -535.73, "z": -2.77},
+            {"x": -122.4, "y": -560, "z": 9.73},
+            {"x": -104.8, "y": -520.4, "z": 10.8}
+          ]
         },
         {
           "entries": [10375, 10375, 10374],
@@ -617,76 +624,13 @@
           }
         },
         {
-          "entries": [9240],
+          "entries": [9268, 9241, 9268],
           "positions": [
-            {"x": -125.541, "y": -472.941, "z": 24.3398}
+            {"x": -77.0484, "y": -521.654, "z": -7.14287},
+            {"x": -72.5541, "y": -517.343, "z": -7.14281},
+            {"x": -77.47, "y": -513.12, "z": -6.96}
           ],
-          "radius": 5,
-          "patrol": {
-            "entries": [10374],
-            "path": [
-              {"x": -127.151, "y": -511.369, "z": 11.3636},
-              {"x": -127.429, "y": -493.976, "z": 11.3567},
-              {"x": -127.005, "y": -504.143, "z": 11.3607},
-              {"x": -126.588, "y": -516.658, "z": 11.7612},
-              {"x": -126.609, "y": -520.664, "z": 11.7612},
-              {"x": -122.625, "y": -521.096, "z": 11.7612},
-              {"x": -116.24, "y": -521.575, "z": 11.0583},
-              {"x": -104.837, "y": -520.382, "z": 10.8036},
-              {"x": -116.714, "y": -521.25, "z": 11.0689},
-              {"x": -125.462, "y": -520.888, "z": 11.7612},
-              {"x": -127.024, "y": -530.692, "z": 11.3652},
-              {"x": -126.508, "y": -540.155, "z": 11.3652},
-              {"x": -126.758, "y": -552.192, "z": 11.3652},
-              {"x": -127.207, "y": -540.946, "z": 11.3652},
-              {"x": -126.976, "y": -530.475, "z": 11.3652},
-              {"x": -127.018, "y": -521.193, "z": 11.7612},
-              {"x": -130.026, "y": -520.442, "z": 11.7612},
-              {"x": -136.242, "y": -520.639, "z": 11.3496},
-              {"x": -141.835, "y": -520.482, "z": 11.3498},
-              {"x": -133.624, "y": -520.864, "z": 11.3495},
-              {"x": -127.177, "y": -520.906, "z": 11.7612}
-            ],
-            "period_s": 75.3,
-            "period_estimate": true,
-            "source": "guid 44349"
-          }
-        },
-        {
-          "entries": [9240],
-          "positions": [
-            {"x": -125.34, "y": -489.88, "z": 24.44}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [10374],
-            "path": [
-              {"x": -127.151, "y": -511.369, "z": 11.3636},
-              {"x": -127.429, "y": -493.976, "z": 11.3567},
-              {"x": -127.005, "y": -504.143, "z": 11.3607},
-              {"x": -126.588, "y": -516.658, "z": 11.7612},
-              {"x": -126.609, "y": -520.664, "z": 11.7612},
-              {"x": -122.625, "y": -521.096, "z": 11.7612},
-              {"x": -116.24, "y": -521.575, "z": 11.0583},
-              {"x": -104.837, "y": -520.382, "z": 10.8036},
-              {"x": -116.714, "y": -521.25, "z": 11.0689},
-              {"x": -125.462, "y": -520.888, "z": 11.7612},
-              {"x": -127.024, "y": -530.692, "z": 11.3652},
-              {"x": -126.508, "y": -540.155, "z": 11.3652},
-              {"x": -126.758, "y": -552.192, "z": 11.3652},
-              {"x": -127.207, "y": -540.946, "z": 11.3652},
-              {"x": -126.976, "y": -530.475, "z": 11.3652},
-              {"x": -127.018, "y": -521.193, "z": 11.7612},
-              {"x": -130.026, "y": -520.442, "z": 11.7612},
-              {"x": -136.242, "y": -520.639, "z": 11.3496},
-              {"x": -141.835, "y": -520.482, "z": 11.3498},
-              {"x": -133.624, "y": -520.864, "z": 11.3495},
-              {"x": -127.177, "y": -520.906, "z": 11.7612}
-            ],
-            "period_s": 75.3,
-            "period_estimate": true,
-            "source": "guid 44349"
-          }
+          "radius": 5.1
         },
         {
           "entries": [9240, 9239, 9239, 9240, 9265, 9269],
@@ -698,16 +642,13 @@
             {"x": -103.79, "y": -491.78, "z": 24.43},
             {"x": -100.07, "y": -491.54, "z": 24.43}
           ],
-          "radius": 11.6
-        },
-        {
-          "entries": [9268, 9241, 9268],
-          "positions": [
-            {"x": -77.0484, "y": -521.654, "z": -7.14287},
-            {"x": -72.5541, "y": -517.343, "z": -7.14281},
-            {"x": -77.47, "y": -513.12, "z": -6.96}
-          ],
-          "radius": 5.1
+          "radius": 11.6,
+          "approach": [
+            {"x": -45.8, "y": -512.9, "z": 5},
+            {"x": -45.6, "y": -494.13, "z": 17.53},
+            {"x": -46.13, "y": -491.73, "z": 16.23},
+            {"x": -81.07, "y": -482.4, "z": 24.4}
+          ]
         },
         {
           "entries": [9098, 9097, 9045],
@@ -726,7 +667,13 @@
             "period_s": 20,
             "period_estimate": true,
             "source": "guid 43503"
-          }
+          },
+          "approach": [
+            {"x": -46.4, "y": -479.2, "z": 16.5},
+            {"x": -3.7, "y": -492.3, "z": 30},
+            {"x": -21.3, "y": -500.3, "z": 29.7},
+            {"x": -42.7, "y": -512, "z": 29.7}
+          ]
         },
         {
           "entries": [9258, 9416, 9416],
@@ -847,7 +794,8 @@
       ],
       "boss": {
         "entry": 9236,
-        "position": {"x": -121.19, "y": -482.18, "z": 24.71}
+        "position": {"x": -121.19, "y": -482.18, "z": 24.71},
+        "first": [9240]
       }
     },
     {
