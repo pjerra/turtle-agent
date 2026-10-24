@@ -26,14 +26,14 @@
   "cc_always": [5259],
   "kill_first": [5271, 5280, 5291],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 109 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "DRAFT: a skeleton from the world database export of map 109 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the script order (Jammal'an before the two drakes), the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: six Atal'ai statues (GO_ATALAI_STATUE_1-6) lit in order summon Atal'alarion; the six troll mini-bosses (5712-5717) are the statues' guards",
     "Needs: four Eternal Flames (GO_ETERNAL_FLAME_1-4) summon the Avatar of Hakkar (8443, no spawn row)",
     "Needs: Jammal'an's barrier (GO_JAMMALAN_BARRIER) and the Hakkar doors (GO_HAKKAR_DOOR_1-2)",
     "Needs: Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar",
     "Census 2026-10-23 (map 109 spawn export, no live run): fleers 5259 and 5273 (EventAI command 47 at 15% HP); cc_priority 5259,5273,5269,5226 (the healers, the Hex, the Slowing Poison); cc_always 5259; kill_first 5271,5280,5291 (Fear, Sleep, Frostbolt Volley with the Swoop summon). Radii cut on pulls 0.5, 3.2 and 3.3 so a row does not take the next pack (same entries, 14.4-26.8 yd), and set to 17 yd on the seven Hakkari Frostwing 5291 pulls (their wander is 15 yd).",
-    "BLOCKER for the first live run: the instance script hides Weaver 5720 and Dreamscythe 5721 (VISIBILITY_OFF, not selectable) and keeps Shade of Eranikus 5709 not selectable until TYPE_JAMMALAN is DONE, but this skeleton fights the Weaver (leg 1) and Dreamscythe (leg 2) boss rows before the Jammal'an leg (leg 3); Atal'alarion 8580 is hidden until the six statues are lit in order and the plan has no statue steps. The leg-0 boss row and the leg-1/2 boss rows cannot finish as ordered (bug: the plan fails at what it is meant to do; the fix is an order change, a behaviour change for the maintainer to decide).",
+    "FIXED 2026-10-24 (boss order): the instance script keeps Weaver 5720 and Dreamscythe 5721 (VISIBILITY_OFF, not selectable, immune, patrol idle) and Shade of Eranikus 5709 (not selectable, immune, sleeping) until SetData(TYPE_JAMMALAN, DONE) (instance_sunken_temple.cpp:384-408, gated on m_auiEncounter[2]); the legs are now atal'alarion, jammal'an_the_prophet, weaver, dreamscythe, morphaz, shade_of_eranikus, so the Weaver and Dreamscythe boss rows come after Jammal'an. Jammal'an's leg carries the walkway via from the old weaver leg (atal'alarion hold spot back up to -300 100.5 -172.1).",
     "Patrols: 5708 Spawn of Hakkar (guids 33621 and 34520, 12-point paths spanning about 190 yd) and Murk Worm 5226 (guids 33676 46 points and 34168 4 points) walk the halls the plan clears; the pull rows carry no patrol path, so a pull of one of them can find nothing at its point (the run leader then reads the pack as cleared) and they can join later fights."
   ],
   "legs": [
@@ -246,8 +246,8 @@
       ]
     },
     {
-      "name": "weaver",
-      "to": {"x": -415.086, "y": 95.6637, "z": -148.742},
+      "name": "jammal'an_the_prophet",
+      "to": {"x": -438.797, "y": 8.83912, "z": -53.9463},
       "via": [
         {"x": -460.0, "y": 96.8, "z": -189.58},
         {"x": -435.0, "y": 97.4, "z": -181.49},
@@ -255,6 +255,96 @@
         {"x": -349.6, "y": 99.4, "z": -172.86},
         {"x": -300.0, "y": 100.5333, "z": -172.13}
       ],
+      "pull_groups": [
+        {
+          "entries": [8318, 5256, 5259, 5256, 8318],
+          "positions": [
+            {"x": -438.797, "y": 8.83912, "z": -53.9463},
+            {"x": -442.327, "y": 5.6199, "z": -53.9463},
+            {"x": -432.846, "y": 9.76502, "z": -53.9463},
+            {"x": -436.797, "y": 2.26111, "z": -53.9463},
+            {"x": -430.725, "y": 3.5262, "z": -53.9463}
+          ]
+        },
+        {
+          "entries": [5263, 5271, 5271],
+          "positions": [
+            {"x": -447.073, "y": -52.2468, "z": -90.8275},
+            {"x": -442.985, "y": -53.7109, "z": -90.8275},
+            {"x": -449.691, "y": -55.0559, "z": -90.8275}
+          ]
+        },
+        {
+          "entries": [5271, 5271, 5271, 5273, 5263, 5271, 5271],
+          "positions": [
+            {"x": -450.099, "y": -74.562, "z": -90.8274},
+            {"x": -459.757, "y": -74.6776, "z": -90.8275},
+            {"x": -449.994, "y": -79.4681, "z": -90.8274},
+            {"x": -459.898, "y": -77.7837, "z": -90.8275},
+            {"x": -467.583, "y": -76.3734, "z": -90.8275},
+            {"x": -476.669, "y": -74.2078, "z": -90.8275},
+            {"x": -476.251, "y": -80.8728, "z": -90.8275}
+          ],
+          "radius": 14.3
+        },
+        {
+          "entries": [5271, 5271, 5273, 5263, 5263, 5271, 5271, 5269, 5271],
+          "positions": [
+            {"x": -466.791, "y": -92.1131, "z": -90.8274},
+            {"x": -457.172, "y": -90.0466, "z": -90.8275},
+            {"x": -466.5, "y": -94.7733, "z": -90.8275},
+            {"x": -477.877, "y": -93.8933, "z": -90.8275},
+            {"x": -466.663, "y": -97.4965, "z": -90.8275},
+            {"x": -477.84, "y": -97.6526, "z": -90.8275},
+            {"x": -457.244, "y": -97.7436, "z": -90.8275},
+            {"x": -448.423, "y": -91.5326, "z": -90.8275},
+            {"x": -448.944, "y": -93.9112, "z": -90.8275}
+          ],
+          "radius": 15.6
+        },
+        {
+          "entries": [5263, 5271, 5271],
+          "positions": [
+            {"x": -482.958, "y": -116.101, "z": -90.8275},
+            {"x": -486.837, "y": -112.27, "z": -90.8275},
+            {"x": -488.346, "y": -116.971, "z": -90.8275}
+          ]
+        },
+        {
+          "entries": [5271, 5271],
+          "positions": [
+            {"x": -444.604, "y": -116.482, "z": -90.8275},
+            {"x": -440.499, "y": -120.2, "z": -90.8275}
+          ]
+        },
+        {
+          "entries": [5271, 5271, 5263],
+          "positions": [
+            {"x": -491.812, "y": -61.1224, "z": -90.8281},
+            {"x": -487.119, "y": -54.2088, "z": -90.8281},
+            {"x": -492.77, "y": -54.5658, "z": -90.8275}
+          ]
+        },
+        {
+          "entries": [5267, 8318, 5270, 8318, 5259],
+          "positions": [
+            {"x": -362.514, "y": 3.44433, "z": -69.3923},
+            {"x": -359.015, "y": -3.4845, "z": -69.3923},
+            {"x": -359.358, "y": 6.96094, "z": -69.3923},
+            {"x": -356.844, "y": 13.1748, "z": -69.3923},
+            {"x": -350.239, "y": 4.82687, "z": -69.3923}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 5710,
+        "position": {"x": -426.677, "y": -85.7376, "z": -88.1407},
+        "first": [5711]
+      }
+    },
+    {
+      "name": "weaver",
+      "to": {"x": -415.086, "y": 95.6637, "z": -148.742},
       "pull_groups": [
         {
           "entries": [5226, 8311, 8311, 8384],
@@ -847,96 +937,6 @@
       "notes": [
         "goober \"Atal'ai Statue\" entry 148830 at -515.6 95.3 -148.7"
       ]
-    },
-    {
-      "name": "jammal'an_the_prophet",
-      "to": {"x": -438.797, "y": 8.83912, "z": -53.9463},
-      "pull_groups": [
-        {
-          "entries": [8318, 5256, 5259, 5256, 8318],
-          "positions": [
-            {"x": -438.797, "y": 8.83912, "z": -53.9463},
-            {"x": -442.327, "y": 5.6199, "z": -53.9463},
-            {"x": -432.846, "y": 9.76502, "z": -53.9463},
-            {"x": -436.797, "y": 2.26111, "z": -53.9463},
-            {"x": -430.725, "y": 3.5262, "z": -53.9463}
-          ]
-        },
-        {
-          "entries": [5263, 5271, 5271],
-          "positions": [
-            {"x": -447.073, "y": -52.2468, "z": -90.8275},
-            {"x": -442.985, "y": -53.7109, "z": -90.8275},
-            {"x": -449.691, "y": -55.0559, "z": -90.8275}
-          ]
-        },
-        {
-          "entries": [5271, 5271, 5271, 5273, 5263, 5271, 5271],
-          "positions": [
-            {"x": -450.099, "y": -74.562, "z": -90.8274},
-            {"x": -459.757, "y": -74.6776, "z": -90.8275},
-            {"x": -449.994, "y": -79.4681, "z": -90.8274},
-            {"x": -459.898, "y": -77.7837, "z": -90.8275},
-            {"x": -467.583, "y": -76.3734, "z": -90.8275},
-            {"x": -476.669, "y": -74.2078, "z": -90.8275},
-            {"x": -476.251, "y": -80.8728, "z": -90.8275}
-          ],
-          "radius": 14.3
-        },
-        {
-          "entries": [5271, 5271, 5273, 5263, 5263, 5271, 5271, 5269, 5271],
-          "positions": [
-            {"x": -466.791, "y": -92.1131, "z": -90.8274},
-            {"x": -457.172, "y": -90.0466, "z": -90.8275},
-            {"x": -466.5, "y": -94.7733, "z": -90.8275},
-            {"x": -477.877, "y": -93.8933, "z": -90.8275},
-            {"x": -466.663, "y": -97.4965, "z": -90.8275},
-            {"x": -477.84, "y": -97.6526, "z": -90.8275},
-            {"x": -457.244, "y": -97.7436, "z": -90.8275},
-            {"x": -448.423, "y": -91.5326, "z": -90.8275},
-            {"x": -448.944, "y": -93.9112, "z": -90.8275}
-          ],
-          "radius": 15.6
-        },
-        {
-          "entries": [5263, 5271, 5271],
-          "positions": [
-            {"x": -482.958, "y": -116.101, "z": -90.8275},
-            {"x": -486.837, "y": -112.27, "z": -90.8275},
-            {"x": -488.346, "y": -116.971, "z": -90.8275}
-          ]
-        },
-        {
-          "entries": [5271, 5271],
-          "positions": [
-            {"x": -444.604, "y": -116.482, "z": -90.8275},
-            {"x": -440.499, "y": -120.2, "z": -90.8275}
-          ]
-        },
-        {
-          "entries": [5271, 5271, 5263],
-          "positions": [
-            {"x": -491.812, "y": -61.1224, "z": -90.8281},
-            {"x": -487.119, "y": -54.2088, "z": -90.8281},
-            {"x": -492.77, "y": -54.5658, "z": -90.8275}
-          ]
-        },
-        {
-          "entries": [5267, 8318, 5270, 8318, 5259],
-          "positions": [
-            {"x": -362.514, "y": 3.44433, "z": -69.3923},
-            {"x": -359.015, "y": -3.4845, "z": -69.3923},
-            {"x": -359.358, "y": 6.96094, "z": -69.3923},
-            {"x": -356.844, "y": 13.1748, "z": -69.3923},
-            {"x": -350.239, "y": 4.82687, "z": -69.3923}
-          ]
-        }
-      ],
-      "boss": {
-        "entry": 5710,
-        "position": {"x": -426.677, "y": -85.7376, "z": -88.1407},
-        "first": [5711]
-      }
     },
     {
       "name": "morphaz",
