@@ -36,6 +36,10 @@ const (
 	ReasonAvoid = "in an avoid box"
 	// ReasonAvoidCut is a point the navmesh reaches only through one of the plan's avoid boxes: the box cuts the plan's route.
 	ReasonAvoidCut = "cut by an avoid box"
+	// ReasonMagma is a point that sits on, or within MagmaClearYd of, a polygon the mmaps flag magma or slime (MoveMapSharedDefines.h
+	// NavTerrain): the server's move check refuses such a spot ("why=magma", Hateforge Quarry step 273) even when the point is on the
+	// ground polygon's side of the seam, because the polygon the query snaps it to can be the magma one.
+	ReasonMagma = "on magma/slime"
 
 	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
 	ReasonSkipped = "skipped"
@@ -56,6 +60,91 @@ type Navmesh interface {
 // AvoidSetter is the optional part of a Navmesh that keeps out of avoid boxes (navmesh.Planner.SetAvoid).
 type AvoidSetter interface {
 	SetAvoid(mapID uint32, boxes []navmesh.Box)
+}
+
+// PolygonLister is the optional part of a Navmesh that lists the map's polygons with their area flags (navmesh.Planner.Polygons).
+type PolygonLister interface {
+	Polygons(mapID uint32, x0, y0, x1, y1 float32) ([]navmesh.Polygon, bool, error)
+}
+
+// MagmaClearYd is how near a plan point may stand to a magma or slime polygon: nearer than this, the server's snap of the point to a walk
+// polygon can land on the hazard's side of the seam. The closest point of any other shipped plan is over 20 yd from one; Hateforge
+// Quarry's step 273 sat exactly on a ground/magma shared edge and the live move was refused "why=magma path=0x0".
+const MagmaClearYd = 2.5
+
+// magmaZOverlap is how far above or below a plan point a magma polygon's own heights may lie for the point to count as on it: a lava
+// pool under a bridge is a different floor and is not the party's hazard.
+const magmaZOverlap = 1.5
+
+// hazard fails a point that sits on, or within MagmaClearYd of, a magma or slime polygon, and says whether it did.
+func (c *planChecker) hazard(part string, group int, at, from Point) bool {
+	lister, ok := c.nav.(PolygonLister)
+	if !ok {
+		return false
+	}
+	const near = MagmaClearYd
+	polys, _, err := lister.Polygons(c.p.Map, at.X-near, at.Y-near, at.X+near, at.Y+near)
+	if err != nil {
+		return false // the walk's own queries report a navmesh that cannot answer
+	}
+	for _, poly := range polys {
+		if poly.Flags&(navmesh.NavMagma|navmesh.NavSlime) == 0 || len(poly.Verts) < 3 {
+			continue
+		}
+		lo, hi := poly.Verts[0][2], poly.Verts[0][2]
+		for _, v := range poly.Verts[1:] {
+			lo, hi = min(lo, v[2]), max(hi, v[2])
+		}
+		if at.Z < lo-magmaZOverlap || at.Z > hi+magmaZOverlap {
+			continue
+		}
+		d, inside := polyDistance(at, poly.Verts)
+		if !inside && d >= near {
+			continue
+		}
+		what := "magma"
+		if poly.Flags&navmesh.NavSlime != 0 {
+			what = "slime"
+		}
+		if inside && d > 0.01 {
+			c.fail(part, group, at, from, ReasonMagma, "the point lies inside a %s polygon (%.1f %.1f %.1f); the server's move check refuses it", what, at.X, at.Y, at.Z)
+		} else {
+			c.fail(part, group, at, from, ReasonMagma, "the point is %.1f yd from a %s polygon (the plan keeps %g yd clear); the server's snap may land on it and refuse the move", d, what, near)
+		}
+		return true
+	}
+	return false
+}
+
+// polyDistance is the horizontal distance from p to the convex polygon's boundary and whether p lies inside it.
+func polyDistance(p Point, verts []navmesh.Vec3) (float64, bool) {
+	x, y := float64(p.X), float64(p.Y)
+	const eps = 1e-6
+	sign := 0
+	for i, a := range verts {
+		b := verts[(i+1)%len(verts)]
+		cross := (float64(b[0])-float64(a[0]))*(y-float64(a[1])) - (float64(b[1])-float64(a[1]))*(x-float64(a[0]))
+		switch {
+		case cross > eps && sign < 0, cross < -eps && sign > 0:
+			sign = 0 // a vertex order the caller did not keep: no inside test, the distance says enough
+		case cross > eps:
+			sign = 1
+		case cross < -eps:
+			sign = -1
+		}
+	}
+	best := math.Inf(1)
+	for i, a := range verts {
+		b := verts[(i+1)%len(verts)]
+		ax, ay, bx, by := float64(a[0]), float64(a[1]), float64(b[0]), float64(b[1])
+		dx, dy := bx-ax, by-ay
+		t := 0.0
+		if l := dx*dx + dy*dy; l > 0 {
+			t = min(max(((x-ax)*dx+(y-ay)*dy)/l, 0), 1)
+		}
+		best = min(best, math.Hypot(x-ax-t*dx, y-ay-t*dy))
+	}
+	return best, sign != 0
 }
 
 // NavBoxes is the plan's avoid boxes as the navmesh takes them.
@@ -588,7 +677,7 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
 	c.rec.begin("", part, from, to)
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
 		return from, nil
 	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
@@ -635,7 +724,7 @@ func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 	c.rec.begin("gmcross", part, from, to)
 	c.rec.straight()
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
 		return to, nil
 	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
@@ -660,7 +749,7 @@ func (c *planChecker) direct(part string, to, from Point) (Point, error) {
 	c.rec.begin("direct", part, from, to)
 	c.rec.straight()
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
 		return to, nil
 	}
 	if !DirectStepOK(from, to) {
@@ -763,6 +852,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		stand = from
 	}
 	c.rec.lookPath(pts, stand, moved)
+	c.hazard(part, group, stand, from)
 	if b, ok := c.p.InAvoid(stand); ok {
 		c.fail(part, group, at, from, ReasonAvoid, "the look point %.1f %.1f %.1f lies in avoid box %q (%s)", stand.X, stand.Y, stand.Z, b.Name, boxText(b))
 	}

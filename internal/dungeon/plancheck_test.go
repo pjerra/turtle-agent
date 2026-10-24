@@ -737,3 +737,95 @@ func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 		}
 	}
 }
+
+// magmaNav is fakeNav with the map's polygons for the magma rule: magma lists the flagged polygons (area 0x02 or 0x04).
+type magmaNav struct {
+	fakeNav
+	magma []navmesh.Polygon
+}
+
+func (m magmaNav) Polygons(_ uint32, x0, y0, x1, y1 float32) ([]navmesh.Polygon, bool, error) {
+	var out []navmesh.Polygon
+	for _, p := range m.magma {
+		lo, hi := p.Verts[0], p.Verts[0]
+		for _, v := range p.Verts {
+			lo = navmesh.Vec3{minF(lo[0], v[0]), minF(lo[1], v[1]), minF(lo[2], v[2])}
+			hi = navmesh.Vec3{maxF(hi[0], v[0]), maxF(hi[1], v[1]), maxF(hi[2], v[2])}
+		}
+		if hi[0] < x0 || lo[0] > x1 || hi[1] < y0 || lo[1] > y1 {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, false, nil
+}
+
+func minF(a, b float32) float32 { return min(a, b) }
+func maxF(a, b float32) float32 { return max(a, b) }
+
+// TestHazardFlagsAMagmaSeam: a plan point exactly on the ground/magma shared edge is refused although the point itself is on the ground
+// polygon (the server's snap may land on the magma one: Hateforge Quarry step 273, live "why=magma path=0x0"); a point MagmaClearYd clear
+// of magma is fine, and a magma floor well above or below the point is another storey.
+func TestHazardFlagsAMagmaSeam(t *testing.T) {
+	// A magma square from (10, -10) to (10, 10) ... x 10..20, y -10..10 at z 0.
+	magma := navmesh.Polygon{Flags: navmesh.NavMagma, Verts: []navmesh.Vec3{{10, -10, 0}, {20, -10, 0}, {20, 10, 0}, {10, 10, 0}}}
+	slime := navmesh.Polygon{Flags: navmesh.NavSlime, Verts: []navmesh.Vec3{{-20, -10, 0}, {-10, -10, 0}, {-10, 10, 0}, {-20, 10, 0}}}
+	bridged := navmesh.Polygon{Flags: navmesh.NavMagma, Verts: []navmesh.Vec3{{40, -10, 60}, {50, -10, 60}, {50, 10, 60}, {40, 10, 60}}}
+	nav := magmaNav{fakeNav{}, []navmesh.Polygon{magma, slime, bridged}}
+	cases := []struct {
+		name   string
+		to     Point
+		reason string // "" passes
+	}{
+		{"on the shared edge", Point{10, 0, 0}, "the point is 0.0 yd from a magma polygon"},
+		{"inside", Point{15, 0, 0}, "the point lies inside a magma polygon"},
+		{"0.5 yd clear", Point{9.5, 0, 0}, "the point is 0.5 yd from a magma polygon"},
+		{"MagmaClearYd clear", Point{10 - MagmaClearYd, 0, 0}, ""},
+		{"3 yd clear", Point{7, 0, 0}, ""},
+		{"slime", Point{-10, 0, 0}, "the point is 0.0 yd from a slime polygon"},
+		{"lava floor 60 yd up", Point{45, 0, 0}, ""},
+	}
+	for _, c := range cases {
+		plan := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: c.to}}}
+		res, err := CheckPlan(plan, nav, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		for _, i := range res.Issues {
+			if i.Reason == ReasonMagma {
+				got = i.Detail
+			}
+		}
+		switch {
+		case c.reason == "" && got != "":
+			t.Errorf("%s: flagged: %s", c.name, got)
+		case c.reason != "" && !strings.HasPrefix(got, c.reason):
+			t.Errorf("%s: got %q, want %q", c.name, got, c.reason)
+		}
+	}
+}
+
+// TestHateforgeQuarryKeepsClearOfMagma pins the r37 slot4 fix: no point of the plan (a move row, an approach stand, a look point) may sit
+// on, or within MagmaClearYd of, a magma or slime polygon. Live r37 stopped at step 273, whose approach stand -8073.12 -3441.07 162.52 sat
+// exactly on the shared edge of a ground and a magma polygon: the server's move check read it as magma ("why=magma path=0x0") and the lead
+// bot paused 4x 11.4 yd from it.
+func TestHateforgeQuarryKeepsClearOfMagma(t *testing.T) {
+	p, err := Load(filepath.Join(plansDir, "hateforge_quarry.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := mapMmaps(p.Map)
+	if dir == "" {
+		t.Skipf("no navmesh files for map %d here", p.Map)
+	}
+	pl := navmesh.NewPlanner(dir)
+	defer pl.Close()
+	res, err := CheckPlan(p, pl, 0)
+	skipNoEngine(t, err)
+	for _, i := range res.Issues {
+		if i.Reason == ReasonMagma {
+			t.Errorf("leg %d %s %.2f %.2f %.2f: %s", i.Leg, i.Part, i.Point.X, i.Point.Y, i.Point.Z, i.Detail)
+		}
+	}
+}
