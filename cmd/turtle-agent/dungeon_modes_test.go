@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -260,6 +261,32 @@ func TestCheckModeFromStep(t *testing.T) {
 		if remote, err := checkMode(p); !remote || err != nil {
 			t.Errorf("%+v: remote %v, %v", p, remote, err)
 		}
+	}
+}
+
+// eluna_place {dz, skip} is an observed run's placement option: observe only, dz from 0, entries real.
+func TestCheckModeElunaPlace(t *testing.T) {
+	f := func(v float32) *float32 { return &v }
+	for _, c := range []struct {
+		p    dungeonRunParams
+		want string
+	}{
+		{dungeonRunParams{Mode: "commander", LeadBot: "Tanky", ElunaPlace: &elunaPlaceParams{Dz: f(8)}}, `mode "observe"`},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", ElunaPlace: &elunaPlaceParams{Dz: f(-1)}}, "eluna_place.dz"},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", ElunaPlace: &elunaPlaceParams{Skip: make([]uint32, 17)}}, "at most 16"},
+		{dungeonRunParams{Mode: "observe", LeadBot: "Tanky", ElunaPlace: &elunaPlaceParams{Skip: []uint32{0}}}, "entry 0"},
+	} {
+		if _, err := checkMode(c.p); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v", c.p, err)
+		}
+	}
+	ok := dungeonRunParams{Mode: "observe", LeadBot: "Tanky", FromStep: intp(5), ElunaPlace: &elunaPlaceParams{Dz: f(0), Skip: []uint32{3849}}}
+	if remote, err := checkMode(ok); !remote || err != nil {
+		t.Errorf("remote %v, %v", remote, err)
+	}
+	var p dungeonRunParams
+	if err := json.Unmarshal([]byte(`{"name":"sfk","mode":"observe","eluna_place":{"dz":8,"skip":[3849]}}`), &p); err != nil || p.ElunaPlace == nil || *p.ElunaPlace.Dz != 8 || len(p.ElunaPlace.Skip) != 1 || p.ElunaPlace.Skip[0] != 3849 {
+		t.Errorf("json: %+v %v", p.ElunaPlace, err)
 	}
 }
 
