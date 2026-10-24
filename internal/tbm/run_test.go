@@ -39,6 +39,33 @@ func TestParseRunLine(t *testing.T) {
 	}
 }
 
+func TestParseRunLineLeftPacks(t *testing.T) {
+	st, ok := ParseRunLine("TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|left 2")
+	if !ok || st.Left != 2 || st.Note != "plan done" {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|uldaman|running|7/41|baelog|pull|pull|pulling 4851")
+	if !ok || st.Left != 0 || st.Note != "pulling 4851" {
+		t.Fatalf("no field: %+v %v", st, ok)
+	}
+	// a note that merely mentions left text is not the trailing field
+	for _, line := range []string{
+		"TBM:RUN|uldaman|paused|12/41|baelog|boss|begin|left alone: regroup",
+		"TBM:RUN|uldaman|paused|12/41|baelog|boss|begin|3 left: regroup|left 0",
+		"TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|left x",
+		"TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|leftover",
+	} {
+		st, ok = ParseRunLine(line)
+		if !ok || st.Left != 0 {
+			t.Errorf("%q: Left %d, ok %v", line, st.Left, ok)
+		}
+	}
+	st, ok = ParseRunLine("TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|left 2|left 3")
+	if !ok || st.Left != 3 {
+		t.Fatalf("last field wins: %+v %v", st, ok)
+	}
+}
+
 func TestRunCommandsPassTheCheck(t *testing.T) {
 	for _, c := range []string{"run start uldaman", "run start", "run pause", "run resume", "run skip", "run stop", "run status", "run list"} {
 		if err := CheckCommand(c); err != nil {
