@@ -50,7 +50,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | 129 | `razorfen_downs`: Razorfen Downs | 35-40 | 4 | draft | yes | Tuten'kash (7355) has no spawn row: the Gong (GO_GONG) summons him; Belnistrasz idol-room ritual (GO_BELNISTRASZ_BRAZIER, GO_IDOL_*_FIRE) summons Plaguemaw the Rotting; escort quest, optional |
 | 189 | `scarlet_cathedral`: Scarlet Monastery: Cathedral | 37-42 | 3 | draft | yes | chapel door (GO_CHAPPEL_DOOR) before Mograine and Whitemane; Mograine and Whitemane are one event: Whitemane resurrects Mograine |
 | 70 | `uldaman`: Uldaman | 41-45 | 14 | live-checked | yes | Keystone (needs the Staff of Prehistoria, made from the Gni'kiv Medallion and the Shaft of Tsol) opens the Seal of Khaz'Mul for Ironaya; Altar of the Keepers and Altar of Archaedas: ritual of three bots |
-| 815 | `gilneas_city`: Gilneas City | 42-47 | 7 | draft | yes | Harlow family chest (GO_HARLOW_FAMILY_CHEST) after the Regent-Lord and Regent-Lady; Genn Greymane (61418) is script-driven (genn_greymane): his role (final fight or event) is unverified |
+| 815 | `gilneas_city`: Gilneas City | 43-49 | 7 | draft | yes | no door, key, lever or gossip: the map has only chests, chairs and doodads; Harlow family chest (2020027) after Regent-Lady Celia Harlow (61263) dies (the instance respawns it for an hour); Genn Greymane (61418) is a scripted boss (genn_greymane: Drain Life, Mortal Strike, Curse of Agony, Fear at 50 %), the last leg; every creature that enters combat is put in combat with the whole zone (instance_gilneas_city OnCreatureEnterCombat), so a fight cannot be dropped by running; critters (Rat 4075, Raven 61643) are not pulls; the linked spawns (3 Footmen + 1 Arbalest, 2 Stable Horses) fight in one pull each; boss guards: Packmaster Ragetooth's Darkpelt Alpha 61425 and Marshal Magnus Greystone's three Justicars 61417 are inside the boss's detection, so they are the bosses' first lists, not pulls |
 | 209 | `zulfarrak`: Zul'Farrak | 44-48 | 18 | live-checked | yes | Zum'rah: area trigger 962 makes him hostile; stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz (its phase is instance data 1 = 7; the plan waits on Nekrum seen, no phase step yet); Weegli's gossip (or Bly's) has him blow the End Door for Ukorz and Ruuzlu; Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; it drops from Qiaga the Keeper 7996 outside the instance and 9241 must be used to make 9240, so no bot run can obtain it; skipped without give_items) |
 | 349 | `maraudon_purple`: Maraudon: Purple | 44-49 | 6 | draft | yes | Celebras the Cursed's Scepter of Celebras event is optional; Vylestem vines (GO_VYLESTEM_VINE, GO_HEALED_CELEBRIAN_VINE) round Celebras' room |
 | 349 | `maraudon_orange`: Maraudon: Orange | 45-50 | 6 | draft | yes | Celebras the Cursed's Scepter of Celebras event is optional and not on this route; Princess Theradras: the party enters her cave by the inner passage (join of the orange and purple routes unverified) |
@@ -100,7 +100,6 @@ Points with no navmesh floor within reach (see mmaps above); each is marked `nee
 | `stratholme_undead` | 3 | 0 | 0 |
 | `windhorn_canyon` | 1 | 0 | 0 |
 | `stormwrought_ruins` | 24 | 1 | 0 |
-| `gilneas_city` | 7 | 0 | 0 |
 | `karazhan_crypt` | 12 | 0 | 0 |
 | `zul_gurub` | 25 | 0 | 1 |
 | `ruins_of_ahnqiraj` | 1 | 0 | 0 |

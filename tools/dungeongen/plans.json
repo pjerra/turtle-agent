@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -858,12 +897,17 @@
    ],
    "entrance_tele": "gilneascity",
    "special": [
-    "Harlow family chest (GO_HARLOW_FAMILY_CHEST) after the Regent-Lord and Regent-Lady",
-    "Genn Greymane (61418) is script-driven (genn_greymane): his role (final fight or event) is unverified"
+    "no door, key, lever or gossip: the map has only chests, chairs and doodads",
+    "Harlow family chest (2020027) after Regent-Lady Celia Harlow (61263) dies (the instance respawns it for an hour)",
+    "Genn Greymane (61418) is a scripted boss (genn_greymane: Drain Life, Mortal Strike, Curse of Agony, Fear at 50 %), the last leg",
+    "every creature that enters combat is put in combat with the whole zone (instance_gilneas_city OnCreatureEnterCombat), so a fight cannot be dropped by running",
+    "critters (Rat 4075, Raven 61643) are not pulls; the linked spawns (3 Footmen + 1 Arbalest, 2 Stable Horses) fight in one pull each",
+    "boss guards: Packmaster Ragetooth's Darkpelt Alpha 61425 and Marshal Magnus Greystone's three Justicars 61417 are inside the boss's detection, so they are the bosses' first lists, not pulls"
    ],
    "notes": [
     "Turtle custom. Order follows the layout from the entrance northward."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "hateforge_quarry",
