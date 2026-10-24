@@ -129,6 +129,7 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
+	Left  int       `json:"left,omitempty"` // packs the run leader left alive
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -143,6 +144,7 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
+	Left  int    `json:"left,omitempty"` // packs the run leader left alive
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -194,6 +196,10 @@ type observeState struct {
 	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
 	restSince time.Time // when the run leader's current rest phase began
 	restOpen  bool
+	// fightHP is the last hp percent the feed showed per hostile: an engaged
+	// unit falling below it is a fight that wears down (the stall watch's
+	// progress while the status line itself does not change).
+	fightHP map[packet.GUID]int
 	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
 	playerPaused bool
 
@@ -366,6 +372,7 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 			return err
 		}
 		d.look()
+		d.observeFightProgress()
 		if err := d.endedByModule(); err != nil {
 			return err
 		}
@@ -736,11 +743,49 @@ func playerOrderOf(note string) (order string, ok bool) {
 	return "", false
 }
 
+// fightHoldsNote says the run leader's own status note reports a fight that is
+// wearing its units down (the fight ceiling's progress note, TortoiseBots
+// DungeonRunPolicy: "past the N s ceiling: an engaged unit lost hp in the last
+// 60 s"): repeating it is the run going on, not the run standing still.
+func fightHoldsNote(note string) bool {
+	return strings.Contains(note, "lost hp in the last")
+}
+
+// observeFightProgress folds the feed's hostiles into the stall watch: the
+// status line of a long boss fight does not change while the fight wears its
+// units down, so an engaged unit at a new hp low is progress too. The per-unit
+// low is a baseline, not a rule about how fast the fight goes: every fall
+// below it counts (as the module's own ceiling judges loss per unit, not per
+// second). Units with no hp read are skipped, never trusted.
+func (d *RemoteDriver) observeFightProgress() {
+	o := d.obs
+	if o == nil || !o.haveLast || o.last.State != tbm.RunRunning || !d.haveFr {
+		return
+	}
+	if o.fightHP == nil {
+		o.fightHP = map[packet.GUID]int{}
+	}
+	for _, h := range d.fr.Hostiles {
+		if h.HPPct <= 0 || !d.engagedWith(h) {
+			continue
+		}
+		if low, ok := o.fightHP[h.GUID]; !ok {
+			o.fightHP[h.GUID] = h.HPPct
+		} else if h.HPPct < low {
+			o.fightHP[h.GUID] = h.HPPct
+			o.lastAt = d.clk.Now()
+		}
+	}
+}
+
 // takeStatus folds one status into the observer, the report, the trace, the events and the current-step label.
 func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	o := d.obs
 	now := d.clk.Now()
 	if o.haveLast && o.last.Same(st) {
+		if st.State == tbm.RunRunning && fightHoldsNote(st.Note) {
+			o.lastAt = now
+		}
 		return
 	}
 	// A status of another plan is not this run's (a leftover line, or another commander's run on a shared log).
@@ -750,6 +795,11 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	prev, had := o.last, o.haveLast
 	o.last, o.haveLast, o.lastAt = st, true, now
+	// A new fight is a new watch: a step or note change drops the per-unit hp
+	// lows, so a mob stuck at its old low is not progress on a later step.
+	if st.State != tbm.RunRunning || (had && (prev.Step != st.Step || prev.Note != st.Note)) {
+		clear(o.fightHP)
+	}
 	// The run leader's rest phase is the observed run's rest: a running status still in phase rest keeps it open (one rest), any
 	// other phase or state closes it before the leg switch below, so the rest lands in the leg it happened in. A paused status keeps
 	// the phase it paused in, but the pause is waiting for a person, not resting: it closes the rest, and the resume opens a new one.
@@ -769,10 +819,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++
@@ -813,7 +863,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	d.rep.setCurrent(label)
 	d.wd.progress("run leader: " + st.Text())
-	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note}
+	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note, "left": st.Left}
 	d.tr.Event("run_leader", data)
 	// The legs: a new leg name ends the one before it and starts the next, so the report has the per-leg times.
 	if li := d.legOf(st.Leg); li >= 0 && li != d.curLeg && st.State != tbm.RunNone {
@@ -826,7 +876,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", li, name), map[string]any{"leg": li, "name": name, "phase": "start", "mode": "observe"})
 	}
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
-		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note})
+		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note, "left": st.Left})
 	}
 }
 
