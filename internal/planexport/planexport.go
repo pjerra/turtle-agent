@@ -30,6 +30,7 @@ const (
 	KindBoss         = "boss"
 	KindLoot         = "loot"
 	KindOpen         = "open"
+	KindOpenProof    = "open_proof"
 	KindUseItem      = "use_item"
 	KindWaitObject   = "wait_object"
 	KindWaitClear    = "wait_clear"
@@ -59,28 +60,32 @@ const (
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
 	FlagExact = 64
+	// FlagProofCreature marks an open_proof row whose proof entry is a creature (alive), not a spawned game object
+	// (DungeonPlanPolicy.h kPlanFlagProofCreature, the next free bit: 1024 is the module's pull-only no-defer flag).
+	FlagProofCreature = 2048
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
 
 // The limits of the module's loader (NormalizePlanStep) and of its column widths.
 const (
-	MaxRadius      = 100   // yards
-	MaxTimeoutS    = 600   // seconds
-	MaxEntries     = 16    // creature entries of a pull or boss
-	MaxKind        = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
-	MaxPlanName    = 32    // ai_dungeon_plan.plan
-	MaxLegName     = 32    // ai_dungeon_leg.name
-	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
-	MaxSource      = 64    // ai_dungeon_plan.source
-	MaxComment     = 255   // every comment column
-	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
-	MaxSteps       = 65535 // ai_dungeon_step.seq is a smallint unsigned
-	DefaultPullYd  = 15    // the module's pull radius for 0
-	PullSlackYd    = 10    // added to the farthest position of a group when the plan gives no radius
-	MoveGapWarnYd  = 60    // the module logs consecutive moves farther apart than this
-	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
-	DefaultBossRad = 30
+	MaxRadius        = 100   // yards
+	MaxTimeoutS      = 600   // seconds
+	MaxProofRadiusYd = 20    // yards around the object an open_proof's proof is searched (the module's kPlanMaxProofRadius)
+	MaxEntries       = 16    // creature entries of a pull or boss
+	MaxKind          = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
+	MaxPlanName      = 32    // ai_dungeon_plan.plan
+	MaxLegName       = 32    // ai_dungeon_leg.name
+	MaxPlanList      = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
+	MaxSource        = 64    // ai_dungeon_plan.source
+	MaxComment       = 255   // every comment column
+	MaxLegs          = 255   // ai_dungeon_leg.leg is a tinyint unsigned
+	MaxSteps         = 65535 // ai_dungeon_step.seq is a smallint unsigned
+	DefaultPullYd    = 15    // the module's pull radius for 0
+	PullSlackYd      = 10    // added to the farthest position of a group when the plan gives no radius
+	MoveGapWarnYd    = 60    // the module logs consecutive moves farther apart than this
+	MoveGapCutYd     = 50    // the longest hop the exporter leaves when it cuts a leg into via points
+	DefaultBossRad   = 30
 	// MaxGossipOption is the highest `param` of a gossip row: the number `.bot cmd gossip` takes counts the menu from 1 (a 1.12 menu holds 15
 	// options), while the plan's `option` is the menu's own index counted from 0 (the CMSG_GOSSIP_SELECT_OPTION value): the row's param is option + 1.
 	MaxGossipOption = 15
@@ -585,7 +590,17 @@ func (b *builder) step(st dungeon.Step) error {
 			b.move(*u.Stand, false, "stand")
 		}
 		x, y, z := refPoint(u.ObjectRef)
-		b.add(StepRow{Kind: KindOpen, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Comment: itemComment("open", u.RequiresItem)})
+		if p := u.Proof; p != nil {
+			entry, flags, what := p.GameObject, uint32(0), "object"
+			if p.Creature != 0 {
+				entry, flags, what = p.Creature, uint32(FlagProofCreature), "creature"
+			}
+			b.add(StepRow{Kind: KindOpenProof, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Radius: p.Radius,
+				Flags: flags, Entries: []uint32{entry},
+				Comment: clip(fmt.Sprintf("%s; done when %s %d is up within %g yd", itemComment("open", u.RequiresItem), what, entry, p.Radius), MaxComment)})
+		} else {
+			b.add(StepRow{Kind: KindOpen, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Comment: itemComment("open", u.RequiresItem)})
+		}
 	case st.LootObject != nil:
 		l := st.LootObject
 		x, y, z := refPoint(l.ObjectRef)
@@ -775,6 +790,26 @@ func Validate(r Rows) error {
 			if s.Radius <= 0 {
 				return bad("a wait_clear needs a radius")
 			}
+		case KindOpenProof:
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep, open_proof).
+			switch {
+			case s.Entry == 0:
+				return bad("needs an entry")
+			case len(s.Entries) != 1:
+				return bad("an open_proof names exactly one proof entry, not %d", len(s.Entries))
+			case s.Radius <= 0 || s.Radius > MaxProofRadiusYd:
+				return bad("radius %g: an open_proof's proof radius is more than 0 and at most %d", s.Radius, MaxProofRadiusYd)
+			case s.Param != 0:
+				return bad("an open_proof carries no param (the module reads an open's param as a second item)")
+			case s.Flags&^uint32(FlagProofCreature) != 0:
+				return bad("an open_proof carries no flag but %d (the proof is a creature)", FlagProofCreature)
+			case s.TimeoutS != 0:
+				return bad("an open_proof carries no timeout_s")
+			case s.X == 0 && s.Y == 0 && s.Z == 0:
+				return bad("an open_proof needs the object's point")
+			case s.Flags&FlagProofCreature == 0 && s.Entries[0] == s.Entry:
+				return bad("the proof object is the used object itself")
+			}
 		default:
 			return bad("unknown kind")
 		}
@@ -788,6 +823,9 @@ func Validate(r Rows) error {
 			if s.Kind != KindLoot && s.Kind != KindOpen {
 				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
 			}
+		}
+		if s.Flags&FlagProofCreature != 0 && s.Kind != KindOpenProof {
+			return bad("flag %d (the proof is a creature) is for an open_proof row (the loader refuses it on a %s)", FlagProofCreature, s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
