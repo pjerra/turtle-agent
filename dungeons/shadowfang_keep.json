@@ -713,9 +713,24 @@
       ],
       "boss": {
         "entry": 4274,
-        "position": {"x": -135.609, "y": 2168.66, "z": 128.779}
+        "position": {"x": -135.609, "y": 2168.66, "z": 128.779},
+        "approach": [
+          {"x": -145.07, "y": 2182.13, "z": 110.3},
+          {"x": -150, "y": 2175, "z": 128.27},
+          {"x": -152, "y": 2168, "z": 128.69}
+        ]
       },
       "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 35,
+              "center": {"x": -147.1, "y": 2171.6, "z": 128.6}
+            },
+            "timeout_s": 120,
+            "fail_text": "Fenrus' death summons 4 Arugal's Voidwalkers (4627) 14 s later (generic_scripts 9536); their 4th death opens the Sorcerer's Gate 18972 (instance_shadowfang_keep.cpp:176-184): kill all four, a voidwalker left alive keeps it shut."
+          }
+        },
         {
           "wait_for": {
             "gameobject": {
@@ -724,12 +739,13 @@
               "state": "active"
             },
             "timeout_s": 90,
-            "fail_text": "Fenrus' death summons 4 Arugal's Voidwalkers (4627) 14 s later (generic_scripts 9536); the Sorcerer's Gate opens on the 4th voidwalker death (instance_shadowfang_keep.cpp:176-184): kill all four, a voidwalker left alive keeps it shut."
+            "fail_text": "The Sorcerer's Gate opens on the 4th voidwalker death (instance_shadowfang_keep.cpp:176-184); a voidwalker left alive keeps it shut."
           }
         }
       ],
       "notes": [
-        "door \"Sorcerer's Gate\" entry 18972 at -129.0 2166.2 129.2"
+        "door \"Sorcerer's Gate\" entry 18972 at -129.0 2166.2 129.2",
+        "Fix round 2026-10-24 (r36 slotA + r30 slotB): the boss step 304 found Fenrus 'alive 0.0 yd from his spot' with the party at z95 while he stands at z128.8 behind the shut gate, and the tank could not reach him from -174 2175 z129. The boss approach walks the party up to his own floor (z~129) and ends on the ranged stand -152 2168 z128.7 (16.4 yd from him, mesh-checked with line of sight through the gate arch), so the mage/hunter engage him while the gate is shut. The after_boss waits hold the party on the gate's floor until the 4 voidwalkers (4627, summoned 14 s after his death around -137..-155 2163..2181 z128.5) are dead (radius 35 around -147.1 2171.6 covers all four spawns from the stand) and the gate 18972 reads active, before the walk to Nandos."
       ]
     },
     {

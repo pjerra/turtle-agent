@@ -220,3 +220,59 @@ func TestShadowfangKeepStep39SplitAndStair(t *testing.T) {
 		t.Fatalf("the stair points do not climb: %v", stair)
 	}
 }
+
+// TestShadowfangKeepFenrusStandAndVoidwalkers holds the 2026-10-24 data fix (r36 shadowfang_keep slotA + r30 slotB):
+// the boss step 304 found Fenrus 'alive 0.0 yd from his spot' with the party at z95 while he stands at z128.8 behind
+// the shut Sorcerer's Gate, and the tank could not reach him from -174 2175 z129. The boss approach walks the party
+// up to his own floor and ends on the ranged stand -152 2168 z128.7 (16.4 yd from him, line of sight through the
+// gate arch), and the after_boss waits hold the party until the 4 voidwalkers (4627) are dead and the gate reads
+// active. Every pin fails when a piece is cut.
+func TestShadowfangKeepFenrusStandAndVoidwalkers(t *testing.T) {
+	p, err := Load("../../dungeons/shadowfang_keep.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := p.Legs[7]
+	if leg.Name != "fenrus_the_devourer" || leg.Boss == nil || leg.Boss.Entry != 4274 {
+		t.Fatalf("leg 7: %q boss %+v", leg.Name, leg.Boss)
+	}
+	want := []Point{{X: -145.07, Y: 2182.13, Z: 110.3}, {X: -150, Y: 2175, Z: 128.27}, {X: -152, Y: 2168, Z: 128.69}}
+	got := leg.Boss.Approach
+	if len(got) != len(want) {
+		t.Fatalf("fenrus boss approach: %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("fenrus approach point %d: %v, want %v", i, got[i], want[i])
+		}
+	}
+	// The stand ends on Fenrus' own floor, 15-25 yd from him: a ranged stand, not a melee walk-up.
+	stand := got[len(got)-1]
+	if dz := stand.Z - leg.Boss.Position.Z; dz < -1 || dz > 1 {
+		t.Fatalf("the stand %v is off Fenrus' floor (his z %g)", stand, leg.Boss.Position.Z)
+	}
+	if d := dist3(stand, leg.Boss.Position); d < 15 || d > 25 {
+		t.Fatalf("the stand %v is %.1f yd from Fenrus: a 15-25 yd ranged stand", stand, d)
+	}
+	// The approach climbs: the last point is two floors above the leg's low start.
+	if got[len(got)-1].Z-got[0].Z < 10 {
+		t.Fatalf("the approach does not climb to his floor: %v", got)
+	}
+	if len(leg.AfterBoss) != 2 {
+		t.Fatalf("after_boss steps: %d", len(leg.AfterBoss))
+	}
+	hg := leg.AfterBoss[0].WaitFor
+	if hg == nil || hg.HostilesGone == nil || hg.HostilesGone.Center == nil {
+		t.Fatalf("after_boss[0] is no hostiles_gone wait with a centre: %+v", leg.AfterBoss[0].WaitFor)
+	}
+	// The voidwalker spawns (-147.1 2163.2, -155.4 2172.8, -148.9 2180.9, -140.2 2175.3, z128.5-128.7) all lie in the radius.
+	for _, v := range []Point{{X: -147.059, Y: 2163.19, Z: 128.696}, {X: -155.352, Y: 2172.78, Z: 128.448}, {X: -148.869, Y: 2180.86, Z: 128.448}, {X: -140.203, Y: 2175.26, Z: 128.448}} {
+		if d := dist3(*hg.HostilesGone.Center, v); d > float64(hg.HostilesGone.Radius) {
+			t.Fatalf("voidwalker spawn %v is %.1f yd from the wait centre (radius %g)", v, d, hg.HostilesGone.Radius)
+		}
+	}
+	gate := leg.AfterBoss[1].WaitFor
+	if gate == nil || gate.GameObject == nil || gate.GameObject.Entry != 18972 || gate.GameObject.State != "active" {
+		t.Fatalf("after_boss[1] is no wait for the Sorcerer's Gate 18972 active: %+v", leg.AfterBoss[1].WaitFor)
+	}
+}
