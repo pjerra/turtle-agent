@@ -80,6 +80,68 @@ func TestOfflineMappedPlansAreStillDrafts(t *testing.T) {
 	}
 }
 
+// TestNoPlanPullsAnEventUnit holds the r36 shadowfang_keep slotI data fix: the walk back replayed step 1 and pulled
+// Deathstalker Adamant 3849, the friendly prisoner whose gossip opens the courtyard door; he died and the door leg's
+// gossip could not be done (respawn 4 h 36 min). No plan lists, in a pull group, a boss row's first, or a
+// cc_priority/cc_always/kill_first list, an entry that one of its own gossip steps names. Run over every plan file;
+// shadowfang_keep is pinned clean (3849 in the gossip step only). A hold's entries are its scripted event's units,
+// so holds are out of this pin.
+func TestNoPlanPullsAnEventUnit(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(plansDir, "*.json"))
+	if err != nil || len(files) < 40 {
+		t.Fatalf("%d plan files: %v", len(files), err)
+	}
+	for _, f := range files {
+		p, err := Load(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gossip := map[uint32]bool{}
+		for _, l := range p.Legs {
+			for _, s := range l.Steps {
+				if s.Gossip != nil {
+					gossip[s.Gossip.NPC] = true
+				}
+			}
+			for _, s := range l.AfterBoss {
+				if s.Gossip != nil {
+					gossip[s.Gossip.NPC] = true
+				}
+			}
+		}
+		if len(gossip) == 0 {
+			continue
+		}
+		unit := func(entry uint32, where string) {
+			t.Helper()
+			if gossip[entry] {
+				t.Errorf("%s: %s lists its own gossip NPC %d in a unit list", f, where, entry)
+			}
+		}
+		for li, l := range p.Legs {
+			for gi, g := range l.PullGroups {
+				for _, e := range g.Entries {
+					unit(e, fmt.Sprintf("leg %d pull group %d", li, gi))
+				}
+			}
+			if l.Boss != nil {
+				for _, e := range l.Boss.First {
+					unit(e, fmt.Sprintf("leg %d boss first", li))
+				}
+			}
+		}
+		for _, e := range p.CCPriority {
+			unit(e, "cc_priority")
+		}
+		for _, e := range p.CCAlways {
+			unit(e, "cc_always")
+		}
+		for _, e := range p.KillFirst {
+			unit(e, "kill_first")
+		}
+	}
+}
+
 // Every plan file loads, says how far it has been checked, and is kept in the form Marshal writes. A raid plan has its group; a draft is a
 // draft all the way (no hand-written steps in it, which would make "not mapped" a lie only in part).
 func TestEveryPlanFileLoads(t *testing.T) {
