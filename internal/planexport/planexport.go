@@ -767,6 +767,12 @@ func Validate(r Rows) error {
 			if byData && byObject {
 				return bad("a hold ends by instance data or by an object state, not both")
 			}
+
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the encounter flag reads the data as the core's
+			// encounter states, so it is refused without the done-data flag (an object hold with flag 32 is refused too).
+			if s.Flags&FlagEncounter != 0 && !byData {
+				return bad("the encounter flag reads instance data: a hold without the done-data flag carries no flag %d", FlagEncounter)
+			}
 			if byObject && s.Param > 2 {
 				return bad("param %d is no object state (0-2)", s.Param)
 			}

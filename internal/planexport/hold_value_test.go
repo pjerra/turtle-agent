@@ -73,7 +73,8 @@ func TestWaitHoldIsTheRowAndValueIsAScriptValue(t *testing.T) {
 }
 
 // Validate takes a hold's param above 4 only as a script value (flag 8 without 32), the module loader's rule (NormalizePlanStep): an
-// encounter state is 0-4.
+// encounter state is 0-4. The encounter flag reads the data as encounter states, so the loader refuses it without the done-data
+// flag (an object hold with flag 32 is refused too).
 func TestValidateHoldParamByFlags(t *testing.T) {
 	hold := func(param, flags uint32) Rows {
 		return Rows{Steps: []StepRow{{Plan: "p", Kind: KindHold, Entry: 1, Param: param, Flags: flags}}}
@@ -86,6 +87,12 @@ func TestValidateHoldParamByFlags(t *testing.T) {
 	}
 	if err := Validate(hold(3, FlagDoneData|FlagEncounter)); err != nil {
 		t.Errorf("DONE: %v", err)
+	}
+	if err := Validate(hold(1, FlagDoneObject)); err != nil {
+		t.Errorf("object active: %v", err)
+	}
+	if err := Validate(hold(1, FlagDoneObject|FlagEncounter)); err == nil || !strings.Contains(err.Error(), "encounter") {
+		t.Errorf("an object hold with the encounter flag must be refused: %v", err)
 	}
 }
 
