@@ -1375,6 +1375,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
+		if b.SkipUnreachable != "" && b.Hold != nil {
+			c.fail(bp+".skip_unreachable", "a boss with a hold cannot be skipped as out of reach: the hold fight needs him in reach")
+		}
+		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
+			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
+		}
 
 		l.Boss = &b
 	}
