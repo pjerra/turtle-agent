@@ -344,6 +344,13 @@ type PullGroup struct {
 // row in place of the wait (which the run leader could not run), and the agent's driver runs the wait as written.
 type Hold struct {
 	Data uint32 `json:"instance_data"`
+	// Object, when set, makes the hold's done condition a game object state instead of an instance data value: plan-export
+	// writes entry Object.Entry, param the state's index (0 ready, 1 active, 2 active_alt) and flag 16 (done by object), and
+	// the run leader reads that object near the hold's spot. Data stays 0 then. A hold with neither Object nor a Data value is
+	// refused. The first user is Dire Maul West's five crystals: each is used when its four Mana Remnants die, and the hold
+	// fights them and ends when the crystal reads active.
+	Object *ObjectRef `json:"object,omitempty"`
+	State  string     `json:"state,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
@@ -814,6 +821,8 @@ type rawPullGroup struct {
 
 type rawHold struct {
 	Data     uint32    `json:"instance_data"`
+	Object   *rawRef   `json:"object"`
+	State    string    `json:"state"`
 	Spot     *rawPoint `json:"spot"`
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
@@ -1440,8 +1449,27 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
 	}
 	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
 	h.Spot = c.point(path+".spot", r.Spot)
-	if r.Data == 0 {
-		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
+	if r.Object != nil {
+		h.State = r.State
+		h.Object = &ObjectRef{Entry: r.Object.Entry, Spawn: r.Object.Spawn}
+		if r.Data != 0 {
+			c.fail(path+".instance_data", "is for a hold done by instance data; an object hold names object and state instead")
+		}
+		if r.Object.Entry == 0 {
+			c.fail(path+".object.entry", "required (the game object whose state ends the hold)")
+		}
+		if r.Object.Near != nil {
+			p := c.point(path+".object.near", r.Object.Near)
+			h.Object.Near = &p
+		}
+		if !slices.Contains(ObjectStates, r.State) {
+			c.fail(path+".state", "%q is none of %s", r.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.Value != nil {
+			c.fail(path+".value", "an object hold ends on the object's state; it takes no value")
+		}
+	} else if r.Data == 0 {
+		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more), or give object and state")
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)

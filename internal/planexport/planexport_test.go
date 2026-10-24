@@ -892,6 +892,51 @@ func TestApproachAndHold(t *testing.T) {
 	}
 }
 
+// TestObjectHold: a hold done by a game object state writes the object's entry, the state's index and flag 16, and reads back equal.
+// The crystal event of Dire Maul West is the first user: the hold fights the four Mana Remnants on the spot and ends when the crystal
+// reads active.
+func TestObjectHold(t *testing.T) {
+	js := `{"version":1,"name":"crystals","status":"live-checked","map":429,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"a","to":{"x":10,"y":0,"z":0},
+	  "pull_groups":[{"entries":[11483,11483,11483,11483],"positions":[{"x":40,"y":0,"z":0},{"x":60,"y":0,"z":0},{"x":60,"y":20,"z":0},{"x":40,"y":20,"z":0}],"radius":18,
+	   "approach":[{"x":30,"y":-10,"z":0}]},
+	   {"entries":[11483],"positions":[{"x":50,"y":10,"z":0}],
+	    "hold":{"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}},"state":"active","spot":{"x":30,"y":-10,"z":0},"radius":40,"timeout_s":120}}]}]}`
+	r := build(t, parsePlan(t, js))
+	if got := strings.Join(kinds(r, 0), " "); got != "move move pull hold" {
+		t.Fatalf("leg 0 %s", got)
+	}
+	var hold StepRow
+	for _, s := range r.Steps {
+		if s.Kind == KindHold {
+			hold = s
+		}
+	}
+	if hold.Entry != 177259 || hold.Param != 1 || hold.Flags != FlagDoneObject || hold.Radius != 40 || hold.TimeoutS != 120 ||
+		hold.X != 30 || hold.Y != -10 || fmt.Sprint(hold.Entries) != "[11483]" {
+		t.Fatalf("object hold %+v", hold)
+	}
+	if hold.Comment != "pull group 1 hold: the event's mobs are fought on the spot until object 177259 is active" {
+		t.Fatalf("comment %q", hold.Comment)
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil {
+		t.Fatal(err)
+	}
+	// The plan refuses a state it does not know, and data next to an object.
+	bad := strings.Replace(js, `"state":"active"`, `"state":"open"`, 1)
+	if _, err := dungeon.Parse("test.json", []byte(bad)); err == nil {
+		t.Fatal("state open accepted")
+	}
+	bad = strings.Replace(js, `"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}}`, `"instance_data":1,"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}}`, 1)
+	if _, err := dungeon.Parse("test.json", []byte(bad)); err == nil {
+		t.Fatal("instance data next to an object accepted")
+	}
+}
+
 // TestLongHopStartsAtTheLastFight: the hop to a leg's first move is measured from the boss (or pack) the party fought last, not from the
 // last move before that fight: Uldaman's export of dd05724 walked the party from the scorpid pit to the Sentinel's hall and back because
 // leg 6's `to` was measured from leg 5's ramp top.
