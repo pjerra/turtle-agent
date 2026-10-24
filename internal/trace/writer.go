@@ -373,6 +373,25 @@ func SummaryOf(f *File, size int64, checks []Check, scored time.Time) Summary {
 	if s.Src == "" {
 		s.Src = Producer
 	}
+	// A driver that learns the instance from the feed (remote and observe runs) writes it as an instance event: the header may have none.
+	if s.Instance == 0 {
+		for _, e := range f.Events {
+			if e.Ev != "instance" {
+				continue
+			}
+			switch v := e.D["instance"].(type) {
+			case float64:
+				s.Instance = uint32(v)
+			case int:
+				s.Instance = uint32(v)
+			case uint32:
+				s.Instance = v
+			}
+			if s.Instance > 0 {
+				break
+			}
+		}
+	}
 	if e := f.End; e != nil {
 		s.Status, s.EndReason, s.Result, s.Error = "complete", e.Reason, e.Reason, e.Error
 		s.DurationMS = int64(e.Seconds * 1000)

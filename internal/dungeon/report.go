@@ -29,6 +29,9 @@ type Report struct {
 	// LeaderGM says whether the run took the leader's account for a GM (and so may have sent GM commands). A run with
 	// leader_gm false sent none.
 	LeaderGM bool `json:"leader_gm"`
+	// Instance is the numeric instance id of the lead bot's dungeon, read from the feed (remote and observe runs); absent until a
+	// frame shows one.
+	Instance uint32 `json:"instance,omitempty"`
 	// AccountLevel is the leader's security level (0 player, 3 developer) when the probe read it from ".account"; absent otherwise.
 	AccountLevel *int `json:"account_level,omitempty"`
 	// GMCaps are the GM commands the leader's account level let the run use (visible, teleport, revive, buffs).

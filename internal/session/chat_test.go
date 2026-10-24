@@ -5,15 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
 // chatBody transcribes ChatHandler::BuildChatPacket's default and say branches (Chat.cpp:2251-2314).
@@ -210,27 +211,50 @@ func TestUnansweredNameDoesNotStallAgain(t *testing.T) {
 	h.logout()
 }
 
-// GMOn selects the unit and sends the command in one step of the session: however many target calls run at the same
-// time, the packet before each command is the selection of the unit it was meant for.
-func TestGMOnSelectsAndSendsAtomically(t *testing.T) {
+// targetEcho is the values update of the player's own object with the target field the core writes after a selection.
+func targetEcho(g packet.GUID) []byte {
+	return valuesUpdate(me.GUID, map[uint16]uint32{objects.UnitTarget: uint32(g), objects.UnitTarget + 1: uint32(g >> 32)})
+}
+
+// GMOn selects the unit, waits for the server to show that selection, and sends the command only while it stands: however many target
+// calls run at the same time, every command runs on the unit it was meant for. The server here applies each selection as it reads it and
+// echoes it when the field changes (as the core does); a command runs on the selection in force when it is read.
+func TestGMOnRunsOnlyOnTheConfirmedSelection(t *testing.T) {
 	ctx := context.Background()
 	h := start(t, Options{})
 	h.enterWorld()
-	const mine, other, n = packet.GUID(0x31), packet.GUID(0x99), 40
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	const mine, other, n = packet.GUID(0x31), packet.GUID(0x99), 20
 
-	var got []worldconn.Packet
-	collected := make(chan struct{})
+	var mu sync.Mutex
+	var ranOn []packet.GUID
+	var texts []string
+	stopSrv := make(chan struct{})
+	srvDone := make(chan struct{})
 	go func() {
-		defer close(collected)
-		chats := 0
-		for chats < n {
-			p, err := h.srv.Next(3 * time.Second)
-			if err != nil {
+		defer close(srvDone)
+		inForce := packet.GUID(0)
+		for {
+			select {
+			case <-stopSrv:
 				return
+			default:
 			}
-			got = append(got, p)
-			if p.Op == opcode.CMSGMessagechat {
-				chats++
+			p, err := h.srv.Next(50 * time.Millisecond)
+			if err != nil {
+				continue
+			}
+			switch p.Op {
+			case opcode.CMSGSetSelection:
+				if g := packet.NewReader(p.Body).GUID(); g != inForce {
+					inForce = g
+					h.send(opcode.SMSGUpdateObject, targetEcho(g))
+				}
+			case opcode.CMSGMessagechat:
+				mu.Lock()
+				ranOn = append(ranOn, inForce)
+				texts = append(texts, string(p.Body))
+				mu.Unlock()
 			}
 		}
 	}()
@@ -243,38 +267,31 @@ func TestGMOnSelectsAndSendsAtomically(t *testing.T) {
 			select {
 			case <-stop:
 				return
-			default:
+			case <-time.After(15 * time.Millisecond):
 				_, _ = h.s.Target(ctx, other, "")
 			}
 		}
 	}()
+	sent := 0
 	for i := 0; i < n; i++ {
-		if err := h.s.GMOn(ctx, mine, fmt.Sprintf("aura %d", 1000+i)); err != nil {
-			t.Fatal(err)
+		if err := h.s.GMOn(ctx, mine, fmt.Sprintf("aura %d", 1000+i)); err == nil {
+			sent++
 		}
 	}
 	close(stop)
 	wg.Wait()
-	<-collected
-
-	cmds := 0
-	for i, p := range got {
-		if p.Op != opcode.CMSGMessagechat {
-			continue
-		}
-		cmds++
-		if i == 0 || got[i-1].Op != opcode.CMSGSetSelection || packet.NewReader(got[i-1].Body).GUID() != mine {
-			t.Fatalf("command %d (%q) was not right after the selection of its unit", cmds, p.Body)
-		}
-		if !bytes.Contains(p.Body, []byte(fmt.Sprintf(".aura %d", 1000+cmds-1))) {
-			t.Fatalf("command %d: % X", cmds, p.Body)
-		}
+	time.Sleep(200 * time.Millisecond)
+	close(stopSrv)
+	<-srvDone
+	mu.Lock()
+	defer mu.Unlock()
+	if sent == 0 || len(ranOn) != sent {
+		t.Fatalf("%d sent, %d ran", sent, len(ranOn))
 	}
-	if cmds != n {
-		t.Fatalf("%d commands seen", cmds)
-	}
-	if h.s.Status().Target == 0 {
-		t.Fatal("no target")
+	for i, g := range ranOn {
+		if g != mine {
+			t.Errorf("command %d (%q) ran on %v", i, texts[i], g)
+		}
 	}
 	for _, bad := range []string{"", "..gm"} {
 		if err := h.s.GMOn(ctx, mine, bad); err == nil {
@@ -283,6 +300,29 @@ func TestGMOnSelectsAndSendsAtomically(t *testing.T) {
 	}
 	if err := h.s.GMOn(ctx, 0, "aura 1"); err == nil {
 		t.Error("GMOn without a unit accepted")
+	}
+}
+
+// GMOn sends nothing when the server never shows the selection.
+func TestGMOnSendsNothingWithoutTheEcho(t *testing.T) {
+	old := GMOnSelectWait
+	GMOnSelectWait = 200 * time.Millisecond
+	defer func() { GMOnSelectWait = old }()
+	ctx := context.Background()
+	h := start(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	if err := h.s.GMOn(ctx, 0x31, ".aura 1"); err == nil || !strings.Contains(err.Error(), "did not show") {
+		t.Fatalf("%v", err)
+	}
+	for {
+		p, err := h.srv.Next(200 * time.Millisecond)
+		if err != nil {
+			break
+		}
+		if p.Op == opcode.CMSGMessagechat {
+			t.Fatalf("a line went out: %q", p.Body)
+		}
 	}
 }
 
