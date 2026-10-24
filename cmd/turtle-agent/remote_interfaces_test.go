@@ -16,6 +16,7 @@ var (
 	_ dungeon.AreaTriggerGame  = remoteGame{}
 	_ dungeon.BotLiner         = remoteGame{}
 	_ dungeon.BotLinesAller    = remoteGame{}
+	_ dungeon.BotTeamer        = remoteGame{}
 	_ dungeon.Enterer          = remoteGame{}
 	_ dungeon.EntryLedger      = remoteGame{}
 	_ dungeon.FloorSnapper     = remoteGame{}

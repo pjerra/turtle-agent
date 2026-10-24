@@ -134,7 +134,8 @@ type RestGate struct {
 	Leg     int     `json:"leg"`
 	Seconds float64 `json:"seconds"`
 	// Result is "rested" (everyone at the targets), "stalled" (passed with casters whose mana does not rise), "gave_up" (the cap
-	// came with someone short; the run went on) or "failed" (the gate ended the run).
+	// came with someone short; the run went on), "failed" (the gate ended the run) or "run_leader" (the run leader's own rest phase,
+	// observe mode).
 	Result string `json:"result"`
 	MaxS   int    `json:"max_s"` // the cap this gate had
 	// Short is who was short when the gate ended ("Name mana 29%", "Name health 60%"); empty for a rested gate.

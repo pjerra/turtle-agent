@@ -276,7 +276,8 @@
   // The words about the ghost for the hover box / legend: "best earlier run: cleared in 41:07 (folder)".
   function ghostDescribe(g) {
     if (!g || !g.found) return "";
-    return (g.complete ? "fastest clear: " : "furthest earlier run (" + g.legs_done + (g.plan_legs ? " of " + g.plan_legs : "") + " sections): ") + clockMin(g.seconds) + (g.folder ? " (" + g.folder + ")" : "");
+    const left = g.left > 0 ? ", " + g.left + " pack" + (g.left === 1 ? "" : "s") + " left" : "";
+    return (g.complete ? "fastest clear: " : "furthest earlier run (" + g.legs_done + (g.plan_legs ? " of " + g.plan_legs : "") + " sections): ") + clockMin(g.seconds) + left + (g.folder ? " (" + g.folder + ")" : "");
   }
 
   // ---- stalls and refusals ----

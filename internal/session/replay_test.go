@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -24,13 +25,34 @@ func allEvents(l *events.Log) []events.Event {
 // liveScenario drives a session through combat with names (one of them never answered),
 // vendor and quest requests whose events are inferred from the agent's own packets, a
 // knockback with its landing, and a logout, all recorded to a capture.
+//
+// The capture stamps each record with the wall clock, which a WSL2 host steps back about two
+// seconds every half minute (clock.go). A step inside the scenario puts later records before
+// earlier ones and the replay then lands the knockback in the past (17 decoded events, 18 live).
+// The scenario therefore runs again when the wall clock moved against the monotonic one while
+// it ran; the step is the host's, not the replay's, and the next run is a fresh one.
 func liveScenario(t *testing.T, path string) []events.Event {
+	t.Helper()
+	const attempts = 5
+	for i := 1; ; i++ {
+		_ = os.Remove(path) // capture.Create refuses a file that exists
+		began := time.Now()
+		live := liveScenarioOnce(t, path)
+		skew := time.Since(began) - time.Now().Round(0).Sub(began.Round(0)) // monotonic elapsed minus wall elapsed
+		if i == attempts || skew > -50*time.Millisecond && skew < 50*time.Millisecond {
+			return live
+		}
+		t.Logf("the wall clock stepped back %v during the scenario; running it again (%d of %d)", skew, i, attempts)
+	}
+}
+
+func liveScenarioOnce(t *testing.T, path string) []events.Event {
 	t.Helper()
 	w, err := capture.Create(path, []byte("SECRETPW"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := startTapped(t, Options{NamesWait: 100 * time.Millisecond}, testKey, testKey, nil, w)
+	h := startClocked(t, Options{NamesWait: 100 * time.Millisecond}, testKey, testKey, nil, w, false) // the real clock: the events take the live stamps
 	h.enterWorld()
 	ctx := context.Background()
 	stranger := packet.GUID(0x40)

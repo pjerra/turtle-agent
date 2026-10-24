@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -63,6 +64,9 @@ const (
 	// wipeDeadReArm is the dead-member count below which the wipe latch re-arms (TortoiseBots DungeonRunPolicy.kWipeDead, 3): a party
 	// that is all dead, one member alive for a poll, all dead again, is one collapse, not two.
 	wipeDeadReArm = 3
+	// wipeWindow is a wipe counted from the feed's deaths: every member of the party dying within this long, even when the lead bot
+	// revives in between (the RFC run: all five dead within 63 s, never in one frame).
+	wipeWindow = 90 * time.Second
 )
 
 func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
@@ -125,6 +129,7 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
+	Left  int       `json:"left,omitempty"` // packs the run leader left alive
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -139,6 +144,7 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
+	Left  int    `json:"left,omitempty"` // packs the run leader left alive
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -149,6 +155,8 @@ type ObserveReport struct {
 	Pauses int `json:"pauses"`
 	// Controls are the pause, resume, skip and stop requests sent, in order, each with its answer.
 	Controls []string `json:"controls,omitempty"`
+	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
+	PlayerOrders []string `json:"player_orders,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
 	Ended string `json:"ended,omitempty"`
 	// Changes are the status changes, oldest first (the newest MaxRunChanges).
@@ -161,24 +169,35 @@ func (r *ObserveReport) clone() *ObserveReport {
 	}
 	c := *r
 	c.Controls = append([]string(nil), r.Controls...)
+	c.PlayerOrders = append([]string(nil), r.PlayerOrders...)
 	c.Changes = append([]RunChange{}, r.Changes...)
 	return &c
 }
 
 // observeState is the observer's own state.
 type observeState struct {
-	spec      ObserveSpec
-	started   bool
-	startedAt time.Time
-	last      tbm.RunStatus
-	haveLast  bool
-	lastAt    time.Time // when the status last changed
-	pausedAt  time.Time
-	seenN     uint64
-	baseN     uint64 // lines read before the start: older ones are another run's
-	lastPoll  time.Time
-	serverEnd bool // the module said the run is done: no stop is needed
-	wiped     bool // the feed showed the whole party dead: one rising edge of it is one wipe
+	spec       ObserveSpec
+	started    bool
+	startedAt  time.Time
+	last       tbm.RunStatus
+	haveLast   bool
+	lastAt     time.Time // when the status last changed
+	pausedAt   time.Time
+	seenN      uint64
+	baseN      uint64 // lines read before the start: older ones are another run's
+	lastPoll   time.Time
+	serverEnd  bool                      // the module said the run is done: no stop is needed
+	wiped      bool                      // the feed showed the whole party dead: one rising edge of it is one wipe
+	wasDead    map[packet.GUID]bool      // dead in the previous frame (nil until the first frame)
+	deathAt    map[packet.GUID]time.Time // when each member last went dead
+	leadDownAt time.Time                 // when the lead bot last went dead
+	leadDown   bool
+	lastWipeAt time.Time // when the last wipe was counted
+	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
+	restSince time.Time // when the run leader's current rest phase began
+	restOpen  bool
+	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
+	playerPaused bool
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -306,6 +325,9 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	})
 	// Whatever way the watch ends, a run still alive on the server is stopped: the agent leaves the party idle, not half-led.
 	defer func() {
+		if o.restOpen {
+			d.endObservedRest(d.clk.Now())
+		}
 		why, reason := "", ""
 		var ceiling *runCeilingError
 		switch {
@@ -355,12 +377,17 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		// latch re-arms only once fewer than wipeDeadReArm members are dead (the module's kWipeDead): a single in-place revive (one member
 		// alive for a poll, dead again the next) re-arms a plain "not all dead" check and double counts the collapse. The "wipe" event goes
 		// to the trace, so the tracecheck deaths oracle sees the wipes of an observed run too (stepFailedRecover never runs in observe mode).
+		// The window rule counts a wipe the frames never show: every member died within wipeWindow, each death newer than the last counted
+		// wipe, so a lead bot that revives between their deaths does not hide the collapse. trackObservedDeaths reads the same frames for
+		// the lead bot's deaths and revives.
 		all := d.countDeaths()
-		if all && !o.wiped {
+		window := d.trackObservedDeaths(d.clk.Now())
+		if (all || window) && !o.wiped {
 			d.rep.update(func(r *Report) { r.Wipes++ })
-			d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": "the whole party is dead", "observe": true})
+			o.lastWipeAt = d.clk.Now()
+			d.tr.Event("wipe", map[string]any{"leg": d.curLeg, "error": "the whole party is dead", "observe": true, "window": !all})
 		}
-		if all {
+		if all || window {
 			o.wiped = true
 		} else if deadCount(d.fr) < wipeDeadReArm {
 			o.wiped = false
@@ -695,6 +722,22 @@ func (d *RemoteDriver) takeLines(lines []string) {
 	}
 }
 
+// playerOrderOf reads the order out of the note of a pause the module made for a player's order: "player order (<order>): <why>". A later
+// status of the same pause appends to the note ("; X meanwhile: ..."), so the order ends at the first "): ". ok is false for any other note.
+func playerOrderOf(note string) (order string, ok bool) {
+	rest, ok := strings.CutPrefix(note, "player order (")
+	if !ok {
+		return "", false
+	}
+	if order, _, ok := strings.Cut(rest, "): "); ok {
+		return order, true
+	}
+	if i := strings.LastIndex(rest, ")"); i >= 0 {
+		return rest[:i], true
+	}
+	return "", false
+}
+
 // takeStatus folds one status into the observer, the report, the trace, the events and the current-step label.
 func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	o := d.obs
@@ -709,6 +752,16 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	prev, had := o.last, o.haveLast
 	o.last, o.haveLast, o.lastAt = st, true, now
+	// The run leader's rest phase is the observed run's rest: a running status still in phase rest keeps it open (one rest), any
+	// other phase or state closes it before the leg switch below, so the rest lands in the leg it happened in. A paused status keeps
+	// the phase it paused in, but the pause is waiting for a person, not resting: it closes the rest, and the resume opens a new one.
+	if st.Phase == "rest" && st.State == tbm.RunRunning {
+		if !o.restOpen {
+			o.restSince, o.restOpen = now, true
+		}
+	} else if o.restOpen {
+		d.endObservedRest(now)
+	}
 	if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 		o.pausedAt = now
 	}
@@ -718,10 +771,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++
@@ -731,13 +784,38 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 			ob.Changes = append([]RunChange{}, ob.Changes[n-MaxRunChanges:]...)
 		}
 	})
+	// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the
+	// order so a person sees why the run waited. Only the first status of that pause counts: the module appends to the note of a pause it
+	// already made. The run going on again is the resume after the order, whether the agent or a person sent it.
+	if order, ok := playerOrderOf(st.Note); st.State == tbm.RunPaused && ok && !o.playerPaused {
+		o.playerPaused = true
+		d.remote(func(r *RemoteReport) {
+			if ob := r.Observe; len(ob.PlayerOrders) < 50 {
+				ob.PlayerOrders = append(ob.PlayerOrders, fmt.Sprintf("step %d/%d (%s): %s", st.Step, st.Steps, st.Leg, order))
+			}
+		})
+		d.control("player order: " + order)
+		d.tr.Event("player_order", map[string]any{"order": order, "step": st.Step, "leg_name": st.Leg})
+		d.rep.note("observe mode: the run paused for a player order (" + order + ")")
+	}
+	if o.playerPaused {
+		switch st.State {
+		case tbm.RunRunning:
+			o.playerPaused = false
+			d.control(fmt.Sprintf("resumed after the player order at step %d", st.Step))
+			d.rep.note("observe mode: the run went on after the player order")
+		case tbm.RunDone:
+			// The run stopped instead of going on: the pause is over, but there was no resume to record (#270).
+			o.playerPaused = false
+		}
+	}
 	label := "run leader: " + st.Text()
 	if st.State != tbm.RunRunning {
 		label = "run leader " + st.State + ": " + st.Text()
 	}
 	d.rep.setCurrent(label)
 	d.wd.progress("run leader: " + st.Text())
-	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note}
+	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note, "left": st.Left}
 	d.tr.Event("run_leader", data)
 	// The legs: a new leg name ends the one before it and starts the next, so the report has the per-leg times.
 	if li := d.legOf(st.Leg); li >= 0 && li != d.curLeg && st.State != tbm.RunNone {
@@ -750,8 +828,26 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", li, name), map[string]any{"leg": li, "name": name, "phase": "start", "mode": "observe"})
 	}
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
-		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note})
+		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note, "left": st.Left})
 	}
+}
+
+// endObservedRest closes the run leader's rest phase: it counts as a rest gate (Result "run_leader"), in the report, the leg and the trace.
+func (d *RemoteDriver) endObservedRest(now time.Time) {
+	o := d.obs
+	o.restOpen = false
+	secs := max(now.Sub(o.restSince).Seconds(), 0)
+	leg := max(d.curLeg, 0)
+	d.rep.update(func(r *Report) {
+		r.RestSeconds += secs
+		if n := len(r.Legs); n > 0 {
+			r.Legs[n-1].RestSeconds += secs
+		}
+		if len(r.RestGates) < maxRestGates {
+			r.RestGates = append(r.RestGates, RestGate{Leg: leg, Seconds: secs, Result: "run_leader"})
+		}
+	})
+	d.tr.Event("rest", map[string]any{"leg": d.curLeg, "seconds": secs, "source": "run_leader"})
 }
 
 // deadCount is how many members of the frame's party are dead (the latch of the wipe count compares it with wipeDeadReArm; tbm.ViewFrame
@@ -764,6 +860,52 @@ func deadCount(fr tbm.ViewFrame) int {
 		}
 	}
 	return n
+}
+
+// trackObservedDeaths follows the party's deaths in the newest frame: the lead bot's deaths and revives go into the report
+// (LeaderDeaths, Resurrections, SecondsDead, the leg's too) and the trace (event leader_death), and the result says that every
+// member has died within wipeWindow, each death newer than the last counted wipe.
+func (d *RemoteDriver) trackObservedDeaths(now time.Time) bool {
+	o := d.obs
+	if !d.haveFr {
+		return false
+	}
+	if o.wasDead == nil { // the first frame is the baseline: a bot already dead in it is not a death
+		o.wasDead, o.deathAt = map[packet.GUID]bool{}, map[packet.GUID]time.Time{}
+		for _, p := range d.fr.Party {
+			o.wasDead[p.GUID] = p.Dead
+		}
+		return false
+	}
+	for _, p := range d.fr.Party {
+		isLead := d.fr.Lead != 0 && p.GUID == d.fr.Lead
+		if p.Dead && !o.wasDead[p.GUID] {
+			o.deathAt[p.GUID] = now
+			if isLead {
+				o.leadDown, o.leadDownAt = true, now
+				d.rep.update(func(r *Report) { r.LeaderDeaths++ })
+				d.legStat(func(l *LegReport) { l.LeaderDeaths++ })
+				d.tr.Event("leader_death", map[string]any{"name": p.Name, "a": guidText(p.GUID), "leg": d.curLeg})
+			}
+		}
+		if !p.Dead && o.wasDead[p.GUID] && isLead && o.leadDown {
+			o.leadDown = false
+			secs := now.Sub(o.leadDownAt).Seconds()
+			d.rep.update(func(r *Report) { r.Resurrections++; r.SecondsDead += secs })
+			d.legStat(func(l *LegReport) { l.Resurrections++; l.SecondsDead += secs })
+		}
+		o.wasDead[p.GUID] = p.Dead
+	}
+	if len(d.fr.Party) < 2 {
+		return false
+	}
+	for _, p := range d.fr.Party {
+		at, ok := o.deathAt[p.GUID]
+		if !ok || !at.After(o.lastWipeAt) || now.Sub(at) > wipeWindow {
+			return false
+		}
+	}
+	return true
 }
 
 // legOf finds the plan leg a status line names (by name, or by number when the module had no name); -1 when none.
