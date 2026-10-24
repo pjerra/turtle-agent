@@ -242,7 +242,6 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 		case res.Kind == tbm.KindAck && res.State != nil:
 			d.entry.waitLast = fmt.Sprintf("state:%s flags:%s", res.State.State, res.State.Flags)
 			d.entry.seen.add(&w.ObjectRef)
-			d.entry.missSince = time.Time{}
 			if strings.EqualFold(res.State.State, wantedState(w.State)) {
 				d.rep.note(fmt.Sprintf("%s: cmd state says %s is %s (guid %d)", a.Label, describeRef(&w.ObjectRef), res.State.State, res.State.GUID))
 				d.st.SkipStep()

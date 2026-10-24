@@ -235,6 +235,24 @@ func TestStepperWaitGoneOKNeedsAReadableMissHeldWithoutABreak(t *testing.T) {
 	}
 }
 
+// A wait with no near point cannot be judged gone (nothing says where the agent would have to stand to see it).
+func TestStepperWaitGoneOKWithoutNearIsNeverGone(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{10, 1, 0}}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":124372,"state":"active","gone_ok":true},"timeout_s":60}}],
+  "boss":{"entry":7,"position":{"x":40,"y":0,"z":0}}}]}`)
+	s := NewStepper(p, w, clk.now)
+	s.Next()
+	w.objs = w.objs[:1]
+	for i := 0; i < 5; i++ {
+		clk.t = clk.t.Add(2 * time.Second)
+		if a := s.Next(); a.Kind != ActWait {
+			t.Fatalf("%+v", a)
+		}
+	}
+}
+
 func TestStepperWaitGoneOKNeverSeenWaitsOutItsTimeout(t *testing.T) {
 	w := &fakeWorld{objs: doors()[:1], pos: Point{10, 1, 0}}
 	clk := &fakeClock{t: time.Unix(1000, 0)}
