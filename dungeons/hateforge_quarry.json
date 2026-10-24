@@ -967,6 +967,11 @@
           "z": 180.1,
           "direct": true,
           "check_skip": "the way down from Bargul's terrace crosses the same seam as the way up (6.1 yd ground, 2.4 down, from the exact launch at the ramp top -8323.71 -3452.3 z182.5 to -8320.0 -3447.5 z180.1); the direct hop is walked on the vmap line, not tried live"
+        },
+        {
+          "x": -8192.0,
+          "y": -3349.33,
+          "z": 136.12
         }
       ],
       "pull_groups": [
@@ -2525,6 +2530,18 @@
     {
       "name": "hatereaver_annihilator",
       "to": {"x": -8091.65, "y": -3631.19, "z": 125.361},
+      "via": [
+        {
+          "x": -8192.0,
+          "y": -3349.33,
+          "z": 136.12
+        },
+        {
+          "x": -8220.8,
+          "y": -3445.07,
+          "z": 135.52
+        }
+      ],
       "pull_groups": [
         {
           "entries": [60717, 60721, 60717],
