@@ -986,6 +986,66 @@ func TestObserveAStalledRunIsStopped(t *testing.T) {
 	}
 }
 
+// A 27-minute boss fight the run leader says is wearing its units down is the
+// run going on, not standing still (RUN-LESSONS r27 dragonmaw_retreat slot 5:
+// the client stopped Searistrasz at 600 s on the 'lost hp' note): repeating
+// the fight ceiling's progress note holds the stall watch off.
+func TestObserveProgressNoteHoldsOffStall(t *testing.T) {
+	const prog = "fighting; past the 420 s ceiling: an engaged unit lost hp in the last 60 s"
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "pull", "pull", prog)},
+		leaderStep{s(1620), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(600)}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if g.stopped != 0 {
+		t.Fatalf("a run the server ended was stopped again: %v", g.orders)
+	}
+}
+
+// The ceiling's other note says the run only watches: the same status with it
+// still stalls out.
+func TestObserveWatchingNoteStillStalls(t *testing.T) {
+	const watching = "fighting; past the 420 s ceiling: watching the engaged units' hp"
+	g := newFakeLeader(t, leaderStep{0, rs("running", 1, 5, "first", "pull", "pull", watching)})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err == nil || !strings.Contains(err.Error(), "stalled") || g.stopped != 1 || rep.State != "failed" {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}
+
+// Without the progress note, an engaged unit the feed shows losing hp still
+// holds the watch off: Searistrasz 100 % to 30 % on one step.
+func TestObserveFallingHpHoldsOffStall(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "pull", "pull", "fighting")},
+		leaderStep{s(700), rs("done", 5, 5, "second", "move", "walk", "plan done")})
+	m := g.addMob(62072, Point{30, 0, 0})
+	m.pulled, m.engaged, m.attacked, m.target = true, true, true, gTank
+	g.killRate = 0.1 // 100 % to 30 % over the run
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(600)}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if g.stopped != 0 {
+		t.Fatalf("a run the server ended was stopped again: %v", g.orders)
+	}
+}
+
+// An engaged unit whose hp does not fall is no progress: the same stuck fight
+// with a mob in the feed still stalls out.
+func TestObserveFlatHpStillStalls(t *testing.T) {
+	g := newFakeLeader(t, leaderStep{0, rs("running", 1, 5, "first", "pull", "pull", "fighting")})
+	m := g.addMob(62072, Point{30, 0, 0})
+	m.pulled, m.engaged, m.target = true, true, gTank
+	g.killRate = 0
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err == nil || !strings.Contains(err.Error(), "stalled") || g.stopped != 1 || rep.State != "failed" {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}
+
 func TestObserveHasACeilingOnTheWholeRun(t *testing.T) {
 	steps := []leaderStep{{0, rs("running", 1, 5, "first", "move", "walk", "walking")}}
 	for i := 1; i <= 40; i++ { // the status keeps changing: only the ceiling stops it
