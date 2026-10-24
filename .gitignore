@@ -10,3 +10,4 @@ settings.json
 /minimaps/
 *.cap
 *.cap.gz
+/turtle-agent
