@@ -60,16 +60,17 @@ func dist3S(a, b scholomanceSpawn) float64 {
 	return math.Sqrt((a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z))
 }
 
-// The EventAI fleers (10469, 10477), the polymorphable humanoid casters (best first: the Fear, the Counterspell, the Shadow Bolt, the Handler, the
-// Adept), the undead no Polymorph lands on, and the killers (the Acolyte's Dark Mending, the Dark Summoner's Risen Lackey, the Necromancer's Call
-// of the Grave/Corpse Explosion). A kill_first entry must not be in cc_priority (the loader refuses both).
+// The EventAI fleers (10469, 10477) plus the r29 slot8 runners (10489 Risen Guard, 10499 Spectral Researcher, seen re-joining at 15-16%),
+// the polymorphable humanoid casters (best first: the Fear, the Counterspell, the Shadow Bolt, the Handler, the Adept), the undead no
+// Polymorph lands on, and the killers (the Acolyte's Dark Mending, the Dark Summoner's Risen Lackey, the Necromancer's Call of the
+// Grave/Corpse Explosion). A kill_first entry must not be in cc_priority (the loader refuses both).
 func TestScholomanceUnitListsComeFromTheCensus(t *testing.T) {
 	p := loadPlan(t, scholomancePlan)
 	for _, c := range []struct {
 		name      string
 		got, want string
 	}{
-		{"fleers", fmt.Sprint(p.Fleers), "[10469 10477]"},
+		{"fleers", fmt.Sprint(p.Fleers), "[10469 10477 10489 10499]"},
 		{"cc_priority", fmt.Sprint(p.CCPriority), "[10470 10472 10476 11257 10469]"},
 		{"cc_always", fmt.Sprint(p.CCAlways), "[]"},
 		{"no_cc", fmt.Sprint(p.NoCC), "[10478 10480 10481 10482 10485 10486 10487 10488 10489 10491 10495 10498 10499 10500 10678 11258 11551]"},
@@ -217,6 +218,16 @@ func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
 	}
 	if got := fmt.Sprint(leg.PullGroups[len(leg.PullGroups)-1].Entries); got != "[10469 10472]" {
 		t.Errorf("last leg-0 pack %s, want [10469 10472]", got)
+	}
+	// The r29 slot8 run wiped five times walking to the old group-4 stand (235.8 40.1, 7 yd from the 10499 pack): the three packs around that
+	// point (the 10499 pack, the lone patrolling 10471, the 10470 pack) are pulled before the southern pair, from western stands.
+	idx := map[string]int{}
+	for gi, g := range leg.PullGroups {
+		idx[fmt.Sprint(g.Entries)] = gi
+	}
+	if !(idx["[10471 10470 10471 10499]"] < idx["[10471 10470]"] && idx["[10471 10470]"] < idx["[10471]"] && idx["[10471]"] < idx["[10470 10470 10471]"]) {
+		t.Errorf("leg-0 115.8 cluster out of order: 10499 pack at %d, southern pair at %d, lone 10471 at %d, 10470 pack at %d; want the three around the old step-11 point first",
+			idx["[10471 10470 10471 10499]"], idx["[10471 10470]"], idx["[10471]"], idx["[10470 10470 10471]"])
 	}
 }
 
