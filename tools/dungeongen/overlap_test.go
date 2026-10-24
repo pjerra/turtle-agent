@@ -19,8 +19,8 @@ import (
 // groups are not touched by an offline lane (38 since the courtyard, Zum'rah and Gahz'rilla legs of #192 and #195 came in; was 29). Uldaman's 150 (was 149, 144) count the two Jadespine Basilisks
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
-// member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+// member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first. lower_blackrock_spire's 36 are the two dense rooms: the 30 Spire Scorpions of the pit (each radius 5-7 reaches 6-11 of the same entry) and the spider rows (10375), plus Omokk 4.5 yd from his antechamber pack and the Firebrand rows of the Voone room.
+var packOverlapKnownFailing = map[string]int{"lower_blackrock_spire": 36, "uldaman": 150, "zulfarrak": 38}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
