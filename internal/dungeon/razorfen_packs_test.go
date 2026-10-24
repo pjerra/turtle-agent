@@ -120,15 +120,25 @@ func TestRazorfenBossPacksAreTheBossFight(t *testing.T) {
 		{"overlord_ramtusk", 4420, "[4438]", 14},
 		{"rotthorn", 62503, "[]", 17},
 		{"agathelos_the_raging", 4422, "[]", 10},
-		{"charlga_razorflank", 4421, "[4517]", 22},
+		// r35 slot7b split the old charlga leg in three: the den packs, the pit (a leg of its own because only a leg's via chain
+		// can row the 1200-yd walk into the pit), and the boss with the pit-rim, upper-ledge and corridor packs.
+		{"charlga_den", 0, "", 6},
+		{"charlga_pit", 0, "", 11},
+		{"charlga_razorflank", 4421, "[4517]", 4},
 	} {
 		l := rfkLeg(t, p, c.leg)
-		if l.Boss == nil || l.Boss.Entry != c.boss {
+		if c.boss == 0 {
+			if l.Boss != nil {
+				t.Errorf("leg %s: boss %+v, want none (the packs of a leg with no boss, the walk is its via chain)", c.leg, l.Boss)
+			}
+		} else if l.Boss == nil || l.Boss.Entry != c.boss {
 			t.Errorf("leg %s: boss %+v, want %d", c.leg, l.Boss, c.boss)
 			continue
 		}
-		if got := fmt.Sprint(l.Boss.First); got != c.first {
-			t.Errorf("leg %s: boss first %s, want %s", c.leg, got, c.first)
+		if c.boss != 0 {
+			if got := fmt.Sprint(l.Boss.First); got != c.first {
+				t.Errorf("leg %s: boss first %s, want %s", c.leg, got, c.first)
+			}
 		}
 		if len(l.PullGroups) != c.pulls {
 			t.Errorf("leg %s: %d pull groups, want %d", c.leg, len(l.PullGroups), c.pulls)
@@ -220,6 +230,140 @@ func TestRazorfenBrambleClustersAreSinglePulls(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("rotthorn: %v is %d pull groups, want 1", c.entries, n)
+		}
+	}
+}
+
+// r35 slot7b (2026-10-24) stopped at the first pit stand of the charlga leg (step 655): the whole party walked from the den
+// floor (2157 1941 z65) up the z76 dead-end ledge over the pit, 28.1 yd from and 25 yd above the stand, because the plan asked
+// for one 49.1 yd move whose only walkable route is the 1200-yd loop round the instance (the server's own path ends on the
+// ledge, and the offline route the exporter would have cut runs 1347 yd). A leg's via chain is the plan field that can row
+// that walk: a pull group's approach holds at most 4 points, and every move must stay under the run leader's 150 yd
+// ReactDistance. charlga_den keeps the den corridor packs, charlga_pit walks the loop down and pulls the pit, and
+// charlga_razorflank walks it back up to the ledge corner for the pit-rim, upper-ledge and corridor packs and Charlga.
+func TestRazorfenCharlgaLegsWalkThePitLoop(t *testing.T) {
+	p := loadPlan(t, rfkPlan)
+	den := rfkLeg(t, p, "charlga_den")
+	if got := fmt.Sprintf("%.1f %.1f %.4f", den.To.X, den.To.Y, den.To.Z); got != "2135.6 1978.4 60.1695" {
+		t.Errorf("charlga_den to = %s, want the den corridor point 2135.6 1978.4 60.1695", got)
+	}
+	if len(den.Via) != 0 {
+		t.Errorf("charlga_den has %d via points: the den packs are walked from the corridor point", len(den.Via))
+	}
+	if den.Boss != nil {
+		t.Errorf("charlga_den holds the boss %+v: Charlga is charlga_razorflank's", den.Boss)
+	}
+	pit := rfkLeg(t, p, "charlga_pit")
+	if got := fmt.Sprintf("%.1f %.1f %.1f", pit.To.X, pit.To.Y, pit.To.Z); got != "2095.0 1845.0 50.8" {
+		t.Errorf("charlga_pit to = %s, want the pit stand 2095.0 1845.0 50.8", got)
+	}
+	if len(pit.Via) != 31 {
+		t.Errorf("charlga_pit has %d via points, want the 31 of the loop walk", len(pit.Via))
+	}
+	if got := fmt.Sprintf("%.1f %.1f %.1f", pit.Via[0].X, pit.Via[0].Y, pit.Via[0].Z); got != "2112.0 1877.3 72.8" {
+		t.Errorf("charlga_pit via 0 = %s, want the spiral ramp foot 2112.0 1877.3 72.8", got)
+	}
+	if got := pit.Via[len(pit.Via)-1]; got.X != 2126.9 || got.Y != 1824 || got.Z != 47.8 {
+		t.Errorf("charlga_pit last via = %+.1f %+.1f %+.1f, want the pit mouth 2126.9 1824 47.8", got.X, got.Y, got.Z)
+	}
+	// the pit's first pack is pulled from the leg's own stand: no approach row, so the party does not walk to the pack
+	if a := pit.PullGroups[0].Approach; len(a) != 0 {
+		t.Errorf("charlga_pit pull group 0 has the approach %+v: the leg's 'to' is its stand", a)
+	}
+	up := rfkLeg(t, p, "charlga_razorflank")
+	if got := fmt.Sprintf("%.1f %.1f %.1f", up.To.X, up.To.Y, up.To.Z); got != "2093.1 1767.5 79.8" {
+		t.Errorf("charlga_razorflank to = %s, want route corner 2093.1 1767.5 79.8", got)
+	}
+	if len(up.Via) != 26 {
+		t.Errorf("charlga_razorflank has %d via points, want the 26 of the loop walk back", len(up.Via))
+	}
+	if got := fmt.Sprintf("%.1f %.1f %.1f", up.Via[0].X, up.Via[0].Y, up.Via[0].Z); got != "2117.1 1807.5 48.0" {
+		t.Errorf("charlga_razorflank via 0 = %s, want the pit mouth point 2117.1 1807.5 48.0", got)
+	}
+	if got := up.Via[len(up.Via)-1]; got.X != 2102.7 || got.Y != 1728 || got.Z != 78.2 {
+		t.Errorf("charlga_razorflank last via = %+.1f %+.1f %+.1f, want the ledge point 2102.7 1728 78.2", got.X, got.Y, got.Z)
+	}
+	if a := up.PullGroups[0].Approach; len(a) != 0 {
+		t.Errorf("charlga_razorflank pull group 0 has the approach %+v: the leg's 'to' is its stand", a)
+	}
+	// every hop of both walks stays under the run leader's 150 yd ReactDistance (a longer cmd move is refused too-far), and
+	// under the exporter's 60 yd cut (a longer move would be cut again into interpolated points that leave the mesh).
+	// The leg start is the previous leg's 'to' (plan check) while the exporter anchors on the last row before the leg (a pull
+	// row); both are covered: the first via within the 150 yd ReactDistance of the leg start, every other hop within the
+	// exporter's 60 yd cut.
+	legs := []Leg{pit, up}
+	starts := []Point{den.To, pit.To}
+	for i, l := range legs {
+		if d := dist3v(starts[i], l.Via[0].Point); d > 150 {
+			t.Errorf("leg %s: via 0 is %.1f yd from the leg start (ReactDistance 150)", l.Name, d)
+		}
+		prev := l.Via[0].Point
+		for j, w := range l.Via[1:] {
+			if d := dist3v(prev, w.Point); d > 60 {
+				t.Errorf("leg %s via %d: %.1f yd from the point before it (the exporter would cut it)", l.Name, j+1, d)
+			}
+			prev = w.Point
+		}
+		if d := dist3v(prev, l.To); d > 60 {
+			t.Errorf("leg %s: 'to' is %.1f yd from the last via (the exporter would cut it)", l.Name, d)
+		}
+	}
+}
+
+// dist3v is the 3-D distance of two points (the plan's dist3 is unexported to this package's tests? it is here).
+func dist3v(a, b Point) float64 {
+	dx, dy, dz := float64(a.X-b.X), float64(a.Y-b.Y), float64(a.Z-b.Z)
+	return math.Sqrt(dx*dx + dy*dy + dz*dz)
+}
+
+// r35 slot7b wiped three times at step 313 (the old rotthorn leg's 'to'): it stood on the first Quilguard Champion's own
+// spawn (4.1 yd), so the party walked into the 2-Champion pack and the Stalker 6035, 25.9 yd away, joined. The 'to' is the
+// spiral's own corner point 2102.67 1728 78.19 now, 25.7 yd from the pack and 20+ yd from every spawn. The two Quilguard
+// Champions 87430/87431 (4 yd apart, the only patrolling spawns of the spiral: a 176 yd round trip up to the pit rim and back)
+// were split across the rotthorn leg (87431) and the charlga leg (87430); pulling one while the other stands 4 yd away is the
+// joiner the census warns of, so the pair is one pull of two and the charlga leg no longer books 87430 again.
+func TestRazorfenRotthornSpiralStandAndPatrol(t *testing.T) {
+	p := loadPlan(t, rfkPlan)
+	r := rfkLeg(t, p, "rotthorn")
+	if got := fmt.Sprintf("%.2f %.1f %.2f", r.To.X, r.To.Y, r.To.Z); got != "2102.67 1728.0 78.19" {
+		t.Errorf("rotthorn to = %s, want the spiral corner 2102.67 1728.0 78.19", got)
+	}
+	if d := dist3v(r.To, r.PullGroups[0].Positions[0]); d < 15 || d > 30 {
+		t.Errorf("rotthorn to is %.1f yd from its first pack: want a stand 15-30 yd off it", d)
+	}
+	g := r.PullGroups[1]
+	if got := fmt.Sprint(g.Entries); got != "[4623 4623]" {
+		t.Errorf("rotthorn pull group 1 entries %s, want the patrolling pair [4623 4623]", got)
+	}
+	if len(g.Positions) != 2 || g.Radius != 6 {
+		t.Errorf("rotthorn pull group 1: %d positions radius %v, want 2 and 6", len(g.Positions), g.Radius)
+	}
+	if g.Patrol == nil || fmt.Sprint(g.Patrol.Entries) != "[4623]" || len(g.Patrol.Path) != 6 || g.Patrol.PeriodS != 70 || !g.Patrol.PeriodEstimate {
+		t.Errorf("rotthorn pull group 1 patrol %+v, want entries [4623], the 6 creature_movement points, period 70 (estimate)", g.Patrol)
+	}
+	c := rfkLeg(t, p, "charlga_razorflank")
+	n := 0
+	for _, g := range c.PullGroups {
+		holds := false
+		for _, e := range g.Entries {
+			holds = holds || e == 4623
+		}
+		if !holds {
+			continue
+		}
+		n++
+		if got := fmt.Sprintf("%.1f %.1f", g.Positions[0].X, g.Positions[0].Y); got != "2105.5 1822.5" {
+			t.Errorf("charlga_razorflank pull group at %s holds a 4623: the pit-rim pair is the only one", got)
+		}
+	}
+	if n != 1 {
+		t.Errorf("charlga_razorflank books 4623 in %d pull groups, want the pit-rim pair only", n)
+	}
+	for _, g := range c.PullGroups {
+		for _, pos := range g.Positions {
+			if math.Abs(float64(pos.X-2094.39)) < 0.5 && math.Abs(float64(pos.Y-1773.56)) < 0.5 {
+				t.Errorf("charlga_razorflank still pulls 87430 at 2094.39 1773.56: it is rotthorn pull group 1's pair")
+			}
 		}
 	}
 }
