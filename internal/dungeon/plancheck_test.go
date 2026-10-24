@@ -763,6 +763,17 @@ func (m magmaNav) Polygons(_ uint32, x0, y0, x1, y1 float32) ([]navmesh.Polygon,
 func minF(a, b float32) float32 { return min(a, b) }
 func maxF(a, b float32) float32 { return max(a, b) }
 
+// errPolys is a PolygonLister whose listing always fails (a tile load or fetch error): every path through the check must report the
+// point as a BLOCKING magma-check issue, never silently pass it.
+type errPolys struct {
+	fakeNav
+	err error
+}
+
+func (m errPolys) Polygons(_ uint32, _, _, _, _ float32) ([]navmesh.Polygon, bool, error) {
+	return nil, false, m.err
+}
+
 // TestHazardFlagsAMagmaSeam: a plan point exactly on the ground/magma shared edge is refused although the point itself is on the ground
 // polygon (the server's snap may land on the magma one: Hateforge Quarry step 273, live "why=magma path=0x0"); a point MagmaClearYd clear
 // of magma is fine, and a magma floor well above or below the point is another storey.
@@ -806,6 +817,52 @@ func TestHazardFlagsAMagmaSeam(t *testing.T) {
 	}
 }
 
+// TestHazardErrorFailsThePoint: when listing the map's polygons fails, the point is reported as a BLOCKING magma-check issue (through
+// walk, gm_cross, direct and look), not silently passed. A hazard that swallowed the error again fails it.
+func TestHazardErrorFailsThePoint(t *testing.T) {
+	errBoom := errors.New("tile boom")
+	nav := errPolys{fakeNav{}, errBoom}
+	to := Point{10, 0, 0}
+	plans := map[string]*Plan{
+		"walk":      {Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: to}}},
+		"gm_cross":  {Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: to, Via: []Waypoint{{Point: to, GMCross: true}}}}},
+		"direct":    {Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: to, Via: []Waypoint{{Point: Point{5, 0, 0}}, {Point: to, Direct: true}}}}},
+		"look":      {Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{pg(10, 0)}}}},
+		"boss look": {Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{0, 0, 0}, Boss: &Boss{Entry: 9, Position: Point{10, 0, 0}}}}},
+	}
+	for name, p := range plans {
+		res, err := CheckPlan(p, nav, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var got *PlanIssue
+		for i := range res.Issues {
+			if res.Issues[i].Reason == ReasonMagmaCheck {
+				got = &res.Issues[i]
+				break
+			}
+		}
+		if got == nil {
+			t.Errorf("%s: no %q issue (issues: %s)", name, ReasonMagmaCheck, issueReasons(res.Issues))
+			continue
+		}
+		if !strings.HasPrefix(got.Detail, "magma check failed: ") || !strings.Contains(got.Detail, "tile boom") {
+			t.Errorf("%s: detail %q names neither the rule nor the error", name, got.Detail)
+		}
+	}
+	// A look whose path is too short to move from stands where it is (`from` when the path is shorter than the standoff): the failing
+	// lister still reports it. The point is the leg's `to` (the walk of the pack's stand reports the `to` it came from) — the pack at
+	// (10, 0, 0) is within the look view of the party at (0, 0, 0), so the check stands pat and reports the check it could not run.
+	short := errPolys{fakeNav{partial: map[Point]Point{{10, 0, 0}: {0, 0, 0}}}, errBoom}
+	res, err := CheckPlan(plans["look"], short, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issueReasons(res.Issues) != "0/to/0/magma check failed" {
+		t.Errorf("short look: issues %q", issueReasons(res.Issues))
+	}
+}
+
 // TestHateforgeQuarryKeepsClearOfMagma pins the r37 slot4 fix: no point of the plan (a move row, an approach stand, a look point) may sit
 // on, or within MagmaClearYd of, a magma or slime polygon. Live r37 stopped at step 273, whose approach stand -8073.12 -3441.07 162.52 sat
 // exactly on the shared edge of a ground and a magma polygon: the server's move check read it as magma ("why=magma path=0x0") and the lead
@@ -817,7 +874,7 @@ func TestHateforgeQuarryKeepsClearOfMagma(t *testing.T) {
 	}
 	dir := mapMmaps(p.Map)
 	if dir == "" {
-		t.Skipf("no navmesh files for map %d here", p.Map)
+		t.Skipf("no navmesh files for map %d here: set TURTLE_AGENT_MMAPS to a folder holding %03d.mmap and the %03d*.mmtile tiles", p.Map, p.Map, p.Map)
 	}
 	pl := navmesh.NewPlanner(dir)
 	defer pl.Close()
@@ -827,5 +884,69 @@ func TestHateforgeQuarryKeepsClearOfMagma(t *testing.T) {
 		if i.Reason == ReasonMagma {
 			t.Errorf("leg %d %s %.2f %.2f %.2f: %s", i.Leg, i.Part, i.Point.X, i.Point.Y, i.Point.Z, i.Detail)
 		}
+	}
+}
+
+// TestMagmaFlagsMatchTheServerEnum pins the agent's NavMagma/NavSlime bits against the server core's NavTerrain enum
+// (MoveMapSharedDefines.h): the magma rule reads the real area/flag decoding off the mmaps, so the check fails closed on the same
+// polygons the server's move check refuses. The test runs the REAL decoding path — the flags of a hand-built dtPoly-like value, the
+// same uint16 the tiles carry — not the constants against themselves.
+//
+// Cited: ~/wt-core-revive/src/game/Maps/MoveMapSharedDefines.h, enum NavTerrain:
+//
+//	NAV_GROUND = 0x01, NAV_MAGMA = 0x02, NAV_SLIME = 0x04, NAV_WATER = 0x08,
+//	NAV_STEEP_SLOPES = 0x10 (slopes above the player climb angle).
+//
+// Cited: ~/wt-core-revive/tools/mmap/src/TileBuilder.cpp (the mmap generator maps AREA_MAGMA -> NAV_MAGMA and AREA_SLIME ->
+// NAV_SLIME; AREA_* in src/game/Maps/GridMapDefines.h: AREA_MAGMA = 7, AREA_SLIME = 8), and GridMapDefines.h MAP_LIQUID_TYPE_MAGMA =
+// 0x01 / MAP_LIQUID_TYPE_SLIME = 0x04 feeding AREA_MAGMA / AREA_SLIME in tools/mmap/src/TerrainBuilder.cpp.
+func TestMagmaFlagsMatchTheServerEnum(t *testing.T) {
+	// The server core's NavTerrain numbers (MoveMapSharedDefines.h): a hand-read copy, pinned below bit by bit.
+	const (
+		serverGround = 0x01
+		serverMagma  = 0x02
+		serverSlime  = 0x04
+		serverWater  = 0x08
+		serverSteep  = 0x10
+	)
+	if navmesh.NavMagma != serverMagma || navmesh.NavSlime != serverSlime || navmesh.NavGround != serverGround ||
+		navmesh.NavWater != serverWater || navmesh.NavSteep != serverSteep {
+		t.Fatalf("agent flags %#04x/%#04x/%#04x/%#04x/%#04x != server NavTerrain %#04x/%#04x/%#04x/%#04x/%#04x",
+			navmesh.NavGround, navmesh.NavMagma, navmesh.NavSlime, navmesh.NavWater, navmesh.NavSteep,
+			serverGround, serverMagma, serverSlime, serverWater, serverSteep)
+	}
+	// The REAL decoding path: a raw tile flag word (the uint16 dtPoly.flags the tiles carry, as nd_polys hands it to
+	// engine.polys and Polygons reports it) decoded the way hazard decodes it — the NavMagma|NavSlime mask. The magma
+	// square is a dtPoly-like value built by hand: flags field first, then its verts.
+	decode := func(flags uint16) (magma, slime bool) {
+		return flags&(navmesh.NavMagma|navmesh.NavSlime) != 0, flags&navmesh.NavSlime != 0
+	}
+	for _, c := range []struct {
+		name       string
+		flags      uint16
+		wantHazard bool
+	}{
+		{"server NAV_MAGMA", serverMagma, true},
+		{"server NAV_SLIME", serverSlime, true},
+		{"server NAV_MAGMA on ground", serverGround | serverMagma, true},
+		{"server NAV_GROUND", serverGround, false},
+		{"server NAV_WATER", serverWater, false},
+		{"server NAV_STEEP_SLOPES", serverSteep, false},
+	} {
+		// The hand-built "tile word": the flags the generator wrote for that area, no agent constant in the input.
+		raw := c.flags
+		if got, _ := decode(raw); got != c.wantHazard {
+			t.Errorf("%s (%#04x): decoded hazard=%v, want %v", c.name, raw, got, c.wantHazard)
+		}
+	}
+	// And end to end through the check: a polygon carrying the server's raw NAV_MAGMA word fails the point as on magma/slime.
+	magma := navmesh.Polygon{Flags: serverMagma, Verts: []navmesh.Vec3{{10, -10, 0}, {20, -10, 0}, {20, 10, 0}, {10, 10, 0}}}
+	res, err := CheckPlan(&Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{15, 0, 0}}}},
+		magmaNav{fakeNav{}, []navmesh.Polygon{magma}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issueReasons(res.Issues) != "0/to/0/on magma/slime" {
+		t.Errorf("raw server word through the check: issues %q", issueReasons(res.Issues))
 	}
 }

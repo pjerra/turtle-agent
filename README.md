@@ -857,7 +857,7 @@ A **warning** (not a failure, and it never blocks a run) says a `direct` hop is 
 waypoint does the same and can be sent again from wherever a fight leaves the lead bot. The check is static: it cannot see where a fight drags the lead bot, or a refusal
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
-a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
+a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files. `TestHateforgeQuarryKeepsClearOfMagma` needs the map's mmaps (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle808` or `~/tortoise-wow-server/data/mmaps`); without them it skips.
 
 ### Route oracle
 

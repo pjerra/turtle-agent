@@ -40,6 +40,9 @@ const (
 	// NavTerrain): the server's move check refuses such a spot ("why=magma", Hateforge Quarry step 273) even when the point is on the
 	// ground polygon's side of the seam, because the polygon the query snaps it to can be the magma one.
 	ReasonMagma = "on magma/slime"
+	// ReasonMagmaCheck is a point the magma rule could not answer: listing the map's polygons failed (a tile load, listing or fetch
+	// error). It fails the plan like ReasonMagma does: the hazard half of the check is not proven, so the point is not passed.
+	ReasonMagmaCheck = "magma check failed"
 
 	// ReasonSkipped is the reason of a hop the plan exempts (Waypoint.CheckSkip).
 	ReasonSkipped = "skipped"
@@ -76,16 +79,18 @@ const MagmaClearYd = 2.5
 // pool under a bridge is a different floor and is not the party's hazard.
 const magmaZOverlap = 1.5
 
-// hazard fails a point that sits on, or within MagmaClearYd of, a magma or slime polygon, and says whether it did.
-func (c *planChecker) hazard(part string, group int, at, from Point) bool {
+// hazard says whether a point sits on, or within MagmaClearYd of, a magma or slime polygon (failing it as ReasonMagma itself). A
+// Polygons error is returned, not swallowed: the caller fails the point as ReasonMagmaCheck, a BLOCKING issue — a tile load, listing
+// or fetch failure must not silently pass an unsafe point.
+func (c *planChecker) hazard(part string, group int, at, from Point) (bool, error) {
 	lister, ok := c.nav.(PolygonLister)
 	if !ok {
-		return false
+		return false, nil
 	}
 	const near = MagmaClearYd
 	polys, _, err := lister.Polygons(c.p.Map, at.X-near, at.Y-near, at.X+near, at.Y+near)
 	if err != nil {
-		return false // the walk's own queries report a navmesh that cannot answer
+		return false, err
 	}
 	for _, poly := range polys {
 		if poly.Flags&(navmesh.NavMagma|navmesh.NavSlime) == 0 || len(poly.Verts) < 3 {
@@ -111,9 +116,20 @@ func (c *planChecker) hazard(part string, group int, at, from Point) bool {
 		} else {
 			c.fail(part, group, at, from, ReasonMagma, "the point is %.1f yd from a %s polygon (the plan keeps %g yd clear); the server's snap may land on it and refuse the move", d, what, near)
 		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// hazardAt fails the point when the magma rule answers against it (ReasonMagma itself) or cannot answer (ReasonMagmaCheck, a BLOCKING
+// issue carrying the Polygons error). It reports whether the point failed.
+func (c *planChecker) hazardAt(part string, group int, at, from Point) bool {
+	bad, err := c.hazard(part, group, at, from)
+	if err != nil {
+		c.fail(part, group, at, from, ReasonMagmaCheck, "magma check failed: %v", err)
 		return true
 	}
-	return false
+	return bad
 }
 
 // polyDistance is the horizontal distance from p to the convex polygon's boundary and whether p lies inside it.
@@ -677,7 +693,7 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
 	c.rec.begin("", part, from, to)
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazardAt(part, 0, to, from) {
 		return from, nil
 	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
@@ -724,7 +740,7 @@ func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 	c.rec.begin("gmcross", part, from, to)
 	c.rec.straight()
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazardAt(part, 0, to, from) {
 		return to, nil
 	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
@@ -749,7 +765,7 @@ func (c *planChecker) direct(part string, to, from Point) (Point, error) {
 	c.rec.begin("direct", part, from, to)
 	c.rec.straight()
 	defer c.rec.end()
-	if c.avoided(part, 0, to, from) || c.hazard(part, 0, to, from) {
+	if c.avoided(part, 0, to, from) || c.hazardAt(part, 0, to, from) {
 		return to, nil
 	}
 	if !DirectStepOK(from, to) {
@@ -852,7 +868,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		stand = from
 	}
 	c.rec.lookPath(pts, stand, moved)
-	c.hazard(part, group, stand, from)
+	c.hazardAt(part, group, stand, from)
 	if b, ok := c.p.InAvoid(stand); ok {
 		c.fail(part, group, at, from, ReasonAvoid, "the look point %.1f %.1f %.1f lies in avoid box %q (%s)", stand.X, stand.Y, stand.Z, b.Name, boxText(b))
 	}
