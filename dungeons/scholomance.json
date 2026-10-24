@@ -22,13 +22,13 @@
     "hunter:dps"
   ],
   "fleers": [10469, 10477, 10489, 10499],
-  "cc_priority": [10470, 10472, 10476, 11257, 10469],
+  "cc_priority": [10470, 10472, 10476, 11257, 10469, 10475],
   "no_cc": [10478, 10480, 10481, 10482, 10485, 10486, 10487, 10488, 10489, 10491, 10495, 10498, 10499, 10500, 10678, 11258, 11551],
   "kill_first": [10471, 11582, 10477],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 289 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "Leg order (2026-10-24): instructor_malicia, the_ravenian, lorekeeper_polkelt, lady_illucia_barov, jandice_barov, rattlegore, vectus, ras_frostwhisper, doctor_theolen_krastinov, lord_alexei_barov. It is a 2-opt route over the bosses' own positions (Malicia-Ravenian 17 yd, Krastinov-Alexei 4 yd, Polkelt-Illucia 9 yd): the export walks 3863 yd instead of 4506 yd, 476 steps instead of 531. No gate or event depends on the order: every boss gate (177371-177377, 175570) spawns OPEN and Gandling's gate opens only when the six bosses are done.",
-    "The plan is hand-written as of 2026-10-24 (spec handwritten: true): the census and the fixes are in ~/TortoiseBots-audit/PREP-SCHOLOMANCE-2026-10-24.md. Critters 2110 Black Rat and 4075 Rat (faction 31, 1 and 8 hp, civilian) are out of every group; 32 Scholomance Students 10475 are neutral (faction 15, script npc_scholomance_student) and in no pull, but Vectus' Aggro turns every student within 100 yd to FACTION_MONSTER, so the Vectus leg meets them as adds.",
+    "The plan is hand-written as of 2026-10-24 (spec handwritten: true): the census and the fixes are in ~/TortoiseBots-audit/PREP-SCHOLOMANCE-2026-10-24.md. Critters 2110 Black Rat and 4075 Rat (faction 31, 1 and 8 hp, civilian) are out of every group; 32 Scholomance Students 10475 are neutral (faction 15, script npc_scholomance_student) until one of them aggroes: its Aggro turns every student within 100 yd, Marduk and Vectus to FACTION_MONSTER for the run, and Vectus' first victim makes every living student attack (boss_vectus.cpp:164-176, 237-250). Leg vectus clears all 32 in ten pulls (pull groups 18-27) from stands 26+ yd from every later student and 31+ yd from Vectus before the boss row; spec ~/TortoiseBots-audit/specs/scholo-vectus-fight.md.",
     "Doors: the map has 8 closed doors/gates on the route (state 1 = READY = closed: Viewing Room Door 175167, Doors 175610/175619/177370, Iron Gates 175611-175614, 175617, 175618). The navmesh has no doors, so the plan walks through them and has no use_object step: the first run stops at a closed one. The boss gates (177371-177377, 175570) spawn open (state 0 = ACTIVE).",
     "Boss-linked guards: Alexei Barov is linked (creature_groups 48862, flags 2 AGGRO_TOGETHER) to his two Risen Guards 10489; Rattlegore is linked (48801) to a Risen Construct 10488. Their pulls are gone and the entries are the boss rows' first, so the boss row is the fight. Lord Blackwood 14695 (Turtle boss, script boss_lord_blackwood, 30520 hp) stands in the leg-7 hall pack at 200.29 151.785 109.795 and is fought as that pull's member; he is not one of the plan's ten bosses.",
     "Kormok: the trigger 16047 and Kormok 16118 share one point at -24.898 141.242 84.0468 with Ras Frostwhisper; Kormok's spawn 1068112 has spawn_flags 2 (SPAWN_FLAG_DISABLED: never spawned) and the trigger only spawns him on a spell hit. Their pull is gone; the Ras leg is three hall packs and the boss.",
@@ -1523,6 +1523,128 @@
             {"x": 185.168, "y": 95.0084, "z": 104.799}
           ],
           "radius": 5.5
+        },
+        {
+          "entries": [10475, 10475, 10475],
+          "positions": [
+            {"x": 143.114, "y": 65.1004, "z": 103.226},
+            {"x": 144.228, "y": 68.1884, "z": 103.473},
+            {"x": 139.847, "y": 68.5642, "z": 103.207}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 165, "y": 74, "z": 102.96}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475, 10475, 10475],
+          "positions": [
+            {"x": 123.59, "y": 79.7615, "z": 101.698},
+            {"x": 136.103, "y": 87.3239, "z": 102.13},
+            {"x": 131.626, "y": 86.589, "z": 102.056},
+            {"x": 126.328, "y": 81.184, "z": 101.868},
+            {"x": 133.769, "y": 82.9655, "z": 102.423}
+          ],
+          "radius": 8.8,
+          "approach": [
+            {"x": 151, "y": 69, "z": 102.97}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475],
+          "positions": [
+            {"x": 111.239, "y": 64.8379, "z": 99.035},
+            {"x": 109.245, "y": 68.8032, "z": 98.9383},
+            {"x": 113.776, "y": 68.9133, "z": 99.8338}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 134, "y": 61, "z": 102.82}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475],
+          "positions": [
+            {"x": 94.8988, "y": 73.5054, "z": 97.7763},
+            {"x": 97.9246, "y": 75.0885, "z": 97.9626},
+            {"x": 95.2852, "y": 76.5092, "z": 97.7875}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 113, "y": 59, "z": 99.5}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475, 10475],
+          "positions": [
+            {"x": 110.322, "y": 84.9862, "z": 99.9234},
+            {"x": 112.661, "y": 86.179, "z": 99.6562},
+            {"x": 105.698, "y": 88.6083, "z": 98.2769},
+            {"x": 110.395, "y": 87.146, "z": 99.8255}
+          ],
+          "radius": 5.7,
+          "approach": [
+            {"x": 113, "y": 63, "z": 99.58}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475],
+          "positions": [
+            {"x": 97.1261, "y": 97.5603, "z": 97.8059},
+            {"x": 96.7977, "y": 93.9028, "z": 97.416},
+            {"x": 99.9902, "y": 95.1306, "z": 97.7582}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 90, "y": 73, "z": 98.83}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475, 10475, 10475],
+          "positions": [
+            {"x": 110.053, "y": 98.8023, "z": 99.7995},
+            {"x": 103.822, "y": 106.933, "z": 98.6173},
+            {"x": 114.324, "y": 103.698, "z": 99.837},
+            {"x": 110.434, "y": 101.785, "z": 100.11},
+            {"x": 107.033, "y": 106.829, "z": 99.1358}
+          ],
+          "radius": 7.4,
+          "approach": [
+            {"x": 96, "y": 82, "z": 97.93}
+          ]
+        },
+        {
+          "entries": [10475],
+          "positions": [
+            {"x": 105.327, "y": 110.351, "z": 98.8685}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 88, "y": 100, "z": 98.21}
+          ]
+        },
+        {
+          "entries": [10475, 10475, 10475],
+          "positions": [
+            {"x": 120.956, "y": 97.073, "z": 101.359},
+            {"x": 123.5, "y": 99.3146, "z": 102.006},
+            {"x": 123.571, "y": 95.8893, "z": 101.615}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 124, "y": 74, "z": 101.93}
+          ]
+        },
+        {
+          "entries": [10475, 10475],
+          "positions": [
+            {"x": 118.303, "y": 115.577, "z": 101.587},
+            {"x": 118.181, "y": 113.647, "z": 101.827}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 113, "y": 92, "z": 99.37}
+          ]
         }
       ],
       "boss": {
@@ -1530,7 +1652,7 @@
         "position": {"x": 143.481, "y": 99.0964, "z": 104.659},
         "first": [10433],
         "approach": [
-          {"x": 128.0, "y": 105.0, "z": 102.4}
+          {"x": 128, "y": 105, "z": 102.4}
         ]
       },
       "notes": [
@@ -1549,9 +1671,9 @@
       "name": "ras_frostwhisper",
       "to": {"x": 35.9159, "y": 126.749, "z": 83.629},
       "via": [
-        {"x": 124.0, "y": 116.0, "z": 101.9},
-        {"x": 120.0, "y": 115.0, "z": 101.1},
-        {"x": 110.0, "y": 110.0, "z": 99.5}
+        {"x": 124, "y": 116, "z": 101.9},
+        {"x": 120, "y": 115, "z": 101.1},
+        {"x": 110, "y": 110, "z": 99.5}
       ],
       "pull_groups": [
         {

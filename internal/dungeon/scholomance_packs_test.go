@@ -63,7 +63,8 @@ func dist3S(a, b scholomanceSpawn) float64 {
 // The EventAI fleers (10469, 10477) plus the r29 slot8 runners (10489 Risen Guard, 10499 Spectral Researcher, seen re-joining at 15-16%),
 // the polymorphable humanoid casters (best first: the Fear, the Counterspell, the Shadow Bolt, the Handler, the Adept), the undead no
 // Polymorph lands on, and the killers (the Acolyte's Dark Mending, the Dark Summoner's Risen Lackey, the Necromancer's Call of the
-// Grave/Corpse Explosion). A kill_first entry must not be in cc_priority (the loader refuses both).
+// Grave/Corpse Explosion). A kill_first entry must not be in cc_priority (the loader refuses both). The Viewing Room students 10475
+// (humanoid, mechanic_immune_mask 0) are last for one Polymorph and one Sap per pull.
 func TestScholomanceUnitListsComeFromTheCensus(t *testing.T) {
 	p := loadPlan(t, scholomancePlan)
 	for _, c := range []struct {
@@ -71,7 +72,7 @@ func TestScholomanceUnitListsComeFromTheCensus(t *testing.T) {
 		got, want string
 	}{
 		{"fleers", fmt.Sprint(p.Fleers), "[10469 10477 10489 10499]"},
-		{"cc_priority", fmt.Sprint(p.CCPriority), "[10470 10472 10476 11257 10469]"},
+		{"cc_priority", fmt.Sprint(p.CCPriority), "[10470 10472 10476 11257 10469 10475]"},
 		{"cc_always", fmt.Sprint(p.CCAlways), "[]"},
 		{"no_cc", fmt.Sprint(p.NoCC), "[10478 10480 10481 10482 10485 10486 10487 10488 10489 10491 10495 10498 10499 10500 10678 11258 11551]"},
 		{"kill_first", fmt.Sprint(p.KillFirst), "[10471 11582 10477]"},
@@ -120,7 +121,7 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		{"lady_illucia_barov", 10502, 14, "[]"},
 		{"jandice_barov", 10503, 36, "[]"},
 		{"rattlegore", 11622, 25, "[10488]"},
-		{"vectus", 10432, 18, "[10433]"},
+		{"vectus", 10432, 28, "[10433]"},
 		{"ras_frostwhisper", 10508, 3, "[]"},
 		{"doctor_theolen_krastinov", 11261, 2, "[]"},
 		{"lord_alexei_barov", 10504, 3, "[10489]"},
@@ -146,8 +147,8 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		}
 		pulls += len(l.PullGroups)
 	}
-	if pulls != 152 {
-		t.Errorf("%d pull groups in all, want 152", pulls)
+	if pulls != 162 {
+		t.Errorf("%d pull groups in all, want 162", pulls)
 	}
 }
 
@@ -297,5 +298,158 @@ func TestScholomancePacksAreSixOnOneFloorAndTheirRadiiHoldOnlyThem(t *testing.T)
 				}
 			}
 		}
+	}
+}
+
+// The Viewing Room: all 32 students die in ten pulls (groups 18-27) before the Marduk/Vectus boss row. Vectus' first
+// victim pulls every living student (boss_vectus.cpp:164-176), and one student's aggro turns the room hostile
+// (boss_vectus.cpp:237-250), so each stand is 26+ yd from every later student and 31+ yd from Vectus, and takes in
+// every student within the 10 yd assistance ring of its first unit.
+func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
+	p := loadPlan(t, scholomancePlan)
+	spawns := loadScholomanceSpawns(t)
+	var students []scholomanceSpawn
+	var marduk scholomanceSpawn
+	for _, s := range spawns {
+		if s.entry == 10475 {
+			students = append(students, s)
+		}
+		if s.entry == 10433 {
+			marduk = s
+		}
+	}
+	if len(students) != 32 {
+		t.Fatalf("%d census 10475 spawns, want 32", len(students))
+	}
+	leg := p.Legs[6]
+	if leg.Name != "vectus" {
+		t.Fatalf("leg 6 is %q, want vectus", leg.Name)
+	}
+	if len(leg.PullGroups) != 28 {
+		t.Fatalf("leg vectus has %d pull groups, want the 18 hall pulls plus the 10 student pulls", len(leg.PullGroups))
+	}
+	if leg.Boss == nil || leg.Boss.Entry != 10432 {
+		t.Fatalf("leg vectus boss %+v, want 10432", leg.Boss)
+	}
+	vectus := scholomanceSpawn{x: float64(leg.Boss.Position.X), y: float64(leg.Boss.Position.Y), z: float64(leg.Boss.Position.Z)}
+	// (a) every census student is a position of exactly one new group, and no other leg lists 10475.
+	seen := map[scholomanceSpawn]int{}
+	for li, l := range p.Legs {
+		for gi, g := range l.PullGroups {
+			for _, e := range g.Entries {
+				if e != 10475 {
+					continue
+				}
+				if li != 6 || gi < 18 {
+					t.Errorf("leg %d pull group %d lists 10475 outside the ten student pulls", li, gi)
+				}
+			}
+		}
+	}
+	for gi := 18; gi < 28; gi++ {
+		g := leg.PullGroups[gi]
+		for k, at := range g.Positions {
+			pos := scholomanceSpawn{entry: 10475, x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}
+			found := false
+			for _, s := range students {
+				if dist3S(s, pos) < 0.2 {
+					found = true
+					if prev, ok := seen[s]; ok {
+						t.Errorf("student at %v in groups %d and %d", at, prev, gi)
+					}
+					seen[s] = gi
+					break
+				}
+			}
+			if !found {
+				t.Errorf("leg vectus pull group %d position %d: no census 10475 at %v", gi, k, at)
+			}
+		}
+		if got := len(g.Entries); got != len(g.Positions) {
+			t.Errorf("leg vectus pull group %d: %d entries but %d positions", gi, got, len(g.Positions))
+		}
+	}
+	if len(seen) != 32 {
+		t.Errorf("%d of the 32 census students are in the ten pulls, want all 32", len(seen))
+	}
+	for gi := 18; gi < 28; gi++ {
+		g := leg.PullGroups[gi]
+		if len(g.Approach) == 0 {
+			t.Errorf("leg vectus pull group %d: no approach stand", gi)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		sp := scholomanceSpawn{x: float64(stand.X), y: float64(stand.Y), z: float64(stand.Z)}
+		// (b) the stand is 16-22.5 yd from its first unit, every other member at least 1 yd farther.
+		nearest := math.Inf(1)
+		ni := -1
+		for k, at := range g.Positions {
+			d := dist3S(sp, scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)})
+			if d < nearest {
+				nearest = d
+				ni = k
+			}
+		}
+		if nearest < 16 || nearest > 22.5 {
+			t.Errorf("leg vectus pull group %d: stand is %.1f yd from its first unit, want 16-22.5", gi, nearest)
+		}
+		for k, at := range g.Positions {
+			if k == ni {
+				continue
+			}
+			if d := dist3S(sp, scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}); d < nearest+1 {
+				t.Errorf("leg vectus pull group %d: member %d is %.1f yd from the stand, inside first %.1f + 1", gi, k, d, nearest)
+			}
+		}
+		// (c) every 10475 of a LATER group is at least 26 yd from the stand.
+		for gj := gi + 1; gj < 28; gj++ {
+			for k, at := range leg.PullGroups[gj].Positions {
+				if d := dist3S(sp, scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}); d < 26 {
+					t.Errorf("leg vectus pull group %d: stand is %.1f yd from later group %d member %d, want 26+", gi, d, gj, k)
+				}
+			}
+		}
+		// (d) the stand is at least 31 yd from Vectus and 33 yd from Marduk's census spawn.
+		if d := dist3S(sp, vectus); d < 31 {
+			t.Errorf("leg vectus pull group %d: stand is %.1f yd from Vectus, want 31+", gi, d)
+		}
+		if d := dist3S(sp, marduk); d < 33 {
+			t.Errorf("leg vectus pull group %d: stand is %.1f yd from Marduk, want 33+", gi, d)
+		}
+		// (e) every 10475 not in an earlier group that stands within 11 yd of `first` is a member of this group.
+		first := scholomanceSpawn{x: float64(g.Positions[ni].X), y: float64(g.Positions[ni].Y), z: float64(g.Positions[ni].Z)}
+		atPos := func(at Point) scholomanceSpawn {
+			return scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}
+		}
+		near := func(list []Point, s scholomanceSpawn) bool {
+			for _, at := range list {
+				if dist3S(atPos(at), s) < 0.2 {
+					return true
+				}
+			}
+			return false
+		}
+		for _, s := range students {
+			if dist3S(s, first) > 11 {
+				continue
+			}
+			earlier := false
+			for gj := 18; gj < gi; gj++ {
+				if near(leg.PullGroups[gj].Positions, s) {
+					earlier = true
+					break
+				}
+			}
+			if earlier {
+				continue
+			}
+			if !near(g.Positions, s) {
+				t.Errorf("leg vectus pull group %d: student at %.3f %.3f within 11 yd of first is not a member", gi, s.x, s.y)
+			}
+		}
+	}
+	// (f) the boss approach comes after all ten: it is the boss object's own.
+	if len(leg.Boss.Approach) == 0 {
+		t.Errorf("leg vectus boss has no approach stand")
 	}
 }
