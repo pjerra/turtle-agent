@@ -142,6 +142,15 @@ type RemoteOptions struct {
 	FromPullGroup *int
 	StartHere     bool
 	StartWait     time.Duration
+	// ElunaPlace puts a partway start's party on the start step with the Eluna test toolkit (settings eluna_toolkit; test servers
+	// only, see eluna_place.go): the agent's `.go xyz` to the step, `q floor`, `quiet`, `.bot summon <lead>`, `place`, `cmd stay`,
+	// `cmd follow`, in place of the distance check. Off: no `.tt` line is sent.
+	ElunaPlace bool
+	// ElunaDz and ElunaSkip are the run's placement options (dungeon_run eluna_place {dz, skip}): the toolkit's quiet then ignores
+	// units more than ElunaDz yards above or below the start step (0: no vertical limit; nil: the toolkit's default, 8) and the
+	// listed entries (a friendly NPC the test needs near the step). Only read with ElunaPlace on.
+	ElunaDz   *float32
+	ElunaSkip []uint32
 	// HaveItems are item entries the caller says the party already carries: a start past the leg that makes one does not refuse for it.
 	HaveItems []uint32
 	// GiveItems is the give_items run option: GM `.additem` lines on named bots at the prepare step (prepare_give.go).
@@ -535,6 +544,7 @@ type RemoteDriver struct {
 	stalled bool
 
 	bound       bool
+	elunaPlaced bool // the Eluna toolkit placed and verified the party at the start step (eluna_place.go): the distance check is not asked of the stale feed
 	unbinding   bool
 	gpsWarned   bool // the note that the start's z check could not read .gps is written
 	serverTrace bool // the run owns the server's run trace: its `trace start` was acked, and no `trace stop` was answered yet (stopServerTrace)
