@@ -59,7 +59,6 @@
   "notes": [
     "DRAFT, census 2026-10-24 (no live run): the world export of map 429 (tools/dungeongen/testdata/map429), the world SQL (~/tortoise-wow/sql/base) and the instance script (src/scripts/dungeons/dire_maul). Every hostile trash spawn of the west wing is a pull member (204 units, 81 pulls), except the 18 Residual Monstrosities 11484 (not pulled: see the ring note) and the 13 upper-west room units at z 28.6 (one unsplittable 13-unit room, no link from the lower route: the r38 run deferred them; see the round-3 note); the 6 bosses are boss steps. Not mapped: the GM-invisible mapping walk is still to do (after the round-2 chains: 3 detour pulls and 98 run-leader hop notices remain) (dungeon_run refuses the plan without allow_draft).",
     "Neutral NPCs left out (29 Shen'dralar Wisps 14361, level 1, faction 1354; 16 Highborne Summoners 11466, faction 1355): faction_template hostileMask 0, so neither is trash and the run leader would find no pack. The 6 Gordok mobs at 273-304 183-325 (north-wing courtyard, faction 45) are not this wing's; the north plan has them.",
-    "Crystal (pylon) event (instance_dire_maul::SetData TYPE_CRISTAL_EVENT): five CrystalGenerator gameobjects - 177259 16.8 277.2 -8.5, 177257 111.9 436.1 28.6, 177258 -85.2 444.7 28.6, 179504 71.1 874.5 -24.6, 179505 -130.4 713.0 -24.6 - each holding four Mana Remnants (11483) within 20 yd. Each crystal has one four-guard pull from a stand 15-25 yd off the pack and a hold on the crystal's object state (active): the hold fights any remnant the pull left and ends only when the crystal is used, so a missed guardian pauses at the crystal instead of at Immol'thar. Killing the last four opens the force field 179503 and the magic vortex 179506 (-38.6 812.7 -29.5) and makes Immol'thar selectable. No use_object step: the kills do it.",
     "Immol'thar's 16 Highborne Summoners turn hostile (faction 100) at the crystal event and attack him; before that they are neutral. Tortheldrin is enabled only when Immol'thar dies (TYPE_IMMOL_THAR DONE), so his leg is the last.",
     "Ferra (14308) is Illyanna's pet and stands 3 yd from her: her boss step lists Ferra first. Revanchion (14690) is Turtle's (loot 14690, 26862 hp via database_updates/world/20260510092659 over the base 24420, Frost Nova 29849): his leg is first in the hall so the hall's trash never wakes him. Tsu'zee (11467, rank 2 rare) is a member of the 3.5 pull (11467,11471, radius 8.6); no skip list (the run leader's rows carry none and would pull him anyway). kill_first holds the four casters, not him.",
     "Fleers: none. No trash entry has the EventAI flee (action 47); the Spectres, the Summoners and the Mana Remnants stand and die. CC: nothing but the Darter (14398, dragonkin) and the Summoners is not undead/elemental, and Polymorph takes neither, so cc_priority and cc_always are empty; no_cc lists every trash entry. kill_first: the two healers/regrowthers (14303 Petrified Guardian, 11473 Eldreth Spectre), the Sorcerer 11470 (Polymorph 13323, Chain Lightning) and the summoner 11484 (Mana Bursts).",
@@ -67,7 +66,10 @@
     "Doors: the west-wing door 300601 at 50.6 501.4 -23.3 (lock 1562; the lock table is not in this world export - the Crescent Key 18249 is the inference from the other Dire Maul doors, so give the commander the key) and the stair door 177211 at 106.1 623.7 -26.3 (no lock). Both are state 1/active; the plan has no door step.",
     "Three detour pulls remain for the mapping walk (leg 0 group 27, leg 3 groups 3 and 8): the pack lies on its own floor but the way from the previous row is on another. Leg 2 group 3's pit climb is an approach chain now (round 2). No pull member stands on another floor than its row (|dz| <= 6). The dreadsteed ritual (Bell 179674, Candle 179673, Wheel 179672, circle 179668 at 800-825 812.7) is a class quest, not part of the clear. The crumble wall 177220 is the east wing's door, not this one.",
     "Server-path fix 2026-10-24 round 2 (r33 slot7b step 112): the 50 yd split of the exporter's 22.4 379.2 -3.5 -> 21.33 448 -20.5 drop to the Tendris boss landed at 21.6 427.7 -15.5, which is in mid air (path-check: not on the navmesh, the live step 112 skipped it); the boss now carries the on-mesh approach points 21.6 420 -4.4 and 21.33 448 -20.5.",
-    "Residual Monstrosities (11484, 18 of them) are not pulled: they guard nothing (the crystals are guarded by the 20 Mana Remnants 11483, the boss only needs the crystal event), all 18 walk the same 18-point 705 yd waypoint ring (creature_movement guids 352901-352915, 341529, 353467-353491), so no stand on that walkway is outside a patrol path, and a fixed pull of a patrolling unit either finds nothing or meets the next patrol. Live r36 steps 421/425: the patrols joining the first ring fights wiped the party 5 times. The ring's trash is left to normal aggro; kill_first still names 11484 for the boss fight."
+    "Crystal (pylon) event (instance_dire_maul::SetData TYPE_CRISTAL_EVENT): five CrystalGenerator gameobjects - 177259 16.8 277.2 -8.5, 177257 111.9 436.1 28.6, 177258 -85.2 444.7 28.6, 179504 71.1 874.5 -24.6, 179505 -130.4 713.0 -24.6 - each holding four Mana Remnants (11483) within 20 yd. Each crystal has one four-guard pull from a stand 15-25 yd off the pack and a hold on the crystal's object state (active): the hold fights any remnant the pull left and ends only when the crystal is used, so a missed guardian pauses at the crystal instead of at Immol'thar. Killing the last four opens the force field 179503 and the magic vortex 179506 (-38.6 812.7 -29.5) and makes Immol'thar selectable. No use_object step: the kills do it. The two hall crystals' stands are off the hall's patrolled ring (r38 slotC2: the old stands -111.3 731.7 and 51.6 855.5 were 1.5 and 8.6 yd from the Residual Monstrosities' ring, so their fights were inside its 20 yd detection).",
+    "Residual Monstrosities (11484, 18 on map 429) walk one shared 18-point ring around Immol'thar's pit (radius 109-118 yd from the pit centre -40.45 811.14; creature_movement guids 341529, 352901-352915, 353467-353491, all z -24.58; the script npc_residual_montruosity keeps them 32-36 yd apart by changing each one's speed 1.0/1.79/2.2). They are NOT linked: no creature_groups row names any of their guids and creature_linking_template has no row on map 429, so only their 5 yd call_for_help and their 20 yd detection tie them. Their template: level 59-60, 14214-14652 hp, arcane school IMMUNE (school_immune_mask 64, and the script applies the immunity too), melee 366-472, Arcane Bolt 13748 every 2.4-3.8 s, a self-centred Arcane Blast 22940 (knockback 350) every 3.8-5.2 s - the knockback is why r38 saw 'the tank picks up 11484 off the healer' - and on death it casts 22939 Summon Mana Bursts: 7 Mana Bursts (14397, 900-1100 hp, stationary, Arcane Explosion 22938 every 1 s) that live 60 s (SpellDuration 3 = 60 s, summoned as TIMED_DEATH_AND_DEAD_DESPAWN). Leg 4 now pulls them in parts: 6 rows at the north ring point -17.6352 697.856 (stand the hall mouth -23 660.7, 37.6 yd from it) and 4 rows at the south-east ring point 46.989 881.837 (stand 85 895, 40 yd from it), each radius 30 and each its own step, so each fight has a rest gate and one Monstrosity (a 30 yd radius holds one at the 32-36 yd spacing; the run leader waits up to 60 s for the next patroller to walk into it). r38 slotC2 wiped twice on them (5 dead in 25 s) when two moves ran along the ring.",
+    "Two more Arcane Torrent formations (14399 + three 14400, creature_groups flags 3 = formation + aggro together, 5 yd) patrol this hall and were pulled only by leg 3 group 11 (at -38.5111 631.679, the party upstairs could not reach it: it read 'pack cleared' in 1 s) and leg 5 group 0 (105.188 724.409, after the boss). Their loops (period ~239 s and ~252 s at 2.5 yd/s) cross the hall's north corridor and the Monstrosities' ring; the run leader's hop pull (a hostile within 15 yd of a hop point) is how r38 met them mid-walk ('a new unit joined: the orders start over' at step 441). Leg 4 now pulls both first, each its own step with a stand in the north corridor (95 700 and -70 650, 24.6 and 36.4 yd from the spawn) and radius 45: a patrolling formation is only inside a fixed radius for part of its loop, and the run leader waits at most 60 s for one, so a pull that finds the pack away from its spawn clears without a fight and the pack is met later (the plan's patrol blocks carry the loop for the agent's own driver).",
+    "No crowd control fits this hall: 11484, 14399, 14400, 11483 and 14397 are creature type 4 (elemental), and the run leader's CC set is Polymorph (humanoid/beast/critter), Shackle Undead, Banish (demon/elemental) and Sap (humanoid) - TortoiseBots runtime/DungeonRunPolicy.h kRunCc. The plan's party (warrior, priest, mage, rogue, hunter) has no warlock, so no Banish; a Banish on 11484 would be the right hold (it stops the knockback and the death summon), and cc_always would carry it for a party with one, but with this hire list it would only make the agent's own driver send Polymorphs at an immune elemental (the Zul'Farrak 'nine orders, one cast' case that no_cc was added for). cc_priority and cc_always stay empty and no_cc keeps the elementals."
   ],
   "legs": [
     {
@@ -3848,7 +3850,29 @@
             "period_s": 259.8,
             "period_estimate": true,
             "source": "creature_movement guid 377673"
-          }
+          },
+          "approach": [
+            {
+              "x": -61.0,
+              "y": 551.4,
+              "z": 29.18
+            },
+            {
+              "x": 124.8,
+              "y": 539.2,
+              "z": 28.68
+            },
+            {
+              "x": 125.07,
+              "y": 483.2,
+              "z": -2.32
+            },
+            {
+              "x": -57.07,
+              "y": 570.67,
+              "z": -4.32
+            }
+          ]
         },
         {
           "entries": [
@@ -5177,11 +5201,459 @@
     {
       "name": "immol'thar",
       "to": {
-        "x": -17.6352,
-        "y": 697.856,
-        "z": -24.5808
+        "x": -18.0,
+        "y": 668.0,
+        "z": -24.571
       },
+      "via": [
+        {
+          "x": 73.6985,
+          "y": 539.6372,
+          "z": -3.6072
+        },
+        {
+          "x": 88.0,
+          "y": 522.6665,
+          "z": -3.5181
+        },
+        {
+          "x": 95.9253,
+          "y": 473.3033,
+          "z": -4.1974
+        },
+        {
+          "x": 97.3333,
+          "y": 464.5332,
+          "z": -4.3181
+        },
+        {
+          "x": 97.8666,
+          "y": 460.5332,
+          "z": -4.3181
+        },
+        {
+          "x": 85.3333,
+          "y": 447.9999,
+          "z": -3.5181
+        },
+        {
+          "x": 77.8666,
+          "y": 433.3332,
+          "z": -3.5181
+        },
+        {
+          "x": 77.6,
+          "y": 432.7999,
+          "z": -3.5181
+        },
+        {
+          "x": 70.1333,
+          "y": 414.6665,
+          "z": -3.5181
+        },
+        {
+          "x": 69.6,
+          "y": 414.1332,
+          "z": -3.5181
+        },
+        {
+          "x": 40.5333,
+          "y": 385.8666,
+          "z": -3.5181
+        },
+        {
+          "x": 37.0667,
+          "y": 383.9999,
+          "z": -3.5181
+        },
+        {
+          "x": 36.2667,
+          "y": 382.3999,
+          "z": -3.5181
+        },
+        {
+          "x": 34.4,
+          "y": 375.9999,
+          "z": -3.5181
+        },
+        {
+          "x": 25.0667,
+          "y": 375.9999,
+          "z": -3.5181
+        },
+        {
+          "x": 22.4,
+          "y": 379.1999,
+          "z": -3.5181
+        },
+        {
+          "x": 22.4,
+          "y": 412.2665,
+          "z": -3.5181
+        },
+        {
+          "x": 24.8,
+          "y": 450.9332,
+          "z": -22.1181
+        },
+        {
+          "x": 25.0667,
+          "y": 453.3332,
+          "z": -23.3181
+        },
+        {
+          "x": 42.6667,
+          "y": 490.6665,
+          "z": -23.2181
+        },
+        {
+          "x": 46.1333,
+          "y": 500.5332,
+          "z": -23.2181
+        },
+        {
+          "x": 46.1333,
+          "y": 525.0665,
+          "z": -23.2181
+        },
+        {
+          "x": 44.0,
+          "y": 537.6,
+          "z": -23.2181
+        },
+        {
+          "x": 21.3333,
+          "y": 554.6666,
+          "z": -23.2181
+        },
+        {
+          "x": -20.0001,
+          "y": 567.4666,
+          "z": -23.2181
+        },
+        {
+          "x": -21.3335,
+          "y": 568.0,
+          "z": -23.2181
+        },
+        {
+          "x": -29.0668,
+          "y": 575.9999,
+          "z": -23.2181
+        },
+        {
+          "x": -30.1335,
+          "y": 588.8,
+          "z": -23.2181
+        },
+        {
+          "x": -30.1335,
+          "y": 611.1999,
+          "z": -23.2181
+        },
+        {
+          "x": -27.4668,
+          "y": 627.7333,
+          "z": -24.6181
+        }
+      ],
       "pull_groups": [
+        {
+          "entries": [
+            14400,
+            14399,
+            14400,
+            14400
+          ],
+          "positions": [
+            {
+              "x": 105.188,
+              "y": 724.409,
+              "z": -24.5797
+            },
+            {
+              "x": 105.188,
+              "y": 724.409,
+              "z": -24.5797
+            },
+            {
+              "x": 105.188,
+              "y": 724.409,
+              "z": -24.5797
+            },
+            {
+              "x": 105.188,
+              "y": 724.409,
+              "z": -24.5797
+            }
+          ],
+          "radius": 45,
+          "patrol": {
+            "entries": [
+              14399
+            ],
+            "path": [
+              {
+                "x": 105.188,
+                "y": 724.409,
+                "z": -24.5797
+              },
+              {
+                "x": 30.9,
+                "y": 727.4,
+                "z": -24.58
+              },
+              {
+                "x": 55.2,
+                "y": 657.6,
+                "z": -24.58
+              },
+              {
+                "x": -5.6,
+                "y": 700.9,
+                "z": -24.58
+              },
+              {
+                "x": -38.5,
+                "y": 632.2,
+                "z": -24.58
+              },
+              {
+                "x": -5.6,
+                "y": 700.4,
+                "z": -24.58
+              },
+              {
+                "x": 55.0,
+                "y": 657.4,
+                "z": -24.58
+              },
+              {
+                "x": 30.8,
+                "y": 726.9,
+                "z": -24.58
+              }
+            ],
+            "period_s": 238.9,
+            "period_estimate": true,
+            "source": "creature_movement guid 314853"
+          },
+          "approach": [
+            {
+              "x": 95,
+              "y": 700,
+              "z": -24.52
+            }
+          ]
+        },
+        {
+          "entries": [
+            14400,
+            14399,
+            14400,
+            14400
+          ],
+          "positions": [
+            {
+              "x": -38.5111,
+              "y": 631.679,
+              "z": -24.6788
+            },
+            {
+              "x": -38.5111,
+              "y": 631.679,
+              "z": -24.6788
+            },
+            {
+              "x": -38.5111,
+              "y": 631.679,
+              "z": -24.6788
+            },
+            {
+              "x": -38.5111,
+              "y": 631.679,
+              "z": -24.6788
+            }
+          ],
+          "radius": 45,
+          "patrol": {
+            "entries": [
+              14399
+            ],
+            "path": [
+              {
+                "x": -38.5111,
+                "y": 631.679,
+                "z": -24.6788
+              },
+              {
+                "x": -73.4,
+                "y": 706.8,
+                "z": -24.58
+              },
+              {
+                "x": -133.1,
+                "y": 656.9,
+                "z": -24.58
+              },
+              {
+                "x": -105.5,
+                "y": 722.8,
+                "z": -24.58
+              },
+              {
+                "x": -186.6,
+                "y": 741.6,
+                "z": -24.58
+              },
+              {
+                "x": -105.5,
+                "y": 722.8,
+                "z": -24.58
+              },
+              {
+                "x": -132.9,
+                "y": 656.6,
+                "z": -24.58
+              },
+              {
+                "x": -73.4,
+                "y": 706.5,
+                "z": -24.58
+              }
+            ],
+            "period_s": 252.2,
+            "period_estimate": true,
+            "source": "creature_movement guid 346789"
+          },
+          "approach": [
+            {
+              "x": -70,
+              "y": 650,
+              "z": -24.52
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": -17.6352,
+              "y": 697.856,
+              "z": -24.5808
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": -18.0,
+              "y": 668.0,
+              "z": -24.571
+            }
+          ]
+        },
         {
           "entries": [
             11483,
@@ -5214,9 +5686,9 @@
           "radius": 18,
           "approach": [
             {
-              "x": -111.3,
-              "y": 731.7,
-              "z": -24.0
+              "x": -150,
+              "y": 690,
+              "z": -24.52
             }
           ]
         },
@@ -5242,77 +5714,9 @@
             },
             "state": "active",
             "spot": {
-              "x": -111.3,
-              "y": 731.7,
-              "z": -24.0
-            },
-            "radius": 40,
-            "timeout_s": 120
-          }
-        },
-        {
-          "entries": [
-            11483,
-            11483,
-            11483,
-            11483
-          ],
-          "positions": [
-            {
-              "x": 62.92,
-              "y": 882.38,
-              "z": -24.5795
-            },
-            {
-              "x": 62.92,
-              "y": 866.82,
-              "z": -24.5781
-            },
-            {
-              "x": 78.48,
-              "y": 866.82,
-              "z": -24.5781
-            },
-            {
-              "x": 78.48,
-              "y": 882.38,
-              "z": -24.5796
-            }
-          ],
-          "radius": 18,
-          "approach": [
-            {
-              "x": 51.6,
-              "y": 855.5,
-              "z": -23.4
-            }
-          ]
-        },
-        {
-          "entries": [
-            11483
-          ],
-          "positions": [
-            {
-              "x": 71.097,
-              "y": 874.454,
-              "z": -24.5794
-            }
-          ],
-          "hold": {
-            "object": {
-              "entry": 179504,
-              "near": {
-                "x": 71.097,
-                "y": 874.454,
-                "z": -24.5794
-              }
-            },
-            "state": "active",
-            "spot": {
-              "x": 51.6,
-              "y": 855.5,
-              "z": -23.4
+              "x": -150,
+              "y": 690,
+              "z": -24.52
             },
             "radius": 40,
             "timeout_s": 120
@@ -5400,14 +5804,9 @@
           },
           "approach": [
             {
-              "x": 17,
-              "y": 716,
-              "z": -24.58
-            },
-            {
-              "x": -128,
-              "y": 725,
-              "z": -24.58
+              "x": -180,
+              "y": 710,
+              "z": -24.49
             }
           ]
         },
@@ -5493,14 +5892,9 @@
           },
           "approach": [
             {
-              "x": -173,
-              "y": 789,
-              "z": -24.46
-            },
-            {
-              "x": -146,
-              "y": 885,
-              "z": -24.5
+              "x": -160,
+              "y": 895,
+              "z": -24.47
             }
           ]
         },
@@ -5586,14 +5980,157 @@
           },
           "approach": [
             {
-              "x": -86,
-              "y": 928.5,
-              "z": -24.46
+              "x": 75,
+              "y": 900,
+              "z": -24.43
+            }
+          ]
+        },
+        {
+          "entries": [
+            11483,
+            11483,
+            11483,
+            11483
+          ],
+          "positions": [
+            {
+              "x": 62.92,
+              "y": 882.38,
+              "z": -24.5795
             },
             {
-              "x": 13.9,
-              "y": 929.5,
-              "z": -24.46
+              "x": 62.92,
+              "y": 866.82,
+              "z": -24.5781
+            },
+            {
+              "x": 78.48,
+              "y": 866.82,
+              "z": -24.5781
+            },
+            {
+              "x": 78.48,
+              "y": 882.38,
+              "z": -24.5796
+            }
+          ],
+          "radius": 18,
+          "approach": [
+            {
+              "x": 95,
+              "y": 880,
+              "z": -24.19
+            }
+          ]
+        },
+        {
+          "entries": [
+            11483
+          ],
+          "positions": [
+            {
+              "x": 71.097,
+              "y": 874.454,
+              "z": -24.5794
+            }
+          ],
+          "hold": {
+            "object": {
+              "entry": 179504,
+              "near": {
+                "x": 71.097,
+                "y": 874.454,
+                "z": -24.5794
+              }
+            },
+            "state": "active",
+            "spot": {
+              "x": 95,
+              "y": 880,
+              "z": -24.19
+            },
+            "radius": 40,
+            "timeout_s": 120
+          }
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": 46.989,
+              "y": 881.837,
+              "z": -24.5796
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": 85,
+              "y": 895,
+              "z": -24.52
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": 46.989,
+              "y": 881.837,
+              "z": -24.5796
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": 85,
+              "y": 895,
+              "z": -24.52
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": 46.989,
+              "y": 881.837,
+              "z": -24.5796
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": 85,
+              "y": 895,
+              "z": -24.52
+            }
+          ]
+        },
+        {
+          "entries": [
+            11484
+          ],
+          "positions": [
+            {
+              "x": 46.989,
+              "y": 881.837,
+              "z": -24.5796
+            }
+          ],
+          "radius": 30,
+          "approach": [
+            {
+              "x": 85,
+              "y": 895,
+              "z": -24.52
             }
           ]
         }
@@ -5609,17 +6146,18 @@
           {
             "x": 25.07,
             "y": 891.66,
-            "z": -25.72
+            "z": -24.25
           },
           {
             "x": -7.05,
             "y": 853.36,
-            "z": -26.98
+            "z": -30.95
           }
         ]
       },
       "notes": [
-        "Immol'thar is level 61 and not selectable until all five crystals are used: the pulls of this leg hold crystals 4 and 5 (8 Mana Remnants) and the 18 patrolling Residual Monstrosities. His 16 Summoners turn hostile at the event; expect them as adds, not pulls."
+        "Immol'thar is level 61 and not selectable until all five crystals are used: the pulls of this leg hold crystals 4 and 5 (8 Mana Remnants) and the 18 patrolling Residual Monstrosities. His 16 Summoners turn hostile at the event; expect them as adds, not pulls.",
+        "r38 slotC2 (steps 441-442) walked from the hall mouth -17.6 697.9 to -64 704 and -107.15 729.27: the latter two are 0.9 and 2.3 yd from the Residual Monstrosities' ring, and the second is 5.7 yd from the Arcane Torrent loop of 346789, so the moves hop-pulled two Monstrosities and a Torrent formation mid-walk and the party wiped twice (5 dead in 25 s). The leg now opens at the mouth (-23 660.7, 37.6 yd from the ring), pulls the two wandering Torrent formations (leg 5 group 0 / leg 3 group 11 as before, now first in this leg, each with a stand in the north corridor), then the Monstrosities in parts from the mouth, then works the outer corridor: west crystal (-150 690), T3 (-180 710), T4 (-160 895), T5 (75 900), east crystal (95 880), 4 more Monstrosity pulls at 46.989 881.837 from 85 895, then the boss approach. No row of the hall walk is within 20 yd of the ring except the boss approach (25.07 891.66 is 8 yd inside it: the pit is inside the ring and the approach must cross it)."
       ]
     },
     {
