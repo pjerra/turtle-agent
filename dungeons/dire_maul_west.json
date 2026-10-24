@@ -1024,12 +1024,39 @@
     {
       "name": "revanchion",
       "to": {"x": 29.7657, "y": 547.141, "z": -4.39526},
+      "pull_groups": [
+        {
+          "entries": [11471, 11472, 11472],
+          "positions": [
+            {"x": 101.058, "y": 499.006, "z": -4.39552},
+            {"x": 95.5937, "y": 509.64, "z": -4.39552},
+            {"x": 108.099, "y": 514.157, "z": -4.39552}
+          ],
+          "radius": 14.7,
+          "approach": [
+            {"x": 120.0, "y": 505.0, "z": -4.3}
+          ]
+        },
+        {
+          "entries": [11472, 11472, 11471, 11475],
+          "positions": [
+            {"x": 71.8152, "y": 549.049, "z": -4.395},
+            {"x": 60.184, "y": 548.875, "z": -4.395},
+            {"x": 68.2634, "y": 562.322, "z": -4.39066},
+            {"x": 66.9158, "y": 538.415, "z": -4.395}
+          ],
+          "radius": 18.2,
+          "approach": [
+            {"x": 67.0, "y": 522.0, "z": -4.3}
+          ]
+        }
+      ],
       "boss": {
         "entry": 14690,
         "position": {"x": 29.7657, "y": 547.141, "z": -4.39526}
       },
       "notes": [
-        "Turtle boss 14690 at 29.8 547.1 -4.4, between Illyanna's floor and Kalendris' hall: killed before the hall's trash, which walks past him. No pulls in his leg; the two packs within 20 yd of him stay in the Kalendris leg."
+        "Turtle boss 14690 at 29.8 547.1 -4.4, between Illyanna's floor and Kalendris' hall: killed before the hall's trash, which walks past him. r33 (2026-10-24) wiped 4 times on the leg walk: the move to the boss crosses the lower hall through Kalendris packs 6 (101 499/96 510/108 514) and 2 (72 549/60 549/68 562/67 538). Group 0 pulls pack 6 from (120 505), 15 yd off its nearest member and 43+ yd off packs 2/3, on the mesh; group 1 pulls pack 2 from (67 522), 15-17 yd off its nearest member and 26+ yd off packs 3/6/12 and 40+ yd off the boss, on the mesh; both stands path-check complete from the leg walk. The two packs within 20 yd of Revanchion (group 12 and the lower-floor group 1) stay in the Kalendris leg."
       ]
     },
     {
