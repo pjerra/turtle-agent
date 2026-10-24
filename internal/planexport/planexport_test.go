@@ -1253,3 +1253,24 @@ func TestBossSkipUnreachableExportsTheFlag(t *testing.T) {
 		t.Fatalf("boss comment %q", b.Comment)
 	}
 }
+
+// TestBossSkipUnreachableFlagValues: the spec's literal cases — no team exports 4096, alliance exports 4096 | 2.
+func TestBossSkipUnreachableFlagValues(t *testing.T) {
+	leg := func(team string) string {
+		tm := ""
+		if team != "" {
+			tm = `"team":"` + team + `",`
+		}
+		return `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+  "boss":{"entry":62661,"position":{"x":-5798.46,"y":-3742.97,"z":201.241},` + tm + `"skip_unreachable":"deep water"}}]}`
+	}
+	bare := build(t, parsePlan(t, leg("")))
+	if got := bare.Steps[len(bare.Steps)-1].Flags; got != 4096 {
+		t.Fatalf("no team: flags %d (want 4096)", got)
+	}
+	ally := build(t, parsePlan(t, leg("alliance")))
+	if got := ally.Steps[len(ally.Steps)-1].Flags; got != 4096|2 {
+		t.Fatalf("alliance: flags %d (want %d)", got, 4096|2)
+	}
+}
