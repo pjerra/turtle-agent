@@ -99,7 +99,7 @@ Points with no navmesh floor within reach (see mmaps above); each is marked `nee
 | `blackrock_depths` | 11 | 0 | 1 |
 | `stratholme_undead` | 3 | 0 | 0 |
 | `windhorn_canyon` | 1 | 0 | 0 |
-| `stormwrought_ruins` | 24 | 1 | 0 |
+| `stormwrought_ruins` | 0 | 1 | 0 |
 | `gilneas_city` | 7 | 0 | 0 |
 | `karazhan_crypt` | 12 | 0 | 0 |
 | `zul_gurub` | 25 | 0 | 1 |
