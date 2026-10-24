@@ -30,7 +30,8 @@
     "Fleers: 12216 Poison Sprite (EventAI flee at 15 %). Humanoid casters: 11793/11794 (Polymorph). kill_first 12224 (Wild Regeneration at 75 %), 13142 and 12220 (roots), 12217 (Corruption); no healer among the trash.",
     "Patrols: 29 hostile creature_movement patrols (7 Theradrim Guardians with their linked shardlings, 3 Shadowstalkers, 2 Dryads, 2 Sisters, 2 Slimes, 2 Hydras, 2 Snapjaws, 2 Stompers, one each Tangler/Behemoth/Corruptor/Lurker/Spewed Larva, and the rare Meshlok). The 80 groups whose anchors come within 25 yd of a path carry one block each (the nearest patrol); periods are estimates (path length at 2.5 yd/s). The run leader's rows carry no patrol.",
     "Route risks no plan field fixes: 56 hostile Vile Larvae (12218, non-elite 45-47) are not in any pull (the generator left them to the orange wing) and the leg-0 approach path passes within 0.7-6 yd of seven 7-larva linked groups; friendly NPCs stand on the route: Spirit of Maraudos 12242 at 2.3 yd (leg 0), Elder Splitrock 15556 at 3.3 yd (leg 4), Celebras the Redeemed 13716 at 0.0 yd on the Celebras boss point. Princess Theradras summons 12238 on aggro (script); no door, lever or key is in the wing. The Scepter of Celebras event and the Vylestem vines are optional and not in the plan.",
-    "Still open: the rotgrip boss point needs the mapping walk (needs_walk), 11 detour groups stand on another layer than their pack (leg 0 groups 2/3/14/24/25/48/49/71, leg 2 groups 20/21, leg 3 group 6), and the run-leader hop notices remain."
+    "Still open: the rotgrip boss point needs the mapping walk (needs_walk), 11 detour groups stand on another layer than their pack (leg 0 groups 2/3/14/24/25/48/49/71, leg 2 groups 20/21, leg 3 group 6), and the run-leader hop notices remain.",
+    "Fix round 2026-10-24 (r28b maraudon_purple slotA, the steps 70-74 wipes: the run walked its approach into the patrolling slime pair at 762 -181 and fought the sludge, the lurker and the satyr mix as one 6-8 unit pack): leg 0 groups 35-39 are 4 pulls in route order, radius 5, one approach stand each on the pack's floor 15-25 yd from the pack and outside the later packs' aggro reach: the slime pair 12221 first with its own patrol block (source 54580, pulled first or waited out), then the Sisters 11794, the sludge 12222, and the lone lurker 12223 folded into the satyr mix (6 units) with the Meshlok patrol. kill_first 12217 and cc_priority 11794 already cover the mix's Corruptor and the Sisters at plan level. Leg 0 is 71 pulls; nothing else changed."
   ],
   "legs": [
     {
@@ -759,7 +760,32 @@
             {"x": 763.298, "y": -187.649, "z": -59.7045},
             {"x": 765.684, "y": -184.129, "z": -58.4382}
           ],
-          "radius": 5
+          "radius": 5,
+          "patrol": {
+            "entries": [12221],
+            "path": [
+              {"x": 775.96, "y": -172.869, "z": -56.7207},
+              {"x": 778.393, "y": -158.287, "z": -56.1565},
+              {"x": 775.505, "y": -172.203, "z": -56.6955},
+              {"x": 765.061, "y": -183.781, "z": -58.5442},
+              {"x": 761.998, "y": -197.65, "z": -63.1052},
+              {"x": 766.374, "y": -210.599, "z": -65.0405},
+              {"x": 776.22, "y": -208.315, "z": -65.8325},
+              {"x": 780.707, "y": -193.719, "z": -70.6212},
+              {"x": 790.682, "y": -181.59, "z": -74.8264},
+              {"x": 780.967, "y": -193.273, "z": -70.7535},
+              {"x": 776.294, "y": -207.799, "z": -65.8931},
+              {"x": 767.029, "y": -210.955, "z": -65.0218},
+              {"x": 762.595, "y": -197.41, "z": -62.9624},
+              {"x": 764.941, "y": -184.185, "z": -58.5874}
+            ],
+            "period_s": 74.4,
+            "period_estimate": true,
+            "source": "creature_movement of spawn 54580 (Noxious Slime, 14 points, 186 yd at 2.5 yd/s)"
+          },
+          "approach": [
+            {"x": 775, "y": -170, "z": -56.6}
+          ]
         },
         {
           "entries": [11794, 11794],
@@ -789,7 +815,10 @@
             "period_s": 74.4,
             "period_estimate": true,
             "source": "creature_movement of spawn 54580 (Noxious Slime, 14 points, 186 yd at 2.5 yd/s)"
-          }
+          },
+          "approach": [
+            {"x": 812.5, "y": -152.5, "z": -74.9}
+          ]
         },
         {
           "entries": [12222, 12222, 12222, 12222],
@@ -821,11 +850,19 @@
             "period_s": 74.4,
             "period_estimate": true,
             "source": "creature_movement of spawn 54580 (Noxious Slime, 14 points, 186 yd at 2.5 yd/s)"
-          }
+          },
+          "approach": [
+            {"x": 775, "y": -162.5, "z": -56.3}
+          ]
         },
         {
-          "entries": [12223],
+          "entries": [12216, 11791, 11791, 12216, 12217, 12223],
           "positions": [
+            {"x": 736.766, "y": -114.996, "z": -56.4388},
+            {"x": 739.91, "y": -122.194, "z": -56.5653},
+            {"x": 742.923, "y": -127.961, "z": -56.2506},
+            {"x": 747.838, "y": -121.34, "z": -56.4993},
+            {"x": 750.224, "y": -129.533, "z": -56.3232},
             {"x": 765.097, "y": -112.538, "z": -57.4167}
           ],
           "radius": 5,
@@ -853,43 +890,10 @@
             "period_s": 110.2,
             "period_estimate": true,
             "source": "creature_movement of spawn 1246210 (Meshlok the Harvester, 17 points, 275 yd at 2.5 yd/s)"
-          }
-        },
-        {
-          "entries": [12216, 12217, 11791, 11791, 12216],
-          "positions": [
-            {"x": 747.838, "y": -121.34, "z": -56.4993},
-            {"x": 750.224, "y": -129.533, "z": -56.3232},
-            {"x": 739.91, "y": -122.194, "z": -56.5653},
-            {"x": 742.923, "y": -127.961, "z": -56.2506},
-            {"x": 736.766, "y": -114.996, "z": -56.4388}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [12237],
-            "path": [
-              {"x": 756.757, "y": -82.4439, "z": -57.3813},
-              {"x": 767.826, "y": -89.5371, "z": -57.5593},
-              {"x": 762.118, "y": -97.7071, "z": -56.3762},
-              {"x": 750.452, "y": -101.092, "z": -57.4764},
-              {"x": 726.43, "y": -82.5648, "z": -57.4997},
-              {"x": 701.567, "y": -84.3042, "z": -57.4999},
-              {"x": 688.907, "y": -92.4233, "z": -57.5},
-              {"x": 673.819, "y": -94.9076, "z": -57.5},
-              {"x": 655.716, "y": -87.5088, "z": -57.5},
-              {"x": 642.722, "y": -90.4145, "z": -57.4999},
-              {"x": 627.422, "y": -96.631, "z": -57.5},
-              {"x": 642.365, "y": -90.2384, "z": -57.4999},
-              {"x": 656.258, "y": -88.0142, "z": -57.4999},
-              {"x": 674.224, "y": -94.7124, "z": -57.4999},
-              {"x": 688.994, "y": -92.4803, "z": -57.4999},
-              {"x": 701.847, "y": -84.2126, "z": -57.4991},
-              {"x": 727.092, "y": -82.5207, "z": -57.5}
-            ],
-            "period_s": 110.2,
-            "period_estimate": true,
-            "source": "creature_movement of spawn 1246210 (Meshlok the Harvester, 17 points, 275 yd at 2.5 yd/s)"
-          }
+          },
+          "approach": [
+            {"x": 765, "y": -135, "z": -56.3}
+          ]
         },
         {
           "entries": [12223, 12223],
