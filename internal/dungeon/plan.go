@@ -95,6 +95,9 @@ type Plan struct {
 	// LevelBand is the character levels the dungeon is meant for, low and high (Uldaman 41-45): the prepare step's hired party takes the
 	// middle of it as its level. Empty: the plan gives none.
 	LevelBand []int `json:"level_band,omitempty"`
+	// TankMinHP is the least max health the hired tank should have for the plan's level band (Ragefire Chasm 800 at 13-18, #266): a tank
+	// below it is a preflight warning (weak gear: autogear again, or hire another tank). 0: no check.
+	TankMinHP uint32 `json:"tank_min_hp,omitempty"`
 	// HireComposition is the hired party (prepare.party "hire") when prepare.hire.composition gives none, in its form ("class" or
 	// "class:role" each). Empty: DefaultHireComposition. Zul'Farrak hires a mage for the Polymorph of its big packs.
 	HireComposition []string `json:"hire_composition,omitempty"`
@@ -751,6 +754,7 @@ type rawPlan struct {
 	Outside    string            `json:"outside_tele"`
 	Portal     *rawPortal        `json:"portal"`
 	Band       []int             `json:"level_band"`
+	TankMinHP  *uint32           `json:"tank_min_hp"`
 	Hire       []string          `json:"hire_composition"`
 	CCPrio     []uint32          `json:"cc_priority"`
 	CCAlways   []uint32          `json:"cc_always"`
@@ -1036,6 +1040,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 		c.fail("level_band", "%v: use [low, high] with 1 <= low <= high <= 60", rp.Band)
 	default:
 		p.LevelBand = []int{rp.Band[0], rp.Band[1]}
+	}
+	if rp.TankMinHP != nil {
+		if v := *rp.TankMinHP; v != 0 && (v < 100 || v > 20000) {
+			c.fail("tank_min_hp", "%d: use 0 or 100-20000", v)
+		} else {
+			p.TankMinHP = v
+		}
 	}
 	if len(rp.CCPrio) > 0 {
 		p.CCPriority = slices.Clone(rp.CCPrio)

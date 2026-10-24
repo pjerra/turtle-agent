@@ -114,7 +114,7 @@ func TestCreateMissingCharacterThenLogin(t *testing.T) {
 	h.send(opcode.SMSGLoginVerifyWorld, packet.NewWriter().U32(0).F32(0).F32(0).F32(0).F32(0).Bytes())
 	select {
 	case <-h.s.Ready():
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		t.Fatal("not ready after the create")
 	}
 }
@@ -144,7 +144,7 @@ func TestCreateFailureEndsSession(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("code %d: err = %v", c.code, err)
 			}
-		case <-time.After(2 * time.Second):
+		case <-time.After(expectWait):
 			t.Fatalf("code %d: session did not end", c.code)
 		}
 		if n := len(h.srv.Skipped()); n != 0 {
@@ -169,7 +169,7 @@ func TestCreateEmptyReplyEndsSession(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "empty reply") {
 			t.Fatalf("err = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(expectWait):
 		t.Fatal("session did not end")
 	}
 }

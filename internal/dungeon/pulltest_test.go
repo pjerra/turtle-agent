@@ -65,8 +65,8 @@ func TestPulltestEquivalentPacks(t *testing.T) {
 	if len(g.mobs) != 0 || len(g.ordersOf("cmd pullback")) != 3 {
 		t.Fatalf("mobs %v pullbacks %v", g.mobs, g.ordersOf("cmd pullback"))
 	}
-	// GM use: the start's two lines only; nothing was respawned.
-	if g.respawns != 0 || rep.Remote.GMCommands != 2 || rep.Remote.RunGMAssists != 0 || len(pt.GMCommands) != 0 {
+	// GM use: the start's three lines only (.appear, .go xyz and .gps); nothing was respawned.
+	if g.respawns != 0 || rep.Remote.GMCommands != 3 || rep.Remote.RunGMAssists != 0 || len(pt.GMCommands) != 0 {
 		t.Fatalf("respawns %d gm %d assists %d", g.respawns, rep.Remote.GMCommands, rep.Remote.RunGMAssists)
 	}
 	if pt.Summary.TimeToKillMeanS <= 0 || pt.Summary.HealerMinManaPct != 100 {
@@ -94,7 +94,7 @@ func TestPulltestRespawn(t *testing.T) {
 	if len(pt.Tries) != 3 || pt.Summary.Killed != 3 || pt.Tries[1].Reset != "respawn" || pt.Tries[2].Reset != "respawn" || pt.Tries[1].PullGroup != 0 {
 		t.Fatalf("%+v", pt)
 	}
-	if g.respawns != 2 || rep.Remote.RunGMAssists != 2 || rep.Remote.GMCommands != 2 || len(pt.GMCommands) != 2 {
+	if g.respawns != 2 || rep.Remote.RunGMAssists != 2 || rep.Remote.GMCommands != 3 || len(pt.GMCommands) != 2 {
 		t.Fatalf("respawns %d assists %d gm %d / %v", g.respawns, rep.Remote.RunGMAssists, rep.Remote.GMCommands, pt.GMCommands)
 	}
 	n := 0
