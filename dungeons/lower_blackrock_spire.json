@@ -36,7 +36,7 @@
     "Needs: the Doors (GO_DOORS) and the Rookery eggs (GO_ROOKERY_EGG) are UBRS-side; no door, lever or key step is needed for the seven bosses.",
     "LBRS and UBRS share map 229; this plan is the lower half. UBRS is the raid plan upper_blackrock_spire.",
     "Server-path fix 2026-10-24 (r33 slot5): leg 0 pull group 13's pack is pulled from the z 31 pit floor and a refused or skipped pull leaves the party there; the export's cut from the z 50 row ran through the z 45-46 ledge (-62.1 -389.3, -63.5 -389.9) and -106.7 -405.3, all refused by the server. Pull group 14 now walks from the pit point -45.3 -404 31.5 via -42.666786 -533 29.3; pull group 5 and the Omokk boss split the 39.2 -577.1 / 0 -576 corridor at 10 -576.2 29.7; leg 1 has a via at 0 -448 -18.5, and pull group 22 (leg 1) and pull group 3 (leg 3) split the 0 -448 and -21.33 -533.33 seams. Every exported move passes path-check from the last executed move.",
-    "Server-path fix 2026-10-24 round 2 (r33 slot4b, step 80 = leg 0 pull group 20): the run leader stood on the z 31 pit floor at -27.3 -371.1 after the pit pulls and the server has no path from there up to the group's z 48.8 shelf row (NOPATH; the shelf is reached only by the east loop and the ramp at 41.9 -434.9 -> 43.9 -404.1), so pull group 20 now walks the loop from the pit point -27.26 -345.83 31.63 via -35.2 -395.2, 48.8 -529.6, 41.87 -434.93 and up the ramp to the shelf stand 35.2 -355.73 48.73 (38 yd short of the pack). Every leg passes path-check, and the first point is reachable from every pit point the pulls leave the party on."
+    "Server-path fix 2026-10-24 round 2 (r33 slot4b, step 80 = leg 0 pull group 20): the run leader stood on the z 31 pit floor at -27.3 -371.1 after the pit pulls and the server has no path from there up to the group's z 48.8 shelf row (NOPATH; the shelf is reached only by the east loop and the ramp at 41.9 -434.9 -> 43.9 -404.1), so pull group 20 now walks from the pit point -27.26 -345.83 31.63 via -35.2 -395.2 and the east loop and ramp bottom at 41.87 -434.93 up to the shelf stand 35.2 -355.73 48.73 (38 yd short of the pack); the export's cut splits each leg into hops of at most 50 yd and every one passes path-check, and the first point is reachable from every pit point the pit pulls leave the party on."
   ],
   "legs": [
     {
@@ -254,24 +254,7 @@
           "approach": [
             {"x": -27.26, "y": -345.83, "z": 31.63},
             {"x": -35.2, "y": -395.2, "z": 31.63},
-            {"x": -36.647, "y": -427.167, "z": 32.33},
-            {"x": -38.39, "y": -465.7, "z": 30.46},
-            {"x": -39.2, "y": -496, "z": 29.63},
-            {"x": -42.67, "y": -533, "z": 29.3},
-            {"x": -40.53, "y": -544.27, "z": 29.23},
-            {"x": -36.8, "y": -552, "z": 29.23},
-            {"x": -21.33, "y": -570.93, "z": 29.23},
-            {"x": 5.33, "y": -574.93, "z": 29.23},
-            {"x": 21.33, "y": -576, "z": 26.73},
-            {"x": 39.2, "y": -577.07, "z": 31.13},
-            {"x": 49.6, "y": -569.33, "z": 30.63},
-            {"x": 48.8, "y": -529.6, "z": 27.23},
-            {"x": 48.27, "y": -516.8, "z": 30.03},
-            {"x": 45.025, "y": -476.932, "z": 27.119},
-            {"x": 42.67, "y": -448, "z": 28.03},
             {"x": 41.87, "y": -434.93, "z": 30.53},
-            {"x": 40, "y": -411.2, "z": 42.23},
-            {"x": 43.2, "y": -405.33, "z": 48.73},
             {"x": 35.2, "y": -355.73, "z": 48.73}
           ]
         },
