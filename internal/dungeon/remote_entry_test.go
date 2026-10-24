@@ -394,7 +394,7 @@ func TestEntryTargetsWaitGoneBlipRestartsTheConfirmation(t *testing.T) {
 		}
 		return len(g.asked)
 	}
-	steady := polls(func(n int) bool { return n < 4 })                  // gone from the fourth poll on
+	steady := polls(func(n int) bool { return n < 4 })                   // gone from the fourth poll on
 	blip := polls(func(n int) bool { return n < 4 || n == 5 || n == 6 }) // gone at 4, found again at 5-6, gone from 7
 	// Without the reset the miss at poll 4 would count on to the first miss after the blip.
 	if blip < steady+3 {
