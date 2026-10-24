@@ -25,7 +25,7 @@
   "no_cc": [11458, 11459, 11462, 11469, 11470, 11471, 11472, 11473, 11475, 11476, 11477, 11483, 11484, 14303, 14398, 14399, 14400, 11467, 14690],
   "kill_first": [14303, 11473, 11470, 11484],
   "notes": [
-    "DRAFT, census 2026-10-24 (no live run): the world export of map 429 (tools/dungeongen/testdata/map429), the world SQL (~/tortoise-wow/sql/base) and the instance script (src/scripts/dungeons/dire_maul). Every hostile trash spawn of the west wing is a pull member (235 units, 109 pulls); the 6 bosses are boss steps. Not mapped: the GM-invisible mapping walk is still to do and the 6 detour pulls and 99 run-leader hop notices need it (dungeon_run refuses the plan without allow_draft).",
+    "DRAFT, census 2026-10-24 (no live run): the world export of map 429 (tools/dungeongen/testdata/map429), the world SQL (~/tortoise-wow/sql/base) and the instance script (src/scripts/dungeons/dire_maul). Every hostile trash spawn of the west wing is a pull member (235 units, 109 pulls); the 6 bosses are boss steps. Not mapped: the GM-invisible mapping walk is still to do (after the round-2 chains: 3 detour pulls and 98 run-leader hop notices remain) (dungeon_run refuses the plan without allow_draft).",
     "Neutral NPCs left out (29 Shen'dralar Wisps 14361, level 1, faction 1354; 16 Highborne Summoners 11466, faction 1355): faction_template hostileMask 0, so neither is trash and the run leader would find no pack. The 6 Gordok mobs at 273-304 183-325 (north-wing courtyard, faction 45) are not this wing's; the north plan has them.",
     "Crystal (pylon) event (instance_dire_maul::SetData TYPE_CRISTAL_EVENT): five CrystalGenerator gameobjects - 177259 16.8 277.2 -8.5, 177257 111.9 436.1 28.6, 177258 -85.2 444.7 28.6, 179504 71.1 874.5 -24.6, 179505 -130.4 713.0 -24.6 - each holding four Mana Remnants (11483) within 20 yd. All 20 are pull members before Immol'thar's boss step; killing them uses each crystal, and the last one opens the force field 179503 and the magic vortex 179506 (-38.6 812.7 -29.5) and makes Immol'thar selectable. No use_object step: the kills do it.",
     "Immol'thar's 16 Highborne Summoners turn hostile (faction 100) at the crystal event and attack him; before that they are neutral. Tortheldrin is enabled only when Immol'thar dies (TYPE_IMMOL_THAR DONE), so his leg is the last.",
@@ -33,7 +33,8 @@
     "Fleers: none. No trash entry has the EventAI flee (action 47); the Spectres, the Summoners and the Mana Remnants stand and die. CC: nothing but the Darter (14398, dragonkin) and the Summoners is not undead/elemental, and Polymorph takes neither, so cc_priority and cc_always are empty; no_cc lists every trash entry. kill_first: the two healers/regrowthers (14303 Petrified Guardian, 11473 Eldreth Spectre), the Sorcerer 11470 (Polymorph 13323, Chain Lightning) and the summoner 11484 (Mana Bursts).",
     "Patrols: 68 pull groups carry a patrol block with an estimated period (path length at 2.5 yd/s): the 17 Eldreth Spectres (329-748 yd loops), the 18 Residual Monstrosities (705 yd), the 8 Ironbark Protectors (610-689 yd), the 5 Arcane Torrents (496-630 yd) and Illyanna (266 yd). The blocks are for the agent's driver; the run leader's rows carry no patrol.",
     "Doors: the west-wing door 300601 at 50.6 501.4 -23.3 (lock 1562; the lock table is not in this world export - the Crescent Key 18249 is the inference from the other Dire Maul doors, so give the commander the key) and the stair door 177211 at 106.1 623.7 -26.3 (no lock). Both are state 1/active; the plan has no door step.",
-    "Four detour pulls remain for the mapping walk (leg 0 group 27, leg 2 group 3, leg 3 groups 3 and 8): the pack lies on its own floor but the way from the previous row is on another. No pull member stands on another floor than its row (|dz| \u003c= 6). The dreadsteed ritual (Bell 179674, Candle 179673, Wheel 179672, circle 179668 at 800-825 812.7) is a class quest, not part of the clear. The crumble wall 177220 is the east wing's door, not this one."
+    "Three detour pulls remain for the mapping walk (leg 0 group 27, leg 3 groups 3 and 8): the pack lies on its own floor but the way from the previous row is on another. Leg 2 group 3's pit climb is an approach chain now (round 2). No pull member stands on another floor than its row (|dz| \u003c= 6). The dreadsteed ritual (Bell 179674, Candle 179673, Wheel 179672, circle 179668 at 800-825 812.7) is a class quest, not part of the clear. The crumble wall 177220 is the east wing's door, not this one.",
+    "Server-path fix 2026-10-24 round 2 (r33 slot7b step 112): the 50 yd split of the exporter's 22.4 379.2 -3.5 -> 21.33 448 -20.5 drop to the Tendris boss landed at 21.6 427.7 -15.5, which is in mid air (path-check: not on the navmesh, the live step 112 skipped it); the boss now carries the on-mesh approach points 21.6 420 -4.4 and 21.33 448 -20.5."
   ],
   "legs": [
     {
@@ -1015,7 +1016,11 @@
       ],
       "boss": {
         "entry": 11489,
-        "position": {"x": 13.526, "y": 478.282, "z": -23.2991}
+        "position": {"x": 13.526, "y": 478.282, "z": -23.2991},
+        "approach": [
+          {"x": 21.6, "y": 420, "z": -4.4},
+          {"x": 21.33, "y": 448, "z": -20.5}
+        ]
       },
       "notes": [
         "Crystal 177259 sits at 16.8 277.2 -8.5: the four Mana Remnants around it are pulls 7-12. The door 300601 (50.6 501.4 -23.3, lock 1562) leads on; the Ironbark Protectors patrol the whole courtyard (610-689 yd)."
@@ -1101,6 +1106,12 @@
             {"x": -46.1223, "y": 549.568, "z": -4.39694}
           ],
           "radius": 17.6,
+          "approach": [
+            {"x": 21.33, "y": 547.47, "z": -23.22},
+            {"x": 24.8, "y": 450.93, "z": -22.12},
+            {"x": 5.07, "y": 371.47, "z": -3.02},
+            {"x": -61.33, "y": 515, "z": -3.52}
+          ],
           "patrol": {
             "entries": [11473],
             "path": [
@@ -1188,7 +1199,13 @@
           "positions": [
             {"x": -85.3, "y": 456, "z": 28.603}
           ],
-          "radius": 5
+          "radius": 5,
+          "approach": [
+            {"x": -64, "y": 493.6, "z": -4.32},
+            {"x": 70.4, "y": 498.4, "z": -3.52},
+            {"x": 125.07, "y": 483.2, "z": -2.32},
+            {"x": 124.8, "y": 539.2, "z": 28.68}
+          ]
         },
         {
           "entries": [11470, 11477, 11469, 14398, 11476],
@@ -1475,7 +1492,8 @@
         "first": [14308]
       },
       "notes": [
-        "Illyanna patrols a 266 yd loop on the upper floor; Ferra (14308) is her pet (boss.first). The room pack that stands within her detection is the last pull before the boss step."
+        "Illyanna patrols a 266 yd loop on the upper floor; Ferra (14308) is her pet (boss.first). The room pack that stands within her detection is the last pull before the boss step.",
+        "Server-path fix 2026-10-24 round 2 (r33 slot7b, steps 152 and 157): the z -23 pit and the z 28.6 balcony have no walkable link to the hall near -64 490.7; the only route to either is the east loop and the stairs at x 125. Pull group 3 (the first z -4 pack after the pit) carries the approach 21.33 547.47 -23.22, 24.8 450.93 -22.12, 5.07 371.47 -3.02 and the stand -61.33 515 -3.52 (19.6 yd from group 4's pack, 35.7 yd from its own), and pull group 7 (the first z 28.6 pack) the approach -64 493.6 -4.32, 70.4 498.4 -3.52, 125.07 483.2 -2.32 and the stair top 124.8 539.2 28.68. The exporter's cut fills each with 50 yd hops; every exported leg passes path-check from the last executed move, and the first chain point of each is reachable from every spot the pulls before it leave the party on."
       ]
     },
     {
