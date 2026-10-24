@@ -22,6 +22,7 @@
   ],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 820 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
+    "Server-path chains (2026-10-24, SERVER-PATHCHECK-AUDIT-2026-10-24.md): the live server's PathFinder (2048 nodes) refuses 16 hops of this plan (leg 0 pull-group 26..46 approaches, leg 2 pull-group 4..9 approaches, leg 5's to), although the offline route (65535 nodes) exists. Each refused hop is cut into legs the server query answers complete (type 0x1): leg 0 group 26 climbs the z 149 floor in three stands (-7676 -3684.27 z197.59, -7601.33 -3418.13 z221.59, then its -7786.4 -3493.8 z240.8 stand, from which every later leg-0 terrace stand is one complete leg); leg 2 groups 4, 7, 8 and 9 get one chain stand each (-7488 -3663.73 z215.49; -7622.4 -3408 z221.39; -7490.4 -3675.2 z219.39; -7274.67 -3562.67 z281.37); leg 5 gets four via stands (-7834.67 -3615.2 z172.99, -7677.6 -3588.53 z198.29, -7509.33 -3690.67 z220.19, -7274.67 -3598.13 z254.17). At most 5 waypoints per hop; no row is hand-set.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: Champion Rotag (62785) is summoned (SPELL_SUMMON_ROTAG) by Bonespeaker Narlgom's event",
     "Turtle custom; which boss is the last is not known from the data, the order is a nearest-neighbour walk."
@@ -226,6 +227,8 @@
           ],
           "radius": 8,
           "approach": [
+            {"x": -7676, "y": -3684.27, "z": 197.59},
+            {"x": -7601.33, "y": -3418.13, "z": 221.59},
             {"x": -7786.4, "y": -3493.8, "z": 240.8}
           ]
         },
@@ -703,6 +706,7 @@
           ],
           "radius": 11,
           "approach": [
+            {"x": -7488, "y": -3663.73, "z": 215.49},
             {"x": -7628, "y": -3570, "z": 241}
           ]
         },
@@ -736,6 +740,7 @@
           ],
           "radius": 9,
           "approach": [
+            {"x": -7622.4, "y": -3408, "z": 221.39},
             {"x": -7650, "y": -3630, "z": 197.6}
           ]
         },
@@ -748,6 +753,7 @@
           ],
           "radius": 8,
           "approach": [
+            {"x": -7490.4, "y": -3675.2, "z": 219.39},
             {"x": -7600, "y": -3625, "z": 220}
           ]
         },
@@ -758,6 +764,7 @@
           ],
           "radius": 7,
           "approach": [
+            {"x": -7274.67, "y": -3562.67, "z": 281.37},
             {"x": -7620, "y": -3585, "z": 282.3}
           ]
         },
@@ -1215,6 +1222,12 @@
     },
     {
       "name": "chieftain_shalk_blackwind",
+      "via": [
+        {"x": -7834.67, "y": -3615.2, "z": 172.99},
+        {"x": -7677.6, "y": -3588.53, "z": 198.29},
+        {"x": -7509.33, "y": -3690.67, "z": 220.19},
+        {"x": -7274.67, "y": -3598.13, "z": 254.17}
+      ],
       "to": {"x": -7544.51, "y": -3761.01, "z": 282.885},
       "pull_groups": [
         {
