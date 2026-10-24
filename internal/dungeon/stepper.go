@@ -146,7 +146,38 @@ type Stepper struct {
 	err       string
 	skipped   []string        // what the team gate passed over since Skipped was last called
 	teamSeen  map[string]bool // team-gated parts already noted as hostile in view (a note once per part)
-	objSeen   map[string]bool // game objects a wait has seen in view (describeRef): with gone_ok, gone later counts as done
+	objSeen   sightings       // game objects a wait has seen in view: with gone_ok, gone later counts as done
+	goneSince time.Time       // when the current gone_ok wait began to read its object missing, readably; zero: not missing
+	goneKey   [2]int          // the leg and step goneSince counts for
+}
+
+// Gone-object rules (wait_for gameobject with gone_ok). A miss is read from the agent's own object store, which lists only what the
+// agent sees: it proves the object gone only when the agent stands within GoneReadYd of the wait's point (a nearer object would be
+// listed), and only after it has held for GoneConfirm without a break. The remote driver's `cmd state` answers follow the same
+// confirmation (remote_entry.go).
+const (
+	GoneReadYd  = 50.0
+	GoneConfirm = 3 * time.Second
+	// SightYd: two waits on one entry within this of each other are one target; farther apart, two.
+	SightYd = 10.0
+)
+
+// sightings is the targets (entry and point) a game-object wait has read found in this run.
+type sightings []ObjectRef
+
+func (l *sightings) add(r *ObjectRef) {
+	if !l.has(r) {
+		*l = append(*l, *r)
+	}
+}
+
+func (l sightings) has(r *ObjectRef) bool {
+	for _, o := range l {
+		if o.Entry == r.Entry && (o.Near == nil || r.Near == nil || dist3(*o.Near, *r.Near) <= SightYd) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewStepper starts at the first leg. now may be nil (time.Now).
@@ -581,6 +612,24 @@ func (s *Stepper) Skipped() []string {
 	return out
 }
 
+// goneConfirmed says whether a gone_ok wait's object, not in the agent's view now, is gone: seen earlier in this run, the agent stands
+// within GoneReadYd of the wait's point (so that a miss is the object's, not the agent's distance), and the miss has held for
+// GoneConfirm. A wait with no near point can never be judged so.
+func (s *Stepper) goneConfirmed(r *ObjectRef) bool {
+	key := [2]int{s.leg, s.idx}
+	if s.goneKey != key {
+		s.goneKey, s.goneSince = key, time.Time{}
+	}
+	if r.Near == nil || dist3(s.w.Position(), *r.Near) > GoneReadYd || !s.objSeen.has(r) {
+		s.goneSince = time.Time{}
+		return false
+	}
+	if s.goneSince.IsZero() {
+		s.goneSince = s.now()
+	}
+	return s.now().Sub(s.goneSince) >= GoneConfirm
+}
+
 func (s *Stepper) holds(w *WaitFor) bool {
 	switch {
 	case w.GameObject != nil:
@@ -589,13 +638,11 @@ func (s *Stepper) holds(w *WaitFor) bool {
 		}
 		o, ok := s.find(&w.GameObject.ObjectRef)
 		if ok {
-			if s.objSeen == nil {
-				s.objSeen = map[string]bool{}
-			}
-			s.objSeen[describeRef(&w.GameObject.ObjectRef)] = true
+			s.objSeen.add(&w.GameObject.ObjectRef)
+			s.goneSince = time.Time{}
+			return o.State == w.GameObject.State
 		}
-		// gone_ok: not in view now, seen earlier in this run: the script removed it after using it.
-		return (ok && o.State == w.GameObject.State) || (!ok && w.GameObject.GoneOK && s.objSeen[describeRef(&w.GameObject.ObjectRef)])
+		return w.GameObject.GoneOK && s.goneConfirmed(&w.GameObject.ObjectRef)
 	case w.HostilesGone != nil:
 		c := s.w.Position()
 		if w.HostilesGone.Center != nil {

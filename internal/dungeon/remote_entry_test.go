@@ -357,7 +357,8 @@ func entrySealGoneStep(timeout int, goneOK bool) []Step {
 	return st
 }
 
-// gone_ok: the object is answered ready, then not-found (a script that removes it): done, with the note, long before the timeout.
+// gone_ok: the object is answered ready, then not-found for GoneConfirm (a script that removes it): done, with the note, long before the
+// timeout.
 func TestEntryTargetsWaitGoneAfterSeenIsDone(t *testing.T) {
 	g := entryKeystoneGame(t, 3, true)
 	g.fakeRemote.onTick = func(*fakeRemote) {
@@ -372,6 +373,65 @@ func TestEntryTargetsWaitGoneAfterSeenIsDone(t *testing.T) {
 	}
 	if !hasNote(rep, "is gone after it was seen: counted as done (gone_ok)") {
 		t.Fatalf("%s", notesOf(rep))
+	}
+}
+
+// A blip (the object answered again between two misses) starts the confirmation over: the misses before it do not add up.
+func TestEntryTargetsWaitGoneBlipRestartsTheConfirmation(t *testing.T) {
+	polls := func(present func(n int) bool) int {
+		g := entryKeystoneGame(t, 3, true)
+		seal := g.world[1]
+		g.fakeRemote.onTick = func(*fakeRemote) {
+			g.world = g.world[:1]
+			if present(len(g.asked)) {
+				g.world = append(g.world, seal)
+			}
+		}
+		plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(60, true)}, Leg{Name: "i", To: Point{20, 20, 0}})
+		rep, err := entryRun(t, g, plan)
+		if err != nil || !hasNote(rep, "counted as done (gone_ok)") {
+			t.Fatalf("%v\n%s", err, notesOf(rep))
+		}
+		return len(g.asked)
+	}
+	steady := polls(func(n int) bool { return n < 4 })                  // gone from the fourth poll on
+	blip := polls(func(n int) bool { return n < 4 || n == 5 || n == 6 }) // gone at 4, found again at 5-6, gone from 7
+	// Without the reset the miss at poll 4 would count on to the first miss after the blip.
+	if blip < steady+3 {
+		t.Fatalf("steady %d polls, with a blip %d", steady, blip)
+	}
+}
+
+// A refusal that is not a not-found (the point is out of the bots' reach) is no proof of a gone object, however long it lasts.
+func TestEntryTargetsWaitGoneNeedsTheModuleToLookAndFindNothing(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	g.fakeRemote.onTick = func(*fakeRemote) {
+		if len(g.asked) >= 4 {
+			g.world = g.world[:1]
+			g.reach = 1 // every poll now answers too-far
+		}
+	}
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(20, true)})
+	_, err := entryRun(t, g, plan)
+	if err == nil || !strings.Contains(err.Error(), "waited 20 s for game object 124372") || !strings.Contains(err.Error(), "too-far") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// Sightings are per target: a Seal seen at one point says nothing of the same entry at another.
+func TestEntryTargetsWaitGoneSightingsAreKeyedByTarget(t *testing.T) {
+	var l sightings
+	here := ObjectRef{Entry: 18895, Near: &Point{-242, 2159, 90}}
+	near := ObjectRef{Entry: 18895, Near: &Point{-238, 2159, 90}}
+	far := ObjectRef{Entry: 18895, Near: &Point{-100, 2159, 90}}
+	other := ObjectRef{Entry: 18896, Near: &Point{-242, 2159, 90}}
+	l.add(&here)
+	if !l.has(&here) || !l.has(&near) || l.has(&far) || l.has(&other) {
+		t.Fatalf("%v", l)
+	}
+	l.add(&near)
+	if len(l) != 1 {
+		t.Fatalf("a target within SightYd is one: %v", l)
 	}
 }
 

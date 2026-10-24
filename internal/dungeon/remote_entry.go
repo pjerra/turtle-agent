@@ -39,8 +39,10 @@ type entryState struct {
 	waitKey    [2]int
 	waitPolled time.Time
 	waitLast   string
-	// The game objects (describeRef) a wait has had a `cmd state` answer for in this run: with gone_ok, not-found later counts as done.
-	seen map[string]bool
+	// The targets a wait has had a `cmd state` answer for in this run (entry and point): with gone_ok, not-found later counts as done
+	// once it has held for GoneConfirm (missSince: the first not-found of an unbroken run of them, for the wait waitKey names).
+	seen      sightings
+	missSince time.Time
 }
 
 // entryPlanScan is what the plan's object steps (from fromLeg on) offer a probe, and whether all of them can be named by entry.
@@ -225,7 +227,7 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 	defer release()
 	key := [2]int{a.Leg, a.Step}
 	if d.entry.waitKey != key {
-		d.entry.waitKey, d.entry.waitPolled, d.entry.waitLast = key, time.Time{}, ""
+		d.entry.waitKey, d.entry.waitPolled, d.entry.waitLast, d.entry.missSince = key, time.Time{}, "", time.Time{}
 	}
 	if now := d.clk.Now(); d.entry.waitPolled.IsZero() || now.Sub(d.entry.waitPolled) >= entryStatePoll {
 		d.entry.waitPolled = now
@@ -239,10 +241,8 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 		switch {
 		case res.Kind == tbm.KindAck && res.State != nil:
 			d.entry.waitLast = fmt.Sprintf("state:%s flags:%s", res.State.State, res.State.Flags)
-			if d.entry.seen == nil {
-				d.entry.seen = map[string]bool{}
-			}
-			d.entry.seen[describeRef(&w.ObjectRef)] = true
+			d.entry.seen.add(&w.ObjectRef)
+			d.entry.missSince = time.Time{}
 			if strings.EqualFold(res.State.State, wantedState(w.State)) {
 				d.rep.note(fmt.Sprintf("%s: cmd state says %s is %s (guid %d)", a.Label, describeRef(&w.ObjectRef), res.State.State, res.State.GUID))
 				d.st.SkipStep()
@@ -253,8 +253,11 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 			d.entry.waitLast = "an answer cmd state could not be read: " + res.Final
 		case res.Code() == "not-found":
 			d.entry.waitLast = "not-found: no spawned object of that entry there yet (or out of the bots' reach)"
-			if w.GoneOK && d.entry.seen[describeRef(&w.ObjectRef)] {
-				// Seen by an earlier answer and gone now: the script removed it after using it (gone_ok).
+			if w.GoneOK && d.entry.seen.has(&w.ObjectRef) && d.entry.missSince.IsZero() {
+				d.entry.missSince = now
+			}
+			if w.GoneOK && d.entry.seen.has(&w.ObjectRef) && now.Sub(d.entry.missSince) >= GoneConfirm {
+				// Seen by an earlier answer and gone now for GoneConfirm: the script removed it after using it (gone_ok).
 				d.rep.note(fmt.Sprintf("%s: cmd state says %s is gone after it was seen: counted as done (gone_ok)", a.Label, describeRef(&w.ObjectRef)))
 				d.st.SkipStep()
 				d.entry.waitKey = [2]int{-1, -1}
@@ -273,6 +276,9 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 			return
 		default:
 			d.entry.waitLast = res.Describe()
+		}
+		if res.Kind == tbm.KindAck || res.Code() != "not-found" {
+			d.entry.missSince = time.Time{} // any answer but a not-found breaks the run of misses
 		}
 	}
 	if err := d.tick(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {

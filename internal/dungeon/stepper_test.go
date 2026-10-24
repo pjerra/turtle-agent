@@ -167,12 +167,13 @@ func TestStepperSkipsWhatIsAlreadyTrue(t *testing.T) {
 	}
 }
 
-// A wait_for gameobject with gone_ok (Shadowfang Keep's Courtyard Door): done when the object is in the state, or not in view after it
-// was seen; an object never seen waits out its timeout.
+// A wait_for gameobject with gone_ok (Shadowfang Keep's Courtyard Door): done when the object is in the state, or missing from the
+// agent's view after it was seen, when the agent stands within GoneReadYd of the point and the miss has held for GoneConfirm; an object
+// never seen waits out its timeout.
 func goneOKPlan(goneOK string) string {
 	return `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"a","to":{"x":10,"y":0,"z":0},
-  "steps":[{"wait_for":{"gameobject":{"entry":124372,"state":"active"` + goneOK + `},"timeout_s":20}}],
+  "steps":[{"wait_for":{"gameobject":{"entry":124372,"near":{"x":30,"y":0,"z":0},"state":"active"` + goneOK + `},"timeout_s":60}}],
   "boss":{"entry":7,"position":{"x":40,"y":0,"z":0}}}]}`
 }
 
@@ -185,8 +186,52 @@ func TestStepperWaitGoneOKAfterSeenIsDone(t *testing.T) {
 	}
 	w.objs = w.objs[:1] // the script removed the seal
 	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("one miss is no proof: %+v", a)
+	}
+	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("2 s of misses is not GoneConfirm: %+v", a)
+	}
+	clk.t = clk.t.Add(1 * time.Second)
 	if a := s.Next(); a.Kind != ActKill {
-		t.Fatalf("seen and gone is done: %+v", a)
+		t.Fatalf("seen, and missing for GoneConfirm: %+v", a)
+	}
+}
+
+// A miss from where the agent could not see the object (far from the point) never counts, and a blip of the object resets the count.
+func TestStepperWaitGoneOKNeedsAReadableMissHeldWithoutABreak(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{10, 1, 0}}
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	s := NewStepper(mustPlan(t, goneOKPlan(`,"gone_ok":true`)), w, clk.now)
+	s.Next()
+	seal := w.objs[1]
+	w.objs = w.objs[:1]
+	w.pos = Point{-200, 0, 0} // 230 yd from the point: the store lists nothing there
+	for i := 0; i < 8; i++ {
+		clk.t = clk.t.Add(2 * time.Second)
+		if a := s.Next(); a.Kind != ActWait {
+			t.Fatalf("a miss from out of view is not gone: %+v", a)
+		}
+	}
+	w.pos = Point{10, 1, 0}
+	clk.t = clk.t.Add(2 * time.Second)
+	s.Next() // readable miss number one
+	clk.t = clk.t.Add(2 * time.Second)
+	w.objs = append(w.objs, seal) // a blip: found again
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("%+v", a)
+	}
+	w.objs = w.objs[:1]
+	clk.t = clk.t.Add(2 * time.Second)
+	s.Next() // the count starts over
+	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActWait {
+		t.Fatalf("2 s after the break: %+v", a)
+	}
+	clk.t = clk.t.Add(2 * time.Second)
+	if a := s.Next(); a.Kind != ActKill {
+		t.Fatalf("4 s after the break: %+v", a)
 	}
 }
 
@@ -197,12 +242,14 @@ func TestStepperWaitGoneOKNeverSeenWaitsOutItsTimeout(t *testing.T) {
 	if a := s.Next(); a.Kind != ActWait {
 		t.Fatalf("%+v", a)
 	}
-	clk.t = clk.t.Add(5 * time.Second)
-	if a := s.Next(); a.Kind != ActWait {
-		t.Fatalf("never seen is not gone: %+v", a)
+	for i := 0; i < 5; i++ {
+		clk.t = clk.t.Add(10 * time.Second)
+		if a := s.Next(); i < 5 && clk.t.Sub(time.Unix(1000, 0)) < 60*time.Second && a.Kind != ActWait {
+			t.Fatalf("never seen is not gone: %+v", a)
+		}
 	}
 	clk.t = clk.t.Add(20 * time.Second)
-	if a := s.Next(); a.Kind != ActFailed || !strings.Contains(a.Err, "waited 20 s for game object 124372") {
+	if a := s.Next(); a.Kind != ActFailed || !strings.Contains(a.Err, "waited 60 s for game object 124372") {
 		t.Fatalf("%+v", a)
 	}
 }
@@ -213,9 +260,36 @@ func TestStepperWaitGoneWithoutGoneOKKeepsWaiting(t *testing.T) {
 	s := NewStepper(mustPlan(t, goneOKPlan("")), w, clk.now)
 	s.Next()
 	w.objs = w.objs[:1]
-	clk.t = clk.t.Add(2 * time.Second)
-	if a := s.Next(); a.Kind != ActWait {
-		t.Fatalf("%+v", a)
+	for i := 0; i < 5; i++ {
+		clk.t = clk.t.Add(2 * time.Second)
+		if a := s.Next(); a.Kind != ActWait {
+			t.Fatalf("%+v", a)
+		}
+	}
+}
+
+// A sighting belongs to its target (entry and point), not to the entry: the second wait is on the same entry 60 yd away, never read
+// found, so the first one's sighting does not make it gone.
+func TestStepperWaitGoneOKSightingsAreKeyedByTarget(t *testing.T) {
+	w := &fakeWorld{objs: doors(), pos: Point{60, 0, 0}}
+	w.set(seal, "active")
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	p := mustPlan(t, `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":60,"y":0,"z":0},"steps":[
+  {"wait_for":{"gameobject":{"entry":124372,"near":{"x":30,"y":0,"z":0},"state":"active","gone_ok":true},"timeout_s":60}},
+  {"wait_for":{"gameobject":{"entry":124372,"near":{"x":90,"y":0,"z":0},"state":"active","gone_ok":true},"timeout_s":60}}],
+  "boss":{"entry":7,"position":{"x":70,"y":0,"z":0}}}]}`)
+	s := NewStepper(p, w, clk.now)
+	var a Action
+	for i := 0; i < 12; i++ {
+		a = s.Next()
+		clk.t = clk.t.Add(2 * time.Second)
+		if a.Kind == ActKill || a.Kind == ActFailed {
+			break
+		}
+	}
+	if a.Kind != ActWait || !strings.Contains(a.Label, "near 90 0 0") {
+		t.Fatalf("the second wait must still be waiting: %+v", a)
 	}
 }
 
