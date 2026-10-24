@@ -1752,47 +1752,17 @@
             {"x": 910.216, "y": -302.067, "z": -49.8437}
           ],
           "radius": 10
-        },
-        {
-          "entries": [8900, 8902, 8911, 8902, 8900, 8898],
-          "positions": [
-            {"x": 929.067, "y": -287.174, "z": -49.8526},
-            {"x": 931.065, "y": -289.693, "z": -49.8563},
-            {"x": 934.519, "y": -292.655, "z": -49.8605},
-            {"x": 931.526, "y": -284.472, "z": -49.8526},
-            {"x": 936.359, "y": -285.072, "z": -49.8526},
-            {"x": 939.377, "y": -288.623, "z": -49.8552}
-          ],
-          "radius": 11
-        },
-        {
-          "entries": [8899, 8902, 8902, 8902, 8899, 8920],
-          "positions": [
-            {"x": 927.385, "y": -260.026, "z": -49.8526},
-            {"x": 929.761, "y": -256.317, "z": -49.8526},
-            {"x": 933.663, "y": -258.504, "z": -49.8526},
-            {"x": 935.763, "y": -246.896, "z": -50.114},
-            {"x": 940.441, "y": -246.455, "z": -50.2505},
-            {"x": 934.78, "y": -242.939, "z": -50.2242}
-          ],
-          "radius": 16
-        },
-        {
-          "entries": [8902, 8911, 8902, 8902, 8900, 8911],
-          "positions": [
-            {"x": 905.382, "y": -230.302, "z": -49.8965},
-            {"x": 902.047, "y": -238.54, "z": -49.8527},
-            {"x": 902.036, "y": -233.051, "z": -49.8527},
-            {"x": 901.834, "y": -227.637, "z": -50.0352},
-            {"x": 898.066, "y": -235.703, "z": -49.8527},
-            {"x": 898.096, "y": -232.077, "z": -49.8527}
-          ],
-          "radius": 11
         }
       ],
       "boss": {
         "entry": 9017,
-        "position": {"x": 893.546, "y": -267.056, "z": -71.9002}
+        "position": {"x": 893.546, "y": -267.056, "z": -71.9002},
+        "approach": [
+          {"x": 900, "y": -325, "z": -49.9},
+          {"x": 911.7, "y": -383.2, "z": -49.8},
+          {"x": 976.3, "y": -370.4, "z": -64.7},
+          {"x": 905, "y": -290, "z": -71.8}
+        ]
       },
       "notes": [
         "button \"Dark Keeper Portrait\" entry 164819 at 831.5 -339.6 -46.8",
@@ -1809,7 +1779,9 @@
         "door \"Relic Coffer Door\" entry 174563 at 825.3 -355.3 -49.3",
         "door \"Relic Coffer Door\" entry 174564 at 829.6 -351.3 -49.3",
         "door \"Relic Coffer Door\" entry 174566 at 806.8 -335.4 -49.3",
-        "door \"Secret Door\" entry 174553 at 804.2 -356.1 -49.0"
+        "door \"Secret Door\" entry 174553 at 804.2 -356.1 -49.0",
+        "g23/g24/g25 (8900 8902 8911 8898 / 8899 8902 8920 / 8902 8911 8900: 18 spawns at 898-940 -227..-292 z -49.85) are gone: they stand on the gallery above the Incendius pit and no walkable path from the ring the leg holds reaches that gallery. Server path-check from the positions the leg really holds: 884 -301 -48.8 -> 933.65 -287.95 -49.85 1238.6 yd ends 23.2 yd short; 910.87 -306.58 -49.85 -> 933.63 -251.86 -50.02 1210.1 yd 24.8 short; 794.34 -220.19 -43.2 -> 933.63 -251.86 -50.02 1276.8 yd 24.8 short; 815 -300.9 -43.21, 837.78 -244.41 -48.34 and 867 -245 -71.7 each 1030-1310 yd and 20-33 yd short; g23's own point is NOPATH from the pit floor 923.2 -284.2 -70.2. The gallery is one walkable island of its own (933.63 -251.86 -> 901.24 -232.88 37.1 yd ok, -> 933.65 -287.95 36.1 yd ok) with a single door: the north ramp 886.13 -227.47 -48.12 <- 871.47 -228.27 -43.72 <- 853.3 -213.3 -43.62 <- 839.22 -192.65 -49.72 <- 844 -133.6 -53.9 <- 832 -85.33 -54.32, which only leg 7's via chain walks (161.4 yd from leg 5's first row 813.6 16.8 -53.6, 1030-1310 yd from anywhere in this leg's tail). Nothing links them to Incendius (creature_linking has no row for any of the 18 guids), they never move (movement_type 0, wander 0, creature_groups flag 2 only inside their own groups) and no later step needs them (r38 slotB2: 12 cycles of 'no firing stand found'/'firing stands used up (2)' for 10+ minutes while they never came down)",
+        "Incendius 9017 stands 22.0 yd below the ring the leg ends on, and the direct hop refuses: from 901.24 -232.88 -49.9 the boss is 1215.2 yd away and the path ends 33.0 yd short. From g22's stand (910.87 -306.58 -49.85, the party's real 884 -301 -48.8) the served route is 305.9 yd down the arena's south-east door, so the boss approach now walks it: 900 -325 -49.9 (28.9 yd ok from 884 -301 -48.8, 21.4 from g22's point), 911.7 -383.2 -49.8 (60.5), 976.3 -370.4 -64.7 (92.5), 905 -290 -71.8 (109.4), 25.6 yd from the boss on the arena floor and outside his 20 yd aggro with the party's 3 yd spread, so the run leader's own rest gate runs out of combat before the pull. The door passes 10-14 yd from the two 8910 Blazing Fireguards of leg 6 group 0 (940.976 -305.621, 928.311 -320.615), which are leg 6's own first pull"
       ]
     },
     {
@@ -2092,7 +2064,10 @@
       "boss": {
         "entry": 9156,
         "position": {"x": 1009.75, "y": -239.017, "z": -61.3038}
-      }
+      },
+      "notes": [
+        "via points 27-29 (871.46655 -228.26674 -43.72, 886.13324 -227.46674 -48.12, 933.3332 -232.8 -50.02) walk the gallery above the Incendius pit that leg 5 no longer pulls (leg 5's note): the three packs there (18 spawns at 898-940 -227..-292 z -49.85, entries 8900 8902 8911 8898 / 8899 8902 8920 / 8902 8911 8900) stand 2-15 yd from that line and will come at the party during this walk. They can be pulled only on that gallery (its single door is the north ramp 886.13324 -227.46674 -48.12, reached from 871.46655 -228.26674 -43.72); a later round should put their three pulls between the ramp and 933.3332 -232.8 -50.02, where 901.2405 -232.8786 -49.8856, 933.6315 -251.8615 -50.02 and 933.651 -287.945 -49.85 are 16.2, 37.5 and 36.1 yd apart on one walkable floor"
+      ]
     },
     {
       "name": "magmus",
