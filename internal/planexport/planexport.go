@@ -59,6 +59,10 @@ const (
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
 	FlagExact = 64
+	// FlagSkipUnreachable marks a boss row whose boss may stand out of the party's reach by design (Stormwrought Ruins'
+	// Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagSkipUnreachable): where the step would pause on him alive it ends
+	// "not cleared" with a note instead.
+	FlagSkipUnreachable = 4096
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -520,7 +524,12 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
 		return nil
 	}
-	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Flags: teamFlags(bs.Team), Entries: uniq(bs.First), Comment: "boss"})
+	flags, comment := teamFlags(bs.Team), "boss"
+	if bs.SkipUnreachable != "" {
+		flags |= FlagSkipUnreachable
+		comment = clip("boss; out of reach: "+bs.SkipUnreachable, MaxComment)
+	}
+	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Flags: flags, Entries: uniq(bs.First), Comment: comment})
 	b.last, b.haveLast = bs.Position, true
 	if bs.LootItem != nil {
 		b.add(StepRow{Kind: KindLoot, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Item: bs.LootItem.Entry, Comment: clip("boss loot: "+bs.LootItem.String(), MaxComment)})
