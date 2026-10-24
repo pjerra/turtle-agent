@@ -718,23 +718,13 @@
       "after_boss": [
         {
           "wait_for": {
-            "hostiles_gone": {
-              "radius": 35,
-              "center": {"x": -148, "y": 2171, "z": 128.6}
-            },
-            "timeout_s": 90,
-            "fail_text": "Fenrus' death summons 4 Arugal's Voidwalkers (4627) 14 s later (generic_scripts 9536); the 4th death opens the Sorcerer's Gate 18972. Kill all four."
-          }
-        },
-        {
-          "wait_for": {
             "gameobject": {
               "entry": 18972,
               "near": {"x": -129.034, "y": 2166.16, "z": 129.187},
               "state": "active"
             },
             "timeout_s": 90,
-            "fail_text": "The Sorcerer's Gate opens on the 4th voidwalker death (instance_shadowfang_keep.cpp:176-184); a voidwalker left alive keeps it shut."
+            "fail_text": "Fenrus' death summons 4 Arugal's Voidwalkers (4627) 14 s later (generic_scripts 9536); the Sorcerer's Gate opens on the 4th voidwalker death (instance_shadowfang_keep.cpp:176-184): kill all four, a voidwalker left alive keeps it shut."
           }
         }
       ],

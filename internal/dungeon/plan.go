@@ -657,7 +657,8 @@ type ObjectState struct {
 	ObjectRef
 	State string `json:"state"`
 	// GoneOK counts the object being gone as the wanted state, once the run has seen it: a wait that reads the object found (in any
-	// state) and later not found at all is done. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
+	// state) and later missing is done, when the miss is the object's (the agent within GoneReadYd of Near, or the module's `not-found`
+	// answer, never a refusal) and has held for GoneConfirm; a wait with no Near is never judged gone. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
 	// Door 18895, which Deathstalker Adamant's escort opens and despawns a few waypoints later) never reads "active" for long. An object
 	// never seen is not gone, only not there yet: the wait runs out its timeout as before. plan-export writes it as the wait_object
 	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries).

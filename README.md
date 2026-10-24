@@ -686,7 +686,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
   close) or `unit` (a creature's state, below), with a `timeout_s` (default 60, at most 600) after which the plan fails, and an optional `fail_text` (up to 400 characters, one line) that is added to that failure: the reason a person should read (Uldaman's altar waits name the three-participant ritual). A door that a lever or key opens may do so well after
   the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s. A `gameobject` wait may carry `"gone_ok": true` (default false): the object being **gone** then counts as the wanted
-  state, once the run has seen it, found in any state, in this run: a script that sets a door active and removes it a few waypoints later (Shadowfang Keep's Courtyard Door 18895, which
+  state, once the run has seen that target (entry and point, within 10 yd) found, in any state, in this run, and the miss is the object's: the agent's own copy of the world counts a miss only
+  while the agent stands within 50 yd of the `near` point (a `gone_ok` wait needs a `near`), and a remote run counts only a `cmd state` answer of `not-found` (a `too-far` or any other answer is no proof);
+  either way the miss must hold 3 s without a break (a blip of the object starts it over): a script that sets a door active and removes it a few waypoints later (Shadowfang Keep's Courtyard Door 18895, which
   Deathstalker Adamant's escort opens and despawns) is passed by not finding it again. An object never seen is not gone, only not there yet: the wait runs out its `timeout_s` and fails as
   before. In an export it is the `wait_object` row's flag 256, the same bit a `loot` or `open` row carries for a gone chest (TortoiseBots `kPlanFlagGoneIsDone`; a module without the
   `wait_object` reading refuses the flag on that kind and skips the row).
