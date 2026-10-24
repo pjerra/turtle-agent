@@ -445,9 +445,7 @@
           ],
           "radius": 12,
           "approach": [
-            {"x": 499.13, "y": -128.93, "z": -61.95},
-            {"x": 514.06, "y": -173.13, "z": -59.94},
-            {"x": 516.89, "y": -205.01, "z": -58.6},
+            {"x": 522, "y": -241, "z": -65},
             {"x": 535, "y": -244, "z": -68}
           ]
         },
@@ -800,7 +798,12 @@
             {"x": 678.689, "y": -121.644, "z": -72.0716},
             {"x": 676.695, "y": -125.1, "z": -72.1019}
           ],
-          "radius": 9
+          "radius": 9,
+          "approach": [
+            {"x": 565, "y": -53, "z": -60},
+            {"x": 583, "y": 17, "z": -69},
+            {"x": 676, "y": -94, "z": -71.5}
+          ]
         },
         {
           "entries": [8892, 8894, 8895, 8893, 8893],
@@ -1018,7 +1021,8 @@
         "door \"Ironfel\" entry 164688 at 525.1 -238.8 -41.0",
         "Warder Stilgiss 16079 dropped: the live run cleared his single row without a fight (r35 step 171), and his point between the z-34 shelf and the g38 pit forced a 63 yd hop the lead cannot walk from the shelf; the g38 approach now starts on the shelf",
         "g38 (four 8921) is pulled from a 23 yd stand on its own z-84 floor (582.8 -164.4 -83.9); the approach climbs down the shelf in four checked hops",
-        "g9 (8909 8892 8892) is pulled from the z-65 tier: the approach (499.1 -128.9 -61.9, 514.1 -173.1 -59.9, 516.9 -205.0 -58.6, 535 -244 -68) walks the only served route from the z-43 ledge down, because the direct hop from the tier refuses"
+        "g9 (8909 8892 8892) is pulled from the z-65 tier: the approach (522 -241 -65, 535 -244 -68) starts on the stand the party holds after g7/g8 (522 -241 -65, 13.4 yd from 535 -244 -68, same tier). The first point is also the exporter's anchor reset: g8's row is its pack centre on the z-43 ledge, and a move cut from there to 535 -244 -68 is a 442.7 yd loop the party does not walk (r37: step 93 'no walkable path toward 569.3 -271.5 -43.0', lead 523.6 -237.8 -64.4, server NOPATH; the old 499.1 -128.9 -61.9 descent was that loop's tail)",
+        "g45 (five 8893/8895/8894 at 679.5 -124.3 -72.1) stands 26 yd below the z-45 hall: the approach (565 -53 -60, 583 17 -69, 676 -94 -71.5) walks the only served route down and pulls from 676 -94 -71.5, 30.6 yd from the pack on its own floor (r37: step 240 '8 approach hops did not bring the party within 60.0 yd of the pack (nearest 82.5 yd) ... not reachable from this floor', lead 624.5 -11.8 -72.7)"
       ]
     },
     {
@@ -1211,13 +1215,14 @@
         "position": {"x": 652.39, "y": 21.3737, "z": -59.976},
         "first": [8901],
         "approach": [
-          {"x": 668, "y": 36, "z": -59.4}
+          {"x": 668.4, "y": 40.6, "z": -59.4}
         ]
       },
       "notes": [
         "door \"Giant Door Mechanism\" entry 161461 at 614.0 -46.9 -59.6",
         "door \"The Shadowforge Lock\" entry 161460 at 615.6 -49.8 -60.1",
-        "g3 (8898 8898 8899) is not pulled here any more: the walk down from the upper hall to its room passes the z-45 hall (8911/8898) and the boss's aggro, so the hall and the boss come first and g3 opens the next leg"
+        "g3 (8898 8898 8899) is not pulled here any more: the walk down from the upper hall to its room passes the z-45 hall (8911/8898) and the boss's aggro, so the hall and the boss come first and g3 opens the next leg",
+        "Angerforge 9033 cannot be pulled alone: creature_linking guids 45955/45956/45958/45959 (the four Anvilrage Reservists 8901 at 654.3 17.6, 656.5 19.4, 656.4 22.6, 655.0 24.2, 3.8-4.5 yd from the boss, guids 45954) -> master 45954, flag 1031 = FLAG_AGGRO_ON_AGGRO (1) + FLAG_TO_AGGRO_ON_AGGRO (2) + FLAG_RESPAWN_ON_EVADE (4) + FLAG_CANT_SPAWN_IF_BOSS_DEAD (0x400): killing or aggroing any guard puts the boss in combat (CreatureLinkingMgr.cpp DoCreatureLinkingEvent, pMaster->EnterCombatWithTarget) and aggroing the boss puts all four guards in combat, so the 5-unit fight is unavoidable in data. The approach now stops 25.0 yd from the boss (aggro radius 20, party spread 3) instead of 21.4 yd, so the run leader's own rest gate (90 % health / 50 % healer mana / 35 % mana, 60 s: the rows carry no rest override, plan-export drops leg rest) runs out of combat before the pull; splitting the guards is escalated, not guessed (r37 slot5: 11 wipes at step 451, boss + 4 guards at once, tank 5935 hp dead in 25-30 s)"
       ]
     },
     {
