@@ -33,6 +33,8 @@ const (
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
 	MaxFailText        = 400 // characters of a wait's fail_text
+	// MaxProofRadius is the most yards a use_object's proof is searched around the object (TortoiseBots kPlanMaxProofRadius).
+	MaxProofRadius = 20
 )
 
 // Point is a position in the map's coordinates.
@@ -592,7 +594,18 @@ type UseObject struct {
 	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
 	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
 	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
-	ViaItem bool `json:"via_item,omitempty"`
+	ViaItem bool      `json:"via_item,omitempty"`
+	Proof   *UseProof `json:"proof,omitempty"`
+}
+
+// UseProof names what shows that a use_object took when the object itself changes no state (Sunken Temple's Atal'ai statues
+// 148830-148835: the script only sets NO_INTERACT on the right one and respawns the green light 148883 beside it). Exactly one of
+// GameObject (a spawned object) and Creature (a living one), within Radius yards of the object's near point. plan-export writes the
+// run leader's open_proof row (TortoiseBots DungeonPlanPolicy.h kPlanKindOpenProof). The agent's own driver does not read it.
+type UseProof struct {
+	GameObject uint32  `json:"gameobject,omitempty"`
+	Creature   uint32  `json:"creature,omitempty"`
+	Radius     float32 `json:"radius"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -944,6 +957,13 @@ type rawUse struct {
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
 	ViaItem      bool      `json:"via_item"`
+	Proof        *rawProof `json:"proof"`
+}
+
+type rawProof struct {
+	GameObject uint32  `json:"gameobject"`
+	Creature   uint32  `json:"creature"`
+	Radius     float32 `json:"radius"`
 }
 
 type rawItem struct {
@@ -1545,6 +1565,23 @@ func (c *checker) step(path string, r *rawStep) Step {
 				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
 			case dist3(*u.Stand, *u.Near) > UseRange:
 				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
+		if p := r.UseObject.Proof; p != nil {
+			pp := path + ".use_object.proof"
+			switch {
+			case (p.GameObject == 0) == (p.Creature == 0):
+				c.fail(pp, "name exactly one of gameobject and creature: the entry whose spawn shows that the use took")
+			case p.Radius <= 0 || p.Radius > MaxProofRadius:
+				c.fail(pp+".radius", "%g: more than 0 and at most %d yards around near", p.Radius, MaxProofRadius)
+			case u.ViaItem:
+				c.fail(pp, "a via_item use is the run leader's use_on, which takes no proof")
+			case u.Near == nil || u.Entry == 0:
+				c.fail(pp, "needs the object's entry and near: the proof is searched around the object's point")
+			case p.GameObject != 0 && p.GameObject == u.Entry:
+				c.fail(pp+".gameobject", "%d is the used object itself: the proof is another object", p.GameObject)
+			default:
+				u.Proof = &UseProof{GameObject: p.GameObject, Creature: p.Creature, Radius: p.Radius}
 			}
 		}
 		s.UseObject = u
