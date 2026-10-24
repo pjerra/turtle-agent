@@ -57,7 +57,7 @@
     11484
   ],
   "notes": [
-    "DRAFT, census 2026-10-24 (no live run): the world export of map 429 (tools/dungeongen/testdata/map429), the world SQL (~/tortoise-wow/sql/base) and the instance script (src/scripts/dungeons/dire_maul). Every hostile trash spawn of the west wing is a pull member (217 units, 83 pulls) except the 18 Residual Monstrosities 11484 (not pulled: see the ring note); the 6 bosses are boss steps. Not mapped: the GM-invisible mapping walk is still to do (after the round-2 chains: 3 detour pulls and 98 run-leader hop notices remain) (dungeon_run refuses the plan without allow_draft).",
+    "DRAFT, census 2026-10-24 (no live run): the world export of map 429 (tools/dungeongen/testdata/map429), the world SQL (~/tortoise-wow/sql/base) and the instance script (src/scripts/dungeons/dire_maul). Every hostile trash spawn of the west wing is a pull member (204 units, 81 pulls), except the 18 Residual Monstrosities 11484 (not pulled: see the ring note) and the 13 upper-west room units at z 28.6 (one unsplittable 13-unit room, no link from the lower route: the r38 run deferred them; see the round-3 note); the 6 bosses are boss steps. Not mapped: the GM-invisible mapping walk is still to do (after the round-2 chains: 3 detour pulls and 98 run-leader hop notices remain) (dungeon_run refuses the plan without allow_draft).",
     "Neutral NPCs left out (29 Shen'dralar Wisps 14361, level 1, faction 1354; 16 Highborne Summoners 11466, faction 1355): faction_template hostileMask 0, so neither is trash and the run leader would find no pack. The 6 Gordok mobs at 273-304 183-325 (north-wing courtyard, faction 45) are not this wing's; the north plan has them.",
     "Crystal (pylon) event (instance_dire_maul::SetData TYPE_CRISTAL_EVENT): five CrystalGenerator gameobjects - 177259 16.8 277.2 -8.5, 177257 111.9 436.1 28.6, 177258 -85.2 444.7 28.6, 179504 71.1 874.5 -24.6, 179505 -130.4 713.0 -24.6 - each holding four Mana Remnants (11483) within 20 yd. Each crystal has one four-guard pull from a stand 15-25 yd off the pack and a hold on the crystal's object state (active): the hold fights any remnant the pull left and ends only when the crystal is used, so a missed guardian pauses at the crystal instead of at Immol'thar. Killing the last four opens the force field 179503 and the magic vortex 179506 (-38.6 812.7 -29.5) and makes Immol'thar selectable. No use_object step: the kills do it.",
     "Immol'thar's 16 Highborne Summoners turn hostile (faction 100) at the crystal event and attack him; before that they are neutral. Tortheldrin is enabled only when Immol'thar dies (TYPE_IMMOL_THAR DONE), so his leg is the last.",
@@ -519,645 +519,177 @@
         },
         {
           "entries": [
+            11475,
+            11472,
+            11471,
+            11473,
             11473
           ],
           "positions": [
             {
-              "x": -72.3775,
-              "y": 388.903,
-              "z": 27.9891
-            }
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -61.3909,
-                "y": 388.815,
-                "z": 26.237
-              },
-              {
-                "x": -52.6411,
-                "y": 388.745,
-                "z": 25.0568
-              },
-              {
-                "x": -41.7215,
-                "y": 388.658,
-                "z": 25.0568
-              },
-              {
-                "x": -30.8018,
-                "y": 388.57,
-                "z": 25.0568
-              },
-              {
-                "x": -14.4224,
-                "y": 388.439,
-                "z": 25.0568
-              },
-              {
-                "x": -1.2628,
-                "y": 388.334,
-                "z": 25.0568
-              },
-              {
-                "x": 13.0168,
-                "y": 388.219,
-                "z": 25.0568
-              },
-              {
-                "x": 27.2263,
-                "y": 388.105,
-                "z": 25.0561
-              },
-              {
-                "x": 44.9007,
-                "y": 390.29,
-                "z": 25.0561
-              },
-              {
-                "x": 56.9404,
-                "y": 390.194,
-                "z": 25.0561
-              },
-              {
-                "x": 68.98,
-                "y": 390.098,
-                "z": 25.0561
-              },
-              {
-                "x": 79.8996,
-                "y": 390.01,
-                "z": 25.0561
-              },
-              {
-                "x": 87.5294,
-                "y": 389.949,
-                "z": 26.0647
-              },
-              {
-                "x": 100.689,
-                "y": 389.844,
-                "z": 28.1631
-              },
-              {
-                "x": 113.779,
-                "y": 389.739,
-                "z": 28.6011
-              },
-              {
-                "x": 120.358,
-                "y": 389.686,
-                "z": 28.6014
-              },
-              {
-                "x": 120.553,
-                "y": 407.185,
-                "z": 28.6014
-              },
-              {
-                "x": 120.651,
-                "y": 415.934,
-                "z": 28.6014
-              },
-              {
-                "x": 120.749,
-                "y": 424.684,
-                "z": 28.6014
-              },
-              {
-                "x": 120.846,
-                "y": 433.433,
-                "z": 28.6014
-              },
-              {
-                "x": 120.98,
-                "y": 445.472,
-                "z": 28.6014
-              },
-              {
-                "x": 121.115,
-                "y": 457.512,
-                "z": 28.6014
-              },
-              {
-                "x": 119.476,
-                "y": 469.44,
-                "z": 28.6014
-              },
-              {
-                "x": 117.99,
-                "y": 480.258,
-                "z": 28.6014
-              },
-              {
-                "x": 117.716,
-                "y": 499.848,
-                "z": 28.6011
-              },
-              {
-                "x": 117.851,
-                "y": 511.888,
-                "z": 28.6011
-              },
-              {
-                "x": 117.96,
-                "y": 521.687,
-                "z": 28.6011
-              },
-              {
-                "x": 117.96,
-                "y": 521.687,
-                "z": 28.6011
-              },
-              {
-                "x": 118.131,
-                "y": 537.016,
-                "z": 28.6011
-              },
-              {
-                "x": 118.253,
-                "y": 547.935,
-                "z": 28.6023
-              },
-              {
-                "x": 118.253,
-                "y": 547.935,
-                "z": 28.6023
-              },
-              {
-                "x": 102.247,
-                "y": 559.09,
-                "z": 28.6096
-              },
-              {
-                "x": 76.0802,
-                "y": 558.455,
-                "z": 28.6106
-              },
-              {
-                "x": 55.3037,
-                "y": 557.707,
-                "z": 28.6091
-              },
-              {
-                "x": 43.2715,
-                "y": 557.274,
-                "z": 28.6077
-              },
-              {
-                "x": 43.2715,
-                "y": 557.274,
-                "z": 28.6077
-              },
-              {
-                "x": 30.1899,
-                "y": 556.803,
-                "z": 28.6046
-              },
-              {
-                "x": 13.7506,
-                "y": 556.212,
-                "z": 28.6046
-              },
-              {
-                "x": -13.5868,
-                "y": 556.399,
-                "z": 28.6061
-              },
-              {
-                "x": -25.6176,
-                "y": 555.928,
-                "z": 28.6078
-              },
-              {
-                "x": -37.6569,
-                "y": 556.063,
-                "z": 28.6096
-              },
-              {
-                "x": -49.6961,
-                "y": 556.197,
-                "z": 28.6097
-              },
-              {
-                "x": -49.6961,
-                "y": 556.197,
-                "z": 28.6097
-              },
-              {
-                "x": -64.9552,
-                "y": 556.367,
-                "z": 28.6097
-              },
-              {
-                "x": -84.6239,
-                "y": 556.587,
-                "z": 28.6048
-              },
-              {
-                "x": -85.3573,
-                "y": 550.048,
-                "z": 28.6031
-              },
-              {
-                "x": -85.3573,
-                "y": 550.048,
-                "z": 28.6031
-              },
-              {
-                "x": -87.0658,
-                "y": 534.813,
-                "z": 28.6061
-              },
-              {
-                "x": -89.5366,
-                "y": 505.385,
-                "z": 28.6018
-              },
-              {
-                "x": -90.241,
-                "y": 494.487,
-                "z": 28.6018
-              },
-              {
-                "x": -91.2977,
-                "y": 478.141,
-                "z": 28.6018
-              },
-              {
-                "x": -91.9345,
-                "y": 468.292,
-                "z": 28.6018
-              },
-              {
-                "x": -92.9912,
-                "y": 451.946,
-                "z": 28.6024
-              },
-              {
-                "x": -92.9912,
-                "y": 451.946,
-                "z": 28.6024
-              },
-              {
-                "x": -93.1114,
-                "y": 430.188,
-                "z": 28.6025
-              },
-              {
-                "x": -92.0191,
-                "y": 417.073,
-                "z": 28.6011
-              },
-              {
-                "x": -91.0197,
-                "y": 405.075,
-                "z": 28.6011
-              },
-              {
-                "x": -89.8403,
-                "y": 390.914,
-                "z": 28.6011
-              },
-              {
-                "x": -79.9908,
-                "y": 390.277,
-                "z": 28.6011
-              },
-              {
-                "x": -74.5422,
-                "y": 389.925,
-                "z": 28.3343
-              }
-            ],
-            "period_s": 296.8,
-            "period_estimate": true,
-            "source": "creature_movement guid 84320"
-          }
-        },
-        {
-          "entries": [
-            11473
-          ],
-          "positions": [
-            {
-              "x": -80.695,
-              "y": 400.128,
-              "z": 28.6011
-            }
-          ],
-          "radius": 5.5,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -80.695,
-                "y": 400.128,
-                "z": 28.6011
-              },
-              {
-                "x": -52.1489,
-                "y": 399.923,
-                "z": 25.0565
-              },
-              {
-                "x": 79.3037,
-                "y": 400.181,
-                "z": 25.0569
-              },
-              {
-                "x": 105.82,
-                "y": 400.281,
-                "z": 28.6011
-              },
-              {
-                "x": 105.539,
-                "y": 531.377,
-                "z": 28.6014
-              },
-              {
-                "x": -76.1146,
-                "y": 536.42,
-                "z": 28.6024
-              }
-            ],
-            "period_s": 254.5,
-            "period_estimate": true,
-            "source": "creature_movement guid 335013"
-          }
-        },
-        {
-          "entries": [
-            11477,
-            11476,
-            11476,
-            11476,
-            11477,
-            11477
-          ],
-          "positions": [
-            {
-              "x": -89.0403,
-              "y": 398.958,
-              "z": 28.6011
+              "x": -97.4294,
+              "y": 467.994,
+              "z": -4.39928
             },
             {
-              "x": -83.4523,
-              "y": 398.982,
-              "z": 28.6011
+              "x": -99.7541,
+              "y": 478.879,
+              "z": -4.39805
             },
             {
-              "x": -77.295,
-              "y": 399.313,
-              "z": 28.6011
+              "x": -89.1419,
+              "y": 476.422,
+              "z": -4.39946
             },
             {
-              "x": -86.03,
-              "y": 405.163,
-              "z": 28.6011
+              "x": -70.3529,
+              "y": 462.695,
+              "z": -4.3998
             },
-            {
-              "x": -91.8316,
-              "y": 405.222,
-              "z": 28.6011
-            },
-            {
-              "x": -80.5561,
-              "y": 405.692,
-              "z": 28.6011
-            }
-          ],
-          "radius": 8.5,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -80.695,
-                "y": 400.128,
-                "z": 28.6011
-              },
-              {
-                "x": -52.1489,
-                "y": 399.923,
-                "z": 25.0565
-              },
-              {
-                "x": 79.3037,
-                "y": 400.181,
-                "z": 25.0569
-              },
-              {
-                "x": 105.82,
-                "y": 400.281,
-                "z": 28.6011
-              },
-              {
-                "x": 105.539,
-                "y": 531.377,
-                "z": 28.6014
-              },
-              {
-                "x": -76.1146,
-                "y": 536.42,
-                "z": 28.6024
-              }
-            ],
-            "period_s": 254.5,
-            "period_estimate": true,
-            "source": "creature_movement guid 335013"
-          }
-        },
-        {
-          "entries": [
-            11476,
-            11476,
-            11477,
-            11477,
-            11476
-          ],
-          "positions": [
-            {
-              "x": -83.3604,
-              "y": 386.547,
-              "z": 28.6018
-            },
-            {
-              "x": -89.0412,
-              "y": 386.749,
-              "z": 28.6021
-            },
-            {
-              "x": -81.042,
-              "y": 392.429,
-              "z": 28.6011
-            },
-            {
-              "x": -86.2816,
-              "y": 392.618,
-              "z": 28.6011
-            },
-            {
-              "x": -92.0568,
-              "y": 393.105,
-              "z": 28.6011
-            }
-          ],
-          "radius": 6.9,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -80.695,
-                "y": 400.128,
-                "z": 28.6011
-              },
-              {
-                "x": -52.1489,
-                "y": 399.923,
-                "z": 25.0565
-              },
-              {
-                "x": 79.3037,
-                "y": 400.181,
-                "z": 25.0569
-              },
-              {
-                "x": 105.82,
-                "y": 400.281,
-                "z": 28.6011
-              },
-              {
-                "x": 105.539,
-                "y": 531.377,
-                "z": 28.6014
-              },
-              {
-                "x": -76.1146,
-                "y": 536.42,
-                "z": 28.6024
-              }
-            ],
-            "period_s": 254.5,
-            "period_estimate": true,
-            "source": "creature_movement guid 335013"
-          }
-        },
-        {
-          "entries": [
-            11473
-          ],
-          "positions": [
             {
               "x": -103.251,
               "y": 463.166,
               "z": -4.39676
             }
           ],
-          "radius": 5.5,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -103.251,
-                "y": 463.166,
-                "z": -4.3968
-              },
-              {
-                "x": -69.9768,
-                "y": 463.051,
-                "z": -4.3997
-              },
-              {
-                "x": -70.0305,
-                "y": 532.348,
-                "z": -4.397
-              },
-              {
-                "x": 116.656,
-                "y": 532.168,
-                "z": -4.3952
-              },
-              {
-                "x": 115.915,
-                "y": 568.388,
-                "z": -4.3955
-              },
-              {
-                "x": -101.388,
-                "y": 570.068,
-                "z": -4.3949
-              }
-            ],
-            "period_s": 259.9,
-            "period_estimate": true,
-            "source": "creature_movement guid 377671"
-          }
+          "radius": 23,
+          "approach": [
+            {
+              "x": -50.0,
+              "y": 455.0,
+              "z": -3.0
+            },
+            {
+              "x": -50.0,
+              "y": 470.0,
+              "z": -3.0
+            },
+            {
+              "x": -65.0,
+              "y": 480.0,
+              "z": -3.8
+            }
+          ]
         },
         {
           "entries": [
+            11471,
+            11472,
+            11475,
             11473
           ],
           "positions": [
             {
-              "x": -70.3529,
-              "y": 462.695,
-              "z": -4.3998
+              "x": -101.06,
+              "y": 516.332,
+              "z": -4.39725
+            },
+            {
+              "x": -87.3749,
+              "y": 518.146,
+              "z": -4.39756
+            },
+            {
+              "x": -76.2904,
+              "y": 519.175,
+              "z": -4.39574
+            },
+            {
+              "x": -70.3033,
+              "y": 532.076,
+              "z": -4.39671
             }
           ],
-          "radius": 5.5,
-          "patrol": {
-            "entries": [
-              11473
-            ],
-            "path": [
-              {
-                "x": -70.4786,
-                "y": 462.985,
-                "z": -4.3986
-              },
-              {
-                "x": -70.4569,
-                "y": 532.37,
-                "z": -4.3969
-              },
-              {
-                "x": 116.325,
-                "y": 532.194,
-                "z": -4.3954
-              },
-              {
-                "x": 115.589,
-                "y": 568.277,
-                "z": -4.3954
-              },
-              {
-                "x": -101.619,
-                "y": 570.241,
-                "z": -4.395
-              },
-              {
-                "x": -103.488,
-                "y": 463.232,
-                "z": -4.3968
-              }
-            ],
-            "period_s": 259.8,
-            "period_estimate": true,
-            "source": "creature_movement guid 377646"
-          }
+          "radius": 19,
+          "approach": [
+            {
+              "x": -114.0,
+              "y": 520.0,
+              "z": -3.8
+            }
+          ]
+        },
+        {
+          "entries": [
+            11472,
+            11472,
+            11471,
+            11475
+          ],
+          "positions": [
+            {
+              "x": -61.214,
+              "y": 549.37,
+              "z": -4.39694
+            },
+            {
+              "x": -46.1223,
+              "y": 549.568,
+              "z": -4.39694
+            },
+            {
+              "x": -54.8078,
+              "y": 538.254,
+              "z": -4.39694
+            },
+            {
+              "x": -54.2185,
+              "y": 561.823,
+              "z": -4.39544
+            }
+          ],
+          "radius": 18,
+          "approach": [
+            {
+              "x": -56.0,
+              "y": 524.0,
+              "z": -3.3
+            }
+          ]
+        },
+        {
+          "entries": [
+            11469,
+            11470,
+            11476,
+            11476,
+            14398
+          ],
+          "positions": [
+            {
+              "x": -30.0408,
+              "y": 510.327,
+              "z": -3.56821
+            },
+            {
+              "x": -26.2289,
+              "y": 510.593,
+              "z": -3.5676
+            },
+            {
+              "x": -32.3199,
+              "y": 505.084,
+              "z": -3.56653
+            },
+            {
+              "x": -23.1637,
+              "y": 505.796,
+              "z": -3.56728
+            },
+            {
+              "x": -27.3891,
+              "y": 505.578,
+              "z": -3.5662
+            }
+          ],
+          "radius": 6,
+          "approach": [
+            {
+              "x": -48.0,
+              "y": 490.0,
+              "z": -3.0
+            }
+          ]
         },
         {
           "entries": [
@@ -3031,7 +2563,8 @@
         ]
       },
       "notes": [
-        "Crystal 177259 sits at 16.8 277.2 -8.5: the four Mana Remnants around it are pulls 7-12. The door 300601 (50.6 501.4 -23.3, lock 1562) leads on; the Ironbark Protectors patrol the whole courtyard (610-689 yd)."
+        "Crystal 177259 sits at 16.8 277.2 -8.5: the four Mana Remnants around it are pulls 7-12. The door 300601 (50.6 501.4 -23.3, lock 1562) leads on; the Ironbark Protectors patrol the whole courtyard (610-689 yd).",
+        "Server-path fix 2026-10-24 round 3 (r38 slotB step 29): the z 28.6 upper-west room (old pull groups 13-16: 11473 -72.3775 388.903, 11473 -80.695 400.128, six 11476/11477 at 398.958-405.692, five 11476/11477 at 386.547-393.105) has no walkable link from the lower hall (the server path from -85.3 373.3 -3.5 ends 35-42 yd short at -76.8 373.3 -2.9) and its packs stand 2-6 yd apart (no stand 21-30 yd from one is outside the others' 18-20 yd detection), so it is one 13-unit fight that cannot be split: it is left out (the live run deferred it: '2 packs left alive (deferred, not reachable)'). The lower-hall walk is now the route: pull groups 17/18 (the two 11473 patrols) are replaced by the four pulls W1-W4 of the r38 step-29 fight, and the 11473 patrols' spawn points are inside W1."
       ]
     },
     {
