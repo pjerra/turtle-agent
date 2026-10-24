@@ -39,17 +39,44 @@ func TestPlanCheckFlagsWindhornLedgeRow(t *testing.T) {
 	}
 }
 
+// TestPlanCheckFlagsWindhornServerRefusal is the addendum's offline-complete
+// fixture: the offline query takes the 952 yd climb complete but the server
+// answers INCOMPLETE 21.7 yd short, so the row fails server unreachable.
+func TestPlanCheckFlagsWindhornServerRefusal(t *testing.T) {
+	mustHaveMmaps(t, 820)
+	pl := navmesh.NewPlanner(planServerMmaps(820))
+	defer pl.Close()
+	from := Point{X: -7640.0, Y: -3636.0, Z: 197.4}
+	to := Point{X: -7616.0, Y: -3648.0, Z: 219.7}
+	path, err := pl.Plan(820, vec(from), vec(to))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Status != navmesh.Complete {
+		t.Fatalf("offline: %+v, want complete", path)
+	}
+	plan := &Plan{Name: "t", Map: 820, Entrance: from,
+		Legs: []Leg{{Name: "a", To: to}}}
+	res, err := CheckPlan(plan, pl, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Issues) != 1 || res.Issues[0].Reason != ReasonServerUnreachable || res.Issues[0].Part != "to" {
+		t.Fatalf("issues %+v, want one server-unreachable on to", res.Issues)
+	}
+}
+
 // TestPlanCheckFlagsHateforgeSwallowedHop is case 2 at plan level: the leg
 // starts on the ramp-foot point, with the direct check_skip hop onto the
 // terrace 1.75 yd above it and the terrace `to`. The direct hop is inside the
-// arrival radius (never sent: the party stays on the lower poly), and the
-// terrace `to` is then unreachable on the offline mesh from the lower poly
-// (the spec's table row: offline partial 1 poly vs server INCOMPLETE into
-// the pocket from the same lower start).
+// arrival radius (never sent: the party stays on the lower poly). From the
+// lower poly the offline query is already partial, so with the offline-first
+// order (addendum 2026-10-24) the boss approach fails as the established
+// offline ReasonUnreachable and the server query is not asked for that hop.
 func TestPlanCheckFlagsHateforgeSwallowedHop(t *testing.T) {
 	mustHaveMmaps(t, 808)
-	pl := navmesh.NewPlanner(planServerMmaps(808))
-	defer pl.Close()
+	nav := &countServerNav{Planner: navmesh.NewPlanner(planServerMmaps(808))}
+	defer nav.Planner.Close()
 	plan := &Plan{Name: "t", Map: 808, Entrance: Point{X: -8320, Y: -3447.5, Z: 180.1},
 		Legs: []Leg{{Name: "bargul_terrace",
 			Via: []Waypoint{
@@ -60,25 +87,78 @@ func TestPlanCheckFlagsHateforgeSwallowedHop(t *testing.T) {
 			Boss: &Boss{Entry: 1, Position: Point{X: -8309.45, Y: -3460.42, Z: 194.43},
 				Approach: []Point{{X: -8309.45, Y: -3460.42, Z: 194.43}}},
 		}}}
-	res, err := CheckPlan(plan, pl, 0)
+	res, err := CheckPlan(plan, nav, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var swallowed, unreachable bool
+	var swallowed, offline bool
 	for _, is := range res.Issues {
 		if is.Reason == ReasonArriveSwallowed && is.Part == "direct via 1" {
 			swallowed = true
 		}
+		if is.Reason == ReasonUnreachable && is.Part == "run leader boss approach 0" {
+			offline = true
+		}
 		if is.Reason == ReasonServerUnreachable {
-			unreachable = true
+			t.Errorf("server query ran on an offline-partial hop: %+v", is)
 		}
 	}
 	if !swallowed {
 		t.Errorf("no arrival-radius issue on direct via 1: %+v", res.Issues)
 	}
-	if !unreachable {
-		t.Errorf("no server-unreachable issue on the boss approach or the to row (the server walks into the pocket, then refuses): %+v", res.Issues)
+	if !offline {
+		t.Errorf("no offline-unreachable issue on the boss approach from the lower poly: %+v", res.Issues)
 	}
+	if nav.calls != 0 {
+		t.Errorf("ServerPath called %d times, want 0 (offline already fails the hop)", nav.calls)
+	}
+}
+
+// countServerNav wraps a Planner and counts ServerPath calls, so the
+// offline-first order is pinned: an offline-partial hop must not ask the
+// server query at all.
+type countServerNav struct {
+	*navmesh.Planner
+	calls int
+}
+
+func (n *countServerNav) ServerPath(mapID uint32, from, to navmesh.Vec3) (navmesh.ServerPath, error) {
+	n.calls++
+	return n.Planner.ServerPath(mapID, from, to)
+}
+
+// TestPlanCheckOfflinePartialNeverAsksTheServer is the offline-first order
+// (addendum 2026-10-24) on a synthetic plan: the offline path is partial but
+// the server query would refuse too. The hop fails as the established offline
+// ReasonUnreachable and ServerPath is never called.
+func TestPlanCheckOfflinePartialNeverAsksTheServer(t *testing.T) {
+	nav := &offlinePartialServerNoPathNav{fakeNav: fakeNav{
+		partial: map[Point]Point{{X: 10}: {X: 5}},
+	}}
+	plan := &Plan{Name: "t", Map: 1, Entrance: Point{X: 0, Y: 0, Z: 0},
+		Legs: []Leg{{Name: "a", To: Point{X: 10, Y: 0, Z: 0}}}}
+	res, err := CheckPlan(plan, nav, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Issues) != 1 || res.Issues[0].Reason != ReasonUnreachable {
+		t.Fatalf("issues %+v, want one offline unreachable", res.Issues)
+	}
+	if nav.calls != 0 {
+		t.Fatalf("ServerPath called %d times, want 0", nav.calls)
+	}
+}
+
+// offlinePartialServerNoPathNav is a fake whose offline path ends short of
+// the goal while its server query refuses outright.
+type offlinePartialServerNoPathNav struct {
+	fakeNav
+	calls int
+}
+
+func (n *offlinePartialServerNoPathNav) ServerPath(_ uint32, from, to navmesh.Vec3) (navmesh.ServerPath, error) {
+	n.calls++
+	return navmesh.ServerPath{Type: navmesh.PathNoPath}, nil
 }
 
 // TestPlanCheckStillPassesStormwroughtLedgeFromMeshPoints is the documented

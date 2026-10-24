@@ -657,18 +657,9 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	c.rec.path(path)
-	// The server's own query judges the hop first: when it answers 'arrived'
-	// (inside the arrival radius) the run leader sends NO order, so the
-	// modelled position stays where it was: the offline check must not also
-	// run as if the hop happened.
-	if at, ok, err := c.serverWalk(part, 0, to, from); err != nil {
-		return at, err
-	} else if !ok {
-		return at, nil
-	} else if at != to {
-		// The server answered 'arrived': the party stays where it was.
-		return at, nil
-	}
+	// The offline query judges the hop first: when it answers anything but
+	// complete the run never sends the hop, so the run leader's own query is
+	// not asked. The route-trace exception stays for the Plan failure only.
 	if path.Status != navmesh.Complete {
 		err := c.failPath(part, 0, to, from, path)
 		if c.rec != nil && err == nil && pathReason(path) == ReasonUnreachable {
@@ -677,6 +668,17 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 			return to, nil
 		}
 		return from, err
+	}
+	// The offline query takes the hop: the run leader's own query judges it
+	// next (it answers 'arrived' inside the arrival radius: the run leader
+	// sends NO order, so the modelled position stays where it was).
+	if at, ok, err := c.serverWalk(part, 0, to, from); err != nil {
+		return at, err
+	} else if !ok {
+		return at, nil
+	} else if at != to {
+		// The server answered 'arrived': the party stays where it was.
+		return at, nil
 	}
 	return to, nil
 }
