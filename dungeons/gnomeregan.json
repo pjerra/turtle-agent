@@ -1523,25 +1523,6 @@
       "notes": [
         "door \"The Final Chamber\" entry 142207 at -618.6 691.1 -327.0"
       ]
-    },
-    {
-      "name": "dark_iron_ambassador",
-      "to": {"x": -712.112, "y": 550.954, "z": -298.008},
-      "pull_groups": [
-        {
-          "entries": [6212],
-          "positions": [
-            {"x": -712.112, "y": 550.954, "z": -298.008}
-          ],
-          "radius": 10
-        }
-      ],
-      "skip": [7849],
-      "boss": {
-        "entry": 6228,
-        "position": {"x": -718.106, "y": 565.242, "z": -289.116},
-        "first": [6212]
-      }
     }
   ]
 }

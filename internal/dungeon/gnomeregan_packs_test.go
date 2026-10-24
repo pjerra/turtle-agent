@@ -44,43 +44,35 @@ func TestGnomereganUnitListsComeFromTheCensus(t *testing.T) {
 	}
 }
 
-// The Dark Iron Ambassador's guard, the Dark Iron Agent that stands at his own spot (-718.1 565.2 -289.1) and patrols his 12-point loop with him,
-// is the boss's first, not a pull of its own: pulling the old pull group 9 pulled the boss with it. No pull group of any leg may hold a position
-// within 20 yd (3-D) of its leg's boss: that is the boss fight, not a pull (Viscous Fallout, the Electrocutioner, the Crowd Pummeler and
-// Thermaplugg have no pull inside their sight; the draft's 2-D near misses 0.1/0.2 are 54 yd above the Fallout, 2.7 is 44 yd below the Pummeler).
+// The Dark Iron Ambassador (6228) is a 30 % pool spawn (pool 9001, max_limit 1 against the Dark Iron Agent 6212 at the
+// same spot), not a guaranteed one: r25 and r31 slot 8 reached his boss step with no Ambassador in the instance and
+// paused there. He has no leg now: the plan ends with Mekgineer Thermaplugg, and a kill of 6228 still counts (he stays
+// in the ai_dungeon_boss table of 20261022210500). No pull group of any leg may hold a position within 20 yd (3-D) of
+// its leg's boss: that is the boss fight, not a pull (Viscous Fallout, the Electrocutioner, the Crowd Pummeler and
+// Thermaplugg have no pull inside their sight; the draft's 2-D near misses 0.1/0.2 are 54 yd above the Fallout, 2.7 is
+// 44 yd below the Pummeler).
 func TestGnomereganTheAgentsAtTheAmbassadorAreHisFirst(t *testing.T) {
 	p := loadPlan(t, gnomereganPlan)
-	if len(p.Legs) != 6 {
-		t.Fatalf("%d legs, want 6", len(p.Legs))
+	if len(p.Legs) != 5 {
+		t.Fatalf("%d legs, want 5", len(p.Legs))
 	}
-	// 6228 is a 30 % pool spawn (pool 9001), not a guaranteed one: his leg is last, after Thermaplugg, so an instance without him
-	// stops the run only once everything else is done.
-	if len(p.Legs) == 0 || p.Legs[len(p.Legs)-1].Name != "dark_iron_ambassador" {
-		t.Fatalf("the last leg is %q, want dark_iron_ambassador", p.Legs[len(p.Legs)-1].Name)
+	// 6228 is a 30 % pool spawn (pool 9001), not a guaranteed one: he has no leg, and the plan ends with Thermaplugg.
+	if len(p.Legs) == 0 || p.Legs[len(p.Legs)-1].Name != "mekgineer_thermaplugg" {
+		t.Fatalf("the last leg is %q, want mekgineer_thermaplugg", p.Legs[len(p.Legs)-1].Name)
 	}
-	d := gnomereganLeg(t, p, "dark_iron_ambassador")
-	if d.Boss == nil || d.Boss.Entry != 6228 {
-		t.Fatalf("dark_iron_ambassador: boss %+v, want 6228", d.Boss)
-	}
-	if got := fmt.Sprint(d.Boss.First); got != "[6212]" {
-		t.Errorf("dark_iron_ambassador: boss first %s, want [6212]", got)
-	}
-	if n := len(d.PullGroups); n != 1 {
-		t.Errorf("dark_iron_ambassador: %d pull groups, want the one Agent in front of him", n)
-	}
-	if last := d.PullGroups[len(d.PullGroups)-1]; last.Entries[0] != 6212 || len(last.Entries) != 1 {
-		t.Errorf("dark_iron_ambassador: the last pull is %v, want the Agent in front of him", last.Entries)
+	for _, l := range p.Legs {
+		if l.Name == "dark_iron_ambassador" {
+			t.Fatalf("leg dark_iron_ambassador is still in the plan: 6228 is a 30 %% pool spawn, he has no leg")
+		}
+		if l.Boss != nil && l.Boss.Entry == 6228 {
+			t.Fatalf("leg %s still has 6228 as its boss: the Ambassador has no leg", l.Name)
+		}
 	}
 	for _, l := range p.Legs {
 		if l.Boss == nil {
 			continue
 		}
 		for i, g := range l.PullGroups {
-			// The Agent pulled in front of the Ambassador (17.9 yd, inside his 20 yd sight) is the leg's LAST pull, the boss-approach fight:
-			// the Stockade Dextren pattern. Every other group stays out of the boss's sight.
-			if l.Name == "dark_iron_ambassador" && i == len(l.PullGroups)-1 {
-				continue
-			}
 			for _, q := range g.Positions {
 				if dz := dist3(q, l.Boss.Position); dz < 20 {
 					t.Errorf("leg %s pull group %d: a member stands %.1f yd from the boss", l.Name, i, dz)
