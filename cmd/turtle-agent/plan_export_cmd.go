@@ -193,8 +193,23 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// cutWith cuts a hop along the navmesh path, leaving hops of at most planexport.MoveGapCutYd.
+// cutWith cuts a hop along the navmesh path, leaving hops of at most planexport.MoveGapCutYd. Every via point is put on
+// the nearest walkable floor within cutSnapYd: an interpolated point on a long segment can leave the mesh where the
+// floor dips (the smooth path cuts a concave corner), and the server's own query then ends >5 yd short of it (off-mesh;
+// the module refuses the row and the party is left behind). The remote driver puts each walk step on the floor the same
+// way (RemoteDriver.onFloor), so the rows match where the party really stands.
 func cutWith(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+	snap := func(mapID uint32, p navmesh.Vec3) navmesh.Vec3 {
+		q, ok, err := pl.Nearest(mapID, p)
+		if err != nil || !ok {
+			return p
+		}
+		dx, dy, dz := float64(q[0]-p[0]), float64(q[1]-p[1]), float64(q[2]-p[2])
+		if math.Sqrt(dx*dx+dy*dy+dz*dz) > cutSnapYd {
+			return p
+		}
+		return q
+	}
 	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
 		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 		if err != nil {
@@ -211,16 +226,21 @@ func cutWith(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]
 			// A corner is a point of the route; a long stretch between two corners is split into equal hops.
 			for k := 1; float64(k)*planexport.MoveGapCutYd < d; k++ {
 				f := float32(float64(k) * planexport.MoveGapCutYd / d)
-				via = append(via, dungeon.Point{X: prev[0] + (p[0]-prev[0])*f, Y: prev[1] + (p[1]-prev[1])*f, Z: prev[2] + (p[2]-prev[2])*f})
+				q := snap(mapID, navmesh.Vec3{prev[0] + (p[0]-prev[0])*f, prev[1] + (p[1]-prev[1])*f, prev[2] + (p[2]-prev[2])*f})
+				via = append(via, dungeon.Point{X: q[0], Y: q[1], Z: q[2]})
 			}
 			if i < len(path.Points)-1 {
-				via = append(via, dungeon.Point{X: p[0], Y: p[1], Z: p[2]})
+				q := snap(mapID, p)
+				via = append(via, dungeon.Point{X: q[0], Y: q[1], Z: q[2]})
 			}
 			prev = p
 		}
 		return via, nil
 	}
 }
+
+// cutSnapYd is how far a cut point may be moved to reach the nearest walkable floor (the remote driver's floor band).
+const cutSnapYd = 6.5
 
 func sq32(v float32) float32 { return v * v }
 
