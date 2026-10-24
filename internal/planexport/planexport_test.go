@@ -1230,3 +1230,26 @@ func TestCutterLeavesTheExactHopAlone(t *testing.T) {
 		}
 	}
 }
+
+// TestBossSkipUnreachableExportsTheFlag: a boss with skip_unreachable exports Flags 4096 (or'd with the team gate)
+// and carries the reason in its comment (Stormwrought Ruins' Eldermaw 62661, specs/sw-eldermaw.md Spec A).
+func TestBossSkipUnreachableExportsTheFlag(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+  "boss":{"entry":62661,"position":{"x":-5798.46,"y":-3742.97,"z":201.241},
+   "team":"horde","skip_unreachable":"swims a pool (WMO water 202.2, bed 191-196); bed navmesh cut off from the shore"}}]}`
+	r := build(t, parsePlan(t, js))
+	if len(r.Steps) < 2 {
+		t.Fatalf("%d steps", len(r.Steps))
+	}
+	b := r.Steps[len(r.Steps)-1]
+	if b.Kind != KindBoss || b.Entry != 62661 {
+		t.Fatalf("last row %+v", b)
+	}
+	if b.Flags != FlagSkipUnreachable|FlagHorde {
+		t.Fatalf("boss flags %d (want %d)", b.Flags, FlagSkipUnreachable|FlagHorde)
+	}
+	if !strings.Contains(b.Comment, "out of reach: swims a pool") {
+		t.Fatalf("boss comment %q", b.Comment)
+	}
+}

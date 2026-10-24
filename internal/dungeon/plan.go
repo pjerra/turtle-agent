@@ -421,6 +421,10 @@ type Boss struct {
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
 	Hold *Hold `json:"hold,omitempty"`
+	// SkipUnreachable says the boss may stand out of the party's reach by design (Stormwrought Ruins' Eldermaw 62661
+	// swims a pool whose bed navmesh is cut off from the shore; specs/sw-eldermaw.md): plan-export sets the run leader's
+	// skip-unreachable flag on the boss row and carries the reason in its comment. Required to be non-empty when set.
+	SkipUnreachable string `json:"skip_unreachable,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -843,6 +847,8 @@ type rawBoss struct {
 	NeedsWalk bool             `json:"needs_walk"`
 	Approach  []rawPoint       `json:"approach"`
 	Hold      *rawHold         `json:"hold"`
+	// SkipUnreachable is Boss.SkipUnreachable.
+	SkipUnreachable string `json:"skip_unreachable"`
 }
 
 type rawStep struct {
@@ -1338,7 +1344,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, SkipUnreachable: r.Boss.SkipUnreachable}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
