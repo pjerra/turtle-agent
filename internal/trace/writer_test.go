@@ -363,3 +363,31 @@ func TestReadIsTolerantAndRefusesANewerSchema(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// The summary's instance comes from the trace's instance event when the header has none (a run whose driver learned it from the feed);
+// a header instance wins.
+func TestSummaryTakesTheInstanceFromTheInstanceEvent(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		hdr  uint32
+		want uint32
+	}{
+		{"from the event", 0, 77},
+		{"the header wins", 5, 5},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := open(t, Options{})
+			w.Header(Header{Source: "dungeon_run", Mode: "remote", Plan: "rt", Map: 43, Instance: c.hdr,
+				Start: time.Unix(1_000_000, 0).UTC(), StartUnix: 1_000_000})
+			w.Event(1000, "instance", map[string]any{"instance": float64(77), "map": float64(43)})
+			w.Close()
+			f, err := Read(w.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s := SummaryOf(f, w.Bytes(), nil, time.Time{}); s.Instance != c.want {
+				t.Fatalf("summary instance %d, want %d", s.Instance, c.want)
+			}
+		})
+	}
+}
