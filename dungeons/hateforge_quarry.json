@@ -30,6 +30,7 @@
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Turtle custom. 'Broody' (60715) shares Engineer Figgles' spot and is not a leg.",
     "Bargul 60735 stands on the terrace above the quarry; that terrace is a separate navmesh network (the creature path 2570432 walks up a ramp at -8321.1 -3448.1 z 180.8 / -8323.7 -3452.3 z 182.5 that the mesh does not link to the lower floor). The boss is needs_walk: the mapping walk tests the ramp, else the leg needs a gm_cross or an off-mesh link.",
+    "r28c slotE (2026-10-24): steps 1-82 clean, step 83 stopped 4 times at the boss with no firing stand (the party waits 21-23 yd below the terrace). Fix hfq-fix1 (option b: no walkable route exists, the ramp seam has no navmesh link): the Overseer 60722 that patrols the ramp (spawn 2570432 at -8318.7 -3461.5) is pulled at group 22 before the walk up; leg high_foreman_bargul_blackhammer_terrace walks the lower mesh to the exact launch -8320.0 -3447.5 z180.1, takes the direct hop (1.5 yd across, 0.9 up, check_skip, not tried live) to -8321.5 -3447.5 z181.0 on the terrace mesh, then walks the terrace to the stand -8309.45 -3460.42 z194.43 (18.8 yd from the boss, ray clear) and the boss approach; leg corrosis starts with the reverse hop down the same seam.",
     "No creature_groups, no creature_linking, no rare rank 2/4, no EventAI event (nothing flees) and no instance script on map 808. The Cleric 60718 is the only healer (Greater Heal 10965), the Shadowcaller 60726 the only AoE caster, the Taskmaster 60723 roots with Hooked Net 13608.",
     "34 spawns patrol (creature_movement type 2, the boss Corrosis 60829 among them); a patrol block sits on every pull its path enters and on every pull of a patrolling member. The run leader's rows carry none.",
     "Not in the rows: no_cc, summoned_kill_first (the Engineer's Decoy Dragonlings 60712, Har'gesh's Faceless Terrors 60738), the patrols, needs_walk, the draft status."
@@ -493,13 +494,6 @@
           }
         },
         {
-          "entries": [60721],
-          "positions": [
-            {"x": -8332.35, "y": -3461.73, "z": 172.321}
-          ],
-          "radius": 2.5
-        },
-        {
           "entries": [60722],
           "positions": [
             {"x": -8318.72, "y": -3461.45, "z": 170.883}
@@ -536,6 +530,13 @@
             "period_estimate": true,
             "source": "creature_movement 2570432"
           }
+        },
+        {
+          "entries": [60721],
+          "positions": [
+            {"x": -8332.35, "y": -3461.73, "z": 172.321}
+          ],
+          "radius": 2.5
         },
         {
           "entries": [60719],
@@ -921,16 +922,30 @@
           ],
           "radius": 2.5
         }
+      ]
+    },
+    {
+      "name": "high_foreman_bargul_blackhammer_terrace",
+      "to": {"x": -8321.5, "y": -3447.5, "z": 181.0},
+      "via": [
+        {"x": -8320.0, "y": -3447.5, "z": 180.1, "exact": true},
+        {"x": -8321.5, "y": -3447.5, "z": 181.0, "direct": true, "check_skip": "the ramp up to Bargul's terrace is a 1.5 yd step across with no navmesh link (the lower mesh ends at -8320.0 -3447.5 z180.1, the terrace mesh starts 1.5 yd away at -8321.5 -3447.5 z181.0); the direct hop is 1.5 yd across and 0.9 up, walked on the vmap line, not tried live: the run of 2026-10-24 (r28c slotE) stopped at the boss for it"}
       ],
       "boss": {
         "entry": 60735,
         "position": {"x": -8304.88, "y": -3442.24, "z": 194.45},
-        "needs_walk": true
+        "approach": [
+          {"x": -8309.45, "y": -3460.42, "z": 194.43}
+        ]
       }
     },
     {
       "name": "corrosis",
       "to": {"x": -8302.06, "y": -3514.62, "z": 109.141},
+      "via": [
+        {"x": -8321.5, "y": -3447.5, "z": 181.0, "exact": true},
+        {"x": -8320.0, "y": -3447.5, "z": 180.1, "direct": true, "check_skip": "the way down from Bargul's terrace crosses the same unlinked ramp seam as the way up (1.5 yd across, 0.9 down); the direct hop is walked on the vmap line, not tried live"}
+      ],
       "pull_groups": [
         {
           "entries": [60723, 60721, 60721],
