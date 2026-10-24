@@ -219,15 +219,16 @@ func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
 	if got := fmt.Sprint(leg.PullGroups[len(leg.PullGroups)-1].Entries); got != "[10469 10472]" {
 		t.Errorf("last leg-0 pack %s, want [10469 10472]", got)
 	}
-	// The r29 slot8 run wiped five times walking to the old group-4 stand (235.8 40.1, 7 yd from the 10499 pack): the three packs around that
-	// point (the 10499 pack, the lone patrolling 10471, the 10470 pack) are pulled before the southern pair, from western stands.
+	// Scholomance r30 slot C: the step-16 stand 215 22 stood 11-20 yd from the unpulled 48845 pack and the
+	// 91341/91350 pair; the hall packs are pulled from the stairs, the stair foot and 220 38, the western and southern packs are
+	// left alone.
 	idx := map[string]int{}
 	for gi, g := range leg.PullGroups {
 		idx[fmt.Sprint(g.Entries)] = gi
 	}
-	if !(idx["[10471 10470 10471 10499]"] < idx["[10471 10470]"] && idx["[10471 10470]"] < idx["[10471]"] && idx["[10471]"] < idx["[10470 10470 10471]"]) {
-		t.Errorf("leg-0 115.8 cluster out of order: 10499 pack at %d, southern pair at %d, lone 10471 at %d, 10470 pack at %d; want the three around the old step-11 point first",
-			idx["[10471 10470 10471 10499]"], idx["[10471 10470]"], idx["[10471]"], idx["[10470 10470 10471]"])
+	if !(idx["[10471 10470 10471 10499]"] < idx["[10471]"] && idx["[10471]"] < idx["[10470 10470 10471]"] && idx["[10470 10470 10471]"] < idx["[10471 10470]"]) {
+		t.Errorf("leg-0 115.8 cluster out of order: 10499 pack at %d, lone 10471 at %d, 10470 pack at %d, southern pair at %d; want the stairs, stair-foot, 220-38 hall order",
+			idx["[10471 10470 10471 10499]"], idx["[10471]"], idx["[10470 10470 10471]"], idx["[10471 10470]"])
 	}
 }
 
