@@ -162,9 +162,9 @@ type Options struct {
 	// 6 yd down over a 3.9 yd gap); the row's comment and a warning say it is not tried live.
 	GMCrossDirect bool
 	// SkipLegs names legs (by their name in the plan) that are left out of the rows, each with a warning, and the later legs close up, as for
-	// an optional leg. For a leg the run leader cannot do while the legs after it can: Zul'Farrak's Sergeant Bly, who turns hostile after his
-	// gossip (the run leader has no boss that turns hostile later), stands between the Weegli gossip that opens the End Door and the legs behind
-	// that door. An unknown name is an error (a misspelling would otherwise export the leg or cut the plan there).
+	// an optional leg. For a leg the run leader cannot do while the legs after it can (Zul'Farrak's Sergeant Bly was exported this way until
+	// 2026-10-21, when his leg got a boss hold done by its units). An unknown name is an error (a misspelling would otherwise export the leg or
+	// cut the plan there).
 	SkipLegs []string
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
@@ -506,9 +506,18 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 		param, flags = *h.Value, FlagDoneData
 		done = fmt.Sprintf("%d (a script value, not an encounter state)", *h.Value)
 	}
+	text := fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done)
+	if h.Data == 0 {
+		// Done by its units (a boss's hold without instance data, dungeon.Hold): neither done flag, so the run leader ends the hold when
+		// every unit of the entries within the radius is dead after one was seen hostile; the first entry (the boss) counts while friendly.
+		param, flags = 0, 0
+		text = comment + ": fought on the spot until every unit of it is dead"
+		if len(entries) > 0 {
+			text += fmt.Sprintf(" (%d counts while still friendly)", entries[0])
+		}
+	}
 	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
-		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries,
-		Comment: clip(fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done), MaxComment)})
+		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries, Comment: clip(text, MaxComment)})
 	b.last, b.haveLast = h.Spot, true
 }
 
@@ -625,6 +634,10 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 		// The wait's run leader form (dungeon.Hold on a wait_for): the event's hold row in place of the wait, which the run leader may not
 		// be able to run at all (a unit wait). The agent's driver still runs the wait as written.
 		b.hold(w.Hold, uniq(w.Hold.Entries), "wait hold")
+		return nil
+	}
+	if w.AgentOnly != "" {
+		// A unit wait the plan says the run leader needs no row for (dungeon.WaitFor.AgentOnly): left out, and listed by unexpressed.
 		return nil
 	}
 	switch {
@@ -744,8 +757,15 @@ func Validate(r Rows) error {
 				return bad("a gossip carries no flags")
 			}
 		case KindHold:
-			if s.Entry == 0 || s.Flags&FlagDoneData == 0 {
-				return bad("a hold needs its instance data (entry) and done flag")
+			// Done by instance data (flag 8, entry = the data's index) or by its units (no flag, the entries): the loader's rule
+			// (DungeonPlanPolicy.h NormalizePlanStep refuses a units hold without entries). The exporter writes no object-done hold.
+			switch {
+			case s.Flags&FlagDoneData != 0 && s.Entry == 0:
+				return bad("a hold done by instance data needs the data's index (entry)")
+			case s.Flags&FlagDoneData == 0 && s.Flags&FlagEncounter != 0:
+				return bad("the encounter flag needs the instance data flag")
+			case s.Flags&FlagDoneData == 0 && (s.Entry != 0 || s.Param != 0 || len(s.Entries) == 0):
+				return bad("a hold done by its units carries no entry or param, and needs its entries")
 			}
 			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
 			if s.Flags&FlagEncounter != 0 && s.Param > 4 {

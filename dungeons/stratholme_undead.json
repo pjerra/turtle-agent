@@ -806,97 +806,98 @@
           "positions": [
             {"x": 4009.16, "y": -3434.68, "z": 120.951}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 3995.31, "y": -3425.23, "z": 120.991}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 3998.95, "y": -3403.29, "z": 117.52}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4012.37, "y": -3401.48, "z": 116.073}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4022.83, "y": -3424.39, "z": 117.549}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4040.22, "y": -3443.81, "z": 119.751}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4052.9, "y": -3432.7, "z": 118.528}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 4053.98, "y": -3413.3, "z": 116.076}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4072.01, "y": -3401.01, "z": 115.653}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4083.99, "y": -3379.84, "z": 116.318}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 4097.98, "y": -3397.96, "z": 115.993}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10417],
           "positions": [
             {"x": 4089.61, "y": -3431.32, "z": 116.945}
           ],
-          "radius": 5
+          "radius": 18
         },
         {
           "entries": [10416],
           "positions": [
             {"x": 3990.78, "y": -3381.93, "z": 118.724}
           ],
-          "radius": 5
+          "radius": 18
         }
       ],
       "skip": [10384, 10385, 10558],
       "boss": {
         "entry": 10440,
-        "position": {"x": 4032.79, "y": -3333.02, "z": 115.061}
+        "position": {"x": 4032.79, "y": -3333.02, "z": 115.061},
+        "hold": {"spot": {"x": 4040.01, "y": -3413.15, "z": 117.77}, "radius": 68, "timeout_s": 300, "entries": [10416, 10417]}
       },
       "notes": [
         "door \"Ysida's Cage\" entry 181071 at 4044.3 -3334.2 115.1"
