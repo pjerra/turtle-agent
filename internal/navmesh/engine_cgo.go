@@ -158,6 +158,7 @@ func (e *engine) serverPath(from, to Vec3) (uint32, []Vec3, Vec3, float32, float
 }
 
 // raycast casts a walkability ray over the mesh from one point to another: the fraction of the way at which it meets the mesh's
+// edge (over 1 when it reaches the end), and 0 for done, -1 when the start is off the mesh, -3 on a Detour failure.
 func (e *engine) raycast(from, to Vec3) (float32, int) {
 	var t C.float
 	rc := C.nd_raycast(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags), &t)

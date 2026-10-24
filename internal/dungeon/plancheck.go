@@ -303,7 +303,7 @@ func checkPlanRec(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc, rec *ro
 	if a, ok := nav.(AvoidSetter); ok {
 		a.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	}
-	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, rec: rec, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}}
+	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, rec: rec, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}, ends: map[string]Point{}}
 	cur, group := p.Entrance, -1
 	switch {
 	case opt.FromPullGroup != nil:
@@ -348,13 +348,19 @@ func (c *planChecker) runLeader(from int) error {
 			return
 		}
 		if !strings.Contains(m.Part, "approach") && !strings.Contains(m.Part, "hold spot") {
-			prev = m.Point // checked by checkLeg already
+			// Checked by checkLeg already: the approach pass starts from where
+			// its walk left the party (the arrival rule or the server walk may
+			// have kept it behind), not from the plan's point.
+			prev = m.Point
+			if at, ok := c.ends[endKey(m.Leg, m.Part)]; ok {
+				prev = at
+			}
 			return
 		}
 		c.leg, c.l = m.Leg, c.p.Legs[m.Leg]
 		var at Point
-		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil && at == m.Point {
-			prev = m.Point
+		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil {
+			prev = at
 		}
 	}, func(int, string, Point, int, string) {})
 	if err != nil {
@@ -397,7 +403,14 @@ type planChecker struct {
 	res *PlanCheck
 	leg int
 	l   Leg
+	// ends is where checkLeg's walk left the party after each move row of the
+	// plan, keyed "leg/part" with runLeaderWalk's part names: the run leader's
+	// approach pass starts from there, not from the plan's point.
+	ends map[string]Point
 }
+
+// endKey keys ends: the leg and the runLeaderWalk part name of the move row.
+func endKey(leg int, part string) string { return fmt.Sprintf("%d/%s", leg, part) }
 
 func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
 
@@ -440,8 +453,13 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 				// Within the run leader's arrival radius the point counts as
 				// reached: WalkTo returns "arrived" without sending an order,
 				// so the party stays where it was (kArriveYd, WalkTo).
+				part := fmt.Sprintf("via %d", vi)
 				if w.Direct {
-					c.fail(fmt.Sprintf("via %d", vi), 0, w.Point, cur, ReasonArriveSwallowed, "%.1f yd from the point before it: the run leader counts it reached (kArriveYd %g) and never sends the hop; the party stays at %.1f %.1f %.1f", dist3(cur, w.Point), ArriveYd, cur.X, cur.Y, cur.Z)
+					part = fmt.Sprintf("direct via %d", vi)
+				}
+				c.ends[endKey(c.leg, part)] = cur
+				if w.Direct {
+					c.fail(part, 0, w.Point, cur, ReasonArriveSwallowed, "%.1f yd from the point before it: the run leader counts it reached (kArriveYd %g) and never sends the hop; the party stays at %.1f %.1f %.1f", dist3(cur, w.Point), ArriveYd, cur.X, cur.Y, cur.Z)
 				}
 				continue
 			}
@@ -459,6 +477,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 			if err != nil {
 				return cur, err
 			}
+			c.ends[endKey(c.leg, fmt.Sprintf("via %d", vi))] = cur
 		}
 		c.rec.stop("stage", "to", 0, l.To, "")
 		if !l.NeedsWalk {
@@ -466,6 +485,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 			if cur, err = c.walk("to", l.To, cur); err != nil {
 				return cur, err
 			}
+			c.ends[endKey(c.leg, "to")] = cur
 		} else {
 			c.needsWalk("to", 0, "", l.To, cur)
 			cur = l.To
@@ -588,6 +608,7 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 		if st.Gossip != nil && st.Gossip.Talker() == GossipByAgent {
 			cur = prev // the agent's own character walks to it: the party stays where it was
 		}
+		c.ends[endKey(c.leg, label)] = cur
 	}
 	return cur, nil
 }
@@ -612,7 +633,6 @@ func (c *planChecker) count() {
 	c.res.Points++
 }
 
-// walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
 	c.rec.begin("", part, from, to)
@@ -637,25 +657,17 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	c.rec.path(path)
-	// The server's own query judges the hop first: it models where the run
-	// leader really stands (the arrival radius kept the party behind) and the
-	// server's filter (steep included) and node budget. The walk goes on from
-	// where the server leaves the party.
+	// The server's own query judges the hop first: when it answers 'arrived'
+	// (inside the arrival radius) the run leader sends NO order, so the
+	// modelled position stays where it was: the offline check must not also
+	// run as if the hop happened.
 	if at, ok, err := c.serverWalk(part, 0, to, from); err != nil {
 		return at, err
 	} else if !ok {
 		return at, nil
 	} else if at != to {
-		path, err = c.nav.Plan(c.p.Map, vec(at), vec(to))
-		if err != nil {
-			return at, err
-		}
-		c.rec.path(path)
-		if path.Status != navmesh.Complete {
-			err := c.failPath(part, 0, to, at, path)
-			return at, err
-		}
-		return to, nil
+		// The server answered 'arrived': the party stays where it was.
+		return at, nil
 	}
 	if path.Status != navmesh.Complete {
 		err := c.failPath(part, 0, to, from, path)
@@ -682,7 +694,9 @@ func (c *planChecker) serverWalk(part string, group int, to, from Point) (Point,
 	cur := from
 	for range 3 {
 		if dist3(cur, to) <= ArriveYd {
-			return to, true, nil
+			// Inside the arrival radius the run leader sends NO order
+			// (WalkTo returns "arrived"): the party stays where it was.
+			return from, true, nil
 		}
 		sp, err := q.ServerPath(c.p.Map, vec(cur), vec(to))
 		if err != nil {

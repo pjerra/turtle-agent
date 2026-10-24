@@ -407,8 +407,12 @@ static uint32_t fixupCorridor(dtPolyRef* path, uint32_t npath, uint32_t maxPath,
         return npath;
     uint32_t req = nvisited - fv, orig = uint32_t(fp + 1) < npath ? fp + 1 : npath,
              size = npath > orig ? npath - orig : 0;
-    if (req + size > maxPath)
-        size = maxPath - req;
+    // Keep the copy inside the buffer: req + size never exceeds maxPath, and the
+    // subtraction cannot underflow (the bound -Wstringop-overflow asked for; the
+    // query passes maxPath = SERVER_MAX_POLYS for a polys buffer of that size).
+    if (req > maxPath)
+        req = maxPath;
+    size = dtMin(size, maxPath - req);
     if (size)
         memmove(path + req, path + orig, size * sizeof(dtPolyRef));
     for (uint32_t i = 0; i < req; ++i)

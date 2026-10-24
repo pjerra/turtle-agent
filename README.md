@@ -851,7 +851,9 @@ What it checks:
   fails as `hop inside the arrival radius`: the run leader counts it reached without sending an order, so the party stays behind. Replay one hop of a live refusal from the logged lead
   position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
 Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
-  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end).
+  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
+  search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
+  saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 

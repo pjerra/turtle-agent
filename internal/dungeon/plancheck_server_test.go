@@ -53,6 +53,7 @@ func TestPlanCheckFlagsHateforgeSwallowedHop(t *testing.T) {
 	plan := &Plan{Name: "t", Map: 808, Entrance: Point{X: -8320, Y: -3447.5, Z: 180.1},
 		Legs: []Leg{{Name: "bargul_terrace",
 			Via: []Waypoint{
+				{Point: Point{X: -8320, Y: -3447.5, Z: 180.1}},
 				{Point: Point{X: -8321.5, Y: -3447.5, Z: 181}, Direct: true, CheckSkip: "terrace hop"},
 			},
 			To: Point{X: -8321.5, Y: -3447.5, Z: 181},
@@ -65,18 +66,18 @@ func TestPlanCheckFlagsHateforgeSwallowedHop(t *testing.T) {
 	}
 	var swallowed, unreachable bool
 	for _, is := range res.Issues {
-		if is.Reason == ReasonArriveSwallowed && is.Part == "via 0" {
+		if is.Reason == ReasonArriveSwallowed && is.Part == "direct via 1" {
 			swallowed = true
 		}
-		if is.Reason == ReasonUnreachable && is.Part == "to" {
+		if is.Reason == ReasonServerUnreachable {
 			unreachable = true
 		}
 	}
 	if !swallowed {
-		t.Errorf("no arrival-radius issue on via 0: %+v", res.Issues)
+		t.Errorf("no arrival-radius issue on direct via 1: %+v", res.Issues)
 	}
 	if !unreachable {
-		t.Errorf("no unreachable issue on the to row (terrace hop stands on the lower poly, then the offline mesh cannot rejoin): %+v", res.Issues)
+		t.Errorf("no server-unreachable issue on the boss approach or the to row (the server walks into the pocket, then refuses): %+v", res.Issues)
 	}
 }
 
