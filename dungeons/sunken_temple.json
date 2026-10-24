@@ -34,7 +34,8 @@
     "Needs: Shade of Eranikus needs the Essence of Eranikus path and the Altar of Hakkar",
     "Census 2026-10-23 (map 109 spawn export, no live run): fleers 5259 and 5273 (EventAI command 47 at 15% HP); cc_priority 5259,5273,5269,5226 (the healers, the Hex, the Slowing Poison); cc_always 5259; kill_first 5271,5280,5291 (Fear, Sleep, Frostbolt Volley with the Swoop summon). Radii cut on pulls 0.5, 3.2 and 3.3 so a row does not take the next pack (same entries, 14.4-26.8 yd), and set to 17 yd on the seven Hakkari Frostwing 5291 pulls (their wander is 15 yd).",
     "FIXED 2026-10-24 (boss order): the instance script keeps Weaver 5720 and Dreamscythe 5721 (VISIBILITY_OFF, not selectable, immune, patrol idle) and Shade of Eranikus 5709 (not selectable, immune, sleeping) until SetData(TYPE_JAMMALAN, DONE) (instance_sunken_temple.cpp:384-408, gated on m_auiEncounter[2]); the legs are now atal'alarion, jammal'an_the_prophet, weaver, dreamscythe, morphaz, shade_of_eranikus, so the Weaver and Dreamscythe boss rows come after Jammal'an. Jammal'an's leg carries the walkway via from the old weaver leg (atal'alarion hold spot back up to -300 100.5 -172.1).",
-    "Patrols: 5708 Spawn of Hakkar (guids 33621 and 34520, 12-point paths spanning about 190 yd) and Murk Worm 5226 (guids 33676 46 points and 34168 4 points) walk the halls the plan clears; the pull rows carry no patrol path, so a pull of one of them can find nothing at its point (the run leader then reads the pack as cleared) and they can join later fights."
+    "Patrols: 5708 Spawn of Hakkar (guids 33621 and 34520, 12-point paths spanning about 190 yd) and Murk Worm 5226 (guids 33676 46 points and 34168 4 points) walk the halls the plan clears; the pull rows carry no patrol path, so a pull of one of them can find nothing at its point (the run leader then reads the pack as cleared) and they can join later fights.",
+    "FIXED 2026-10-25 (r38 slotD polish): (1) the Atal'alarion leg's island gap (run pause at step 236, lead at -448.0 103.2 -191.0, three moves refused): the walk off Atal'ai platform to the z -172.9 ring crossed the pool floor 3.2 yd under the navmesh. Group 9 now carries four approach points up the east ramp (-448 96 -188.9, -440 96 -184.6, -432 96.5 -179.6, -424 99 -174.8), each hop server path-checked from the live fight spot (all type 0x1 ok); the exporter's own cut had gone to -448 103.2 -187.83, above the pool. (2) dreamscythe's deferred pack (5714 at -467.2 26.3 -67.0, 'never within reach' at r38 step 2194): its platform is reached only from the -53.9 hall by the ramp (-512 26.4 -53.83, -490.67 21.33 -61.83, -484.53 18.13 -64.93, the stand 19.3 yd from the pack); the group moves after the hall group (-481 1.4 -53.9) so the party is on that floor when it walks up. (3) the wasted-time round trip of r38 steps 1981-2103 (down the spiral to the statue ring for 5 packs and back up, 1774 yd of rows for 191 yd of ring): the five statue-ring packs (8311/8384 at -546 151, -555 131, -564 105, -533 115, -522 93) move into the Atal'alarion leg after its last statue-ring group (-508.5 183), 50 yd from it and 10 yd from the first statue stand; dreamscythe then walks group 8 -> group 9 (-555.5 270.6 -90.8 -> -542.9 94.3 -90.9) on the ring in 191 yd. Every reordered hop is server path-checked (type 0x1 ok); pulls move nobody."
   ],
   "legs": [
     {
@@ -146,6 +147,12 @@
             {"x": -509.183, "y": 125.616, "z": -173.458},
             {"x": -513.666, "y": 120.161, "z": -173.293},
             {"x": -515.758, "y": 123.722, "z": -172.939}
+          ],
+          "approach": [
+            {"x": -448.0, "y": 96.0, "z": -188.9},
+            {"x": -432.0, "y": 96.5, "z": -179.6},
+            {"x": -424.0, "y": 99.0, "z": -174.8},
+            {"x": -499.0, "y": 136.0, "z": -172.8}
           ]
         },
         {
@@ -215,6 +222,44 @@
             {"x": -506.616, "y": 183.867, "z": -147.307},
             {"x": -510.948, "y": 181.021, "z": -148.802},
             {"x": -510.957, "y": 186.878, "z": -148.802}
+          ]
+        },
+        {
+          "entries": [8311],
+          "positions": [
+            {"x": -546.35, "y": 151.003, "z": -147.526}
+          ]
+        },
+        {
+          "entries": [8311],
+          "positions": [
+            {"x": -555.539, "y": 131.459, "z": -148.802}
+          ]
+        },
+        {
+          "entries": [8384, 8311, 8311, 8311, 8311, 8384],
+          "positions": [
+            {"x": -563.259, "y": 109.207, "z": -148.802},
+            {"x": -558.676, "y": 107.74, "z": -147.236},
+            {"x": -568.104, "y": 106.208, "z": -148.802},
+            {"x": -566.167, "y": 104.666, "z": -148.802},
+            {"x": -562.351, "y": 101.242, "z": -148.802},
+            {"x": -565.612, "y": 101.893, "z": -148.802}
+          ]
+        },
+        {
+          "entries": [8311],
+          "positions": [
+            {"x": -533.006, "y": 115.369, "z": -148.805}
+          ]
+        },
+        {
+          "entries": [8311, 8384, 8311, 8384],
+          "positions": [
+            {"x": -517.782, "y": 98.4696, "z": -148.742},
+            {"x": -527.616, "y": 92.2731, "z": -148.744},
+            {"x": -524.655, "y": 90.3218, "z": -148.743},
+            {"x": -521.151, "y": 90.4728, "z": -148.741}
           ]
         }
       ],
@@ -828,44 +873,6 @@
           "radius": 17
         },
         {
-          "entries": [8311],
-          "positions": [
-            {"x": -546.35, "y": 151.003, "z": -147.526}
-          ]
-        },
-        {
-          "entries": [8311],
-          "positions": [
-            {"x": -555.539, "y": 131.459, "z": -148.802}
-          ]
-        },
-        {
-          "entries": [8384, 8311, 8311, 8311, 8311, 8384],
-          "positions": [
-            {"x": -563.259, "y": 109.207, "z": -148.802},
-            {"x": -558.676, "y": 107.74, "z": -147.236},
-            {"x": -568.104, "y": 106.208, "z": -148.802},
-            {"x": -566.167, "y": 104.666, "z": -148.802},
-            {"x": -562.351, "y": 101.242, "z": -148.802},
-            {"x": -565.612, "y": 101.893, "z": -148.802}
-          ]
-        },
-        {
-          "entries": [8311],
-          "positions": [
-            {"x": -533.006, "y": 115.369, "z": -148.805}
-          ]
-        },
-        {
-          "entries": [8311, 8384, 8311, 8384],
-          "positions": [
-            {"x": -517.782, "y": 98.4696, "z": -148.742},
-            {"x": -527.616, "y": 92.2731, "z": -148.744},
-            {"x": -524.655, "y": 90.3218, "z": -148.743},
-            {"x": -521.151, "y": 90.4728, "z": -148.741}
-          ]
-        },
-        {
           "entries": [5277, 5283, 5277],
           "positions": [
             {"x": -542.652, "y": 94.2902, "z": -90.8689},
@@ -940,12 +947,6 @@
           ]
         },
         {
-          "entries": [5714],
-          "positions": [
-            {"x": -467.178, "y": 26.3112, "z": -66.9833}
-          ]
-        },
-        {
           "entries": [5259, 5270, 8318, 8318, 8318],
           "positions": [
             {"x": -480.794, "y": 4.1161, "z": -53.9463},
@@ -957,6 +958,17 @@
           "approach": [
             {"x": -508.8, "y": 25.87, "z": -53.83},
             {"x": -502.87, "y": 11.13, "z": -53.08}
+          ]
+        },
+        {
+          "entries": [5714],
+          "positions": [
+            {"x": -467.178, "y": 26.3112, "z": -66.9833}
+          ],
+          "approach": [
+            {"x": -512.0, "y": 26.4, "z": -53.83},
+            {"x": -490.67, "y": 21.33, "z": -61.83},
+            {"x": -484.53, "y": 18.13, "z": -64.93}
           ]
         },
         {
