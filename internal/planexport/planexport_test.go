@@ -1288,8 +1288,8 @@ func TestBossRadiusExported(t *testing.T) {
 	if b.Kind != KindBoss || b.Radius != 95 {
 		t.Fatalf("boss row %+v (want radius 95)", b)
 	}
-	if _, err := Build(parsePlan(t, leg("101")), Options{Source: "test"}); err == nil {
-		t.Fatalf("radius 101 exported without an error")
+	if _, err := Build(parsePlan(t, leg("101")), Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "boss 62661") {
+		t.Fatalf("radius 101 error %v (want the named boss and its range)", err)
 	}
 }
 
@@ -1320,8 +1320,8 @@ func TestBossStandPullFlagAndApproach(t *testing.T) {
 	const bare = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
 	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
 	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"stand_pull":true}}]}`
-	if _, err := Build(parsePlan(t, bare), Options{Source: "test"}); err == nil {
-		t.Fatalf("stand_pull without an approach exported without an error")
+	if _, err := Build(parsePlan(t, bare), Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
+		t.Fatalf("stand_pull without an approach error %v (want the no-approach refusal)", err)
 	}
 }
 
@@ -1345,6 +1345,7 @@ func TestBossStandPullNoApproachHops(t *testing.T) {
 	for i, s := range res.Rows.Steps {
 		if s.Kind == KindBoss {
 			bi = i
+			break
 		}
 	}
 	if bi < 0 {
@@ -1353,20 +1354,20 @@ func TestBossStandPullNoApproachHops(t *testing.T) {
 	if prev := res.Rows.Steps[bi-1]; prev.Kind != KindMove || prev.Y == 999 {
 		t.Fatalf("row before the boss %+v (want the stand move, no approach path)", prev)
 	}
-	for _, s := range res.Rows.Steps {
-		if s.Kind == KindMove && s.Comment == "approach path" && s.Y == 999 {
-			t.Fatalf("approach-path row between the stand and the boss: %+v", s)
+	for _, s := range res.Rows.Steps[:bi] {
+		if s.Kind == KindMove && s.Comment == "approach path" {
+			t.Fatalf("approach-path row before the stand-pull boss: %+v", s)
 		}
 	}
 	var after *StepRow
 	for i := bi + 1; i < len(res.Rows.Steps); i++ {
-		if s := res.Rows.Steps[i]; s.Kind == KindMove && s.Comment == "path" {
+		if s := res.Rows.Steps[i]; s.Kind == KindMove {
 			after = &res.Rows.Steps[i]
 			break
 		}
 	}
 	if after == nil {
-		t.Fatalf("no cut path row after the boss: %+v", res.Rows.Steps)
+		t.Fatalf("no move row after the boss: %+v", res.Rows.Steps)
 	}
 	if after.Y != 999 || after.X != 205 {
 		t.Fatalf("first cut after the boss %+v (want the stand-to-next midpoint 205,999)", *after)
