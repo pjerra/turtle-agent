@@ -417,6 +417,13 @@ type Boss struct {
 	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Radius is the yards around Position the run leader searches for a patrolling boss (Stormwrought Ruins' Eldermaw
+	// 62661 swims a 440 yd loop; specs/sw-eldermaw.md Spec B). Zero means the module's 30.
+	Radius float32 `json:"radius,omitempty"`
+	// StandPull says the party holds at the boss's last approach point (the move row right before the boss row) and the
+	// boss is pulled from there once in the tank's shot: no firing-stand search, no walk toward his spot
+	// (specs/sw-eldermaw.md Spec B).
+	StandPull bool `json:"stand_pull,omitempty"`
 	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
@@ -845,8 +852,12 @@ type rawBoss struct {
 	// Tactics is Boss.Tactics.
 	Tactics   *tactics.Tactics `json:"tactics"`
 	NeedsWalk bool             `json:"needs_walk"`
-	Approach  []rawPoint       `json:"approach"`
-	Hold      *rawHold         `json:"hold"`
+	// Radius is Boss.Radius.
+	Radius float32 `json:"radius"`
+	// StandPull is Boss.StandPull.
+	StandPull bool       `json:"stand_pull"`
+	Approach  []rawPoint `json:"approach"`
+	Hold      *rawHold   `json:"hold"`
 	// SkipUnreachable is Boss.SkipUnreachable.
 	SkipUnreachable string `json:"skip_unreachable"`
 }
@@ -1344,7 +1355,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, SkipUnreachable: r.Boss.SkipUnreachable}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, Radius: r.Boss.Radius, StandPull: r.Boss.StandPull, SkipUnreachable: r.Boss.SkipUnreachable}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
