@@ -17,8 +17,8 @@ func (*engine) floors(float32, float32, float32, float32) ([]Floor, error) {
 	return nil, ErrNoEngine
 }
 func (*engine) polys([4]float32) ([]Polygon, error) { return nil, ErrNoEngine }
-func (*engine) findPath(Vec3, Vec3) (int, []Vec3, Vec3) {
-	return -3, nil, Vec3{}
+func (*engine) findPath(Vec3, Vec3) (int, []Vec3, []uint8, Vec3) {
+	return -3, nil, nil, Vec3{}
 }
 func (*engine) raycast(Vec3, Vec3) (float32, int) { return 0, -3 }
 func (*engine) markBox(Box, uint16, float32) int  { return 0 }

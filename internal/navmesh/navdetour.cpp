@@ -139,6 +139,17 @@ extern "C" int nd_add_tile(void* h, const unsigned char* file, int size, unsigne
         dtFree(data);
         return -4;
     }
+    // Off-mesh links are traversable ground like the server's player filter
+    // (include ground, exclude nothing) sees them: MoveMapGen writes their
+    // flags 0xFF, whose magma/slime/steep bits would throw every link away
+    // under the agent's exclude filter. Set them to NAV_GROUND (0x01).
+    if (const dtMeshTile* tile = n->mesh->getTileByRef(ref)) {
+        const dtPolyRef base = n->mesh->getPolyRefBase(tile);
+        for (int i = 0; i < tile->header->polyCount; ++i) {
+            if (tile->polys[i].getType() == DT_POLYTYPE_OFFMESH_CONNECTION)
+                n->mesh->setPolyFlags(base | (dtPolyRef)i, 0x01);
+        }
+    }
     *tile = ref;
     return 0;
 }
@@ -175,6 +186,11 @@ extern "C" int nd_floors(void* h, const float* p, float lo, float hi, float* z, 
         return -1;
     int count = 0;
     for (int i = 0; i < nrefs && count < max; ++i) {
+        const dtMeshTile* tile = 0;
+        const dtPoly* poly = 0;
+        if (dtStatusSucceed(n->mesh->getTileAndPolyByRef(refs[i], &tile, &poly)) &&
+            poly->getType() == DT_POLYTYPE_OFFMESH_CONNECTION)
+            continue; // a link is no surface: getPolyHeight would interpolate mid-air
         float y = 0;
         if (dtStatusFailed(n->query->getPolyHeight(refs[i], c, &y)) || y < lo || y > hi)
             continue;
@@ -286,6 +302,10 @@ extern "C" int nd_mark_box(void* h, const float* box, unsigned short flag, float
         const dtPolyRef base = mesh->getPolyRefBase(t);
         for (int pi = 0; pi < t->header->polyCount; ++pi) {
             const dtPoly* p = &t->polys[pi];
+            // Off-mesh links are never marked: an avoid box over a link's
+            // middle must not cut the route that crosses it.
+            if (p->getType() == DT_POLYTYPE_OFFMESH_CONNECTION)
+                continue;
             if (p->getType() != DT_POLYTYPE_GROUND || p->vertCount < 3)
                 continue;
             int m = p->vertCount;
@@ -338,7 +358,8 @@ extern "C" int nd_raycast(void* h, const float* start, const float* end, unsigne
 }
 
 extern "C" int nd_find_path(void* h, const float* start, const float* end, unsigned short include,
-                            unsigned short exclude, float* out, int max_points, int* count, float* goal) {
+                            unsigned short exclude, float* out, unsigned char* flags, int max_points,
+                            int* count, float* goal) {
     Nav* n = (Nav*)h;
     *count = 0;
     dtQueryFilter f = makeFilter(include, exclude);
@@ -366,9 +387,74 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
     if (polys[np - 1] != eref || dtStatusDetail(st, DT_PARTIAL_RESULT))
         result = 1;
     int npts = 0;
-    if (dtStatusFailed(n->query->findStraightPath(sc, ec, polys, np, out, nullptr, nullptr, &npts, max_points)) ||
+    unsigned char sflags[2048];
+    dtPolyRef refs[2048];
+    if (dtStatusFailed(n->query->findStraightPath(sc, ec, polys, np, out, flags ? flags : sflags, refs,
+                                                  &npts, max_points)) ||
         npts < 1)
         return -3;
+    // An off-mesh link is recovered from the poly corridor: the straight
+    // corner at the link's far end carries DT_STRAIGHTPATH_OFFMESH_CONNECTION
+    // (meaning the segment from that corner is the link). The funnel may merge
+    // the link's two ends into one corner or skip the flag, so mark or split
+    // here: for each link poly, find its far end and either flag the corner
+    // nearest to it or split the crossed segment there.
+    if (flags && npts < max_points) {
+        float out2[3 * 2048];
+        unsigned char fl2[2048];
+        for (int i = 0; i < npts; ++i) {
+            dtVcopy(&out2[i * 3], &out[i * 3]);
+            fl2[i] = sflags[i];
+        }
+        int w = npts;
+        for (int k = 1; k + 1 < np; ++k) {
+            const dtMeshTile* tile = 0;
+            const dtPoly* poly = 0;
+            if (!dtStatusSucceed(n->mesh->getTileAndPolyByRef(polys[k], &tile, &poly)) ||
+                poly->getType() != DT_POLYTYPE_OFFMESH_CONNECTION)
+                continue;
+            float s2[3], e2[3];
+            if (!dtStatusSucceed(n->mesh->getOffMeshConnectionPolyEndPoints(polys[k - 1], polys[k], s2, e2)))
+                continue;
+            if (!dtStatusSucceed(n->mesh->getOffMeshConnectionPolyEndPoints(polys[k - 1], polys[k], s2, e2)))
+                continue;
+            // No corner at the far end: split the segment whose span passes
+            // nearest to it.
+            int bi = -1;
+            float bd = 1e30f;
+            for (int i = 0; i + 1 < w && w < 2048 && w < max_points; ++i) {
+                float ab[3], ap[3];
+                dtVsub(ab, &out2[(i + 1) * 3], &out2[i * 3]);
+                dtVsub(ap, e2, &out2[i * 3]);
+                float denom = dtVdot(ab, ab);
+                float t = denom > 0 ? dtVdot(ap, ab) / denom : 0;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                float q[3], dd[3];
+                dtVmad(q, &out2[i * 3], ab, t);
+                dtVsub(dd, e2, q);
+                float d2 = dtVlenSqr(dd);
+                if (d2 < bd) {
+                    bd = d2;
+                    bi = i;
+                }
+            }
+            if (bi < 0 || bd > 0.25f)
+                continue;
+            for (int i = w; i > bi + 1; --i) {
+                dtVcopy(&out2[i * 3], &out2[(i - 1) * 3]);
+                fl2[i] = fl2[i - 1];
+            }
+            fl2[bi] = DT_STRAIGHTPATH_OFFMESH_CONNECTION;
+            dtVcopy(&out2[(bi + 1) * 3], e2);
+            fl2[bi + 1] = 0;
+            ++w;
+        }
+        for (int i = 0; i < w; ++i) {
+            dtVcopy(&out[i * 3], &out2[i * 3]);
+            flags[i] = fl2[i];
+        }
+        npts = w;
+    }
     for (int i = 0; i < npts; ++i) {
         float d[3];
         dtVcopy(d, &out[i * 3]);

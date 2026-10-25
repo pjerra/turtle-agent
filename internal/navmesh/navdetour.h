@@ -60,7 +60,7 @@ int nd_raycast(void* h, const float* start, const float* end, unsigned short inc
 // -2 goal off the mesh, -3 Detour failure. *count = points written (3 floats each); goal
 // = the floor point found for end (set from 0 up).
 int nd_find_path(void* h, const float* start, const float* end, unsigned short include, unsigned short exclude,
-                 float* out, int max_points, int* count, float* goal);
+                 float* out, unsigned char* flags, int max_points, int* count, float* goal);
 
 #ifdef __cplusplus
 }

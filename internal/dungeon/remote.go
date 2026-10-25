@@ -61,6 +61,13 @@ type PathPlanner interface {
 	PlanPath(ctx context.Context, mapID uint32, from, to Point) ([]Point, error)
 }
 
+// PlanPathOffMesher is the optional part of a PathPlanner that also reports the
+// path's off-mesh link segments, aligned to its points (offMesh[i] marks the
+// segment Points[i] -> Points[i+1]); nil when the planner cannot say.
+type PlanPathOffMesher interface {
+	PlanPathOffMesh(ctx context.Context, mapID uint32, from, to Point) ([]bool, error)
+}
+
 // FloorSnapper is the optional part of a RemoteGame that puts a point on the navmesh floor under it (false: there is none near): the look
 // point of a pack (LookPoint) is snapped with it, as the plan check snaps its own.
 type FloorSnapper interface {

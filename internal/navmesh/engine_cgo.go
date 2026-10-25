@@ -127,14 +127,16 @@ func (e *engine) markBox(b Box, flag uint16, share float32) int {
 
 // findPath returns Detour's verdict (0 complete, 1 partial, 2 partial with the goal over
 // 7 yd from the mesh, -1 start off the mesh, -2 goal off the mesh, -3 failure), the
-// straight path between the floor points, and the floor point found for the goal.
-func (e *engine) findPath(from, to Vec3) (int, []Vec3, Vec3) {
+// straight path between the floor points, one straight-path flag per point (bit 0x04
+// marks the start of an off-mesh link), and the floor point found for the goal.
+func (e *engine) findPath(from, to Vec3) (int, []Vec3, []uint8, Vec3) {
 	out := make([]Vec3, maxPoints)
+	fl := make([]uint8, maxPoints)
 	var n C.int
 	var goal Vec3
 	rc := C.nd_find_path(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags),
-		cvec(&out[0]), C.int(maxPoints), &n, cvec(&goal))
-	return int(rc), out[:int(n)], goal
+		cvec(&out[0]), (*C.uchar)(unsafe.Pointer(&fl[0])), C.int(maxPoints), &n, cvec(&goal))
+	return int(rc), out[:int(n)], fl[:int(n)], goal
 }
 
 // serverMaxPoints is the most smooth points the server's findSmoothPath returns

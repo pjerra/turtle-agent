@@ -859,6 +859,8 @@ A run that starts inside the plan is checked from where the driver puts the part
 
 A hop the plan itself exempts, `"check_skip": "<reason>"` on a `via` point (Uldaman's two direct hops over the scorpid pit, which the navmesh cannot judge), is listed under `exempt` with the reason and not checked.
 
+A complete hop that crosses an off-mesh link (a swim or a drop) warns with the reason `off-mesh link`, naming the link's two ends: the walk works, but the swim stays visible.
+
 A **warning** (not a failure, and it never blocks a run) says a `direct` hop is not needed: the navmesh already joins its two ends with a complete, nearly straight path, so a plain
 waypoint does the same and can be sent again from wherever a fight leaves the lead bot. The check is static: it cannot see where a fight drags the lead bot, or a refusal
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
@@ -3734,7 +3736,8 @@ planner of its own, so drawing an image unloads none of these.
 [tortoise-wow](https://github.com/tortoise-wow/tortoise-wow) with its 64-bit poly refs), compiled in through cgo, and
 it makes the PathFinder's calls: `findNearestPoly` with its extents (5 yd round, 10 yd of height, never a floor more
 than 3 yd above the point), `findPath` with a player's filter (ground and water; lava, slime and too-steep slopes left
-out) and `findStraightPath`. So the corners are the ones the server computes; only the two ends differ, put on the
+out) and `findStraightPath`. Off-mesh links (swims, drops) are followed as the server follows them: their polygons are
+treated as ground, and no ground is sampled along a link. So the corners are the ones the server computes; only the two ends differ, put on the
 floor where the server keeps the points it was given. Two alternatives were turned down:
 a pure-Go Detour such as [arl/go-detour](https://github.com/arl/go-detour) (zlib) has 32-bit poly refs and 12-byte
 links, so it cannot read these tiles without a fork, and its port of Detour is older than the core's; and a port of

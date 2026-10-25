@@ -285,6 +285,19 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	return out, nil
 }
 
+// PlanPathOffMesh implements dungeon.PlanPathOffMesher: the off-mesh link
+// segments of the navmesh path, aligned to its points.
+func (g remoteGame) PlanPathOffMesh(_ context.Context, mapID uint32, from, to dungeon.Point) ([]bool, error) {
+	if g.c.planner == nil {
+		return nil, errNoPlanner
+	}
+	p, err := g.c.planner.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
+	if err != nil {
+		return nil, err
+	}
+	return p.OffMesh, nil
+}
+
 var _ dungeon.AvoidMarker = remoteGame{}
 
 // MarkAvoid implements dungeon.AvoidMarker: the plan's avoid boxes are marked on the agent's planner, so its paths and floor snaps keep

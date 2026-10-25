@@ -42,6 +42,10 @@ const (
 
 	// WarnNeedlessDirect is the reason of the warning on a direct hop the navmesh already joins.
 	WarnNeedlessDirect = "needless direct"
+	// WarnOffMeshLink is the reason of the warning on a complete hop that
+	// crosses an off-mesh link (a swim or a drop): the walk works, but the
+	// link stays visible.
+	WarnOffMeshLink = "off-mesh link"
 	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
 	WarnEstimatedPatrol = "estimated patrol period"
 
@@ -116,9 +120,20 @@ func (c *planChecker) cutByAvoid(from, to Point) (string, bool, error) {
 	var names []string
 	for _, b := range c.p.Avoid {
 		hit := false
-		for _, seg := range append([][]navmesh.Vec3{path.Points}, path.Ground...) {
+		segs := append([][]navmesh.Vec3{path.Points}, path.Ground...)
+		for i, seg := range segs {
+			if i > 0 && i-1 < len(path.OffMesh) && path.OffMesh[i-1] {
+				continue // a link segment has no ground: only its ends count
+			}
 			for _, q := range seg {
 				hit = hit || b.Contains(point(q))
+			}
+		}
+		if len(path.OffMesh) == len(path.Points) {
+			for i := range path.Points {
+				if i < len(path.OffMesh) && path.OffMesh[i] {
+					hit = hit || b.Contains(point(path.Points[i])) || b.Contains(point(path.Points[i+1]))
+				}
 			}
 		}
 		if hit {
@@ -371,7 +386,8 @@ func (c *planChecker) runLeader(from int) error {
 }
 
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
-type lookFunc func(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool)
+// offMesh marks the path's link segments (nil: none).
+type lookFunc func(path []Point, pack Point, standoff, view float32, snap func(Point) Point, offMesh []bool) (Point, bool)
 
 // planPoints is GatherSpot's path function over the navmesh.
 func (c *planChecker) planPoints(from, to Point) []Point {
@@ -411,6 +427,20 @@ type planChecker struct {
 
 // endKey keys ends: the leg and the runLeaderWalk part name of the move row.
 func endKey(leg int, part string) string { return fmt.Sprintf("%d/%s", leg, part) }
+
+// offMeshOf returns the path's link segments aligned to its points: offMeshOf
+// is nil when the path has none.
+func offMeshOf(path navmesh.Path) []bool {
+	if len(path.OffMesh) != len(path.Points) {
+		return nil
+	}
+	for _, b := range path.OffMesh {
+		if b {
+			return path.OffMesh
+		}
+	}
+	return nil
+}
 
 func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
 
@@ -657,6 +687,7 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	c.rec.path(path)
+	c.warnOffMesh(part, to, from, path)
 	// The offline query judges the hop first: when it answers anything but
 	// complete the run never sends the hop, so the run leader's own query is
 	// not asked. The route-trace exception stays for the Plan failure only.
@@ -681,6 +712,27 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return at, nil
 	}
 	return to, nil
+}
+
+// warnOffMesh warns once per link of a complete path that crosses one: the hop
+// works, but the swim or drop stays visible.
+func (c *planChecker) warnOffMesh(part string, to, from Point, path navmesh.Path) {
+	if path.Status != navmesh.Complete || len(path.OffMesh) != len(path.Points) {
+		return
+	}
+	seen := map[string]bool{}
+	for i, b := range path.OffMesh {
+		if !b || i+1 >= len(path.Points) {
+			continue
+		}
+		a, e := point(path.Points[i]), point(path.Points[i+1])
+		key := fmt.Sprintf("%.1f %.1f %.1f %.1f %.1f %.1f", a.X, a.Y, a.Z, e.X, e.Y, e.Z)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		c.warn(part, to, from, WarnOffMeshLink, "crosses an off-mesh link (swim or drop) from %.1f %.1f %.1f to %.1f %.1f %.1f", a.X, a.Y, a.Z, e.X, e.Y, e.Z)
+	}
 }
 
 // serverWalk simulates the run leader's walk of one hop with the server's own path
@@ -852,7 +904,7 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 		}
 		return point(n)
 	}
-	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, view, snap)
+	stand, moved := c.lookAt(pts, at, c.opt.LookStandoff, view, snap, offMeshOf(path))
 	if snapErr != nil {
 		return from, snapErr
 	}
