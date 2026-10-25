@@ -594,6 +594,21 @@ func (d *RemoteDriver) approachArrive(ctx context.Context, p Point, standoff, ar
 	return d.approachView(ctx, p, standoff, arrive, 0)
 }
 
+// planPathOffMesh reports the off-mesh link segments of the path the planner
+// found from here to p (nil: none, or the planner cannot say). It re-plans: the
+// approach already holds the points but not the flags.
+func (d *RemoteDriver) planPathOffMesh(ctx context.Context, pl PathPlanner, here, p Point, pts []Point) []bool {
+	q, ok := pl.(PlanPathOffMesher)
+	if !ok {
+		return nil
+	}
+	off, err := q.PlanPathOffMesh(ctx, d.plan.Map, here, p)
+	if err != nil || len(off) != len(pts) {
+		return nil
+	}
+	return off
+}
+
 // floorSnap is LookPoint's snap over the game's navmesh, if it has one (FloorSnapper); nil otherwise.
 func (d *RemoteDriver) floorSnap(ctx context.Context) func(Point) Point {
 	fs, ok := d.g.(FloorSnapper)
@@ -620,7 +635,7 @@ func (d *RemoteDriver) approachView(ctx context.Context, p Point, standoff, arri
 		if pts, err := pl.PlanPath(ctx, d.plan.Map, here, p); err == nil {
 			s, ok := StandoffPoint(pts, standoff)
 			if view > 0 {
-				s, ok = LookPoint(pts, p, standoff, view, d.floorSnap(ctx))
+				s, ok = LookPoint(pts, p, standoff, view, d.floorSnap(ctx), d.planPathOffMesh(ctx, pl, here, p, pts))
 			}
 			if ok {
 				stand = s
