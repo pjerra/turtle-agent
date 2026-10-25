@@ -43,6 +43,10 @@ int nd_polys(void* h, const float* box, float* out, int max);
 // count of polygons it marked, -1 when Detour has no mesh.
 int nd_mark_box(void* h, const float* box, unsigned short flag, float share);
 
+// nd_server_path replays the server's own query (the core's PathInfo: BuildPolyPath +
+// findSmoothPath, MoveMap.cpp:333): 2048 search nodes, at most 256 polys, ground|water
+// included, nothing excluded, a smoothed path of at most 256 points.
+int nd_server_path(void* h, const float* start, const float* end, float* out, int max_points, int* count, float* actual_end, unsigned* type, float* start_dist, float* end_dist);
 // A walkability ray along the mesh surface from start to end (WoW x, y, z; the height of end is ignored, the ray runs
 // over the polygons). 0 done: *t = the fraction of the way from start to end at which the ray meets the mesh's edge
 // (an unwalkable polygon, a missing tile, a wall of the mesh), or a value over 1 when it reaches end; -1 start is off the mesh;
