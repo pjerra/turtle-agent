@@ -490,8 +490,8 @@ type ragefireLook struct {
 func ragefireLooks(t *testing.T, p *Plan, pl *navmesh.Planner) []ragefireLook {
 	t.Helper()
 	var out []ragefireLook
-	rec := func(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool) {
-		s, ok := LookPoint(path, pack, standoff, view, snap)
+	rec := func(path []Point, pack Point, standoff, view float32, snap func(Point) Point, offMesh []bool) (Point, bool) {
+		s, ok := LookPoint(path, pack, standoff, view, snap, offMesh)
 		var route []Point
 		for k := 1; k < len(path); k++ {
 			route = append(route, path[k-1])

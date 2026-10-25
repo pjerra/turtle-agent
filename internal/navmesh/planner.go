@@ -65,13 +65,17 @@ const (
 // and the last the goal (or, when partial, the nearest point to it the mesh reaches).
 // Ground[i] holds surface points every GroundStep yards strictly between Points[i] and
 // Points[i+1], so a walk keeps to the ground between corners.
+// OffMesh[i] is true when the segment Points[i] -> Points[i+1] is an off-mesh link
+// (a swim or a drop): Ground[i] is nil there, as there is no surface to sample.
+// The last entry is always false.
 type Path struct {
-	Status Status   `json:"status"`
-	Reason string   `json:"reason,omitempty"`
-	Points []Vec3   `json:"points"`
-	Length float32  `json:"length"`
-	Engine string   `json:"engine"`
-	Ground [][]Vec3 `json:"-"`
+	Status  Status   `json:"status"`
+	Reason  string   `json:"reason,omitempty"`
+	Points  []Vec3   `json:"points"`
+	Length  float32  `json:"length"`
+	Engine  string   `json:"engine"`
+	Ground  [][]Vec3 `json:"-"`
+	OffMesh []bool   `json:"off_mesh,omitempty"`
 }
 
 // Planner plans paths on the tiles under one folder. It is safe for concurrent use.
@@ -601,8 +605,30 @@ func (p *Planner) load(m *mapMesh, want []string, data map[string][]byte) error 
 	return nil
 }
 
+// offMeshFlag is Detour's straight-path flag on the start of an off-mesh link.
+const offMeshFlag = 0x04 // DT_STRAIGHTPATH_OFFMESH_CONNECTION
+
 func plan(eng *engine, from, to Vec3) Path {
-	rc, pts, goal := eng.findPath(from, to)
+	rc, pts, fl, goal := eng.findPath(from, to)
+	// The funnel can emit the same corner twice where it crosses a link (the
+	// link's far end as both a link-start and a plain corner): drop the
+	// duplicate, keeping the link flag on the surviving segment.
+	if len(pts) > 0 {
+		keep, keepFl := pts[:1], fl[:1]
+		for i := 1; i < len(pts); i++ {
+			if dist3D(keep[len(keep)-1], pts[i]) < 1e-3 {
+				if i < len(fl) && fl[i]&offMeshFlag != 0 && len(keepFl) > 0 {
+					keepFl[len(keepFl)-1] |= offMeshFlag
+				}
+				continue
+			}
+			keep = append(keep, pts[i])
+			if i < len(fl) {
+				keepFl = append(keepFl, fl[i])
+			}
+		}
+		pts, fl = keep, keepFl
+	}
 	path := Path{Engine: engineName, Points: pts}
 	switch rc {
 	case 0:
@@ -618,8 +644,18 @@ func plan(eng *engine, from, to Vec3) Path {
 	default:
 		return Path{Status: NoPath, Engine: engineName, Points: []Vec3{}, Reason: "Detour found no path"}
 	}
+	if len(pts) > 0 {
+		path.OffMesh = make([]bool, len(pts))
+		for i := 0; i+1 < len(pts) && i < len(fl); i++ {
+			path.OffMesh[i] = fl[i]&offMeshFlag != 0
+		}
+	}
 	for i := 1; i < len(pts); i++ {
 		path.Length += dist3D(pts[i-1], pts[i])
+		if i-1 < len(path.OffMesh) && path.OffMesh[i-1] {
+			path.Ground = append(path.Ground, nil)
+			continue
+		}
 		path.Ground = append(path.Ground, ground(eng, pts[i-1], pts[i]))
 	}
 	end := pts[len(pts)-1]
