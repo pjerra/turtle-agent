@@ -63,6 +63,9 @@ const (
 	// Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagSkipUnreachable): where the step would pause on him alive it ends
 	// "not cleared" with a note instead.
 	FlagSkipUnreachable = 4096
+	// FlagStandPull marks a boss row the party pulls from its stand: the move row right before it in the same leg
+	// (Stormwrought Ruins' Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagStandPull).
+	FlagStandPull = 8192
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
