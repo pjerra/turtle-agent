@@ -45,6 +45,10 @@ type ObserveSpec struct {
 	// AllowFarStart lets a partway start go on although the lead bot stands more than farStartYd from the start step's point: the note
 	// says so and the run leader walks there (or pauses) on its own. Off by default: a party in the wrong place is refused.
 	AllowFarStart bool
+	// Speed is the test walking speed of an observed run (`.bot run start <plan> [from ...] speed=<1.0-4.0>`, a GM-only
+	// test option; owner request 2026-10-25): 0 or 1 is omitted from the start line (a normal run). Above 1.0 the server
+	// walks the bots faster between fights and marks every status line with `|speed <x> (test)`; such a run never clears.
+	Speed float64
 	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the
 	// run start's undo of a crashed run's boss `loot off`). Off by default. Observe only: a driven run always sends the undo, since
 	// its legs turn looting off and on themselves and a crashed run may have left it off.
@@ -129,7 +133,8 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
-	Left  int       `json:"left,omitempty"` // packs the run leader left alive
+	Left  int       `json:"left,omitempty"`  // packs the run leader left alive
+	Speed string    `json:"speed,omitempty"` // the test speed (`speed <x> (test)`); a run with it never clears
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -144,7 +149,8 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
-	Left  int    `json:"left,omitempty"` // packs the run leader left alive
+	Left  int    `json:"left,omitempty"`  // packs the run leader left alive
+	Speed string `json:"speed,omitempty"` // the test speed (`speed <x> (test)`); a run with it never clears
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -403,11 +409,17 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	}
 }
 
-// startRunLeader sends `.bot run start <plan> [from ...]` and takes its answer. The `from ...` words are the probe's resolution of a
-// partial start (from_leg, from_pull_group, from_step): the run leader begins at that step of its own plan (#248).
+// startRunLeader sends `.bot run start <plan> [speed=<x>] [from ...]` and takes its answer. The `from ...` words are the
+// probe's resolution of a partial start (from_leg, from_pull_group, from_step): the run leader begins at that step of its
+// own plan (#248). The speed comes from ObserveSpec.Speed (a GM-only test option, owner request 2026-10-25): 0 or 1 is
+// omitted, anything else goes as `speed=<x>` with one decimal, AFTER the plan and BEFORE any `from ...` words (the
+// server's ParseStartArgs takes `from` last; TakeSpeed takes `speed=` out of the words anywhere).
 func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	o := d.obs
 	line := "run start " + o.spec.Plan
+	if speed := o.spec.Speed; speed != 0 && speed != 1 {
+		line += " speed=" + strconv.FormatFloat(speed, 'f', 1, 64)
+	}
 	if d.start != nil && d.start.Words != "" {
 		line += " " + d.start.Words
 	}
@@ -771,10 +783,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left, Speed: st.Speed}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Speed, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Speed, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++
@@ -815,7 +827,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	d.rep.setCurrent(label)
 	d.wd.progress("run leader: " + st.Text())
-	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note, "left": st.Left}
+	data := map[string]any{"mode": "observe", "state": st.State, "step": st.Step, "steps": st.Steps, "leg_name": st.Leg, "kind": st.Kind, "phase": st.Phase, "note": st.Note, "left": st.Left, "speed": st.Speed}
 	d.tr.Event("run_leader", data)
 	// The legs: a new leg name ends the one before it and starts the next, so the report has the per-leg times.
 	if li := d.legOf(st.Leg); li >= 0 && li != d.curLeg && st.State != tbm.RunNone {
@@ -828,7 +840,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: start", li, name), map[string]any{"leg": li, "name": name, "phase": "start", "mode": "observe"})
 	}
 	if !had || prev.Step != st.Step || prev.Kind != st.Kind {
-		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note, "left": st.Left})
+		d.emit(events.KindDungeonStep, "run leader: "+st.Text(), map[string]any{"leg": d.curLeg, "step": st.Step, "steps": st.Steps, "action": st.Kind, "ok": true, "mode": "observe", "state": st.State, "phase": st.Phase, "note": st.Note, "left": st.Left, "speed": st.Speed})
 	}
 }
 

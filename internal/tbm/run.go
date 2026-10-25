@@ -7,12 +7,13 @@ import (
 )
 
 // The run leader (TortoiseBots docs/guides/dungeon-run-leader.md, `.bot run`): a bound party clears a dungeon plan by itself, and
-// the commander watches its status line. When packs were left alive the run leader appends an optional trailing field:
+// the commander watches its status line. When packs were left alive the run leader appends an optional trailing field, and a
+// test-speed run appends one more after it:
 //
-//	TBM:RUN|<plan>|<state>|<step>/<steps>|<leg>|<kind>|<phase>|<note>[|left <K>]
+//	TBM:RUN|<plan>|<state>|<step>/<steps>|<leg>|<kind>|<phase>|<note>[|left <K>][|speed <x> (test)]
 //
-// The field is present only when K > 0; the parser takes `|left <K>` only as the LAST field matching exactly `left <digits>`.
-// Old lines without it parse exactly as before.
+// The `left` field is present only when K > 0, the `speed` field only above speed 1.0; the parser takes each only as the LAST
+// field matching it, so old lines parse exactly as before.
 //
 // The module sends it whenever the step, phase or note changes, and on start, status, pause, resume, skip and stop.
 
@@ -36,17 +37,40 @@ type RunStatus struct {
 	State string `json:"state"` // running, paused, done or none
 	Step  int    `json:"step"`  // counts from 1; 0 before the first
 	Steps int    `json:"steps"`
-	Leg   string `json:"leg"`            // the leg's name, or its number; empty when the module sent "-"
-	Kind  string `json:"kind"`           // the step kind; empty for "-"
-	Phase string `json:"phase"`          // begin, gather, walk, pull, task, rest or wait; empty for "-"
-	Note  string `json:"note"`           // what it does, or why it paused; empty for "-"
-	Left  int    `json:"left,omitempty"` // packs the run leader left alive; only the trailing `left <K>` field sets it
+	Leg   string `json:"leg"`             // the leg's name, or its number; empty when the module sent "-"
+	Kind  string `json:"kind"`            // the step kind; empty for "-"
+	Phase string `json:"phase"`           // begin, gather, walk, pull, task, rest or wait; empty for "-"
+	Note  string `json:"note"`            // what it does, or why it paused; empty for "-"
+	Left  int    `json:"left,omitempty"`  // packs the run leader left alive; only the trailing `left <K>` field sets it
+	Speed string `json:"speed,omitempty"` // the test speed (`speed <x> (test)`); only the trailing `speed ...` field sets it. A run with it is never a clear.
 	Line  string `json:"line,omitempty"`
 }
 
+// isSpeedField reports whether a trailing status field is the run leader's test-speed marker: `speed <x> (test)` (a
+// GM-only run above speed 1.0, never a clear), with x a number, or the latched form `speed <x> (test; 1.0 since a real
+// player joined)`. Anything else (a note that merely mentions speed text) is not the field.
+func isSpeedField(tail string) bool {
+	v, ok := strings.CutPrefix(tail, "speed ")
+	if !ok || v == "" {
+		return false
+	}
+	i := 0
+	for i < len(v) && (v[i] == '.' || (v[i] >= '0' && v[i] <= '9')) {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	if _, err := strconv.ParseFloat(v[:i], 64); err != nil {
+		return false
+	}
+	rest := v[i:]
+	return rest == " (test)" || strings.HasPrefix(rest, " (test;")
+}
+
 // ParseRunLine reads a TBM:RUN line. The note may hold anything but a line break; a trailing field matching exactly
-// `left <digits>` is the packs-left count and is stripped from the note. A line with fewer than eight fields or a step
-// that is not "n/m" is not a status line.
+// `left <digits>` is the packs-left count and a trailing field `speed <x> (test[; ...])` is the test speed, and both
+// are stripped from the note. A line with fewer than eight fields or a step that is not "n/m" is not a status line.
 func ParseRunLine(line string) (RunStatus, bool) {
 	rest, ok := strings.CutPrefix(strings.TrimSpace(line), RunPrefix)
 	if !ok {
@@ -71,24 +95,30 @@ func ParseRunLine(line string) (RunStatus, bool) {
 		}
 		return s
 	}
-	// The note holds no '|' of its own, but the parser still takes `|left <K>` only as the LAST field matching exactly
-	// `left <digits>`: anything else stays note text, so old lines parse exactly as before.
-	note, left := dash(f[6]), 0
-	if i := strings.LastIndexByte(f[6], '|'); i >= 0 {
-		if tail := f[6][i+1:]; strings.HasPrefix(tail, "left ") {
+	// The note holds no '|' of its own, but the parser still takes trailing fields only as their LAST fields matching
+	// exactly: `|left <K>` (packs alive) and then `|speed <x> (test[; ...])` (a test-speed run, never a clear): anything
+	// else stays note text, so old lines parse exactly as before.
+	note, left, speed := dash(f[6]), 0, ""
+	if i := strings.LastIndexByte(note, '|'); i >= 0 {
+		if tail := note[i+1:]; isSpeedField(tail) {
+			speed, note = tail, dash(note[:i])
+		}
+	}
+	if i := strings.LastIndexByte(note, '|'); i >= 0 {
+		if tail := note[i+1:]; strings.HasPrefix(tail, "left ") {
 			if digits := strings.TrimPrefix(tail, "left "); digits != "" {
 				if n, err := strconv.Atoi(digits); err == nil && n > 0 && strconv.Itoa(n) == digits {
-					left, note = n, dash(f[6][:i])
+					left, note = n, dash(note[:i])
 				}
 			}
 		}
 	}
-	return RunStatus{Plan: dash(f[0]), State: f[1], Step: step, Steps: steps, Leg: dash(f[3]), Kind: dash(f[4]), Phase: dash(f[5]), Note: note, Left: left, Line: strings.TrimSpace(line)}, true
+	return RunStatus{Plan: dash(f[0]), State: f[1], Step: step, Steps: steps, Leg: dash(f[3]), Kind: dash(f[4]), Phase: dash(f[5]), Note: note, Left: left, Speed: speed, Line: strings.TrimSpace(line)}, true
 }
 
 // Same reports whether two statuses say the same thing (the line may differ in nothing else).
 func (s RunStatus) Same(o RunStatus) bool {
-	return s.Plan == o.Plan && s.State == o.State && s.Step == o.Step && s.Steps == o.Steps && s.Leg == o.Leg && s.Kind == o.Kind && s.Phase == o.Phase && s.Note == o.Note && s.Left == o.Left
+	return s.Plan == o.Plan && s.State == o.State && s.Step == o.Step && s.Steps == o.Steps && s.Leg == o.Leg && s.Kind == o.Kind && s.Phase == o.Phase && s.Note == o.Note && s.Left == o.Left && s.Speed == o.Speed
 }
 
 // Text is the status in a few plain words for a report or a dashboard: "Sentinel room · pull 7/41 · pulling".
