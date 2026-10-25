@@ -2169,14 +2169,15 @@ func lookView(standoff, arrive float32) float32 {
 // the lead bot on a 14 yd path). When no point of the path is within view nothing is gained by moving (the lead bot would only be taken to
 // the end of a partial path toward a pack it cannot see): the result is the old one, StandoffPoint's, with its ok. snap, when not nil,
 // puts a point that was moved on the floor of the navmesh (a point interpolated along a path over stairs or a drop may float): the driver
-// and the plan check both pass theirs, so they stand at the same place.
-func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool) {
+// and the plan check both pass theirs, so they stand at the same place. offMesh marks the path's link segments: a walk-up point that falls
+// strictly inside a link moves to that segment's end point, as the driver could not stand mid-link.
+func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point) Point, offMesh []bool) (Point, bool) {
 	if snap == nil {
 		snap = func(p Point) Point { return p }
 	}
 	stand, ok := StandoffPoint(path, standoff)
 	if ok && dist3(stand, pack) <= float64(view) {
-		return snap(stand), ok
+		return snap(linkEnd(path, stand, offMesh)), ok
 	}
 	if !ok && (len(path) == 0 || dist3(path[0], pack) <= float64(view)) {
 		return stand, false
@@ -2192,7 +2193,7 @@ func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point
 			f := t / seg
 			p := Point{X: a.X + float32(f)*(b.X-a.X), Y: a.Y + float32(f)*(b.Y-a.Y), Z: a.Z + float32(f)*(b.Z-a.Z)}
 			if dist3(p, pack) <= float64(view) {
-				return snap(p), true
+				return snap(linkEnd(path, p, offMesh)), true
 			}
 			if t >= seg {
 				break
@@ -2200,4 +2201,25 @@ func LookPoint(path []Point, pack Point, standoff, view float32, snap func(Point
 		}
 	}
 	return stand, ok
+}
+
+// linkEnd moves a walk-up point that falls strictly inside a link segment to
+// that segment's end point.
+func linkEnd(path []Point, p Point, offMesh []bool) Point {
+	for i := 1; i < len(path) && i-1 < len(offMesh); i++ {
+		if !offMesh[i-1] {
+			continue
+		}
+		if onSegment(p, path[i-1], path[i]) {
+			return path[i]
+		}
+	}
+	return p
+}
+
+// onSegment says whether p lies strictly inside the segment a -> b.
+func onSegment(p, a, b Point) bool {
+	ab, ap := dist3(a, b), dist3(a, p)
+	pb := dist3(p, b)
+	return ap > 1e-3 && pb > 1e-3 && ap+pb <= ab+1e-3
 }
