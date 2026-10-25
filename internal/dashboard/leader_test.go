@@ -44,6 +44,36 @@ func TestCardShowsTheRunLeader(t *testing.T) {
 	}
 }
 
+// A run leader that left packs alive says so on the card.
+func TestCardShowsPacksLeftByTheRunLeader(t *testing.T) {
+	d := observedDungeon("done", 41, "archaedas", "boss", "pull", "plan done", "done")
+	d = strings.Replace(d, `"lines":9}`, `"left":2,"lines":9}`, 1)
+	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(d)})
+	l := c.Run.Leader
+	if l == nil || l.Left != 2 || l.Text != "Run leader: finished all 41 steps, 2 packs left" {
+		t.Fatalf("%+v", l)
+	}
+	d = strings.Replace(observedDungeon("running", 7, "sentinel", "pull", "pull", "pulling 4851", "running"), `"lines":9}`, `"left":1,"lines":9}`, 1)
+	c = BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(d)})
+	if l = c.Run.Leader; l == nil || l.Text != "Run leader: Sentinel · pull 7/41 · pulling, 1 pack left" {
+		t.Fatalf("%+v", l)
+	}
+}
+
+// A test-speed run is never a clear: the card reports it as done (test speed x).
+func TestCardShowsTestSpeedRunAsDoneNotClear(t *testing.T) {
+	d := observedDungeon("done", 41, "archaedas", "boss", "pull", "plan done (speed 2.0 (test))", "done")
+	d = strings.Replace(d, `"lines":9}`, `"left":2,"speed":"speed 2.0 (test)","lines":9}`, 1)
+	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(d)})
+	l := c.Run.Leader
+	if l == nil || l.Speed != "speed 2.0 (test)" || l.Left != 2 {
+		t.Fatalf("%+v", l)
+	}
+	if l.Text != "Run leader: done (test speed speed 2.0 (test)), 2 packs left" {
+		t.Fatalf("%q", l.Text)
+	}
+}
+
 // A driven run's card has no run leader.
 func TestCardWithoutRunLeader(t *testing.T) {
 	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): walk to 1 2 3", 0))})

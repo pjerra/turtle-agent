@@ -845,9 +845,15 @@ What it checks:
   before them (the last `via`, `to`, step stand or approach point; part `run leader pull group 3 approach 0`). A separate list, `run_leader` (reason `run leader hop`; never a failure, not a warning of the agent's own run), names every pack (the centre its `pull` row
   gets) and boss that stands more than 50 yd from the run leader's last move row: the run leader sees 60 yd from its lead bot and walks toward anything farther in navmesh hops of its own
   (`kApproachYd`/`kApproachHopYd`), which is where its Uldaman test of 2026-10-16 stopped (a hop point under a low ceiling refused `off-mesh`, and long paths with no path at all). Give such a
-  pack `approach` points. The check does **not** model the server's own refusals: `cmd move` snaps a point to the vmap floor found from 8 yd above it (a ceiling 4-6 yd above the floor wins
-  and the point is refused `off-mesh`, more than 5 yd from where the path ends), and the server's path finder keeps 2048 search nodes and 256 polygons (here 65535 and 2048) and builds
-  a smoothed path of at most 256 points; neither the vmaps nor that path are here, so an approach point is checked against the vmaps offline (`lostool` on the test VM).
+  pack `approach` points. Every offline-complete `walk` hop above also runs the server's own path query (2048 search nodes, 256 polygons, ground|water included, steep included, a smoothed path of at most
+  256 points) and the run leader's `CheckMove` verdict on it: a hop the offline query takes but the server refuses fails as `server unreachable`, and the walk goes on from where the
+  server leaves the party (an incomplete path's end, or where it stood). An offline-partial hop keeps the established offline reason and never asks the server query. A `direct` hop within the arrival radius (`ArriveYd`, 3 yd: `DungeonRunPolicy.h kArriveYd`) of the point before it
+  fails as `hop inside the arrival radius`: the run leader counts it reached without sending an order, so the party stays behind. Replay one hop of a live refusal from the logged lead
+  position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
+Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
+  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
+  search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
+  saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 
@@ -3582,7 +3588,8 @@ most sections; `GET /api/heat/<plan>` the death places of the latest 20 runs. Bo
 at most 600 files, 6 folders deep, listed at most every 90 s, parsed once per change and cached (28 digests). What the data lacks is left out and the legend
 says so: the feed has **no creature level** (rings are 20 yd), **no name of who put a crowd control on** (the cyan line needs a `cmd cc` order of the commander),
 **no heal spell target** (a healer that targets a friend is taken to heal it), and patrols are only drawn when the plan has them. Runs that started at a later
-section (`from_leg`) are not counted as a clear of the whole dungeon. Botwatch files are not read: they carry no plan name.
+section (`from_leg`) are not counted as a clear of the whole dungeon, nor are runs whose run leader reported packs left alive (`TBM:RUN ... |left <K>`):
+the ghost names the count ("furthest earlier run (4 sections), 2 packs left") and a run's card shows it ("Run leader: finished all 41 steps, 2 packs left"). Botwatch files are not read: they carry no plan name.
 
 **Limits.** The map shows what `bot_view` reports: the module's perception of the party, so a creature none of the bots sees
 is not there. A run on a plan the dashboard cannot find or load shows the reason in place of the map. A card of an agent that
