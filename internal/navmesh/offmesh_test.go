@@ -70,6 +70,7 @@ func TestOffMeshLinkJoinsTwoFloors(t *testing.T) {
 		t.Errorf("length %.3f, want 3D segment length %.3f", path.Length, want)
 	}
 }
+
 // offMeshSegments checks that exactly the wanted segments carry the off-mesh
 // flag and that no ground is sampled on a link: with the straight-path flags
 // read from an uninitialized buffer, ordinary segments randomly carried the
