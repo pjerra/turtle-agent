@@ -65,6 +65,8 @@ func TestDungeonRunModesAreRefusedClearly(t *testing.T) {
 		{`{"name":"rig","mode":"observe"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","start_here":true}`, "move or equip the party"},
 		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","tank":"Tanky"}`, "the agent sends no order"},
+		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","observe":{"speed":0.5}}`, "observe.speed"},
+		{`{"name":"rig","mode":"observe","lead_bot":"Tanky","observe":{"speed":5}}`, "observe.speed"},
 		{`{"name":"rig","mode":"commander"}`, "needs lead_bot"},
 		{`{"name":"rig","mode":"leader","lead_bot":"Tanky"}`, `go with mode "remote"`},
 		{`{"name":"rig","mode":"commander","lead_bot":"Tanky","rotation":"frost_mage"}`, "in remote (commander) mode the bots fight"},

@@ -109,7 +109,8 @@ type RunDigest struct {
 	Ended     bool      `json:"ended"`
 	Reason    string    `json:"reason,omitempty"`
 	LegsDone  int       `json:"legs_done"`
-	Left      int       `json:"left,omitempty"` // packs the run leader left alive
+	Left      int       `json:"left,omitempty"`       // packs the run leader left alive
+	TestSpeed string    `json:"test_speed,omitempty"` // the test speed (`speed <x> (test)`); a run with it never clears
 	Legs      []DLeg    `json:"legs"`
 	Paths     []DPath   `json:"paths"`
 	Stalls    []DStall  `json:"stalls"`
@@ -141,7 +142,8 @@ type digestBuilder struct {
 	ended                 bool
 	reason                string
 	endSeconds            float64
-	left                  int // packs the run leader left alive, from the newest run_leader trace event
+	left                  int    // packs the run leader left alive, from the newest run_leader trace event
+	testSpeed             string // the test speed (`speed <x> (test)`), from the newest run_leader trace event
 	legs                  []DLeg
 	stalls                []DStall
 	refusals, deaths      []DMark
@@ -395,10 +397,12 @@ func (b *digestBuilder) event(ev string, t int64, line []byte) {
 	switch ev {
 	case "run_leader":
 		var e struct {
-			Left float64 `json:"left"`
+			Left  float64 `json:"left"`
+			Speed string  `json:"speed,omitempty"`
 		}
 		if json.Unmarshal(line, &e) == nil {
 			b.left = int(e.Left)
+			b.testSpeed = strings.TrimSpace(e.Speed)
 		}
 		return
 	case "leg":
@@ -581,7 +585,7 @@ func (b *digestBuilder) event(ev string, t int64, line []byte) {
 
 // Snapshot is the digest so far. minutes > 0 keeps only the last minutes of every walk (the stalls, marks and the rest are not cut).
 func (b *digestBuilder) Snapshot(minutes int) *RunDigest {
-	d := &RunDigest{Run: b.run, Plan: b.plan, Map: b.mapID, Mode: b.mode, Lead: b.lead, StartUnix: b.startUnix, Ended: b.ended, Reason: b.reason, Left: b.left,
+	d := &RunDigest{Run: b.run, Plan: b.plan, Map: b.mapID, Mode: b.mode, Lead: b.lead, StartUnix: b.startUnix, Ended: b.ended, Reason: b.reason, Left: b.left, TestSpeed: b.testSpeed,
 		Seconds: round1(float64(b.lastT) / 1000), Legs: append([]DLeg{}, b.legs...), Stalls: append([]DStall{}, b.stalls...),
 		Refusals: append([]DMark{}, b.refusals...), Deaths: append([]DMark{}, b.deaths...), Rests: append([]DMark{}, b.rests...), Gathers: append([]DMark{}, b.gathers...),
 		Pulls: append([]DPull{}, b.pulls...), Objects: append([]DObject{}, b.objects...), Paths: []DPath{}}

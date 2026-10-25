@@ -289,6 +289,11 @@ type observeParam struct {
 	// AllowFarStart lets a partway start (from_leg, from_pull_group, from_step) go on although the lead bot stands more than 80 yd
 	// from the start step's point; the note says so. Off by default: a party in the wrong place is refused before `run start`.
 	AllowFarStart bool `json:"allow_far_start,omitempty"`
+	// Speed is the run leader's test walking speed (`.bot run start <plan> [from ...] speed=<1.0-4.0>`, a GM-only test
+	// option; owner request 2026-10-25): 0 or 1 is omitted from the start line (a normal run). The run brief sets
+	// `observe: {speed: 2}` for a fix-check run; the server walks there at 2x between fights, marks every status line
+	// `|speed 2.0 (test)`, and such a run never clears.
+	Speed float64 `json:"speed,omitempty"`
 	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the undo
 	// of a boss `loot off` a crashed run left in place). Off by default. Observe only; a driven run always sends the undo.
 	KeepLootSetting bool `json:"keep_loot_setting,omitempty"`

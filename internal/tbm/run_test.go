@@ -66,6 +66,39 @@ func TestParseRunLineLeftPacks(t *testing.T) {
 	}
 }
 
+func TestParseRunLineTestSpeed(t *testing.T) {
+	st, ok := ParseRunLine("TBM:RUN|uldaman|running|7/41|baelog|pull|pull|pulling 4851|speed 2.0 (test)")
+	if !ok || st.Speed != "speed 2.0 (test)" || st.Left != 0 || st.Note != "pulling 4851" {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	if st.Plan != "uldaman" || st.State != RunRunning || st.Step != 7 || st.Steps != 41 || st.Leg != "baelog" || st.Kind != "pull" || st.Phase != "pull" {
+		t.Fatalf("fixed fields shifted: %+v", st)
+	}
+	st, ok = ParseRunLine("TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done (speed 2.0 (test))|left 2|speed 2.0 (test)")
+	if !ok || st.Speed != "speed 2.0 (test)" || st.Left != 2 || st.Note != "plan done (speed 2.0 (test))" {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|speed 2.0 (test; 1.0 since a real player joined)")
+	if !ok || st.Speed != "speed 2.0 (test; 1.0 since a real player joined)" || st.Note != "plan done" {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	// old lines parse exactly as before: no speed, and a note that merely mentions speed text is not the field
+	st, ok = ParseRunLine("TBM:RUN|uldaman|running|7/41|baelog|pull|pull|pulling 4851")
+	if !ok || st.Speed != "" || st.Note != "pulling 4851" {
+		t.Fatalf("no field: %+v %v", st, ok)
+	}
+	for _, line := range []string{
+		"TBM:RUN|uldaman|paused|12/41|baelog|boss|begin|speed up: regroup",
+		"TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|speed 2.0",
+		"TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done|speed x (test)",
+		"TBM:RUN|uldaman|done|41/41|archaedas|boss|pull|plan done (speed 2.0 (test))",
+	} {
+		st, ok = ParseRunLine(line)
+		if !ok || st.Speed != "" {
+			t.Errorf("%q: Speed %q, ok %v (note %q)", line, st.Speed, ok, st.Note)
+		}
+	}
+}
 func TestRunCommandsPassTheCheck(t *testing.T) {
 	for _, c := range []string{"run start uldaman", "run start", "run pause", "run resume", "run skip", "run stop", "run status", "run list"} {
 		if err := CheckCommand(c); err != nil {

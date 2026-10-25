@@ -247,19 +247,20 @@ func (h *History) runsOf(plan string) []runFile {
 
 // GhostAnswer is the best earlier run of a plan, ready for the page.
 type GhostAnswer struct {
-	Found    bool         `json:"found"`
-	Why      string       `json:"why,omitempty"` // when not found
-	Plan     string       `json:"plan"`
-	Run      string       `json:"run,omitempty"`
-	Folder   string       `json:"folder,omitempty"`
-	Seconds  float64      `json:"seconds,omitempty"`
-	Complete bool         `json:"complete,omitempty"` // the run cleared the whole dungeon (done with no packs left)
-	Left     int          `json:"left,omitempty"`     // packs the run leader left alive
-	LegsDone int          `json:"legs_done,omitempty"`
-	PlanLegs int          `json:"plan_legs,omitempty"` // the plan's sections, when the page said
-	Legs     []DLeg       `json:"legs,omitempty"`
-	Path     [][3]float64 `json:"path,omitempty"` // [x, y, seconds since the run began] of the lead
-	Runs     int          `json:"runs"`           // runs of the plan looked at
+	Found     bool         `json:"found"`
+	Why       string       `json:"why,omitempty"` // when not found
+	Plan      string       `json:"plan"`
+	Run       string       `json:"run,omitempty"`
+	Folder    string       `json:"folder,omitempty"`
+	Seconds   float64      `json:"seconds,omitempty"`
+	Complete  bool         `json:"complete,omitempty"`   // the run cleared the whole dungeon (done with no packs left)
+	TestSpeed string       `json:"test_speed,omitempty"` // the test speed (`speed <x> (test)`); a run with it is done (test speed x), never a clear
+	Left      int          `json:"left,omitempty"`       // packs the run leader left alive
+	LegsDone  int          `json:"legs_done,omitempty"`
+	PlanLegs  int          `json:"plan_legs,omitempty"` // the plan's sections, when the page said
+	Legs      []DLeg       `json:"legs,omitempty"`
+	Path      [][3]float64 `json:"path,omitempty"` // [x, y, seconds since the run began] of the lead
+	Runs      int          `json:"runs"`           // runs of the plan looked at
 }
 
 // Ghost picks the best earlier run of plan, not counting the run called exclude: the one that got through the most sections, and of
@@ -307,8 +308,9 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 		return h.keepGhost(key, ans)
 	}
 	ans.Found, ans.Run, ans.Folder, ans.Seconds, ans.LegsDone, ans.Left, ans.Legs = true, best.Run, bestF.folder, best.Seconds, best.LegsDone, best.Left, best.Legs
+	ans.TestSpeed = best.TestSpeed
 	if planLegs > 0 {
-		ans.Complete = best.LegsDone >= planLegs && best.Left == 0
+		ans.Complete = best.LegsDone >= planLegs && best.Left == 0 && best.TestSpeed == ""
 	} else {
 		ans.Complete = confirmedClear(bestF, best)
 	}
@@ -325,11 +327,13 @@ func (h *History) Ghost(plan, exclude string, planLegs int) []byte {
 }
 
 // confirmedClear is a run that cleared the whole dungeon for sure: it ended
-// "done", started at the first section and left no packs alive. An
-// interrupted run never reported a final count, so its Left of 0 proves
-// nothing. Complete and the ghost tie-break share this predicate.
+// "done", started at the first section, left no packs alive, and never ran at
+// a test speed (a `|speed <x> (test)` line is a test, reported as 'done (test
+// speed x)', never a clear). An interrupted run never reported a final count,
+// so its Left of 0 proves nothing. Complete and the ghost tie-break share
+// this predicate.
 func confirmedClear(f runFile, d *RunDigest) bool {
-	return f.reason == "done" && f.fromLeg == 0 && d.Left == 0
+	return f.reason == "done" && f.fromLeg == 0 && d.Left == 0 && d.TestSpeed == ""
 }
 
 // ghostBetter says whether d is the better ghost of two runs that finished the same sections: a confirmed clean clear beats any other run, and of two alike runs the quicker wins.

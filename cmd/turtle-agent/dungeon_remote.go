@@ -168,6 +168,9 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
 			}
 		}
+		if s := o.Speed; s != 0 && (s < 1 || s > 4) {
+			return bad("observe.speed: %v is outside 1.0-4.0 (0: omit it, a normal run)", s)
+		}
 	}
 	return nil
 }
@@ -178,6 +181,7 @@ func observeSpec(o *observeParam) *dungeon.ObserveSpec {
 	if o != nil {
 		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
 		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait, spec.Maintenance, spec.AllowFarStart, spec.KeepLootSetting = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS), o.Maintenance, o.AllowFarStart, o.KeepLootSetting
+		spec.Speed = o.Speed
 	}
 	return spec
 }
