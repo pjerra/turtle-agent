@@ -417,10 +417,21 @@ type Boss struct {
 	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Radius is the yards around Position the run leader searches for a patrolling boss (Stormwrought Ruins' Eldermaw
+	// 62661 swims a 440 yd loop; specs/sw-eldermaw.md Spec B). Zero means the module's 30.
+	Radius float32 `json:"radius,omitempty"`
+	// StandPull says the party holds at the boss's last approach point (the move row right before the boss row) and the
+	// boss is pulled from there once in the tank's shot: no firing-stand search, no walk toward his spot
+	// (specs/sw-eldermaw.md Spec B).
+	StandPull bool `json:"stand_pull,omitempty"`
 	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
 	Hold *Hold `json:"hold,omitempty"`
+	// SkipUnreachable says the boss may stand out of the party's reach by design (Stormwrought Ruins' Eldermaw 62661
+	// swims a pool whose bed navmesh is cut off from the shore; specs/sw-eldermaw.md): plan-export sets the run leader's
+	// skip-unreachable flag on the boss row and carries the reason in its comment. Required to be non-empty when set.
+	SkipUnreachable string `json:"skip_unreachable,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -841,8 +852,14 @@ type rawBoss struct {
 	// Tactics is Boss.Tactics.
 	Tactics   *tactics.Tactics `json:"tactics"`
 	NeedsWalk bool             `json:"needs_walk"`
-	Approach  []rawPoint       `json:"approach"`
-	Hold      *rawHold         `json:"hold"`
+	// Radius is Boss.Radius.
+	Radius float32 `json:"radius"`
+	// StandPull is Boss.StandPull.
+	StandPull bool       `json:"stand_pull"`
+	Approach  []rawPoint `json:"approach"`
+	Hold      *rawHold   `json:"hold"`
+	// SkipUnreachable is Boss.SkipUnreachable.
+	SkipUnreachable string `json:"skip_unreachable"`
 }
 
 type rawStep struct {
@@ -1338,7 +1355,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, Radius: r.Boss.Radius, StandPull: r.Boss.StandPull, SkipUnreachable: r.Boss.SkipUnreachable}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
@@ -1368,6 +1385,15 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
+		}
+		if b.SkipUnreachable != "" && b.Hold != nil {
+			c.fail(bp+".skip_unreachable", "a boss with a hold cannot be skipped as out of reach: the hold fight needs him in reach")
+		}
+		if b.StandPull && b.Hold != nil {
+			c.fail(bp+".stand_pull", "a stand_pull boss with a hold is an error (like hold + skip_unreachable)")
+		}
+		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
+			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
 		}
 
 		l.Boss = &b
