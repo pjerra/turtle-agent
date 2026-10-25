@@ -32,6 +32,8 @@ var CCMarks = []string{"skull", "cross", "square", "moon", "triangle", "diamond"
 
 // argRe is what one argument of a command may be: names, numbers, a GUID, a mark, an object by entry (entry:<id>@x,y,z). No spaces, no control characters, no way to
 // put a second command on the line.
+var speedArgRe = regexp.MustCompile(`^speed=[0-9](\.[0-9])?$`)
+
 var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
 
 // traceDriverRe is the `driver=` word of a trace start (`driver=<model>:<effort>:<run>`), the one argument outside the commander's
@@ -141,6 +143,9 @@ func CheckCommand(command string) error {
 		return nil
 	}
 	for _, a := range f[2:] {
+		if group == "run" && verb == "start" && speedArgRe.MatchString(a) {
+			continue // the GM test option `speed=<1.0-4.0>` (local refast fix: '=' is not in argRe)
+		}
 		if !argRe.MatchString(a) {
 			return fmt.Errorf("argument %q: letters, digits and _ . , : + - only, not starting with a dot", a)
 		}
