@@ -22,3 +22,6 @@ func (*engine) findPath(Vec3, Vec3) (int, []Vec3, Vec3) {
 }
 func (*engine) raycast(Vec3, Vec3) (float32, int) { return 0, -3 }
 func (*engine) markBox(Box, uint16, float32) int  { return 0 }
+func (*engine) serverPath(Vec3, Vec3) (uint32, []Vec3, Vec3, float32, float32) {
+	return 0, nil, Vec3{}, 0, 0
+}
