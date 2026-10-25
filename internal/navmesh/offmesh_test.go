@@ -70,6 +70,95 @@ func TestOffMeshLinkJoinsTwoFloors(t *testing.T) {
 		t.Errorf("length %.3f, want 3D segment length %.3f", path.Length, want)
 	}
 }
+// offMeshSegments checks that exactly the wanted segments carry the off-mesh
+// flag and that no ground is sampled on a link: with the straight-path flags
+// read from an uninitialized buffer, ordinary segments randomly carried the
+// off-mesh bit and real flags were lost.
+func offMeshSegments(t *testing.T, path Path, want ...int) {
+	t.Helper()
+	if len(path.OffMesh) != len(path.Points) {
+		t.Fatalf("OffMesh len %d, want %d", len(path.OffMesh), len(path.Points))
+	}
+	if path.Status != Complete {
+		t.Fatalf("status %s, want complete: %s", path.Status, path.Reason)
+	}
+	got := map[int]bool{}
+	for i, b := range path.OffMesh {
+		if !b {
+			continue
+		}
+		got[i] = true
+		if i >= len(path.Points)-1 {
+			t.Errorf("OffMesh at %d, want a segment start", i)
+		}
+		if i < len(path.Ground) && path.Ground[i] != nil {
+			t.Errorf("Ground[%d] sampled on a link: %v", i, path.Ground[i])
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("OffMesh true on segments %v, want %v (%v)", got, want, path.Points)
+	}
+	for _, i := range want {
+		if !got[i] {
+			t.Errorf("segment %d misses the off-mesh flag (%v)", i, path.Points)
+		}
+	}
+}
+
+// TestOffMeshFlagsOnlyOnTheLink plans the same link 50 times: a walk of
+// several normal segments round one link must flag only the link segment,
+// every time. Reading the flags from an uninitialized buffer made ordinary
+// segments randomly carry the off-mesh bit.
+func TestOffMeshFlagsOnlyOnTheLink(t *testing.T) {
+	polys := append(append([]navfixture.Poly{}, navfixture.LCorridor(0)...), navfixture.Square(46, 20, 50, 24, -10))
+	links := [][2][3]float32{{{48, 14, 0}, {48, 22, -10}}}
+	p := linkTile(t, polys, links)
+	for range 50 {
+		path, err := p.Plan(fixtureMap, Vec3{12, 12, 0}, Vec3{48, 22, -10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		link := -1
+		for i := 1; i+1 < len(path.Points); i++ {
+			if near(path.Points[i], Vec3{48, 14, 0}, 0.6) && near(path.Points[i+1], Vec3{48, 22, -10}, 0.6) {
+				link = i
+			}
+		}
+		if link < 0 {
+			t.Fatalf("no link segment in %v", path.Points)
+		}
+		offMeshSegments(t, path, link)
+	}
+}
+
+// TestOffMeshFlagsTwoLinks: two links in a row flag exactly the two link
+// segments, 50 times. The second link drops from the middle square to a far
+// one, so every segment between the links stays ordinary ground.
+func TestOffMeshFlagsTwoLinks(t *testing.T) {
+	polys := append(append([]navfixture.Poly{}, navfixture.LCorridor(0)...), navfixture.Square(46, 20, 50, 24, -10), navfixture.Square(46, 30, 50, 34, -20))
+	links := [][2][3]float32{{{48, 14, 0}, {48, 22, -10}}, {{48, 24, -10}, {48, 32, -20}}}
+	p := linkTile(t, polys, links)
+	for range 50 {
+		path, err := p.Plan(fixtureMap, Vec3{12, 12, 0}, Vec3{48, 32, -20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var segs []int
+		for i := 0; i+1 < len(path.Points); i++ {
+			a, b := path.Points[i], path.Points[i+1]
+			if near(a, Vec3{48, 14, 0}, 0.6) && near(b, Vec3{48, 22, -10}, 0.6) {
+				segs = append(segs, i)
+			}
+			if near(a, Vec3{48, 24, -10}, 0.6) && near(b, Vec3{48, 32, -20}, 0.6) {
+				segs = append(segs, i)
+			}
+		}
+		if len(segs) != 2 {
+			t.Fatalf("want 2 link segments, got %d in %v", len(segs), path.Points)
+		}
+		offMeshSegments(t, path, segs...)
+	}
+}
 
 // TestOffMeshLinkIgnoredWithoutLink: the same floors without the link stay
 // Partial. This proves the test above sees the link, not a seam.

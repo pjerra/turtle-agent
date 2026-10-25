@@ -389,8 +389,17 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
     int npts = 0;
     unsigned char sflags[2048];
     dtPolyRef refs[2048];
-    if (dtStatusFailed(n->query->findStraightPath(sc, ec, polys, np, out, flags ? flags : sflags, refs,
-                                                  &npts, max_points)) ||
+#ifdef ND_TEST_POISON_SFLAGS
+    // Test builds fill the scratch flags first, so a rebuild that reads them
+    // back without findStraightPath having written them fails deterministically
+    // instead of depending on whatever the stack held.
+    memset(sflags, 0xFF, sizeof(sflags));
+#endif
+    // findStraightPath always writes here; the rebuild below reads this array
+    // back, and the caller's flags get the amended copy afterwards.
+    memset(sflags, 0, sizeof(sflags));
+    if (dtStatusFailed(n->query->findStraightPath(sc, ec, polys, np, out, sflags, refs, &npts,
+                                                  max_points)) ||
         npts < 1)
         return -3;
     // An off-mesh link is recovered from the poly corridor: the straight
@@ -399,7 +408,7 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
     // the link's two ends into one corner or skip the flag, so mark or split
     // here: for each link poly, find its far end and either flag the corner
     // nearest to it or split the crossed segment there.
-    if (flags && npts < max_points) {
+    if (npts < max_points) {
         float out2[3 * 2048];
         unsigned char fl2[2048];
         for (int i = 0; i < npts; ++i) {
@@ -451,9 +460,13 @@ extern "C" int nd_find_path(void* h, const float* start, const float* end, unsig
         }
         for (int i = 0; i < w; ++i) {
             dtVcopy(&out[i * 3], &out2[i * 3]);
-            flags[i] = fl2[i];
+            sflags[i] = fl2[i];
         }
         npts = w;
+    }
+    if (flags) {
+        for (int i = 0; i < npts; ++i)
+            flags[i] = sflags[i];
     }
     for (int i = 0; i < npts; ++i) {
         float d[3];
