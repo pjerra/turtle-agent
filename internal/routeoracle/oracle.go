@@ -448,7 +448,7 @@ func hop(mapID uint32, pl *navmesh.Planner, cur Vec3, spec storedSpec) (path nav
 						return point(n)
 					}
 					return p
-				})
+				}, path.OffMesh)
 			if moved {
 				next = vec(stand)
 			}
