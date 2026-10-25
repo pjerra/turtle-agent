@@ -1323,6 +1323,47 @@ func TestBossStandPullFlagAndApproach(t *testing.T) {
 	if _, err := Build(parsePlan(t, bare), Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
 		t.Fatalf("stand_pull without an approach error %v (want the no-approach refusal)", err)
 	}
+	// stand_pull together with hold is an error (like hold + skip_unreachable): the run leader's row for the
+	// group is the event's hold, never a pulled boss.
+	const held = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"stand_pull":true,
+	   "approach":[{"x":-5842.0,"y":-3807.0,"z":200.7}],
+	   "hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}}}]}`
+	if _, err := dungeon.Parse("test.json", []byte(held)); err == nil || !strings.Contains(err.Error(), "stand_pull") || !strings.Contains(err.Error(), "hold") {
+		t.Fatalf("stand_pull with a hold error %v (want the hold refusal)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, StandPull: true, Approach: []dungeon.Point{{X: 10}}, Hold: &dungeon.Hold{}}); err == nil || !strings.Contains(err.Error(), "together with hold") {
+		t.Fatalf("stand_pull with a hold builder error %v (want the hold refusal)", err)
+	}
+}
+
+// TestBossStandPullKeepsLastAtTheStand: with a stand_pull boss, b.last is the stand (the move row right before
+// the boss), not P in deep water: a centerless hostiles_gone step right after the boss is centered on the stand.
+func TestBossStandPullKeepsLastAtTheStand(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":0,"y":0,"z":0},
+	  "boss":{"entry":62661,"position":{"x":200,"y":0,"z":0},"stand_pull":true,
+	   "approach":[{"x":10,"y":0,"z":0}]},
+	  "after_boss":[{"wait_for":{"hostiles_gone":{"radius":20}}}]}]}`
+	r := build(t, parsePlan(t, js))
+	var boss, wait *StepRow
+	for i := range r.Steps {
+		s := &r.Steps[i]
+		if s.Kind == KindBoss && s.Entry == 62661 {
+			boss = s
+		} else if s.Kind == KindWaitClear && boss != nil {
+			wait = s
+			break
+		}
+	}
+	if boss == nil || wait == nil {
+		t.Fatalf("boss %+v wait %+v in %+v", boss, wait, r.Steps)
+	}
+	// The wait is centered on the stand (10,0,0), not on P (200,0,0) in deep water.
+	if wait.X != 10 || wait.Y != 0 || wait.Z != 0 {
+		t.Fatalf("wait after the boss %+v (want the stand 10,0,0)", *wait)
+	}
 }
 
 // TestBossStandPullNoApproachHops: with a cutter, no "approach path" row comes between the stand and a stand_pull
