@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -125,5 +126,82 @@ func TestObserveStartFromStepKnowsItsLeg(t *testing.T) {
 	ps, err = observeStartFrom(p, 0, nil, n, nil)(0)
 	if err != nil || ps.ExpectLeg != "" || ps.HavePoint {
 		t.Fatalf("no count: %+v %v", ps, err)
+	}
+}
+
+// farPlan has a 200 yd hop between its legs: with cut hops the second leg's FIRST ROW is a walk row, not the leg's own first point.
+const farPlan = `{"version":1,"name":"Far","status":"mapped (test)","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":100,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":120,"y":0,"z":0}]}]},
+ {"name":"b","to":{"x":300,"y":0,"z":0},"pull_groups":[{"entries":[101],"positions":[{"x":320,"y":0,"z":0}]}]}]}`
+
+// from_leg places at the leg's first ROW (the same point as from_step <that row>), not at the plan's first point of the leg.
+func TestObserveStartFromLegUsesTheFirstRow(t *testing.T) {
+	p, err := dungeon.Parse("far.json", []byte(farPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+		if to.X-from.X > 100 {
+			return []dungeon.Point{{X: 150, Y: 5, Z: 0}, {X: 220, Y: 5, Z: 0}}, nil
+		}
+		return nil, nil
+	}
+	res, err := planexport.Build(p, planexport.Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true, Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	// the first row of leg 1 is the cut walk row at x 150, not the plan's To (300)
+	var first int
+	for i, s := range rows.Steps {
+		if s.Leg == 1 {
+			first = i + 1
+			break
+		}
+	}
+	at, ok := legFirstRowIn([]planexport.Rows{rows}, rows.StepCount(), 1)
+	want, _ := rows.StepPoint(first)
+	if !ok || at != want || at.X != 150 {
+		t.Fatalf("first row %+v ok %v, want %+v (step %d)", at, ok, want, first)
+	}
+	// a server count none of the option sets reproduce: unknown
+	if _, ok := legFirstRowIn([]planexport.Rows{rows}, rows.StepCount()+1, 1); ok {
+		t.Fatal("a point for rows that are not the server's")
+	}
+	if _, ok := legFirstRowIn([]planexport.Rows{rows}, 0, 1); ok {
+		t.Fatal("a point without the server's count")
+	}
+	// two option sets with the same count that disagree on the row: unknown, not a guess
+	other := planexport.Rows{Steps: slices.Clone(rows.Steps)}
+	other.Legs = rows.Legs
+	other.Steps[first-1].X += 30
+	if _, ok := legFirstRowIn([]planexport.Rows{rows, other}, rows.StepCount(), 1); ok {
+		t.Fatal("ambiguous option sets gave a point")
+	}
+}
+
+// Through the resolver: with the server's step count the plan's rows reproduce, from_leg's point is the first row's and not marked;
+// without it the plan's leg point goes, marked so that the Eluna placement refuses it.
+func TestObserveStartFromLegPointSource(t *testing.T) {
+	p := startTestPlan(t)
+	res, err := planexport.Build(p, planexport.Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := observeStartFrom(p, 2, nil, 0, nil)(res.Rows.StepCount())
+	if err != nil || !ps.HavePoint || ps.PointFromPlan {
+		t.Fatalf("with the count: %+v %v", ps, err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Leg == ps.LegNumber {
+			if want, _ := res.Rows.StepPoint(i + 1); ps.Point != want {
+				t.Fatalf("point %+v, first row %+v", ps.Point, want)
+			}
+			break
+		}
+	}
+	ps, err = observeStartFrom(p, 2, nil, 0, nil)(0)
+	if err != nil || !ps.HavePoint || !ps.PointFromPlan {
+		t.Fatalf("without the count: %+v %v", ps, err)
 	}
 }
