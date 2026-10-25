@@ -523,6 +523,9 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	if bs.StandPull && len(bs.Approach) == 0 {
 		return fmt.Errorf("boss %d: a stand_pull boss needs an approach point (its stand)", bs.Entry)
 	}
+	if bs.StandPull && bs.Hold != nil {
+		return fmt.Errorf("boss %d: stand_pull together with hold is an error (like hold + skip_unreachable)", bs.Entry)
+	}
 	if bs.Radius < 0 || bs.Radius > MaxRadius {
 		return fmt.Errorf("boss %d: radius %.1f is outside 0-%d", bs.Entry, bs.Radius, MaxRadius)
 	}
