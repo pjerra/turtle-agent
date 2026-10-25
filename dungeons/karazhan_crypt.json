@@ -2,7 +2,7 @@
   "version": 1,
   "name": "karazhan_crypt",
   "kind": "dungeon",
-  "status": "draft (reordered 2026-10-25: the upper floors first, the shaft dive last, the lower crypt at the end; Corpsemuncher out: its wing has no dry contact; not live-checked)",
+  "status": "draft (reordered 2026-10-25: the upper floors first, the shaft dive last, the lower crypt at the end; Corpsemuncher out: its wing has no dry contact; not live-checked; hivaxxis leg reordered with a stand for every pack after r40 slot5b)",
   "map": 800,
   "entrance": {"x": -11068.1, "y": -1806.4, "z": 52.7},
   "entrance_trigger": 5008,
@@ -34,7 +34,7 @@
     "Doors: the six Gates 177245/177246 (upper hall, z 28) spawn ACTIVE (open). The karazhan_crypt_gate script opens one for 25 s for a player carrying the Karazhan Crypt Key 51356 and closes it again - click only if one is found closed. The crypt gate outside (177203, map 0) needs the key on foot; cmd enter 5008 bypasses it. Tomb of the Unrepentant 177312 (Hivaxxis), Pauper's Walk 2006634 (Alarus) spawn ACTIVE too.",
     "Patrols: Guard Captain Gort 92935 (503 yd, 201 s) walks the hall and a Risen Crypt Guard 2571714 (501 yd, 200 s) the terraces; an Unseen Stalker 2567896 (325 yd, 130 s) the upper hall; two Stalkers 2567937/2567938 (187/145 yd, 75/58 s) and a Guard 2568426 (221 yd, 88 s) the lower crypt. Every pull within 30 yd of a path carries its patrol block with period_estimate (path length at 2.5 yd/s, not measured): 104 pulls.",
     "No EventAI flee row exists for any map-800 creature in this data: no trash flees at 15 %. No trash heals. The trash is undead type 6 (no Polymorph): no_cc lists it and cc_priority is empty. kill_first: the Death Coil / Banshee Shriek / frost casters 91918 91913 91911 91925.",
-    "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only: no leg climbs back up the shaft. commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to.",
+    "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only: no leg climbs back up the shaft. commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to. The hivaxxis leg walks its room east to west (stalker, four creepers, one creeper, the pair, then the boss) with a stand on the server floor before every pack: r40 slot5b stopped there (step 256 deferred, 257-258 unreachable) after pulling the pair first from the east end and walking into the z -13.5 ledge pocket at -11245.7 -1747.3 -15.0, which no corridor point reaches.",
     "Corpsemuncher (91917) is out of the plan: his wing is a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) whose only contact to the rest of the crypt is the off-mesh swim across the flooded shaft (-11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8), water at both ends. The core answers a both-ends-in-water move with a straight UNDERWATER path (0x81) and the bots' mover refuses that type (BFD-STUCK-POINTS C2/C3): the swim is one-way for the party in practice too - a bot that starts in water makes no way toward a dry point (r40, step 113). His 11 south-wing pulls stay mapped in this file's history (20261025001100, leg 5) for when the swim works; the other way to that wing is the 57.6 yd swim from the south ramp, same block.",
     "Turtle custom 5-man: plan level band 59-60, trash 60-61, bosses 62-63. The wiki has 58-60.",
     "Radii: farthest position from the centre + 0.5 yd, floor 5, +5 where a member wanders (5 to 12.8 yd): the round is how far from the row's centre the pull takes its entries. The 3-unit pack at -11185.1 -1621.0 4.8 is split (a Remains + its Rotten Zombie 4.3 yd apart, the other Remains alone). The overlap test's 8 recorded findings are Remains 91924 that never wake (7 in the south wing and the lower crypt, dead props) and one awake Remains 12.4 yd from a wandering pull - outside its 10 yd radius, inside the check's 3 yd aggro margin."
@@ -4194,47 +4194,18 @@
       "to": {"x": -11249, "y": -1769.26, "z": -28.4651},
       "pull_groups": [
         {
-          "entries": [91930, 91930],
+          "entries": [91923],
           "positions": [
-            {"x": -11244.2, "y": -1765.5, "z": -15.7003},
-            {"x": -11241.1, "y": -1751.94, "z": -15.6995}
+            {"x": -11173.3, "y": -1741.94, "z": -15.4374}
           ],
-          "radius": 7.5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91930],
-          "positions": [
-            {"x": -11229.1, "y": -1746.86, "z": -15.3863}
-          ],
+          "ambush": true,
           "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
+          "approach": [
+            {"x": -11215.79, "y": -1743.7, "z": -29.24},
+            {"x": -11199.96, "y": -1704.06, "z": -28.24},
+            {"x": -11191.09, "y": -1668.78, "z": -27.97},
+            {"x": -11164.57, "y": -1698.66, "z": -27.97}
+          ]
         },
         {
           "entries": [91930, 91930, 91930, 91930],
@@ -4258,23 +4229,71 @@
             "period_s": 75,
             "period_estimate": true,
             "source": "2567937"
-          }
+          },
+          "approach": [
+            {"x": -11196.86, "y": -1746.51, "z": -15.08}
+          ]
         },
         {
-          "entries": [91923],
+          "entries": [91930],
           "positions": [
-            {"x": -11173.3, "y": -1741.94, "z": -15.4374}
+            {"x": -11229.1, "y": -1746.86, "z": -15.3863}
           ],
-          "ambush": true,
-          "radius": 5
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          },
+          "approach": [
+            {"x": -11212.57, "y": -1749.56, "z": -14.91}
+          ]
+        },
+        {
+          "entries": [91930, 91930],
+          "positions": [
+            {"x": -11244.2, "y": -1765.5, "z": -15.7003},
+            {"x": -11241.1, "y": -1751.94, "z": -15.6995}
+          ],
+          "radius": 7.5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          },
+          "approach": [
+            {"x": -11230.24, "y": -1752.98, "z": -14.78}
+          ]
         }
       ],
       "boss": {
         "entry": 91929,
-        "position": {"x": -11255, "y": -1744.53, "z": -15.6889}
+        "position": {"x": -11255, "y": -1744.53, "z": -15.6889},
+        "approach": [
+          {"x": -11243.99, "y": -1751.02, "z": -15.17}
+        ]
       },
       "notes": [
-        "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5"
+        "walked order east to west along the spider room's own corridor: the Unseen Stalker 91923 behind the Tomb door first, then the four Tomb Creepers 91930 at -11206.6 -1743.9, the creeper at -11229.1, the pair at -11244.2/-11241.1 and Hivaxxis last. Every stand is a point of the server path (-14.78..-15.08, 10.1-17.0 yd from its pack) and every hop is 0x1, ends within 1 yd: the offline exporter cut its own approach points at z -15.27/-15.29, 0.4-0.5 yd under the -14.8 floor, and those are no walkable target from the west end (r40 slot5b steps 257-258).",
+        "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5 (spawns ACTIVE: both runs walked through it)"
       ]
     }
   ]
