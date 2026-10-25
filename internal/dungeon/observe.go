@@ -110,6 +110,10 @@ type PartialStart struct {
 	// place: a partway start is refused when the lead bot stands far from it (ObserveSpec.AllowFarStart overrides).
 	Point     Point
 	HavePoint bool
+	// PointFromPlan marks a from_leg whose Point is the plan's leg point (first via, else to) because the leg's first row could not be
+	// found: no exporter option set reproduced the server's step count. The run leader starts at the first ROW, which can be far from
+	// that point, so the Eluna placement (settings eluna_toolkit) refuses it.
+	PointFromPlan bool
 }
 
 // StartFromResolver maps an observed run's partial start (from_leg, from_pull_group, from_step) to how it starts once the server's step
@@ -363,6 +367,9 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	if w, ok := d.g.(RunLeaderWatcher); ok {
 		_, o.baseN, _ = w.RunStatus()
 	}
+	if err := d.elunaPlace(ctx); err != nil {
+		return err
+	}
 	if err := d.checkStartPlace(); err != nil {
 		return err
 	}
@@ -588,6 +595,11 @@ const farStartYd = 80.0
 // each refusal into a note.
 func (d *RemoteDriver) checkStartPlace() error {
 	if d.start == nil || d.start.Words == "" {
+		return nil
+	}
+	if d.elunaPlaced {
+		// The toolkit put the party on the step's floor and its second read proved it; the view feed's lead position is still the one
+		// from before the teleport (live 2026-10-23: "the lead bot stands 689 yd" right after a verified place).
 		return nil
 	}
 	allow := d.opt.Observe.withDefaults(d.plan).AllowFarStart
