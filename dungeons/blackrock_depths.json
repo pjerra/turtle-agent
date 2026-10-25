@@ -22,6 +22,10 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "fleers": [8890, 8892, 8894, 8895, 8903, 8916, 8920, 9041],
+  "cc_priority": [8903, 8892, 8890, 8891],
+  "cc_always": [8903],
+  "kill_first": [8894, 8898, 8896, 8904, 8900],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 230 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -445,7 +449,7 @@
           ],
           "radius": 12,
           "approach": [
-            {"x": 522, "y": -241, "z": -65},
+            {"x": 585.6, "y": -103.4668, "z": -45.4225},
             {"x": 535, "y": -244, "z": -68}
           ]
         },
@@ -835,6 +839,7 @@
           "positions": [
             {"x": 615.522, "y": -267.397, "z": -83.5907}
           ],
+          "radius": 7,
           "patrol": {
             "entries": [9025],
             "path": [
@@ -890,8 +895,7 @@
             "period_s": 291,
             "period_estimate": true,
             "source": "creature_movement guid 47899"
-          },
-          "radius": 7
+          }
         },
         {
           "entries": [8902, 8904, 8895, 8896, 8916, 8916, 8902, 8893],
@@ -1021,7 +1025,7 @@
         "door \"Ironfel\" entry 164688 at 525.1 -238.8 -41.0",
         "Warder Stilgiss 16079 dropped: the live run cleared his single row without a fight (r35 step 171), and his point between the z-34 shelf and the g38 pit forced a 63 yd hop the lead cannot walk from the shelf; the g38 approach now starts on the shelf",
         "g38 (four 8921) is pulled from a 23 yd stand on its own z-84 floor (582.8 -164.4 -83.9); the approach climbs down the shelf in four checked hops",
-        "g9 (8909 8892 8892) is pulled from the z-65 tier: the approach (522 -241 -65, 535 -244 -68) starts on the stand the party holds after g7/g8 (522 -241 -65, 13.4 yd from 535 -244 -68, same tier). The first point is also the exporter's anchor reset: g8's row is its pack centre on the z-43 ledge, and a move cut from there to 535 -244 -68 is a 442.7 yd loop the party does not walk (r37: step 93 'no walkable path toward 569.3 -271.5 -43.0', lead 523.6 -237.8 -64.4, server NOPATH; the old 499.1 -128.9 -61.9 descent was that loop's tail)",
+        "g9 (8909 8892 8892) is pulled from the z-65 tier, and the party reaches it by the only served way down: the ring north and the long ramp. The g7/g8 fight drags the tank onto the z-43 ledge (refast step 92: the lead at 536.7 -246.6 -42.5, 27.5 yd above 522 -241 -65 in a straight line but 432.2 yd along the mesh; the server's smooth path reached its 256-point cap, so the move was NOPATH and the follow-up 535 -244 -68 too, 4 pauses). The approach now anchors on the ramp top (585.6 -103.4668 -45.4225, 151.3 yd and 73 smooth points from that ledge spot, NORMAL) and then the pull stand (535 -244 -68, 150.8 yd and 41 points from the ramp top, NORMAL); from r39's fight end (549.9 -274.8 -43.1) the same two hops are 246.3/63 and 165.6/41 points. The exporter cuts the ring and ramp into 28 path rows, every hop server path-checked from both fight ends. (The old first point 522 -241 -65 assumed a stand the party does not hold after the fight: from the ledge it was the same 432.2 yd loop, step 91 was skipped 'no walkable path'.)",
         "g45 (five 8893/8895/8894 at 679.5 -124.3 -72.1) stands 26 yd below the z-45 hall: the approach (565 -53 -60, 583 17 -69, 676 -94 -71.5) walks the only served route down and pulls from 676 -94 -71.5, 30.6 yd from the pack on its own floor (r37: step 240 '8 approach hops did not bring the party within 60.0 yd of the pack (nearest 82.5 yd) ... not reachable from this floor', lead 624.5 -11.8 -72.7)"
       ]
     },
@@ -1222,7 +1226,7 @@
         "door \"Giant Door Mechanism\" entry 161461 at 614.0 -46.9 -59.6",
         "door \"The Shadowforge Lock\" entry 161460 at 615.6 -49.8 -60.1",
         "g3 (8898 8898 8899) is not pulled here any more: the walk down from the upper hall to its room passes the z-45 hall (8911/8898) and the boss's aggro, so the hall and the boss come first and g3 opens the next leg",
-        "Angerforge 9033 cannot be pulled alone: creature_linking guids 45955/45956/45958/45959 (the four Anvilrage Reservists 8901 at 654.3 17.6, 656.5 19.4, 656.4 22.6, 655.0 24.2, 3.8-4.5 yd from the boss, guids 45954) -> master 45954, flag 1031 = FLAG_AGGRO_ON_AGGRO (1) + FLAG_TO_AGGRO_ON_AGGRO (2) + FLAG_RESPAWN_ON_EVADE (4) + FLAG_CANT_SPAWN_IF_BOSS_DEAD (0x400): killing or aggroing any guard puts the boss in combat (CreatureLinkingMgr.cpp DoCreatureLinkingEvent, pMaster->EnterCombatWithTarget) and aggroing the boss puts all four guards in combat, so the 5-unit fight is unavoidable in data. The approach now stops 25.0 yd from the boss (aggro radius 20, party spread 3) instead of 21.4 yd, so the run leader's own rest gate (90 % health / 50 % healer mana / 35 % mana, 60 s: the rows carry no rest override, plan-export drops leg rest) runs out of combat before the pull; splitting the guards is escalated, not guessed (r37 slot5: 11 wipes at step 451, boss + 4 guards at once, tank 5935 hp dead in 25-30 s)"
+        "Angerforge 9033 cannot be pulled alone: creature_linking guids 45955/45956/45958/45959 (the four Anvilrage Reservists 8901 at 654.3 17.6, 656.5 19.4, 656.4 22.6, 655.0 24.2, 3.8-4.5 yd from the boss, guids 45954) -\u003e master 45954, flag 1031 = FLAG_AGGRO_ON_AGGRO (1) + FLAG_TO_AGGRO_ON_AGGRO (2) + FLAG_RESPAWN_ON_EVADE (4) + FLAG_CANT_SPAWN_IF_BOSS_DEAD (0x400): killing or aggroing any guard puts the boss in combat (CreatureLinkingMgr.cpp DoCreatureLinkingEvent, pMaster-\u003eEnterCombatWithTarget) and aggroing the boss puts all four guards in combat, so the 5-unit fight is unavoidable in data. The approach now stops 25.0 yd from the boss (aggro radius 20, party spread 3) instead of 21.4 yd, so the run leader's own rest gate (90 % health / 50 % healer mana / 35 % mana, 60 s: the rows carry no rest override, plan-export drops leg rest) runs out of combat before the pull; splitting the guards is escalated, not guessed (r37 slot5: 11 wipes at step 451, boss + 4 guards at once, tank 5935 hp dead in 25-30 s)"
       ]
     },
     {
@@ -1780,7 +1784,7 @@
         "door \"Relic Coffer Door\" entry 174564 at 829.6 -351.3 -49.3",
         "door \"Relic Coffer Door\" entry 174566 at 806.8 -335.4 -49.3",
         "door \"Secret Door\" entry 174553 at 804.2 -356.1 -49.0",
-        "g23/g24/g25 (8900 8902 8911 8898 / 8899 8902 8920 / 8902 8911 8900: 18 spawns at 898-940 -227..-292 z -49.85) are gone: they stand on the gallery above the Incendius pit and no walkable path from the ring the leg holds reaches that gallery. Server path-check from the positions the leg really holds: 884 -301 -48.8 -> 933.65 -287.95 -49.85 1238.6 yd ends 23.2 yd short; 910.87 -306.58 -49.85 -> 933.63 -251.86 -50.02 1210.1 yd 24.8 short; 794.34 -220.19 -43.2 -> 933.63 -251.86 -50.02 1276.8 yd 24.8 short; 815 -300.9 -43.21, 837.78 -244.41 -48.34 and 867 -245 -71.7 each 1030-1310 yd and 20-33 yd short; g23's own point is NOPATH from the pit floor 923.2 -284.2 -70.2. The gallery is one walkable island of its own (933.63 -251.86 -> 901.24 -232.88 37.1 yd ok, -> 933.65 -287.95 36.1 yd ok) with a single door: the north ramp 886.13 -227.47 -48.12 <- 871.47 -228.27 -43.72 <- 853.3 -213.3 -43.62 <- 839.22 -192.65 -49.72 <- 844 -133.6 -53.9 <- 832 -85.33 -54.32, which only leg 7's via chain walks (161.4 yd from leg 5's first row 813.6 16.8 -53.6, 1030-1310 yd from anywhere in this leg's tail). Nothing links them to Incendius (creature_linking has no row for any of the 18 guids), they never move (movement_type 0, wander 0, creature_groups flag 2 only inside their own groups) and no later step needs them (r38 slotB2: 12 cycles of 'no firing stand found'/'firing stands used up (2)' for 10+ minutes while they never came down)",
+        "g23/g24/g25 (8900 8902 8911 8898 / 8899 8902 8920 / 8902 8911 8900: 18 spawns at 898-940 -227..-292 z -49.85) are gone: they stand on the gallery above the Incendius pit and no walkable path from the ring the leg holds reaches that gallery. Server path-check from the positions the leg really holds: 884 -301 -48.8 -\u003e 933.65 -287.95 -49.85 1238.6 yd ends 23.2 yd short; 910.87 -306.58 -49.85 -\u003e 933.63 -251.86 -50.02 1210.1 yd 24.8 short; 794.34 -220.19 -43.2 -\u003e 933.63 -251.86 -50.02 1276.8 yd 24.8 short; 815 -300.9 -43.21, 837.78 -244.41 -48.34 and 867 -245 -71.7 each 1030-1310 yd and 20-33 yd short; g23's own point is NOPATH from the pit floor 923.2 -284.2 -70.2. The gallery is one walkable island of its own (933.63 -251.86 -\u003e 901.24 -232.88 37.1 yd ok, -\u003e 933.65 -287.95 36.1 yd ok) with a single door: the north ramp 886.13 -227.47 -48.12 \u003c- 871.47 -228.27 -43.72 \u003c- 853.3 -213.3 -43.62 \u003c- 839.22 -192.65 -49.72 \u003c- 844 -133.6 -53.9 \u003c- 832 -85.33 -54.32, which only leg 7's via chain walks (161.4 yd from leg 5's first row 813.6 16.8 -53.6, 1030-1310 yd from anywhere in this leg's tail). Nothing links them to Incendius (creature_linking has no row for any of the 18 guids), they never move (movement_type 0, wander 0, creature_groups flag 2 only inside their own groups) and no later step needs them (r38 slotB2: 12 cycles of 'no firing stand found'/'firing stands used up (2)' for 10+ minutes while they never came down)",
         "Incendius 9017 stands 22.0 yd below the ring the leg ends on, and the direct hop refuses: from 901.24 -232.88 -49.9 the boss is 1215.2 yd away and the path ends 33.0 yd short. From g22's stand (910.87 -306.58 -49.85, the party's real 884 -301 -48.8) the served route is 305.9 yd down the arena's south-east door, so the boss approach now walks it: 900 -325 -49.9 (28.9 yd ok from 884 -301 -48.8, 21.4 from g22's point), 911.7 -383.2 -49.8 (60.5), 976.3 -370.4 -64.7 (92.5), 905 -290 -71.8 (109.4), 25.6 yd from the boss on the arena floor and outside his 20 yd aggro with the party's 3 yd spread, so the run leader's own rest gate runs out of combat before the pull. The door passes 10-14 yd from the two 8910 Blazing Fireguards of leg 6 group 0 (940.976 -305.621, 928.311 -320.615), which are leg 6's own first pull"
       ]
     },
@@ -1894,21 +1898,31 @@
             {"x": 1133.1, "y": -444.435, "z": -103.302},
             {"x": 1140.18, "y": -449.129, "z": -104.768}
           ],
-          "radius": 14
+          "radius": 14,
+          "approach": [
+            {"x": 1180.5664, "y": -397.7208, "z": -91.6458}
+          ]
         },
         {
           "entries": [8911],
           "positions": [
             {"x": 1209.99, "y": -442.035, "z": -102.026}
           ],
-          "radius": 7
+          "radius": 7,
+          "approach": [
+            {"x": 1171.39, "y": -410.6161, "z": -93.4582}
+          ]
         }
       ],
       "boss": {
         "entry": 9056,
         "position": {"x": 963.267, "y": -343.735, "z": -71.7394},
         "first": [8897, 8905]
-      }
+      },
+      "notes": [
+        "g12's approach stands on the ridge at 1180.5664 -397.7208 -91.6458: the old cut from 1216 -362.6667 -94.02249 to the pack put its 50 yd hop at 1180.5664 -397.7208 -97.98146, 6.33 yd under the ridge floor (server: no end poly, step 816 refused, no reachable point within 25 yd)",
+        "g13's approach stands on the ridge at 1171.39 -410.6161 -93.4582: the old cut's 50 yd hop (1171.39 -410.61612 -98.72122) was 5.26 yd under the floor (no end poly, step 818 skipped); the ridge point is 50.6 yd from g12's pack centre and 49.9 yd from g13's"
+      ]
     },
     {
       "name": "ambassador_flamelash",
@@ -1971,6 +1985,7 @@
           "positions": [
             {"x": 1135.47, "y": -163.023, "z": -74.9241}
           ],
+          "radius": 7,
           "patrol": {
             "entries": [8923],
             "path": [
@@ -2010,8 +2025,7 @@
             "period_s": 228,
             "period_estimate": true,
             "source": "creature_movement guid 1067620"
-          },
-          "radius": 7
+          }
         },
         {
           "entries": [8900, 8908, 8900],
@@ -2851,9 +2865,5 @@
         "position": {"x": 1380.18, "y": -831.645, "z": -87.59}
       }
     }
-  ],
-  "fleers": [8890, 8892, 8894, 8895, 8903, 8916, 8920, 9041],
-  "cc_priority": [8903, 8892, 8890, 8891],
-  "cc_always": [8903],
-  "kill_first": [8894, 8898, 8896, 8904, 8900]
+  ]
 }
