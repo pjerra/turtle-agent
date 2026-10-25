@@ -520,6 +520,12 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 }
 
 func (b *builder) boss(bs *dungeon.Boss) error {
+	if bs.StandPull && len(bs.Approach) == 0 {
+		return fmt.Errorf("boss %d: a stand_pull boss needs an approach point (its stand)", bs.Entry)
+	}
+	if bs.Radius < 0 || bs.Radius > MaxRadius {
+		return fmt.Errorf("boss %d: radius %.1f is outside 0-%d", bs.Entry, bs.Radius, MaxRadius)
+	}
 	for _, a := range bs.Approach {
 		b.move(a, false, "boss approach")
 	}
@@ -532,8 +538,16 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 		flags |= FlagSkipUnreachable
 		comment = clip("boss; out of reach: "+bs.SkipUnreachable, MaxComment)
 	}
-	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Flags: flags, Entries: uniq(bs.First), Comment: comment})
-	b.last, b.haveLast = bs.Position, true
+	if bs.StandPull {
+		flags |= FlagStandPull
+	}
+	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Radius: bs.Radius, Flags: flags, Entries: uniq(bs.First), Comment: comment})
+	stand := bs.Position
+	if bs.StandPull {
+		// The party fought there, and P is in deep water: the next move's hop is measured from the stand.
+		stand = bs.Approach[len(bs.Approach)-1]
+	}
+	b.last, b.haveLast = stand, true
 	if bs.LootItem != nil {
 		b.add(StepRow{Kind: KindLoot, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Item: bs.LootItem.Entry, Comment: clip("boss loot: "+bs.LootItem.String(), MaxComment)})
 	}
@@ -812,7 +826,7 @@ func (b *builder) cutLongHops() error {
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
-		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) {
+		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
 				via, err := b.opt.Cut(b.plan.Map, a, c)
@@ -830,8 +844,12 @@ func (b *builder) cutLongHops() error {
 		if (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && prev != nil {
 			// The party fought there (a pull or boss it saw from its move point, a hold on its spot): the next move's hop is measured
 			// from it, not from the move before the fight (a leg's first move after a boss would otherwise be walked back from the
-			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724).
+			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724). A stand-pull boss is fought from
+			// its stand (the move row right before it), while its point stands in deep water: the next hop is measured from the stand.
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
+			if s.Kind == KindBoss && s.Flags&FlagStandPull != 0 && prev.Kind == KindMove {
+				cp.X, cp.Y, cp.Z = prev.X, prev.Y, prev.Z
+			}
 			prev = &cp
 		}
 		if s.Kind == KindMove || s.Kind == KindMoveDirect || s.Kind == KindMoveHopExact {
