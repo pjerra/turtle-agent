@@ -407,6 +407,31 @@ func TestHistoryGhostRunWithPacksLeftIsNoClear(t *testing.T) {
 	}
 }
 
+func TestHistoryGhostTestSpeedRunIsNoClear(t *testing.T) {
+	dir := t.TempDir()
+	w := fullRun("r-speed", "zf", 100, 600, 4, "done", nil)
+	w.event(599000, "run_leader", `"mode":"observe","state":"done","step":41,"steps":41,"leg_name":"archaedas","kind":"boss","phase":"pull","note":"plan done (speed 2.0 (test))","speed":"speed 2.0 (test)"`)
+	writeRun(t, dir, "g", w)
+	h := NewHistory(nil, dir)
+	var g GhostAnswer
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || g.Complete || g.TestSpeed != "speed 2.0 (test)" || g.LegsDone != 4 {
+		t.Fatalf("a finished test-speed run is not a clear: %+v", g)
+	}
+	clean := fullRun("r-clean", "zf", 200, 700, 4, "done", nil)
+	writeRun(t, dir, "h", clean)
+	h = NewHistory(nil, dir)
+	g = GhostAnswer{}
+	if err := json.Unmarshal(h.Ghost("zf", "", 0), &g); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Found || !g.Complete || g.TestSpeed != "" || g.Run != "r-clean" {
+		t.Fatalf("a clean run beats a faster test-speed one: %+v", g)
+	}
+}
+
 func TestHistoryGhostPrefersCleanClearOverFasterDirty(t *testing.T) {
 	dir := t.TempDir()
 	// dirty run is faster (600 s) with the same LegsDone; clean run is slower (700 s). The clean one must win.
