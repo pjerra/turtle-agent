@@ -1091,7 +1091,7 @@
             {"x": -6400, "y": -3880, "z": 73.2},
             {"x": -6370, "y": -3890, "z": 73.2},
             {"x": -6341.7, "y": -3892.5, "z": 72.7},
-            {"x": -6328, "y": -3861.5, "z": 73.2}
+            {"x": -6322, "y": -3880, "z": 72.6}
           ]
         },
         {
@@ -1099,6 +1099,21 @@
           "positions": [
             {"x": -6275.41, "y": -3899.49, "z": 72.5997},
             {"x": -6272.17, "y": -3896.24, "z": 72.5997}
+          ],
+          "approach": [
+            {"x": -6326, "y": -3912, "z": 72.6},
+            {"x": -6281, "y": -3915.5, "z": 72.6}
+          ]
+        },
+        {
+          "entries": [62035, 62036, 62046],
+          "positions": [
+            {"x": -6260.61, "y": -3935.97, "z": 72.6007},
+            {"x": -6262.17, "y": -3932.23, "z": 72.6007},
+            {"x": -6260.73, "y": -3928.89, "z": 72.6007}
+          ],
+          "approach": [
+            {"x": -6264, "y": -3914, "z": 72.6}
           ]
         },
         {
@@ -1129,7 +1144,7 @@
         }
       ],
       "notes": [
-        "r39s2 slotA (2026-10-25): the rest stand of pull group 19 (old 18) was -6332.93 -3863.11, in the magma sheet under the bridge: the party burned there twice with no hostile in combat (the core lava tick, 605-610 a second) and stopped at step 453. The stand is now -6328.0 -3861.5, dry in the trace (Sprizzaa stood there unhurt 05:06-05:08 while the lead 6 yd away burned); the two packs that stand in the lava (62035 at -6360.97 -3838.82 73.17 and the ledge 62036 at -6357.21 -3867.19 106.973) are left out, and the avoid box keeps the run leader's own path out."
+        "r39s2/r41s2 (2026-10-25): 33 of 34 hall deaths stood on a thin floor (z 72.6) over the WMO magma (level 72.25, bed 60-67), one in the open pool: the module's DispatchMovement applies UpdateAllowedPositionZ, the core's GetWaterOrGroundLevel answers level-2 = 70.25 there, in the lava. Stands are only on solid columns (specs/dmr-step453.md); the fix-4 stand -6328 -3861.5 was in the channel."
       ]
     },
     {
@@ -1720,14 +1735,6 @@
           "entries": [62048],
           "positions": [
             {"x": -6257.16, "y": -3960.46, "z": 72.5999}
-          ]
-        },
-        {
-          "entries": [62035, 62036, 62046],
-          "positions": [
-            {"x": -6260.61, "y": -3935.97, "z": 72.6007},
-            {"x": -6262.17, "y": -3932.23, "z": 72.6007},
-            {"x": -6260.73, "y": -3928.89, "z": 72.6007}
           ]
         },
         {
