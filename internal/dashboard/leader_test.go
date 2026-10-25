@@ -60,6 +60,20 @@ func TestCardShowsPacksLeftByTheRunLeader(t *testing.T) {
 	}
 }
 
+// A test-speed run is never a clear: the card reports it as done (test speed x).
+func TestCardShowsTestSpeedRunAsDoneNotClear(t *testing.T) {
+	d := observedDungeon("done", 41, "archaedas", "boss", "pull", "plan done (speed 2.0 (test))", "done")
+	d = strings.Replace(d, `"lines":9}`, `"left":2,"speed":"speed 2.0 (test)","lines":9}`, 1)
+	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(d)})
+	l := c.Run.Leader
+	if l == nil || l.Speed != "speed 2.0 (test)" || l.Left != 2 {
+		t.Fatalf("%+v", l)
+	}
+	if l.Text != "Run leader: done (test speed speed 2.0 (test)), 2 packs left" {
+		t.Fatalf("%q", l.Text)
+	}
+}
+
 // A driven run's card has no run leader.
 func TestCardWithoutRunLeader(t *testing.T) {
 	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): walk to 1 2 3", 0))})
