@@ -2,7 +2,7 @@
   "version": 1,
   "name": "karazhan_crypt",
   "kind": "dungeon",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "draft (route mapped for the shaft dive 2026-10-25; leg 5 waits for the swim across the shaft; not live-checked)",
   "map": 800,
   "entrance": {"x": -11068.1, "y": -1806.4, "z": 52.7},
   "entrance_trigger": 5008,
@@ -25,7 +25,7 @@
   "no_cc": [91910, 91911, 91912, 91913, 91915, 91918, 91922, 91923, 91924, 91925, 91926, 91929, 91930, 91932],
   "kill_first": [91918, 91913, 91911, 91925],
   "notes": [
-    "DRAFT: hand-written from the map-800 world export (tools/dungeongen/testdata/map800), the instance script instance_karazhan_crypt.cpp and the world SQL. Not mapped, not live-checked: plan-check fails 173 of 191 points - 149 unreachable, 12 too far, 12 needs_walk: the navmesh has no route into the lower crypt (z -28) or the flooded shaft (z -45), only onto the walkway 33 yd above it. The GM-invisible mapping walk comes first (AUTO-IMPROVE step 0); dungeon_run refuses the plan without allow_draft.",
+    "DRAFT: reworked 2026-10-25 on the rebuilt tile 8005334 (off-mesh links: a dive into the flooded shaft and a swim across it), checked and exported with turtle-agent feat/offmesh-links 2756955, the revision that follows the links (plan-check: 0 of 195 points fail). The route into the lower crypt: a move to a dry point on the south ramp above the waterline (-11219.96 -1586.82 4.13, water surface 3.046), one dry-start move through the dive link to the shaft floor (-11221.3 -1560 -45.9, 56.8 yd straight; a bot did it in 9 s), the four Drowned Sinners 91932 that swim at the floor pulled from there (they kill a bot parked on the floor in about 30 s), short floor legs (under 60 yd) and a stand on the slope at -11213.8 -1632 -34.3 to pull the two Risen Crypt Guards and the Shadowblade Spectre 91918 before the walk past them to the lower crypt (a bot that walked on was stopped at y -1655 and died there). Leg 5 (Corpsemuncher) stays behind the water-to-water swim across the shaft: no dry route to that wing exists.",
     "Census fixes (2026-10-24, was 173 groups / 243 positions, 6 legs / 205 steps / 212 rows): the 19 Spider 14881 critters are out of the spider room pull (level 1, 8 hp, faction 190: a pull of critters is no pull); 31 of the 96 Skeletal Remains 91924 have no Remains Trigger 177310 within 30 yd and can never stand - out of every pull (19 groups touched, 11 became empty); the 7 Tomb Creepers 91930 of that room are split into two pulls by side (radii 12.8 and 12.7); the 5-unit pack at the Archlich's feet is gone and Midnight 91927 is his boss.first (the pack's 3 Remains + Guard join the boss fight: their entries stand all over the crypt, and a boss.first entry is matched by id anywhere in view).",
     "Skeletal Remains: 91924 lie dead and unselectable until a player steps within 15 yd of a Remains Trigger 177310, which spawns 177311 and wakes every Remains within 30 yd of it. Each Remains pull therefore needs the party near a trigger first; the rows have no such step.",
     "Tomb bats: a player within 20 yd of the Tomb Bats Waiting trigger 177300 (-11104.3 -1797.5 52.6) summons a Crypt Fearfeaster 91922 at -11063.4 -1795.69 56.65 while none is within 20 yd. No row can carry it.",
@@ -851,8 +851,66 @@
     },
     {
       "name": "marrowspike",
-      "to": {"x": -11194.2, "y": -1796.43, "z": -28.4605},
+      "to": {"x": -11219.96, "y": -1586.82, "z": 4.13},
       "pull_groups": [
+        {
+          "entries": [91932],
+          "positions": [
+            {"x": -11207.9, "y": -1553.22, "z": -44.7312}
+          ],
+          "radius": 8,
+          "ambush": true,
+          "approach": [
+            {"x": -11221.3, "y": -1560, "z": -45.9}
+          ]
+        },
+        {
+          "entries": [91932],
+          "positions": [
+            {"x": -11237.8, "y": -1554.05, "z": -41.2229}
+          ],
+          "radius": 8,
+          "ambush": true
+        },
+        {
+          "entries": [91932],
+          "positions": [
+            {"x": -11210.3, "y": -1604.6, "z": -42.7167}
+          ],
+          "radius": 8,
+          "ambush": true
+        },
+        {
+          "entries": [91932],
+          "positions": [
+            {"x": -11233, "y": -1606.03, "z": -42.7975}
+          ],
+          "radius": 8,
+          "ambush": true
+        },
+        {
+          "entries": [91925, 91918, 91925],
+          "positions": [
+            {"x": -11209, "y": -1637.61, "z": -31.0695},
+            {"x": -11219.3, "y": -1639.77, "z": -31.8884},
+            {"x": -11230, "y": -1638.68, "z": -31.0682}
+          ],
+          "radius": 11.1,
+          "patrol": {
+            "entries": [91925],
+            "path": [
+              {"x": -11130.2, "y": -1655.3, "z": -28.49},
+              {"x": -11240.4, "y": -1658.76, "z": -28.48},
+              {"x": -11130.5, "y": -1655.07, "z": -28.49}
+            ],
+            "period_s": 88,
+            "period_estimate": true,
+            "source": "2568426"
+          },
+          "approach": [
+            {"x": -11213.8, "y": -1632, "z": -34.3}
+          ]
+        },
         {
           "entries": [91915],
           "positions": [
@@ -872,7 +930,10 @@
             "period_s": 75,
             "period_estimate": true,
             "source": "2567937"
-          }
+          },
+          "approach": [
+            {"x": -11211, "y": -1689, "z": -28.5}
+          ]
         },
         {
           "entries": [91923],
@@ -1301,26 +1362,6 @@
           ],
           "ambush": true,
           "radius": 5,
-          "patrol": {
-            "entries": [91925],
-            "path": [
-              {"x": -11130.2, "y": -1655.3, "z": -28.49},
-              {"x": -11240.4, "y": -1658.76, "z": -28.48},
-              {"x": -11130.5, "y": -1655.07, "z": -28.49}
-            ],
-            "period_s": 88,
-            "period_estimate": true,
-            "source": "2568426"
-          }
-        },
-        {
-          "entries": [91925, 91918, 91925],
-          "positions": [
-            {"x": -11209, "y": -1637.61, "z": -31.0695},
-            {"x": -11219.3, "y": -1639.77, "z": -31.8884},
-            {"x": -11230, "y": -1638.68, "z": -31.0682}
-          ],
-          "radius": 11.1,
           "patrol": {
             "entries": [91925],
             "path": [
@@ -2514,14 +2555,6 @@
             {"x": -11163.4, "y": -1648.42, "z": 1.5057}
           ],
           "radius": 12.8
-        },
-        {
-          "entries": [91922],
-          "positions": [
-            {"x": -11168.1, "y": -1652.65, "z": 23.6941}
-          ],
-          "radius": 10,
-          "needs_walk": true
         },
         {
           "entries": [91925],
@@ -4260,6 +4293,16 @@
         {
           "entries": [91926],
           "positions": [
+            {"x": -11190.6, "y": -1401.54, "z": -1.87382}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -11195, "y": -1405, "z": -4.36}
+          ]
+        },
+        {
+          "entries": [91926],
+          "positions": [
             {"x": -11212.4, "y": -1450.79, "z": 1.82863}
           ],
           "radius": 10
@@ -4301,147 +4344,9 @@
           "radius": 5
         },
         {
-          "entries": [91932],
-          "positions": [
-            {"x": -11219.5, "y": -1512.12, "z": -1.45669}
-          ],
-          "ambush": true,
-          "radius": 10
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11235.7, "y": -1531.59, "z": -5.83211}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11251.7, "y": -1541.55, "z": -13.377}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11246, "y": -1525.62, "z": -26.1725}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11256.3, "y": -1521.67, "z": -36.8567}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11237.8, "y": -1554.05, "z": -41.2229}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11207.9, "y": -1553.22, "z": -44.7312}
-          ],
-          "ambush": true,
-          "radius": 10
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11213.7, "y": -1549.59, "z": -23.6425}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11208.5, "y": -1535.94, "z": -28.5044}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11199.5, "y": -1526.2, "z": -33.6321}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11191.4, "y": -1543.67, "z": -5.62395}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11210.4, "y": -1541.23, "z": -4.93433}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11186.1, "y": -1565.9, "z": -2.40692}
-          ],
-          "ambush": true,
-          "radius": 10,
-          "needs_walk": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11210.3, "y": -1604.6, "z": -42.7167}
-          ],
-          "ambush": true,
-          "radius": 10
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11233, "y": -1606.03, "z": -42.7975}
-          ],
-          "ambush": true,
-          "radius": 10
-        },
-        {
           "entries": [91926],
           "positions": [
             {"x": -11260.6, "y": -1412.68, "z": -0.316311}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [91926],
-          "positions": [
-            {"x": -11190.6, "y": -1401.54, "z": -1.87382}
           ],
           "radius": 10
         }
@@ -4449,7 +4354,11 @@
       "boss": {
         "entry": 91917,
         "position": {"x": -11223.5, "y": -1406.58, "z": -15.426}
-      }
+      },
+      "notes": [
+        "Corpsemuncher's wing is a navmesh island whose only contact is the off-mesh link across the flooded shaft (from -11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8): every route to this leg's to crosses it. The link is water at both ends and the bots' mover refuses an underwater straight path (BFD C2/C3), so the leg is not runnable until a swim across the shaft works; its pull data is mapped and checked.",
+        "The Drowned Sinners 91932 are not pulled here: the four at the shaft floor are pulled right after the dive in leg 1 (marrowspike), and the ones left swim in the water column where no floor is within the tank's look view."
+      ]
     }
   ]
 }
