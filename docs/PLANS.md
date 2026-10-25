@@ -64,7 +64,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | 429 | `dire_maul_west`: Dire Maul: West | 57-60 | 5 | draft | yes | Immol'thar behind a force field (GO_FORCE_FIELD) and the pylons; Tortheldrin's crumble wall (GO_CRUMBLE_WALL); Ferra (14308) shares Illyanna's spot; Revanchion (14690) is Turtle's; Dreadsteed ritual (dreadsteed_ritual.cpp) is a class quest, not part of the clear |
 | 429 | `dire_maul_north`: Dire Maul: North | 57-60 | 5 | draft | yes | Gordok Courtyard Key and Gordok Inner Door Key (ITEM_GORDOK_COURTYARD_KEY, ITEM_GORDOK_INNER_DOOR_KEY); the Gordok guards and Captain Kromcrush carry npc_flags (gossip): they are the tribute event's mobs, hostile only after the event or the quest; King Gordok can be befriended (tribute) instead of killed; Stomper Kreeg (14322, vendor) is not a leg |
 | 289 | `scholomance`: Scholomance | 57-60 | 10 | draft | yes | Viewing Room Key (GO_VIEWING_ROOM_DOOR) and the boss gates (GO_GATE_MALICIA, GO_GATE_THEOLEN, GO_GATE_POLKELT, GO_GATE_RAVENIAN, GO_GATE_ILLUCIA, GO_GATE_BAROV, GO_GATE_GANDLING); the gates open as the Barovs fall; Kirtonos the Herald is summoned at the brazier (GO_BRAZIER_KIRTONOS, GO_GATE_KIRTONOS), optional; Darkmaster Gandling (1853) has no spawn row: he appears after the Barov wing; Dawn's Gambit (GO_DAWN_S_GAMBIT) for Vectus and Marduk Blackpool; Doctor Theolen Krastinov carries npc_flags (questgiver) until the fight |
-| 800 | `karazhan_crypt`: Karazhan Crypt | 59-60 | 6 | draft | yes | no navmesh route into the lower crypt (plan-check 173 of 191 points fail); hand-written 2026-10-24: critters and 31 never-waking Remains out, the spider room split, the Archlich's guard pack folded (first 91927), legs by floor band; doors spawn ACTIVE, Alarus 91928 is a script summon not in the plan |
+| 800 | `karazhan_crypt`: Karazhan Crypt | 59-60 | 6 | draft | yes | the shaft dive (rebuilt tile 8005334) is the only way into the lower crypt and it is one-way down for the bots (r40: the old plan's walk back up the shaft made no way); hand-written 2026-10-24/25: critters and 31 never-waking Remains out, the spider room split, the Archlich's guard pack folded (first 91927), the upper floors first and the lower crypt last; Corpsemuncher 91917 out (his wing is a navmesh island behind a water-to-water swim the mover refuses); doors spawn ACTIVE, Alarus 91928 is a script summon not in the plan |
 | 35 | `stormwind_vault`: Stormwind Vault | 59-60 | 6 | draft | yes | vault door and rat doors (GO_VAULT_DOOR, GO_RAT_DOOR_ONE/TWO); Tham'Grarr carries npc_flags (gossip): his fight is started by gossip |
 | 269 | `black_morass`: Black Morass | 59-60 | 4 | draft | yes | wave/portal event: Time Anomalies (50106, 49 spawns) and the Black Morass portals; Chronar, Epochronos, Antnormi are timed events (npc_antnormi, boss_epochronos, boss_chronar), Medivh (faction 35) closes it |
 
@@ -101,7 +101,6 @@ Points with no navmesh floor within reach (see mmaps above); each is marked `nee
 | `windhorn_canyon` | 1 | 0 | 0 |
 | `stormwrought_ruins` | 24 | 1 | 0 |
 | `gilneas_city` | 7 | 0 | 0 |
-| `karazhan_crypt` | 12 | 0 | 0 |
 | `zul_gurub` | 25 | 0 | 1 |
 | `ruins_of_ahnqiraj` | 1 | 0 | 0 |
 | `temple_of_ahnqiraj` | 1 | 0 | 0 |

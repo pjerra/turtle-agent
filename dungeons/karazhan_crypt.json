@@ -2,7 +2,7 @@
   "version": 1,
   "name": "karazhan_crypt",
   "kind": "dungeon",
-  "status": "draft (route mapped for the shaft dive 2026-10-25; leg 5 waits for the swim across the shaft; not live-checked)",
+  "status": "draft (reordered 2026-10-25: the upper floors first, the shaft dive last, the lower crypt at the end; Corpsemuncher out: its wing has no dry contact; not live-checked)",
   "map": 800,
   "entrance": {"x": -11068.1, "y": -1806.4, "z": 52.7},
   "entrance_trigger": 5008,
@@ -25,7 +25,8 @@
   "no_cc": [91910, 91911, 91912, 91913, 91915, 91918, 91922, 91923, 91924, 91925, 91926, 91929, 91930, 91932],
   "kill_first": [91918, 91913, 91911, 91925],
   "notes": [
-    "DRAFT: reworked 2026-10-25 on the rebuilt tile 8005334 (off-mesh links: a dive into the flooded shaft and a swim across it), checked and exported with turtle-agent feat/offmesh-links 2756955, the revision that follows the links (plan-check: 0 of 195 points fail). The route into the lower crypt: a move to a dry point on the south ramp above the waterline (-11219.96 -1586.82 4.13, water surface 3.046), one dry-start move through the dive link to the shaft floor (-11221.3 -1560 -45.9, 56.8 yd straight; a bot did it in 9 s), the four Drowned Sinners 91932 that swim at the floor pulled from there (they kill a bot parked on the floor in about 30 s), short floor legs (under 60 yd) and a stand on the slope at -11213.8 -1632 -34.3 to pull the two Risen Crypt Guards and the Shadowblade Spectre 91918 before the walk past them to the lower crypt (a bot that walked on was stopped at y -1655 and died there). Leg 5 (Corpsemuncher) stays behind the water-to-water swim across the shaft: no dry route to that wing exists.",
+    "DRAFT: reordered 2026-10-25 after r40 (karazhan_crypt slot5, RUN-LESSONS): the party never comes back up the shaft. The upper floors first - archlich_enkhraz (entrance hall down to the z 4.3 walkway), guard_captain_gort (walkway), commander_andreon (upper hall z 28) - then the shaft dive (marrowspike_dive: a dry point on the south ramp -11219.96 -1586.82 4.13, one dry-start move through the dive link to the shaft floor -11221.3 -1560 -45.9, the four Drowned Sinners 91932 at the floor, the slope pack with the Shadowblade Spectre 91918), then the lower crypt: the rest of marrowspike and hivaxxis. The run ends in the lower crypt. r40 walked the dive in 12 s with 0 deaths and killed Enkhraz, Marrowspike and Hivaxxis; it then stopped at the old leg 3 (step 113, 4 pauses): its first point was the walkway 4.3 and the only way up is the dive link in reverse, from the water, which the lead bot never makes (it stood on the shaft floor and made no way). The link is one-way DOWN for the bots.",
+    "marrowspike_dive/marrowspike split: r40's step 67 (\"cmd move -11200.0 -1749.3 -29.4 refused: unreachable\") was the exporter's cut approach row to pull group 5. The run walked 6.1 yd to the nearest reachable point -11194.8 -1752.3 -28.3 and went on; that point is now a via of the marrowspike leg, and the `to` after it is r40's next row -11199.199 -1770.6667 -29.27348 (walked and fought from at 06:33:59). The via chain before it is r40's own walk: the Spectre stand, then -11211 -1689 -28.5 (step 65) and -11202.032 -1738.1836 -29.204737 (step 66); pull group 5's old approach (-11211 -1689) is dropped from the group so the walk does not go back.",
     "Census fixes (2026-10-24, was 173 groups / 243 positions, 6 legs / 205 steps / 212 rows): the 19 Spider 14881 critters are out of the spider room pull (level 1, 8 hp, faction 190: a pull of critters is no pull); 31 of the 96 Skeletal Remains 91924 have no Remains Trigger 177310 within 30 yd and can never stand - out of every pull (19 groups touched, 11 became empty); the 7 Tomb Creepers 91930 of that room are split into two pulls by side (radii 12.8 and 12.7); the 5-unit pack at the Archlich's feet is gone and Midnight 91927 is his boss.first (the pack's 3 Remains + Guard join the boss fight: their entries stand all over the crypt, and a boss.first entry is matched by id anywhere in view).",
     "Skeletal Remains: 91924 lie dead and unselectable until a player steps within 15 yd of a Remains Trigger 177310, which spawns 177311 and wakes every Remains within 30 yd of it. Each Remains pull therefore needs the party near a trigger first; the rows have no such step.",
     "Tomb bats: a player within 20 yd of the Tomb Bats Waiting trigger 177300 (-11104.3 -1797.5 52.6) summons a Crypt Fearfeaster 91922 at -11063.4 -1795.69 56.65 while none is within 20 yd. No row can carry it.",
@@ -33,7 +34,8 @@
     "Doors: the six Gates 177245/177246 (upper hall, z 28) spawn ACTIVE (open). The karazhan_crypt_gate script opens one for 25 s for a player carrying the Karazhan Crypt Key 51356 and closes it again - click only if one is found closed. The crypt gate outside (177203, map 0) needs the key on foot; cmd enter 5008 bypasses it. Tomb of the Unrepentant 177312 (Hivaxxis), Pauper's Walk 2006634 (Alarus) spawn ACTIVE too.",
     "Patrols: Guard Captain Gort 92935 (503 yd, 201 s) walks the hall and a Risen Crypt Guard 2571714 (501 yd, 200 s) the terraces; an Unseen Stalker 2567896 (325 yd, 130 s) the upper hall; two Stalkers 2567937/2567938 (187/145 yd, 75/58 s) and a Guard 2568426 (221 yd, 88 s) the lower crypt. Every pull within 30 yd of a path carries its patrol block with period_estimate (path length at 2.5 yd/s, not measured): 104 pulls.",
     "No EventAI flee row exists for any map-800 creature in this data: no trash flees at 15 %. No trash heals. The trash is undead type 6 (no Polymorph): no_cc lists it and cc_priority is empty. kill_first: the Death Coil / Banshee Shriek / frost casters 91918 91913 91911 91925.",
-    "Legs are floor bands (2026-10-24): the lower-crypt groups of archlich_enkhraz, the z 4.3 groups of marrowspike, the lower-crypt groups of hivaxxis and guard_captain_gort and the upper-hall groups of guard_captain_gort moved to the leg whose boss stands on that floor - the drafted plan walked down to -28.5 and back to 4.3 twice in leg 0. Every leg's pulls are in nearest-neighbour order from its to; a 2-opt sweep would save 382 yd more (8 %).",
+    "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only: no leg climbs back up the shaft. commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to.",
+    "Corpsemuncher (91917) is out of the plan: his wing is a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) whose only contact to the rest of the crypt is the off-mesh swim across the flooded shaft (-11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8), water at both ends. The core answers a both-ends-in-water move with a straight UNDERWATER path (0x81) and the bots' mover refuses that type (BFD-STUCK-POINTS C2/C3): the swim is one-way for the party in practice too - a bot that starts in water makes no way toward a dry point (r40, step 113). His 11 south-wing pulls stay mapped in this file's history (20261025001100, leg 5) for when the swim works; the other way to that wing is the 57.6 yd swim from the south ramp, same block.",
     "Turtle custom 5-man: plan level band 59-60, trash 60-61, bosses 62-63. The wiki has 58-60.",
     "Radii: farthest position from the centre + 0.5 yd, floor 5, +5 where a member wanders (5 to 12.8 yd): the round is how far from the row's centre the pull takes its entries. The 3-unit pack at -11185.1 -1621.0 4.8 is split (a Remains + its Rotten Zombie 4.3 yd apart, the other Remains alone). The overlap test's 8 recorded findings are Remains 91924 that never wake (7 in the south wing and the lower crypt, dead props) and one awake Remains 12.4 yd from a wandering pull - outside its 10 yd radius, inside the check's 3 yd aggro margin."
   ],
@@ -844,673 +846,6 @@
         "entry": 91916,
         "position": {"x": -11188.2, "y": -1791.57, "z": 4.29357},
         "first": [91927]
-      },
-      "notes": [
-        "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5"
-      ]
-    },
-    {
-      "name": "marrowspike",
-      "to": {"x": -11219.96, "y": -1586.82, "z": 4.13},
-      "pull_groups": [
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11207.9, "y": -1553.22, "z": -44.7312}
-          ],
-          "radius": 8,
-          "ambush": true,
-          "approach": [
-            {"x": -11221.3, "y": -1560, "z": -45.9}
-          ]
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11237.8, "y": -1554.05, "z": -41.2229}
-          ],
-          "radius": 8,
-          "ambush": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11210.3, "y": -1604.6, "z": -42.7167}
-          ],
-          "radius": 8,
-          "ambush": true
-        },
-        {
-          "entries": [91932],
-          "positions": [
-            {"x": -11233, "y": -1606.03, "z": -42.7975}
-          ],
-          "radius": 8,
-          "ambush": true
-        },
-        {
-          "entries": [91925, 91918, 91925],
-          "positions": [
-            {"x": -11209, "y": -1637.61, "z": -31.0695},
-            {"x": -11219.3, "y": -1639.77, "z": -31.8884},
-            {"x": -11230, "y": -1638.68, "z": -31.0682}
-          ],
-          "radius": 11.1,
-          "patrol": {
-            "entries": [91925],
-            "path": [
-              {"x": -11130.2, "y": -1655.3, "z": -28.49},
-              {"x": -11240.4, "y": -1658.76, "z": -28.48},
-              {"x": -11130.5, "y": -1655.07, "z": -28.49}
-            ],
-            "period_s": 88,
-            "period_estimate": true,
-            "source": "2568426"
-          },
-          "approach": [
-            {"x": -11213.8, "y": -1632, "z": -34.3}
-          ]
-        },
-        {
-          "entries": [91915],
-          "positions": [
-            {"x": -11194.2, "y": -1796.43, "z": -28.4605}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          },
-          "approach": [
-            {"x": -11211, "y": -1689, "z": -28.5}
-          ]
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11215.1, "y": -1778.02, "z": -29.9224}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91915],
-          "positions": [
-            {"x": -11238.1, "y": -1797.69, "z": -28.4618}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11249, "y": -1769.26, "z": -28.4651}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91915],
-          "positions": [
-            {"x": -11250.3, "y": -1738.71, "z": -28.4694}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11250.4, "y": -1708.87, "z": -28.4625}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11230.5, "y": -1686.84, "z": -28.507}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11204.4, "y": -1685.89, "z": -28.507}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11183.4, "y": -1706.76, "z": -28.4929}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11159.5, "y": -1696.19, "z": -28.4942}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11143.1, "y": -1695.08, "z": -28.4974}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11129.1, "y": -1720, "z": -29.7372}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11107.3, "y": -1742.45, "z": -28.5213}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91924],
-          "positions": [
-            {"x": -11120.4, "y": -1754.29, "z": -28.5095}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91924, 91924],
-          "positions": [
-            {"x": -11120.3, "y": -1771.25, "z": -28.5066},
-            {"x": -11111.4, "y": -1770.86, "z": -28.5173}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91924],
-          "positions": [
-            {"x": -11137.5, "y": -1763.75, "z": -29.7362}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11160.3, "y": -1753.96, "z": -28.5046}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91912],
-          "positions": [
-            {"x": -11181.3, "y": -1767.49, "z": -28.5127}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91915],
-          "positions": [
-            {"x": -11181.7, "y": -1737.11, "z": -28.5158}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11161.5, "y": -1727.53, "z": -28.5045}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11217, "y": -1718.23, "z": -29.8815}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11241.9, "y": -1655.8, "z": -28.4673}
-          ],
-          "ambush": true,
-          "radius": 5,
-          "patrol": {
-            "entries": [91925],
-            "path": [
-              {"x": -11130.2, "y": -1655.3, "z": -28.49},
-              {"x": -11240.4, "y": -1658.76, "z": -28.48},
-              {"x": -11130.5, "y": -1655.07, "z": -28.49}
-            ],
-            "period_s": 88,
-            "period_estimate": true,
-            "source": "2568426"
-          }
-        },
-        {
-          "entries": [91925],
-          "positions": [
-            {"x": -11130.2, "y": -1655.3, "z": -28.4917}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91925],
-            "path": [
-              {"x": -11130.2, "y": -1655.3, "z": -28.49},
-              {"x": -11240.4, "y": -1658.76, "z": -28.48},
-              {"x": -11130.5, "y": -1655.07, "z": -28.49}
-            ],
-            "period_s": 88,
-            "period_estimate": true,
-            "source": "2568426"
-          }
-        },
-        {
-          "entries": [91924, 91924],
-          "positions": [
-            {"x": -11137.1, "y": -1808.18, "z": -28.5048},
-            {"x": -11138.4, "y": -1798.86, "z": -28.9578}
-          ],
-          "radius": 5.2,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11129.1, "y": -1720, "z": -29.74},
-              {"x": -11128.7, "y": -1775.45, "z": -29.74},
-              {"x": -11144.4, "y": -1776.3, "z": -29.74},
-              {"x": -11147.2, "y": -1720.66, "z": -29.74},
-              {"x": -11129.6, "y": -1719.86, "z": -29.74}
-            ],
-            "period_s": 58,
-            "period_estimate": true,
-            "source": "2567938"
-          }
-        },
-        {
-          "entries": [91924, 91924, 91923],
-          "positions": [
-            {"x": -11163.8, "y": -1795.81, "z": -28.5048},
-            {"x": -11165.6, "y": -1805.23, "z": -28.5048},
-            {"x": -11170.2, "y": -1809.46, "z": -28.5047}
-          ],
-          "radius": 8.7
-        }
-      ],
-      "boss": {
-        "entry": 91920,
-        "position": {"x": -11214.6, "y": -1800.15, "z": -28.3992}
-      }
-    },
-    {
-      "name": "hivaxxis",
-      "to": {"x": -11249, "y": -1769.26, "z": -28.4651},
-      "pull_groups": [
-        {
-          "entries": [91930, 91930],
-          "positions": [
-            {"x": -11244.2, "y": -1765.5, "z": -15.7003},
-            {"x": -11241.1, "y": -1751.94, "z": -15.6995}
-          ],
-          "radius": 7.5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91930],
-          "positions": [
-            {"x": -11229.1, "y": -1746.86, "z": -15.3863}
-          ],
-          "radius": 5,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91930, 91930, 91930, 91930],
-          "positions": [
-            {"x": -11213.6, "y": -1753.87, "z": -15.2784},
-            {"x": -11212.3, "y": -1737.53, "z": -15.6332},
-            {"x": -11201.7, "y": -1748.25, "z": -15.6507},
-            {"x": -11198.8, "y": -1735.93, "z": -15.7374}
-          ],
-          "radius": 12.7,
-          "patrol": {
-            "entries": [91923],
-            "path": [
-              {"x": -11215.1, "y": -1778.02, "z": -29.92},
-              {"x": -11201.5, "y": -1777.44, "z": -29.91},
-              {"x": -11203.4, "y": -1710.26, "z": -29.91},
-              {"x": -11229.5, "y": -1710.22, "z": -29.91},
-              {"x": -11228.2, "y": -1777.15, "z": -29.91},
-              {"x": -11215.7, "y": -1777.95, "z": -29.93}
-            ],
-            "period_s": 75,
-            "period_estimate": true,
-            "source": "2567937"
-          }
-        },
-        {
-          "entries": [91923],
-          "positions": [
-            {"x": -11173.3, "y": -1741.94, "z": -15.4374}
-          ],
-          "ambush": true,
-          "radius": 5
-        }
-      ],
-      "boss": {
-        "entry": 91929,
-        "position": {"x": -11255, "y": -1744.53, "z": -15.6889}
       },
       "notes": [
         "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5"
@@ -2863,7 +2198,7 @@
     },
     {
       "name": "commander_andreon",
-      "to": {"x": -11118.3, "y": -1630.84, "z": 5.87479},
+      "to": {"x": -11096.95, "y": -1642.28, "z": 28.8001},
       "pull_groups": [
         {
           "entries": [91923],
@@ -4265,99 +3600,681 @@
       ]
     },
     {
-      "name": "corpsemuncher",
-      "to": {"x": -11178, "y": -1478.97, "z": 3.57707},
+      "name": "marrowspike_dive",
+      "to": {"x": -11219.96, "y": -1586.82, "z": 4.13},
+      "via": [
+        {"x": -11200.09, "y": -1621.23, "z": 4.82}
+      ],
       "pull_groups": [
         {
-          "entries": [91923],
+          "entries": [91932],
           "positions": [
-            {"x": -11178, "y": -1478.97, "z": 3.57707}
+            {"x": -11207.9, "y": -1553.22, "z": -44.7312}
           ],
           "ambush": true,
-          "radius": 5
-        },
-        {
-          "entries": [91910],
-          "positions": [
-            {"x": -11177.9, "y": -1451.03, "z": 1.21702}
-          ],
-          "radius": 5
-        },
-        {
-          "entries": [91926],
-          "positions": [
-            {"x": -11187.9, "y": -1434.97, "z": 1.39315}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [91926],
-          "positions": [
-            {"x": -11190.6, "y": -1401.54, "z": -1.87382}
-          ],
-          "radius": 10,
+          "radius": 8,
           "approach": [
-            {"x": -11195, "y": -1405, "z": -4.36}
+            {"x": -11221.3, "y": -1560, "z": -45.9}
           ]
         },
         {
-          "entries": [91926],
+          "entries": [91932],
           "positions": [
-            {"x": -11212.4, "y": -1450.79, "z": 1.82863}
+            {"x": -11237.8, "y": -1554.05, "z": -41.2229}
           ],
-          "radius": 10
+          "ambush": true,
+          "radius": 8
         },
         {
-          "entries": [91911],
+          "entries": [91932],
           "positions": [
-            {"x": -11222.1, "y": -1472.57, "z": 3.5759}
+            {"x": -11210.3, "y": -1604.6, "z": -42.7167}
           ],
-          "radius": 5
+          "ambush": true,
+          "radius": 8
         },
         {
-          "entries": [91926],
+          "entries": [91932],
           "positions": [
-            {"x": -11241.5, "y": -1451.99, "z": 2.68017}
+            {"x": -11233, "y": -1606.03, "z": -42.7975}
           ],
-          "radius": 10
+          "ambush": true,
+          "radius": 8
         },
         {
-          "entries": [91926],
+          "entries": [91925, 91918, 91925],
           "positions": [
-            {"x": -11258.6, "y": -1434.1, "z": 1.57751}
+            {"x": -11209, "y": -1637.61, "z": -31.0695},
+            {"x": -11219.3, "y": -1639.77, "z": -31.8884},
+            {"x": -11230, "y": -1638.68, "z": -31.0682}
           ],
-          "radius": 10
-        },
+          "radius": 11.1,
+          "patrol": {
+            "entries": [91925],
+            "path": [
+              {"x": -11130.2, "y": -1655.3, "z": -28.49},
+              {"x": -11240.4, "y": -1658.76, "z": -28.48},
+              {"x": -11130.5, "y": -1655.07, "z": -28.49}
+            ],
+            "period_s": 88,
+            "period_estimate": true,
+            "source": "2568426"
+          },
+          "approach": [
+            {"x": -11213.8, "y": -1632, "z": -34.3}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "marrowspike",
+      "to": {"x": -11199.199, "y": -1770.6667, "z": -29.27348},
+      "via": [
+        {"x": -11211, "y": -1689, "z": -28.5},
+        {"x": -11202.032, "y": -1738.1836, "z": -29.204737},
+        {"x": -11194.8, "y": -1752.3, "z": -28.3}
+      ],
+      "pull_groups": [
         {
-          "entries": [91910],
+          "entries": [91915],
           "positions": [
-            {"x": -11266.7, "y": -1453.24, "z": 2.74866}
+            {"x": -11194.2, "y": -1796.43, "z": -28.4605}
           ],
-          "radius": 5
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
         },
         {
           "entries": [91923],
           "positions": [
-            {"x": -11265.4, "y": -1481.66, "z": 3.57707}
+            {"x": -11215.1, "y": -1778.02, "z": -29.9224}
           ],
           "ambush": true,
-          "radius": 5
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
         },
         {
-          "entries": [91926],
+          "entries": [91915],
           "positions": [
-            {"x": -11260.6, "y": -1412.68, "z": -0.316311}
+            {"x": -11238.1, "y": -1797.69, "z": -28.4618}
           ],
-          "radius": 10
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11249, "y": -1769.26, "z": -28.4651}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91915],
+          "positions": [
+            {"x": -11250.3, "y": -1738.71, "z": -28.4694}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11250.4, "y": -1708.87, "z": -28.4625}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11230.5, "y": -1686.84, "z": -28.507}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11204.4, "y": -1685.89, "z": -28.507}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11183.4, "y": -1706.76, "z": -28.4929}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11159.5, "y": -1696.19, "z": -28.4942}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11143.1, "y": -1695.08, "z": -28.4974}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11129.1, "y": -1720, "z": -29.7372}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11107.3, "y": -1742.45, "z": -28.5213}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91924],
+          "positions": [
+            {"x": -11120.4, "y": -1754.29, "z": -28.5095}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91924, 91924],
+          "positions": [
+            {"x": -11120.3, "y": -1771.25, "z": -28.5066},
+            {"x": -11111.4, "y": -1770.86, "z": -28.5173}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91924],
+          "positions": [
+            {"x": -11137.5, "y": -1763.75, "z": -29.7362}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11160.3, "y": -1753.96, "z": -28.5046}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91912],
+          "positions": [
+            {"x": -11181.3, "y": -1767.49, "z": -28.5127}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91915],
+          "positions": [
+            {"x": -11181.7, "y": -1737.11, "z": -28.5158}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11161.5, "y": -1727.53, "z": -28.5045}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11217, "y": -1718.23, "z": -29.8815}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11241.9, "y": -1655.8, "z": -28.4673}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "patrol": {
+            "entries": [91925],
+            "path": [
+              {"x": -11130.2, "y": -1655.3, "z": -28.49},
+              {"x": -11240.4, "y": -1658.76, "z": -28.48},
+              {"x": -11130.5, "y": -1655.07, "z": -28.49}
+            ],
+            "period_s": 88,
+            "period_estimate": true,
+            "source": "2568426"
+          }
+        },
+        {
+          "entries": [91925],
+          "positions": [
+            {"x": -11130.2, "y": -1655.3, "z": -28.4917}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91925],
+            "path": [
+              {"x": -11130.2, "y": -1655.3, "z": -28.49},
+              {"x": -11240.4, "y": -1658.76, "z": -28.48},
+              {"x": -11130.5, "y": -1655.07, "z": -28.49}
+            ],
+            "period_s": 88,
+            "period_estimate": true,
+            "source": "2568426"
+          }
+        },
+        {
+          "entries": [91924, 91924],
+          "positions": [
+            {"x": -11137.1, "y": -1808.18, "z": -28.5048},
+            {"x": -11138.4, "y": -1798.86, "z": -28.9578}
+          ],
+          "radius": 5.2,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11129.1, "y": -1720, "z": -29.74},
+              {"x": -11128.7, "y": -1775.45, "z": -29.74},
+              {"x": -11144.4, "y": -1776.3, "z": -29.74},
+              {"x": -11147.2, "y": -1720.66, "z": -29.74},
+              {"x": -11129.6, "y": -1719.86, "z": -29.74}
+            ],
+            "period_s": 58,
+            "period_estimate": true,
+            "source": "2567938"
+          }
+        },
+        {
+          "entries": [91924, 91924, 91923],
+          "positions": [
+            {"x": -11163.8, "y": -1795.81, "z": -28.5048},
+            {"x": -11165.6, "y": -1805.23, "z": -28.5048},
+            {"x": -11170.2, "y": -1809.46, "z": -28.5047}
+          ],
+          "radius": 8.7
         }
       ],
       "boss": {
-        "entry": 91917,
-        "position": {"x": -11223.5, "y": -1406.58, "z": -15.426}
+        "entry": 91920,
+        "position": {"x": -11214.6, "y": -1800.15, "z": -28.3992}
+      }
+    },
+    {
+      "name": "hivaxxis",
+      "to": {"x": -11249, "y": -1769.26, "z": -28.4651},
+      "pull_groups": [
+        {
+          "entries": [91930, 91930],
+          "positions": [
+            {"x": -11244.2, "y": -1765.5, "z": -15.7003},
+            {"x": -11241.1, "y": -1751.94, "z": -15.6995}
+          ],
+          "radius": 7.5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91930],
+          "positions": [
+            {"x": -11229.1, "y": -1746.86, "z": -15.3863}
+          ],
+          "radius": 5,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91930, 91930, 91930, 91930],
+          "positions": [
+            {"x": -11213.6, "y": -1753.87, "z": -15.2784},
+            {"x": -11212.3, "y": -1737.53, "z": -15.6332},
+            {"x": -11201.7, "y": -1748.25, "z": -15.6507},
+            {"x": -11198.8, "y": -1735.93, "z": -15.7374}
+          ],
+          "radius": 12.7,
+          "patrol": {
+            "entries": [91923],
+            "path": [
+              {"x": -11215.1, "y": -1778.02, "z": -29.92},
+              {"x": -11201.5, "y": -1777.44, "z": -29.91},
+              {"x": -11203.4, "y": -1710.26, "z": -29.91},
+              {"x": -11229.5, "y": -1710.22, "z": -29.91},
+              {"x": -11228.2, "y": -1777.15, "z": -29.91},
+              {"x": -11215.7, "y": -1777.95, "z": -29.93}
+            ],
+            "period_s": 75,
+            "period_estimate": true,
+            "source": "2567937"
+          }
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11173.3, "y": -1741.94, "z": -15.4374}
+          ],
+          "ambush": true,
+          "radius": 5
+        }
+      ],
+      "boss": {
+        "entry": 91929,
+        "position": {"x": -11255, "y": -1744.53, "z": -15.6889}
       },
       "notes": [
-        "Corpsemuncher's wing is a navmesh island whose only contact is the off-mesh link across the flooded shaft (from -11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8): every route to this leg's to crosses it. The link is water at both ends and the bots' mover refuses an underwater straight path (BFD C2/C3), so the leg is not runnable until a swim across the shaft works; its pull data is mapped and checked.",
-        "The Drowned Sinners 91932 are not pulled here: the four at the shaft floor are pulled right after the dive in leg 1 (marrowspike), and the ones left swim in the water column where no floor is within the tank's look view."
+        "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5"
       ]
     }
   ]

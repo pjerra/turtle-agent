@@ -905,11 +905,11 @@
    "entrance_tele": "instancedkarazhancrypt",
    "outside_tele": "karazhancrypt",
    "special": [
-    "no navmesh route into the lower crypt (plan-check 173 of 191 points fail); hand-written 2026-10-24: critters and 31 never-waking Remains out, the spider room split, the Archlich's guard pack folded (first 91927), legs by floor band; doors spawn ACTIVE, Alarus 91928 is a script summon not in the plan"
+    "the shaft dive (rebuilt tile 8005334) is the only way into the lower crypt and it is one-way down for the bots (r40: the old plan's walk back up the shaft made no way); hand-written 2026-10-24/25: critters and 31 never-waking Remains out, the spider room split, the Archlich's guard pack folded (first 91927), the upper floors first and the lower crypt last; Corpsemuncher 91917 out (his wing is a navmesh island behind a water-to-water swim the mover refuses); doors spawn ACTIVE, Alarus 91928 is a script summon not in the plan"
    ],
    "notes": [
     "Turtle custom 5-man at level 60-62 (plan band 59-60, trash 60-61, bosses 62-63).",
-    "Plan-check offline 2026-10-24: 173 of 191 points fail (149 unreachable, 12 too far, 12 needs_walk) - the lower crypt and the flooded shaft have no navmesh route; the GM mapping walk is to do.",
+    "Plan-check 2026-10-25 on the rebuilt tile 8005334 (the two off-mesh links): 0 of 185 points fail (173 of 191 failed on the 2026-10-11 tiles). r40 (2026-10-25, slot5): the dive and the first lower-crypt pulls worked (0 deaths, Enkhraz, Marrowspike and Hivaxxis down); the run stopped only where the old order walked back up the shaft. The reorder (upper floors, dive, lower crypt) is exported in 20261025001400.",
     "Skeletal Remains 91924 wake only near a Remains Trigger 177310 (30 yd); Alarus 91928 is summoned by the six Necrotic Runes (they spawn ACTIVE) at the entrance-hall Crypt Watcher and has no spawn row."
    ]
   },
