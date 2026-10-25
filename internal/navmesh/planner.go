@@ -610,6 +610,25 @@ const offMeshFlag = 0x04 // DT_STRAIGHTPATH_OFFMESH_CONNECTION
 
 func plan(eng *engine, from, to Vec3) Path {
 	rc, pts, fl, goal := eng.findPath(from, to)
+	// The funnel can emit the same corner twice where it crosses a link (the
+	// link's far end as both a link-start and a plain corner): drop the
+	// duplicate, keeping the link flag on the surviving segment.
+	if len(pts) > 0 {
+		keep, keepFl := pts[:1], fl[:1]
+		for i := 1; i < len(pts); i++ {
+			if dist3D(keep[len(keep)-1], pts[i]) < 1e-3 {
+				if i < len(fl) && fl[i]&offMeshFlag != 0 && len(keepFl) > 0 {
+					keepFl[len(keepFl)-1] |= offMeshFlag
+				}
+				continue
+			}
+			keep = append(keep, pts[i])
+			if i < len(fl) {
+				keepFl = append(keepFl, fl[i])
+			}
+		}
+		pts, fl = keep, keepFl
+	}
 	path := Path{Engine: engineName, Points: pts}
 	switch rc {
 	case 0:
