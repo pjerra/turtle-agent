@@ -71,6 +71,9 @@ func runLine(st tbm.RunStatus) string {
 	if st.Left > 0 {
 		s += fmt.Sprintf("|left %d", st.Left)
 	}
+	if st.Speed != "" {
+		s += "|" + st.Speed
+	}
 	return s
 }
 
@@ -291,6 +294,61 @@ func TestObserveKeepsThePacksLeftCount(t *testing.T) {
 	}
 }
 
+// A test-speed start line carries speed= after the plan and before any from words; a test-speed run never clears.
+func TestObserveStartSendsTheTestSpeed(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Speed: 2}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if i := g.indexOf("run start rt speed=2.0"); i < 0 {
+		t.Fatalf("no test-speed start line: %v", g.orders)
+	}
+	g = newFakeLeader(t, happyScript()...)
+	g.startExtra = []string{"The run starts at step 3 of 5 (leg first): the party is in the instance."}
+	o := observeOpts(ObserveSpec{Speed: 2, AllowFarStart: true})
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from step 3", Step: 3, Leg: -1, ExpectLeg: "first", Point: Point{}, HavePoint: true}, nil
+	}
+	if _, err := runRemote(t, g, observePlan(), o, nil); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if i := g.indexOf("run start rt speed=2.0 from step 3"); i < 0 {
+		t.Fatalf("speed goes after the plan and before from: %v", g.orders)
+	}
+	// 0 and 1 are omitted from the start line (a normal run).
+	for _, speed := range []float64{0, 1} {
+		g = newFakeLeader(t, happyScript()...)
+		if _, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Speed: speed}), nil); err != nil {
+			t.Fatalf("speed %v: %v", speed, err)
+		}
+		if i := g.indexOf("run start rt"); i < 0 || slices.Contains(g.orders, "run start rt speed=1.0") {
+			t.Fatalf("speed %v is not omitted: %v", speed, g.orders)
+		}
+	}
+}
+
+// A done line with a test-speed field keeps it in the report, and the note carries the done marker; a reader counts it
+// as done (test speed x), never a clear.
+func TestObserveKeepsTheTestSpeed(t *testing.T) {
+	done := rs("done", 5, 5, "second", "move", "walk", "plan done (speed 2.0 (test))")
+	done.Left = 2
+	done.Speed = "speed 2.0 (test)"
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking")},
+		leaderStep{s(10), done})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if ob.Speed != "speed 2.0 (test)" || ob.Left != 2 || ob.Note != "plan done (speed 2.0 (test))" || ob.State != "done" {
+		t.Fatalf("observe %+v", ob)
+	}
+	if last := ob.Changes[len(ob.Changes)-1]; last.Speed != "speed 2.0 (test)" || last.Left != 2 {
+		t.Fatalf("last change %+v", last)
+	}
+}
 func TestObservePollsWhenNothingIsPushed(t *testing.T) {
 	g := newFakeLeader(t, happyScript()...)
 	g.pushOff = true
