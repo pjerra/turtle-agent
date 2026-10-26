@@ -121,7 +121,7 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		{"lady_illucia_barov", 10502, 14, "[]"},
 		{"jandice_barov", 10503, 36, "[]"},
 		{"rattlegore", 11622, 25, "[10488]"},
-		{"vectus", 10432, 26, "[10475 10433]"},
+		{"vectus", 10432, 26, "[10433 10475]"},
 		{"ras_frostwhisper", 10508, 3, "[]"},
 		{"doctor_theolen_krastinov", 11261, 2, "[]"},
 		{"lord_alexei_barov", 10504, 3, "[10489]"},
@@ -406,8 +406,9 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 	if len(seen) != 24 {
 		t.Errorf("%d of the 32 census students are in the eight pulls, want 24", len(seen))
 	}
-	// (b) the other 8 are the boss row's adds: 10475 before 10433 (the students must die before Marduk is touched: his
-	// creature group wakes Vectus, whose first victim pulls every living student), each within its 30 yd radius of Vectus.
+	// (b) the other 8 are the boss row's adds: 10433 before 10475 (Marduk's Defiling Aura and Shadow Bolt Volley hit every
+	// bot, the party's 4.3k hp priest first, so he dies first: SCHOLO-REFAST-AUDIT.md E1; the students are in the pack and
+	// attack anyway once Vectus has a victim), each within its 30 yd radius of Vectus.
 	studentAdd, mardukAdd := -1, -1
 	for i, e := range leg.Boss.First {
 		if e == 10475 {
@@ -417,8 +418,8 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 			mardukAdd = i
 		}
 	}
-	if studentAdd < 0 || mardukAdd < 0 || studentAdd > mardukAdd {
-		t.Fatalf("leg vectus boss first is %v, want 10475 (the students) before 10433 (Marduk)", leg.Boss.First)
+	if studentAdd < 0 || mardukAdd < 0 || mardukAdd > studentAdd {
+		t.Fatalf("leg vectus boss first is %v, want 10433 (Marduk) before 10475 (the students)", leg.Boss.First)
 	}
 	adds := 0
 	for _, s := range students {
