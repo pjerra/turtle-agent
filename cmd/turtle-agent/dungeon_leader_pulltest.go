@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/pjerra/turtle-agent/internal/brain"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -16,28 +14,7 @@ import (
 // Respawn sends the character's own ".respawn" with nothing selected (dungeon.Respawner), as the commander's does: the selection is cleared
 // first and the server is waited for to show it cleared, else the line would act on that one unit alone.
 func (g *sessionGame) Respawn(ctx context.Context) error {
-	s := g.cur()
-	if err := s.ClearTarget(ctx); err != nil {
-		return err
-	}
-	timer := time.NewTimer(gmSelectConfirmWait)
-	defer timer.Stop()
-	tick := time.NewTicker(25 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if sel, ok := s.ServerSelection(); ok && sel == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			sel, _ := s.ServerSelection()
-			return fmt.Errorf("the server did not show the selection cleared within %s (it shows %v): not sending .respawn", gmSelectConfirmWait, sel)
-		case <-tick.C:
-		}
-	}
-	return s.GM(ctx, ".respawn")
+	return respawnUnselected(ctx, g.cur())
 }
 
 // CombatMark is the position of the event log now (dungeon.CombatMeter).
