@@ -38,6 +38,10 @@ const (
 	KindHold         = "hold"
 	// KindGossip is a gossip step: the lead bot talks to creature `entry` and picks option `param` (`.bot cmd gossip <entry> <bot> <param>`).
 	KindGossip = "gossip"
+	// KindUseOn is an item used ON a game object (TortoiseBots kind use_on, 2026-10-21): entry = the object, x,y,z = its point, item = the
+	// item (`.bot cmd use <item> <carrier> entry:<obj>@x,y,z`). A plan's use_object with via_item. A module from before the kind skips the
+	// row (UnknownKind).
+	KindUseOn = "use_on"
 )
 
 // Flags of ai_dungeon_step.flags.
@@ -55,6 +59,11 @@ const (
 	// resumed after a wipe at one of these rows (a fresh run does not need it). A loader that knows no such flag drops it (unknown flags
 	// are ignored on a loot/open), so the rows still load.
 	FlagGoneIsDone = 256
+	// FlagDeadNpcIsDone marks a gossip row as done when its NPC is dead (the module's kPlanFlagDeadNpcIsDone): the order refused with the
+	// dead-NPC wording ends the step with a note instead of pausing the run. A plan's gossip step sets it with "dead_is_done": true
+	// (Zul'Farrak's Sergeant Bly, whose crew the pyramid event's troll waves kill in some runs). A module without the flag refuses a
+	// gossip row that carries any flag, so the module and the exported rows go together. 512: 128 is reserved by the module.
+	FlagDeadNpcIsDone = 512
 	// FlagExact marks a move row as an exact waypoint (the plan's Waypoint.Exact): the run leader counts it done only once the lead bot
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
@@ -162,10 +171,15 @@ type Options struct {
 	// 6 yd down over a 3.9 yd gap); the row's comment and a warning say it is not tried live.
 	GMCrossDirect bool
 	// SkipLegs names legs (by their name in the plan) that are left out of the rows, each with a warning, and the later legs close up, as for
-	// an optional leg. For a leg the run leader cannot do while the legs after it can: Zul'Farrak's Sergeant Bly, who turns hostile after his
-	// gossip (the run leader has no boss that turns hostile later), stands between the Weegli gossip that opens the End Door and the legs behind
-	// that door. An unknown name is an error (a misspelling would otherwise export the leg or cut the plan there).
+	// an optional leg. For a leg the run leader cannot do while the legs after it can (Zul'Farrak's Sergeant Bly was exported this way until
+	// 2026-10-21, when his leg got a boss hold done by its units). An unknown name is an error (a misspelling would otherwise export the leg or
+	// cut the plan there).
 	SkipLegs []string
+	// WithOptional names optional legs (Leg.Optional) to write into the rows anyway, each with a warning that the item the leg needs is the
+	// operator's to give to the lead bot before `.bot run start` (a GM .additem: the run leader has no GM step, and pauses at the leg's
+	// use_on when no party bot carries it). Zul'Farrak's gahzrilla (the Mallet of Zul'Farrak 9240 on the gong). A name that is no optional
+	// leg of the plan is an error.
+	WithOptional []string
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -234,6 +248,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	for _, n := range opt.SkipLegs {
 		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n }) {
 			return Result{}, fmt.Errorf("plan %s: skip-legs names %q, which is no leg of the plan", name, n)
+		}
+	}
+	for _, n := range opt.WithOptional {
+		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n && l.Optional != nil }) {
+			return Result{}, fmt.Errorf("plan %s: with-optional names %q, which is no optional leg of the plan", name, n)
 		}
 	}
 	b := &builder{opt: opt, plan: p, name: name}
@@ -341,7 +360,10 @@ func (b *builder) leg(li int) error {
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): left out of the export by the exporter's skip-legs option (a leg the run leader cannot do, or does not need): the later legs close up", li, l.Name))
 		return nil
 	}
-	if l.Optional != nil {
+	if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
+		item := l.Optional.Ref()
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
+	} else if l.Optional != nil {
 		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
 		// end the run at its first use of the object: the leg is left out and the later legs close up.
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
@@ -506,9 +528,18 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 		param, flags = *h.Value, FlagDoneData
 		done = fmt.Sprintf("%d (a script value, not an encounter state)", *h.Value)
 	}
+	text := fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done)
+	if h.Data == 0 {
+		// Done by its units (a boss's hold without instance data, dungeon.Hold): neither done flag, so the run leader ends the hold when
+		// every unit of the entries within the radius is dead after one was seen hostile; the first entry (the boss) counts while friendly.
+		param, flags = 0, 0
+		text = comment + ": fought on the spot until every unit of it is dead"
+		if len(entries) > 0 {
+			text += fmt.Sprintf(" (%d counts while still friendly)", entries[0])
+		}
+	}
 	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
-		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries,
-		Comment: clip(fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done), MaxComment)})
+		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries, Comment: clip(text, MaxComment)})
 	b.last, b.haveLast = h.Spot, true
 }
 
@@ -570,7 +601,16 @@ func (b *builder) step(st dungeon.Step) error {
 	case st.UseObject != nil:
 		u := st.UseObject
 		if u.ViaItem {
-			return fmt.Errorf("use_object %d with via_item (the item is used on the object): the run leader's open row cannot carry it", u.Entry)
+			// The item used ON the object: the run leader's use_on row (TortoiseBots 2026-10-21), the object named by its point.
+			if u.RequiresItem == nil || u.Near == nil {
+				return fmt.Errorf("use_object %d with via_item needs requires_item (the item used on it) and near (the object's point) for the run leader's use_on row", u.Entry)
+			}
+			if u.Stand != nil {
+				b.move(*u.Stand, false, "stand")
+			}
+			b.add(StepRow{Kind: KindUseOn, Entry: u.Entry, X: u.Near.X, Y: u.Near.Y, Z: u.Near.Z, Item: u.RequiresItem.Entry,
+				Comment: clip("use "+u.RequiresItem.String()+" on object "+strconv.Itoa(int(u.Entry)), MaxComment)})
+			return nil
 		}
 		if u.Stand != nil {
 			b.move(*u.Stand, false, "stand")
@@ -611,7 +651,11 @@ func (b *builder) step(st dungeon.Step) error {
 		}
 		// x y z: where the NPC stands (the run leader walks the lead bot there when it is farther than 30 yd, and the order searches within 40 yd
 		// of the bot). The row's param is the option the way `.bot cmd gossip` counts it, from 1: the plan's option (the menu index) + 1.
-		b.add(StepRow{Kind: KindGossip, Entry: g.NPC, X: g.Near.X, Y: g.Near.Y, Z: g.Near.Z, Param: *g.Option + 1,
+		var flags uint32
+		if g.DeadIsDone {
+			flags = FlagDeadNpcIsDone
+		}
+		b.add(StepRow{Kind: KindGossip, Entry: g.NPC, X: g.Near.X, Y: g.Near.Y, Z: g.Near.Z, Param: *g.Option + 1, Flags: flags,
 			Comment: clip(gossipComment(g), MaxComment)})
 	default:
 		return fmt.Errorf("an empty step")
@@ -625,6 +669,10 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 		// The wait's run leader form (dungeon.Hold on a wait_for): the event's hold row in place of the wait, which the run leader may not
 		// be able to run at all (a unit wait). The agent's driver still runs the wait as written.
 		b.hold(w.Hold, uniq(w.Hold.Entries), "wait hold")
+		return nil
+	}
+	if w.AgentOnly != "" {
+		// A unit wait the plan says the run leader needs no row for (dungeon.WaitFor.AgentOnly): left out, and listed by unexpressed.
 		return nil
 	}
 	switch {
@@ -732,20 +780,39 @@ func Validate(r Rows) error {
 			if s.Entry == 0 {
 				return bad("needs an entry")
 			}
+		case KindUseOn:
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the object, the item, a point; no flag or param.
+			if s.Entry == 0 || s.Item == 0 {
+				return bad("a use_on needs the object (entry) and the item used on it (item)")
+			}
+			if s.X == 0 && s.Y == 0 && s.Z == 0 {
+				return bad("a use_on needs the object's point")
+			}
+			if s.Flags != 0 || s.Param != 0 {
+				return bad("a use_on carries no flags or param")
+			}
 		case KindGossip:
 			if s.Entry == 0 {
 				return bad("needs an entry")
 			}
-			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the option counts from 1, `.bot cmd gossip` refuses 0; no flag is read.
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep): the option counts from 1, `.bot cmd gossip` refuses 0; the one flag
+			// read is kPlanFlagDeadNpcIsDone.
 			if s.Param < 1 || s.Param > MaxGossipOption {
 				return bad("param %d is outside 1-%d (the option, counted from 1)", s.Param, MaxGossipOption)
 			}
-			if s.Flags != 0 {
-				return bad("a gossip carries no flags")
+			if s.Flags&^FlagDeadNpcIsDone != 0 {
+				return bad("a gossip carries no flag but the dead-npc-is-done flag (%d)", FlagDeadNpcIsDone)
 			}
 		case KindHold:
-			if s.Entry == 0 || s.Flags&FlagDoneData == 0 {
-				return bad("a hold needs its instance data (entry) and done flag")
+			// Done by instance data (flag 8, entry = the data's index) or by its units (no flag, the entries): the loader's rule
+			// (DungeonPlanPolicy.h NormalizePlanStep refuses a units hold without entries). The exporter writes no object-done hold.
+			switch {
+			case s.Flags&FlagDoneData != 0 && s.Entry == 0:
+				return bad("a hold done by instance data needs the data's index (entry)")
+			case s.Flags&FlagDoneData == 0 && s.Flags&FlagEncounter != 0:
+				return bad("the encounter flag needs the instance data flag")
+			case s.Flags&FlagDoneData == 0 && (s.Entry != 0 || s.Param != 0 || len(s.Entries) == 0):
+				return bad("a hold done by its units carries no entry or param, and needs its entries")
 			}
 			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
 			if s.Flags&FlagEncounter != 0 && s.Param > 4 {
@@ -768,6 +835,9 @@ func Validate(r Rows) error {
 			if s.Kind != KindLoot && s.Kind != KindOpen {
 				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
 			}
+		}
+		if s.Flags&FlagDeadNpcIsDone != 0 && s.Kind != KindGossip {
+			return bad("the dead-npc-is-done flag is for a gossip row (the loader refuses it on a %s)", s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
