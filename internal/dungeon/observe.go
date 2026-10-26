@@ -699,14 +699,14 @@ func autoResumable(note string) bool {
 }
 
 // samePauseNote says whether a paused status still names the latched pause: the module appends asides to the note of a pause it
-// already made ("; boss meanwhile: ..."), so the note grows by ";" sections while the pause stays the same. A note that is not
+// already made ("; boss meanwhile: ..."), so the note grows by "; " sections while the pause stays the same. A note that is not
 // such an extension — shortened, replaced, or different before the first ";" — is a new pause.
 func samePauseNote(latched, cur string) bool {
-	if strings.HasPrefix(cur, latched) {
-		rest := cur[len(latched):]
-		return rest == "" || strings.HasPrefix(rest, ";")
+	if cur == latched {
+		return true
 	}
-	return strings.HasPrefix(latched, cur)
+	rest, ok := strings.CutPrefix(cur, latched)
+	return ok && strings.HasPrefix(rest, "; ")
 }
 
 // autoResumeTick resumes the run leader by itself after its "did not hold" pause (observe.auto_resume): the same one regroup per step
