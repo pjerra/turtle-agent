@@ -121,7 +121,7 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		{"lady_illucia_barov", 10502, 14, "[]"},
 		{"jandice_barov", 10503, 36, "[]"},
 		{"rattlegore", 11622, 25, "[10488]"},
-		{"vectus", 10432, 28, "[10433]"},
+		{"vectus", 10432, 26, "[10475 10433]"},
 		{"ras_frostwhisper", 10508, 3, "[]"},
 		{"doctor_theolen_krastinov", 11261, 2, "[]"},
 		{"lord_alexei_barov", 10504, 3, "[10489]"},
@@ -147,8 +147,8 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		}
 		pulls += len(l.PullGroups)
 	}
-	if pulls != 167 {
-		t.Errorf("%d pull groups in all, want 167", pulls)
+	if pulls != 165 {
+		t.Errorf("%d pull groups in all, want 165", pulls)
 	}
 }
 
@@ -330,10 +330,15 @@ func TestScholomancePacksAreSixOnOneFloorAndTheirRadiiHoldOnlyThem(t *testing.T)
 	}
 }
 
-// The Viewing Room: all 32 students die in ten pulls (groups 18-27) before the Marduk/Vectus boss row. Vectus' first
-// victim pulls every living student (boss_vectus.cpp:164-176), and one student's aggro turns the room hostile
-// (boss_vectus.cpp:237-250), so each stand is 26+ yd from every later student and 31+ yd from Vectus, and takes in
-// every student within the 10 yd assistance ring of its first unit.
+// The Viewing Room: 24 of the 32 students die in eight pulls (groups 18-25), each from a stand 26+ yd from every later
+// student and 31+ yd from Vectus. The other 8 (the old ten-pull groups 19 and 26, whose spawns are 13.9-27.7 yd from
+// Vectus) are the boss row's first adds, killed before Marduk: Vectus' own aggro radius is 20 yd
+// (Creature::GetAttackDistance) and his first victim makes every living student attack (boss_vectus.cpp:164-176), so a
+// melee fight with them cannot stay out of the room: proof20d4 step 470 (the rogue's pre-pull Sap reached 18.6 yd, 24
+// students at once, 7 wipes) and proof20d2 step 460 (the hunter stepped to 19.1 yd, the same 24). Splitting the
+// 5-student pack does not help: the pulled unit's 10 yd assistance ring (CreatureFamilyAssistanceRadius) covers the rest.
+// The last student pull's approach carries a staging point 50 yd from Vectus (out of the boss row's 30 + 10 yd reach) so
+// the walk back after a wipe replays the room's own points instead of the leg's entry row.
 func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 	p := loadPlan(t, scholomancePlan)
 	spawns := loadScholomanceSpawns(t)
@@ -354,14 +359,14 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 	if leg.Name != "vectus" {
 		t.Fatalf("leg 6 is %q, want vectus", leg.Name)
 	}
-	if len(leg.PullGroups) != 28 {
-		t.Fatalf("leg vectus has %d pull groups, want the 18 hall pulls plus the 10 student pulls", len(leg.PullGroups))
+	if len(leg.PullGroups) != 26 {
+		t.Fatalf("leg vectus has %d pull groups, want the 18 hall pulls plus the 8 student pulls", len(leg.PullGroups))
 	}
 	if leg.Boss == nil || leg.Boss.Entry != 10432 {
 		t.Fatalf("leg vectus boss %+v, want 10432", leg.Boss)
 	}
 	vectus := scholomanceSpawn{x: float64(leg.Boss.Position.X), y: float64(leg.Boss.Position.Y), z: float64(leg.Boss.Position.Z)}
-	// (a) every census student is a position of exactly one new group, and no other leg lists 10475.
+	// (a) every census student is a position of exactly one of the eight pulls, and no other leg lists 10475.
 	seen := map[scholomanceSpawn]int{}
 	for li, l := range p.Legs {
 		for gi, g := range l.PullGroups {
@@ -369,13 +374,13 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 				if e != 10475 {
 					continue
 				}
-				if li != 6 || gi < 18 {
-					t.Errorf("leg %d pull group %d lists 10475 outside the ten student pulls", li, gi)
+				if li != 6 || gi < 18 || gi > 25 {
+					t.Errorf("leg %d pull group %d lists 10475 outside the eight student pulls", li, gi)
 				}
 			}
 		}
 	}
-	for gi := 18; gi < 28; gi++ {
+	for gi := 18; gi < 26; gi++ {
 		g := leg.PullGroups[gi]
 		for k, at := range g.Positions {
 			pos := scholomanceSpawn{entry: 10475, x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}
@@ -398,10 +403,40 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 			t.Errorf("leg vectus pull group %d: %d entries but %d positions", gi, got, len(g.Positions))
 		}
 	}
-	if len(seen) != 32 {
-		t.Errorf("%d of the 32 census students are in the ten pulls, want all 32", len(seen))
+	if len(seen) != 24 {
+		t.Errorf("%d of the 32 census students are in the eight pulls, want 24", len(seen))
 	}
-	for gi := 18; gi < 28; gi++ {
+	// (b) the other 8 are the boss row's adds: 10475 before 10433 (the students must die before Marduk is touched: his
+	// creature group wakes Vectus, whose first victim pulls every living student), each within its 30 yd radius of Vectus.
+	studentAdd, mardukAdd := -1, -1
+	for i, e := range leg.Boss.First {
+		if e == 10475 {
+			studentAdd = i
+		}
+		if e == 10433 {
+			mardukAdd = i
+		}
+	}
+	if studentAdd < 0 || mardukAdd < 0 || studentAdd > mardukAdd {
+		t.Fatalf("leg vectus boss first is %v, want 10475 (the students) before 10433 (Marduk)", leg.Boss.First)
+	}
+	adds := 0
+	for _, s := range students {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		adds++
+		if d := dist3S(s, vectus); d > 30 {
+			t.Errorf("student at %.3f %.3f is in no pull group and stands %.1f yd from Vectus, outside the boss row's 30 yd radius", s.x, s.y, d)
+		}
+	}
+	if adds != 8 {
+		t.Errorf("%d students are the boss row's adds, want the 8 near Vectus (the old pull groups 19 and 26)", adds)
+	}
+	// (c) each stand is 16-22.5 yd from its first unit, every other member at least 1 yd farther, 26+ yd from every later
+	// student, 31+ yd from Vectus and 33+ yd from Marduk, and takes in every student within the 10 yd assistance ring of
+	// its first unit.
+	for gi := 18; gi < 26; gi++ {
 		g := leg.PullGroups[gi]
 		if len(g.Approach) == 0 {
 			t.Errorf("leg vectus pull group %d: no approach stand", gi)
@@ -409,7 +444,6 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 		}
 		stand := g.Approach[len(g.Approach)-1]
 		sp := scholomanceSpawn{x: float64(stand.X), y: float64(stand.Y), z: float64(stand.Z)}
-		// (b) the stand is 16-22.5 yd from its first unit, every other member at least 1 yd farther.
 		nearest := math.Inf(1)
 		ni := -1
 		for k, at := range g.Positions {
@@ -430,22 +464,19 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 				t.Errorf("leg vectus pull group %d: member %d is %.1f yd from the stand, inside first %.1f + 1", gi, k, d, nearest)
 			}
 		}
-		// (c) every 10475 of a LATER group is at least 26 yd from the stand.
-		for gj := gi + 1; gj < 28; gj++ {
+		for gj := gi + 1; gj < 26; gj++ {
 			for k, at := range leg.PullGroups[gj].Positions {
 				if d := dist3S(sp, scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}); d < 26 {
 					t.Errorf("leg vectus pull group %d: stand is %.1f yd from later group %d member %d, want 26+", gi, d, gj, k)
 				}
 			}
 		}
-		// (d) the stand is at least 31 yd from Vectus and 33 yd from Marduk's census spawn.
 		if d := dist3S(sp, vectus); d < 31 {
 			t.Errorf("leg vectus pull group %d: stand is %.1f yd from Vectus, want 31+", gi, d)
 		}
 		if d := dist3S(sp, marduk); d < 33 {
 			t.Errorf("leg vectus pull group %d: stand is %.1f yd from Marduk, want 33+", gi, d)
 		}
-		// (e) every 10475 not in an earlier group that stands within 11 yd of `first` is a member of this group.
 		first := scholomanceSpawn{x: float64(g.Positions[ni].X), y: float64(g.Positions[ni].Y), z: float64(g.Positions[ni].Z)}
 		atPos := func(at Point) scholomanceSpawn {
 			return scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}
@@ -477,7 +508,27 @@ func TestScholomanceVectusRoomStudentsDieBeforeTheBossOutOfReach(t *testing.T) {
 			}
 		}
 	}
-	// (f) the boss approach comes after all ten: it is the boss object's own.
+	// (d) the first and the last student pull's approaches start at a staging point 41+ yd from Vectus: outside the boss
+	// row's 30 + 10 yd reach, so the walk back after a wipe in the room targets one of them instead of the leg's entry row
+	// (proof20d4: 'straight to step 448, then the plan's points' after every room wipe).
+	for _, gi := range []int{18, 25} {
+		g := leg.PullGroups[gi]
+		if len(g.Approach) < 2 {
+			t.Fatalf("leg vectus pull group %d has %d approach points, want a staging point and the stand", gi, len(g.Approach))
+		}
+		stage := false
+		for _, at := range g.Approach[:len(g.Approach)-1] {
+			sp := scholomanceSpawn{x: float64(at.X), y: float64(at.Y), z: float64(at.Z)}
+			d := dist3S(sp, vectus)
+			if d >= 41 {
+				stage = true
+			}
+			t.Logf("pull group %d staging point %.3f %.3f: %.1f yd from Vectus", gi, at.X, at.Y, d)
+		}
+		if !stage {
+			t.Errorf("leg vectus pull group %d: no approach point at least 41 yd from Vectus (the walk back's safe point)", gi)
+		}
+	}
 	if len(leg.Boss.Approach) == 0 {
 		t.Errorf("leg vectus boss has no approach stand")
 	}
