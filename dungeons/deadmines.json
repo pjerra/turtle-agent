@@ -415,7 +415,7 @@
         }
       ],
       "notes": [
-        "The upper mine's south tunnel (entered from the mine's east ledge at -73 -404, z 56, down to the laboratory door at -97 -490): the tunnel's Defias Miners (598) and one Defias Mixologist (61960) are on no other leg. Rows from the map 36 spawn export: 2583008, 2583007, 2583009, 2583010, 2583012, 2583013, 2583017, 2583018, 2583082. The two Miners 79129 and 79131 stand in the mine's west pocket, 17.7-17.9 yd from the tunnel mouth in 3-D but behind a wall (no navmesh link; the way to them is 134 yd round the mine) and 2.7-2.9 yd outside their 15 yd aggro radius: not pulled (the test's exemptions carry them). Not walked; every stand is a point of the server path to its pack and 19.5 to 22.9 yd from it (the aggro radius of a level 17 mob against the level-22 party is 15 yd)."
+        "The upper mine's south tunnel (entered from the mine's east ledge at -73 -404, z 56, down to the laboratory door at -97 -490): the tunnel's Defias Miners (598) and two Defias Mixologists (61960, 2583007 and 2583082) are on no other leg. Rows from the map 36 spawn export: 2583008, 2583007, 2583009, 2583010, 2583012, 2583013, 2583017, 2583018, 2583082. The two Miners 79129 and 79131 stand in the mine's west pocket, 17.7-17.9 yd from the tunnel mouth in 3-D but behind a wall (no navmesh link; the way to them is 134 yd round the mine) and 2.7-2.9 yd outside their 15 yd aggro radius: not pulled (the test's exemptions carry them). Not walked; every stand is a point of the server path to its pack and 19.5 to 22.9 yd from it (the aggro radius of a level 17 mob against the level-22 party is 15 yd)."
       ]
     },
     {
