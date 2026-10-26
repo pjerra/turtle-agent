@@ -83,6 +83,8 @@ const (
 	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
 	MaxSource      = 64    // ai_dungeon_plan.source
 	MaxComment     = 255   // every comment column
+	MaxNeedName    = 64    // ai_dungeon_leg_need.name
+	MaxNeedHow     = 255   // ai_dungeon_leg_need.how
 	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
 	MaxSteps       = 65535 // ai_dungeon_step.seq is a smallint unsigned
 	DefaultPullYd  = 15    // the module's pull radius for 0
@@ -91,7 +93,6 @@ const (
 	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
 	DefaultBossRad = 30
 	// MaxGossipOption is the highest `param` of a gossip row: the number `.bot cmd gossip` takes counts the menu from 1 (a 1.12 menu holds 15
-	// options), while the plan's `option` is the menu's own index counted from 0 (the CMSG_GOSSIP_SELECT_OPTION value): the row's param is option + 1.
 	MaxGossipOption = 15
 )
 
@@ -112,6 +113,22 @@ type LegRow struct {
 	Leg     int
 	Name    string
 	Comment string
+}
+
+// NeedRow is one ai_dungeon_leg_need row: the item a run needs for the leg
+// (mode 1 optional, 2 door, 3 blocking; pick the Lockpicking skill that opens
+// the lock instead, door only; object the gameobject entry of the key door,
+// door only; how where a player gets the key, door only). Leg is the exported
+// leg number (after left-out legs close up).
+type NeedRow struct {
+	Plan   string
+	Leg    int
+	Item   uint32
+	Mode   uint8
+	Pick   uint16
+	Object uint32
+	Name   string
+	How    string
 }
 
 // StepRow is one ai_dungeon_step row.
@@ -136,10 +153,11 @@ type Rows struct {
 	Plan  PlanRow
 	Legs  []LegRow
 	Steps []StepRow
+	Needs []NeedRow
 }
 
 // Count is the number of rows of the plan in all three tables.
-func (r Rows) Count() int { return 1 + len(r.Legs) + len(r.Steps) }
+func (r Rows) Count() int { return 1 + len(r.Legs) + len(r.Steps) + len(r.Needs) }
 
 // Options are the exporter's choices.
 type Options struct {
@@ -180,6 +198,9 @@ type Options struct {
 	// use_on when no party bot carries it). Zul'Farrak's gahzrilla (the Mallet of Zul'Farrak 9240 on the gong). A name that is no optional
 	// leg of the plan is an error.
 	WithOptional []string
+	// WithoutOptional leaves optional legs out of the rows, with the leave-out warning, as the exporter did before the need rows: for a
+	// module older than the ai_dungeon_leg_need table. By default optional legs are written, with a mode-1 need row for the leg's item.
+	WithoutOptional bool
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -255,6 +276,9 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 			return Result{}, fmt.Errorf("plan %s: with-optional names %q, which is no optional leg of the plan", name, n)
 		}
 	}
+	if opt.WithoutOptional && len(opt.WithOptional) > 0 {
+		return Result{}, fmt.Errorf("plan %s: without-optional leaves every optional leg out, with-optional names %q", name, opt.WithOptional[0])
+	}
 	b := &builder{opt: opt, plan: p, name: name}
 	b.rows.Plan = PlanRow{Plan: name, Map: p.Map, CCPriority: slices.Clone(p.CCPriority), CCAlways: slices.Clone(p.CCAlways), KillFirst: slices.Clone(p.KillFirst), Source: clip(source, MaxSource), Comment: clip(planComment(p), MaxComment)}
 	cut, cutLeg := "", 0
@@ -293,10 +317,50 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 		upto = cutLeg
 	}
 	b.warnings = append(b.warnings, unexpressed(p, opt, upto)...)
+	b.rows.Needs = legNeeds(p, opt, upto)
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
 	return Result{Rows: b.rows, Warnings: b.warnings, Cut: cut}, nil
+}
+
+// needMode is the ai_dungeon_leg_need.mode number of a leg need mode.
+func needMode(m dungeon.LegNeedMode) uint8 {
+	switch m {
+	case dungeon.NeedOptional:
+		return 1
+	case dungeon.NeedDoor:
+		return 2
+	case dungeon.NeedBlocking:
+		return 3
+	}
+	return 0
+}
+
+// legNeeds maps the plan legs before upto to ai_dungeon_leg_need rows. Every
+// needs entry becomes a row with the EXPORTED leg number (after left-out legs
+// close up); a written optional leg gets a mode-1 row for its item on top. A
+// left-out leg (optional without its rows, skip-legs, cut off) contributes no
+// row.
+func legNeeds(p *dungeon.Plan, opt Options, upto int) []NeedRow {
+	var out []NeedRow
+	name := strings.ToLower(strings.TrimSpace(p.Name))
+	row := 0
+	for li := 0; li < upto && li < len(p.Legs); li++ {
+		l := p.Legs[li]
+		written := !slices.Contains(opt.SkipLegs, l.Name) && (l.Optional == nil || !opt.WithoutOptional)
+		if !written {
+			continue
+		}
+		if l.Optional != nil && l.Optional.Item != 0 {
+			out = append(out, NeedRow{Plan: name, Leg: row, Item: l.Optional.Item, Mode: 1, Name: clip(l.Optional.Name, MaxNeedName)})
+		}
+		for _, n := range l.Needs {
+			out = append(out, NeedRow{Plan: name, Leg: row, Item: n.Item, Mode: needMode(n.Mode), Pick: n.Pick, Object: n.Object, Name: clip(n.Name, MaxNeedName), How: clip(n.How, MaxNeedHow)})
+		}
+		row++
+	}
+	return out
 }
 
 // leaveComment is the leg row's comment for the leg's `leave` list. The rows have no column or step kind for a spawn the run leaves alone (a
@@ -360,14 +424,15 @@ func (b *builder) leg(li int) error {
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): left out of the export by the exporter's skip-legs option (a leg the run leader cannot do, or does not need): the later legs close up", li, l.Name))
 		return nil
 	}
+	if l.Optional != nil && b.opt.WithoutOptional {
+		// --without-optional keeps the old leave-out for a module older than the ai_dungeon_leg_need table: the run leader's bots carry no
+		// such item, so the leg would end the run at its first use of the object; the later legs close up.
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
+		return nil
+	}
 	if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
 		item := l.Optional.Ref()
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
-	} else if l.Optional != nil {
-		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
-		// end the run at its first use of the object: the leg is left out and the later legs close up.
-		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
-		return nil
 	}
 	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
 	if l.CompanionsLoot != nil && !*l.CompanionsLoot && !b.opt.DropCompanionsLoot {
@@ -1000,31 +1065,73 @@ func clip(s string, n int) string {
 // StepCount is the number of ai_dungeon_step rows: the step count the run leader lists for this plan (`.bot run list`).
 func (r Rows) StepCount() int { return len(r.Steps) }
 
-// LegNumber is the ai_dungeon_leg.leg number the export gives the plan's leg leg. An optional leg is left out and the legs after it
-// close up, so this is not the plan's own index. ok is false for a leg outside the plan and for an optional leg (which has no rows).
+// LegNumber is the ai_dungeon_leg.leg number the export gives the plan's leg leg. A leg left out (WithoutOptional, skip-legs) takes no
+// number and the legs after it close up, so this is not the plan's own index. ok is false for a leg outside the plan and for a left-out
+// leg (which has no rows). Without an option set this counts optional legs as written (the default): pass WithoutOptional to number as
+// the old leave-out did.
 func LegNumber(p *dungeon.Plan, leg int) (int, bool) {
-	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil {
+	return LegNumberOpt(p, Options{}, leg)
+}
+
+// LegNumberOpt is LegNumber with the export options that number the legs (WithoutOptional, SkipLegs): a leg the options leave out takes
+// no number.
+func LegNumberOpt(p *dungeon.Plan, opt Options, leg int) (int, bool) {
+	if leg < 0 || leg >= len(p.Legs) {
+		return 0, false
+	}
+	if p.Legs[leg].Optional != nil && opt.WithoutOptional {
+		return 0, false
+	}
+	if slices.Contains(opt.SkipLegs, p.Legs[leg].Name) {
 		return 0, false
 	}
 	row := 0
-	for i := 0; i < leg; i++ {
-		if p.Legs[i].Optional == nil {
-			row++
+	for i := range leg {
+		if p.Legs[i].Optional != nil && opt.WithoutOptional {
+			continue
 		}
+		if slices.Contains(opt.SkipLegs, p.Legs[i].Name) {
+			continue
+		}
+		row++
 	}
 	return row, true
 }
 
-// LegNumber is LegNumber(p, leg), and false also when these rows were cut before that leg (it has no rows at all).
+// LegNumber is the row number of the plan's leg leg in these rows. False when the leg has no rows here (left out, or cut before it).
 func (r Rows) LegNumber(p *dungeon.Plan, leg int) (int, bool) {
-	row, ok := LegNumber(p, leg)
-	if !ok || row >= len(r.Legs) {
+	if leg < 0 || leg >= len(p.Legs) {
 		return 0, false
 	}
-	return row, true
+	for _, l := range r.Legs {
+		if l.Name == clip(p.Legs[leg].Name, MaxLegName) {
+			return l.Leg, true
+		}
+	}
+	return 0, false
 }
 
-// PlanLeg is the plan leg index of the exported row leg rowLeg (false when no leg has that number: a cut plan, or a leg outside it).
+// PlanLeg is the plan leg index of these rows' row leg rowLeg (false when no leg has that number: a cut plan, or a leg outside it).
+func (r Rows) PlanLeg(p *dungeon.Plan, rowLeg int) (int, bool) {
+	name := ""
+	for _, l := range r.Legs {
+		if l.Leg == rowLeg {
+			name = l.Name
+			break
+		}
+	}
+	if name == "" {
+		return 0, false
+	}
+	for i := range p.Legs {
+		if clip(p.Legs[i].Name, MaxLegName) == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// PlanLeg is the plan leg index of the exported row leg rowLeg under the default options (false when no leg has that number).
 func PlanLeg(p *dungeon.Plan, rowLeg int) (int, bool) {
 	for i := range p.Legs {
 		if n, ok := LegNumber(p, i); ok && n == rowLeg {

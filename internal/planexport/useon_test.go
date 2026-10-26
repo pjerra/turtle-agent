@@ -10,8 +10,8 @@ import (
 )
 
 // A use_object with via_item is the run leader's use_on row (TortoiseBots kind use_on: entry = the object, x,y,z = its near point,
-// item = requires_item), after the move to its stand. Its optional leg is left out unless WithOptional names it; then it is in the
-// rows with a warning that the item is the operator's to give (a GM .additem on the lead bot before .bot run start).
+// item = requires_item), after the move to its stand. Its optional leg is written by default, with a mode-1 need row for its item;
+// WithoutOptional leaves it out.
 func TestViaItemIsAUseOnRowOnlyWithOptional(t *testing.T) {
 	const js = `{"version":1,"name":"zf","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"a","to":{"x":5,"y":0,"z":0},"pull_groups":[{"entries":[5649],"positions":[{"x":8,"y":0,"z":0}]}]},
@@ -21,12 +21,12 @@ func TestViaItemIsAUseOnRowOnlyWithOptional(t *testing.T) {
   "boss":{"entry":7273,"position":{"x":40,"y":0,"z":0}}},
  {"name":"b","to":{"x":50,"y":0,"z":0},"pull_groups":[{"entries":[5650],"positions":[{"x":55,"y":0,"z":0}]}]}]}`
 	p := parsePlan(t, js)
-	res, err := Build(p, Options{Source: "test"})
+	res, err := Build(p, Options{Source: "test", WithoutOptional: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Rows.Legs) != 2 || res.Rows.Legs[1].Name != "b" || slices.Contains(kinds(res.Rows, 1), KindUseOn) {
-		t.Fatalf("without WithOptional the optional leg is left out: %+v", res.Rows.Legs)
+		t.Fatalf("with WithoutOptional the optional leg is left out: %+v", res.Rows.Legs)
 	}
 	res, err = Build(p, Options{Source: "test", WithOptional: []string{"gong"}})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestValidateUseOn(t *testing.T) {
 	}
 }
 
-// The shipped Zul'Farrak plan with --with-optional gahzrilla: the gahzrilla leg is row leg 9 (move to the stand, the 8 pulls, the stand
+// The shipped Zul'Farrak plan by default: the gahzrilla leg is row leg 9 (move to the stand, the 8 pulls, the stand
 // move, use_on 141832 with 9240 at the gong's point, boss 7273), the courtyard follows as leg 10, and the plan still exports without a
 // cut through Ukorz.
 func TestZulfarrakWithGahzrilla(t *testing.T) {
@@ -100,7 +100,7 @@ func TestZulfarrakWithGahzrilla(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, WithOptional: []string{"gahzrilla"}})
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestZulfarrakWithGahzrilla(t *testing.T) {
 		t.Fatalf("legs %+v", legs)
 	}
 	g := kinds(res.Rows, 9)
-	wantKinds := []string{KindMove, KindPull, KindPull, KindPull, KindPull, KindPull, KindPull, KindPull, KindPull, KindMove, KindUseOn, KindBoss}
+	wantKinds := []string{KindMove, KindPull, KindPull, KindPull, KindMove, KindPull, KindMove, KindPull, KindPull, KindPull, KindPull, KindMove, KindUseOn, KindBoss}
 	if !slices.Equal(g, wantKinds) {
 		t.Fatalf("gahzrilla kinds %v", g)
 	}

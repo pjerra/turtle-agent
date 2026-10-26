@@ -331,6 +331,16 @@
     {
       "name": "houndmaster_grebmar",
       "to": {"x": 473.529, "y": -88.3264, "z": -62.8351},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8889, 8890],
@@ -837,6 +847,16 @@
     {
       "name": "bael'gar",
       "to": {"x": 638.245, "y": 124.286, "z": -73.7859},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8894, 8895, 8892, 8893, 8893],
@@ -901,6 +921,16 @@
     {
       "name": "general_angerforge",
       "to": {"x": 675.326, "y": 103.708, "z": -73.7868},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8893, 8893, 8895, 8894, 8894],
@@ -1167,6 +1197,16 @@
     {
       "name": "golem_lord_argelmach",
       "to": {"x": 763.269, "y": 22.2708, "z": -53.664},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8920],
@@ -1276,6 +1316,16 @@
     {
       "name": "lord_incendius",
       "to": {"x": 789.975, "y": -147.427, "z": -73.3867},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8910, 8910],
@@ -1533,6 +1583,16 @@
     {
       "name": "fineous_darkvire",
       "to": {"x": 940.976, "y": -305.621, "z": -71.6783},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8910, 8910],
@@ -1662,6 +1722,16 @@
     {
       "name": "ambassador_flamelash",
       "to": {"x": 983.66, "y": -278.923, "z": -116.411},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8911],
@@ -1779,6 +1849,16 @@
     {
       "name": "magmus",
       "to": {"x": 1290.35, "y": -409.823, "z": -91.9711},
+      "needs": [
+        {
+          "item": 11000,
+          "name": "Shadowforge Key",
+          "mode": "door",
+          "pick": 250,
+          "object": 170560,
+          "how": "Dark Iron Legacy quest (Searing Gorge/BRD)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [8901, 8901, 8901, 8901, 8901, 8901, 8901, 8901, 8901, 8901],

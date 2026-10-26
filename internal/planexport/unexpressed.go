@@ -98,7 +98,7 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 		if li >= upto {
 			break
 		}
-		if (l.Optional != nil && !slices.Contains(opt.WithOptional, l.Name)) || slices.Contains(opt.SkipLegs, l.Name) {
+		if (l.Optional != nil && opt.WithoutOptional) || slices.Contains(opt.SkipLegs, l.Name) {
 			continue // left out of the export, with its own warning
 		}
 		leg := fmt.Sprintf("leg %d (%s)", li, l.Name)

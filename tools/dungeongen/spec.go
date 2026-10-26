@@ -64,6 +64,8 @@ type PlanSpec struct {
 	// ("Needs: ...") and the table.
 	Notes   []string `json:"notes,omitempty"`
 	Special []string `json:"special,omitempty"`
+	// LegNeeds maps a leg's boss entry to the leg's needs (ai_dungeon_leg_need rows on re-export): the key doors on the leg's route.
+	LegNeeds map[uint32][]dungeon.LegNeed `json:"leg_needs,omitempty"`
 }
 
 // BossSpec is a boss entry, or a boss entry with the entries to kill before it ({"entry": 15276, "first": [15275]}).
@@ -209,6 +211,9 @@ func GenerateSpec(ps PlanSpec, dataRoot string) (*dungeon.Plan, error) {
 	}
 	for i := range p.Legs {
 		p.Legs[i].Boss.First = first[p.Legs[i].Boss.Entry]
+		if needs, ok := ps.LegNeeds[p.Legs[i].Boss.Entry]; ok {
+			p.Legs[i].Needs = needs
+		}
 	}
 	p.Kind = ps.Kind
 	p.Status = dungeon.DraftStatus

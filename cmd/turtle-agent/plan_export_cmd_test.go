@@ -137,7 +137,7 @@ func TestPlanExportSkipLegs(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	if !strings.Contains(out, "zulfarrak: map 209, 16 legs") || strings.Contains(out, "CUT") {
+	if !strings.Contains(out, "zulfarrak: map 209, 17 legs") || strings.Contains(out, "CUT") {
 		t.Fatalf("output %q", out)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "20261021005900_world.sql"))
@@ -222,5 +222,41 @@ func TestPlanExportWithOptional(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "20261021180001_world.sql")); err == nil {
 		t.Fatal("a file was written for a refused export")
+	}
+}
+
+// By default the optional leg is written with its need row; --without-optional leaves it out with the leave-out warning.
+func TestPlanExportWithoutOptional(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runExport("--dir", "../../dungeons", "--drop-companions-loot", "--stamp", "20261021180002", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 18 legs") {
+		t.Fatalf("output %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021180002_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "('zulfarrak', 9, 9240, 1, 0, 0, 'Mallet of Zul''Farrak', '')") {
+		t.Fatal("the rows lack the gahzrilla need row")
+	}
+	code, out, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--without-optional", "--stamp", "20261021180003", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 17 legs") {
+		t.Fatalf("output %q", out)
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "20261021180003_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "'gahzrilla'") {
+		t.Fatal("the rows keep the gahzrilla leg with --without-optional")
+	}
+	if !strings.Contains(errs, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240), which the run leader's bots do not carry): left out of the export") {
+		t.Fatalf("stderr %q", errs)
 	}
 }

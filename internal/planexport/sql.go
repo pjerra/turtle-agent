@@ -49,6 +49,7 @@ func WriteSQL(plans []Rows) string {
 		fmt.Fprintf(&b, "\n-- %s: map %d, %d legs, %d steps\n", p.Plan, p.Map, len(r.Legs), len(r.Steps))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_step` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg` WHERE `plan` = %s;\n", quote(p.Plan))
+		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg_need` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_plan` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n(%s, %d, %s, %s, %s, %s, %s);\n", quote(p.Plan), p.Map,
 			quote(entriesText(p.CCPriority)), quote(entriesText(p.CCAlways)), quote(entriesText(p.KillFirst)), quote(p.Source), quote(p.Comment))
@@ -59,6 +60,16 @@ func WriteSQL(plans []Rows) string {
 				sep = ";\n"
 			}
 			fmt.Fprintf(&b, "(%s, %d, %s, %s)%s", quote(l.Plan), l.Leg, quote(l.Name), quote(l.Comment), sep)
+		}
+		if len(r.Needs) > 0 {
+			b.WriteString("INSERT INTO `ai_dungeon_leg_need` (`plan`, `leg`, `item`, `mode`, `pick`, `object`, `name`, `how`) VALUES\n")
+			for i, n := range r.Needs {
+				sep := ",\n"
+				if i == len(r.Needs)-1 {
+					sep = ";\n"
+				}
+				fmt.Fprintf(&b, "(%s, %d, %d, %d, %d, %d, %s, %s)%s", quote(n.Plan), n.Leg, n.Item, n.Mode, n.Pick, n.Object, quote(n.Name), quote(n.How), sep)
+			}
 		}
 		b.WriteString("INSERT INTO `ai_dungeon_step` (`plan`, `leg`, `seq`, `kind`, `entry`, `x`, `y`, `z`, `radius`, `item`, `param`, `flags`, `timeout_s`, `entries`, `comment`) VALUES\n")
 		for i, s := range r.Steps {
@@ -137,6 +148,29 @@ func Parse(sql string) ([]Rows, error) {
 				return nil, fmt.Errorf("line %d: leg: %w", line, err)
 			}
 			r.Legs = append(r.Legs, LegRow{Plan: f[0], Leg: n, Name: f[2], Comment: f[3]})
+		case "ai_dungeon_leg_need":
+			if len(f) != 8 {
+				return nil, fmt.Errorf("line %d: %d columns in ai_dungeon_leg_need", line, len(f))
+			}
+			r, err := cur(f[0])
+			if err != nil {
+				return nil, err
+			}
+			n := NeedRow{Plan: f[0], Name: f[6], How: f[7]}
+			var e1 error
+			ints := func(i int) int {
+				v, err := strconv.Atoi(f[i])
+				if err != nil && e1 == nil {
+					e1 = fmt.Errorf("column %d: %w", i, err)
+				}
+				return v
+			}
+			n.Leg, n.Item = ints(1), uint32(ints(2))
+			n.Mode, n.Pick, n.Object = uint8(ints(3)), uint16(ints(4)), uint32(ints(5))
+			if e1 != nil {
+				return nil, fmt.Errorf("line %d: %w", line, e1)
+			}
+			r.Needs = append(r.Needs, n)
 		case "ai_dungeon_step":
 			if len(f) != 15 {
 				return nil, fmt.Errorf("line %d: %d columns in ai_dungeon_step", line, len(f))
@@ -274,6 +308,14 @@ func Equal(want, got []Rows) error {
 		for j := range w.Legs {
 			if w.Legs[j] != g.Legs[j] {
 				return fmt.Errorf("plan %s leg %d: %+v, read back %+v", w.Plan.Plan, j, w.Legs[j], g.Legs[j])
+			}
+		}
+		if len(w.Needs) != len(g.Needs) {
+			return fmt.Errorf("plan %s: %d need rows, read back %d", w.Plan.Plan, len(w.Needs), len(g.Needs))
+		}
+		for j := range w.Needs {
+			if w.Needs[j] != g.Needs[j] {
+				return fmt.Errorf("plan %s need %d: %+v, read back %+v", w.Plan.Plan, j, w.Needs[j], g.Needs[j])
 			}
 		}
 		if len(w.Steps) != len(g.Steps) {

@@ -451,12 +451,12 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 17 || legs[14].Name != "weegli_door" || legs[15].Name != "bly" || legs[16].Name != "ukorz" {
+	if len(legs) != 18 || legs[15].Name != "weegli_door" || legs[16].Name != "bly" || legs[17].Name != "ukorz" {
 		t.Fatalf("legs %+v", legs)
 	}
 	var bly []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 15 {
+		if s.Leg == 16 {
 			bly = append(bly, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -475,11 +475,11 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		}
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 15 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {
+		if s.Leg == 16 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {
 			t.Errorf("the units hold's comment: %q", s.Comment)
 		}
 	}
-	if ukorz := kinds(res.Rows, 16); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
+	if ukorz := kinds(res.Rows, 17); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
 	if fmt.Sprint(res.Rows.Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605]" {
@@ -522,12 +522,12 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 16 || legs[14].Name != "weegli_door" || legs[15].Name != "ukorz" || legs[15].Leg != 15 {
+	if len(legs) != 17 || legs[15].Name != "weegli_door" || legs[16].Name != "ukorz" || legs[16].Leg != 16 {
 		t.Fatalf("legs %+v", legs)
 	}
 	var door []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 14 {
+		if s.Leg == 15 {
 			door = append(door, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -540,7 +540,7 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 	if !slices.Equal(door, want) {
 		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
 	}
-	ukorz := kinds(res.Rows, 15)
+	ukorz := kinds(res.Rows, 16)
 	if len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss || slices.Contains(ukorz, KindGossip) {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
@@ -619,24 +619,22 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The optional gahzrilla leg is left out of the run leader's rows (its bots carry no Mallet), so the rows have one leg fewer and the later
-	// legs close up: the last leg is the plan's last, one number lower.
-	if len(res.Rows.Legs) != len(p.Legs)-1 {
+	// The optional gahzrilla leg is written by default, with a mode-1 need row for its Mallet: the rows hold every plan leg.
+	if len(res.Rows.Legs) != len(p.Legs) {
 		t.Fatalf("%d rows legs for %d plan legs", len(res.Rows.Legs), len(p.Legs))
 	}
 	last := len(res.Rows.Legs) - 1
 	if p.Legs[len(p.Legs)-1].Name != "zumrah" || res.Rows.Legs[last].Name != "zumrah" {
 		t.Fatalf("%s", p.Legs[len(p.Legs)-1].Name)
 	}
-	for _, l := range res.Rows.Legs {
-		if l.Name == "gahzrilla" {
-			t.Errorf("the optional leg is in the rows: %+v", l)
-		}
-	}
+	found := false
 	for _, s := range res.Rows.Steps {
 		if s.Entry == 7273 || s.Entry == 141832 {
-			t.Errorf("a step of the optional leg is in the rows: %+v", s)
+			found = true
 		}
+	}
+	if !found {
+		t.Error("no step of the optional leg is in the rows")
 	}
 	// via, to, the walk into the zone, the boss: the grave steps (the carrier bot's loot_object) are left out of a leg whose companions_loot is false.
 	if got := strings.Join(kinds(res.Rows, last), " "); got != "move move move boss" {
@@ -645,8 +643,8 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
-	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
-		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
+	if w := strings.Join(res.Warnings, "\n"); strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
+		t.Fatalf("the optional leg is left out: %v", res.Warnings)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
@@ -735,14 +733,14 @@ func TestCompanionsLootFalseLegIsRefused(t *testing.T) {
 	}
 }
 
-// An optional leg (it needs an item no bot of the run leader carries) is left out of the rows with a warning, and the legs after it take its
-// numbers; every row's leg number is one of the legs written.
+// With WithoutOptional an optional leg (it needs an item no bot of the run leader carries) is left out of the rows with a warning, and the
+// legs after it take its numbers; every row's leg number is one of the legs written. By default the leg is written with a need row.
 func TestOptionalLegIsLeftOut(t *testing.T) {
 	p := parsePlan(t, `{"version":1,"name":"opt","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"a","to":{"x":10,"y":0,"z":0},"boss":{"entry":1,"position":{"x":20,"y":0,"z":0}}},
  {"name":"gong","to":{"x":30,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"requires_item":{"entry":9240,"name":"Mallet"}}}],"boss":{"entry":7273,"position":{"x":40,"y":0,"z":0}}},
  {"name":"c","to":{"x":50,"y":0,"z":0},"boss":{"entry":3,"position":{"x":60,"y":0,"z":0}}}]}`)
-	res, err := Build(p, Options{})
+	res, err := Build(p, Options{WithoutOptional: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -956,8 +954,9 @@ func TestLongHopStartsAtTheLastFight(t *testing.T) {
 	}
 }
 
-// The run leader numbers the rows it loaded: an optional leg takes no leg number and its legs close up, and a pull group starts at its
-// first row (its approach move, else its pull row). An observer's from_leg / from_pull_group map through these.
+// The run leader numbers the rows it loaded: with WithoutOptional an optional leg takes no leg number and its legs close up, and a pull
+// group starts at its first row (its approach move, else its pull row). By default the optional leg is written and numbered. An
+// observer's from_leg / from_pull_group map through these.
 func TestLegNumberAndGroupStep(t *testing.T) {
 	const groups = `{"version":1,"name":"Groups","status":"live-checked (test)","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
 	 {"name":"first","to":{"x":10,"y":0,"z":0},"pull_groups":[
@@ -966,7 +965,11 @@ func TestLegNumberAndGroupStep(t *testing.T) {
 	 {"name":"gong","to":{"x":0,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":900,"near":{"x":2,"y":0,"z":0},"requires_item":{"entry":9240}}}],"boss":{"entry":7,"position":{"x":5,"y":0,"z":0}}},
 	 {"name":"third","to":{"x":30,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":40,"y":0,"z":0}]}]}]}`
 	p := parsePlan(t, groups)
-	r := build(t, p)
+	res, err := Build(p, Options{Source: "test", WithoutOptional: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Rows
 	if r.StepCount() != 6 || len(r.Steps) != 6 {
 		t.Fatalf("%d steps: %+v", r.StepCount(), r.Steps)
 	}

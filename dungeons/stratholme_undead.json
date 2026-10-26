@@ -32,6 +32,16 @@
     {
       "name": "magistrate_barthilas",
       "to": {"x": 3636.06, "y": -3636.82, "z": 138.218},
+      "needs": [
+        {
+          "item": 12382,
+          "name": "Key to the City",
+          "mode": "door",
+          "pick": 300,
+          "object": 175357,
+          "how": "Stratholme: Magistrate Barthilas (100 %)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10381, 10391, 10390, 10391, 10390, 10382, 10381],
@@ -211,6 +221,16 @@
     {
       "name": "nerub'enkan",
       "to": {"x": 3714.04, "y": -3480.83, "z": 129.701},
+      "needs": [
+        {
+          "item": 12382,
+          "name": "Key to the City",
+          "mode": "door",
+          "pick": 300,
+          "object": 175357,
+          "how": "Stratholme: Magistrate Barthilas (100 %)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10384, 10385, 10385],

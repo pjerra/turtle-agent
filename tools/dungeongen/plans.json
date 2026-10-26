@@ -122,6 +122,11 @@
     6228,
     7800
    ],
+   "leg_needs": {
+    "6229": [
+     { "item": 6893, "name": "Workshop Key", "mode": "door", "pick": 150, "object": 90858, "how": "Gnomeregan drop" }
+    ]
+   },
    "entrance_tele": "gnome",
    "outside_tele": "Gnomeregan",
    "special": [
@@ -225,6 +230,11 @@
     61982,
     3975
    ],
+   "leg_needs": {
+    "3975": [
+     { "item": 7146, "name": "The Scarlet Key", "mode": "door", "pick": 175, "object": 101854, "how": "SM Library chest (Arcanist Doan)" }
+    ]
+   },
    "bbox": [
     [
      1550,
@@ -254,6 +264,11 @@
     3976,
     3977
    ],
+   "leg_needs": {
+    "4542": [
+     { "item": 7146, "name": "The Scarlet Key", "mode": "door", "pick": 175, "object": 104591, "how": "SM Library chest (Arcanist Doan)" }
+    ]
+   },
    "bbox": [
     [
      700,
@@ -446,6 +461,32 @@
     9938,
     9019
    ],
+   "leg_needs": {
+    "8983": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9016": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9017": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9033": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9056": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9156": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9319": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ],
+    "9938": [
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+    ]
+   },
    "entrance_tele": "brd",
    "outside_tele": "BlackrockDepths",
    "special": [
@@ -545,6 +586,20 @@
     11496,
     11486
    ],
+   "leg_needs": {
+    "11486": [
+     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
+    ],
+    "11487": [
+     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
+    ],
+    "11488": [
+     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
+    ],
+    "11496": [
+     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
+    ]
+   },
    "bbox": [
     [
      -300,
@@ -583,6 +638,15 @@
      ]
     }
    ],
+   "leg_needs": {
+    "14323": [
+     { "item": 18266, "name": "Gordok Courtyard Key", "mode": "door", "object": 177219, "how": "Dire Maul: Fengus's Chest (100 %)" },
+     { "item": 18268, "name": "Gordok Inner Door Key", "mode": "door", "pick": 200, "object": 177217, "how": "Dire Maul: Guard Mol'dar (100 %)" }
+    ],
+    "14325": [
+     { "item": 18268, "name": "Gordok Inner Door Key", "mode": "door", "pick": 200, "object": 177217, "how": "Dire Maul: Guard Mol'dar (100 %)" }
+    ]
+   },
    "bbox": [
     [
      300,
@@ -656,6 +720,14 @@
     10436,
     10440
    ],
+   "leg_needs": {
+    "10435": [
+     { "item": 12382, "name": "Key to the City", "mode": "door", "pick": 300, "object": 175357, "how": "Stratholme: Magistrate Barthilas (100 %)" }
+    ],
+    "10437": [
+     { "item": 12382, "name": "Key to the City", "mode": "door", "pick": 300, "object": 175357, "how": "Stratholme: Magistrate Barthilas (100 %)" }
+    ]
+   },
    "bbox": [
     [
      3550,
@@ -697,6 +769,23 @@
     },
     10508
    ],
+   "leg_needs": {
+    "10502": [
+     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
+    ],
+    "10503": [
+     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
+    ],
+    "10507": [
+     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
+    ],
+    "10901": [
+     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
+    ],
+    "11261": [
+     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
+    ]
+   },
    "outside_tele": "Scholomance",
    "scripted": [
     10505,
@@ -799,6 +888,11 @@
     62072,
     62037
    ],
+   "leg_needs": {
+    "62072": [
+     { "item": 41876, "name": "Lower Reserve Key", "mode": "door", "pick": 160, "object": 2020232, "how": "quest 41774" }
+    ]
+   },
    "route": true,
    "last": 62037,
    "outside_tele": "DragonmawRetreat",
@@ -826,6 +920,14 @@
     62652,
     62671
    ],
+   "leg_needs": {
+    "62550": [
+     { "item": 41913, "name": "Key to Stormwrought Castle", "mode": "door", "pick": 185, "object": 2020233, "how": "quest 41837" }
+    ],
+    "62551": [
+     { "item": 41913, "name": "Key to Stormwrought Castle", "mode": "door", "pick": 185, "object": 2020233, "how": "quest 41837" }
+    ]
+   },
    "route": true,
    "special": [
     "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",

@@ -168,6 +168,10 @@ type Leg struct {
 	// run looks for the item in the lead bot's and the carrier's bags and, when neither has it, skips the whole leg (the leg's result says
 	// so) instead of failing. The run-start check for a step's requires_item leaves such a leg out.
 	Optional *OptionalLeg `json:"optional,omitempty"`
+	// Needs lists the items a run needs for the leg: a key for a door on the route (mode door, with the door's gameobject entry and the
+	// Lockpicking skill that opens it instead), or an item the run must use (mode blocking). The existing Optional field stays and means
+	// {mode optional} for its item; a leg with both for the same item is a plan error.
+	Needs []LegNeed `json:"needs,omitempty"`
 	// Via are waypoints walked, in order, before To (and before the pull groups). A plain waypoint is walked like To (the navmesh
 	// path). A waypoint with Direct set is a straight-line step for a gap the navmesh does not bridge: the remote driver sends
 	// `cmd move x y z direct` (TortoiseBots), which walks the lead bot in a line instead of on a path; the others walk to its spot first
@@ -224,6 +228,28 @@ type OptionalLeg struct {
 
 // Ref is the item as an ItemRef.
 func (o OptionalLeg) Ref() ItemRef { return ItemRef{Entry: o.Item, Name: o.Name} }
+
+// Leg need modes (LegNeed.Mode): the run skips an optional leg whose item nobody carries, refuses no start for it; a door need is a key
+// door on the leg's route (a real player must carry the key or pick the lock); a blocking need is an item the run must use.
+type LegNeedMode string
+
+const (
+	NeedOptional LegNeedMode = "optional"
+	NeedDoor     LegNeedMode = "door"
+	NeedBlocking LegNeedMode = "blocking"
+)
+
+// LegNeed is one entry of Leg.Needs: the item a run needs for the leg. Pick/Object/How are door-only: the Lockpicking skill that opens
+// the lock instead (0 none), the gameobject entry of the key door (required with door), and where a player gets the key (short, for
+// the notes).
+type LegNeed struct {
+	Item   uint32      `json:"item"`
+	Name   string      `json:"name,omitempty"`
+	Mode   LegNeedMode `json:"mode"`
+	Pick   uint16      `json:"pick,omitempty"`
+	Object uint32      `json:"object,omitempty"`
+	How    string      `json:"how,omitempty"`
+}
 
 // The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
@@ -801,6 +827,7 @@ type rawLeg struct {
 	CompanionsLoot *bool        `json:"companions_loot"`
 	Leftover       []uint32     `json:"leftover_entries"`
 	Optional       *OptionalLeg `json:"optional"`
+	Needs          []LegNeed    `json:"needs"`
 	Rest           *RestSpec    `json:"rest"`
 	Notes          []string     `json:"notes"`
 	NeedsWalk      bool         `json:"needs_walk"`
@@ -1246,6 +1273,25 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			c.fail(path+".optional.item", "required (the item entry the leg needs)")
 		}
 	}
+	for i, n := range r.Needs {
+		np := fmt.Sprintf("%s.needs[%d]", path, i)
+		switch {
+		case n.Item == 0:
+			c.fail(np+".item", "required (the item entry the run needs)")
+		case n.Mode != NeedOptional && n.Mode != NeedDoor && n.Mode != NeedBlocking:
+			c.fail(np+".mode", "%q: use \"optional\", \"door\" or \"blocking\"", string(n.Mode))
+		case n.Mode != NeedDoor && (n.Pick != 0 || n.Object != 0 || n.How != ""):
+			c.fail(np, "pick, object and how are door-only (mode \"door\"): an optional or blocking need is the item alone")
+		case n.Mode == NeedDoor && n.Pick > 300:
+			c.fail(np+".pick", "%d: use 0 (no lockpicking) or 1-300 (the Lockpicking skill that opens the lock instead)", n.Pick)
+		case n.Mode == NeedDoor && n.Object == 0:
+			c.fail(np+".object", "required with a door need (the gameobject entry of the key door)")
+		case l.Optional != nil && n.Item == l.Optional.Item:
+			c.fail(np+".item", "%d is both the leg's optional item and a needs entry: keep the optional form only", n.Item)
+		default:
+			l.Needs = append(l.Needs, n)
+		}
+	}
 	for i, w := range r.Via {
 		wp := fmt.Sprintf("%s.via[%d]", path, i)
 		pt := c.point(wp, &rawPoint{X: w.X, Y: w.Y, Z: w.Z})
@@ -1408,10 +1454,18 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
 	}
-	if o := l.Optional; o != nil && o.Item != 0 && !slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
-		return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item
-	}) {
+	uses := func(item uint32) bool {
+		return slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
+			return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == item
+		})
+	}
+	if o := l.Optional; o != nil && o.Item != 0 && !uses(o.Item) {
 		c.fail(path+".optional.item", "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", o.Item)
+	}
+	for i, n := range l.Needs {
+		if n.Mode == NeedOptional && !uses(n.Item) {
+			c.fail(fmt.Sprintf("%s.needs[%d].item", path, i), "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", n.Item)
+		}
 	}
 	if rs := r.Rest; rs != nil {
 		for _, f := range []struct {

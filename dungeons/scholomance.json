@@ -50,6 +50,15 @@
     {
       "name": "doctor_theolen_krastinov",
       "to": {"x": 181.189, "y": -17.0533, "z": 115.791},
+      "needs": [
+        {
+          "item": 13873,
+          "name": "Viewing Room Key",
+          "mode": "door",
+          "object": 175167,
+          "how": "Scholomance: Rattlegore (100 %), quest chain"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10470, 10499, 10471],
@@ -79,6 +88,15 @@
     {
       "name": "lorekeeper_polkelt",
       "to": {"x": 230.383, "y": -1.70041, "z": 115.791},
+      "needs": [
+        {
+          "item": 13873,
+          "name": "Viewing Room Key",
+          "mode": "door",
+          "object": 175167,
+          "how": "Scholomance: Rattlegore (100 %), quest chain"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10471, 10470],
@@ -115,6 +133,15 @@
     {
       "name": "the_ravenian",
       "to": {"x": 174.938, "y": 5.5529, "z": 115.791},
+      "needs": [
+        {
+          "item": 13873,
+          "name": "Viewing Room Key",
+          "mode": "door",
+          "object": 175167,
+          "how": "Scholomance: Rattlegore (100 %), quest chain"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10470, 10470],
@@ -264,6 +291,15 @@
     {
       "name": "lady_illucia_barov",
       "to": {"x": 194.77, "y": -12.3419, "z": 75.646},
+      "needs": [
+        {
+          "item": 13873,
+          "name": "Viewing Room Key",
+          "mode": "door",
+          "object": 175167,
+          "how": "Scholomance: Rattlegore (100 %), quest chain"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [4075],
@@ -395,6 +431,15 @@
     {
       "name": "jandice_barov",
       "to": {"x": 240.778, "y": 45.3544, "z": 115.791},
+      "needs": [
+        {
+          "item": 13873,
+          "name": "Viewing Room Key",
+          "mode": "door",
+          "object": 175167,
+          "how": "Scholomance: Rattlegore (100 %), quest chain"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [10471, 10499, 10470, 10471],

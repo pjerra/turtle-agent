@@ -149,6 +149,23 @@
     {
       "name": "guard_slip'kik",
       "to": {"x": 490.175, "y": 530.082, "z": -25.3997},
+      "needs": [
+        {
+          "item": 18266,
+          "name": "Gordok Courtyard Key",
+          "mode": "door",
+          "object": 177219,
+          "how": "Dire Maul: Fengus's Chest (100 %)"
+        },
+        {
+          "item": 18268,
+          "name": "Gordok Inner Door Key",
+          "mode": "door",
+          "pick": 200,
+          "object": 177217,
+          "how": "Dire Maul: Guard Mol'dar (100 %)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160],
@@ -289,6 +306,16 @@
     {
       "name": "captain_kromcrush",
       "to": {"x": 682.682, "y": 454.001, "z": 29.4598},
+      "needs": [
+        {
+          "item": 18268,
+          "name": "Gordok Inner Door Key",
+          "mode": "door",
+          "pick": 200,
+          "object": 177217,
+          "how": "Dire Maul: Guard Mol'dar (100 %)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [13036, 13036, 13036],

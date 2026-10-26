@@ -33,6 +33,16 @@
     {
       "name": "high_inquisitor_fairbanks",
       "to": {"x": 876.701, "y": 1322.55, "z": 18.0893},
+      "needs": [
+        {
+          "item": 7146,
+          "name": "The Scarlet Key",
+          "mode": "door",
+          "pick": 175,
+          "object": 104591,
+          "how": "SM Library chest (Arcanist Doan)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [4295],

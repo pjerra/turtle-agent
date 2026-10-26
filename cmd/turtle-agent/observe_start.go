@@ -54,7 +54,9 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *group, leg, plan.Legs[leg].Name, n, n-1)
 			}
 			if plan.Legs[leg].Optional != nil {
-				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) is optional (it needs item %d) and the exporter leaves optional legs out of the run leader's rows", *group, leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)
+				if _, ok := planexport.LegNumber(plan, leg); !ok {
+					return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) is optional (it needs item %d) and the deployed rows leave optional legs out (--without-optional)", *group, leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)
+				}
 			}
 			n, at, ok, err := observeGroupStep(plan, leg, *group, planner, serverSteps)
 			if err != nil {
@@ -68,7 +70,7 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 			}
 			rowLeg, ok := planexport.LegNumber(plan, leg)
 			if !ok {
-				return dungeon.PartialStart{}, fmt.Errorf("from_leg %d: leg %q is optional (it needs item %d) and the exporter leaves optional legs out of the run leader's rows; start at a later leg, or pass observe.from_step", leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)
+				return dungeon.PartialStart{}, fmt.Errorf("from_leg %d: leg %q is optional (it needs item %d) and the deployed rows leave optional legs out (--without-optional); start at a later leg, or pass observe.from_step", leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)
 			}
 			ps := dungeon.PartialStart{Leg: leg, LegNumber: rowLeg}
 			if name, ok := legNameForCommand(plan, leg); ok {
@@ -171,7 +173,7 @@ func observeStepInfo(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps, 
 			at, have = dungeon.Point{}, false
 		}
 		name := ""
-		if pi, ok := planexport.PlanLeg(plan, s.Leg); ok {
+		if pi, ok := r.PlanLeg(plan, s.Leg); ok {
 			name = plan.Legs[pi].Name
 		}
 		if !haveLeg {

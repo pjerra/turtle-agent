@@ -930,6 +930,16 @@
     {
       "name": "crowd_pummeler_9-60",
       "to": {"x": -759.105, "y": 399.505, "z": -272.578},
+      "needs": [
+        {
+          "item": 6893,
+          "name": "Workshop Key",
+          "mode": "door",
+          "pick": 150,
+          "object": 90858,
+          "how": "Gnomeregan drop"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [7849],

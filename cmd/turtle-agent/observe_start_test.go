@@ -44,18 +44,20 @@ func TestObserveStartFromStep(t *testing.T) {
 	}
 }
 
-// from_leg starts at the leg's first step; the number is the run leader's (an optional leg takes none), and no step count is needed.
+// from_leg starts at the leg's first step; the number is the run leader's (the optional leg is written by default), and no step count is
+// needed.
 func TestObserveStartFromLeg(t *testing.T) {
 	p := startTestPlan(t)
 	ps, err := observeStartFrom(p, 2, nil, 0, nil)(0)
-	if err != nil || ps.Words != "from leg third" || ps.LegName != "third" || ps.Leg != 2 || ps.LegNumber != 1 || !ps.HavePoint || ps.Point != (dungeon.Point{X: 30, Y: 0, Z: 0}) {
+	if err != nil || ps.Words != "from leg third" || ps.LegName != "third" || ps.Leg != 2 || ps.LegNumber != 2 || !ps.HavePoint || ps.Point != (dungeon.Point{X: 30, Y: 0, Z: 0}) {
 		t.Fatalf("leg 2: %+v %v", ps, err)
 	}
 	if observeStartFrom(p, 0, nil, 0, nil) != nil {
 		t.Fatal("leg 0 is the first step: it has a resolver")
 	}
-	if _, err := observeStartFrom(p, 1, nil, 0, nil)(0); err == nil || !strings.Contains(err.Error(), "optional") {
-		t.Fatalf("the optional leg: %v", err)
+	ps, err = observeStartFrom(p, 1, nil, 0, nil)(0)
+	if err != nil || ps.Leg != 1 || ps.LegNumber != 1 || ps.LegName != "gong" {
+		t.Fatalf("the optional leg is written by default: %+v %v", ps, err)
 	}
 	if _, err := observeStartFrom(p, 9, nil, 0, nil)(0); err == nil || !strings.Contains(err.Error(), "numbers 0-2") {
 		t.Fatalf("a leg the plan does not have: %v", err)
@@ -93,14 +95,14 @@ func TestObserveStartLegNameFallsBackToTheNumber(t *testing.T) {
 	p := startTestPlan(t)
 	p.Legs[2].Name = "high_priestess_mar'li"
 	ps, err := observeStartFrom(p, 2, nil, 0, nil)(0)
-	if err != nil || ps.Words != "from 1" || ps.LegName != "" || ps.LegNumber != 1 {
+	if err != nil || ps.Words != "from 2" || ps.LegName != "" || ps.LegNumber != 2 {
 		t.Fatalf("%+v %v", ps, err)
 	}
 	// A duplicate name (case-insensitively) is not unique: the number goes too.
 	p = startTestPlan(t)
 	p.Legs[2].Name = "FIRST"
 	ps, err = observeStartFrom(p, 2, nil, 0, nil)(0)
-	if err != nil || ps.Words != "from 1" || ps.LegName != "" {
+	if err != nil || ps.Words != "from 2" || ps.LegName != "" {
 		t.Fatalf("duplicate name: %+v %v", ps, err)
 	}
 }

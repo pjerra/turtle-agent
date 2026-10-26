@@ -639,19 +639,23 @@
         },
         {
           "entries": [5649],
-          "approach": [{"x": 1640.0, "y": 1205.0, "z": 9.2}],
           "positions": [
             {"x": 1652.06, "y": 1219.91, "z": 9.67}
           ],
-          "radius": 15
+          "radius": 15,
+          "approach": [
+            {"x": 1640, "y": 1205, "z": 9.2}
+          ]
         },
         {
           "entries": [5649],
-          "approach": [{"x": 1682.0, "y": 1226.0, "z": 9.2}],
           "positions": [
             {"x": 1666.97, "y": 1233.6, "z": 9.41}
           ],
-          "radius": 15
+          "radius": 15,
+          "approach": [
+            {"x": 1682, "y": 1226, "z": 9.2}
+          ]
         },
         {
           "entries": [5649],
@@ -703,7 +707,10 @@
         "entry": 7273,
         "position": {"x": 1702.58, "y": 1224.19, "z": 8.88},
         "tactics": {
-          "interrupt": ["Freeze Solid", "Icicle"]
+          "interrupt": [
+            "Freeze Solid",
+            "Icicle"
+          ]
         }
       },
       "notes": [

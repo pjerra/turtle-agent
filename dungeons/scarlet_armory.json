@@ -257,6 +257,16 @@
     {
       "name": "herod",
       "to": {"x": 1894.78, "y": -378.765, "z": 18.7614},
+      "needs": [
+        {
+          "item": 7146,
+          "name": "The Scarlet Key",
+          "mode": "door",
+          "pick": 175,
+          "object": 101854,
+          "how": "SM Library chest (Arcanist Doan)"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [4298, 4298],

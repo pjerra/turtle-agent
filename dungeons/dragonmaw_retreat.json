@@ -251,6 +251,16 @@
     {
       "name": "searistrasz",
       "to": {"x": -5755.52, "y": -3954.59, "z": 300.186},
+      "needs": [
+        {
+          "item": 41876,
+          "name": "Lower Reserve Key",
+          "mode": "door",
+          "pick": 160,
+          "object": 2020232,
+          "how": "quest 41774"
+        }
+      ],
       "pull_groups": [
         {
           "entries": [4075],
