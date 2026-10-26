@@ -128,6 +128,11 @@ type dungeonRunParams struct {
 	// (README "Observe mode"). It is the fallback for a from_leg / from_pull_group whose step cannot be mapped offline (the deployed rows
 	// were exported with other options); observe only, and it excludes from_leg and from_pull_group.
 	FromStep *int `json:"from_step,omitempty"`
+	// ElunaPlace sets the Eluna placement's options for this run (settings eluna_toolkit, observe mode): Dz is the vertical window of
+	// the toolkit's quiet check in yards (units farther above or below the start step do not count; 0: no limit; absent: the toolkit's
+	// default, 8), Skip lists entries that never count (a friendly NPC the test needs near the step, e.g. Shadowfang's Deathstalker
+	// Adamant 3849). Refused without the setting or outside observe mode.
+	ElunaPlace *elunaPlaceParams `json:"eluna_place,omitempty"`
 	// FromPullGroup starts the run inside from_leg, at that pull group (remote mode; README "Start anywhere"): the commander's own GM move
 	// brings the party to the group's gather spot. StartHere keeps the old from_leg (no move: the run starts where the lead bot stands).
 	// Pulltest runs one pull group as a scored scenario instead of the plan (README "Pull test").
@@ -299,6 +304,12 @@ type observeParam struct {
 	KeepLootSetting bool `json:"keep_loot_setting,omitempty"`
 }
 
+// elunaPlaceParams is dungeon_run's eluna_place: {"dz": 8, "skip": [3849]}.
+type elunaPlaceParams struct {
+	Dz   *float32 `json:"dz,omitempty"`
+	Skip []uint32 `json:"skip,omitempty"`
+}
+
 type dungeonRunResult struct {
 	Started bool   `json:"started"`
 	Plan    string `json:"plan"`
@@ -354,6 +365,8 @@ type dungeonRunner struct {
 	tracesDir string
 	// runMeta is the default AI driver of the slot's runs (settings run_meta): dungeon_run's run_meta wins when it names one.
 	runMeta dungeon.RunMeta
+	// eluna puts a remote run's partway start on the Eluna test toolkit (settings eluna_toolkit; test servers only).
+	eluna bool
 	// checkNav makes the navmesh the plan check walks, and the func that closes it (nil: a scratch copy of the commander service's planner).
 	checkNav func() (dungeon.Navmesh, func(), error)
 	// tunePath is the login's --tune: the tunables file of runs that name none.
