@@ -49,7 +49,9 @@ func WriteSQL(plans []Rows) string {
 		fmt.Fprintf(&b, "\n-- %s: map %d, %d legs, %d steps\n", p.Plan, p.Map, len(r.Legs), len(r.Steps))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_step` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg` WHERE `plan` = %s;\n", quote(p.Plan))
-		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg_need` WHERE `plan` = %s;\n", quote(p.Plan))
+		if !r.NoNeedTable {
+			fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_leg_need` WHERE `plan` = %s;\n", quote(p.Plan))
+		}
 		fmt.Fprintf(&b, "DELETE FROM `ai_dungeon_plan` WHERE `plan` = %s;\n", quote(p.Plan))
 		fmt.Fprintf(&b, "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n(%s, %d, %s, %s, %s, %s, %s);\n", quote(p.Plan), p.Map,
 			quote(entriesText(p.CCPriority)), quote(entriesText(p.CCAlways)), quote(entriesText(p.KillFirst)), quote(p.Source), quote(p.Comment))

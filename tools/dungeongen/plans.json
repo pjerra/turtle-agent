@@ -463,28 +463,13 @@
    ],
    "leg_needs": {
     "8983": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
-    ],
-    "9016": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
-    ],
-    "9017": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
-    ],
-    "9033": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
-    ],
-    "9056": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
-    ],
-    "9156": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170559, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
     ],
     "9319": [
      { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
     ],
     "9938": [
-     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170560, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
+     { "item": 11000, "name": "Shadowforge Key", "mode": "door", "pick": 250, "object": 170558, "how": "Dark Iron Legacy quest (Searing Gorge/BRD)" }
     ]
    },
    "entrance_tele": "brd",
@@ -587,16 +572,7 @@
     11486
    ],
    "leg_needs": {
-    "11486": [
-     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
-    ],
-    "11487": [
-     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
-    ],
     "11488": [
-     { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
-    ],
-    "11496": [
      { "item": 18249, "name": "Crescent Key", "mode": "door", "pick": 300, "object": 300601, "how": "Dire Maul: Pusillin (East), quest" }
     ]
    },
@@ -640,8 +616,7 @@
    ],
    "leg_needs": {
     "14323": [
-     { "item": 18266, "name": "Gordok Courtyard Key", "mode": "door", "object": 177219, "how": "Dire Maul: Fengus's Chest (100 %)" },
-     { "item": 18268, "name": "Gordok Inner Door Key", "mode": "door", "pick": 200, "object": 177217, "how": "Dire Maul: Guard Mol'dar (100 %)" }
+     { "item": 18266, "name": "Gordok Courtyard Key", "mode": "door", "object": 177219, "how": "Dire Maul: Fengus's Chest (100 %)" }
     ],
     "14325": [
      { "item": 18268, "name": "Gordok Inner Door Key", "mode": "door", "pick": 200, "object": 177217, "how": "Dire Maul: Guard Mol'dar (100 %)" }
@@ -721,9 +696,6 @@
     10440
    ],
    "leg_needs": {
-    "10435": [
-     { "item": 12382, "name": "Key to the City", "mode": "door", "pick": 300, "object": 175357, "how": "Stratholme: Magistrate Barthilas (100 %)" }
-    ],
     "10437": [
      { "item": 12382, "name": "Key to the City", "mode": "door", "pick": 300, "object": 175357, "how": "Stratholme: Magistrate Barthilas (100 %)" }
     ]
@@ -770,19 +742,7 @@
     10508
    ],
    "leg_needs": {
-    "10502": [
-     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
-    ],
-    "10503": [
-     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
-    ],
     "10507": [
-     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
-    ],
-    "10901": [
-     { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
-    ],
-    "11261": [
      { "item": 13873, "name": "Viewing Room Key", "mode": "door", "object": 175167, "how": "Scholomance: Rattlegore (100 %), quest chain" }
     ]
    },
@@ -921,9 +881,6 @@
     62671
    ],
    "leg_needs": {
-    "62550": [
-     { "item": 41913, "name": "Key to Stormwrought Castle", "mode": "door", "pick": 185, "object": 2020233, "how": "quest 41837" }
-    ],
     "62551": [
      { "item": 41913, "name": "Key to Stormwrought Castle", "mode": "door", "pick": 185, "object": 2020233, "how": "quest 41837" }
     ]

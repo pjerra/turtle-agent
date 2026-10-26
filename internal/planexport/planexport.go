@@ -154,6 +154,9 @@ type Rows struct {
 	Legs  []LegRow
 	Steps []StepRow
 	Needs []NeedRow
+	// NoNeedTable: the rows are for a module older than the ai_dungeon_leg_need table (Options.WithoutOptional): WriteSQL writes no
+	// DELETE and no INSERT for that table (either would fail where the table does not exist), and Needs is empty.
+	NoNeedTable bool
 }
 
 // Count is the number of rows of the plan in all three tables.
@@ -318,6 +321,7 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	}
 	b.warnings = append(b.warnings, unexpressed(p, opt, upto)...)
 	b.rows.Needs = legNeeds(p, opt, upto)
+	b.rows.NoNeedTable = opt.WithoutOptional
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
@@ -343,6 +347,9 @@ func needMode(m dungeon.LegNeedMode) uint8 {
 // left-out leg (optional without its rows, skip-legs, cut off) contributes no
 // row.
 func legNeeds(p *dungeon.Plan, opt Options, upto int) []NeedRow {
+	if opt.WithoutOptional {
+		return nil // a module without the ai_dungeon_leg_need table: no need rows at all (door rows too)
+	}
 	var out []NeedRow
 	name := strings.ToLower(strings.TrimSpace(p.Name))
 	row := 0

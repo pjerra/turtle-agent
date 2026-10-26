@@ -644,16 +644,6 @@
     {
       "name": "magister_kalendris",
       "to": {"x": 25.9157, "y": 556.036, "z": 28.6032},
-      "needs": [
-        {
-          "item": 18249,
-          "name": "Crescent Key",
-          "mode": "door",
-          "pick": 300,
-          "object": 300601,
-          "how": "Dire Maul: Pusillin (East), quest"
-        }
-      ],
       "pull_groups": [
         {
           "entries": [14361],
@@ -794,16 +784,6 @@
     {
       "name": "immol'thar",
       "to": {"x": -17.6352, "y": 697.856, "z": -24.5808},
-      "needs": [
-        {
-          "item": 18249,
-          "name": "Crescent Key",
-          "mode": "door",
-          "pick": 300,
-          "object": 300601,
-          "how": "Dire Maul: Pusillin (East), quest"
-        }
-      ],
       "pull_groups": [
         {
           "entries": [11484],
@@ -1062,16 +1042,6 @@
     {
       "name": "prince_tortheldrin",
       "to": {"x": 105.188, "y": 724.409, "z": -24.5797},
-      "needs": [
-        {
-          "item": 18249,
-          "name": "Crescent Key",
-          "mode": "door",
-          "pick": 300,
-          "object": 300601,
-          "how": "Dire Maul: Pusillin (East), quest"
-        }
-      ],
       "pull_groups": [
         {
           "entries": [14399, 14400, 14400, 14400],

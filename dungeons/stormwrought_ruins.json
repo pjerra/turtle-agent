@@ -801,16 +801,6 @@
     {
       "name": "deathlord_tidebane",
       "to": {"x": -6190.02, "y": -4022.86, "z": 221.673},
-      "needs": [
-        {
-          "item": 41913,
-          "name": "Key to Stormwrought Castle",
-          "mode": "door",
-          "pick": 185,
-          "object": 2020233,
-          "how": "quest 41837"
-        }
-      ],
       "pull_groups": [
         {
           "entries": [62544, 62540, 62545, 62540],

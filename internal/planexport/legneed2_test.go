@@ -47,7 +47,9 @@ func TestNeedsExportedWithDelete(t *testing.T) {
  {"name":"gong","to":{"x":15,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":141832,"near":{"x":16,"y":0,"z":0},"stand":{"x":15,"y":0,"z":0},"requires_item":{"entry":9240}}}]},
  {"name":"b","to":{"x":20,"y":0,"z":0},"needs":[{"item":11000,"name":"Shadowforge Key","mode":"door","pick":250,"object":170560,"how":"Dark Iron Legacy quest (Searing Gorge/BRD)"}],"boss":{"entry":7001,"position":{"x":22,"y":0,"z":0}}}]}`
 	p := parsePlan(t, js)
-	res, err := Build(p, Options{Source: "test", WithoutOptional: true})
+	// The gong leg is left out by skip-legs (review round 2: WithoutOptional now writes no need rows at all, for a module
+	// without the table; TestWithoutOptionalWritesNothingForTheNeedTable).
+	res, err := Build(p, Options{Source: "test", SkipLegs: []string{"gong"}})
 	if err != nil {
 		t.Fatal(err)
 	}

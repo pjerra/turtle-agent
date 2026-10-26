@@ -1,6 +1,7 @@
 package planexport
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -79,5 +80,55 @@ func TestWithoutOptionalLeavesItOut(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the leave-out warning is gone: %q", res.Warnings)
+	}
+}
+
+// Review round 2: --without-optional is for a module older than the ai_dungeon_leg_need table: the migration names
+// that table nowhere (no DELETE, no INSERT: either fails where it does not exist), door needs included; the default
+// export still deletes and writes the plan's need rows.
+func TestWithoutOptionalWritesNothingForTheNeedTable(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/blackrock_depths.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, WithoutOptional: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Rows.Needs) != 0 || !old.Rows.NoNeedTable {
+		t.Fatalf("WithoutOptional: %d need rows, NoNeedTable %v", len(old.Rows.Needs), old.Rows.NoNeedTable)
+	}
+	if sql := WriteSQL([]Rows{old.Rows}); strings.Contains(sql, "ai_dungeon_leg_need") {
+		t.Fatalf("the --without-optional migration names ai_dungeon_leg_need:\n%s", sql)
+	}
+	cur, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := WriteSQL([]Rows{cur.Rows})
+	if !strings.Contains(sql, "DELETE FROM `ai_dungeon_leg_need` WHERE `plan` = 'blackrock_depths';") ||
+		!strings.Contains(sql, "INSERT INTO `ai_dungeon_leg_need`") {
+		t.Fatalf("the default migration lacks the need rows:\n%s", sql)
+	}
+}
+
+// Review round 2 (Opus 3): one door need per door, on the leg whose route crosses it (the TortoiseBots migration's
+// rows by leg name): Blackrock Depths has its three gates on houndmaster_grebmar, golem_lord_argelmach and magmus.
+func TestBlackrockDepthsDoorNeedsOnePerDoor(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/blackrock_depths.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, n := range res.Rows.Needs {
+		got = append(got, fmt.Sprintf("%s:%d:%d", res.Rows.Legs[n.Leg].Name, n.Item, n.Object))
+	}
+	want := []string{"houndmaster_grebmar:11000:170560", "golem_lord_argelmach:11000:170559", "magmus:11000:170558"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("need rows %v, want %v", got, want)
 	}
 }
