@@ -86,7 +86,8 @@ func wcNear(ss []wcSpawn, entry uint32, p Point, yd float64) bool {
 	return false
 }
 
-// The plan is what the export and the instance script say: the five bosses in route order, Lady Anacondra's four spawn spots (spawn pool
+// The plan is what the export and the instance script say: the seven bosses in route order (the five of the script and the two Turtle
+// bosses of the west wing and the east spur, added 2026-10-26), Lady Anacondra's four spawn spots (spawn pool
 // 10004) as one-member groups, every group member a spawn row of its entry, the one hop of the route a plain direct step with a check_skip (no GM).
 func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	p := loadPlan(t, wailingPlan)
@@ -231,8 +232,9 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	if !via[1].Direct || via[1].GMCross {
 		t.Errorf("legs[%d] (serpentis) via[1] %v: want the plain direct landing after the exact foot", serp, via[1].Point)
 	}
-	// The four Fanglords open the Disciple's second menu (instance_wailing_caverns.cpp): Cobrahn, Pythas and Serpentis are bosses of the plan.
-	want := []uint32{3669, 3670, 3674, 3673, 5775}
+	// The four Fanglords open the Disciple's second menu (instance_wailing_caverns.cpp): Cobrahn, Pythas and Serpentis are bosses of the
+	// plan; Skum and Verdan follow the script; Vangros (west wing) and Zandara (east spur) are Turtle's, added 2026-10-26.
+	want := []uint32{3669, 3670, 61968, 3674, 61965, 3673, 5775}
 	if len(bosses) != len(want) {
 		t.Fatalf("bosses %v, want %v", bosses, want)
 	}
@@ -372,7 +374,8 @@ func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 }
 
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
-// the hop is the only break, and the whole walk to every member position is about 6240 yd (a change of route moves this number: update it with the plan's notes).
+// the hop is the only break, and the whole walk to every member position is about 8038 yd (6240 before the vangros and zandara legs of
+// 2026-10-26; a change of route moves this number: update it with the plan's notes).
 func TestWailingCavernsOnNavmesh(t *testing.T) {
 	dir := mapMmaps(43)
 	if dir == "" {
@@ -414,8 +417,8 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
-		if p.Name == "wailing_caverns" && (total < 6150 || total > 6350 || hops != 1) {
-			t.Errorf("%s: %.0f yd and %d hops, expected about 6240 yd and one hop", p.Name, total, hops)
+		if p.Name == "wailing_caverns" && (total < 7980 || total > 8100 || hops != 1) {
+			t.Errorf("%s: %.0f yd and %d hops, expected about 8038 yd and one hop", p.Name, total, hops)
 		}
 	}
 }
