@@ -173,7 +173,7 @@ func (d *Driver) leaderHas(list []Buff) bool {
 }
 
 // sendBuffs has the leader put each of list on the member with ".aura <id>", every application flagged in the report
-// as a "buff" shortcut. Each command goes with the selection of the member as ONE session operation (Game.GMOn): the
+// as a "buff" shortcut. Each command goes only once the server has confirmed the selection of the member (Game.GMOn): the
 // core runs .aura on whatever is selected when it arrives, and the target RPC or the addon host could change the
 // selection between a separate Target and GM call (the world buffs would land on a boss).
 //
