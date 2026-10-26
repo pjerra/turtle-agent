@@ -117,13 +117,13 @@ func TestRazorfenBossPacksAreTheBossFight(t *testing.T) {
 		{"roogug", 6168, "[4516 4442]", 31},
 		{"aggem_thorncurse", 4424, "[]", 20},
 		{"death_speaker_jargba", 4428, "[4515 4523]", 8},
-		{"overlord_ramtusk", 4420, "[4438]", 14},
+		{"overlord_ramtusk", 4420, "[4438]", 8},
 		{"rotthorn", 62503, "[]", 12},
 		{"agathelos_the_raging", 4422, "[]", 10},
 		// r35 slot7b split the old charlga leg in three: the den packs, the pit (a leg of its own because only a leg's via chain
 		// can row the 1200-yd walk into the pit), and the boss with the pit-rim, upper-ledge and corridor packs.
 		{"charlga_den", 0, "", 6},
-		{"charlga_pit", 0, "", 17},
+		{"charlga_pit", 0, "", 23},
 		{"charlga_razorflank", 4421, "[4517]", 4},
 	} {
 		l := rfkLeg(t, p, c.leg)
@@ -169,8 +169,8 @@ func TestRazorfenRaresAreOwnedNotSkipped(t *testing.T) {
 	if n != 1 {
 		t.Errorf("4842 is in %d pull groups of overlord_ramtusk, want 1", n)
 	}
-	// the Earthbreaker + Stalker + Sage trio: radius 12 keeps the mate Earthbreaker (16 yd) and Halmgar (14 yd) out
-	g := r.PullGroups[len(r.PullGroups)-8]
+	// the Earthbreaker + Stalker + Sage trio (pull group 6): radius 12 keeps the mate Earthbreaker (16 yd) and Halmgar (14 yd) out
+	g := r.PullGroups[6]
 	if g.Entries[0] != 4525 || len(g.Entries) != 3 || g.Radius != 12 {
 		t.Errorf("overlord_ramtusk trio: entries %v radius %v, want [4525 6035 4518] radius 12", g.Entries, g.Radius)
 	}
@@ -379,11 +379,12 @@ func TestRazorfenLowerFloorPacksArePulledFromTheirOwnFloor(t *testing.T) {
 		}
 	}
 	pit := rfkLeg(t, p, "charlga_pit")
-	if len(pit.PullGroups) != 17 {
-		t.Fatalf("charlga_pit: %d pull groups, want 17", len(pit.PullGroups))
+	if len(pit.PullGroups) != 23 {
+		t.Fatalf("charlga_pit: %d pull groups, want 23", len(pit.PullGroups))
 	}
 	moved := pit.PullGroups[11:]
-	wantPit := []string{"[4514]", "[4511]", "[4514 4541]", "[4514]", "[4514]", "[4512 4511]"}
+	wantPit := []string{"[4514]", "[4511]", "[4514 4541]", "[4514]", "[4514]", "[4512 4511]",
+		"[4511]", "[4511]", "[4514]", "[4511]", "[4511 4514]", "[4511]"}
 	for i, g := range moved {
 		if fmt.Sprint(g.Entries) != wantPit[i] {
 			t.Errorf("charlga_pit group %d: %v, want %s", 11+i, g.Entries, wantPit[i])
@@ -401,9 +402,10 @@ func TestRazorfenLowerFloorPacksArePulledFromTheirOwnFloor(t *testing.T) {
 			t.Errorf("charlga_pit group %d (%v): the stand z %.2f is not on the pit floor the pack stands on", 11+i, g.Entries, a.Z)
 		}
 	}
-	// one stand each, and the chain is joined: every approach is a short complete walk from the one before
+	// one stand each, and the chain is joined: every approach is within the exporter's 60-yd move gap of the one before it (a longer
+	// hop is cut into path rows along the navmesh)
 	for i := 1; i < len(moved); i++ {
-		if d := dist3v(moved[i-1].Approach[0], moved[i].Approach[0]); d > 40 {
+		if d := dist3v(moved[i-1].Approach[0], moved[i].Approach[0]); d > 60 {
 			t.Errorf("charlga_pit moved group %d: %.1f yd from the stand before it", 11+i, d)
 		}
 	}
@@ -464,5 +466,101 @@ func TestRazorfenRotthornSpiralStandAndPatrol(t *testing.T) {
 				t.Errorf("charlga_razorflank still pulls 87430 at 2094.39 1773.56: it is rotthorn pull group 1's pair")
 			}
 		}
+	}
+}
+
+// The Ramtusk leg's six lower-floor packs (proof20d4 slotD, steps 322-327: 4511 at 2122.66 1738.86, 2138.32 1744.36, 2167.05
+// 1701.62 and 2166 1686.35 and the [4511 4514] pair at 2149.51/2149.64 1674-1686, all z 52-59) stand 25-28 yd below the leg's
+// own floor: step 322's three pulls killed nothing, step 323 logged "pack skipped, not cleared: 2 units out of reach", steps
+// 324-326 were deferred "not reachable from this floor" (cmd pullback refused: no safe stand 15.0-25.0 yd the lead bot has a
+// path to) and the four packs were left alive. They are pulled in charlga_pit, the leg that walks the pit floor, in the order
+// that floor is walked from the pit's south mouth (P1 -> P2 -> P3 -> P4 -> the pair -> P5), each from a stand on its own floor
+// 19-24 yd from it and 20+ yd from every pack pulled after it (the approach-clearance rule), the [4511 4514] pair from the
+// pit's north-west corner. The Ramtusk leg keeps the eight packs of its own floor, and its pull group 4 (the 4623 pair) gets a
+// stand 20 yd from it with a clear ray: the run's step 319 was not seen from the party's spot, walked in blind and body-pulled
+// 4534/4532/4518 (the first wipe).
+func TestRazorfenRamtuskLegLowerPacksArePulledFromTheirOwnFloor(t *testing.T) {
+	p := loadPlan(t, rfkPlan)
+	ram := rfkLeg(t, p, "overlord_ramtusk")
+	if len(ram.PullGroups) != 8 {
+		t.Fatalf("overlord_ramtusk: %d pull groups, want 8", len(ram.PullGroups))
+	}
+	for i, g := range ram.PullGroups {
+		for _, pos := range g.Positions {
+			if pos.Z < 70 {
+				t.Errorf("overlord_ramtusk group %d: a spawn at %.2f %.2f z %.2f is on the pit floor", i, pos.X, pos.Y, pos.Z)
+			}
+		}
+	}
+	g4 := ram.PullGroups[4]
+	if fmt.Sprint(g4.Entries) != "[4623 4623]" || len(g4.Approach) != 1 {
+		t.Fatalf("overlord_ramtusk group 4: %v approach %+v, want the 4623 pair with one stand", g4.Entries, g4.Approach)
+	}
+	if a := g4.Approach[0]; dist3v(a, g4.Positions[0]) < 15 || dist3v(a, g4.Positions[0]) > 24.5 {
+		t.Errorf("overlord_ramtusk group 4 stand %.2f %.2f %.2f: %.2f yd from the pair, want 15-24.5", a.X, a.Y, a.Z, dist3v(a, g4.Positions[0]))
+	}
+	pit := rfkLeg(t, p, "charlga_pit")
+	want := []struct {
+		entries string
+		x, y, z float32
+		stand   Point
+	}{
+		{"[4511]", 2122.66, 1738.86, 52.8069, Point{2106.66, 1724.86, 54.26}},
+		{"[4511]", 2138.32, 1744.36, 52.5633, Point{2126.32, 1728.36, 52.18}},
+		{"[4514]", 2152.54, 1722.03, 52.0952, Point{2136.54, 1734.03, 51.88}},
+		{"[4511]", 2167.05, 1701.62, 55.0645, Point{2149.73, 1711.63, 55.01}},
+		{"[4511 4514]", 2149.51, 1685.73, 58.4076, Point{2133.51, 1673.73, 58.83}},
+		{"[4511]", 2166, 1686.35, 58.7368, Point{2155, 1705.35, 55.37}},
+	}
+	n := len(pit.PullGroups) - len(want)
+	for i, w := range want {
+		g := pit.PullGroups[n+i]
+		pos := g.Positions[0]
+		if fmt.Sprint(g.Entries) != w.entries || pos.X != w.x || pos.Y != w.y || pos.Z != w.z {
+			t.Errorf("charlga_pit group %d: %v at %.2f %.2f %.2f, want %s at %.2f %.2f %.2f", n+i, g.Entries, pos.X, pos.Y, pos.Z, w.entries, w.x, w.y, w.z)
+			continue
+		}
+		if len(g.Approach) != 1 || g.Approach[0] != w.stand {
+			t.Errorf("charlga_pit group %d (%v): approach %+v, want %+v", n+i, g.Entries, g.Approach, w.stand)
+			continue
+		}
+		if d := dist3v(w.stand, pos); d < 15 || d > 24.5 {
+			t.Errorf("charlga_pit group %d (%v): the stand is %.2f yd from the pack, want 15-24.5", n+i, g.Entries, d)
+		}
+		// the approach-clearance rule: 20 yd from every pack pulled after it
+		for _, later := range pit.PullGroups[n+i+1:] {
+			for _, lp := range later.Positions {
+				if d := math.Hypot(float64(w.stand.X-lp.X), float64(w.stand.Y-lp.Y)); d < 20 {
+					t.Errorf("charlga_pit group %d (%v): the stand is %.1f yd from a later pack at %.1f %.1f", n+i, g.Entries, d, lp.X, lp.Y)
+				}
+			}
+		}
+	}
+	// the pit's last packs are the six moved ones: the leg ends on the pit floor before the corridor leg
+	if last := pit.PullGroups[len(pit.PullGroups)-1]; fmt.Sprint(last.Entries) != "[4511]" || last.Positions[0].X != 2166 {
+		t.Errorf("charlga_pit ends on %v at %.1f %.1f, want the 4511 at 2166 1686", last.Entries, last.Positions[0].X, last.Positions[0].Y)
+	}
+}
+
+// Step 1 of the run (proof20d4 slotD: "cmd move 1951.0 1570.0 83.3 refused: unreachable" after a 96-yd blind approach to the
+// opening stand, the lead 2.1 yd from the hop point and 12 yd past it when the answer came): the opening walk is one via point
+// 39.9 yd from the entrance, the spot the live party walked to and stood on, so the run leader's first approach stays inside its
+// 40-yd hop and the point it sends is a plan point.
+func TestRazorfenOpeningWalkHasTheEntranceVia(t *testing.T) {
+	p := loadPlan(t, rfkPlan)
+	l := rfkLeg(t, p, "roogug")
+	if len(l.Via) != 1 {
+		t.Fatalf("roogug via %+v, want the one entrance-side point", l.Via)
+	}
+	w := l.Via[0].Point
+	if w.X != 1954.5 || w.Y != 1582.3 || w.Z != 82.61 {
+		t.Errorf("roogug via %+v, want 1954.5 1582.3 82.61", w)
+	}
+	if d := math.Hypot(float64(w.X-p.Entrance.X), float64(w.Y-p.Entrance.Y)); d > 40 {
+		t.Errorf("roogug via is %.1f yd from the entrance, want at most the run leader's 40-yd hop", d)
+	}
+	// the stand is 51.3 yd on: the run leader cuts that hop once, 30 yd short (a ~21-yd order), not into the 2-yd order step 1 sent
+	if d := math.Hypot(float64(l.To.X-w.X), float64(l.To.Y-w.Y)); d > 60 || d < 41 {
+		t.Errorf("the opening stand is %.1f yd from the via, want 41-60 (one cut hop of the run leader's approach)", d)
 	}
 }
