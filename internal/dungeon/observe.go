@@ -153,8 +153,12 @@ type ObserveReport struct {
 	Lines  int `json:"lines"`
 	Polls  int `json:"polls"`
 	Pauses int `json:"pauses"`
-	// Controls are the pause, resume, skip and stop requests sent, in order, each with its answer.
-	Controls []string `json:"controls,omitempty"`
+	// ModuleWipes, ModuleNearWipes and ModuleLeadDeaths are the run leader's own counts, read from its notes
+	// ("N wipes, M near wipes" in a self-regroup note, "plan done (..., K lead deaths)"): the highest seen.
+	ModuleWipes      int      `json:"module_wipes,omitempty"`
+	ModuleNearWipes  int      `json:"module_near_wipes,omitempty"`
+	ModuleLeadDeaths int      `json:"module_lead_deaths,omitempty"`
+	Controls         []string `json:"controls,omitempty"`
 	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
 	PlayerOrders []string `json:"player_orders,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
@@ -738,7 +742,38 @@ func playerOrderOf(note string) (order string, ok bool) {
 	return "", false
 }
 
+var (
+	moduleWipeRe = regexp.MustCompile(`(?:^|[^a-z])(\d+) wipes?\b`)
+	moduleNearRe = regexp.MustCompile(`(\d+) near wipes?\b`)
+	moduleLeadRe = regexp.MustCompile(`(\d+) lead deaths?\b`)
+)
+
+// moduleCounts reads the run leader's counts from a note: "2 wipes", "1 wipe", "3 near wipes", "4 lead deaths"; ok is false
+// when the note names none.
+func moduleCounts(note string) (wipes, near, lead int, ok bool) {
+	for _, m := range moduleNearRe.FindAllStringSubmatch(note, -1) {
+		near = max(near, atoi(m[1]))
+		ok = true
+	}
+	clean := moduleNearRe.ReplaceAllString(note, " ")
+	for _, m := range moduleWipeRe.FindAllStringSubmatch(clean, -1) {
+		wipes = max(wipes, atoi(m[1]))
+		ok = true
+	}
+	for _, m := range moduleLeadRe.FindAllStringSubmatch(note, -1) {
+		lead = max(lead, atoi(m[1]))
+		ok = true
+	}
+	return wipes, near, lead, ok
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 // takeStatus folds one status into the observer, the report, the trace, the events and the current-step label.
+
 func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	o := d.obs
 	now := d.clk.Now()
@@ -782,6 +817,11 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		ob.Changes = append(ob.Changes, ch)
 		if n := len(ob.Changes); n > MaxRunChanges {
 			ob.Changes = append([]RunChange{}, ob.Changes[n-MaxRunChanges:]...)
+		}
+		if wipes, near, lead, ok := moduleCounts(st.Note); ok {
+			ob.ModuleWipes = max(ob.ModuleWipes, wipes)
+			ob.ModuleNearWipes = max(ob.ModuleNearWipes, near)
+			ob.ModuleLeadDeaths = max(ob.ModuleLeadDeaths, lead)
 		}
 	})
 	// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the
