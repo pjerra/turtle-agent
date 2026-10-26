@@ -374,7 +374,7 @@ func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 }
 
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
-// the hop is the only break, and the whole walk to every member position is about 8038 yd (6240 before the vangros and zandara legs of
+// the hop is the only break, and the whole walk to every member position is about 8195 yd (6240 before the vangros and zandara legs of
 // 2026-10-26; a change of route moves this number: update it with the plan's notes).
 func TestWailingCavernsOnNavmesh(t *testing.T) {
 	dir := mapMmaps(43)
@@ -417,8 +417,8 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
-		if p.Name == "wailing_caverns" && (total < 7980 || total > 8100 || hops != 1) {
-			t.Errorf("%s: %.0f yd and %d hops, expected about 8038 yd and one hop", p.Name, total, hops)
+		if p.Name == "wailing_caverns" && (total < 8130 || total > 8260 || hops != 1) {
+			t.Errorf("%s: %.0f yd and %d hops, expected about 8195 yd and one hop", p.Name, total, hops)
 		}
 	}
 }

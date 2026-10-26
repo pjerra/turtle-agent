@@ -753,13 +753,12 @@
           ]
         },
         {
-          "entries": [61966, 61966, 61967],
+          "entries": [61966, 61966],
           "positions": [
             {"x": 64.82, "y": -6.75, "z": -66.51},
-            {"x": 74.2, "y": 9.05, "z": -66.7},
-            {"x": 91.96, "y": 21.06, "z": -67.04}
+            {"x": 74.2, "y": 9.05, "z": -66.7}
           ],
-          "radius": 16,
+          "radius": 12,
           "approach": [
             {"x": 55, "y": -15.9, "z": -65.6}
           ]
@@ -1003,16 +1002,82 @@
     },
     {
       "name": "vangros",
-      "to": {"x": -505.2, "y": -127.7, "z": -66.7},
+      "to": {"x": -355.5, "y": -80.8, "z": -65.3},
       "pull_groups": [
         {
-          "entries": [61964, 5761, 61964],
+          "entries": [5056, 3640],
           "positions": [
-            {"x": -525.9, "y": -140.4, "z": -66.7},
+            {"x": -374, "y": -101.1, "z": -65.07},
+            {"x": -387.2, "y": -97.3, "z": -63.96}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [3640, 5761],
+          "positions": [
+            {"x": -385.3, "y": -64.4, "z": -65.01},
+            {"x": -390.7, "y": -66.4, "z": -65.24}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -371.4, "y": -81.9, "z": -65.84}
+          ]
+        },
+        {
+          "entries": [5761],
+          "positions": [
+            {"x": -531.6, "y": -53.7, "z": -68.4}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -505, "y": -58, "z": -67.49}
+          ]
+        },
+        {
+          "entries": [5055, 5055, 5055, 5055, 5055, 5055, 61964, 5761],
+          "positions": [
+            {"x": -532.3, "y": -81.1, "z": -67.49},
+            {"x": -528.3, "y": -78.2, "z": -67.64},
+            {"x": -523.8, "y": -78, "z": -67.66},
+            {"x": -520.9, "y": -82.4, "z": -67.43},
+            {"x": -526.1, "y": -87.6, "z": -67.15},
+            {"x": -532.6, "y": -88, "z": -67.17},
+            {"x": -525.4, "y": -81.8, "z": -67.46},
+            {"x": -530.1, "y": -99.4, "z": -66.83}
+          ],
+          "radius": 16,
+          "approach": [
+            {"x": -505, "y": -58, "z": -67.49}
+          ]
+        },
+        {
+          "entries": [3641, 3641],
+          "positions": [
+            {"x": -518.9, "y": -119.2, "z": -71.54},
+            {"x": -530, "y": -119.2, "z": -71.83}
+          ],
+          "radius": 8,
+          "approach": [
+            {"x": -515, "y": -85, "z": -67.36}
+          ]
+        },
+        {
+          "entries": [61964],
+          "positions": [
+            {"x": -525.9, "y": -140.4, "z": -66.7}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -505.2, "y": -127.7, "z": -66.7}
+          ]
+        },
+        {
+          "entries": [5761, 61964],
+          "positions": [
             {"x": -495.3, "y": -149.1, "z": -66.2},
             {"x": -501.7, "y": -161.4, "z": -66.1}
           ],
-          "radius": 22
+          "radius": 10
         },
         {
           "entries": [5055, 5055, 61964, 61964, 61964],
@@ -1027,27 +1092,18 @@
           "approach": [
             {"x": -496, "y": -145, "z": -65.5}
           ]
-        },
-        {
-          "entries": [5053, 5056, 5053, 5756],
-          "positions": [
-            {"x": -417.6, "y": -201.9, "z": -66.3},
-            {"x": -420.6, "y": -210.9, "z": -65.1},
-            {"x": -436.7, "y": -214.3, "z": -65.1},
-            {"x": -422.9, "y": -226.8, "z": -65.6}
-          ],
-          "radius": 15,
-          "approach": [
-            {"x": -455, "y": -190, "z": -65.5}
-          ]
         }
       ],
       "boss": {
         "entry": 61965,
-        "position": {"x": -419.6, "y": -218, "z": -65.6}
+        "position": {"x": -419.6, "y": -218, "z": -65.6},
+        "first": [5053, 5056, 5053, 5756],
+        "approach": [
+          {"x": -455, "y": -190, "z": -65.5}
+        ]
       },
       "notes": [
-        "The Turtle-added west wing (x -400 to -550, y -140 to -230), a separate navmesh part entered from the west column's north loop at -469 0: 455 yd round the loop from the leg's last pull (-331.5 -79.3), and it is not reachable from Skum's south hall (the server's path from there stops at -350 -153). Vangros (61965, -419.6 -218 -65.6, level 22 elite, faction 17 which is hostile to every player, 3428 hp and 953 mana, no ai_name or script, spell list 180303: Crush Armor 21055 and Knock Away 18670, both instant so neither is interruptible) holds the room with 5 Unnatural Overgrowth 61964 (spell list 180302, Poison Bolt 21971), 2 Lashers 5055, 3 Shamblers 5761, 2 Crocolisks 5053, a Dreadfang 5056 and a Venomwing 5756; the two east Shamblers (-413.6 -163.8, -383.5 -189.7) stand beyond the route's aggro range and are left alone, the Coiler Hatchling 61218 and the Biletoads 3835 are skipped. Three pulls from the north (the entry stand -505.2 -127.7, then -496 -145, then -455 -190) clear the room; the boss stands 5 yd from the last pull's centre, so he joins it and the boss row certifies the kill. The leg sits after west_column and before serpentis because the wing is only reachable from the column's north end: the walk back to the ramp foot is 527 yd.",
+        "The Turtle-added west wing (x -400 to -550, y -140 to -230), a separate navmesh part entered from the west column's north loop at -469 0: 455 yd round the loop from the leg's last pull (-331.5 -79.3), and it is not reachable from Skum's south hall (the server's path from there stops at -350 -153). Vangros (61965, -419.6 -218 -65.6, level 22 elite, faction 17 which is hostile to every player, 3428 hp and 953 mana, no ai_name or script, spell list 180303: Crush Armor 21055 and Knock Away 18670, both instant so neither is interruptible) holds the room with 5 Unnatural Overgrowth 61964 (spell list 180302, Poison Bolt 21971), 2 Lashers 5055, 3 Shamblers 5761, 2 Crocolisks 5053, a Dreadfang 5056 and a Venomwing 5756. The loop in is lined with the wing's own camps, all within aggro of the walk, so they are tight pulls: the Dreadfang and an Ectoplasm at -374/-387 -98 (from -355.5 -80.8), an Ectoplasm and a Shambler at -385/-390 -64 (from -371.4 -81.9), a lone Shambler at -531.6 -53.7 and the six-Lasher/Overgrowth/Shambler camp at -520 to -532 -78 to -99 (both from -505 -58), the two Lurkers at -519/-530 -119 (from -515 -85), then the room's -525.9 Overgrowth (from -505.2 -127.7), the -495.3 Shambler with the -501.7 Overgrowth, and the -471.6/-486.2 Lashers with the three Overgrowths (from -496 -145). The south pack (two Crocolisks 5053, a Dreadfang 5056, a Venomwing 5756, all within 18 yd of the boss) is the boss's first; the boss is pulled last from -455 -190 (5 yd from that pack, so he joins the first adds and the boss row certifies the kill). The two east Shamblers (-413.6 -163.8, -383.5 -189.7) stand beyond the route's aggro range and are left alone; the Coiler Hatchling 61218 and the Biletoads 3835 are skipped. The leg sits after west_column and before serpentis because the wing is only reachable from the column's north end: the walk back to the ramp foot is 527 yd.",
         "Vangros has no interruptible cast (both spells are instant), so no ai_boss_tactic row (20261018120925 says the same). The boss's room is not part of the 2026-10-15 mapping walk: its stands were checked with the server's own path query on 2026-10-26."
       ]
     },
