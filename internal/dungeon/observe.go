@@ -755,8 +755,7 @@ func moduleCounts(note string) (wipes, near, lead int, ok bool) {
 		near = max(near, atoi(m[1]))
 		ok = true
 	}
-	clean := moduleNearRe.ReplaceAllString(note, " ")
-	for _, m := range moduleWipeRe.FindAllStringSubmatch(clean, -1) {
+	for _, m := range moduleWipeRe.FindAllStringSubmatch(note, -1) {
 		wipes = max(wipes, atoi(m[1]))
 		ok = true
 	}

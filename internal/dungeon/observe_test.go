@@ -732,8 +732,8 @@ func TestObserveNoSecondWipeFromALoneDeathAfterAWindowWipe(t *testing.T) {
 }
 
 // TestModuleCountsParse reads the run leader's counts from its notes: the wipes, near wipes and lead deaths its
-// DoneNote and self-regroup notes name. The near regexp runs first and its matches are blanked out before the wipes
-// regexp runs, so "5 near wipes" is not also read as 5 wipes.
+// DoneNote and self-regroup notes name. The wipes regexp needs digits directly before "wipe(s)", so "5 near wipes"
+// is never also read as 5 wipes (no blank-out needed).
 func TestModuleCountsParse(t *testing.T) {
 	cases := []struct {
 		note        string
@@ -803,11 +803,11 @@ func TestObserveRfc19z16Run2bCountsOneWipeAndFourLeadDeaths(t *testing.T) {
 		4: {{1035, 1072}, {2402, 2423}, {2605, 2616}},
 	})
 	var script []leaderStep
-	script = append(script, leaderStep{0, rs("running", 1, 25, "first", "move", "walk", "walking")})
-	for i := 1; i <= 24; i++ {
-		script = append(script, leaderStep{s(i * 100), rs("running", i+1, 25, "first", "move", "walk", fmt.Sprintf("walking %d", i))})
+	script = append(script, leaderStep{0, rs("running", 1, 28, "first", "move", "walk", "walking")})
+	for i := 1; i <= 26; i++ {
+		script = append(script, leaderStep{s(i * 100), rs("running", i+1, 28, "first", "move", "walk", fmt.Sprintf("walking %d", i))})
 	}
-	script[len(script)-1] = leaderStep{s(2400), rs("done", 25, 25, "first", "move", "walk", "plan done")}
+	script = append(script, leaderStep{s(2700), rs("done", 28, 28, "first", "move", "walk", "plan done")})
 	g := fiveBotLeader(t, script...)
 	deathsOnTickTable(g, table)
 	dir := t.TempDir()
@@ -820,6 +820,9 @@ func TestObserveRfc19z16Run2bCountsOneWipeAndFourLeadDeaths(t *testing.T) {
 	}
 	if rep.Wipes != 1 {
 		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 14 {
+		t.Fatalf("deaths %d (want 14: the second collapse's 2402-2616 deaths are replayed too): %+v", len(rep.Deaths), rep.Deaths)
 	}
 	if rep.LeaderDeaths != 4 {
 		t.Fatalf("leader deaths %d (want 4)\n%s", rep.LeaderDeaths, notesOf(rep))
