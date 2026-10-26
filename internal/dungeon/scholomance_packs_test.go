@@ -115,7 +115,7 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		pulls int
 		first string
 	}{
-		{"instructor_malicia", 10505, 40, "[]"},
+		{"instructor_malicia", 10505, 45, "[]"},
 		{"the_ravenian", 10507, 7, "[]"},
 		{"lorekeeper_polkelt", 10901, 4, "[]"},
 		{"lady_illucia_barov", 10502, 14, "[]"},
@@ -147,8 +147,8 @@ func TestScholomanceLegsBossesAndPullCounts(t *testing.T) {
 		}
 		pulls += len(l.PullGroups)
 	}
-	if pulls != 162 {
-		t.Errorf("%d pull groups in all, want 162", pulls)
+	if pulls != 167 {
+		t.Errorf("%d pull groups in all, want 167", pulls)
 	}
 }
 
@@ -161,8 +161,8 @@ func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
 	if leg.Name != "instructor_malicia" || leg.Boss == nil || leg.Boss.Entry != 10505 {
 		t.Fatalf("leg 0 is %q boss %+v, want instructor_malicia 10505", leg.Name, leg.Boss)
 	}
-	if len(leg.PullGroups) != 40 {
-		t.Fatalf("leg 0 has %d pull groups, want the 40 packs of the route", len(leg.PullGroups))
+	if len(leg.PullGroups) != 45 {
+		t.Fatalf("leg 0 has %d pull groups, want the 45 pulls of the route", len(leg.PullGroups))
 	}
 	members := 0
 	for gi, g := range leg.PullGroups {
@@ -211,7 +211,7 @@ func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
 		}
 	}
 	if members != 113 {
-		t.Errorf("leg 0 holds %d members, want the 113 of the 40 route packs", members)
+		t.Errorf("leg 0 holds %d members, want the 113 of the 45 route pulls", members)
 	}
 	// The first pack is the stair guard and the last is the pair by Malicia's door.
 	if got := fmt.Sprint(leg.PullGroups[0].Entries); got != "[10489]" {
@@ -222,14 +222,43 @@ func TestScholomanceLeg0ClearsTheRouteToMalicia(t *testing.T) {
 	}
 	// Scholomance r30 slot C: the step-16 stand 215 22 stood 11-20 yd from the unpulled 48845 pack and the
 	// 91341/91350 pair; the hall packs are pulled from the stairs, the stair foot and 220 38, the western and southern packs are
-	// left alone.
-	idx := map[string]int{}
-	for gi, g := range leg.PullGroups {
-		idx[fmt.Sprint(g.Entries)] = gi
+	// left alone. Step 11 (proof20d2, 2026-10-26) pulled the 4-member pack as one: 8 at once (10489 patroller and 14861 steward
+	// joined), 5 deaths; the pack is now four single pulls from the same stair stand, in this order.
+	find := func(entries string, x, y float64) int {
+		for gi, g := range leg.PullGroups {
+			if fmt.Sprint(g.Entries) != entries || len(g.Positions) == 0 {
+				continue
+			}
+			if math.Abs(float64(g.Positions[0].X)-x) < 0.5 && math.Abs(float64(g.Positions[0].Y)-y) < 0.5 {
+				return gi
+			}
+		}
+		return -1
 	}
-	if !(idx["[10471 10470 10471 10499]"] < idx["[10471]"] && idx["[10471]"] < idx["[10470 10470 10471]"] && idx["[10470 10470 10471]"] < idx["[10471 10470]"]) {
-		t.Errorf("leg-0 115.8 cluster out of order: 10499 pack at %d, lone 10471 at %d, 10470 pack at %d, southern pair at %d; want the stairs, stair-foot, 220-38 hall order",
-			idx["[10471 10470 10471 10499]"], idx["[10471]"], idx["[10470 10470 10471]"], idx["[10471 10470]"])
+	order := []struct {
+		entries string
+		x, y    float64
+	}{
+		{"[10471]", 240.778, 45.3544},
+		{"[10470]", 241.015, 52.0705},
+		{"[10471]", 239.281, 53.6591},
+		{"[10499]", 241.602, 48.3987},
+		{"[10471]", 238.317, 30.1833},
+		{"[10470 10470 10471]", 242.78, 32.143},
+		{"[10471 10470]", 230.72, 19.9185},
+	}
+	at := make([]int, len(order))
+	for i, o := range order {
+		at[i] = find(o.entries, o.x, o.y)
+		if at[i] < 0 {
+			t.Fatalf("leg-0 115.8 cluster: no pull group %s at %.3f %.4f", o.entries, o.x, o.y)
+		}
+	}
+	for i := 1; i < len(at); i++ {
+		if at[i-1] >= at[i] {
+			t.Errorf("leg-0 115.8 cluster out of order: %s at %d, then %s at %d; want the stairs, stair-foot, 220-38 hall order",
+				order[i-1].entries, at[i-1], order[i].entries, at[i])
+		}
 	}
 }
 
