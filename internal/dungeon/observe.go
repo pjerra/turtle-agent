@@ -212,11 +212,15 @@ type observeState struct {
 	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
 	playerPaused bool
 	// autoResumed counts the resumes the observer sent by itself per step; autoResumes counts them over the run. Both bound
-	// observe.auto_resume (0: off). autoResumeSent marks that this pause was already tried: the attempt is tracked apart from
-	// pausedAt, so a refused or dropped resume does not renew the PausedWait ceiling.
+	// observe.auto_resume (0: off). autoResumeSent marks that this pause was already tried, with autoResumeStep and autoResumeNote
+	// naming the pause's identity (step, pause note text): only a non-paused status proves the resume worked, so a refused or
+	// dropped resume does not renew the PausedWait ceiling; a paused status with a different identity is a new pause, which
+	// re-arms the latch and restarts pausedAt.
 	autoResumed    map[int]int
 	autoResumes    int
 	autoResumeSent bool
+	autoResumeStep int
+	autoResumeNote string
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -694,6 +698,17 @@ func autoResumable(note string) bool {
 	return autoResumeNote.MatchString(note)
 }
 
+// samePauseNote says whether a paused status still names the latched pause: the module appends asides to the note of a pause it
+// already made ("; boss meanwhile: ..."), so the note grows by ";" sections while the pause stays the same. A note that is not
+// such an extension — shortened, replaced, or different before the first ";" — is a new pause.
+func samePauseNote(latched, cur string) bool {
+	if strings.HasPrefix(cur, latched) {
+		rest := cur[len(latched):]
+		return rest == "" || strings.HasPrefix(rest, ";")
+	}
+	return strings.HasPrefix(latched, cur)
+}
+
 // autoResumeTick resumes the run leader by itself after its "did not hold" pause (observe.auto_resume): the same one regroup per step
 // the hand resume the workers sent until now. It queues the same "resume" RunControl sends and records it the same three ways; a person
 // resuming first wins, since the pause is then gone. The attempt is marked apart from pausedAt: only a non-paused status proves the
@@ -743,6 +758,7 @@ func (d *RemoteDriver) autoResumeTick() {
 	d.rep.note("observe mode: auto resume: " + text)
 	d.tr.Event("auto_resume", map[string]any{"step": st.Step, "note": st.Note, "n": n})
 	o.autoResumeSent = true
+	o.autoResumeStep, o.autoResumeNote = st.Step, st.Note
 }
 
 func (d *RemoteDriver) serveRunRequests(ctx context.Context) {
@@ -845,10 +861,18 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	} else if o.restOpen {
 		d.endObservedRest(now)
 	}
-	if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
-		o.pausedAt = now
-	}
-	if st.State != tbm.RunPaused {
+	// A pause's identity is its step and pause note text: a paused status with a different step or note than the latched one is a
+	// new pause (resume OK -> running -> a new pause arrives as paused -> paused, and the watcher keeps only the newest status),
+	// so the latch re-arms and pausedAt restarts. The module appends asides to the note of a pause it already made ("; X
+	// meanwhile: ..."), so a note that only extends the latched one is the same pause. A refused or dropped resume of the same
+	// pause keeps the old rule: pausedAt is kept and PausedWait still ends it.
+	if st.State == tbm.RunPaused {
+		if o.autoResumeSent && (st.Step != o.autoResumeStep || !samePauseNote(o.autoResumeNote, st.Note)) {
+			o.pausedAt, o.autoResumeSent = now, false
+		} else if !had || prev.State != tbm.RunPaused {
+			o.pausedAt = now
+		}
+	} else {
 		o.pausedAt = time.Time{}
 		o.autoResumeSent = false
 	}

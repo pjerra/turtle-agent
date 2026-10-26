@@ -172,3 +172,62 @@ func TestObserveRefusedAutoResumeStillEndsAtPausedWait(t *testing.T) {
 		t.Fatalf("run resume sent %d times, want 1: %v", n, g.orders)
 	}
 }
+
+// A new pause after a refused resume is resumed again: the first resume is
+// refused (the fake leader was never paused, so no running status clears the
+// latch), and the next status is another eligible pause with a different step
+// and note. It arrives as paused -> paused — the observed sequence of the
+// real miss, where the watcher keeps only the newest status — so the old
+// latch must not block it: the latch re-arms, pausedAt restarts, and the new
+// pause is auto-resumed (and refused again, so PausedWait ends it).
+func TestObserveAutoResumeRearmsForANewPause(t *testing.T) {
+	note2 := "1 dead: regroup (cmd revive party), then .bot run resume (1 regroups by itself at this step did not hold)"
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking to -1 2 3")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote)},
+		leaderStep{s(40), rs("paused", 3, 5, "first", "pull", "gather", note2)})
+	var firstPausedAt time.Time
+	tick := g.onTick
+	g.onTick = func(gr *fakeRemote) {
+		if g.haveCur && g.cur.State == tbm.RunPaused && firstPausedAt.IsZero() {
+			firstPausedAt = g.now
+		}
+		tick(gr)
+	}
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{PausedWait: s(60), MaxRun: s(600), AutoResume: 1}), nil)
+	if err == nil || !strings.Contains(err.Error(), "paused for 1m0s without a resume") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	var resumeAt []time.Time
+	for i, o := range g.orders {
+		if strings.HasPrefix(o, "run resume") {
+			resumeAt = append(resumeAt, g.orderAt[i])
+		}
+	}
+	if len(resumeAt) != 2 {
+		t.Fatalf("run resume sent %d times, want 2: %v", len(resumeAt), g.orders)
+	}
+	if d := resumeAt[1].Sub(firstPausedAt); d < 45*time.Second {
+		t.Fatalf("second resume after %s, want pausedAt to have restarted at the new pause", d)
+	}
+	if d := g.now.Sub(firstPausedAt); d < 90*time.Second {
+		t.Fatalf("run ended %s after the first pause, want PausedWait from the new pause", d)
+	}
+}
+
+// The same pause with the module's appended aside is not a new pause: after
+// a refused resume, a paused -> paused status with the same step but more
+// note text still ends at PausedWait with no second resume.
+func TestObserveAutoResumeAppendedAsideIsNoNewPause(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking to -1 2 3")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote)},
+		leaderStep{s(40), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote+"; boss meanwhile: waiting")})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{PausedWait: s(60), MaxRun: s(600), AutoResume: 1}), nil)
+	if err == nil || !strings.Contains(err.Error(), "paused for 1m0s without a resume") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if n := len(g.ordersOf("run resume")); n != 1 {
+		t.Fatalf("run resume sent %d times, want 1: %v", n, g.orders)
+	}
+}
