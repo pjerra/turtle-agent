@@ -413,7 +413,7 @@ func (d *RemoteDriver) bossWay(ctx context.Context, sp fightSpec, h tbm.HostileR
 			for _, at := range g.Positions {
 				for k := 1; k < len(path); k++ {
 					if distToSegment(at, path[k-1], path[k]) <= float64(r) {
-						return nil, fmt.Sprintf("the way passes pull group %d of leg %d (%s), not cleared", gi, li, d.plan.Legs[li].Name)
+						return nil, fmt.Sprintf("the way passes %s of leg %d (%s), not cleared", PullGroupRef(gi, len(d.plan.Legs[li].PullGroups)), li, d.plan.Legs[li].Name)
 					}
 				}
 			}

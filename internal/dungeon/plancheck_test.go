@@ -104,7 +104,7 @@ func TestPlanCheckReasons(t *testing.T) {
 	if res.OK() || res.Points != 8 {
 		t.Errorf("ok %v points %d", res.OK(), res.Points)
 	}
-	if s := res.Issues[1].String(); !strings.Contains(s, "leg 0 (a) pull group 3 of 3") {
+	if s := res.Issues[1].String(); !strings.Contains(s, "leg 0 (a) pull group 3 of 3 (from_pull_group 2)") {
 		t.Errorf("numbered like dungeon_status: %s", s)
 	}
 }

@@ -168,6 +168,9 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
 			}
 		}
+		if o.AutoResume < 0 || o.AutoResume > 3 {
+			return bad("observe.auto_resume: %d is outside 0-3 (at most 3 auto resumes a step, 0: off)", o.AutoResume)
+		}
 	}
 	return nil
 }
@@ -178,6 +181,7 @@ func observeSpec(o *observeParam) *dungeon.ObserveSpec {
 	if o != nil {
 		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
 		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait, spec.Maintenance, spec.AllowFarStart, spec.KeepLootSetting = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS), o.Maintenance, o.AllowFarStart, o.KeepLootSetting
+		spec.AutoResume = o.AutoResume
 	}
 	return spec
 }

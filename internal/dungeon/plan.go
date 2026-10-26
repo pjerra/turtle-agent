@@ -295,6 +295,16 @@ type RestSpec struct {
 	WalkMana       int `json:"walk_mana,omitempty"`
 }
 
+// PullGroupRef names a pull group both ways: "pull group 9 of 12 (from_pull_group 8)". from_pull_group is 0-based and
+// dungeon_status numbers packs 1-based; the text carries both so a refusal can be matched to the status line. n <= 0
+// (the leg's group count is not at hand) gives "pull group 9 (from_pull_group 8)".
+func PullGroupRef(idx0, n int) string {
+	if n <= 0 {
+		return fmt.Sprintf("pull group %d (from_pull_group %d)", idx0+1, idx0)
+	}
+	return fmt.Sprintf("pull group %d of %d (from_pull_group %d)", idx0+1, n, idx0)
+}
+
 // PullGroup is one pack: the entries it holds and where its members stand (one position each, or fewer when they
 // stand together; the first is the one to pull).
 type PullGroup struct {
