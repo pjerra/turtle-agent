@@ -212,9 +212,11 @@ type observeState struct {
 	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
 	playerPaused bool
 	// autoResumed counts the resumes the observer sent by itself per step; autoResumes counts them over the run. Both bound
-	// observe.auto_resume (0: off).
-	autoResumed map[int]int
-	autoResumes int
+	// observe.auto_resume (0: off). autoResumeSent marks that this pause was already tried: the attempt is tracked apart from
+	// pausedAt, so a refused or dropped resume does not renew the PausedWait ceiling.
+	autoResumed    map[int]int
+	autoResumes    int
+	autoResumeSent bool
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -694,7 +696,9 @@ func autoResumable(note string) bool {
 
 // autoResumeTick resumes the run leader by itself after its "did not hold" pause (observe.auto_resume): the same one regroup per step
 // the hand resume the workers sent until now. It queues the same "resume" RunControl sends and records it the same three ways; a person
-// resuming first wins, since the pause is then gone. The agent sends only `run resume`: the module's own regroup sends `revive party`.
+// resuming first wins, since the pause is then gone. The attempt is marked apart from pausedAt: only a non-paused status proves the
+// resume worked, so a refused or dropped one still ends the run at PausedWait. The agent sends only `run resume`: the module's own
+// regroup sends `revive party`.
 func (d *RemoteDriver) autoResumeTick() {
 	o := d.obs
 	spec := o.spec
@@ -705,6 +709,9 @@ func (d *RemoteDriver) autoResumeTick() {
 		return
 	}
 	if o.pausedAt.IsZero() || d.clk.Now().Sub(o.pausedAt) < observeAutoResumeDelay {
+		return
+	}
+	if o.autoResumeSent {
 		return
 	}
 	if d.haveFr && d.fr.PartyInCombat() {
@@ -735,7 +742,7 @@ func (d *RemoteDriver) autoResumeTick() {
 	d.control(text)
 	d.rep.note("observe mode: auto resume: " + text)
 	d.tr.Event("auto_resume", map[string]any{"step": st.Step, "note": st.Note, "n": n})
-	o.pausedAt = time.Time{}
+	o.autoResumeSent = true
 }
 
 func (d *RemoteDriver) serveRunRequests(ctx context.Context) {
@@ -843,6 +850,7 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	}
 	if st.State != tbm.RunPaused {
 		o.pausedAt = time.Time{}
+		o.autoResumeSent = false
 	}
 	if st.State == tbm.RunDone {
 		o.serverEnd = true

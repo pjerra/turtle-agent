@@ -253,8 +253,9 @@ func parseTrees(s string) (tbm.Talents, bool) {
 }
 
 // knownTalents are a bot's spent points when the hire already read them: first the ready block's entry for a name
-// matching case-insensitively (a hire of this run), else the hire memory of a kept binding (name in lower case). A
-// "no answer" ready entry and 0/0/0 memory count as unknown: the bot is asked as before.
+// matching case-insensitively (a hire of this run), else the hire memory of a kept binding (name in lower case). An
+// unknown ready entry ("no answer", malformed, 0/0/0) falls through to the memory; unknown in both places, the bot is
+// asked as before.
 func knownTalents(ready *ReadyReport, memory map[string]tbm.Who, name string) (string, bool) {
 	if ready != nil {
 		for _, b := range ready.Bots {
@@ -264,7 +265,7 @@ func knownTalents(ready *ReadyReport, memory map[string]tbm.Who, name string) (s
 			if t, ok := parseTrees(b.Talents); ok && t.Total > 0 {
 				return b.Talents, true
 			}
-			return "", false
+			break
 		}
 	}
 	if w, ok := memory[strings.ToLower(name)]; ok {

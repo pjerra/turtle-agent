@@ -72,7 +72,7 @@ func TestKnownTalentsPrefersTheReadyBlock(t *testing.T) {
 		{"memory", "Healy", nil, map[string]tbm.Who{"healy": {Class: "priest", Level: 40, Trees: [3]int{0, 5, 31}}}, "0/5/31", true},
 		{"case differs", "HEALY", nil, map[string]tbm.Who{"healy": {Class: "priest", Level: 40, Trees: [3]int{0, 5, 31}}}, "0/5/31", true},
 		{"memory 0/0/0 unknown", "Healy", nil, map[string]tbm.Who{"healy": {Class: "priest", Level: 40, Trees: [3]int{}}}, "", false},
-		{"ready no answer unknown", "Magey", ready, map[string]tbm.Who{"magey": {Class: "mage", Level: 40, Trees: [3]int{1, 2, 3}}}, "", false},
+		{"ready no answer falls back to memory", "Magey", ready, map[string]tbm.Who{"magey": {Class: "mage", Level: 40, Trees: [3]int{1, 2, 3}}}, "1/2/3", true},
 		{"no entry unknown", "Healy", nil, nil, "", false},
 	} {
 		if got, ok := knownTalents(c.ready, c.mem, c.bot); got != c.want || ok != c.ok {
@@ -100,5 +100,17 @@ func TestRemotePreflightTalentsMixedKnownAndAsked(t *testing.T) {
 	}
 	if len(g.allCmds) != 2 {
 		t.Fatalf("asked %v, want Tanky and Healy only", g.allCmds)
+	}
+}
+
+// An unknown ready entry ("no answer", malformed, 0/0/0) falls back to the
+// hire memory instead of asking the bot again.
+func TestKnownTalentsUnknownReadyFallsBackToMemory(t *testing.T) {
+	mem := map[string]tbm.Who{"magey": {Class: "mage", Level: 40, Trees: [3]int{1, 2, 3}}}
+	for _, talents := range []string{"no answer", "garbage", "1/2", "0/0/0", "error: timeout"} {
+		ready := &ReadyReport{Bots: []ReadyBot{{Name: "Magey", Talents: talents}}}
+		if got, ok := knownTalents(ready, mem, "Magey"); got != "1/2/3" || !ok {
+			t.Errorf("%q: knownTalents = %q, %v, want %q, %v", talents, got, ok, "1/2/3", true)
+		}
 	}
 }

@@ -139,8 +139,8 @@ func TestObserveAutoResumeLeavesOtherPausesAlone(t *testing.T) {
 }
 
 // One pause is resumed once: a later status of the same pause (the module
-// appends "; X meanwhile: ...") is not a new pause, so without the pausedAt
-// reset the same pause would fire again on the next look. (The resume is
+// appends "; X meanwhile: ...") is not a new pause, so without the attempt
+// mark the same pause would fire again on the next look. (The resume is
 // refused — the fake leader was never paused — so the pause persists until
 // PausedWait.)
 func TestObserveAutoResumeSendsOneResumePerPause(t *testing.T) {
@@ -149,7 +149,23 @@ func TestObserveAutoResumeSendsOneResumePerPause(t *testing.T) {
 		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote)},
 		leaderStep{s(40), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote+"; boss meanwhile: waiting")})
 	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{AutoResume: 2}), nil)
-	if err == nil || !strings.Contains(err.Error(), "took longer than") || rep.State != "failed" {
+	if err == nil || !strings.Contains(err.Error(), "paused for 10m0s without a resume") || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+	if n := len(g.ordersOf("run resume")); n != 1 {
+		t.Fatalf("run resume sent %d times, want 1: %v", n, g.orders)
+	}
+}
+
+// A refused auto resume does not renew the pause: the run still ends at
+// PausedWait, not MaxRun. (The fake leader was never paused, so it refuses
+// the resume with "state".)
+func TestObserveRefusedAutoResumeStillEndsAtPausedWait(t *testing.T) {
+	g := newFakeLeader(t,
+		leaderStep{0, rs("running", 1, 5, "first", "move", "walk", "walking to -1 2 3")},
+		leaderStep{s(5), rs("paused", 2, 5, "first", "pull", "gather", didNotHoldNote)})
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{PausedWait: s(60), MaxRun: s(600), AutoResume: 1}), nil)
+	if err == nil || !strings.Contains(err.Error(), "paused for 1m0s without a resume") || rep.State != "failed" {
 		t.Fatalf("%v %s", err, rep.State)
 	}
 	if n := len(g.ordersOf("run resume")); n != 1 {
