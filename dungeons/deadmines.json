@@ -29,7 +29,7 @@
   "notes": [
     "The Deadmines (map 36), written from the world database export of tortoise-wow (tools/dungeongen/testdata/map36, read with export.sh; creature_movement of the patrols in movement.tsv), the instance script (src/scripts/dungeons/deadmines: instance_deadmines.cpp, deadmines.cpp, boss_mr_smite.cpp), the EventAI and creature_spells rows, Lock.dbc, and the map 36 navmesh (every route point is a point of a path_to route; TestDeadminesOnNavmesh). Wowhead Classic (the instance page zone=1581, the strategy guide 7786 and the npc pages with their comments, fetched with tools/wowhead/wh.py) was read for the kill order, the trash to watch and the boss tips; where it differs from the database or the script the plan follows the server and the README section lists the differences. Status stays draft (not mapped, not live-checked) until the GM-invisible walk (step 2) has checked the route, the doors and the patrols in the instance; dungeon_run refuses it without allow_draft. The patrol periods are estimates (path length at 2.5 yd/s plus the waits), not timed.",
     "Mapping walk 2026-10-15 (GM, invisible, nothing attacked; tests/walk-dm/FINDINGS.txt in the audit folder): entered by area_trigger 78, all 16 legs walked (206 paths complete, 5112 yd, 0 stuck), 249 of 252 spawns seen at the export's places with no entry mismatch, Smite, VanCleef and the Blackguards to 0.1 yd, gunpowder radius 45 holds exactly the 15 spawns of cannon_a and cannon. The two clicked Heavy Doors (26183, 26184) open with one click (flags 32 to 33) and stay open for 50 minutes; they start shut. The walk cannot prove the doors that scripted deaths open: the navmesh and the GM walk go through shut doors. 25 patrol periods were timed (24 within 3 % of the estimate, the miner 79144 at 1.65 yd/s, the Wizard pack of hall at 130.5 s on its own path); nine Defias Companions (3450, level 14-15, hostile, server-made pets 2.3 to 4.8 yd from Pirates) stand with eight planned Pirates and Greenskin's and are members of those groups (no spawn row); the Pirate 79341's Companion is left out with its pack (stern, on no leg). Still open: the three catwalk Overseers, which the route passes 6.6 to 10.8 yd below (so the plan stays a draft), and one live run.",
-    "Route (1611 yd of navmesh path, 16 legs, 130 pull groups, 7 bosses): mine_a and rhahk_zor along the upper mine to Rhahk'Zor (644, opens the Factory Door 13965 by dying); factory and the Heavy Door 17153 at -262.7 -482.4; sneed (Sneed's Shredder 642, then Sneed 643, whose death opens the Heavy Door at -290.3 -537.0); west_area and the Heavy Door 17154 at -243.0 -578.6; hall and harvester (Masterpiece Harvester 61963 on the z 51 plateau, a side branch the navmesh reaches before the foundry); gilnid (down the spiral ramp to Gilnid 1763, whose death opens the Heavy Door 26182 at -168.5 -579.9); cannon_a and cannon (Defias Gunpowder 17155, Defias Cannon 16398, the Iron Clad Door 16397); dock and mr_smite (Mr. Smite 646); deck_a, deck_b and captain_greenskin (647); edwin_vancleef (639). Cookie (645), Miner Johnson (3586), Jared Voss (61961) and the laboratory are named mobs on no leg.",
+    "Route (18 legs, 149 pull groups, 8 bosses; the route oracle's live walk over the legs is 5300 yd, 668 yd more than the 16-leg plan): mine_a, then the upper mine's south tunnel (lab_tunnel) down to the laboratory and Jared Voss (61961, Turtle's custom boss) before Rhahk'Zor (the shorter of the two places the branch can be cut in; the return walks the tunnel back to rhahk_zor's via); rhahk_zor along the upper mine to Rhahk'Zor (644, opens the Factory Door 13965 by dying); factory and the Heavy Door 17153 at -262.7 -482.4; sneed (Sneed's Shredder 642, then Sneed 643, whose death opens the Heavy Door at -290.3 -537.0); west_area and the Heavy Door 17154 at -243.0 -578.6; hall and harvester (Masterpiece Harvester 61963 on the z 51 plateau, a side branch the navmesh reaches before the foundry); gilnid (down the spiral ramp to Gilnid 1763, whose death opens the Heavy Door 26182 at -168.5 -579.9); cannon_a and cannon (Defias Gunpowder 17155, Defias Cannon 16398, the Iron Clad Door 16397); dock and mr_smite (Mr. Smite 646); deck_a, deck_b and captain_greenskin (Captain Greenskin 647); edwin_vancleef (Edwin VanCleef 639).",
     "Doors, from the instance script and the gameobject_scripts rows: Rhahk'Zor's death opens 13965 (state active); Sneed's death opens spawn 26185 (17153 at -290.3 -537.0); Gilnid's death opens spawn 26182 (17153 at -168.5 -579.9); the cannon sets 16397 to active_alt. The levers 101831, 101832, 101834 (gameobject_scripts 26188, 26197, 26192) open the same three doors for 15 s from the far side and are not used; the lever 101833 does something only once the Iron Clad Door is open. Spawns 26183 (-262.7 -482.4) and 26184 (-243.0 -578.6) have no script and no lever: the plan clicks them (use_object, wait_for active), which is what their lock 86 (Quick Open, no key) allows; NOT VERIFIED, the walk must try both.",
     "Mechanics the plan cannot express (the step types do not exist): killing a unit that has no spawn row (Sneed 643, the Defias Overseer the gunpowder summons) is done by a wait_for hostiles_gone, not by a step that names it; a trigger that waits for a door to be shut again; the alarm event after the cannon; picking the Smite phases (nothing to do but heal and survive the 6 s swaps). See the README section on the Deadmines plan.",
     "The CC lists come from the spell lists and Wowhead's guide, not from a run: cc_priority the Wizard (4418: Chains of Ice, Fireball), the Evoker (1729: Flamestrike) and the Squallshaper (1732: Frost Nova, which Wowhead calls the most annoying and which is also the one to keep sheeped at Greenskin); kill_first the Blackguards (636, before Smite's 66 % and VanCleef's adds) and the Goblin Engineer (622: Summon Remote-Controlled Golem, stun the cast or kill the goblin first, the golem goes with it). Wowhead also names Melt Ore (the Craftsman's slowing fire DoT). fleers are the entries whose EventAI flees at 15 % health (command 47).",
@@ -323,8 +323,181 @@
       ]
     },
     {
+      "name": "lab_tunnel",
+      "to": {"x": -73, "y": -404, "z": 56.29},
+      "pull_groups": [
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -87.3985, "y": -421.766, "z": 56.0572}
+          ],
+          "radius": 1
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -76.5884, "y": -435.058, "z": 56.718}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -71, "y": -414, "z": 55.8}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -96.4333, "y": -442.155, "z": 55.8174}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -83, "y": -425, "z": 55.64}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -83.9959, "y": -445.069, "z": 56.0449}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -83, "y": -424, "z": 55.6}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -91.2473, "y": -459.754, "z": 56.0719}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -88, "y": -438, "z": 56.38}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -98.4166, "y": -469.802, "z": 56.2318}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -90, "y": -450, "z": 56.11}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -102.796, "y": -477.032, "z": 54.4928}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -94, "y": -457, "z": 55.9}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -82.5628, "y": -484.323, "z": 54.5806}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -92, "y": -465, "z": 56.44}
+          ]
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -97.2543, "y": -489.712, "z": 54.2621}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": -94, "y": -469, "z": 56.29}
+          ]
+        }
+      ],
+      "notes": [
+        "The upper mine's south tunnel (entered from the mine's east ledge at -73 -404, z 56, down to the laboratory door at -97 -490): the tunnel's Defias Miners (598) and one Defias Mixologist (61960) are on no other leg. Rows from the map 36 spawn export: 2583008, 2583007, 2583009, 2583010, 2583012, 2583013, 2583017, 2583018, 2583082. The two Miners 79129 and 79131 stand in the mine's west pocket, 17.7-17.9 yd from the tunnel mouth in 3-D but behind a wall (no navmesh link; the way to them is 134 yd round the mine) and 2.7-2.9 yd outside their 15 yd aggro radius: not pulled (the test's exemptions carry them). Not walked; every stand is a point of the server path to its pack and 19.5 to 22.9 yd from it (the aggro radius of a level 17 mob against the level-22 party is 15 yd)."
+      ]
+    },
+    {
+      "name": "laboratory",
+      "to": {"x": -93, "y": -477, "z": 55.56},
+      "pull_groups": [
+        {
+          "entries": [61959],
+          "positions": [
+            {"x": -101.098, "y": -497.095, "z": 54.8054}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -86.7989, "y": -503.043, "z": 54.4325}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -91, "y": -482, "z": 54.78}
+          ]
+        },
+        {
+          "entries": [61959],
+          "positions": [
+            {"x": -90.491, "y": -505.258, "z": 54.3517}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -91, "y": -484, "z": 54.7}
+          ]
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -108.696, "y": -506.088, "z": 53.9933}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -96, "y": -489, "z": 54.37}
+          ]
+        },
+        {
+          "entries": [61959, 61960],
+          "positions": [
+            {"x": -98.7702, "y": -514.548, "z": 54.1626},
+            {"x": -99.9165, "y": -521.855, "z": 54.1195}
+          ],
+          "radius": 7,
+          "approach": [
+            {"x": -96, "y": -501, "z": 54.34}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 61961,
+        "position": {"x": -85.063, "y": -525.839, "z": 54.4025},
+        "approach": [
+          {"x": -91.5, "y": -505.5, "z": 54.73}
+        ]
+      },
+      "notes": [
+        "The laboratory (x -85 to -109, y -497 to -526): the Defias Chemists (61959) and Mixologists (61960) around Jared Voss (61961, Turtle's custom boss; spawn row 2582921). Voss is a static spawn (604800 s respawn like every Deadmines boss, no game_event_creature row, no pool, no script; EventAI only says on aggro and death) and stands 15.4 yd from the Mixologist 2583081, so the pair 2583084/2583081 is pulled from -96 -501 (21.2 and 21.7 yd) before him. His spell list 180300 carries Poison Cloud 3815 (a 7 s cast: the interrupt row of 20261018120925); Poison 13298, Withering Poison 13884 and Poisonous Stab 7357 are instant. Every caster is pulled on its own from a stand 21.1 to 21.7 yd away; the room's rats (4075) are critters."
+      ]
+    },
+    {
       "name": "rhahk_zor",
       "to": {"x": -113.3, "y": -386.7, "z": 57.2},
+      "via": [
+        {"x": -98.67, "y": -506.4, "z": 54.21},
+        {"x": -102.4, "y": -498.93, "z": 54.21},
+        {"x": -93.07, "y": -476, "z": 55.81},
+        {"x": -90.93, "y": -453.33, "z": 56.11},
+        {"x": -87.4, "y": -421.8, "z": 56.38},
+        {"x": -75.2, "y": -414.13, "z": 55.91},
+        {"x": -70.93, "y": -401.87, "z": 55.51},
+        {"x": -67.2, "y": -389.33, "z": 55.11},
+        {"x": -72.8, "y": -383.2, "z": 56.51},
+        {"x": -88.27, "y": -378.67, "z": 58.41},
+        {"x": -106.67, "y": -384, "z": 57.01}
+      ],
       "pull_groups": [
         {
           "entries": [598],

@@ -20,7 +20,12 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+// deadmines was already 3 at turtle-agent 16efe83 and is not green on that head (the pack fixes of r12/r14: the Taskmaster 4417 pull's
+// radius 12 has two 622 and a 1731 within it, and a 634 catwalk Overseer stands in a 622 group's radius 9); this lane adds the fourth:
+// the laboratory's Chemist 2583080 (radius 7 for its 6 yd wander) has the Mixologist 2583082 8.3 yd away, which the laboratory's
+// predecessor leg lab_tunnel pulls and kills first. The plan is a draft; the four are recorded here rather than hidden by cutting a
+// radius the live pull needs.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "deadmines": 4}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
