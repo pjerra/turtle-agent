@@ -2,7 +2,7 @@
   "version": 1,
   "name": "karazhan_crypt",
   "kind": "dungeon",
-  "status": "draft (reordered 2026-10-25: the upper floors first, the shaft dive last, the lower crypt at the end; Corpsemuncher out: its wing has no dry contact; not live-checked; hivaxxis leg reordered with a stand for every pack after r40 slot5b)",
+  "status": "draft (reordered 2026-10-25: upper floors, shaft dive, lower crypt last; Corpsemuncher out: no dry contact; not live-checked; hivaxxis reordered after r40 slot5b; lower-crypt pools dry 2026-10-26 after proof20d2)",
   "map": 800,
   "entrance": {"x": -11068.1, "y": -1806.4, "z": 52.7},
   "entrance_trigger": 5008,
@@ -35,6 +35,7 @@
     "Patrols: Guard Captain Gort 92935 (503 yd, 201 s) walks the hall and a Risen Crypt Guard 2571714 (501 yd, 200 s) the terraces; an Unseen Stalker 2567896 (325 yd, 130 s) the upper hall; two Stalkers 2567937/2567938 (187/145 yd, 75/58 s) and a Guard 2568426 (221 yd, 88 s) the lower crypt. Every pull within 30 yd of a path carries its patrol block with period_estimate (path length at 2.5 yd/s, not measured): 104 pulls.",
     "No EventAI flee row exists for any map-800 creature in this data: no trash flees at 15 %. No trash heals. The trash is undead type 6 (no Polymorph): no_cc lists it and cc_priority is empty. kill_first: the Death Coil / Banshee Shriek / frost casters 91918 91913 91911 91925.",
     "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only: no leg climbs back up the shaft. commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to. The hivaxxis leg walks its room east to west (stalker, four creepers, one creeper, the pair, then the boss) with a stand on the server floor before every pack: r40 slot5b stopped there (step 256 deferred, 257-258 unreachable) after pulling the pair first from the east end and walking into the z -13.5 ledge pocket at -11245.7 -1747.3 -15.0, which no corridor point reaches.",
+    "Lower-crypt pools (2026-10-26, proof20d2 steps 248 and 254): the exporter's 50 yd cuts and the Hivaxxis leg's first approach point crossed two water polygons of the lower crypt (the pool at -11138.4 -1741.7, floor -29.6; the flooded basin at -11215.79 -1743.7, floor -29.74). proof20d2's `cmd move` to each was refused 'unreachable' after the lead sank into the water (at step 254 it already stood on the point). Both walks now use dry stands on the pool rims (flag 0x1 polygons): pull group 23's approach goes around the first pool west and south (-11152 -1710, -11152 -1758, -11154 -1790, -11150 -1800), and the Hivaxxis leg's first hop goes around the basin west and north (-11233 -1755, -11233 -1706) before the unchanged corridor chain. Every hop is 0x1 on the server-exact tile 8005334 (6a8168b1), stays on dry floor, and the replay is 0 refused.",
     "Corpsemuncher (91917) is out of the plan: his wing is a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) whose only contact to the rest of the crypt is the off-mesh swim across the flooded shaft (-11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8), water at both ends. The core answers a both-ends-in-water move with a straight UNDERWATER path (0x81) and the bots' mover refuses that type (BFD-STUCK-POINTS C2/C3): the swim is one-way for the party in practice too - a bot that starts in water makes no way toward a dry point (r40, step 113). His 11 south-wing pulls stay mapped in this file's history (20261025001100, leg 5) for when the swim works; the other way to that wing is the 57.6 yd swim from the south ramp, same block.",
     "Turtle custom 5-man: plan level band 59-60, trash 60-61, bosses 62-63. The wiki has 58-60.",
     "Radii: farthest position from the centre + 0.5 yd, floor 5, +5 where a member wanders (5 to 12.8 yd): the round is how far from the row's centre the pull takes its entries. The 3-unit pack at -11185.1 -1621.0 4.8 is split (a Remains + its Rotten Zombie 4.3 yd apart, the other Remains alone). The overlap test's 8 recorded findings are Remains 91924 that never wake (7 in the south wing and the lower crypt, dead props) and one awake Remains 12.4 yd from a wandering pull - outside its 10 yd radius, inside the check's 3 yd aggro margin."
@@ -4172,7 +4173,13 @@
             "period_s": 58,
             "period_estimate": true,
             "source": "2567938"
-          }
+          },
+          "approach": [
+            {"x": -11152, "y": -1710, "z": -28},
+            {"x": -11152, "y": -1758, "z": -29},
+            {"x": -11154, "y": -1790, "z": -28.5},
+            {"x": -11150, "y": -1800, "z": -28.4}
+          ]
         },
         {
           "entries": [91924, 91924, 91923],
@@ -4187,7 +4194,10 @@
       "boss": {
         "entry": 91920,
         "position": {"x": -11214.6, "y": -1800.15, "z": -28.3992}
-      }
+      },
+      "notes": [
+        "pull group 23's approach walks around the pool (water polygon at -11138.4 -1741.7, floor -29.6) west and south: -11152 -1710, -11152 -1758, -11154 -1790, -11150 -1800, 12.7 yd from the pull row. proof20d2 step 248's exporter cut -11138.4 -1733.6 -31.4 lay in the pool and its `cmd move` was refused when the walk sank to -31.4; the cuts are gone and every new row is on a dry 0x1 floor."
+      ]
     },
     {
       "name": "hivaxxis",
@@ -4201,8 +4211,8 @@
           "ambush": true,
           "radius": 5,
           "approach": [
-            {"x": -11215.79, "y": -1743.7, "z": -29.24},
-            {"x": -11199.96, "y": -1704.06, "z": -28.24},
+            {"x": -11233, "y": -1755, "z": -28.4},
+            {"x": -11233, "y": -1706, "z": -28.3},
             {"x": -11191.09, "y": -1668.78, "z": -27.97},
             {"x": -11164.57, "y": -1698.66, "z": -27.97}
           ]
@@ -4293,6 +4303,7 @@
       },
       "notes": [
         "walked order east to west along the spider room's own corridor: the Unseen Stalker 91923 behind the Tomb door first, then the four Tomb Creepers 91930 at -11206.6 -1743.9, the creeper at -11229.1, the pair at -11244.2/-11241.1 and Hivaxxis last. Every stand is a point of the server path (-14.78..-15.08, 10.1-17.0 yd from its pack) and every hop is 0x1, ends within 1 yd: the offline exporter cut its own approach points at z -15.27/-15.29, 0.4-0.5 yd under the -14.8 floor, and those are no walkable target from the west end (r40 slot5b steps 257-258).",
+        "the first hop from the lower crypt's `to` goes around the flooded basin (water polygon at -11215.79 -1743.7, floor -29.74) on its west and north shores: -11233 -1755 then -11233 -1706, then the corridor chain. proof20d2 step 254's `cmd move -11215.8 -1743.7 -31.4` was refused with the lead already on that point, in the water; the basin point is gone and every new row is on a dry 0x1 floor.",
         "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5 (spawns ACTIVE: both runs walked through it)"
       ]
     }
