@@ -45,7 +45,9 @@ const (
 	ZoneTimeout      = 180 * time.Second
 	ZoneTriggerTries = 3
 	ZoneTriggerWait  = 10 * time.Second
-	FollowMaxDeaths  = 10 // Config.MaxLeaderDeaths of the recovery driver
+	FollowMaxDeaths  = 10               // Config.MaxLeaderDeaths of the recovery driver
+	FollowHeadingYd  = 6.0              // the lead's heading is known once its trail (and its newest look) is this long
+	FollowNoHeadWait = 20 * time.Second // a lead over FollowHoldYd away with no heading this long: the player walks to it directly
 	FollowNotes      = 50
 )
 
@@ -106,28 +108,33 @@ type PlayerFollower struct {
 	d   *Driver
 	clk Clock
 
-	mu       sync.Mutex
-	status   FollowStatus
-	trail    []Point
-	trailLen float64
-	lastSeen time.Time
-	leadInPt bool
-	lead     string
-	pending  string // a lead switch SetLead asked for; the loop picks it up at the next tick
-	runCtx   context.Context
-	failRun  int
-	holdGUID packet.GUID
-	holdNote bool
-	holdAt   time.Time
-	ahead    bool        // the ahead note is out (until the state is near again)
-	brain    bool        // the brain note is out
-	leash    bool        // the leash note is out
-	hitting  bool        // the melee swing is on
-	assistID packet.GUID // the mob the swing is on (no re-target while the row keeps it as the target)
-	waitBack bool        // after recovery: waiting until the lead is in view again
-	zoneAt   time.Time
-	zoneN    int
-	zoneNote bool
+	mu        sync.Mutex
+	status    FollowStatus
+	trail     []Point
+	trailLen  float64
+	lastSeen  time.Time
+	leadInPt  bool
+	lead      string
+	pending   string // a lead switch SetLead asked for; the loop picks it up at the next tick
+	runCtx    context.Context
+	failRun   int
+	holdGUID  packet.GUID
+	holdNote  bool
+	holdAt    time.Time
+	ahead     bool        // the ahead note is out (until the state is near again)
+	brain     bool        // the brain note is out
+	leash     bool        // the leash note is out
+	hitting   bool        // the melee swing is on
+	assistID  packet.GUID // the mob the swing is on (no re-target while the row keeps it as the target)
+	assistOn  bool        // the player's own row was seen with assistID as its target since the swing began
+	waitBack  bool        // after recovery: waiting until the lead is in view again
+	zoneAt    time.Time
+	zoneN     int
+	zoneNote  bool
+	noHead    time.Time // when the player first waited for the lead's heading (zero: not waiting)
+	headNote  bool      // the no-heading note is out (until the heading is known)
+	frontNote bool      // the "way passes in front of the lead" note is out (until the state is near again)
+	lostOut   bool      // the lost event is out (until the lead is seen again)
 }
 
 func NewFollower(g FollowGame, cfg FollowConfig, clk Clock) *PlayerFollower {
@@ -148,7 +155,7 @@ func NewFollower(g FollowGame, cfg FollowConfig, clk Clock) *PlayerFollower {
 		walkWatch = 500 * time.Millisecond
 	}
 	f := &PlayerFollower{g: g, cfg: cfg, clk: clk, lead: cfg.Lead}
-	f.d = NewDriver(cfg.Plan, g, Config{Brain: cfg.Brain, MaxLeaderDeaths: FollowMaxDeaths, WalkWatch: walkWatch}, clk)
+	f.d = NewDriver(cfg.Plan, g, Config{Brain: cfg.Brain, MaxLeaderDeaths: FollowMaxDeaths, WalkWatch: walkWatch, EventMode: "follow"}, clk)
 	f.status.Running = true
 	f.status.State = "starting"
 	f.status.Plan = cfg.Plan.Name
@@ -178,6 +185,16 @@ func (f *PlayerFollower) SetLead(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pending = name
+}
+
+// WantedLead is the lead bot the loop follows from its next tick on: a switch SetLead asked for, else the current lead.
+func (f *PlayerFollower) WantedLead() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pending != "" {
+		return f.pending
+	}
+	return f.lead
 }
 
 // Run runs until ctx ends or the mode stops itself; sets Running false at the end.
@@ -352,6 +369,13 @@ func (f *PlayerFollower) tick() string {
 		f.status.LeadYd = dist3(self, l)
 		f.status.LeadAt = &Point{X: l.X, Y: l.Y, Z: l.Z}
 		f.waitBack = false
+		f.lostOut = false
+		f.mu.Unlock()
+	}
+
+	if seen && f.headingKnown() {
+		f.mu.Lock()
+		f.noHead, f.headNote = time.Time{}, false
 		f.mu.Unlock()
 	}
 
@@ -412,6 +436,8 @@ func (f *PlayerFollower) tick() string {
 		f.status.State = "near"
 		f.failRun = 0
 		f.ahead = false
+		f.frontNote = false
+		f.holdAt = time.Time{}
 		f.mu.Unlock()
 		return ""
 	}
@@ -430,7 +456,23 @@ func (f *PlayerFollower) tick() string {
 	at := f.cfg.Near + (f.cfg.Far-f.cfg.Near)/2
 	t, ok := f.trailPoint(at)
 	if !ok {
+		// No trail target: with no heading of the lead yet the player may stand in front of it, and the way to it would go
+		// through its front, so it stands still (a lead over 60 yd away: walked to directly after FollowNoHeadWait).
+		if !f.noHeadingWalk(now, dist) {
+			f.mu.Lock()
+			f.status.State = "holding"
+			f.holdAt = time.Time{}
+			f.mu.Unlock()
+			return ""
+		}
 		tp, ok2, hold := f.fallbackTarget(self, l, now)
+		if hold == frontHoldText {
+			f.mu.Lock()
+			f.status.State = "holding"
+			f.holdAt = time.Time{}
+			f.mu.Unlock()
+			return ""
+		}
 		if hold != "" {
 			f.mu.Lock()
 			f.status.State = "holding"
@@ -536,17 +578,103 @@ func (f *PlayerFollower) isAhead(self Point) bool {
 	if lead == nil {
 		return false
 	}
-	pts := append(trail, *lead)
-	h, ok := trailBackPoint(pts, TrailHeadingYd)
+	h, ok := headingFrom(trail, *lead)
 	if !ok {
 		return false
 	}
-	hx, hy := lead.X-h.X, lead.Y-h.Y
-	sx, sy := self.X-lead.X, self.Y-lead.Y
+	return aheadOf(self, *lead, h, near)
+}
+
+// headingFrom is the trail point TrailHeadingYd behind the lead at l, when the polyline (trail..., l) is FollowHeadingYd long.
+func headingFrom(trail []Point, l Point) (Point, bool) {
+	pts := append(append([]Point(nil), trail...), l)
+	var n float64
+	for i := 0; i+1 < len(pts); i++ {
+		n += dist3(pts[i], pts[i+1])
+	}
+	if n < FollowHeadingYd {
+		return Point{}, false
+	}
+	return trailBackPoint(pts, TrailHeadingYd)
+}
+
+// aheadOf reports whether p stands in front of the lead at l, whose heading comes from the point h behind it: on the front
+// side (2D) and farther than near.
+func aheadOf(p, l, h Point, near float64) bool {
+	hx, hy := l.X-h.X, l.Y-h.Y
+	sx, sy := p.X-l.X, p.Y-l.Y
 	if sx*hx+sy*hy <= 0 {
 		return false
 	}
-	return hdist(self, *lead) > near
+	return hdist(p, l) > near
+}
+
+// headingKnown reports whether the lead's heading is known now.
+func (f *PlayerFollower) headingKnown() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.status.LeadAt == nil {
+		return false
+	}
+	_, ok := headingFrom(f.trail, *f.status.LeadAt)
+	return ok
+}
+
+// noHeadingWalk decides a walk toward the lead that is not on its trail: with the heading known it may go (the way is checked
+// against it, wayInFront); with none it waits, except that a lead over FollowHoldYd away is walked to directly once the wait
+// has lasted FollowNoHeadWait (note "no heading: direct walk").
+func (f *PlayerFollower) noHeadingWalk(now time.Time, dist float64) bool {
+	if f.headingKnown() {
+		f.mu.Lock()
+		f.noHead, f.headNote = time.Time{}, false
+		f.mu.Unlock()
+		return true
+	}
+	f.mu.Lock()
+	if f.noHead.IsZero() {
+		f.noHead = now
+	}
+	since := f.noHead
+	note := !f.headNote
+	f.headNote = true
+	f.mu.Unlock()
+	if dist > FollowHoldYd && now.Sub(since) >= FollowNoHeadWait {
+		f.note(fmt.Sprintf("no heading: direct walk (the lead bot is %.0f yd away and has not moved for %.0f s)", dist, now.Sub(since).Seconds()))
+		return true
+	}
+	if note {
+		f.note(fmt.Sprintf("the lead bot's heading is not known yet: standing still until it has moved %.0f yd (it is %.0f yd away)", FollowHeadingYd, dist))
+	}
+	return false
+}
+
+// wayInFront reports whether a sample of the way pts (from the player to its goal) lies in front of the lead at l, by the
+// lead's heading; false when the heading is not known (noHeadingWalk decided that case).
+func (f *PlayerFollower) wayInFront(pts []Point, l Point) bool {
+	f.mu.Lock()
+	h, ok := headingFrom(f.trail, l)
+	near := f.cfg.Near
+	f.mu.Unlock()
+	if !ok {
+		return false
+	}
+	for _, s := range samplePath(pts, FallbackSampleYd) {
+		if aheadOf(s, l, h, near) {
+			return true
+		}
+	}
+	return false
+}
+
+// frontHold notes once that the way to the lead passes in front of it.
+func (f *PlayerFollower) frontHold(dist float64) {
+	f.mu.Lock()
+	note := !f.frontNote
+	f.frontNote = true
+	f.mu.Unlock()
+	if note {
+		f.note(fmt.Sprintf("the way to the lead bot (%.0f yd) passes in front of it: standing still until it has walked past", dist))
+	}
 }
 
 // partyCombat reports whether the party is in a fight.
@@ -666,6 +794,9 @@ func (f *PlayerFollower) walkToTick(t Point, dist float64, kind string, set func
 	return ""
 }
 
+// frontHoldText is fallbackTarget's hold when the way passes in front of the lead: the player stands still, with no time limit.
+const frontHoldText = "front"
+
 // fallbackTarget finds the standoff way toward the lead when there is no trail.
 func (f *PlayerFollower) fallbackTarget(self, l Point, now time.Time) (Point, bool, string) {
 	pts, err := f.g.PathPoints(f.ctx(), l)
@@ -675,6 +806,10 @@ func (f *PlayerFollower) fallbackTarget(self, l Point, now time.Time) (Point, bo
 	t, ok := StandoffPoint(pts, float32(f.cfg.Near))
 	if !ok {
 		return Point{}, false, ""
+	}
+	if f.wayInFront(pts, l) {
+		f.frontHold(dist3(self, l))
+		return Point{}, false, frontHoldText
 	}
 	samples := samplePath(pts, FallbackSampleYd)
 	for _, u := range f.g.Units() {
@@ -751,6 +886,9 @@ func samplePath(pts []Point, every float64) []Point {
 // combatTick decides one tick of a fight.
 func (f *PlayerFollower) combatTick(dist float64, l, self Point) string {
 	cfg := f.cfg
+	f.mu.Lock()
+	f.holdAt = time.Time{} // a fight ends a fallback hold: its 60 s start again after it
+	f.mu.Unlock()
 	brainRuns := cfg.BrainRunning != nil && cfg.BrainRunning()
 	if cfg.Assist && !brainRuns {
 		var leadRow *objects.Unit
@@ -774,11 +912,19 @@ func (f *PlayerFollower) combatTick(dist float64, l, self Point) string {
 		}
 		if mob != nil {
 			mp := Point{X: mob.X, Y: mob.Y, Z: mob.Z}
-			f.mu.Lock()
-			swung := f.assistID == mob.GUID
-			f.mu.Unlock()
 			row, _ := f.g.SelfRow()
-			if !swung && row.Target != mob.GUID {
+			f.mu.Lock()
+			same := f.assistID == mob.GUID
+			if same && row.Target == mob.GUID {
+				f.assistOn = true // the swing is on: the row shows it
+			}
+			// A new mob, or the same one whose swing the row showed and no longer does (the core writes 0 into the
+			// target field at AttackStop): target and swing again. The same mob not yet shown on the row is the
+			// update still on its way: no second swing.
+			again := same && f.assistOn && row.Target != mob.GUID
+			swing := (!same && row.Target != mob.GUID) || again
+			f.mu.Unlock()
+			if swing {
 				if err := f.g.Target(f.ctx(), mob.GUID); err != nil {
 					f.note(fmt.Sprintf("assist: %v", err))
 				} else if err := f.g.Attack(f.ctx()); err != nil {
@@ -788,8 +934,13 @@ func (f *PlayerFollower) combatTick(dist float64, l, self Point) string {
 					f.status.Assists++
 					f.hitting = true
 					f.assistID = mob.GUID
+					f.assistOn = false
 					f.mu.Unlock()
-					f.note(fmt.Sprintf("assist: attacking %s (entry %d), the lead bot's target", mob.Name, mob.Entry))
+					if again {
+						f.note(fmt.Sprintf("assist: the swing at %s (entry %d) stopped: attacking it again", mob.Name, mob.Entry))
+					} else {
+						f.note(fmt.Sprintf("assist: attacking %s (entry %d), the lead bot's target", mob.Name, mob.Entry))
+					}
 				}
 			}
 			if d := dist3(self, mp); d > AssistMeleeYd+2 && d <= AssistReachYd {
@@ -807,11 +958,7 @@ func (f *PlayerFollower) combatTick(dist float64, l, self Point) string {
 		f.mu.Unlock()
 	}
 	if dist > CombatLeashYd {
-		pts, err := f.g.PathPoints(f.ctx(), l)
-		if err != nil || len(pts) < 2 {
-			pts = []Point{self, l}
-		}
-		if t, ok := StandoffPoint(pts, CombatStandYd); ok {
+		if t, ok := f.leashTarget(dist, l, self); ok {
 			f.mu.Lock()
 			if !f.leash {
 				f.leash = true
@@ -829,6 +976,28 @@ func (f *PlayerFollower) combatTick(dist float64, l, self Point) string {
 	}
 	f.mu.Unlock()
 	return ""
+}
+
+// leashTarget is the combat leash's goal, CombatStandYd short of the lead along the way to it, or false when the player must
+// not walk: the lead's heading is not known yet (noHeadingWalk), or the way passes in front of the lead (the fight is there;
+// a player standing in front of the lead is on that way's first point, and the lead comes past it).
+func (f *PlayerFollower) leashTarget(dist float64, l, self Point) (Point, bool) {
+	if !f.noHeadingWalk(f.clk.Now(), dist) {
+		return Point{}, false
+	}
+	pts, err := f.g.PathPoints(f.ctx(), l)
+	if err != nil || len(pts) < 2 {
+		pts = []Point{self, l}
+	}
+	t, ok := StandoffPoint(pts, CombatStandYd)
+	if !ok {
+		return Point{}, false
+	}
+	if f.wayInFront(pts, l) {
+		f.frontHold(dist)
+		return Point{}, false
+	}
+	return t, true
 }
 
 // zoneTick handles the player off the plan's map with the lead not seen.
@@ -898,15 +1067,12 @@ func (f *PlayerFollower) zoneTick(now time.Time, self Point) string {
 	f.zoneN++
 	zn = f.zoneN
 	f.mu.Unlock()
-	end := now.Add(ZoneTriggerWait)
-	for f.clk.Now().Before(end) {
-		if f.g.Map() == f.cfg.Plan.Map {
-			break
-		}
-		if err := f.clk.Sleep(f.ctx(), ZoneTriggerWait); err != nil {
+	// The map is looked at every FollowTick until it changes or ZoneTriggerWait has passed (the injected clock).
+	end := f.clk.Now().Add(ZoneTriggerWait)
+	for f.g.Map() != f.cfg.Plan.Map && f.clk.Now().Before(end) {
+		if err := f.clk.Sleep(f.ctx(), FollowTick); err != nil {
 			return ""
 		}
-		break
 	}
 	if f.g.Map() == f.cfg.Plan.Map {
 		f.mu.Lock()
@@ -953,7 +1119,12 @@ func (f *PlayerFollower) lostTick(now time.Time, self Point) string {
 	lead := f.status.Lead
 	lostAfter := f.cfg.LostAfter
 	inParty := f.leadInPt
+	lostOnce := !f.lostOut
+	f.lostOut = true
 	f.mu.Unlock()
+	if lostOnce {
+		f.emit("lost", nil)
+	}
 	if now.Sub(lastSeen) > lostAfter {
 		if !inParty {
 			return fmt.Sprintf("the lead bot %s left the party (%.0f s): the mode stops", lead, now.Sub(lastSeen).Seconds())

@@ -236,6 +236,10 @@ type Config struct {
 	MaxWipeRecoveries  int           // recovered wipes in one run (RecoverWipe)
 	WipeRecoverTimeout time.Duration // the members' corpse runs after a wipe
 	SicknessMax        time.Duration // longest wait for resurrection sickness (WaitSickness)
+
+	// EventMode, when set, is put in every dungeon_leader event as data.mode ("follow": the player follow mode's own recovery,
+	// not a run's leader), so that a run analysis can tell them apart.
+	EventMode string
 }
 
 // DefaultConfig is the Driver's limits for a live run.

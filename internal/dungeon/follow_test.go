@@ -399,9 +399,18 @@ func TestFollowRecoversWithoutAWord(t *testing.T) {
 	if len(f.walks) != n {
 		t.Fatalf("walked while waiting after recovery")
 	}
-	// The lead is in view again: the mode follows behind it.
+	// The lead is in view again, 30 yd from the player at the graveyard: with no heading of it yet the player stands still;
+	// once it has walked on (away from the player) the mode follows behind it.
 	leadAt(f, Point{20, 0, 0})
-	for range 10 {
+	if reason := fr.tick(); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	f.now = f.now.Add(FollowTick)
+	if s := fr.Status().State; s != "holding" || len(f.walks) != n {
+		t.Fatalf("state %q walks %d after the lead is back with no heading, want holding and no walk", s, len(f.walks)-n)
+	}
+	for x := float32(18); x >= 4; x -= 2 {
+		leadAt(f, Point{x, 0, 0})
 		if reason := fr.tick(); reason != "" {
 			t.Fatalf("stopped: %s", reason)
 		}
@@ -411,7 +420,7 @@ func TestFollowRecoversWithoutAWord(t *testing.T) {
 		f.now = f.now.Add(FollowTick)
 	}
 	if s := fr.Status().State; s != "near" && s != "walking" {
-		t.Fatalf("state %q after the lead is back, want near/walking", s)
+		t.Fatalf("state %q after the lead walked on, want near/walking (self %v)", s, f.pos)
 	}
 	if len(f.chats) != 0 || len(f.gms) != 0 {
 		t.Fatalf("sent a chat or GM line: chats %q gms %q", f.chats, f.gms)
@@ -596,12 +605,15 @@ func TestFollowZoneTriggerGivesUp(t *testing.T) {
 func TestFollowFallbackHoldsForAPackOnTheWay(t *testing.T) {
 	f, p := followFixture(t, false)
 	fr := newFollowerForTest(f, p, nil)
-	leadAt(f, Point{60, 0, 0})                      // seen once: no trail yet
 	addHostile(f, 0x20, Point{15, 10, 0}, false, 0) // 10 yd off the way, 46 yd from the lead
-	if reason := fr.tick(); reason != "" {
-		t.Fatalf("stopped: %s", reason)
+	// The lead walks 54 -> 60, away from the player at 0: its heading is known, its trail (6 yd) too short for a trail target.
+	for x := float32(54); x <= 60; x += 2 {
+		leadAt(f, Point{x, 0, 0})
+		if reason := fr.tick(); reason != "" {
+			t.Fatalf("stopped: %s", reason)
+		}
+		f.now = f.now.Add(FollowTick)
 	}
-	f.now = f.now.Add(FollowTick)
 	if reason := runTicks(f, fr, 3); reason != "" {
 		t.Fatalf("stopped: %s", reason)
 	}
@@ -759,5 +771,313 @@ func TestFollowWalksUnderTheMoveLock(t *testing.T) {
 	}
 	if br.holds != len(f.moveLog) {
 		t.Fatalf("holds %d moves %d", br.holds, len(f.moveLog))
+	}
+}
+
+// Review round 2 (ta-follow-r2).
+
+// walkLead moves the lead from x0 to x1 in 2 yd steps (one tick each) along y 0.
+func walkLead(t *testing.T, f *followFake, fr *PlayerFollower, x0, x1 float32) {
+	t.Helper()
+	step := float32(2)
+	if x1 < x0 {
+		step = -2
+	}
+	for x := x0; (step > 0 && x <= x1) || (step < 0 && x >= x1); x += step {
+		leadAt(f, Point{x, 0, 0})
+		if reason := fr.tick(); reason != "" {
+			t.Fatalf("tick at lead x %.0f stopped: %s", x, reason)
+		}
+		f.now = f.now.Add(FollowTick)
+	}
+}
+
+// Item 5, backlog 33 inside the band: a player 12 yd AHEAD of the lead (the band is 15) is not "near": it walks back behind it.
+func TestFollowWalksBackFromAheadInsideTheBand(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	f.pos = Point{-12, 0, 0}
+	walkLead(t, f, fr, 0, 40) // the player trails it 12 yd behind, never walking far
+	f.walks = nil
+	f.pos = Point{52, 0, 0} // 12 yd ahead of the lead at 40, heading +x
+	if reason := runTicks(f, fr, 3); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) == 0 {
+		t.Fatalf("no walk with the player 12 yd ahead of the lead: %+v", fr.Status())
+	}
+	if g := f.walks[0]; g.X >= 40 {
+		t.Fatalf("walk goal %v not behind the lead (x 40)", g)
+	}
+}
+
+// Item 4: with no heading of the lead (here: first sight) the player stands still; it walks toward the lead only once the lead
+// has moved and the way does not pass in front of it.
+func TestFollowNoHeadingStandsStill(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	f.pos = Point{20, 0, 0}
+	leadAt(f, Point{0, 0, 0}) // first sight, 20 yd away: the player may stand in front of it
+	if reason := runTicks(f, fr, 20); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) != 0 {
+		t.Fatalf("walked with no heading of the lead: %v", f.walks)
+	}
+	if st := fr.Status(); st.State != "holding" || !lastNoteHas(st, "heading is not known yet") {
+		t.Fatalf("want holding with the heading note: %+v", st)
+	}
+	// The lead walks toward the player (heading +x): the player is in front of it, and the way to the lead is its front.
+	walkLead(t, f, fr, 2, 8)
+	if len(f.walks) != 0 {
+		t.Fatalf("walked through the lead's front: %v", f.walks)
+	}
+	if !lastNoteHas(fr.Status(), "passes in front of it") {
+		t.Fatalf("no front note: %+v", fr.Status())
+	}
+}
+
+func TestFollowNoHeadingWalksOnceTheLeadWalksAway(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	f.pos = Point{20, 0, 0}
+	leadAt(f, Point{0, 0, 0})
+	if reason := runTicks(f, fr, 4); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) != 0 {
+		t.Fatalf("walked with no heading: %v", f.walks)
+	}
+	walkLead(t, f, fr, -2, -8) // away from the player: heading -x, the player behind it
+	if len(f.walks) == 0 {
+		t.Fatalf("no walk once the lead walked away: %+v", fr.Status())
+	}
+	for _, g := range f.walks {
+		if g.X < leadRow(f).X {
+			t.Fatalf("walk goal %v in front of the lead (x %.0f, heading -x)", g, leadRow(f).X)
+		}
+	}
+}
+
+// Item 4: a lead over 60 yd away that never moves is walked to directly, but only after FollowNoHeadWait.
+func TestFollowNoHeadingFarWalksDirectlyAfter20s(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	leadAt(f, Point{70, 0, 0})
+	if reason := runTicks(f, fr, 39); reason != "" { // 19.5 s
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) != 0 {
+		t.Fatalf("walked before %v with no heading: %v", FollowNoHeadWait, f.walks)
+	}
+	if reason := runTicks(f, fr, 2); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) == 0 || !lastNoteHas(fr.Status(), "no heading: direct walk") {
+		t.Fatalf("no direct walk after %v: walks %v %+v", FollowNoHeadWait, f.walks, fr.Status())
+	}
+}
+
+// Item 4: the combat leash never walks through the lead's front: neither from in front of it nor with no heading.
+func TestFollowLeashNeverThroughTheFront(t *testing.T) {
+	inFight := func(f *followFake, at Point) {
+		m := f.add(healer, 0, at)
+		m.Type, m.Name, m.Hostile, m.InParty, m.InCombat = "player", "Heal", false, true, true
+	}
+	t.Run("ahead", func(t *testing.T) {
+		f, p := followFixture(t, false)
+		fr := newFollowerForTest(f, p, nil)
+		f.pos = Point{-12, 0, 0}
+		walkLead(t, f, fr, 0, 40)
+		f.walks = nil
+		inFight(f, Point{40, 0, 0})
+		f.pos = Point{90, 0, 0} // 50 yd in front of the lead (heading +x)
+		if reason := runTicks(f, fr, 3); reason != "" {
+			t.Fatalf("stopped: %s", reason)
+		}
+		if len(f.walks) != 0 {
+			t.Fatalf("leash walk through the front: %v", f.walks)
+		}
+		if st := fr.Status(); st.State != "combat" {
+			t.Fatalf("state %q, want combat", st.State)
+		}
+	})
+	t.Run("no heading", func(t *testing.T) {
+		f, p := followFixture(t, false)
+		fr := newFollowerForTest(f, p, nil)
+		leadAt(f, Point{50, 0, 0}) // first sight, 50 yd away
+		inFight(f, Point{50, 0, 0})
+		if reason := runTicks(f, fr, 3); reason != "" {
+			t.Fatalf("stopped: %s", reason)
+		}
+		if len(f.walks) != 0 {
+			t.Fatalf("leash walk with no heading: %v", f.walks)
+		}
+	})
+}
+
+// Item 7: the 60 s of a blocked fallback way are one hold: a fight or the band in between starts them again.
+func TestFollowFallbackHoldRestartsAfterAFightOrTheBand(t *testing.T) {
+	for _, between := range []string{"fight", "band"} {
+		t.Run(between, func(t *testing.T) {
+			f, p := followFixture(t, false)
+			fr := newFollowerForTest(f, p, nil)
+			addHostile(f, 0x20, Point{15, 10, 0}, false, 0)
+			walkLead(t, f, fr, 54, 60)
+			if reason := runTicks(f, fr, 100); reason != "" { // 50 s held
+				t.Fatalf("stopped: %s", reason)
+			}
+			if s := fr.Status().State; s != "holding" {
+				t.Fatalf("state %q, want holding", s)
+			}
+			switch between {
+			case "fight":
+				m := f.add(healer, 0, Point{60, 0, 0})
+				m.Type, m.Name, m.Hostile, m.InParty, m.InCombat = "player", "Heal", false, true, true
+				if reason := runTicks(f, fr, 1); reason != "" {
+					t.Fatalf("stopped: %s", reason)
+				}
+				m.InCombat = false
+			case "band":
+				f.pos = Point{50, 0, 0} // 10 yd behind the lead
+				if reason := runTicks(f, fr, 1); reason != "" {
+					t.Fatalf("stopped: %s", reason)
+				}
+				if s := fr.Status().State; s != "near" {
+					t.Fatalf("state %q in the band, want near", s)
+				}
+			}
+			f.pos = Point{0, 0, 0}
+			f.walks = nil
+			if reason := runTicks(f, fr, 40); reason != "" { // 20 s held again: 70 s since the first hold
+				t.Fatalf("a hold after a %s stopped as if it had lasted since the first: %s", between, reason)
+			}
+			if s := fr.Status().State; s != "holding" {
+				t.Fatalf("state %q, want holding again", s)
+			}
+		})
+	}
+}
+
+// Item 8: after the area trigger the map is looked at every tick: a zone-in 1 s later is seen 1 s later, not after 10 s.
+func TestFollowZoneWaitPollsEachTick(t *testing.T) {
+	f, p := followFixture(t, true)
+	z := &zoneFake{followFake: f} // the trigger itself changes nothing: the map changes 1 s later
+	fr := NewFollower(z, FollowConfig{Plan: p, Lead: "Tank", WalkWatch: 2 * time.Millisecond}, f.clock())
+	f.mapID, f.pos = 0, Point{98, 0, 0}
+	leadAt(f, Point{100, 0, 0})
+	if reason := fr.tick(); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	f.now = f.now.Add(FollowTick)
+	f.units = nil
+	var in time.Time
+	f.onTick = func(g *fakeGame) {
+		if len(g.dead.triggerIDs) == 0 {
+			return
+		}
+		if in.IsZero() {
+			in = g.now.Add(time.Second - FollowTick) // the first sleep after the trigger has already passed one tick
+		}
+		if !g.now.Before(in) {
+			g.mapID, g.pos = 70, Point{95, 0, 0}
+		}
+	}
+	var before, after time.Time
+	for range 100 {
+		before = f.now
+		if reason := fr.tick(); reason != "" {
+			t.Fatalf("stopped: %s", reason)
+		}
+		after = f.now
+		if fr.Status().ZoneIns == 1 {
+			break
+		}
+		f.now = f.now.Add(FollowTick)
+	}
+	if fr.Status().ZoneIns != 1 {
+		t.Fatalf("no zone-in: %+v", fr.Status())
+	}
+	if d := after.Sub(before); d > 2*time.Second {
+		t.Fatalf("the zoning tick took %v of the clock: the map was not looked at each tick", d)
+	}
+}
+
+// Item 9: the player's own swing stopping (its row's target goes to 0) while the lead's target stays is a re-target and a
+// new swing; the row not showing the target yet right after the swing is not.
+func TestFollowAssistSwingsAgainWhenItsSwingStopped(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, func(c *FollowConfig) { c.Assist = true })
+	leadAt(f, Point{30, 0, 0})
+	mob := addHostile(f, 0x20, Point{33, 0, 0}, true, tank)
+	leadRow(f).Target = mob.GUID
+	f.pos = Point{31, 1, 0}
+	if reason := runTicks(f, fr, 3); reason != "" { // the row never shows the target: the update is on its way
+		t.Fatalf("stopped: %s", reason)
+	}
+	if f.attacks != 1 {
+		t.Fatalf("attacks %d before the row showed the swing, want 1", f.attacks)
+	}
+	f.row.Target = mob.GUID // the swing is on
+	if reason := runTicks(f, fr, 2); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if f.attacks != 1 {
+		t.Fatalf("attacks %d while the swing is on, want 1", f.attacks)
+	}
+	f.row.Target = 0 // the swing stopped; the lead's target is unchanged
+	if reason := runTicks(f, fr, 1); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if f.attacks != 2 || f.targets[len(f.targets)-1] != mob.GUID {
+		t.Fatalf("attacks %d targets %v after the swing stopped, want a second swing at the mob", f.attacks, f.targets)
+	}
+	if !lastNoteHas(fr.Status(), "stopped: attacking it again") {
+		t.Fatalf("no re-swing note: %+v", fr.Status())
+	}
+}
+
+// Item 10 and the lost phase: the recovery's dungeon_leader events carry mode follow; a loss of sight emits lost once.
+func TestFollowEventsAreTagged(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	leadAt(f, Point{10, 0, 0})
+	if reason := fr.tick(); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	f.now = f.now.Add(FollowTick)
+	f.kill()
+	f.dead.graveyard, f.dead.graveMap = Point{50, 0, 0}, 70
+	f.dead.corpse = Corpse{Found: true, Map: 70, CorpseMap: 70, Pos: Point{25, 0, 0}}
+	for range 2000 {
+		if fr.Status().CorpseRuns == 1 {
+			break
+		}
+		if reason := fr.tick(); reason != "" {
+			t.Fatalf("stopped: %s", reason)
+		}
+		f.now = f.now.Add(FollowTick)
+	}
+	leaderEvents, lost := 0, 0
+	f.units = nil
+	if reason := runTicks(f, fr, 5); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	for _, e := range f.events {
+		switch {
+		case e.kind == "dungeon_leader":
+			leaderEvents++
+			if e.data["mode"] != "follow" {
+				t.Fatalf("dungeon_leader event without mode follow: %v", e.data)
+			}
+		case e.kind == "player_follow" && e.data["phase"] == "lost":
+			lost++
+		}
+	}
+	if leaderEvents == 0 {
+		t.Fatalf("no dungeon_leader event in the recovery: %s", f.kinds())
+	}
+	if lost != 1 {
+		t.Fatalf("lost events %d, want 1", lost)
 	}
 }

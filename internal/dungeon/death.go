@@ -99,6 +99,9 @@ const (
 // leaderEvent sends a dungeon_leader event of phase for the current leg.
 func (d *Driver) leaderEvent(phase string, extra map[string]any) {
 	data := map[string]any{"phase": phase, "leg": max(d.curLeg, 0)}
+	if d.cfg.EventMode != "" {
+		data["mode"] = d.cfg.EventMode
+	}
 	for k, v := range extra {
 		data[k] = v
 	}
