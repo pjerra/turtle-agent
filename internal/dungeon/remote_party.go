@@ -35,6 +35,7 @@ type boundParty struct {
 	Lead     string   // the ACK's lead bot
 	Count    int      // the ACK's number of bots
 	Names    []string // the listing's names ((dead) marks dropped); empty when the reply carried no listing
+	Dead     []string // the listing's names marked (dead)
 }
 
 // readBoundParty sends `commander status` through command and reads the answer.
@@ -53,9 +54,13 @@ func readBoundParty(ctx context.Context, command func(context.Context, string) (
 			continue
 		}
 		for _, n := range strings.Split(m[1], ",") {
+			dead := strings.HasSuffix(strings.TrimSpace(n), "(dead)")
 			n = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(n), "(dead)"))
 			if n != "" {
 				b.Names = append(b.Names, n)
+				if dead {
+					b.Dead = append(b.Dead, n)
+				}
 			}
 		}
 		break
