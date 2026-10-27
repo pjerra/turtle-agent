@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
 // The stage-check command needs the real navmesh: like zulfarrakMmaps it
@@ -130,5 +132,24 @@ func TestStageFirstRowFallsBackForAnOptionalLeg(t *testing.T) {
 	plan := zulfarrakOptionalPlan(t)
 	if _, ok := stageFirstRowNote(t, plan, optionalLegIndex(plan)); !ok {
 		t.Fatal("want the optional fallback")
+	}
+}
+
+// 8. A missing leg is refused as invalid params (instead of staging leg 0).
+func TestStageRunRefusesAMissingLeg(t *testing.T) {
+	r := &dungeonRunner{dir: "../../dungeons"}
+	_, err := stageRun(context.Background(), nil, r, nil, stageParams{Name: "zulfarrak"})
+	if err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "leg is required") {
+		t.Errorf("nil leg: %v", err)
+	}
+}
+
+// 11. --json output includes res.Warnings.
+func TestStageCheckJSONIncludesWarnings(t *testing.T) {
+	plan := &dungeon.Plan{Name: "t", Legs: []dungeon.Leg{{Name: "a"}}}
+	res := dungeon.StageResult{Leg: 0, LegName: "a", Warnings: []string{"a quiet warning"}}
+	out := buildStageCheckJSON(plan, res, "plan", "")
+	if len(out.Warnings) != 1 || out.Warnings[0] != "a quiet warning" {
+		t.Errorf("warnings dropped: %+v", out.Warnings)
 	}
 }

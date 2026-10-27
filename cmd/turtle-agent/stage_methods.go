@@ -150,7 +150,7 @@ func stageFirstRow(plan *dungeon.Plan, leg int, planner *navmesh.Planner, server
 	var firsts []dungeon.Point
 	for _, k := range kept {
 		for _, st := range k.Steps {
-			if st.Leg == rowLeg && st.Kind == planexport.KindMove {
+			if st.Leg == rowLeg && (st.Kind == planexport.KindMove || st.Kind == planexport.KindMoveDirect || st.Kind == planexport.KindMoveHopExact) {
 				firsts = append(firsts, dungeon.Point{X: st.X, Y: st.Y, Z: st.Z})
 				break
 			}
@@ -198,6 +198,9 @@ func stageRun(ctx context.Context, cmdr *commanderService, runner *dungeonRunner
 	plan, err := dungeon.Load(filepath.Join(runner.dir, p.Name+".json"))
 	if err != nil {
 		return stageResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
+	}
+	if p.Leg == nil {
+		return bad("leg is required (a leg number from 0 or a leg name)")
 	}
 	leg := legIndex(plan, p.Leg)
 	if leg < 0 {

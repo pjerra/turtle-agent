@@ -129,7 +129,7 @@ func buildStageCheckJSON(plan *dungeon.Plan, res dungeon.StageResult, firstSourc
 	out := stageCheckJSONOut{Plan: plan.Name, Map: res.Map, Leg: res.Leg, LegName: res.LegName,
 		First: dungeonPointJSON(res.First), FirstSource: firstSource,
 		Point: dungeonPointJSON(res.Point), Kind: res.Kind, BackYd: res.BackYd,
-		Refusal: res.Refusal, DryRun: true}
+		Refusal: res.Refusal, Warnings: res.Warnings, DryRun: true}
 	if fnote != "" {
 		out.Notes = append(out.Notes, fnote)
 	}
