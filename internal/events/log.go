@@ -104,6 +104,8 @@ const (
 	// KindDungeonLeader is the leader's death and its way back during a run: data.phase died, resurrected, released,
 	// corpse_run, reclaimed, back or gave_up (data.leg, seconds dead, how).
 	KindDungeonLeader = "dungeon_leader"
+	// KindPlayerFollow is the player follow mode (follow_start): data.phase started, walk, ahead, dead, back, zoned, stopped.
+	KindPlayerFollow = "player_follow"
 	// The bot brain (brain_start, README "Bot brain"): what it decided each tick, and why it did nothing.
 	KindBrainDecision = "brain_decision" // data.trigger, action, relevance, result (ok, not_possible, vetoed, error), via; spell_id and target_guid set
 	KindBrainIdle     = "brain_idle"     // the brain had nothing to do (throttled): data.reason

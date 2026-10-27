@@ -371,6 +371,7 @@ type Driver struct {
 	inWipe         bool   // a wipe is being recovered from: the waits do not report it again
 	deathCounted   bool   // the leader's current death is in the report
 	recoveries     int    // how often the leader came back; a walk does not count the interruption as a failed try
+	lastHow        string // how the leader last came back ("resurrected" or "corpse_run"), for RecoverSelf
 	leaderDeaths   int
 	wipeRecoveries int
 
