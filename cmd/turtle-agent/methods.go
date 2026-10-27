@@ -267,6 +267,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	dungeonRun.checkNav = opts.PlanCheckNav
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	registerStageMethods(srv, cmdrSvc, dungeonRun, opts.Planner)
+	registerTeardownMethods(srv, cur, cmdrSvc, dungeonRun, brainCtl, lease)
 	return func() {
 		stopMap()
 		stopDungeon()
