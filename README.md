@@ -95,6 +95,7 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
@@ -275,6 +276,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `pet` | | The player's pet, from `UNIT_FIELD_SUMMON` of the player and the pet's own unit row: `present` (false: no pet), `guid`, `entry`, `name`, `level`, `dead`, `health`, `max_health`, `power_type` (2 focus for a hunter's pet, 0 mana for a demon), `power`, `max_power`, `happiness` (the pet's POWER5, 0 to 1,000,000) and `happiness_state` (1 unhappy, 2 content, 3 happy; absent for a demon), `loyalty`, `in_combat`, `target` (what it attacks), `distance`, `moving`; and its action bar, from `SMSG_PET_SPELLS`: `bar` (the session has it), `react` (`passive`, `defensive`, `aggressive`), `command` (`stay`, `follow`), `enabled` (false while the bar is off, e.g. mounted), `spells[]` (`spell_id`, `name`, `slot` 3 to 6 or -1 off the bar, `autocast`, `passive`), `refused` (the reason of its last refused cast). See [Pets](#pets) |
 | `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
 | `plan_check` | `name` (a plan in `dungeons_dir`), `from_leg` (as `dungeon_run`), `from_pull_group` (with it; 0-based) | `checked` (false: `skipped` says why, no navmesh files or planner), `plan`, `map`, `points`, `issues` (each `leg`, `leg_name`, `part`, `pull_group` / `pull_groups`, `point`, `from`, `reason`, `detail`), `warnings`, `exempt`, `run_leader` (the same rows); see [Plan check](#plan-check) |
+| `dungeon_stage` | `name`, `leg` (number from 0 or name), `cleared_through`, `use_safe_point`, `force`, `dry_run`, `start`, `resume`, `speed` (with start, 1.0-3.0), `quiet_wait_s` (0-60, default 20) | `staged`, `started`, `dry_run`, `plan`, `map`, `leg`, `leg_name`, `first`, `first_source`, `point`, `kind` (`leg_first`, `before_leg`, `forced`), `back_yd`, `floor_z`, `refusal`, `proposal` (`kind` `before_leg` or `earlier_leg`, `leg`, `leg_name`, `point`, `back_yd`), `warnings`, `notes`, `gm_commands`, `party[]`, `run` (`sent`, `start_step`, `steps`, `leg`, `line`), `seconds`; see [Staging a leg](#staging-a-leg-for-the-run-leader) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `dungeon_pause`, `dungeon_resume`, `dungeon_skip` | | One set of commands that acts on the active run by its mode. In a **commander** run (`mode: "remote"`) only `dungeon_pause` exists: it halts the run so that it can be resumed: the run ends `stopped` with the bots stood still (`cmd stay`) and the **commander binding kept**, so the next `dungeon_run` (`resume`, `from_leg`) re-enters the same group and instance; `report.remote.unbind_via` says `kept (the run was paused ...)`. `dungeon_stop` unbinds, which returns the hires to the commander's raid and loses the instance (ZF-2 run 3b). With no run going `dungeon_pause` changes nothing; a group-mode run has no binding and is refused (`dungeon_stop` ends it). `on_end: "logout"` still unbinds. In an **observe** run ([Observe mode](#observe-mode)) the three ask the TortoiseBots run leader for `.bot run pause`, `resume` or `skip`; the watch sends it on its next look (within a second) and the answer is in `report.remote.observe.controls`. `dungeon_resume` and `dungeon_skip` are refused when no run goes or the run is a commander one (a paused commander run goes on with `dungeon_run`). Same result as `dungeon_status` |
@@ -1721,6 +1723,21 @@ move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) a
 the card JSON: `Run leader: Sentinel · pull 7/41 · pulling`, `Run leader paused: Sentinel · boss 12/41 · 3 dead: regroup ...`, `Run leader: finished all 41 steps`.
 
 `tools/run-uldaman.sh --mode observe [--hire] [--no-fresh] [--keep-loot-setting]` builds the params of an observed Uldaman run.
+
+### Staging a leg for the run leader
+
+`dungeon_stage` puts the party at a leg's safe start for a targeted test of one leg with the TortoiseBots run leader
+(`from leg <name>`). The stage point is the leg's first row (else its first via/To) when that stands clear: 30 yd from a
+skipped leg's pack, boss or patrol point, 20 yd from the leg's own and later packs, and the walk to the first point 20 yd
+clear of skipped packs; the server-exact reach runs to the leg's first point and on to its next point. When the first
+point is unsafe the search backs off in 5 yd steps up to 120 yd along the way in, and an earlier leg (up to 3 back) is
+proposed; `cleared_through` counts legs as cleared, `force` stages anyway. Live it walks the commander there (`.appear`,
+`.go xyz`, `.gps` floor check), applies the quiet rule (no living hostile within 20 yd, none within 30 yd that is not a
+pack of the leg or later, no roamer within 80 yd, from two reads `quiet_wait_s` apart), summons every bot with GM `.summon`
+in one burst (the commander's own character and own bots only, per AGENTS.md; the commander should be `.gm on` and
+invisible), waits for arrival within 10 yd and 2 yd of the floor, retries once, settles 5 s, then optionally `start`s
+(`from leg <name>`, with `speed=`) or `resume`s. `stage-check` checks a leg offline before login (a fresh Zul'Farrak
+refuses most legs, so check first; Gahzrilla stages from `velratha_b`). Call with a client timeout of 120 s.
 
 ## Remote leader
 
