@@ -19,36 +19,37 @@ import (
 )
 
 const (
-	FollowTick       = 500 * time.Millisecond // one look per tick (fake clock in tests)
-	FollowNear       = 8.0                    // default inner edge of the band behind the lead bot
-	FollowFar        = 15.0                   // default outer edge: a walk starts when the lead is farther (3D)
-	FollowRetargetYd = 8.0                    // a walk is cancelled and made again when its target moved this far
-	FollowWalkMax    = 30 * time.Second       // ceiling of one walk
-	FollowFailStop   = 5                      // walks in a row that did not arrive while the lead is over FollowHoldYd: the mode stops
-	FollowHoldYd     = 60.0                   // the run leader's kPlayerPullYd
-	TrailStepYd      = 2.0                    // a trail point is added when the lead moved this far from the last one (3D)
-	TrailJumpYd      = 30.0                   // a lead that moved this far between two looks was teleported or summoned: the trail starts again
-	TrailMaxYd       = 300.0                  // the trail keeps this much length, oldest dropped
-	TrailHeadingYd   = 5.0                    // the lead's heading is taken from the trail point this far back
-	CombatLeashYd    = 40.0                   // in a fight the player moves only when the lead is farther than this
-	CombatStandYd    = 25.0                   // ... and then to this far short of the lead along the path
-	SitLeashYd       = 45.0                   // a sitting player (eating, drinking) gets up only when the lead is farther than this
-	FallbackAggroYd  = 15.0                   // a fallback way (no trail) passing a hostile this close is not walked
-	FallbackLeadYd   = 30.0                   // ... unless the hostile stands this close to the lead bot (its pull, not ours)
-	FallbackSampleYd = 4.0                    // the fallback way is sampled this often for that check
-	FallbackHoldMax  = 60 * time.Second       // a fallback held this long stops the mode
-	AssistTankYd     = 8.0                    // the lead's target counts as tanked when this close to the lead
-	AssistReachYd    = 30.0                   // the player walks to a tanked target only from this close
-	AssistMeleeYd    = 3.0                    // ... and stops this far short of it
-	ZonePortalYd     = 40.0                   // the lead last seen this close to the portal: it went in (zone in after it)
-	ZoneMaxYd        = 300.0                  // the portal farther than this: no zoning, the mode stops
-	ZoneTimeout      = 180 * time.Second
-	ZoneTriggerTries = 3
-	ZoneTriggerWait  = 10 * time.Second
-	FollowMaxDeaths  = 10               // Config.MaxLeaderDeaths of the recovery driver
-	FollowHeadingYd  = 6.0              // the lead's heading is known once its trail (and its newest look) is this long
-	FollowNoHeadWait = 20 * time.Second // a lead over FollowHoldYd away with no heading this long: the player walks to it directly
-	FollowNotes      = 50
+	FollowTick           = 500 * time.Millisecond // one look per tick (fake clock in tests)
+	FollowNear           = 8.0                    // default inner edge of the band behind the lead bot
+	FollowFar            = 15.0                   // default outer edge: a walk starts when the lead is farther (3D)
+	FollowRetargetYd     = 8.0                    // a walk is cancelled and made again when its target moved this far
+	FollowWalkMax        = 30 * time.Second       // ceiling of one walk
+	FollowFailStop       = 5                      // walks in a row that did not arrive while the lead is over FollowHoldYd: the mode stops
+	FollowHoldYd         = 60.0                   // the run leader's kPlayerPullYd
+	TrailStepYd          = 2.0                    // a trail point is added when the lead moved this far from the last one (3D)
+	TrailJumpYd          = 30.0                   // a lead that moved this far between two looks was teleported or summoned: the trail starts again
+	TrailMaxYd           = 300.0                  // the trail keeps this much length, oldest dropped
+	TrailHeadingYd       = 5.0                    // the lead's heading is taken from the trail point this far back
+	CombatLeashYd        = 40.0                   // in a fight the player moves only when the lead is farther than this
+	CombatStandYd        = 25.0                   // ... and then to this far short of the lead along the path
+	SitLeashYd           = 45.0                   // a sitting player (eating, drinking) gets up only when the lead is farther than this
+	FallbackAggroYd      = 15.0                   // a fallback way (no trail) passing a hostile this close is not walked
+	FallbackLeadYd       = 30.0                   // ... unless the hostile stands this close to the lead bot (its pull, not ours)
+	FallbackSampleYd     = 4.0                    // the fallback way is sampled this often for that check
+	FallbackHoldMax      = 60 * time.Second       // a fallback held this long stops the mode
+	AssistTankYd         = 8.0                    // the lead's target counts as tanked when this close to the lead
+	AssistReachYd        = 30.0                   // the player walks to a tanked target only from this close
+	AssistMeleeYd        = 3.0                    // ... and stops this far short of it
+	ZonePortalYd         = 40.0                   // the lead last seen this close to the portal: it went in (zone in after it)
+	ZoneMaxYd            = 300.0                  // the portal farther than this: no zoning, the mode stops
+	ZoneTimeout          = 180 * time.Second
+	ZoneTriggerTries     = 3
+	ZoneTriggerWait      = 10 * time.Second
+	FollowMaxDeaths      = 10               // Config.MaxLeaderDeaths of the recovery driver
+	FollowHeadingYd      = 6.0              // the lead's heading is known once its trail (and its newest look) is this long
+	FollowNoHeadWait     = 20 * time.Second // a lead FollowNoHeadDirectYd or more away with no heading this long: the player walks to it directly
+	FollowNoHeadDirectYd = 20.0             // ... (the run leader's kGatherYd: a regroup waits for the player within it)
+	FollowNotes          = 50
 )
 
 // FollowGame is what the follow mode needs: the leader-mode Game (positions, units, party, walk, path, death calls, area
@@ -284,6 +285,7 @@ func (f *PlayerFollower) tick() string {
 		f.lead = f.pending
 		f.pending = ""
 		f.trail, f.trailLen = nil, 0
+		f.noHead, f.headNote = time.Time{}, false // the trail starts again: so does the wait for a heading
 		f.status.TrailYd = 0
 		f.lastSeen = now
 		f.status.LeadAt = nil
@@ -318,6 +320,7 @@ func (f *PlayerFollower) tick() string {
 		}
 		f.noteLocked(fmt.Sprintf("back after %.0f s (%s): waiting for the lead bot, then following behind it", back.Sub(now).Seconds(), how))
 		f.trail, f.trailLen = nil, 0
+		f.noHead, f.headNote = time.Time{}, false // the trail starts again: so does the wait for a heading
 		f.status.TrailYd = 0
 		f.lastSeen = back
 		f.waitBack = true
@@ -457,7 +460,7 @@ func (f *PlayerFollower) tick() string {
 	t, ok := f.trailPoint(at)
 	if !ok {
 		// No trail target: with no heading of the lead yet the player may stand in front of it, and the way to it would go
-		// through its front, so it stands still (a lead over 60 yd away: walked to directly after FollowNoHeadWait).
+		// through its front, so it stands still (a lead FollowNoHeadDirectYd or more away: walked to directly after FollowNoHeadWait).
 		if !f.noHeadingWalk(now, dist) {
 			f.mu.Lock()
 			f.status.State = "holding"
@@ -519,6 +522,7 @@ func (f *PlayerFollower) trailSeen(l Point) {
 	last := f.trail[len(f.trail)-1]
 	if dist3(l, last) >= TrailJumpYd {
 		f.trail = []Point{l}
+		f.noHead, f.headNote = time.Time{}, false // the trail starts again: so does the wait for a heading
 		f.trailLen = 0
 		f.status.TrailYd = 0
 		f.noteLocked(fmt.Sprintf("the lead bot jumped %.0f yd (a teleport or a summon): the trail starts again", dist3(l, last)))
@@ -621,8 +625,8 @@ func (f *PlayerFollower) headingKnown() bool {
 }
 
 // noHeadingWalk decides a walk toward the lead that is not on its trail: with the heading known it may go (the way is checked
-// against it, wayInFront); with none it waits, except that a lead over FollowHoldYd away is walked to directly once the wait
-// has lasted FollowNoHeadWait (note "no heading: direct walk").
+// against it, wayInFront); with none it waits, except that a lead FollowNoHeadDirectYd or more away is walked to directly once
+// the wait (since the trail last started) has lasted FollowNoHeadWait (note "no heading: direct walk").
 func (f *PlayerFollower) noHeadingWalk(now time.Time, dist float64) bool {
 	if f.headingKnown() {
 		f.mu.Lock()
@@ -638,7 +642,7 @@ func (f *PlayerFollower) noHeadingWalk(now time.Time, dist float64) bool {
 	note := !f.headNote
 	f.headNote = true
 	f.mu.Unlock()
-	if dist > FollowHoldYd && now.Sub(since) >= FollowNoHeadWait {
+	if dist >= FollowNoHeadDirectYd && now.Sub(since) >= FollowNoHeadWait {
 		f.note(fmt.Sprintf("no heading: direct walk (the lead bot is %.0f yd away and has not moved for %.0f s)", dist, now.Sub(since).Seconds()))
 		return true
 	}
@@ -1078,6 +1082,7 @@ func (f *PlayerFollower) zoneTick(now time.Time, self Point) string {
 		f.mu.Lock()
 		f.status.ZoneIns++
 		f.trail, f.trailLen = nil, 0
+		f.noHead, f.headNote = time.Time{}, false // the trail starts again: so does the wait for a heading
 		f.status.TrailYd = 0
 		f.lastSeen = f.clk.Now()
 		f.zoneAt = time.Time{}

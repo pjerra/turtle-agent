@@ -1081,3 +1081,24 @@ func TestFollowEventsAreTagged(t *testing.T) {
 		t.Fatalf("lost events %d, want 1", lost)
 	}
 }
+
+// Lead decision (round 2b): the no-heading direct walk applies from FollowNoHeadDirectYd up, not only beyond 60 yd, so that a
+// lead standing still 20-60 yd away (a regroup waiting for the player) is reached.
+func TestFollowNoHeadingWalksDirectlyFrom20Yd(t *testing.T) {
+	f, p := followFixture(t, false)
+	fr := newFollowerForTest(f, p, nil)
+	f.pos = Point{0, 0, 0}
+	leadAt(f, Point{30, 0, 0})                       // stands still 30 yd away: no heading ever
+	if reason := runTicks(f, fr, 39); reason != "" { // 19.5 s
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) != 0 {
+		t.Fatalf("walked before %v with no heading: %v", FollowNoHeadWait, f.walks)
+	}
+	if reason := runTicks(f, fr, 2); reason != "" {
+		t.Fatalf("stopped: %s", reason)
+	}
+	if len(f.walks) == 0 || !lastNoteHas(fr.Status(), "no heading: direct walk") {
+		t.Fatalf("no direct walk to a lead 30 yd away after %v: walks %v %+v", FollowNoHeadWait, f.walks, fr.Status())
+	}
+}
