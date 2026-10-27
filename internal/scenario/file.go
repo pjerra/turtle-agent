@@ -25,7 +25,9 @@ var (
 	charName     = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
 	// varRef matches a whole ${name} template: allowed wherever a var
 	// expands to the value at run time (char names, where values with vars).
-	varRef = regexp.MustCompile(`^\$\{[a-z][a-z0-9_]{0,31}\}$`)
+	// Dotted session built-ins (${A.character}) match too: refs plus the static
+	// check prove the var exists, and the expanded value is re-checked.
+	varRef = regexp.MustCompile(`^\$\{[A-Za-z][A-Za-z0-9_.]{0,63}\}$`)
 )
 
 var validOps = map[string]bool{"==": true, "!=": true, ">=": true, "<=": true, ">": true, "<": true}

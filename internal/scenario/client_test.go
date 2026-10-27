@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
 // TestHTTPCallerSendsTheTokenAndHidesIt pins the client's auth behaviour:
@@ -80,4 +83,32 @@ func TestHTTPCallerSendsTheTokenAndHidesIt(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	_ = base64.StdEncoding
+}
+
+// TestHTTPCallerWorksAgainstTheRealRPCServer runs the scenario client
+// against the real agent RPC server (in-process, token auth): a missing
+// Content-Type header answers 415 there, so this fails without the header.
+func TestHTTPCallerWorksAgainstTheRealRPCServer(t *testing.T) {
+	dir := t.TempDir()
+	tok := "tok-" + strings.Repeat("s", 40)
+	tokPath := filepath.Join(dir, "rpc-8774.token")
+	if err := os.WriteFile(tokPath, []byte(tok+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := rpc.NewServer()
+	s.SetToken(tok)
+	s.Register("nothing", rpc.Typed(func(ctx context.Context, _ struct{}) (struct{}, error) {
+		return struct{}{}, nil
+	}))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	c := &HTTPCaller{Addr: addr, TokenFile: tokPath, HTTP: srv.Client()}
+	raw, err := c.Call(t.Context(), "nothing", map[string]any{}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "{}" {
+		t.Fatalf("reply %s", raw)
+	}
 }

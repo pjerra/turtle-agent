@@ -71,6 +71,7 @@ func (c *HTTPCaller) Call(ctx context.Context, method string, params any, timeou
 		return nil, fmt.Errorf("scenario: token file: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	c.token = tok
 	hc := c.HTTP
 	if hc == nil {
