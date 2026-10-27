@@ -94,10 +94,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return pathCheckCmd(args[1:], stdout, stderr)
 	case "stage-check":
 		return stageCheckCmd(args[1:], stdout, stderr)
-	case "route-oracle":
-		return routeOracleCmd(args[1:], stdout, stderr)
-	case "route-edits":
-		return routeEditsCmd(ctx, args[1:], stdout, stderr)
+	case "lease":
+		return leaseCmd(args[1:], stdout, stderr)
+	case "slot":
+		if len(args) > 1 && args[1] == "setup" {
+			return slotSetupCmd(args[2:], stdout, stderr)
+		}
+		usage(stderr)
+		return exitUsage
+	case "teardown":
+		return teardownCmd(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -109,7 +115,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, `usage:
-  turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--tune FILE] [<account>] <character>
+  turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--tune FILE] [--pid-file FILE] [<account>] <character>
   turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait DURATION] [--reconnect N] [--stop-on-failure]
   turtle-agent scrub-check [--config FILE] <capture>...
   turtle-agent capture-stats <capture>
@@ -125,6 +131,9 @@ func usage(w io.Writer) {
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
   turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
   turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+  turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME [--ttl MIN] | release <server> <slot> --holder NAME [--force] | list [<server>] [--json]   [--slots FILE]
+  turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
+  turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] <dir>
   turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--plan NAME]...
   turtle-agent route-edits list [--edit-dir DIR] [--json] [<plan>] | export [--edit-dir DIR] [--config-dir DIR] --to DIR <plan> [vN|latest] | promote [--edit-dir DIR] --worktree PATH <plan> vN
   turtle-agent version`)
