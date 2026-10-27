@@ -242,16 +242,21 @@ func (rr *run) abort(step int, desc string, err error) {
 	rr.errorf(step, desc, "%v", err)
 }
 
-// errorf records an ERROR check entry, prints it and counts it.
+// errorf records an ERROR check entry, prints it and counts it. The reason
+// is redacted before it is stored: only the scrubbed Record used to reach
+// result.json, so a server-controlled string (rpcText of a JSON-RPC error)
+// echoing the bearer token must never land there unredacted.
 func (rr *run) errorf(step int, desc, format string, args ...any) {
-	reason := fmt.Sprintf(format, args...)
+	reason := redactAll(fmt.Sprintf(format, args...), rr.tokens())
 	rr.checks = append(rr.checks, CheckResult{Step: step, Desc: desc, Status: "ERROR", Reason: reason})
 	rr.errs++
 	rr.emit(Record{T: "check", Step: step, Raw: "  ERROR " + desc + ": " + reason, Norm: "  ERROR " + desc + ": " + reason, Status: "ERROR"})
 }
 
 // failf records a FAIL check entry, prints it, counts it and honours on_fail.
+// Like errorf it redacts the reason before storing it in the CheckResult.
 func (rr *run) failf(step int, desc, reason string, onFail string) bool {
+	reason = redactAll(reason, rr.tokens())
 	rr.checks = append(rr.checks, CheckResult{Step: step, Desc: desc, Status: "FAIL", Reason: reason})
 	rr.failed++
 	rr.emit(Record{T: "check", Step: step, Raw: "  FAIL " + desc + ": " + reason, Norm: "  FAIL " + desc + ": " + reason, Status: "FAIL"})

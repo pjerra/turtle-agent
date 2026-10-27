@@ -47,6 +47,8 @@ func redactEvent(e *events.Event, tokens []string) {
 	if len(tokens) == 0 {
 		return
 	}
+	e.Source = redactAll(e.Source, tokens)
+	e.Target = redactAll(e.Target, tokens)
 	e.Text = redactAll(e.Text, tokens)
 	e.Data = redactValue(e.Data, tokens).(map[string]any)
 }

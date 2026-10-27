@@ -244,7 +244,9 @@ func (rr *run) doExpectNot(ctx context.Context, s *Step, n int) bool {
 	deadline := rr.now().Add(time.Duration(s.WithinS * float64(time.Second)))
 	for {
 		if e := st.find(m, st.window); e != nil {
-			line := eventLine(*e)
+			// Redact before the cut: an event echoing the token straddling
+			// the 200-char edge must not leave a fragment failf cannot match.
+			line := redactAll(eventLine(*e), rr.tokens())
 			if len(line) > 200 {
 				line = line[:200]
 			}

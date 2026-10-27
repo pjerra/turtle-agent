@@ -356,7 +356,10 @@ func (rr *run) doRPC(ctx context.Context, s *Step, n int, inFinally bool) bool {
 	tplParams, _ := json.Marshal(s.Params)
 	rawParams, _ := json.Marshal(pm)
 	maxParams := 300
-	rp, tp := string(rawParams), string(tplParams)
+	// Redact before the cut: expanded params can carry a captured token, and
+	// a token straddling the 300-char edge would leave a fragment emit's
+	// redact cannot match.
+	rp, tp := redactAll(string(rawParams), rr.tokens()), redactAll(string(tplParams), rr.tokens())
 	rr.emit(Record{T: "action", Step: n, Session: s.Session,
 		Raw:  fmt.Sprintf("  rpc[%s] %s %s", s.Session, s.Method, cut(rp, maxParams)),
 		Norm: fmt.Sprintf("  rpc[%s] %s %s", s.Session, s.Method, cut(tp, maxParams))})

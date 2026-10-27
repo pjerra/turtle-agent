@@ -540,6 +540,79 @@ func TestRunnerNeverWritesTheToken(t *testing.T) {
 	}
 }
 
+// TestRunnerNeverWritesTheTokenInCheckReasons pins the errorf/failf fix: a
+// failing RPC whose RPCError.Message echoes the bearer token (and a token
+// fragment straddling the 300-char result cut) leaves <token> in the stored
+// CheckResult.Reason, and neither the full token nor any fragment in
+// result.json, transcript.jsonl, raw.txt, norm.txt or stdout.
+func TestRunnerNeverWritesTheTokenInCheckReasons(t *testing.T) {
+	tok := "bearer-AbC-9876-token"
+	// Pad so the token straddles the 300-char result cut in the emitted
+	// "    -> error ..." raw line (13 + len("error 1: ") prefix): redact
+	// must run before any cut for no fragment to survive.
+	padLen := 300 - len("    -> error ") - len("error 1: ") - len(tok)/2
+	msg := strings.Repeat("x", padLen) + tok + " boom"
+	f := parseFile(t, scenarioBase()+`
+		{"do":"rpc","session":"A","method":"party"}
+	]}`)
+	a := &fakeCaller{token: tok}
+	a.char = "Tacmdaron"
+	a.results = map[string]fakeResult{"party": {Err: &RPCError{Code: 1, Message: msg}}}
+	clk := newFakeClock()
+	var stdout strings.Builder
+	r := &Runner{Sessions: map[string]Caller{"A": bindFake(a, clk)}, Now: clk.Now, Sleep: clk.Sleep, Out: &stdout}
+	res, err := r.Run(context.Background(), f)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Errors != 1 || res.Exit != 15 {
+		t.Fatalf("%+v", res)
+	}
+	if len(res.Checks) != 1 || res.Checks[0].Status != "ERROR" {
+		t.Fatalf("%+v", res.Checks)
+	}
+	checkReason := func(s string) {
+		t.Helper()
+		if strings.Contains(s, tok) {
+			t.Fatalf("token leaked: %q", s)
+		}
+		// A token straddling the 300-char result cut must not leak even a
+		// fragment: redact ran before errorf's store and the cut.
+		for i := 0; i+4 <= len(tok); i++ {
+			frag := tok[i : i+4]
+			if frag == "toke" || frag == "oken" {
+				continue // also inside the "<token>" placeholder
+			}
+			if strings.Contains(s, frag) {
+				t.Fatalf("token fragment %q leaked: %q", frag, s)
+			}
+		}
+	}
+	checkReason(res.Checks[0].Reason)
+	for _, rec := range res.Records {
+		checkReason(rec.Raw)
+		checkReason(rec.Norm)
+		if len(rec.Got) > 0 && strings.Contains(string(rec.Got), tok) {
+			t.Fatalf("token leaked in Got: %+v", rec)
+		}
+	}
+	checkReason(stdout.String())
+	checkReason(strings.Join(RenderRaw(res.Records), "\n"))
+	checkReason(strings.Join(RenderNorm(res.Records, f.Normalise), "\n"))
+	var jl strings.Builder
+	for _, rec := range res.Records {
+		raw, _ := json.Marshal(rec)
+		jl.Write(raw)
+		jl.WriteByte('\n')
+	}
+	checkReason(jl.String())
+	out, _ := json.Marshal(res.Checks)
+	checkReason(string(out))
+	if !strings.Contains(res.Checks[0].Reason, "<token>") {
+		t.Fatalf("reason not redacted: %q", res.Checks[0].Reason)
+	}
+}
+
 // TestRunnerWaitTimeoutAborts pins that a wait timeout is an ERROR, exit 15.
 func TestRunnerWaitTimeoutAborts(t *testing.T) {
 	f := parseFile(t, scenarioBase()+`
