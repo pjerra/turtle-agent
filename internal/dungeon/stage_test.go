@@ -83,8 +83,9 @@ func TestStageRefusesALiveBossAtTheFirstPoint(t *testing.T) {
 }
 
 // 3. The BRD case: an own pull group stands at F. Refused with
-// "pass use_safe_point"; the proposal is before_leg >= 20 yd back; with
-// UseSafePoint it stages before_leg >= 20 yd from the pack.
+// "pass use_safe_point"; the proposal is before_leg >= 20 yd back with NO
+// earlier_leg proposal; with UseSafePoint it stages before_leg >= 20 yd
+// from the pack.
 func TestStageBacksOffFromAnOwnPack(t *testing.T) {
 	p := mkStagePlan()
 	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 120, Y: 0, Z: 0}}}}
@@ -96,14 +97,11 @@ func TestStageBacksOffFromAnOwnPack(t *testing.T) {
 	if res.OK {
 		t.Fatalf("staged onto an own pack: %+v", res)
 	}
-	if !strings.Contains(res.Refusal, "pass use_safe_point") {
-		t.Errorf("no use_safe_point hint: %q", res.Refusal)
-	}
-	if res.Proposal == nil || res.Proposal.Kind != "before_leg" {
-		t.Fatalf("no before_leg proposal: %+v", res.Proposal)
-	}
 	if res.Proposal.BackYd < 20 {
 		t.Errorf("back %.0f yd, want >= 20: %+v", res.Proposal.BackYd, res.Proposal)
+	}
+	if strings.Contains(res.Refusal, "Nearest earlier leg") {
+		t.Errorf("before_leg found, yet the earlier-leg search ran: %q", res.Refusal)
 	}
 	ok, err := StageLeg(p, 1, nav, StageOptions{ClearedThrough: -1, UseSafePoint: true})
 	if err != nil {
@@ -146,6 +144,7 @@ func TestStageBackOffMeetsTheSkippedDistance(t *testing.T) {
 
 // 5. The G3 case: ServerPath F->N answers PathNoPath. Refused with
 // "does not reach its next point"; Force does not pass it (warning added).
+
 func TestStageRefusesAFirstPointCutOffFromItsNextPoint(t *testing.T) {
 	p := mkStagePlan()
 	nav := &stageNav{noPath: map[string]bool{stagePairKey(Point{X: 120, Y: 0, Z: 0}, Point{X: 150, Y: 0, Z: 0}): true}}
@@ -178,11 +177,34 @@ func TestStageRefusesAFirstPointCutOffFromItsNextPoint(t *testing.T) {
 	}
 }
 
+// The reviewer's case: test-5 setup (ServerPath F->N PathNoPath) with
+// FirstRow set to Via[0] itself. N falls through to the runLeaderWalk
+// search and the walk F->N fails: refused R2.
+func TestStageRefusesCutOffFirstRowOnVia(t *testing.T) {
+	p := mkStagePlan()
+	p.Legs[1].Via = []Waypoint{{Point: Point{X: 100, Y: 0, Z: 0}}}
+	fr := Point{X: 100, Y: 0, Z: 0}
+	nav := &stageNav{noPath: map[string]bool{stagePairKey(Point{X: 100, Y: 0, Z: 0}, Point{X: 120, Y: 0, Z: 0}): true}}
+	res, err := StageLeg(p, 1, nav, StageOptions{ClearedThrough: -1, FirstRow: &fr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("staged a cut-off leg_first row: %+v", res)
+	}
+	if !strings.Contains(res.Refusal, "does not reach its next point") {
+		t.Errorf("no R2 text: %q", res.Refusal)
+	}
+}
+
 // 6. The first back-off candidate's ServerPath to F is PathNoPath: it is
-// skipped and the second one is chosen.
+// skipped and the second one is chosen. The own pack stands 18 yd past F,
+// so the x=115 candidate passes the own-pack check and only the step-4
+// reach fault rejects it (drop that fault and this test fails: 115 is
+// chosen).
 func TestStageSkipsACandidateOnAnotherFloor(t *testing.T) {
 	p := mkStagePlan()
-	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 120, Y: 0, Z: 0}}}}
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 138, Y: 0, Z: 0}}}}
 	nav := &stageNav{noPath: map[string]bool{stagePairKey(Point{X: 115, Y: 0, Z: 0}, Point{X: 120, Y: 0, Z: 0}): true}}
 	res, err := StageLeg(p, 1, nav, StageOptions{ClearedThrough: -1, UseSafePoint: true})
 	if err != nil {

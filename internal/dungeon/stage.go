@@ -244,7 +244,13 @@ type stageNextPoint struct {
 // more than ArriveYd from F is taken. None: no reach check below.
 func (s *stageState) nextPoint(fromRow bool) stageNextPoint {
 	if fromRow {
-		return stageNextPoint{at: s.p.LegFirstPoint(s.leg), have: true}
+		// The first row came from a path row: N is the leg's first
+		// plan point, but only when it stands past F. When the first
+		// row IS Via[0] LegFirstPoint is F itself, and using it as N
+		// would pass R2 vacuously: fall through to the walk search.
+		if fp := s.p.LegFirstPoint(s.leg); dist3(fp, s.first) > ArriveYd {
+			return stageNextPoint{at: fp, have: true}
+		}
 	}
 	var out []Point
 	s.p.runLeaderWalk(s.leg, func(m RunLeaderPoint) {
@@ -478,12 +484,11 @@ func (s *stageState) refuse(out StageResult, refusal string, prop *StageProposal
 }
 
 // forceOrRefuse applies force to a non-R2 refusal (keeping the before_leg
-// proposal) or returns the refusal with the earlier-leg search. Force
-// snapshots the refusal AFTER the earlier-leg note is appended, so
-// Warnings[0] is the full refusal text.
+// proposal) or returns the refusal. The earlier-leg search does not run
+// here: a before_leg point was found (spec step 4). Force snapshots the
+// refusal as-is, so Warnings[0] is the full refusal text.
 func (s *stageState) forceOrRefuse(out StageResult, refusal string, prop *StageProposal, opt StageOptions, fault string) StageResult {
 	out.Refusal, out.Proposal = refusal, prop
-	s.earlier(&out, opt)
 	if opt.Force {
 		if ok, fr := s.force(out, out.Refusal, prop); ok {
 			return fr
