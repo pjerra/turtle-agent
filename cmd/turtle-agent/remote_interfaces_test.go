@@ -34,7 +34,7 @@ var (
 	_ dungeon.RunLeaderWatcher = remoteGame{}
 	_ dungeon.StartHands       = remoteGame{}
 	_ dungeon.TeamSource       = remoteGame{}
-	_ dungeon.UnitSource       = remoteGame{}
+	_ dungeon.StageGame        = remoteGame{}
 )
 
 // The optional interfaces the dungeon package asserts that remoteGame does NOT implement, and why that is right. Every `d.g.(X)` of the package
