@@ -168,22 +168,20 @@ func TestStartGPSIsBestEffort(t *testing.T) {
 	}
 }
 
-// A reply about another unit (500 yd away, its floor 15 yd under the commander's z) is not the commander's: it is unreadable, so it
-// neither moves the commander again nor refuses the start, and one note says the check could not be made.
-func TestStartIgnoresAReplyAboutAnotherUnit(t *testing.T) {
+// A reply about another unit (500 yd away, its floor 15 yd under the commander's z) never settles on the stage point: it is re-read
+// up to settleGPSDelayTries times, like a stale reply, and then the start is refused — the reply content alone decides, never elapsed
+// wall time. The wait runs through the driver's (fake) clock, so the re-reads take no real time.
+func TestStartRefusesAReplyAboutAnotherUnit(t *testing.T) {
 	g := newStartFake(t)
 	g.addMob(300, Point{250, 5, 0})
 	g.sink = 15
 	g.gpsFn = func(*startFake) (string, error) { return gpsTextAt(500, 500, 0, 0), nil }
-	rep, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
-	if err != nil || rep.State != "done" {
-		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	_, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
+	if err == nil || !strings.Contains(err.Error(), "the commander did not arrive at the stage point") {
+		t.Fatalf("%v", err)
 	}
-	if len(g.goPts) != 1 || g.gpsCalls != 1 {
-		t.Fatalf("go xyz %v, gps calls %d: a reply about another unit must not move the commander", g.goPts, g.gpsCalls)
-	}
-	if n := strings.Count(notesOf(rep), "best effort"); n != 1 {
-		t.Fatalf("%d best-effort notes\n%s", n, notesOf(rep))
+	if len(g.goPts) != 1 || g.gpsCalls != settleGPSDelayTries {
+		t.Fatalf("go xyz %v, gps calls %d (want %d): a reply about another unit is re-read, never acted on", g.goPts, g.gpsCalls, settleGPSDelayTries)
 	}
 }
 

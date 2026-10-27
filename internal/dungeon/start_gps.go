@@ -188,6 +188,13 @@ func floorCheck(ctx context.Context, h floorHands, mapID uint32, at Point, hk fl
 		if serr != nil {
 			return 0, false, serr
 		}
+		if !ok {
+			if hk.warned != nil && !*hk.warned {
+				*hk.warned = true
+				hk.note("warning: the commander's z could not be checked with .gps (no usable reply); the z check is best effort and the start goes on")
+			}
+			return 0, false, nil // unreadable (as the single read): best effort, no floor known
+		}
 	} else if r, ok, err = readGPSWith(ctx, h, hk); err != nil || !ok {
 		return 0, false, err
 	}
@@ -219,8 +226,11 @@ func floorCheck(ctx context.Context, h floorHands, mapID uint32, at Point, hk fl
 	return floor, true, nil
 }
 
-// checkStartZ is the z check after the `.go xyz` to at (see above).
+// checkStartZ is the z check after the `.go xyz` to at (see above). It runs the settle loop: a stale `.gps` (the race right after the
+// move) is re-read up to settleGPSDelayTries times, settleGPSDelayWait apart, through the driver's clock — the fake clock in tests,
+// so no test waits on wall time. Arrival is judged from the reply content only (X/Y within settleGPSDelayYd of at), never from
+// elapsed time.
 func (d *RemoteDriver) checkStartZ(ctx context.Context, h StartHands, at Point) error {
-	_, _, err := floorCheck(ctx, h, d.plan.Map, at, floorHooks{gm: d.startGM, note: d.startNote, warned: &d.gpsWarned})
+	_, _, err := floorCheck(ctx, h, d.plan.Map, at, floorHooks{gm: d.startGM, note: d.startNote, warned: &d.gpsWarned, wait: d.clk.Sleep})
 	return err
 }
