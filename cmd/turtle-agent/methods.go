@@ -272,8 +272,8 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	dungeonRun.checkNav = opts.PlanCheckNav
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	registerStageMethods(srv, cmdrSvc, dungeonRun, opts.Planner)
-	followSvc, stopFollow := registerFollowMethods(srv, cur, opts.DungeonsDir, opts.Planner != nil, brainCtl, dungeonRun, followOptions{Follow: opts.Follow, Stderr: opts.Stderr})
-	dungeonRun.follow = followSvc
+	// The follow service shares the runner's movement mode (dungeonRun.moves): dungeon_run and follow_start refuse each other.
+	_, stopFollow := registerFollowMethods(srv, cur, opts.DungeonsDir, opts.Planner != nil, brainCtl, dungeonRun, followOptions{Follow: opts.Follow, Stderr: opts.Stderr})
 	registerTeardownMethods(srv, cur, cmdrSvc, dungeonRun, brainCtl, lease)
 	return func() {
 		stopFollow()

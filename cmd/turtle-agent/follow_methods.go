@@ -154,18 +154,52 @@ type followService struct {
 	nav    bool
 	brain  *brain.Controller
 	runner *dungeonRunner
+	// moves is the movement mode shared with dungeon_run (the runner's; a service of its own without a runner).
+	moves *moveMode
+	// stopWait is how long Stop waits for the loop to exit (0: 10 s).
+	stopWait time.Duration
+	// testLoop replaces the follower's Run in a test (nil: f.Run).
+	testLoop func(ctx context.Context, f *dungeon.PlayerFollower)
 
-	f      *dungeon.PlayerFollower
-	cancel context.CancelFunc
-	done   chan struct{}
-	last   dungeon.FollowStatus
-	root   context.Context
+	f        *dungeon.PlayerFollower
+	cancel   context.CancelFunc
+	done     chan struct{}
+	stopping bool // follow_stop cancelled the loop; it has not been seen to exit yet
+	last     dungeon.FollowStatus
+	root     context.Context
 }
 
+// Running reports whether the follow loop is going: true only while its goroutine has not exited (a loop that stopped by itself,
+// the lead lost for instance, is not running).
 func (s *followService) Running() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.f != nil
+	return s.loopGoingLocked()
+}
+
+func (s *followService) loopGoingLocked() bool {
+	if s.f == nil || s.done == nil {
+		return false
+	}
+	select {
+	case <-s.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// settleLocked forgets a loop whose goroutine has exited, keeping its last status.
+func (s *followService) settleLocked() {
+	if s.f == nil || s.loopGoingLocked() {
+		return
+	}
+	st := s.f.Status()
+	if st.StoppedReason == "" && s.stopping {
+		st.StoppedReason = "stopped by follow_stop"
+	}
+	s.last = st
+	s.f, s.cancel, s.done, s.stopping = nil, nil, nil, false
 }
 
 func (s *followService) statusLocked() followStatusJSON {
@@ -218,21 +252,28 @@ func (s *followService) Start(ctx context.Context, p followStartParams) (followS
 		}
 		lost = time.Duration(*p.LostS) * time.Second
 	}
-	if s.runner != nil && s.runner.running() {
-		return followStatusJSON{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going: it moves the character itself (dungeon_stop it first)"}
+	// A loop that ended by itself (or after a follow_stop that gave up waiting) is forgotten here: this call starts a fresh one.
+	s.settleLocked()
+	if s.f != nil {
+		if s.stopping {
+			return followStatusJSON{}, &rpc.Error{Code: rpc.CodeGame, Message: "the player follow is still ending (follow_stop did not see it end): try again in a moment"}
+		}
+		// near, far, assist and lost_s of a repeated call are ignored: only the lead may change.
+		if plan.Name != s.last.Plan {
+			return followStatusJSON{}, &rpc.Error{Code: rpc.CodeGame, Message: "following with plan " + s.last.Plan + ": follow_stop first"}
+		}
+		if !strings.EqualFold(p.Lead, s.f.WantedLead()) {
+			s.f.SetLead(p.Lead)
+		}
+		return s.statusLocked(), nil
 	}
 	if !s.nav {
 		return followStatusJSON{}, &rpc.Error{Code: rpc.CodeGame, Message: "no navmesh planner (set \"mmaps_dir\" in the settings file): the follow mode walks with walk_path"}
 	}
-	if s.f != nil {
-		if plan.Name == s.last.Plan && strings.EqualFold(p.Lead, s.last.Lead) {
-			return s.statusLocked(), nil
-		}
-		if plan.Name != s.last.Plan {
-			return followStatusJSON{}, &rpc.Error{Code: rpc.CodeGame, Message: "following with plan " + s.last.Plan + ": follow_stop first"}
-		}
-		s.f.SetLead(p.Lead)
-		return s.statusLocked(), nil
+	// The movement mode is checked and claimed in one step (dungeon_run claims the same one); the loop's goroutine releases it when
+	// it has exited.
+	if err := s.moves.acquire(moveOwnerFollow); err != nil {
+		return followStatusJSON{}, err
 	}
 	cfg := dungeon.FollowConfig{Plan: plan, Lead: p.Lead, Near: near, Far: far, Assist: p.Assist, LostAfter: lost, Brain: followBrain{ctl: s.brain}}
 	if s.brain != nil {
@@ -241,39 +282,64 @@ func (s *followService) Start(ctx context.Context, p followStartParams) (followS
 	f := dungeon.NewFollower(&followGame{sessionGame: &sessionGame{cur: s.cur}}, cfg, dungeon.RealClock())
 	ctx, cancel := context.WithCancel(s.root)
 	done := make(chan struct{})
-	s.f, s.cancel, s.done = f, cancel, done
+	s.f, s.cancel, s.done, s.stopping = f, cancel, done, false
+	s.last = f.Status()
+	loop := s.testLoop
+	if loop == nil {
+		loop = func(ctx context.Context, f *dungeon.PlayerFollower) { f.Run(ctx) }
+	}
+	moves := s.moves
 	go func() {
 		defer close(done)
+		defer moves.release(moveOwnerFollow) // just before done closes: a closed done is a free mode
 		defer cancel()
-		f.Run(ctx)
+		loop(ctx, f)
 	}()
-	s.last = f.Status()
-	return s.statusLocked(), nil
+	return followStatusOf(s.last), nil
 }
 
-// Stop ends the follow (spec 1b).
+// Stop ends the follow (spec 1b). When the loop does not exit within the wait, the follow stays "ending": it still owns the
+// movement mode (dungeon_run is refused) until its goroutine has exited.
 func (s *followService) Stop() followStatusJSON {
 	s.mu.Lock()
+	s.settleLocked()
 	f, cancel, done := s.f, s.cancel, s.done
-	s.mu.Unlock()
 	if f == nil {
-		s.mu.Lock()
 		defer s.mu.Unlock()
 		return s.statusLocked()
 	}
+	s.stopping = true
+	wait := s.stopWait
+	s.mu.Unlock()
+	if wait <= 0 {
+		wait = 10 * time.Second
+	}
 	cancel()
+	ended := true
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(wait):
+		ended = false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !ended {
+		s.moves.markEnding(moveOwnerFollow)
+		st := f.Status()
+		st.State = "ending"
+		if st.StoppedReason == "" {
+			st.StoppedReason = "stopped by follow_stop"
+		}
+		return followStatusOf(st)
+	}
+	if s.f == f {
+		s.settleLocked()
+		return followStatusOf(s.last)
+	}
 	st := f.Status()
 	if st.StoppedReason == "" {
 		st.StoppedReason = "stopped by follow_stop"
 	}
-	s.last = st
-	s.f, s.cancel, s.done = nil, nil, nil
 	return followStatusOf(st)
 }
 
@@ -293,6 +359,11 @@ func registerFollowMethods(srv *rpc.Server, cur func() *session.Session, dir str
 		dir = "dungeons"
 	}
 	svc := &followService{cur: cur, dir: dir, nav: nav, brain: brainCtl, runner: runner, root: context.Background()}
+	if runner != nil {
+		svc.moves = runner.moves
+	} else {
+		svc.moves = &moveMode{}
+	}
 	srv.Register("follow_start", rpc.Typed(func(ctx context.Context, p followStartParams) (followStatusJSON, error) {
 		return svc.Start(ctx, p)
 	}))
