@@ -181,6 +181,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	createSpec := fs.String("create", "", "create the character at login when the account lacks it: race,class[,gender] (numbers)")
 	tuneFile := fs.String("tune", "", "tunables file of remote dungeon runs that name none (default: <plan>.tune.json beside the plan; README \"Live tuning\")")
 	budgetAddr := fs.String("login-budget", "", "loopback address of the fleet's shared login budget (set by `fleet`; its token is in the environment)")
+	pidPath := fs.String("pid-file", "", "write this process's pid here (0600) and remove it at exit; slot setup's start line passes it")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -268,7 +269,14 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return exitUsage
 	}
 	defer removeToken()
-
+	if *pidPath != "" {
+		removePID, err := writePIDFile(*pidPath)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUsage
+		}
+		defer removePID()
+	}
 	if *capPath != "" {
 		if err := checkCapture(*capPath, account, password); err != nil {
 			fmt.Fprintln(stderr, err)
