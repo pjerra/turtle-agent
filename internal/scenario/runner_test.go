@@ -81,6 +81,62 @@ func TestRunnerCapturesAndExpands(t *testing.T) {
 	}
 }
 
+// TestRunnerCaptureKeysAreSorted pins a stable order for multi-capture PASS
+// lines: keys sort, so the transcript is deterministic.
+func TestRunnerCaptureKeysAreSorted(t *testing.T) {
+	f := parseFile(t, scenarioBase()+`
+		{"do":"expect","session":"A","match":"^(a)(b)(c)$","timeout_s":1,"capture":{"zz":1,"mm":2,"aa":3}}
+	]}`)
+	a := &fakeCaller{}
+	a.script = func(call int) {
+		if call == 1 {
+			a.add(addonEvent("abc", "TW_LFG", "guild"))
+		}
+	}
+	clk := newFakeClock()
+	res, _ := runWith(t, f, map[string]*fakeCaller{"A": a}, nil, clk)
+	if res.Passed != 1 {
+		t.Fatalf("%+v", res)
+	}
+	for _, rec := range res.Records {
+		if rec.T == "check" && strings.Contains(rec.Raw, "PASS") {
+			idx := strings.Index(rec.Raw, " -> ")
+			if idx < 0 {
+				t.Fatalf("no captures: %q", rec.Raw)
+			}
+			tail := rec.Raw[idx:]
+			if tail != " -> aa=c -> mm=b -> zz=a" {
+				t.Fatalf("unsorted captures: %q", rec.Raw)
+			}
+		}
+	}
+}
+
+// TestRunnerRecordWithSessionMatches pins that a record matcher naming a
+// session records that session's events (the caller filters by session).
+func TestRunnerRecordWithSessionMatches(t *testing.T) {
+	f := parseFile(t, `{"scenario":"t","sessions":{"A":{"rpc":"127.0.0.1:8774"}},
+		"record":[{"session":"A","kind":"addon"}],
+		"steps":[{"do":"mark"}]}`)
+	a := &fakeCaller{}
+	a.script = func(call int) {
+		if call == 1 {
+			a.add(addonEvent("hello", "TW_LFG", "guild"))
+		}
+	}
+	clk := newFakeClock()
+	res, _ := runWith(t, f, map[string]*fakeCaller{"A": a}, nil, clk)
+	found := false
+	for _, rec := range res.Records {
+		if rec.T == "event" && rec.Session == "A" && strings.Contains(rec.Raw, "hello") {
+			found = true
+		}
+	}
+	if !found || res.Errors != 0 {
+		t.Fatalf("not recorded: %+v", res)
+	}
+}
+
 // TestRunnerExpectIsOrderedPerSession pins ordered matching: expects see only
 // events after the previous match.
 func TestRunnerExpectIsOrderedPerSession(t *testing.T) {
@@ -193,6 +249,122 @@ func TestRunnerStopSkipsTheRestAndRunsFinally(t *testing.T) {
 	}
 	if !haveSkip {
 		t.Fatal("no SKIP records")
+	}
+}
+
+// TestRunnerFinallyFailureCountsOnce pins that a failing finally step counts
+// exactly once, numbered 1-based, with the reason after a colon.
+func TestRunnerFinallyFailureCountsOnce(t *testing.T) {
+	f := parseFile(t, `{"scenario":"t","sessions":{"A":{"rpc":"127.0.0.1:8774"}},"steps":[
+		{"do":"mark"}
+	],"finally":[{"do":"rpc","session":"A","method":"invite"}]}`)
+	a := &fakeCaller{results: map[string]fakeResult{"invite": {Err: &RPCError{Code: -32003, Message: "nope"}}}}
+	clk := newFakeClock()
+	res, _ := runWith(t, f, map[string]*fakeCaller{"A": a}, nil, clk)
+	if res.Errors != 1 || res.Exit != 15 {
+		t.Fatalf("%+v", res)
+	}
+	if len(res.Checks) != 1 {
+		t.Fatalf("%+v", res.Checks)
+	}
+	if res.Checks[0].Desc != "finally step 1 (rpc)" {
+		t.Fatalf("%+v", res.Checks[0])
+	}
+	if !strings.Contains(res.Checks[0].Reason, "nope") {
+		t.Fatalf("%+v", res.Checks[0])
+	}
+	found := false
+	for _, rec := range res.Records {
+		if rec.T == "check" && strings.Contains(rec.Raw, "ERROR finally step 1 (rpc):") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no finally ERROR line: %+v", res.Records)
+	}
+}
+
+// TestRunnerMarkDrainErrorIsAnError pins that a drain failure inside mark is
+// an ERROR (spec 3.2), not a silent skip.
+func TestRunnerMarkDrainErrorIsAnError(t *testing.T) {
+	f := parseFile(t, `{"scenario":"t","sessions":{"A":{"rpc":"127.0.0.1:8774"}},"steps":[
+		{"do":"mark"},
+		{"do":"rpc","session":"A","method":"party"}
+	]}`)
+	a := &fakeCaller{eventsErr: errors.New("boom")}
+	clk := newFakeClock()
+	res, _ := runWith(t, f, map[string]*fakeCaller{"A": a}, nil, clk)
+	if res.Errors != 1 || res.Exit != 15 {
+		t.Fatalf("%+v", res)
+	}
+	if res.Checks[0].Desc != "step 1 (mark)" {
+		t.Fatalf("%+v", res.Checks[0])
+	}
+	if a.callCount("party") != 0 {
+		t.Fatalf("continued after drain error: %+v", a.calls)
+	}
+}
+
+// TestRunnerMaxMinutesDuringSleep pins that a sleep crossing the max_minutes
+// deadline reports "max_minutes passed" (exit 15), not "interrupted": the
+// test Sleep mimics the real one, failing once the fake clock passes the
+// deadline.
+func TestRunnerMaxMinutesDuringSleep(t *testing.T) {
+	f := parseFile(t, `{"scenario":"t","max_minutes":1,"sessions":{"A":{"rpc":"127.0.0.1:8774"}},"steps":[
+		{"do":"sleep","seconds":120},
+		{"do":"mark"}
+	]}`)
+	a := &fakeCaller{}
+	a.char = "Tacmdaron"
+	clk := newFakeClock()
+	dl := clk.Now().Add(time.Minute)
+	sleep := func(ctx context.Context, d time.Duration) error {
+		clk.advance(d)
+		if !clk.Now().Before(dl) {
+			return context.DeadlineExceeded
+		}
+		return ctx.Err()
+	}
+	r := &Runner{Sessions: map[string]Caller{"A": bindFake(a, clk)}, Now: clk.Now, Sleep: sleep, Out: io.Discard}
+	res, err := r.Run(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Errors != 1 || res.Exit != 15 {
+		t.Fatalf("%+v", res)
+	}
+	if !strings.Contains(res.Checks[0].Reason, "max_minutes passed") {
+		t.Fatalf("%+v", res.Checks[0])
+	}
+}
+
+// TestRunnerMaxMinutesDuringSettle pins the same for an action step's
+// settle sleep: an rpc whose settle crosses the deadline reports max_minutes.
+func TestRunnerMaxMinutesDuringSettle(t *testing.T) {
+	f := parseFile(t, `{"scenario":"t","max_minutes":1,"sessions":{"A":{"rpc":"127.0.0.1:8774"}},"steps":[
+		{"do":"rpc","session":"A","method":"party","settle_s":60}
+	]}`)
+	a := &fakeCaller{}
+	a.char = "Tacmdaron"
+	clk := newFakeClock()
+	dl := clk.Now().Add(time.Minute)
+	sleep := func(ctx context.Context, d time.Duration) error {
+		clk.advance(d)
+		if !clk.Now().Before(dl) {
+			return context.DeadlineExceeded
+		}
+		return ctx.Err()
+	}
+	r := &Runner{Sessions: map[string]Caller{"A": bindFake(a, clk)}, Now: clk.Now, Sleep: sleep, Out: io.Discard}
+	res, err := r.Run(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Errors != 1 || res.Exit != 15 {
+		t.Fatalf("%+v", res)
+	}
+	if !strings.Contains(res.Checks[0].Reason, "max_minutes passed") {
+		t.Fatalf("%+v", res.Checks[0])
 	}
 }
 
@@ -310,32 +482,61 @@ func TestRunnerLogoutClosesTheSession(t *testing.T) {
 }
 
 // TestRunnerNeverWritesTheToken pins redaction: a reply echoing the token
-// leaves <token> in every stored record.
+// leaves <token> in every stored record, including a token straddling the
+// 300-char result cut, and in the marshalled transcript/result bytes.
 func TestRunnerNeverWritesTheToken(t *testing.T) {
 	f := parseFile(t, scenarioBase()+`
 		{"do":"rpc","session":"A","method":"party","record_result":true}
 	]}`)
-	a := &fakeCaller{token: "sekret-token-123"}
+	tok := "sekret-token-123"
+	a := &fakeCaller{token: tok}
 	a.char = "Tacmdaron"
-	a.results = map[string]fakeResult{"party": {Result: map[string]any{"tok": "sekret-token-123"}}}
+	a.results = map[string]fakeResult{"party": {Result: map[string]any{"tok": tok, "pad": strings.Repeat("x", 285) + tok}}}
 	clk := newFakeClock()
 	res, _ := runWith(t, f, map[string]*fakeCaller{"A": a}, nil, clk)
 	if res.Errors != 0 {
 		t.Fatalf("%+v", res)
 	}
 	for _, rec := range res.Records {
-		if strings.Contains(rec.Raw, "sekret-token-123") || strings.Contains(rec.Norm, "sekret-token-123") {
+		if strings.Contains(rec.Raw, tok) || strings.Contains(rec.Norm, tok) {
 			t.Fatalf("token leaked: %+v", rec)
+		}
+		// A token straddling the 300-char cut must not leak even a fragment:
+		// redact runs before the cut.
+		for i := 0; i+4 <= len(tok); i++ {
+			frag := tok[i : i+4]
+			if frag == "toke" || frag == "oken" {
+				continue // also inside the "<token>" placeholder
+			}
+			if strings.Contains(rec.Raw, frag) || strings.Contains(rec.Norm, frag) {
+				t.Fatalf("token fragment %q leaked: %+v", frag, rec)
+			}
+		}
+		if len(rec.Got) > 0 && strings.Contains(string(rec.Got), tok) {
+			t.Fatalf("token leaked in Got: %+v", rec)
 		}
 	}
 	found := false
 	for _, rec := range res.Records {
-		if rec.T == "result" && strings.Contains(rec.Raw, "<token>") {
+		if rec.T == "result" && (strings.Contains(rec.Raw, "<token>") || strings.Contains(string(rec.Got), "<token>")) {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("no redacted result line")
+	}
+	var jl strings.Builder
+	for _, rec := range res.Records {
+		raw, _ := json.Marshal(rec)
+		jl.Write(raw)
+		jl.WriteByte('\n')
+	}
+	if strings.Contains(jl.String(), tok) {
+		t.Fatal("token leaked in transcript.jsonl bytes")
+	}
+	out, _ := json.Marshal(res.Checks)
+	if strings.Contains(string(out), tok) {
+		t.Fatal("token leaked in result.json bytes")
 	}
 }
 

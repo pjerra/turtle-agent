@@ -164,6 +164,10 @@ func scenarioRunCmd(ctx context.Context, args []string, stdout, stderr io.Writer
 		}
 		addr, tokFile, _ := strings.Cut(val, "@")
 		sd.RPC = addr
+		if err := scenario.CheckAddr(name, addr); err != nil {
+			fmt.Fprintf(stderr, "scenario: --session %s: %v\n", name, err)
+			return exitUsage
+		}
 		if tokFile != "" {
 			sd.TokenFile = tokFile
 		}
@@ -214,7 +218,10 @@ func scenarioRunCmd(ctx context.Context, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "scenario: %v\n", err)
 		return exitScenarioAbort
 	}
-	writeScenarioOut(outDir, f, res)
+	if err := writeScenarioOut(outDir, f, res); err != nil {
+		fmt.Fprintf(stderr, "scenario: cannot write %s: %v\n", outDir, err)
+		return exitScenarioAbort
+	}
 	switch res.Exit {
 	case 0:
 		return 0
@@ -240,18 +247,27 @@ func defaultScenarioTokenFile(addr string) string {
 }
 
 // writeScenarioOut writes raw.txt, norm.txt, transcript.jsonl and result.json.
-func writeScenarioOut(dir string, f *scenario.File, res *scenario.Result) {
+// Each file goes through a temp file plus rename so a failed run never leaves
+// a half-written artifact; any failed required artifact is an ERROR for the
+// caller (exit 15).
+func writeScenarioOut(dir string, f *scenario.File, res *scenario.Result) error {
 	raw := scenario.RenderRaw(res.Records)
 	norm := scenario.RenderNorm(res.Records, f.Normalise)
-	_ = os.WriteFile(filepath.Join(dir, "raw.txt"), []byte(strings.Join(raw, "\n")+"\n"), 0o644)
-	_ = os.WriteFile(filepath.Join(dir, "norm.txt"), []byte(strings.Join(norm, "\n")+"\n"), 0o644)
+	if err := writeFileAtomic(dir, "raw.txt", []byte(strings.Join(raw, "\n")+"\n")); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(dir, "norm.txt", []byte(strings.Join(norm, "\n")+"\n")); err != nil {
+		return err
+	}
 	var jl bytes.Buffer
 	for _, rec := range res.Records {
 		raw, _ := json.Marshal(rec)
 		jl.Write(raw)
 		jl.WriteByte('\n')
 	}
-	_ = os.WriteFile(filepath.Join(dir, "transcript.jsonl"), jl.Bytes(), 0o644)
+	if err := writeFileAtomic(dir, "transcript.jsonl", jl.Bytes()); err != nil {
+		return err
+	}
 	checks := []map[string]any{}
 	for _, c := range res.Checks {
 		m := map[string]any{"step": c.Step, "desc": c.Desc, "status": c.Status}
@@ -270,7 +286,36 @@ func writeScenarioOut(dir string, f *scenario.File, res *scenario.Result) {
 		"errors": res.Errors, "skipped": res.Skipped, "checks": checks,
 	}
 	out, _ := json.MarshalIndent(result, "", "  ")
-	_ = os.WriteFile(filepath.Join(dir, "result.json"), append(out, '\n'), 0o644)
+	if err := writeFileAtomic(dir, "result.json", append(out, '\n')); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeFileAtomic(dir, name string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, name+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func scenarioNormCmd(args []string, stdout, stderr io.Writer) int {
@@ -319,7 +364,10 @@ func scenarioNormCmd(args []string, stdout, stderr io.Writer) int {
 		lines = append(lines, r.Norm)
 	}
 	_ = norm
-	_ = os.WriteFile(filepath.Join(dir, "norm.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	if err := writeFileAtomic(dir, "norm.txt", []byte(strings.Join(lines, "\n")+"\n")); err != nil {
+		fmt.Fprintf(stderr, "scenario: %v\n", err)
+		return exitScenarioAbort
+	}
 	fmt.Fprintln(stdout, filepath.Join(dir, "norm.txt"))
 	return 0
 }

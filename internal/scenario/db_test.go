@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -82,8 +83,8 @@ func TestSSHArgvAndStdin(t *testing.T) {
 	if gotName != "ssh" {
 		t.Fatalf("name %q", gotName)
 	}
-	want := []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "m910q"}
-	if len(gotArgs) < len(want) {
+	want := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "m910q"}
+	if len(gotArgs) != len(want)+1 {
 		t.Fatalf("argv %q", gotArgs)
 	}
 	for i, w := range want {
@@ -115,6 +116,42 @@ func TestSSHArgvAndStdin(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("stdin %q lacks %q", body, want)
 		}
+	}
+}
+
+// TestSSHDefaultExecRunsSsh pins that the default Exec shells out to `ssh`:
+// a stub ssh script on PATH captures the argv and stdin, and Count parses
+// the stub's single-line number.
+func TestSSHDefaultExecRunsSsh(t *testing.T) {
+	dir := t.TempDir()
+	argvPath := dir + "/argv"
+	stdinPath := dir + "/stdin"
+	sh := "#!/bin/sh\n" +
+		"echo \"$0 $*\" > " + argvPath + "\n" +
+		"cat > " + stdinPath + "\n" +
+		"printf '7\\n'\n"
+	if err := os.WriteFile(dir+"/ssh", []byte(sh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	db := SSHDB{Host: "m910q", Container: "tortoise-db"}
+	n, err := db.Count(context.Background(), DBQuery{Table: "tw_world.lft_user_groups", Op: "=="})
+	if err != nil || n != 7 {
+		t.Fatalf("%d %v", n, err)
+	}
+	argv, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(argv), " -o BatchMode=yes -o ConnectTimeout=10 m910q docker exec -i tortoise-db sh -c '") {
+		t.Fatalf("argv %q", argv)
+	}
+	stdin, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stdin), "SELECT COUNT(*) FROM tw_world.lft_user_groups;") {
+		t.Fatalf("stdin %q", stdin)
 	}
 }
 
@@ -162,6 +199,14 @@ func TestDBOutputIsOnlyANumber(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "ERROR 1146 (42S02)") || strings.Contains(err.Error(), "more") {
 		t.Fatalf("stderr: %v", err)
 	}
+	if !strings.Contains(err.Error(), "exited 1:") && !strings.Contains(err.Error(), "exited 1 ") {
+		t.Fatalf("no exit code: %v", err)
+	}
+	// The ERROR line is found even when it is not the first stderr line.
+	_, err = mk("", "Warning: noise\nERROR 1064 (42000) at line 1: boom\n", 3).Count(context.Background(), DBQuery{Table: "tw_world.lft_user_groups", Op: "=="})
+	if err == nil || !strings.Contains(err.Error(), "ERROR 1064 (42000)") || !strings.Contains(err.Error(), "exited 3:") {
+		t.Fatalf("stderr scan: %v", err)
+	}
 }
 
 // exitError fakes an exec exit status for the stderr tests.
@@ -170,3 +215,5 @@ type exitError struct {
 }
 
 func (e *exitError) Error() string { return "exit status 1" }
+
+func (e *exitError) ExitCode() int { return e.code }

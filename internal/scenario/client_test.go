@@ -72,5 +72,12 @@ func TestHTTPCallerSendsTheTokenAndHidesIt(t *testing.T) {
 		!strings.Contains(err.Error(), "not a loopback address") {
 		t.Fatalf("got %v", err)
 	}
+	// A userinfo smuggling a host ("@") fails before any dial: the token
+	// must never go to evil.example however Sscanf parses the port.
+	c5 := &HTTPCaller{Addr: "127.0.0.1:80@evil.example", TokenFile: tokPath, HTTP: srv.Client()}
+	if _, err := c5.Call(t.Context(), "party", map[string]any{}, time.Second); err == nil ||
+		!strings.Contains(err.Error(), "not a loopback address") {
+		t.Fatalf("got %v", err)
+	}
 	_ = base64.StdEncoding
 }

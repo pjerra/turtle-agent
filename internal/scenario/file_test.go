@@ -45,16 +45,18 @@ func TestParseAcceptsACaptureAndASave(t *testing.T) {
 // TestParseRejectsANonLoopbackSession pins that a token must never leave the
 // machine: only loopback RPC addresses parse.
 func TestParseRejectsANonLoopbackSession(t *testing.T) {
-	for _, addr := range []string{"10.0.0.5:8774", "example.com:1"} {
+	for _, addr := range []string{"10.0.0.5:8774", "example.com:1", "127.0.0.1:80@evil.example", "127.0.0.1:abc", "127.0.0.1:0", "127.0.0.1:99999", "127.0.0.1", "[::1]:80@evil.example"} {
 		data := `{"scenario":"x","sessions":{"A":{"rpc":"` + addr + `"}},"steps":[{"do":"mark"}]}`
 		_, err := Parse([]byte(data), nil)
 		if err == nil || !strings.Contains(err.Error(), "is not a loopback address") {
 			t.Fatalf("%s: got %v", addr, err)
 		}
 	}
-	data := `{"scenario":"x","sessions":{"A":{"rpc":"[::1]:8774"}},"steps":[{"do":"mark"}]}`
-	if _, err := Parse([]byte(data), nil); err != nil {
-		t.Fatalf("::1: got %v", err)
+	for _, addr := range []string{"127.0.0.1:8774", "localhost:1", "[::1]:8774"} {
+		data := `{"scenario":"x","sessions":{"A":{"rpc":"` + addr + `"}},"steps":[{"do":"mark"}]}`
+		if _, err := Parse([]byte(data), nil); err != nil {
+			t.Fatalf("%s: got %v", addr, err)
+		}
 	}
 }
 
@@ -139,6 +141,7 @@ func TestParseRejectsBadDBValues(t *testing.T) {
 	steps := []string{
 		`{"do":"check_db","table":"tw_world.lft_user_groups","where":{"a;b":1},"rows":0}`,
 		`{"do":"check_db","table":"tw_world.lft_user_groups","where":{"a":"x'"},"rows":0}`,
+		`{"do":"check_db","table":"tw_world.lft_user_groups","where":{"a":2.5},"rows":0}`,
 		`{"do":"check_db","item":{"char":"Bob'--","entry":9240},"count":0}`,
 	}
 	for _, step := range steps {
@@ -157,6 +160,30 @@ func TestParseRejectsBadDBValues(t *testing.T) {
 		if _, err := Parse([]byte(data), nil); err == nil {
 			t.Fatalf("%s: accepted", db)
 		}
+	}
+}
+
+// TestParseRejectsAVarNeverSetInFinally pins that the static check covers
+// finally templates (finally sees only vars main steps set).
+func TestParseRejectsAVarNeverSetInFinally(t *testing.T) {
+	data := `{"scenario":"x","sessions":{"A":{"rpc":"127.0.0.1:8774"}},
+		"steps":[{"do":"mark"}],
+		"finally":[{"do":"gm","session":"A","text":".go ${nowhere} 1 2"}]}`
+	_, err := Parse([]byte(data), nil)
+	if err == nil || !strings.Contains(err.Error(), "finally step 1 (gm)") || !strings.Contains(err.Error(), "${nowhere} is never set before this step") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// TestParseRejectsAVarNeverSetInRecord pins that the static check covers
+// record match fields.
+func TestParseRejectsAVarNeverSetInRecord(t *testing.T) {
+	data := `{"scenario":"x","sessions":{"A":{"rpc":"127.0.0.1:8774"}},
+		"record":[{"match":"^${gid}$"}],
+		"steps":[{"do":"mark"}]}`
+	_, err := Parse([]byte(data), nil)
+	if err == nil || !strings.Contains(err.Error(), "${gid} is never set before this step") {
+		t.Fatalf("got %v", err)
 	}
 }
 

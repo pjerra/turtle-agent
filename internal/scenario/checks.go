@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,7 +126,12 @@ func (rr *run) doExpect(ctx context.Context, s *Step, n int) bool {
 			line := fmt.Sprintf("  PASS %s (seq %d, %.1f s)", desc, e.Seq, dur)
 			norm := fmt.Sprintf("  PASS %s", desc)
 			if len(s.Capture) > 0 {
+				keys := make([]string, 0, len(s.Capture))
 				for k := range s.Capture {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
 					line += fmt.Sprintf(" -> %s=%s", k, rr.vars[k])
 					norm += fmt.Sprintf(" -> %s", k)
 				}
@@ -493,16 +499,16 @@ func (rr *run) doCheckRPC(ctx context.Context, s *Step, n int) bool {
 			gb2, _ := json.Marshal(ga)
 			wb2, _ := json.Marshal(wa)
 			pass = string(gb2) == string(wb2)
-			reason = fmt.Sprintf("got %s", cut(string(gb), 200))
+			reason = fmt.Sprintf("got %s", cut(string(redactJSON(gb, rr.tokens())), 200))
 		case s.HasRe:
 			re, _ := compileRegexp(s.MatchRe)
 			str := render(v)
 			pass = re.MatchString(str)
-			reason = fmt.Sprintf("got %s", cut(str, 200))
+			reason = fmt.Sprintf("got %s", cut(redactAll(str, rr.tokens()), 200))
 		default:
 			arr, ok := v.([]any)
 			if !ok {
-				reason = fmt.Sprintf("got %s", cut(render(v), 200))
+				reason = fmt.Sprintf("got %s", cut(redactAll(render(v), rr.tokens()), 200))
 				break
 			}
 			pass = int64(len(arr)) == *s.Len
@@ -510,6 +516,7 @@ func (rr *run) doCheckRPC(ctx context.Context, s *Step, n int) bool {
 		}
 		if pass {
 			gotRaw, _ := json.Marshal(v)
+			gotRaw = redactJSON(gotRaw, rr.tokens())
 			line := fmt.Sprintf("  PASS %s (got %s)", desc, cut(string(gotRaw), 200))
 			rr.emit(Record{T: "check", Step: n, Session: s.Session, Raw: line, Norm: line, Status: "PASS"})
 			rr.checks = append(rr.checks, CheckResult{Step: n, Desc: desc, Status: "PASS", Got: gotRaw})
@@ -537,16 +544,22 @@ func (rr *run) finalStep(ctx context.Context, s *Step, n int) {
 	if s.Note != "" {
 		rr.emit(Record{T: "note", Step: n, Raw: "  # " + s.Note, Norm: "  # " + s.Note})
 	}
+	checksBefore := len(rr.checks)
+	errsBefore := rr.errs
 	var ok bool
 	switch s.Do {
 	case "section":
 		rr.sections++
 		line := fmt.Sprintf("=== STEP %d: %s", rr.sections, s.Title)
 		rr.emit(Record{T: "section", Step: n, Raw: "\n" + line, Norm: "\n" + line})
-		rr.doMark(s, n)
+		if err := rr.doMark(ctx, s, n); err != nil {
+			rr.errorf(n, fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do), "%v", err)
+		}
 		return
 	case "mark":
-		rr.doMark(s, n)
+		if err := rr.doMark(ctx, s, n); err != nil {
+			rr.errorf(n, fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do), "%v", err)
+		}
 		return
 	case "gm":
 		ok = rr.doGM(ctx, s, n, true)
@@ -559,14 +572,28 @@ func (rr *run) finalStep(ctx context.Context, s *Step, n int) {
 	case "sleep":
 		ok = rr.doSleep(ctx, s, n)
 	default:
-		ok = false
+		rr.errorf(n, fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do), "bad do %q", s.Do)
+		return
 	}
-	if !ok {
-		rr.errs++
-		rr.emit(Record{T: "check", Step: n,
-			Raw:  fmt.Sprintf("  ERROR finally step %d (%s)", n-1000, s.Do),
-			Norm: fmt.Sprintf("  ERROR finally step %d (%s)", n-1000, s.Do), Status: "ERROR"})
+	if ok {
+		return
 	}
+	// Helpers already called errorf exactly once on failure: rename that one
+	// record to finally numbering, keeping the helper's ": <reason>" suffix.
+	if len(rr.checks) == checksBefore+1 && rr.errs == errsBefore+1 {
+		oldDesc := rr.checks[len(rr.checks)-1].Desc
+		newDesc := fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do)
+		rr.checks[len(rr.checks)-1].Desc = newDesc
+		for j := len(rr.records) - 1; j >= 0; j-- {
+			if rr.records[j].T == "check" && rr.records[j].Step == n {
+				rr.records[j].Raw = strings.Replace(rr.records[j].Raw, "  ERROR "+oldDesc, "  ERROR "+newDesc, 1)
+				rr.records[j].Norm = strings.Replace(rr.records[j].Norm, "  ERROR "+oldDesc, "  ERROR "+newDesc, 1)
+				break
+			}
+		}
+		return
+	}
+	rr.errorf(n, fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do), "failed")
 }
 
 func minDur(a, b time.Duration) time.Duration {

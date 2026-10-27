@@ -131,5 +131,6 @@ func usage(w io.Writer) {
   turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
   turtle-agent scenario norm <file> <dir>
   turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--plan NAME]...
+  turtle-agent route-edits list [--edit-dir DIR] [--json] [<plan>] | export [--edit-dir DIR] [--config-dir DIR] --to DIR <plan> [vN|latest] | promote [--edit-dir DIR] [--worktree PATH] <plan> vN
   turtle-agent version`)
 }

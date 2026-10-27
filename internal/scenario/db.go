@@ -3,6 +3,7 @@ package scenario
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -253,9 +254,9 @@ func (d SSHDB) Count(ctx context.Context, q DBQuery) (int64, error) {
 		}
 	}
 	remote := fmt.Sprintf(dbRemote, d.Container)
-	stdout, stderr, err := execFn(ctx, "ssh", []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", d.Host, remote}, dbWrap(sql))
+	stdout, stderr, err := execFn(ctx, "ssh", []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", d.Host, remote}, dbWrap(sql))
 	if err != nil {
-		return 0, fmt.Errorf("scenario db: ssh/mysql exited: %s", firstErrorLine(stderr))
+		return 0, fmt.Errorf("scenario db: ssh/mysql exited %d: %s", exitCode(err), firstErrorLine(stderr))
 	}
 	out := stdout
 	if len(out) > 64<<10 {
@@ -273,18 +274,29 @@ func (d SSHDB) Count(ctx context.Context, q DBQuery) (int64, error) {
 	return n, nil
 }
 
-// firstErrorLine shows only a mysql ERROR line's first 200 chars, or a bare
-// exit note that never carries secrets.
+// firstErrorLine shows only the first mysql ERROR line's first 200 chars, or
+// a bare exit note that never carries secrets.
 func firstErrorLine(stderr []byte) string {
 	if len(stderr) > 64<<10 {
 		stderr = stderr[:64<<10]
 	}
-	line, _, _ := strings.Cut(string(stderr), "\n")
-	if m := regexp.MustCompile(`^ERROR \d+ \([0-9A-Z]{5}\)`).FindString(line); m != "" {
-		if len(line) > 200 {
-			line = line[:200]
+	for line := range strings.Lines(strings.TrimSuffix(string(stderr), "\n")) {
+		if m := errLine.FindString(line); m != "" {
+			if len(line) > 200 {
+				line = line[:200]
+			}
+			return line
 		}
-		return line
 	}
 	return "ssh/mysql failed"
+}
+
+var errLine = regexp.MustCompile(`^ERROR \d+ \([0-9A-Z]{5}\)`)
+
+func exitCode(err error) int {
+	var ee interface{ ExitCode() int }
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return 1
 }

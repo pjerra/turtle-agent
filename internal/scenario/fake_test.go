@@ -18,6 +18,7 @@ type fakeCaller struct {
 	mu        sync.Mutex
 	char      string
 	statusErr error
+	eventsErr error
 	evs       []events.Event
 	next      uint64
 	calls     []fakeCall
@@ -54,7 +55,7 @@ func (f *fakeCaller) Call(ctx context.Context, method string, params any, timeou
 	raw, _ := json.Marshal(params)
 	f.mu.Lock()
 	f.calls = append(f.calls, fakeCall{Method: method, Params: raw})
-	char, statusErr, results := f.char, f.statusErr, f.results
+	char, statusErr, eventsErr, results := f.char, f.statusErr, f.eventsErr, f.results
 	f.mu.Unlock()
 	switch method {
 	case "status":
@@ -66,6 +67,9 @@ func (f *fakeCaller) Call(ctx context.Context, method string, params any, timeou
 		f.mu.Unlock()
 		return json.Marshal(map[string]any{"character": char, "last_seq": last})
 	case "events":
+		if eventsErr != nil {
+			return nil, eventsErr
+		}
 		f.mu.Lock()
 		f.polls++
 		n := f.polls

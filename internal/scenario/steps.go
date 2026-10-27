@@ -50,10 +50,8 @@ func (rr *run) drain(ctx context.Context, step int) error {
 }
 
 // matchable reports whether a matcher applies to the event for recording.
+// The caller filters by session; the matcher's Session field is ignored here.
 func matchable(m Matcher, e events.Event) bool {
-	if m.Session != "" && m.Session != sessOf(e) {
-		return false
-	}
 	c, err := m.compile(nil)
 	if err != nil {
 		return false
@@ -83,8 +81,6 @@ func matchable(m Matcher, e events.Event) bool {
 	}
 	return c.matches(e)
 }
-
-func sessOf(e events.Event) string { return "" }
 
 // writeRecorded writes every new event matching any record matcher (or an
 // expect just fulfilled — callers pass those explicitly), in sorted session
@@ -149,8 +145,11 @@ func eventRecord(step int, session string, e *events.Event) Record {
 }
 
 // doMark drains and moves every window and match cursor to the newest event.
-func (rr *run) doMark(s *Step, n int) {
-	_ = rr.drain(rr.runCtx, n)
+// A drain error is an ERROR (spec 3.2); the caller records it.
+func (rr *run) doMark(ctx context.Context, s *Step, n int) error {
+	if err := rr.drain(ctx, n); err != nil {
+		return err
+	}
 	for _, name := range rr.order {
 		st := rr.sess[name]
 		if st.closed {
@@ -158,15 +157,15 @@ func (rr *run) doMark(s *Step, n int) {
 		}
 		st.window, st.from = st.cursor, st.cursor
 	}
+	return nil
 }
 
 // doSection prints the header, marks, and then behaves as mark.
-func (rr *run) doSection(s *Step, n int) bool {
+func (rr *run) doSection(ctx context.Context, s *Step, n int) error {
 	rr.sections++
 	line := fmt.Sprintf("=== STEP %d: %s", rr.sections, s.Title)
 	rr.emit(Record{T: "section", Step: n, Raw: "\n" + line, Norm: "\n" + line})
-	rr.doMark(s, n)
-	return true
+	return rr.doMark(ctx, s, n)
 }
 
 // settle sleeps settle_s (step value, else top-level), then drains.
@@ -177,7 +176,11 @@ func (rr *run) settle(ctx context.Context, s *Step, n int) error {
 	}
 	if d > 0 {
 		if err := rr.sleep(ctx, time.Duration(d*float64(time.Second))); err != nil {
-			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "interrupted")
+			if !rr.now().Before(rr.deadline) {
+				rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "max_minutes passed")
+			} else {
+				rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "interrupted")
+			}
 			rr.skipRest(n + 1)
 			return err
 		}
@@ -380,8 +383,9 @@ func (rr *run) doRPC(ctx context.Context, s *Step, n int, inFinally bool) bool {
 		}
 		return false
 	}
-	line := "    -> " + cut(string(res), 300)
-	rr.emit(Record{T: "result", Step: n, Session: s.Session, Raw: line, Norm: resultNorm(s, line), Got: res})
+	got := redactJSON(res, rr.tokens())
+	line := "    -> " + cut(string(got), 300)
+	rr.emit(Record{T: "result", Step: n, Session: s.Session, Raw: line, Norm: resultNorm(s, line), Got: got})
 	if len(s.Save) > 0 {
 		for k, path := range s.Save {
 			v, ok := pathValue(res, path)
@@ -416,7 +420,9 @@ func (rr *run) doSleep(ctx context.Context, s *Step, n int) bool {
 	line := fmt.Sprintf("  sleep %g s", s.Seconds)
 	rr.emit(Record{T: "action", Step: n, Raw: line, Norm: line})
 	if err := rr.sleep(ctx, time.Duration(s.Seconds*float64(time.Second))); err != nil {
-		if ctx.Err() != nil {
+		if !rr.now().Before(rr.deadline) {
+			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "max_minutes passed")
+		} else if ctx.Err() != nil {
 			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "interrupted")
 		} else {
 			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "%v", err)

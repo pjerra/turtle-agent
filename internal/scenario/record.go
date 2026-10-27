@@ -70,6 +70,26 @@ func redactValue(v any, tokens []string) any {
 	}
 }
 
+// redactJSON replaces every token occurrence in raw JSON bytes, recursing
+// through strings via redactValue so nested fields are scrubbed too. The
+// output keeps the literal <token> text (no \u003c escapes).
+func redactJSON(raw json.RawMessage, tokens []string) json.RawMessage {
+	if len(tokens) == 0 || len(raw) == 0 {
+		return raw
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return json.RawMessage(redactAll(string(raw), tokens))
+	}
+	var buf strings.Builder
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(redactValue(v, tokens)); err != nil {
+		return raw
+	}
+	return json.RawMessage(strings.TrimSuffix(buf.String(), "\n"))
+}
+
 var (
 	// B1: RFC3339 times, with optional fractions and zone.
 	bNormTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`)

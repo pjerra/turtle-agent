@@ -94,6 +94,7 @@ type run struct {
 	sleep    func(ctx context.Context, d time.Duration) error
 	now      func() time.Time
 	runCtx   context.Context
+	deadline time.Time
 }
 
 func sortedKeys(m map[string]Session) []string {
@@ -131,6 +132,7 @@ func (r *Runner) Run(ctx context.Context, f *File) (*Result, error) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(f.MaxMinutes*float64(time.Minute)))
 	defer cancel()
 	rr.runCtx = runCtx
+	rr.deadline = res.Started.Add(time.Duration(f.MaxMinutes * float64(time.Minute)))
 
 	// 3.1 Start: status probe every session, sorted by name.
 	rr.order = sortedKeys(f.Sessions)
@@ -172,7 +174,7 @@ func (r *Runner) Run(ctx context.Context, f *File) (*Result, error) {
 	rr.header()
 	aborted := false
 	for i, s := range f.Steps {
-		if err := runCtx.Err(); err != nil && ctx.Err() == nil {
+		if ctx.Err() == nil && (runCtx.Err() != nil || !rr.now().Before(rr.deadline)) {
 			rr.errorf(i+1, fmt.Sprintf("step %d (%s)", i+1, s.Do), "max_minutes passed")
 			rr.skipRest(i + 1)
 			aborted = true
@@ -280,8 +282,8 @@ func (rr *run) header() {
 	}
 }
 
-// emit stores a record (redacting tokens) and prints its raw line live.
-func (rr *run) emit(rec Record) {
+// tokens collects the current bearer token of every session for redaction.
+func (rr *run) tokens() []string {
 	tokens := []string{}
 	for _, st := range rr.sess {
 		if tr, ok := st.caller.(tokenReader); ok {
@@ -290,8 +292,17 @@ func (rr *run) emit(rec Record) {
 			}
 		}
 	}
+	return tokens
+}
+
+// emit stores a record (redacting tokens) and prints its raw line live.
+func (rr *run) emit(rec Record) {
+	tokens := rr.tokens()
 	rec.Raw = redactAll(rec.Raw, tokens)
 	rec.Norm = redactAll(rec.Norm, tokens)
+	if len(rec.Got) > 0 {
+		rec.Got = redactJSON(rec.Got, tokens)
+	}
 	if rec.Event != nil {
 		cp := *rec.Event
 		redactEvent(&cp, tokens)
@@ -320,9 +331,18 @@ func (rr *run) step(ctx context.Context, s *Step, n int) bool {
 	}
 	switch s.Do {
 	case "section":
-		return rr.doSection(s, n)
+		if err := rr.doSection(ctx, s, n); err != nil {
+			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "%v", err)
+			rr.skipRest(n + 1)
+			return false
+		}
+		return true
 	case "mark":
-		rr.doMark(s, n)
+		if err := rr.doMark(ctx, s, n); err != nil {
+			rr.errorf(n, fmt.Sprintf("step %d (%s)", n, s.Do), "%v", err)
+			rr.skipRest(n + 1)
+			return false
+		}
 		return true
 	case "gm":
 		return rr.doGM(ctx, s, n, false)

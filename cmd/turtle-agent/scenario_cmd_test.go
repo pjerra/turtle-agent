@@ -205,4 +205,46 @@ func TestScenarioCmdVarAndSessionFlags(t *testing.T) {
 	if code := scenarioCmd(t.Context(), []string{"run", "--session", "ZZZ=127.0.0.1:9@/x", "--out", filepath.Join(dir, "o"), file}, &out3, &err3); code != exitUsage {
 		t.Fatalf("exit %d", code)
 	}
+	// A --session override to a non-loopback address is refused before any dial.
+	var out4, err4 bytes.Buffer
+	if code := scenarioCmd(t.Context(), []string{"run", "--session", "A=10.0.0.5:8774", "--out", filepath.Join(dir, "o2"), file}, &out4, &err4); code != exitUsage {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(err4.String(), "is not a loopback address") {
+		t.Fatalf("stderr %q", err4.String())
+	}
+}
+
+// TestScenarioCmdRunArtifactFailure pins that an unwritable out dir aborts
+// with exit 15 and an explicit message.
+func TestScenarioCmdRunArtifactFailure(t *testing.T) {
+	dir := t.TempDir()
+	tokPath := filepath.Join(dir, "rpc-8774.token")
+	if err := os.WriteFile(tokPath, []byte("tok-"+strings.Repeat("z", 32)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fa := &fakeScenarioAgent{t: t, tok: "tok-" + strings.Repeat("z", 32)}
+	srv := httptest.NewServer(fa.handler())
+	defer srv.Close()
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	file := writeFakeFile(t, dir, "run.json", `{"scenario":"cmdrun","sessions":{"A":{"rpc":"`+addr+`","token_file":"`+tokPath+`"}},
+		"steps":[{"do":"addon_send","session":"A","channel":"guild","text":"C2S_GET_GROUPS_LIST"}]}`)
+	outDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "raw.txt"), []byte("x"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(outDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(outDir, 0o755)
+	var out, errOut bytes.Buffer
+	if code := scenarioCmd(t.Context(), []string{"run", "--force", "--out", outDir, file}, &out, &errOut); code != exitScenarioAbort {
+		t.Fatalf("exit %d (%s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "cannot write") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
 }

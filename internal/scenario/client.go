@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,11 +36,20 @@ func (c *HTTPCaller) Token() string { return c.token }
 // The token file is read at every call (a restarted agent has a new token)
 // and never appears in an error.
 func (c *HTTPCaller) Call(ctx context.Context, method string, params any, timeout time.Duration) (json.RawMessage, error) {
-	host, _, err := net.SplitHostPort(c.Addr)
+	host, portS, err := net.SplitHostPort(c.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
 	}
-	if host != "127.0.0.1" && host != "localhost" && host != "[::1]" && host != "::1" {
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
+	}
+	for _, b := range []byte(portS) {
+		if b < '0' || b > '9' {
+			return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
+		}
+	}
+	port, err := strconv.Atoi(portS)
+	if err != nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
 	}
 	id := 1
@@ -50,7 +60,12 @@ func (c *HTTPCaller) Call(ctx context.Context, method string, params any, timeou
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if h := req.URL.Hostname(); h != "127.0.0.1" && h != "localhost" && h != "::1" {
+		return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
+	}
+	if req.URL.User != nil {
+		return nil, fmt.Errorf("scenario: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", c.Addr)
+	}
 	tok, err := rpc.ReadTokenFile(c.TokenFile)
 	if err != nil {
 		return nil, fmt.Errorf("scenario: token file: %v", err)

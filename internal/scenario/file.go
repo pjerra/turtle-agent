@@ -5,9 +5,11 @@ package scenario
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -207,7 +209,7 @@ func Parse(data []byte, vars map[string]string) (*File, error) {
 		if !sessionName.MatchString(name) {
 			return nil, fmt.Errorf("scenario: bad session name %q", name)
 		}
-		if err := checkAddr(name, s.RPC); err != nil {
+		if err := CheckAddr(name, s.RPC); err != nil {
 			return nil, err
 		}
 	}
@@ -312,14 +314,14 @@ func strOr(s *string) string {
 	return *s
 }
 
-// checkAddr pins the RPC address to loopback: a bearer token must never
-// leave the machine.
-func checkAddr(session, addr string) error {
+// CheckAddr pins the RPC address to loopback: a bearer token must never
+// leave the machine. The cmd layer re-runs it on every --session override.
+func CheckAddr(session, addr string) error {
 	host, port, err := splitAddr(addr)
 	if err != nil {
 		return fmt.Errorf("session %s: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", session, addr)
 	}
-	if host != "127.0.0.1" && host != "localhost" && host != "[::1]" && host != "::1" {
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
 		return fmt.Errorf("session %s: rpc %q is not a loopback address (the agent only listens on loopback; a token must never leave the machine)", session, addr)
 	}
 	if port < 1 || port > 65535 {
@@ -329,19 +331,22 @@ func checkAddr(session, addr string) error {
 }
 
 func splitAddr(addr string) (string, int, error) {
-	i := strings.LastIndex(addr, ":")
-	if i < 0 {
-		return "", 0, fmt.Errorf("no port")
-	}
-	host := addr[:i]
-	var port int
-	if _, err := fmt.Sscanf(addr[i+1:], "%d", &port); err != nil {
+	host, portS, err := net.SplitHostPort(addr)
+	if err != nil {
 		return "", 0, err
 	}
-	if strings.Contains(addr[i+1:], " ") || strings.Contains(addr[i+1:], ":") {
-		return "", 0, fmt.Errorf("bad port")
+	if portS == "" {
+		return "", 0, fmt.Errorf("no port")
 	}
-	_ = host
+	for _, c := range []byte(portS) {
+		if c < '0' || c > '9' {
+			return "", 0, fmt.Errorf("bad port")
+		}
+	}
+	port, err := strconv.Atoi(portS)
+	if err != nil {
+		return "", 0, err
+	}
 	return host, port, nil
 }
 
@@ -632,6 +637,9 @@ func parseStep(raw json.RawMessage, n int, inFinally bool) (*Step, error) {
 							return nil, fmt.Errorf("step %d (check_db): bad where value %q", n, t)
 						}
 					case float64:
+						if t != float64(int64(t)) {
+							return nil, fmt.Errorf("step %d (check_db): bad where value for %q", n, k)
+						}
 					default:
 						return nil, fmt.Errorf("step %d (check_db): bad where value for %q", n, k)
 					}
@@ -919,10 +927,10 @@ func (f *File) validate() error {
 	for name := range f.Sessions {
 		have[name+".character"] = true
 	}
-	checkRefs := func(n int, do, s string) error {
+	checkRefs := func(prefix, s string) error {
 		for _, r := range refs(s) {
 			if !have[r] {
-				return fmt.Errorf("step %d (%s): ${%s} is never set before this step", n, do, r)
+				return fmt.Errorf("%s: ${%s} is never set before this step", prefix, r)
 			}
 		}
 		return nil
@@ -947,6 +955,9 @@ func (f *File) validate() error {
 			}
 		case "expect", "wait", "expect_not":
 			tmpl = append(tmpl, s.Match)
+			tmpl = append(tmpl, s.Source)
+			tmpl = append(tmpl, s.Prefix)
+			tmpl = append(tmpl, s.Channel)
 		case "check_db":
 			for _, v := range s.Where {
 				if str, ok := v.(string); ok {
@@ -962,9 +973,10 @@ func (f *File) validate() error {
 		case "check_rpc":
 			tmpl = append(tmpl, jsonStrings(s.Params)...)
 			tmpl = append(tmpl, jsonStrings(s.Equals)...)
+			tmpl = append(tmpl, s.Path)
 		}
 		for _, t := range tmpl {
-			if err := checkRefs(n, s.Do, t); err != nil {
+			if err := checkRefs(fmt.Sprintf("step %d (%s)", n, s.Do), t); err != nil {
 				return err
 			}
 		}
@@ -975,11 +987,40 @@ func (f *File) validate() error {
 			have[k] = true
 		}
 	}
+	for i, m := range f.Record {
+		for _, t := range []string{m.Match, m.Source, m.Prefix, m.Channel} {
+			if err := checkRefs(fmt.Sprintf("record %d", i), t); err != nil {
+				return err
+			}
+		}
+	}
 	// finally sees every var any main step can set.
 	for i, s := range f.Finally {
 		if s.Session != "" {
 			if _, ok := f.Sessions[s.Session]; !ok {
 				return fmt.Errorf("finally step %d (%s): unknown session %q", i+1, s.Do, s.Session)
+			}
+		}
+		var tmpl []string
+		switch s.Do {
+		case "gm":
+			tmpl = append(tmpl, s.Text)
+		case "bot":
+			tmpl = append(tmpl, s.Command)
+		case "addon_send":
+			tmpl = append(tmpl, s.Text, s.To)
+		case "rpc":
+			tmpl = append(tmpl, s.Method)
+			tmpl = append(tmpl, jsonStrings(s.Params)...)
+			if s.Method == "gm" {
+				if t, _ := s.Params["text"].(string); t != "" {
+					tmpl = append(tmpl, t)
+				}
+			}
+		}
+		for _, t := range tmpl {
+			if err := checkRefs(fmt.Sprintf("finally step %d (%s)", i+1, s.Do), t); err != nil {
+				return err
 			}
 		}
 	}
