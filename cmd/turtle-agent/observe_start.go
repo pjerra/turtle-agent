@@ -104,11 +104,7 @@ func legStartPoint(p *dungeon.Plan, leg int) (dungeon.Point, bool) {
 	if leg < 0 || leg >= len(p.Legs) {
 		return dungeon.Point{}, false
 	}
-	l := p.Legs[leg]
-	if len(l.Via) > 0 {
-		return l.Via[0].Point, true
-	}
-	return l.To, true
+	return p.LegFirstPoint(leg), true
 }
 
 // observeGroupStep maps a plan leg's pull group to the run leader's 1-based step number and that step's point.

@@ -51,11 +51,24 @@ func ParseGPS(text string) (r GPSReply, ok bool) {
 	return GPSReply{X: x, Y: y, GroundZ: g, FloorZ: f}, true
 }
 
-// readGPS sends `.gps` (booked as a GM start line) and parses the reply. ok is false (with a nil error, and one note per driver) when the
-// check cannot be made: the line failed, the reply has no X/Y, GroundZ and FloorZ, or it is about another unit (its X/Y is more than startNear
-// from the commander, e.g. a mob the commander has selected). The error is the context's.
-func (d *RemoteDriver) readGPS(ctx context.Context, h StartHands) (reply GPSReply, ok bool, err error) {
-	d.startGM(".gps")
+// floorHands is what the floor check needs of the game.
+type floorHands interface {
+	GoXYZ(ctx context.Context, mapID uint32, at Point) error
+	GPS(ctx context.Context) (string, error)
+	AgentPlace() (Point, uint32, bool)
+}
+
+type floorHooks struct {
+	gm     func(line string) // a GM line was sent (".gps", ".go xyz ...")
+	note   func(text string) // a note ("the commander stands at z ...", the best-effort warning)
+	warned *bool             // the best-effort warning was given already
+}
+
+// readGPSWith is readGPS's body: it sends `.gps` (booked as a GM line) and parses the reply. ok is false (with a nil error, and one note
+// through the hooks) when the check cannot be made: the line failed, the reply has no X/Y, GroundZ and FloorZ, or it is about another unit
+// (its X/Y is more than startNear from the commander, e.g. a mob the commander has selected). The error is the context's.
+func readGPSWith(ctx context.Context, h floorHands, hk floorHooks) (reply GPSReply, ok bool, err error) {
+	hk.gm(".gps")
 	text, gerr := h.GPS(ctx)
 	if err := ctx.Err(); err != nil {
 		return GPSReply{}, false, err
@@ -71,30 +84,38 @@ func (d *RemoteDriver) readGPS(ctx context.Context, h StartHands) (reply GPSRepl
 			return reply, true, nil
 		}
 	}
-	if !d.gpsWarned {
-		d.gpsWarned = true
-		d.startNote("warning: the commander's z could not be checked with .gps (" + gerr.Error() + "); the z check is best effort and the start goes on")
+	if hk.warned != nil && !*hk.warned {
+		*hk.warned = true
+		hk.note("warning: the commander's z could not be checked with .gps (" + gerr.Error() + "); the z check is best effort and the start goes on")
 	}
 	return GPSReply{}, false, nil
 }
 
-// checkStartZ is the z check after the `.go xyz` to at (see above).
-func (d *RemoteDriver) checkStartZ(ctx context.Context, h StartHands, at Point) error {
-	r, ok, err := d.readGPS(ctx, h)
+// readGPS sends `.gps` (booked as a GM start line) and parses the reply. ok is false (with a nil error, and one note per driver) when the
+// check cannot be made: the line failed, the reply has no X/Y, GroundZ and FloorZ, or it is about another unit (its X/Y is more than startNear
+// from the commander, e.g. a mob the commander has selected). The error is the context's.
+func (d *RemoteDriver) readGPS(ctx context.Context, h StartHands) (reply GPSReply, ok bool, err error) {
+	return readGPSWith(ctx, h, floorHooks{gm: d.startGM, note: d.startNote, warned: &d.gpsWarned})
+}
+
+// floorCheck is checkStartZ's body: the z check after the `.go xyz` to at (see above). floor/known: the last FloorZ read (known false
+// when .gps gave nothing usable).
+func floorCheck(ctx context.Context, h floorHands, mapID uint32, at Point, hk floorHooks) (floor float64, known bool, err error) {
+	r, ok, err := readGPSWith(ctx, h, hk)
 	if err != nil || !ok {
-		return err
+		return 0, false, err
 	}
 	ground, floor := r.GroundZ, r.FloorZ
 	here, _, _ := h.AgentPlace()
 	if math.Abs(float64(here.Z)-floor) > startZTol {
 		fix := Point{X: at.X, Y: at.Y, Z: float32(floor + startFloorLift)}
-		d.startNote(fmt.Sprintf("the commander stands at z %.1f, FloorZ is %.1f: .go xyz again at z %.1f", here.Z, floor, fix.Z))
-		if err := h.GoXYZ(ctx, d.plan.Map, fix); err != nil {
-			return fmt.Errorf(".go xyz %.1f %.1f %.1f (z re-send): %w", fix.X, fix.Y, fix.Z, err)
+		hk.note(fmt.Sprintf("the commander stands at z %.1f, FloorZ is %.1f: .go xyz again at z %.1f", here.Z, floor, fix.Z))
+		if err := h.GoXYZ(ctx, mapID, fix); err != nil {
+			return 0, false, fmt.Errorf(".go xyz %.1f %.1f %.1f (z re-send): %w", fix.X, fix.Y, fix.Z, err)
 		}
-		d.startGM(fmt.Sprintf(".go xyz %.2f %.2f %.2f %d", fix.X, fix.Y, fix.Z, d.plan.Map))
-		if r, ok, err = d.readGPS(ctx, h); err != nil || !ok {
-			return err
+		hk.gm(fmt.Sprintf(".go xyz %.2f %.2f %.2f %d", fix.X, fix.Y, fix.Z, mapID))
+		if r, ok, err = readGPSWith(ctx, h, hk); err != nil || !ok {
+			return 0, false, err
 		}
 		ground, floor = r.GroundZ, r.FloorZ
 		here, _, _ = h.AgentPlace()
@@ -106,8 +127,14 @@ func (d *RemoteDriver) checkStartZ(ctx context.Context, h StartHands, at Point) 
 		if !offFloor {
 			why = "the floor under the commander is another layer than the target point"
 		}
-		return fmt.Errorf("%s after .go xyz: target z %.1f, GroundZ %.1f, FloorZ %.1f, commander z %.1f; the start is refused (the party would be brought to a commander that is under the ground or in the air)",
+		return 0, false, fmt.Errorf("%s after .go xyz: target z %.1f, GroundZ %.1f, FloorZ %.1f, commander z %.1f; the start is refused (the party would be brought to a commander that is under the ground or in the air)",
 			why, at.Z, ground, floor, here.Z)
 	}
-	return nil
+	return floor, true, nil
+}
+
+// checkStartZ is the z check after the `.go xyz` to at (see above).
+func (d *RemoteDriver) checkStartZ(ctx context.Context, h StartHands, at Point) error {
+	_, _, err := floorCheck(ctx, h, d.plan.Map, at, floorHooks{gm: d.startGM, note: d.startNote, warned: &d.gpsWarned})
+	return err
 }
