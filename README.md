@@ -300,10 +300,11 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
-| `follow_start` | `plan`, `lead`, `near` (3-30, default 8), `far` (near+2 to 45, default 15), `assist`, `lost_s` (10-120, default 30) | the `follow_status` result; a second call with another `lead` switches the lead bot; see [Following the lead bot as a player](#following-the-lead-bot-as-a-player) |
-| `follow_stop` | | the final `follow_status` |
+| `follow_start` | `plan`, `lead`, `near` (3-30, default 8), `far` (near+2 to 45, default 15), `assist`, `lost_s` (10-120, default 30) | the `follow_status` result; a second call with another `lead` switches the lead bot (its `near`, `far`, `assist` and `lost_s` are ignored: follow_stop and start again to change them); see [Following the lead bot as a player](#following-the-lead-bot-as-a-player) |
+| `follow_stop` | | the final `follow_status`; `state` `ending` when the loop did not end within 10 s (it still owns the movement: `dungeon_run` stays refused until it has) |
 | `follow_status` | | `running`, `state`, `plan`, `lead`, `assist`, `near`, `far`, `lost_s`, `lead_seen`, `lead_yd`, `lead_at`, `self_at`, `map`, `trail_yd`, `walks`, `walk_fails`, `deaths`, `resurrections`, `corpse_runs`, `zone_ins`, `assists`, `max_lead_yd`, `seconds_over_60`, `stopped_reason`, `notes[]`, `started`, `seconds` |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
+| `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
 | `cancel_cast` | `spell_id` (optional; none cancels whatever is being cast) | |
 | `spells` | `spell_id`, `name` (a part of it), `highest` (only the highest known rank of each name), `passive` (include passives) | the known spells with their template data, cooldown and `ready`/`remaining_ms`/`why`, `affordable`; see [Agent state](#agent-state) |
@@ -1795,8 +1796,11 @@ quiet check when a patrol walks by (then clear the patrol or stage with `force`)
 A real player in a bot-led TortoiseBots run: the run leader holds pulls beyond 60 yd and a regroup waits 60 s for every
 living player within 20 yd. `follow_start` walks the agent behind the lead bot on its own trail (2 yd points, 300 yd
 kept, reset on a 30 yd jump): when the lead is over `far` yd away it walks to the trail point halfway between `near`
-and `far` behind the lead; a player ahead of the lead walks back behind it; it never walks toward anything else. In a
-fight it does not walk unless the lead is over 40 yd away, then to 25 yd; `assist` swings at the lead's target when it
+and `far` behind the lead; a player ahead of the lead walks back behind it; it never walks toward anything else. While
+the lead's heading is not known (it has moved less than 6 yd since the follow began, the player came back from a death,
+zoned, or the lead was switched or jumped) the player stands still (`holding`), and a way toward the lead that passes in
+front of it is not walked; a lead over 60 yd away that does not move for 20 s is walked to directly (note `no heading:
+direct walk`). In a fight it does not walk unless the lead is over 40 yd away, then to 25 yd (the same front rules); `assist` swings at the lead's target when it
 is within 8 yd of the lead (melee auto-attack only, a caster or hunter gets no damage from it), never with the brain
 running. A sitting player gets up at 45 yd. On death it comes back the leader mode's way (see [Death and the corpse
 run](#death-and-the-corpse-run)), without its `.bot action follow`; then it waits for the lead bot to be in view and
@@ -2500,8 +2504,8 @@ packets are the ones a 1.12 client sends (layouts checked against the core, `int
 | --- | --- |
 | `resurrect_request` | the caster; `caster`, `name` (when the server sent one), `sickness` (accepting costs resurrection sickness: a spirit healer), `timer`. SMSG_RESURRECT_REQUEST |
 | `corpse_reclaim_delay` | the player; `ms`. SMSG_CORPSE_RECLAIM_DELAY |
-| `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms` |
-| `player_follow` | the follow mode; `phase` (`started`, `walk`, `ahead`, `zoning`, `zoned`, `dead`, `back`, `stopped`), `lead`, `reason`, `how`, `seconds` |
+| `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms`; `mode` `follow` when the player follow mode recovers its own death (see `player_follow`) |
+| `player_follow` | the follow mode; `phase` (`started`, `walk`, `ahead`, `lost`, `zoning`, `zoned`, `dead`, `back`, `stopped`), `lead`, `reason`, `how`, `seconds`. The follow mode's own death recovery also sends `dungeon_leader` events, with `mode` `follow` |
 
 Bounds: a corpse run longer than 10 min fails the run (`corpse run: gave up after 10 min`), the leader may die 5 times a run (every death
 counts, also one during a wipe's recovery or while dead members are brought back), and an
