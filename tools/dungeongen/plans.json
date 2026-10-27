@@ -1212,6 +1212,7 @@
   },
   {
    "name": "lower_karazhan_halls",
+   "handwritten": true,
    "title": "Lower Karazhan Halls",
    "map": 532,
    "kind": "raid",
@@ -1232,9 +1233,10 @@
     61225
    ],
    "special": [
-    "Moroes carries npc_flags (gossip) and is fought after a dialogue",
-    "Blackwald II (script boss_blackwald_ii) has no export row of the rank-3 kind: his entry is unverified"
-   ]
+  "Lord Blackwald II (61222) has no spawn row: the instance summons him when the Dark Rider Champion (61204) is DONE",
+  "Moroes carries npc_flags (gossip) and is fought after a dialogue; his menu opens only once the other four bosses are DONE",
+  "the map's doors are all open and no lever or key gates the route"
+ ]
   },
   {
    "name": "upper_karazhan_halls",

@@ -20,7 +20,12 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "lower_karazhan_halls": 6}
+// lower_karazhan_halls' 6 (B1 prep, RAID-PREP-lkh.md): its packs are the raid merge of the spawns within 15 yd on one floor, with the
+// radius at the pack's own spread + 0.5 and every hostile spawn within that radius + 3 pulled into the pack up to the 8-unit cap. What
+// is left are six packs where more than 8 spawns stand within the pull's reach (the entrance hall's 61210/61211/61193 rows, the
+// 61198/61199 corner by the west wall, the 61200 at -11134.8 -1950.1, and two 61205 pairs in the Moroes wing): the room sends them
+// with the pull whether the plan lists them or not, and the cap keeps the row at 8.
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
