@@ -29,13 +29,23 @@ func bindCommand(lead string, bots []string) string {
 // listingRe is the system line of `commander bind|status`: "You command Lcwarra's group: Lcwarra, Lchunter (dead), Lcpriest."
 var listingRe = regexp.MustCompile(`(?i)you command .*? group: (.+?)\.?\s*$`)
 
-// boundParty is what `commander status` said.
-type boundParty struct {
+// BoundParty is what `commander status` said (readBoundParty's result, exported fields).
+type BoundParty struct {
 	Answered bool     // an ACK came
 	Lead     string   // the ACK's lead bot
 	Count    int      // the ACK's number of bots
 	Names    []string // the listing's names ((dead) marks dropped); empty when the reply carried no listing
 	Dead     []string // the listing's names marked (dead)
+}
+
+type boundParty = BoundParty
+
+func ReadBoundParty(ctx context.Context, command func(context.Context, string) (tbm.Reply, error)) (BoundParty, error) {
+	b, err := readBoundParty(ctx, command)
+	if err != nil {
+		return BoundParty{}, err
+	}
+	return BoundParty{Answered: b.Answered, Lead: b.Lead, Count: b.Count, Names: append([]string(nil), b.Names...), Dead: append([]string(nil), b.Dead...)}, nil
 }
 
 // readBoundParty sends `commander status` through command and reads the answer.
