@@ -127,3 +127,12 @@ func renderRaw(recs []Record) []string {
 	}
 	return out
 }
+
+// RenderNorm is the exported renderNorm for the CLI.
+func RenderNorm(recs []Record, rules []NormRule) []string { return renderNorm(recs, rules) }
+
+// RenderRaw is the exported renderRaw for the CLI.
+func RenderRaw(recs []Record) []string { return renderRaw(recs) }
+
+// NormaliseOne is the exported normaliseOne for the CLI.
+func NormaliseOne(line string, rules []NormRule) string { return normaliseOne(line, rules) }

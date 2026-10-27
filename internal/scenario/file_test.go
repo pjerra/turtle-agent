@@ -159,3 +159,29 @@ func TestParseRejectsBadDBValues(t *testing.T) {
 		}
 	}
 }
+
+// TestParseExampleScenariosParse pins that both shipped files parse with
+// their own vars: LFT has 8 sections, the item file 4.
+func TestParseExampleScenariosParse(t *testing.T) {
+	for _, tc := range []struct {
+		path     string
+		sections int
+	}{
+		{"../../scenarios/lft-addon-path.json", 8},
+		{"../../scenarios/itemleg3-g1-items.json", 4},
+	} {
+		f, err := Load(tc.path, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.path, err)
+		}
+		sections := 0
+		for _, s := range f.Steps {
+			if s.Do == "section" {
+				sections++
+			}
+		}
+		if sections != tc.sections {
+			t.Fatalf("%s: %d sections, want %d", tc.path, sections, tc.sections)
+		}
+	}
+}

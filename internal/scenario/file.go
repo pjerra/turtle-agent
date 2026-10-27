@@ -21,6 +21,9 @@ var (
 	whereKey     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 	whereValue   = regexp.MustCompile(`^[A-Za-z0-9 _.:-]{0,64}$`)
 	charName     = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
+	// varRef matches a whole ${name} template: allowed wherever a var
+	// expands to the value at run time (char names, where values with vars).
+	varRef = regexp.MustCompile(`^\$\{[a-z][a-z0-9_]{0,31}\}$`)
 )
 
 var validOps = map[string]bool{"==": true, "!=": true, ">=": true, "<=": true, ">": true, "<": true}
@@ -623,7 +626,9 @@ func parseStep(raw json.RawMessage, n int, inFinally bool) (*Step, error) {
 					}
 					switch t := v.(type) {
 					case string:
-						if !whereValue.MatchString(t) {
+						// A whole ${var} template expands at run time (and
+						// is re-checked there); literals must match now.
+						if !whereValue.MatchString(t) && !varRef.MatchString(t) {
 							return nil, fmt.Errorf("step %d (check_db): bad where value %q", n, t)
 						}
 					case float64:
@@ -666,8 +671,16 @@ func parseStep(raw json.RawMessage, n int, inFinally bool) (*Step, error) {
 				return nil, fmt.Errorf("step %d (check_db): exactly one of char or chars", n)
 			}
 			q := &ItemQuery{}
+			// Names may hold ${vars} (expanded and re-checked at run
+			// time); otherwise they must already match.
+			okName := func(name string) bool {
+				if charName.MatchString(name) {
+					return true
+				}
+				return varRef.MatchString(name)
+			}
 			if iq.Char != nil {
-				if !charName.MatchString(*iq.Char) {
+				if !okName(*iq.Char) {
 					return nil, fmt.Errorf("step %d (check_db): bad char name %q", n, *iq.Char)
 				}
 				q.Char = *iq.Char
@@ -676,7 +689,7 @@ func parseStep(raw json.RawMessage, n int, inFinally bool) (*Step, error) {
 					return nil, fmt.Errorf("step %d (check_db): bad chars", n)
 				}
 				for _, c := range iq.Chars {
-					if !charName.MatchString(c) {
+					if !okName(c) {
 						return nil, fmt.Errorf("step %d (check_db): bad char name %q", n, c)
 					}
 				}

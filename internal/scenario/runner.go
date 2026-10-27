@@ -211,11 +211,7 @@ func (r *Runner) Run(ctx context.Context, f *File) (*Result, error) {
 }
 
 func (rr *run) finish(res *Result, exit int) *Result {
-	now := rr.r.Now
-	if now == nil {
-		now = time.Now
-	}
-	res.Finished = now()
+	res.Finished = rr.now()
 	res.Seconds = res.Finished.Sub(res.Started).Seconds()
 	res.Exit = exit
 	res.Passed, res.Failed, res.Errors, res.Skipped = rr.passed, rr.failed, rr.errs, rr.skipped
@@ -271,10 +267,7 @@ func (rr *run) skipRest(from int) {
 }
 
 func (rr *run) header() {
-	started := rr.r.Now()
-	if rr.r.Now == nil {
-		started = time.Now()
-	}
+	started := rr.now()
 	head := fmt.Sprintf("# scenario %s (%s), started %s", rr.f.Scenario, rr.f.path, started.Format(time.RFC3339))
 	rr.emit(Record{T: "header", Raw: head, Norm: "# scenario " + rr.f.Scenario})
 	if rr.f.Description != "" {
