@@ -1733,11 +1733,14 @@ clear of skipped packs; the server-exact reach runs to the leg's first point and
 point is unsafe the search backs off in 5 yd steps up to 120 yd along the way in, and an earlier leg (up to 3 back) is
 proposed; `cleared_through` counts legs as cleared, `force` stages anyway. Live it walks the commander there (`.appear`,
 `.go xyz`, `.gps` floor check), applies the quiet rule (no living hostile within 20 yd, none within 30 yd that is not a
-pack of the leg or later, no roamer within 80 yd, from two reads `quiet_wait_s` apart), summons every bot with GM `.summon`
+pack of the leg or later, no roamer within 80 yd except the staged leg's own boss and own packs, from two reads
+`quiet_wait_s` apart), summons every bot with GM `.summon`
 in one burst (the commander's own character and own bots only, per AGENTS.md; the commander should be `.gm on` and
 invisible), waits for arrival within 10 yd and 2 yd of the floor, retries once, settles 5 s, then optionally `start`s
-(`from leg <name>`, with `speed=`) or `resume`s. `stage-check` checks a leg offline before login (a fresh Zul'Farrak
-refuses most legs, so check first; Gahzrilla stages from `velratha_b`). Call with a client timeout of 120 s.
+(`from leg <name>`, with `speed=`) or `resume`s. `stage-check` checks a leg offline before login (a fresh instance usually
+needs `cleared_through` or `force` for legs past the first patrols, since every skipped pack stands alive; Gahzrilla stages
+from `velratha_b`). The offline check knows only plan packs, not patrols: a point the check passes can still fail the live
+quiet check when a patrol walks by (then clear the patrol or stage with `force`). Call with a client timeout of 120 s.
 
 ## Remote leader
 

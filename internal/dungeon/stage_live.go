@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -312,6 +313,7 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 		gm:     gmLine,
 		note:   func(text string) { note(text) },
 		warned: new(bool),
+		wait:   s.Sleep,
 	})
 	if ferr != nil {
 		rep.Refusal = ferr.Error()
@@ -321,14 +323,12 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 		f := floor
 		rep.FloorZ = &f
 	}
-
-	// 8. Quiet check (skipped with Force, which adds the would-be refusal
-	// as a warning instead).
+	// 8. Quiet check (skipped with Force, which adds a warning that the quiet check was skipped instead).
 	if qref, err := s.quiet(ctx, req); err != nil {
 		return rep, err
 	} else if qref != "" {
 		if req.Opt.Force {
-			rep.Warnings = append(rep.Warnings, qref)
+			rep.Warnings = append(rep.Warnings, strings.TrimSuffix(qref, "; nothing was summoned")+"; the quiet check was skipped (force)")
 		} else {
 			rep.Refusal = qref
 			return done()
@@ -549,7 +549,9 @@ func (s *Stager) quiet(ctx context.Context, req StageRequest) (string, error) {
 // L1 a hostile within StageOwnYd (20) 3D of the commander; L2 a hostile
 // within StageSkippedYd (30) 3D that is not a member of an own pack; L3 a
 // roamer within 80 yd 2D (Moving at either read, or moved >= 3 yd 2D
-// between the reads, matched by name+entry, nearest).
+// between the reads, matched by name+entry, nearest), except the staged
+// leg's own boss and the units of the staged leg's own packs (and later
+// legs' packs, as L2 already exempts within 30 yd), wherever they walk.
 func (s *Stager) judgeQuiet(req StageRequest, first, second []StageUnit) string {
 	here, _, _ := s.G.AgentPlace()
 	hostile := func(u StageUnit) bool { return !u.Player && u.Hostile && !u.Dead }
@@ -595,6 +597,7 @@ func (s *Stager) judgeQuiet(req StageRequest, first, second []StageUnit) string 
 		return m
 	}
 	secondByKey := byKey(second)
+	firstByKey := byKey(first)
 	nearest := func(us []StageUnit, at Point) *StageUnit {
 		var best *StageUnit
 		for i, u := range us {
@@ -607,6 +610,9 @@ func (s *Stager) judgeQuiet(req StageRequest, first, second []StageUnit) string 
 	checkRoam := func(u StageUnit, d2 float64, other *StageUnit) {
 		if d2 > 80 {
 			return
+		}
+		if s.ownUnit(req, u) {
+			return // the staged leg's own boss and own packs pace: not a patrol to refuse
 		}
 		if u.Moving || (other != nil && other.Moving) {
 			flag(u, d2, true)
@@ -628,13 +634,34 @@ func (s *Stager) judgeQuiet(req StageRequest, first, second []StageUnit) string 
 			continue
 		}
 		k := strings.ToLower(u.Name) + "\x00" + strconv.Itoa(int(u.Entry))
-		checkRoam(u, hdist(u.At, here), nearest(byKey(first)[k], u.At))
+		checkRoam(u, hdist(u.At, here), nearest(firstByKey[k], u.At))
 	}
 	if len(bad) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("the stage point is not quiet: %s (rule: no living hostile within 20 yd, none within 30 yd that is not a pack of leg %d or later, no roamer within 80 yd); nothing was summoned",
+	return fmt.Sprintf("the stage point is not quiet: %s (rule: no living hostile within 20 yd, none within 30 yd that is not a pack of leg %d or later, no roamer within 80 yd except the staged leg's own boss and own packs); nothing was summoned",
 		strings.Join(bad, ", "), req.Leg)
+}
+
+// ownUnit says whether the hostile is the staged leg's own boss (its boss
+// entry, including First) or a unit of the staged leg's own packs (or later
+// legs' packs): the entry alone decides, wherever the unit walks. The L3
+// roamer rule exempts those; L1 (within 20 yd) and L2 still see them.
+func (s *Stager) ownUnit(req StageRequest, u StageUnit) bool {
+	if l := req.Plan.Legs[req.Leg]; l.Boss != nil && (u.Entry == l.Boss.Entry || slices.Contains(l.Boss.First, u.Entry)) {
+		return true
+	}
+	for li := req.Leg; li < len(req.Plan.Legs); li++ {
+		if li <= req.Opt.ClearedThrough {
+			continue
+		}
+		for _, g := range req.Plan.Legs[li].PullGroups {
+			if slices.Contains(g.Entries, u.Entry) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ownMember says whether the hostile is a member of an own pull group: a

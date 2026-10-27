@@ -39,6 +39,7 @@ type stageFake struct {
 	runSent      []string
 	stopReply    *tbm.Reply // when set, the whole run stop reply
 	floorZ       string
+	floorSeq     []string // when set, the nth .gps answers floorSeq[n] (last repeats)
 	inView       map[string]Point
 	runState     tbm.RunStatus
 	runSeq       uint64
@@ -152,6 +153,18 @@ func (f *stageFake) GPS(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.gm = append(f.gm, ".gps")
+	if len(f.floorSeq) > 0 {
+		i := 0
+		for _, g := range f.gm {
+			if g == ".gps" {
+				i++
+			}
+		}
+		if i -= 1; i >= len(f.floorSeq) {
+			i = len(f.floorSeq) - 1
+		}
+		return f.floorSeq[i], nil
+	}
 	return f.floorZ, nil
 }
 
@@ -392,6 +405,202 @@ func TestStageLiveRefusesANonOwnHostileAt25Yd(t *testing.T) {
 	}
 	if !strings.Contains(rep.Refusal, "Other (entry 555) 25 yd") {
 		t.Errorf("hostile not named: %q", rep.Refusal)
+	}
+}
+
+// The staged leg's own boss pacing at 50 yd (live: Hydromancer Velratha
+// 7795, refused 6 times) does not trip the L3 roamer rule: quiet OK.
+func TestStageLiveAllowsTheStagedLegsOwnBossAt50Yd(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].Boss = &Boss{Entry: 7795, Position: Point{X: 170, Y: 0, Z: 0}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	here := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Velratha", Entry: 7795, Hostile: true, At: Point{X: 170, Y: 0, Z: 0}},
+	}
+	moved := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Velratha", Entry: 7795, Hostile: true, Moving: true, At: Point{X: 172, Y: 0, Z: 0}},
+	}
+	f.unitsSeq = [][]StageUnit{here, moved}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if !rep.Staged {
+		t.Fatalf("refused the staged leg's own boss at 50 yd: %q %+v", rep.Refusal, rep)
+	}
+}
+
+// A non-own roamer at 50 yd is still refused: the exemption is the staged
+// leg's own boss and own packs only.
+func TestStageLiveRefusesANonOwnRoamerAt50Yd(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 300, Y: 0, Z: 0}}}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	here := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Roamer", Entry: 200, Hostile: true, At: Point{X: 170, Y: 0, Z: 0}},
+	}
+	moved := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Roamer", Entry: 200, Hostile: true, Moving: true, At: Point{X: 172, Y: 0, Z: 0}},
+	}
+	f.unitsSeq = [][]StageUnit{here, moved}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if rep.Staged {
+		t.Fatalf("staged with a non-own roamer at 50 yd: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "is not quiet") {
+		t.Errorf("no quiet refusal: %q", rep.Refusal)
+	}
+}
+
+// The staged leg's own boss at 15 yd still trips L1 (within 20 yd): the L3
+// exemption does not reach into the 20 yd rule.
+func TestStageLiveRefusesTheStagedLegsOwnBossAt15Yd(t *testing.T) {
+	p := mkLivePlan()
+	// The boss's plan spot stands clear (170 yd), but she paces to 15 yd:
+	// the L3 exemption does not reach into the 20 yd rule.
+	p.Legs[1].Boss = &Boss{Entry: 7795, Position: Point{X: 170, Y: 0, Z: 0}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Velratha", Entry: 7795, Hostile: true, At: Point{X: 135, Y: 0, Z: 0}},
+	}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if rep.Staged {
+		t.Fatalf("staged with the own boss at 15 yd: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "is not quiet") {
+		t.Errorf("no quiet refusal: %q", rep.Refusal)
+	}
+}
+
+// A unit of the staged leg's own pack pacing at 50 yd does not trip L3.
+func TestStageLiveAllowsTheStagedLegsOwnPackRoamerAt50Yd(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 300, Y: 0, Z: 0}}}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	here := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, At: Point{X: 170, Y: 0, Z: 0}},
+	}
+	moved := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, Moving: true, At: Point{X: 172, Y: 0, Z: 0}},
+	}
+	f.unitsSeq = [][]StageUnit{here, moved}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if !rep.Staged {
+		t.Fatalf("refused an own pack roamer at 50 yd: %q %+v", rep.Refusal, rep)
+	}
+}
+
+// The first `.gps` after `.go xyz` may describe the old spot: a re-read at
+// the stage point passes (live: the entrance 1213,842 right after the move).
+func TestStageLivePassesWhenTheSecondGPSIsAtThePoint(t *testing.T) {
+	p := mkLivePlan()
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	old := "X: 1213.000000 Y: 842.000000 Z: 0.000000 Orientation: 0.000000\nGroundZ: 1.000000 FloorZ: 0.000000 Have height data (Map: 1 VMap: 1)"
+	here := "X: 120.000000 Y: 0.000000 Z: 0.000000 Orientation: 0.000000\nGroundZ: 1.000000 FloorZ: 0.000000 Have height data (Map: 1 VMap: 1)"
+	f.floorSeq = []string{old, here}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if !rep.Staged {
+		t.Fatalf("refused after the .gps settled: %q %+v", rep.Refusal, rep)
+	}
+	if rep.FloorZ == nil || *rep.FloorZ != 0 {
+		t.Fatalf("no floor from the settled .gps: %+v", rep)
+	}
+	sleeps := 0
+	for _, g := range f.gm {
+		if g == ".gps" {
+			sleeps++
+		}
+	}
+	if sleeps != 2 {
+		t.Fatalf(".gps read %d times, want 2 (one stale, one at the point): %v", sleeps, f.gm)
+	}
+}
+
+// Four stale `.gps` replies refuse and summon nobody (live: the entrance
+// 1213,842 right after the move).
+func TestStageLiveRefusesWhenGPSStaysAtTheOldSpot(t *testing.T) {
+	p := mkLivePlan()
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	f.floorSeq = []string{
+		"X: 1213.000000 Y: 842.000000 Z: 0.000000 Orientation: 0.000000\nGroundZ: 1.000000 FloorZ: 0.000000 Have height data (Map: 1 VMap: 1)",
+	}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if rep.Staged {
+		t.Fatalf("staged with a stale .gps: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "the commander did not arrive at the stage point") {
+		t.Errorf("no stale-.gps refusal: %q", rep.Refusal)
+	}
+	for _, g := range f.gm {
+		if strings.HasPrefix(g, ".summon") {
+			t.Fatalf("summoned with a stale .gps: %v", f.gm)
+		}
+	}
+	n := 0
+	for _, g := range f.gm {
+		if g == ".gps" {
+			n++
+		}
+	}
+	if n != 4 {
+		t.Fatalf(".gps read %d times, want 4: %v", n, f.gm)
+	}
+}
+
+// A hostile at 30 yd matching an own pack of a LATER leg (entry + place)
+// stages: the exemption is the staged leg's own packs and later legs'
+// packs, like L2 within 30 yd.
+func TestStageLiveAllowsALaterLegsOwnPackRoamerAt50Yd(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs = append(p.Legs, Leg{Name: "c", To: Point{X: 180, Y: 0, Z: 0}, PullGroups: []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 300, Y: 0, Z: 0}}}}})
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	here := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, At: Point{X: 170, Y: 0, Z: 0}},
+	}
+	moved := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, Moving: true, At: Point{X: 172, Y: 0, Z: 0}},
+	}
+	f.unitsSeq = [][]StageUnit{here, moved}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if !rep.Staged {
+		t.Fatalf("refused a later leg's own pack roamer at 50 yd: %q %+v", rep.Refusal, rep)
+	}
+}
+
+// The staged leg's own pack entry pacing FAR from its plan position (300 yd
+// away) still counts as own: the entry alone decides.
+func TestStageLiveAllowsAnOwnPackEntryFarFromItsSpot(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 500, Y: 0, Z: 0}}}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	here := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, At: Point{X: 170, Y: 0, Z: 0}},
+	}
+	moved := []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Own", Entry: 9319, Hostile: true, Moving: true, At: Point{X: 172, Y: 0, Z: 0}},
+	}
+	f.unitsSeq = [][]StageUnit{here, moved}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if !rep.Staged {
+		t.Fatalf("refused an own pack entry far from its spot: %q %+v", rep.Refusal, rep)
 	}
 }
 
@@ -725,7 +934,7 @@ func TestStageLiveDryRunSendsNothing(t *testing.T) {
 	}
 }
 
-// 25. Force passes the quiet check; the warning holds the quiet refusal.
+// 25. Force passes the quiet check; the warning holds the quiet refusal and says the quiet check was skipped (force).
 func TestStageLiveForcePassesTheQuietCheck(t *testing.T) {
 	f := newStageFake()
 	f.atPoint(Point{X: 120, Y: 0, Z: 0})
@@ -741,12 +950,12 @@ func TestStageLiveForcePassesTheQuietCheck(t *testing.T) {
 	}
 	found := false
 	for _, w := range rep.Warnings {
-		if strings.Contains(w, "is not quiet") {
+		if strings.Contains(w, "is not quiet") && strings.Contains(w, "the quiet check was skipped (force)") && !strings.Contains(w, "nothing was summoned") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("no quiet warning: %+v", rep.Warnings)
+		t.Errorf("no quiet-skipped warning: %+v", rep.Warnings)
 	}
 }
 
