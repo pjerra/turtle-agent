@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -96,23 +95,14 @@ func teardownCmd(args []string, stdout, stderr io.Writer) int {
 	if !slotsSupported() {
 		return slotsUnsupported("teardown", stderr)
 	}
-	fs := flag.NewFlagSet("teardown", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	keepLease := fs.Bool("keep-lease", false, "keep the slot lease")
-	releaseAnyway := fs.Bool("release-anyway", false, "release the lease even when game-side steps failed")
-	gm := fs.String("gm", "off", "gm mode at the end: off, on or keep")
-	dryRun := fs.Bool("dry-run", false, "ask the agent for a plan, change nothing")
-	asJSON := fs.Bool("json", false, "print the result as JSON")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 1)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseTeardownArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) != 1 || fs.NArg() != 0 || (*gm != "off" && *gm != "on" && *gm != "keep") {
-		fmt.Fprintln(stderr, teardownUsage)
-		return exitUsage
-	}
-	dir := pos[0]
+	// Aliases so the body below reads as before.
+	keepLease, releaseAnyway, gm := &o.keepLease, &o.releaseAnyway, &o.gm
+	dryRun, asJSON, slotsPath := &o.dryRun, &o.asJSON, &o.slotsPath
+	dir := o.dir
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "teardown: %v\n", err)

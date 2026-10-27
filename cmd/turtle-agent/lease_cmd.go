@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"regexp"
@@ -20,21 +19,6 @@ const leaseUsage = "usage: turtle-agent lease acquire <server> (--slot ID | --an
 
 var leaseHolderRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
-// splitPositionals pulls leading non-flag args off the front so forms like
-// `lease acquire <server> --slot 1` work with the stdlib flag package (which
-// stops parsing at the first positional).
-func splitPositionals(args []string, n int) (pos []string, rest []string) {
-	for len(args) > 0 && n > 0 && !isFlagArg(args[0]) {
-		pos = append(pos, args[0])
-		args = args[1:]
-		n--
-	}
-	return pos, args
-}
-
-func isFlagArg(s string) bool {
-	return len(s) > 1 && s[0] == '-' && s != "-"
-}
 func leaseCmd(args []string, stdout, stderr io.Writer) int {
 	if !slotsSupported() {
 		return slotsUnsupported("lease", stderr)
@@ -77,22 +61,13 @@ func leaseTTL(ttl int) (time.Duration, bool) {
 }
 
 func leaseAcquireCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("lease acquire", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	slotID := fs.String("slot", "", "slot id to take")
-	any := fs.Bool("any", false, "take the first free slot of the server")
-	holder := fs.String("holder", "", "lease holder name")
-	ttlMin := fs.Int("ttl", 180, "lease length in minutes (1-720)")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 1)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseLeaseAcquireArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) != 1 || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, leaseUsage)
-		return exitUsage
-	}
-	server := pos[0]
+	// Aliases so the body below reads as before.
+	slotID, any, holder, ttlMin, slotsPath := &o.slotID, &o.any, &o.holder, &o.ttlMin, &o.slotsPath
+	server := o.server
 	if (*slotID == "") == (!*any) {
 		fmt.Fprintln(stderr, "lease acquire: pass --slot ID or --any")
 		return exitUsage
@@ -148,21 +123,13 @@ func leaseAcquireCmd(args []string, stdout, stderr io.Writer) int {
 }
 
 func leaseRenewCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("lease renew", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	holder := fs.String("holder", "", "lease holder name")
-	leaseID := fs.String("lease-id", "", "lease id from acquire (holder alone is not enough)")
-	ttlMin := fs.Int("ttl", 180, "lease length in minutes (1-720)")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 2)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseLeaseRenewArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) != 2 || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, leaseUsage)
-		return exitUsage
-	}
-	server, slotID := pos[0], pos[1]
+	// Aliases so the body below reads as before.
+	holder, leaseID, ttlMin, slotsPath := &o.holder, &o.leaseID, &o.ttlMin, &o.slotsPath
+	server, slotID := o.server, o.slotID
 	if !leaseHolderRe.MatchString(*holder) {
 		fmt.Fprintln(stderr, "lease: --holder must be 1-64 letters, digits, . _ -")
 		return exitUsage
@@ -196,21 +163,13 @@ func leaseRenewCmd(args []string, stdout, stderr io.Writer) int {
 }
 
 func leaseReleaseCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("lease release", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	holder := fs.String("holder", "", "lease holder name")
-	leaseID := fs.String("lease-id", "", "lease id from acquire (holder alone is not enough; not needed with --force)")
-	force := fs.Bool("force", false, "release another holder's or a live lease")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 2)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseLeaseReleaseArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) != 2 || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, leaseUsage)
-		return exitUsage
-	}
-	server, slotID := pos[0], pos[1]
+	// Aliases so the body below reads as before.
+	holder, leaseID, force, slotsPath := &o.holder, &o.leaseID, &o.force, &o.slotsPath
+	server, slotID := o.server, o.slotID
 	if !leaseHolderRe.MatchString(*holder) {
 		fmt.Fprintln(stderr, "lease: --holder must be 1-64 letters, digits, . _ -")
 		return exitUsage
@@ -261,22 +220,13 @@ type leaseSlotView struct {
 }
 
 func leaseListCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("lease list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	asJSON := fs.Bool("json", false, "print the slot states as JSON")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 1)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseLeaseListArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) > 1 || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, leaseUsage)
-		return exitUsage
-	}
-	server := ""
-	if len(pos) == 1 {
-		server = pos[0]
-	}
+	// Aliases so the body below reads as before.
+	asJSON, slotsPath := &o.asJSON, &o.slotsPath
+	server := o.server
 	_, store, err := leaseStore(*slotsPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "lease: %v\n", err)

@@ -3,7 +3,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -43,23 +42,15 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	if !slotsSupported() {
 		return slotsUnsupported("slot", stderr)
 	}
-	fs := flag.NewFlagSet("slot setup", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	holder := fs.String("holder", "", "lease holder name")
-	dirFlag := fs.String("dir", "", "client dir (default ~/ta-<holder>)")
-	binaryFlag := fs.String("binary", "", "turtle-agent binary to install (default os.Executable())")
-	dungeonsFlag := fs.String("dungeons-dir", "", "dungeons dir (default <dir>/dungeons)")
-	characterFlag := fs.String("character", "", "character to play (default the slot's)")
-	slotsPath := fs.String("slots", "", "slot table file")
-	pos, rest := splitPositionals(args, 2)
-	if err := fs.Parse(rest); err != nil {
-		return exitUsage
+	o, code := parseSlotSetupArgs(args, stderr)
+	if code != exitOK {
+		return code
 	}
-	if len(pos) != 2 || fs.NArg() != 0 || *holder == "" {
-		fmt.Fprintln(stderr, slotSetupUsage)
-		return exitUsage
-	}
-	serverName, slotID := pos[0], pos[1]
+	// Aliases so the body below reads as before.
+	holder, dirFlag := &o.holder, &o.dir
+	binaryFlag, dungeonsFlag := &o.binary, &o.dungeonsDir
+	characterFlag, slotsPath := &o.character, &o.slotsPath
+	serverName, slotID := o.server, o.slot
 	if !leaseHolderRe.MatchString(*holder) {
 		fmt.Fprintln(stderr, "lease: --holder must be 1-64 letters, digits, . _ -")
 		return exitUsage
