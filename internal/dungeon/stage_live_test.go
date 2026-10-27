@@ -33,16 +33,19 @@ type stageFake struct {
 	neverArrive  map[string]bool
 	inCombat     map[string]bool
 	statusLines  []string
+	statusReply  *tbm.Reply // when set, the whole run status reply
 	statusErr    *tbm.Err
 	runLine      string
 	runSent      []string
+	stopReply    *tbm.Reply // when set, the whole run stop reply
 	floorZ       string
 	inView       map[string]Point
 	runState     tbm.RunStatus
 	runSeq       uint64
 	runHave      bool
-	runSeqs      []tbm.RunStatus
 	listReply    []string
+	listReplyObj *tbm.Reply // when set, the whole run list reply
+	runSeqs      []tbm.RunStatus
 }
 
 func newStageFake() *stageFake {
@@ -59,6 +62,7 @@ func newStageFake() *stageFake {
 		inView:       map[string]Point{},
 		runSeq:       1,
 		runHave:      true,
+		statusLines:  []string{"TBM:RUN|t|none|0/0|-|-|-|idle"},
 		listReply:    []string{"TBM:ACTION_ACK|run list|plans|0|ok", "Dungeon plans: t (map 1, 10 steps)"},
 	}
 }
@@ -75,8 +79,14 @@ func (f *stageFake) CommandWait(ctx context.Context, command string, wait time.D
 	f.commands = append(f.commands, command)
 	switch {
 	case command == "run status":
+		if f.statusReply != nil {
+			return *f.statusReply, nil
+		}
 		return tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: f.statusLines}, nil
 	case command == "run list":
+		if f.listReplyObj != nil {
+			return *f.listReplyObj, nil
+		}
 		return tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: f.listReply}, nil
 	case strings.HasPrefix(command, "run start "):
 		f.runSent = append(f.runSent, command)
@@ -95,6 +105,9 @@ func (f *stageFake) CommandWait(ctx context.Context, command string, wait time.D
 		return tbm.Reply{Kind: tbm.KindAck, OK: true}, nil
 	case command == "run stop":
 		f.runSent = append(f.runSent, command)
+		if f.stopReply != nil {
+			return *f.stopReply, nil
+		}
 		return tbm.Reply{Kind: tbm.KindAck, OK: true}, nil
 	case command == "commander status":
 		names := []string{}
@@ -359,6 +372,29 @@ func TestStageLiveAllowsTheLegsOwnPackAt25Yd(t *testing.T) {
 	}
 }
 
+// 6. A non-own hostile at 25 yd refuses L2: it fails if ownMember returns
+// true for it (it matches no own pull group).
+func TestStageLiveRefusesANonOwnHostileAt25Yd(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{9319}, Positions: []Point{{X: 300, Y: 0, Z: 0}}}}
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{
+		{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Other", Entry: 555, Hostile: true, At: Point{X: 145, Y: 0, Z: 0}},
+	}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if rep.Staged {
+		t.Fatalf("staged with a non-own hostile at 25 yd: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "is not quiet") {
+		t.Errorf("no quiet refusal: %q", rep.Refusal)
+	}
+	if !strings.Contains(rep.Refusal, "Other (entry 555) 25 yd") {
+		t.Errorf("hostile not named: %q", rep.Refusal)
+	}
+}
+
 // 18. B2 never arrives: exactly two .summon B2, refusal names "B2 not in view".
 func TestStageLiveRetriesTheSummonOnceThenFails(t *testing.T) {
 	f := newStageFake()
@@ -380,6 +416,28 @@ func TestStageLiveRetriesTheSummonOnceThenFails(t *testing.T) {
 	}
 	if !strings.Contains(rep.Refusal, "B2 not in view") {
 		t.Errorf("no B2 arrival refusal: %q", rep.Refusal)
+	}
+}
+
+// 7. A member in combat at the 5 s settle read refuses step 11: it fails
+// if the settle refusal is removed.
+func TestStageLiveRefusesAnAttackedPartyAtSettle(t *testing.T) {
+	p := mkLivePlan()
+	p.Legs[1].PullGroups = []PullGroup{{Entries: []uint32{100}, Positions: []Point{{X: 145, Y: 0, Z: 0}}}}
+	f := newStageFake()
+	f.units = []StageUnit{
+		{Name: "Lead", Player: true, InCombat: true, At: Point{X: 120, Y: 0, Z: 0}},
+		{Name: "Skipped", Entry: 100, Hostile: true, At: Point{X: 145, Y: 0, Z: 0}},
+	}
+	rep := runLive(t, f, liveReq(f, p, 1))
+	if rep.Staged {
+		t.Fatalf("staged an attacked party: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "the party was attacked at the stage point within 5 s: Lead in combat") {
+		t.Errorf("no settle refusal: %q", rep.Refusal)
+	}
+	if !strings.Contains(rep.Refusal, "hostiles within 30 yd: Skipped (entry 100) 25 yd") {
+		t.Errorf("hostiles not listed: %q", rep.Refusal)
 	}
 }
 
@@ -433,6 +491,28 @@ func TestStageLiveStopsOnALegMismatch(t *testing.T) {
 	}
 }
 
+// 13. The run stop after a leg mismatch is checked: an unconfirmed stop
+// refuses "sent but not confirmed" naming the reply.
+func TestStageLiveReportsAnUnconfirmedRunStop(t *testing.T) {
+	f := newStageFake()
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	f.runLine = "The run starts at step 1 of 20 (leg b)"
+	f.runSeqs = []tbm.RunStatus{
+		{Plan: "t", State: tbm.RunRunning, Step: 1, Steps: 20, Leg: "a"},
+	}
+	f.stopReply = &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run stop", Code: "busy", Message: "later"}, Lines: []string{"TBM:ACTION_ERR|run stop|busy|later"}}
+	req := liveReq(f, mkLivePlan(), 1)
+	req.Start = true
+	rep := runLive(t, f, req)
+	if rep.Started {
+		t.Fatalf("started in the wrong leg: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "a run stop was sent but not confirmed: busy (later)") {
+		t.Errorf("no unconfirmed-stop refusal: %q", rep.Refusal)
+	}
+}
+
 // 21. Running and paused runs are refused without resume.
 func TestStageLiveRefusesARunningRun(t *testing.T) {
 	f := newStageFake()
@@ -449,6 +529,149 @@ func TestStageLiveRefusesAPausedRunWithoutResume(t *testing.T) {
 	rep := runLive(t, f, liveReq(f, mkLivePlan(), 1))
 	if rep.Staged || !strings.Contains(rep.Refusal, "has a paused run") {
 		t.Errorf("paused not refused: %+v", rep)
+	}
+}
+
+// 1. Fail closed: a timeout, an ACTION_ERR, a malformed TBM:RUN line and a
+// missing line all refuse, and nothing is sent after.
+func TestStageLiveRefusesWithoutACurrentRunState(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply *tbm.Reply
+		want  string
+	}{
+		{"timeout", &tbm.Reply{Kind: tbm.KindTimeout}, "a timeout"},
+		{"action_err", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run status", Code: "no-run", Message: "none"}, Lines: []string{"TBM:ACTION_ERR|run status|no-run|none"}}, "no-run"},
+		{"malformed", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:RUN|t|running|bogus"}}, "malformed"},
+		{"none", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:ACTION_ACK|run status|ok"}}, "no TBM:RUN line"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStageFake()
+			f.statusReply = tc.reply
+			f.atPoint(Point{X: 120, Y: 0, Z: 0})
+			f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+			rep := runLive(t, f, liveReq(f, mkLivePlan(), 1))
+			if rep.Staged || !strings.Contains(rep.Refusal, "cannot stage without a current run state") {
+				t.Fatalf("not refused fail-closed: %+v", rep)
+			}
+			if !strings.Contains(rep.Refusal, tc.want) {
+				t.Errorf("no %q in %q", tc.want, rep.Refusal)
+			}
+			for _, c := range f.commands {
+				if c != "run status" {
+					t.Errorf("sent %q after a bad run status: %v", c, f.commands)
+				}
+			}
+			if len(f.gm) != 0 {
+				t.Errorf("GM lines sent after a bad run status: %v", f.gm)
+			}
+		})
+	}
+}
+
+// 2. Resume checks the paused run's plan AND leg before moving anyone:
+// a different plan and a different leg both refuse. A fresh running line
+// with the wrong plan/leg after the resume sends run stop and refuses.
+func TestStageLiveRefusesResumeOfADifferentPlan(t *testing.T) {
+	f := newStageFake()
+	f.statusLines = []string{"TBM:RUN|other|paused|5/20|b|move|walk|waiting|"}
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	req := liveReq(f, mkLivePlan(), 1)
+	req.Resume = true
+	rep := runLive(t, f, req)
+	if rep.Staged || !strings.Contains(rep.Refusal, "the paused run is plan other") {
+		t.Fatalf("resumed a different plan: %+v", rep)
+	}
+	for _, c := range f.commands {
+		if c != "run status" {
+			t.Errorf("sent %q before the resume check: %v", c, f.commands)
+		}
+	}
+	if len(f.gm) != 0 {
+		t.Errorf("GM lines sent before the resume check: %v", f.gm)
+	}
+}
+
+func TestStageLiveRefusesResumeOfADifferentLeg(t *testing.T) {
+	f := newStageFake()
+	f.statusLines = []string{"TBM:RUN|t|paused|5/20|a|move|walk|waiting|"}
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	req := liveReq(f, mkLivePlan(), 1)
+	req.Resume = true
+	rep := runLive(t, f, req)
+	if rep.Staged || !strings.Contains(rep.Refusal, "not t leg b") {
+		t.Fatalf("resumed a different leg: %+v", rep)
+	}
+	for _, c := range f.commands {
+		if c != "run status" {
+			t.Errorf("sent %q before the resume check: %v", c, f.commands)
+		}
+	}
+	if len(f.gm) != 0 {
+		t.Errorf("GM lines sent before the resume check: %v", f.gm)
+	}
+}
+
+func TestStageLiveStopsOnAResumeLegMismatch(t *testing.T) {
+	f := newStageFake()
+	f.statusLines = []string{"TBM:RUN|t|paused|5/20|b|move|walk|waiting|"}
+	f.atPoint(Point{X: 120, Y: 0, Z: 0})
+	f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+	f.runSeqs = []tbm.RunStatus{
+		{Plan: "t", State: tbm.RunRunning, Step: 6, Steps: 20, Leg: "a"},
+	}
+	req := liveReq(f, mkLivePlan(), 1)
+	req.Resume = true
+	rep := runLive(t, f, req)
+	if rep.Started {
+		t.Fatalf("resumed into the wrong leg: %+v", rep)
+	}
+	if !strings.Contains(rep.Refusal, "not t leg b") {
+		t.Errorf("no mismatch refusal: %q", rep.Refusal)
+	}
+	found := false
+	for _, s := range f.runSent {
+		if s == "run stop" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no run stop sent: %v", f.runSent)
+	}
+}
+
+// 10. run list times out or has no "Dungeon plans:" line: refused before
+// moving anyone (nothing after run list, no GM line).
+func TestStageLiveRefusesWithoutAPlanList(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply *tbm.Reply
+		want  string
+	}{
+		{"timeout", &tbm.Reply{Kind: tbm.KindTimeout}, "did not answer"},
+		{"action_err", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run list", Code: "busy", Message: "x"}, Lines: []string{"TBM:ACTION_ERR|run list|busy|x"}}, "refused .bot run list"},
+		{"no_line", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:ACTION_ACK|run list|plans|0|ok"}}, "no \"Dungeon plans:\" line"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStageFake()
+			f.listReplyObj = tc.reply
+			f.atPoint(Point{X: 120, Y: 0, Z: 0})
+			f.units = []StageUnit{{Name: "Lead", Player: true, At: Point{X: 120, Y: 0, Z: 0}}}
+			rep := runLive(t, f, liveReq(f, mkLivePlan(), 1))
+			if rep.Staged || !strings.Contains(rep.Refusal, tc.want) {
+				t.Fatalf("not refused without a plan list: %+v", rep)
+			}
+			for _, c := range f.commands {
+				if c != "run status" && c != "run list" {
+					t.Errorf("sent %q before the plan check: %v", c, f.commands)
+				}
+			}
+			if len(f.gm) != 0 {
+				t.Errorf("GM lines sent before the plan check: %v", f.gm)
+			}
+		})
 	}
 }
 

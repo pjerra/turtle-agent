@@ -118,38 +118,69 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 		return rep, nil
 	}
 
-	// 1. Run state.
+	// 1. Run state, fail closed: refuse (no teleport, no summon) unless
+	// the reply is a successful reply with exactly one valid current
+	// TBM:RUN line. A timeout, an ACTION_ERR, a missing line and a
+	// malformed line all refuse.
 	status, err := s.G.CommandWait(ctx, "run status", 4*time.Second)
 	if err != nil {
 		return rep, err
 	}
 	var st *tbm.RunStatus
+	runs := 0
+	malformed := false
 	for _, l := range status.Lines {
 		if rs, ok := tbm.ParseRunLine(l); ok {
+			runs++
 			c := rs
 			st = &c
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(l), tbm.RunPrefix) {
+			malformed = true
 		}
 	}
-	pausedRefusal := ""
-	if st != nil {
-		pausedRefusal = fmt.Sprintf("the run leader has a paused run (step %d/%d, leg %s): pass resume to stage and resume it, or .bot run stop it first", st.Step, st.Steps, st.Leg)
-	}
+	badRun := ""
 	switch {
-	case st != nil && st.State == tbm.RunRunning:
+	case status.Kind == tbm.KindTimeout:
+		badRun = "a timeout (no answer)"
+	case status.Err != nil:
+		badRun = fmt.Sprintf("a refusal: %s (%s)", status.Err.Code, status.Err.Message)
+	case status.Kind != tbm.KindAck:
+		badRun = fmt.Sprintf("no successful reply (kind %s)", status.Kind)
+	case runs == 0 && malformed:
+		badRun = "a malformed TBM:RUN line"
+	case runs == 0:
+		badRun = "no TBM:RUN line"
+	case runs > 1:
+		badRun = fmt.Sprintf("%d TBM:RUN lines", runs)
+	}
+	if badRun != "" {
+		rep.Refusal = fmt.Sprintf("cannot stage without a current run state: run status gave %s; nothing was sent", badRun)
+		return done()
+	}
+	pausedRefusal := fmt.Sprintf("the run leader has a paused run (step %d/%d, leg %s): pass resume to stage and resume it, or .bot run stop it first", st.Step, st.Steps, st.Leg)
+	switch {
+	case st.State == tbm.RunRunning:
 		rep.Refusal = fmt.Sprintf("the run leader has a run going (step %d/%d, leg %s): .bot run stop or pause it first", st.Step, st.Steps, st.Leg)
 		return done()
-	case st != nil && st.State == tbm.RunPaused && !req.Resume:
+	case st.State == tbm.RunPaused && !req.Resume:
 		rep.Refusal = pausedRefusal
 		return done()
-	case (st == nil || st.State != tbm.RunPaused) && req.Resume:
+	case req.Resume && st.State != tbm.RunPaused:
 		rep.Refusal = "resume: the run leader has no paused run"
 		return done()
-	case req.Start && st != nil && st.State == tbm.RunPaused:
+	case req.Resume && (!strings.EqualFold(st.Plan, req.Plan.Name) || !stageLegMatches(req.Plan, req.Leg, st.Leg)):
+		rep.Refusal = fmt.Sprintf("resume: the paused run is plan %s leg %s (step %d/%d), not %s leg %s: .bot run stop it first, then stage that leg",
+			st.Plan, stageLegWord(st.Leg), st.Step, st.Steps, req.Plan.Name, req.Plan.Legs[req.Leg].Name)
+		return done()
+	case req.Start && st.State == tbm.RunPaused:
 		rep.Refusal = pausedRefusal
 		return done()
 	}
 
-	// 2. Server plan.
+	// 2. Server plan: refuse before moving anyone when run list times
+	// out or has no "Dungeon plans:" line (as observe.go:302 does).
 	list, err := s.G.CommandWait(ctx, "run list", 4*time.Second)
 	if err != nil {
 		return rep, err
@@ -160,8 +191,21 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 			planList = rest
 		}
 	}
+	noPlans := planList == ""
+	if list.Kind == tbm.KindTimeout && noPlans {
+		rep.Refusal = "cannot stage: the server did not answer .bot run list, so it has no run leader; nothing was sent"
+		return done()
+	}
+	if list.Err != nil && noPlans {
+		rep.Refusal = fmt.Sprintf("cannot stage: the server refused .bot run list: %s (%s); nothing was sent", list.Err.Code, list.Err.Message)
+		return done()
+	}
+	if noPlans {
+		rep.Refusal = "cannot stage: .bot run list gave no \"Dungeon plans:\" line; nothing was sent"
+		return done()
+	}
 	steps := listedSteps(planList, req.Plan.Name)
-	if planList != "" && steps == 0 {
+	if steps == 0 {
 		rep.Refusal = fmt.Sprintf("the server's run leader has no plan %s (it lists: %s): export it with turtle-agent plan-export, apply the migration and restart the server", req.Plan.Name, planList)
 		return done()
 	}
@@ -710,18 +754,25 @@ func (s *Stager) startRun(ctx context.Context, req StageRequest) (*StageRun, str
 	if have == "" {
 		have = rr.Leg
 	}
-	if !strings.EqualFold(have, want) {
-		if _, err := s.G.CommandWait(ctx, "run stop", 4*time.Second); err != nil {
+	if !stageLegMatches(req.Plan, req.Leg, have) {
+		stop, err := s.G.CommandWait(ctx, "run stop", 4*time.Second)
+		if err != nil {
 			return rr, "", err
 		}
-		return rr, fmt.Sprintf("the run leader started in leg %s, not %s: the server's plan differs from the plan file; the run was stopped (.bot run stop)", have, want), nil
+		reply := fmt.Sprintf("the run leader started in leg %s, not %s: the server's plan differs from the plan file; the run was stopped (.bot run stop)", stageLegWord(have), want)
+		if stop.Err != nil || stop.Kind != tbm.KindAck {
+			reply = fmt.Sprintf("the run leader started in leg %s, not %s: the server's plan differs from the plan file; a run stop was sent but not confirmed: %s", stageLegWord(have), want, stopDescribe(stop))
+		}
+		return rr, reply, nil
 	}
 	rr.Line = got.Line
 	return rr, "", nil
 }
 
-// resumeRun sends `run resume` and waits for the running line (no leg
-// comparison).
+// resumeRun sends `run resume` and waits for the running line, then
+// checks the first fresh running status's plan and leg: on mismatch it
+// sends `run stop` (checked like the start's), and refuses. The paused
+// run itself was checked for plan and leg before anyone moved (step 1).
 func (s *Stager) resumeRun(ctx context.Context, req StageRequest) (*StageRun, string, error) {
 	_, n0, _ := s.G.RunStatus()
 	r, err := s.G.CommandWait(ctx, "run resume", 6*time.Second)
@@ -747,9 +798,36 @@ func (s *Stager) resumeRun(ctx context.Context, req StageRequest) (*StageRun, st
 		}
 		return rr, "no TBM:RUN running line within 20 s after the resume ACK", nil
 	}
+	want := req.Plan.Legs[req.Leg].Name
+	if !strings.EqualFold(got.Plan, req.Plan.Name) || !stageLegMatches(req.Plan, req.Leg, got.Leg) {
+		stop, err := s.G.CommandWait(ctx, "run stop", 4*time.Second)
+		if err != nil {
+			return rr, "", err
+		}
+		reply := fmt.Sprintf("the resumed run is plan %s leg %s (step %d/%d), not %s leg %s: the run was stopped (.bot run stop)",
+			got.Plan, stageLegWord(got.Leg), got.Step, got.Steps, req.Plan.Name, want)
+		if stop.Err != nil || stop.Kind != tbm.KindAck {
+			reply = fmt.Sprintf("the resumed run is plan %s leg %s (step %d/%d), not %s leg %s: a run stop was sent but not confirmed: %s",
+				got.Plan, stageLegWord(got.Leg), got.Step, got.Steps, req.Plan.Name, want, stopDescribe(stop))
+		}
+		return rr, reply, nil
+	}
 	rr.Line = got.Line
 	rr.Steps = got.Steps
 	return rr, "", nil
+}
+
+// stopDescribe is the short reply text for the "stop was sent but not
+// confirmed" refusals: the ACTION_ERR, the kind on a timeout, or the
+// first line.
+func stopDescribe(r tbm.Reply) string {
+	if r.Err != nil {
+		return fmt.Sprintf("%s (%s)", r.Err.Code, r.Err.Message)
+	}
+	if len(r.Lines) == 0 {
+		return "no answer (kind " + r.Kind + ")"
+	}
+	return r.Lines[0]
 }
 
 // stageStartWords is the start's `from` words: `from leg <name>` when the
@@ -794,4 +872,25 @@ func stageRowLeg(p *Plan, leg int) (int, bool) {
 		}
 	}
 	return row, true
+}
+
+// stageLegMatches says whether the run leader's leg word names the
+// requested leg: its plan name (case-insensitive) or its index. The
+// status line carries the name, or its number.
+func stageLegMatches(p *Plan, leg int, have string) bool {
+	if have == "" {
+		return false
+	}
+	if strings.EqualFold(have, p.Legs[leg].Name) {
+		return true
+	}
+	return have == strconv.Itoa(leg)
+}
+
+// stageLegWord is the leg word for a refusal: the raw word, "-" when empty.
+func stageLegWord(have string) string {
+	if have == "" {
+		return "-"
+	}
+	return have
 }
