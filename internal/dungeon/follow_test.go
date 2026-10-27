@@ -119,6 +119,8 @@ func TestFollowWalksToTheTrailBehindTheLead(t *testing.T) {
 	f, p := followFixture(t, false)
 	leadAt(f, Point{0, 0, 0})
 	f.pos = Point{-5, 0, 0}
+	var leadXs []float32
+	f.onWalk = func(g *fakeGame, to Point) { leadXs = append(leadXs, leadRow(f).X) }
 	fr := newFollowerForTest(f, p, nil)
 	for x := float32(0); x <= 40; x += 2 {
 		leadRow(f).X = x
@@ -130,9 +132,11 @@ func TestFollowWalksToTheTrailBehindTheLead(t *testing.T) {
 	if len(f.walks) == 0 {
 		t.Fatalf("no walk; status %+v", fr.Status())
 	}
-	last := f.walks[len(f.walks)-1]
-	if last.Y != 0 || last.X < leadRow(f).X-12 || last.X > leadRow(f).X-11 {
-		t.Fatalf("goal %v not 11.5 yd behind the lead (lead x %.1f)", last, leadRow(f).X)
+	// Every walk goal lies on the trail 11.5 yd behind the lead where it stood at that tick.
+	for i, goal := range f.walks {
+		if goal.Y != 0 || goal.X < leadXs[i]-12 || goal.X > leadXs[i]-11 {
+			t.Fatalf("walk %d goal %v not 11.5 yd behind the lead (lead x %.1f)", i, goal, leadXs[i])
+		}
 	}
 }
 
