@@ -47,6 +47,7 @@ func TestSelectOnlyGuard(t *testing.T) {
 	}
 	for _, bad := range []string{
 		"SELECT 1; DROP TABLE x",
+		"SELECT 1; SELECT 2",
 		"SELECT 1 INTO OUTFILE '/tmp/x'",
 		"UPDATE tw_world.x SET a = 1",
 		"SELECT 1 -- x",
