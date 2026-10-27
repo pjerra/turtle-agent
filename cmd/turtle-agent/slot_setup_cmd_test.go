@@ -220,3 +220,118 @@ func TestSlotSetupFailureMidwayCleansDir(t *testing.T) {
 		t.Fatalf("dir not cleaned: %v", entries)
 	}
 }
+
+// Item 1 (R3): a pre-existing caller-supplied --dungeons-dir is never
+// removed by cleanup: a forced late failure leaves the sentinel intact.
+func TestSlotSetupExternalDungeonsSurvivesFailure(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "shared-dungeons")
+	if err := os.MkdirAll(external, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(external, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "client")
+	oldHook := slotSetupPreWriteHook
+	slotSetupPreWriteHook = func() {
+		cfg, err := slots.Load(slotsPath)
+		if err != nil {
+			panic(err)
+		}
+		st := slots.NewStore(cfg, slotsPath)
+		cur, err := st.Get("m910q", "1")
+		if err != nil {
+			panic(err)
+		}
+		if _, err := st.Release("m910q", "1", cur.Holder, cur.LeaseID, true); err != nil {
+			panic(err)
+		}
+		if _, err := st.Acquire("m910q", "1", false, "w-zf", 3*time.Hour); err != nil {
+			panic(err)
+		}
+	}
+	defer func() { slotSetupPreWriteHook = oldHook }()
+	code, _, _ := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--dungeons-dir", external, "--slots", slotsPath)
+	if code != exitSlotRefused {
+		t.Fatalf("code %d, want %d", code, exitSlotRefused)
+	}
+	raw, err := os.ReadFile(sentinel)
+	if err != nil || string(raw) != "keep" {
+		t.Fatalf("external --dungeons-dir touched: %q %v", raw, err)
+	}
+}
+
+// Item 2 (R3): a --dir that is a symlink is refused before anything is
+// written through it.
+func TestSlotSetupRefusesSymlinkDir(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", link, "--binary", bin, "--slots", slotsPath)
+	if code != exitUsage || !strings.Contains(errOut, "symlink") {
+		t.Fatalf("code %d stderr %q, want a symlink refusal", code, errOut)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("wrote through the symlink: %v", entries)
+	}
+}
+
+// Item 2 (R3): the dir is re-checked right before settings.json is
+// written: a swap to a symlink refuses and writes nothing in the target.
+func TestSlotSetupDirSwapBeforeWriteRefused(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	dir := filepath.Join(base, "client")
+	target := filepath.Join(base, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldHook := slotSetupPreWriteHook
+	slotSetupPreWriteHook = func() {
+		if err := os.Rename(dir, dir+".bak"); err != nil {
+			panic(err)
+		}
+		if err := os.Symlink(target, dir); err != nil {
+			panic(err)
+		}
+	}
+	defer func() { slotSetupPreWriteHook = oldHook }()
+	code, _, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--slots", slotsPath)
+	if code != exitUsage || !strings.Contains(errOut, "replaced") {
+		t.Fatalf("code %d stderr %q, want a replacement refusal", code, errOut)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("settings written through the swapped symlink: %v", entries)
+	}
+}

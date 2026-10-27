@@ -112,12 +112,28 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	dir = absDir
-	// Claim the dir first, before any credential exists: create it 0700,
-	// refuse a non-empty dir, chmod an empty one to 0700. Everything setup
-	// creates below is tracked for cleanup on failure.
+	// Claim the dir first, before any credential exists: refuse a symlink
+	// --dir (or a symlink in any existing parent component), create it
+	// 0700, refuse a non-empty dir, chmod an empty one to 0700. Everything
+	// setup creates below is tracked for cleanup on failure; cleanup only
+	// removes setup-created paths inside the claimed dir.
+	if err := slotSetupCheckNoSymlink(dir); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return exitUsage
+	}
 	var created []string
+	var claimInfo os.FileInfo
 	cleanup := func() {
+		if claimInfo != nil {
+			// The dir was swapped under setup: never reach through it.
+			if cur, err := os.Lstat(dir); err != nil || cur.Mode()&os.ModeSymlink != 0 || !os.SameFile(claimInfo, cur) {
+				return
+			}
+		}
 		for _, p := range created {
+			if !slotSetupInsideDir(dir, p) {
+				continue
+			}
 			os.RemoveAll(p)
 		}
 	}
@@ -126,7 +142,7 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, format+"\n", a...)
 		return exitUsage
 	}
-	if info, err := os.Stat(dir); err == nil {
+	if info, err := os.Lstat(dir); err == nil {
 		if !info.IsDir() {
 			fmt.Fprintf(stderr, "slot setup: %s exists and is not empty: pick a new --dir (setup never overwrites)\n", dir)
 			return exitUsage
@@ -144,6 +160,7 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "slot setup: %v\n", err)
 			return exitUsage
 		}
+		claimInfo = info
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(stderr, "slot setup: %v\n", err)
 		return exitUsage
@@ -153,7 +170,21 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	} else if merr := os.Chmod(dir, 0o700); merr != nil {
 		fmt.Fprintf(stderr, "slot setup: %v\n", merr)
 		return exitUsage
+	} else if info, serr := os.Lstat(dir); serr != nil {
+		fmt.Fprintf(stderr, "slot setup: %v\n", serr)
+		return exitUsage
+	} else {
+		claimInfo = info
 	}
+	// Resolve the claimed dir to its real path once (a refused-symlink
+	// check ran above, so this succeeds only on a plain dir): children
+	// are built from the real path, never through a later-swapped link.
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "slot setup: %v\n", err)
+		return exitUsage
+	}
+	dir = realDir
 	binSrc := *binaryFlag
 	if binSrc == "" {
 		binSrc, err = os.Executable()
@@ -179,15 +210,23 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	if dungeonsDir == "" {
 		dungeonsDir = filepath.Join(dir, "dungeons")
 	}
-	if err := os.MkdirAll(dungeonsDir, 0o755); err != nil {
+	// Only a dir setup created itself is tracked for cleanup: a
+	// pre-existing caller-supplied --dungeons-dir is never removed.
+	dungeonsMade, err := slotSetupEnsureDir(dungeonsDir, 0o755)
+	if err != nil {
 		return fail("slot setup: %v", err)
 	}
-	created = append(created, dungeonsDir)
+	if dungeonsMade {
+		created = append(created, dungeonsDir)
+	}
 	tracesDir := filepath.Join(dir, "traces")
-	if err := os.MkdirAll(tracesDir, 0o755); err != nil {
+	tracesMade, err := slotSetupEnsureDir(tracesDir, 0o755)
+	if err != nil {
 		return fail("slot setup: %v", err)
 	}
-	created = append(created, tracesDir)
+	if tracesMade {
+		created = append(created, tracesDir)
+	}
 	stateDir := slots.ExpandTilde(server.StateDir)
 	if stateDir == "" {
 		stateDir = filepath.Dir(settingsFrom)
@@ -231,6 +270,13 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 			server.Name, slot.ID, *holder, server.Name, slot.ID, *holder)
 		return exitSlotRefused
 	}
+	// The dir must still be the claimed one (not a swapped-in symlink)
+	// right before settings.json lands: re-check via Lstat.
+	curInfo, err := os.Lstat(dir)
+	if err != nil || curInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(claimInfo, curInfo) {
+		return fail("slot setup: %s was replaced during setup: refusing to write settings", dir)
+	}
+
 	settingsPath := filepath.Join(dir, "settings.json")
 	if err := slotSetupWriteSettings(settingsPath, dst, stateDir); err != nil {
 		return fail("slot setup: %v", err)
@@ -276,6 +322,70 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "rpc: 127.0.0.1:%d, token file %s (written at login)\n", slot.Port, tokenFile)
 	fmt.Fprintf(stdout, "teardown: %s teardown %s\n", binDst, dir)
 	return exitOK
+}
+
+// slotSetupCheckNoSymlink refuses a --dir that is a symlink or sits under
+// one: writes through a symlink land outside the claimed dir.
+func slotSetupCheckNoSymlink(dir string) error {
+	clean := filepath.Clean(dir)
+	for p := clean; ; p = filepath.Dir(p) {
+		fi, err := os.Lstat(p)
+		if err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("slot setup: %s resolves through a symlink: pick a new --dir (setup never writes through a symlink)", clean)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("slot setup: %v", err)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+	}
+	// Belt and braces: the deepest existing ancestor must resolve to
+	// itself, or a symlink component hid from the walk above.
+	existing := clean
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			break
+		}
+		existing = parent
+	}
+	if real, err := filepath.EvalSymlinks(existing); err == nil && real != filepath.Clean(existing) {
+		return fmt.Errorf("slot setup: %s resolves through a symlink: pick a new --dir (setup never writes through a symlink)", clean)
+	}
+	return nil
+}
+
+// slotSetupEnsureDir MkdirAlls path, reporting whether setup created it.
+// Only setup-created paths are tracked for cleanup: a pre-existing
+// caller-supplied dir (e.g. an external --dungeons-dir) is never removed.
+func slotSetupEnsureDir(path string, mode os.FileMode) (bool, error) {
+	if st, err := os.Stat(path); err == nil {
+		if !st.IsDir() {
+			return false, fmt.Errorf("slot setup: %s exists and is not a dir", path)
+		}
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.MkdirAll(path, mode); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// slotSetupInsideDir reports whether p is dir itself or below it.
+func slotSetupInsideDir(dir, p string) bool {
+	rel, err := filepath.Rel(dir, p)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func slotSetupCheckLease(store *slots.Store, server, slot, holder string) (string, error) {
