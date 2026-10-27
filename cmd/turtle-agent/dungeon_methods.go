@@ -367,6 +367,8 @@ type dungeonRunner struct {
 	classes map[string]string
 	cancel  context.CancelFunc
 	done    chan struct{}
+	// follow is the player follow service; a run refuses while it runs (and follow_start refuses while a run goes).
+	follow interface{ Running() bool }
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
@@ -494,6 +496,9 @@ func (r *dungeonRunner) running() bool {
 }
 
 func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error) {
+	if r.follow != nil && r.follow.Running() {
+		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a player follow is going: follow_stop it first"}
+	}
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
