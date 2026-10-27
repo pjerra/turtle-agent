@@ -79,7 +79,7 @@ func TestRemoteWatchdogFailsAPullThatRecoveryDoesNotFix(t *testing.T) {
 	g.followTo = &Point{-30, 0, 0} // 60 yd from the boss: the tank runs there on cmd follow and back on the re-pull
 	plan := remotePlan(Leg{Name: "a", To: Point{20, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{30, 5, 0}}}}})
 	rep, err := runRemote(t, g, plan, opts(), func(c *Config) { c.FightTimeout = 3000 * time.Second; c.BossTimeout = 3000 * time.Second })
-	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "leg 0 (a): pull group 1 of 1 for 4") {
+	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "leg 0 (a): pull group 1 of 1 (from_pull_group 0) for 4") {
 		t.Fatalf("%v %q", err, rep.Error)
 	}
 	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 430 {
@@ -149,7 +149,7 @@ func TestRemoteWatchdogFailsAFightThatGoesNowhere(t *testing.T) {
 		c.FightTimeout = 3000 * time.Second
 		c.Watchdog = WatchdogConfig{WarnS: 60, RecoverS: -1, FailS: 200}
 	})
-	if err == nil || !strings.HasPrefix(rep.Error, "stalled: fight leg 0 (a): pull group 1 of 1 for 20") || g.unbinds != 1 {
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: fight leg 0 (a): pull group 1 of 1 (from_pull_group 0) for 20") || g.unbinds != 1 {
 		t.Fatalf("%v unbinds %d", err, g.unbinds)
 	}
 	if !strings.Contains(rep.Error, "last progress pull started") && !strings.Contains(rep.Error, "last progress order acked") {
@@ -263,7 +263,7 @@ func TestDriverWatchdogRecoversOrFailsAStuckFight(t *testing.T) {
 	d := NewDriver(mustPlan(t, plan), g, Config{FightTimeout: 100_000 * time.Second}, g.clock())
 	err := d.Run(t.Context(), 0)
 	rep := d.Report()
-	if err == nil || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 for 3") {
+	if err == nil || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 (from_pull_group 0) for 3") {
 		t.Fatalf("%v %q\n%s", err, rep.Error, notes(d))
 	}
 	if w := rep.Watchdog; w.Recoveries != 1 || w.StallLevel != "fail" || w.StalledForS > 310 || g.count(".bot action follow") < 1 || !strings.Contains(notes(d), "told the party to follow and ended the fight to pick the target again") {
@@ -274,7 +274,7 @@ func TestDriverWatchdogRecoversOrFailsAStuckFight(t *testing.T) {
 	d = NewDriver(mustPlan(t, plan), g, Config{FightTimeout: 100_000 * time.Second, Watchdog: WatchdogConfig{RecoverS: -1}}, g.clock())
 	err = d.Run(t.Context(), 0)
 	rep = d.Report()
-	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 for 3") {
+	if err == nil || rep.State != "failed" || !strings.HasPrefix(rep.Error, "stalled: ") || !strings.Contains(rep.Error, "pull group 1 of 1 (from_pull_group 0) for 3") {
 		t.Fatalf("%v %q\n%s", err, rep.Error, notes(d))
 	}
 	if w := rep.Watchdog; w.WarnS != 50 || w.RecoverS != 0 || w.FailS != 300 || w.StallLevel != "fail" || w.Recoveries != 0 {

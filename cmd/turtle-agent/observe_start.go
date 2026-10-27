@@ -51,7 +51,7 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group: the plan has legs %v (numbers 0-%d)", legNames(plan), len(plan.Legs)-1)
 			}
 			if n := len(plan.Legs[leg].PullGroups); *group < 0 || *group >= n {
-				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *group, leg, plan.Legs[leg].Name, n, n-1)
+				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", *group, leg, plan.Legs[leg].Name, n, n-1, n)
 			}
 			if plan.Legs[leg].Optional != nil {
 				return dungeon.PartialStart{}, fmt.Errorf("from_pull_group %d: leg %d (%s) is optional (it needs item %d) and the exporter leaves optional legs out of the run leader's rows", *group, leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)

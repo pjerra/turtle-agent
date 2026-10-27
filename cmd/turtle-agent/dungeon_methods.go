@@ -282,6 +282,9 @@ type observeParam struct {
 	MaxRunS     float64 `json:"max_run_s,omitempty"`
 	StallS      float64 `json:"stall_s,omitempty"`
 	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
+	// AutoResume resumes the run leader by itself after its "regroups by itself ... did not hold" pause, at most this many times a
+	// step (0-3, default 0: off). Round scripts with nobody watching turn it on.
+	AutoResume int `json:"auto_resume,omitempty"`
 	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight (and at the hire check); off by default. Maintenance
 	// walks a bot to a vendor for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and
 	// the run leader pauses with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
@@ -700,7 +703,7 @@ func checkStartParams(p dungeonRunParams, plan *dungeon.Plan, from int) error {
 	}
 	if g := p.FromPullGroup; g != nil {
 		if n := len(plan.Legs[from].PullGroups); *g < 0 || *g >= n {
-			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *g, from, plan.Legs[from].Name, n, n-1)
+			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", *g, from, plan.Legs[from].Name, n, n-1, n)
 		}
 		if p.StartHere {
 			return bad("from_pull_group and start_here exclude each other: start_here does not move the party")

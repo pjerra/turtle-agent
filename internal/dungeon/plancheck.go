@@ -174,6 +174,7 @@ type PlanIssue struct {
 	// Part says what the point is: "via 2", "direct via 1", "to", "pull group look" or "boss look".
 	Part string `json:"part"`
 	// PullGroup and PullGroups number the pack the way dungeon_status does ("pull group 9 of 12"); 0 for a point that is not a pack's.
+	// Every text shows both numberings (PullGroupRef: "pull group 9 of 12 (from_pull_group 8)").
 	PullGroup  int   `json:"pull_group,omitempty"`
 	PullGroups int   `json:"pull_groups,omitempty"`
 	Point      Point `json:"point"`
@@ -191,7 +192,7 @@ func (i PlanIssue) String() string {
 		where += " (" + i.LegName + ")"
 	}
 	if i.PullGroup > 0 {
-		where += fmt.Sprintf(" pull group %d of %d", i.PullGroup, i.PullGroups)
+		where += " " + PullGroupRef(i.PullGroup-1, i.PullGroups)
 	}
 	if i.Team != "" {
 		where += " [" + i.Team + " only]"
@@ -266,7 +267,7 @@ func (o CheckOptions) Validate(p *Plan) error {
 	}
 	if g := o.FromPullGroup; g != nil {
 		if n := len(p.Legs[o.FromLeg].PullGroups); *g < 0 || *g >= n {
-			return fmt.Errorf("%w: pull group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", ErrCheckStart, *g, o.FromLeg, p.Legs[o.FromLeg].Name, n, n-1)
+			return fmt.Errorf("%w: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", ErrCheckStart, o.FromLeg, p.Legs[o.FromLeg].Name, n, n-1, n)
 		}
 	}
 	return nil

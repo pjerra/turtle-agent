@@ -311,8 +311,8 @@ func (s *Stepper) next() Action {
 			}
 			g := l.PullGroups[s.idx]
 			gate := ""
-			if !s.teamOK(g.Team) && !s.hostileOverride(fmt.Sprintf("g%d/%d", s.leg, s.idx), g.Entries, g.Team, s.label("pull group %d of %d (%v)", s.idx+1, len(l.PullGroups), g.Entries)) {
-				note := s.label("pull group %d of %d (%v) is for team %s, the leader is %s", s.idx+1, len(l.PullGroups), g.Entries, g.Team, s.team())
+			if !s.teamOK(g.Team) && !s.hostileOverride(fmt.Sprintf("g%d/%d", s.leg, s.idx), g.Entries, g.Team, s.label("%s (%v)", PullGroupRef(s.idx, len(l.PullGroups)), g.Entries)) {
+				note := s.label("%s (%v) is for team %s, the leader is %s", PullGroupRef(s.idx, len(l.PullGroups)), g.Entries, g.Team, s.team())
 				if !s.looksFirst() {
 					s.skipped = append(s.skipped, note+": skipped")
 					s.idx++
@@ -321,7 +321,7 @@ func (s *Stepper) next() Action {
 				gate = note
 			}
 			return Action{Kind: ActPull, Leg: s.leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Patrol: g.Patrol, Skip: l.Skip, TeamGate: gate,
-				Label: s.label("pull group %d of %d", s.idx+1, len(l.PullGroups))}
+				Label: s.label("%s", PullGroupRef(s.idx, len(l.PullGroups)))}
 		case phSteps, phAfter:
 			steps := l.Steps
 			if s.ph == phAfter {

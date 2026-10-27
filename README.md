@@ -1648,7 +1648,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    **`.bot maintenance` is off in observe mode** unless `observe.maintenance` is true — in the kit check and in the hire check's top-up of
    a reused hire or one short of drinks or ammo: maintenance walks each bot to a vendor, bank or mailbox, and a party scattered over the maps
    right after the hires' autogear pauses the run leader ("the lead bot is not on the plan's map", #253). The inventory and talent reads still
-   run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step).
+   run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step). The talents ask reuses what the hire read a few minutes earlier (a `0/5/31 (hire)` in the report): the in-instance ask gets no answer.
    The start also undoes a boss `loot off` a crashed run left in place (`.bot behavior <bot> loot on` for every bot) unless
    `observe.keep_loot_setting` is true: then the bots' corpse looting stays as the operator set it, as a dungeon whose legs need looting off
    does. A driven run always sends the undo.
@@ -1686,6 +1686,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | `max_run_s` | 3 h | the whole run, from `run start`, takes longer (a longer dungeon sets it: Uldaman needs more than 3 h). The stop it sends is `.bot run stop time limit reached (<N>h)`, so the server logs the reason (TortoiseBots #1070) instead of "stopped by .bot run stop"; the other endings send the plain `.bot run stop` |
 | `stall_s` | 10 min | a `running` run shows the very same status line this long (the module's longest own ceiling is a boss at 7 min) |
 | `paused_wait_s` | 10 min | a `paused` run is not resumed this long. The run leader pauses itself at 3 dead, an unsupported step (`ritual`) or a ceiling and never goes on alone |
+| `auto_resume` | 0 (off) | not a ceiling: resumes the run leader by itself 15 s after its "regroups by itself ... did not hold" pause, at most this many times a step (0-3) and 6 per run; round scripts with nobody watching turn it on |
 | none | 20 s | no `TBM:RUN` line came after the start, or the module says "no run" |
 | none | | the binding ended: the view feed's end-of-binding line fails the run as in commander mode |
 | `maintenance` | false | not a ceiling: sends `.bot maintenance` to every bot at the kit check (off: it walks them to vendors and can scatter the party) |

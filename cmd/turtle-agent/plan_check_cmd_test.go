@@ -68,7 +68,7 @@ func TestPlanCheckBadStart(t *testing.T) {
 		t.Errorf("from_leg 99: %v", err)
 	}
 	zero := legParam{index: 0}
-	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromLeg: &zero, FromPullGroup: &group}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "pull group 99") {
+	if _, err := r.planCheck(planCheckParams{Name: "zulfarrak", FromLeg: &zero, FromPullGroup: &group}); err == nil || errCodeOf(err) != rpc.CodeInvalidParams || !strings.Contains(err.Error(), "from_pull_group 0-1") || !strings.Contains(err.Error(), "1-2") {
 		t.Errorf("from_pull_group 99: %v", err)
 	}
 	// With no navmesh the start is still validated (no engine is needed for it) when a planner exists.
@@ -347,7 +347,7 @@ func TestDungeonRunForceStartIsTheUnsafeStartGates(t *testing.T) {
 	var checks int
 	r := gateRig(t, &checks)
 	const start = `"mode":"commander","lead_bot":"Tanky","preflight":"off","from_leg":0,"from_pull_group":1,"prepare":{"fresh":true}`
-	const refusal = "from_pull_group 1: the gather spot 145 5 5 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	const refusal = "from_pull_group 1: the gather spot 145 5 5 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
 	report := func(ok func(rep map[string]any) bool) map[string]any {
 		out := r.eventually("dungeon_status", "{}", func(m map[string]any) bool {
 			rep, _ := m["result"].(map[string]any)["report"].(map[string]any)
