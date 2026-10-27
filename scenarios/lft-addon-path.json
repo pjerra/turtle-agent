@@ -1,0 +1,592 @@
+{
+  "scenario": "lft-addon-path",
+  "description": "Core LFT listing API, Part 1 (addon path): two sessions drive TW_LFG messages (specs/core-lft-listing-api-livetest.md); from tests/lftapi/transcript.py",
+  "sessions": {
+    "A": {
+      "rpc": "127.0.0.1:8774",
+      "token_file": "~/ta-lftapi-A/rpc-8774.token"
+    },
+    "B": {
+      "rpc": "127.0.0.1:8776",
+      "token_file": "~/ta-lftapi-B/rpc-8776.token"
+    }
+  },
+  "db": {
+    "host": "m910q",
+    "container": "tortoise-db"
+  },
+  "addon_prefix": "TW_LFG",
+  "settle_s": 4,
+  "timeout_s": 10,
+  "on_fail": "continue",
+  "record": [
+    {
+      "kind": "addon",
+      "prefix": "TW_LFG"
+    }
+  ],
+  "normalise": [
+    {
+      "match": "\"id\":\\d+",
+      "replace": "\"id\":<ID>"
+    },
+    {
+      "match": "(S2C_UPDATE_GROUP;)\\d+",
+      "replace": "${1}<ID>"
+    }
+  ],
+  "steps": [
+    {
+      "do": "rpc",
+      "note": "setup: both out of any group, no listing in the DB",
+      "session": "A",
+      "method": "leave_group",
+      "ignore_error": true,
+      "settle_s": 0
+    },
+    {
+      "do": "rpc",
+      "session": "B",
+      "method": "leave_group",
+      "ignore_error": true,
+      "settle_s": 2
+    },
+    {
+      "do": "check_db",
+      "name": "no listing at start",
+      "table": "tw_world.lft_user_groups",
+      "rows": 0,
+      "on_fail": "stop"
+    },
+    {
+      "do": "section",
+      "title": "A: GET_GROUPS_STATUS, GET_GROUPS_LIST"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_GET_GROUPS_STATUS"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_GET_GROUPS_LIST"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_STATUS;1$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;start$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;end$"
+    },
+    {
+      "do": "expect_not",
+      "session": "B",
+      "kind": "addon",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "section",
+      "title": "A solo NEW_GROUP T1; B GET_GROUPS_LIST then GET_GROUP_DETAILS"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_NEW_GROUP;T1;D1;2;1:1:3;0"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "guild",
+      "text": "C2S_GET_GROUPS_LIST"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":\\d+,\"creator\":\"${A.character}\",\"class\":\"[A-Z]+\",\"level\":\\d+,\"title\":\"T1\",\"description\":\"D1\",\"category\":2,\"limit\":\\[1,1,3\\],\"numConfirmed\":\\[0,0,0\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;\\d+;start;"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":(\\d+),\"creator\":\"${A.character}\".*\"title\":\"T1\"",
+      "capture": {
+        "gid": 1
+      }
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "note": "the reply to B's own GET_GROUPS_LIST",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"title\":\"T1\""
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "guild",
+      "text": "C2S_GET_GROUP_DETAILS;${gid}"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};start;\\{\"id\":${gid},\"creator\":\"${A.character}\".*\"title\":\"T1\""
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};end$"
+    },
+    {
+      "do": "expect_not",
+      "session": "A",
+      "kind": "addon",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "check_db",
+      "name": "one listing after NEW_GROUP",
+      "table": "tw_world.lft_user_groups",
+      "rows": 1
+    },
+    {
+      "do": "section",
+      "title": "A NEW_GROUP T2 category 9 (replaces T1)"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_NEW_GROUP;T2;D2;9;0:0:0;0"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "note": "observed: category 9 comes back as 4",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":(\\d+),\"creator\":\"${A.character}\".*\"title\":\"T2\",\"description\":\"D2\",\"category\":4,\"limit\":\\[0,0,0\\]",
+      "capture": {
+        "gid": 1
+      }
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};end$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"title\":\"T2\""
+    },
+    {
+      "do": "check_db",
+      "name": "T2 replaced T1",
+      "table": "tw_world.lft_user_groups",
+      "rows": 1
+    },
+    {
+      "do": "section",
+      "title": "A invites B, B accepts; B (non-leader) NEW_GROUP"
+    },
+    {
+      "do": "rpc",
+      "session": "A",
+      "method": "invite",
+      "params": {
+        "name": "${B.character}"
+      },
+      "settle_s": 3
+    },
+    {
+      "do": "rpc",
+      "session": "B",
+      "method": "accept_invite",
+      "settle_s": 4
+    },
+    {
+      "do": "check_rpc",
+      "session": "A",
+      "method": "party",
+      "path": "in_group",
+      "equals": true,
+      "within_s": 5
+    },
+    {
+      "do": "check_rpc",
+      "session": "B",
+      "method": "party",
+      "path": "in_group",
+      "equals": true,
+      "within_s": 5
+    },
+    {
+      "do": "check_rpc",
+      "session": "A",
+      "method": "party",
+      "path": "members.0.name",
+      "equals": "${B.character}"
+    },
+    {
+      "do": "expect_not",
+      "session": "A",
+      "kind": "addon",
+      "note": "group forming sends no TW_LFG line",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "guild",
+      "text": "C2S_NEW_GROUP;X;Y;1;1:1:1;0"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_QUEUE_ERROR;not_leader$"
+    },
+    {
+      "do": "expect_not",
+      "session": "A",
+      "kind": "addon",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "section",
+      "title": "B SIGNUP; B role h, A role t, B role 0 (PARTY)"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "guild",
+      "text": "C2S_SIGNUP;true;${gid};4"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};start;"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};start;"
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "party",
+      "text": "C2C_ROLECHECK_RESPONSE;h"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[0,1,0\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "channel": "party",
+      "match": "^C2C_ROLECHECK_RESPONSE;h$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[0,1,0\\]\\}$"
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "party",
+      "text": "C2C_ROLECHECK_RESPONSE;t"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[1,1,0\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[1,1,0\\]\\}$"
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "party",
+      "text": "C2C_ROLECHECK_RESPONSE;0"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[1,0,1\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[1,0,1\\]\\}$"
+    },
+    {
+      "do": "section",
+      "title": "A UPDATE_GROUP with name list, then without"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_UPDATE_GROUP;${gid};T3;D3;1:1:3;A:1;B:2;"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"title\":\"T3\".*\"limit\":\\[1,1,3\\],\"numConfirmed\":\\[1,0,1\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};1;\\{\"name\":\"${A.character}\".*\"confirmed\":true\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_UPDATE_GROUP;${gid};3;\\{\"name\":\"${B.character}\".*\"confirmed\":true\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"title\":\"T3\""
+    },
+    {
+      "do": "expect_not",
+      "session": "B",
+      "kind": "addon",
+      "note": "the member list goes to the creator only",
+      "match": "^S2C_UPDATE_GROUP;",
+      "within_s": 0
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_UPDATE_GROUP;${gid};T3;D3;1:1:3"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[0,0,0\\]\\}$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":${gid},.*\"numConfirmed\":\\[0,0,0\\]\\}$"
+    },
+    {
+      "do": "section",
+      "title": "B DELETE (not creator), then A DELETE"
+    },
+    {
+      "do": "addon_send",
+      "session": "B",
+      "channel": "guild",
+      "text": "C2S_DELETE_GROUP;${gid}"
+    },
+    {
+      "do": "expect_not",
+      "session": "A",
+      "kind": "addon",
+      "note": "observed: a non-creator's DELETE gets no reply",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "expect_not",
+      "session": "B",
+      "kind": "addon",
+      "match": ".",
+      "within_s": 0
+    },
+    {
+      "do": "check_db",
+      "name": "listing survives B's DELETE",
+      "table": "tw_world.lft_user_groups",
+      "rows": 1
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_DELETE_GROUP;${gid}"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;start$"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;end$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;end$"
+    },
+    {
+      "do": "expect_not",
+      "session": "A",
+      "kind": "addon",
+      "match": "\"title\":\"T3\"",
+      "within_s": 0
+    },
+    {
+      "do": "check_db",
+      "name": "listing deleted",
+      "table": "tw_world.lft_user_groups",
+      "rows": 0
+    },
+    {
+      "do": "section",
+      "title": "A creates a new listing, then A logs out"
+    },
+    {
+      "do": "addon_send",
+      "session": "A",
+      "channel": "guild",
+      "text": "C2S_NEW_GROUP;T4;D4;2;1:1:3;0"
+    },
+    {
+      "do": "expect",
+      "session": "A",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":\\d+,.*\"title\":\"T4\""
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;\\{\"id\":\\d+,.*\"title\":\"T4\""
+    },
+    {
+      "do": "check_db",
+      "name": "T4 listed",
+      "table": "tw_world.lft_user_groups",
+      "rows": 1
+    },
+    {
+      "do": "mark"
+    },
+    {
+      "do": "rpc",
+      "session": "A",
+      "method": "logout",
+      "timeout_s": 20,
+      "ignore_error": true,
+      "settle_s": 8
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;start$"
+    },
+    {
+      "do": "expect",
+      "session": "B",
+      "kind": "addon",
+      "match": "^S2C_GROUPS_LIST_UPDATE;end$"
+    },
+    {
+      "do": "expect_not",
+      "session": "B",
+      "kind": "addon",
+      "match": "\"title\":\"T4\"",
+      "within_s": 0
+    },
+    {
+      "do": "check_db",
+      "name": "logout removes the listing",
+      "table": "tw_world.lft_user_groups",
+      "rows": 0,
+      "within_s": 10
+    }
+  ],
+  "finally": [
+    {
+      "do": "rpc",
+      "session": "B",
+      "method": "logout",
+      "timeout_s": 20,
+      "ignore_error": true,
+      "settle_s": 0
+    }
+  ]
+}

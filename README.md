@@ -96,6 +96,9 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+turtle-agent scenario check [--var NAME=VALUE]... <file>
+turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
+turtle-agent scenario norm <file> <dir>
 turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
 turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
 turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
@@ -1493,6 +1496,39 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
+
+## Scenarios
+
+A repeatable live test: steps drive one or more running agents over RPC, built-in checks print PASS/FAIL, and
+`raw.txt` plus `norm.txt` diff cleanly before/after a deploy. `scenarios/lft-addon-path.json` (the core LFT listing
+API over addon messages) and `scenarios/itemleg3-g1-items.json` (a bot-only Zul'Farrak run: Mallets given, soulbound,
+used on the gong, taken back at stop) are the examples.
+
+The file is strict JSON (no comments; every step has an optional `note`): `scenario`, `sessions` (1-8,
+loopback RPC only — a token file is read per call, `rpc_token` settings are not supported), optional `db`
+(`host` ssh alias, `container`), `vars`, `addon_prefix`, `settle_s`, `timeout_s`, `on_fail`, `max_minutes`,
+`record` matchers, `normalise` rules, `steps` (1-500) and `finally` (actions only: `gm`, `bot`, `addon_send`,
+`rpc`, `sleep`).
+
+Step kinds: `section` (prints `=== STEP n:` and marks), `mark` (moves the window), `gm` (a `.`-command), `bot` (a
+`.bot` command without `.bot`), `addon_send`, `rpc` (any agent method, with `params`, `save`, `record_result`,
+`ignore_error`), `sleep`, `wait` (an `expect` that aborts on timeout), `expect`, `expect_not`, `check_db` (two
+no-free-SQL forms: table row counts and item counts) and `check_rpc` (`equals`, `match` or `len` over a result path).
+
+System lines are matched raw (colour stripping eats `|r`; the addon also reads them raw). Matching is ordered per
+session (`section`/`mark` set the window and the match cursor; each `expect` only sees later lines), while
+`expect_not` scans everything since the window. Variables: `${S.character}` built-ins, file `vars` (overridden by
+`--var`), `capture` groups and `save` paths; regex-quoted inside `match`. A check that fails is FAIL (`on_fail`
+`continue` or `stop`); anything unevaluatable — an RPC or DB error, an unset var, a denied GM command, the deadline,
+an interrupt — is ERROR and aborts. Exit codes 0/14/15/2.
+
+`scenario run` writes `raw.txt` (seq, times, expanded text), `norm.txt` (templates, no seq/times/durations, DB counts
+kept), `transcript.jsonl` (one object per line) and `result.json`. The normaliser applies the built-ins (RFC3339
+times, clock times, hex and long decimal guids) then the file's rules; captured values and ids are not replaced
+automatically — normalise them with rules. An event arriving after `settle_s` lands in the next step's block; use
+`mark` plus an `expect` to pin order. DB checks run `SELECT COUNT(*)` over ssh in a read-only transaction, allowlisted
+tables only, and only the count comes back (BatchMode, no password on any command line). The GM deny list refuses
+world-changing commands (AGENTS.md) at load and again at run time.
 
 ## Unit positions
 

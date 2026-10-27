@@ -94,6 +94,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return pathCheckCmd(args[1:], stdout, stderr)
 	case "stage-check":
 		return stageCheckCmd(args[1:], stdout, stderr)
+	case "scenario":
+		return scenarioCmd(ctx, args[1:], stdout, stderr)
 	case "route-oracle":
 		return routeOracleCmd(args[1:], stdout, stderr)
 	case "route-edits":
@@ -135,6 +137,9 @@ func usage(w io.Writer) {
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
   turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
   turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+  turtle-agent scenario check [--var NAME=VALUE]... <file>
+  turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
+  turtle-agent scenario norm <file> <dir>
   turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
   turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
   turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
