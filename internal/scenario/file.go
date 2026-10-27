@@ -44,6 +44,16 @@ type NormRule struct {
 	re      *regexp.Regexp
 }
 
+// compile compiles the rule's regexp (Parse already does; tests use this).
+func (r *NormRule) compile() error {
+	re, err := regexp.Compile(r.Match)
+	if err != nil {
+		return err
+	}
+	r.re = re
+	return nil
+}
+
 // Matcher picks transcript events out (section 2.5 of the spec).
 type Matcher struct {
 	Session string         `json:"session"`

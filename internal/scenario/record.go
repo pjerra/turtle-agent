@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -67,4 +68,62 @@ func redactValue(v any, tokens []string) any {
 	default:
 		return v
 	}
+}
+
+var (
+	// B1: RFC3339 times, with optional fractions and zone.
+	bNormTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`)
+	// B2: clock times.
+	bNormClock = regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`)
+	// B3: hex guids.
+	bNormHexGUID = regexp.MustCompile(`\b0x[0-9A-Fa-f]{16}\b`)
+	// B4: long decimal guids (TBM lines).
+	bNormDecGUID = regexp.MustCompile(`\b\d{17,20}\b`)
+)
+
+// builtinRules is the normaliser's fixed first layer (spec section 5).
+var builtinRules = []NormRule{
+	{Match: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`, Replace: "<TIME>"},
+	{Match: `\b\d{2}:\d{2}:\d{2}\b`, Replace: "<CLOCK>"},
+	{Match: `\b0x[0-9A-Fa-f]{16}\b`, Replace: "<GUID>"},
+	{Match: `\b\d{17,20}\b`, Replace: "<GUID>"},
+}
+
+// normaliseOne applies the builtins then the file rules, in order, to one line.
+func normaliseOne(line string, rules []NormRule) string {
+	line = bNormTime.ReplaceAllString(line, "<TIME>")
+	line = bNormClock.ReplaceAllString(line, "<CLOCK>")
+	line = bNormHexGUID.ReplaceAllString(line, "<GUID>")
+	line = bNormDecGUID.ReplaceAllString(line, "<GUID>")
+	for _, r := range rules {
+		if r.re == nil {
+			continue
+		}
+		line = r.re.ReplaceAllString(line, r.Replace)
+	}
+	return line
+}
+
+// renderNorm renders every record's Norm through the normaliser, dropping
+// records with empty Norm (structural: seq, times, templates already hide
+// the values). scenario norm re-applies this to stored records.
+func renderNorm(recs []Record, rules []NormRule) []string {
+	out := []string{}
+	for _, r := range recs {
+		if r.Norm == "" {
+			continue
+		}
+		out = append(out, normaliseOne(r.Norm, rules))
+	}
+	return out
+}
+
+// renderRaw renders every record's Raw, keeping blank lines (the summary's
+// leading blanks stay).
+func renderRaw(recs []Record) []string {
+	out := make([]string, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, r.Raw)
+	}
+	return out
 }
