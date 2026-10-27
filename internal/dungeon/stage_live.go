@@ -179,11 +179,24 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 		return done()
 	}
 
-	// 2. Server plan: refuse before moving anyone when run list times
-	// out or has no "Dungeon plans:" line (as observe.go:302 does).
+	// 2. Server plan: only an ACK with no error is used. A timeout, an
+	// ACTION_ERR, or any other kind is refused before parsing, since a
+	// reply can carry partial lines (as observe.go:302 does).
 	list, err := s.G.CommandWait(ctx, "run list", 4*time.Second)
 	if err != nil {
 		return rep, err
+	}
+	if list.Kind == tbm.KindTimeout {
+		rep.Refusal = "cannot stage: the server did not answer .bot run list, so it has no run leader; nothing was sent"
+		return done()
+	}
+	if list.Err != nil {
+		rep.Refusal = fmt.Sprintf("cannot stage: the server refused .bot run list: %s (%s); nothing was sent", list.Err.Code, list.Err.Message)
+		return done()
+	}
+	if list.Kind != tbm.KindAck {
+		rep.Refusal = fmt.Sprintf("cannot stage: .bot run list gave no successful reply (kind %s); nothing was sent", list.Kind)
+		return done()
 	}
 	planList := ""
 	for _, l := range list.Lines {
@@ -191,16 +204,7 @@ func (s *Stager) Stage(ctx context.Context, req StageRequest) (StageReport, erro
 			planList = rest
 		}
 	}
-	noPlans := planList == ""
-	if list.Kind == tbm.KindTimeout && noPlans {
-		rep.Refusal = "cannot stage: the server did not answer .bot run list, so it has no run leader; nothing was sent"
-		return done()
-	}
-	if list.Err != nil && noPlans {
-		rep.Refusal = fmt.Sprintf("cannot stage: the server refused .bot run list: %s (%s); nothing was sent", list.Err.Code, list.Err.Message)
-		return done()
-	}
-	if noPlans {
+	if planList == "" {
 		rep.Refusal = "cannot stage: .bot run list gave no \"Dungeon plans:\" line; nothing was sent"
 		return done()
 	}

@@ -541,7 +541,9 @@ func TestStageLiveRefusesWithoutACurrentRunState(t *testing.T) {
 		want  string
 	}{
 		{"timeout", &tbm.Reply{Kind: tbm.KindTimeout}, "a timeout"},
+		{"timeout_partial", &tbm.Reply{Kind: tbm.KindTimeout, Lines: []string{"TBM:RUN|t|none|0/0|-|-|-|idle"}}, "a timeout"},
 		{"action_err", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run status", Code: "no-run", Message: "none"}, Lines: []string{"TBM:ACTION_ERR|run status|no-run|none"}}, "no-run"},
+		{"action_err_partial", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run status", Code: "no-run", Message: "none"}, Lines: []string{"TBM:RUN|t|none|0/0|-|-|-|idle", "TBM:ACTION_ERR|run status|no-run|none"}}, "no-run"},
 		{"malformed", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:RUN|t|running|bogus"}}, "malformed"},
 		{"none", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:ACTION_ACK|run status|ok"}}, "no TBM:RUN line"},
 	} {
@@ -651,7 +653,9 @@ func TestStageLiveRefusesWithoutAPlanList(t *testing.T) {
 		want  string
 	}{
 		{"timeout", &tbm.Reply{Kind: tbm.KindTimeout}, "did not answer"},
+		{"timeout_partial", &tbm.Reply{Kind: tbm.KindTimeout, Lines: []string{"Dungeon plans: t (map 1, 10 steps)"}}, "did not answer"},
 		{"action_err", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run list", Code: "busy", Message: "x"}, Lines: []string{"TBM:ACTION_ERR|run list|busy|x"}}, "refused .bot run list"},
+		{"action_err_partial", &tbm.Reply{Kind: tbm.KindErr, Err: &tbm.Err{Intent: "run list", Code: "busy", Message: "x"}, Lines: []string{"Dungeon plans: t (map 1, 10 steps)", "TBM:ACTION_ERR|run list|busy|x"}}, "refused .bot run list"},
 		{"no_line", &tbm.Reply{Kind: tbm.KindAck, OK: true, Lines: []string{"TBM:ACTION_ACK|run list|plans|0|ok"}}, "no \"Dungeon plans:\" line"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
