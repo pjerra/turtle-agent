@@ -184,6 +184,7 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	followLead := fs.String("follow", "", "follow the lead bot of a bot-led run as a player (with --follow-plan)")
 	followPlan := fs.String("follow-plan", "", "plan file of the follow (its map, portal and entrance trigger)")
 	followAssist := fs.Bool("follow-assist", false, "attack the lead bot's target while following (melee auto-attack only)")
+	pidPath := fs.String("pid-file", "", "write this process's pid here (0600) and remove it at exit; slot setup's start line passes it")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -275,7 +276,14 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return exitUsage
 	}
 	defer removeToken()
-
+	if *pidPath != "" {
+		removePID, err := writePIDFile(*pidPath)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUsage
+		}
+		defer removePID()
+	}
 	if *capPath != "" {
 		if err := checkCapture(*capPath, account, password); err != nil {
 			fmt.Fprintln(stderr, err)

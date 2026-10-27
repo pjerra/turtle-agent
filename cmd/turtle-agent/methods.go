@@ -274,6 +274,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	registerStageMethods(srv, cmdrSvc, dungeonRun, opts.Planner)
 	followSvc, stopFollow := registerFollowMethods(srv, cur, opts.DungeonsDir, opts.Planner != nil, brainCtl, dungeonRun, followOptions{Follow: opts.Follow, Stderr: opts.Stderr})
 	dungeonRun.follow = followSvc
+	registerTeardownMethods(srv, cur, cmdrSvc, dungeonRun, brainCtl, lease)
 	return func() {
 		stopFollow()
 		stopMap()

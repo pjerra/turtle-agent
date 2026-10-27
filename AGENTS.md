@@ -16,7 +16,7 @@ Rules for AI agents (and people) who use or change turtle-agent.
   `.account`, `.ban`), no config edits, no restarts.
 - Report only what you observed (event lines, numbers, log lines with times). Mark anything inferred. Never put account
   names or passwords in reports, captures, fixtures or PRs.
-- Clean up: dismiss hired bots, `.gm on`, save the events, `logout`.
+- Clean up with `turtle-agent teardown <dir>` (it stops the run, unbinds, ends your own hires, `.gm off`, logs out, ends your agent by its pid file and releases the slot lease). Never pkill or kill by name.
 
 ## Changing turtle-agent
 

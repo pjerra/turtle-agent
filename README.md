@@ -56,8 +56,7 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder
-`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default).
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
 
 Log a character in and keep it online with the RPC server running:
 
@@ -86,7 +85,7 @@ recorded a normal logout each time it was checked.
 ## CLI
 
 ```
-turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [--tune FILE] [--follow LEAD --follow-plan PLAN [--follow-assist]] [<account>] <character>
+turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [--tune FILE] [--pid-file FILE] [--follow LEAD --follow-plan PLAN [--follow-assist]] [<account>] <character>
 turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait DURATION] [--reconnect N] [--stop-on-failure]
 turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
@@ -95,7 +94,14 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+turtle-agent scenario check [--var NAME=VALUE]... <file>
+turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
+turtle-agent scenario norm <file> <dir>
+turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
+turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
+turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
@@ -117,7 +123,9 @@ turtle-agent version
 | 8 | the server kept refusing the logout |
 | 9 | `fleet`: a child exited non-zero (the others kept running unless `--stop-on-failure`), or not every character reached the world in time |
 | 10 | a logout did not complete (`lost` or `timeout`); in a fleet, the other characters keep running |
-| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)) |
+| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)); `plan-check` found a point the navmesh cannot take |
+| 14 | `teardown`: a game-side or CLI step failed |
+| 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder) |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -201,6 +209,10 @@ with several accounts) and accept that.
 Set `"addons": [...]` in the settings file to send another list; it must contain the four fingerprint addons above.
 A real Tortoise 1.18.1 client may also list `Turtle_General` and `Turtle_GroupUI` (the core accepts them when built
 with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This was not checked against a real client.
+
+## Test slots, leases and teardown
+
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
 
 ## JSON-RPC API
 
@@ -340,6 +352,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `quest_abandon` | `quest_id`, `wait_ms` | `since`, `event` (`quest_abandoned`) |
 | `quest_log` | | `quests[]` from the character's own quest log: `slot`, `quest_id`, `complete`, `failed`, `counts[4]` |
 | `logout` | | `outcome` (`complete` or `closed_by_server`); `lost` (-32002) and `timeout` (-32004) are errors with `data.outcome`; the reply is written before the process exits |
+| `teardown` | `dry_run`, `gm` (`off` default, `on`, `keep`), `wait_ms` (1000-10000) | `character`, `bound`, `lead`, `listed`, `steps[]` (`step`, `status` ok/skip/fail/plan, `detail`), `failed`, `dry_run`, `seconds`; the agent logs out at the end (see [Test slots](#test-slots-leases-and-teardown)) |
 
 Events have `seq`, `time`, `mono_ms` (ms since the agent started, from the monotonic clock, so it never jumps with the host clock; `time` stays the wall clock), `kind`, `source`, `target`, `spell_id`, `amount`, `crit`, `text`, `party` and `data`.
 Kinds cover chat, system, whispers, melee, spell damage, periodic ticks, heals, energize, spell start/go/miss/fail,
@@ -1485,6 +1498,39 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
+
+## Scenarios
+
+A repeatable live test: steps drive one or more running agents over RPC, built-in checks print PASS/FAIL, and
+`raw.txt` plus `norm.txt` diff cleanly before/after a deploy. `scenarios/lft-addon-path.json` (the core LFT listing
+API over addon messages) and `scenarios/itemleg3-g1-items.json` (a bot-only Zul'Farrak run: Mallets given, soulbound,
+used on the gong, taken back at stop) are the examples.
+
+The file is strict JSON (no comments; every step has an optional `note`): `scenario`, `sessions` (1-8,
+loopback RPC only — a token file is read per call, `rpc_token` settings are not supported), optional `db`
+(`host` ssh alias, `container`), `vars`, `addon_prefix`, `settle_s`, `timeout_s`, `on_fail`, `max_minutes`,
+`record` matchers, `normalise` rules, `steps` (1-500) and `finally` (actions only: `gm`, `bot`, `addon_send`,
+`rpc`, `sleep`).
+
+Step kinds: `section` (prints `=== STEP n:` and marks), `mark` (moves the window), `gm` (a `.`-command), `bot` (a
+`.bot` command without `.bot`), `addon_send`, `rpc` (any agent method, with `params`, `save`, `record_result`,
+`ignore_error`), `sleep`, `wait` (an `expect` that aborts on timeout), `expect`, `expect_not`, `check_db` (two
+no-free-SQL forms: table row counts and item counts) and `check_rpc` (`equals`, `match` or `len` over a result path).
+
+System lines are matched raw (colour stripping eats `|r`; the addon also reads them raw). Matching is ordered per
+session (`section`/`mark` set the window and the match cursor; each `expect` only sees later lines), while
+`expect_not` scans everything since the window. Variables: `${S.character}` built-ins, file `vars` (overridden by
+`--var`), `capture` groups and `save` paths; regex-quoted inside `match`. A check that fails is FAIL (`on_fail`
+`continue` or `stop`); anything unevaluatable — an RPC or DB error, an unset var, a denied GM command, the deadline,
+an interrupt — is ERROR and aborts. Exit codes 0/14/15/2.
+
+`scenario run` writes `raw.txt` (seq, times, expanded text), `norm.txt` (templates, no seq/times/durations, DB counts
+kept), `transcript.jsonl` (one object per line) and `result.json`. The normaliser applies the built-ins (RFC3339
+times, clock times, hex and long decimal guids) then the file's rules; captured values and ids are not replaced
+automatically — normalise them with rules. An event arriving after `settle_s` lands in the next step's block; use
+`mark` plus an `expect` to pin order. DB checks run `SELECT COUNT(*)` over ssh in a read-only transaction, allowlisted
+tables only, and only the count comes back (BatchMode, no password on any command line). The GM deny list refuses
+world-changing commands (AGENTS.md) at load and again at run time.
 
 ## Unit positions
 
