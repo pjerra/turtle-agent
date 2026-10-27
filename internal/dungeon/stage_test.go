@@ -289,3 +289,22 @@ func TestStageFirstRowIsUsed(t *testing.T) {
 		t.Errorf("First %v != FirstRow %v", res.First, fr)
 	}
 }
+
+// TestStageWalkPassesASkippedPack: the candidate is clean but the server
+// walk to the first point passes 10 yd from a skipped pack. The walk
+// check (step 5) must refuse: no back-off point's walk avoids the pack.
+func TestStageWalkPassesASkippedPack(t *testing.T) {
+	p := mkStagePlan()
+	p.Legs[0].PullGroups = []PullGroup{{Entries: []uint32{5649}, Positions: []Point{{X: 105, Y: 15, Z: 0}}}}
+	nav := &stageNav{}
+	res, err := StageLeg(p, 1, nav, StageOptions{ClearedThrough: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("staged a walk past a skipped pack: %+v", res)
+	}
+	if !strings.Contains(res.Refusal, "no point up to 120 yd back") {
+		t.Errorf("no back-off-exhausted refusal: %q", res.Refusal)
+	}
+}
