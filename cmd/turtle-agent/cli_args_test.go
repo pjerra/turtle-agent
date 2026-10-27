@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Every documented flag order for teardown, lease and slot setup parses to
@@ -48,6 +49,30 @@ func TestTeardownFlagOrderSameOptions(t *testing.T) {
 		{"bad gm", []string{"--gm", "sometimes", "somedir"}, teardownOptions{}, exitUsage},
 	} {
 		got, code := parseTeardownArgs(r.args, io.Discard)
+		checkParse(t, r.name, got, r.want, code, r.code)
+	}
+}
+func TestRPCFlagOrderSameOptions(t *testing.T) {
+	full := rpcOptions{dir: "somedir", method: "status", params: `{"a":1}`, timeout: 30 * time.Second}
+	fullRaw := rpcOptions{dir: "somedir", method: "status", params: `{"a":1}`, timeout: 5 * time.Second, raw: true}
+	for _, r := range []struct {
+		name string
+		args []string
+		want rpcOptions
+		code int
+	}{
+		{"positionals first", []string{"somedir", "status", `{"a":1}`}, full, exitOK},
+		{"flags first", []string{"--timeout", "5s", "somedir", "status", `{"a":1}`}, rpcOptions{dir: "somedir", method: "status", params: `{"a":1}`, timeout: 5 * time.Second}, exitOK},
+		{"flags last", []string{"somedir", "status", `{"a":1}`, "--timeout", "5s"}, rpcOptions{dir: "somedir", method: "status", params: `{"a":1}`, timeout: 5 * time.Second}, exitOK},
+		{"flags around", []string{"somedir", "--timeout", "5s", "--raw", "status", `{"a":1}`}, fullRaw, exitOK},
+		{"equals form", []string{"--timeout=5s", "--raw", "somedir", "status", `{"a":1}`}, fullRaw, exitOK},
+		{"stdin params", []string{"somedir", "status", "-"}, rpcOptions{dir: "somedir", method: "status", paramsFromStdin: true, timeout: 30 * time.Second}, exitOK},
+		{"no method", []string{"somedir"}, rpcOptions{}, exitUsage},
+		{"no dir", []string{}, rpcOptions{}, exitUsage},
+		{"bad timeout", []string{"--timeout", "bogus", "somedir", "status"}, rpcOptions{}, exitUsage},
+		{"zero timeout", []string{"--timeout", "0s", "somedir", "status"}, rpcOptions{}, exitUsage},
+	} {
+		got, code := parseRPCArgs(r.args, io.Discard)
 		checkParse(t, r.name, got, r.want, code, r.code)
 	}
 }
