@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -155,11 +156,13 @@ func TestTeardownCLINeverSignalsAForeignPid(t *testing.T) {
 	okSteps := []teardownCLIStep{{Step: "logout", Status: "ok", Detail: "logged out"}}
 	dir, slotsPath, _, _, restore := teardownCLIFixture(t, okSteps, false)
 	defer restore()
-	// agent.pid names a live process (this test) whose exe is not <dir>/turtle-agent:
-	// the probe below reports pid present but not alive.
-	teardownProbe = &teardownCLIFakeProbe{pid: os.Getpid(), alive: false, ports: map[int]bool{}}
+	// Use the real identity probe: agent.pid names this live test process,
+	// whose exe is the test binary, not <dir>/turtle-agent. If the exe check
+	// is removed, the probe reports alive and this test fails below.
+	teardownProbe = slots.LinuxProbe{}
 	os.WriteFile(filepath.Join(dir, "agent.pid"), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
-	// other_pids: a pid file older than its process.
+	// other_pids: a pid file older than its process (this one, started after
+	// the file's mtime) must be left alone as a pid reuse.
 	other := filepath.Join(dir, "sampler.pid")
 	os.WriteFile(other, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
 	past := time.Now().Add(-time.Hour)
@@ -171,8 +174,16 @@ func TestTeardownCLINeverSignalsAForeignPid(t *testing.T) {
 	if !strings.Contains(out, "gone without a clean exit") {
 		t.Fatalf("no gone-pid line: %q", out)
 	}
-	if proc, err := os.FindProcess(os.Getpid()); err != nil || proc == nil {
-		t.Fatalf("self lookup failed")
+	if !strings.Contains(out, "pid reused by another process: left alone") {
+		t.Fatalf("no pid-reused line: %q", out)
+	}
+	// The foreign pid was never signalled: this process is still here, and
+	// its sampler.pid file is untouched.
+	if err := syscall.Kill(os.Getpid(), 0); err != nil {
+		t.Fatalf("self dead: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("sampler.pid touched: %v", err)
 	}
 }
 
@@ -197,5 +208,100 @@ func TestTeardownCLIRunsTwice(t *testing.T) {
 	}
 	if !strings.Contains(out, "not leased by w-a any more") {
 		t.Fatalf("no lease-skip line: %q", out)
+	}
+}
+
+// Item 5 (R2): a slot.json whose token_file points outside the dir deletes
+// nothing outside it (nor inside: the tampered manifest refuses the run).
+func TestTeardownCLIRejectsOutsideTokenPath(t *testing.T) {
+	okSteps := []teardownCLIStep{{Step: "logout", Status: "ok", Detail: "logged out"}}
+	dir, slotsPath, _, _, restore := teardownCLIFixture(t, okSteps, false)
+	defer restore()
+	teardownProbe = &teardownCLIFakeProbe{pid: os.Getpid(), alive: true, ports: map[int]bool{}}
+	outside := filepath.Join(t.TempDir(), "precious.token")
+	if err := os.WriteFile(outside, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "slot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["token_file"] = outside
+	tampered, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(dir, "slot.json"), tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runCLI("teardown", dir, "--slots", slotsPath)
+	if code != exitUsage {
+		t.Fatalf("tampered manifest: code %d stderr %q, want %d", code, errOut, exitUsage)
+	}
+	if !strings.Contains(errOut, "outside") {
+		t.Fatalf("no outside-dir refusal: %q", errOut)
+	}
+	// Only the tampered manifest may stop the run: slot.json itself stays,
+	// and nothing outside the dir is touched.
+	for _, p := range []string{"settings.json", "slot.json"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Fatalf("%s deleted despite the refusal: %v", p, err)
+		}
+	}
+	kept, _ := os.ReadFile(outside)
+	if string(kept) != "precious" {
+		t.Fatal("outside file touched")
+	}
+}
+
+// Item 6 (R2): slot.json records the --slots used at setup; teardown without
+// --slots uses it instead of the default path.
+func TestTeardownUsesManifestSlotsPath(t *testing.T) {
+	okSteps := []teardownCLIStep{{Step: "logout", Status: "ok", Detail: "logged out"}}
+	dir, slotsPath, _, _, restore := teardownCLIFixture(t, okSteps, false)
+	defer restore()
+	raw, err := os.ReadFile(filepath.Join(dir, "slot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["slots_path"] != slotsPath {
+		t.Fatalf("slots_path = %v, want %s", m["slots_path"], slotsPath)
+	}
+	if m["lease_id"] == nil || m["lease_id"] == "" {
+		t.Fatal("slot.json has no lease_id")
+	}
+	// Move the slots file away from the default path: only the manifest
+	// path still leads to the lease.
+	alt := filepath.Join(t.TempDir(), "sub", "slots.json")
+	rawSlots, err := os.ReadFile(slotsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(alt), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alt, rawSlots, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(slotsPath); err != nil {
+		t.Fatal(err)
+	}
+	m["slots_path"] = alt
+	fixed, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(dir, "slot.json"), fixed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No --slots flag: the lease must still be released via the manifest path.
+	teardownProbe = &teardownCLIFakeProbe{pid: os.Getpid(), alive: false, ports: map[int]bool{}}
+	if code, out, _ := runCLI("teardown", dir); code != exitOK {
+		t.Fatalf("code %d stdout %q", code, out)
+	}
+	if teardownCLILeaseHeld(t, alt) {
+		t.Fatal("lease kept without --slots")
 	}
 }

@@ -20,6 +20,19 @@ func TestLoadRefusesALooseMode(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "chmod 600") {
 		t.Fatalf("got %v, want a chmod 600 refusal", err)
 	}
+	// Item 7 (R2): a loose folder names chmod 700 with the folder, not 600.
+	loose := t.TempDir()
+	if err := os.Chmod(loose, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	loosePath := filepath.Join(loose, "slots.json")
+	if err := os.WriteFile(loosePath, []byte(`{"version":1,"servers":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Load(loosePath)
+	if err == nil || !strings.Contains(err.Error(), "chmod 700 "+loose) {
+		t.Fatalf("got %v, want a chmod 700 %s refusal", err, loose)
+	}
 }
 
 // 1. A "password" key is refused, and the refusal never carries the value.

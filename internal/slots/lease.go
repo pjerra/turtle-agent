@@ -1,6 +1,8 @@
 package slots
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,13 +10,25 @@ import (
 	"time"
 )
 
+// newLeaseID mints an unguessable 128-bit lease identity (32 hex chars).
+// Every acquisition gets one; release/renew/SetDir must present the exact
+// ID, so a holder string alone is never enough (Codex ABA).
+func newLeaseID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
 type Lease struct {
 	Server        string    `json:"server"`
 	Slot          string    `json:"slot"`
-	Holder        string    `json:"holder"`
-	Acquired      time.Time `json:"acquired"`
-	Expires       time.Time `json:"expires"`
-	Dir           string    `json:"dir,omitempty"`
+	Holder        string    `json:"holder"`        // ^[A-Za-z0-9._-]{1,64}$
+	LeaseID       string    `json:"lease_id"`      // unguessable per-acquisition identity
+	Acquired      time.Time `json:"acquired"`      // UTC
+	Expires       time.Time `json:"expires"`       // UTC
+	Dir           string    `json:"dir,omitempty"` // set by slot setup: the client dir (absolute)
 	TakenOverFrom string    `json:"taken_over_from,omitempty"`
 }
 
@@ -118,6 +132,10 @@ func (s *Store) isStale(l *Lease) bool {
 	return !alive
 }
 
+// IsStale reports whether a lease read by Get needs a takeover: expired AND
+// no live agent in its dir.
+func (s *Store) IsStale(l *Lease) bool { return s.isStale(l) }
+
 func (s *Store) withLock(fn func() error) error {
 	unlock, err := lockDir(s.Dir)
 	if err != nil {
@@ -169,7 +187,11 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 				continue
 			}
 			now := s.Now().UTC()
-			l := &Lease{Server: server, Slot: sl.ID, Holder: holder, Acquired: now, Expires: now.Add(ttl)}
+			id, err := newLeaseID()
+			if err != nil {
+				return Acquired{}, err
+			}
+			l := &Lease{Server: server, Slot: sl.ID, Holder: holder, LeaseID: id, Acquired: now, Expires: now.Add(ttl)}
 			if existing != nil {
 				old := *existing
 				out := Acquired{Lease: *l, Slot: sl, TookOver: &old}
@@ -230,6 +252,11 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 	}
 	now := s.Now().UTC()
 	if existing != nil && existing.Holder == holder {
+		id, err := newLeaseID()
+		if err != nil {
+			return Acquired{}, err
+		}
+		existing.LeaseID = id
 		existing.Expires = now.Add(ttl)
 		if err := s.writeLease(existing); err != nil {
 			return Acquired{}, err
@@ -248,7 +275,11 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 			server, slot, existing.Holder, fmtClock(existing.Acquired), fmtClock(existing.Expires), tail)}
 	}
 	var took *Lease
-	l := &Lease{Server: server, Slot: slot, Holder: holder, Acquired: now, Expires: now.Add(ttl)}
+	id, err := newLeaseID()
+	if err != nil {
+		return Acquired{}, err
+	}
+	l := &Lease{Server: server, Slot: slot, Holder: holder, LeaseID: id, Acquired: now, Expires: now.Add(ttl)}
 	if existing != nil {
 		old := *existing
 		took = &old
@@ -264,7 +295,7 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 	return Acquired{Lease: *l, Slot: *sl, TookOver: took}, nil
 }
 
-func (s *Store) Renew(server, slot, holder string, ttl time.Duration) (Lease, error) {
+func (s *Store) Renew(server, slot, holder, leaseID string, ttl time.Duration) (Lease, error) {
 	var out Lease
 	err := s.withLock(func() error {
 		if _, _, err := s.Cfg.Find(server, slot); err != nil {
@@ -280,6 +311,9 @@ func (s *Store) Renew(server, slot, holder string, ttl time.Duration) (Lease, er
 		if existing.Holder != holder {
 			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (held by %s)", server, slot, holder, existing.Holder)}
 		}
+		if existing.LeaseID != leaseID {
+			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (lease id mismatch: it was re-acquired)", server, slot, holder)}
+		}
 		existing.Expires = s.Now().UTC().Add(ttl)
 		if err := s.writeLease(existing); err != nil {
 			return err
@@ -290,7 +324,7 @@ func (s *Store) Renew(server, slot, holder string, ttl time.Duration) (Lease, er
 	return out, err
 }
 
-func (s *Store) Release(server, slot, holder string, force bool) (Lease, error) {
+func (s *Store) Release(server, slot, holder, leaseID string, force bool) (Lease, error) {
 	var out Lease
 	err := s.withLock(func() error {
 		if _, _, err := s.Cfg.Find(server, slot); err != nil {
@@ -307,6 +341,10 @@ func (s *Store) Release(server, slot, holder string, force bool) (Lease, error) 
 			if existing.Holder != holder {
 				return &Refusal{Msg: fmt.Sprintf("%s/%s is held by %s, not %s: only the holder releases it (the lead may pass --force)",
 					server, slot, existing.Holder, holder)}
+			}
+			if existing.LeaseID != leaseID {
+				return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (lease id mismatch: it was re-acquired; the lead may pass --force)",
+					server, slot, holder)}
 			}
 			if pid, alive := s.agentAlive(existing.Dir); alive {
 				return &Refusal{Msg: fmt.Sprintf("%s/%s: its agent (pid %d) is still running: run turtle-agent teardown <dir> first",
@@ -375,7 +413,7 @@ func (s *Store) List(server string) ([]SlotState, error) {
 	return out, err
 }
 
-func (s *Store) SetDir(server, slot, holder, dir string) error {
+func (s *Store) SetDir(server, slot, holder, leaseID, dir string) error {
 	return s.withLock(func() error {
 		if _, _, err := s.Cfg.Find(server, slot); err != nil {
 			return err
@@ -390,12 +428,36 @@ func (s *Store) SetDir(server, slot, holder, dir string) error {
 		if existing.Holder != holder {
 			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (held by %s)", server, slot, holder, existing.Holder)}
 		}
+		if existing.LeaseID != leaseID {
+			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (lease id mismatch: it was re-acquired)", server, slot, holder)}
+		}
 		if s.isStale(existing) {
 			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (stale)", server, slot, holder)}
 		}
 		existing.Dir = dir
 		return s.writeLease(existing)
 	})
+}
+
+// Get returns a copy of the current lease, or nil when the slot is free.
+// Setup uses it to re-validate the lease identity right before writing.
+func (s *Store) Get(server, slot string) (*Lease, error) {
+	var out *Lease
+	err := s.withLock(func() error {
+		if _, _, err := s.Cfg.Find(server, slot); err != nil {
+			return err
+		}
+		existing, err := s.readLease(server, slot)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			l := *existing
+			out = &l
+		}
+		return nil
+	})
+	return out, err
 }
 
 func joinComma(parts []string) string {

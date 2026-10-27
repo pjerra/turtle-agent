@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/config"
+	"github.com/pjerra/turtle-agent/internal/slots"
 )
 
 func slotSetupTestEnv(t *testing.T) (slotsPath, srcPath, home string) {
@@ -153,5 +155,68 @@ func TestSlotSetupSetsStateDir(t *testing.T) {
 	}
 	if m["state_dir"] != filepath.Dir(srcPath) {
 		t.Fatalf("state_dir = %v, want %s", m["state_dir"], filepath.Dir(srcPath))
+	}
+}
+
+// Item 4 (R2): a takeover between the lease check and the write leaves no
+// credentials behind: exit 15, no settings.json, dir cleaned.
+func TestSlotSetupTakeoverBeforeWriteLeavesNothing(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	os.WriteFile(bin, []byte("x"), 0o755)
+	dir := filepath.Join(t.TempDir(), "client")
+	oldHook := slotSetupPreWriteHook
+	slotSetupPreWriteHook = func() {
+		// Another holder takes the slot over after setup checked the lease.
+		cfg, err := slots.Load(slotsPath)
+		if err != nil {
+			panic(err)
+		}
+		st := slots.NewStore(cfg, slotsPath)
+		cur, err := st.Get("m910q", "1")
+		if err != nil {
+			panic(err)
+		}
+		if _, err := st.Release("m910q", "1", cur.Holder, cur.LeaseID, true); err != nil {
+			panic(err)
+		}
+		if _, err := st.Acquire("m910q", "1", false, "w-zf", 3*time.Hour); err != nil {
+			panic(err)
+		}
+	}
+	defer func() { slotSetupPreWriteHook = oldHook }()
+	code, _, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--slots", slotsPath)
+	if code != exitSlotRefused {
+		t.Fatalf("takeover: code %d stderr %q, want %d", code, errOut, exitSlotRefused)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("settings.json left behind after a lost lease")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("dir not cleaned: %v", entries)
+	}
+}
+
+// Item 4 (R2): a failure midway (here: an unreadable binary) cleans the dir.
+func TestSlotSetupFailureMidwayCleansDir(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	dir := filepath.Join(t.TempDir(), "client")
+	code, _, _ := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir,
+		"--binary", filepath.Join(t.TempDir(), "no-such-binary"), "--slots", slotsPath)
+	if code != exitUsage {
+		t.Fatalf("code %d, want %d", code, exitUsage)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("dir not cleaned: %v", entries)
 	}
 }

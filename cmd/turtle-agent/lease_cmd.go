@@ -16,7 +16,7 @@ import (
 // exitSlotRefused is the exit code of a lease/setup refusal (exit 15).
 const exitSlotRefused = 15
 
-const leaseUsage = "usage: turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] [--slots FILE] | renew <server> <slot> --holder NAME [--ttl MIN] [--slots FILE] | release <server> <slot> --holder NAME [--force] [--slots FILE] | list [<server>] [--json] [--slots FILE]"
+const leaseUsage = "usage: turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] [--slots FILE] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] [--slots FILE] | release <server> <slot> --holder NAME [--lease-id ID] [--force] [--slots FILE] | list [<server>] [--json] [--slots FILE]"
 
 var leaseHolderRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
@@ -136,10 +136,10 @@ func leaseAcquireCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "took over a stale lease of %s/%s from %s (expired %s, %s)\n",
 			old.Server, old.Slot, old.Holder, old.Expires.UTC().Format("15:04:05Z"), agent)
 	}
-	fmt.Fprintf(stdout, "leased %s/%s to %s until %s: account %s, character %s, port %d",
+	fmt.Fprintf(stdout, "leased %s/%s to %s until %s: account %s, character %s, port %d, lease %s",
 		got.Lease.Server, got.Lease.Slot, got.Lease.Holder,
 		got.Lease.Expires.UTC().Format("15:04:05Z"),
-		got.Slot.Account, got.Slot.Character, got.Slot.Port)
+		got.Slot.Account, got.Slot.Character, got.Slot.Port, got.Lease.LeaseID)
 	if got.Renewed {
 		fmt.Fprint(stdout, " (already yours: expiry renewed)")
 	}
@@ -151,6 +151,7 @@ func leaseRenewCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("lease renew", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	holder := fs.String("holder", "", "lease holder name")
+	leaseID := fs.String("lease-id", "", "lease id from acquire (holder alone is not enough)")
 	ttlMin := fs.Int("ttl", 180, "lease length in minutes (1-720)")
 	slotsPath := fs.String("slots", "", "slot table file")
 	pos, rest := splitPositionals(args, 2)
@@ -166,6 +167,10 @@ func leaseRenewCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "lease: --holder must be 1-64 letters, digits, . _ -")
 		return exitUsage
 	}
+	if *leaseID == "" {
+		fmt.Fprintln(stderr, "lease renew: pass --lease-id (printed by lease acquire; holder alone is not enough)")
+		return exitUsage
+	}
 	ttl, ok := leaseTTL(*ttlMin)
 	if !ok {
 		fmt.Fprintf(stderr, "lease: --ttl %d: 1 to 720 minutes\n", *ttlMin)
@@ -176,7 +181,7 @@ func leaseRenewCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lease: %v\n", err)
 		return exitUsage
 	}
-	l, err := store.Renew(server, slotID, *holder, ttl)
+	l, err := store.Renew(server, slotID, *holder, *leaseID, ttl)
 	if err != nil {
 		if r, ok := err.(*slots.Refusal); ok {
 			fmt.Fprintf(stderr, "lease: %s\n", r.Msg)
@@ -194,6 +199,7 @@ func leaseReleaseCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("lease release", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	holder := fs.String("holder", "", "lease holder name")
+	leaseID := fs.String("lease-id", "", "lease id from acquire (holder alone is not enough; not needed with --force)")
 	force := fs.Bool("force", false, "release another holder's or a live lease")
 	slotsPath := fs.String("slots", "", "slot table file")
 	pos, rest := splitPositionals(args, 2)
@@ -209,12 +215,16 @@ func leaseReleaseCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "lease: --holder must be 1-64 letters, digits, . _ -")
 		return exitUsage
 	}
+	if *leaseID == "" && !*force {
+		fmt.Fprintln(stderr, "lease release: pass --lease-id (printed by lease acquire; holder alone is not enough)")
+		return exitUsage
+	}
 	_, store, err := leaseStore(*slotsPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "lease: %v\n", err)
 		return exitUsage
 	}
-	l, err := store.Release(server, slotID, *holder, *force)
+	l, err := store.Release(server, slotID, *holder, *leaseID, *force)
 	if err != nil {
 		if r, ok := err.(*slots.Refusal); ok {
 			fmt.Fprintf(stderr, "lease: %s\n", r.Msg)

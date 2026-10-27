@@ -94,9 +94,11 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
-turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME [--ttl MIN] | release <server> <slot> --holder NAME [--force] | list [<server>] [--json]   [--slots FILE]
+turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
+turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
 turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
-turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] <dir>
+turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
@@ -118,6 +120,7 @@ turtle-agent version
 | 8 | the server kept refusing the logout |
 | 9 | `fleet`: a child exited non-zero (the others kept running unless `--stop-on-failure`), or not every character reached the world in time |
 | 10 | a logout did not complete (`lost` or `timeout`); in a fleet, the other characters keep running |
+| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)); `plan-check` found a point the navmesh cannot take |
 | 14 | `teardown`: a game-side or CLI step failed |
 | 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder) |
 
@@ -206,7 +209,7 @@ with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This 
 
 ## Test slots, leases and teardown
 
-One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 is never leasable. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
 
 ## JSON-RPC API
 

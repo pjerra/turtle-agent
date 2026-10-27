@@ -41,8 +41,12 @@ func TestLeaseAcquirePrintsTheExactLine(t *testing.T) {
 	if !strings.HasPrefix(out, "leased m910q/4 to w-brd until ") {
 		t.Fatalf("stdout %q", out)
 	}
-	if !strings.Contains(out, ": account TAGENT2, character Tacmdaron, port 18774\n") {
+	if !strings.Contains(out, ": account TAGENT2, character Tacmdaron, port 18774, lease ") {
 		t.Fatalf("stdout %q", out)
+	}
+	id := strings.TrimSpace(strings.SplitN(strings.SplitN(out, ", lease ", 2)[1], " ", 2)[0])
+	if len(id) != 32 {
+		t.Fatalf("lease id %q is not 16 bytes hex", id)
 	}
 	if strings.Contains(out+errOut, "pw-src-2") {
 		t.Fatalf("leak in output")
@@ -78,14 +82,42 @@ func TestLeaseRenewReleaseRoundTrip(t *testing.T) {
 	if code, _, errOut := runCLI("lease", "acquire", "m910q", "--slot", "1", "--holder", "w-a", "--slots", slotsPath); code != exitOK {
 		t.Fatalf("acquire: %d %q", code, errOut)
 	}
-	code, out, errOut := runCLI("lease", "renew", "m910q", "1", "--holder", "w-a", "--slots", slotsPath)
+	id := leaseFileID(t, slotsPath, "m910q", "1")
+	code, out, errOut := runCLI("lease", "renew", "m910q", "1", "--holder", "w-a", "--lease-id", id, "--slots", slotsPath)
 	if code != exitOK || !strings.HasPrefix(out, "renewed m910q/1 for w-a until ") {
 		t.Fatalf("code %d stdout %q stderr %q", code, out, errOut)
 	}
-	code, out, errOut = runCLI("lease", "release", "m910q", "1", "--holder", "w-a", "--force", "--slots", slotsPath)
-	if code != exitOK || strings.TrimSpace(out) != "released m910q/1 (was w-a) (forced)" {
+	if code, _, errOut := runCLI("lease", "renew", "m910q", "1", "--holder", "w-a", "--slots", slotsPath); code != exitUsage {
+		t.Fatalf("renew without id: code %d stderr %q", code, errOut)
+	}
+	code, out, errOut = runCLI("lease", "release", "m910q", "1", "--holder", "w-a", "--lease-id", "bogus-id", "--slots", slotsPath)
+	if code != exitSlotRefused {
+		t.Fatalf("release with wrong id: code %d stdout %q stderr %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI("lease", "release", "m910q", "1", "--holder", "w-a", "--lease-id", id, "--slots", slotsPath)
+	if code != exitOK || strings.TrimSpace(out) != "released m910q/1 (was w-a)" {
 		t.Fatalf("code %d stdout %q stderr %q", code, out, errOut)
 	}
+	if code, _, _ := runCLI("lease", "release", "m910q", "1", "--holder", "w-a", "--force", "--slots", slotsPath); code != exitSlotRefused {
+		t.Fatalf("release of a free slot with --force and no id: code %d, want %d", code, exitSlotRefused)
+	}
+}
+
+// leaseFileID reads the lease id back from the lease file the acquire wrote.
+func leaseFileID(t *testing.T, slotsPath, server, slot string) string {
+	t.Helper()
+	cfg, err := slots.Load(slotsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := slots.NewStore(cfg, slotsPath).Get(server, slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatalf("no lease for %s/%s", server, slot)
+	}
+	return got.LeaseID
 }
 
 func TestLeaseTTLAndHolderRefused(t *testing.T) {

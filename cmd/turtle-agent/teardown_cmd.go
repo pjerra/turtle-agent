@@ -23,7 +23,7 @@ import (
 // exitTeardownFailed is the exit code of a teardown with a failed step (14).
 const exitTeardownFailed = 14
 
-const teardownUsage = "usage: turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] <dir>"
+const teardownUsage = "usage: turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>"
 
 // teardownProbe is the slots.Probe the teardown CLI uses; tests replace it.
 var teardownProbe slots.Probe = slots.LinuxProbe{}
@@ -41,6 +41,7 @@ type teardownSlotManifest struct {
 	Server    string `json:"server"`
 	Slot      string `json:"slot"`
 	Holder    string `json:"holder"`
+	LeaseID   string `json:"lease_id"`
 	Account   string `json:"account"`
 	Character string `json:"character"`
 	Port      int    `json:"port"`
@@ -49,7 +50,46 @@ type teardownSlotManifest struct {
 	Settings  string `json:"settings"`
 	PIDFile   string `json:"pid_file"`
 	TokenFile string `json:"token_file"`
+	SlotsPath string `json:"slots_path"`
 	Created   string `json:"created"`
+}
+
+// teardownCheckManifest treats slot.json paths as assertions: manifest.Dir
+// must be the canonical teardown dir, and the settings/pid/binary/token
+// paths must be the ones derived inside it (never symlinks, never outside).
+// A tampered slot.json refuses the teardown before anything is deleted.
+func teardownCheckManifest(dir string, manifest *teardownSlotManifest) error {
+	canon, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return fmt.Errorf("teardown: %s: %v", dir, err)
+	}
+	if manifest.Dir != canon && manifest.Dir != dir {
+		return fmt.Errorf("teardown: slot.json dir %q is not this dir %q: teardown works on a dir made by slot setup", manifest.Dir, dir)
+	}
+	if manifest.Port < 1 || manifest.Port > 65535 {
+		return fmt.Errorf("teardown: slot.json has a bad port %d", manifest.Port)
+	}
+	want := map[string]string{
+		"settings":   filepath.Join(dir, "settings.json"),
+		"pid_file":   filepath.Join(dir, "agent.pid"),
+		"binary":     filepath.Join(dir, "turtle-agent"),
+		"token_file": filepath.Join(dir, fmt.Sprintf("rpc-%d.token", manifest.Port)),
+	}
+	got := map[string]string{
+		"settings":   manifest.Settings,
+		"pid_file":   manifest.PIDFile,
+		"binary":     manifest.Binary,
+		"token_file": manifest.TokenFile,
+	}
+	for _, k := range []string{"settings", "pid_file", "binary", "token_file"} {
+		if got[k] != want[k] {
+			return fmt.Errorf("teardown: slot.json %s %q is outside %s: teardown works on a dir made by slot setup", k, got[k], dir)
+		}
+		if fi, err := os.Lstat(want[k]); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("teardown: %s is a symlink: teardown works on a dir made by slot setup", want[k])
+		}
+	}
+	return nil
 }
 
 func teardownCmd(args []string, stdout, stderr io.Writer) int {
@@ -89,6 +129,13 @@ func teardownCmd(args []string, stdout, stderr io.Writer) int {
 		manifest.Server == "" || manifest.Slot == "" || manifest.Holder == "" || manifest.Port == 0 {
 		fmt.Fprintf(stderr, "teardown: %s/slot.json missing or unreadable: teardown works on a dir made by slot setup\n", dir)
 		return exitUsage
+	}
+	if err := teardownCheckManifest(dir, &manifest); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return exitUsage
+	}
+	if *slotsPath == "" {
+		*slotsPath = manifest.SlotsPath
 	}
 
 	steps := []teardownCLIStep{}
@@ -148,8 +195,8 @@ func teardownCmd(args []string, stdout, stderr io.Writer) int {
 		add(s.Step, s.Status, s.Detail)
 	}
 
-	// 6. files.
-	step, status, detail := teardownDeleteFiles(dir, manifest)
+	// 6. files: only the derived in-dir paths, never the manifest's strings.
+	step, status, detail := teardownDeleteFiles(dir, manifest.Port)
 	add(step, status, detail)
 
 	// 7. lease.
@@ -316,15 +363,18 @@ func teardownPIDAlive(dir string, pid int) bool {
 	return alive && got == pid
 }
 
-// teardownDeleteFiles removes settings.json, the token file and agent.pid.
-func teardownDeleteFiles(dir string, manifest teardownSlotManifest) (string, string, string) {
+// teardownDeleteFiles removes settings.json, the derived token file and
+// agent.pid. All paths are derived inside dir (the manifest was asserted by
+// teardownCheckManifest); a token_file outside the dir never reaches Remove.
+func teardownDeleteFiles(dir string, port int) (string, string, string) {
 	type gone struct {
 		name string
 		path string
 	}
+	token := fmt.Sprintf("rpc-%d.token", port)
 	targets := []gone{
 		{"settings.json", filepath.Join(dir, "settings.json")},
-		{filepath.Base(manifest.TokenFile), manifest.TokenFile},
+		{token, filepath.Join(dir, token)},
 		{"agent.pid", filepath.Join(dir, "agent.pid")},
 	}
 	var deleted, missing []string
@@ -349,7 +399,7 @@ func teardownReleaseLease(slotsPath string, manifest teardownSlotManifest) (stri
 		return "lease", "fail", err.Error()
 	}
 	store := slots.NewStore(cfg, path)
-	if _, err := store.Release(manifest.Server, manifest.Slot, manifest.Holder, false); err != nil {
+	if _, err := store.Release(manifest.Server, manifest.Slot, manifest.Holder, manifest.LeaseID, false); err != nil {
 		if r, ok := err.(*slots.Refusal); ok {
 			return "lease", "skip", fmt.Sprintf("not leased by %s any more (%s)", manifest.Holder, r.Msg)
 		}

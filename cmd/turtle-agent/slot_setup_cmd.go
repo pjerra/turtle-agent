@@ -21,6 +21,7 @@ type slotManifest struct {
 	Server    string `json:"server"`
 	Slot      string `json:"slot"`
 	Holder    string `json:"holder"`
+	LeaseID   string `json:"lease_id"`
 	Account   string `json:"account"`
 	Character string `json:"character"`
 	Port      int    `json:"port"`
@@ -29,8 +30,14 @@ type slotManifest struct {
 	Settings  string `json:"settings"`
 	PIDFile   string `json:"pid_file"`
 	TokenFile string `json:"token_file"`
+	SlotsPath string `json:"slots_path"`
 	Created   string `json:"created"`
 }
+
+// slotSetupPreWriteHook runs right before setup re-validates the lease and
+// writes settings.json. Tests set it to simulate a takeover between the
+// initial lease check and the write; it is nil in production.
+var slotSetupPreWriteHook func()
 
 func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	if !slotsSupported() {
@@ -75,7 +82,8 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		return exitSlotRefused
 	}
 	store := slots.NewStore(cfg, *slotsPath)
-	if err := slotSetupCheckLease(store, server.Name, slot.ID, *holder); err != nil {
+	leaseID, err := slotSetupCheckLease(store, server.Name, slot.ID, *holder)
+	if err != nil {
 		fmt.Fprintf(stderr, "slot setup: %s/%s is not leased by %s: run turtle-agent lease acquire %s --slot %s --holder %s first\n",
 			server.Name, slot.ID, *holder, server.Name, slot.ID, *holder)
 		return exitSlotRefused
@@ -104,6 +112,20 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	dir = absDir
+	// Claim the dir first, before any credential exists: create it 0700,
+	// refuse a non-empty dir, chmod an empty one to 0700. Everything setup
+	// creates below is tracked for cleanup on failure.
+	var created []string
+	cleanup := func() {
+		for _, p := range created {
+			os.RemoveAll(p)
+		}
+	}
+	fail := func(format string, a ...any) int {
+		cleanup()
+		fmt.Fprintf(stderr, format+"\n", a...)
+		return exitUsage
+	}
 	if info, err := os.Stat(dir); err == nil {
 		if !info.IsDir() {
 			fmt.Fprintf(stderr, "slot setup: %s exists and is not empty: pick a new --dir (setup never overwrites)\n", dir)
@@ -118,10 +140,17 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "slot setup: %s exists and is not empty: pick a new --dir (setup never overwrites)\n", dir)
 			return exitUsage
 		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			fmt.Fprintf(stderr, "slot setup: %v\n", err)
+			return exitUsage
+		}
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(stderr, "slot setup: %v\n", err)
 		return exitUsage
 	} else if merr := os.MkdirAll(dir, 0o700); merr != nil {
+		fmt.Fprintf(stderr, "slot setup: %v\n", merr)
+		return exitUsage
+	} else if merr := os.Chmod(dir, 0o700); merr != nil {
 		fmt.Fprintf(stderr, "slot setup: %v\n", merr)
 		return exitUsage
 	}
@@ -129,45 +158,41 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	if binSrc == "" {
 		binSrc, err = os.Executable()
 		if err != nil {
-			fmt.Fprintf(stderr, "slot setup: %v\n", err)
-			return exitUsage
+			return fail("slot setup: %v", err)
 		}
 	}
 	binDst := filepath.Join(dir, "turtle-agent")
 	if err := copyFileExcl(binSrc, binDst, 0o755); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
+	created = append(created, binDst)
 	settingsFrom := slots.ExpandTilde(slot.SettingsFrom)
 	src, err := config.Load(settingsFrom)
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
-		return exitUsage
+		return fail("%v", err)
 	}
 	pw, err := src.Password(slot.Account)
 	if err != nil {
-		fmt.Fprintf(stderr, "slot setup: %s does not hold the slot's account\n", slot.SettingsFrom)
-		return exitUsage
+		return fail("slot setup: %s does not hold the slot's account", slot.SettingsFrom)
 	}
 	dungeonsDir := *dungeonsFlag
 	if dungeonsDir == "" {
 		dungeonsDir = filepath.Join(dir, "dungeons")
 	}
 	if err := os.MkdirAll(dungeonsDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
+	created = append(created, dungeonsDir)
 	tracesDir := filepath.Join(dir, "traces")
 	if err := os.MkdirAll(tracesDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
+	created = append(created, tracesDir)
 	stateDir := slots.ExpandTilde(server.StateDir)
 	if stateDir == "" {
 		stateDir = filepath.Dir(settingsFrom)
 	} else if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
 	mmapsDir := slots.ExpandTilde(server.MmapsDir)
 	if mmapsDir == "" {
@@ -191,16 +216,32 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		RunMeta:           src.RunMeta,
 		StateDir:          stateDir,
 	}
+	if slotSetupPreWriteHook != nil {
+		slotSetupPreWriteHook()
+	}
+	// Re-validate the lease identity immediately before writing settings:
+	// a takeover between the check and the write must leave no credentials.
+	cur, err := store.Get(server.Name, slot.ID)
+	if err != nil {
+		return fail("slot setup: %v", err)
+	}
+	if cur == nil || cur.Holder != *holder || cur.LeaseID != leaseID || store.IsStale(cur) {
+		cleanup()
+		fmt.Fprintf(stderr, "slot setup: %s/%s is not leased by %s: run turtle-agent lease acquire %s --slot %s --holder %s first\n",
+			server.Name, slot.ID, *holder, server.Name, slot.ID, *holder)
+		return exitSlotRefused
+	}
 	settingsPath := filepath.Join(dir, "settings.json")
 	if err := slotSetupWriteSettings(settingsPath, dst, stateDir); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
+	created = append(created, settingsPath)
 	tokenFile := filepath.Join(dir, fmt.Sprintf("rpc-%d.token", slot.Port))
 	manifest := slotManifest{
 		Server:    server.Name,
 		Slot:      slot.ID,
 		Holder:    *holder,
+		LeaseID:   leaseID,
 		Account:   slot.Account,
 		Character: character,
 		Port:      slot.Port,
@@ -209,24 +250,24 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		Settings:  settingsPath,
 		PIDFile:   filepath.Join(dir, "agent.pid"),
 		TokenFile: tokenFile,
+		SlotsPath: *slotsPath,
 		Created:   store.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	}
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
 	if err := writeFileExcl(filepath.Join(dir, "slot.json"), rawManifest, 0o600); err != nil {
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
-	if err := store.SetDir(server.Name, slot.ID, *holder, dir); err != nil {
+	created = append(created, filepath.Join(dir, "slot.json"))
+	if err := store.SetDir(server.Name, slot.ID, *holder, leaseID, dir); err != nil {
 		if r, ok := err.(*slots.Refusal); ok {
+			cleanup()
 			fmt.Fprintf(stderr, "slot setup: %s\n", r.Msg)
 			return exitSlotRefused
 		}
-		fmt.Fprintf(stderr, "slot setup: %v\n", err)
-		return exitUsage
+		return fail("slot setup: %v", err)
 	}
 	fmt.Fprintf(stdout, "slot %s/%s ready in %s\n", server.Name, slot.ID, dir)
 	fmt.Fprintf(stdout, "account %s, character %s, port %d\n", slot.Account, character, slot.Port)
@@ -237,21 +278,21 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-func slotSetupCheckLease(store *slots.Store, server, slot, holder string) error {
+func slotSetupCheckLease(store *slots.Store, server, slot, holder string) (string, error) {
 	states, err := store.List(server)
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, s := range states {
 		if s.Slot.ID != slot {
 			continue
 		}
 		if s.State == "held" && s.Lease != nil && s.Lease.Holder == holder {
-			return nil
+			return s.Lease.LeaseID, nil
 		}
-		return fmt.Errorf("not leased by %s", holder)
+		return "", fmt.Errorf("not leased by %s", holder)
 	}
-	return fmt.Errorf("not leased by %s", holder)
+	return "", fmt.Errorf("not leased by %s", holder)
 }
 
 func slotSetupAllows(slot *slots.Slot, character string) bool {
@@ -273,18 +314,38 @@ func slotSetupAllowed(slot *slots.Slot) string {
 	return slot.Character + " (and " + strings.Join(slot.OtherCharacters, ", ") + ")"
 }
 
-// slotSetupWriteSettings writes the client settings (O_EXCL, 0600), then loads
-// them back; a load failure removes the file.
+// slotSetupWriteSettings writes the client settings via tmp+rename (0600),
+// then loads them back; a load failure removes the file. The dir was claimed
+// empty, so the rename never overwrites.
 func slotSetupWriteSettings(path string, dst config.Settings, stateDir string) error {
 	raw, err := json.MarshalIndent(dst, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := writeFileExcl(path, raw, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
+	if err != nil {
 		return err
 	}
-	if _, err := config.Load(path); err != nil {
-		os.Remove(path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if _, err := config.Load(tmpName); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
 	return nil

@@ -78,7 +78,7 @@ func Load(path string) (*Config, error) {
 	if di, err := os.Stat(dir); err != nil {
 		return nil, err
 	} else if di.Mode().Perm()&0o022 != 0 {
-		return nil, fmt.Errorf("slots %s has mode %04o: it decides which account a client gets; run: chmod 600 %s", dir, di.Mode().Perm(), path)
+		return nil, fmt.Errorf("slots %s has mode %04o: it decides which account a client gets; run: chmod 700 %s", dir, di.Mode().Perm(), dir)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

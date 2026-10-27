@@ -122,10 +122,11 @@ func TestStaleNeedsExpiryAndDeadAgent(t *testing.T) {
 	st := testStore(t, twoSlotCfg)
 	fp := st.Probe.(*fakeProbe)
 	base := time.Date(2026, 10, 27, 16, 0, 0, 0, time.UTC)
-	if _, err := st.Acquire("m910q", "1", false, "w-a", time.Hour); err != nil {
+	first, err := st.Acquire("m910q", "1", false, "w-a", time.Hour)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetDir("m910q", "1", "w-a", "/tmp/ta-w-a"); err != nil {
+	if err := st.SetDir("m910q", "1", "w-a", first.Lease.LeaseID, "/tmp/ta-w-a"); err != nil {
 		t.Fatal(err)
 	}
 	fp.mu.Lock()
@@ -198,28 +199,83 @@ func TestAnySkipsReservedAndBusyPorts(t *testing.T) {
 func TestReleaseRules(t *testing.T) {
 	st := testStore(t, twoSlotCfg)
 	fp := st.Probe.(*fakeProbe)
-	if _, err := st.Acquire("m910q", "1", false, "w-a", 3*time.Hour); err != nil {
+	first, err := st.Acquire("m910q", "1", false, "w-a", 3*time.Hour)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Release("m910q", "1", "w-b", false); err == nil ||
+	if _, err := st.Release("m910q", "1", "w-b", "bogus", false); err == nil ||
 		!strings.Contains(err.Error(), "held by w-a, not w-b") {
 		t.Fatalf("got %v, want a held-by refusal", err)
 	}
-	if err := st.SetDir("m910q", "1", "w-a", "/tmp/ta-w-a"); err != nil {
+	if _, err := st.Release("m910q", "1", "w-a", "bogus-id", false); err == nil ||
+		!strings.Contains(err.Error(), "lease id mismatch") {
+		t.Fatalf("got %v, want a lease-id refusal", err)
+	}
+	if err := st.SetDir("m910q", "1", "w-a", first.Lease.LeaseID, "/tmp/ta-w-a"); err != nil {
 		t.Fatal(err)
+	}
+	if err := st.SetDir("m910q", "1", "w-a", "bogus-id", "/tmp/ta-w-a"); err == nil ||
+		!strings.Contains(err.Error(), "lease id mismatch") {
+		t.Fatalf("got %v, want a lease-id refusal", err)
 	}
 	fp.mu.Lock()
 	fp.agents["/tmp/ta-w-a"] = 80353
 	fp.mu.Unlock()
-	if _, err := st.Release("m910q", "1", "w-a", false); err == nil ||
+	if _, err := st.Release("m910q", "1", "w-a", first.Lease.LeaseID, false); err == nil ||
 		!strings.Contains(err.Error(), "run turtle-agent teardown") {
 		t.Fatalf("got %v, want a teardown-first refusal", err)
 	}
-	if _, err := st.Release("m910q", "1", "w-b", true); err != nil {
+	if _, err := st.Release("m910q", "1", "w-b", "bogus-id", true); err != nil {
 		t.Fatal(err)
 	}
 	if l, _ := st.readLease("m910q", "1"); l != nil {
 		t.Fatal("forced release left the file")
+	}
+}
+
+// Item 3 (R2, Codex ABA): every acquisition gets an unguessable lease ID;
+// release with the old ID after a re-acquire by the same holder is refused
+// and the new lease stays.
+func TestReleaseWithOldIDAfterReacquire(t *testing.T) {
+	st := testStore(t, twoSlotCfg)
+	first, err := st.Acquire("m910q", "1", false, "w-a", 3*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Lease.LeaseID == "" {
+		t.Fatal("acquire minted no lease id")
+	}
+	if len(first.Lease.LeaseID) != 32 {
+		t.Fatalf("lease id %q is not 16 bytes hex", first.Lease.LeaseID)
+	}
+	second, err := st.Acquire("m910q", "1", false, "w-a", 3*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Renewed {
+		t.Fatal("same-holder re-acquire did not renew")
+	}
+	if second.Lease.LeaseID == first.Lease.LeaseID {
+		t.Fatal("re-acquire kept the old lease id")
+	}
+	if _, err := st.Renew("m910q", "1", "w-a", first.Lease.LeaseID, 3*time.Hour); err == nil ||
+		!strings.Contains(err.Error(), "lease id mismatch") {
+		t.Fatalf("renew with the old id: got %v, want a lease-id refusal", err)
+	}
+	if _, err := st.Release("m910q", "1", "w-a", first.Lease.LeaseID, false); err == nil ||
+		!strings.Contains(err.Error(), "lease id mismatch") {
+		t.Fatalf("release with the old id: got %v, want a lease-id refusal", err)
+	}
+	cur, err := st.Get("m910q", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur == nil || cur.LeaseID != second.Lease.LeaseID || cur.Holder != "w-a" {
+		t.Fatalf("new lease did not stay: %+v", cur)
+	}
+	// The current ID still releases.
+	if _, err := st.Release("m910q", "1", "w-a", second.Lease.LeaseID, false); err != nil {
+		t.Fatalf("release with the current id: %v", err)
 	}
 }
 
@@ -241,6 +297,9 @@ func TestSameHolderRenews(t *testing.T) {
 	}
 	if !second.Lease.Expires.After(first.Lease.Expires) {
 		t.Fatalf("expiry not extended: %v vs %v", second.Lease.Expires, first.Lease.Expires)
+	}
+	if second.Lease.LeaseID == "" || second.Lease.LeaseID == first.Lease.LeaseID {
+		t.Fatal("re-acquire kept the old lease id")
 	}
 	entries, err := os.ReadDir(filepath.Join(st.Dir, "m910q"))
 	if err != nil {
