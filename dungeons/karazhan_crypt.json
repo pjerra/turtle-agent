@@ -2,7 +2,7 @@
   "version": 1,
   "name": "karazhan_crypt",
   "kind": "dungeon",
-  "status": "draft (reordered 2026-10-25: upper floors, shaft dive, lower crypt last; Corpsemuncher out: no dry contact; not live-checked; hivaxxis reordered after r40 slot5b; lower-crypt pools dry 2026-10-26 after proof20d2)",
+  "status": "draft (reordered 2026-10-25: upper floors, shaft dive, lower crypt last; Corpsemuncher leg 6 by the shaft climb (swim hand-off), probe T0 2026-10-28; not live-checked; hivaxxis reordered after r40 slot5b; lower-crypt pools dry 2026-10-26)",
   "map": 800,
   "entrance": {"x": -11068.1, "y": -1806.4, "z": 52.7},
   "entrance_trigger": 5008,
@@ -34,9 +34,9 @@
     "Doors: the six Gates 177245/177246 (upper hall, z 28) spawn ACTIVE (open). The karazhan_crypt_gate script opens one for 25 s for a player carrying the Karazhan Crypt Key 51356 and closes it again - click only if one is found closed. The crypt gate outside (177203, map 0) needs the key on foot; cmd enter 5008 bypasses it. Tomb of the Unrepentant 177312 (Hivaxxis), Pauper's Walk 2006634 (Alarus) spawn ACTIVE too.",
     "Patrols: Guard Captain Gort 92935 (503 yd, 201 s) walks the hall and a Risen Crypt Guard 2571714 (501 yd, 200 s) the terraces; an Unseen Stalker 2567896 (325 yd, 130 s) the upper hall; two Stalkers 2567937/2567938 (187/145 yd, 75/58 s) and a Guard 2568426 (221 yd, 88 s) the lower crypt. Every pull within 30 yd of a path carries its patrol block with period_estimate (path length at 2.5 yd/s, not measured): 104 pulls.",
     "No EventAI flee row exists for any map-800 creature in this data: no trash flees at 15 %. No trash heals. The trash is undead type 6 (no Polymorph): no_cc lists it and cc_priority is empty. kill_first: the Death Coil / Banshee Shriek / frost casters 91918 91913 91911 91925.",
-    "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only: no leg climbs back up the shaft. commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to. The hivaxxis leg walks its room east to west (stalker, four creepers, one creeper, the pair, then the boss) with a stand on the server floor before every pack: r40 slot5b stopped there (step 256 deferred, 257-258 unreachable) after pulling the pair first from the east end and walking into the z -13.5 ledge pocket at -11245.7 -1747.3 -15.0, which no corridor point reaches.",
+    "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only on foot: no leg walks back up the shaft (leg 6 swims up it from F1 to S1). commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to. The hivaxxis leg walks its room east to west (stalker, four creepers, one creeper, the pair, then the boss) with a stand on the server floor before every pack: r40 slot5b stopped there (step 256 deferred, 257-258 unreachable) after pulling the pair first from the east end and walking into the z -13.5 ledge pocket at -11245.7 -1747.3 -15.0, which no corridor point reaches.",
     "Lower-crypt pools (2026-10-26, proof20d2 steps 248 and 254): the exporter's 50 yd cuts and the Hivaxxis leg's first approach point crossed two water polygons of the lower crypt (the pool at -11138.4 -1741.7, floor -29.6; the flooded basin at -11215.79 -1743.7, floor -29.74). proof20d2's `cmd move` to each was refused 'unreachable' after the lead sank into the water (at step 254 it already stood on the point). Both walks now use dry stands on the pool rims (flag 0x1 polygons): pull group 23's approach goes around the first pool west and south (-11152 -1710, -11152 -1758, -11154 -1790, -11150 -1800), and the Hivaxxis leg's first hop goes around the basin west and north (-11233 -1755, -11233 -1706) before the unchanged corridor chain. Every hop is 0x1 on the server-exact tile 8005334 (6a8168b1), stays on dry floor, and the replay is 0 refused.",
-    "Corpsemuncher (91917) is out of the plan: his wing is a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) whose only contact to the rest of the crypt is the off-mesh swim across the flooded shaft (-11213.1 -1572.3 -2.8 to -11207.3 -1510.4 -3.8), water at both ends. The core answers a both-ends-in-water move with a straight UNDERWATER path (0x81) and the bots' mover refuses that type (BFD-STUCK-POINTS C2/C3): the swim is one-way for the party in practice too - a bot that starts in water makes no way toward a dry point (r40, step 113). His 11 south-wing pulls stay mapped in this file's history (20261025001100, leg 5) for when the swim works; the other way to that wing is the 57.6 yd swim from the south ramp, same block.",
+    "Corpsemuncher (91917) is leg 6, by the shaft climb (specs/kc-corpsemuncher.md, T0 probe 2026-10-28: Q1 and Q2 PASS): from hivaxxis the party walks to the shaft floor F1 (-11211 -1522 -45.9), swims straight up 42.6 yd to open water S1 (-11211 -1516 -3.0) and walks the north ramp's first dry polygon D1 (-11211 -1492 3.6) into his dry wing. His wing is still a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) with water at both ends of that line, so the core answers it with a straight UNDERWATER path (0x81) that the swim hand-off takes; the mmaps have no swim volume and refuse the hop offline, hence its check_skip. The dry-wing pulls are the old draft's groups 0-10 and 22 (20261025001100); the lane Sinners 2575600/2575611 are not pulled, and the ramp-foot Sinner 2575603 is the leg's first group, pulled from D1.",
     "Turtle custom 5-man: plan level band 59-60, trash 60-61, bosses 62-63. The wiki has 58-60.",
     "Radii: farthest position from the centre + 0.5 yd, floor 5, +5 where a member wanders (5 to 12.8 yd): the round is how far from the row's centre the pull takes its entries. The 3-unit pack at -11185.1 -1621.0 4.8 is split (a Remains + its Rotten Zombie 4.3 yd apart, the other Remains alone). The overlap test's 8 recorded findings are Remains 91924 that never wake (7 in the south wing and the lower crypt, dead props) and one awake Remains 12.4 yd from a wandering pull - outside its 10 yd radius, inside the check's 3 yd aggro margin."
   ],
@@ -4306,6 +4306,120 @@
         "the first hop from the lower crypt's `to` goes around the flooded basin (water polygon at -11215.79 -1743.7, floor -29.74) on its west and north shores: -11233 -1755 then -11233 -1706, then the corridor chain. proof20d2 step 254's `cmd move -11215.8 -1743.7 -31.4` was refused with the lead already on that point, in the water; the basin point is gone and every new row is on a dry 0x1 floor.",
         "door \"Tomb of the Unrepetant\" entry 177312 at -11177.8 -1742.0 -15.5 (spawns ACTIVE: both runs walked through it)"
       ]
+    },
+    {
+      "name": "corpsemuncher",
+      "to": {"x": -11211, "y": -1492, "z": 3.6},
+      "via": [
+        {"x": -11211, "y": -1522, "z": -45.9},
+        {
+          "x": -11211,
+          "y": -1516,
+          "z": -3,
+          "check_skip": "swim up the flooded shaft: water to water, the core's 0x81 line taken by the swim hand-off (specs/kc-corpsemuncher.md); the mmaps have no swim volume"
+        }
+      ],
+      "pull_groups": [
+        {
+          "entries": [91932],
+          "positions": [
+            {"x": -11219.5, "y": -1512.12, "z": -1.46}
+          ],
+          "ambush": true,
+          "radius": 5,
+          "approach": [
+            {"x": -11211, "y": -1492, "z": 3.6}
+          ]
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11178, "y": -1478.97, "z": 3.57707}
+          ],
+          "ambush": true
+        },
+        {
+          "entries": [91910],
+          "positions": [
+            {"x": -11177.9, "y": -1451.03, "z": 1.21702}
+          ]
+        },
+        {
+          "entries": [91926, 91924, 91924],
+          "positions": [
+            {"x": -11187.9, "y": -1434.97, "z": 1.39315},
+            {"x": -11193.1, "y": -1438.69, "z": 0.697765},
+            {"x": -11186.7, "y": -1427.9, "z": 1.06009}
+          ]
+        },
+        {
+          "entries": [91924, 91926, 91924],
+          "positions": [
+            {"x": -11207.8, "y": -1443.78, "z": 0.488383},
+            {"x": -11212.4, "y": -1450.79, "z": 1.82863},
+            {"x": -11209.6, "y": -1462.1, "z": 3.19172}
+          ]
+        },
+        {
+          "entries": [91911],
+          "positions": [
+            {"x": -11222.1, "y": -1472.57, "z": 3.5759}
+          ]
+        },
+        {
+          "entries": [91924, 91926, 91924],
+          "positions": [
+            {"x": -11237.6, "y": -1461.02, "z": 2.83571},
+            {"x": -11241.5, "y": -1451.99, "z": 2.68017},
+            {"x": -11245.9, "y": -1443.2, "z": 1.45983}
+          ]
+        },
+        {
+          "entries": [91924, 91926],
+          "positions": [
+            {"x": -11254.8, "y": -1434.05, "z": 1.16184},
+            {"x": -11258.6, "y": -1434.1, "z": 1.57751}
+          ]
+        },
+        {
+          "entries": [91924, 91926],
+          "positions": [
+            {"x": -11260.2, "y": -1421.33, "z": 0.257852},
+            {"x": -11260.6, "y": -1412.68, "z": -0.316311}
+          ]
+        },
+        {
+          "entries": [91924],
+          "positions": [
+            {"x": -11259.6, "y": -1394.19, "z": -0.0768216}
+          ]
+        },
+        {
+          "entries": [91910],
+          "positions": [
+            {"x": -11266.7, "y": -1453.24, "z": 2.74866}
+          ]
+        },
+        {
+          "entries": [91923],
+          "positions": [
+            {"x": -11265.4, "y": -1481.66, "z": 3.57707}
+          ],
+          "ambush": true
+        },
+        {
+          "entries": [91924, 91926, 91924],
+          "positions": [
+            {"x": -11181.6, "y": -1408.96, "z": 0.621345},
+            {"x": -11190.6, "y": -1401.54, "z": -1.87382},
+            {"x": -11191, "y": -1394.77, "z": -1.52534}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 91917,
+        "position": {"x": -11223.5, "y": -1406.58, "z": -15.426}
+      }
     }
   ]
 }
