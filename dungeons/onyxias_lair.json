@@ -34,7 +34,8 @@
     "Approach points: every pack and the boss get a stand on their own floor with a complete server path from the previous row (15-20 yd from a pack; the boss's is 80.7 yd out, so it breaks the 15-20 yd band and keeps the raid's follow ring out of her wake), so the run leader does not walk toward a pack it cannot see in hops of its own (the draft had 5 such hops of 105-270 yd). plan-check: ok, the run-leader hop notice on the boss stand and the 4 estimated-patrol warnings only (the new wake rule, boss wake_yd 58 + bounding_yd 3.6 + a bot 0.5 + the raid ring 8 + 5 margin = 75.1 yd, passes).",
     "Boss pull: she wakes on the first player within 58 yd (boss_onyxia.cpp CheckForTargetsInAggroRadius), measured in 3D with both bounding radii added, so her real wake is about 62 yd; the raid's formation puts its front bots 5-7 yd ahead of the lead while it walks in. The boss stand is -80.0 -211.4 -83.0: 80.7 yd from her spawn in 3D (0.70 -211.97 -86.08), and the walk in needs 75.1 yd (58 + her bounding 3.6 + a bot 0.5 + the raid ring 8 + 5 margin). The leash line stays 15 yd west of the stand. The fight starts with the raid together at the stand (walk 1 woke her at the path row -50.03, 50.7 yd out, with the raid strung out in the chamber mouth).",
     "Turtle 1.18.1 (guide, not in this data): a new section with the optional Broodcommander Axelus 49018, Cindarion 50143, the Onyxian Hatcher 50144, Inciter 49016 and Flamespawn 49017. Their creature_template rows exist (database_updates 20260510092659) but no map 249 spawn, summon or instance-script hook references any of them in the effective world DB, and the core's boss_onyxia.cpp is the vanilla phase script. No leg is written for them; B2 looks for a passage the DB does not have.",
-    "Entrance: areatrigger 2848 needs a raid group, level 50 and the Drakefire Amulet (required_condition 16309) and lands at 30.89 -54.08 -5.03 on map 249 (orientation 4.71239); `.tele onyxia` (game_tele 195, map 249, 29.16 -71.34 -8.18) is the way in without the trigger. The portal on the outer map is at -4768.61 -3752.11 53.43 on map 1."
+    "Entrance: areatrigger 2848 needs a raid group, level 50 and the Drakefire Amulet (required_condition 16309) and lands at 30.89 -54.08 -5.03 on map 249 (orientation 4.71239); `.tele onyxia` (game_tele 195, map 249, 29.16 -71.34 -8.18) is the way in without the trigger. The portal on the outer map is at -4768.61 -3752.11 53.43 on map 1.",
+    "Walk 3 (2026-10-28): the export's cut put the first third of the 120 yd hop from pull group 4 to the stand 7.9 yd under the floor (-149.5 -210.5 z -74.6, floor -66.7): unreachable, skipped. The boss approach now carries two floor-measured points before the stand, so no row of that hop is cut."
   ],
   "legs": [
     {
@@ -163,6 +164,8 @@
         "wake_yd": 58,
         "bounding_yd": 3.6,
         "approach": [
+          {"x": -149.46, "y": -210.48, "z": -66.7},
+          {"x": -114.73, "y": -210.94, "z": -72.4},
           {"x": -80, "y": -211.4, "z": -83}
         ]
       }
