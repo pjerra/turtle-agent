@@ -102,6 +102,7 @@ turtle-agent scenario norm <file> <dir>
 turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
 turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
 turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
+turtle-agent rpc [--timeout DUR] [--raw] <dir> <method> [<params-json>|-]
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
@@ -124,8 +125,11 @@ turtle-agent version
 | 9 | `fleet`: a child exited non-zero (the others kept running unless `--stop-on-failure`), or not every character reached the world in time |
 | 10 | a logout did not complete (`lost` or `timeout`); in a fleet, the other characters keep running |
 | 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)); `plan-check` found a point the navmesh cannot take |
+| 12 | `route-oracle` could not report every plan |
+| 13 | `stage-check` refused the leg |
 | 14 | `teardown`: a game-side or CLI step failed |
-| 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder) |
+| 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
+| 16 | `rpc`: the agent answered with a JSON-RPC error |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -213,6 +217,15 @@ with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This 
 ## Test slots, leases and teardown
 
 One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+
+`rpc <dir> <method> [<params-json>]` drives the agent of a slot dir with one JSON-RPC call, for live-test workers that must never read its token file: the command reads `slot.json`, checks it like `teardown` does (the dir must match, the port must be valid, outside paths are refused), reads the token file derived from the port itself, refuses it unless it has exactly the shape the agent generates (32 random bytes as 43 base64url characters; anything else gets `rpc: the token file is not an agent token`, exit 15, with the content never printed), and posts to `127.0.0.1:<port>` with the token as `Authorization: Bearer` and `Content-Type: application/json`. It prints only the `result` as JSON (pretty; `--raw` for one line), a JSON-RPC error as `error: <code> <message>` on stderr (exit 16), an unreachable agent as exit 15, usage errors as exit 2. A reply that is not a 2.0 envelope for the request (any non-200 status; a body that is not an object with `"jsonrpc":"2.0"`, `"id"` 1 and exactly one of a present `"result"` or an `"error"` object with a numeric code and a string message) is `rpc: bad reply from the agent: <reason>` on stderr, exit 15, never 0. `params-json` is an object or an array; `-` reads it from stdin; omitted means no params; `--timeout DUR` (default 30 s) bounds the call. The token never appears in output, errors or help: it is redacted from every printed line. Examples:
+
+```sh
+turtle-agent rpc ~/ta-w status
+turtle-agent rpc ~/ta-w gm '{"text": ".bot run list"}'
+turtle-agent rpc ~/ta-w commander '{"op": "status"}' --timeout 10s
+echo '{"text": ".bot follow start"}' | turtle-agent rpc ~/ta-w gm -
+```
 
 ## JSON-RPC API
 
