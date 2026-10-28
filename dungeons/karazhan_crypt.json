@@ -36,7 +36,7 @@
     "No EventAI flee row exists for any map-800 creature in this data: no trash flees at 15 %. No trash heals. The trash is undead type 6 (no Polymorph): no_cc lists it and cc_priority is empty. kill_first: the Death Coil / Banshee Shriek / frost casters 91918 91913 91911 91925.",
     "Legs are floor bands, in run order (2026-10-25): archlich_enkhraz and guard_captain_gort at z 4.3, commander_andreon at z 28, then marrowspike_dive/shaft floor (-45.9), marrowspike (lower crypt, -28.5) and hivaxxis (-15.7). One way only on foot: no leg walks back up the shaft (leg 6 swims up it from F1 to S1). commander_andreon's `to` was the terrace (-11118.3 -1630.84 5.87), 23.7 yd straight below its first upper-hall pack but a 297.6 yd navmesh walk from it (the run leader's `seen` is a 3D distance, so it would have pulled the hall pack through the ceiling); it is now a hall-floor point 21.0 yd along that path from pull group 0 (-11096.95 -1642.28 28.8). Every leg's pulls are in nearest-neighbour order from its to. The hivaxxis leg walks its room east to west (stalker, four creepers, one creeper, the pair, then the boss) with a stand on the server floor before every pack: r40 slot5b stopped there (step 256 deferred, 257-258 unreachable) after pulling the pair first from the east end and walking into the z -13.5 ledge pocket at -11245.7 -1747.3 -15.0, which no corridor point reaches.",
     "Lower-crypt pools (2026-10-26, proof20d2 steps 248 and 254): the exporter's 50 yd cuts and the Hivaxxis leg's first approach point crossed two water polygons of the lower crypt (the pool at -11138.4 -1741.7, floor -29.6; the flooded basin at -11215.79 -1743.7, floor -29.74). proof20d2's `cmd move` to each was refused 'unreachable' after the lead sank into the water (at step 254 it already stood on the point). Both walks now use dry stands on the pool rims (flag 0x1 polygons): pull group 23's approach goes around the first pool west and south (-11152 -1710, -11152 -1758, -11154 -1790, -11150 -1800), and the Hivaxxis leg's first hop goes around the basin west and north (-11233 -1755, -11233 -1706) before the unchanged corridor chain. Every hop is 0x1 on the server-exact tile 8005334 (6a8168b1), stays on dry floor, and the replay is 0 refused.",
-    "Corpsemuncher (91917) is leg 6, by the shaft climb (specs/kc-corpsemuncher.md, T0 probe 2026-10-28: Q1 and Q2 PASS): from hivaxxis the party walks to the shaft floor F1 (-11211 -1522 -45.9), swims straight up 42.6 yd to open water S1 (-11211 -1516 -3.0) and walks the north ramp's first dry polygon D1 (-11211 -1492 3.6) into his dry wing. His wing is still a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) with water at both ends of that line, so the core answers it with a straight UNDERWATER path (0x81) that the swim hand-off takes; the mmaps have no swim volume and refuse the hop offline, hence its check_skip. The dry-wing pulls are the old draft's groups 0-10 and 22 (20261025001100); the lane Sinners 2575600/2575611 are not pulled, and the ramp-foot Sinner 2575603 is the leg's first group, pulled from D1.",
+    "Corpsemuncher (91917) is leg 6, by the shaft climb (specs/kc-corpsemuncher.md, T0 probe 2026-10-28: Q1 and Q2 PASS): from hivaxxis the party walks to the shaft floor F1 (-11211 -1522 -45.9), swims straight up 42.6 yd to open water S1 (-11211 -1516 -3.0), swims 6.7 yd on to S2 (-11205 -1514.5 -0.5; leg 6's note: combat live 1236b) and walks the north ramp's first dry polygon D1 (-11211 -1492 3.6) into his dry wing. His wing is still a navmesh island (79 polygons, KARAZHAN-CRYPT-NAVMESH.md) with water at both ends of that line, so the core answers it with a straight UNDERWATER path (0x81) that the swim hand-off takes; the mmaps have no swim volume and refuse the hop offline, hence its check_skip. The dry-wing pulls are the old draft's groups 0-10 and 22 (20261025001100); the lane Sinners 2575600/2575611 are not pulled, and the ramp-foot Sinner 2575603 is the leg's first group, pulled from D1.",
     "Turtle custom 5-man: plan level band 59-60, trash 60-61, bosses 62-63. The wiki has 58-60.",
     "Radii: farthest position from the centre + 0.5 yd, floor 5, +5 where a member wanders (5 to 12.8 yd): the round is how far from the row's centre the pull takes its entries. The 3-unit pack at -11185.1 -1621.0 4.8 is split (a Remains + its Rotten Zombie 4.3 yd apart, the other Remains alone). The overlap test's 8 recorded findings are Remains 91924 that never wake (7 in the south wing and the lower crypt, dead props) and one awake Remains 12.4 yd from a wandering pull - outside its 10 yd radius, inside the check's 3 yd aggro margin."
   ],
@@ -4318,6 +4318,12 @@
           "y": -1516,
           "z": -3,
           "check_skip": "swim up the flooded shaft: water to water, the core's 0x81 line taken by the swim hand-off (specs/kc-corpsemuncher.md); the mmaps have no swim volume"
+        },
+        {
+          "x": -11205,
+          "y": -1514.5,
+          "z": -0.5,
+          "check_skip": "S2: open water by design, 2.5 yd under the surface and 1.9 yd south of the ramp's end (no floor under it): water to water from S1 or from wherever a fight in the shaft left the lead bot (0x81/0x11, the swim hand-off); from it the core paths to D1 (0x1, start poly 3.4 yd); leg 6's note"
         }
       ],
       "pull_groups": [
@@ -4420,7 +4426,10 @@
       "boss": {
         "entry": 91917,
         "position": {"x": -11223.5, "y": -1406.58, "z": -15.426}
-      }
+      },
+      "notes": [
+        "S2 (-11205 -1514.5 -0.5) is a second open-water point after S1, inside the band where the core has a ramp polygon within its 5 yd start search (y north of about -1518.5, x -11203..-11226): from there the move to D1 is a 0x1 path (path-check: start poly 3.4 yd). Combat live 1236b run A (2026-10-28 09:00:55, step 292): a Drowned Sinner engaged on the arrival at S1, so its fight ran under the D1 step and left the lead bot 34.2 yd from D1 in open water south of that band; the core answered the move to the dry D1 with its mid-water shortcut 0x11, which the swim hand-off takes only when both ends are in water, and the swim-out only within 30 yd: the lead stood still and the run paused. With S2 the fight on arriving at S1 runs under a water step (water to water: 0x81 or 0x11, both taken by the hand-off from anywhere in the open shaft), and D1 is sent from S2. S2 is 6.7 yd from S1, more than the stalled-arrival 6 yd, so it is not counted as reached from S1."
+      ]
     }
   ]
 }
