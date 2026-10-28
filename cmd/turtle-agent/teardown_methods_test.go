@@ -32,6 +32,9 @@ type tdFakeGame struct {
 	brainRan   bool
 	stopped    bool
 	visibleSeq [][]string
+	followOn   bool // a player follow loop runs
+	followHang bool // ... and does not end within follow_stop's wait
+	followStop int  // StopFollow calls
 }
 
 func tdAck(lines ...string) tbm.Reply {
@@ -111,6 +114,19 @@ func (f *tdFakeGame) BrainFree() bool {
 
 func (f *tdFakeGame) StopBrain() { f.mu.Lock(); defer f.mu.Unlock(); f.brainOn = false }
 
+func (f *tdFakeGame) FollowActive() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.followOn }
+
+func (f *tdFakeGame) StopFollow() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.followStop++
+	if f.followHang {
+		return "stopped by follow_stop", false
+	}
+	f.followOn = false
+	return "stopped by follow_stop", true
+}
+
 func tdBaseFake() *tdFakeGame {
 	statusLine := "You command Ragnar's group: Ragnar, Bo, Beardmeister."
 	runLine := "TBM:RUN|zulfarrak|running|76/247|room|pull|gather|at the door"
@@ -152,7 +168,7 @@ func TestTeardownOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"snapshot", "agent_run", "brain", "run_stop", "unbind", "remove Bo", "remove Beardmeister", "leave_group", "gone", "gm", "logout"}
+	want := []string{"snapshot", "follow", "agent_run", "brain", "run_stop", "unbind", "remove Bo", "remove Beardmeister", "leave_group", "gone", "gm", "logout"}
 	if got := tdStepNames(res); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("steps %v", got)
 	}
@@ -232,11 +248,11 @@ func TestTeardownGoesOnAfterAFailure(t *testing.T) {
 	if res.Failed != 1 {
 		t.Fatalf("failed=%d", res.Failed)
 	}
-	if len(res.Steps) != 11 {
+	if len(res.Steps) != 12 { // snapshot, follow, agent_run, brain, run_stop, ...: the follow step came with the player follow
 		t.Fatalf("steps %d", len(res.Steps))
 	}
-	if res.Steps[3].Status != "fail" {
-		t.Fatalf("run_stop %v", res.Steps[3])
+	if res.Steps[4].Status != "fail" {
+		t.Fatalf("run_stop %v", res.Steps[4])
 	}
 }
 
@@ -294,5 +310,70 @@ func TestTeardownRemoveReplies(t *testing.T) {
 		if st != c.status || detail != c.detail {
 			t.Fatalf("%q -> %q %q", c.line, st, detail)
 		}
+	}
+}
+
+// Teardown stops a running player follow first of the stop steps (before agent_run and the brain), waiting for its loop; a
+// loop that does not end in time is reported "ending" and counts as failed.
+func TestTeardownStopsThePlayerFollow(t *testing.T) {
+	stepOf := func(res teardownResult) teardownStep {
+		for _, st := range res.Steps {
+			if st.Step == "follow" {
+				return st
+			}
+		}
+		t.Fatalf("no follow step: %v", tdStepNames(res))
+		return teardownStep{}
+	}
+	f := tdBaseFake()
+	f.followOn = true
+	res, err := runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := stepOf(res); st.Status != "ok" || f.followStop != 1 || f.followOn {
+		t.Fatalf("follow step %+v, stops %d, still on %v", st, f.followStop, f.followOn)
+	}
+	if names := tdStepNames(res); names[1] != "follow" || names[2] != "agent_run" {
+		t.Fatalf("follow is not the first stop step: %v", names)
+	}
+
+	f = tdBaseFake()
+	res, _ = runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) {})
+	if st := stepOf(res); st.Status != "skip" || f.followStop != 0 {
+		t.Fatalf("no follow: step %+v, stops %d", st, f.followStop)
+	}
+
+	f = tdBaseFake()
+	f.followOn, f.followHang = true, true
+	res, _ = runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) {})
+	if st := stepOf(res); st.Status != "ending" || res.Failed == 0 {
+		t.Fatalf("hanging follow: step %+v, failed %d", st, res.Failed)
+	}
+
+	f = tdBaseFake()
+	f.followOn = true
+	res, _ = runTeardown(context.Background(), f, teardownParams{WaitMS: 4000, DryRun: true}, func(time.Duration) {})
+	if st := stepOf(res); st.Status != "plan" || f.followStop != 0 {
+		t.Fatalf("dry run: step %+v, stops %d", st, f.followStop)
+	}
+}
+
+// The production teardown game stops the agent's real follow service and waits for its loop (the shared movement mode is
+// free afterwards).
+func TestSessionTeardownGameStopsTheFollow(t *testing.T) {
+	svc, runner := sharedModeRig(t)
+	if _, err := svc.Start(context.Background(), followStartParams{Plan: "followtest", Lead: "Tank"}); err != nil {
+		t.Fatal(err)
+	}
+	g := sessionTeardownGame{cur: svc.cur, runner: runner, follow: svc}
+	if !g.FollowActive() {
+		t.Fatal("FollowActive false with a loop going")
+	}
+	if _, ended := g.StopFollow(); !ended {
+		t.Fatal("StopFollow did not see the loop end")
+	}
+	if g.FollowActive() || svc.moves.refusal(moveOwnerRun) != nil {
+		t.Fatalf("after StopFollow: active %v, mode refusal %v", g.FollowActive(), svc.moves.refusal(moveOwnerRun))
 	}
 }
