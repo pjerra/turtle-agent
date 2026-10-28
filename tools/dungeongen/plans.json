@@ -1056,17 +1056,18 @@
     14507,
     14510,
     14599,
+    14515,
     11382,
-    15114,
     11380,
     14834
    ],
    "size": 20,
    "entrance_tele": "zg",
    "special": [
-    "Arlokk (14515), Hazza'rah, Renataki, Gri'lek, Wushoolay (Edge of Madness) have no spawn rows; Arlokk is called at the gong (GO_ARLOKK_GONG, GO_ARLOKK_FORCE_FIELD)",
-    "Hakkar's eggs (GO_EGG) and the Mandokir/Jin'do ghost sequence"
-   ]
+    "Handwritten prep: 174 merged packs (L22), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).",
+    "Arlokk (14515) has no spawn row; the gong 180526 runs event script 9066 and summons her at -11540.7 -1627.71 41.27. The gong step is open for the mapping walk (no walkable server path to it)."
+   ],
+   "handwritten": true
   },
   {
    "name": "ruins_of_ahnqiraj",

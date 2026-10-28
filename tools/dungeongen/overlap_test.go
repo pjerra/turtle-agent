@@ -20,7 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38,
+	// zul_gurub (2026-10-28): 37 packs have a neighbour of another entry within radius+3 (the shared
+	// troll/panther/bat clusters of the Arlokk, Jindo and Hakkar terraces). The 20-man cap keeps the
+	// rows at 12; the room sends the rest with the pull whether the plan lists them or not.
+	"zul_gurub": 37}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

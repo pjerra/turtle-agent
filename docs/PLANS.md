@@ -75,7 +75,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | 249 | `onyxias_lair` (40-man): Onyxia's Lair | 60-60 | 1 | draft | yes | lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2 |
 | 409 | `molten_core` (40-man): Molten Core | 60-60 | 11 | draft | yes | Majordomo Executus (12018) and Ragnaros (11502) have no spawn row: Majordomo appears after the bosses, Ragnaros is summoned (SPELL_SUMMON_RAGNAROS) by talking to Majordomo; the rune douse of the Core Hounds and lava bursts (GO_LAVA_BURST) |
 | 469 | `blackwing_lair` (40-man): Blackwing Lair | 58-60 | 8 | draft | yes | Razorgore's Orb of Domination (GO_ORBE_DOMINATION) and eggs (GO_OEUF_RAZ); Vaelastrasz carries npc_flags (gossip) to start his fight; Chromaggus' side lever (GO_LEVER_CHROMAGGUS_SIDE) and doors; suppression devices (GO_SUPPRESSION_ENGINE); Nefarian (11583) has no spawn row: Lord Victor Nefarius (10162) summons him; Onyxia Scale Cloak attunement (class check, not a step) |
-| 309 | `zul_gurub` (20-man): Zul'Gurub | 58-60 | 8 | draft | yes | Arlokk (14515), Hazza'rah, Renataki, Gri'lek, Wushoolay (Edge of Madness) have no spawn rows; Arlokk is called at the gong (GO_ARLOKK_GONG, GO_ARLOKK_FORCE_FIELD); Hakkar's eggs (GO_EGG) and the Mandokir/Jin'do ghost sequence |
+| 309 | `zul_gurub` (20-man): Zul'Gurub | 58-60 | 9 | draft | yes | Handwritten prep: 174 merged packs (L22), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).; Arlokk (14515) has no spawn row; the gong 180526 runs event script 9066 and summons her at -11540.7 -1627.71 41.27. The gong step is open for the mapping walk (no walkable server path to it). |
 | 509 | `ruins_of_ahnqiraj` (20-man): Ruins of Ahn'Qiraj | 59-60 | 6 | draft | yes | General Rajaxx's waves (Captain Qeez and the Andorov escort); Ossirian's crystals (GO_OSSIRIAN_CRYSTAL) |
 | 531 | `temple_of_ahnqiraj` (40-man): Temple of Ahn'Qiraj | 58-60 | 8 | draft | yes | Ouro (15517) has no spawn row: summoned from the mound (SPELL_SUMMON_OURO); Skeram's gate (GO_SKERAM_GATE), the twin emperors' doors (GO_TWINS_ENTER_DOOR, GO_TWINS_EXIT_DOOR); C'Thun's eye and grasp (GO_GRASP_OF_CTHUN) |
 | 533 | `naxxramas` (40-man): Naxxramas | 59-60 | 15 | draft | yes | each quarter's eye-boss ramp and portal (GO_ARAC_*, GO_PLAG_*, GO_MILI_*, GO_CONS_*), Gothik's gates (GO_MILI_GOTH_*), the four horsemen door (GO_MILI_HORSEMEN_DOOR); Thaddius' tesla coils (GO_CONS_NOX_TESLA_FEUGEN/STALAGG); Kel'Thuzad's windows and door (GO_KT_WINDOW_1-4, GO_KELTHUZAD_DOOR); Sapphiron's icy room |
@@ -102,7 +102,6 @@ Points with no navmesh floor within reach (see mmaps above); each is marked `nee
 | `stormwrought_ruins` | 24 | 1 | 0 |
 | `gilneas_city` | 7 | 0 | 0 |
 | `karazhan_crypt` | 12 | 0 | 0 |
-| `zul_gurub` | 25 | 0 | 1 |
 | `ruins_of_ahnqiraj` | 1 | 0 | 0 |
 | `temple_of_ahnqiraj` | 1 | 0 | 0 |
 | `naxxramas` | 7 | 0 | 0 |
