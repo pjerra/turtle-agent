@@ -54,6 +54,9 @@ type Settings struct {
 	// TracesDir is where run traces and their summaries are written (<run_id>.jsonl, <run_id>.summary.json; default "traces"
 	// under the working directory). A leading ~/ is the home folder.
 	TracesDir string `json:"traces_dir,omitempty"`
+	// TBDashboardURL is the TortoiseBots observability dashboard this slot's raids are watched on: a raid run's card
+	// shows `Raid view: <url>/#commanders`. Absent: no link (a 5-man run shows none anyway).
+	TBDashboardURL string `json:"tb_dashboard_url,omitempty"`
 	// Addons overrides the addon list sent at world login (default: a stock 1.12.1 client's
 	// Blizzard_* set). It must include the four fingerprint addons, see worldconn.StockAddons.
 	Addons []string `json:"addons,omitempty"`

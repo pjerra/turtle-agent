@@ -1199,7 +1199,11 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	d.g.ResetView()
 	d.setStats0(d.g.ViewStats())
 	d.endsAtBind = len(d.g.BindingEnds())
-	r, err := d.g.Command(ctx, bindCommand(d.opt.Lead, d.opt.Bots))
+	bindLine := bindCommand(d.opt.Lead, d.opt.Bots)
+	if d.plan.IsRaid() {
+		bindLine += " raid"
+	}
+	r, err := d.g.Command(ctx, bindLine)
 	if err != nil {
 		return fmt.Errorf("commander bind: %w", err)
 	}
@@ -1421,7 +1425,11 @@ func (d *RemoteDriver) adoptBinding(ctx context.Context, refusal *tbm.Err) error
 		return fmt.Errorf("commander bind refused: %s (and commander status gave no answer to compare it with)", describeBindErr(refusal))
 	}
 	lead, n, want := strings.TrimSpace(sr.Ack.Executor), sr.Ack.Count, 1+len(d.opt.Bots)
-	if !strings.EqualFold(lead, d.opt.Lead) || (len(d.opt.Bots) > 0 && n != want) {
+	mismatch := !strings.EqualFold(lead, d.opt.Lead) || (len(d.opt.Bots) > 0 && n != want)
+	if d.plan.IsRaid() && d.plan.Raid != nil {
+		mismatch = !strings.EqualFold(lead, d.opt.Lead) || n != d.plan.Raid.Size
+	}
+	if mismatch {
 		return fmt.Errorf("the commander is already bound to another group: lead bot %s with %d bots, not %s%s; unbind it first (commander op unbind)", lead, n, d.opt.Lead, botsSuffix(d.opt.Bots))
 	}
 	d.rep.note(fmt.Sprintf("commander bind: already bound to %s with %d bots, the same group; reusing the binding", lead, n))

@@ -420,13 +420,17 @@ func planCheckApplies(p dungeonRunParams) bool {
 	return p.Pulltest == nil && mode == modeCommander
 }
 
-// planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
-// draft plan has had no mapping walk, so it runs only when the caller says allow_draft.
-func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
+// planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan runs in observe mode only,
+// with prepare.party "hire" (the server's run leader leads the bound raid); a draft plan has had no mapping walk, so it
+// runs only when the caller says allow_draft.
+func planRunRefusal(plan *dungeon.Plan, p dungeonRunParams) string {
 	switch {
 	case plan.IsRaid():
-		return fmt.Sprintf("plan %s is a raid plan: dungeon_run leads a 5-man party and has no raid driver yet", plan.Name)
-	case strings.HasPrefix(plan.Status, dungeon.StatusDraft) && !allowDraft:
+		if mode, _, _ := runMode(p.Mode); mode != modeObserve || p.Prepare == nil || !p.Prepare.HiredParty() {
+			return fmt.Sprintf("plan %s is a raid plan: run it with mode \"observe\" and prepare.party \"hire\" (the server's run leader leads raids; the agent hires, gears and binds)", plan.Name)
+		}
+		return ""
+	case strings.HasPrefix(plan.Status, dungeon.StatusDraft) && !p.AllowDraft:
 		return fmt.Sprintf("plan %s is a draft (%s): its route is a skeleton from the world database that has not had its mapping walk; walk it first, or pass allow_draft to run it anyway", plan.Name, plan.Status)
 	}
 	return ""
@@ -502,7 +506,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
 	}
-	if msg := planRunRefusal(plan, p.AllowDraft); msg != "" {
+	if msg := planRunRefusal(plan, p); msg != "" {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: msg}
 	}
 	setup, err := cleanSetup(p.Setup)
