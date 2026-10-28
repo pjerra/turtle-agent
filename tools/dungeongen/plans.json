@@ -966,6 +966,7 @@
   },
   {
    "name": "onyxias_lair",
+   "handwritten": true,
    "title": "Onyxia's Lair",
    "map": 249,
    "kind": "raid",
@@ -977,7 +978,7 @@
    "size": 40,
    "entrance_tele": "onyxia",
    "special": [
-    "lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+    "no door, lever or key: Onyxia's phases are health thresholds in boss_onyxia.cpp; the five Onyxian Warders patrol the lair; the 95 eggs (GO 176511), the 52 lava fissures and the two lava traps (GO_LAVATRAP_1-2) are the map's other objects; GO_WHELP_SPAWNER 176510 has no spawn on map 249: the boss summons the whelps"
    ]
   },
   {

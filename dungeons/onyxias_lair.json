@@ -7,6 +7,7 @@
   "entrance": {"x": 30.8916, "y": -54.079, "z": -5.02784},
   "entrance_trigger": 2848,
   "entrance_tele": "onyxia",
+  "outside_tele": "DustwallowMarsh",
   "portal": {
     "map": 1,
     "x": -4768.61,
@@ -21,50 +22,146 @@
     "dps": 26
   },
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 249 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Raid plan: 40 players, the tank/healer/dps split is a placeholder. dungeon_run has no raid driver yet; the file is data for the raid leader.",
-    "Needs: lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+    "DRAFT: the dungeongen skeleton (spec tools/dungeongen/plans.json) prepped in task B1 (TortoiseBots-audit RAID-PREP-ony.md) from the world DB (base plus database_updates, the two trees setup_databases.sh applies), the core's onyxias_lair scripts and the server's map 249 navmesh. Not mapped, not live-checked: the GM-invisible mapping walk (B2) and the first live run are still to do; dungeon_run refuses it without allow_draft.",
+    "Census: map 249 holds 6 creature spawns and nothing else hostile: Onyxia 10184 (rank 3, boss_onyxia, at 0.70 -211.97 -86.08) and five Onyxian Warders 12129 (rank 1 elites: 49.82 -114.61 -24.31, -52.97 -96.88 -38.64, -131.20 -137.47 -52.52, -166.62 -196.00 -66.26, -199.10 -209.83 -68.91). Four of the five patrol (creature_movement: 80.5, 110.5, 158.9 and 98.3 yd paths); their blocks carry the path and a period estimated at 2.5 yd/s (32, 44, 64, 39 s), which plan-check warns about and the mapping walk measures.",
+    "Packs: no two warders stand within 15 yd of one another (the closest pair, the fourth and fifth, are 35.4 yd apart), so the 5 pull groups stay 5: one unit each, radius 1. Nothing is merged, no patrol is merged into a trash pull, and there is no linked group on the map (creature_linking, creature_linking_template and creature_groups have no map 249 row). The five are the lair's only trash.",
+    "Boss: Onyxia 10184, the only boss, killed last. boss_onyxia.cpp: she sleeps until a player is within 58 yd (CheckForTargetsInAggroRadius) and then fights where she stands; at 65 % health she takes off (Hover 17131) and at 40 % she lands. The plan has no phase or event step: the phases are health thresholds in the script, and no gossip, object or door starts the fight.",
+    "Warders on aggro: Onyxia's Aggro respawns every dead Onyxian Warder within 200 yd (boss_onyxia.cpp Aggro, GetCreatureListWithEntryInGrid 200.0f). Warders 1-4 stand 125.3-169.2 yd (3D) from her and come back when she aggroes; warder 5 stands 200.5 yd away, outside the grid. No step kind can prevent this (BLOCKER for B2: watch what a boss pull after the clear really spawns).",
+    "Leash: she enters evade mode as soon as she stands at x \u003c -95 (boss_onyxia.cpp LeashIfOutOfCombatArea), so the fight is fought at the east side of the chamber: her spawn x is 0.70 and the boss stand is -19.30, well inside.",
+    "Whelps and eggs: Onyxia summons Onyxian Whelps 11262 in the air phase (afSpawnLocations -30.13 -254.46 -89.44 and -30.82 -177.11 -89.26) and after she lands; the map has 95 Onyxia Egg objects 176511 in the west egg field (about -49 -160, floor z -93) and 52 lava-fissure objects (176513-176515, 176809-176842, 176908-176922) plus the two lava traps 177984/177985. No step kind expresses \"stay out of the egg field\": the bots' own Onyxia strategy does (onyxia eggs near -\u003e onyxia avoid eggs, onyxia whelps -\u003e onyxia kill whelps, AiPlayerbot.OnyxiaWhelpsAndEggs, on by default).",
+    "No door, lever, key or gossip gates the route: map 249's 149 game objects are the eggs, the lava fissures and the two lava traps, all at state 1, and the instance script has no door (instance_onyxia_lair.cpp only summons a whelp from GO_WHELP_SPAWNER 176510, of which the map has none). So the plan has no use_on, wait_object, gossip or hold step.",
+    "Whelps come from the boss, not the walls: the instance script's spawner object is absent from the map, and every whelp is SummonCreature in boss_onyxia.cpp (phase 2: 16, then 5-7 every 30 s; phase 3: one every 1-10 s).",
+    "Approach points: every pack and the boss get a stand on its own floor 15-20 yd from it with a complete server path from the previous row, so the run leader does not walk toward a pack it cannot see in hops of its own (the draft had 5 such hops). plan-check: ok, 7 points, 0 failures, the 4 estimated-patrol warnings only.",
+    "Turtle 1.18.1 (guide, not in this data): a new section with the optional Broodcommander Axelus 49018, Cindarion 50143, the Onyxian Hatcher 50144, Inciter 49016 and Flamespawn 49017. Their creature_template rows exist (database_updates 20260510092659) but no map 249 spawn, summon or instance-script hook references any of them in the effective world DB, and the core's boss_onyxia.cpp is the vanilla phase script. No leg is written for them; B2 looks for a passage the DB does not have.",
+    "Entrance: areatrigger 2848 needs a raid group, level 50 and the Drakefire Amulet (required_condition 16309) and lands at 30.89 -54.08 -5.03 on map 249 (orientation 4.71239); `.tele onyxia` (game_tele 195, map 249, 29.16 -71.34 -8.18) is the way in without the trigger. The portal on the outer map is at -4768.61 -3752.11 53.43 on map 1."
   ],
   "legs": [
     {
       "name": "onyxia",
-      "to": {"x": 49.8206, "y": -114.607, "z": -24.3112},
+      "to": {"x": 59.46, "y": -103.12, "z": -22.98},
       "pull_groups": [
         {
           "entries": [12129],
           "positions": [
             {"x": 49.8206, "y": -114.607, "z": -24.3112}
-          ]
+          ],
+          "radius": 1,
+          "patrol": {
+            "entries": [12129],
+            "path": [
+              {"x": 52.29, "y": -105.33, "z": -24.8},
+              {"x": 52.44, "y": -97.07, "z": -25.11},
+              {"x": 50.33, "y": -90.02, "z": -25.79},
+              {"x": 46.18, "y": -77.35, "z": -26.59},
+              {"x": 50.56, "y": -90.4, "z": -25.74},
+              {"x": 52.57, "y": -97.47, "z": -25.09},
+              {"x": 52.5, "y": -105.63, "z": -24.78},
+              {"x": 46.47, "y": -114.82, "z": -24.69}
+            ],
+            "period_s": 32,
+            "period_estimate": true,
+            "source": "creature_movement guid 52050"
+          }
         },
         {
           "entries": [12129],
           "positions": [
             {"x": -52.9699, "y": -96.8813, "z": -38.6419}
+          ],
+          "radius": 1,
+          "patrol": {
+            "entries": [12129],
+            "path": [
+              {"x": -52.14, "y": -98.24, "z": -38.65},
+              {"x": -74.76, "y": -98.32, "z": -34.99},
+              {"x": -86.22, "y": -99.96, "z": -36.58},
+              {"x": -96.56, "y": -108.61, "z": -39.22},
+              {"x": -101.85, "y": -112.66, "z": -41.54},
+              {"x": -96.86, "y": -108.63, "z": -39.29},
+              {"x": -85.81, "y": -100.25, "z": -36.52},
+              {"x": -74.63, "y": -98.54, "z": -34.98}
+            ],
+            "period_s": 44,
+            "period_estimate": true,
+            "source": "creature_movement guid 52049"
+          },
+          "approach": [
+            {"x": -33.05, "y": -95.14, "z": -36.06}
           ]
         },
         {
           "entries": [12129],
           "positions": [
             {"x": -131.203, "y": -137.47, "z": -52.5151}
+          ],
+          "radius": 1,
+          "patrol": {
+            "entries": [12129],
+            "path": [
+              {"x": -135.8, "y": -142.14, "z": -53.38},
+              {"x": -149.95, "y": -151.32, "z": -53.53},
+              {"x": -159.63, "y": -158.22, "z": -57.46},
+              {"x": -164.14, "y": -163.1, "z": -59.32},
+              {"x": -169.92, "y": -174, "z": -63.47},
+              {"x": -164.28, "y": -163.27, "z": -59.37},
+              {"x": -159.71, "y": -157.77, "z": -57.41},
+              {"x": -149.38, "y": -150.85, "z": -53.54},
+              {"x": -135.62, "y": -142.15, "z": -53.35},
+              {"x": -125.86, "y": -133.64, "z": -51.44},
+              {"x": -113.42, "y": -122.5, "z": -49.03},
+              {"x": -125.62, "y": -133.46, "z": -51.43}
+            ],
+            "period_s": 64,
+            "period_estimate": true,
+            "source": "creature_movement guid 52052"
+          },
+          "approach": [
+            {"x": -113.88, "y": -127.47, "z": -48.98}
           ]
         },
         {
           "entries": [12129],
           "positions": [
             {"x": -166.623, "y": -196.003, "z": -66.2619}
+          ],
+          "radius": 1,
+          "patrol": {
+            "entries": [12129],
+            "path": [
+              {"x": -163.83, "y": -204.6, "z": -66.27},
+              {"x": -155.15, "y": -212.38, "z": -66.63},
+              {"x": -141.73, "y": -213.38, "z": -68.87},
+              {"x": -154.95, "y": -212.48, "z": -66.64},
+              {"x": -164.34, "y": -204.27, "z": -66.27},
+              {"x": -166.68, "y": -190.9, "z": -66.25},
+              {"x": -168.71, "y": -181.38, "z": -65.46},
+              {"x": -166.79, "y": -190.46, "z": -66.25}
+            ],
+            "period_s": 39,
+            "period_estimate": true,
+            "source": "creature_movement guid 52048"
+          },
+          "approach": [
+            {"x": -163.15, "y": -176.31, "z": -63.21}
           ]
         },
         {
           "entries": [12129],
           "positions": [
             {"x": -199.097, "y": -209.826, "z": -68.9112}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -184.95, "y": -195.68, "z": -67.15}
           ]
         }
       ],
       "boss": {
         "entry": 10184,
-        "position": {"x": 0.69628, "y": -211.972, "z": -86.075}
+        "position": {"x": 0.69628, "y": -211.972, "z": -86.075},
+        "approach": [
+          {"x": -19.3, "y": -211.97, "z": -88.65}
+        ]
       }
     }
   ]
