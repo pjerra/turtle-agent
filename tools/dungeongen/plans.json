@@ -1307,25 +1307,35 @@
    "data": "map819",
    "trigger": 5613,
    "bosses": [
-    62935,
-    62941,
-    62938,
-    2139,
-    62946,
+    62934,
     {
      "entry": 62936,
      "first": [
       62937
      ]
-    }
+    },
+    2139,
+    62935,
+    62940,
+    62946,
+    62938,
+    62941
    ],
    "route": true,
    "size": 20,
    "scripted": [
     62938
    ],
+   "handwritten": true,
+   "special": [
+    "hand-written offline from the map 819 export and the server mesh (task B1, RAID-PREP-tmh.md): 9 legs, 93 packs, 208 units; Karrsh the Sentinel (62934) and Selenaxx Foulheart (62940) are boss steps although the hire unlock list does not count them",
+    "Ursol (62947) and Peroth'arn (60686) have templates but no spawn row: the final boss area (z 310-364, behind the Barrier of Ursol 300606) has no navmesh route from the rest of the map and is not a leg",
+    "the upper ledge at -7500..-7370 -3590..-3370 z 270-281 (17 units, two patrols) is a navmesh island: no route to or from the map, not in the pulls",
+    "no instance script and no EventAI or spell list on any boss but Loktanag the Vile: combat initialization is missing in this core (the 2026-07-02 Timbermaw migration says so); Chieftain Partath (62941) is faction 370 (Timbermaw Hold, friendly) and cannot be attacked until a script makes him hostile",
+    "62874 Vile Skitterer is neutral wildlife (faction template 15, hostile_mask 0) and is in every leg's skip list, not in pulls"
+   ],
    "notes": [
-    "Turtle custom, no instance script in the core. The 20-man size and the boss list are guesses from the data (six bosses with 500k-700k health, comparable to Zul'Gurub); Archdruid Kronn carries npc_flags (gossip)."
+    "Turtle custom, no instance script in the core. The 20-man size and the tank/healer/dps split are placeholders."
    ]
   }
  ]
