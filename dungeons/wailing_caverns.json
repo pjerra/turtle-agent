@@ -1175,38 +1175,33 @@
           "positions": [
             {"x": -145.7, "y": 2.4, "z": -28.6}
           ]
-        },
-        {
-          "entries": [3840, 5756],
-          "positions": [
-            {"x": -102.1, "y": -8.8, "z": -29.1},
-            {"x": -111, "y": -16.1, "z": -28.5}
-          ],
-          "radius": 9
         }
       ],
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "boss": {
         "entry": 3673,
         "position": {"x": -120.2, "y": -24.6, "z": -28.6},
+        "first": [3840, 5756],
         "tactics": {
           "interrupt": [700, 6778, 9532]
         }
       },
       "notes": [
-        "Starts with the hop from -293.3 0.5 -58.0 to -287.5 5.0 -63.6 (via 2, a plain `direct` step with its `check_skip`; via 1, the foot, is an `exact` waypoint, so a run holds the lead bot on it before the step; no GM move: taken live three times on 2026-10-18 with the lead bot on the exact foot, tests/wc-hop-probe-2), then up the ramp past Shamblers and Druids to Lord Serpentis (3673, -120.2 -24.6 -28.6, level 21, 4289 hp): Sleep (700), Healing Touch (6778), Lightning Bolt (9532); the guide says he needs no trash, the database has a Druid and a Venomwing 24 yd from him (group 5); he yells when the first of the other three Fanglords dies (SERPENTIS_YELL). Killing him completes the four that open the Disciple's menu."
+        "Starts with the hop from -293.3 0.5 -58.0 to -287.5 5.0 -63.6 (via 2, a plain `direct` step with its `check_skip`; via 1, the foot, is an `exact` waypoint, so a run holds the lead bot on it before the step; no GM move: taken live three times on 2026-10-18 with the lead bot on the exact foot, tests/wc-hop-probe-2), then up the ramp past Shamblers and Druids to Lord Serpentis (3673, -120.2 -24.6 -28.6, level 21, 4289 hp): Sleep (700), Healing Touch (6778), Lightning Bolt (9532); the guide says he needs no trash, the database has a Druid and a Venomwing 24 yd from him (group 5); he yells when the first of the other three Fanglords dies (SERPENTIS_YELL). Killing him completes the four that open the Disciple's menu.",
+        "The Druid and the Venomwing beside Serpentis (-102.1 -8.8 and -111.0 -16.1, 12.5 yd from him) are his first, not a pull group: as a pull they dragged him in and the boss row ended at once with 'pack cleared' (live 2026-10-20, #250)."
       ]
     },
     {
       "name": "verdan",
-      "to": {"x": -85.3, "y": 21.3, "z": -31.1},
+      "to": {"x": -98.6, "y": 7.4, "z": -29.9},
       "skip": [2914, 3653, 3678, 3679, 3835, 5912],
       "boss": {
         "entry": 5775,
         "position": {"x": -81.9, "y": 32.3, "z": -31}
       },
       "notes": [
-        "Verdan the Everliving (5775, -81.9 32.3 -31.0, level 21 elemental, 8099 hp, 69 yd from Serpentis): hits harder than anyone before him (Wowhead comments: 150 to 470 per hit, start healing the tank at once), Grasping Vines (8142, a root of 10 s on everyone within 10 yd and a 2 s knockdown with damage, not interruptible; ranged stay 10 yd off), no adds. Wowhead: always kill him, it opens the waterfall shortcut behind him, a hole that drops into the river near the entrance; a fall is no plan step, so the plan's own way back to the Disciple is still the 1700 yd over the ramp and the hop cannot be climbed (live, 2026-10-18: a `cmd move` from the ramp back to the foot was acked and the lead stopped at the ramp edge, 5.0 yd short, tests/wc-hop-probe-2): a group that has to return to the Disciple leaves through the waterfall hole behind Verdan, a drop into the river near the entrance (see dungeons/wailing_caverns-extra.json)."
+        "Verdan the Everliving (5775, -81.9 32.3 -31.0, level 21 elemental, 8099 hp, 69 yd from Serpentis): hits harder than anyone before him (Wowhead comments: 150 to 470 per hit, start healing the tank at once), Grasping Vines (8142, a root of 10 s on everyone within 10 yd and a 2 s knockdown with damage, not interruptible; ranged stay 10 yd off), no adds. Wowhead: always kill him, it opens the waterfall shortcut behind him, a hole that drops into the river near the entrance; a fall is no plan step, so the plan's own way back to the Disciple is still the 1700 yd over the ramp and the hop cannot be climbed (live, 2026-10-18: a `cmd move` from the ramp back to the foot was acked and the lead stopped at the ramp edge, 5.0 yd short, tests/wc-hop-probe-2): a group that has to return to the Disciple leaves through the waterfall hole behind Verdan, a drop into the river near the entrance (see dungeons/wailing_caverns-extra.json).",
+        "The leg's to is 30 yd short of Verdan on the line from Serpentis (-98.6 7.4 -29.9): the old to (-85.3 21.3 -31.1) was 11.6 yd from him and the walk pulled him before the boss row (live 2026-10-20, #250)."
       ]
     }
   ]

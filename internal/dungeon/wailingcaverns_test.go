@@ -443,9 +443,42 @@ func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 	}
 }
 
+// A boss who stands beside a pack is fought as one encounter: no pull group of his own leg may stand within 20 yd (3-D) of him (the pack
+// would drag him in and his row would end as "pack cleared"), and the leg before the next boss stops far enough short that the walk cannot
+// pull him. Serpentis's Druid and Venomwing are his `first`; Verdan's leg stops at least 25 yd short (live 2026-10-20, #250).
+func TestWailingCavernsBossesAreEncounters(t *testing.T) {
+	p := loadPlan(t, wailingPlan)
+	for _, name := range []string{"serpentis", "verdan"} {
+		l := zfLeg(t, p, name)
+		if l.Boss == nil {
+			t.Fatalf("leg %q has no boss", name)
+		}
+		for gi, g := range l.PullGroups {
+			for k, q := range g.Positions {
+				if d := dist3(q, l.Boss.Position); d < 20 {
+					t.Errorf("leg %q pull_groups[%d] member %d (%v) is %.1f yd from boss %d: a pack beside a boss is his first, not a pull group",
+						name, gi, k, q, d, l.Boss.Entry)
+				}
+			}
+		}
+	}
+	serp := zfLeg(t, p, "serpentis")
+	if b := serp.Boss; b == nil || len(b.First) != 2 || b.First[0] != 3840 || b.First[1] != 5756 {
+		t.Errorf("serpentis boss.first = %+v, want [3840 5756] (the Druid and the Venomwing beside him)", serp.Boss)
+	}
+	verdan := zfLeg(t, p, "verdan")
+	if verdan.Boss == nil {
+		t.Fatalf("verdan leg has no boss")
+	}
+	if d := dist3(verdan.To, verdan.Boss.Position); d < 25 {
+		t.Errorf("verdan.to %v is %.1f yd from Verdan %v: want at least 25 yd (the walk to it pulled him at 11.6 yd)", verdan.To, d, verdan.Boss.Position)
+	}
+}
+
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
-// the hop is the only break, and the whole walk to every member position is about 8223 yd (8195 before the kresh leg of 2026-10-28,
-// 6240 before the vangros and zandara legs of 2026-10-26; a change of route moves this number: update it with the plan's notes).
+// the hop is the only break, and the whole walk to every member position is about 8189 yd (8223 before the Serpentis pack became the
+// boss's first on 2026-10-29, 8195 before the kresh leg of 2026-10-28, 6240 before the vangros and zandara legs of 2026-10-26; a change
+// of route moves this number: update it with the plan's notes).
 func TestWailingCavernsOnNavmesh(t *testing.T) {
 	dir := mapMmaps(43)
 	if dir == "" {
@@ -488,7 +521,7 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
 		if p.Name == "wailing_caverns" && (total < 8160 || total > 8290 || hops != 1) {
-			t.Errorf("%s: %.0f yd and %d hops, expected about 8223 yd and one hop", p.Name, total, hops)
+			t.Errorf("%s: %.0f yd and %d hops, expected about 8189 yd and one hop", p.Name, total, hops)
 		}
 	}
 }
