@@ -227,6 +227,16 @@ turtle-agent rpc ~/ta-w commander '{"op": "status"}' --timeout 10s
 echo '{"text": ".bot follow start"}' | turtle-agent rpc ~/ta-w gm -
 ```
 
+How a brief uses it (workers never open or edit settings files):
+
+```sh
+turtle-agent lease acquire m910q --slot 1 --holder w-a
+turtle-agent slot setup m910q 1 --holder w-a --mmaps-dir ~/turtle-agent-mmaps --dungeons-from dungeons
+turtle-agent teardown ~/ta-w-a
+```
+
+`slot setup` also takes `--mmaps-dir DIR` and `--dungeons-from DIR` (not in the usage line above). `--mmaps-dir DIR` writes `mmaps_dir` into the private `settings.json` it creates (the navmesh folder the agent walks on); DIR must exist and be a directory (a leading `~` is the home folder), else setup refuses with exit 15. `--dungeons-from DIR` copies every `*.json` plan file from DIR into the slot's `dungeons/` folder (plain files only: a symlink is refused, other files are skipped, a bad plan name is refused); workers pass the checked-out `dungeons/` folder so `follow_start`/`dungeon_run` find their plans. Without the flags, behaviour is unchanged: the 5 printed lines stay the same, plus one `mmaps: <dir>` line when `--mmaps-dir` was given and one `dungeons: <n> plans copied from <dir>` line when `--dungeons-from` was given; settings contents are never printed.
+
 ## JSON-RPC API
 
 JSON-RPC 2.0 over HTTP POST on the loopback address (`Content-Type: application/json`, no batches). Requests from a

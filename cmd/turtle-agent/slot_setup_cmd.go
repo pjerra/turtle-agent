@@ -13,7 +13,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/slots"
 )
 
-const slotSetupUsage = "usage: turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]"
+const slotSetupUsage = "usage: turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--mmaps-dir DIR] [--dungeons-from DIR] [--character NAME] [--slots FILE]"
 
 // slotManifest is the no-secret <dir>/slot.json written by slot setup.
 type slotManifest struct {
@@ -49,6 +49,7 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	// Aliases so the body below reads as before.
 	holder, dirFlag := &o.holder, &o.dir
 	binaryFlag, dungeonsFlag := &o.binary, &o.dungeonsDir
+	mmapsFlag, dungeonsFromFlag := &o.mmapsDir, &o.dungeonsFrom
 	characterFlag, slotsPath := &o.character, &o.slotsPath
 	serverName, slotID := o.server, o.slot
 	if !leaseHolderRe.MatchString(*holder) {
@@ -78,6 +79,16 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "slot setup: %s/%s is not leased by %s: run turtle-agent lease acquire %s --slot %s --holder %s first\n",
 			server.Name, slot.ID, *holder, server.Name, slot.ID, *holder)
 		return exitSlotRefused
+	}
+	// --mmaps-dir is validated before anything is created: a missing dir
+	// refuses like other slot refusals and leaves nothing behind.
+	var mmapsOverride string
+	if *mmapsFlag != "" {
+		mmapsOverride = slots.ExpandTilde(*mmapsFlag)
+		if info, err := os.Stat(mmapsOverride); err != nil || !info.IsDir() {
+			fmt.Fprintf(stderr, "slot setup: --mmaps-dir %s is not a folder (copy the server's data/mmaps files there)\n", mmapsOverride)
+			return exitSlotRefused
+		}
 	}
 	character := slot.Character
 	if *characterFlag != "" {
@@ -210,6 +221,24 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	if dungeonsMade {
 		created = append(created, dungeonsDir)
 	}
+	// Copy seeded plans (backlog 56: the empty dungeons/ folder made
+	// follow_start/dungeon_run fail with 'no such file'). Copied files
+	// sit inside the claimed dir, so the normal cleanup removes them;
+	// a pre-existing --dungeons-dir keeps its old files (rename never
+	// overwrites: it refuses instead).
+	var plansCopied int
+	var plansSource string
+	if *dungeonsFromFlag != "" {
+		copied, src, err := slotSetupCopyPlans(slots.ExpandTilde(*dungeonsFromFlag), dungeonsDir)
+		if err != nil {
+			return fail("slot setup: %v", err)
+		}
+		plansSource = src
+		plansCopied = len(copied)
+		for _, p := range copied {
+			created = append(created, p)
+		}
+	}
 	tracesDir := filepath.Join(dir, "traces")
 	tracesMade, err := slotSetupEnsureDir(tracesDir, 0o755)
 	if err != nil {
@@ -227,6 +256,9 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	mmapsDir := slots.ExpandTilde(server.MmapsDir)
 	if mmapsDir == "" {
 		mmapsDir = src.MmapsDir
+	}
+	if mmapsOverride != "" {
+		mmapsDir = mmapsOverride
 	}
 	dst := config.Settings{
 		Realmd:            server.Realmd,
@@ -312,6 +344,12 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		binDst, settingsPath, manifest.PIDFile, character, filepath.Join(dir, "agent.out"))
 	fmt.Fprintf(stdout, "rpc: 127.0.0.1:%d, token file %s (written at login)\n", slot.Port, tokenFile)
 	fmt.Fprintf(stdout, "teardown: %s teardown %s\n", binDst, dir)
+	if mmapsOverride != "" {
+		fmt.Fprintf(stdout, "mmaps: %s\n", mmapsOverride)
+	}
+	if *dungeonsFromFlag != "" {
+		fmt.Fprintf(stdout, "dungeons: %d plans copied from %s\n", plansCopied, plansSource)
+	}
 	return exitOK
 }
 
@@ -377,6 +415,63 @@ func slotSetupInsideDir(dir, p string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// slotSetupPlanNameOK reports whether name is a plain file name the copy may
+// place in the dungeons dir: no path separators, no dot-dirs. ReadDir never
+// returns separators, but the copy still proves every destination stays
+// inside the dungeons dir instead of assuming it.
+func slotSetupPlanNameOK(name string) bool {
+	return name != "" && name != "." && name != ".." &&
+		name == filepath.Base(name) && !strings.ContainsAny(name, `/\`)
+}
+
+// slotSetupCopyPlans copies every *.json plan file from srcDir into dstDir
+// and returns the copied destination paths plus the source shown in the
+// printed line. Only plain files are copied: a symlinked *.json refuses the
+// setup (setup never follows symlinks), any other non-regular file does too,
+// and a bad name refuses it. Other files are skipped. A git:<ref> source is
+// refused: only the DIR form is implemented (export dungeons/*.json of that
+// ref into a folder instead).
+func slotSetupCopyPlans(srcDir, dstDir string) ([]string, string, error) {
+	if ref, ok := strings.CutPrefix(srcDir, "git:"); ok {
+		return nil, "", fmt.Errorf("--dungeons-from git:%s is not supported: export dungeons/*.json of that ref into a folder and pass its DIR", ref)
+	}
+	info, err := os.Stat(srcDir)
+	if err != nil || !info.IsDir() {
+		return nil, "", fmt.Errorf("--dungeons-from %s is not a folder of plan files", srcDir)
+	}
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("--dungeons-from %s: %v", srcDir, err)
+	}
+	var copied []string
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if !slotSetupPlanNameOK(name) {
+			return nil, "", fmt.Errorf("--dungeons-from %s: bad plan name %q (plain file names only)", srcDir, name)
+		}
+		src := filepath.Join(srcDir, name)
+		fi, err := os.Lstat(src)
+		if err != nil {
+			return nil, "", fmt.Errorf("--dungeons-from %s: %v", srcDir, err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, "", fmt.Errorf("--dungeons-from %s: %q is a symlink (setup never follows symlinks)", srcDir, name)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, "", fmt.Errorf("--dungeons-from %s: %q is not a plain file", srcDir, name)
+		}
+		dst := filepath.Join(dstDir, name)
+		if err := copyFileExcl(src, dst, 0o644); err != nil {
+			return nil, "", fmt.Errorf("--dungeons-from %s: %v", srcDir, err)
+		}
+		copied = append(copied, dst)
+	}
+	return copied, srcDir, nil
 }
 
 func slotSetupCheckLease(store *slots.Store, server, slot, holder string) (string, error) {
