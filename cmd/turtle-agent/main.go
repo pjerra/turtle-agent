@@ -92,6 +92,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return planCheckCmd(args[1:], stdout, stderr)
 	case "path-check":
 		return pathCheckCmd(args[1:], stdout, stderr)
+	case "patrol-record":
+		return patrolRecordCmd(ctx, args[1:], stdout, stderr)
 	case "stage-check":
 		return stageCheckCmd(args[1:], stdout, stderr)
 	case "scenario":
@@ -138,6 +140,7 @@ func usage(w io.Writer) {
   turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
   turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
+  turtle-agent patrol-record <slot-dir> --map M --area x,y,r [--z Z] --minutes N [--sample-ms 1000] [--out FILE] [--spawns DIR] [--mmaps DIR] [--entries e1,e2]
   turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
   turtle-agent scenario check [--var NAME=VALUE]... <file>
   turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
