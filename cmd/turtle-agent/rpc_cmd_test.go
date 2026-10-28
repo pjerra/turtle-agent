@@ -342,3 +342,112 @@ func TestRPCUsage(t *testing.T) {
 		}
 	}
 }
+
+// Every bad envelope exits 15 with the bad-reply line, never 0: the body
+// must be an object with "jsonrpc":"2.0", "id" 1 and exactly one of a
+// present "result" or a well-shaped "error" (numeric code, string message);
+// a non-200 status counts too. The replies come from an in-process HTTP
+// server, so the client never touches the real agent here. Mutation:
+// accepting the old unmarshal-only envelope (no id/version/exactly-one
+// check, no status check, errors.As-free "cannot reach" for everything)
+// lets one of these bodies exit 0 or print the wrong line.
+func TestRPCBadRepliesExit15(t *testing.T) {
+	token := rpcCLITestToken(t)
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"empty object":               {200, `{}`},
+		"null":                       {200, `null`},
+		"array":                      {200, `[]`},
+		"wrong id":                   {200, `{"jsonrpc":"2.0","id":2,"result":{"state":"in_world"}}`},
+		"missing id":                 {200, `{"jsonrpc":"2.0","result":{"state":"in_world"}}`},
+		"missing version":            {200, `{"id":1,"result":{"state":"in_world"}}`},
+		"bad version":                {200, `{"jsonrpc":"1.0","id":1,"result":{"state":"in_world"}}`},
+		"both":                       {200, `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":1,"message":"x"}}`},
+		"neither":                    {200, `{"jsonrpc":"2.0","id":1}`},
+		"null result and null error": {200, `{"jsonrpc":"2.0","id":1,"result":null,"error":null}`},
+		"error without code":         {200, `{"jsonrpc":"2.0","id":1,"error":{"message":"x"}}`},
+		"error string code":          {200, `{"jsonrpc":"2.0","id":1,"error":{"code":"1","message":"x"}}`},
+		"error without message":      {200, `{"jsonrpc":"2.0","id":1,"error":{"code":1}}`},
+		"error not an object":        {200, `{"jsonrpc":"2.0","id":1,"error":"boom"}`},
+		"not JSON":                   {200, `not json`},
+		"teapot":                     {http.StatusTeapot, `{"jsonrpc":"2.0","id":1,"result":{}}`},
+	} {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(tc.status)
+			fmt.Fprint(w, tc.body)
+		}))
+		t.Cleanup(ts.Close)
+		dir := rpcCLITestDir(t, rpcCLITestPort(t, ts), token)
+		code, out, errOut := runCLI("rpc", "--timeout", "5s", dir, "status")
+		if code != exitSlotRefused {
+			t.Errorf("%s: code %d stdout %q stderr %q, want %d", name, code, out, errOut, exitSlotRefused)
+		}
+		if !strings.Contains(errOut, "rpc: bad reply from the agent:") {
+			t.Errorf("%s: stderr %q has no bad-reply line", name, errOut)
+		}
+		if out != "" {
+			t.Errorf("%s: stdout %q, want empty", name, out)
+		}
+		if strings.Contains(out+errOut, token) {
+			t.Errorf("%s: token in output", name)
+		}
+	}
+}
+
+// A non-agent token file is refused before any request, with the fixed
+// line and exit 15, and the content is never printed; a valid token the
+// server echoes is still redacted. Mutation: skipping the shape check
+// (using the raw file as the bearer) sends the quotes/backslash/markup
+// to the server or prints them; scrubbing only and printing the content
+// leaks the file.
+func TestRPCRefusesNonAgentToken(t *testing.T) {
+	token := rpcCLITestToken(t)
+	ts := rpcCLITestAgent(t, token, nil)
+	port := rpcCLITestPort(t, ts)
+	bad := map[string]string{
+		"quotes":        `"0123456789012345678901234567890123456789ab"`,
+		"backslash":     `0123456789012345678901234567890123456789a\`,
+		"markup":        `012345678901234567890123456789012345678<ab`,
+		"inner newline": `0123456789012345678901234567890123456789a` + "\n" + `x`,
+		"too short":     `short`,
+		"too long":      token + "x",
+	}
+	for name, content := range bad {
+		dir := rpcCLITestDir(t, port, token)
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("rpc-%d.token", port)), []byte(content+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errOut := runCLI("rpc", "--timeout", "5s", dir, "status")
+		if code != exitSlotRefused {
+			t.Errorf("%s: code %d stdout %q stderr %q, want %d", name, code, out, errOut, exitSlotRefused)
+		}
+		if !strings.Contains(errOut, "rpc: the token file is not an agent token") {
+			t.Errorf("%s: stderr %q has no not-an-agent-token line", name, errOut)
+		}
+		for _, line := range strings.Split(out+"\n"+errOut, "\n") {
+			if got := strings.TrimSpace(content); got != "" && strings.Contains(line, got) {
+				t.Errorf("%s: token file content in output %q %q", name, out, errOut)
+				break
+			}
+		}
+	}
+	// A valid echoed token is still redacted on stdout.
+	dir := rpcCLITestDir(t, port, token)
+	code, out, errOut := runCLI("rpc", "--raw", dir, "leak")
+	if code != exitOK {
+		t.Fatalf("valid token: code %d stdout %q stderr %q", code, out, errOut)
+	}
+	if strings.Contains(out+errOut, token) {
+		t.Fatal("valid token in output")
+	}
+	if !strings.Contains(out, "<token>") {
+		t.Fatalf("no redaction marker in %q", out)
+	}
+}

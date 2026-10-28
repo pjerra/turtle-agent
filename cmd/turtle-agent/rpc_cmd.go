@@ -11,6 +11,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,6 +73,15 @@ func rpcCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "rpc: token file: %v\n", rpcScrub(err.Error(), ""))
 		return exitSlotRefused
 	}
+	// The file must hold a token the agent generates (rpc.NewToken: 32
+	// random bytes as 43 base64url characters): anything else (quotes, a
+	// backslash, markup, an inner newline, the wrong length) is refused
+	// before use, without printing it. The rpcScrub calls below stay as a
+	// second line of defence.
+	if !rpcValidToken(token) {
+		fmt.Fprintln(stderr, "rpc: the token file is not an agent token")
+		return exitSlotRefused
+	}
 	params, err := rpcReadParams(o.params, o.paramsFromStdin)
 	if err != nil {
 		fmt.Fprintf(stderr, "rpc: %v\n", err)
@@ -79,8 +89,14 @@ func rpcCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	result, rpcErr, err := rpcPostCall(manifest.Port, token, o.method, params, o.timeout)
 	if err != nil {
-		// Transport failure (agent not running, connection refused):
-		// the lease/session wording matches teardown's own.
+		// A bad envelope keeps its own "bad reply" line; only transport
+		// failures (agent not running, connection refused) use the
+		// lease/session wording, matching teardown's own.
+		var bad *rpcBadReplyError
+		if errors.As(err, &bad) {
+			fmt.Fprintf(stderr, "rpc: %s\n", rpcScrub(err.Error(), token))
+			return exitSlotRefused
+		}
 		fmt.Fprintf(stderr, "rpc: cannot reach the agent at 127.0.0.1:%d: %s\n", manifest.Port, rpcScrub(err.Error(), token))
 		return exitSlotRefused
 	}
@@ -143,6 +159,8 @@ type rpcError struct {
 
 // rpcCall posts one JSON-RPC 2.0 request to 127.0.0.1:port and returns the
 // result (nil for notifications/empty), or the error the agent answered.
+// Anything that is not a valid 2.0 envelope for our id comes back as an
+// *rpcBadReplyError, so the caller can tell a bad reply from a dead agent.
 func rpcPostCall(port int, token, method string, params json.RawMessage, timeout time.Duration) (json.RawMessage, *rpcError, error) {
 	reqBody := map[string]any{
 		"jsonrpc": "2.0",
@@ -169,26 +187,97 @@ func rpcPostCall(port int, token, method string, params json.RawMessage, timeout
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, nil, fmt.Errorf("unauthorized: token file no longer matches the agent (restarted?)")
+		return nil, nil, &rpcBadReplyError{reason: "unauthorized: token file no longer matches the agent (restarted?)"}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("http %d", resp.StatusCode)
+		return nil, nil, &rpcBadReplyError{reason: fmt.Sprintf("http %d", resp.StatusCode)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, nil, err
 	}
-	var env struct {
-		Result json.RawMessage `json:"result"`
-		Error  *rpcError       `json:"error"`
+	return rpcCheckReply(raw)
+}
+
+// rpcBadReplyError is a reply that fails the JSON-RPC envelope check: a
+// non-200 status, or a body that is not an object with "jsonrpc":"2.0",
+// our id and exactly one of result/error. rpcCmd reports it as
+// "rpc: bad reply from the agent: <reason>" (exit 15); anything else from
+// rpcPostCall is a transport failure ("cannot reach").
+type rpcBadReplyError struct {
+	reason string
+}
+
+func (e *rpcBadReplyError) Error() string { return "bad reply from the agent: " + e.reason }
+
+// rpcTokenLen is the length of rpc.NewToken: 32 random bytes in base64url
+// without padding.
+const rpcTokenLen = 43
+
+// rpcValidToken reports whether tok has exactly the shape the agent
+// generates, so a stray file is refused before it is ever sent.
+func rpcValidToken(tok string) bool {
+	if len(tok) != rpcTokenLen {
+		return false
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, nil, fmt.Errorf("bad reply: %v", err)
+	for i := range len(tok) {
+		c := tok[i]
+		if c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '-' || c == '_' {
+			continue
+		}
+		return false
 	}
-	if env.Error != nil {
-		return nil, env.Error, nil
+	return true
+}
+
+// rpcCheckReply validates the full JSON-RPC envelope of a 200 reply to our
+// request (id 1): an object with "jsonrpc":"2.0", "id" 1, and exactly one
+// of a present "result" or "error"; an "error" must be an object with a
+// numeric code and a string message.
+func rpcCheckReply(raw []byte) (json.RawMessage, *rpcError, error) {
+	bad := func(format string, args ...any) (json.RawMessage, *rpcError, error) {
+		return nil, nil, &rpcBadReplyError{reason: fmt.Sprintf(format, args...)}
 	}
-	return env.Result, nil, nil
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '{' {
+		return bad("not a JSON object")
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return bad("invalid JSON: %v", err)
+	}
+	var version string
+	if v, ok := obj["jsonrpc"]; !ok || json.Unmarshal(v, &version) != nil || version != "2.0" {
+		return bad(`want "jsonrpc":"2.0"`)
+	}
+	var id any
+	if v, ok := obj["id"]; !ok || json.Unmarshal(v, &id) != nil || id != float64(1) {
+		return bad(`want "id":1`)
+	}
+	res, hasRes := obj["result"]
+	errRaw, hasErr := obj["error"]
+	if hasRes == hasErr {
+		return bad(`want exactly one of "result" or "error"`)
+	}
+	if !hasErr {
+		return res, nil, nil
+	}
+	var ebody struct {
+		Code    any `json:"code"`
+		Message any `json:"message"`
+	}
+	const errShape = `"error" must be an object with a numeric code and a string message`
+	if json.Unmarshal(errRaw, &ebody) != nil {
+		return bad(errShape)
+	}
+	code, ok := ebody.Code.(float64)
+	if !ok {
+		return bad(errShape)
+	}
+	msg, ok := ebody.Message.(string)
+	if !ok {
+		return bad(errShape)
+	}
+	return nil, &rpcError{Code: int(code), Message: msg}, nil
 }
 
 // rpcScrub replaces the token with <token> so it never reaches stdout or
