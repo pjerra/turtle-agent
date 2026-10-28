@@ -1070,6 +1070,7 @@
   },
   {
    "name": "ruins_of_ahnqiraj",
+   "handwritten": true,
    "title": "Ruins of Ahn'Qiraj",
    "map": 509,
    "kind": "raid",
@@ -1086,11 +1087,14 @@
    "size": 20,
    "entrance_tele": "aq20",
    "special": [
-    "General Rajaxx's waves (Captain Qeez and the Andorov escort)",
-    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL)"
+    "General Rajaxx is an event: Andorov's gossip (15471, menu 0) starts the seven waves, and the raid holds on the spot until instance data 2 reads 3 (Rajaxx's death)",
+    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL 180619) are summoned two at a time during the fight: the bots' own fight strategy clicks them, no plan step",
+    "the map has no static door, lever or key: its 7 game objects are Scarab Coffers, and door 176149 is summoned in combat and deleted after",
+    "the 49 Rajaxx event units (the captains and their escorts) are no pulls; Andorov and the four Kaldorei Elite are friendly",
+    "the 19 Canal Frenzy sit in the sunken water channel below the Moam corridor and are in no pull"
    ],
    "notes": [
-    "Captain Tuubid (15392) is Turtle's addition and not a leg."
+    "Captain Tuubid (15392) is Turtle's addition and the second captain of Rajaxx's waves, not a leg."
    ]
   },
   {
