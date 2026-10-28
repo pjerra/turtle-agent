@@ -30,6 +30,40 @@ strategy it replaces. The full reference is README "Rotations as data"; this is 
 Built in: `frost_mage`, `fire_mage`, `arcane_mage`, `shadow_priest`, `arms_warrior`, `fury_warrior`, `tank_warrior` (`turtle-agent rotation list`). Put your own
 files in a folder and name it `rotations_dir` in the settings; names must be new (a built-in name is refused).
 
+## Format additions for rotations from the knowledge base
+
+These fields are part of version 1, are all optional, and are checked by `rotation check`. They exist so that a rotation written from a
+spec guide can say what the guide says (the KB rotations themselves come later, from the recipes of `tools/kbrotgen`).
+
+- **Level bands:** `when.level_min` and `when.level_max` (a character level, 1-60; `level_min` <= `level_max`) limit an entry to a range of levels.
+  Advice that only holds while leveling ("Sunder before Heroic Strike at leveling rage") is an entry with `level_max`.
+- **Mobs near the fight's mob:** `when.mobs_near_mob_min: N` needs at least N hostile mobs in combat within 8 yd of the fight's mob (the fight's
+  mob included). It is the ranged classes' "3+ targets" for an AoE row; a melee row uses `mobs_in_reach_min`.
+- **Healing targets:** `target: "heal"` casts on the member the healer's triage picked this tick (`HealPlan`: the party member the healer role would
+  heal, counting heals in flight, the tank's bonus included). The entry cannot run when no member needs a heal or healing is not allowed now. A
+  heal entry is never harmful and has no threat; it is cast through the healer's cast path, so the heal memory (the in-flight count) sees it.
+  Conditions that look at that member are valid only with this target: `heal_hp_below` (percent), `heal_is_tank` (bool) and `heal_no_aura` (none
+  of these auras on the member, e.g. `Renew`); `members_hurt_min` (members in reach below the heal threshold) works with any target.
+  Without `when.state` a heal entry runs in and out of combat (the triage itself decides), not only while a mob is fought.
+- **One rank:** `rank: N` (1 or above) casts exactly rank N of the spell's name, if the spellbook knows that rank; it never falls back to the
+  highest rank (a guide that says "Renew (rank 1)" means rank 1). The rank must exist for that name in the spell data.
+- **Add mode:** `"mode": "add"` with an empty `replaces`: the file replaces nothing and its strategy is inserted right after `role_healer`. It is
+  for a healing class's extra casts (a guide's tank upkeep, an extra heal), whose entries in band `high` pre-empt the generic heal. The class
+  must have a heal kit, and the preset must have `role_healer`; anything else is refused.
+- **Where the file came from:** the optional top-level `kb` block names the guide file, its sha256, the preset, the recipe and the rows the
+  rotation does not express (`{"row", "text", "why"}` each). `rotation show` prints `kb: <file>, N rows not expressed (see the file's
+  kb.unexpressed)`; `preset` must be a known preset.
+
+```json
+{"version": 1, "name": "kb_holy_priest_extra", "class": "priest", "mode": "add", "replaces": [],
+ "priorities": [
+  {"id": "renew_tank", "spell": "Renew", "level": 8, "rank": 1, "target": "heal", "band": "high",
+   "when": {"heal_is_tank": true, "heal_no_aura": ["Renew"]}}],
+ "kb": {"file": "classes/yaml/priest/holy-healer.yaml", "sha256": "…", "preset": "holy_priest",
+        "recipe": "tools/kbrotgen/recipes/kb_holy_priest.json",
+        "unexpressed": [{"row": "rotation_single[1]", "text": "…", "why": "pre-pull/opener outside the brain's fight"}]}}
+```
+
 ## Check a file
 
 ```sh
