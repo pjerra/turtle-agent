@@ -105,6 +105,7 @@ turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dr
 turtle-agent rpc [--timeout DUR] [--raw] <dir> <method> [<params-json>|-]
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port] [--speed N] [--max-gap D] [--loop] [--dry-run] [--i-know] | convert <api-dump-dir> [--out <dir>] | record --out <dir> [--listen host:port] [--duration D] [--max-mb N]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
@@ -130,6 +131,7 @@ turtle-agent version
 | 14 | `teardown`: a game-side or CLI step failed |
 | 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
 | 16 | `rpc`: the agent answered with a JSON-RPC error |
+| 17 | `dashboard-replay` refused its target: not a loopback address (`--i-know` vouches for a test dashboard), or a bad port |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -1522,6 +1524,69 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
+
+## Dashboard replay
+
+`turtle-agent dashboard-replay` plays a recorded TortoiseBots run into the **observability dashboard daemon**'s real UDP
+port, so its Commanders tab and fight debugger can be exercised on a laptop with no server, no bots and no game client:
+every view they show comes from the datagrams the module sends, and a recording is those datagrams. It logs in to
+nothing and reads no settings, token or key file.
+
+```
+turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port] [--speed N] [--max-gap D] [--loop] [--dry-run] [--i-know]
+turtle-agent dashboard-replay convert <api-dump-dir> [--out <dir>]
+turtle-agent dashboard-replay record --out <dir> [--listen host:port] [--duration D] [--max-mb N]
+```
+
+**Play.** A folder holding `replay.jsonl` (or the file itself) is sent one datagram per line, at the recorded pace
+divided by `--speed` (default 1), the pause between two datagrams capped at `--max-gap` (default 10 s, under the
+daemon's 12 s commanders staleness). A progress line appears every 10 s of played time; `--loop` starts over with a new
+session after the last datagram (Ctrl-C ends it), without it the command exits 0 at the end. `--dry-run` checks the
+target, prints `N datagrams over T s at speed S: COMMANDERS a, ...` and sends nothing.
+
+**Convert.** A folder holding only API dumps (`commanders-*.json` from `GET /api/v1/commanders`, `combat-fight-*.json`
+from `GET /api/v1/combat/fight/<key>`) is converted in memory first: a COMMANDERS snapshot and a synthetic HEARTBEAT
+every 2 s (the module's cadence), and each fight once when the module would have sent it. That is approximate, because
+the API output has already been through the daemon's caps and its nil-to-empty fixes; stderr says
+`converted from API dumps: N datagrams`. `convert` writes the same timeline to `<dir>/replay.jsonl` (mode 0600) so a
+dump folder can be replayed as a recording later.
+
+**Record.** `-forward-udp 127.0.0.1:9296` on the daemon copies every datagram it receives, byte for byte, before
+processing; `record` listens there (default `127.0.0.1:9296`), appends the datagram lines to `replay.jsonl.part`, and on
+Ctrl-C (or `--duration`, or `--max-mb`) writes `replay.jsonl` = header + those lines and removes the part file. That
+file is the better source: it holds what the module really sent, not the daemon's answer.
+
+```sh
+# on the daemon host, once per run you want on record
+./tbdash -forward-udp 127.0.0.1:9296
+turtle-agent dashboard-replay record --out ~/TortoiseBots-audit/tests/<run>/
+```
+
+**Safety rules.** The target is `127.0.0.1:9195` unless `--to` says otherwise, and anything whose host does not resolve
+only to a loopback address is refused with exit code 17 and
+`refusing to replay to <host:port>: not a loopback address; pass --i-know if this daemon is a test dashboard`.
+`--i-know` allows it and prints `WARNING: replaying to non-loopback <addr>`. Every datagram is rewritten on the way out:
+`session` = the replay's (a newer one per loop, so a second pass is not deduped away), `ts` = now, `seq` = the recorded
+seq minus the file's smallest plus 1 (a shared recorded seq stays shared, so a BOT_BATCH snapshot cycle still
+assembles), and `"replay": true` is added. The daemon's receive-side guard drops a `replay: true` datagram unless it
+was started with `-accept-replay` (env `TBDASH_ACCEPT_REPLAY=1`), so once that guard is deployed (TortoiseBots task R4)
+a replay that reaches a production daemon by mistake changes nothing there; until then only the sender's refusal stands
+between a wrong `--to` and a live dashboard. Note that a replay session is **newer** than a running module's session, so a daemon that also receives
+a live module shows the replay until the module restarts: another reason to replay only into a test daemon.
+
+**A test daemon.** From the TortoiseBots `tools/observability`:
+
+```sh
+go run ./cmd/server -udp-port 9195 -http-port 8095 -accept-replay -dev-no-auth
+turtle-agent dashboard-replay ~/TortoiseBots-audit/tests/raid-ony-walk2 --speed 10
+```
+
+Then open `http://127.0.0.1:8095` and the Commanders tab (`-accept-replay` is the daemon guard of the paragraph
+above). Checked on 2026-10-28 against
+`origin/feat/fight-debugger` @ `3c909e75` with no database: the daemon does start without one (its MySQL connections
+open lazily and the background DB sweeps only log their failures), but its page and API sit behind the GM login, which
+reads the realmd database, so a machine without a database needs `-dev-no-auth`; with a database and a GM account,
+drop it. If a daemon build does refuse to start without a database, use the docker compose the dashboard README names.
 
 ## Scenarios
 

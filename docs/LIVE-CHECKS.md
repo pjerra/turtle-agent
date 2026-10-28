@@ -1058,3 +1058,26 @@ README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Nee
 9. **Partial start (#248).** From a party standing inside the instance, `dungeon_run {"mode":"observe", "from_leg": 10, ...}` must send `.bot run start wailing_caverns from leg serpentis` (a one-word, unique leg name; else `from 10`-style number) and the run leader's first status line must show the leg's first step (Wailing Caverns leg 10: step 207 of 226; `from 207` was the hand-started run of 2026-10-20). With `from_pull_group`, check that the server's listed step count matched the agent's rebuilt rows (the report's "starts partway" note names the step): when it did not, the probe must refuse before hiring and name `observe.from_step`. Then check the start is proven: the start message's step and leg are compared with the request (a reply at another step for `from_step`/`from_pull_group`, another leg, or a planted deployment of another plan version must stop the run and refuse the watch — only the module's documented "moved back to the step that starts the event" may differ, and is noted); an ACK-only start (no message) is proven by `run status` or, at another step, the run is stopped and the watch refused; a busy run at another step is not adopted. Check the party-placed start: a start elsewhere must pause/refuse as the module's `not-in-instance`/`party-scattered`; a lead bot more than 80 yd from the step's point, a step whose point is not known and a start without the lead's position are refused before `run start` (`observe.allow_far_start` turns each into a note).
 10. **Server trace (#249).** With `run_meta.server_trace: true` the start must go out and be acknowledged: the report has no "server trace state unknown", `.bot trace status` shows the run's id while it runs, and `.bot trace stop` ends it at the end (the server's summary joins the agent's trace on the run id). Before this fix the agent's own CheckCommand refused the whole `trace` group.
 11. **No maintenance at the observe start (#253).** With `prepare.party "hire"` (hires autogeared a moment before), the preflight must show `maintenance: "not sent (observe mode: observe.maintenance is off)"` for every bot, the hire check must not send `.bot maintenance` to a reused hire or one short of drinks or ammo (its warning says so), and no hire must leave the instance's map: the run leader must not pause with "the lead bot is not on the plan's map". `observe.maintenance: true` brings the `.bot maintenance` lines back in both places.
+
+## Dashboard replay: walk 2 through a local daemon
+
+`turtle-agent dashboard-replay` feeds a recording to the observability daemon's real UDP port (README "Dashboard
+replay"). The walk-2 recording replays without a server, but its views were only fetched as JSON here, not looked at in
+the page:
+
+1. From `tools/observability`: `go run ./cmd/server -udp-port 9195 -http-port 8095 -accept-replay -dev-no-auth`, then
+   `turtle-agent dashboard-replay ~/TortoiseBots-audit/tests/raid-ony-walk2 --speed 10` (`--loop` leaves time to look).
+   Observed 2026-10-28 on `origin/feat/fight-debugger` @ `3c909e75` without a database: `GET /api/v1/commanders` holds
+   two cards, Glacienne with 39 bots and Gbmage with 5, and `GET /api/v1/combat/fights?commander=Glacienne` lists 5-5
+   to 5-1 newest first (5-4 with 2 deaths, Irelanthe twice).
+2. The Fight debugger's verdicts for 5-5, 5-4, 5-3, 5-2, 5-1 must read `warn, fail, warn, warn, ok`
+   (commander-fight-debugger.md §2). Judged here on the replayed `{fight, warnings}` with the page's own
+   `web/static/js/fightdebug.js` under node: exactly those verdicts, with `tank_death` failing 5-4,
+   `debuff:expose_armor` warning 5-5 and `mt_sunder` + `ot_taunt:Irelanthe` warning 5-3. Still to see in the browser:
+   the card, the map overlay, the rail and the death recaps on that data.
+   The walk-2 dumps carry **no `layout`**, so the debugger's fallback takes the first tank in `fight.bots` order;
+   Ragemeister is first in all five fights, which is why the pinned numbers hold without a layout. A card that shows a
+   Layout row means the recording came from a newer module.
+3. Once the daemon has the replay guard (TortoiseBots task R4): the same replay without `-accept-replay` must leave the
+   cards empty and log `[UDP] dropped replayed datagram (start with -accept-replay to take them)` at most once a
+   minute. Not run: the daemon build used above predates the guard and took the datagrams either way.
