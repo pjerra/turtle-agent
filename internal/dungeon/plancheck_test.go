@@ -443,6 +443,112 @@ func TestLookPointSeesTheLastFractionOfASegment(t *testing.T) {
 	}
 }
 
+// wakePlan runs the check on one leg whose boss has a scripted wake, in a plan of the given kind.
+func wakePlan(t *testing.T, kind string, nav Navmesh, leg Leg) *PlanCheck {
+	t.Helper()
+	res, err := CheckPlanWith(&Plan{Name: "t", Kind: kind, Map: 1, Entrance: Point{200, 0, 0}, Legs: []Leg{leg}}, nav, CheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// wakeBoss is Onyxia's boss block: wake_yd 58 (CheckForTargetsInAggroRadius) and bounding_yd 3.6, at the origin.
+func wakeBoss(approach ...Point) *Boss {
+	return &Boss{Entry: 10184, Position: Point{}, WakeYd: 58, BoundingYd: 3.6, Approach: approach}
+}
+
+// A leg whose boss has a scripted wake keeps every party point of its walk out of the wake plus the room the fight needs:
+// Onyxia wakes at 58 yd, her bounding radius is 3.6, a bot's 0.5, a raid's follow ring 8 and the margin 5: 75.1 yd.
+func TestPlanCheckWakeRadius(t *testing.T) {
+	leg := func(approach Point) Leg {
+		return Leg{Name: "onyxia", To: Point{0, -200, 0}, Boss: wakeBoss(approach)}
+	}
+	// Walk 1's stand at 62.7 yd woke her: one failing point, the approach.
+	res := wakePlan(t, KindRaid, fakeNav{}, leg(Point{0, -62.7, 0}))
+	if got, want := issueReasons(res.Issues), "0/boss approach 0/0/inside the boss's wake radius"; got != want {
+		t.Fatalf("issues %q, want %q", got, want)
+	}
+	if s := res.Issues[0].String(); !strings.Contains(s, "62.7 yd from boss 10184 (needs 75.1)") {
+		t.Errorf("not named with the need: %s", s)
+	}
+	// 80.7 yd: the stand of the fix.
+	if res := wakePlan(t, KindRaid, fakeNav{}, leg(Point{0, -80.7, 0})); !res.OK() {
+		t.Errorf("80.7 yd: %s", res.Summary())
+	}
+	// A party's follow ring is 3 yd, so its limit is 70.1.
+	res = wakePlan(t, KindDungeon, fakeNav{}, leg(Point{0, -70, 0}))
+	if got, want := issueReasons(res.Issues), "0/boss approach 0/0/inside the boss's wake radius"; got != want {
+		t.Errorf("a party at 70 yd: %q, want %q", got, want)
+	}
+	if res := wakePlan(t, KindDungeon, fakeNav{}, leg(Point{0, -71, 0})); !res.OK() {
+		t.Errorf("a party at 71 yd: %s", res.Summary())
+	}
+	// No scripted wake, no rule.
+	noWake := leg(Point{0, -62.7, 0})
+	noWake.Boss.WakeYd = 0
+	if res := wakePlan(t, KindRaid, fakeNav{}, noWake); !res.OK() {
+		t.Errorf("wake_yd 0: %s", res.Summary())
+	}
+	// The wake is 3D (Object.h IsWithinDistInMap adds both bounding radii): 74.6 yd out on the ground but 10 yd up is
+	// 75.3 yd away and outside; a 2D measure would fail it.
+	if res := wakePlan(t, KindRaid, fakeNav{}, leg(Point{74.6, 0, 10})); !res.OK() {
+		t.Errorf("75.3 yd in 3D: %s", res.Summary())
+	}
+	// The limit itself is outside (>=): with a 3.5 yd bounding radius the need is exactly 75 yd.
+	exact := leg(Point{0, -75, 0})
+	exact.Boss.BoundingYd = 3.5
+	if res := wakePlan(t, KindRaid, fakeNav{}, exact); !res.OK() {
+		t.Errorf("the limit: %s", res.Summary())
+	}
+}
+
+// The rule covers the leg's via points, not only the boss approach.
+func TestPlanCheckWakeRadiusCoversVias(t *testing.T) {
+	leg := Leg{Name: "onyxia", To: Point{0, -200, 0}, Via: []Waypoint{{Point: Point{0, -70, 0}}},
+		Boss: wakeBoss(Point{0, -80.7, 0})}
+	res := wakePlan(t, KindRaid, fakeNav{}, leg)
+	if got, want := issueReasons(res.Issues), "0/via 0/0/inside the boss's wake radius"; got != want {
+		t.Errorf("issues %q, want %q", got, want)
+	}
+}
+
+// wakeBendNav is a fakeNav whose path to a goal bends through the given points.
+type wakeBendNav struct {
+	fakeNav
+	bend map[Point][]Point // goal -> the path's middle vertices
+}
+
+func (n wakeBendNav) Plan(m uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
+	p, err := n.fakeNav.Plan(m, from, to)
+	if err != nil {
+		return p, err
+	}
+	mid, ok := n.bend[Point{to[0], to[1], to[2]}]
+	if !ok || len(p.Points) < 2 {
+		return p, nil
+	}
+	pts := []navmesh.Vec3{from}
+	for _, q := range mid {
+		pts = append(pts, navmesh.Vec3{q.X, q.Y, q.Z})
+	}
+	p.Points = append(pts, p.Points[len(p.Points)-1])
+	return p, nil
+}
+
+// The path between two party points is checked too: a corner that cuts the chamber would wake her where no row stands.
+func TestPlanCheckWakeRadiusCoversThePathBetweenPoints(t *testing.T) {
+	leg := Leg{Name: "onyxia", To: Point{0, -200, 0}, Boss: wakeBoss(Point{0, -80.7, 0})}
+	nav := wakeBendNav{fakeNav: fakeNav{}, bend: map[Point][]Point{{0, -80.7, 0}: {{0, -70, 0}}}}
+	res := wakePlan(t, KindRaid, nav, leg)
+	if got, want := issueReasons(res.Issues), "0/boss approach 0/0/inside the boss's wake radius"; got != want {
+		t.Errorf("issues %q, want %q", got, want)
+	}
+	if len(res.Issues) == 1 && res.Issues[0].Point != (Point{0, -70, 0}) {
+		t.Errorf("the bend at %v, not %v", res.Issues[0].Point, Point{0, -70, 0})
+	}
+}
+
 // oldLook is the look point before LookPoint: the standoff counted back from the path's end.
 func oldLook(path []Point, _ Point, standoff, _ float32, _ func(Point) Point) (Point, bool) {
 	return StandoffPoint(path, standoff)

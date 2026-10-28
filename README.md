@@ -775,6 +775,12 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
     one off after the run, type `.bot behavior <Name> loot off`.
   - **A crash between the two orders leaves the companions' looting off.** Turn it back on in party chat with no bot selected:
     `.bot action loot on`.
+- `boss.wake_yd` and `boss.bounding_yd` describe a **scripted proximity wake**: the boss wakes on the first player within `wake_yd` (Onyxia's
+  `CheckForTargetsInAggroRadius`, 58), measured as the core's `IsWithinDistInMap` does, in 3D and with both units' bounding radii added;
+  `bounding_yd` is the boss's own (its display's radius times the template's scale; Onyxia's 3.6). The plan check then fails (`inside the boss's wake
+  radius`) every party point of the leg before the boss — its `to`, vias, pull group `approach` points and the boss's `approach` — and every vertex of
+  the path between two of them that stands nearer than `wake_yd` + `bounding_yd` + 0.5 (a bot) + 8 (a raid's follow ring; 3 for a party) + 5 (margin)
+  from the boss: Onyxia's raid needs 75.1 yd, and her stand is 80.7 yd out. The boss's own position is the fight, not a party point.
 - **Team gate**: `boss.team` and a pull group's `team` (`"alliance"` or `"horde"`). The driver takes the leader's team from its race (human, dwarf, night elf, gnome and high elf
   are the Alliance; orc, undead, tauren, troll and goblin the Horde: `Player::TeamForRace`) and skips what is gated to the other team, with a line in the report's
   `notes` and a `dungeon_step` event (`action: skip_team`). A leader whose race is not known yet runs everything. Uldaman's Baelog, Eric and Olaf (6906-6908) are faction 122
@@ -853,6 +859,9 @@ What it checks:
   the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count; on a path shorter than the standoff the lead bot stays put when the pack is in view and otherwise moves up the path the same way; the moved point is put on the navmesh floor by the driver and the check alike). The positions of a group are looked at in order, each look starting where the one before ended, and the next group goes on from the last; a position within 25 yd of the party needs no look. No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
   called most packs blind that were pulled fine live. A pull group or boss gated to a `team` is checked like the rest (the commander driver looks at it before it skips the fight); its issues name the team;
 - a leg `to`, pull group or boss marked `needs_walk` (never snapped to the navmesh: its mapping walk is still to do) is a failing point (`needs a mapping walk`), not a silent skip; Zul'Farrak and Uldaman have none;
+- a leg whose boss has a scripted wake (`boss.wake_yd` > 0): every party point before the boss fight (the vias, `to`, the pull groups' `approach`
+  points and the boss's `approach`) and every vertex of the navmesh path between two of them must stand at least `wake_yd` + `boss.bounding_yd` + 0.5
+  + the follow ring (8, or 3 for a party) + 5 yd away in 3D (`inside the boss's wake radius`); the boss's own position and its pull are exempt;
 - the `stand` points of `use_object`, `loot_object`, `ritual`, `area_trigger` and `gossip` steps (before the boss, and the `after_boss` ones), walked like `via` points;
 - an `area_trigger`'s `stand` inside its zone (`outside the zone`: its distance from the `center` must not exceed the `radius`; nobody who stands outside takes the trigger), and, when the leg has a boss, within 30 yd of the boss (`too far`: the trigger would start a fight the party is not at).; the `stand` of a `gossip` must also lie within 5 yd of the NPC's `near` (`too far` otherwise), and a gossip step `by` the agent does not move the party's point for the hops after it.
 

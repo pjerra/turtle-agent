@@ -54,11 +54,27 @@ const (
 	// the arrival radius (DungeonRunPolicy.h kArriveYd) of the point before it, so the
 	// run counts it reached (WalkTo returns "arrived") and the party stays behind.
 	ReasonArriveSwallowed = "hop inside the arrival radius"
+	// ReasonInsideWake is a party point of a leg whose boss has a scripted wake (Boss.WakeYd) that stands inside the wake with
+	// the room the fight needs: the boss wakes with the party strung out on the walk in, before its own step.
+	ReasonInsideWake = "inside the boss's wake radius"
 )
 
 // ArriveYd is the run leader's arrival radius: within it of its point a move counts as
 // reached without sending an order (TortoiseBots DungeonRunPolicy.h kArriveYd, WalkTo).
 const ArriveYd = 3.0
+
+// The room a scripted wake needs beyond its radius (Boss.WakeYd), in yards on top of the boss's own bounding radius
+// (Boss.BoundingYd).
+const (
+	// WakeBotBoundYd is a bot's bounding radius: the core's proximity tests add both units' radii to the distance.
+	WakeBotBoundYd = 0.5
+	// WakeRingRaidYd is a raid's follow ring: the formation puts the front bots this much nearer the boss than the lead bot.
+	WakeRingRaidYd = 8.0
+	// WakeRingPartyYd is a party's follow ring (AiPlayerbot.RaidFollowDistance is 5; a party's bots stand nearer).
+	WakeRingPartyYd = 3.0
+	// WakeMarginYd is the rest of the margin.
+	WakeMarginYd = 5.0
+)
 
 // ServerQuerier is the optional part of a Navmesh that replays the server's own path
 // query; *navmesh.Planner implements it. The test fakes compile without it.
@@ -441,11 +457,71 @@ func (c *planChecker) warn(part string, at, from Point, reason, format string, a
 	c.rec.warn(is)
 }
 
+// wake checks a leg's boss with a scripted wake (Boss.WakeYd): every point the party stands on before the boss fight, and every
+// vertex of the path between two of them, must lie outside the wake plus the room the fight needs (both bounding radii, the follow
+// ring and WakeMarginYd). The walk to the boss itself is its own pull and is not a party point. group is checkLeg's start group:
+// when a run starts at a pull group, the leg's vias, `to` and the groups before it are not walked and are not checked.
+func (c *planChecker) wake(cur Point, group int) {
+	b := c.l.Boss
+	if b == nil || b.WakeYd <= 0 {
+		return
+	}
+	need := b.WakeYd + b.BoundingYd + WakeBotBoundYd + WakeMarginYd
+	if c.p.IsRaid() {
+		need += WakeRingRaidYd
+	} else {
+		need += WakeRingPartyYd
+	}
+	type stop struct {
+		part  string
+		group int
+		at    Point
+	}
+	var stops []stop
+	if group < 0 {
+		for vi, w := range c.l.Via {
+			stops = append(stops, stop{fmt.Sprintf("via %d", vi), 0, w.Point})
+		}
+		stops = append(stops, stop{"to", 0, c.l.To})
+	}
+	for gi, g := range c.l.PullGroups {
+		if gi < group {
+			continue
+		}
+		for ai, a := range g.Approach {
+			stops = append(stops, stop{fmt.Sprintf("pull group %d approach %d", gi+1, ai), gi + 1, a})
+		}
+	}
+	for ai, a := range b.Approach {
+		stops = append(stops, stop{fmt.Sprintf("boss approach %d", ai), 0, a})
+	}
+	check := func(part string, group int, at, from Point) {
+		if d := dist3(at, b.Position); d < need {
+			c.fail(part, group, at, from, ReasonInsideWake, "%.1f yd from boss %d (needs %.1f)", d, b.Entry, need)
+		}
+	}
+	prev := cur
+	for i, s := range stops {
+		check(s.part, s.group, s.at, prev)
+		if i > 0 {
+			// The path between two party points is walked in the boss's chamber too: a corner that cuts the corner of the chamber
+			// would wake her where no row stands.
+			if path, err := c.nav.Plan(c.p.Map, vec(prev), vec(s.at)); err == nil && len(path.Points) > 2 {
+				for _, v := range path.Points[1 : len(path.Points)-1] {
+					check(s.part, s.group, point(v), prev)
+				}
+			}
+		}
+		prev = s.at
+	}
+}
+
 // checkLeg walks one leg from cur and returns where the party stands at its end. A leg the run enters at a pull group (group 0 or more)
 // starts at that group: the leg's own via points and `to` and the groups before it are not walked.
 func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 	c.l = l
 	c.rec.startLeg(c.leg)
+	c.wake(cur, group)
 	if group < 0 {
 		for vi, w := range l.Via {
 			var err error

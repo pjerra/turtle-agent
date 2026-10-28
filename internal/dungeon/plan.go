@@ -427,6 +427,12 @@ type Boss struct {
 	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// WakeYd is a scripted proximity aggro's radius: the boss wakes on the first player within this many yards (Onyxia's
+	// CheckForTargetsInAggroRadius, 58). 0 means none. The plan check keeps every party point of the leg out of it (plancheck.go).
+	WakeYd float64 `json:"wake_yd,omitempty"`
+	// BoundingYd is the boss's bounding radius in yards (its display's radius times the template's scale): the core's proximity
+	// tests add both units' bounding radii to the distance, so a bot is in the wake this much before it is within WakeYd of the centre.
+	BoundingYd float64 `json:"bounding_yd,omitempty"`
 	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
@@ -851,8 +857,11 @@ type rawBoss struct {
 	// Tactics is Boss.Tactics.
 	Tactics   *tactics.Tactics `json:"tactics"`
 	NeedsWalk bool             `json:"needs_walk"`
-	Approach  []rawPoint       `json:"approach"`
-	Hold      *rawHold         `json:"hold"`
+	// WakeYd and BoundingYd are Boss.WakeYd and Boss.BoundingYd.
+	WakeYd     *float64   `json:"wake_yd"`
+	BoundingYd *float64   `json:"bounding_yd"`
+	Approach   []rawPoint `json:"approach"`
+	Hold       *rawHold   `json:"hold"`
 }
 
 type rawStep struct {
@@ -1376,6 +1385,16 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
 		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
+		if r.Boss.WakeYd != nil {
+			if b.WakeYd = *r.Boss.WakeYd; b.WakeYd < 0 {
+				c.fail(bp+".wake_yd", "%g: a radius is 0 or more (0: no scripted wake)", b.WakeYd)
+			}
+		}
+		if r.Boss.BoundingYd != nil {
+			if b.BoundingYd = *r.Boss.BoundingYd; b.BoundingYd < 0 {
+				c.fail(bp+".bounding_yd", "%g: a radius is 0 or more", b.BoundingYd)
+			}
+		}
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
