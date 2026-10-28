@@ -1095,6 +1095,7 @@
   },
   {
    "name": "temple_of_ahnqiraj",
+   "handwritten": true,
    "title": "Temple of Ahn'Qiraj",
    "map": 531,
    "kind": "raid",
@@ -1119,17 +1120,20 @@
       15275
      ]
     },
-    15727
+    15727,
+    15517
    ],
    "size": 40,
    "entrance_tele": "aq40",
    "special": [
-    "Ouro (15517) has no spawn row: summoned from the mound (SPELL_SUMMON_OURO)",
-    "Skeram's gate (GO_SKERAM_GATE), the twin emperors' doors (GO_TWINS_ENTER_DOOR, GO_TWINS_EXIT_DOOR)",
-    "C'Thun's eye and grasp (GO_GRASP_OF_CTHUN)"
+    "Ouro (15517) has no spawn row: the Ouro Spawner (15957) at -9188 2092 -64 summons him (spell 26061) when a non-GM player stands within 25 yd, so the optional last leg walks to a stand within 25 yd and waits for him to turn hostile",
+    "the instance opens the doors on the kill before them: 180636 (the gate above Skeram's room) on TYPE_SKERAM DONE, 180634 (the Twin Emperors' entry) on TYPE_HUHURAN DONE, 180635 (their exit, to C'Thun's corridor) on TYPE_TWINS DONE",
+    "the three Silithid Royalty bosses are one boss step (Vem's entry, Kri and Yauj first); Sartura is pulled by area trigger 4052 and the Twins' intro is dialogue on 4047, neither a step",
+    "C'Thun's chamber is an island on map 531's navmesh: no server path reaches it from the Twins' exit corridor or the upper terrace, so the boss point is needs_walk until the mapping walk finds the ramp"
    ],
    "notes": [
-    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a mob; none is a leg."
+    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a scripted mob, the Beetle (15475) is a level 1 critter and the C'Thun Portal (15896) is spawned with C'Thun; none is a leg",
+    "the bosses' trash entries are the instance's own groups, each despawned after the boss before it: Anubisath Sentinel and Obsidian Eradicator after Skeram, Vekniss Guardian, Vekniss Warrior and Qiraji Brainwasher after Sartura, Vekniss Drone and Vekniss Soldier after Fankriss, Vekniss Hive Crawler, Vekniss Wasp, Qiraji Lasher and Vekniss Stinger after Huhuran, Anubisath Defender and Qiraji Scarab/Scorpion after the Twins, Qiraji Mindslayer/Slayer/Champion and Anubisath Warder/Obsidian Nullifier after C'Thun"
    ]
   },
   {
