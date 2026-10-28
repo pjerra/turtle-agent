@@ -222,6 +222,27 @@
       ]
     },
     {
+      "name": "anub_rekhan",
+      "to": {"x": 3316.47, "y": -3476.23, "z": 287.26},
+      "boss": {
+        "entry": 15956,
+        "position": {"x": 3316.47, "y": -3476.23, "z": 287.26},
+        "first": [16573]
+      },
+      "after_boss": [
+        {
+          "use_object": {
+            "entry": 181195,
+            "near": {"x": 3143.96, "y": -3572.22, "z": 287.097}
+          }
+        }
+      ],
+      "notes": [
+        "Anub'Rekhan's hall behind the door: his two Crypt Guards (16573) are summoned by his own AI on the pull and are the boss row's first entries, so the row kills them before him.",
+        "The gate 181195 is unlocked by his death but stays shut: the leg opens it after the kill."
+      ]
+    },
+    {
       "name": "grand_widow_faerlina",
       "to": {"x": 3207.88, "y": -3583.36, "z": 286.27},
       "pull_groups": [
@@ -637,6 +658,10 @@
             "fail_text": "game object 181209 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "Faerlina's room: the 56 cultists, acolytes and skitterers in it are creature_linking slaves of her guid with flag 3073 (aggro on her aggro, map-wide), so a pull anywhere in the room brings the room; the packs are the room's formation groups.",
+        "Her worshippers (16506) and followers (16505) are summoned by her AI on the pull and are the boss row's first entries. The Turtle guide's note that pulling her pulls the room is the 3073 link."
       ]
     },
     {
@@ -1021,7 +1046,11 @@
       "boss": {
         "entry": 15952,
         "position": {"x": 3503.04, "y": -3919.22, "z": 297.6}
-      }
+      },
+      "notes": [
+        "Maexxna's web wraps (16486) and spiderlings (17055) are mid-fight summons: no step kind targets them.",
+        "The two Carron Spinner packs that stand on the 10-yd ledge are pulled from their approach rows; the agent's own look check cannot see them from its path."
+      ]
     },
     {
       "name": "noth_the_plaguebringer",
@@ -1319,6 +1348,9 @@
             "fail_text": "game object 181201 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "Noth's balcony wave and blink are his own AI; the gauntlet after him (16034/16036/16037/16297) belongs to the next leg."
       ]
     },
     {
@@ -1554,6 +1586,9 @@
             "fail_text": "game object 181241 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "Heigan's dance and the fissure sectors are his own AI (the bots' HeiganDancePolicy walks the floor); the entry door 181202 is opened by Noth's DONE and his exit 181496 is waited for after the kill."
       ]
     },
     {
@@ -1565,7 +1600,10 @@
       "boss": {
         "entry": 16011,
         "position": {"x": 2909.43, "y": -3999.46, "z": 274.28}
-      }
+      },
+      "notes": [
+        "Loatheb's arena holds no static trash: the corridor's maggots (16056/16057) are creature_linking_template slaves of him and are pulled before the door."
+      ]
     },
     {
       "name": "instructor_razuvious",
@@ -2079,6 +2117,9 @@
             "fail_text": "game object 181124 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "The wing's 80 linked spawns come with his aggro; his deathknight understudies (16803) are summoned and meant to be mind-controlled, not killed, so the boss row has no first entries."
       ]
     },
     {
@@ -2104,6 +2145,10 @@
             "fail_text": "game object 181125 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "Gothik's arena floor (2642.2 -3392.0 268.2): his dais stands 18 yd above it with no walkable link on the mesh, so the boss row's point is the floor the party fights from.",
+        "BLOCKER: boss_gothik.cpp HasLessPlayersPerSide(10) (az:418, :453) evades the event unless more than 10 living players stand on each side of the gate 181170; the party stands on one spot."
       ]
     },
     {
@@ -2529,11 +2574,23 @@
           }
         }
       ],
+      "steps": [
+        {
+          "use_object": {
+            "entry": 181119,
+            "near": {"x": 2587.96, "y": -3017.17, "z": 241.304}
+          }
+        }
+      ],
       "boss": {
         "entry": 16064,
         "position": {"x": 2513.52, "y": -2954.96, "z": 245.64},
         "first": [16065, 16062, 16063]
-      }
+      },
+      "notes": [
+        "All four horsemen wake together (boss_four_horsemen.cpp Aggro attack-starts the others), so the leg is one boss row: 16064 Korth'azz with 16065, 16062 and 16063 as its first entries, the order the rows kill them in.",
+        "The door 181119 is unlocked by Gothik's DONE but stays shut: the leg's step opens it before the room's packs."
+      ]
     },
     {
       "name": "patchwerk",
@@ -2880,6 +2937,10 @@
             "fail_text": "game object 181123 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "Patchwerk's room garbage is creature_linking slaves of him with flag 3073: 87 spawns aggro with him map-wide, so the packs of this leg are cleared before the boss row.",
+        "The hateful-strike soaker layout and the opening threat are boss AI and the waterys patches (needs waterys patch 266, 503-513)."
       ]
     },
     {
@@ -2907,7 +2968,10 @@
       "boss": {
         "entry": 15931,
         "position": {"x": 3205.45, "y": -3341.86, "z": 320.177}
-      }
+      },
+      "notes": [
+        "The seven Stitched Spewers 16025 are creature_linking slaves of him with flag 3073: they come with his aggro from 28 yd below his platform, so they are listed as a pack of their own before the boss row."
+      ]
     },
     {
       "name": "gluth",
@@ -3336,6 +3400,10 @@
             "near": {"x": 3421.86, "y": -3017.51, "z": 295.615}
           }
         }
+      ],
+      "notes": [
+        "BLOCKER: Gluth's room floor (z 297.8) is a navmesh island: from Grobbulus' platform (z 320.18) the nearest reachable point is 53.9 yd away and the mesh has no polygon for the drop, so neither the packs nor the boss point can be walked to. The data stays for the mapping walk.",
+        "His zombies (16360) are summoned by his AI and eat to heal him; the bots' GluthKitePolicy owns the chow."
       ]
     },
     {
@@ -3345,7 +3413,11 @@
         "entry": 15928,
         "position": {"x": 3518, "y": -2925.7, "z": 291.7},
         "first": [15929, 15930]
-      }
+      },
+      "notes": [
+        "BLOCKER: the pit floor (3518 -2925.7 291.7) is 12 yd from the boss point and on a navmesh island of its own (Gluth's section), reached in game through 181121 and the drop.",
+        "Stalagg 15929 and Feugen 15930 are summoned by his AI when either is pulled; they are the boss row's first entries. The polarity shift and the 5 s double-kill window are boss AI, not steps."
+      ]
     },
     {
       "name": "sapphiron",
@@ -3377,6 +3449,11 @@
             "fail_text": "game object 181228 is not open: the kill before it did not happen."
           }
         }
+      ],
+      "notes": [
+        "BLOCKER: the frostwyrm lair is entered by area trigger 4156 only (instance_naxxramas.cpp:1362-1366, gated on all 13 encounters DONE), and a bot in a raid fires no area trigger (ai/playerbot/BotAreaTriggers.cpp: IsNonRaidDungeon); the GO 181229 portal has no script. No navmesh route from the hub (1,296.7 yd short).",
+        "Sapphiron starts on proximity (boss_sapphiron.cpp AggroRadius, 70 yd): the skeleton summon and her phases need no step.",
+        "The doors 181225 and 181228 are waited for after her death; 181228 opens about 53 s later, at the end of the Kel'Thuzad dialogue, hence the 90 s timeout."
       ]
     },
     {
@@ -3388,7 +3465,11 @@
       "boss": {
         "entry": 15990,
         "position": {"x": 3746.41, "y": -5113.35, "z": 142.031}
-      }
+      },
+      "notes": [
+        "BLOCKER: Kel'Thuzad starts only from area trigger 4112 (boss_kelthuzad.cpp:1273-1285 OnKTAreaTrigger calls StartEncounter); MoveInLineOfSight is empty and AttackStart/Aggro refuse while the immunity flag is up, so proximity cannot start him, and a raid bot fires no area trigger.",
+        "His phase-1 waves and portals are his own AI; no step kind reaches them."
+      ]
     }
   ]
 }
