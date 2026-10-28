@@ -1031,18 +1031,22 @@
     14601,
     11981,
     14020,
-    10162
+    11583
    ],
    "size": 40,
+   "entrance_tele": "BlackwingLair",
    "outside_tele": "BlackwingLair",
    "scripted": [
-    13020
+    13020,
+    10162
    ],
    "special": [
-    "Razorgore's Orb of Domination (GO_ORBE_DOMINATION) and eggs (GO_OEUF_RAZ); Vaelastrasz carries npc_flags (gossip) to start his fight",
-    "Chromaggus' side lever (GO_LEVER_CHROMAGGUS_SIDE) and doors; suppression devices (GO_SUPPRESSION_ENGINE)",
-    "Nefarian (11583) has no spawn row: Lord Victor Nefarius (10162) summons him; Onyxia Scale Cloak attunement (class check, not a step)"
-   ]
+    "Razorgore's Orb of Domination (177808) and eggs (177807): the eggs are destroyed only by the possessed Razorgore, so the encounter needs a player at the orb",
+    "Vaelastrasz (13020) and Lord Victor Nefarius (10162) are gossip-started NPCs: Vael's fight needs two menu levels, Nefarius' three",
+    "Nefarian (11583) has no spawn row: Lord Victor Nefarius summons him; the plan's boss row is Nefarian at his landing point",
+    "The Suppression Room's devices (179784) are disarmed by the bots' own strategy; the Chromaggus side lever (179148) has no script in the core"
+   ],
+   "handwritten": true
   },
   {
    "name": "zul_gurub",

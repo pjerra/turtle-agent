@@ -6,6 +6,7 @@
   "map": 469,
   "entrance": {"x": -7672.32, "y": -1107.05, "z": 396.651},
   "entrance_trigger": 3726,
+  "entrance_tele": "BlackwingLair",
   "outside_tele": "BlackwingLair",
   "portal": {
     "map": 229,
@@ -21,755 +22,748 @@
     "dps": 26
   },
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 469 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Raid plan: 40 players, the tank/healer/dps split is a placeholder. dungeon_run has no raid driver yet; the file is data for the raid leader.",
-    "Needs: Razorgore's Orb of Domination (GO_ORBE_DOMINATION) and eggs (GO_OEUF_RAZ); Vaelastrasz carries npc_flags (gossip) to start his fight",
-    "Needs: Chromaggus' side lever (GO_LEVER_CHROMAGGUS_SIDE) and doors; suppression devices (GO_SUPPRESSION_ENGINE)",
-    "Needs: Nefarian (11583) has no spawn row: Lord Victor Nefarius (10162) summons him; Onyxia Scale Cloak attunement (class check, not a step)"
+    "DRAFT: a raid plan written offline in task B1 (TortoiseBots-audit RAID-PREP-bwl.md) from the world database export of map 469 (284 creature spawns, 27 entries, 91 game objects; sql/base 2026-09-12), the core's blackwing_lair instance and boss scripts and the server's map 469 navmesh (16 tiles). Not mapped, not live-checked: the GM-invisible mapping walk (B2) and the first live run are still to do; dungeon_run refuses it without allow_draft.",
+    "Packs: the draft's 64 pull groups (275 units) become 43 pull groups of 273 units: the two Tortured Drakes (13976, neutral, level 40) and Master Elemental Shaper Krixix (14401, gossip flag) are in no pull, and the rest are chained where they stand within 15 yd on one floor (|dz| \u003c= 4) and where the walk from one to the next is no longer than 2.2 times their distance plus 8 yd. The merge stops when a pack's own radius would pass 18 yd: the Suppression Room is a uniform field of 158 spawns (134 whelps of four colours, 12 hatchers, 12 taskmasters) 8-14 yd apart, so the 15-yd chain alone takes 16 units across 54 yd (radius 26.9). Each group's radius is its own spread from its centre plus 0.5, kept inside the nearest spawn of every entry it lists (1.7 to 17.9 yd).",
+    "The instance keeps every non-GM player inside Razorgore's room until TYPE_RAZORGORE is DONE: instance_blackwing_lair.cpp Update teleports a player farther than 100 yd from razorgoreRoomCenter (-7596.10 -1053.41 408.15) or above z 420 back to the room (\"Cheating detected. Cannot leave boss room before encounter is complete.\"). Legs 1 to 7 lie past that line, so a headless run cannot reach Vaelastrasz or any later boss before the Razorgore encounter is completed.",
+    "Razorgore's encounter needs a player at the Orb of Domination (177808 at -7615.05 -1026.24 413.381): GOHello_go_orbe_domination possesses Razorgore only when he is already in combat, and the 30 Black Dragon Eggs (177807) are destroyed only by the possessed Razorgore (go_oeuf_razAI OnUse). The plan pulls Grethok the Controller (12557) and his two Blackwing Guardsmen, whose enter-combat starts the event, then fights Razorgore; it has no orb or egg step because no bot can take the orb. Blocker, see the prep.",
+    "Vaelastrasz (13020) and Lord Victor Nefarius (10162) are started by a gossip chain of two and three menus: each selection shows the next menu, and the run leader's gossip step sends one hello and one select, so it reaches the first menu only. The plan writes the first level and makes each boss the event's hold on its instance data (1 and 7); both are blockers until the run can chain gossip options or a player talks.",
+    "Doors: the eight Portcullis doors (176964/176965/179364/179365/179115/179116/179117/176966) start open (the spawn state and the template's startOpen agree), the lever 179148 has no script in the core, and the instance opens the doors on each boss's DONE. No door, lever or key gates the route, so the plan has no wait_object or use_object step.",
+    "Suppression Room: 38 Suppression Devices (179784) apply Suppression (22247) within 15 yd of every non-stealthed, non-GM player, and are deleted once Broodlord Lashlayer is DONE (go_engin_suppressionAI, instance OnObjectCreate); the bots' own strategy disarms them (disarm suppression device, BlackwingLairDungeonStrategies.cpp), so the plan has no step for them.",
+    "Patrols: no map 469 spawn has a waypoint path (creature_movement has no point for any of the 284 guids; the movement type 2 spawns have no path), so no pull group carries a patrol block and there is no estimated period for the walk to measure.",
+    "Boss order: Razorgore, Vaelastrasz, Broodlord Lashlayer, Firemaw, Ebonroc, Flamegor, Chromaggus, Nefarian (the instance loads the later bosses only once Razorgore is DONE, and each door opens on the boss before it). Nefarian (11583) has no world spawn: Lord Victor Nefarius summons him at 40 killed adds and he lands at -7495.96 -1252.40 476.80, which is the boss row's position.",
+    "No ai_boss_tactic rows: the eight bosses cast from C++ and the bots' own Blackwing Lair strategies already cover the front cone, the drakes' facing, the Flame Buffet stacks, the Chromaggus afflictions and the Nefarian class calls (dungeons-and-raids.md); the trash casters (Spellbinder Greater Polymorph 22274, Hatcher Flamestrike 22275, Warlock Rain of Fire 19717 and Demon Portal 22372, Wyrmkin Blast Wave 22424) are not bosses and their interrupts are the bot AI's current-target interrupts. A 'behind' row would duplicate the raid positioning the bot AI already does.",
+    "Community: waterys419 has no Blackwing Lair report. The inventory's per-boss patches would be Razorgore 309, Vaelastrasz 310, Ebonroc 258 and Nefarian 311/312/313/316; none is needed by this data and none is cherry-picked (owner decision)."
   ],
   "legs": [
     {
       "name": "razorgore_the_untamed",
-      "to": {"x": -7666.62, "y": -1111.86, "z": 449.165},
+      "to": {"x": -7634.13, "y": -1035.27, "z": 408.55},
       "pull_groups": [
         {
-          "entries": [14025, 14024, 14023],
+          "entries": [14456, 12557, 14456],
           "positions": [
-            {"x": -7666.62, "y": -1111.86, "z": 449.165},
-            {"x": -7666.81, "y": -1114.49, "z": 449.165},
-            {"x": -7663.56, "y": -1114.82, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14024, 14024, 14022, 14023],
-          "positions": [
-            {"x": -7677.64, "y": -1123.01, "z": 449.118},
-            {"x": -7679.55, "y": -1121.17, "z": 449.117},
-            {"x": -7681.99, "y": -1122.57, "z": 449.1},
-            {"x": -7680.42, "y": -1125.24, "z": 449.095}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7686.12, "y": -1114.31, "z": 449.118}
-          ]
-        },
-        {
-          "entries": [14023, 14025, 14024],
-          "positions": [
-            {"x": -7692.41, "y": -1107.29, "z": 449.12},
-            {"x": -7690.42, "y": -1104.18, "z": 449.131},
-            {"x": -7692.69, "y": -1103.53, "z": 449.13}
-          ]
-        },
-        {
-          "entries": [14025, 14022, 14025, 14023],
-          "positions": [
-            {"x": -7679.8, "y": -1095.72, "z": 449.126},
-            {"x": -7677.66, "y": -1097.38, "z": 449.133},
-            {"x": -7678.83, "y": -1094.33, "z": 449.133},
-            {"x": -7675.47, "y": -1096.21, "z": 449.144}
-          ]
-        },
-        {
-          "entries": [14024, 14023, 14025],
-          "positions": [
-            {"x": -7666.15, "y": -1084.75, "z": 449.165},
-            {"x": -7662.77, "y": -1086.54, "z": 449.165},
-            {"x": -7662.56, "y": -1083.52, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14023, 14022, 14024, 14022],
-          "positions": [
-            {"x": -7652.77, "y": -1101.83, "z": 449.165},
-            {"x": -7649.61, "y": -1102.08, "z": 449.165},
-            {"x": -7652.81, "y": -1105.01, "z": 449.165},
-            {"x": -7650.09, "y": -1105.39, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7633.6, "y": -1098.48, "z": 449.162}
-          ]
-        },
-        {
-          "entries": [14022, 14025, 14025, 12458, 12458, 12458, 14022, 14024, 14023, 14024],
-          "positions": [
-            {"x": -7630.8, "y": -1094.99, "z": 449.165},
-            {"x": -7628.17, "y": -1097.42, "z": 449.165},
-            {"x": -7626.5, "y": -1093.33, "z": 449.165},
-            {"x": -7621.2, "y": -1088.59, "z": 449.163},
-            {"x": -7620.84, "y": -1087.45, "z": 449.163},
-            {"x": -7619.46, "y": -1087.49, "z": 449.163},
-            {"x": -7621.83, "y": -1076.39, "z": 449.165},
-            {"x": -7618.75, "y": -1076.93, "z": 449.165},
-            {"x": -7620.81, "y": -1073.98, "z": 449.165},
-            {"x": -7618.49, "y": -1074.5, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14025, 14024, 14023, 14023],
-          "positions": [
-            {"x": -7636.83, "y": -1082.6, "z": 449.165},
-            {"x": -7638.77, "y": -1082.21, "z": 449.165},
-            {"x": -7636.34, "y": -1080.04, "z": 449.165},
-            {"x": -7638.88, "y": -1079.63, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7606.11, "y": -1080.45, "z": 449.162}
-          ]
-        },
-        {
-          "entries": [14022, 14024, 14023, 14025],
-          "positions": [
-            {"x": -7597.93, "y": -1080.51, "z": 449.165},
-            {"x": -7596.44, "y": -1078.54, "z": 449.165},
-            {"x": -7594.62, "y": -1081.37, "z": 449.165},
-            {"x": -7594.17, "y": -1079.04, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12458, 12458, 12458],
-          "positions": [
-            {"x": -7701.32, "y": -1088.36, "z": 449.117},
-            {"x": -7701.66, "y": -1090.06, "z": 449.117},
-            {"x": -7703.11, "y": -1089.63, "z": 449.117}
-          ]
+            {"x": -7623.09, "y": -1022.1, "z": 413.38},
+            {"x": -7617, "y": -1023.08, "z": 413.38},
+            {"x": -7615.8, "y": -1017.07, "z": 413.38}
+          ],
+          "radius": 5.2
         }
       ],
+      "skip": [13976, 14401],
       "boss": {
         "entry": 12435,
-        "position": {"x": -7571.69, "y": -1088.25, "z": 413.465}
+        "position": {"x": -7571.69, "y": -1088.25, "z": 413.46},
+        "approach": [
+          {"x": -7591.71, "y": -1095.93, "z": 408.65}
+        ]
       },
       "notes": [
-        "goober \"Black Dragon Egg\" entry 177807 at -7563.1 -1088.7 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7568.3 -1097.7 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7568.6 -1086.6 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7569.4 -1079.7 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7572.5 -1095.0 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7576.9 -1083.7 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7578.6 -1089.9 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7584.7 -1075.8 408.5",
-        "goober \"Suppression Device\" entry 179784 at -7593.8 -1063.4 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7595.8 -1080.0 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7609.9 -1061.5 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7620.1 -1075.7 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7628.0 -1095.3 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7629.8 -1061.5 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7637.9 -1081.1 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7647.8 -1067.0 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7651.3 -1103.5 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7664.0 -1084.9 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7665.3 -1113.6 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7677.7 -1095.2 449.1",
-        "goober \"Suppression Device\" entry 179784 at -7680.1 -1123.3 449.1",
-        "goober \"Suppression Device\" entry 179784 at -7692.0 -1105.4 449.1",
-        "goober \"Suppression Device\" entry 179784 at -7716.1 -1077.4 445.2"
+        "Razorgore's room, from the trigger landing: one pack, Grethok the Controller (12557) with his two Blackwing Guardsmen (14456). Their enter-combat sets instance data 0 (TYPE_RAZORGORE) IN_PROGRESS and Razorgore in combat with the zone (instance_blackwing_lair.cpp OnCreatureEnterCombat), and the orb trigger 14453 spawns the add waves from then on: the fight starts with any pull here, so the pack is a deliberate pull and the boss is the event's hold.",
+        "The 30 Black Dragon Eggs (177807) and the Orb of Domination (177808) stand around the room. The eggs are destroyed only by the player the orb possesses (go_oeuf_razAI OnUse with the possessed Razorgore as user), and the orb's GOHello needs Razorgore already in combat (GOHello_go_orbe_domination): no bot can do that, so the plan has no orb or egg step and the hold waits for instance data 0 DONE, which needs a player at the orb. Blocker, see the prep."
       ]
     },
     {
       "name": "vaelastrasz_the_corrupt",
-      "to": {"x": -7493.69, "y": -1040.58, "z": 408.57},
+      "to": {"x": -7516.94, "y": -1020.09, "z": 408.65},
       "pull_groups": [
         {
           "entries": [13996, 13996, 13996],
           "positions": [
-            {"x": -7493.69, "y": -1040.58, "z": 408.57},
-            {"x": -7497.83, "y": -1030.94, "z": 408.558},
-            {"x": -7501.24, "y": -1020.11, "z": 408.549}
-          ]
+            {"x": -7501.24, "y": -1020.11, "z": 408.55},
+            {"x": -7497.83, "y": -1030.94, "z": 408.56},
+            {"x": -7493.69, "y": -1040.58, "z": 408.57}
+          ],
+          "radius": 11.6
         },
         {
           "entries": [13996, 13996, 13996],
           "positions": [
-            {"x": -7464.99, "y": -1007.95, "z": 408.566},
-            {"x": -7473.72, "y": -1001.03, "z": 408.564},
-            {"x": -7456.18, "y": -1014.83, "z": 408.573}
+            {"x": -7473.72, "y": -1001.03, "z": 408.56},
+            {"x": -7464.99, "y": -1007.95, "z": 408.57},
+            {"x": -7456.18, "y": -1014.83, "z": 408.57}
+          ],
+          "radius": 11.7,
+          "approach": [
+            {"x": -7486.39, "y": -1012.94, "z": 408.66}
           ]
+        }
+      ],
+      "skip": [13976, 14401],
+      "steps": [
+        {
+          "gossip": {
+            "npc": 13020,
+            "near": {"x": -7482.26, "y": -1017.31, "z": 408.567},
+            "option": 0,
+            "by": "tank",
+            "fail_text": "Vaelastrasz' menu has no first option: instance data 0 (Razorgore) is not DONE, and his GossipHello only opens the menu then (boss_vaelastrasz.cpp)."
+          }
         }
       ],
       "boss": {
         "entry": 13020,
-        "position": {"x": -7482.26, "y": -1017.31, "z": 408.567}
-      }
+        "position": {"x": -7482.26, "y": -1017.31, "z": 408.57},
+        "hold": {
+          "instance_data": 1,
+          "spot": {"x": -7482.26, "y": -1017.31, "z": 408.567},
+          "radius": 45,
+          "timeout_s": 600
+        }
+      },
+      "notes": [
+        "Vaelastrasz' room behind the Razorgore exit door (176965): three Blackwing Technicians (13996) around the ramp, two packs.",
+        "The fight starts with a two-level gossip (GossipHello_boss_vael offers one item, its selection offers \"Fight Time\" with action 2, and only that runs BeginSpeech); the run's gossip step sends one hello and one select, so it opens the first menu and stops. The gossip step is written for the first level and the boss is a hold on instance data 1 (TYPE_VAELASTRASZ), which no bot can complete without the second level. Blocker, see the prep."
+      ]
     },
     {
       "name": "broodlord_lashlayer",
-      "to": {"x": -7544.97, "y": -1016.96, "z": 449.243},
+      "to": {"x": -7530.39, "y": -940.07, "z": 428.12},
       "pull_groups": [
         {
-          "entries": [12459, 13996, 13996, 13996, 12459, 13996, 13996, 13996],
+          "entries": [12464, 12465, 12467, 12465, 12463, 12463, 12464],
           "positions": [
-            {"x": -7544.97, "y": -1016.96, "z": 449.243},
-            {"x": -7547.72, "y": -1014.95, "z": 449.325},
-            {"x": -7547.72, "y": -1014.95, "z": 449.325},
-            {"x": -7550.69, "y": -1014.26, "z": 449.242},
-            {"x": -7549.04, "y": -1040, "z": 449.242},
-            {"x": -7550.06, "y": -1037.95, "z": 449.242},
-            {"x": -7551.41, "y": -1039, "z": 449.243},
-            {"x": -7551.77, "y": -1042.98, "z": 449.242}
+            {"x": -7534.23, "y": -926.7, "z": 427.96},
+            {"x": -7539.97, "y": -921.61, "z": 428.02},
+            {"x": -7525.67, "y": -925.21, "z": 427.91},
+            {"x": -7523.96, "y": -917.88, "z": 427.92},
+            {"x": -7539.57, "y": -914.06, "z": 428.01},
+            {"x": -7534.21, "y": -910.26, "z": 427.96},
+            {"x": -7527.41, "y": -911.41, "z": 427.92}
+          ],
+          "radius": 10.1
+        },
+        {
+          "entries": [12463, 12463, 12465, 12464, 12464, 12465, 12467],
+          "positions": [
+            {"x": -7568.89, "y": -934.96, "z": 428.19},
+            {"x": -7573.06, "y": -941.41, "z": 428.14},
+            {"x": -7573.8, "y": -927.04, "z": 428.26},
+            {"x": -7580.7, "y": -945.09, "z": 428.16},
+            {"x": -7583.51, "y": -924.03, "z": 428.32},
+            {"x": -7590.22, "y": -939.64, "z": 428.22},
+            {"x": -7590.3, "y": -930.08, "z": 428.26}
+          ],
+          "radius": 11.8
+        },
+        {
+          "entries": [14022, 14024, 14023, 12468, 14024, 14024, 14025, 14023],
+          "positions": [
+            {"x": -7635.06, "y": -965.83, "z": 440.03},
+            {"x": -7637.73, "y": -962.73, "z": 440.24},
+            {"x": -7639.45, "y": -966.22, "z": 440.26},
+            {"x": -7647.77, "y": -967.77, "z": 440.19},
+            {"x": -7649.3, "y": -974.47, "z": 440.26},
+            {"x": -7649.25, "y": -977.76, "z": 440.26},
+            {"x": -7651.94, "y": -973.8, "z": 440.23},
+            {"x": -7652.64, "y": -976.69, "z": 440.26}
+          ],
+          "radius": 11.9,
+          "approach": [
+            {"x": -7631.77, "y": -953.38, "z": 440.17}
+          ]
+        },
+        {
+          "entries": [14023, 14024, 14023, 14025],
+          "positions": [
+            {"x": -7628.89, "y": -979.82, "z": 440.02},
+            {"x": -7625.79, "y": -979.68, "z": 440.03},
+            {"x": -7628.34, "y": -983.12, "z": 440.01},
+            {"x": -7625.49, "y": -982.72, "z": 440.03}
+          ],
+          "radius": 2.8
+        },
+        {
+          "entries": [14022, 14023, 14025, 12468],
+          "positions": [
+            {"x": -7618.08, "y": -996.5, "z": 440.02},
+            {"x": -7616.4, "y": -999.01, "z": 440.26},
+            {"x": -7614.46, "y": -996.16, "z": 440.29},
+            {"x": -7608.99, "y": -998.19, "z": 440.2}
+          ],
+          "radius": 6
+        },
+        {
+          "entries": [14025, 14023, 14024, 14025, 12468, 14022, 12458, 12458, 14023, 12458, 14023],
+          "positions": [
+            {"x": -7631.64, "y": -1003.87, "z": 440.26},
+            {"x": -7631.67, "y": -1006.49, "z": 440.26},
+            {"x": -7628.57, "y": -1004.67, "z": 440.26},
+            {"x": -7629.28, "y": -1007.07, "z": 440.24},
+            {"x": -7632.38, "y": -1010.09, "z": 440.23},
+            {"x": -7640.71, "y": -1015.45, "z": 440.23},
+            {"x": -7637.41, "y": -1018.38, "z": 440.17},
+            {"x": -7636.19, "y": -1018.89, "z": 440.17},
+            {"x": -7644.14, "y": -1014.11, "z": 439.99},
+            {"x": -7636.02, "y": -1020.15, "z": 440.17},
+            {"x": -7643.26, "y": -1017.57, "z": 440.23}
+          ],
+          "radius": 11,
+          "approach": [
+            {"x": -7634.16, "y": -990.48, "z": 440.22}
+          ]
+        },
+        {
+          "entries": [14022, 14023, 14024, 14022, 14024, 14023, 14025],
+          "positions": [
+            {"x": -7638.39, "y": -991.57, "z": 440.26},
+            {"x": -7641.58, "y": -992.98, "z": 440.26},
+            {"x": -7641.37, "y": -989.34, "z": 440.26},
+            {"x": -7651.72, "y": -999.78, "z": 439.99},
+            {"x": -7654.21, "y": -998.12, "z": 439.99},
+            {"x": -7653.74, "y": -1001.64, "z": 439.99},
+            {"x": -7655.79, "y": -999.5, "z": 439.99}
+          ],
+          "radius": 11.2
+        },
+        {
+          "entries": [14022, 14024, 14023, 12468, 14023, 14024, 14025, 14023],
+          "positions": [
+            {"x": -7663.12, "y": -985.44, "z": 439.99},
+            {"x": -7665.13, "y": -981.97, "z": 440.22},
+            {"x": -7666.94, "y": -984.18, "z": 440.23},
+            {"x": -7671.79, "y": -988.51, "z": 440.24},
+            {"x": -7676.24, "y": -993.07, "z": 440.26},
+            {"x": -7676.89, "y": -996.26, "z": 440.26},
+            {"x": -7679.24, "y": -993.47, "z": 440.24},
+            {"x": -7679.7, "y": -995.74, "z": 440.26}
+          ],
+          "radius": 11.2
+        },
+        {
+          "entries": [14025, 14023, 14024, 14025, 12458, 12458, 12458, 14024, 14022, 14023, 12468],
+          "positions": [
+            {"x": -7678.88, "y": -1018.34, "z": 439.98},
+            {"x": -7679.48, "y": -1020.49, "z": 439.98},
+            {"x": -7681.98, "y": -1016.85, "z": 439.98},
+            {"x": -7681.93, "y": -1020.2, "z": 439.98},
+            {"x": -7684.71, "y": -1010.01, "z": 439.98},
+            {"x": -7684.34, "y": -1008.1, "z": 439.98},
+            {"x": -7686.03, "y": -1007.55, "z": 439.98},
+            {"x": -7690.06, "y": -1003.81, "z": 439.98},
+            {"x": -7693.2, "y": -1003.6, "z": 440.24},
+            {"x": -7692.7, "y": -1001.07, "z": 440.21},
+            {"x": -7699.92, "y": -1005.57, "z": 440.21}
+          ],
+          "radius": 14.7,
+          "approach": [
+            {"x": -7665.47, "y": -1004.57, "z": 440.09}
           ]
         },
         {
           "entries": [14024, 14023, 14022],
           "positions": [
-            {"x": -7572.96, "y": -1059.89, "z": 449.164},
-            {"x": -7571.3, "y": -1064.4, "z": 449.164},
-            {"x": -7575.48, "y": -1061.75, "z": 449.163}
-          ]
+            {"x": -7667.77, "y": -1006.39, "z": 440.26},
+            {"x": -7669.4, "y": -1008.97, "z": 440.26},
+            {"x": -7666.68, "y": -1009.73, "z": 440.26}
+          ],
+          "radius": 2.5
         },
         {
-          "entries": [12468],
+          "entries": [14025, 14023, 14024, 14024, 12468, 14025, 14022, 14023],
           "positions": [
-            {"x": -7580.94, "y": -1063.43, "z": 449.162}
-          ]
-        },
-        {
-          "entries": [14023, 14025, 14022],
-          "positions": [
-            {"x": -7593.52, "y": -1065.42, "z": 449.165},
-            {"x": -7595.26, "y": -1062.21, "z": 449.165},
-            {"x": -7595.64, "y": -1064.42, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14023, 14024, 14025],
-          "positions": [
-            {"x": -7607.83, "y": -1061.51, "z": 449.143},
-            {"x": -7610.56, "y": -1062.99, "z": 449.165},
-            {"x": -7611.57, "y": -1060.75, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14022, 14024, 14023, 14023, 14025, 14022, 14025],
-          "positions": [
-            {"x": -7619.78, "y": -1050.12, "z": 449.163},
-            {"x": -7606.39, "y": -1047.59, "z": 449.165},
-            {"x": -7620.22, "y": -1048.97, "z": 449.165},
-            {"x": -7609, "y": -1044.69, "z": 449.165},
-            {"x": -7621.15, "y": -1047.38, "z": 449.165},
-            {"x": -7620.34, "y": -1046.74, "z": 449.164},
-            {"x": -7605.97, "y": -1042.12, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7616.96, "y": -1038.64, "z": 449.162}
-          ]
-        },
-        {
-          "entries": [14023, 14024, 14025],
-          "positions": [
-            {"x": -7598.6, "y": -1031.86, "z": 449.165},
-            {"x": -7598.56, "y": -1029.8, "z": 449.165},
-            {"x": -7597.44, "y": -1028.95, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7608.99, "y": -998.192, "z": 440.2}
-          ]
-        },
-        {
-          "entries": [14025, 14023, 14022],
-          "positions": [
-            {"x": -7614.46, "y": -996.162, "z": 440.288},
-            {"x": -7616.4, "y": -999.008, "z": 440.258},
-            {"x": -7618.08, "y": -996.5, "z": 440.016}
-          ]
-        },
-        {
-          "entries": [14024, 14025, 14025, 14023],
-          "positions": [
-            {"x": -7628.57, "y": -1004.67, "z": 440.262},
-            {"x": -7629.28, "y": -1007.07, "z": 440.238},
-            {"x": -7631.64, "y": -1003.87, "z": 440.261},
-            {"x": -7631.67, "y": -1006.49, "z": 440.261}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7632.38, "y": -1010.09, "z": 440.227}
-          ]
-        },
-        {
-          "entries": [12458, 12458, 14022, 12458, 14023, 14023],
-          "positions": [
-            {"x": -7636.19, "y": -1018.89, "z": 440.167},
-            {"x": -7637.41, "y": -1018.38, "z": 440.171},
-            {"x": -7640.71, "y": -1015.45, "z": 440.231},
-            {"x": -7636.02, "y": -1020.15, "z": 440.171},
-            {"x": -7644.14, "y": -1014.11, "z": 439.986},
-            {"x": -7643.26, "y": -1017.57, "z": 440.226}
-          ]
-        },
-        {
-          "entries": [14024, 14023, 14025, 14024],
-          "positions": [
-            {"x": -7654.51, "y": -1025.07, "z": 440.23},
-            {"x": -7655.41, "y": -1022.59, "z": 440.259},
             {"x": -7656.66, "y": -1022.02, "z": 440.26},
-            {"x": -7658.88, "y": -1024.86, "z": 440.258}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7658.54, "y": -1034.79, "z": 440.147}
-          ]
-        },
-        {
-          "entries": [14022, 14025, 14023],
-          "positions": [
-            {"x": -7667.62, "y": -1035.14, "z": 440.218},
-            {"x": -7668.67, "y": -1032.3, "z": 439.992},
-            {"x": -7669.58, "y": -1036.15, "z": 440.222}
-          ]
-        },
-        {
-          "entries": [14024, 14025, 14022, 14023],
-          "positions": [
-            {"x": -7685.02, "y": -1046.43, "z": 440.332},
-            {"x": -7687.6, "y": -1044.97, "z": 440.423},
-            {"x": -7687.01, "y": -1048.93, "z": 440.361},
-            {"x": -7688.77, "y": -1047.68, "z": 440.427}
-          ]
-        },
-        {
-          "entries": [14025, 14023, 14024],
-          "positions": [
-            {"x": -7697.04, "y": -1032.25, "z": 440.552},
-            {"x": -7697.94, "y": -1029.58, "z": 440.539},
-            {"x": -7699.6, "y": -1028.41, "z": 440.562}
-          ]
-        },
-        {
-          "entries": [14025, 14023, 14022, 14022],
-          "positions": [
-            {"x": -7707.88, "y": -1018.66, "z": 440.506},
-            {"x": -7710.12, "y": -1019.02, "z": 440.509},
-            {"x": -7707.28, "y": -1015.93, "z": 440.426},
-            {"x": -7709.91, "y": -1015.32, "z": 440.388}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7699.92, "y": -1005.57, "z": 440.206}
-          ]
-        },
-        {
-          "entries": [14022, 14023, 14024, 12458, 12458, 12458, 14024, 14025, 14025, 14023],
-          "positions": [
-            {"x": -7693.2, "y": -1003.6, "z": 440.243},
-            {"x": -7692.7, "y": -1001.07, "z": 440.214},
-            {"x": -7690.06, "y": -1003.81, "z": 439.983},
-            {"x": -7686.03, "y": -1007.55, "z": 439.983},
-            {"x": -7684.34, "y": -1008.1, "z": 439.983},
-            {"x": -7684.71, "y": -1010.01, "z": 439.983},
-            {"x": -7681.98, "y": -1016.85, "z": 439.983},
-            {"x": -7681.93, "y": -1020.2, "z": 439.983},
-            {"x": -7678.88, "y": -1018.34, "z": 439.983},
-            {"x": -7679.48, "y": -1020.49, "z": 439.983}
-          ]
-        },
-        {
-          "entries": [14023, 14024, 14022],
-          "positions": [
-            {"x": -7669.4, "y": -1008.97, "z": 440.258},
-            {"x": -7667.77, "y": -1006.39, "z": 440.258},
-            {"x": -7666.68, "y": -1009.73, "z": 440.258}
-          ]
+            {"x": -7655.41, "y": -1022.59, "z": 440.26},
+            {"x": -7658.88, "y": -1024.86, "z": 440.26},
+            {"x": -7654.51, "y": -1025.07, "z": 440.23},
+            {"x": -7658.54, "y": -1034.79, "z": 440.15},
+            {"x": -7668.67, "y": -1032.3, "z": 439.99},
+            {"x": -7667.62, "y": -1035.14, "z": 440.22},
+            {"x": -7669.58, "y": -1036.15, "z": 440.22}
+          ],
+          "radius": 11.4
         },
         {
           "entries": [14025, 14023, 14024, 14022],
           "positions": [
-            {"x": -7655.79, "y": -999.496, "z": 439.986},
-            {"x": -7653.74, "y": -1001.64, "z": 439.986},
-            {"x": -7654.21, "y": -998.125, "z": 439.986},
-            {"x": -7651.72, "y": -999.785, "z": 439.986}
+            {"x": -7687.6, "y": -1044.97, "z": 440.42},
+            {"x": -7688.77, "y": -1047.68, "z": 440.43},
+            {"x": -7685.02, "y": -1046.43, "z": 440.33},
+            {"x": -7687.01, "y": -1048.93, "z": 440.36}
+          ],
+          "radius": 2.7
+        },
+        {
+          "entries": [14023, 14024, 14025, 14025, 14023, 14022, 14022],
+          "positions": [
+            {"x": -7697.94, "y": -1029.58, "z": 440.54},
+            {"x": -7699.6, "y": -1028.41, "z": 440.56},
+            {"x": -7697.04, "y": -1032.25, "z": 440.55},
+            {"x": -7707.88, "y": -1018.66, "z": 440.51},
+            {"x": -7710.12, "y": -1019.02, "z": 440.51},
+            {"x": -7707.28, "y": -1015.93, "z": 440.43},
+            {"x": -7709.91, "y": -1015.32, "z": 440.39}
+          ],
+          "radius": 12.4
+        },
+        {
+          "entries": [14024, 14023, 14025, 14023, 14022, 14025, 14023, 14024, 14025, 14022],
+          "positions": [
+            {"x": -7710.66, "y": -1059.92, "z": 445.18},
+            {"x": -7712.22, "y": -1061.73, "z": 445.18},
+            {"x": -7715.37, "y": -1060.55, "z": 445.18},
+            {"x": -7712.6, "y": -1066.8, "z": 445.18},
+            {"x": -7710.82, "y": -1069.85, "z": 445.18},
+            {"x": -7714.33, "y": -1069.58, "z": 445.18},
+            {"x": -7712.97, "y": -1070.87, "z": 445.18},
+            {"x": -7714.8, "y": -1076.22, "z": 445.18},
+            {"x": -7717.04, "y": -1075.64, "z": 445.18},
+            {"x": -7714.24, "y": -1078.33, "z": 445.18}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -7699.04, "y": -1052.51, "z": 443.17}
           ]
         },
         {
-          "entries": [14023, 14024, 14022],
+          "entries": [12458, 12458, 12458],
           "positions": [
-            {"x": -7641.58, "y": -992.982, "z": 440.261},
-            {"x": -7641.37, "y": -989.344, "z": 440.263},
-            {"x": -7638.39, "y": -991.571, "z": 440.263}
+            {"x": -7701.32, "y": -1088.36, "z": 449.12},
+            {"x": -7701.66, "y": -1090.06, "z": 449.12},
+            {"x": -7703.11, "y": -1089.63, "z": 449.12}
+          ],
+          "radius": 1.7
+        },
+        {
+          "entries": [14024, 14025, 14023, 14023, 14025, 14022, 14025],
+          "positions": [
+            {"x": -7666.15, "y": -1084.75, "z": 449.17},
+            {"x": -7662.56, "y": -1083.52, "z": 449.17},
+            {"x": -7662.77, "y": -1086.54, "z": 449.17},
+            {"x": -7675.47, "y": -1096.21, "z": 449.14},
+            {"x": -7678.83, "y": -1094.33, "z": 449.13},
+            {"x": -7677.66, "y": -1097.38, "z": 449.13},
+            {"x": -7679.8, "y": -1095.72, "z": 449.13}
+          ],
+          "radius": 12.6
+        },
+        {
+          "entries": [14023, 14022, 14024, 14022, 14023, 14025, 14024],
+          "positions": [
+            {"x": -7652.77, "y": -1101.83, "z": 449.17},
+            {"x": -7649.61, "y": -1102.08, "z": 449.17},
+            {"x": -7652.81, "y": -1105.01, "z": 449.17},
+            {"x": -7650.09, "y": -1105.39, "z": 449.17},
+            {"x": -7663.56, "y": -1114.82, "z": 449.17},
+            {"x": -7666.62, "y": -1111.86, "z": 449.17},
+            {"x": -7666.81, "y": -1114.49, "z": 449.17}
+          ],
+          "radius": 11.9,
+          "approach": [
+            {"x": -7677.46, "y": -1098.78, "z": 450.09}
           ]
         },
         {
-          "entries": [14023, 14023, 14025, 14024],
+          "entries": [14025, 14024, 14023, 12468, 14024, 14022, 14024, 14023],
           "positions": [
-            {"x": -7628.34, "y": -983.119, "z": 440.014},
-            {"x": -7628.89, "y": -979.816, "z": 440.019},
-            {"x": -7625.49, "y": -982.718, "z": 440.026},
-            {"x": -7625.79, "y": -979.679, "z": 440.032}
+            {"x": -7690.42, "y": -1104.18, "z": 449.13},
+            {"x": -7692.69, "y": -1103.53, "z": 449.13},
+            {"x": -7692.41, "y": -1107.29, "z": 449.12},
+            {"x": -7686.12, "y": -1114.31, "z": 449.12},
+            {"x": -7679.55, "y": -1121.17, "z": 449.12},
+            {"x": -7681.99, "y": -1122.57, "z": 449.1},
+            {"x": -7677.64, "y": -1123.01, "z": 449.12},
+            {"x": -7680.42, "y": -1125.24, "z": 449.1}
+          ],
+          "radius": 14.4
+        },
+        {
+          "entries": [12468, 14022, 14025, 14025, 12458, 12458, 12458],
+          "positions": [
+            {"x": -7633.6, "y": -1098.48, "z": 449.16},
+            {"x": -7630.8, "y": -1094.99, "z": 449.17},
+            {"x": -7628.17, "y": -1097.42, "z": 449.17},
+            {"x": -7626.5, "y": -1093.33, "z": 449.17},
+            {"x": -7621.2, "y": -1088.59, "z": 449.16},
+            {"x": -7620.84, "y": -1087.45, "z": 449.16},
+            {"x": -7619.46, "y": -1087.49, "z": 449.16}
+          ],
+          "radius": 10.3,
+          "approach": [
+            {"x": -7647.64, "y": -1095.18, "z": 449.22}
           ]
         },
         {
-          "entries": [14022, 14023, 14024],
+          "entries": [14024, 14025, 14023, 14023, 14024, 14022, 14023, 14025, 14023, 14024, 12468],
           "positions": [
-            {"x": -7635.06, "y": -965.827, "z": 440.032},
-            {"x": -7639.45, "y": -966.215, "z": 440.265},
-            {"x": -7637.73, "y": -962.731, "z": 440.235}
+            {"x": -7638.77, "y": -1082.21, "z": 449.17},
+            {"x": -7636.83, "y": -1082.6, "z": 449.17},
+            {"x": -7638.88, "y": -1079.63, "z": 449.17},
+            {"x": -7636.34, "y": -1080.04, "z": 449.17},
+            {"x": -7645.69, "y": -1068.12, "z": 449.17},
+            {"x": -7649.74, "y": -1067.41, "z": 449.17},
+            {"x": -7646.77, "y": -1064.79, "z": 449.17},
+            {"x": -7630.34, "y": -1062.68, "z": 449.17},
+            {"x": -7627.63, "y": -1062.39, "z": 449.17},
+            {"x": -7630.53, "y": -1060.19, "z": 449.16},
+            {"x": -7641.44, "y": -1057.17, "z": 449.16}
+          ],
+          "radius": 13.6
+        },
+        {
+          "entries": [14022, 14023, 14024, 14024, 12468, 14024, 14025, 14023, 14022, 14024, 14023, 14025, 14022, 14025, 14023],
+          "positions": [
+            {"x": -7621.83, "y": -1076.39, "z": 449.17},
+            {"x": -7620.81, "y": -1073.98, "z": 449.17},
+            {"x": -7618.75, "y": -1076.93, "z": 449.17},
+            {"x": -7618.49, "y": -1074.5, "z": 449.17},
+            {"x": -7606.11, "y": -1080.45, "z": 449.16},
+            {"x": -7610.56, "y": -1062.99, "z": 449.17},
+            {"x": -7611.57, "y": -1060.75, "z": 449.17},
+            {"x": -7607.83, "y": -1061.51, "z": 449.14},
+            {"x": -7597.93, "y": -1080.51, "z": 449.17},
+            {"x": -7596.44, "y": -1078.54, "z": 449.17},
+            {"x": -7594.62, "y": -1081.37, "z": 449.17},
+            {"x": -7594.17, "y": -1079.04, "z": 449.17},
+            {"x": -7595.64, "y": -1064.42, "z": 449.17},
+            {"x": -7595.26, "y": -1062.21, "z": 449.17},
+            {"x": -7593.52, "y": -1065.42, "z": 449.17}
+          ],
+          "radius": 17.4
+        },
+        {
+          "entries": [14022, 14023, 14025, 14022, 12468, 14023, 14024, 14025],
+          "positions": [
+            {"x": -7619.78, "y": -1050.12, "z": 449.16},
+            {"x": -7620.22, "y": -1048.97, "z": 449.17},
+            {"x": -7621.15, "y": -1047.38, "z": 449.17},
+            {"x": -7620.34, "y": -1046.74, "z": 449.16},
+            {"x": -7616.96, "y": -1038.64, "z": 449.16},
+            {"x": -7609, "y": -1044.69, "z": 449.17},
+            {"x": -7606.39, "y": -1047.59, "z": 449.17},
+            {"x": -7605.97, "y": -1042.12, "z": 449.17}
+          ],
+          "radius": 10.2,
+          "approach": [
+            {"x": -7627.11, "y": -1064.13, "z": 449.25}
           ]
         },
         {
-          "entries": [12468],
+          "entries": [14023, 14024, 14025],
           "positions": [
-            {"x": -7647.77, "y": -967.77, "z": 440.191}
-          ]
+            {"x": -7598.6, "y": -1031.86, "z": 449.17},
+            {"x": -7598.56, "y": -1029.8, "z": 449.17},
+            {"x": -7597.44, "y": -1028.95, "z": 449.17}
+          ],
+          "radius": 2.2
         },
         {
-          "entries": [14024, 14025, 14024, 14023],
+          "entries": [12468, 14022, 14024, 14023],
           "positions": [
-            {"x": -7649.3, "y": -974.469, "z": 440.263},
-            {"x": -7651.94, "y": -973.798, "z": 440.233},
-            {"x": -7649.25, "y": -977.765, "z": 440.263},
-            {"x": -7652.64, "y": -976.687, "z": 440.263}
-          ]
-        },
-        {
-          "entries": [14024, 14022, 14023],
-          "positions": [
-            {"x": -7665.13, "y": -981.965, "z": 440.218},
-            {"x": -7663.12, "y": -985.436, "z": 439.988},
-            {"x": -7666.94, "y": -984.179, "z": 440.23}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7671.79, "y": -988.513, "z": 440.243}
-          ]
-        },
-        {
-          "entries": [14023, 14025, 14024, 14023],
-          "positions": [
-            {"x": -7676.24, "y": -993.073, "z": 440.258},
-            {"x": -7679.24, "y": -993.468, "z": 440.239},
-            {"x": -7676.89, "y": -996.265, "z": 440.258},
-            {"x": -7679.7, "y": -995.742, "z": 440.258}
-          ]
-        },
-        {
-          "entries": [14456, 14456, 12557],
-          "positions": [
-            {"x": -7623.09, "y": -1022.1, "z": 413.382},
-            {"x": -7615.8, "y": -1017.07, "z": 413.382},
-            {"x": -7617, "y": -1023.08, "z": 413.382}
-          ]
-        },
-        {
-          "entries": [14024, 14023, 14025],
-          "positions": [
-            {"x": -7630.53, "y": -1060.19, "z": 449.164},
-            {"x": -7627.63, "y": -1062.39, "z": 449.165},
-            {"x": -7630.34, "y": -1062.68, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [12468],
-          "positions": [
-            {"x": -7641.44, "y": -1057.17, "z": 449.162}
-          ]
-        },
-        {
-          "entries": [14023, 14024, 14022],
-          "positions": [
-            {"x": -7646.77, "y": -1064.79, "z": 449.165},
-            {"x": -7645.69, "y": -1068.12, "z": 449.165},
-            {"x": -7649.74, "y": -1067.41, "z": 449.165}
-          ]
-        },
-        {
-          "entries": [14022, 14024, 14023, 14023, 14023, 14025, 14022, 14024, 14025, 14025],
-          "positions": [
-            {"x": -7710.82, "y": -1069.85, "z": 445.177},
-            {"x": -7710.66, "y": -1059.92, "z": 445.177},
-            {"x": -7712.22, "y": -1061.73, "z": 445.177},
-            {"x": -7712.6, "y": -1066.8, "z": 445.177},
-            {"x": -7712.97, "y": -1070.87, "z": 445.177},
-            {"x": -7714.33, "y": -1069.58, "z": 445.176},
-            {"x": -7714.24, "y": -1078.33, "z": 445.177},
-            {"x": -7714.8, "y": -1076.22, "z": 445.177},
-            {"x": -7715.37, "y": -1060.55, "z": 445.177},
-            {"x": -7717.04, "y": -1075.64, "z": 445.177}
-          ]
-        },
-        {
-          "entries": [12465, 12464, 12467, 12463, 12464, 12463, 12465],
-          "positions": [
-            {"x": -7590.22, "y": -939.636, "z": 428.222},
-            {"x": -7580.7, "y": -945.092, "z": 428.161},
-            {"x": -7590.3, "y": -930.078, "z": 428.261},
-            {"x": -7573.06, "y": -941.412, "z": 428.14},
-            {"x": -7583.51, "y": -924.026, "z": 428.317},
-            {"x": -7568.89, "y": -934.958, "z": 428.192},
-            {"x": -7573.8, "y": -927.041, "z": 428.258}
+            {"x": -7580.94, "y": -1063.43, "z": 449.16},
+            {"x": -7575.48, "y": -1061.75, "z": 449.16},
+            {"x": -7572.96, "y": -1059.89, "z": 449.16},
+            {"x": -7571.3, "y": -1064.4, "z": 449.16}
+          ],
+          "radius": 6.4,
+          "approach": [
+            {"x": -7597.16, "y": -1063.11, "z": 449.25}
           ]
         }
       ],
+      "skip": [13976, 14401],
       "boss": {
         "entry": 12017,
-        "position": {"x": -7573.89, "y": -1035.25, "z": 449.248}
+        "position": {"x": -7573.89, "y": -1035.25, "z": 449.25}
       },
       "notes": [
-        "door \"Portcullis\" entry 179365 at -7568.4 -1031.6 449.1",
-        "goober \"Black Dragon Egg\" entry 177807 at -7609.9 -1035.1 408.5",
-        "goober \"Black Dragon Egg\" entry 177807 at -7611.6 -1020.3 413.4",
-        "goober \"Black Dragon Egg\" entry 177807 at -7626.7 -1011.7 413.4",
-        "goober \"Orb of Domination\" entry 177808 at -7615.0 -1026.2 413.4",
-        "goober \"Suppression Device\" entry 179784 at -7572.6 -1062.6 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7593.8 -1063.4 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7595.3 -1030.4 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7595.8 -1080.0 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7606.0 -1045.1 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7609.9 -1061.5 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7616.2 -997.1 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7619.1 -1047.2 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7620.1 -1075.7 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7627.0 -981.4 440.0",
-        "goober \"Suppression Device\" entry 179784 at -7629.8 -1061.5 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7630.3 -1005.5 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7637.6 -965.0 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7637.9 -1081.1 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7640.3 -991.3 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7642.7 -1015.7 440.2",
-        "goober \"Suppression Device\" entry 179784 at -7647.8 -1067.0 449.2",
-        "goober \"Suppression Device\" entry 179784 at -7650.9 -975.8 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7653.7 -999.9 440.0",
-        "goober \"Suppression Device\" entry 179784 at -7656.7 -1024.3 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7664.8 -984.1 440.2",
-        "goober \"Suppression Device\" entry 179784 at -7667.5 -1008.3 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7669.5 -1034.2 440.2",
-        "goober \"Suppression Device\" entry 179784 at -7677.6 -994.4 440.3",
-        "goober \"Suppression Device\" entry 179784 at -7680.5 -1018.7 440.0",
-        "goober \"Suppression Device\" entry 179784 at -7686.9 -1047.0 440.4",
-        "goober \"Suppression Device\" entry 179784 at -7691.3 -1002.4 440.2",
-        "goober \"Suppression Device\" entry 179784 at -7699.2 -1031.0 440.6",
-        "goober \"Suppression Device\" entry 179784 at -7709.2 -1017.0 440.4",
-        "goober \"Suppression Device\" entry 179784 at -7713.1 -1060.0 445.2",
-        "goober \"Suppression Device\" entry 179784 at -7716.1 -1077.4 445.2"
+        "The corridor behind the Vaelastrasz door (179364, opened by Vael's DONE) with two Death Talon packs (12467 Captain, 12463 Flamescale, 12464 Seether, 12465 Wyrmkin), then the Suppression Room: 38 Suppression Devices (179784) and 158 spawns (12 Blackwing Taskmasters 12458, 12 Death Talon Hatchers 12468 and the 134 whelps of the four Corrupted Whelp colours 14022-14025). The whelps' 300 school resistance is on the template; the core also gives them a permanent immunity aura on evade (instance_blackwing_lair.cpp OnCreatureEvade).",
+        "The devices apply Suppression (22247) within 15 yd of every player who is not stealthed or a GM (go_engin_suppressionAI); the bots' own strategy disarms them (disarm suppression device, BlackwingLairDungeonStrategies.cpp), so the plan has no step. Broodlord Lashlayer stands at the room's east end; his DONE opens the Firemaw door (179365)."
       ]
     },
     {
       "name": "firemaw",
-      "to": {"x": -7523.27, "y": -1057.33, "z": 449.242},
+      "to": {"x": -7569.35, "y": -1034.24, "z": 449.9},
       "pull_groups": [
         {
-          "entries": [12457, 13996, 13996, 12459, 13996, 13996, 13996, 13996, 13996, 13996, 12461, 12459],
+          "entries": [13996, 13996, 12459, 13996],
           "positions": [
-            {"x": -7523.27, "y": -1057.33, "z": 449.242},
-            {"x": -7523.28, "y": -1060.82, "z": 449.325},
-            {"x": -7521.09, "y": -1059.26, "z": 449.242},
-            {"x": -7519.01, "y": -1054.88, "z": 449.242},
-            {"x": -7514.81, "y": -1054.19, "z": 449.242},
-            {"x": -7513.05, "y": -1051.5, "z": 449.325},
-            {"x": -7508.46, "y": -1046.72, "z": 449.242},
-            {"x": -7508.72, "y": -1050.38, "z": 449.242},
-            {"x": -7504.52, "y": -1043.61, "z": 449.325},
-            {"x": -7501.86, "y": -1042.58, "z": 449.242},
-            {"x": -7496.66, "y": -1038.1, "z": 449.242},
-            {"x": -7493.06, "y": -1038.68, "z": 449.242}
+            {"x": -7551.41, "y": -1039, "z": 449.24},
+            {"x": -7550.06, "y": -1037.95, "z": 449.24},
+            {"x": -7549.04, "y": -1040, "z": 449.24},
+            {"x": -7551.77, "y": -1042.98, "z": 449.24}
+          ],
+          "radius": 3.7
+        },
+        {
+          "entries": [13996, 13996, 13996, 12459],
+          "positions": [
+            {"x": -7550.69, "y": -1014.26, "z": 449.24},
+            {"x": -7547.72, "y": -1014.95, "z": 449.32},
+            {"x": -7547.72, "y": -1014.95, "z": 449.32},
+            {"x": -7544.97, "y": -1016.96, "z": 449.24}
+          ],
+          "radius": 3.8
+        },
+        {
+          "entries": [12457, 13996, 13996, 12459, 13996, 13996, 13996, 13996, 13996, 13996],
+          "positions": [
+            {"x": -7523.27, "y": -1057.33, "z": 449.24},
+            {"x": -7521.09, "y": -1059.26, "z": 449.24},
+            {"x": -7523.28, "y": -1060.82, "z": 449.32},
+            {"x": -7519.01, "y": -1054.88, "z": 449.24},
+            {"x": -7514.81, "y": -1054.19, "z": 449.24},
+            {"x": -7513.05, "y": -1051.5, "z": 449.32},
+            {"x": -7508.72, "y": -1050.38, "z": 449.24},
+            {"x": -7508.46, "y": -1046.72, "z": 449.24},
+            {"x": -7504.52, "y": -1043.61, "z": 449.32},
+            {"x": -7501.86, "y": -1042.58, "z": 449.24}
+          ],
+          "radius": 15.8,
+          "approach": [
+            {"x": -7534.04, "y": -1043.53, "z": 450.14}
           ]
+        },
+        {
+          "entries": [12459, 13996, 13996, 13996, 12461, 13996, 13996, 13996, 12457, 13996, 12459, 13996],
+          "positions": [
+            {"x": -7538.58, "y": -983.23, "z": 449.42},
+            {"x": -7543.13, "y": -981.19, "z": 449.42},
+            {"x": -7541.24, "y": -977.1, "z": 449.42},
+            {"x": -7540.13, "y": -974.13, "z": 449.24},
+            {"x": -7527.93, "y": -979.7, "z": 449.24},
+            {"x": -7533.51, "y": -971.84, "z": 449.42},
+            {"x": -7530.19, "y": -968.04, "z": 449.24},
+            {"x": -7527.01, "y": -967.03, "z": 449.32},
+            {"x": -7521.64, "y": -969.5, "z": 449.24},
+            {"x": -7523.45, "y": -963.62, "z": 449.24},
+            {"x": -7518.65, "y": -966.95, "z": 449.42},
+            {"x": -7519.65, "y": -962.05, "z": 449.24}
+          ],
+          "radius": 16.2,
+          "approach": [
+            {"x": -7529.01, "y": -993.99, "z": 449.25}
+          ]
+        }
+      ],
+      "skip": [13976, 14401],
+      "boss": {
+        "entry": 11983,
+        "position": {"x": -7506.4, "y": -1015.7, "z": 448.91}
+      },
+      "notes": [
+        "Firemaw's room behind the Lashlayer door: two four-whelp packs, a twelve-mob pack of technicians, warlocks and an overseer, and a twelve-mob pack at the room's north side. Firemaw's own room needs Fire Resistance on the tanks; the bots' raid strategy handles the breath and the Flame Buffet stacks (dungeons-and-raids.md)."
+      ]
+    },
+    {
+      "name": "ebonroc",
+      "to": {"x": -7504.83, "y": -1018.78, "z": 449.07},
+      "pull_groups": [
+        {
+          "entries": [12461, 12459],
+          "positions": [
+            {"x": -7496.66, "y": -1038.1, "z": 449.24},
+            {"x": -7493.06, "y": -1038.68, "z": 449.24}
+          ],
+          "radius": 2.3
         },
         {
           "entries": [12460, 12461, 12461, 12461],
           "positions": [
-            {"x": -7467.35, "y": -994.523, "z": 449.748},
-            {"x": -7471.38, "y": -988.328, "z": 449.845},
-            {"x": -7459.26, "y": -995.384, "z": 449.784},
-            {"x": -7461.63, "y": -985.513, "z": 449.782}
-          ]
+            {"x": -7467.35, "y": -994.52, "z": 449.75},
+            {"x": -7471.38, "y": -988.33, "z": 449.85},
+            {"x": -7459.26, "y": -995.38, "z": 449.78},
+            {"x": -7461.63, "y": -985.51, "z": 449.78}
+          ],
+          "radius": 7.7
         },
         {
-          "entries": [13996, 13996, 13996, 13996, 12459, 13996, 12457, 12457, 13996, 12461, 13996, 13996, 12459],
+          "entries": [13996, 13996, 12459, 13996, 12457, 13996, 13996, 13996],
           "positions": [
-            {"x": -7438.3, "y": -966.928, "z": 464.984},
-            {"x": -7440.87, "y": -962.536, "z": 464.984},
-            {"x": -7452.42, "y": -953.67, "z": 464.984},
-            {"x": -7455.86, "y": -950.444, "z": 464.984},
-            {"x": -7438.12, "y": -959.161, "z": 464.984},
-            {"x": -7459.25, "y": -946.115, "z": 464.984},
-            {"x": -7447.49, "y": -943.708, "z": 464.984},
-            {"x": -7446.48, "y": -939.84, "z": 465.16},
-            {"x": -7462.8, "y": -935.178, "z": 464.983},
-            {"x": -7448.3, "y": -934.665, "z": 464.984},
-            {"x": -7464.44, "y": -931.376, "z": 464.984},
-            {"x": -7466.14, "y": -927.378, "z": 464.983},
-            {"x": -7459.57, "y": -927.623, "z": 464.984}
-          ]
-        },
-        {
-          "entries": [12459, 13996, 13996, 12457, 12459, 13996, 12461, 13996, 13996, 13996, 13996, 13996],
-          "positions": [
-            {"x": -7499.36, "y": -908.3, "z": 458.04},
-            {"x": -7505.29, "y": -903.581, "z": 457.576},
-            {"x": -7507.64, "y": -905.047, "z": 457.576},
-            {"x": -7516.12, "y": -921.914, "z": 457.856},
+            {"x": -7519.27, "y": -931.85, "z": 457.58},
+            {"x": -7523.18, "y": -929.48, "z": 457.58},
             {"x": -7518.56, "y": -924.99, "z": 457.76},
-            {"x": -7519.27, "y": -931.852, "z": 457.576},
-            {"x": -7515.62, "y": -910.707, "z": 457.576},
-            {"x": -7523.18, "y": -929.477, "z": 457.576},
-            {"x": -7524.24, "y": -916.833, "z": 457.659},
             {"x": -7525.64, "y": -924.33, "z": 457.76},
-            {"x": -7525.82, "y": -921.754, "z": 457.576},
-            {"x": -7526.95, "y": -918.837, "z": 457.576}
+            {"x": -7516.12, "y": -921.91, "z": 457.86},
+            {"x": -7525.82, "y": -921.75, "z": 457.58},
+            {"x": -7526.95, "y": -918.84, "z": 457.58},
+            {"x": -7524.24, "y": -916.83, "z": 457.66}
+          ],
+          "radius": 9.2,
+          "approach": [
+            {"x": -7511.4, "y": -942.6, "z": 456.08}
           ]
         },
         {
-          "entries": [12467, 12465, 12464, 12464, 12465, 12463, 12463],
+          "entries": [12461, 13996, 13996, 12459],
           "positions": [
-            {"x": -7525.67, "y": -925.212, "z": 427.908},
-            {"x": -7523.96, "y": -917.881, "z": 427.921},
-            {"x": -7534.23, "y": -926.704, "z": 427.963},
-            {"x": -7527.41, "y": -911.406, "z": 427.92},
-            {"x": -7539.97, "y": -921.612, "z": 428.016},
-            {"x": -7534.21, "y": -910.26, "z": 427.964},
-            {"x": -7539.57, "y": -914.064, "z": 428.012}
-          ]
+            {"x": -7515.62, "y": -910.71, "z": 457.58},
+            {"x": -7507.64, "y": -905.05, "z": 457.58},
+            {"x": -7505.29, "y": -903.58, "z": 457.58},
+            {"x": -7499.36, "y": -908.3, "z": 458.04}
+          ],
+          "radius": 9.9
         },
         {
-          "entries": [13996, 13996, 13996, 13996, 12459, 12457, 13996, 13996, 13996, 12461, 13996, 12459],
+          "entries": [13996, 13996, 13996, 12459, 12461, 12457, 13996, 13996, 13996],
           "positions": [
-            {"x": -7519.65, "y": -962.049, "z": 449.242},
-            {"x": -7523.45, "y": -963.623, "z": 449.242},
-            {"x": -7527.01, "y": -967.031, "z": 449.325},
-            {"x": -7530.19, "y": -968.04, "z": 449.242},
-            {"x": -7518.65, "y": -966.95, "z": 449.42},
-            {"x": -7521.64, "y": -969.504, "z": 449.242},
-            {"x": -7533.51, "y": -971.84, "z": 449.42},
-            {"x": -7540.13, "y": -974.129, "z": 449.242},
-            {"x": -7541.24, "y": -977.1, "z": 449.42},
-            {"x": -7527.93, "y": -979.702, "z": 449.242},
-            {"x": -7543.13, "y": -981.19, "z": 449.42},
-            {"x": -7538.58, "y": -983.23, "z": 449.42}
-          ]
-        },
-        {
-          "entries": [13996, 13996, 13996, 12459, 12461, 12457, 13996, 13996, 13996, 12459, 13996, 13996],
-          "positions": [
-            {"x": -7483.17, "y": -887.794, "z": 464.983},
-            {"x": -7485.17, "y": -884.734, "z": 464.983},
-            {"x": -7487.21, "y": -880.388, "z": 464.983},
-            {"x": -7483.78, "y": -879.046, "z": 464.984},
-            {"x": -7476.91, "y": -878.195, "z": 464.984},
-            {"x": -7470.82, "y": -875.382, "z": 464.984},
+            {"x": -7483.17, "y": -887.79, "z": 464.98},
+            {"x": -7485.17, "y": -884.73, "z": 464.98},
+            {"x": -7487.21, "y": -880.39, "z": 464.98},
+            {"x": -7483.78, "y": -879.05, "z": 464.98},
+            {"x": -7476.91, "y": -878.2, "z": 464.98},
+            {"x": -7470.82, "y": -875.38, "z": 464.98},
             {"x": -7471.38, "y": -871.23, "z": 465.16},
-            {"x": -7465.24, "y": -871.099, "z": 464.983},
-            {"x": -7462.58, "y": -866.428, "z": 464.983},
-            {"x": -7455.8, "y": -864.465, "z": 464.984},
-            {"x": -7451.73, "y": -865.07, "z": 465.16},
-            {"x": -7453.61, "y": -860.511, "z": 465.067}
+            {"x": -7465.24, "y": -871.1, "z": 464.98},
+            {"x": -7462.58, "y": -866.43, "z": 464.98}
+          ],
+          "radius": 17.9,
+          "approach": [
+            {"x": -7486.61, "y": -896.41, "z": 462.73}
           ]
-        }
-      ],
-      "boss": {
-        "entry": 11983,
-        "position": {"x": -7506.4, "y": -1015.7, "z": 448.906}
-      }
-    },
-    {
-      "name": "ebonroc",
-      "to": {"x": -7405.67, "y": -964.438, "z": 465.031},
-      "pull_groups": [
+        },
+        {
+          "entries": [12459, 13996, 13996],
+          "positions": [
+            {"x": -7455.8, "y": -864.47, "z": 464.98},
+            {"x": -7451.73, "y": -865.07, "z": 465.16},
+            {"x": -7453.61, "y": -860.51, "z": 465.07}
+          ],
+          "radius": 3.3
+        },
+        {
+          "entries": [13996, 12459, 13996, 13996, 12457, 12461, 13996, 12457, 13996, 13996],
+          "positions": [
+            {"x": -7419.28, "y": -895.44, "z": 465.07},
+            {"x": -7419.3, "y": -900.76, "z": 464.98},
+            {"x": -7413.43, "y": -895.07, "z": 464.98},
+            {"x": -7410.77, "y": -900.6, "z": 464.98},
+            {"x": -7418.69, "y": -908.4, "z": 464.98},
+            {"x": -7419.65, "y": -913.13, "z": 464.98},
+            {"x": -7412.01, "y": -912.22, "z": 464.98},
+            {"x": -7411.78, "y": -916.85, "z": 465.16},
+            {"x": -7408.65, "y": -917.05, "z": 465.07},
+            {"x": -7404.07, "y": -918.97, "z": 464.98}
+          ],
+          "radius": 15.2,
+          "approach": [
+            {"x": -7435.84, "y": -904.58, "z": 466.17}
+          ]
+        },
+        {
+          "entries": [13996, 12459, 13996],
+          "positions": [
+            {"x": -7398.85, "y": -929.6, "z": 464.98},
+            {"x": -7399.52, "y": -934.33, "z": 464.98},
+            {"x": -7396.42, "y": -935.19, "z": 464.98}
+          ],
+          "radius": 4
+        },
         {
           "entries": [12460, 12460, 12460],
           "positions": [
-            {"x": -7405.67, "y": -964.438, "z": 465.031},
-            {"x": -7396.24, "y": -961.435, "z": 465.044},
-            {"x": -7388.2, "y": -955.983, "z": 465.047}
+            {"x": -7405.67, "y": -964.44, "z": 465.03},
+            {"x": -7396.24, "y": -961.43, "z": 465.04},
+            {"x": -7388.2, "y": -955.98, "z": 465.05}
+          ],
+          "radius": 10.2,
+          "approach": [
+            {"x": -7409.3, "y": -942.58, "z": 465.07}
           ]
         },
         {
-          "entries": [13996, 12459, 13996, 13996, 13996, 12457, 13996, 12461, 12457, 13996, 12459, 13996, 13996],
+          "entries": [12459, 13996, 13996],
           "positions": [
-            {"x": -7396.42, "y": -935.186, "z": 464.984},
-            {"x": -7399.52, "y": -934.327, "z": 464.984},
-            {"x": -7398.85, "y": -929.604, "z": 464.984},
-            {"x": -7404.07, "y": -918.965, "z": 464.984},
-            {"x": -7408.65, "y": -917.047, "z": 465.067},
-            {"x": -7411.78, "y": -916.85, "z": 465.16},
-            {"x": -7412.01, "y": -912.215, "z": 464.984},
-            {"x": -7419.65, "y": -913.131, "z": 464.984},
-            {"x": -7418.69, "y": -908.397, "z": 464.983},
-            {"x": -7410.77, "y": -900.602, "z": 464.984},
-            {"x": -7419.3, "y": -900.757, "z": 464.984},
-            {"x": -7413.43, "y": -895.067, "z": 464.984},
-            {"x": -7419.28, "y": -895.444, "z": 465.067}
-          ]
+            {"x": -7438.12, "y": -959.16, "z": 464.98},
+            {"x": -7440.87, "y": -962.54, "z": 464.98},
+            {"x": -7438.3, "y": -966.93, "z": 464.98}
+          ],
+          "radius": 4.6
         },
         {
-          "entries": [13976],
+          "entries": [12457, 12457, 12461, 13996, 13996, 13996, 13996, 12459, 13996, 13996],
           "positions": [
-            {"x": -7342.44, "y": -957.519, "z": 481.487}
-          ]
+            {"x": -7446.48, "y": -939.84, "z": 465.16},
+            {"x": -7447.49, "y": -943.71, "z": 464.98},
+            {"x": -7448.3, "y": -934.66, "z": 464.98},
+            {"x": -7455.86, "y": -950.44, "z": 464.98},
+            {"x": -7459.25, "y": -946.12, "z": 464.98},
+            {"x": -7452.42, "y": -953.67, "z": 464.98},
+            {"x": -7462.8, "y": -935.18, "z": 464.98},
+            {"x": -7459.57, "y": -927.62, "z": 464.98},
+            {"x": -7464.44, "y": -931.38, "z": 464.98},
+            {"x": -7466.14, "y": -927.38, "z": 464.98}
+          ],
+          "radius": 15.7
         }
       ],
+      "skip": [13976, 14401],
       "boss": {
         "entry": 14601,
-        "position": {"x": -7358.19, "y": -994.32, "z": 477.35}
-      }
+        "position": {"x": -7358.19, "y": -994.32, "z": 477.35},
+        "approach": [
+          {"x": -7378.83, "y": -986.92, "z": 475.32}
+        ]
+      },
+      "notes": [
+        "Out of Firemaw's room and up the ramp to Ebonroc: the room's east exit pack, the side room at z 457.7, and the z 465 hall with three twelve-mob packs. Master Elemental Shaper Krixix (14401, gossip flag, faction 103) stands with three Death Talon Wyrmguards in the hall's south pack and is in no pull: a hostile-faction NPC with a gossip menu, left to the walk (see the prep's open items)."
+      ]
     },
     {
       "name": "flamegor",
-      "to": {"x": -7393.3, "y": -1070.78, "z": 479.793},
-      "pull_groups": [
-        {
-          "entries": [13976],
-          "positions": [
-            {"x": -7393.3, "y": -1070.78, "z": 479.793}
-          ]
-        },
-        {
-          "entries": [12460, 12460, 12460],
-          "positions": [
-            {"x": -7435.87, "y": -1052.21, "z": 477.018},
-            {"x": -7443.51, "y": -1045.13, "z": 477.02},
-            {"x": -7450.65, "y": -1035.77, "z": 477}
-          ]
-        }
-      ],
+      "to": {"x": -7390.24, "y": -1017.98, "z": 477.2},
+      "skip": [13976, 14401],
       "boss": {
         "entry": 11981,
         "position": {"x": -7407.94, "y": -1031.04, "z": 477.35}
       },
       "notes": [
-        "door \"Portcullis\" entry 179115 at -7455.2 -1051.7 480.0"
+        "Flamegor's room: no static spawn of its own between Ebonroc and it (61 yd of walk); the three Death Talon Wyrmguards at z 477 west of Flamegor belong to the Chromaggus leg, on the way out."
       ]
     },
     {
       "name": "chromaggus",
-      "to": {"x": -7515.34, "y": -1029.62, "z": 476.73},
+      "to": {"x": -7422.76, "y": -1036.62, "z": 477.1},
+      "pull_groups": [
+        {
+          "entries": [12460, 12460, 12460],
+          "positions": [
+            {"x": -7435.87, "y": -1052.21, "z": 477.02},
+            {"x": -7443.51, "y": -1045.13, "z": 477.02},
+            {"x": -7450.65, "y": -1035.77, "z": 477}
+          ],
+          "radius": 11.8
+        }
+      ],
+      "skip": [13976, 14401],
       "boss": {
         "entry": 14020,
-        "position": {"x": -7515.34, "y": -1029.62, "z": 476.73}
+        "position": {"x": -7515.34, "y": -1029.62, "z": 476.73},
+        "approach": [
+          {"x": -7497.47, "y": -1042.45, "z": 476.65}
+        ]
       },
       "notes": [
-        "door \"Portcullis\" entry 179116 at -7506.3 -1043.2 480.0"
+        "The corridor from Flamegor to Chromaggus with three Death Talon Wyrmguards, then Chromaggus. The side door 179116 is open at spawn and the lever 179148 has no script in the core, so nothing gates the room; Chromaggus' DONE opens the exit 179117."
       ]
     },
     {
-      "name": "lord_victor_nefarius",
-      "to": {"x": -7588.27, "y": -1261.92, "z": 482.03},
+      "name": "nefarian",
+      "to": {"x": -7578.04, "y": -1246.02, "z": 478.13},
+      "skip": [13976, 14401],
+      "steps": [
+        {
+          "gossip": {
+            "npc": 10162,
+            "near": {"x": -7588.27, "y": -1261.92, "z": 482.03},
+            "option": 0,
+            "by": "tank",
+            "fail_text": "Lord Victor Nefarius' menu has no mistake option: instance data 6 (Chromaggus) is not DONE (boss_victor_nefarius.cpp GossipHello)."
+          }
+        }
+      ],
       "boss": {
-        "entry": 10162,
-        "position": {"x": -7588.27, "y": -1261.92, "z": 482.03}
+        "entry": 11583,
+        "position": {"x": -7495.96, "y": -1252.4, "z": 476.8},
+        "hold": {
+          "instance_data": 7,
+          "spot": {"x": -7545, "y": -1250, "z": 476.9},
+          "radius": 90,
+          "timeout_s": 600,
+          "entries": [14261, 14262, 14263, 14264, 14265, 14302]
+        }
       },
       "notes": [
-        "button \"Fel Orc Encampment Custom Area\" entry 200000 at -7587.8 -1261.4 482.0"
+        "Nefarian's hall, no static spawns: Lord Victor Nefarius (10162) sits at -7588.27 -1261.92 482.03 and only offers his menu item when Chromaggus is DONE (GossipHello_boss_victor_nefarius). His fight start is three menu levels (option 1, then 2, then 3, each shown by the previous selection); the run's gossip step sends one hello and one select, so it reaches the first level only. The gossip step is written for it and the boss is a hold on instance data 7 (TYPE_NEFARIAN); Nefarian (11583) is summoned at 40 killed adds and lands at -7495.96 -1252.40 476.80. Blocker, see the prep."
       ]
     }
   ]
