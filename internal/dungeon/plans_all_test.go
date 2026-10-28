@@ -55,7 +55,7 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 
 // offlineMapped are the plans whose legs, doors and steps were written by hand offline (no live walk yet), so they carry steps and are still
 // drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
-var offlineMapped = map[string]bool{"deadmines": true}
+var offlineMapped = map[string]bool{"deadmines": true, "naxxramas": true}
 
 // Ragefire Chasm is the one plan with measured hire data: 800 is the issue's tank floor for its level band (#266).
 func TestRagefireChasmPlanCarriesTheTankFloor(t *testing.T) {
