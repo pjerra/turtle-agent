@@ -396,6 +396,317 @@ func TestRaidWalkPairAlphanumericSlotsInReport(t *testing.T) {
 	}
 }
 
+func TestRaidWalkPairCleanupRetriesFailedTeardownAndRelease(t *testing.T) {
+	var mu sync.Mutex
+	calls := map[string]int{}
+	count := func(k string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		calls[k]++
+		return calls[k]
+	}
+	oldRun, oldEnv, oldSleep := raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) {
+		return walkEnv{
+			acquire: func(server, slot string, any bool, holder string, ttl time.Duration) (slots.Acquired, error) {
+				if slot != "2" {
+					return slots.Acquired{}, fmt.Errorf("slot %s: not leased by this test", slot)
+				}
+				return slots.Acquired{Lease: slots.Lease{Server: server, Slot: slot, Holder: holder, LeaseID: "id-2"}}, nil
+			},
+			release: func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
+				if count("release") == 1 {
+					return slots.Lease{}, fmt.Errorf("lease store closed")
+				}
+				panic("release boom")
+			},
+			teardown: func(args []string, stdout, stderr io.Writer) int {
+				if count("teardown") == 1 {
+					panic("teardown boom")
+				}
+				fmt.Fprintln(stdout, `{"server":"s","slot":"2","steps":[{"step":"lease","status":"fail","detail":"still held"}],"failed":1}`)
+				return exitTeardownFailed
+			},
+		}, walkDeps{}, nil
+	}
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error { return nil }
+	raidWalkPairRun = func(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkDeps, stdout, stderr io.Writer) int {
+		if o.slot != "2" {
+			return exitOK
+		}
+		if _, err := env.acquire(o.server, o.slot, false, o.holder, time.Minute); err != nil {
+			t.Errorf("walk %s: acquire: %v", o.slot, err)
+		}
+		if _, err := env.release(o.server, o.slot, o.holder, "id-2", false); err == nil {
+			t.Error("walk 2: release: want the first attempt to fail")
+		}
+		env.teardown([]string{"--json", filepath.Join(o.out, "slot")}, stdout, stderr)
+		t.Error("walk 2: teardown did not panic")
+		return exitOK
+	}
+	t.Cleanup(func() { raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep = oldRun, oldEnv, oldSleep })
+
+	out := filepath.Join(t.TempDir(), "pair")
+	var stdout, stderr bytes.Buffer
+	if code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2", "--out", out, "onyxias_lair"}, &stdout, &stderr); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d\n%s%s", code, exitRaidWalkFailed, stdout.String(), stderr.String())
+	}
+	mu.Lock()
+	rels, teard := calls["release"], calls["teardown"]
+	mu.Unlock()
+	if rels != 2 {
+		t.Fatalf("release ran %d times, want 2 (the walk's failed attempt and the cleanup retry)", rels)
+	}
+	if teard != 2 {
+		t.Fatalf("teardown ran %d times, want 2 (the walk's panic and the cleanup retry)", teard)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "pair.json"))
+	if err != nil {
+		t.Fatalf("pair.json: %v", err)
+	}
+	var p struct {
+		Notes []string `json:"notes"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(p.Notes, "\n")
+	for _, want := range []string{"lease m910q/2 id-2", "teardown failed (exit 14)", "release panicked: release boom"} {
+		if !strings.Contains(notes, want) {
+			t.Fatalf("pair.json notes do not say %q (what was left):\n%s", want, notes)
+		}
+	}
+	text, err := os.ReadFile(filepath.Join(out, "pair.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "note: s2 onyxias_lair: lease m910q/2 id-2") {
+		t.Fatalf("pair.txt does not carry the leftover lease note:\n%s", text)
+	}
+}
+
+func TestRaidWalkPairCleanupRetrySucceeds(t *testing.T) {
+	var mu sync.Mutex
+	calls := map[string]int{}
+	count := func(k string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		calls[k]++
+		return calls[k]
+	}
+	oldRun, oldEnv, oldSleep := raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) {
+		return walkEnv{
+			acquire: func(server, slot string, any bool, holder string, ttl time.Duration) (slots.Acquired, error) {
+				if slot != "2" {
+					return slots.Acquired{}, fmt.Errorf("slot %s: not leased by this test", slot)
+				}
+				return slots.Acquired{Lease: slots.Lease{Server: server, Slot: slot, Holder: holder, LeaseID: "id-2"}}, nil
+			},
+			release: func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
+				if count("release") == 1 {
+					panic("release boom")
+				}
+				return slots.Lease{Server: server, Slot: slot, Holder: holder, LeaseID: leaseID}, nil
+			},
+			teardown: func(args []string, stdout, stderr io.Writer) int {
+				n := count("teardown")
+				fmt.Fprintln(stdout, `{"server":"s","slot":"2","steps":[{"step":"lease","status":"skip","detail":"kept for the test"}],"failed":0}`)
+				if n == 1 {
+					return exitTeardownFailed
+				}
+				return exitOK
+			},
+		}, walkDeps{}, nil
+	}
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error { return nil }
+	raidWalkPairRun = func(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkDeps, stdout, stderr io.Writer) int {
+		if o.slot != "2" {
+			return exitOK
+		}
+		if _, err := env.acquire(o.server, o.slot, false, o.holder, time.Minute); err != nil {
+			t.Errorf("walk %s: acquire: %v", o.slot, err)
+		}
+		env.teardown([]string{"--json", filepath.Join(o.out, "slot")}, stdout, stderr)
+		env.release(o.server, o.slot, o.holder, "id-2", false)
+		t.Error("walk 2: release did not panic")
+		return exitOK
+	}
+	t.Cleanup(func() { raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep = oldRun, oldEnv, oldSleep })
+
+	out := filepath.Join(t.TempDir(), "pair")
+	var stdout, stderr bytes.Buffer
+	if code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2", "--out", out, "onyxias_lair"}, &stdout, &stderr); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d\n%s%s", code, exitRaidWalkFailed, stdout.String(), stderr.String())
+	}
+	mu.Lock()
+	rels, teard := calls["release"], calls["teardown"]
+	mu.Unlock()
+	if teard != 2 {
+		t.Fatalf("teardown ran %d times, want 2 (failed, then the cleanup retry)", teard)
+	}
+	if rels != 2 {
+		t.Fatalf("release ran %d times, want 2 (panicked, then the cleanup retry)", rels)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "pair.json"))
+	if err != nil {
+		t.Fatalf("pair.json: %v", err)
+	}
+	var p struct {
+		Notes []string `json:"notes"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(p.Notes, "\n")
+	if strings.Contains(notes, "was left held") {
+		t.Fatalf("pair.json still reports a held lease after the retries succeeded:\n%s", notes)
+	}
+	if !strings.Contains(notes, "panic: release boom") {
+		t.Fatalf("pair.json does not record the walk's panic:\n%s", notes)
+	}
+}
+
+func TestRaidWalkPairCleanupNeedsValidTeardownReport(t *testing.T) {
+	var mu sync.Mutex
+	calls := map[string]int{}
+	count := func(k string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		calls[k]++
+		return calls[k]
+	}
+	oldRun, oldEnv, oldSleep := raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) {
+		return walkEnv{
+			acquire: func(server, slot string, any bool, holder string, ttl time.Duration) (slots.Acquired, error) {
+				return slots.Acquired{Lease: slots.Lease{Server: server, Slot: slot, Holder: holder, LeaseID: "id-" + slot}}, nil
+			},
+			release: func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
+				count("release")
+				return slots.Lease{}, nil
+			},
+			teardown: func(args []string, stdout, stderr io.Writer) int {
+				count("teardown")
+				fmt.Fprintf(stdout, "teardown: ok\n") // exit 0 but no --json report
+				return exitOK
+			},
+		}, walkDeps{}, nil
+	}
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error { return nil }
+	raidWalkPairRun = func(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkDeps, stdout, stderr io.Writer) int {
+		if o.slot != "2" {
+			return exitOK
+		}
+		if _, err := env.acquire(o.server, o.slot, false, o.holder, time.Minute); err != nil {
+			t.Errorf("walk %s: acquire: %v", o.slot, err)
+		}
+		env.teardown([]string{"--json", filepath.Join(o.out, "slot")}, stdout, stderr)
+		panic("after teardown")
+	}
+	t.Cleanup(func() { raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep = oldRun, oldEnv, oldSleep })
+
+	out := filepath.Join(t.TempDir(), "pair")
+	var stdout, stderr bytes.Buffer
+	if code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2", "--out", out, "onyxias_lair"}, &stdout, &stderr); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d\n%s%s", code, exitRaidWalkFailed, stdout.String(), stderr.String())
+	}
+	mu.Lock()
+	rels, teard := calls["release"], calls["teardown"]
+	mu.Unlock()
+	// Walk 2's teardown (slot 2) ran once; exit 0 without a report does not count as done, so cleanup retried it.
+	if teard != 2 {
+		t.Fatalf("teardown ran %d times, want 2 (exit 0 without a report is not a confirmed teardown)", teard)
+	}
+	if rels != 1 {
+		t.Fatalf("release ran %d times, want 1 (cleanup's release after the unconfirmed teardown)", rels)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "pair.json"))
+	if err != nil {
+		t.Fatalf("pair.json: %v", err)
+	}
+	var p struct {
+		Notes []string `json:"notes"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(p.Notes, "\n")
+	if strings.Contains(notes, "was left held") {
+		t.Fatalf("pair.json reports a held lease after the release succeeded:\n%s", notes)
+	}
+	if !strings.Contains(notes, "panic: after teardown") {
+		t.Fatalf("pair.json does not record the walk's panic:\n%s", notes)
+	}
+}
+
+func TestRaidWalkPairTeardownReportReleasesLease(t *testing.T) {
+	var mu sync.Mutex
+	releases, teardowns := 0, 0
+	oldRun, oldEnv, oldSleep := raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) {
+		return walkEnv{
+			acquire: func(server, slot string, any bool, holder string, ttl time.Duration) (slots.Acquired, error) {
+				return slots.Acquired{Lease: slots.Lease{Server: server, Slot: slot, Holder: holder, LeaseID: "id-" + slot}}, nil
+			},
+			release: func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
+				mu.Lock()
+				releases++
+				mu.Unlock()
+				return slots.Lease{}, nil
+			},
+			teardown: func(args []string, stdout, stderr io.Writer) int {
+				mu.Lock()
+				teardowns++
+				mu.Unlock()
+				fmt.Fprintln(stdout, `{"server":"m910q","slot":"2","steps":[{"step":"lease","status":"ok","detail":"released"}],"failed":0}`)
+				return exitOK
+			},
+		}, walkDeps{}, nil
+	}
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error { return nil }
+	raidWalkPairRun = func(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkDeps, stdout, stderr io.Writer) int {
+		if o.slot != "2" {
+			return exitOK
+		}
+		if _, err := env.acquire(o.server, o.slot, false, o.holder, time.Minute); err != nil {
+			t.Errorf("walk %s: acquire: %v", o.slot, err)
+		}
+		env.teardown([]string{"--json", filepath.Join(o.out, "slot")}, stdout, stderr)
+		panic("after teardown")
+	}
+	t.Cleanup(func() { raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep = oldRun, oldEnv, oldSleep })
+
+	out := filepath.Join(t.TempDir(), "pair")
+	var stdout, stderr bytes.Buffer
+	if code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2", "--out", out, "onyxias_lair"}, &stdout, &stderr); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d\n%s%s", code, exitRaidWalkFailed, stdout.String(), stderr.String())
+	}
+	mu.Lock()
+	rels, teard := releases, teardowns
+	mu.Unlock()
+	if teard != 1 {
+		t.Fatalf("teardown ran %d times, want 1 (a confirmed teardown is not retried)", teard)
+	}
+	if rels != 0 {
+		t.Fatalf("release ran %d times, want 0 (the teardown's report already gave the lease back)", rels)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "pair.json"))
+	if err != nil {
+		t.Fatalf("pair.json: %v", err)
+	}
+	var p struct {
+		Notes []string `json:"notes"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(p.Notes, "\n")
+	if strings.Contains(notes, "was left held") {
+		t.Fatalf("pair.json reports a held lease after teardown's lease step was ok:\n%s", notes)
+	}
+}
+
 func TestPrefixWriterKeepsLinesWhole(t *testing.T) {
 	var buf bytes.Buffer
 	w1 := prefixW(&buf, "[1] ")

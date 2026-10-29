@@ -1953,6 +1953,9 @@ The default holder is `raid-walk-<plan>-s<slot>`; two equal holders are refused.
 independent: one failing does not stop the other; SIGINT stops both and each tears down its own slot. A panic in
 either half (a bug, not a failed walk) is caught at the pair boundary: it is recorded as that half's failed walk,
 cancels the other half, and both halves still run their teardown and lease release before `pair.json` is written.
+A cleanup step counts as done only when it succeeded (release returned no error; teardown exited 0 with a readable
+`--json` report); when it panics or fails, the deferred cleanup retries it once, and a lease it still could not give
+back is named in the pair's notes.
 
 Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
 `--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
@@ -1963,7 +1966,7 @@ plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier
 `#/commanders/<name>`), `overlap_s` (seconds both runs were between their start and their end, from the two
 summaries), `dashboard_both_listed` (true when one `/api/v1/commanders` dump of either walk names both characters;
 `null` with the dashboard off) and `notes`.
-`pair.txt` is one line per walk plus `pair: exit <c>`. The pair's exit is the first code that occurs in the order
+`pair.txt` is one line per walk, one `note:` line per note, then `pair: exit <c>`. The pair's exit is the first code that occurs in the order
 2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23). Each walk binds its own
 commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs show one tab each. Two 40-man raids
 are up to 80 hires on one server: plan the slots and the worldserver's memory.

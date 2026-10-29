@@ -211,7 +211,9 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 				errW[i].Flush()
 			}
 			if clean != nil {
-				clean.cleanup(w.outDir)
+				for _, left := range clean.cleanup(w.outDir) {
+					addNote("s%s %s: %s", w.slot, w.plan, left)
+				}
 			}
 		}()
 		env, deps, err := raidWalkPairEnv(&w.opts)
@@ -286,15 +288,58 @@ type pairResult struct {
 }
 
 // pairWalkCleanup is one half's panic-safe cleanup. It wraps the half's environment so the lease the walk
-// acquired is known to the pair: the walk's own release and teardown mark themselves done, so the deferred
-// cleanup runs each at most once, and a panic after either point still ends the agent and gives the lease back.
+// acquired is known to the pair. A step is marked done only after it confirmed success (release returned nil;
+// teardown exited 0 with a --json report that parses), so a panic or a failure leaves it incomplete and the
+// deferred cleanup retries it once. A panic in one step never skips the other.
 type pairWalkCleanup struct {
 	env      walkEnv
 	release  func(server, slot, holder, leaseID string, force bool) (slots.Lease, error)
 	teardown func(args []string, stdout, stderr io.Writer) int
 	lease    slots.Lease
-	released bool
-	tornDown bool
+	released bool // confirmed: teardown's report says the lease went back, or release returned nil
+	tornDown bool // confirmed: teardown exited 0 and wrote a report that parses
+}
+
+// pairTeardownResult is one teardown attempt: its exit code, and the --json report when it was asked for.
+type pairTeardownResult struct {
+	code   int
+	report teardownJSON
+	ok     bool   // the --json report parsed
+	detail string // the first stderr line, for the report
+}
+
+// confirmed is teardown's success: exit 0 and, when --json was asked for, a report that parses.
+func (r pairTeardownResult) confirmed() bool { return r.code == exitOK && r.ok }
+
+// released is true when a confirmed teardown's own lease step says the lease was given back.
+func (r pairTeardownResult) released() bool {
+	for _, s := range r.report.Steps {
+		if s.Step == "lease" {
+			return s.Status == "ok"
+		}
+	}
+	return false
+}
+
+// failureText says why a teardown did not confirm, for the pair report.
+func (r pairTeardownResult) failureText() string {
+	if r.code == exitOK {
+		return "teardown wrote no valid --json report"
+	}
+	detail := r.detail
+	if detail == "" && r.ok {
+		var fails []string
+		for _, s := range r.report.Steps {
+			if s.Status == "fail" || s.Status == "ending" {
+				fails = append(fails, s.Step+": "+s.Detail)
+			}
+		}
+		detail = strings.Join(fails, "; ")
+	}
+	if detail == "" {
+		return fmt.Sprintf("teardown failed (exit %d)", r.code)
+	}
+	return fmt.Sprintf("teardown failed (exit %d): %s", r.code, detail)
 }
 
 // newPairWalkCleanup wraps env and returns the cleanup with the environment the walk must use.
@@ -309,43 +354,126 @@ func newPairWalkCleanup(env walkEnv) (*pairWalkCleanup, walkEnv) {
 			return acq, err
 		}
 	}
-	if c.release != nil {
+	if release := c.release; release != nil {
 		c.env.release = func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
-			c.released = true
-			return c.release(server, slot, holder, leaseID, force)
+			l, err := release(server, slot, holder, leaseID, force)
+			// Confirmed success only: a panic or an error leaves released false, so cleanup retries it once.
+			if err == nil {
+				c.released = true
+			}
+			return l, err
 		}
 	}
-	if c.teardown != nil {
+	if teardown := c.teardown; teardown != nil {
 		c.env.teardown = func(args []string, stdout, stderr io.Writer) int {
-			c.tornDown = true
-			return c.teardown(args, stdout, stderr)
+			res := pairCallTeardown(teardown, args, stdout, stderr)
+			if res.confirmed() {
+				c.tornDown = true
+				if res.released() {
+					c.released = true
+				}
+			}
+			return res.code
 		}
 	}
 	return c, c.env
 }
 
-// cleanup ends what a panicked walk left behind: its slot dir (agent, files) and, when teardown could not
-// reach the lease (no slot.json yet), the lease itself. It is called from the panic handler, so every step
-// is guarded: one failing step never skips the other.
-func (c *pairWalkCleanup) cleanup(outDir string) {
-	if c.lease.Slot == "" {
-		return
+// pairArgsHaveJSON reports whether a teardown call asked for its JSON report.
+func pairArgsHaveJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
 	}
+	return false
+}
+
+// pairCallTeardown runs teardown, capturing the report it writes when --json was asked for. A panic is not
+// recovered here: it must reach the walk (or cleanup's own guard) with the completion flags still unset.
+func pairCallTeardown(teardown func(args []string, stdout, stderr io.Writer) int, args []string, stdout, stderr io.Writer) pairTeardownResult {
+	var report bytes.Buffer
+	asJSON := pairArgsHaveJSON(args)
+	if asJSON {
+		stdout = io.MultiWriter(stdout, &report)
+	}
+	res := pairTeardownResult{code: teardown(args, stdout, stderr)}
+	if asJSON {
+		res.report, res.ok = parseTeardownJSON(report.Bytes())
+	}
+	return res
+}
+
+// cleanup ends what a panicked or failed walk left behind: its slot dir (agent, files) and, when teardown could
+// not reach the lease, the lease itself. It runs at most once more here, so a step that fails again is reported
+// rather than retried forever; every step is guarded, so one panic never skips the other. What is still held
+// comes back as one report line.
+func (c *pairWalkCleanup) cleanup(outDir string) []string {
+	if c.lease.Slot == "" {
+		return nil
+	}
+	var problems []string
 	if !c.tornDown && c.teardown != nil {
-		c.tornDown = true
-		func() {
-			defer func() { _ = recover() }()
-			var buf bytes.Buffer
-			c.teardown([]string{"--json", filepath.Join(outDir, "slot")}, &buf, &buf)
-		}()
+		res, panicked := pairSafeTeardown(c.teardown, []string{"--json", filepath.Join(outDir, "slot")})
+		switch {
+		case panicked != "":
+			problems = append(problems, "teardown panicked: "+panicked)
+		case res.confirmed():
+			c.tornDown = true
+			if res.released() {
+				c.released = true
+			}
+		default:
+			problems = append(problems, res.failureText())
+		}
 	}
 	if !c.released && c.release != nil {
-		c.released = true
-		func() {
-			defer func() { _ = recover() }()
-			_, _ = c.release(c.lease.Server, c.lease.Slot, c.lease.Holder, c.lease.LeaseID, false)
-		}()
+		err, panicked := pairSafeRelease(c.release, c.lease)
+		switch {
+		case panicked != "":
+			problems = append(problems, "release panicked: "+panicked)
+		case err != nil:
+			problems = append(problems, "release failed: "+err.Error())
+		default:
+			c.released = true
+		}
 	}
+	if c.released {
+		return nil
+	}
+	note := fmt.Sprintf("lease %s/%s %s (holder %s) was left held", c.lease.Server, c.lease.Slot, c.lease.LeaseID, c.lease.Holder)
+	if len(problems) > 0 {
+		note += ": " + strings.Join(problems, "; ")
+	}
+	return []string{note}
+}
+
+// pairSafeTeardown is one guarded teardown attempt for cleanup: a panic becomes a message.
+func pairSafeTeardown(teardown func(args []string, stdout, stderr io.Writer) int, args []string) (res pairTeardownResult, panicked string) {
+	var out, errb bytes.Buffer
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = fmt.Sprint(r)
+		}
+	}()
+	res = pairCallTeardown(teardown, args, &out, &errb)
+	if res.code != exitOK {
+		if d := strings.TrimSpace(errb.String()); d != "" {
+			res.detail = firstLine(d)
+		}
+	}
+	return res, ""
+}
+
+// pairSafeRelease is one guarded release attempt for cleanup: a panic becomes a message.
+func pairSafeRelease(release func(server, slot, holder, leaseID string, force bool) (slots.Lease, error), l slots.Lease) (err error, panicked string) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = fmt.Sprint(r)
+		}
+	}()
+	_, err = release(l.Server, l.Slot, l.Holder, l.LeaseID, false)
+	return err, ""
 }
 
 // parsePairArgs reads the pair flags and turns them into two raid-walk option sets.
@@ -680,6 +808,9 @@ func (r pairReport) Text() string {
 		}
 		fmt.Fprintf(&b, "s%s %s: %s; steps %d/%d; deaths %d; fights %d; pauses %d; out %s; exit %d\n",
 			w.Slot, w.Plan, reason, w.StepsReached, w.StepsTotal, w.Deaths, w.Fights, w.Pauses, w.Out, w.ExitCode)
+	}
+	for _, n := range r.Notes {
+		fmt.Fprintf(&b, "note: %s\n", n)
 	}
 	fmt.Fprintf(&b, "pair: exit %d\n", r.ExitCode)
 	return b.String()
