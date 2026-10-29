@@ -21,7 +21,8 @@
     "dps": 12
   },
   "notes": [
-    "DRAFT: prep from the world database export of map 309 (tools/dungeongen) and the server mesh: 169 merged packs (L22: one floor, 15 yd, cap 12), runts/triggers/boss adds/friendly NPCs out, 17 off-mesh or look-stand spawns and 6 unreachable packs dropped. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run; dungeon_run refuses it without allow_draft.",
+    "DRAFT: prep from the world database export of map 309 (tools/dungeongen) and the server mesh: 168 merged packs (L22: one floor, 15 yd, cap 12), runts/triggers/boss adds/friendly NPCs out, 17 off-mesh or look-stand spawns and 6 unreachable packs dropped. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run; dungeon_run refuses it without allow_draft.",
+    "WALK 1 (2026-10-29, leg 0 only): the two first-terrace pairs and the z 130 plateau are pulled in turn now. The 125 yd split group (radius 2.8: its pull row could not reach its own units) is gone: the -12152 cluster joined the -12153 pack (8 units) and the -12276 cluster the -12277 pack (8 units). Every plateau pull has a rest stand and a pull stand of its own, out of the next pack's aggro; a stand before the first-terrace pull keeps it out of both pairs' aggro; and an off-water via point at the canal rim (-11928.5 -1364.5) keeps the walk back after a wipe out of the water at -11944 -1355. Legs 1-8 are unchanged.",
     "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar. Gahz'ranka (15114) is optional and has no step: his summon is fishing Muddy Churning Waters (180369) with Zulian Mudskunk (17321), which the plan format cannot express. Edge of Madness (15082-15085) has no spawn and instance_zulgurub::SpawnRandomBoss is deactivated: no leg.",
     "Arlokk (14515) has no spawn row. The gong go_gong_of_bethekk (180526 at -11569.2 -1627.87 41.28) runs event script 9066 and summons her at -11540.7 -1627.71 41.27; the gong step is open for the mapping walk: the server path from the Arlokk terrace ends 9-10 yd above the gong (a drop the mesh does not link), so no use_object stand passes plan-check.",
     "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s."
@@ -29,10 +30,11 @@
   "legs": [
     {
       "name": "high_priestess_jeklik",
-      "to": {"x": -12014.133, "y": -1500.2511, "z": 78.426575},
+      "to": {"x": -12028, "y": -1510, "z": 75.63},
       "via": [
         {"x": -11926.133, "y": -1283.2001, "z": 85.45147},
         {"x": -11930.933, "y": -1326.9333, "z": 80.05147},
+        {"x": -11928.5, "y": -1364.5, "z": 76.81},
         {"x": -11912.267, "y": -1370.4, "z": 71.75147},
         {"x": -11896.8, "y": -1400.5334, "z": 61.05147},
         {"x": -11917.333, "y": -1441.6001, "z": 41.65147},
@@ -80,32 +82,21 @@
           ]
         },
         {
-          "entries": [11368, 11368, 11368, 14750, 11368],
+          "entries": [11368, 11368, 11368, 14750, 11368, 14750, 14750, 11368],
           "positions": [
             {"x": -12153.8, "y": -1482.52, "z": 130.8},
             {"x": -12153.9, "y": -1489.43, "z": 131.62},
             {"x": -12166.8, "y": -1463.59, "z": 130.74},
             {"x": -12170.5, "y": -1467.25, "z": 130.71},
-            {"x": -12171.8, "y": -1462.23, "z": 130.72}
-          ],
-          "radius": 15.9,
-          "approach": [
-            {"x": -12136.524, "y": -1479.5303, "z": 130.72688}
-          ]
-        },
-        {
-          "entries": [14750, 14750, 11368, 11368, 11368, 11368],
-          "positions": [
+            {"x": -12171.8, "y": -1462.23, "z": 130.72},
             {"x": -12152.5, "y": -1484.64, "z": 130.8},
             {"x": -12152.1, "y": -1486.58, "z": 130.85},
-            {"x": -12155.9, "y": -1487.27, "z": 131.06},
-            {"x": -12276.2, "y": -1451.29, "z": 130.7},
-            {"x": -12277.5, "y": -1450.48, "z": 130.7},
-            {"x": -12281.2, "y": -1451.64, "z": 130.7}
+            {"x": -12155.9, "y": -1487.27, "z": 131.06}
           ],
-          "radius": 2.8,
+          "radius": 20.5,
           "approach": [
-            {"x": -12137.329, "y": -1479.8519, "z": 130.71886}
+            {"x": -12112, "y": -1486, "z": 130.65},
+            {"x": -12165, "y": -1478, "z": 130.77}
           ]
         },
         {
@@ -161,17 +152,21 @@
           ]
         },
         {
-          "entries": [14750, 11368, 14750, 11368, 11368],
+          "entries": [14750, 11368, 14750, 11368, 11368, 14750, 14750, 11368],
           "positions": [
             {"x": -12277.5, "y": -1444.66, "z": 130.7},
             {"x": -12279.2, "y": -1446.06, "z": 130.7},
             {"x": -12281.9, "y": -1443, "z": 130.7},
             {"x": -12265.8, "y": -1463.01, "z": 131.17},
-            {"x": -12281.7, "y": -1451.19, "z": 130.7}
+            {"x": -12281.7, "y": -1451.19, "z": 130.7},
+            {"x": -12276.2, "y": -1451.29, "z": 130.7},
+            {"x": -12277.5, "y": -1450.48, "z": 130.7},
+            {"x": -12281.2, "y": -1451.64, "z": 130.7}
           ],
-          "radius": 1,
+          "radius": 18.5,
           "approach": [
-            {"x": -12259.92, "y": -1440.741, "z": 130.78612}
+            {"x": -12255, "y": -1438, "z": 131.21},
+            {"x": -12268, "y": -1448, "z": 130.7}
           ]
         }
       ],
