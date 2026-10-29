@@ -20,6 +20,8 @@ type Summary struct {
 	From         string          `json:"from"`
 	Speed        float64         `json:"speed"`
 	TestSpeed    bool            `json:"test_speed"`
+	RowsSHA256   string          `json:"rows_sha256"`
+	UntilStep    int             `json:"until_step"`
 	Roster       RosterSummary   `json:"roster"`
 	Layout       LayoutSummary   `json:"layout"`
 	Started      time.Time       `json:"started"`
@@ -30,6 +32,7 @@ type Summary struct {
 	StepTimeline []StepSummary   `json:"step_timeline"`
 	Legs         []LegSummary    `json:"legs"`
 	Deaths       DeathSummary    `json:"deaths"`
+	Injections   []InjectSummary `json:"injections"`
 	Wipes        []int           `json:"wipes"`
 	BossEngaged  *BossSummary    `json:"boss_engaged"`
 	Pauses       []PauseSummary  `json:"pauses"`
@@ -79,6 +82,17 @@ type DeathSummary struct {
 	Total  int            `json:"total"`
 	ByStep map[int]int    `json:"by_step"`
 	ByBot  map[string]int `json:"by_bot"`
+	// Injected is the deaths a fault caused (kill-mt's main tank): not a death of the run's own walk.
+	Injected int `json:"injected"`
+}
+
+// InjectSummary is one fault of a walk's --inject run (spec raid-walk-addons 1.5).
+type InjectSummary struct {
+	Kind    string `json:"kind"`
+	Verdict string `json:"verdict"`
+	Reason  string `json:"reason"`
+	Step    int    `json:"step"`
+	Victim  string `json:"victim"`
 }
 
 // BossSummary is the first boss the frames showed engaged.
@@ -123,6 +137,10 @@ type SummaryMeta struct {
 	From      string
 	Speed     float64
 	TestSpeed bool
+	// RowsSHA256 is the hex sha256 of planexport.WriteSQL of the walk's rows: the plan the run walked.
+	RowsSHA256 string
+	// UntilStep is the step of the start line's until label (0 when unknown or no until).
+	UntilStep int
 	Roster    *Roster
 	// TierSource and TierComparison qualify the roster's tier (tiers.go).
 	TierSource     string
@@ -132,6 +150,8 @@ type SummaryMeta struct {
 	Ended          time.Time
 	EndReason      string
 	Fights         []FightSummary
+	Injections     []InjectSummary
+	InjectedDeaths int
 	Dashboard      string
 	Teardown       TeardownSummary
 	ExitCode       int
@@ -152,11 +172,14 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		From:         m.From,
 		Speed:        m.Speed,
 		TestSpeed:    m.TestSpeed,
+		RowsSHA256:   m.RowsSHA256,
+		UntilStep:    m.UntilStep,
 		Layout:       m.Layout,
 		Started:      m.Started,
 		Ended:        m.Ended,
 		EndReason:    m.EndReason,
 		Fights:       nonNilFights(m.Fights),
+		Injections:   nonNilInjections(m.Injections),
 		Roster:       RosterSummary{OT: []string{}, Rest: []string{}},
 		Dashboard:    m.Dashboard,
 		Teardown:     m.Teardown,
@@ -206,6 +229,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 			s.Pauses = append(s.Pauses, PauseSummary{Step: p.Step, Note: p.Note, Seconds: round1(p.Seconds), Resumed: p.Resumed})
 		}
 	}
+	s.Deaths.Injected = m.InjectedDeaths
 	return s
 }
 
@@ -234,6 +258,13 @@ func nonNilStrings(in []string) []string {
 func nonNilFights(in []FightSummary) []FightSummary {
 	if in == nil {
 		return []FightSummary{}
+	}
+	return in
+}
+
+func nonNilInjections(in []InjectSummary) []InjectSummary {
+	if in == nil {
+		return []InjectSummary{}
 	}
 	return in
 }
@@ -286,6 +317,17 @@ func (s *Summary) Text() string {
 	fmt.Fprintf(&b, "started %s; ended %s; exit %d\n",
 		s.Started.Format(time.RFC3339), s.Ended.Format(time.RFC3339), s.ExitCode)
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
+	if len(s.Injections) > 0 {
+		parts := make([]string, 0, len(s.Injections))
+		for _, f := range s.Injections {
+			part := f.Kind + " " + f.Verdict
+			if f.Reason != "" {
+				part += ": " + f.Reason
+			}
+			parts = append(parts, fmt.Sprintf("%s (step %d)", part, f.Step))
+		}
+		fmt.Fprintf(&b, "faults: %s\n", strings.Join(parts, "; "))
+	}
 	fmt.Fprintf(&b, "dashboard: %s\n", s.Dashboard)
 	if s.Teardown.Failed {
 		fmt.Fprintf(&b, "teardown: failed\n")

@@ -10,6 +10,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -29,6 +31,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/patrols"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/privfile"
@@ -41,15 +44,16 @@ import (
 
 // The exit codes of a raid walk (spec 1.2).
 const (
-	exitRaidWalkFailed   = 18 // a phase failed or was refused
-	exitRaidWalkIncident = 19 // the walk ran and was torn down, but a wipe or a boss engagement happened, or hires were left
+	exitRaidWalkFailed       = 18 // a phase failed or was refused
+	exitRaidWalkIncident     = 19 // the walk ran and was torn down, but a wipe or a boss engagement happened, or hires were left
+	exitRaidWalkInjectFailed = 23 // a walk that would exit 0 had at least one fault with verdict fail
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]`
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
 var raidWalkPlanRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
@@ -85,11 +89,67 @@ type raidWalkOptions struct {
 	mmaps         string
 	slotsPath     string
 	binary        string
+	injects       stringList // --inject, repeatable
 	dryRun        bool
 }
 
+// stringList is a repeatable string flag: --inject a --inject b, or --inject=a.
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+
+func (s *stringList) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+// raidWalkPairEntry is the two-raid mode's entry (spec raid-walk-addons 4.1); nil in this build (P1 sets it).
+var raidWalkPairEntry func(ctx context.Context, args []string, stdout, stderr io.Writer) int
+
+// raidWalkSlotList reports a --slot (or --slot=) value that lists slots, e.g. "1,2": the pair form.
+func raidWalkSlotList(args []string) (string, bool) {
+	for i, a := range args {
+		var v string
+		switch {
+		case a == "--slot":
+			if i+1 < len(args) {
+				v = args[i+1]
+			}
+		case strings.HasPrefix(a, "--slot="):
+			v = strings.TrimPrefix(a, "--slot=")
+		default:
+			continue
+		}
+		if strings.Contains(v, ",") {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// walkInjector is the fault injector's command side (spec raid-walk-addons 1.6): nil in this build (I2 sets it).
+type walkInjector interface {
+	Prepare(ctx context.Context) error
+	Tick(ctx context.Context, now time.Time) error
+	Cleanup(ctx context.Context)
+	Results() ([]raidwalk.InjectSummary, int)
+	Failed() bool
+	PrintPlan(io.Writer)
+}
+
+// newWalkInjector builds the injector from the --inject specs; nil in this build (I2 sets it).
+var newWalkInjector func(w *walk, specs []string) (walkInjector, error)
+
 // raidWalkCmd is the command line entry.
 func raidWalkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// Two raids at once: a --slot list is the pair form, handled before anything is parsed (spec 1.7.5).
+	if _, ok := raidWalkSlotList(args); ok {
+		if raidWalkPairEntry == nil {
+			fmt.Fprintln(stderr, "this build has no two-raid mode (--slot A,B)")
+			return exitUsage
+		}
+		return raidWalkPairEntry(ctx, args, stdout, stderr)
+	}
 	o, code := parseRaidWalkArgs(args, stderr)
 	if code != exitOK {
 		return code
@@ -145,6 +205,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.mmaps, "mmaps", "", "the navmesh dir for slot setup")
 	fs.StringVar(&o.slotsPath, "slots", "", "the slots file (default ~/.config/turtle-agent/slots.json)")
 	fs.StringVar(&o.binary, "binary", "", "the agent binary slot setup copies (default: this executable)")
+	fs.Var(&o.injects, "inject", "a fault to inject, repeatable (at most 4): kill-mt, runaway, add-pack or lag, each with @from=N and its keys")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "validate and print the phase plan, send nothing")
 	if err := fs.Parse(args); err != nil {
 		return o, exitUsage
@@ -393,6 +454,7 @@ type walk struct {
 
 	untilWords []string
 	untilLabel string
+	untilStep  int // the step of the start line's until label (0: unknown)
 	fromWords  []string
 
 	agent    walkAgent
@@ -407,10 +469,12 @@ type walk struct {
 	logF    *os.File
 	framesF *os.File
 
-	tracker *raidwalk.Tracker
-	layout  raidwalk.LayoutSummary
-	notes   []string
-	fights  []raidwalk.FightSummary
+	tracker  *raidwalk.Tracker
+	inj      walkInjector
+	newNotes []string // the RUN notes read since the last injector Tick (it drains them)
+	layout   raidwalk.LayoutSummary
+	notes    []string
+	fights   []raidwalk.FightSummary
 
 	seenFights map[string]bool
 	hostiles   map[string]hostileState
@@ -460,15 +524,23 @@ type walk struct {
 }
 
 type hostileState struct {
-	hppct  int
-	target uint64
-	at     time.Time
+	entry    uint32
+	x, y, z  float32
+	kind     string
+	reaction string
+	flags    string
+	hppct    int
+	target   uint64
+	at       time.Time
 }
 
 type botPos struct {
-	mapID uint32
-	dead  bool
-	at    time.Time
+	guid     packet.GUID
+	x, y, z  float32
+	inCombat bool
+	mapID    uint32
+	dead     bool
+	at       time.Time
 }
 
 // raidWalkRun runs a parsed walk; tests call it directly with fakes.
@@ -606,6 +678,17 @@ func (w *walk) validate() error {
 		w.note("step points from the plan JSON, not the deployed rows")
 	}
 	w.stepFirst = firstStepPoint(w.rows)
+
+	if len(w.opts.injects) > 0 {
+		if newWalkInjector == nil {
+			return stopf(exitUsage, "this build has no fault injection (--inject)")
+		}
+		inj, err := newWalkInjector(w, w.opts.injects)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.inj = inj
+	}
 
 	if w.opts.patrols != "" {
 		patrols, guids, mapID, err := readPatrolsFile(slots.ExpandTilde(w.opts.patrols))
@@ -963,6 +1046,9 @@ func (w *walk) printPlan(out io.Writer) {
 	fmt.Fprintf(out, " 11 hold: %dm\n", w.opts.holdMinutes)
 	fmt.Fprintf(out, " 12 commander: status; teardown --json %s/slot\n", outDir)
 	fmt.Fprintf(out, " 13 summary: %s/summary.json, %s/summary.txt\n", outDir, outDir)
+	if w.inj != nil {
+		w.inj.PrintPlan(out)
+	}
 }
 
 // dashNoteOrOff is the dry run's dashboard word (nothing was opened).
@@ -989,15 +1075,29 @@ func firstStepPoint(rows planexport.Rows) *dungeon.Point {
 // num32 prints a plan coordinate the way planexport does.
 func num32(v float32) string { return strconv.FormatFloat(float64(v), 'f', -1, 32) }
 
+// rowsSHA256 is the walk's rows as the deployed SQL, sha256 hex: the plan the run actually walked (spec 1.7).
+func rowsSHA256(rows planexport.Rows) string {
+	h := sha256.Sum256([]byte(planexport.WriteSQL([]planexport.Rows{rows})))
+	return hex.EncodeToString(h[:])
+}
+
 // finish writes the summary (phase 13) and the one stdout line.
 func (w *walk) finish(code int) {
+	// A fault with verdict fail makes an otherwise clean walk exit 23 (spec 0.5); 18 and 19 keep their meaning.
+	if code == exitOK && w.inj != nil && w.inj.Failed() {
+		code = exitRaidWalkInjectFailed
+	}
 	w.exitCode = code
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
 		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
+		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+	}
+	if w.inj != nil {
+		meta.Injections, meta.InjectedDeaths = w.inj.Results()
 	}
 	if w.roster != nil {
 		r := *w.roster

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
@@ -80,6 +83,7 @@ type walkFakeAgent struct {
 	lines    []queuedEvent
 	next     uint64
 	viewN    int
+	views    int // bot_view calls, for the fault hooks' one Tick per watch loop
 	dead     map[string]bool
 	targeted bool
 
@@ -265,6 +269,7 @@ type viewReply struct {
 func (f *walkFakeAgent) viewPage() any {
 	f.mu.Lock()
 	f.viewN++
+	f.views++
 	n := f.viewN
 	m := uint32(1)
 	if f.entered {
@@ -1117,5 +1122,338 @@ func TestRaidWalkInterruptStopsRunAndTearsDown(t *testing.T) {
 	}
 	if sum := f.summary(); sum.EndReason != "interrupted" {
 		t.Fatalf("summary end %q", sum.EndReason)
+	}
+}
+
+// --- fault injection hooks and the two-raid entry (task T0, spec raid-walk-addons 1.7) ---
+
+// fakeInjector records the hooks' calls so their order can be checked.
+type fakeInjector struct {
+	w     *walk
+	specs []string
+	fail  bool
+
+	prepares   int
+	ticks      int
+	cleanups   int
+	preparedAt uint64 // w.afterN at Prepare: the watch's own views come after it
+	afterNs    []uint64
+	notes      []string
+	prepared   bool // the run had started when Prepare ran
+	cleaned    bool
+	stopped    bool // w.runStopped at Cleanup: false when Cleanup ran before stopRun
+}
+
+func (f *fakeInjector) Prepare(ctx context.Context) error {
+	f.prepares++
+	f.prepared = f.w.runStarted
+	f.preparedAt = f.w.afterN
+	return nil
+}
+
+func (f *fakeInjector) Tick(ctx context.Context, now time.Time) error {
+	f.ticks++
+	f.afterNs = append(f.afterNs, f.w.afterN)
+	f.notes = append(f.notes, f.w.newNotes...)
+	f.w.newNotes = nil // the injector drains them, as I2 will
+	return nil
+}
+
+func (f *fakeInjector) Cleanup(ctx context.Context) {
+	f.cleanups++
+	f.cleaned = true
+	f.stopped = f.w.runStopped
+}
+
+func (f *fakeInjector) Results() ([]raidwalk.InjectSummary, int) {
+	return []raidwalk.InjectSummary{{Kind: "kill-mt", Verdict: "pass", Step: 7}}, 1
+}
+
+func (f *fakeInjector) Failed() bool { return f.fail }
+
+func (f *fakeInjector) PrintPlan(out io.Writer) {
+	fmt.Fprintln(out, "faults: 1 (kill-mt)")
+}
+
+// installFakeInjector puts a recording injector behind the walk's hook; the getter returns it once the walk made it.
+func installFakeInjector(t *testing.T, fail bool) func() *fakeInjector {
+	t.Helper()
+	var mu sync.Mutex
+	var fi *fakeInjector
+	old := newWalkInjector
+	newWalkInjector = func(w *walk, specs []string) (walkInjector, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		fi = &fakeInjector{w: w, specs: append([]string{}, specs...), fail: fail}
+		return fi, nil
+	}
+	t.Cleanup(func() { newWalkInjector = old })
+	return func() *fakeInjector {
+		mu.Lock()
+		defer mu.Unlock()
+		return fi
+	}
+}
+
+func TestRaidWalkInjectFlagWithoutHookIsUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := raidWalkCmd(context.Background(), []string{"--dry-run", "--dir", "../../dungeons", "--inject", "kill-mt", "onyxias_lair"}, &stdout, &stderr)
+	if code != exitUsage {
+		t.Fatalf("--inject without a hook: exit %d, want %d (stderr %q)", code, exitUsage, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "this build has no fault injection (--inject)") {
+		t.Fatalf("the refusal does not name the missing hook: %q", stderr.String())
+	}
+}
+
+func TestRaidWalkInjectorHookOrder(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
+		inj := installFakeInjector(t, false)
+		f := newFixture(t)
+		f.opts.injects = stringList{"kill-mt"}
+		f.defaultRun("onyxias_lair")
+		teardownSawCleanup := false
+		real := f.env.teardown
+		f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+			teardownSawCleanup = inj().cleaned
+			return real(args, stdout, stderr)
+		}
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		fake := inj()
+		if fake == nil {
+			t.Fatal("the walk did not create an injector")
+		}
+		if fake.prepares != 1 || !fake.prepared {
+			t.Fatalf("Prepare ran %d times (run started at Prepare: %v), want once after the start line", fake.prepares, fake.prepared)
+		}
+		if fake.ticks == 0 {
+			t.Fatal("no Tick in the watch")
+		}
+		f.agent.mu.Lock()
+		views := f.agent.views
+		f.agent.mu.Unlock()
+		if want := views - int(fake.preparedAt); fake.ticks != want {
+			t.Fatalf("%d Ticks for %d watch loops", fake.ticks, want)
+		}
+		for i := 1; i < len(fake.afterNs); i++ {
+			if fake.afterNs[i] <= fake.afterNs[i-1] {
+				t.Fatalf("tick %d saw no fresh frame (afterN %d -> %d)", i, fake.afterNs[i-1], fake.afterNs[i])
+			}
+		}
+		if len(fake.notes) != fake.ticks {
+			t.Fatalf("the injector saw %d notes in %d ticks: newNotes were not drained", len(fake.notes), fake.ticks)
+		}
+		if fake.cleanups != 1 || !teardownSawCleanup {
+			t.Fatalf("Cleanup ran %d times (cleaned before teardown: %v), want once before teardown", fake.cleanups, teardownSawCleanup)
+		}
+		if len(fake.specs) != 1 || fake.specs[0] != "kill-mt" {
+			t.Fatalf("the hook got %q, want the --inject spec", fake.specs)
+		}
+		if sum := f.summary(); len(sum.Injections) != 1 || sum.Injections[0].Kind != "kill-mt" || sum.Deaths.Injected != 1 {
+			t.Fatalf("summary injections %+v, injected %d", sum.Injections, sum.Deaths.Injected)
+		}
+	})
+	t.Run("interrupt", func(t *testing.T) {
+		inj := installFakeInjector(t, false)
+		f := newFixture(t)
+		f.opts.injects = stringList{"lag"}
+		var q []queuedEvent
+		for step := 2; step <= 28; step++ {
+			q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/29|onyxia|move|walk|walking", step)})
+		}
+		f.agent.mu.Lock()
+		f.agent.startQueue = q
+		f.agent.mu.Unlock()
+		ctx, cancel := context.WithCancel(context.Background())
+		var once sync.Once
+		f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+			if n >= 3 {
+				once.Do(cancel)
+			}
+			return nil
+		}
+		teardownSawCleanup := false
+		real := f.env.teardown
+		f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+			teardownSawCleanup = inj().cleaned
+			return real(args, stdout, stderr)
+		}
+		if code := f.run(ctx); code != exitRaidWalkFailed {
+			t.Fatalf("exit %d, want 18", code)
+		}
+		fake := inj()
+		if fake == nil {
+			t.Fatal("the walk did not create an injector")
+		}
+		if fake.cleanups != 1 || !teardownSawCleanup {
+			t.Fatalf("Cleanup ran %d times (before teardown: %v), want once", fake.cleanups, teardownSawCleanup)
+		}
+		if fake.stopped {
+			t.Fatal("Cleanup ran after .bot run stop, want before stopRun")
+		}
+	})
+	t.Run("wipe keeps exit 19", func(t *testing.T) {
+		inj := installFakeInjector(t, true)
+		f := newFixture(t)
+		f.opts.injects = stringList{"kill-mt"}
+		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.allDeadFromHires()
+		teardownSawCleanup := false
+		real := f.env.teardown
+		f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+			teardownSawCleanup = inj().cleaned
+			return real(args, stdout, stderr)
+		}
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+		}
+		fake := inj()
+		if fake == nil {
+			t.Fatal("the walk did not create an injector")
+		}
+		if fake.cleanups != 1 || !teardownSawCleanup {
+			t.Fatalf("Cleanup ran %d times (before teardown: %v), want once", fake.cleanups, teardownSawCleanup)
+		}
+		if sum := f.summary(); sum.ExitCode != exitRaidWalkIncident {
+			t.Fatalf("a failed fault overrode the wipe: exit %d", sum.ExitCode)
+		}
+	})
+	t.Run("failed fault is exit 23", func(t *testing.T) {
+		installFakeInjector(t, true)
+		f := newFixture(t)
+		f.opts.injects = stringList{"kill-mt"}
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitRaidWalkInjectFailed {
+			t.Fatalf("exit %d, want %d (stdout %q stderr %q)", code, exitRaidWalkInjectFailed, f.stdout.String(), f.stderr.String())
+		}
+		if sum := f.summary(); sum.ExitCode != exitRaidWalkInjectFailed {
+			t.Fatalf("summary exit %d, want %d", sum.ExitCode, exitRaidWalkInjectFailed)
+		}
+	})
+	t.Run("no injects, no injector", func(t *testing.T) {
+		inj := installFakeInjector(t, false)
+		f := newFixture(t)
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		if fake := inj(); fake != nil {
+			t.Fatalf("a walk without --inject made an injector: %+v", fake)
+		}
+	})
+}
+
+func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
+	t.Run("no hook", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := raidWalkCmd(context.Background(), []string{"onyxias_lair", "--slot", "1,2"}, &stdout, &stderr)
+		if code != exitUsage {
+			t.Fatalf("--slot 1,2: exit %d, want %d", code, exitUsage)
+		}
+		if !strings.Contains(stderr.String(), "this build has no two-raid mode (--slot A,B)") {
+			t.Fatalf("the refusal does not name the pair form: %q", stderr.String())
+		}
+	})
+	t.Run("hook gets the args", func(t *testing.T) {
+		var got []string
+		old := raidWalkPairEntry
+		raidWalkPairEntry = func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+			got = append([]string{}, args...)
+			return 7
+		}
+		t.Cleanup(func() { raidWalkPairEntry = old })
+		for _, args := range [][]string{
+			{"onyxias_lair", "--slot", "1,2"},
+			{"onyxias_lair", "--slot=1,2"},
+		} {
+			got = nil
+			var stdout, stderr bytes.Buffer
+			if code := raidWalkCmd(context.Background(), args, &stdout, &stderr); code != 7 {
+				t.Fatalf("%q: exit %d, want the hook's 7 (stderr %q)", args, code, stderr.String())
+			}
+			if strings.Join(got, " ") != strings.Join(args, " ") {
+				t.Fatalf("the hook got %q, want %q", got, args)
+			}
+		}
+	})
+	t.Run("slot 3 alone still refused", func(t *testing.T) {
+		called := false
+		old := raidWalkPairEntry
+		raidWalkPairEntry = func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+			called = true
+			return exitOK
+		}
+		t.Cleanup(func() { raidWalkPairEntry = old })
+		var stdout, stderr bytes.Buffer
+		if code := raidWalkCmd(context.Background(), []string{"--slot", "3", "onyxias_lair"}, &stdout, &stderr); code != exitSlotRefused {
+			t.Fatalf("--slot 3: exit %d, want %d (stderr %q)", code, exitSlotRefused, stderr.String())
+		}
+		if called {
+			t.Fatal("a single slot went to the pair entry")
+		}
+	})
+}
+
+func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
+	now := newFakeClock().now()
+	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},
+		bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	frame := &tbm.ViewFrame{
+		Party: []tbm.PartyRec{
+			{GUID: 7, Name: "Mt", X: 1.5, Y: 2.25, Z: -3.75, Map: 249, State: "c"},
+			{GUID: 8, Name: "Dead", X: 4, Y: 5, Z: 6, Map: 249, State: "d", Dead: true},
+		},
+		Hostiles: []tbm.HostileRec{
+			{GUID: 9, Entry: 10184, X: -4, Y: -5, Z: -6, HPPct: 55, Target: 7, Kind: "u", Reaction: "h", Flags: "ce"},
+		},
+	}
+	w.trackFrame(now, frame)
+	mt, ok := w.botAt["Mt"]
+	if !ok || mt.guid != 7 || mt.x != 1.5 || mt.y != 2.25 || mt.z != -3.75 || !mt.inCombat || mt.mapID != 249 {
+		t.Fatalf("bot Mt %+v, want its guid, position, map and combat state", mt)
+	}
+	if dead := w.botAt["Dead"]; dead.guid != 8 || dead.inCombat || !dead.dead {
+		t.Fatalf("bot Dead %+v, want guid 8, dead and not in combat", dead)
+	}
+	h, ok := w.hostiles[packet.GUID(9).String()]
+	if !ok || h.entry != 10184 || h.x != -4 || h.y != -5 || h.z != -6 || h.kind != "u" || h.reaction != "h" || h.flags != "ce" {
+		t.Fatalf("hostile %+v, want its entry, position, kind, reaction and flags", h)
+	}
+	if h.hppct != 55 || h.target != 7 || !h.at.Equal(now) {
+		t.Fatalf("hostile %+v, want hp 55, target 7 and the frame's time", h)
+	}
+}
+
+func TestSummaryCarriesRowsShaAndUntilStep(t *testing.T) {
+	f := newFixture(t)
+	f.opts.sql = "../../internal/planexport/testdata/onyxias_lair-20261029130000.sql"
+	// A note holding "(step 5)" before the until label: only the label's own step number counts.
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			"TBM:RUN|onyxias_lair|running|1/29|onyxia|move|walk|regrouped at (step 5); until boss (step 29)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	rows, _, err := readRaidMigration(f.opts.sql, "onyxias_lair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256([]byte(planexport.WriteSQL([]planexport.Rows{rows})))
+	sum := f.summary()
+	if want := hex.EncodeToString(h[:]); sum.RowsSHA256 != want {
+		t.Fatalf("rows_sha256 %q, want %q", sum.RowsSHA256, want)
+	}
+	if sum.UntilStep != 29 {
+		t.Fatalf("until_step %d, want 29", sum.UntilStep)
+	}
+	if sum.Injections == nil || len(sum.Injections) != 0 {
+		t.Fatalf("injections %+v, want an empty list", sum.Injections)
 	}
 }
