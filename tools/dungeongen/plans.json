@@ -21,7 +21,7 @@
    "kind": "dungeon",
    "handwritten": true,
    "special": [
-    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event summons him; the event is the segment dungeons/wailing_caverns-extra.json (gossip at menu 202 option 0, the escort stops of script_waypoint 3678, the summoned waves, Mutanus held by instance data 4 reading DONE): its return from Verdan is the Serpentis hop taken the other way (the ramp lip, then a move_hop_exact to the foot; live-probed 3 of 3 on 2026-10-22, no GM), because the navmesh has no walk back",
     "Lady Anacondra has four spawn rows in one pool (one up per reset)",
     "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a plain direct step with a check_skip (no GM; the foot is an exact waypoint held to 1.5 yd with a stationary proof, and the step was taken live three times from that foot on 2026-10-18, tests/wc-hop-probe-2, while the driver has not been run on this hop and the run leader side is open)"
    ]
