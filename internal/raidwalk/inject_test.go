@@ -1,6 +1,7 @@
 package raidwalk
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -169,7 +170,14 @@ func TestKillMTFiresMidPackOnly(t *testing.T) {
 	}
 	// `.die` follows on the next tick: the allow-list refuses a `.die` until the MT's selection has been read
 	// back (spec 1.4), so the injector cannot send both in one Tick.
-	in.Ack(acts[0], InjectCtx{SelfSelected: true, SelectedHire: "Mt"}, nil)
+	// The MT is a hire, not the commander: the read-back is SelectedHire == Mt with SelfSelected false.
+	in.Ack(acts[0], InjectCtx{SelectedHire: "Mt"}, nil)
+	if c := in.Ctx(); c.SelfSelected || c.SelectedHire != "Mt" {
+		t.Fatalf("selection state after the MT's read-back = %+v, want SelectedHire Mt and SelfSelected false", c)
+	}
+	if !AllowedInjectLine(".die", in.Ctx()) {
+		t.Fatalf(".die refused after the MT's realizable read-back: %+v", in.Ctx())
+	}
 	acts = in.Tick(killObsAt(base.Add(8*time.Second), "pull", 60, false, gMt, gR1))
 	if len(acts) != 2 || acts[0].Kind != ActGM || acts[0].Line != ".die" || acts[1].Kind != ActSelectSelf {
 		t.Fatalf("after the selection: %+v, want [.die, select self]", acts)
@@ -220,7 +228,7 @@ func startKillMT(t *testing.T) (*Injector, time.Time) {
 	if len(acts) != 1 {
 		t.Fatalf("kill-mt fire actions = %+v", acts)
 	}
-	in.Ack(acts[0], InjectCtx{SelfSelected: true, SelectedHire: "Mt"}, nil)
+	in.Ack(acts[0], InjectCtx{SelectedHire: "Mt"}, nil)
 	acts = in.Tick(killObsAt(base.Add(8*time.Second), "pull", 60, false, gMt, gR1))
 	for _, a := range acts {
 		in.Ack(a, InjectCtx{}, nil)
@@ -302,20 +310,33 @@ func TestKillMTVerdicts(t *testing.T) {
 	})
 
 	t.Run("selection not confirmed", func(t *testing.T) {
-		base := injectBase()
-		in := NewInjector(mustInjects(t, "kill-mt"), injectNames(), planexport.Rows{}, injectPlan())
-		in.Tick(killObsAt(base, "pull", 60, false, gMt, gR1))
-		acts := in.Tick(killObsAt(base.Add(7*time.Second), "pull", 60, false, gMt, gR1))
-		if len(acts) != 1 || acts[0].Kind != ActSelect {
-			t.Fatalf("fire actions = %+v", acts)
-		}
-		in.Ack(acts[0], InjectCtx{}, nil) // status.target did not read back as the MT
-		if acts := in.Tick(killObsAt(base.Add(8*time.Second), "pull", 60, false, gMt, gR1)); len(acts) != 0 {
-			t.Fatalf("a .die followed an unconfirmed selection: %+v", acts)
-		}
-		res := in.Results()[0]
-		if res.Verdict != VerdictInconclusive || !strings.Contains(res.Reason, "selection not confirmed") {
-			t.Fatalf("verdict = %q (%s), want selection not confirmed", res.Verdict, res.Reason)
+		for _, tc := range []struct {
+			name string
+			ctx  InjectCtx
+		}{
+			// status.target read back as nothing usable.
+			{"nothing selected", InjectCtx{}},
+			// The MT's name together with the commander's flag is not a read-back the command can produce:
+			// the target of a hire selection is the hire, so SelfSelected is false.
+			{"self and the MT", InjectCtx{SelfSelected: true, SelectedHire: "Mt"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				base := injectBase()
+				in := NewInjector(mustInjects(t, "kill-mt"), injectNames(), planexport.Rows{}, injectPlan())
+				in.Tick(killObsAt(base, "pull", 60, false, gMt, gR1))
+				acts := in.Tick(killObsAt(base.Add(7*time.Second), "pull", 60, false, gMt, gR1))
+				if len(acts) != 1 || acts[0].Kind != ActSelect {
+					t.Fatalf("fire actions = %+v", acts)
+				}
+				in.Ack(acts[0], tc.ctx, nil) // status.target did not read back as the MT alone
+				if acts := in.Tick(killObsAt(base.Add(8*time.Second), "pull", 60, false, gMt, gR1)); len(acts) != 0 {
+					t.Fatalf("a .die followed an unconfirmed selection: %+v", acts)
+				}
+				res := in.Results()[0]
+				if res.Verdict != VerdictInconclusive || !strings.Contains(res.Reason, "selection not confirmed") {
+					t.Fatalf("verdict = %q (%s), want selection not confirmed", res.Verdict, res.Reason)
+				}
+			})
 		}
 	})
 }
@@ -505,6 +526,21 @@ func TestRunawayPassOnF4Note(t *testing.T) {
 		res := in.Results()[0]
 		if res.Verdict != VerdictInconclusive {
 			t.Fatalf("verdict = %q (%s), want inconclusive (F4 waits for no fight)", res.Verdict, res.Reason)
+		}
+	})
+
+	t.Run("a boss while frozen", func(t *testing.T) {
+		in, t0 := frozenRunaway(t)
+		o := atQ(runawayObs(t0.Add(1*time.Second), 5))
+		o.BossEngaged = true
+		in.Tick(o)
+		acts := in.Tick(atQ(runawayObs(t0.Add(90*time.Second), 5)))
+		ackSelect(t, in, acts)
+		acts = in.Tick(atQ(runawayObs(t0.Add(91*time.Second), 5)))
+		ackGM(t, in, acts, ".unfreeze R3")
+		res := in.Results()[0]
+		if res.Verdict != VerdictInconclusive || !strings.Contains(res.Reason, "never on a boss step") {
+			t.Fatalf("verdict = %q (%s), want inconclusive (F4 never on a boss step)", res.Verdict, res.Reason)
 		}
 	})
 }
@@ -808,6 +844,24 @@ func TestNeverFiresNearUntilStopOrPaused(t *testing.T) {
 	}
 }
 
+// TestBossSeenDoesNotDisableLaterFaults pins that the boss block reads the current observation only: a boss the
+// walk passed earlier must not keep the injector from firing on the trash after it.
+func TestBossSeenDoesNotDisableLaterFaults(t *testing.T) {
+	base := injectBase()
+	in := NewInjector(mustInjects(t, "kill-mt"), injectNames(), planexport.Rows{}, injectPlan())
+	o := killObsAt(base, "boss", 60, false, gMt, gR1)
+	o.BossEngaged = true
+	if acts := in.Tick(o); len(acts) != 0 {
+		t.Fatalf("kill-mt fired on the boss: %+v", acts)
+	}
+	// The boss is dead: the run is on a trash pull and no boss is engaged any more.
+	o = killObsAt(base.Add(7*time.Second), "pull", 60, false, gMt, gR1)
+	acts := in.Tick(o)
+	if len(acts) != 1 || acts[0].Kind != ActSelect || acts[0].GUID != gMt {
+		t.Fatalf("kill-mt on the trash after a boss = %+v, want [select the MT]", acts)
+	}
+}
+
 // TestCleanupUnfreezesFrozenOnly pins spec 1.2's idempotent cleanup.
 func TestCleanupUnfreezesFrozenOnly(t *testing.T) {
 	base := injectBase()
@@ -840,6 +894,79 @@ func TestCleanupUnfreezesFrozenOnly(t *testing.T) {
 	if acts := in.Cleanup(); len(acts) != 0 {
 		t.Fatalf("cleanup froze/unfroze a released bot: %+v", acts)
 	}
+}
+
+// TestCleanupRetriesFailedUnfreeze pins spec 1.2's cleanup accounting: cleanup only asks for the release, a bot is
+// released by a `.unfreeze` the command acknowledged, and a failed one leaves the bot frozen and retryable.
+func TestCleanupRetriesFailedUnfreeze(t *testing.T) {
+	base := injectBase()
+	fireLag := func(t *testing.T) (*Injector, time.Time) {
+		t.Helper()
+		in := NewInjector(mustInjects(t, "lag,secs=30"), injectNames(), planexport.Rows{}, injectPlan())
+		in.Tick(runawayObs(base, 5))
+		acts := in.Tick(runawayObs(base.Add(10*time.Second), 5))
+		ackSelect(t, in, acts)
+		acts = in.Tick(runawayObs(base.Add(11*time.Second), 5))
+		ackGM(t, in, acts, ".freeze R3")
+		return in, base.Add(11 * time.Second)
+	}
+	wantCleanup := func(t *testing.T, acts []InjectAction, what string) {
+		t.Helper()
+		if len(acts) != 3 || acts[0].Kind != ActSelectSelf || acts[1].Kind != ActGM || acts[1].Line != ".unfreeze R3" || acts[2].Kind != ActSelectSelf {
+			t.Fatalf("%s = %+v, want [select self, .unfreeze R3, select self]", what, acts)
+		}
+	}
+
+	t.Run("unfreeze fails, then succeeds", func(t *testing.T) {
+		in, _ := fireLag(t)
+		acts := in.Cleanup()
+		wantCleanup(t, acts, "cleanup actions")
+		in.Ack(acts[0], InjectCtx{SelfSelected: true}, nil)
+		if c := in.Ctx(); !c.SelfSelected {
+			t.Fatalf("the commander's read-back did not set SelfSelected: %+v", c)
+		}
+		in.Ack(acts[1], InjectCtx{SelfSelected: true}, errors.New(".unfreeze R3: timed out"))
+		// The bot is still frozen: cleanup asks again instead of forgetting it.
+		acts = in.Cleanup()
+		wantCleanup(t, acts, "retry actions")
+		in.Ack(acts[0], InjectCtx{SelfSelected: true}, nil)
+		in.Ack(acts[1], InjectCtx{SelfSelected: true}, nil)
+		if again := in.Cleanup(); len(again) != 0 {
+			t.Fatalf("cleanup kept unfreezing a released bot: %+v", again)
+		}
+	})
+
+	t.Run("no selection is assumed", func(t *testing.T) {
+		in, t0 := fireLag(t)
+		// The release's own selection times out: the fault ends inconclusive, nothing is selected, and the bot
+		// stays frozen for cleanup.
+		acts := in.Tick(runawayObs(t0.Add(30*time.Second), 5))
+		if len(acts) != 1 || acts[0].Kind != ActSelectSelf {
+			t.Fatalf("release actions = %+v, want [select self]", acts)
+		}
+		in.Ack(acts[0], InjectCtx{}, errors.New("select self: timed out"))
+		if c := in.Ctx(); c.SelfSelected {
+			t.Fatalf("a failed selection left SelfSelected on: %+v", c)
+		}
+		acts = in.Cleanup()
+		wantCleanup(t, acts, "cleanup actions")
+		if c := in.Ctx(); c.SelfSelected {
+			t.Fatalf("cleanup assumed the commander without a read-back: %+v", c)
+		}
+	})
+
+	t.Run("a failed selection drops the unfreeze", func(t *testing.T) {
+		in, _ := fireLag(t)
+		acts := in.Cleanup()
+		wantCleanup(t, acts, "cleanup actions")
+		in.Ack(acts[0], InjectCtx{}, errors.New("select self: timed out"))
+		if c := in.Ctx(); c.SelfSelected {
+			t.Fatalf("a failed selection left SelfSelected on: %+v", c)
+		}
+		// The unfreeze was never allowed to follow; the retry starts with a selection again.
+		acts = in.Cleanup()
+		wantCleanup(t, acts, "retry actions")
+	})
 }
 
 // TestFinishVerdicts pins spec 1.2's end-of-watch verdicts.

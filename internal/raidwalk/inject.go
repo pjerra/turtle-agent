@@ -395,7 +395,6 @@ type Injector struct {
 	lead     dungeon.Point
 	haveLead bool
 	wipe     bool
-	bossSeen bool
 
 	selfSelected bool
 	selectedHire string
@@ -408,13 +407,14 @@ type Injector struct {
 	pending  []pendingInject
 	out      []InjectAction
 	finished bool
-	cleaned  bool
 }
 
 type pendingInject struct {
 	act   InjectAction
 	fault *injectFault
 	at    time.Time
+	// cleanup is one of Cleanup's actions: it carries no verdict and only its acknowledgement changes state.
+	cleanup bool
 }
 
 // NewInjector builds the injector of one walk (spec 1.5).
@@ -523,9 +523,9 @@ func (in *Injector) observe(o InjectObs) {
 	if o.Wipe {
 		in.wipe = true
 	}
-	boss := o.BossEngaged || (o.HaveRun && o.Run.Kind == "boss")
-	if boss {
-		in.bossSeen = true
+	// Historical boss exposure is per active fault, where it only affects that fault's verdict (runaway's F4):
+	// the fire blocks read the current observation instead.
+	if o.BossEngaged || (o.HaveRun && o.Run.Kind == "boss") {
 		if in.active != nil {
 			in.active.bossSeen = true
 		}
@@ -619,7 +619,7 @@ func (in *Injector) globalBlock(o InjectObs) string {
 	if o.Run.Kind == "boss" {
 		return "on a boss step"
 	}
-	if in.bossSeen {
+	if o.BossEngaged {
 		return "a boss is engaged"
 	}
 	if o.UntilStep > 0 && o.Run.Step >= o.UntilStep-2 {
@@ -1516,7 +1516,8 @@ func sameInjectAction(a, b InjectAction) bool {
 }
 
 // Ack takes the command's result of one action (spec 1.5). A failed action ends its fault inconclusive, never the
-// walk; a refused allow-list line is the command's own programming error and is checked before it gets here.
+// walk; a refused allow-list line is the command's own programming error and is checked before it gets here. A
+// cleanup action carries no verdict: a failed release is left for the next Cleanup call.
 func (in *Injector) Ack(a InjectAction, ctx InjectCtx, err error) {
 	idx := -1
 	for i, p := range in.pending {
@@ -1536,6 +1537,10 @@ func (in *Injector) Ack(a InjectAction, ctx InjectCtx, err error) {
 		} else {
 			in.selfSelected, in.selectedHire = ctx.SelfSelected, ctx.SelectedHire
 		}
+	}
+	if p.cleanup {
+		in.ackCleanup(p.fault, a, err)
+		return
 	}
 	f := p.fault
 	if f == nil || f.state != injectActive {
@@ -1565,7 +1570,9 @@ func (in *Injector) ackKill(f *injectFault, a InjectAction, ctx InjectCtx, at ti
 		if a.Kind != ActSelect {
 			return
 		}
-		if !ctx.SelfSelected || ctx.SelectedHire != in.names.MT {
+		// The MT is a hire, not the commander: a realizable read-back has SelectedHire == MT and SelfSelected
+		// false, and never both (SelfSelected is the ActSelectSelf read-back of the commander's own GUID).
+		if ctx.SelfSelected || ctx.SelectedHire != in.names.MT {
 			in.endFault(f, VerdictInconclusive, "selection not confirmed", at)
 			return
 		}
@@ -1751,29 +1758,69 @@ func (in *Injector) finishActive(f *injectFault, o InjectObs) {
 	}
 }
 
-// Cleanup is idempotent (spec 1.2): select self, `.unfreeze` every bot still frozen, then select self once.
+// Cleanup is the watch's end (spec 1.2): select self, `.unfreeze` every bot still frozen, then select self once.
+// It only asks: a bot is released when the command acknowledges its `.unfreeze` through Ack, so a failed or
+// unattempted release leaves the bot frozen and the next Cleanup call asks for it again. The command acks every
+// action it is handed, with an error for the ones it did not send.
 func (in *Injector) Cleanup() []InjectAction {
-	if in.cleaned {
-		return nil
-	}
-	in.cleaned = true
-	var out []InjectAction
 	at := in.lastTick
+	var out []InjectAction
+	ask := func(f *injectFault, a InjectAction) {
+		if f != nil {
+			f.lines = append(f.lines, InjectLine{T: at.Format(injectTimeLayout), Kind: injectLineKind(a.Kind), Text: injectActionText(a)})
+		}
+		in.pending = append(in.pending, pendingInject{act: a, fault: f, at: at, cleanup: true})
+		out = append(out, a)
+	}
 	for _, f := range in.faults {
-		if !f.frozen || f.unfrozen {
+		if !f.frozen || f.unfrozen || in.cleanupInFlight(f) {
 			continue
 		}
-		out = append(out, InjectAction{Kind: ActSelectSelf})
-		out = append(out, InjectAction{Kind: ActGM, Line: ".unfreeze " + f.victim})
-		f.lines = append(f.lines, InjectLine{T: at.Format(injectTimeLayout), Kind: "select", Text: "select self"})
-		f.lines = append(f.lines, InjectLine{T: at.Format(injectTimeLayout), Kind: "gm", Text: ".unfreeze " + f.victim})
-		f.frozen, f.unfrozen = false, true
+		ask(f, InjectAction{Kind: ActSelectSelf})
+		ask(f, InjectAction{Kind: ActGM, Line: ".unfreeze " + f.victim})
 	}
 	if len(out) > 0 {
-		out = append(out, InjectAction{Kind: ActSelectSelf})
-		in.selfSelected, in.selectedHire = true, ""
+		ask(nil, InjectAction{Kind: ActSelectSelf})
 	}
 	return out
+}
+
+// cleanupInFlight says whether a cleanup action of this fault waits for its acknowledgement.
+func (in *Injector) cleanupInFlight(f *injectFault) bool {
+	for _, p := range in.pending {
+		if p.cleanup && p.fault == f {
+			return true
+		}
+	}
+	return false
+}
+
+// dropCleanup forgets a fault's unacknowledged cleanup actions: once the selection failed, the `.unfreeze` that
+// follows it is not allowed and is asked for again with the selection.
+func (in *Injector) dropCleanup(f *injectFault) {
+	kept := in.pending[:0]
+	for _, p := range in.pending {
+		if p.cleanup && p.fault == f {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	in.pending = kept
+}
+
+// ackCleanup folds one cleanup action: only a `.unfreeze` the command sent releases its bot; the selection state
+// comes from the select's read-back in Ack. The trailing select belongs to no fault.
+func (in *Injector) ackCleanup(f *injectFault, a InjectAction, err error) {
+	if f == nil {
+		return
+	}
+	if err != nil {
+		in.dropCleanup(f)
+		return
+	}
+	if a.Kind == ActGM {
+		f.frozen, f.unfrozen = false, true
+	}
 }
 
 // Results is the faults' final state in command-line order.
