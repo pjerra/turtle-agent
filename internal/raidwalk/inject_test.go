@@ -1002,3 +1002,142 @@ func TestFinishVerdicts(t *testing.T) {
 		t.Fatalf("verdict = %q (%s), want the unresolved inconclusive", res.Verdict, res.Reason)
 	}
 }
+
+// TestWipeBeforeEffectIsInconclusive pins spec 1.2's wipe rule: a wipe that comes before the fault's disruptive
+// effect (the MT dead, the extra pack engaged, the victim frozen) says nothing about the fault.
+func TestWipeBeforeEffectIsInconclusive(t *testing.T) {
+	base := injectBase()
+	wantInconclusive := func(t *testing.T, in *Injector) {
+		t.Helper()
+		res := in.Results()[0]
+		if res.Verdict != VerdictInconclusive || !strings.Contains(res.Reason, "wipe before the fault took effect") {
+			t.Fatalf("verdict = %q (%s), want the wipe-before-effect inconclusive", res.Verdict, res.Reason)
+		}
+	}
+
+	t.Run("kill-mt still awaits the MT selection", func(t *testing.T) {
+		in := NewInjector(mustInjects(t, "kill-mt"), injectNames(), planexport.Rows{}, injectPlan())
+		in.Tick(killObsAt(base, "pull", 60, false, gMt, gR1))
+		acts := in.Tick(killObsAt(base.Add(7*time.Second), "pull", 60, false, gMt, gR1))
+		if len(acts) != 1 || acts[0].Kind != ActSelect {
+			t.Fatalf("fire actions = %+v, want [select the MT]", acts)
+		}
+		o := killObsAt(base.Add(8*time.Second), "pull", 60, false, gMt, gR1)
+		o.Wipe = true
+		if acts := in.Tick(o); len(acts) != 0 {
+			t.Fatalf("actions after the wipe: %+v, want none", acts)
+		}
+		wantInconclusive(t, in)
+	})
+
+	t.Run("add-pack still awaits its engagement", func(t *testing.T) {
+		fight := []HostileObs{partyHostile(), idleHostile(402, 0, 40)}
+		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+		in.Tick(addPackObs(base, fight))
+		acts := in.Tick(addPackObs(base.Add(3*time.Second), fight))
+		if len(acts) != 1 || acts[0].Kind != ActOrder {
+			t.Fatalf("fire actions = %+v, want [order attack ...]", acts)
+		}
+		in.Ack(acts[0], InjectCtx{}, nil)
+		// The extra pack is still idle: no hostile of it targets the party.
+		o := addPackObs(base.Add(4*time.Second), fight)
+		o.Wipe = true
+		in.Tick(o)
+		wantInconclusive(t, in)
+	})
+
+	t.Run("lag still awaits the freeze", func(t *testing.T) {
+		in := NewInjector(mustInjects(t, "lag,secs=30"), injectNames(), planexport.Rows{}, injectPlan())
+		in.Tick(runawayObs(base, 5))
+		acts := in.Tick(runawayObs(base.Add(10*time.Second), 5))
+		ackSelect(t, in, acts)
+		o := runawayObs(base.Add(11*time.Second), 5)
+		o.Wipe = true
+		if acts := in.Tick(o); len(acts) != 0 {
+			t.Fatalf("actions after the wipe: %+v, want no .freeze", acts)
+		}
+		wantInconclusive(t, in)
+	})
+
+	t.Run("runaway still awaits the freeze", func(t *testing.T) {
+		in := NewInjector(mustInjects(t, "runaway"), injectNames(), runawayRows(), injectPlan())
+		in.Tick(runawayObs(base, 5))
+		acts := in.Tick(runawayObs(base.Add(10*time.Second), 5))
+		if len(acts) != 2 || acts[0].Kind != ActGM {
+			t.Fatalf("fire actions = %+v, want [.go, wait]", acts)
+		}
+		o := runawayObs(base.Add(11*time.Second), 5)
+		o.Wipe = true
+		in.Tick(o)
+		wantInconclusive(t, in)
+	})
+}
+
+// TestWipeBlocksNewFaults pins spec 1.2's latch: once a wipe is observed, a fault that has not fired stays unfired.
+func TestWipeBlocksNewFaults(t *testing.T) {
+	base := injectBase()
+	in := NewInjector(mustInjects(t, "runaway"), injectNames(), runawayRows(), injectPlan())
+	in.Tick(runawayObs(base, 5))
+	// The runaway is eligible on this tick: without the latch it would fire its .go.
+	o := runawayObs(base.Add(10*time.Second), 5)
+	o.Wipe = true
+	if acts := in.Tick(o); len(acts) != 0 {
+		t.Fatalf("a fault fired after the wipe: %+v", acts)
+	}
+	if in.active != nil {
+		t.Fatalf("a fault is active after the wipe: %+v", in.active.spec)
+	}
+	in.Finish(runawayObs(base.Add(11*time.Second), 5))
+	res := in.Results()[0]
+	if res.Verdict != VerdictNotFired || !strings.Contains(res.Reason, "a wipe is on") {
+		t.Fatalf("verdict = %q (%s), want not-fired with the wipe reason", res.Verdict, res.Reason)
+	}
+}
+
+// TestWipeAfterEffectFails pins that a wipe after the fault's effect is attributed to it as before.
+func TestWipeAfterEffectFails(t *testing.T) {
+	base := injectBase()
+
+	t.Run("lag frozen", func(t *testing.T) {
+		in := NewInjector(mustInjects(t, "lag,secs=30"), injectNames(), planexport.Rows{}, injectPlan())
+		in.Tick(runawayObs(base, 5))
+		acts := in.Tick(runawayObs(base.Add(10*time.Second), 5))
+		ackSelect(t, in, acts)
+		acts = in.Tick(runawayObs(base.Add(11*time.Second), 5))
+		ackGM(t, in, acts, ".freeze R3")
+		o := runawayObs(base.Add(13*time.Second), 5)
+		o.Wipe = true
+		in.Tick(o)
+		res := in.Results()[0]
+		if res.Verdict != VerdictFail || !strings.Contains(res.Reason, "wipe while the victim lagged") {
+			t.Fatalf("verdict = %q (%s), want the lag wipe fail", res.Verdict, res.Reason)
+		}
+	})
+
+	t.Run("runaway frozen", func(t *testing.T) {
+		in, t0 := frozenRunaway(t)
+		o := atQ(runawayObs(t0.Add(5*time.Second), 5))
+		o.Wipe = true
+		in.Tick(o)
+		res := in.Results()[0]
+		if res.Verdict != VerdictFail || !strings.Contains(res.Reason, "wipe while the victim was out of reach") {
+			t.Fatalf("verdict = %q (%s), want the runaway wipe fail", res.Verdict, res.Reason)
+		}
+	})
+
+	t.Run("add-pack engaged in the same observation", func(t *testing.T) {
+		fight := []HostileObs{partyHostile(), idleHostile(402, 0, 40)}
+		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+		in.Tick(addPackObs(base, fight))
+		acts := in.Tick(addPackObs(base.Add(3*time.Second), fight))
+		in.Ack(acts[0], InjectCtx{}, nil)
+		pack := []HostileObs{partyHostile(), {GUID: 402, Entry: 502, HPPct: 100, Target: gR2, Reaction: "h", Kind: "-", Flags: "-"}}
+		o := addPackObs(base.Add(4*time.Second), pack)
+		o.Wipe = true
+		in.Tick(o)
+		res := in.Results()[0]
+		if res.Verdict != VerdictFail || !strings.Contains(res.Reason, "wipe after the extra pack was pulled") {
+			t.Fatalf("verdict = %q (%s), want the add-pack wipe fail", res.Verdict, res.Reason)
+		}
+	})
+}

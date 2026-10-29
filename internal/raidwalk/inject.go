@@ -622,6 +622,9 @@ func (in *Injector) globalBlock(o InjectObs) string {
 	if o.BossEngaged {
 		return "a boss is engaged"
 	}
+	if in.wipe {
+		return "a wipe is on"
+	}
 	if o.UntilStep > 0 && o.Run.Step >= o.UntilStep-2 {
 		return fmt.Sprintf("within 2 steps of the until stop (step %d)", o.UntilStep)
 	}
@@ -944,16 +947,7 @@ func (in *Injector) stepFault(f *injectFault, o InjectObs) {
 		return
 	}
 	if in.wipe {
-		switch f.spec.Kind {
-		case InjectKillMT:
-			in.endFault(f, VerdictFail, "wipe after the MT died", o.Now)
-		case InjectAddPack:
-			in.endFault(f, VerdictFail, "wipe after the extra pack was pulled", o.Now)
-		case InjectLag:
-			in.endFault(f, VerdictFail, "wipe while the victim lagged", o.Now)
-		default:
-			in.endFault(f, VerdictFail, "wipe while the victim was out of reach", o.Now)
-		}
+		in.wipeOutcome(f, o, o.Now)
 		return
 	}
 	switch f.spec.Kind {
@@ -966,6 +960,47 @@ func (in *Injector) stepFault(f *injectFault, o InjectObs) {
 	case InjectLag:
 		in.stepLag(f, o)
 	}
+}
+
+// faultTookEffect says whether a fault's disruptive action was acknowledged or observed: the MT died, the extra
+// pack engaged, the victim froze. A wipe before that point says nothing about the fault.
+func (in *Injector) faultTookEffect(f *injectFault, o InjectObs) bool {
+	switch f.spec.Kind {
+	case InjectKillMT:
+		if f.killed {
+			return true
+		}
+		if f.phase == "dying" {
+			mt, ok := o.Bots[in.names.MT]
+			return ok && mt.Dead
+		}
+	case InjectAddPack:
+		// The order has to be acknowledged first: an idle pack's engagement before that is not this fault's pull.
+		return f.engaged || (f.phase != "order" && in.packEngaged(o, f.pack))
+	case InjectRunaway, InjectLag:
+		// t0 is set when the `.freeze` is acknowledged.
+		return !f.t0.IsZero()
+	}
+	return false
+}
+
+// wipeOutcome ends an active fault once the wipe is latched (spec 1.2): only a fault whose effect came first can be
+// blamed for it; one still waiting for its effect ends inconclusive.
+func (in *Injector) wipeOutcome(f *injectFault, o InjectObs, at time.Time) {
+	if !in.faultTookEffect(f, o) {
+		in.endFault(f, VerdictInconclusive, "wipe before the fault took effect", at)
+		return
+	}
+	reason := "wipe while the victim was out of reach"
+	switch f.spec.Kind {
+	case InjectKillMT:
+		reason = "wipe after the MT died"
+	case InjectAddPack:
+		reason = "wipe after the extra pack was pulled"
+	case InjectLag:
+		reason = "wipe while the victim lagged"
+	}
+	in.endFault(f, VerdictFail, reason, at)
 }
 
 func (in *Injector) stepKill(f *injectFault, o InjectObs) {
@@ -1047,10 +1082,6 @@ func (in *Injector) killMeasure(f *injectFault, o InjectObs) {
 			}
 		}
 		if now.Sub(f.fightEndedAt) >= 60*time.Second {
-			if in.wipe {
-				in.endFault(f, VerdictFail, "wipe after the MT died", now)
-				return
-			}
 			in.endFault(f, VerdictPass, "", now)
 		}
 		return
@@ -1719,16 +1750,7 @@ func (in *Injector) Finish(o InjectObs) {
 
 func (in *Injector) finishActive(f *injectFault, o InjectObs) {
 	if in.wipe {
-		switch f.spec.Kind {
-		case InjectKillMT:
-			in.endFault(f, VerdictFail, "wipe after the MT died", o.Now)
-		case InjectAddPack:
-			in.endFault(f, VerdictFail, "wipe after the extra pack was pulled", o.Now)
-		case InjectLag:
-			in.endFault(f, VerdictFail, "wipe while the victim lagged", o.Now)
-		default:
-			in.endFault(f, VerdictFail, "wipe while the victim was out of reach", o.Now)
-		}
+		in.wipeOutcome(f, o, o.Now)
 		return
 	}
 	switch f.spec.Kind {
