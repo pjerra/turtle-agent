@@ -2034,7 +2034,8 @@ cleanup ran out of time, `incidents[]` (`severity` `blocking`, `kind` `cleanup_i
 `manual`). `summary.json` gains `injections[]` (kind, verdict, reason, step, victim), `incidents[]` (the same blocking
 findings) and `deaths.injected` (kill-mt's MT, which is not a death of the run). A walk that would exit 0 with at least
 one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. A blocking cleanup incident raises any
-lower exit code to **23** as well. A fault that never fired is `not-fired`; one that could not be caused or measured is
+lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
+that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
 ### Raid suite
 
@@ -2104,7 +2105,8 @@ plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier
 summaries), `dashboard_both_listed` (true when one `/api/v1/commanders` dump of either walk names both characters;
 `null` with the dashboard off) and `notes`.
 `pair.txt` is one line per walk, one `note:` line per note, then `pair: exit <c>`. The pair's exit is the first code that occurs in the order
-2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23). Each walk binds its own
+2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23); a blocking incident (a bot
+left frozen, 23) ranks ahead of 18 and 19 in both walks, so it never hides. Each walk binds its own
 commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs show one tab each. Two 40-man raids
 are up to 80 hires on one server: plan the slots and the worldserver's memory.
 

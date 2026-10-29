@@ -322,7 +322,9 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 				w.logLine(w.env.now(), "note: .gps after selecting "+label+": known position unknown")
 			}
 		}
-		// The identity is the proof every line that acts on the selection needs.
+		// The identity is the proof every line that acts on the selection needs. A self read-back cannot tell "self"
+		// from "none": nothing or an invalid unit selected also answers with the commander's name, which is acceptable
+		// because `.freeze`/`.unfreeze <hire>` act on the named hire and no line here targets a creature.
 		name, counter, ok, err := r.pinfoSelected(ctx)
 		if err != nil {
 			return r.in.Ctx(), fmt.Errorf("selection not proven: %v", err), nil
@@ -384,8 +386,69 @@ func (r *raidInjector) sleep(ctx context.Context, d time.Duration) error {
 // injectGPSRe matches `.gps`'s coordinates line ("X: -158.440994 Y: 131.600998 Z: -74.255203 Orientation: ...").
 var injectGPSRe = regexp.MustCompile(`^X: (-?[0-9]+(?:\.[0-9]+)?) Y: (-?[0-9]+(?:\.[0-9]+)?) Z: (-?[0-9]+(?:\.[0-9]+)?)`)
 
-// gpsSelected sends `.gps` and reads the reply from the event log: the reply reports the SELECTED unit. It consumes
-// the events like pollOnce does, so no TBM:RUN line is lost.
+// injectPageRead is what one events page held for the selection readers: the first `.gps` coordinates and the first
+// `.pinfo` identity of the page, and whether the page carried the `.gps` reply's end line.
+type injectPageRead struct {
+	pos     dungeon.Point
+	havePos bool
+	gpsEnd  bool
+	name    string
+	counter uint64
+	haveID  bool
+}
+
+// readEventsPage reads the WHOLE events page the way pollOnce does: every TBM:RUN line is logged, fed to the
+// tracker and its note kept for the injector's next Tick; the first `.gps` and `.pinfo` replies are also kept. A
+// reader must not return at its own reply line: the page's later RUN lines would be lost (page.Next already
+// advanced past them).
+func (r *raidInjector) readEventsPage(page events.Page) injectPageRead {
+	w := r.w
+	var got injectPageRead
+	for _, e := range page.Events {
+		if line, ok := tbm.Line(e); ok {
+			w.logLine(w.env.now(), line)
+			if st, ok := raidwalk.ParseRun(line); ok && st.Plan == w.plan.Name {
+				if w.tracker != nil {
+					w.tracker.Feed(w.env.now(), st)
+				}
+				w.lastStatus, w.haveStatus = st, true
+				if st.Note != "" {
+					w.newNotes = append(w.newNotes, st.Note)
+				}
+			}
+			continue
+		}
+		if e.Kind != events.KindSystem || e.Text == "" {
+			continue
+		}
+		if !got.havePos {
+			if p, ok := parseGPSPoint(e.Text); ok {
+				got.pos, got.havePos = p, true
+			}
+		}
+		if !got.gpsEnd && strings.Contains(e.Text, "FloorZ") {
+			got.gpsEnd = true
+		}
+		if got.haveID {
+			continue
+		}
+		// LANG_PINFO_ACCOUNT is localized, but its player link and "(guid: N)" are not: require both.
+		text := raidwalk.CleanLine(e.Text)
+		gm, nm := injectPInfoGUIDRe.FindStringSubmatch(text), injectPInfoNameRe.FindStringSubmatch(text)
+		if gm == nil || nm == nil {
+			continue
+		}
+		counter, err := strconv.ParseUint(gm[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		got.name, got.counter, got.haveID = nm[2], counter, true
+	}
+	return got
+}
+
+// gpsSelected sends `.gps` and reads the reply from the event log: the reply reports the SELECTED unit. The whole
+// page goes through readEventsPage before the reply returns, so a TBM:RUN line behind the reply is not dropped.
 func (r *raidInjector) gpsSelected(ctx context.Context) (dungeon.Point, bool, error) {
 	w := r.w
 	if r.in != nil && !raidwalk.AllowedInjectLine(".gps", r.in.Ctx()) {
@@ -404,29 +467,12 @@ func (r *raidInjector) gpsSelected(ctx context.Context) (dungeon.Point, bool, er
 			return dungeon.Point{}, false, fmt.Errorf(".gps events: %v", err)
 		}
 		w.eventsAt = page.Next
-		for _, e := range page.Events {
-			if line, ok := tbm.Line(e); ok {
-				w.logLine(w.env.now(), line)
-				if st, ok := raidwalk.ParseRun(line); ok && st.Plan == w.plan.Name {
-					if w.tracker != nil {
-						w.tracker.Feed(w.env.now(), st)
-					}
-					w.lastStatus, w.haveStatus = st, true
-					if st.Note != "" {
-						w.newNotes = append(w.newNotes, st.Note)
-					}
-				}
-				continue
-			}
-			if e.Kind != events.KindSystem || e.Text == "" {
-				continue
-			}
-			if p, ok := parseGPSPoint(e.Text); ok {
-				pos, have = p, true
-			}
-			if strings.Contains(e.Text, "FloorZ") {
-				return pos, have, nil
-			}
+		got := r.readEventsPage(page)
+		if got.havePos {
+			pos, have = got.pos, true
+		}
+		if got.gpsEnd {
+			return pos, have, nil
 		}
 		if !w.env.now().Before(deadline) {
 			return dungeon.Point{}, false, fmt.Errorf("no .gps reply in %s", injectGPSWait)
@@ -443,8 +489,9 @@ var injectPInfoGUIDRe = regexp.MustCompile(`\(guid: ([0-9]+)\)`)
 // injectPInfoNameRe matches the character's player link in that line (ChatHandler::playerLink).
 var injectPInfoNameRe = regexp.MustCompile(`\|Hplayer:([^|]+)\|h\[([^\]]+)\]\|h`)
 
-// pinfoSelected sends `.pinfo` with no name (the core uses the selected player) and reads the first reply line of its
-// LANG_PINFO_ACCOUNT message: the character's name and guid counter. It consumes events like gpsSelected does.
+// pinfoSelected sends `.pinfo` with no name (the core uses the selected player) and reads the first identity line of
+// its LANG_PINFO_ACCOUNT message: the character's name and guid counter. The whole page goes through readEventsPage
+// before the reply returns, so a TBM:RUN line behind the reply is not dropped.
 func (r *raidInjector) pinfoSelected(ctx context.Context) (string, uint64, bool, error) {
 	w := r.w
 	if r.in != nil && !raidwalk.AllowedInjectLine(".pinfo", r.in.Ctx()) {
@@ -461,34 +508,9 @@ func (r *raidInjector) pinfoSelected(ctx context.Context) (string, uint64, bool,
 			return "", 0, false, fmt.Errorf(".pinfo events: %v", err)
 		}
 		w.eventsAt = page.Next
-		for _, e := range page.Events {
-			if line, ok := tbm.Line(e); ok {
-				w.logLine(w.env.now(), line)
-				if st, ok := raidwalk.ParseRun(line); ok && st.Plan == w.plan.Name {
-					if w.tracker != nil {
-						w.tracker.Feed(w.env.now(), st)
-					}
-					w.lastStatus, w.haveStatus = st, true
-					if st.Note != "" {
-						w.newNotes = append(w.newNotes, st.Note)
-					}
-				}
-				continue
-			}
-			if e.Kind != events.KindSystem || e.Text == "" {
-				continue
-			}
-			// LANG_PINFO_ACCOUNT is localized, but its player link and "(guid: N)" are not: require both.
-			text := raidwalk.CleanLine(e.Text)
-			gm, nm := injectPInfoGUIDRe.FindStringSubmatch(text), injectPInfoNameRe.FindStringSubmatch(text)
-			if gm == nil || nm == nil {
-				continue
-			}
-			counter, err := strconv.ParseUint(gm[1], 10, 64)
-			if err != nil {
-				continue
-			}
-			return nm[2], counter, true, nil
+		got := r.readEventsPage(page)
+		if got.haveID {
+			return got.name, got.counter, true, nil
 		}
 		if !w.env.now().Before(deadline) {
 			return "", 0, false, fmt.Errorf("no .pinfo reply in %s", injectPInfoWait)

@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -431,6 +433,7 @@ func TestRaidWalkInjectEveryLinePassesAnAllowList(t *testing.T) {
 	f.setupInject()
 	f.defaultRun("onyxias_lair")
 	f.opts.injects = []string{"runaway"}
+	f.agent.injectCtx = captureInjectorCtx(t)
 	const victim = "Bot39"
 	f.agent.onGM = func(line string) {
 		if line != ".freeze "+victim {
@@ -450,24 +453,99 @@ func TestRaidWalkInjectEveryLinePassesAnAllowList(t *testing.T) {
 	for i := 1; i <= 39; i++ {
 		hires[fmt.Sprintf("Bot%02d", i)] = true
 	}
-	lead := dungeon.Point{X: injLeadX, Y: injLeadY, Z: injLeadZ}
-	c0 := raidwalk.InjectCtx{Hires: hires, Map: 249, Lead: lead, HaveLead: true}
-	var attempts []raidwalk.InjectCtx
-	attempts = append(attempts, c0)
-	for _, k := range []raidwalk.InjectKind{raidwalk.InjectKillMT, raidwalk.InjectRunaway, raidwalk.InjectAddPack, raidwalk.InjectLag} {
-		for _, v := range []string{victim, "Bot01"} {
-			c := c0
-			c.Fault, c.Victim, c.SelfSelected, c.SelectedHire, c.Candidate = k, v, true, "Bot01", packet.GUID(9001)
-			attempts = append(attempts, c)
+	ctxs, haveCtx := f.agent.gmContexts()
+	for i, line := range f.agent.gmLines() {
+		if isInjectorLine(line) && i < len(ctxs) && haveCtx[i] {
+			// The injector's line: the context it was really sent with, not a union of plausible ones.
+			if !raidwalk.AllowedInjectLine(line, ctxs[i]) {
+				t.Fatalf("gm line %q (send %d) fails the fault allow-list at its own context %+v", line, i, ctxs[i])
+			}
+			continue
+		}
+		if !raidwalk.AllowedLine(line, hires) {
+			t.Fatalf("gm line %q (send %d) passes no allow-list", line, i)
 		}
 	}
-	for _, line := range f.agent.gmLines() {
-		ok := raidwalk.AllowedLine(line, hires)
-		for _, c := range attempts {
-			ok = ok || raidwalk.AllowedInjectLine(line, c)
+}
+
+// isInjectorLine says whether a gm line can only come from the fault injector once the watch runs (the walk sends
+// none of these after Prepare; .bot run stop is the walk's own).
+func isInjectorLine(line string) bool {
+	f := strings.Fields(line)
+	if len(f) == 0 {
+		return false
+	}
+	switch f[0] {
+	case ".gm", ".gps", ".pinfo", ".die", ".go", ".summon", ".freeze", ".unfreeze":
+		return true
+	}
+	return false
+}
+
+// captureInjectorCtx wraps the real injector and returns its allow-list context at the moment a gm line goes out; there
+// is no context before Prepare, when only the walk sends lines.
+func captureInjectorCtx(t *testing.T) func() (raidwalk.InjectCtx, bool) {
+	t.Helper()
+	var mu sync.Mutex
+	var inj *raidInjector
+	old := newWalkInjector
+	newWalkInjector = func(w *walk, specs []string) (walkInjector, error) {
+		v, err := newRaidInjector(w, specs)
+		if r, ok := v.(*raidInjector); ok {
+			mu.Lock()
+			inj = r
+			mu.Unlock()
 		}
-		if !ok {
-			t.Fatalf("gm line %q passes no allow-list", line)
+		return v, err
+	}
+	t.Cleanup(func() { newWalkInjector = old })
+	return func() (raidwalk.InjectCtx, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if inj == nil || inj.in == nil {
+			return raidwalk.InjectCtx{}, false
 		}
+		return inj.in.Ctx(), true
+	}
+}
+
+// TestRaidInjectPageReadKeepsTheWholePage: the `.gps`/`.pinfo` readers must process the WHOLE events page, not return
+// at their own reply line: page.Next has already advanced past the rest, so a TBM:RUN note behind the reply (an F4
+// summon, a pause, the run's done) would be lost for good - neither in run.log nor in the notes the injector drains.
+func TestRaidInjectPageReadKeepsTheWholePage(t *testing.T) {
+	f := newFixture(t)
+	logPath := filepath.Join(t.TempDir(), "run.log")
+	logF, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logF.Close()
+	const reply = `Human Warrior |cffffffff|Hplayer:Bot03|h[Bot03]|h|r (guid: 1002) Account: acct (id: 1) GMLevel: 3`
+	const note = "Bot39 is 152.3 yd from the lead bot (8 s out of reach): summoned"
+	runLine := "TBM:RUN|onyxias_lair|running|6/29|lair|move|walk|" + note
+	w := &walk{plan: &dungeon.Plan{Name: "onyxias_lair", Map: 249}, env: walkEnv{now: f.clock.now}, logF: logF}
+	r := &raidInjector{w: w}
+	got := r.readEventsPage(events.Page{
+		Next: 2,
+		Events: []events.Event{
+			{Seq: 1, Kind: events.KindSystem, Text: reply},
+			{Seq: 2, Kind: events.KindSystem, Text: runLine, Data: map[string]any{"raw": runLine}},
+		},
+	})
+	if !got.haveID || got.name != "Bot03" || got.counter != 1002 {
+		t.Fatalf("identity %+v, want Bot03 (guid counter 1002)", got)
+	}
+	if len(w.newNotes) != 1 || w.newNotes[0] != note {
+		t.Fatalf("newNotes %v, want the page's note %q", w.newNotes, note)
+	}
+	if !w.haveStatus || w.lastStatus.Step != 6 || w.lastStatus.Note != note {
+		t.Fatalf("lastStatus %+v (have %v), want step 6 with the note", w.lastStatus, w.haveStatus)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), runLine) {
+		t.Fatalf("run.log lacks the page's RUN line:\n%s", raw)
 	}
 }

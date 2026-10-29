@@ -153,17 +153,25 @@ func TestRaidWalkPairSeparateDirsAndHolders(t *testing.T) {
 }
 
 func TestRaidWalkPairWorstExit(t *testing.T) {
-	cases := []struct{ a, b, want int }{
-		{exitOK, exitRaidWalkInjectFailed, exitRaidWalkInjectFailed},
-		{exitRaidWalkIncident, exitRaidWalkInjectFailed, exitRaidWalkIncident},
-		{exitRaidWalkFailed, exitOK, exitRaidWalkFailed},
-		{exitSlotRefused, exitOK, exitSlotRefused},
-		{exitSlotRefused, exitUsage, exitUsage},
-		{exitOK, exitOK, exitOK},
+	cases := []struct {
+		name     string
+		blocking bool
+		a, b     int
+		want     int
+	}{
+		{"a failed fault", false, exitOK, exitRaidWalkInjectFailed, exitRaidWalkInjectFailed},
+		{"a wipe over a failed fault", false, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitRaidWalkIncident},
+		{"a failed phase", false, exitRaidWalkFailed, exitOK, exitRaidWalkFailed},
+		{"blocking over 18", true, exitRaidWalkFailed, exitRaidWalkInjectFailed, exitRaidWalkInjectFailed},
+		{"blocking over 19", true, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitRaidWalkInjectFailed},
+		{"usage over blocking", true, exitUsage, exitRaidWalkInjectFailed, exitUsage},
+		{"a refused slot", false, exitSlotRefused, exitOK, exitSlotRefused},
+		{"usage first", false, exitSlotRefused, exitUsage, exitUsage},
+		{"clean", false, exitOK, exitOK, exitOK},
 	}
 	for _, c := range cases {
-		if got := pairWorstExit(c.a, c.b); got != c.want {
-			t.Fatalf("pairWorstExit(%d, %d) = %d, want %d", c.a, c.b, got, c.want)
+		if got := pairWorstExit(c.blocking, c.a, c.b); got != c.want {
+			t.Fatalf("%s: pairWorstExit(%v, %d, %d) = %d, want %d", c.name, c.blocking, c.a, c.b, got, c.want)
 		}
 	}
 }

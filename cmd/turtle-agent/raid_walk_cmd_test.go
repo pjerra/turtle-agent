@@ -127,6 +127,12 @@ type walkFakeAgent struct {
 	pinfoLagTargets bool
 	prevSel         packet.GUID
 	gmFail          func(line string) error
+
+	// injectCtx is the injector's allow-list context at a gm send (nil: the walk's own gm line); gmCtx and gmCtxOK
+	// hold it per line, so a test checks every line against the context it was really sent with.
+	injectCtx func() (raidwalk.InjectCtx, bool)
+	gmCtx     []raidwalk.InjectCtx
+	gmCtxOK   []bool
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -163,6 +169,11 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.gmAt = append(f.gmAt, f.clock.now())
 		f.gmUnits = append(f.gmUnits, f.unitsN)
 		f.timeline = append(f.timeline, timelineEntry{Text: p.Text, Targeted: f.targeted})
+		if f.injectCtx != nil {
+			c, ok := f.injectCtx()
+			f.gmCtx = append(f.gmCtx, c)
+			f.gmCtxOK = append(f.gmCtxOK, ok)
+		}
 		onGM := f.onGM
 		fail := f.gmFail
 		f.mu.Unlock()
@@ -537,6 +548,13 @@ func (f *walkFakeAgent) gmLines() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string{}, f.gm...)
+}
+
+// gmContexts is the injector's allow-list context per gm line (gmCtxOK false: none was available).
+func (f *walkFakeAgent) gmContexts() ([]raidwalk.InjectCtx, []bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]raidwalk.InjectCtx{}, f.gmCtx...), append([]bool{}, f.gmCtxOK...)
 }
 
 // fakeDash is the dashboard client.

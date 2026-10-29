@@ -151,7 +151,7 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 			pre.Flush()
 			perr.Flush()
 		}
-		return pairWorstExit(codes...)
+		return pairWorstExit(false, codes...)
 	}
 
 	out := slots.ExpandTilde(o.out)
@@ -249,10 +249,12 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	codes := make([]int, len(results))
+	blocking := false
 	for i := range results {
 		codes[i] = results[i].code
+		blocking = blocking || pairBlocking(results[i])
 	}
-	code = pairWorstExit(codes...)
+	code = pairWorstExit(blocking, codes...)
 	ended := time.Now()
 
 	rep := pairReport{
@@ -633,9 +635,15 @@ func pairHasFlag(flags []pairFlag, name string) bool {
 	return false
 }
 
-// pairWorstExit is the pair's exit: the first that occurs in this order over the walks' codes (spec 4.1).
-func pairWorstExit(codes ...int) int {
-	for _, p := range []int{exitUsage, exitSlotRefused, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK} {
+// pairWorstExit is the pair's exit: the first that occurs in this order over the walks' codes (spec 4.1). A blocking
+// incident - a walk that exits 23 because a bot was left frozen - ranks above 18 and 19, so it never hides (spec 0.5,
+// lead amendment); every other 23 keeps its place.
+func pairWorstExit(blocking bool, codes ...int) int {
+	order := []int{exitUsage, exitSlotRefused, exitRaidWalkInjectFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitOK}
+	if !blocking {
+		order = []int{exitUsage, exitSlotRefused, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK}
+	}
+	for _, p := range order {
 		for _, c := range codes {
 			if c == p {
 				return p
@@ -648,6 +656,20 @@ func pairWorstExit(codes ...int) int {
 		}
 	}
 	return exitOK
+}
+
+// pairBlocking says whether one half left a bot frozen: its summary carries a blocking incident (its walk exits 23 at
+// least, spec 0.5).
+func pairBlocking(r pairResult) bool {
+	if r.sum == nil {
+		return false
+	}
+	for _, inc := range r.sum.Incidents {
+		if inc.Severity == "blocking" {
+			return true
+		}
+	}
+	return false
 }
 
 // pairWalkReport is one walk of pair.json. Slot is the slot id as given (a slot id is alphanumeric).

@@ -399,3 +399,79 @@ func TestRaidWalkInjectCleanupRunsOnPanic(t *testing.T) {
 		f.run(context.Background())
 	}()
 }
+
+// TestRaidWalkInjectErroredFreezeStillReleases: a `.freeze` whose RPC fails may have landed - the GM command took
+// effect and only the call failed - so the victim is treated as maybe-frozen and Cleanup unfreezes it. The fault
+// still ends inconclusive; the release is the safety net, not a verdict.
+func TestRaidWalkInjectErroredFreezeStillReleases(t *testing.T) {
+	const victim = "Bot39"
+
+	t.Run("the freeze lands and the RPC fails", func(t *testing.T) {
+		f := newFixture(t)
+		f.setupInject()
+		f.defaultRun("onyxias_lair")
+		f.opts.injects = []string{"runaway"}
+		f.agent.mu.Lock()
+		f.agent.gmFail = func(line string) error {
+			if line != ".freeze "+victim {
+				return nil
+			}
+			// The server cast the freeze (spell 9454); only the RPC's answer was lost.
+			return errors.New("the RPC timed out")
+		}
+		f.agent.mu.Unlock()
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		freeze, unfreeze := f.gmIndex(".freeze "+victim), f.gmIndex(".unfreeze "+victim)
+		if freeze < 0 || unfreeze < 0 {
+			t.Fatalf("freeze %d unfreeze %d in %v", freeze, unfreeze, f.agent.gmLines())
+		}
+		if unfreeze < freeze {
+			t.Fatalf(".unfreeze (%d) came before the freeze (%d): %v", unfreeze, freeze, f.agent.gmLines())
+		}
+		sum := f.summary()
+		if len(sum.Injections) != 1 || sum.Injections[0].Verdict != raidwalk.VerdictInconclusive {
+			t.Fatalf("injections %+v, want one inconclusive", sum.Injections)
+		}
+		if len(sum.Incidents) != 0 {
+			t.Fatalf("the released victim left incidents %+v", sum.Incidents)
+		}
+	})
+
+	t.Run("the call's context ends", func(t *testing.T) {
+		f := newFixture(t)
+		f.setupInject()
+		f.defaultRun("onyxias_lair")
+		f.opts.injects = []string{"runaway"}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		f.agent.mu.Lock()
+		f.agent.gmFail = func(line string) error {
+			if line != ".freeze "+victim {
+				return nil
+			}
+			// The freeze landed, then the walk's context ended inside the call.
+			cancel()
+			return ctx.Err()
+		}
+		f.agent.mu.Unlock()
+		if code := f.run(ctx); code != exitRaidWalkFailed {
+			t.Fatalf("exit %d, want %d: %s", code, exitRaidWalkFailed, f.stderr.String())
+		}
+		freeze, unfreeze, stop := f.gmIndex(".freeze "+victim), f.gmIndex(".unfreeze "+victim), f.gmIndex(".bot run stop")
+		if freeze < 0 || unfreeze < 0 || stop < 0 {
+			t.Fatalf("freeze %d unfreeze %d stop %d in %v", freeze, unfreeze, stop, f.agent.gmLines())
+		}
+		if unfreeze > stop {
+			t.Fatalf(".unfreeze (%d) does not come before .bot run stop (%d): %v", unfreeze, stop, f.agent.gmLines())
+		}
+		sum := f.summary()
+		if len(sum.Injections) != 1 || sum.Injections[0].Verdict != raidwalk.VerdictInconclusive {
+			t.Fatalf("injections %+v, want one inconclusive", sum.Injections)
+		}
+		if len(sum.Incidents) != 0 {
+			t.Fatalf("the released victim left incidents %+v", sum.Incidents)
+		}
+	})
+}
