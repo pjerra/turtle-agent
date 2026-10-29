@@ -20,6 +20,15 @@ func AllowedInjectLine(line string, c InjectCtx) bool {
 		return false
 	}
 	switch f[0] {
+	case ".gps":
+		// The selection read-back (spec raid-walk-addons 1.6, P0 finding 4): a read-only line that names no unit; the
+		// commands send it after a target RPC to see which unit the server really has selected, before any line that acts
+		// on the selection.
+		return len(f) == 1
+	case ".pinfo":
+		// The identity read-back: with no name the core's .pinfo uses the selected player and its first reply line
+		// names that character and guid (LANG_PINFO_ACCOUNT). A destructive selected-target line (.die) needs it.
+		return len(f) == 1
 	case ".gm":
 		// Only the invisible switch of Prepare; nothing else may be typed into the GM console.
 		return c.Fault == "" && len(f) == 3 && f[1] == "visible" && f[2] == "off"
