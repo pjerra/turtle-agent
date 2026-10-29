@@ -18,7 +18,7 @@ func TestAllowedLine(t *testing.T) {
 		".bot run stop time limit reached (raid-walk 90m)",
 	}
 	for _, line := range ok {
-		if !allowedLine(line, hires) {
+		if !AllowedLine(line, hires) {
 			t.Errorf("refused an allowed line %q", line)
 		}
 	}
@@ -47,7 +47,7 @@ func TestAllowedLine(t *testing.T) {
 		".bot run stop time limit reached (raid-walk 0m)",
 	}
 	for _, line := range bad {
-		if allowedLine(line, hires) {
+		if AllowedLine(line, hires) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
 	}

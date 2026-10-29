@@ -14,9 +14,10 @@ var (
 	tierWordRe = regexp.MustCompile(`^(?:t|tier)([1-3])$`)
 )
 
-// allowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
-// the forms, with its arguments checked, and a bot name must be one of the walk's hires.
-func allowedLine(line string, hires map[string]bool) bool {
+// AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
+// the forms, with its arguments checked, and a bot name must be one of the walk's hires. The command checks every
+// gm line with it before sending; there is no second copy of the rule.
+func AllowedLine(line string, hires map[string]bool) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
 	}

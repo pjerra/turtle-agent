@@ -95,6 +95,7 @@ turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -1831,6 +1832,97 @@ follows from there. It zones in after a lead last seen within 40 yd of the plan'
 when the lead is not in view for `lost_s`, the lead left the party, it is not in a group, 5 walks in a row did not
 arrive while over 60 yd, a fallback way stayed blocked 60 s, or after 10 deaths. It sends no chat and no GM line (no
 `.bot`, no `.appear`), and `dungeon_run` and `follow_start` refuse each other. Events `player_follow` (`data.phase`).
+
+## Raid walks
+
+`turtle-agent raid-walk <plan>` walks a raid plan with hired bots and the TortoiseBots run leader (`feat/run-until`): it
+leases a slot, sets it up, logs the slot agent in, puts the commander outside the entrance, hires the roster, binds the
+raid to its main tank, enters, starts the run with an `until` clause, watches it and tears everything down. It never
+takes slot 3 (owner rule) and it never walks without `until` (a server without feat/run-until is refused, exit 18).
+
+```
+turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
+    --sql ~/wt-plan-raid-ony/data/sql/world/20261029130000_world.sql --speed 3.0 --hold-minutes 5
+```
+
+- `<plan>` is the plan name the server knows (`a-z0-9_-`, at most 32). The plan JSON is `<--dir>/<plan>.json` (default
+  `dungeons`) and is copied into the slot by `slot setup --dungeons-from`. `--sql` is a deployed migration: its step
+  numbers and the first point (the revive point) are what the walk uses; without it they come from the plan JSON, and
+  the summary says so.
+- `--until` is `boss` (default: a trash walk never wakes a boss), `none` (a full clear), `step N` or `leg L`; the word
+  goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
+  for a raid already standing at that point (for example after a hold): raid-walk does not stage.
+- `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
+- `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
+  the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
+- `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
+  `--paused-wait` (10m) stops a pause that is not a regroup; `--auto-resume K` (0-3) resumes a "did not hold" regroup
+  pause 15 s after it starts, at most K times per step and 6 per run; `--reset-wait` (5m) bounds the wait for a wipe's
+  reset. `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
+  every line the walk would send, with `<hire>` placeholders, without leasing or writing anything.
+- The lease lasts `max-run-minutes + hold-minutes + 30` and is renewed every 30 minutes; a refused renewal stops the
+  run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
+  during the hold it exits 0.
+
+The roster (`--hires FILE`, format `tb-raid-roster` v1) hires batches in order and learns the names of each batch by
+diffing `party` before and after the hire:
+
+```json
+{"format":"tb-raid-roster","version":1,"level":60,"tier":3,"gear_preset":"onyxia",
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},
+            {"role":"ot","hire":"1 druid:tank 1 paladin:tank"},
+            {"role":"rest","hire":"10h 26d"}]}
+```
+
+`hire` is `<n>t`, `<n>h`, `<n>d` or `<n> <class>[:<role>]`; a preset (`onyxia`, `mc`, ...) is refused because it fills
+the raid in one go and leaves no way to know the MT. Exactly one `mt` batch comes first and hires exactly one tank; at
+most one `ot` batch (tanks only); one or more `rest` batches; 1 to 39 bots and at most the plan's raid size minus one.
+`level` defaults to the plan's band maximum, `tier` (1-3) is optional, `gear_preset` sends
+`.bot gear raid <commander> preset <word>`. Without `--hires` the roster comes from the plan's `raid {size, tanks,
+healers, dps}`: `1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-1-tanks-healers>d`, tier 3 and the raid's hire preset
+when it has one (Onyxia's plan gives `1 warrior:tank`, `3t`, `10h 25d`).
+
+The phases, in order: validate (no network), lease, `slot setup`, `login` (a detached process group, `status` until
+`in_world`, 90 s), GM `.go xyz` to the plan's portal and wait for its map, hire and gear, `commander bind <MT> raid`
+(plus `commander view on`) with the `TBM:RAID_LAYOUT` check (its first tank must be the roster's MT), enter and wait
+until every hire's newest frame is on the plan's map (one re-teleport or one `cmd summon` for stragglers), `run start`,
+watch, hold, `commander status` and `teardown --json`, summary.
+
+While watching, the walk reads the run's `TBM:RUN` lines (always through the raw event text, never the colour-stripped
+one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (every hire dead with fresh states) stops
+the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
+minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
+no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
+once, `.summon` then `.revive` every hire. It never revives while a boss row has a target: a boss engagement stops the
+run at once and waits up to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement ends the walk with
+exit 19.
+
+Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
+`.bot gear raid <commander> preset <word>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
+`.bot run stop[ time limit reached (raid-walk <n>m)]`); everything else goes through the `commander` RPC. Nothing names
+a creature or changes the world for others.
+
+The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused if it exists; 0700, files 0600):
+
+| file | content |
+|---|---|
+| `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
+| `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
+| `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
+| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles) |
+| `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, dashboard, teardown, exit code, notes |
+
+Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
+enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
+torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 15 the lease was refused
+(incl. slot 3); 14 teardown failed; 2 usage.
+
+Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-file` (or `TBDASH_PASS_FILE`);
+`--dash-user`/`TBDASH_USER` default `TADASH`. The password is read only from the given file (it must be 0600 and not a
+symlink, `privfile.Read`), never printed and never written to the output; a failed login is a warning
+(`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
+the summary says so.
 
 ## Remote leader
 
