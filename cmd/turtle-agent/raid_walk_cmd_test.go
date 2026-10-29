@@ -95,6 +95,9 @@ type walkFakeAgent struct {
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
+
+	// hireCap is the server's hire limit (0: raidwalk.HireCap, the 39 of onyxia-kill-plan C6).
+	hireCap int
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -177,8 +180,15 @@ func (f *walkFakeAgent) gmSide(line string) {
 			hire = hire[:i]
 		}
 		n := hireCount(hire)
-		names := make([]string, 0, n)
 		f.mu.Lock()
+		cap := f.hireCap
+		if cap == 0 {
+			cap = raidwalk.HireCap
+		}
+		if room := cap - len(f.party); n > room {
+			n = room // the server's hire cap: it hires what fits and no more
+		}
+		names := make([]string, 0, n)
 		for range n {
 			f.nameSeq++
 			names = append(names, fmt.Sprintf("Bot%02d", f.nameSeq))
@@ -554,7 +564,7 @@ func TestRaidWalkDryRunPrintsThePhasePlan(t *testing.T) {
 	got := f.stdout.String()
 	want := `raid-walk onyxias_lair: dry run, nothing is sent
 plan ../../dungeons/onyxias_lair.json, map 249, 1 legs, 7 steps, raid 40
-roster 39 bots: mt 1 warrior:tank, ot 3t, rest 10h 25d, level 60, tier 3, gear preset onyxia
+roster 40 bots: mt 1 warrior:tank, ot 3t, rest 10h 26d, level 60, tier 2 (table)
 until boss; from -; enter auto; server m910q slot any holder raid-walk-onyxias_lair
 out ` + f.out + `
 phases:
@@ -563,11 +573,12 @@ phases:
   3 slot setup: slot setup m910q <slot> --holder raid-walk-onyxias_lair --dir ` + f.out + `/slot --binary <bin> --dungeons-from ../../dungeons
   4 login: ` + f.out + `/slot/turtle-agent login --config ` + f.out + `/slot/settings.json --pid-file ` + f.out + `/slot/agent.pid <commander>
   5 gm: .go xyz -4768.61 -3752.11 53.4317 1
-  6 gm: .bot hire raid 1 warrior:tank level=60 t3
-  6 gm: .bot hire raid 3t level=60 t3
-  6 gm: .bot hire raid 10h 25d level=60 t3
+  6 gm: .bot hire raid 1 warrior:tank level=60 t2
+  6 gm: .bot hire raid 3t level=60 t2
+  6 gm: .bot hire raid 10h 26d level=60 t2
   6 party: before and after every batch (the new names are the mt, ot and rest)
-  6 gm: .bot gear raid <commander> preset onyxia
+  6 hire cap: 39 (the server hires 39 of the 40 asked; the summary notes it)
+  6 gm: .bot gear raid <commander> tier 2
   7 commander: bind <hire> raid
   7 commander: view on
   8 commander: cmd enter near
@@ -601,7 +612,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 	}
 	gm := f.agent.gmLines()
 	if len(gm) < 5 || !strings.HasPrefix(gm[0], ".go xyz ") || !strings.HasPrefix(gm[1], ".bot hire raid 1 warrior:tank") ||
-		!strings.HasPrefix(gm[4], ".bot gear raid Commander preset onyxia") {
+		!strings.HasPrefix(gm[4], ".bot gear raid Commander tier 2") {
 		t.Fatalf("GM lines out of order: %q", gm)
 	}
 	hires := map[string]bool{}
@@ -620,6 +631,231 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 	}
 	if !strings.Contains(f.stdout.String(), "raid-walk onyxias_lair: until; steps 28/29") {
 		t.Fatalf("one-line result: %q", f.stdout.String())
+	}
+	// The tier of the committed table, in the summary and in every dump's meta (amendment G1).
+	if sum.Roster.Tier != 2 || sum.Roster.TierSource != raidwalk.TierSourceTable || sum.Roster.TierComparison {
+		t.Fatalf("summary roster tier %d %q comparison %v, want 2 table false",
+			sum.Roster.Tier, sum.Roster.TierSource, sum.Roster.TierComparison)
+	}
+	if !hasNote(sum, "hire cap 39: asked for 40 bots, the server hired 39") {
+		t.Fatalf("summary notes %q, want the hire cap note", sum.Notes)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "frames.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame struct {
+		Tier int `json:"tier"`
+	}
+	if err := json.Unmarshal(bytes.SplitN(raw, []byte("\n"), 2)[0], &frame); err != nil || frame.Tier != 2 {
+		t.Fatalf("frames.jsonl tier = %d (%v), want 2", frame.Tier, err)
+	}
+	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "tier 2 (table)\n") {
+		t.Fatalf("summary.txt has no tier line: %q", text)
+	}
+}
+
+// hasNote says whether the summary carries a note holding text.
+func hasNote(s raidwalk.Summary, text string) bool {
+	for _, n := range s.Notes {
+		if strings.Contains(n, text) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRaidWalkReadsDeployedOnyxiaMigration is the smoke of the deployed migrations (B1's lenient reader): the
+// ai_dungeon_boss block beside the rows is skipped with a note, and the rows are the walk's (1 leg, 29 steps).
+func TestRaidWalkReadsDeployedOnyxiaMigration(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		z26  float32
+	}{
+		{"onyxias_lair-20261029120000.sql", -74.62397},
+		{"onyxias_lair-20261029130000.sql", -66.7},
+	} {
+		path := filepath.Join("../../internal/planexport/testdata", c.file)
+		rows, notes, err := readRaidMigration(path, "onyxias_lair")
+		if err != nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		if len(rows.Legs) != 1 || len(rows.Steps) != 29 {
+			t.Fatalf("%s: %d legs, %d steps, want 1 and 29", c.file, len(rows.Legs), len(rows.Steps))
+		}
+		if z := rows.Steps[25].Z; z != c.z26 {
+			t.Fatalf("%s: step 26 z %v, want %v", c.file, z, c.z26)
+		}
+		if len(notes) != 1 || !strings.HasPrefix(notes[0], "skipped ai_dungeon_boss:") {
+			t.Fatalf("%s: notes %q, want the skipped boss block", c.file, notes)
+		}
+		if _, _, err := readRaidMigration(path, "molten_core"); err == nil || !strings.Contains(err.Error(), "no plan") {
+			t.Fatalf("%s as molten_core: %v, want the no-plan refusal", c.file, err)
+		}
+	}
+}
+
+// TestRaidWalkUsesTheDeployedMigration runs the walk with --sql and carries the reader's notes into the summary.
+func TestRaidWalkUsesTheDeployedMigration(t *testing.T) {
+	f := newFixture(t)
+	f.opts.sql = "../../internal/planexport/testdata/onyxias_lair-20261029130000.sql"
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.StepsTotal != 29 {
+		t.Fatalf("steps total %d, want 29 from the migration", sum.StepsTotal)
+	}
+	if !hasNote(sum, "skipped ai_dungeon_boss") {
+		t.Fatalf("summary notes %q, want the skipped-table note", sum.Notes)
+	}
+	if hasNote(sum, "step points from the plan JSON") {
+		t.Fatalf("a walk with --sql used the plan JSON: %q", sum.Notes)
+	}
+}
+
+// TestRaidWalkReadsTbPatrolsFile reads a real D1 file (numeric spawn_guids, period, waits): the fallback reader of
+// the patrols format cannot, internal/patrols can.
+func TestRaidWalkReadsTbPatrolsFile(t *testing.T) {
+	doc := `{"format":"tb-patrols","version":1,"map":249,"source":"record","created":"2026-10-29T10:00:00Z",
+ "area":{"x":-100,"y":-150,"r":120},"minutes":15,"sample_ms":1000,
+ "patrols":[{"id":"52050","guids":["0xF130002F61000ABC"],"spawn_guids":[52050],"entries":[12129],"name":"Onyxian Warder",
+   "path":[{"x":49.8,"y":-114.6,"z":-24.3},{"x":30,"y":-114.6,"z":-24.3}],"waits_ms":[0,2000],"period_s":33.4,
+   "period_estimate":false,"cycles_seen":3,"phase_epoch_ms":1793223608123,"complete":true,"samples":900,
+   "source":"record m910q 2026-10-29"}],
+ "static":[],"wanderers":[],"stopped":""}`
+	path := filepath.Join(t.TempDir(), "patrols-249.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	patrols, guids, mapID, err := readPatrolsFile(path)
+	if err != nil {
+		t.Fatalf("a real tb-patrols file: %v", err)
+	}
+	if mapID != 249 || len(patrols) != 1 || len(patrols[0].Path) != 2 || patrols[0].ID != "52050" {
+		t.Fatalf("patrols %+v map %d", patrols, mapID)
+	}
+	for _, key := range []string{"0XF130002F61000ABC", "52050", "0X000000000000CB52"} {
+		if !guids[0][key] {
+			t.Errorf("the guid set does not hold %q: %v", key, guids[0])
+		}
+	}
+
+	// The reader's own refusals reach the walk (a patrol path with one point).
+	short := `{"format":"tb-patrols","version":1,"map":249,"patrols":[{"id":"52050",
+ "path":[{"x":49.8,"y":-114.6,"z":-24.3}],"period_s":33.4}]}`
+	shortPath := filepath.Join(t.TempDir(), "short.json")
+	if err := os.WriteFile(shortPath, []byte(short), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := readPatrolsFile(shortPath); err == nil || !strings.Contains(err.Error(), "need 2") {
+		t.Fatalf("a one-point path: %v, want the reader's refusal", err)
+	}
+
+	f := newFixture(t)
+	f.opts.dryRun = true
+	f.opts.patrols = path
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run with --patrols: exit %d, %s", code, f.stderr.String())
+	}
+
+	// A file of another map is a usage error (the plan's map check stays in the walk).
+	other := strings.Replace(doc, `"map":249`, `"map":1`, 1)
+	if err := os.WriteFile(path, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.run(context.Background()); code != exitUsage {
+		t.Fatalf("--patrols of map 1: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// TestRaidWalkTierFlags: --tier fills a raid the table leaves unknown, --tier-override marks a comparison, and both
+// are refused where they do not apply.
+func TestRaidWalkTierFlags(t *testing.T) {
+	t.Run("override", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.tierOverride = 3
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		sum := f.summary()
+		if sum.Roster.Tier != 3 || sum.Roster.TierSource != raidwalk.TierSourceOverride || !sum.Roster.TierComparison {
+			t.Fatalf("roster %+v, want tier 3 by --tier-override and the comparison mark", sum.Roster)
+		}
+		if !hasNote(sum, "comparison, not a tier proof") {
+			t.Fatalf("notes %q, want the comparison mark", sum.Notes)
+		}
+		want := ".bot gear raid Commander tier 3"
+		if !strings.Contains(strings.Join(f.agent.gmLines(), "\n"), want) {
+			t.Fatalf("no refit %q in %q", want, f.agent.gmLines())
+		}
+	})
+	t.Run("unknown raid without a tier", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.plan, f.opts.holder, f.opts.dryRun = "molten_core", "raid-walk-molten_core", true
+		if code := f.run(context.Background()); code != exitUsage {
+			t.Fatalf("exit %d, want 2 (stderr %q)", code, f.stderr.String())
+		}
+		if !strings.Contains(f.stderr.String(), "--tier") {
+			t.Fatalf("the refusal does not name --tier: %q", f.stderr.String())
+		}
+	})
+	t.Run("unknown raid with --tier", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.plan, f.opts.holder, f.opts.dryRun = "molten_core", "raid-walk-molten_core", true
+		f.opts.tier = 1
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		if !strings.Contains(f.stdout.String(), "tier 1 (--tier)") {
+			t.Fatalf("the dry run does not name the flag tier: %q", f.stdout.String())
+		}
+	})
+	t.Run("--tier on a known raid", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.tier, f.opts.dryRun = 3, true
+		if code := f.run(context.Background()); code != exitUsage {
+			t.Fatalf("exit %d, want 2", code)
+		}
+		if !strings.Contains(f.stderr.String(), "--tier-override") {
+			t.Fatalf("the refusal does not offer --tier-override: %q", f.stderr.String())
+		}
+	})
+	t.Run("both flags", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := raidWalkCmd(context.Background(), []string{"--tier", "1", "--tier-override", "2", "onyxias_lair"}, &stdout, &stderr)
+		if code != exitUsage || !strings.Contains(stderr.String(), "not both") {
+			t.Fatalf("exit %d, stderr %q", code, stderr.String())
+		}
+	})
+	t.Run("out of range", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := raidWalkCmd(context.Background(), []string{"--tier", "4", "molten_core"}, &stdout, &stderr)
+		if code != exitUsage || !strings.Contains(stderr.String(), "1, 2 or 3") {
+			t.Fatalf("exit %d, stderr %q", code, stderr.String())
+		}
+	})
+}
+
+// TestRaidWalkShortHireIsAnError: below the server's cap a short hire is a failed walk, not a note.
+func TestRaidWalkShortHireIsAnError(t *testing.T) {
+	f := newFixture(t)
+	f.agent.hireCap = 30
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "asked for 40 bots, the party has 30") {
+		t.Fatalf("summary end %q", sum.EndReason)
+	}
+	if hasNote(f.summary(), "hire cap 39") {
+		t.Fatalf("a short hire below the cap was noted away: %q", f.summary().Notes)
 	}
 }
 

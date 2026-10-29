@@ -12,14 +12,13 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
 
-// Roster is the tb-raid-roster v1 file: the batches hired, in order, and the level, tier and gear preset.
+// Roster is the tb-raid-roster v1 file: the batches hired, in order, and the level and tier.
 type Roster struct {
-	Format     string  `json:"format"`
-	Version    int     `json:"version"`
-	Level      int     `json:"level,omitempty"`
-	Tier       int     `json:"tier,omitempty"`
-	GearPreset string  `json:"gear_preset,omitempty"`
-	Batches    []Batch `json:"batches"`
+	Format  string  `json:"format"`
+	Version int     `json:"version"`
+	Level   int     `json:"level,omitempty"`
+	Tier    int     `json:"tier,omitempty"`
+	Batches []Batch `json:"batches"`
 }
 
 // Batch is one hire order: an mt, an ot or a rest batch.
@@ -45,12 +44,17 @@ type hireToken struct {
 }
 
 const (
-	maxRosterBots = 39
+	// maxRosterBots is the most a roster may ask for: every seat of a 40-player raid (the commander stands outside
+	// the group, so all 40 are hires; amendment G2).
+	maxRosterBots = 40
 	maxHireTier   = 3
+	// HireCap is the most the TortoiseBots server hires into one commander's raid today: its
+	// HireMaxBotsPerPlayer stops at 39 (onyxia-kill-plan.md C6), so a 40-bot roster is asked for and its 40th seat
+	// comes up short with a summary note, never an error (amendment G2).
+	HireCap = 39
 )
 
 var (
-	gearPresetRe = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
 	hireCountRe  = regexp.MustCompile(`^[0-9]+`)
 	hireRoleWord = map[string]string{"t": "tank", "h": "healer", "d": "dps"}
 	hireClass    = map[string]bool{
@@ -94,9 +98,6 @@ func (r *Roster) check(p *dungeon.Plan) error {
 	}
 	if r.Tier < 0 || r.Tier > maxHireTier {
 		return fmt.Errorf("roster tier %d, want 1-3 or absent", r.Tier)
-	}
-	if r.GearPreset != "" && !gearPresetRe.MatchString(r.GearPreset) {
-		return fmt.Errorf("roster gear_preset %q: use lower-case letters, digits and _", r.GearPreset)
 	}
 	if len(r.Batches) == 0 {
 		return errors.New("roster: no batches")
@@ -158,9 +159,9 @@ func (r *Roster) check(p *dungeon.Plan) error {
 		if p.Raid.Size < 2 {
 			return fmt.Errorf("plan %s: raid size %d", p.Name, p.Raid.Size)
 		}
-		if total > p.Raid.Size-1 {
-			return fmt.Errorf("the roster hires %d bots; plan %s keeps the commander outside its %d-player raid, so at most %d",
-				total, p.Name, p.Raid.Size, p.Raid.Size-1)
+		if total > p.Raid.Size {
+			return fmt.Errorf("the roster hires %d bots; plan %s has %d raid slots and its commander stands outside, so at most %d",
+				total, p.Name, p.Raid.Size, p.Raid.Size)
 		}
 		if r.Level == 0 {
 			if len(p.LevelBand) < 2 {
@@ -172,7 +173,7 @@ func (r *Roster) check(p *dungeon.Plan) error {
 	return nil
 }
 
-// validateHire reads the hire grammar: <n>t, <n>h, <n>d, or "<n> <class>[:<role>]", counts 1-39. A bare word is a
+// validateHire reads the hire grammar: <n>t, <n>h, <n>d, or "<n> <class>[:<role>]", counts 1-40. A bare word is a
 // preset and refused.
 func validateHire(s string) ([]hireToken, int, error) {
 	fields := strings.Fields(s)
@@ -253,27 +254,17 @@ func (r *Roster) HireLines() []string {
 	return out
 }
 
-// raidGearPreset is the `.bot gear raid ... preset <word>` of each raid that has a hire preset (TortoiseBots
-// AiPlayerbot.HireRaidPresets / BotGearPresets).
-var raidGearPreset = map[string]string{
-	"onyxias_lair":       "onyxia",
-	"molten_core":        "mc",
-	"blackwing_lair":     "bwl",
-	"zul_gurub":          "zg",
-	"ruins_of_ahnqiraj":  "aq20",
-	"temple_of_ahnqiraj": "aq40",
-	"naxxramas":          "naxx",
-}
-
 // DefaultRoster builds the roster of spec 3.2 from the plan's raid block: an mt of one warrior tank, the other
-// tanks as an ot batch, and the healers and dps as one rest batch. The plan's numbers win (walk 3's manual roster
-// named one tank fewer than Onyxia's plan).
+// tanks as an ot batch, and the healers and dps as one rest batch — every raid slot of the plan (amendment G2; the
+// commander stands outside the group). Its tier is the committed table's row, 0 for a raid the table leaves unknown
+// (the walk then needs --tier N). The plan's numbers win (walk 3's manual roster named one tank fewer than Onyxia's
+// plan).
 func DefaultRoster(p *dungeon.Plan) (*Roster, error) {
 	if p == nil || p.Raid == nil {
 		return nil, errors.New("the plan has no raid block")
 	}
 	size, tanks, healers := p.Raid.Size, p.Raid.Tanks, p.Raid.Healers
-	if size < 2 || tanks < 1 || healers < 0 || tanks+healers > size-1 {
+	if size < 2 || tanks < 1 || healers < 0 || tanks+healers > size {
 		return nil, fmt.Errorf("plan %s: raid size %d, tanks %d, healers %d do not make a party", p.Name, size, tanks, healers)
 	}
 	level := 0
@@ -281,17 +272,16 @@ func DefaultRoster(p *dungeon.Plan) (*Roster, error) {
 		level = p.LevelBand[1]
 	}
 	r := &Roster{
-		Format:     "tb-raid-roster",
-		Version:    1,
-		Level:      level,
-		Tier:       3,
-		GearPreset: raidGearPreset[p.Name],
-		Batches:    []Batch{{Role: RoleMT, Hire: "1 warrior:tank"}},
+		Format:  "tb-raid-roster",
+		Version: 1,
+		Level:   level,
+		Tier:    MinimumHireTier[p.Name],
+		Batches: []Batch{{Role: RoleMT, Hire: "1 warrior:tank"}},
 	}
 	if tanks > 1 {
 		r.Batches = append(r.Batches, Batch{Role: RoleOT, Hire: fmt.Sprintf("%dt", tanks-1)})
 	}
-	dps := size - 1 - tanks - healers
+	dps := size - tanks - healers
 	var rest []string
 	if healers > 0 {
 		rest = append(rest, fmt.Sprintf("%dh", healers))

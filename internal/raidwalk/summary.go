@@ -42,12 +42,15 @@ type Summary struct {
 
 // RosterSummary is the roster as hired.
 type RosterSummary struct {
-	MT         string   `json:"mt"`
-	OT         []string `json:"ot"`
-	Rest       []string `json:"rest"`
-	Level      int      `json:"level"`
-	Tier       int      `json:"tier"`
-	GearPreset string   `json:"gear_preset"`
+	MT    string   `json:"mt"`
+	OT    []string `json:"ot"`
+	Rest  []string `json:"rest"`
+	Level int      `json:"level"`
+	Tier  int      `json:"tier"`
+	// TierSource is where Tier came from: "table", "roster", "--tier" or "--tier-override" (tiers.go).
+	TierSource string `json:"tier_source"`
+	// TierComparison is a run whose tier is not the raid's minimum: comparison, not a tier proof.
+	TierComparison bool `json:"tier_comparison"`
 }
 
 // LayoutSummary is the TBM:RAID_LAYOUT check.
@@ -121,15 +124,18 @@ type SummaryMeta struct {
 	Speed     float64
 	TestSpeed bool
 	Roster    *Roster
-	Layout    LayoutSummary
-	Started   time.Time
-	Ended     time.Time
-	EndReason string
-	Fights    []FightSummary
-	Dashboard string
-	Teardown  TeardownSummary
-	ExitCode  int
-	Notes     []string
+	// TierSource and TierComparison qualify the roster's tier (tiers.go).
+	TierSource     string
+	TierComparison bool
+	Layout         LayoutSummary
+	Started        time.Time
+	Ended          time.Time
+	EndReason      string
+	Fights         []FightSummary
+	Dashboard      string
+	Teardown       TeardownSummary
+	ExitCode       int
+	Notes          []string
 }
 
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
@@ -173,6 +179,8 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 	}
 	if m.Roster != nil {
 		s.Roster = rosterSummary(m.Roster)
+		s.Roster.TierSource = m.TierSource
+		s.Roster.TierComparison = m.TierComparison
 	}
 	if t != nil {
 		if s.EndReason == "" {
@@ -202,7 +210,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 }
 
 func rosterSummary(r *Roster) RosterSummary {
-	out := RosterSummary{OT: []string{}, Rest: []string{}, Level: r.Level, Tier: r.Tier, GearPreset: r.GearPreset}
+	out := RosterSummary{OT: []string{}, Rest: []string{}, Level: r.Level, Tier: r.Tier}
 	for _, b := range r.Batches {
 		switch b.Role {
 		case RoleMT:
@@ -231,6 +239,14 @@ func nonNilFights(in []FightSummary) []FightSummary {
 }
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
+
+// comparisonWord marks a run whose tier is not the raid's minimum.
+func comparisonWord(comparison bool) string {
+	if !comparison {
+		return ""
+	}
+	return ": comparison, not a tier proof"
+}
 
 func bossLine(b *BossSummary) string {
 	if b == nil {
@@ -263,6 +279,9 @@ func (s *Summary) Text() string {
 		fmt.Fprintf(&b, "speed %.1f (test)\n", s.Speed)
 	} else if s.Speed > 0 {
 		fmt.Fprintf(&b, "speed %.1f\n", s.Speed)
+	}
+	if s.Roster.Tier > 0 {
+		fmt.Fprintf(&b, "tier %d (%s)%s\n", s.Roster.Tier, s.Roster.TierSource, comparisonWord(s.Roster.TierComparison))
 	}
 	fmt.Fprintf(&b, "started %s; ended %s; exit %d\n",
 		s.Started.Format(time.RFC3339), s.Ended.Format(time.RFC3339), s.ExitCode)

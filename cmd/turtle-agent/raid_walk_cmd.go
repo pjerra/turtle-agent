@@ -29,6 +29,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/patrols"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/privfile"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -45,7 +46,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE]
+    [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]`
@@ -68,6 +69,8 @@ type raidWalkOptions struct {
 	from          string
 	speed         float64
 	hires         string
+	tier          int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride  int // --tier-override: a comparison, not a tier proof
 	enter         string
 	holdMinutes   int
 	maxRunMinutes int
@@ -126,6 +129,8 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
+	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
+	fs.IntVar(&o.tierOverride, "tier-override", 0, "the hire gear tier (1-3) in place of the raid's minimum: a comparison, not a tier proof")
 	fs.StringVar(&o.enter, "enter", "auto", "auto, near or tele")
 	fs.IntVar(&o.holdMinutes, "hold-minutes", 0, "keep the raid bound for this many minutes after the run")
 	fs.IntVar(&o.maxRunMinutes, "max-run-minutes", 90, "the ceiling from run start to the end")
@@ -170,6 +175,19 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		return o, exitUsage
 	}
 	o.speed = v
+	for _, c := range []struct {
+		name string
+		v    int
+	}{{"--tier", o.tier}, {"--tier-override", o.tierOverride}} {
+		if c.v != 0 && (c.v < 1 || c.v > 3) {
+			fmt.Fprintf(stderr, "raid-walk: %s wants 1, 2 or 3, not %d\n", c.name, c.v)
+			return o, exitUsage
+		}
+	}
+	if o.tier != 0 && o.tierOverride != 0 {
+		fmt.Fprintf(stderr, "raid-walk: --tier fills a raid the table leaves unknown and --tier-override replaces a known one; not both\n")
+		return o, exitUsage
+	}
 	switch o.enter {
 	case "auto", "near", "tele":
 	default:
@@ -416,6 +434,8 @@ type walk struct {
 	lastFrameSave time.Time
 	dashWarned    bool
 
+	tierSource string // where the roster's tier came from (raidwalk.TierSource*)
+
 	hires    map[string]bool
 	mt       string
 	ots      []string
@@ -475,6 +495,7 @@ func (w *walk) main(ctx context.Context) int {
 	}
 	defer w.closeOut()
 	w.started = w.env.now()
+	w.logLine(w.started, fmt.Sprintf("tier %d (%s) for %s", w.roster.Tier, w.tierSource, w.plan.Name))
 	w.openDashboard(ctx)
 	return w.phases(ctx)
 }
@@ -522,6 +543,20 @@ func (w *walk) validate() error {
 		w.roster = r
 	}
 
+	tier, source, err := raidwalk.ResolveTier(p.Name, w.roster.Tier, w.opts.tier, w.opts.tierOverride)
+	if err != nil {
+		return stopf(exitUsage, "%v", err)
+	}
+	w.roster.Tier = tier
+	w.tierSource = source
+	if source == raidwalk.TierSourceOverride {
+		if min, ok := raidwalk.MinimumTier(p.Name); ok {
+			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s's minimum is %d)", tier, p.Name, min)
+		} else {
+			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s has no sourced tier)", tier, p.Name)
+		}
+	}
+
 	words, label, err := raidwalk.ParseUntil(w.opts.until)
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
@@ -554,11 +589,14 @@ func (w *walk) validate() error {
 	}
 
 	if w.opts.sql != "" {
-		rows, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)
+		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
 		w.rows = rows
+		for _, n := range notes {
+			w.note("%s", n)
+		}
 	} else {
 		res, err := planexport.Build(p, planexport.Options{})
 		if err != nil {
@@ -806,131 +844,48 @@ func (w *walk) slotNumber() int {
 	return n
 }
 
-// readRaidMigration reads the plan's rows from a deployed migration.
-//
-// A deployed raid migration carries statements for tables beside the run leader's (the prep's ai_dungeon_boss
-// block) and REPLACE INTO for the hand-edited rows. planexport.Parse in this branch reads only what WriteSQL
-// writes; B1 (feat/ta-plan-sql-lenient) adds planexport.ParseMigration for the deployed form. Until it is merged
-// here, this function cuts the file down to the three ai_dungeon tables and reads the result with Parse.
-func readRaidMigration(path, plan string) (planexport.Rows, error) {
+// readRaidMigration reads the plan's rows from a deployed migration with planexport.ParseMigration (B1): it reads the
+// three ai_dungeon tables and skips the hand-edited statements around them (a prep's ai_dungeon_boss block, REPLACE
+// INTO for the edited rows), naming each skipped table once for the summary.
+func readRaidMigration(path, plan string) (planexport.Rows, []string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return planexport.Rows{}, err
+		return planexport.Rows{}, nil, err
 	}
-	rows, err := planexport.Parse(planMigrationForParse(string(raw)))
+	plans, notes, err := planexport.ParseMigration(string(raw))
 	if err != nil {
-		return planexport.Rows{}, fmt.Errorf("%s: %v", path, err)
+		return planexport.Rows{}, nil, fmt.Errorf("%s: %v", path, err)
 	}
-	for _, r := range rows {
+	for _, r := range plans {
 		if r.Plan.Plan == plan {
-			return r, nil
+			return r, notes, nil
 		}
 	}
-	return planexport.Rows{}, fmt.Errorf("%s holds no plan %q", path, plan)
+	return planexport.Rows{}, nil, fmt.Errorf("%s holds no plan %q", path, plan)
 }
 
-// planMigrationForParse keeps the statements of ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step (REPLACE INTO
-// reads like INSERT INTO) and drops every other statement whole.
-func planMigrationForParse(sql string) string {
-	var b strings.Builder
-	keep := false
-	for _, line := range strings.SplitAfter(sql, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" {
-			continue
-		}
-		if strings.HasPrefix(t, "--") {
-			if keep {
-				// a comment inside a kept block is not what WriteSQL writes; the tuples are one line each, so a
-				// statement is one header line plus tuple lines and this cannot split one.
-				continue
-			}
-			continue
-		}
-		if head, rest, ok := cutAny(strings.NewReplacer("REPLACE INTO `", "INSERT INTO `").Replace(t),
-			"INSERT INTO `", "DELETE FROM `", "UPDATE `"); ok {
-			table, _, _ := strings.Cut(rest, "`")
-			switch head {
-			case "INSERT INTO `":
-				keep = table == "ai_dungeon_plan" || table == "ai_dungeon_leg" || table == "ai_dungeon_step"
-				if keep {
-					b.WriteString(head + rest)
-					b.WriteString("\n")
-					continue
-				}
-			default:
-				keep = false
-			}
-			continue
-		}
-		if !keep {
-			continue
-		}
-		b.WriteString(line)
-		if strings.HasSuffix(t, ";") {
-			keep = false
-		}
-	}
-	return b.String()
-}
-
-// cutAny returns the first prefix of s among prefixes, and the rest after it.
-func cutAny(s string, prefixes ...string) (string, string, bool) {
-	for _, p := range prefixes {
-		if rest, ok := strings.CutPrefix(s, p); ok {
-			return p, rest, true
-		}
-	}
-	return "", "", false
-}
-
-// patrolFile is the part of a tb-patrols v1 file the revive quiet check reads (D1's internal/patrols owns the
-// format; this reads id, guids and path until that package is merged here).
-type patrolFile struct {
-	Format  string `json:"format"`
-	Version int    `json:"version"`
-	Map     uint32 `json:"map"`
-	Patrols []struct {
-		ID         string          `json:"id"`
-		GUIDS      []string        `json:"guids"`
-		SpawnGUIDS []string        `json:"spawn_guids"`
-		Path       []dungeon.Point `json:"path"`
-	} `json:"patrols"`
-}
-
-// readPatrolsFile reads a tb-patrols file for the quiet check.
+// readPatrolsFile reads a tb-patrols file (D1's internal/patrols) for the revive quiet check: each patrol's path, and
+// the guid keys a member's unit row may carry (the recorded hex guids and the matched spawn guids, decimal and hex).
 func readPatrolsFile(path string) ([]raidwalk.QuietPatrol, []map[string]bool, uint32, error) {
-	raw, err := os.ReadFile(path)
+	f, err := patrols.Read(path)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, fmt.Errorf("--patrols: %v", err)
 	}
-	var f patrolFile
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, nil, 0, fmt.Errorf("--patrols %s: %v", path, err)
-	}
-	if f.Format != "tb-patrols" {
-		return nil, nil, 0, fmt.Errorf("--patrols %s: format %q, want tb-patrols", path, f.Format)
-	}
-	if f.Version != 1 {
-		return nil, nil, 0, fmt.Errorf("--patrols %s: version %d, want 1", path, f.Version)
-	}
-	var patrols []raidwalk.QuietPatrol
-	var guids []map[string]bool
+	quiet := make([]raidwalk.QuietPatrol, 0, len(f.Patrols))
+	guids := make([]map[string]bool, 0, len(f.Patrols))
 	for _, p := range f.Patrols {
-		if len(p.Path) == 0 {
-			continue
-		}
-		patrols = append(patrols, raidwalk.QuietPatrol{ID: p.ID, Path: p.Path})
+		quiet = append(quiet, raidwalk.QuietPatrol{ID: p.ID, Path: p.Path})
 		set := map[string]bool{}
-		for _, g := range p.GUIDS {
+		for _, g := range p.GUIDs {
 			set[strings.ToUpper(g)] = true
 		}
-		for _, g := range p.SpawnGUIDS {
-			set[strings.ToUpper(g)] = true
+		for _, g := range p.SpawnGUIDs {
+			set[strconv.FormatUint(uint64(g), 10)] = true
+			set[fmt.Sprintf("0X%016X", uint64(g))] = true
 		}
 		guids = append(guids, set)
 	}
-	return patrols, guids, f.Map, nil
+	return quiet, guids, f.Map, nil
 }
 
 // printPlan is --dry-run: every line the walk would send, with <hire> placeholders.
@@ -948,12 +903,12 @@ func (w *walk) printPlan(out io.Writer) {
 			rest = append(rest, b.Hire)
 		}
 	}
-	preset := w.roster.GearPreset
-	if preset == "" {
-		preset = "none"
+	tierNote := ""
+	if w.tierSource == raidwalk.TierSourceOverride {
+		tierNote = "; comparison, not a tier proof"
 	}
-	fmt.Fprintf(out, "roster %d bots: mt %s, ot %s, rest %s, level %d, tier %d, gear preset %s\n",
-		w.roster.Total(), w.roster.Batches[0].Hire, ot, strings.Join(rest, "; "), w.roster.Level, w.roster.Tier, preset)
+	fmt.Fprintf(out, "roster %d bots: mt %s, ot %s, rest %s, level %d, tier %d (%s)%s\n", w.roster.Total(),
+		w.roster.Batches[0].Hire, ot, strings.Join(rest, "; "), w.roster.Level, w.roster.Tier, w.tierSource, tierNote)
 	from := w.opts.from
 	if from == "" {
 		from = "-"
@@ -983,9 +938,11 @@ func (w *walk) printPlan(out io.Writer) {
 		fmt.Fprintf(out, "  6 gm: %s\n", line)
 	}
 	fmt.Fprintf(out, "  6 party: before and after every batch (the new names are the mt, ot and rest)\n")
-	if w.roster.GearPreset != "" {
-		fmt.Fprintf(out, "  6 gm: .bot gear raid <commander> preset %s\n", w.roster.GearPreset)
+	if w.roster.Total() > raidwalk.HireCap {
+		fmt.Fprintf(out, "  6 hire cap: %d (the server hires %d of the %d asked; the summary notes it)\n",
+			raidwalk.HireCap, raidwalk.HireCap, w.roster.Total())
 	}
+	fmt.Fprintf(out, "  6 gm: .bot gear raid <commander> tier %d\n", w.roster.Tier)
 	fmt.Fprintf(out, "  7 commander: bind <hire> raid\n")
 	fmt.Fprintf(out, "  7 commander: view on\n")
 	switch w.opts.enter {
@@ -1040,6 +997,7 @@ func (w *walk) finish(code int) {
 		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
+		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 	}
 	if w.roster != nil {
 		r := *w.roster

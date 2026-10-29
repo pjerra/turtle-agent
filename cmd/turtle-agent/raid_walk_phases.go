@@ -263,7 +263,9 @@ func (w *walk) phaseHire(ctx context.Context) error {
 			return err
 		}
 		added := newNames(before, after)
-		if len(added) != hired {
+		// The 40th seat (amendment G2): the server's hire cap ends the last batch early, and its reply may count the
+		// order rather than the seats. Any other shortfall is a failed hire.
+		if len(added) != hired && !(len(w.hires)+len(added) == raidwalk.HireCap && len(added) < hired) {
 			return stopf(exitRaidWalkFailed, "hire %s: the reply says %d hired, the party grew by %d", b.Hire, hired, len(added))
 		}
 		for _, n := range added {
@@ -282,21 +284,31 @@ func (w *walk) phaseHire(ctx context.Context) error {
 		}
 		w.logLine(w.env.now(), fmt.Sprintf("hired %s: %s", b.Role, strings.Join(added, ", ")))
 	}
-	if w.roster.GearPreset != "" {
-		line := fmt.Sprintf(".bot gear raid %s preset %s", w.manifest.Character, w.roster.GearPreset)
-		if err := w.gm(ctx, line); err != nil {
-			return err
-		}
-		gear, ok, err := w.waitTBM(ctx, "TBM:GEAR|", 60*time.Second)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
-		}
-		if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
-			return stopf(exitRaidWalkFailed, "gear: %s", gear)
-		}
+	// A roster asks for the raid's every seat; the server's hire cap fills all but the last one (amendment G2).
+	requested := w.roster.Total()
+	switch hired := len(w.hires); {
+	case hired == requested:
+	case hired == raidwalk.HireCap:
+		w.note("hire cap %d: asked for %d bots, the server hired %d", raidwalk.HireCap, requested, hired)
+		w.logLine(w.env.now(), fmt.Sprintf("hire cap %d: %d of %d hired", raidwalk.HireCap, hired, requested))
+	default:
+		return stopf(exitRaidWalkFailed, "hire: asked for %d bots, the party has %d", requested, hired)
+	}
+	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
+	// override. A failed refit is a failed walk: the tier is what the run is judged against.
+	line := fmt.Sprintf(".bot gear raid %s tier %d", w.manifest.Character, w.roster.Tier)
+	if err := w.gm(ctx, line); err != nil {
+		return err
+	}
+	gear, ok, err := w.waitTBM(ctx, "TBM:GEAR|", 60*time.Second)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
+	}
+	if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
+		return stopf(exitRaidWalkFailed, "gear: %s", gear)
 	}
 	w.tracker = raidwalk.NewTracker(w.plan, w.hireList())
 	return nil
@@ -892,6 +904,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 type savedFrame struct {
 	T        int64          `json:"t"`
 	Seq      uint64         `json:"seq"`
+	Tier     int            `json:"tier"` // the walk's hire gear tier (amendment G1: every dump's meta)
 	Party    []savedBot     `json:"party"`
 	Hostiles []savedHostile `json:"hostiles"`
 }
@@ -929,7 +942,7 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 		return
 	}
 	w.lastFrameSave = now
-	rec := savedFrame{T: now.UnixMilli(), Seq: f.Seq}
+	rec := savedFrame{T: now.UnixMilli(), Seq: f.Seq, Tier: w.roster.Tier}
 	for _, p := range f.Party {
 		rec.Party = append(rec.Party, savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
 			HP: p.HP, MaxHP: p.MaxHP, Dead: p.Dead || p.State == "d", State: p.State})

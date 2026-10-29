@@ -1077,3 +1077,11 @@ tools' slot setup. What the first live use has to settle:
    is empty; teardown's `teardown.json` has no failed step.
 6. **Wipe and boss rules.** Not expected on a normal walk: a forced wipe must wait for a reset, revive only when the
    quiet check passes, and never revive while a boss row has a target; the exit code is 19.
+7. **Tier and refit.** The hires carry `t2` in each `.bot hire raid` line and the walk sends
+   `.bot gear raid <commander> tier 2`; the `TBM:GEAR` line's tier field reads 2 and the kits are the Zul'Gurub set (no
+   Molten Core pieces above the kit). `summary.json` says `roster.tier 2`, `tier_source "table"`; with
+   `--tier-override 3` it says `tier_comparison true` and the notes carry "comparison, not a tier proof". A raid the
+   table leaves unknown refuses to start without `--tier`.
+8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
+   `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
+   below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.

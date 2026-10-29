@@ -12,6 +12,7 @@ var (
 	teleWordRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
 	runStopRe  = regexp.MustCompile(`^\.bot run stop(?: time limit reached \(raid-walk ([0-9]{1,3})m\))?$`)
 	tierWordRe = regexp.MustCompile(`^(?:t|tier)([1-3])$`)
+	gearTierRe = regexp.MustCompile(`^[1-3]$`)
 )
 
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
@@ -60,7 +61,9 @@ func AllowedLine(line string, hires map[string]bool) bool {
 		case f[1] == "hire" && f[2] == "raid":
 			return allowedHireRaid(f[3:])
 		case f[1] == "gear" && f[2] == "raid":
-			return len(f) == 6 && gmNameRe.MatchString(f[3]) && f[4] == "preset" && gearPresetRe.MatchString(f[5])
+			// `.bot gear raid <commander> tier <N>`, the refit after the hire (amendment G1); the speculative
+			// `preset <word>` form is gone.
+			return len(f) == 6 && gmNameRe.MatchString(f[3]) && f[4] == "tier" && gearTierRe.MatchString(f[5])
 		}
 	}
 	return false

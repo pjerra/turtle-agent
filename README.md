@@ -1853,6 +1853,13 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
+- The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
+  (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).
+  `onyxias_lair` is **2**: the tier-3 quest is her own kill's reward, so a player fighting her holds the Zul'Gurub kit.
+  A raid with no sourced tier (the other eleven, a 0 row and a `TODO` each in that file) refuses to run without
+  `--tier N`. `--tier-override N` replaces a known tier and marks the run **comparison, not a tier proof** in the
+  notes and in `summary.json` (`roster.tier_comparison`). The walk refits after the hire with
+  `.bot gear raid <commander> tier <N>`.
 - `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
   the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
@@ -1868,19 +1875,25 @@ The roster (`--hires FILE`, format `tb-raid-roster` v1) hires batches in order a
 diffing `party` before and after the hire:
 
 ```json
-{"format":"tb-raid-roster","version":1,"level":60,"tier":3,"gear_preset":"onyxia",
+{"format":"tb-raid-roster","version":1,"level":60,"tier":2,
  "batches":[{"role":"mt","hire":"1 warrior:tank"},
             {"role":"ot","hire":"1 druid:tank 1 paladin:tank"},
-            {"role":"rest","hire":"10h 26d"}]}
+            {"role":"rest","hire":"10h 27d"}]}
 ```
 
 `hire` is `<n>t`, `<n>h`, `<n>d` or `<n> <class>[:<role>]`; a preset (`onyxia`, `mc`, ...) is refused because it fills
 the raid in one go and leaves no way to know the MT. Exactly one `mt` batch comes first and hires exactly one tank; at
-most one `ot` batch (tanks only); one or more `rest` batches; 1 to 39 bots and at most the plan's raid size minus one.
-`level` defaults to the plan's band maximum, `tier` (1-3) is optional, `gear_preset` sends
-`.bot gear raid <commander> preset <word>`. Without `--hires` the roster comes from the plan's `raid {size, tanks,
-healers, dps}`: `1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-1-tanks-healers>d`, tier 3 and the raid's hire preset
-when it has one (Onyxia's plan gives `1 warrior:tank`, `3t`, `10h 25d`).
+most one `ot` batch (tanks only); one or more `rest` batches; 1 to 40 bots and at most the plan's raid size (the
+commander stands outside the group, so every raid seat is a hire). `level` defaults to the plan's band maximum; `tier`
+(1-3) is optional — absent, the walk takes the committed table's row, and a tier that differs from that row needs
+`--tier-override`. Without `--hires` the roster comes from the plan's `raid {size, tanks, healers, dps}`:
+`1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-tanks-healers>d` (Onyxia's plan gives `1 warrior:tank`, `3t`,
+`10h 26d` = 40) and the table's tier (2 for Onyxia; 0, "no tier sourced yet", for the other eleven raids until
+their unlock quests are written into `tiers.go`).
+
+The server's hire cap is 39 bots (TortoiseBots `HireMaxBotsPerPlayer`, onyxia-kill-plan C6), so a 40-man roster asks
+for all 40 and gets 39: the summary notes `hire cap 39` and the walk goes on. A shortfall below the cap is a failed
+walk (exit 18).
 
 The phases, in order: validate (no network), lease, `slot setup`, `login` (a detached process group, `status` until
 `in_world`, 90 s), GM `.go xyz` to the plan's portal and wait for its map, hire and gear, `commander bind <MT> raid`
@@ -1898,7 +1911,7 @@ run at once and waits up to 15 minutes for a kill, a reset or a wipe. A wipe or 
 exit 19.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
-`.bot gear raid <commander> preset <word>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
+`.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
 `.bot run stop[ time limit reached (raid-walk <n>m)]`); everything else goes through the `commander` RPC. Nothing names
 a creature or changes the world for others.
 
@@ -1909,9 +1922,9 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
-| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles) |
+| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, dashboard, teardown, exit code, notes |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
