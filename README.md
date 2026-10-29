@@ -1937,6 +1937,65 @@ symlink, `privfile.Read`), never printed and never written to the output; a fail
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
 
+### Fault injection
+
+`--inject SPEC` (repeatable, at most 4, each of the four kinds at most once) makes the walk inject a controlled fault
+and measure what the raid does about it. The grammar is `<kind>[@from=<N>][,<key>=<int>]...`:
+
+| kind | keys (range, default) | victim |
+|---|---|---|
+| `kill-mt` | none | the roster's main tank; refused at parse time when the roster has no `ot` batch |
+| `runaway` | `dist` (110-250 yd, 150), `hold` (30-180 s, 90) | the last `rest` hire alive and out of combat |
+| `add-pack` | `max` (30-80 yd, 60) | the extra pack; the puller is the nearest rest hire |
+| `lag` | `secs` (10-90 s, 30) | the last rest hire within 30 yd of the lead bot |
+
+`@from=N` holds a fault until step N. Anything else (an unknown kind or key, a key of another kind, an out-of-range
+value, a fifth spec, a repeated kind) is a usage error naming the spec; `--dry-run` prints the fault plan.
+
+```
+turtle-agent raid-walk --slot 2 --inject kill-mt --inject 'runaway,dist=150,hold=90' --inject add-pack onyxias_lair
+```
+
+At most one fault is active; the first not-yet-fired fault in command-line order that is eligible fires, and the next
+may fire only 60 s after the previous one ended and with no fight on. A fault never fires while paused, on a `boss`
+step, with a boss engaged, in the last two steps before the `until` stop, before the watch's prepare, or after the
+watch ended. Fight on means a hostile the frames show targeting a party GUID (seen in the last 4 s) or a hire in combat.
+
+- **`kill-mt`** fires on a `pull` step with a fight on for 6 s, 2+ hostiles on the party, the MT targeted, their mean
+  health 20-90 % and an OT alive. It selects the MT, kills it with `.die`, selects itself again, and measures the
+  attackers' retarget (`pickup_s`/`pickup_by`), non-tank switches, deaths after the kill and the fight's end. Pass:
+  a tank picks the attackers up within 10 s, no wipe, the fight over within 180 s; a wipe is `fail`.
+- **`runaway`** fires on a `move`/`move_direct` step with no fight for 10 s: it moves the commander to a plan point
+  120-200 yd behind the lead bot (row x/y/z, closest to `dist`), summons the victim there and freezes it. It measures
+  when the run leader's runaway summon (F4) names the victim and when the victim is back; pass: the F4 note and back
+  within 15 s of it. A summon by the straggler ladder first is `fail`.
+- **`add-pack`** fires on a `pull` step with a fight on for 3 s and an idle hostile 20-`max` yd from the lead: it
+  orders the nearest rest hire to `attack` that pack. Pass: the pack engages, no wipe, the fight over within 240 s and
+  the run not stopped by a pause.
+- **`lag`** fires on a `move`/`move_direct` step with no fight for 10 s: it freezes a hire for `secs`, then releases
+  it. Pass: it rejoins within 120 s and no pause stopped the walk.
+
+**The selection rule.** `.freeze`, `.unfreeze` and `.die` act on the unit the *server* has selected, and the `.freeze`
+/`.unfreeze` name is used only when the selection is the GM itself. A `target` RPC's `status.target` read-back is not
+proof (a selection sent right before a chat line is not in force yet: the core handles the two on different threads).
+So after every `target` the walk waits 2 s, sends `.gps` (which reports the selected unit) and checks its coordinates
+against the target's known position (the commander's own `status`, or the hire's newest frame) within 3 yd; a mismatch
+is retried once, then the fault ends `inconclusive` and no line that acts on the selection is sent. `.gps` is the only
+extra GM line the fault allow-list carries; every other line is `.gm visible off` (prepare), `.go xyz` (the plan's
+map, within 260 yd of the lead while a fault is active), `.summon <victim>`, `.freeze <victim>`, `.unfreeze <hire>`
+and `.die` (kill-mt, with the MT read back).
+
+**Cleanup** runs before the hold, before `stop`'s `.bot run stop` and before teardown: for every bot the injector
+froze and has not unfrozen it selects itself (with the same 2 s/`.gps` check) and sends `.unfreeze <hire>`, then
+selects itself once; a failed release is summary note and is asked for again by the next cleanup.
+
+`<out>/inject.json` (format `tb-raid-inject` v1, 0600) holds every fault's verdict, reason, fire step/leg, victim, its
+GM/order/select lines with times, and the measured keys (`placed_yd`, `f4_at_s`, `pickup_s`, `max_gap_yd`, ...).
+`summary.json` gains `injections[]` (kind, verdict, reason, step, victim) and `deaths.injected` (kill-mt's MT, which is
+not a death of the run). A walk that would exit 0 with at least one fault in `fail` exits **23**; 18 and 19 keep their
+meaning and win over 23. A fault that never fired is `not-fired`; one that could not be caused or measured is
+`inconclusive`; neither changes the exit code.
+
 ## Remote leader
 
 Issue #83. `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"Tanky"}` leads a bot group **without being in it**, through the

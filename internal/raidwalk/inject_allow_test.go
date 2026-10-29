@@ -33,6 +33,8 @@ func TestAllowedInjectLine(t *testing.T) {
 		want bool
 	}{
 		{"prepare gm visible off", ".gm visible off", mk(nil), true},
+		{"gps read-back", ".gps", mk(nil), true},
+		{"gps with an argument", ".gps X", mk(nil), false},
 		{"gm visible off not in prepare", ".gm visible off", mk(func(c *InjectCtx) { c.Fault = InjectRunaway }), false},
 		{"gm off", ".gm off", mk(nil), false},
 		{"kick", ".kick X", mk(nil), false},
