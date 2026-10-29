@@ -1,0 +1,257 @@
+{
+  "name": "kb_elemental_shaman",
+  "class": "shaman",
+  "spec": "elemental",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/shaman/elemental-ranged-dps.yaml",
+  "preset": "elemental_shaman",
+  "replaces": [
+    "shaman_elemental"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's elemental list: Elemental Mastery before a fresh Flame Shock, Flame Shock kept up, Chain Lightning on cooldown, Lightning Bolt as the filler, Earthquake at two mobs and the shocks' instant cases. Molten Blast's refresh needs the debuff's remaining time, which a condition cannot see; the totems and the trinkets stay with the preset and combat_consumables.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Searing Totem (Flametongue Totem in a melee group); other totems | before pull",
+      "text_sha": "70ede4ab371c",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Elemental Mastery / trinkets, then Flame Shock | target not fire-immune; Flame Shock snapshots [[d:shaman#1420830381762154628]]",
+      "text_sha": "4a00af5d7dbc",
+      "entries": [
+        {
+          "id": "elemental_mastery",
+          "spell": "Elemental Mastery",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "note": "The KB's snapshot order: Elemental Mastery, then the fresh Flame Shock.",
+          "when": {
+            "state": "combat",
+            "no_mob_aura": [
+              "Flame Shock"
+            ]
+          }
+        },
+        {
+          "id": "flame_shock",
+          "spell": "Flame Shock",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Flame Shock"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Molten Blast | Flame Shock about to expire (~every 10-12 s); refreshes to full [[d:shaman#1482850420484210790]] [[d:shaman#1492517323838460035]]",
+      "text_sha": "f4d2cc68abdf",
+      "entries": [],
+      "unexpressed": "time left on an aura is not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Chain Lightning | Clearcasting up, or on cooldown when mana allows [[d:shaman#1484941909620428922]]",
+      "text_sha": "d410a1940eaa",
+      "entries": [
+        {
+          "id": "chain_lightning",
+          "spell": "Chain Lightning",
+          "level": 32,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's 'on cooldown when mana allows'; the KB's Clearcasting case is the same cast, and the mana floor is the spell's own cost.",
+          "when": {
+            "moving": false
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Lightning Bolt | filler [[d:shaman#1485686440070479892]]",
+      "text_sha": "4e3091b1fd9b",
+      "entries": [
+        {
+          "id": "lightning_bolt",
+          "spell": "Lightning Bolt",
+          "level": 1,
+          "target": "fight",
+          "note": "The filler waits for the player to stand still; Earth Shock covers the moving case.",
+          "when": {
+            "moving": false
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Earthquake | only with 2+ targets while bugged (DPS-neutral single target) [[d:shaman#1490703968576471180]]",
+      "text_sha": "4e93386c8213",
+      "entries": [
+        {
+          "id": "earthquake",
+          "spell": "Earthquake",
+          "level": 40,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's 'while bugged' note says its single-target damage is neutral: two mobs is its threshold here. Moved ahead of the Lightning Bolt filler, which would take every tick.",
+          "when": {
+            "mobs_near_mob_min": 2,
+            "moving": false
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Earth Shock | moving, interrupt, or target about to die; never as filler [[d:shaman#1459503774186999850]]",
+      "text_sha": "6c90ea0c34c4",
+      "entries": [
+        {
+          "id": "earth_shock_moving",
+          "spell": "Earth Shock",
+          "level": 4,
+          "target": "fight",
+          "note": "The class_interrupt strategy owns the interrupt case (Earth Shock).",
+          "when": {
+            "moving": true
+          }
+        },
+        {
+          "id": "earth_shock_low",
+          "spell": "Earth Shock",
+          "level": 4,
+          "target": "fight",
+          "note": "'Never as filler': it takes a moving player or a nearly dead mob, not the filler slot.",
+          "when": {
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Earthquake and Chain Lightning on cooldown, Lightning Bolt filler",
+      "text_sha": "1cac6e37e4f1",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Flame Shock several targets and refresh with Molten Blast",
+      "text_sha": "717ca278ab6e",
+      "entries": [],
+      "unexpressed": "a debuff on several targets is not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Fire Nova Totem when Earthquake and Chain Lightning are on cooldown",
+      "text_sha": "1eec99970368",
+      "entries": [
+        {
+          "id": "fire_nova_totem",
+          "spell": "Fire Nova Totem",
+          "level": 12,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's fire-slot totem on big packs; the totem manager drops the standing totems. It sits after Earthquake and Chain Lightning and above the filler, as the KB says.",
+          "when": {
+            "mobs_near_mob_min": 4
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Oil of Immolation",
+      "text_sha": "b2652028109b",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Elemental Mastery | right before a fresh Flame Shock (snapshot); weak otherwise [[d:shaman#1485731517710860439]]",
+      "text_sha": "dba2d30e5c47",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Blood Fury (Orc) | with Elemental Mastery; beats Berserking [[d:shaman#1471895235184295960]]",
+      "text_sha": "f3d6333885fc",
+      "entries": [],
+      "unexpressed": "not in the Turtle spell data"
+    }
+  ],
+  "order": [
+    "elemental_mastery",
+    "flame_shock",
+    "chain_lightning",
+    "earthquake",
+    "fire_nova_totem",
+    "lightning_bolt",
+    "earth_shock_moving",
+    "earth_shock_low"
+  ],
+  "oracle": {
+    "core": [
+      "Flame Shock",
+      "Molten Blast",
+      "Chain Lightning",
+      "Lightning Bolt"
+    ],
+    "situational": [
+      "Earthquake",
+      "Earth Shock",
+      "Elemental Mastery",
+      "Fire Nova Totem",
+      "Searing Totem",
+      "Flametongue Totem"
+    ],
+    "never": [],
+    "signature": [
+      "Elemental Mastery",
+      "Chain Lightning"
+    ],
+    "taunt": []
+  }
+}
