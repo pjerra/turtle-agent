@@ -1937,6 +1937,47 @@ symlink, `privfile.Read`), never printed and never written to the output; a fail
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
 
+### Raid suite
+
+`turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
+against the last good walk of the same plan in a history dir. It is the regression check for the raid plans.
+
+```
+turtle-agent raid-suite --suite suite.json --history ~/TortoiseBots-audit/raid-walks --server m910q --gap 60s
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --dry-run
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --compare-only
+```
+
+- **Inputs.** `--suite FILE` is a `tb-raid-suite` v1 file: `{"format":"tb-raid-suite","version":1,"raids":[{"plan":
+  "onyxias_lair","dir":"~/ta-wt-raid-ony/dungeons","sql":"~/wt-plan-raid-ony/data/sql/world/20261029130000_world.sql",
+  "hires":""}]}`, walked in file order (`dir` is required, `sql` and `hires` are optional). `--dir DIR` takes every raid plan
+  in the folder, sorted by plan name. `--only p1,p2` filters by plan name; an unknown name is a usage error. A plan listed
+  twice is a usage error (one history dir per plan).
+- **Tier.** The suite never takes `--tier`. A raid's tier comes from the committed table (`internal/raidwalk/tiers.go`) or
+  from its `hires` file. A raid with no sourced tier is **refused** with the reason and is not walked.
+- **Until.** Each raid is walked to its first leg's end (`raidwalk.FirstLegUntil`): a boss in leg 0 stops at the boss, else
+  the walk stops when leg 2 starts, else it runs to the end.
+- **History.** Each walk writes to `<history>/<plan>/<YYYYmmdd-HHMMSS>/` (its own `summary.json`). Walks put there by hand
+  count as history too.
+- **Rules.** A walk that did not exit 0 is `failed`. Otherwise it is compared with the newest good walk of its plan (exit 0,
+  ended by its `until` or `plan done`, no tier comparison, the same tier, until, speed and test speed, no injected fault):
+  - `regression` when run time is more than 20 % and more than 60 s above the baseline, deaths are above
+    `base + max(2, 25 % of base)`, pauses or stops are above the baseline, the end reason changed, or fights are more than
+    one above it. `faster` and `fewer fights` are info.
+  - `ok` when no rule fires; `new` when there is no baseline (exit 0).
+  - Rows that changed since the baseline (`rows_sha256`) are a note; the rules still apply.
+- **Verdicts.** `ok`, `regression`, `new`, `failed`, `refused`, `skipped` (after a Ctrl-C the rest are skipped with
+  `interrupted`; the walk that was running tears down by itself).
+- **Compare only.** `--compare-only` walks nothing: each plan's newest walk in the history is compared with the last good
+  one before it. A plan with no walk is `skipped`.
+- **Dry run.** `--dry-run` prints `plan tier (source) until out` per raid, or `plan: refused: <reason>`; nothing is sent
+  and no out dir is made.
+- **Output.** `--out DIR` (default `./raid-suite-<stamp>`, refused if it exists; 0700) gets `suite.json` (format
+  `tb-raid-suite-report` v1) and `suite.txt` (0600). `--json` prints the JSON on stdout instead of the text. The walks'
+  own output goes to stderr, so stdout stays the report.
+- **Exit codes.** 0 when no raid regressed or failed; 24 when one did; 15 for `--slot 3` (refused before anything); 2 usage,
+  including `--slot A,B` (`raid-suite` walks one raid at a time).
+
 ## Remote leader
 
 Issue #83. `dungeon_run {"name":"uldaman","mode":"remote","lead_bot":"Tanky"}` leads a bot group **without being in it**, through the

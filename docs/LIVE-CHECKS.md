@@ -1085,3 +1085,18 @@ tools' slot setup. What the first live use has to settle:
 8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
    `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
    below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.
+
+## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
+
+README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
+is sourced in `internal/raidwalk/tiers.go` (onyxias_lair, tier 2). What the first live use has to settle:
+
+1. **Dry run.** `raid-suite --dir <the 11 prep plans> --history <dir> --dry-run` prints onyxias_lair as `tier 2 (table) until
+   boss` and each 0-row raid as `refused: raid <plan> has no minimum hire tier`; no lease is taken and no out dir is made.
+2. **First walk is new.** The first `raid-suite` on onyxias_lair walks it to its boss and writes `<history>/onyxias_lair/<stamp>/`;
+   the verdict is `new`, exit 0, and `suite.json` names the walk's out dir.
+3. **Second walk compares.** A second walk on the same server and settings is `ok` (or `regression` with a reason that names both
+   values); the baseline's `out` and `started` are the first walk's.
+4. **Refusals never walk.** Only onyxias_lair gets a walk dir under `<history>/`; a refused raid leaves no dir there.
+5. **Teardown between raids.** Each walk's `teardown.json` has no hire left online before the next raid starts (the `--gap`
+   sleep sits between two walks).
