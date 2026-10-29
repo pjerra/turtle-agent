@@ -94,6 +94,7 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
@@ -906,6 +907,33 @@ waypoint does the same and can be sent again from wherever a fight leaves the le
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
+
+### Plan diff
+
+`turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]` compares two exports of one
+plan: the rows the TortoiseBots run leader reads (`ai_dungeon_plan`, `ai_dungeon_leg`, `ai_dungeon_step`), as a migration or as rows built from the plan file. Each input is a
+`.sql` migration read with `planexport.ParseMigration` (so a hand edit around the rows, an `ai_dungeon_boss` block, is skipped) or a `.json` plan built with `planexport.Build` (the
+summary says `rows built from the plan JSON (no navmesh cut)`); mixed inputs are fine. `--plan` picks the plan of a migration that holds several (one plan: taken; a name that is not in
+the file is an error). Two maps are a usage error; two plan names are a note. It is offline: it reads the two inputs and, for the picture, the minimaps folder.
+
+**What is compared.** Legs are matched by `ai_dungeon_leg.name` (a leg inserted before another keeps the later legs together), then the rest by leg number; an unmatched leg is
+`leg added` or `leg removed`, and its steps are listed with it. Inside a matched leg the steps are matched by a key of the fields the run leader acts on: kind, entry, entries,
+radius, item, param, flags, timeout_s and the position rounded to 0.1 yd (so the export's float32 noise does not count). The key-equal steps are paired by a longest common
+subsequence; a pair whose comment differs is a `comment` change (the only change `--fail-on-change` ignores). Between two key-equal pairs the unmatched old and new rows are paired in
+order while their kinds match: a 3D distance over 0.05 yd is `moved` (with the distance and both points) and lists any other field that differs; a smaller one is `changed` with its
+field list; the rest are `removed` and `added`. Every step carries its global number on both sides (its index in (leg, seq) order + 1), so an insertion shows as one `added` and
+`renumbered` counts the key-equal steps whose number moved (the first five are named in the notes). The plan row's `cc_priority`, `cc_always`, `kill_first`, `source` and `comment`
+differences are listed under `plan:` in the summary line.
+
+**Output.** The text is one line per change, e.g. `step 26 (leg 0 seq 25) move: moved 7.92 yd (-149.46 -210.48 -74.62 -> -149.46 -210.48 -66.70); comment 'path' -> 'boss approach'`, then
+`onyxias_lair: 29 -> 29 steps: 2 moved, 0 changed, 0 added, 0 removed, 0 comment; 0 renumbered; plan: source`, then the notes. `--json` prints the `tb-plan-diff` v1 file instead
+(the diff, floats at two decimals). `--out DIR` writes `diff-<plan>.txt`, `diff-<plan>.json` and `diff-<plan>.svg` (0700 dir, 0600 files); `--svg FILE` writes the SVG there as well; an existing output file is refused (exit 2). The SVG draws the old route dashed grey and the new route solid over the picture, with a green circle for an added step,
+a red cross for a removed one, an orange arrow old -> new for a moved one, a purple ring for a changed one and a label with the step number and z; hovering a marker shows the
+change line. `--minimaps DIR` (default `~/turtle-agent-minimaps`) and `--picture` choose the picture (`worldmap` = `<map>.json`/`<map>.png`, `minimap` = `<map>.minimap.*`,
+`navmesh` = `<map>.navmesh.*`); a missing picture is a blank canvas with a note, and when the folder has `<map>.worldmap-2f.json` the SVG says the overlay is 2D and z decides on a
+multi-floor map.
+
+Exit: 0 (also when only comments differ), 25 with `--fail-on-change` and any change other than a comment, 2 a usage error or an existing output file, 1 an unreadable input.
 
 ### Route oracle
 
