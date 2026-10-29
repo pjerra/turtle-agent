@@ -210,6 +210,79 @@ func TestKBRotationsResolveInTheirPreset(t *testing.T) {
 	}
 }
 
+// kbSpecRotation is one PvE spec file of the Turtle knowledge base and the rotation generated from it: the 31
+// *-tank|healer|melee-dps|ranged-dps.yaml files. The KB's rogue combat-tank has no rotation (rogues have no taunt in the
+// core, so role_tank cannot hold a mob), and the PvP and gear files are not rotations.
+var kbSpecRotations = []struct{ Name, Class, Spec string }{
+	{"kb_arms_warrior", "warrior", "arms"},
+	{"kb_fury_warrior", "warrior", "fury"},
+	{"kb_fury_tank_warrior", "warrior", "fury_tank"},
+	{"kb_protection_warrior", "warrior", "protection"},
+	{"kb_combat_rogue", "rogue", "combat"},
+	{"kb_assassination_rogue", "rogue", "assassination"},
+	{"kb_subtlety_rogue", "rogue", "subtlety"},
+	{"kb_arcane_mage", "mage", "arcane"},
+	{"kb_fire_mage", "mage", "fire"},
+	{"kb_frost_mage", "mage", "frost"},
+	{"kb_affliction_warlock", "warlock", "affliction"},
+	{"kb_demonology_warlock", "warlock", "demonology"},
+	{"kb_destruction_fire_warlock", "warlock", "destruction_fire"},
+	{"kb_destruction_shadow_warlock", "warlock", "destruction_shadow"},
+	{"kb_marksmanship_hunter", "hunter", "marksmanship"},
+	{"kb_beast_mastery_hunter", "hunter", "beast_mastery"},
+	{"kb_survival_hunter", "hunter", "survival"},
+	{"kb_shadow_priest", "priest", "shadow"},
+	{"kb_discipline_priest", "priest", "discipline"},
+	{"kb_holy_priest", "priest", "holy"},
+	{"kb_retribution_paladin", "paladin", "retribution"},
+	{"kb_protection_paladin", "paladin", "protection"},
+	{"kb_holy_paladin", "paladin", "holy"},
+	{"kb_balance_druid", "druid", "balance"},
+	{"kb_feral_cat_druid", "druid", "feral_cat"},
+	{"kb_feral_bear_druid", "druid", "feral_bear"},
+	{"kb_restoration_druid", "druid", "restoration"},
+	{"kb_elemental_shaman", "shaman", "elemental"},
+	{"kb_enhancement_shaman", "shaman", "enhancement"},
+	{"kb_enhancement_tank_shaman", "shaman", "enhancement_tank"},
+	{"kb_restoration_shaman", "shaman", "restoration"},
+}
+
+// TestEveryKBSpecHasARotation pins the census: every PvE spec of the knowledge base has its generated rotation embedded in
+// the binary, with the kb block (guide file, hash, preset, recipe) that says where it came from, and there is no other kb_
+// rotation. A spec that gains a file without a recipe entry, or loses its rotation, fails here.
+func TestEveryKBSpecHasARotation(t *testing.T) {
+	if len(kbSpecRotations) != 31 {
+		t.Fatalf("the list names %d specs, the KB has 31", len(kbSpecRotations))
+	}
+	named := map[string]bool{}
+	for _, want := range kbSpecRotations {
+		if named[want.Name] {
+			t.Errorf("%s is listed twice", want.Name)
+		}
+		named[want.Name] = true
+		r, err := RotationNamed(want.Name)
+		if err != nil {
+			t.Errorf("%s: %v", want.Name, err)
+			continue
+		}
+		if r.Class != want.Class || r.Spec != want.Spec {
+			t.Errorf("%s: the rotation is %s %s, the KB spec is %s %s", want.Name, r.Class, r.Spec, want.Class, want.Spec)
+		}
+		if r.KB == nil {
+			t.Errorf("%s: no kb block, so nothing says which guide file it came from", want.Name)
+			continue
+		}
+		if r.KB.File == "" || r.KB.SHA256 == "" || r.KB.Preset == "" || r.KB.Recipe == "" {
+			t.Errorf("%s: kb block incomplete: %+v", want.Name, *r.KB)
+		}
+	}
+	for _, name := range RotationNames() {
+		if strings.HasPrefix(name, "kb_") && !named[name] {
+			t.Errorf("%s: a kb_ rotation that is not one of the 31 PvE specs", name)
+		}
+	}
+}
+
 // The KB protection pilot's first two casts: Shield Slam, then Sunder Armor. The stance is the preset's job (the fake is
 // in the stance warrior_tank keeps); 60 rage is enough for the rage dump, and the KB's filler comes before it.
 const spKBShieldSlam uint32 = 23922
