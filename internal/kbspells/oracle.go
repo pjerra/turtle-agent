@@ -55,15 +55,14 @@ type Oracle struct {
 // Load reads an oracle from a file system: `_common.json` and one `<class>.json` per class at the root of fsys.
 func Load(fsys fs.FS) (*Oracle, error) { return load(fsys, ".", "_common.json") }
 
-//go:embed oracle/_common.json
-//go:embed testdata/oracle/*.json
+//go:embed oracle/*.json
 var embedded embed.FS
 
-// Default is the oracle the agent ships: the hand-written warrior and hunter fixture for now; O2 of the KB work switches it to
-// the generated per-class files of internal/kbspells/oracle.
+// Default is the oracle the agent ships: the generated per-class files of internal/kbspells/oracle (written by tools/kbrotgen
+// from the KB rotations) and the hand-written common data.
 func Default() *Oracle {
 	defOnce.Do(func() {
-		o, err := load(embedded, "testdata/oracle", "oracle/_common.json")
+		o, err := load(embedded, "oracle", "oracle/_common.json")
 		if err != nil {
 			panic("kbspells: embedded oracle: " + err.Error())
 		}

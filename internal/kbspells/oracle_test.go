@@ -5,6 +5,8 @@ package kbspells
 
 import (
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -61,6 +63,63 @@ func TestCommonTauntsEqualDebugger(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("taunts %v, want %v", got, want)
 		}
+	}
+}
+
+// kbSpecs are the 31 PvE specs of the Turtle WoW knowledge base the generated oracle must carry, per class (the spec's table
+// K2a-K2d; rogue combat-tank is not one: a rogue has no taunt in the core).
+var kbSpecs = map[string][]string{
+	"warrior": {"arms", "fury", "fury_tank", "protection"},
+	"rogue":   {"assassination", "combat", "subtlety"},
+	"mage":    {"arcane", "fire", "frost"},
+	"warlock": {"affliction", "demonology", "destruction_fire", "destruction_shadow"},
+	"hunter":  {"beast_mastery", "marksmanship", "survival"},
+	"priest":  {"discipline", "holy", "shadow"},
+	"paladin": {"holy", "protection", "retribution"},
+	"druid":   {"balance", "feral_bear", "feral_cat", "restoration"},
+	"shaman":  {"elemental", "enhancement", "enhancement_tank", "restoration"},
+}
+
+// TestEmbeddedOracleLoads: the shipped default is the generated per-class data of internal/kbspells/oracle, not the hand-written
+// warrior/hunter fixture: every class is there, each carries exactly the 31 PvE specs, and no two specs of a class claim the same
+// signature spell (the judge infers a dps spec from those casts).
+func TestEmbeddedOracleLoads(t *testing.T) {
+	o := Default()
+	if len(o.Classes) != len(kbSpecs) {
+		var got []string
+		for c := range o.Classes {
+			got = append(got, c)
+		}
+		slices.Sort(got)
+		t.Fatalf("%d classes %v, want %d", len(o.Classes), got, len(kbSpecs))
+	}
+	total := 0
+	for class, specs := range kbSpecs {
+		have := o.Classes[class]
+		if len(have) != len(specs) {
+			var got []string
+			for _, s := range have {
+				got = append(got, s.Spec)
+			}
+			t.Fatalf("%s: specs %v, want %v", class, got, specs)
+		}
+		sig := map[string]string{}
+		for _, s := range have {
+			if _, ok := o.spec(class, s.Spec); !ok {
+				t.Fatalf("%s: no spec %s", class, s.Spec)
+			}
+			for _, n := range s.Signature {
+				k := strings.ToLower(n)
+				if prev, dup := sig[k]; dup {
+					t.Fatalf("%s: %s is a signature of both %s and %s", class, n, prev, s.Spec)
+				}
+				sig[k] = s.Spec
+			}
+		}
+		total += len(have)
+	}
+	if total != 31 {
+		t.Fatalf("%d specs, want the 31 of the KB", total)
 	}
 }
 
