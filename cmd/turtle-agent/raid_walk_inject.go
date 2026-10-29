@@ -44,17 +44,12 @@ const (
 	// injectSelectSettle is the wait between a target RPC and the `.gps` read-back (P0 finding 4: 2 s was enough; a
 	// selection sent right before a GM line is not in force yet).
 	injectSelectSettle = 2 * time.Second
-	// injectSelectToleranceYd is how far the `.gps` coordinates may be from the target's known position.
-	injectSelectToleranceYd = 3.0
 	// injectPrepareWait is how long Prepare waits for the hires' first bot_view positions.
 	injectPrepareWait = 20 * time.Second
 	// injectGPSWait bounds one `.gps` reply.
 	injectGPSWait = 3 * time.Second
 	// injectPInfoWait bounds one `.pinfo` reply (the core answers it from asynchronous DB queries).
 	injectPInfoWait = 10 * time.Second
-	// injectCrowdYd is how close another unit may stand to a freeze's target before the coordinate proof cannot tell
-	// the selection apart (review ad-i2-r2).
-	injectCrowdYd = 6.0
 	// injectCleanupDeadline is how long Cleanup keeps trying to release the bots it froze.
 	injectCleanupDeadline = 60 * time.Second
 	// injectCleanupRetry is the pause between cleanup attempts.
@@ -65,6 +60,9 @@ const (
 	injectBotFresh     = 10 * time.Second
 	injectHostileFresh = 4 * time.Second
 )
+
+// errInjectCleanupDeadline ends a wait at Cleanup's recovery deadline: the attempt has no time left.
+var errInjectCleanupDeadline = errors.New("cleanup deadline reached")
 
 // injectFile is <out>/inject.json, format tb-raid-inject v1 (spec 1.6).
 type injectFile struct {
@@ -91,6 +89,8 @@ type raidInjector struct {
 	incidents   []raidwalk.InjectIncident
 	blocking    bool
 	cleanupDone bool
+
+	cleanupUntil time.Time // Cleanup's recovery deadline: its attempts and waits never run past it
 }
 
 // newRaidInjector parses the --inject specs (spec 1.1); the roster refuses kill-mt without an ot batch.
@@ -256,15 +256,13 @@ func (r *raidInjector) sendOrder(ctx context.Context, a raidwalk.InjectAction) e
 	return nil
 }
 
-// selectUnit selects the action's unit and proves it before anything acts on the selection (P0 finding 4, review
-// ad-i2-r2): target, status.target read-back, a 2 s settle, then `.gps`; the selected unit's coordinates must be the
-// target's known position within 3 yd. A destructive selection (`.die` acts on the selection itself) also needs the
-// identity read-back: `.pinfo` with no name names the selected player, and only the intended victim's exact name and
-// guid counter pass; anything else ends the fault "selection not proven" with no retry. A freeze's self selection is
-// safe only for an isolated target: while another unit stands within 6 yd of it, the coordinates cannot tell which
-// unit the server selected, so the selection is retried once and then inconclusive. The `.gps` mismatch is likewise
-// retried once, then inconclusive. A release (.unfreeze) skips the crowd gate: unfreezing a wrong, non-frozen unit
-// loses nothing, while a frozen bot left behind does.
+// selectUnit selects the action's unit and proves the selection names the intended unit before anything acts on it
+// (P0 finding 4, review ad-i2-r2, ad-i2-r3): target, status.target read-back, a 2 s settle, `.pinfo` with no name.
+// The selected player must be the intended unit with its exact guid counter: the hire for a `select` (the victim
+// `.die`, `.freeze` and `.unfreeze` act on), the commander for the self selection a `.freeze`/`.unfreeze`'s name
+// applies to. Coordinates cannot prove a selection (a stale neighbour standing close passes them), so `.gps` is only
+// an extra log line; a `.pinfo` mismatch is terminal: the fault ends "selection not proven" with no retry. The target
+// and status.target read-backs keep their one retry for a lagging server.
 func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) (raidwalk.InjectCtx, error, error) {
 	w := r.w
 	self := a.Kind == raidwalk.ActSelectSelf
@@ -280,12 +278,15 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 		}
 	}
 	label := r.hireName(guid)
+	wantName := label
 	if self {
 		label = "the commander"
+		wantName = st.Character
 	}
 	if label == "" {
 		label = guid.String()
 	}
+	wantCounter := uint64(uint32(guid))
 	var last error
 	for range 2 {
 		var u objects.Unit
@@ -302,53 +303,35 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 			last = fmt.Errorf("selection not confirmed: status.target is %s, not %s", st.Target, guid)
 			continue
 		}
-		if err := w.env.sleep(ctx, injectSelectSettle); err != nil {
+		if err := r.sleep(ctx, injectSelectSettle); err != nil {
 			return r.in.Ctx(), err, nil
 		}
+		// The coordinates are an observation only: they cannot tell a stale nearby selection from the intended unit.
 		pos, have, err := r.gpsSelected(ctx)
+		switch {
+		case err != nil && (errors.Is(err, errInjectCleanupDeadline) || ctx.Err() != nil):
+			return r.in.Ctx(), err, nil
+		case err != nil:
+			w.logLine(w.env.now(), fmt.Sprintf("note: .gps after selecting %s: %v", label, err))
+		case !have:
+			w.logLine(w.env.now(), "note: .gps after selecting "+label+": no coordinates")
+		default:
+			if want, known := r.knownPos(guid, self, st); known {
+				w.logLine(w.env.now(), fmt.Sprintf("note: .gps after selecting %s: %.1f yd from its known position", label, injectDist3(pos, want)))
+			} else {
+				w.logLine(w.env.now(), "note: .gps after selecting "+label+": known position unknown")
+			}
+		}
+		// The identity is the proof every line that acts on the selection needs.
+		name, counter, ok, err := r.pinfoSelected(ctx)
 		if err != nil {
-			last = fmt.Errorf("selection not confirmed: %v", err)
-			continue
+			return r.in.Ctx(), fmt.Errorf("selection not proven: %v", err), nil
 		}
-		if !have {
-			last = errors.New("selection not confirmed: .gps gave no coordinates")
-			continue
+		if !ok {
+			return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo named no player, not %s", label), nil
 		}
-		want, known := r.knownPos(guid, self, st)
-		if !known {
-			last = fmt.Errorf("selection not confirmed: %s's position is unknown", label)
-			continue
-		}
-		if d := injectDist3(pos, want); d > injectSelectToleranceYd {
-			last = fmt.Errorf("selection not confirmed: .gps is %.1f yd from %s's position", d, label)
-			continue
-		}
-		if !self {
-			// .die acts on the selection itself: coordinates cannot tell a stale near neighbour from the victim.
-			// The read-back names the selected player; a mismatch is not a lag to wait out.
-			name, counter, ok, err := r.pinfoSelected(ctx)
-			if err != nil {
-				return r.in.Ctx(), fmt.Errorf("selection not proven: %v", err), nil
-			}
-			who := r.hireName(guid)
-			if !ok {
-				return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo named no player, not %s", who), nil
-			}
-			if who == "" || name != who || counter != uint64(uint32(guid)) {
-				return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo names %q (guid %d), not %s (%d)", name, counter, who, uint32(guid)), nil
-			}
-		} else if a.Unit != "" && !a.Release {
-			// .freeze uses its name only while the GM itself is selected: a stale near selection would take that
-			// name's place. Only an isolated line target can be proven by coordinates.
-			names, ok := r.crowdedNear(a.Unit)
-			if !ok {
-				last = fmt.Errorf("selection not confirmed: %s's position is unknown", a.Unit)
-				continue
-			}
-			if len(names) > 0 {
-				last = fmt.Errorf("selection not confirmed: %s is crowded (%s within %.0f yd)", a.Unit, strings.Join(names, ", "), injectCrowdYd)
-				continue
-			}
+		if wantName == "" || name != wantName || counter != wantCounter {
+			return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo names %q (guid %d), not %s (%d)", name, counter, label, wantCounter), nil
 		}
 		c := r.in.Ctx()
 		c.SelfSelected = self
@@ -359,42 +342,6 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 		return c, nil, nil
 	}
 	return r.in.Ctx(), last, nil
-}
-
-// crowdedNear lists the units within 6 yd of the freeze's target, other than the target itself. The commander is not
-// one of them: the self selection is what the line needs (the name then applies), so only another unit's selection can
-// make .freeze act on the wrong unit. Positions come from the newest bot_view frames; a bot the newest dashboard
-// snapshot lists counts too when a frame gives its position.
-func (r *raidInjector) crowdedNear(unit string) ([]string, bool) {
-	w := r.w
-	b, ok := w.botAt[unit]
-	if !ok {
-		return nil, false
-	}
-	p := dungeon.Point{X: b.x, Y: b.y, Z: b.z}
-	var out []string
-	seen := map[string]bool{unit: true}
-	check := func(name string) {
-		if seen[name] {
-			return
-		}
-		seen[name] = true
-		bb, ok := w.botAt[name]
-		if !ok {
-			return
-		}
-		if injectDist3(dungeon.Point{X: bb.x, Y: bb.y, Z: bb.z}, p) <= injectCrowdYd {
-			out = append(out, name)
-		}
-	}
-	for _, name := range w.hireList() {
-		check(name)
-	}
-	for name := range w.dashBots {
-		check(name)
-	}
-	sort.Strings(out)
-	return out, true
 }
 
 // knownPos is where the selected unit is known to stand: the commander's own status position, or the hire's newest
@@ -419,6 +366,19 @@ func (r *raidInjector) hireName(g packet.GUID) string {
 		}
 	}
 	return ""
+}
+
+// sleep waits d, but never past Cleanup's recovery deadline: an attempt's waits must not spend time the deadline
+// does not have (ad-i2-r3). Outside Cleanup it is the walk's own sleep.
+func (r *raidInjector) sleep(ctx context.Context, d time.Duration) error {
+	if !r.cleanupUntil.IsZero() {
+		left := r.cleanupUntil.Sub(r.w.env.now())
+		if left <= 0 {
+			return errInjectCleanupDeadline
+		}
+		d = min(d, left)
+	}
+	return r.w.env.sleep(ctx, d)
 }
 
 // injectGPSRe matches `.gps`'s coordinates line ("X: -158.440994 Y: 131.600998 Z: -74.255203 Orientation: ...").
@@ -471,7 +431,7 @@ func (r *raidInjector) gpsSelected(ctx context.Context) (dungeon.Point, bool, er
 		if !w.env.now().Before(deadline) {
 			return dungeon.Point{}, false, fmt.Errorf("no .gps reply in %s", injectGPSWait)
 		}
-		if err := w.env.sleep(ctx, 200*time.Millisecond); err != nil {
+		if err := r.sleep(ctx, 200*time.Millisecond); err != nil {
 			return dungeon.Point{}, false, err
 		}
 	}
@@ -533,7 +493,7 @@ func (r *raidInjector) pinfoSelected(ctx context.Context) (string, uint64, bool,
 		if !w.env.now().Before(deadline) {
 			return "", 0, false, fmt.Errorf("no .pinfo reply in %s", injectPInfoWait)
 		}
-		if err := w.env.sleep(ctx, 200*time.Millisecond); err != nil {
+		if err := r.sleep(ctx, 200*time.Millisecond); err != nil {
 			return "", 0, false, err
 		}
 	}
@@ -595,9 +555,10 @@ func (r *raidInjector) observe(now time.Time, notes []string, wipe bool) raidwal
 }
 
 // Cleanup releases every bot the injector still holds frozen (spec 1.2): it loops until none is left or the 60 s
-// recovery deadline expires, with a fresh context per try and 3 s between tries (review ad-i2-r2). Exhaustion records
-// a BLOCKING incident with the manual command; the walk exits 23. The walk may be interrupted, so it never uses the
-// walk's own context.
+// recovery deadline expires, with a fresh context per try and 3 s between tries (reviews ad-i2-r2, ad-i2-r3).
+// Every attempt and every retry sleep is bounded by what is left of the deadline, so no attempt can run past it.
+// Exhaustion records a BLOCKING incident with the manual command; the walk exits 23. The walk may be interrupted,
+// so it never uses the walk's own context.
 func (r *raidInjector) Cleanup(_ context.Context) {
 	if r.cleanupDone || r.in == nil || r.prepFail != "" {
 		return
@@ -605,10 +566,17 @@ func (r *raidInjector) Cleanup(_ context.Context) {
 	w := r.w
 	// The walk's own context may be the interrupted one: every attempt gets a fresh context of its own.
 	deadline := w.env.now().Add(injectCleanupDeadline)
+	r.cleanupUntil = deadline
+	defer func() { r.cleanupUntil = time.Time{} }()
 	for {
 		r.in.DropCleanup() // a cut-off attempt must not hide its bots behind stale pending actions
+		remaining := deadline.Sub(w.env.now())
+		if remaining <= 0 {
+			r.finishCleanup()
+			return
+		}
 		if acts := r.in.Cleanup(); len(acts) > 0 {
-			cctx, cancel := context.WithTimeout(context.Background(), injectCleanupAttempt)
+			cctx, cancel := context.WithTimeout(context.Background(), min(injectCleanupAttempt, remaining))
 			_ = r.exec(cctx, acts)
 			cancel()
 		}
@@ -617,15 +585,20 @@ func (r *raidInjector) Cleanup(_ context.Context) {
 			r.cleanupDone = true
 			return
 		}
-		if !w.env.now().Before(deadline) {
-			r.recordStuck(frozen)
-			r.cleanupDone = true
+		if remaining = deadline.Sub(w.env.now()); remaining <= 0 {
+			r.finishCleanup()
 			return
 		}
-		sctx, scancel := context.WithTimeout(context.Background(), injectCleanupAttempt)
-		_ = w.env.sleep(sctx, injectCleanupRetry)
-		scancel()
+		_ = r.sleep(context.Background(), min(injectCleanupRetry, remaining))
 	}
+}
+
+// finishCleanup records the bots still frozen at the recovery deadline (nothing when an attempt released them all).
+func (r *raidInjector) finishCleanup() {
+	if frozen := r.in.FrozenVictims(); len(frozen) > 0 {
+		r.recordStuck(frozen)
+	}
+	r.cleanupDone = true
 }
 
 // recordStuck is the cleanup's exhausted recovery: the bots still frozen, and the exact GM command that frees each.

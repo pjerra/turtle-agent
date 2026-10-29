@@ -122,6 +122,8 @@ type walkFakeAgent struct {
 	// pinfoLagTargets reports the selection one target RPC behind, prevSel is the selection before the newest
 	// target, and gmFail fails one gm line's RPC without its game side effect.
 	pinfoGUID       packet.GUID
+	pinfoName       string // names an untracked player instead of the selection's party record
+	noPInfo         bool   // .pinfo never answers (the reply waits out its own deadline)
 	pinfoLagTargets bool
 	prevSel         packet.GUID
 	gmFail          func(line string) error
@@ -324,21 +326,28 @@ func (f *walkFakeAgent) gpsSide() {
 
 // pinfoSide pushes a `.pinfo` (no name) reply for the selected player, in the core's
 // LANG_PINFO_ACCOUNT shape: the first line names the character with a player link and its
-// guid counter. pinfoGUID / pinfoLagTargets model a read that names another unit or lags one
-// target RPC behind.
+// guid counter. pinfoGUID / pinfoName model a read that names another unit (or an untracked
+// player), pinfoLagTargets a read one target RPC behind, noPInfo one that never answers.
 func (f *walkFakeAgent) pinfoSide() {
 	f.mu.Lock()
+	if f.noPInfo {
+		f.mu.Unlock()
+		return
+	}
 	sel := f.selGUID
+	if f.noSelect { // the server never applied a selection: the previous one (the commander) still stands
+		sel = f.ownGUID
+	}
 	if f.pinfoLagTargets {
 		sel = f.prevSel
 	}
 	if f.pinfoGUID != 0 {
 		sel = f.pinfoGUID
 	}
-	name := ""
-	if sel != 0 && sel == f.ownGUID {
+	name := f.pinfoName
+	if name == "" && sel != 0 && sel == f.ownGUID {
 		name = f.status.Character
-	} else if sel != 0 {
+	} else if name == "" && sel != 0 {
 		for i, n := range f.party {
 			if packet.GUID(1000+i) == sel {
 				name = n

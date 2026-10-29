@@ -184,7 +184,8 @@ func TestRaidWalkInjectKillMTVerifiesSelectionBeforeDie(t *testing.T) {
 }
 
 // TestRaidWalkInjectSelectionWaitsOutALaggingServer pins P0 finding 4: the server applies a target one command later,
-// so the walk waits 2 s and reads `.gps` before the selected-target line, and retries once.
+// so the walk waits 2 s, reads `.gps` (an observation only), then proves the identity with `.pinfo`. One attempt
+// suffices: the command that follows the lagged target applies it before the identity read.
 func TestRaidWalkInjectSelectionWaitsOutALaggingServer(t *testing.T) {
 	t.Run("the lag is waited out", func(t *testing.T) {
 		f := newFixture(t)
@@ -204,8 +205,11 @@ func TestRaidWalkInjectSelectionWaitsOutALaggingServer(t *testing.T) {
 				gps++
 			}
 		}
-		if gps != 2 {
-			t.Fatalf("%d .gps reads before .die, want 2 (one per selection try): %v", gps, f.agent.gmLines())
+		if gps != 1 {
+			t.Fatalf("%d .gps reads before .die, want 1 (the identity read proves the lagged selection): %v", gps, f.agent.gmLines())
+		}
+		if pinfo, die := f.gmIndex(".pinfo"), f.gmIndex(".die"); pinfo < 0 || pinfo > die {
+			t.Fatalf(".pinfo (%d) is not before .die (%d): %v", pinfo, die, f.agent.gmLines())
 		}
 		var mtTargets int
 		for _, g := range f.targetGUIDs() {
@@ -213,8 +217,8 @@ func TestRaidWalkInjectSelectionWaitsOutALaggingServer(t *testing.T) {
 				mtTargets++
 			}
 		}
-		if mtTargets != 2 {
-			t.Fatalf("target RPCs %v, want the MT twice", f.targetGUIDs())
+		if mtTargets != 1 {
+			t.Fatalf("target RPCs %v, want the MT once", f.targetGUIDs())
 		}
 		f.agent.mu.Lock()
 		firstTarget := f.agent.targetAt[0]
@@ -242,7 +246,7 @@ func TestRaidWalkInjectSelectionWaitsOutALaggingServer(t *testing.T) {
 			t.Fatalf("exit %d: %s", code, f.stderr.String())
 		}
 		if i := f.gmIndex(".die"); i >= 0 {
-			t.Fatalf("`.die` was sent although .gps never showed the MT (gm %v)", f.agent.gmLines())
+			t.Fatalf("`.die` was sent although .pinfo never named the MT (gm %v)", f.agent.gmLines())
 		}
 		sum := f.summary()
 		if len(sum.Injections) != 1 || sum.Injections[0].Verdict != raidwalk.VerdictInconclusive {

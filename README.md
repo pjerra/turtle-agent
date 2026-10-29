@@ -1979,19 +1979,14 @@ watch ended. Fight on means a hostile the frames show targeting a party GUID (se
 **The selection rule.** `.freeze`, `.unfreeze` and `.die` act on the unit the *server* has selected, and the `.freeze`
 /`.unfreeze` name is used only when the selection is the GM itself. A `target` RPC's `status.target` read-back is not
 proof (a selection sent right before a chat line is not in force yet: the core handles the two on different threads).
-So after every `target` the walk waits 2 s, sends `.gps` (which reports the selected unit) and checks its coordinates
-against the target's known position (the commander's own `status`, or the hire's newest frame) within 3 yd; a mismatch
-is retried once, then the fault ends `inconclusive` and no line that acts on the selection is sent. Coordinates alone
-cannot tell the intended unit from a stale selection of a neighbour standing next to it, so:
-
-- `.die` (which acts on the selection itself) additionally needs the identity read-back: `.pinfo` with no name uses the
-  selected player, and its reply must name the MT exactly (the `LANG_PINFO_ACCOUNT` line: player link and `(guid: N)`).
-  Anything else — another name, another guid, no player, no reply — ends the fault `inconclusive` with
-  `selection not proven` and `.die` is never sent; a wrong identity is not retried.
-- A `.freeze` selection needs an isolated target: no party member or dashboard-listed bot within 6 yd of the victim (the
-  commander is exempt: a stale selection of it still sends the line to the named victim). A crowded target is retried
-  once, then the fault is `inconclusive` and nothing is frozen. `.unfreeze` releases skip the crowd gate: unfreezing a
-  wrong, non-frozen unit loses nothing, while a bot left frozen does.
+So after every `target` the walk waits 2 s and reads `.gps` (the selected unit's coordinates) as an observation only:
+coordinates cannot tell the intended unit from a stale selection of a nearby neighbour, and they gate nothing. Every
+selection a line acts on then needs the identity read-back: `.pinfo` with no name uses the selected player, and its
+reply must name the intended unit exactly (the `LANG_PINFO_ACCOUNT` line: player link and `(guid: N)`) — the hire for
+`.die` and the victim's `.freeze`/`.unfreeze`, the commander for the self selection whose name the line then applies.
+Anything else — another name, another guid, no player, no reply — ends the fault `inconclusive` with
+`selection not proven` and the line is never sent; a wrong identity is not retried. Only the `target` and
+`status.target` read-backs keep their one retry, for a server that applies a selection late.
 
 `.gps` and `.pinfo` are the only extra GM lines the fault allow-list carries; every other line is `.gm visible off`
 (prepare), `.go xyz` (the plan's map, within 260 yd of the lead while a fault is active), `.summon <victim>`,
@@ -2000,7 +1995,8 @@ cannot tell the intended unit from a stale selection of a neighbour standing nex
 **Cleanup** runs on every exit path — the end of the watch, `stop`'s `.bot run stop`, an interrupt, an error and a panic
 — before the hold and before teardown: for every bot the injector froze and has not unfrozen it selects itself and
 sends `.unfreeze <hire>`, then selects itself once. It loops with a fresh context per attempt and 3 s between tries
-until no frozen bot is left or the 60 s recovery deadline expires. Exhaustion is not silent: `<out>/inject.json` and
+until no frozen bot is left or the 60 s recovery deadline expires; each attempt and each retry wait is bounded by the
+time left, so no attempt runs past the deadline. Exhaustion is not silent: `<out>/inject.json` and
 the summary carry a `blocking` incident (`cleanup_incomplete`) that names the bot(s) still frozen and the exact manual
 command (`.unfreeze <hire>`, with no other unit selected), and the walk exits **23**.
 

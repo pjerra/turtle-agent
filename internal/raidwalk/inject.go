@@ -242,12 +242,9 @@ type InjectAction struct {
 	Verb string
 	Args []string
 	For  time.Duration
-	// Unit is the unit the lines that follow this selection act on (a reversible .freeze/.unfreeze victim): the
-	// command proves the selection is safe for that unit before it sends them. Empty for a selection no line follows.
+	// Unit is the unit the lines that follow this selection act on (a .freeze/.unfreeze victim): the command proves
+	// the selection names that unit before it sends them. Empty for a selection no line follows.
 	Unit string
-	// Release marks a selection that only precedes an .unfreeze: unlike a freeze, a wrong (non-frozen) unit loses
-	// nothing, so a crowded target must not keep the injector from releasing its own bot.
-	Release bool
 }
 
 // InjectCtx is what the allow-lists check against (spec 1.4).
@@ -953,7 +950,7 @@ func (in *Injector) fire(f *injectFault, o InjectObs) {
 	case InjectLag:
 		f.victim = in.lagVictim(o)
 		f.phase = "select_freeze"
-		in.emitSelectSelf(f, f.victim, false, o.Now)
+		in.emitSelectSelf(f, f.victim, o.Now)
 	}
 }
 
@@ -1026,7 +1023,7 @@ func (in *Injector) stepKill(f *injectFault, o InjectObs) {
 	case "die_ready":
 		f.tDie = o.Now
 		in.emitGM(f, ".die", o.Now)
-		in.emitSelectSelf(f, "", false, o.Now)
+		in.emitSelectSelf(f, "", o.Now)
 		f.phase = "dying"
 	case "dying":
 		if mt, ok := o.Bots[in.names.MT]; ok && mt.Dead {
@@ -1118,7 +1115,7 @@ func (in *Injector) stepRunaway(f *injectFault, o InjectObs) {
 	case "summon":
 		v, ok := o.Bots[f.victim]
 		if ok && dist3(v.Pos, f.q) <= 10 {
-			in.emitSelectSelf(f, f.victim, false, o.Now)
+			in.emitSelectSelf(f, f.victim, o.Now)
 			f.phase = "select_freeze"
 		} else if o.Now.Sub(f.phaseAt) >= 10*time.Second {
 			in.endFault(f, VerdictInconclusive, "the victim did not arrive at Q", o.Now)
@@ -1201,7 +1198,7 @@ func (in *Injector) runawayFrozen(f *injectFault, o InjectObs) {
 	if trigger {
 		f.triggered = true
 		f.phase = "select_unfreeze"
-		in.emitSelectSelf(f, f.victim, true, now)
+		in.emitSelectSelf(f, f.victim, now)
 	}
 }
 
@@ -1305,7 +1302,7 @@ func (in *Injector) stepLag(f *injectFault, o InjectObs) {
 		if o.Now.Sub(f.t0) >= time.Duration(f.spec.Secs)*time.Second && !f.triggered {
 			f.triggered = true
 			f.phase = "select_unfreeze"
-			in.emitSelectSelf(f, f.victim, true, o.Now)
+			in.emitSelectSelf(f, f.victim, o.Now)
 		}
 	case "select_unfreeze":
 		// waiting for the read-back
@@ -1518,8 +1515,8 @@ func (in *Injector) emitSelect(f *injectFault, g packet.GUID, at time.Time) {
 	in.emit(f, InjectAction{Kind: ActSelect, GUID: g}, at)
 }
 
-func (in *Injector) emitSelectSelf(f *injectFault, unit string, release bool, at time.Time) {
-	in.emit(f, InjectAction{Kind: ActSelectSelf, Unit: unit, Release: release}, at)
+func (in *Injector) emitSelectSelf(f *injectFault, unit string, at time.Time) {
+	in.emit(f, InjectAction{Kind: ActSelectSelf, Unit: unit}, at)
 }
 
 func (in *Injector) emitOrder(f *injectFault, verb string, args []string, at time.Time) {
@@ -1551,7 +1548,7 @@ func injectActionText(a InjectAction) string {
 }
 
 func sameInjectAction(a, b InjectAction) bool {
-	if a.Kind != b.Kind || a.Line != b.Line || a.GUID != b.GUID || a.Verb != b.Verb || a.Unit != b.Unit || a.Release != b.Release || len(a.Args) != len(b.Args) {
+	if a.Kind != b.Kind || a.Line != b.Line || a.GUID != b.GUID || a.Verb != b.Verb || a.Unit != b.Unit || len(a.Args) != len(b.Args) {
 		return false
 	}
 	for i := range a.Args {
@@ -1814,7 +1811,7 @@ func (in *Injector) Cleanup() []InjectAction {
 		if !f.frozen || f.unfrozen || in.cleanupInFlight(f) {
 			continue
 		}
-		ask(f, InjectAction{Kind: ActSelectSelf, Unit: f.victim, Release: true})
+		ask(f, InjectAction{Kind: ActSelectSelf, Unit: f.victim})
 		ask(f, InjectAction{Kind: ActGM, Line: ".unfreeze " + f.victim})
 	}
 	if len(out) > 0 {

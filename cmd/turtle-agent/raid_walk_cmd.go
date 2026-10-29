@@ -481,7 +481,6 @@ type walk struct {
 	seenFights map[string]bool
 	hostiles   map[string]hostileState
 	botAt      map[string]botPos
-	dashBots   map[string]bool // names of the newest /api/v1/commanders snapshot (a reversible line's crowd check)
 	partyG     map[uint64]bool
 	resetSince time.Time
 	afterN     uint64
@@ -552,8 +551,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
-		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		dashBots: map[string]bool{}}
+		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
 	return w.main(ctx)
 }
 

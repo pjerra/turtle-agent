@@ -1,17 +1,18 @@
-// raid_walk_inject_guard_test.go: the selection guards of --inject (review ad-i2-r2): a destructive line needs the
-// identity read-back, a reversible line only goes to an isolated victim, and cleanups retry until the bots are free or
-// the recovery deadline leaves a BLOCKING incident. Each test here fails on the unguarded implementation.
+// raid_walk_inject_guard_test.go: the selection guards of --inject (reviews ad-i2-r2, ad-i2-r3): every line that acts
+// on the selection needs the identity read-back (`.die`, `.freeze`, `.unfreeze`), and cleanups retry within the
+// recovery deadline, whose attempts and retry waits may not run past it. Each test here fails on the unguarded
+// implementation.
 package main
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -107,55 +108,59 @@ func TestRaidWalkInjectKillMTNeedsIdentity(t *testing.T) {
 	})
 }
 
-// TestRaidWalkInjectFreezeNeedsAnIsolatedTarget: a reversible line's .gps match is ambiguous while another unit stands
-// within 6 yd of the victim. The crowd is retried once, then the fault is inconclusive and nothing is frozen.
-func TestRaidWalkInjectFreezeNeedsAnIsolatedTarget(t *testing.T) {
-	t.Run("crowded target", func(t *testing.T) {
-		f := newFixture(t)
-		f.setupInject() // Bot02..Bot30 one yard apart: the lag victim Bot30 is crowded
-		f.defaultRun("onyxias_lair")
-		f.opts.injects = []string{"lag"}
-		if code := f.run(context.Background()); code != exitOK {
-			t.Fatalf("exit %d: %s", code, f.stderr.String())
-		}
-		if n := f.injectGMCount(".freeze "); n != 0 {
-			t.Fatalf("%d .freeze lines for a crowded target: %v", n, f.agent.gmLines())
-		}
-		if n := f.injectGMCount(".unfreeze "); n != 0 {
-			t.Fatalf("%d .unfreeze lines: %v", n, f.agent.gmLines())
-		}
-		if got := f.injectTargetCount(injOwnGUID); got != 2 {
-			t.Fatalf("%d self targets, want 2 (one retry): %v", got, f.targetGUIDs())
-		}
-		sum := f.summary()
-		if len(sum.Injections) != 1 || sum.Injections[0].Verdict != raidwalk.VerdictInconclusive ||
-			!strings.Contains(sum.Injections[0].Reason, "crowded") {
-			t.Fatalf("injections %+v, want one inconclusive 'crowded'", sum.Injections)
-		}
-	})
+// TestRaidWalkInjectFreezeNeedsIdentity: every line that acts on the selection needs the identity read-back, the
+// reversible `.freeze` included. `.pinfo` that names an untracked nearby player is not the commander, so nothing is
+// frozen and the fault ends inconclusive (a coordinate match would have sent the line).
+func TestRaidWalkInjectFreezeNeedsIdentity(t *testing.T) {
+	f := newFixture(t)
+	f.setupInject() // Bot01..Bot30 one yard apart: a coordinate match cannot name its unit
+	f.defaultRun("onyxias_lair")
+	f.agent.mu.Lock()
+	f.agent.pinfoGUID = packet.GUID(0x4D2)
+	f.agent.pinfoName = "Stranger"
+	f.agent.mu.Unlock()
+	f.opts.injects = []string{"runaway"}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if n := f.injectGMCount(".freeze "); n != 0 {
+		t.Fatalf("%d .freeze lines although .pinfo named a stranger: %v", n, f.agent.gmLines())
+	}
+	if n := f.injectGMCount(".unfreeze "); n != 0 {
+		t.Fatalf("%d .unfreeze lines: %v", n, f.agent.gmLines())
+	}
+	if f.gmIndex(".pinfo") < 0 {
+		t.Fatalf("no .pinfo identity read-back: %v", f.agent.gmLines())
+	}
+	if got := f.injectTargetCount(injOwnGUID); got != 1 {
+		t.Fatalf("%d self targets, want 1 (an identity mismatch is not retried): %v", got, f.targetGUIDs())
+	}
+	sum := f.summary()
+	if len(sum.Injections) != 1 || sum.Injections[0].Verdict != raidwalk.VerdictInconclusive ||
+		!strings.Contains(sum.Injections[0].Reason, "selection not proven") {
+		t.Fatalf("injections %+v, want one inconclusive 'selection not proven'", sum.Injections)
+	}
+}
 
-	t.Run("isolated target", func(t *testing.T) {
-		f := newFixture(t)
-		f.setupInject()
-		f.agent.mu.Lock()
-		lead := [3]float32{injLeadX, injLeadY, injLeadZ}
-		for i := 2; i <= 29; i++ {
-			f.agent.pos[fmt.Sprintf("Bot%02d", i)] = lead
+// logTimes is the fake-clock time of every run.log line that contains s, in order.
+func (f *fixture) logTimes(s string) []time.Time {
+	f.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		f.t.Fatalf("run.log: %v", err)
+	}
+	var out []time.Time
+	for _, line := range strings.Split(string(raw), "\n") {
+		if len(line) < 13 || !strings.Contains(line, s) {
+			continue
 		}
-		f.agent.pos["Bot30"] = [3]float32{lead[0] + 20, lead[1], lead[2]}
-		f.agent.mu.Unlock()
-		f.defaultRun("onyxias_lair")
-		f.opts.injects = []string{"lag"}
-		if code := f.run(context.Background()); code != exitOK {
-			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		ts, err := time.Parse("15:04:05.000", line[:12])
+		if err != nil {
+			continue
 		}
-		if n := f.injectGMCount(".freeze Bot30"); n == 0 {
-			t.Fatalf("no .freeze for an isolated victim: %v", f.agent.gmLines())
-		}
-		if got := f.injectTargetCount(injOwnGUID); got < 1 {
-			t.Fatalf("%d self targets, want the freeze's selection: %v", got, f.targetGUIDs())
-		}
-	})
+		out = append(out, ts)
+	}
+	return out
 }
 
 // freezeThenInterrupt runs a runaway walk and cancels it as soon as the victim is frozen (the bot is left frozen and
@@ -258,7 +263,7 @@ func TestRaidWalkInjectCleanupRetries(t *testing.T) {
 		}
 	})
 
-	t.Run("selection mismatch until the recovery deadline", func(t *testing.T) {
+	t.Run("pinfo naming a stranger keeps the bot frozen", func(t *testing.T) {
 		f := newFixture(t)
 		f.setupInject()
 		f.defaultRun("onyxias_lair")
@@ -272,8 +277,10 @@ func TestRaidWalkInjectCleanupRetries(t *testing.T) {
 				old(line)
 			}
 			if line == ".freeze "+victim {
+				// The release's selection now names an untracked nearby player: `.unfreeze` must not go out.
 				f.agent.mu.Lock()
-				f.agent.statusTargetMismatch = true
+				f.agent.pinfoGUID = packet.GUID(0x4D2)
+				f.agent.pinfoName = "Stranger"
 				f.agent.mu.Unlock()
 			}
 		}
@@ -281,12 +288,62 @@ func TestRaidWalkInjectCleanupRetries(t *testing.T) {
 		if code := f.run(ctx); code < exitRaidWalkInjectFailed {
 			t.Fatalf("exit %d, want at least %d: %s", code, exitRaidWalkInjectFailed, f.stderr.String())
 		}
+		if n := f.injectGMCount(".unfreeze "); n != 0 {
+			t.Fatalf("%d .unfreeze lines against a stranger: %v", n, f.agent.gmLines())
+		}
 		if n := f.injectTargetCount(injOwnGUID); n < 5 {
 			t.Fatalf("%d self targets, want cleanup retries: %v", n, f.targetGUIDs())
 		}
 		sum := f.summary()
 		if len(sum.Incidents) != 1 || sum.Incidents[0].Severity != "blocking" {
 			t.Fatalf("incidents %+v, want one blocking", sum.Incidents)
+		}
+	})
+
+	t.Run("a slow attempt cannot run past the recovery deadline", func(t *testing.T) {
+		f := newFixture(t)
+		f.setupInject()
+		f.defaultRun("onyxias_lair")
+		f.opts.injects = []string{"runaway"}
+		ctx, cancel := freezeThenInterrupt(t, f, victim)
+		defer cancel()
+		f.agent.mu.Lock()
+		old := f.agent.onGM
+		f.agent.onGM = func(line string) {
+			if old != nil {
+				old(line)
+			}
+			if line == ".freeze "+victim {
+				// Every cleanup selection now waits out its `.pinfo` deadline: the old unbounded attempt ran past 60 s.
+				f.agent.mu.Lock()
+				f.agent.noPInfo = true
+				f.agent.mu.Unlock()
+			}
+		}
+		f.agent.mu.Unlock()
+		if code := f.run(ctx); code < exitRaidWalkInjectFailed {
+			t.Fatalf("exit %d, want at least %d: %s", code, exitRaidWalkInjectFailed, f.stderr.String())
+		}
+		freezes := f.logTimes("> .freeze " + victim)
+		gpss := f.logTimes("> .gps")
+		blocking := f.logTimes("BLOCKING:")
+		if len(freezes) != 1 || len(blocking) != 1 {
+			t.Fatalf("freeze times %v, blocking times %v", freezes, blocking)
+		}
+		gps := time.Time{}
+		for _, ts := range gpss {
+			if ts.After(freezes[0]) {
+				gps = ts
+				break
+			}
+		}
+		if gps.IsZero() {
+			t.Fatalf("no cleanup .gps after the freeze: %v", gpss)
+		}
+		// Cleanup entered injectSelectSettle before its first `.gps`.
+		started := gps.Add(-injectSelectSettle)
+		if d := blocking[0].Sub(started); d <= 0 || d > injectCleanupDeadline {
+			t.Fatalf("cleanup recorded the incident after %s, want at most %s", d, injectCleanupDeadline)
 		}
 	})
 
