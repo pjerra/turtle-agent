@@ -30,7 +30,6 @@ type tdFakeGame struct {
 	runState   string
 	brainOn    bool
 	brainRan   bool
-	stopped    bool
 	visibleSeq [][]string
 	followOn   bool // a player follow loop runs
 	followHang bool // ... and does not end within follow_stop's wait
