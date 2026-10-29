@@ -1530,6 +1530,10 @@ func TestRaidWalkInjectorHookOrder(t *testing.T) {
 
 func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 	t.Run("no hook", func(t *testing.T) {
+		// P1's init installs the hook; this subtest is about the build without one.
+		old := raidWalkPairEntry
+		raidWalkPairEntry = nil
+		t.Cleanup(func() { raidWalkPairEntry = old })
 		var stdout, stderr bytes.Buffer
 		code := raidWalkCmd(context.Background(), []string{"onyxias_lair", "--slot", "1,2"}, &stdout, &stderr)
 		if code != exitUsage {
