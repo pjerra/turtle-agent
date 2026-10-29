@@ -17,7 +17,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -169,6 +168,9 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	_ = os.Chmod(out, 0o700)
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	started := time.Now()
 	entries := make([]*pairWalk, len(o.walks))
 	results := make([]pairResult, len(o.walks))
@@ -191,15 +193,36 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 
 	var wg sync.WaitGroup
 	run := func(i int) {
+		w := entries[i]
+		var clean *pairWalkCleanup
 		defer wg.Done()
-		env, deps, err := raidWalkPairEnv(&entries[i].opts)
+		// The recover is the pair's boundary: a panic in either half becomes that half's failure, stops the other
+		// walk (the shared cancel), and still runs the deferred cleanup before the report is written.
+		defer func() {
+			if r := recover(); r != nil {
+				results[i] = pairResult{
+					code:   exitRaidWalkFailed,
+					reason: fmt.Sprintf("panic: %v", r),
+					sum:    readPairSummary(w.outDir),
+				}
+				addNote("s%s %s: panic: %v", w.slot, w.plan, r)
+				cancel()
+				outW[i].Flush()
+				errW[i].Flush()
+			}
+			if clean != nil {
+				clean.cleanup(w.outDir)
+			}
+		}()
+		env, deps, err := raidWalkPairEnv(&w.opts)
 		if err != nil {
 			results[i].code = exitUsage
-			addNote("s%s %s: %v", entries[i].slot, entries[i].plan, err)
+			addNote("s%s %s: %v", w.slot, w.plan, err)
 			return
 		}
-		code := raidWalkPairRun(ctx, entries[i].opts, env, deps, outW[i], errW[i])
-		results[i] = pairResult{code: code, sum: readPairSummary(entries[i].outDir)}
+		clean, env = newPairWalkCleanup(env)
+		code := raidWalkPairRun(ctx, w.opts, env, deps, outW[i], errW[i])
+		results[i] = pairResult{code: code, sum: readPairSummary(w.outDir)}
 	}
 
 	wg.Add(1)
@@ -260,6 +283,69 @@ type pairResult struct {
 	code   int
 	reason string // a fallback end reason when the walk wrote no summary
 	sum    *raidwalk.Summary
+}
+
+// pairWalkCleanup is one half's panic-safe cleanup. It wraps the half's environment so the lease the walk
+// acquired is known to the pair: the walk's own release and teardown mark themselves done, so the deferred
+// cleanup runs each at most once, and a panic after either point still ends the agent and gives the lease back.
+type pairWalkCleanup struct {
+	env      walkEnv
+	release  func(server, slot, holder, leaseID string, force bool) (slots.Lease, error)
+	teardown func(args []string, stdout, stderr io.Writer) int
+	lease    slots.Lease
+	released bool
+	tornDown bool
+}
+
+// newPairWalkCleanup wraps env and returns the cleanup with the environment the walk must use.
+func newPairWalkCleanup(env walkEnv) (*pairWalkCleanup, walkEnv) {
+	c := &pairWalkCleanup{env: env, release: env.release, teardown: env.teardown}
+	if acquire := env.acquire; acquire != nil {
+		c.env.acquire = func(server, slot string, any bool, holder string, ttl time.Duration) (slots.Acquired, error) {
+			acq, err := acquire(server, slot, any, holder, ttl)
+			if err == nil {
+				c.lease = acq.Lease
+			}
+			return acq, err
+		}
+	}
+	if c.release != nil {
+		c.env.release = func(server, slot, holder, leaseID string, force bool) (slots.Lease, error) {
+			c.released = true
+			return c.release(server, slot, holder, leaseID, force)
+		}
+	}
+	if c.teardown != nil {
+		c.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+			c.tornDown = true
+			return c.teardown(args, stdout, stderr)
+		}
+	}
+	return c, c.env
+}
+
+// cleanup ends what a panicked walk left behind: its slot dir (agent, files) and, when teardown could not
+// reach the lease (no slot.json yet), the lease itself. It is called from the panic handler, so every step
+// is guarded: one failing step never skips the other.
+func (c *pairWalkCleanup) cleanup(outDir string) {
+	if c.lease.Slot == "" {
+		return
+	}
+	if !c.tornDown && c.teardown != nil {
+		c.tornDown = true
+		func() {
+			defer func() { _ = recover() }()
+			var buf bytes.Buffer
+			c.teardown([]string{"--json", filepath.Join(outDir, "slot")}, &buf, &buf)
+		}()
+	}
+	if !c.released && c.release != nil {
+		c.released = true
+		func() {
+			defer func() { _ = recover() }()
+			_, _ = c.release(c.lease.Server, c.lease.Slot, c.lease.Holder, c.lease.LeaseID, false)
+		}()
+	}
 }
 
 // parsePairArgs reads the pair flags and turns them into two raid-walk option sets.
@@ -436,9 +522,9 @@ func pairWorstExit(codes ...int) int {
 	return exitOK
 }
 
-// pairWalkReport is one walk of pair.json.
+// pairWalkReport is one walk of pair.json. Slot is the slot id as given (a slot id is alphanumeric).
 type pairWalkReport struct {
-	Slot         int    `json:"slot"`
+	Slot         string `json:"slot"`
 	Plan         string `json:"plan"`
 	Character    string `json:"character"`
 	Out          string `json:"out"`
@@ -469,9 +555,8 @@ type pairReport struct {
 
 // pairWalkReportOf fills one walk's line from its summary (or its fallback when the walk wrote none).
 func pairWalkReportOf(w *pairWalk, r pairResult) pairWalkReport {
-	slot, _ := strconv.Atoi(w.slot)
 	rep := pairWalkReport{
-		Slot: slot, Plan: w.plan, Out: w.outDir, ExitCode: r.code, EndReason: r.reason,
+		Slot: w.slot, Plan: w.plan, Out: w.outDir, ExitCode: r.code, EndReason: r.reason,
 	}
 	if r.sum == nil {
 		return rep
@@ -593,7 +678,7 @@ func (r pairReport) Text() string {
 		if reason == "" {
 			reason = "?"
 		}
-		fmt.Fprintf(&b, "s%d %s: %s; steps %d/%d; deaths %d; fights %d; pauses %d; out %s; exit %d\n",
+		fmt.Fprintf(&b, "s%s %s: %s; steps %d/%d; deaths %d; fights %d; pauses %d; out %s; exit %d\n",
 			w.Slot, w.Plan, reason, w.StepsReached, w.StepsTotal, w.Deaths, w.Fights, w.Pauses, w.Out, w.ExitCode)
 	}
 	fmt.Fprintf(&b, "pair: exit %d\n", r.ExitCode)

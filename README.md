@@ -1948,18 +1948,21 @@ and `plan2` on B.
 Each half is an ordinary raid-walk with its own lease, `slot setup`, agent process, dashboard client and output dir:
 `<out>/s<A>-<plan1>/` and `<out>/s<B>-<plan2>/` (each the normal `summary.json`, `run.log`, frames, ...), plus
 `<out>/pair.json` and `<out>/pair.txt` (`--out` default `./raid-walk-pair-<YYYYmmdd-HHMMSS>`, refused if it exists).
-The default holder is `raid-walk-<plan>-s<N>`; two equal holders are refused. Walk B starts 30 s after walk A
+The default holder is `raid-walk-<plan>-s<slot>`; two equal holders are refused. Walk B starts 30 s after walk A
 (`--stagger 0-600s`) so the two hire bursts (up to 40 bots each) do not hit the server at once. The walks are
-independent: one failing does not stop the other; SIGINT stops both and each tears down its own slot.
+independent: one failing does not stop the other; SIGINT stops both and each tears down its own slot. A panic in
+either half (a bug, not a failed walk) is caught at the pair boundary: it is recorded as that half's failed walk,
+cancels the other half, and both halves still run their teardown and lease release before `pair.json` is written.
 
 Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
 `--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
 repeated `--inject` stays per walk). Every other flag is global and refuses a slot prefix (exit 2).
 
-`pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, plan, character, out, exit code, end
-reason, steps, deaths, fights, pauses, tier, and the dashboard tab `#/commanders/<name>`), `overlap_s` (seconds both
-runs were between their start and their end, from the two summaries), `dashboard_both_listed` (true when one
-`/api/v1/commanders` dump of either walk names both characters; `null` with the dashboard off) and `notes`.
+`pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, the id as given, e.g. `"1"` or `"A"`;
+plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier, and the dashboard tab
+`#/commanders/<name>`), `overlap_s` (seconds both runs were between their start and their end, from the two
+summaries), `dashboard_both_listed` (true when one `/api/v1/commanders` dump of either walk names both characters;
+`null` with the dashboard off) and `notes`.
 `pair.txt` is one line per walk plus `pair: exit <c>`. The pair's exit is the first code that occurs in the order
 2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23). Each walk binds its own
 commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs show one tab each. Two 40-man raids
