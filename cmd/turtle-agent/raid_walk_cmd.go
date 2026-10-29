@@ -133,6 +133,8 @@ type walkInjector interface {
 	Tick(ctx context.Context, now time.Time) error
 	Cleanup(ctx context.Context)
 	Results() ([]raidwalk.InjectSummary, int)
+	Incidents() []raidwalk.InjectIncident
+	Blocking() bool
 	Failed() bool
 	PrintPlan(io.Writer)
 }
@@ -479,6 +481,7 @@ type walk struct {
 	seenFights map[string]bool
 	hostiles   map[string]hostileState
 	botAt      map[string]botPos
+	dashBots   map[string]bool // names of the newest /api/v1/commanders snapshot (a reversible line's crowd check)
 	partyG     map[uint64]bool
 	resetSince time.Time
 	afterN     uint64
@@ -549,7 +552,8 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
-		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
+		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
+		dashBots: map[string]bool{}}
 	return w.main(ctx)
 }
 
@@ -1087,6 +1091,10 @@ func (w *walk) finish(code int) {
 	if code == exitOK && w.inj != nil && w.inj.Failed() {
 		code = exitRaidWalkInjectFailed
 	}
+	// A bot the cleanup could not free is a blocking incident: 23 at least, whatever the walk's own reason.
+	if w.inj != nil && w.inj.Blocking() && code < exitRaidWalkInjectFailed {
+		code = exitRaidWalkInjectFailed
+	}
 	w.exitCode = code
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
@@ -1098,6 +1106,7 @@ func (w *walk) finish(code int) {
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()
+		meta.Incidents = w.inj.Incidents()
 	}
 	if w.roster != nil {
 		r := *w.roster

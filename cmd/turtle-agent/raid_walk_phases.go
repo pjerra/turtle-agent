@@ -33,6 +33,15 @@ func (w *walk) phases(ctx context.Context) int {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w.cancel = cancel
+	// A panic anywhere in the walk still releases the injector's frozen bots before it propagates.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if w.inj != nil {
+				w.inj.Cleanup(context.Background())
+			}
+			panic(rec)
+		}
+	}()
 
 	if err := w.phaseLease(ctx); err != nil {
 		return w.stop(err, false)
@@ -1005,8 +1014,13 @@ func (w *walk) saveCommanders(reason string) {
 	w.dashSeq++
 	name := fmt.Sprintf("commanders-%04d-%s.json", w.dashSeq, reason)
 	_ = w.writeOut(name, raw)
-	if bots, ok := commandersBots(raw, w.manifest.Character); ok && w.tracker != nil {
-		w.tracker.Snapshot(w.env.now(), bots)
+	if bots, ok := commandersBots(raw, w.manifest.Character); ok {
+		for _, b := range bots {
+			w.dashBots[b.Name] = true
+		}
+		if w.tracker != nil {
+			w.tracker.Snapshot(w.env.now(), bots)
+		}
 	}
 }
 

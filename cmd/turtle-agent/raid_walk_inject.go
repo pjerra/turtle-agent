@@ -11,6 +11,9 @@
 //     walk waits 2 s, reads `.gps` (the SELECTED unit's coordinates) and compares it with the target's known position
 //     within 3 yd; a mismatch is retried once, then the fault ends inconclusive. Nothing that acts on the selection
 //     goes out before that check.
+//   - coordinates alone cannot prove a selection: a stale selection of a unit standing next to the intended one passes
+//     the 3 yd check. `.die` (which acts on the selection) therefore also needs `.pinfo`'s identity (review ad-i2-r2),
+//     and a `.freeze` goes out only for a target with no other unit within 6 yd of it.
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"io"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +50,17 @@ const (
 	injectPrepareWait = 20 * time.Second
 	// injectGPSWait bounds one `.gps` reply.
 	injectGPSWait = 3 * time.Second
+	// injectPInfoWait bounds one `.pinfo` reply (the core answers it from asynchronous DB queries).
+	injectPInfoWait = 10 * time.Second
+	// injectCrowdYd is how close another unit may stand to a freeze's target before the coordinate proof cannot tell
+	// the selection apart (review ad-i2-r2).
+	injectCrowdYd = 6.0
+	// injectCleanupDeadline is how long Cleanup keeps trying to release the bots it froze.
+	injectCleanupDeadline = 60 * time.Second
+	// injectCleanupRetry is the pause between cleanup attempts.
+	injectCleanupRetry = 3 * time.Second
+	// injectCleanupAttempt bounds one cleanup attempt; each attempt gets a fresh context.
+	injectCleanupAttempt = 30 * time.Second
 	// injectBotFresh and injectHostileFresh are the observation ages the injector's measurements take (spec 1.3).
 	injectBotFresh     = 10 * time.Second
 	injectHostileFresh = 4 * time.Second
@@ -53,12 +68,13 @@ const (
 
 // injectFile is <out>/inject.json, format tb-raid-inject v1 (spec 1.6).
 type injectFile struct {
-	Format  string                  `json:"format"`
-	Version int                     `json:"version"`
-	Plan    string                  `json:"plan"`
-	Map     uint32                  `json:"map"`
-	Tier    int                     `json:"tier"`
-	Faults  []raidwalk.InjectResult `json:"faults"`
+	Format    string                    `json:"format"`
+	Version   int                       `json:"version"`
+	Plan      string                    `json:"plan"`
+	Map       uint32                    `json:"map"`
+	Tier      int                       `json:"tier"`
+	Faults    []raidwalk.InjectResult   `json:"faults"`
+	Incidents []raidwalk.InjectIncident `json:"incidents,omitempty"`
 }
 
 // raidInjector is the walkInjector of one walk's --inject specs.
@@ -69,9 +85,12 @@ type raidInjector struct {
 	in       *raidwalk.Injector // built in Prepare, when the roster's names and the layout are known
 	prepFail string             // Prepare failed: every fault is inconclusive with this reason
 
-	finalized bool
-	results   []raidwalk.InjectResult
-	failed    bool
+	finalized   bool
+	results     []raidwalk.InjectResult
+	failed      bool
+	incidents   []raidwalk.InjectIncident
+	blocking    bool
+	cleanupDone bool
 }
 
 // newRaidInjector parses the --inject specs (spec 1.1); the roster refuses kill-mt without an ot batch.
@@ -237,9 +256,15 @@ func (r *raidInjector) sendOrder(ctx context.Context, a raidwalk.InjectAction) e
 	return nil
 }
 
-// selectUnit selects the action's unit and proves it before anything acts on the selection (P0 finding 4): target,
-// status.target read-back, a 2 s settle, then `.gps`; the selected unit's coordinates must be the target's known
-// position within 3 yd. One retry; then the fault ends inconclusive.
+// selectUnit selects the action's unit and proves it before anything acts on the selection (P0 finding 4, review
+// ad-i2-r2): target, status.target read-back, a 2 s settle, then `.gps`; the selected unit's coordinates must be the
+// target's known position within 3 yd. A destructive selection (`.die` acts on the selection itself) also needs the
+// identity read-back: `.pinfo` with no name names the selected player, and only the intended victim's exact name and
+// guid counter pass; anything else ends the fault "selection not proven" with no retry. A freeze's self selection is
+// safe only for an isolated target: while another unit stands within 6 yd of it, the coordinates cannot tell which
+// unit the server selected, so the selection is retried once and then inconclusive. The `.gps` mismatch is likewise
+// retried once, then inconclusive. A release (.unfreeze) skips the crowd gate: unfreezing a wrong, non-frozen unit
+// loses nothing, while a frozen bot left behind does.
 func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) (raidwalk.InjectCtx, error, error) {
 	w := r.w
 	self := a.Kind == raidwalk.ActSelectSelf
@@ -298,6 +323,33 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 			last = fmt.Errorf("selection not confirmed: .gps is %.1f yd from %s's position", d, label)
 			continue
 		}
+		if !self {
+			// .die acts on the selection itself: coordinates cannot tell a stale near neighbour from the victim.
+			// The read-back names the selected player; a mismatch is not a lag to wait out.
+			name, counter, ok, err := r.pinfoSelected(ctx)
+			if err != nil {
+				return r.in.Ctx(), fmt.Errorf("selection not proven: %v", err), nil
+			}
+			who := r.hireName(guid)
+			if !ok {
+				return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo named no player, not %s", who), nil
+			}
+			if who == "" || name != who || counter != uint64(uint32(guid)) {
+				return r.in.Ctx(), fmt.Errorf("selection not proven: .pinfo names %q (guid %d), not %s (%d)", name, counter, who, uint32(guid)), nil
+			}
+		} else if a.Unit != "" && !a.Release {
+			// .freeze uses its name only while the GM itself is selected: a stale near selection would take that
+			// name's place. Only an isolated line target can be proven by coordinates.
+			names, ok := r.crowdedNear(a.Unit)
+			if !ok {
+				last = fmt.Errorf("selection not confirmed: %s's position is unknown", a.Unit)
+				continue
+			}
+			if len(names) > 0 {
+				last = fmt.Errorf("selection not confirmed: %s is crowded (%s within %.0f yd)", a.Unit, strings.Join(names, ", "), injectCrowdYd)
+				continue
+			}
+		}
 		c := r.in.Ctx()
 		c.SelfSelected = self
 		c.SelectedHire = ""
@@ -307,6 +359,42 @@ func (r *raidInjector) selectUnit(ctx context.Context, a raidwalk.InjectAction) 
 		return c, nil, nil
 	}
 	return r.in.Ctx(), last, nil
+}
+
+// crowdedNear lists the units within 6 yd of the freeze's target, other than the target itself. The commander is not
+// one of them: the self selection is what the line needs (the name then applies), so only another unit's selection can
+// make .freeze act on the wrong unit. Positions come from the newest bot_view frames; a bot the newest dashboard
+// snapshot lists counts too when a frame gives its position.
+func (r *raidInjector) crowdedNear(unit string) ([]string, bool) {
+	w := r.w
+	b, ok := w.botAt[unit]
+	if !ok {
+		return nil, false
+	}
+	p := dungeon.Point{X: b.x, Y: b.y, Z: b.z}
+	var out []string
+	seen := map[string]bool{unit: true}
+	check := func(name string) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		bb, ok := w.botAt[name]
+		if !ok {
+			return
+		}
+		if injectDist3(dungeon.Point{X: bb.x, Y: bb.y, Z: bb.z}, p) <= injectCrowdYd {
+			out = append(out, name)
+		}
+	}
+	for _, name := range w.hireList() {
+		check(name)
+	}
+	for name := range w.dashBots {
+		check(name)
+	}
+	sort.Strings(out)
+	return out, true
 }
 
 // knownPos is where the selected unit is known to stand: the commander's own status position, or the hire's newest
@@ -389,6 +477,68 @@ func (r *raidInjector) gpsSelected(ctx context.Context) (dungeon.Point, bool, er
 	}
 }
 
+// injectPInfoGUIDRe matches the guid counter in the core's LANG_PINFO_ACCOUNT line: "%s %s%s %s (guid: %u) ...".
+var injectPInfoGUIDRe = regexp.MustCompile(`\(guid: ([0-9]+)\)`)
+
+// injectPInfoNameRe matches the character's player link in that line (ChatHandler::playerLink).
+var injectPInfoNameRe = regexp.MustCompile(`\|Hplayer:([^|]+)\|h\[([^\]]+)\]\|h`)
+
+// pinfoSelected sends `.pinfo` with no name (the core uses the selected player) and reads the first reply line of its
+// LANG_PINFO_ACCOUNT message: the character's name and guid counter. It consumes events like gpsSelected does.
+func (r *raidInjector) pinfoSelected(ctx context.Context) (string, uint64, bool, error) {
+	w := r.w
+	if r.in != nil && !raidwalk.AllowedInjectLine(".pinfo", r.in.Ctx()) {
+		return "", 0, false, errors.New("the fault allow-list refuses .pinfo")
+	}
+	if err := r.sendGM(ctx, ".pinfo"); err != nil {
+		return "", 0, false, err
+	}
+	deadline := w.env.now().Add(injectPInfoWait)
+	for {
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			return "", 0, false, fmt.Errorf(".pinfo events: %v", err)
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			if line, ok := tbm.Line(e); ok {
+				w.logLine(w.env.now(), line)
+				if st, ok := raidwalk.ParseRun(line); ok && st.Plan == w.plan.Name {
+					if w.tracker != nil {
+						w.tracker.Feed(w.env.now(), st)
+					}
+					w.lastStatus, w.haveStatus = st, true
+					if st.Note != "" {
+						w.newNotes = append(w.newNotes, st.Note)
+					}
+				}
+				continue
+			}
+			if e.Kind != events.KindSystem || e.Text == "" {
+				continue
+			}
+			// LANG_PINFO_ACCOUNT is localized, but its player link and "(guid: N)" are not: require both.
+			text := raidwalk.CleanLine(e.Text)
+			gm, nm := injectPInfoGUIDRe.FindStringSubmatch(text), injectPInfoNameRe.FindStringSubmatch(text)
+			if gm == nil || nm == nil {
+				continue
+			}
+			counter, err := strconv.ParseUint(gm[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			return nm[2], counter, true, nil
+		}
+		if !w.env.now().Before(deadline) {
+			return "", 0, false, fmt.Errorf("no .pinfo reply in %s", injectPInfoWait)
+		}
+		if err := w.env.sleep(ctx, 200*time.Millisecond); err != nil {
+			return "", 0, false, err
+		}
+	}
+}
+
 // parseGPSPoint reads `.gps`'s "X: <f> Y: <f> Z: <f>" line.
 func parseGPSPoint(s string) (dungeon.Point, bool) {
 	m := injectGPSRe.FindStringSubmatch(raidwalk.CleanLine(s))
@@ -444,19 +594,55 @@ func (r *raidInjector) observe(now time.Time, notes []string, wipe bool) raidwal
 	return o
 }
 
-// Cleanup releases every bot the injector still holds frozen (spec 1.2): the walk may be interrupted, so it runs on
-// its own context.
-func (r *raidInjector) Cleanup(ctx context.Context) {
-	if r.in == nil || r.prepFail != "" {
+// Cleanup releases every bot the injector still holds frozen (spec 1.2): it loops until none is left or the 60 s
+// recovery deadline expires, with a fresh context per try and 3 s between tries (review ad-i2-r2). Exhaustion records
+// a BLOCKING incident with the manual command; the walk exits 23. The walk may be interrupted, so it never uses the
+// walk's own context.
+func (r *raidInjector) Cleanup(_ context.Context) {
+	if r.cleanupDone || r.in == nil || r.prepFail != "" {
 		return
 	}
-	acts := r.in.Cleanup()
-	if len(acts) == 0 {
-		return
+	w := r.w
+	// The walk's own context may be the interrupted one: every attempt gets a fresh context of its own.
+	deadline := w.env.now().Add(injectCleanupDeadline)
+	for {
+		r.in.DropCleanup() // a cut-off attempt must not hide its bots behind stale pending actions
+		if acts := r.in.Cleanup(); len(acts) > 0 {
+			cctx, cancel := context.WithTimeout(context.Background(), injectCleanupAttempt)
+			_ = r.exec(cctx, acts)
+			cancel()
+		}
+		frozen := r.in.FrozenVictims()
+		if len(frozen) == 0 {
+			r.cleanupDone = true
+			return
+		}
+		if !w.env.now().Before(deadline) {
+			r.recordStuck(frozen)
+			r.cleanupDone = true
+			return
+		}
+		sctx, scancel := context.WithTimeout(context.Background(), injectCleanupAttempt)
+		_ = w.env.sleep(sctx, injectCleanupRetry)
+		scancel()
 	}
-	cctx, cancel := context.WithTimeout(context.Background(), time.Duration(len(acts)+1)*15*time.Second)
-	defer cancel()
-	_ = r.exec(cctx, acts)
+}
+
+// recordStuck is the cleanup's exhausted recovery: the bots still frozen, and the exact GM command that frees each.
+func (r *raidInjector) recordStuck(frozen []string) {
+	bots := append([]string(nil), frozen...)
+	sort.Strings(bots)
+	cmds := make([]string, 0, len(bots))
+	for _, b := range bots {
+		cmds = append(cmds, ".unfreeze "+b)
+	}
+	manual := strings.Join(cmds, "; ")
+	reason := fmt.Sprintf("cleanup could not free %s within %.0f s", strings.Join(bots, ", "), injectCleanupDeadline.Seconds())
+	r.incidents = append(r.incidents, raidwalk.InjectIncident{
+		Severity: "blocking", Kind: "cleanup_incomplete", Bots: bots, Reason: reason, Manual: manual,
+	})
+	r.blocking = true
+	r.w.logLine(r.w.env.now(), "BLOCKING: "+reason+"; manual: "+manual)
 }
 
 // finalize ends the injector with the walk's last state: the watch's end, or a wipe. Idempotent: Failed and Results both
@@ -509,6 +695,14 @@ func (r *raidInjector) Failed() bool {
 	return r.failed
 }
 
+// Incidents is the run's blocking findings, for the summary and inject.json.
+func (r *raidInjector) Incidents() []raidwalk.InjectIncident {
+	return append([]raidwalk.InjectIncident(nil), r.incidents...)
+}
+
+// Blocking is true when a cleanup left a bot frozen past the recovery deadline.
+func (r *raidInjector) Blocking() bool { return r.blocking }
+
 // Results is the walk's injections for the summary, and the injected deaths; it writes <out>/inject.json.
 func (r *raidInjector) Results() ([]raidwalk.InjectSummary, int) {
 	r.finalize()
@@ -535,7 +729,7 @@ func (r *raidInjector) writeInjectJSON() {
 		faults = []raidwalk.InjectResult{}
 	}
 	raw, err := json.MarshalIndent(injectFile{Format: "tb-raid-inject", Version: 1, Plan: w.plan.Name, Map: w.plan.Map,
-		Tier: w.roster.Tier, Faults: faults}, "", "  ")
+		Tier: w.roster.Tier, Faults: faults, Incidents: r.incidents}, "", "  ")
 	if err != nil {
 		w.note("inject.json: %v", err)
 		return

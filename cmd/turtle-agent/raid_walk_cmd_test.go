@@ -117,6 +117,14 @@ type walkFakeAgent struct {
 	gmAt                 []time.Time // when each gm line was sent
 	targetCalls          []packet.GUID
 	targetAt             []time.Time // when each target RPC arrived
+
+	// The identity read-back (`.pinfo`): pinfoGUID names that unit instead of the server's selection,
+	// pinfoLagTargets reports the selection one target RPC behind, prevSel is the selection before the newest
+	// target, and gmFail fails one gm line's RPC without its game side effect.
+	pinfoGUID       packet.GUID
+	pinfoLagTargets bool
+	prevSel         packet.GUID
+	gmFail          func(line string) error
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -154,7 +162,13 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.gmUnits = append(f.gmUnits, f.unitsN)
 		f.timeline = append(f.timeline, timelineEntry{Text: p.Text, Targeted: f.targeted})
 		onGM := f.onGM
+		fail := f.gmFail
 		f.mu.Unlock()
+		if fail != nil {
+			if err := fail(p.Text); err != nil {
+				return err
+			}
+		}
 		f.gmSide(p.Text)
 		if onGM != nil {
 			onGM(p.Text)
@@ -190,6 +204,7 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		} else {
 			f.status.Target = g
 		}
+		f.prevSel = f.selGUID
 		if f.lagTargets {
 			queued := g
 			f.queuedSel = &queued
@@ -261,6 +276,8 @@ func (f *walkFakeAgent) gmSide(line string) {
 		}
 	case line == ".gps":
 		f.gpsSide()
+	case line == ".pinfo":
+		f.pinfoSide()
 	case line == ".die":
 		f.dieSide()
 	case strings.HasPrefix(line, ".summon "):
@@ -302,6 +319,41 @@ func (f *walkFakeAgent) gpsSide() {
 	}
 	f.mu.Lock()
 	f.lines = append(reply, f.lines...)
+	f.mu.Unlock()
+}
+
+// pinfoSide pushes a `.pinfo` (no name) reply for the selected player, in the core's
+// LANG_PINFO_ACCOUNT shape: the first line names the character with a player link and its
+// guid counter. pinfoGUID / pinfoLagTargets model a read that names another unit or lags one
+// target RPC behind.
+func (f *walkFakeAgent) pinfoSide() {
+	f.mu.Lock()
+	sel := f.selGUID
+	if f.pinfoLagTargets {
+		sel = f.prevSel
+	}
+	if f.pinfoGUID != 0 {
+		sel = f.pinfoGUID
+	}
+	name := ""
+	if sel != 0 && sel == f.ownGUID {
+		name = f.status.Character
+	} else if sel != 0 {
+		for i, n := range f.party {
+			if packet.GUID(1000+i) == sel {
+				name = n
+			}
+		}
+	}
+	f.mu.Unlock()
+	line := "There is no such player."
+	if name != "" {
+		line = fmt.Sprintf("Human Warrior |cffffffff|Hplayer:%s|h[%s]|h|r (guid: %d) Account: acct (id: 1) GMLevel: 3",
+			name, name, uint64(uint32(sel)))
+	}
+	// The reply is the next events on the wire (the queued run lines are older), so it goes in front.
+	f.mu.Lock()
+	f.lines = append([]queuedEvent{{raw: line}}, f.lines...)
 	f.mu.Unlock()
 }
 
@@ -1264,6 +1316,9 @@ func (f *fakeInjector) Tick(ctx context.Context, now time.Time) error {
 	f.afterNs = append(f.afterNs, f.w.afterN)
 	f.notes = append(f.notes, f.w.newNotes...)
 	f.w.newNotes = nil // the injector drains them, as I2 will
+	if testFakeInjectorPanicOnTick {
+		panic("fake injector tick")
+	}
 	return nil
 }
 
@@ -1278,6 +1333,13 @@ func (f *fakeInjector) Results() ([]raidwalk.InjectSummary, int) {
 }
 
 func (f *fakeInjector) Failed() bool { return f.fail }
+
+// testFakeInjectorPanicOnTick makes the fake Tick panic, for the panic exit path's cleanup test.
+var testFakeInjectorPanicOnTick bool
+
+func (f *fakeInjector) Incidents() []raidwalk.InjectIncident { return nil }
+
+func (f *fakeInjector) Blocking() bool { return false }
 
 func (f *fakeInjector) PrintPlan(out io.Writer) {
 	fmt.Fprintln(out, "faults: 1 (kill-mt)")

@@ -1924,12 +1924,13 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
-torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 15 the lease was refused
-(incl. slot 3); 14 teardown failed; 2 usage.
+torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 23 a fault verdict failed or
+a cleanup left a bot frozen (at least 23, even over 18/19); 15 the lease was refused (incl. slot 3); 14 teardown
+failed; 2 usage.
 
 Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-file` (or `TBDASH_PASS_FILE`);
 `--dash-user`/`TBDASH_USER` default `TADASH`. The password is read only from the given file (it must be 0600 and not a
@@ -1980,20 +1981,36 @@ watch ended. Fight on means a hostile the frames show targeting a party GUID (se
 proof (a selection sent right before a chat line is not in force yet: the core handles the two on different threads).
 So after every `target` the walk waits 2 s, sends `.gps` (which reports the selected unit) and checks its coordinates
 against the target's known position (the commander's own `status`, or the hire's newest frame) within 3 yd; a mismatch
-is retried once, then the fault ends `inconclusive` and no line that acts on the selection is sent. `.gps` is the only
-extra GM line the fault allow-list carries; every other line is `.gm visible off` (prepare), `.go xyz` (the plan's
-map, within 260 yd of the lead while a fault is active), `.summon <victim>`, `.freeze <victim>`, `.unfreeze <hire>`
-and `.die` (kill-mt, with the MT read back).
+is retried once, then the fault ends `inconclusive` and no line that acts on the selection is sent. Coordinates alone
+cannot tell the intended unit from a stale selection of a neighbour standing next to it, so:
 
-**Cleanup** runs before the hold, before `stop`'s `.bot run stop` and before teardown: for every bot the injector
-froze and has not unfrozen it selects itself (with the same 2 s/`.gps` check) and sends `.unfreeze <hire>`, then
-selects itself once; a failed release is summary note and is asked for again by the next cleanup.
+- `.die` (which acts on the selection itself) additionally needs the identity read-back: `.pinfo` with no name uses the
+  selected player, and its reply must name the MT exactly (the `LANG_PINFO_ACCOUNT` line: player link and `(guid: N)`).
+  Anything else — another name, another guid, no player, no reply — ends the fault `inconclusive` with
+  `selection not proven` and `.die` is never sent; a wrong identity is not retried.
+- A `.freeze` selection needs an isolated target: no party member or dashboard-listed bot within 6 yd of the victim (the
+  commander is exempt: a stale selection of it still sends the line to the named victim). A crowded target is retried
+  once, then the fault is `inconclusive` and nothing is frozen. `.unfreeze` releases skip the crowd gate: unfreezing a
+  wrong, non-frozen unit loses nothing, while a bot left frozen does.
+
+`.gps` and `.pinfo` are the only extra GM lines the fault allow-list carries; every other line is `.gm visible off`
+(prepare), `.go xyz` (the plan's map, within 260 yd of the lead while a fault is active), `.summon <victim>`,
+`.freeze <victim>`, `.unfreeze <hire>` and `.die` (kill-mt).
+
+**Cleanup** runs on every exit path — the end of the watch, `stop`'s `.bot run stop`, an interrupt, an error and a panic
+— before the hold and before teardown: for every bot the injector froze and has not unfrozen it selects itself and
+sends `.unfreeze <hire>`, then selects itself once. It loops with a fresh context per attempt and 3 s between tries
+until no frozen bot is left or the 60 s recovery deadline expires. Exhaustion is not silent: `<out>/inject.json` and
+the summary carry a `blocking` incident (`cleanup_incomplete`) that names the bot(s) still frozen and the exact manual
+command (`.unfreeze <hire>`, with no other unit selected), and the walk exits **23**.
 
 `<out>/inject.json` (format `tb-raid-inject` v1, 0600) holds every fault's verdict, reason, fire step/leg, victim, its
-GM/order/select lines with times, and the measured keys (`placed_yd`, `f4_at_s`, `pickup_s`, `max_gap_yd`, ...).
-`summary.json` gains `injections[]` (kind, verdict, reason, step, victim) and `deaths.injected` (kill-mt's MT, which is
-not a death of the run). A walk that would exit 0 with at least one fault in `fail` exits **23**; 18 and 19 keep their
-meaning and win over 23. A fault that never fired is `not-fired`; one that could not be caused or measured is
+GM/order/select lines with times, the measured keys (`placed_yd`, `f4_at_s`, `pickup_s`, `max_gap_yd`, ...) and, when
+cleanup ran out of time, `incidents[]` (`severity` `blocking`, `kind` `cleanup_incomplete`, `bots`, `reason`,
+`manual`). `summary.json` gains `injections[]` (kind, verdict, reason, step, victim), `incidents[]` (the same blocking
+findings) and `deaths.injected` (kill-mt's MT, which is not a death of the run). A walk that would exit 0 with at least
+one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. A blocking cleanup incident raises any
+lower exit code to **23** as well. A fault that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
 
 ## Remote leader
