@@ -458,6 +458,61 @@ Addons, channels and NPCs:
 Text the server echoes back (for example the account name in a GM reply) is redacted before it reaches events, logs
 or replies.
 
+## LFG (Turtle group finder)
+
+Turtle's group finder (LFT) is an addon conversation, not a set of opcodes: the client writes
+`TW_LFG\t<line>` on the guild addon channel and the core answers as the player himself
+(`Player::SendAddonMessage`). These methods send exactly the lines the LFG addon sends, read the answers from the
+`addon` event log and fold them into one state. Each returns `since` (the log cursor before its send), `sent`
+(the text after the `TW_LFG` tab) and `state`; `wait_ms` defaults to 5000 and is capped at 25000.
+
+| method | params | sends | waits for |
+|---|---|---|---|
+| `lfg_join` | `instances[]` (1-10 core LFT codes, e.g. `ragefirechasm`, lowercase letters and digits), `roles` (`t`, `h`, `d`), `force`, `wait_ms` | `C2S_QUEUE_JOIN;<instances>;<roles>` | `S2C_ROLECHECK_START`, `S2C_QUEUE_ERROR` or `S2C_QUEUE_JOINED` |
+| `lfg_role_check_answer` | `roles`, `force`, `wait_ms` | `C2S_ROLECHECK_RESPONSE;<roles>` | `S2C_ROLECHECK_INFO` naming you, or `S2C_QUEUE_JOINED` |
+| `lfg_proposal_answer` | `accept`, `force`, `wait_ms` | accept: `C2S_OFFER_ACCEPT`; decline: `C2S_QUEUE_LEAVE` | `S2C_OFFER_UPDATE_COUNT`, `S2C_OFFER_COMPLETE` or `S2C_QUEUE_LEFT` |
+| `lfg_leave` | `wait_ms` | `C2S_QUEUE_LEAVE` | `S2C_QUEUE_LEFT` |
+| `lfg_status` | `refresh`, `wait_ms` | with `refresh`: `C2S_GET_QUEUE_STATUS` | `S2C_UPDATE_QUEUE_STATUS` (the core answers nothing when idle) |
+| `lfg_auto` | `roles`, `accept`, `delay_ms`, `off` | in the background, see below | nothing: returns at once with `auto` (`on`, `roles`, `accept`, `delay_ms`) |
+| `lfg_listings` | `refresh`, `id`, `wait_ms` | `C2S_GET_GROUPS_LIST`, `C2S_GET_GROUP_DETAILS;<id>`, or both (details last) | `S2C_GROUPS_LIST_UPDATE;end` / `S2C_UPDATE_GROUP;<id>;end` |
+| `lfg_listing_role` | `role` (`t`, `h`, `d`, or empty to remove), `wait_ms` | `C2C_ROLECHECK_RESPONSE;<role>` on **party** | `S2C_GROUPS_LIST_UPDATE` |
+
+The conversation, as the core runs it (`LFTQeueue.cpp`, `LFTUserGroups.cpp`):
+
+| line | meaning |
+|---|---|
+| `C2S_QUEUE_JOIN;<insts>;<roles>` | queue for instances; roles are masked by the class: druid, paladin and shaman `thd`, warrior `td`, priest `hd`, hunter, mage, rogue and warlock `d` |
+| `S2C_ROLECHECK_START;<insts>` | every non-bot member confirms a role (solo players too); the check times out after 90 s |
+| `C2S_ROLECHECK_RESPONSE;<roles>` | the answer; a mask of 0 is silently ignored, so the check times out |
+| `S2C_ROLECHECK_INFO;<name>;<roles>` | what each member answered |
+| `S2C_QUEUE_JOINED`, `S2C_UPDATE_QUEUE_STATUS;<phase>;<insts>;<joinTime>;<n>;<t>:<h>:<d>` | queued: phase `queued`, `pending_rolecheck` or `pending_offer` |
+| `S2C_OFFER_NEW;<inst>;<role>` | a group wants you; the offer times out after 90 s |
+| `S2C_OFFER_UPDATE_COUNT;<t>:<h>:<d>`, `S2C_OFFER_COMPLETE` | accepted counts, then the group formed |
+| `S2C_QUEUE_LEFT;<name>`, `S2C_QUEUE_ERROR;<reason>` | left or refused (`raid`, `not_leader`, `invalid`) |
+| `S2C_GROUPS_LIST_UPDATE;start`, `<listing json>`, `;end` | the listings; the JSON may hold `;` in a description, so only the leading fields are split |
+| `S2C_UPDATE_GROUP;<id>;start;<json>`, `;<1-3>;<signup json>`, `;end` | one listing's detail and its role rows |
+
+Decisions of the protocol worth knowing:
+
+- **Declining is leaving.** There is no decline message: `lfg_proposal_answer` with `accept: false` sends
+  `C2S_QUEUE_LEAVE`, which cancels the offer and re-queues the others, and `sent` says so.
+- **Spoof guard.** A `S2C_*` line counts only as an `addon` event on the guild channel, prefix `TW_LFG`, sent by
+  the agent's own GUID. The server sends its answers from the player himself, so a guild-mate's forged line is
+  ignored.
+- **Role mask.** A role answer naming a role the class cannot take is refused before sending (`roles "t" are not
+  allowed for a priest (allowed: hd)`) because the core would silently ignore it and the 90 s check would time out;
+  `force: true` sends it anyway for tests that want to see the core ignore it.
+- **Phase checks.** `lfg_role_check_answer` needs the `rolecheck` phase and `lfg_proposal_answer` the `offer`
+  phase; `force: true` overrides. `state.history` keeps the last 50 accepted lines, and `lfg_auto`'s sends appear
+  there as `auto: <line>` (sends are not events, so the log holds only the server's side).
+- **Auto answers.** `lfg_auto {roles:"d", accept:true}` answers the next `S2C_ROLECHECK_START` with `roles` and,
+  when `accept` is set, an `S2C_OFFER_NEW` with accept or leave, after `delay_ms` (default 1500, 0-30000, a
+  human-like pause). `lfg_auto {off:true}` stops it; so do a logout, a reconnect and agent exit.
+- `state` carries `phase` (`idle`, `rolecheck`, `queued`, `offer`, `grouped`, `left`, `error`), `instances`,
+  `rolecheck_since`/`rolecheck_deadline`, `offer_since`/`offer_deadline`, `responses` (name to roles),
+  `offer` (`instance`, `role`, `counts`), `queued_since`, `counts` (`[t,h,d]`), `last_error`, `listings` (by id,
+  with `signups` after a detail request) and `history`.
+
 ## Items, loot and mounts
 
 `use_item` sends `CMSG_USE_ITEM` for an item in the backpack or a bag, as a right-click does. It targets yourself or a unit only: no item or game-object targets yet (poisons, enchants, lockpicking). An on-use trinket or other equipped item is used from bag 255 and its equipment slot (the core refuses an item that needs equipping anywhere else, `SpellHandler.cpp:78-85`); `inventory` lists the bags and backpack only, so pass `bag` 255 and the slot yourself. An `item_entry` picks the first
